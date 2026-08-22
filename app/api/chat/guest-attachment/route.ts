@@ -3,22 +3,27 @@ export const dynamic = "force-dynamic";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  assertGuestAttachmentType,
-  assertGuestTextPayload,
   createGuestAttachmentKey,
   createGuestAttachmentObjectId,
   getGuestAttachmentSecret,
   getGuestAttachmentTtlMinutes,
   guestFileExtension,
   GuestAttachmentError,
-  GUEST_IMAGE_TYPES,
   GUEST_MAX_ATTACHMENT_BYTES,
   GUEST_MAX_EXTRACTED_CHARACTERS,
-  GUEST_OFFICE_TYPES,
-  GUEST_TEXT_TYPES,
   isOwnGuestAttachmentKey,
+  resolveGuestAttachmentFormat,
   sanitizeGuestFilename,
 } from "@/lib/guestAttachments";
+import {
+  attachmentKindForFormat,
+  type ChatAttachmentFormat,
+} from "@/lib/chatAttachmentFormats";
+import { ChatArchiveError } from "@/lib/chatArchive";
+import {
+  ChatAttachmentValidationError,
+  validateChatAttachmentUpload,
+} from "@/lib/chatAttachmentValidation";
 import { chatErrorResponse, identifyChatCaller } from "@/lib/chatSecurity";
 import {
   apiSecurityResponse,
@@ -27,8 +32,6 @@ import {
   reserveDailyUploadBytes,
 } from "@/lib/apiSecurity";
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
-import { extractPdfTextSafely, normalizeImageSafely, validatePdfSafely } from "@/lib/mediaSecurity";
-import { parseOfficeSafely } from "@/lib/officeSecurity";
 import { deleteR2Object, validateR2ObjectMetadata, writeR2Object } from "@/lib/r2";
 import { ensureGuestVerified } from "@/lib/turnstile";
 
@@ -123,118 +126,79 @@ const readBoundedBody = async (request: Request, maxBytes: number) => {
 
 /**
  * Proves the file is genuinely what it claims to be *and* that this product
- * can read it, using the same parsers the signed-in path uses -- the
- * worker-isolated, timeout-bounded ones, not a second lenient copy.
+ * can read it, using the shared upload validator -- the same worker-isolated,
+ * timeout-bounded parsers the signed-in finalize step now runs, not a second
+ * lenient copy.
  *
  * Returns the bytes to store: normalised for images (re-encoded, metadata
- * stripped by `sharp`), unchanged otherwise. The extracted text is measured,
- * never returned and never logged: it exists here only to prove the file is
- * parseable and to enforce the guest input ceiling before the user has typed a
- * question.
+ * stripped by `sharp`, a GIF turned into the PNG a provider will accept),
+ * re-encoded to UTF-8 for text, unchanged otherwise. The extracted text is
+ * measured, never returned and never logged: it exists here only to prove the
+ * file is parseable and to enforce the guest input ceiling before the user has
+ * typed a question.
+ *
+ * Guest refusal codes are preserved. The shared validator speaks in
+ * account-shaped codes, and the composer already has copy for the guest ones,
+ * so they are translated here rather than in the module every caller shares.
  */
-const validateGuestFile = async (buffer: Buffer, mediaType: string) => {
-  if (GUEST_IMAGE_TYPES.has(mediaType)) {
-    try {
-      return await normalizeImageSafely(
-        buffer,
-        mediaType as "image/png" | "image/jpeg" | "image/webp",
-        GUEST_MAX_ATTACHMENT_BYTES
-      );
-    } catch {
-      throw new GuestAttachmentError(
-        400,
-        "GUEST_ATTACHMENT_UNREADABLE",
-        "The image is invalid or unsupported."
-      );
-    }
-  }
+const GUEST_VALIDATION_CODES: Record<string, { code: string; message: string }> = {
+  ATTACHMENT_TYPE_MISMATCH: {
+    code: "GUEST_ATTACHMENT_TYPE_MISMATCH",
+    message: "The file contents do not match its file type.",
+  },
+  ATTACHMENT_ENCODING_UNREADABLE: {
+    code: "GUEST_ATTACHMENT_UNREADABLE",
+    message: "The file could not be read as text.",
+  },
+  ATTACHMENT_ANIMATED_IMAGE: {
+    code: "ATTACHMENT_ANIMATED_IMAGE",
+    message: "Animated images are not supported. Attach a still image instead.",
+  },
+  INVALID_IMAGE_ATTACHMENT: {
+    code: "GUEST_ATTACHMENT_UNREADABLE",
+    message: "The image is invalid or unsupported.",
+  },
+  INVALID_PDF_ATTACHMENT: {
+    code: "GUEST_ATTACHMENT_UNREADABLE",
+    message: "The PDF is invalid or could not be processed.",
+  },
+  ATTACHMENT_NO_TEXT: {
+    code: "GUEST_ATTACHMENT_NO_TEXT",
+    message:
+      "No readable text was found. Sign in to send scanned documents to a model that reads them directly.",
+  },
+  ATTACHMENT_UNREADABLE: {
+    code: "GUEST_ATTACHMENT_UNREADABLE",
+    message: "The document is invalid or could not be processed.",
+  },
+  ATTACHMENT_TEXT_TOO_LARGE: {
+    code: "GUEST_ATTACHMENT_TEXT_TOO_LARGE",
+    message: "The file's text is longer than a guest message can carry.",
+  },
+};
 
-  if (mediaType === "application/pdf") {
-    let extracted = "";
-    try {
-      extracted = await extractPdfTextSafely(
-        buffer,
-        GUEST_MAX_EXTRACTED_CHARACTERS + 1
-      );
-    } catch {
-      // A PDF whose text cannot be extracted is not automatically broken --
-      // it may be a scan. Prove it parses at all before deciding which error
-      // the user sees.
-      try {
-        await validatePdfSafely(buffer);
-      } catch {
-        throw new GuestAttachmentError(
-          400,
-          "GUEST_ATTACHMENT_UNREADABLE",
-          "The PDF is invalid or could not be processed."
-        );
-      }
+const validateGuestFile = async (
+  buffer: Buffer,
+  format: ChatAttachmentFormat
+) => {
+  try {
+    return await validateChatAttachmentUpload({
+      buffer,
+      format,
+      scope: "guest",
+      maxExtractedCharacters: GUEST_MAX_EXTRACTED_CHARACTERS,
+    });
+  } catch (error) {
+    if (error instanceof ChatAttachmentValidationError) {
+      const mapped = GUEST_VALIDATION_CODES[error.code];
       throw new GuestAttachmentError(
-        400,
-        "GUEST_ATTACHMENT_NO_TEXT",
-        "The PDF has no readable text. Sign in to send scanned documents to a model that reads them directly."
+        error.status,
+        mapped?.code || "GUEST_ATTACHMENT_UNREADABLE",
+        mapped?.message || "The file could not be processed."
       );
     }
-    if (!extracted) {
-      throw new GuestAttachmentError(
-        400,
-        "GUEST_ATTACHMENT_NO_TEXT",
-        "The PDF has no readable text. Sign in to send scanned documents to a model that reads them directly."
-      );
-    }
-    if (extracted.length > GUEST_MAX_EXTRACTED_CHARACTERS) {
-      throw new GuestAttachmentError(
-        413,
-        "GUEST_ATTACHMENT_TEXT_TOO_LARGE",
-        "The file's text is longer than a guest message can carry."
-      );
-    }
-    return buffer;
+    throw error;
   }
-
-  if (GUEST_OFFICE_TYPES.has(mediaType)) {
-    let extracted = "";
-    try {
-      extracted = await parseOfficeSafely(
-        buffer,
-        mediaType,
-        GUEST_MAX_EXTRACTED_CHARACTERS + 1
-      );
-    } catch {
-      throw new GuestAttachmentError(
-        400,
-        "GUEST_ATTACHMENT_UNREADABLE",
-        "The document is invalid or could not be processed."
-      );
-    }
-    if (!extracted) {
-      throw new GuestAttachmentError(
-        400,
-        "GUEST_ATTACHMENT_NO_TEXT",
-        "No readable text was found in the document."
-      );
-    }
-    if (extracted.length > GUEST_MAX_EXTRACTED_CHARACTERS) {
-      throw new GuestAttachmentError(
-        413,
-        "GUEST_ATTACHMENT_TEXT_TOO_LARGE",
-        "The file's text is longer than a guest message can carry."
-      );
-    }
-    return buffer;
-  }
-
-  // Text-ish types have no signature of their own, so they get an explicit
-  // one: a renamed binary must not be decoded straight into a prompt.
-  const text = assertGuestTextPayload(buffer);
-  if (text.length > GUEST_MAX_EXTRACTED_CHARACTERS) {
-    throw new GuestAttachmentError(
-      413,
-      "GUEST_ATTACHMENT_TEXT_TOO_LARGE",
-      "The file's text is longer than a guest message can carry."
-    );
-  }
-  return buffer;
 };
 
 export async function POST(request: Request) {
@@ -277,7 +241,7 @@ export async function POST(request: Request) {
     }
     const mediaType = query.data.mediaType.split(";", 1)[0].trim().toLowerCase();
     const name = sanitizeGuestFilename(query.data.name);
-    assertGuestAttachmentType(name, mediaType);
+    const format = resolveGuestAttachmentFormat(name, mediaType);
 
     // The declared body type must agree with the declared media type too, so a
     // caller cannot slip past a proxy or a parser by disagreeing with itself.
@@ -306,7 +270,13 @@ export async function POST(request: Request) {
       GUEST_UPLOAD_BYTES_PER_DAY
     );
 
-    const payload = await validateGuestFile(buffer, mediaType);
+    const validated = await validateGuestFile(buffer, format);
+    const payload = validated.bytes;
+    // An image may leave this call as a different type than it arrived as --
+    // a GIF is stored as the PNG the provider will be sent -- so the stored
+    // object, its metadata check and the response all use the validated type
+    // rather than the declared one.
+    const storedMediaType = validated.mediaType;
 
     const secret = getGuestAttachmentSecret();
     const key = createGuestAttachmentKey(
@@ -314,11 +284,11 @@ export async function POST(request: Request) {
       secret,
       createGuestAttachmentObjectId(randomUUID())
     );
-    await writeR2Object(key, payload, mediaType);
+    await writeR2Object(key, payload, storedMediaType);
     storedKey = key;
     await validateR2ObjectMetadata(key, {
       maxBytes: GUEST_MAX_ATTACHMENT_BYTES,
-      expectedContentType: mediaType,
+      expectedContentType: storedMediaType,
       expectedSize: payload.byteLength,
     });
     storedKey = null;
@@ -331,10 +301,13 @@ export async function POST(request: Request) {
       {
         objectKey: key,
         name,
-        mediaType,
+        mediaType: storedMediaType,
         size: payload.byteLength,
-        kind: GUEST_TEXT_TYPES.has(mediaType) ? "text" : "file",
+        kind: attachmentKindForFormat(format),
         extension: guestFileExtension(name),
+        // Counts, never paths: an entry name is text the uploader chose, and
+        // an upload response is not a place to echo it back.
+        ...(validated.archive ? { archive: validated.archive } : {}),
         ephemeral: true,
         expiresInMinutes: getGuestAttachmentTtlMinutes(),
       },
@@ -353,6 +326,9 @@ export async function POST(request: Request) {
     }
     if (error instanceof GuestAttachmentError) {
       return jsonError(error.message, error.code, error.status);
+    }
+    if (error instanceof ChatArchiveError) {
+      return jsonError("The archive could not be read.", error.code, error.status);
     }
     const chatResponse = chatErrorResponse(error);
     if (chatResponse) return chatResponse;

@@ -2800,6 +2800,7 @@ const checks = [
     file: "app/api/chat/guest-attachment/route.ts",
     test: (source) => {
       const policy = read("lib/guestAttachments.ts");
+      const validation = read("lib/chatAttachmentValidation.ts");
       const chat = read("app/api/chat/route.ts");
       const maintenance = read("lib/maintenance.ts");
       return (
@@ -2807,25 +2808,94 @@ const checks = [
         source.includes("ensureGuestVerified") &&
         source.includes("consumeApiRateLimit") &&
         source.includes("reserveDailyUploadBytes") &&
+        // The type is resolved against the shared registry, in the guest
+        // subset, before a byte is read.
+        source.includes("resolveGuestAttachmentFormat") &&
         // Validated and parsed with the same hardened parsers the signed-in
-        // path uses, never a lenient guest-only copy.
-        source.includes("normalizeImageSafely") &&
-        source.includes("extractPdfTextSafely") &&
-        source.includes("parseOfficeSafely") &&
-        source.includes("assertGuestAttachmentType") &&
-        source.includes("assertGuestTextPayload") &&
+        // path uses, never a lenient guest-only copy. There is now literally
+        // one validator, and the guest scope is what narrows it -- so the
+        // parsers are asserted where they are actually called.
+        source.includes("validateChatAttachmentUpload") &&
+        source.includes('scope: "guest"') &&
+        source.includes("GUEST_MAX_EXTRACTED_CHARACTERS") &&
+        validation.includes("normalizeImageSafely") &&
+        validation.includes("extractPdfTextSafely") &&
+        validation.includes("validatePdfSafely") &&
+        validation.includes("parseOfficeSafely") &&
+        validation.includes("assertSafeOfficeArchive") &&
+        validation.includes("decodeAttachmentText") &&
+        validation.includes("planChatArchive") &&
+        policy.includes("assertGuestAttachmentType") &&
+        policy.includes("assertGuestTextPayload") &&
         // Storage scope is derived from the caller's own signed identity.
         source.includes("isOwnGuestAttachmentKey") &&
         policy.includes("createHmac") &&
         chat.includes("isOwnGuestAttachmentKey") &&
         chat.includes("GUEST_MAX_ATTACHMENTS_PER_MESSAGE") &&
-        // No file content, extracted text or filename reaches the log.
+        // No file content, extracted text or filename reaches the log, in the
+        // route or in the validator it delegates to.
         !/console\.(error|warn|log)\([^)]*\b(text|extracted|buffer|payload)\b/.test(
           source
         ) &&
+        !/console\.(error|warn|log)\(/.test(validation) &&
         // The retention promise has an actual sweep behind it.
         maintenance.includes("sweepExpiredGuestAttachments") &&
         maintenance.includes("GUEST_ATTACHMENT_PREFIX")
+      );
+    },
+  },
+  {
+    name: "Uploaded archives are judged from the central directory, expanded in a bounded worker, and never touch disk",
+    file: "lib/chatArchive.ts",
+    test: (source) => {
+      const plan = read("lib/chatArchivePlan.ts");
+      const limits = read("lib/chatArchiveLimits.ts");
+      const formats = read("lib/chatAttachmentFormats.ts");
+      const chat = read("app/api/chat/route.ts");
+      return (
+        // Every size decision is made from the directory, before inflation:
+        // a local header can lie about a size until after the bytes are out.
+        source.includes("planChatArchive") &&
+        source.indexOf("planChatArchive") < source.indexOf("runInflateWorker(") &&
+        // The stream is then held to what the directory promised.
+        source.includes("CODES.sizeMismatch") &&
+        // Bounded: its own heap ceiling and its own deadline.
+        source.includes("resourceLimits") &&
+        source.includes("maxOldGenerationSizeMb") &&
+        source.includes("CHAT_ARCHIVE_INFLATE_TIMEOUT_MS") &&
+        // Expanded in memory. Nothing is written anywhere, so Zip Slip has
+        // nowhere to land even before the path checks.
+        !/require\(["']node:fs["']\)|from ["']node:fs["']|["']fs\/promises["']/.test(
+          source
+        ) &&
+        !/require\(["']node:fs["']\)|from ["']node:fs["']/.test(plan) &&
+        // The refusal matrix itself.
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.encrypted") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.zip64") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.unsafePath") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.executableEntry") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.credentialEntry") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.compressionRatio") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.expansionTooLarge") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.tooManyEntries") &&
+        plan.includes("CHAT_ARCHIVE_ERROR_CODES.unsupportedCompression") &&
+        // Traversal, absolute, drive-letter and UNC paths, and symlinks.
+        plan.includes('segment === ".."') &&
+        plan.includes('folded.startsWith("/")') &&
+        plan.includes("/^[A-Za-z]:/") &&
+        plan.includes('folded.startsWith("//")') &&
+        plan.includes("S_IFLNK") &&
+        // Nesting is not a setting anyone can raise by accident.
+        limits.includes("readonly maxNestedArchiveDepth: 0") &&
+        formats.includes("ARCHIVE_FATAL_EXTENSIONS") &&
+        formats.includes("EXECUTABLE_ATTACHMENT_EXTENSIONS") &&
+        // An archive entry goes through the same reader as a direct
+        // attachment, so a container is not a way round the image count, the
+        // payload ceiling, the text budget or the OCR allowance.
+        chat.includes("fromArchive: true") &&
+        chat.includes("archiveOcrBudget") &&
+        // The refusal code travels; the entry path never does.
+        chat.includes('"The attached archive could not be read."')
       );
     },
   },

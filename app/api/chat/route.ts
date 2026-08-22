@@ -2,8 +2,28 @@ import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
     buildAttachmentPromptText,
+    inertFilename,
     type ExtractedAttachment,
 } from "@/lib/attachmentContextPrompt";
+import {
+    attachmentKindForFormat,
+    CHAT_ATTACHMENT_MEDIA_TYPES,
+    formatByMediaType,
+    providerMediaTypeForFormat,
+    resolveChatAttachmentFormat,
+    type ChatAttachmentFormat,
+} from "@/lib/chatAttachmentFormats";
+import { decodeAttachmentText } from "@/lib/chatAttachmentText";
+import { ChatArchiveError, expandChatArchive } from "@/lib/chatArchive";
+import {
+    CHAT_ARCHIVE_ERROR_CODES,
+    chatArchiveLimits,
+} from "@/lib/chatArchiveLimits";
+import { totalArchiveExclusions } from "@/lib/chatArchivePlan";
+import {
+    ChatAttachmentValidationError,
+    validateChatAttachmentUpload,
+} from "@/lib/chatAttachmentValidation";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -93,9 +113,11 @@ import {
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
+    AnimatedImageError,
     extractPdfTextSafely,
     normalizeImageSafely,
     validatePdfSafely,
+    type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
 import {
     extractPdfTextWithMistralOcr,
@@ -332,28 +354,15 @@ const tracedJsonError = (
         },
     });
 };
-const OFFICE_ATTACHMENT_TYPES = new Set([
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.oasis.opendocument.text",
-    "application/vnd.oasis.opendocument.spreadsheet",
-    "application/vnd.oasis.opendocument.presentation",
-]);
-const IMAGE_ATTACHMENT_TYPES = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-]);
-const BINARY_ATTACHMENT_TYPES = new Set([
-    ...IMAGE_ATTACHMENT_TYPES,
-    "application/pdf",
-    ...OFFICE_ATTACHMENT_TYPES,
-]);
-const isImageAttachmentType = (
-    mediaType: string
-): mediaType is "image/png" | "image/jpeg" | "image/webp" =>
-    IMAGE_ATTACHMENT_TYPES.has(mediaType);
+/**
+ * Everything this route used to answer from four hand-kept literals now comes
+ * from `lib/chatAttachmentFormats.ts`. The sets below are views onto that
+ * table, not a second copy of it -- adding a format must not require an edit
+ * here.
+ */
+const isImageAttachmentMediaType = (mediaType: string) =>
+    formatByMediaType(mediaType)?.category === "image";
+
 const GOOGLE_EXPORT_TYPES: Record<
     string,
     { mediaType: string; extension: string; kind: "file" | "text" }
@@ -376,17 +385,6 @@ const GOOGLE_EXPORT_TYPES: Record<
         kind: "file",
     },
 };
-const ALLOWED_ATTACHMENT_TYPES = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "application/json",
-    ...OFFICE_ATTACHMENT_TYPES,
-]);
 const uploadPreparationSchema = z.union([
     z
         .object({
@@ -403,7 +401,7 @@ const uploadPreparationSchema = z.union([
             name: z.string().trim().min(1).max(120),
             mediaType: z
                 .string()
-                .refine((value) => ALLOWED_ATTACHMENT_TYPES.has(value)),
+                .refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
             size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
         })
         .strict(),
@@ -416,7 +414,7 @@ const deleteAttachmentSchema = z
 const finalizeAttachmentSchema = z
     .object({
         key: z.string().min(1).max(512),
-        mediaType: z.string().refine((value) => ALLOWED_ATTACHMENT_TYPES.has(value)),
+        mediaType: z.string().refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
         size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
     })
     .strict();
@@ -588,9 +586,17 @@ export async function PUT(req: Request) {
         const mediaType = body.mediaType;
         const size = body.size;
 
-        if (!name || !ALLOWED_ATTACHMENT_TYPES.has(mediaType)) {
+        // The name and the declared type have to agree, here and not only at
+        // send: the presigned URL that follows fixes the object's stored
+        // Content-Type, so a disagreement accepted now becomes an object that
+        // fails its own read later, minutes after the person moved on.
+        const preparedFormat = resolveChatAttachmentFormat({
+            filename: name,
+            declaredMediaType: mediaType,
+        });
+        if (!name || !preparedFormat || preparedFormat.mediaType !== mediaType) {
             return Response.json(
-                { error: "Unsupported attachment." },
+                { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
                 { status: 400 }
             );
         }
@@ -665,17 +671,83 @@ export async function PATCH(req: Request) {
             expectedSize: size,
         });
 
+        // Metadata is a claim the uploader made. This step used to stop here,
+        // so the first thing that looked at an actual byte was the send that
+        // happened minutes later -- and a corrupt PDF, a renamed executable or
+        // an animated GIF surfaced as a failed chat turn rather than a
+        // rejected file. The object is read back and put through the same
+        // parsers the guest path has always run.
+        const format = formatByMediaType(mediaType);
+        if (!format) {
+            return Response.json(
+                { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
+                { status: 400 }
+            );
+        }
+
+        let uploaded: Buffer;
+        try {
+            uploaded = await readR2Object(key, {
+                maxBytes: MAX_ATTACHMENT_SIZE,
+                expectedContentType: mediaType,
+            });
+        } catch (error) {
+            await deleteR2Object(key).catch(() => {});
+            if (error instanceof BoundedBufferError) {
+                return Response.json(
+                    { error: "Uploaded attachment failed validation.", code: "ATTACHMENT_TYPE_MISMATCH" },
+                    { status: 400 }
+                );
+            }
+            throw error;
+        }
+
+        let inspection;
+        try {
+            inspection = await validateChatAttachmentUpload({
+                buffer: uploaded,
+                format,
+                scope: "account",
+            });
+        } catch (error) {
+            // An object that failed its own contents check is removed rather
+            // than left for the sweep: it is unusable, it counts against the
+            // account's stored bytes, and leaving it there while telling the
+            // person the upload failed is two different answers.
+            await deleteR2Object(key).catch((cleanupError) =>
+                console.error("Attachment cleanup after failed validation failed:", {
+                    cleanupError,
+                })
+            );
+            if (error instanceof ChatAttachmentValidationError) {
+                return Response.json(
+                    { error: "Uploaded attachment failed validation.", code: error.code },
+                    { status: error.status }
+                );
+            }
+            if (error instanceof ChatArchiveError) {
+                return Response.json(
+                    { error: "The archive could not be read.", code: error.code },
+                    { status: error.status }
+                );
+            }
+            throw error;
+        }
+
         return Response.json({
             key,
             mediaType,
             size: validated.size,
+            // Counts only -- an entry path is text the uploader chose, and a
+            // response is not a place to echo it back.
+            ...(inspection.archive ? { archive: inspection.archive } : {}),
         });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
         if (error instanceof BoundedBufferError) {
             return Response.json(
-                { error: "Uploaded attachment failed validation." },
+                { error: "Uploaded attachment failed validation.", code: "ATTACHMENT_TYPE_MISMATCH" },
                 { status: 400 }
             );
         }
@@ -1328,6 +1400,10 @@ async function handleChatPost(
         let totalExtractedCharacters = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
+        // Paid OCR reached from inside an archive, and how much of it this
+        // request has been allowed. See `maxOcrPdfs` in lib/chatArchiveLimits.
+        let archiveOcrBudget = 0;
+        let archiveOcrUsed = 0;
         // Shared with the composer estimate and the comparison preflight so a
         // Korean conversation is not reserved several times too small here and
         // correctly elsewhere -- see lib/chatTokenEstimate.ts.
@@ -1665,107 +1741,34 @@ async function handleChatPost(
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
 
-            for (const attachment of attachments) {
-                if (
-                    !attachment ||
-                    typeof attachment.name !== "string" ||
-                    typeof attachment.mediaType !== "string" ||
-                    !ALLOWED_ATTACHMENT_TYPES.has(attachment.mediaType)
-                ) {
-                    throw new Error("Unsupported attachment.");
-                }
-                if (
-                    (BINARY_ATTACHMENT_TYPES.has(attachment.mediaType) &&
-                        attachment.kind !== "file") ||
-                    (!BINARY_ATTACHMENT_TYPES.has(attachment.mediaType) &&
-                        attachment.kind !== "text")
-                ) {
-                    throw new ChatAccessError(
-                        400,
-                        "INVALID_ATTACHMENT_KIND",
-                        "The attachment kind does not match its media type."
-                    );
-                }
-
-                let attachmentData: string;
-                let attachmentBytes: number;
-                let attachmentBuffer: Buffer | undefined;
-                let extractedPdfText: string | undefined;
-                let pdfFilePartBuffer: Buffer | undefined;
-
-                const isGuestObject =
-                    typeof attachment.objectKey === "string" &&
-                    Boolean(guestObjectPrefix) &&
-                    isOwnGuestAttachmentKey(
-                        attachment.objectKey,
-                        access.subjectKey,
-                        getGuestAttachmentSecret()
-                    );
-                if (isGuestObject && !GUEST_ATTACHMENT_TYPES[attachment.mediaType]) {
-                    throw new ChatAccessError(
-                        400,
-                        "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
-                        "This file type cannot be attached as a guest."
-                    );
-                }
-                const attachmentSizeLimit = isGuestObject
-                    ? GUEST_MAX_ATTACHMENT_BYTES
-                    : MAX_ATTACHMENT_SIZE;
-
-                if (typeof attachment.objectKey === "string") {
-                    const isOwnUserObject =
-                        Boolean(userObjectPrefix) &&
-                        attachment.objectKey.startsWith(userObjectPrefix!);
-                    if (!isOwnUserObject && !isGuestObject) {
-                        throw new Error("Attachment access denied.");
-                    }
-
-                    try {
-                        attachmentBuffer = await readR2Object(
-                            attachment.objectKey,
-                            {
-                                maxBytes: attachmentSizeLimit,
-                                expectedContentType: attachment.mediaType,
-                            }
-                        );
-                    } catch (error) {
-                        // A guest object is ephemeral by design, so "gone" is
-                        // an ordinary outcome (the TTL sweep took it), not a
-                        // server fault. Say so instead of returning a 500 the
-                        // user cannot act on.
-                        if (isGuestObject) {
-                            logRequestError(
-                                "guest_attachment_unavailable",
-                                traceId,
-                                error,
-                                requestedModelId
-                            );
-                            throw new ChatAccessError(
-                                410,
-                                "GUEST_ATTACHMENT_EXPIRED",
-                                "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
-                            );
-                        }
-                        throw error;
-                    }
-                    attachmentBytes = attachmentBuffer.byteLength;
-                    attachmentData =
-                        attachment.kind === "text"
-                            ? attachmentBuffer.toString("utf8")
-                            : attachmentBuffer.toString("base64");
-                } else {
-                    throw new Error("Attachment data is missing.");
-                }
-
-                if (attachmentBytes > attachmentSizeLimit) {
-                    throw new ChatAccessError(
-                        413,
-                        "ATTACHMENT_TOO_LARGE",
-                        "An attachment exceeds the per-file size limit."
-                    );
-                }
-
-                if (isImageAttachmentType(attachment.mediaType)) {
+            /**
+             * Reads one file into the turn -- attached directly, or lifted
+             * out of an archive.
+             *
+             * Factored out for the archive, not for tidiness: an entry inside
+             * a ZIP has to be treated *exactly* the way the same file would
+             * be if it had been dragged in on its own, or a container becomes
+             * a way round the image limits, the OCR path and the text budget.
+             * One function is how that stays true.
+             *
+             * Returns `"no-text"` instead of throwing when an archived
+             * document turns out to have nothing readable in it: one
+             * unreadable entry out of twenty is a line in the exclusion
+             * notice, while the same file attached on its own is a failed
+             * upload the person needs to hear about.
+             */
+            const ingestAttachmentFile = async ({
+                format,
+                name,
+                buffer,
+                fromArchive,
+            }: {
+                format: ChatAttachmentFormat;
+                name: string;
+                buffer: Buffer;
+                fromArchive: boolean;
+            }): Promise<"ok" | "no-text" | "unreadable"> => {
+                if (format.category === "image") {
                     if (!modelSupportsImageInput(modelConfig)) {
                         throw new ChatAccessError(
                             400,
@@ -1773,27 +1776,32 @@ async function handleChatPost(
                             `${modelConfig.name} does not support image input. Choose an image-capable model or retry without attachments.`
                         );
                     }
+                    let normalized: Buffer;
                     try {
-                        attachmentBuffer = await normalizeImageSafely(
-                            attachmentBuffer ||
-                                Buffer.from(attachmentData, "base64"),
-                            attachment.mediaType,
+                        normalized = await normalizeImageSafely(
+                            buffer,
+                            format.mediaType as NormalizableImageMediaType,
                             MAX_ATTACHMENT_SIZE
                         );
-                    } catch {
+                    } catch (error) {
+                        if (error instanceof AnimatedImageError) {
+                            throw new ChatAccessError(
+                                400,
+                                "ATTACHMENT_ANIMATED_IMAGE",
+                                "Animated images are not supported. Attach a still image instead."
+                            );
+                        }
+                        if (fromArchive) return "unreadable";
                         throw new ChatAccessError(
                             400,
                             "INVALID_IMAGE_ATTACHMENT",
                             "The attached image is invalid or unsupported."
                         );
                     }
-                    attachmentBytes = attachmentBuffer.byteLength;
-                    attachmentData = attachmentBuffer.toString("base64");
+
+                    const encoded = normalized.toString("base64");
                     totalImageCount += 1;
-                    totalBase64ImagePayloadBytes += Buffer.byteLength(
-                        attachmentData,
-                        "utf8"
-                    );
+                    totalBase64ImagePayloadBytes += Buffer.byteLength(encoded, "utf8");
                     const imageCapabilities = modelConfig.inputCapabilities;
                     if (
                         imageCapabilities?.maxImages &&
@@ -1816,23 +1824,49 @@ async function handleChatPost(
                             `${modelConfig.name} accepts up to 4 MB of base64 image data per request. Use a smaller image.`
                         );
                     }
-                } else if (attachment.mediaType === "application/pdf") {
-                    const pdfBuffer =
-                        attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    const remainingCharacters =
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS -
-                        totalExtractedCharacters;
-                    if (remainingCharacters <= 64) {
+
+                    fileParts.push({
+                        type: "file",
+                        data: { type: "data", data: new Uint8Array(normalized) },
+                        // A GIF left this process as a PNG; telling the
+                        // provider otherwise would describe bytes that are no
+                        // longer there.
+                        mediaType: providerMediaTypeForFormat(format),
+                        filename: name,
+                    });
+                    return "ok";
+                }
+
+                const remainingCharacters =
+                    MAX_EXTRACTED_ATTACHMENT_CHARACTERS - totalExtractedCharacters;
+                if (remainingCharacters <= 64) {
+                    throw new ChatAccessError(
+                        413,
+                        "ATTACHMENT_TEXT_TOO_LARGE",
+                        "Extracted attachment text exceeds the request limit."
+                    );
+                }
+
+                const addExtractedText = (kind: string, text: string) => {
+                    totalExtractedCharacters += text.length;
+                    if (
+                        totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                    ) {
                         throw new ChatAccessError(
                             413,
                             "ATTACHMENT_TEXT_TOO_LARGE",
                             "Extracted attachment text exceeds the request limit."
                         );
                     }
+                    textAttachments.push({ name, kind, text });
+                };
+
+                if (format.category === "pdf") {
+                    let extractedPdfText = "";
                     let pdfValidated = false;
                     try {
                         extractedPdfText = await extractPdfTextSafely(
-                            pdfBuffer,
+                            buffer,
                             remainingCharacters - 64
                         );
                     } catch (error) {
@@ -1843,9 +1877,10 @@ async function handleChatPost(
                             requestedModelId
                         );
                         try {
-                            await validatePdfSafely(pdfBuffer);
+                            await validatePdfSafely(buffer);
                             pdfValidated = true;
                         } catch {
+                            if (fromArchive) return "unreadable";
                             throw new ChatAccessError(
                                 400,
                                 "INVALID_PDF_ATTACHMENT",
@@ -1859,12 +1894,19 @@ async function handleChatPost(
                     // as a backend conversion model. It is never exposed in
                     // the Insight model picker and never consumes user model
                     // credits; its page cost is recorded as internal usage.
+                    //
+                    // An archived PDF only reaches OCR while the archive's own
+                    // allowance lasts (`maxOcrPdfs`): one PDF dragged in is a
+                    // deliberate act, twenty arriving inside a container the
+                    // person did not enumerate is a bill nothing in the
+                    // request asked about.
                     if (!extractedPdfText) {
                         if (!pdfValidated) {
                             try {
-                                await validatePdfSafely(pdfBuffer);
+                                await validatePdfSafely(buffer);
                                 pdfValidated = true;
                             } catch {
+                                if (fromArchive) return "unreadable";
                                 throw new ChatAccessError(
                                     400,
                                     "INVALID_PDF_ATTACHMENT",
@@ -1873,9 +1915,15 @@ async function handleChatPost(
                             }
                         }
 
+                        const ocrAllowance = fromArchive
+                            ? archiveOcrBudget > archiveOcrUsed
+                            : true;
+                        if (!ocrAllowance) return "no-text";
+                        if (fromArchive) archiveOcrUsed += 1;
+
                         try {
                             const ocrResult = await extractPdfTextWithMistralOcr(
-                                pdfBuffer,
+                                buffer,
                                 remainingCharacters - 64
                             );
                             if (ocrResult?.text) {
@@ -1910,7 +1958,8 @@ async function handleChatPost(
                                         traceId,
                                         backendModelId: ocrResult.modelId,
                                         pageCount: ocrResult.pageCount,
-                                        attachmentBytes: pdfBuffer.byteLength,
+                                        attachmentBytes: buffer.byteLength,
+                                        fromArchive,
                                         timestamp: new Date().toISOString(),
                                     })
                                 );
@@ -1922,6 +1971,7 @@ async function handleChatPost(
                                 error,
                                 requestedModelId
                             );
+                            if (fromArchive) return "no-text";
                             if (!modelSupportsNativePdfInput(modelConfig)) {
                                 throw new ChatAccessError(
                                     502,
@@ -1932,19 +1982,162 @@ async function handleChatPost(
                         }
                     }
 
-                    if (!extractedPdfText) {
-                        if (modelSupportsNativePdfInput(modelConfig)) {
-                            pdfFilePartBuffer = pdfBuffer;
-                        } else {
-                            throw new ChatAccessError(
-                                400,
-                                "PDF_TEXT_UNREADABLE",
-                                "The attached PDF does not contain readable text."
-                            );
-                        }
+                    if (extractedPdfText) {
+                        addExtractedText(format.promptKind, extractedPdfText);
+                        return "ok";
                     }
+                    if (fromArchive) return "no-text";
+                    if (modelSupportsNativePdfInput(modelConfig)) {
+                        fileParts.push({
+                            type: "file",
+                            data: { type: "data", data: new Uint8Array(buffer) },
+                            mediaType: format.mediaType,
+                            filename: name,
+                        });
+                        return "ok";
+                    }
+                    throw new ChatAccessError(
+                        400,
+                        "PDF_TEXT_UNREADABLE",
+                        "The attached PDF does not contain readable text."
+                    );
                 }
 
+                if (format.category === "office") {
+                    let extractedText = "";
+                    try {
+                        extractedText = await parseOfficeSafely(
+                            buffer,
+                            format.mediaType,
+                            remainingCharacters - 64
+                        );
+                    } catch (error) {
+                        if (fromArchive) return "unreadable";
+                        throw error;
+                    }
+                    if (!extractedText) {
+                        if (fromArchive) return "no-text";
+                        throw new Error(`No readable text found in ${name}.`);
+                    }
+                    addExtractedText(format.promptKind, extractedText);
+                    return "ok";
+                }
+
+                // Text. Decoded strictly rather than with
+                // `Buffer.toString("utf8")`, which repairs a broken encoding
+                // into U+FFFD and hands the damage to the model as content.
+                const decoded = decodeAttachmentText(
+                    new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+                );
+                if (!decoded.ok) {
+                    if (fromArchive) return "unreadable";
+                    throw new ChatAccessError(
+                        400,
+                        decoded.reason === "binary"
+                            ? "ATTACHMENT_TYPE_MISMATCH"
+                            : "ATTACHMENT_ENCODING_UNREADABLE",
+                        decoded.reason === "binary"
+                            ? "The file's contents do not match its type."
+                            : "The file's character encoding could not be read."
+                    );
+                }
+                if (!decoded.text) {
+                    if (fromArchive) return "no-text";
+                }
+                addExtractedText(format.promptKind, decoded.text);
+                return "ok";
+            };
+
+            for (const attachment of attachments) {
+                if (
+                    !attachment ||
+                    typeof attachment.name !== "string" ||
+                    typeof attachment.mediaType !== "string"
+                ) {
+                    throw new Error("Unsupported attachment.");
+                }
+                // The shared table decides, and the name has to agree with the
+                // declared type: a `.png` sent as `application/pdf` is a
+                // disagreement, not something to resolve in either direction.
+                const format = resolveChatAttachmentFormat({
+                    filename: attachment.name,
+                    declaredMediaType: attachment.mediaType,
+                });
+                if (!format || format.mediaType !== attachment.mediaType) {
+                    throw new Error("Unsupported attachment.");
+                }
+                if (attachment.kind !== attachmentKindForFormat(format)) {
+                    throw new ChatAccessError(
+                        400,
+                        "INVALID_ATTACHMENT_KIND",
+                        "The attachment kind does not match its media type."
+                    );
+                }
+
+                const isGuestObject =
+                    typeof attachment.objectKey === "string" &&
+                    Boolean(guestObjectPrefix) &&
+                    isOwnGuestAttachmentKey(
+                        attachment.objectKey,
+                        access.subjectKey,
+                        getGuestAttachmentSecret()
+                    );
+                if (isGuestObject && !GUEST_ATTACHMENT_TYPES[attachment.mediaType]) {
+                    throw new ChatAccessError(
+                        400,
+                        "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
+                        "This file type cannot be attached as a guest."
+                    );
+                }
+                const attachmentSizeLimit = isGuestObject
+                    ? GUEST_MAX_ATTACHMENT_BYTES
+                    : MAX_ATTACHMENT_SIZE;
+
+                if (typeof attachment.objectKey !== "string") {
+                    throw new Error("Attachment data is missing.");
+                }
+                const isOwnUserObject =
+                    Boolean(userObjectPrefix) &&
+                    attachment.objectKey.startsWith(userObjectPrefix!);
+                if (!isOwnUserObject && !isGuestObject) {
+                    throw new Error("Attachment access denied.");
+                }
+
+                let attachmentBuffer: Buffer;
+                try {
+                    attachmentBuffer = await readR2Object(attachment.objectKey, {
+                        maxBytes: attachmentSizeLimit,
+                        expectedContentType: attachment.mediaType,
+                    });
+                } catch (error) {
+                    // A guest object is ephemeral by design, so "gone" is
+                    // an ordinary outcome (the TTL sweep took it), not a
+                    // server fault. Say so instead of returning a 500 the
+                    // user cannot act on.
+                    if (isGuestObject) {
+                        logRequestError(
+                            "guest_attachment_unavailable",
+                            traceId,
+                            error,
+                            requestedModelId
+                        );
+                        throw new ChatAccessError(
+                            410,
+                            "GUEST_ATTACHMENT_EXPIRED",
+                            "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
+                        );
+                    }
+                    throw error;
+                }
+
+                const attachmentBytes = attachmentBuffer.byteLength;
+                if (attachmentBytes > attachmentSizeLimit) {
+                    throw new ChatAccessError(
+                        413,
+                        "ATTACHMENT_TOO_LARGE",
+                        "An attachment exceeds the per-file size limit."
+                    );
+                }
                 totalAttachmentBytes += attachmentBytes;
                 if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
                     throw new ChatAccessError(
@@ -1954,110 +2147,82 @@ async function handleChatPost(
                     );
                 }
 
-                if (attachment.mediaType === "application/pdf") {
-                    if (pdfFilePartBuffer) {
-                        fileParts.push({
-                            type: "file",
-                            data: {
-                                type: "data",
-                                data: new Uint8Array(pdfFilePartBuffer),
-                            },
-                            mediaType: attachment.mediaType,
-                            filename: attachment.name,
-                        });
-                    } else {
-                        const pdfText = extractedPdfText || "";
-                        totalExtractedCharacters += pdfText.length;
-                        if (
-                            totalExtractedCharacters >
-                            MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                        ) {
-                            throw new ChatAccessError(
-                                413,
-                                "ATTACHMENT_TEXT_TOO_LARGE",
-                                "Extracted attachment text exceeds the request limit."
-                            );
-                        }
-
-                        textAttachments.push({
-                            name: attachment.name,
-                            kind: "PDF file",
-                            text: pdfText,
-                        });
-                    }
-                } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
-                    const officeBuffer =
-                        attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    const remainingCharacters =
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS -
-                        totalExtractedCharacters;
-                    if (remainingCharacters <= 64) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
-                        );
-                    }
-                    const extractedText = await parseOfficeSafely(
-                        officeBuffer,
-                        attachment.mediaType,
-                        remainingCharacters - 64
-                    );
-
-                    if (!extractedText) {
-                        throw new Error(`No readable text found in ${attachment.name}.`);
-                    }
-                    totalExtractedCharacters += extractedText.length;
-                    if (
-                        totalExtractedCharacters >
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                    ) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
-                        );
-                    }
-
-                    textAttachments.push({
+                if (format.category !== "archive") {
+                    await ingestAttachmentFile({
+                        format,
                         name: attachment.name,
-                        kind: "office file",
-                        text: extractedText,
+                        buffer: attachmentBuffer,
+                        fromArchive: false,
                     });
-                } else if (attachment.kind === "text") {
-                    totalExtractedCharacters += attachmentData.length;
-                    if (
-                        totalExtractedCharacters >
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                    ) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
-                        );
-                    }
-                    textAttachments.push({
-                        name: attachment.name,
-                        kind: "file",
-                        text: attachmentData,
-                    });
-                } else {
-                    const binaryData =
-                        attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    fileParts.push({
-                        type: "file",
-                        data: {
-                            type: "data",
-                            data: new Uint8Array(binaryData),
-                        },
-                        mediaType: attachment.mediaType,
-                        filename: attachment.name,
-                    });
+                    continue;
                 }
+
+                // An archive is expanded here and its entries go through the
+                // same reader as any other attachment, so nothing inside it
+                // escapes the image count, the payload ceiling, the text
+                // budget or the OCR allowance.
+                const scope = isGuestObject ? "guest" : "account";
+                archiveOcrBudget += chatArchiveLimits(scope).maxOcrPdfs;
+                let expanded;
+                try {
+                    expanded = await expandChatArchive(attachmentBuffer, scope);
+                } catch (error) {
+                    if (error instanceof ChatArchiveError) {
+                        // The code travels; the entry path that produced it
+                        // never does.
+                        throw new ChatAccessError(
+                            error.status,
+                            error.code,
+                            "The attached archive could not be read."
+                        );
+                    }
+                    throw error;
+                }
+                const archiveName = inertFilename(attachment.name);
+                const readPaths: string[] = [];
+                let unreadableCount = 0;
+
+                for (const file of expanded.files) {
+                    const outcome = await ingestAttachmentFile({
+                        format: file.entry.format,
+                        name: `${archiveName}/${file.entry.path}`,
+                        buffer: file.bytes,
+                        fromArchive: true,
+                    });
+                    if (outcome === "ok") readPaths.push(file.entry.path);
+                    else unreadableCount += 1;
+                }
+
+                if (readPaths.length === 0) {
+                    throw new ChatAccessError(
+                        400,
+                        CHAT_ARCHIVE_ERROR_CODES.noSupportedFiles,
+                        "No file inside the archive could be read."
+                    );
+                }
+
+                // Stated to the model rather than left implicit: without it,
+                // an answer about "the files you sent" silently describes a
+                // subset, and neither side knows which one.
+                const skipped =
+                    totalArchiveExclusions(expanded.plan.exclusions) + unreadableCount;
+                textAttachments.push({
+                    name: attachment.name,
+                    kind: "archive listing",
+                    text: [
+                        `Files read from this archive (${readPaths.length}):`,
+                        ...readPaths.map((path) => `- ${path}`),
+                        skipped > 0
+                            ? `${skipped} other entr${skipped === 1 ? "y" : "ies"} in this archive could not be read by this product and are not included below.`
+                            : "",
+                    ]
+                        .filter(Boolean)
+                        .join("\n"),
+                });
             }
 
             const hasUnsupportedFilePart = fileParts.some((part) =>
-                isImageAttachmentType(part.mediaType)
+                isImageAttachmentMediaType(part.mediaType)
                     ? !modelSupportsImageInput(modelConfig)
                     : part.mediaType === "application/pdf"
                       ? !modelSupportsNativePdfInput(modelConfig)
