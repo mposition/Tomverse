@@ -12,6 +12,7 @@ import {
     Trash2,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { KnowledgeFilesPanel } from "@/components/assistants/KnowledgeFilesPanel";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     ASSISTANT_PROFILE_LIST_PATH,
@@ -887,46 +888,26 @@ export function AssistantProfileEditor({
                                         {t("assistantProfiles.memoryNarrowOnly")}
                                     </p>
 
-                                    {(profile?.knowledgeFiles.length ?? 0) > 0 && (
-                                        <fieldset className="flex flex-col gap-2">
-                                            <legend className="text-sm font-semibold">
-                                                {t("assistantProfiles.knowledgeLabel")}
-                                            </legend>
-                                            {profile?.knowledgeFiles.map((file) => (
-                                                <label
-                                                    key={file.id}
-                                                    className="flex items-center gap-2 text-sm"
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedFileIds.includes(
-                                                            file.id
-                                                        )}
-                                                        disabled={
-                                                            file.processingStatus !== "ready"
-                                                        }
-                                                        onChange={(event) =>
-                                                            setSelectedFileIds((current) =>
-                                                                event.target.checked
-                                                                    ? [...current, file.id]
-                                                                    : current.filter(
-                                                                          (id) => id !== file.id
-                                                                      )
-                                                            )
-                                                        }
-                                                        data-testid={`assistant-knowledge-${file.id}`}
-                                                    />
-                                                    <span>{file.name}</span>
-                                                    {file.processingStatus !== "ready" && (
-                                                        <span className="text-xs text-zinc-500">
-                                                            {t(
-                                                                `assistantProfiles.fileStatus.${file.processingStatus}`
-                                                            )}
-                                                        </span>
-                                                    )}
-                                                </label>
-                                            ))}
-                                        </fieldset>
+                                    {profileId && profile && (
+                                        <KnowledgeFilesPanel
+                                            profileId={profileId}
+                                            files={profile.knowledgeFiles}
+                                            publishedManifest={
+                                                profile.currentVersion
+                                                    ?.knowledgeManifest ?? []
+                                            }
+                                            selectedFileIds={selectedFileIds}
+                                            onToggleFile={(fileId, next) =>
+                                                setSelectedFileIds((current) =>
+                                                    next
+                                                        ? [...current, fileId]
+                                                        : current.filter(
+                                                              (id) => id !== fileId
+                                                          )
+                                                )
+                                            }
+                                            onChanged={load}
+                                        />
                                     )}
                                 </div>
 
