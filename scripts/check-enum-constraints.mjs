@@ -71,6 +71,13 @@ const REGISTRY = {
     reason:
       "ready and failed. ARTIFACT_STATUSES beside it carries a third value, `blocked`, which is a live-stream state for a guest who has not signed in: there is no account to write a row under, so a third database value would be a status nothing could ever query for. The split is what keeps the constraint and the transport union from being forced to agree about a state only one of them has.",
   },
+  RoutingRun_product_key_check: {
+    owner: "list",
+    module: "lib/conversationProduct.ts",
+    list: "CONVERSATION_PRODUCT_KEYS",
+    reason:
+      "The same three products as Conversation.productKey, snapshotted at execution time (decision record v1.2 \u00a75). Deliberately the same list rather than a second one: a run's product is copied from the conversation's, so two lists that could drift would let a run claim a product no conversation can hold. Also NULL-permitting, because rows written before the column existed had no product recorded and a guessed value would be an attribution nobody made.",
+  },
   Conversation_product_key_check: {
     owner: "list",
     module: "lib/conversationProduct.ts",

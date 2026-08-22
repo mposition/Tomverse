@@ -311,6 +311,7 @@ model Conversation {
   shareRevokedAt DateTime?
 
   messages              Message[]
+  routingRuns           RoutingRun[]
   messageArtifacts      MessageArtifact[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
@@ -3009,6 +3010,37 @@ model RoutingRun {
   reservationId     String?
   settlementOutcome String?
 
+  /// --- product attribution (decision record v1.2 §5) ----------------------
+
+  /// Which product this run executed for, snapshotted at execution time.
+  ///
+  /// A snapshot rather than a join, because the join can be broken: a user
+  /// deleting one conversation would otherwise take that turn's product out of
+  /// the evaluation segment with it. ROUTE-01's sample and ROUTE-07's
+  /// denominator would then shrink with user behaviour rather than with
+  /// anything about routing.
+  ///
+  /// Nullable because rows written before this column existed genuinely had no
+  /// product recorded, and a guessed value would claim an attribution nobody
+  /// made. Runs after the cutover must carry one -- how that is enforced is
+  /// decided in docs/policy/adr/2026-08-22-routing-run-product-attribution.md.
+  productKey String?
+
+  /// Which conversation this run belongs to.
+  ///
+  /// `beginInstrumentedDispatch` already received this and dropped it, so a
+  /// failed run -- which never gets an `assistantMessageId` -- had no way at
+  /// all of naming its conversation, and operational lookup was traceId only.
+  ///
+  /// SetNull, not Cascade: today these rows survive a conversation deletion
+  /// because there is no FK at all, and adding a cascade would delete
+  /// evaluation data every time a user tidies up. The same pattern as
+  /// ChatCreditReservation.userId. Deleting the *account* still takes the runs
+  /// with it -- userId -> User stays Cascade, which the data-domain policy
+  /// decided and this does not change.
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
   routingAttempts RoutingAttempt[] @relation("RunAttempts")
   updatedAt       DateTime         @default(now()) @updatedAt
 
@@ -3016,6 +3048,11 @@ model RoutingRun {
   @@index([mode, createdAt])
   @@index([userId, createdAt])
   @@index([finalModelId, createdAt])
+  @@index([productKey, createdAt])
+  /// Not optional. PostgreSQL does not index a referencing column for you, and
+  /// ON DELETE SET NULL has to find the referencing rows -- without this,
+  /// deleting one conversation scans every RoutingRun.
+  @@index([conversationId])
 }
 
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in

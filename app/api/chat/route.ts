@@ -820,6 +820,7 @@ async function handleChatPost(
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
+        let conversationProductKey: string | null = null;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §10: the conversation's bound profile version. Read from the same
         // row as the memory mode so the context this request builds is the
@@ -1232,10 +1233,16 @@ async function handleChatPost(
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
+                    productKey: true,
                     assistantProfileVersionId: true,
                 },
             });
             conversationMemoryMode = conversation?.memoryMode ?? null;
+            // The stored product, read here because this is where the
+            // conversation is already fetched under an ownership check. §6:
+            // once the row exists, its own productKey is the only source --
+            // never the surface the request came from.
+            conversationProductKey = conversation?.productKey ?? null;
             conversationProfileVersionId =
                 conversation?.assistantProfileVersionId ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
@@ -2626,6 +2633,10 @@ async function handleChatPost(
             requestOutputCapTokens: budget.maxOutputTokens,
             reservationId: usageReservation?.reservationId ?? null,
             conversationId: conversationId ?? null,
+            // The snapshot, so a failed or not_dispatched run can still be
+            // attributed to a product. Null on a turn with no conversation --
+            // a guest has no row to read one from.
+            productKey: conversationProductKey,
         });
         // §5 step 4: the effective request is only known once the adapter has
         // assembled it, so the manifest is finalized here and not a line

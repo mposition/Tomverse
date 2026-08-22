@@ -172,6 +172,16 @@ strict 전환이 실제로 일어났음이 증명됩니다. 7번은
 migration의 테스트가 소유합니다. **지금 8번을 작성해 통과하도록 만들지
 마십시오** — 오늘 통과하는 8번은 잘못된 것을 검사하고 있는 것입니다.
 
+## 7.3 RoutingRun 쪽
+
+`RoutingRun.productKey`는 같은 허용값을 **실행 시점 스냅샷**으로 들고 있고
+(`RoutingRun_product_key_check`, 역시 NOT VALID), 목록은 이 문서와 같은
+`CONVERSATION_PRODUCT_KEYS` 하나입니다. 두 목록이 따로 있으면 어떤 대화도 가질 수
+없는 제품을 run이 주장할 수 있게 됩니다.
+
+cutover 이후 필수 강제 방식과 그 근거는
+`docs/policy/routing-run-product-attribution.md` §5에 있습니다.
+
 ## 8. 데이터 수명
 
 `productKey`는 `Conversation`의 평범한 컬럼이므로 별도 수명이 없습니다.
