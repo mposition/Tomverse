@@ -71,6 +71,13 @@ const REGISTRY = {
     reason:
       "ready and failed. ARTIFACT_STATUSES beside it carries a third value, `blocked`, which is a live-stream state for a guest who has not signed in: there is no account to write a row under, so a third database value would be a status nothing could ever query for. The split is what keeps the constraint and the transport union from being forced to agree about a state only one of them has.",
   },
+  Conversation_product_key_check: {
+    owner: "list",
+    module: "lib/conversationProduct.ts",
+    list: "CONVERSATION_PRODUCT_KEYS",
+    reason:
+      "chat, review, studio -- which Tomverse product a conversation belongs to (product boundary decision record v1.2, decision 2). The brand axis has a fourth product, `code`, deliberately absent: Tomverse Code writes no Conversation rows, so admitting it would make a row with no execution surface a legal value. It joins both the list and the constraint on the day Code starts writing conversations, which is why the two are compared here rather than left to agree by memory.",
+  },
   Conversation_memoryMode_check: {
     owner: "list",
     module: "lib/conversationMemoryMode.ts",

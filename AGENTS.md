@@ -296,6 +296,40 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   drift로 잡습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
+# Conversation.productKey
+
+`Conversation.productKey`, 그 CHECK 제약, 또는 productKey를 쓰는 생성 경로를
+건드리기 전에 읽습니다.
+
+- `docs/policy/conversation-product-key.md`
+
+절대 조건:
+
+- **`kind`를 제품 정체성으로 재사용하지 않습니다**(계획서 §5). `kind`는
+  `lib/conversationKindGuard.ts`가 소유하는 **서버 authorization·modality 경계**
+  이고, `productKey`는 사용자가 수행하는 제품 작업입니다. 두 축은 직교하며 어느
+  것도 다른 하나를 대체하지 않습니다.
+- **`selectionMode`로 제품을 유도하거나 백필하지 않습니다.** Chat에서 사용자가
+  모델을 직접 골라도 그 대화는 Chat입니다. 그리고 manual 복귀가 sticky state를
+  지우므로(`Conversation_manual_has_no_sticky_state_check`) "Auto였던 적이 있나"를
+  나중에 물을 수조차 없습니다.
+- **허용값은 `chat` · `review` · `studio` 셋뿐이고 `code`는 없습니다.** Code가
+  Conversation을 쓰기 시작할 때 `lib/conversationProduct.ts`의
+  `CONVERSATION_PRODUCT_KEYS`와 DB CHECK에 **함께** 추가합니다
+  (`npm run check:enum-constraints`가 어긋남을 잡습니다).
+- **DB default를 두지 않습니다.** `review` default는 컬럼을 빼먹은 writer를
+  Review를 의도한 writer처럼 보이게 만듭니다. 전환 기간의 NULL은 "아직 안 정해짐"
+  이고 그것이 백필의 대상 목록입니다.
+- **Auto는 Chat 전용이며 규칙은 허용 하나로 씁니다**, 금지 목록이 아니라.
+  v1.1은 `review + auto`만 금지했고 `studio + auto`가 통과했습니다.
+- **NOT VALID 제약은 writer 누락을 막지 못합니다.** 셋 다 `productKey IS NULL`을
+  통과시킵니다. 누락은 공통 생성 서비스 · 직접 `conversation.create` 정적 검사 ·
+  writer coverage 테스트가 막으며, 이 셋은 제약과 별개로 계속 필요합니다.
+- **`VALIDATE CONSTRAINT`와 `NOT NULL`은 각각 별도 migration이고 별도 증거를
+  갖습니다.** 정책 문서 §7의 조건이 충족되기 전에는 작성하지 않습니다.
+  `tests/integration/conversation-product-key.db.test.ts`가 조기 전환을 실패로
+  만듭니다.
+
 # Chat concurrency and identity namespace
 
 게스트 동시 실행 scope, lease 수명, guest→로그인 전환의 대화 ID를 건드리기 전에

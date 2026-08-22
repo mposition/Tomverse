@@ -72,6 +72,11 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         id: true,
         title: true,
         kind: true,
+        // The product the conversation belongs to, exported for the same
+        // reason `kind` is: it is server-decided identity the account can see
+        // in the product, so an export that omitted it would be narrower than
+        // the screen.
+        productKey: true,
         createdAt: true,
         updatedAt: true,
         messages: {
