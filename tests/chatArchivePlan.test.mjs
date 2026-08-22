@@ -422,23 +422,30 @@ test("one program anywhere fails the whole archive", () => {
 });
 
 test("build output is skipped rather than fatal, because source trees ship it", () => {
-  // A Gradle wrapper is a `.jar`, `node_modules` is full of `.node`, and a
-  // Java tree has `.class` beside the `.java` files somebody wants read.
-  // Failing the whole upload for them refuses the ordinary case.
+  // A Gradle wrapper is a `.jar`, `node_modules` is full of `.node`, a Java
+  // tree has `.class` beside the `.java` files somebody wants read, and every
+  // Python tree has a `__pycache__`. Failing the whole upload for them
+  // refuses the ordinary case.
   const plan = planChatArchive(
     buildRawZip([
       textEntry("src/Main.java", "class Main {}\n"),
+      textEntry("src/app.py", "print(1)\n"),
       textEntry("gradle/wrapper/gradle-wrapper.jar"),
       textEntry("node_modules/sharp/build/sharp.node"),
       textEntry("build/Main.class"),
+      textEntry("src/__pycache__/app.cpython-311.pyc"),
+      textEntry("src/__pycache__/app.cpython-311.pyo"),
     ]),
     ACCOUNT
   );
-  assert.deepEqual(plan.entries.map((entry) => entry.path), ["src/Main.java"]);
-  assert.equal(plan.exclusions["unsupported-format"], 3);
-  // Counted, so the person is told three files were left out rather than
-  // discovering it from an answer.
-  assert.equal(totalArchiveExclusions(plan.exclusions), 3);
+  assert.deepEqual(plan.entries.map((entry) => entry.path), [
+    "src/Main.java",
+    "src/app.py",
+  ]);
+  assert.equal(plan.exclusions["unsupported-format"], 5);
+  // Counted, so the person is told what was left out rather than discovering
+  // it from an answer.
+  assert.equal(totalArchiveExclusions(plan.exclusions), 5);
 });
 
 test("one certificate or private key anywhere fails the whole archive", () => {
