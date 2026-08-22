@@ -437,7 +437,7 @@ export const zh = {
         deepResearchEstimatedTimeValue: "数分钟以上",
         deepResearchEstimatedCost: "预计用量",
         deepResearchStart: "开始研究",
-        searchStatusTrainingKnowledge: "基于训练知识",
+        searchStatusNotSearched: "未进行网页搜索",
         searchStatusWebSearch: "已搜索网页",
         searchStatusRequestedNotExecuted: "未执行搜索 · 已退还 8 积分",
         searchStatusRefundDetail: "未执行网页搜索，已退还额外的 8 点积分。",

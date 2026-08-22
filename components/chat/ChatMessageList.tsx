@@ -38,6 +38,7 @@ import {
 } from "@/lib/chatAutoScroll";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
+import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -531,24 +532,16 @@ export function ChatMessageList({
                       {modelInfo.name}
                     </span>
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
-                      const meta = msg.searchMetadata;
-                      // meta is only absent for messages persisted before this
-                      // field existed -- fall back to the old provider/usageClass
-                      // heuristic so historical Perplexity answers don't regress
-                      // to "training knowledge".
-                      const status = !meta
-                        ? modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
-                          ? "executed"
-                          : "training-knowledge"
-                        : !meta.requested
-                          ? "training-knowledge"
-                          : !meta.supported
-                            ? "unsupported"
-                            : meta.failureCode
-                              ? "failed"
-                              : meta.executed
-                                ? "executed"
-                                : "requested-not-executed";
+                      // The badge reports web search and nothing else. Why it
+                      // no longer says "training knowledge", and why a message
+                      // with no metadata gets no badge at all, is in
+                      // lib/webSearchStatusBadge.ts.
+                      const decision = decideWebSearchBadge({
+                        searchMetadata: msg.searchMetadata,
+                        usageClass: modelInfo.usageClass,
+                      });
+                      if (!decision.shown) return null;
+                      const status = decision.status;
                       // "requested-not-executed" only ever occurs for native
                       // (surcharge-eligible) capability -- unsupported/unverified
                       // models are routed to the "unsupported" status instead,
@@ -557,7 +550,7 @@ export function ChatMessageList({
                         status === "executed" &&
                         getWebSearchCapability(modelInfo.id).support === "native";
                       const label =
-                        modelInfo.usageClass === "deep-research"
+                        status === "deep-research"
                           ? t("chat.searchStatusDeepResearch")
                           : status === "unsupported"
                             ? t("chat.searchStatusUnsupported")
@@ -569,7 +562,7 @@ export function ChatMessageList({
                                   : t("chat.searchStatusWebSearch")
                                 : status === "requested-not-executed"
                                   ? t("chat.searchStatusRequestedNotExecuted")
-                                  : t("chat.searchStatusTrainingKnowledge");
+                                  : t("chat.searchStatusNotSearched");
                       const detail =
                         status === "requested-not-executed"
                           ? t("chat.searchStatusRefundDetail")
@@ -577,9 +570,7 @@ export function ChatMessageList({
                       return (
                         <span
                           data-testid="search-status-badge"
-                          data-search-status={
-                            modelInfo.usageClass === "deep-research" ? "deep-research" : status
-                          }
+                          data-search-status={status}
                           title={detail}
                           aria-label={detail ? `${label} — ${detail}` : undefined}
                           className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"

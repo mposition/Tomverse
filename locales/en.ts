@@ -439,7 +439,7 @@ export const en = {
         deepResearchEstimatedTimeValue: "Several minutes or more",
         deepResearchEstimatedCost: "Estimated cost",
         deepResearchStart: "Start research",
-        searchStatusTrainingKnowledge: "Training knowledge",
+        searchStatusNotSearched: "No web search",
         searchStatusWebSearch: "Web searched",
         searchStatusRequestedNotExecuted: "Not searched · 8 credits refunded",
         searchStatusRefundDetail: "Web search wasn't performed, so the 8 extra credits were refunded.",
