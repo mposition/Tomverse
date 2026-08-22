@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ARCHIVE_FATAL_EXTENSIONS,
+  ARCHIVE_TOLERATED_BINARY_EXTENSIONS,
   CHAT_ATTACHMENT_FORMATS,
   CHAT_ATTACHMENT_MEDIA_TYPES,
   EXECUTABLE_ATTACHMENT_EXTENSIONS,
@@ -70,6 +71,25 @@ test("a supported extension is never also on a refusal list", () => {
   assert.equal(OTHER_ARCHIVE_EXTENSIONS.has("zip"), false);
   assert.equal(EXECUTABLE_ATTACHMENT_EXTENSIONS.has("sh"), false);
   assert.equal(EXECUTABLE_ATTACHMENT_EXTENSIONS.has("bat"), true);
+});
+
+test("build output stays refused as an upload even though an archive tolerates it", () => {
+  // Two different questions. Attaching a `.jar` is still refused for the
+  // reason every library is; finding one inside a source archive is not a
+  // reason to refuse the archive.
+  for (const extension of ARCHIVE_TOLERATED_BINARY_EXTENSIONS) {
+    assert.equal(
+      EXECUTABLE_ATTACHMENT_EXTENSIONS.has(extension),
+      true,
+      `.${extension} must stay refused as a direct upload`
+    );
+    assert.equal(REFUSED_ATTACHMENT_EXTENSIONS.has(extension), true, extension);
+    assert.equal(resolve(`build/thing.${extension}`, ""), null, extension);
+  }
+  // And a program the reader could run is never tolerated anywhere.
+  for (const extension of ["exe", "msi", "bat", "cmd", "dll"]) {
+    assert.equal(ARCHIVE_TOLERATED_BINARY_EXTENSIONS.has(extension), false, extension);
+  }
 });
 
 test("the guest subset is derived, so the two guest lists cannot drift", () => {

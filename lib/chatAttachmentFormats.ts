@@ -481,6 +481,29 @@ export const REFUSED_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Build output that is refused as an upload but only skipped inside an
+ * archive.
+ *
+ * These are libraries and compiled classes, so attaching one on its own is
+ * still refused for the reason everything in
+ * `EXECUTABLE_ATTACHMENT_EXTENSIONS` is. Inside an archive the question is a
+ * different one: a Gradle wrapper ships a `.jar`, a `node_modules` ships
+ * `.node`, and a Java source tree ships `.class` next to the `.java` files
+ * somebody actually wants read. Failing the whole upload for them would
+ * refuse the ordinary source archives this feature exists to read, and
+ * skipping them costs the person nothing -- there is no text in a compiled
+ * class either way.
+ *
+ * The line this keeps: an archive still fails whole for a program the reader
+ * could run (`.exe`, `.msi`, `.bat`) and for a private key.
+ */
+export const ARCHIVE_TOLERATED_BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
+    "jar",
+    "node",
+    "class",
+]);
+
+/**
  * Extensions and names that make an archive fail whole rather than have the
  * entry skipped.
  *

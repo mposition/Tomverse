@@ -412,13 +412,33 @@ test("a directory entry that claims content is refused", () => {
 
 // -- Dangerous contents ------------------------------------------------------
 
-test("one executable anywhere fails the whole archive", () => {
-  for (const name of ["bin/tool.exe", "lib.dll", "setup.msi", "vendor/app.jar", "run.bat"]) {
+test("one program anywhere fails the whole archive", () => {
+  for (const name of ["bin/tool.exe", "lib.dll", "setup.msi", "run.bat", "hook.cmd"]) {
     refuses(
       buildRawZip([textEntry("keep.txt"), textEntry(name)]),
       CODES.executableEntry
     );
   }
+});
+
+test("build output is skipped rather than fatal, because source trees ship it", () => {
+  // A Gradle wrapper is a `.jar`, `node_modules` is full of `.node`, and a
+  // Java tree has `.class` beside the `.java` files somebody wants read.
+  // Failing the whole upload for them refuses the ordinary case.
+  const plan = planChatArchive(
+    buildRawZip([
+      textEntry("src/Main.java", "class Main {}\n"),
+      textEntry("gradle/wrapper/gradle-wrapper.jar"),
+      textEntry("node_modules/sharp/build/sharp.node"),
+      textEntry("build/Main.class"),
+    ]),
+    ACCOUNT
+  );
+  assert.deepEqual(plan.entries.map((entry) => entry.path), ["src/Main.java"]);
+  assert.equal(plan.exclusions["unsupported-format"], 3);
+  // Counted, so the person is told three files were left out rather than
+  // discovering it from an answer.
+  assert.equal(totalArchiveExclusions(plan.exclusions), 3);
 });
 
 test("one certificate or private key anywhere fails the whole archive", () => {

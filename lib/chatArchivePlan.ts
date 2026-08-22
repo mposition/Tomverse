@@ -26,6 +26,7 @@
 import {
     ARCHIVE_FATAL_EXTENSIONS,
     ARCHIVE_FATAL_FILENAMES,
+    ARCHIVE_TOLERATED_BINARY_EXTENSIONS,
     EXECUTABLE_ATTACHMENT_EXTENSIONS,
     OTHER_ARCHIVE_EXTENSIONS,
     attachmentBaseName,
@@ -378,8 +379,18 @@ export function planChatArchive(
         ) {
             refuse(CHAT_ARCHIVE_ERROR_CODES.credentialEntry);
         }
-        if (EXECUTABLE_ATTACHMENT_EXTENSIONS.has(extension)) {
+        if (
+            EXECUTABLE_ATTACHMENT_EXTENSIONS.has(extension) &&
+            !ARCHIVE_TOLERATED_BINARY_EXTENSIONS.has(extension)
+        ) {
             refuse(CHAT_ARCHIVE_ERROR_CODES.executableEntry);
+        }
+        // Build output. Refused as an upload, skipped here: a source tree
+        // ships a Gradle wrapper and a `node_modules`, and failing the whole
+        // archive for them refuses the ordinary case.
+        if (ARCHIVE_TOLERATED_BINARY_EXTENSIONS.has(extension)) {
+            exclusions["unsupported-format"] += 1;
+            continue;
         }
         // Another container. Not fatal -- a source tree ships one often
         // enough -- but never opened: nesting depth is zero by contract.
