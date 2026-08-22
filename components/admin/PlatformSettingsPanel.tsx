@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Bot, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
+import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -30,7 +30,17 @@ type AdminAppSettingsResponse = {
   externalConversationImportEnabled?: boolean;
   assistantProfilesEnabled?: boolean;
   assistantKnowledgeEnabled?: boolean;
+  memoryExtractionEnabled?: boolean;
+  memoryInjectionEnabled?: boolean;
+  memoryApprovedPairCount?: number;
   error?: string;
+};
+
+/** The read-only half of this screen: reported, never submitted. */
+type MemoryReleaseStatus = {
+  memoryExtractionEnabled: boolean;
+  memoryInjectionEnabled: boolean;
+  memoryApprovedPairCount: number;
 };
 
 type Props = {
@@ -47,6 +57,23 @@ type Props = {
    * checkbox shows what is actually in force rather than what is stored.
    */
   assistantKnowledgeEnabled: boolean;
+  /**
+   * Release B (account memory), reported and never edited here. Enabling
+   * either one is the import/memory policy §12.4 human procedure, so this
+   * screen has no control for them -- and `/api/admin/app-settings` refuses a
+   * request that names them rather than ignoring it. What it does have is the
+   * answer to "what are they, then", which an operator otherwise has to get
+   * from the database.
+   */
+  memoryExtractionEnabled: boolean;
+  memoryInjectionEnabled: boolean;
+  /**
+   * Approved AND un-revoked extraction pairs. Zero means both flags above are
+   * inert whatever they say: extraction refuses every run and injection stops
+   * at `no_approved_pair`. Reporting the flags without this would show two
+   * switches whose position explains nothing.
+   */
+  memoryApprovedPairCount: number;
 };
 
 export function PlatformSettingsPanel({
@@ -55,6 +82,9 @@ export function PlatformSettingsPanel({
   externalConversationImportEnabled: initialExternalImportEnabled,
   assistantProfilesEnabled: initialAssistantProfilesEnabled,
   assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
+  memoryExtractionEnabled: initialMemoryExtractionEnabled,
+  memoryInjectionEnabled: initialMemoryInjectionEnabled,
+  memoryApprovedPairCount: initialMemoryApprovedPairCount,
 }: Props) {
   const { models } = useModelCatalog();
   const guestModels = useMemo(
@@ -86,6 +116,13 @@ export function PlatformSettingsPanel({
   const [assistantKnowledgeEnabled, setAssistantKnowledgeEnabled] = useState(
     initialAssistantKnowledgeEnabled
   );
+  // One state object rather than three: they are read together and are only
+  // ever meaningful together, and no control writes any of them.
+  const [memoryStatus, setMemoryStatus] = useState<MemoryReleaseStatus>({
+    memoryExtractionEnabled: initialMemoryExtractionEnabled,
+    memoryInjectionEnabled: initialMemoryInjectionEnabled,
+    memoryApprovedPairCount: initialMemoryApprovedPairCount,
+  });
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -125,6 +162,29 @@ export function PlatformSettingsPanel({
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
+  /**
+   * Kept out of `applySettings` on purpose. That function applies what the
+   * form submits; this applies what the form only reports. Folding the two
+   * together is how a read-only field acquires a writer by accident.
+   */
+  const applyMemoryStatus = (data: AdminAppSettingsResponse) => {
+    if (
+      typeof data.memoryExtractionEnabled !== "boolean" ||
+      typeof data.memoryInjectionEnabled !== "boolean" ||
+      typeof data.memoryApprovedPairCount !== "number"
+    ) {
+      // A partial response leaves the card showing what it last read rather
+      // than a default: "extraction off, 0 pairs" invented from a missing
+      // field is the one wrong answer that looks exactly like the right one.
+      return;
+    }
+    setMemoryStatus({
+      memoryExtractionEnabled: data.memoryExtractionEnabled,
+      memoryInjectionEnabled: data.memoryInjectionEnabled,
+      memoryApprovedPairCount: data.memoryApprovedPairCount,
+    });
+  };
+
   const reload = async () => {
     if (isLoading || isSaving) return;
     setIsLoading(true);
@@ -145,6 +205,7 @@ export function PlatformSettingsPanel({
         data.assistantProfilesEnabled,
         data.assistantKnowledgeEnabled
       );
+      applyMemoryStatus(data);
       dispatchAppToast("Platform settings reloaded. The form now matches what is stored.", "success");
     } catch {
       dispatchAppToast("Platform settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
@@ -208,6 +269,7 @@ export function PlatformSettingsPanel({
         data.assistantProfilesEnabled,
         data.assistantKnowledgeEnabled
       );
+      applyMemoryStatus(data);
       dispatchAppToast("Platform settings saved and are live.", "success");
     } catch {
       // Only a transport failure reaches here now; a retry is the right advice.
@@ -446,6 +508,64 @@ export function PlatformSettingsPanel({
               {assistantKnowledgeEnabled && !assistantProfilesEnabled ? (
                 <p className="mt-3 text-sm font-bold text-amber-300">
                   Knowledge stays off until assistant profiles are enabled.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <div
+          data-testid="admin-memory-release-status"
+          className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
+        >
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-500/30 bg-teal-500/10 text-teal-300">
+              <BrainCircuit className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-300">
+                Reported, not editable
+              </p>
+              <h3 className="mt-2 text-xl font-black text-white">Account memory (Release B)</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Enabling either flag is the import/memory policy &sect;12.4 human
+                procedure &mdash; a decision-grade eval, blind review, an
+                independent re-run, a signed approval, a register merge and a
+                staging verification. There is no control here on purpose, and
+                the endpoint refuses a request naming these flags rather than
+                ignoring it. Stopping is the opposite direction and does have a
+                control: emergency pair revocation (&sect;12.1).
+              </p>
+              <dl className="mt-4 grid gap-2 md:grid-cols-3">
+                {([
+                  ["memoryExtractionEnabled", memoryStatus.memoryExtractionEnabled ? "on" : "off", "memory-extraction-flag"],
+                  ["memoryInjectionEnabled", memoryStatus.memoryInjectionEnabled ? "on" : "off", "memory-injection-flag"],
+                  ["Approved, un-revoked pairs", String(memoryStatus.memoryApprovedPairCount), "memory-approved-pairs"],
+                ] as const).map(([label, value, testId]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3"
+                  >
+                    <dt className="text-[11px] font-semibold text-zinc-500">{label}</dt>
+                    <dd
+                      data-testid={`admin-${testId}`}
+                      className="mt-1 font-mono text-sm font-bold text-white"
+                    >
+                      {value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {memoryStatus.memoryApprovedPairCount === 0 ? (
+                <p
+                  data-testid="admin-memory-blocked-notice"
+                  className="mt-3 text-sm font-bold text-amber-300"
+                >
+                  Blocked &mdash; no decision-grade eval has been run and no
+                  extraction pair is approved. Both flags above are inert
+                  whatever they read: every extraction run answers
+                  MEMORY_EXTRACTION_PAIR_UNAVAILABLE and injection refuses with
+                  no_approved_pair. What has to be decided first is in
+                  docs/ops/memory-extraction-eval-program-kickoff.md.
                 </p>
               ) : null}
             </div>
