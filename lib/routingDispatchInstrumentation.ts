@@ -54,6 +54,7 @@ import type {
 } from "@/lib/routerDecision";
 import {
   MANIFEST_HASH_ALGORITHM,
+  ManifestHashKeyringError,
   activeManifestHashKey,
 } from "@/lib/manifestHashKeyring";
 import {
@@ -92,8 +93,22 @@ const hashKey = () => {
   try {
     return activeManifestHashKey();
   } catch (error) {
+    // The keyring's own message travels in the text, not only as a `cause`.
+    // The four ways this fails need four different edits -- a value that is
+    // not `keyId:secret`, an active id naming a key the ring does not hold, a
+    // secret below the length floor, an id configured twice -- and an operator
+    // reading "no manifest hash key is configured" cannot tell which one they
+    // are looking at. That sentence also reads as "nothing was set", which
+    // sends someone to add a variable that is already there.
+    //
+    // Safe to log: every `ManifestHashKeyringError` message names ids, lengths
+    // and variable names, and none of them interpolates a secret. Anything
+    // that is not one of those errors is reported without its text, because
+    // this function cannot vouch for what an unknown throw carries.
     throw new DispatchBoundaryError(
-      "No manifest hash key is configured, so no manifest can be digested.",
+      error instanceof ManifestHashKeyringError
+        ? `No manifest hash key is configured, so no manifest can be digested: ${error.message}`
+        : "No manifest hash key is configured, so no manifest can be digested.",
       error
     );
   }
