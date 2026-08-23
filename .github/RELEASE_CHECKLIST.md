@@ -130,6 +130,11 @@ Date / timezone:    ____________________
       `NULL` price column still means "inherit the code profile" rather than an
       administrator override. No CI job can run this, so this line is the only
       thing that does.
+- [ ] `npm run check:router-context-window-db` (needs the deployed database) —
+      proves no registry row cleared a context window the catalogue declares.
+      `getRuntimeModels` builds each model from its row alone, so a `NULL`
+      there is an unguarded model however `lib/models.ts` reads, and
+      `check:router-context-window` cannot see it. No CI job can run this.
 - [ ] `npm run check:openai-model-access` (needs a production key) — per-account
       model visibility only. It is **not** a price source; nothing in
       `lib/modelPricing.ts` may be derived from its response.

@@ -118,6 +118,7 @@
     "verify:review-parity-coverage": "node scripts/verify-review-parity-coverage.mjs",
     "test:e2e:review-parity": "node scripts/run-review-parity.mjs",
     "check:router-context-window": "node --import tsx scripts/check-router-context-window.mjs",
+    "check:router-context-window-db": "node --conditions=react-server --import tsx scripts/check-router-context-window-db.mjs",
     "check:context-window-register": "node --import tsx scripts/check-context-window-register.mjs",
     "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs",
     "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs",
