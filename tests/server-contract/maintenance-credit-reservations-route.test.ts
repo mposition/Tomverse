@@ -145,6 +145,14 @@ const loadRoute = () => {
     mock.module(mod("lib/imageAssetLifecycle.ts"), {
       namedExports: { runImageAssetMaintenanceQuietly: quiet({ deleted: 0 }) },
     });
+    mock.module(mod("lib/assistantKnowledgeLifecycle.ts"), {
+      namedExports: {
+        runKnowledgeMaintenanceQuietly: quiet({
+          cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
+          processing: { reclaimed: 0, processed: 0, ready: 0, failed: 0 },
+        }),
+      },
+    });
     mock.module(mod("lib/generatedArtifactStorage.ts"), {
       namedExports: {
         runGeneratedArtifactMaintenanceQuietly: quiet({
