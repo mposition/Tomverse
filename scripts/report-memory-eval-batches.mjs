@@ -19,27 +19,33 @@
 
 import { readFileSync } from "node:fs";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
+import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
 import {
     draftDisagreementRate,
     parseBatchRecord,
     promotionBlockers,
 } from "../lib/memoryEvalBatchRecord.ts";
 
-const rows = CANDIDATE_BATCHES.map((batch) => {
+const rows = [...ADOPTED_BATCHES, ...CANDIDATE_BATCHES].map((batch) => {
     const record = parseBatchRecord(readFileSync(batch.record, "utf8"));
     const blockers = promotionBlockers(record);
     const judged = record.cases.filter((entry) => entry.verdict !== null);
-    return { batch, record, blockers, judged };
+    const adopted = ADOPTED_BATCHES.some((entry) => entry.id === batch.id);
+    return { batch, record, blockers, judged, adopted };
 });
 
-const state = ({ record, blockers, judged }) => {
+const state = ({ record, blockers, judged, adopted }) => {
+    if (adopted) return "in the dataset";
     if (blockers.length === 0) return "promotable";
     if (judged.length === 0) return "awaiting review";
     if (record.decision === "반려") return "rejected";
     return "awaiting decision";
 };
 
-console.log(`${rows.length} candidate batch(es)\n`);
+console.log(
+    `${rows.length} batch(es): ${ADOPTED_BATCHES.length} adopted, ` +
+        `${CANDIDATE_BATCHES.length} awaiting\n`
+);
 for (const row of rows) {
     const { batch, record, blockers, judged } = row;
     const rate = draftDisagreementRate(record);
@@ -53,15 +59,19 @@ for (const row of rows) {
     );
     console.log(`  batch decision ${record.decision ?? "—"}`);
     console.log(`  record         ${batch.record}`);
-    for (const blocker of blockers) console.log(`  blocked on     ${blocker}`);
+    if (!row.adopted)
+        for (const blocker of blockers) console.log(`  blocked on     ${blocker}`);
     console.log();
 }
 
 // docs/ops/memory-extraction-eval-dataset.md §6.5: a cell's first batch is reviewed before the rest is drafted, so
 // this is the number that says whether drafting may continue.
-const promotable = rows.filter((row) => row.blockers.length === 0).length;
+const promotable = rows.filter(
+    (row) => !row.adopted && row.blockers.length === 0
+).length;
 console.log(
-    `${promotable} promotable, ${rows.length - promotable} waiting. ` +
+    `${promotable} promotable, ` +
+        `${rows.filter((row) => !row.adopted).length - promotable} waiting. ` +
         "Nothing here moves a case into the dataset -- that is a separate, " +
         "reviewed change."
 );

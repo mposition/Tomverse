@@ -4,7 +4,15 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
+import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
 import { parseBatchRecord } from "../lib/memoryEvalBatchRecord.ts";
+
+/**
+ * Adopted batches stay in scope here. The record-matches-generator check is
+ * what keeps a record from drifting away from the cases it judged, and a
+ * batch needs that most once it is dataset and the verdicts are load-bearing.
+ */
+const ALL_BATCHES = [...CANDIDATE_BATCHES, ...ADOPTED_BATCHES];
 
 /**
  * The review sheet exists so a one-person organisation reviews what
@@ -32,7 +40,7 @@ const sheet = (batchId) =>
     );
 
 test("a category ① batch asks for 20% of its cases, not all of them", () => {
-    const batch = CANDIDATE_BATCHES.find((entry) =>
+    const batch = ALL_BATCHES.find((entry) =>
         entry.cases.every((testCase) => testCase.category === "durable_facts")
     );
     assert.ok(batch, "expected a durable_facts batch to exist");
@@ -50,7 +58,7 @@ test("a category ① batch asks for 20% of its cases, not all of them", () => {
 });
 
 test("every sampled case is reproduced in full, so no other file is needed", () => {
-    const batch = CANDIDATE_BATCHES[0];
+    const batch = ALL_BATCHES[0];
     const rendered = sheet(batch.id);
     // Each case whose verdict is asked for must have all of its turns in the
     // sheet -- an excerpt sends the reviewer to the source file.
@@ -77,7 +85,7 @@ test("every sampled case is reproduced in full, so no other file is needed", () 
 test("the sample spreads across kinds rather than repeating one", () => {
     // A sample of five that lands on three `preference` cases measures
     // `preference` and reports it as the batch.
-    const batch = CANDIDATE_BATCHES[0];
+    const batch = ALL_BATCHES[0];
     const rendered = sheet(batch.id);
     const sampled = batch.cases.filter((testCase) =>
         rendered.includes(`### ${testCase.id}\n`)
@@ -91,7 +99,7 @@ test("the sample spreads across kinds rather than repeating one", () => {
 });
 
 test("the sheet states the automated checks rather than a command to run", () => {
-    const rendered = sheet(CANDIDATE_BATCHES[0].id);
+    const rendered = sheet(ALL_BATCHES[0].id);
     // docs/ops/memory-extraction-eval-dataset.md §6.5's near-duplicate figures belong in the sheet. Telling the reviewer
     // to run a script is handing them the work the rule assigns to the agent.
     assert.match(rendered, /exact duplicate/);
@@ -103,7 +111,7 @@ test("the sheet states the automated checks rather than a command to run", () =>
 test("the committed record matches what the generator produces", () => {
     // Otherwise the sheet drifts from its source and the next regeneration
     // silently discards someone's edit.
-    for (const batch of CANDIDATE_BATCHES) {
+    for (const batch of ALL_BATCHES) {
         const onDisk = readFileSync(
             fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
             "utf8"
@@ -123,7 +131,7 @@ test("--write refuses to overwrite a sheet that already carries a verdict", () =
     // hand-edit, and regeneration would delete exactly those cells. Losing a
     // verdict means asking the reviewer to judge again, which is the single
     // cost the generated sheet exists to remove.
-    const reviewed = CANDIDATE_BATCHES.filter((batch) => {
+    const reviewed = ALL_BATCHES.filter((batch) => {
         const record = parseBatchRecord(
             readFileSync(
                 fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),

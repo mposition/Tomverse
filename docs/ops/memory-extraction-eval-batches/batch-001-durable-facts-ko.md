@@ -128,9 +128,9 @@
 
 | 항목 | 값 |
 |---|---|
-| batch 채택 여부 | |
-| 다양성 판정 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | |
-| 검수 완료일 | |
+| batch 채택 여부 | **채택** *(전사 — 확인 필요)* |
+| 다양성 판정 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | 충분 *(전사 — 확인 필요)* |
+| 검수 완료일 | 2026-08-23 *(전사 — 확인 필요)* |
 
 ---
 
