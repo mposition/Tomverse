@@ -376,7 +376,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **검증**: DB integration.
 - **파일**: `scripts/run-default-model-reconciliation.mjs:127-200`
 
-### ML-12 — 같은 모델이 provider마다 별개의 후보가 된다 (P1, Medium)
+### ML-12 — 같은 모델이 provider마다 별개의 후보가 된다 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `[측정]`
 - **현재 동작**: 후보의 identity는 `@@unique([provider, apiModel])`입니다
@@ -2112,7 +2112,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - EM-12 legal/transactional template 7개 언어
 - EM-08 snapshot retention + 무한 증가 테이블 등록
 - ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §22
-- ML-12 provider 무관 후보 dedup (이미 있는 모델을 NEW로 보고하지 않기)
+- ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §25
 - ML-13 리포트에서 모델 소유자와 관측 경로 분리
 - ML-10 reconciliation script 범용화 + precondition 검사
 - EM-06 campaign이 templateVersion pin
@@ -2361,3 +2361,37 @@ routing 문구에 대해 하는 검사와 같은 방식입니다.
 enqueue하는 코드가 없으며, marketing은 production에서 비활성입니다. **template
 등록은 발송이 아닙니다.** EM-16(발송 계정·region 분리, 도메인, warm-up)은 그대로
 남아 있습니다.
+
+---
+
+## 25. ML-12 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/providerModelCatalogMonitor.ts` | 후보 판정을 provider slice가 아니라 **카탈로그 전체**의 정규화 키로 |
+| `lib/modelLifecycleWorkItemCore.ts` | `observedVia` 그룹핑, `mergeObservedVia()`, `observationsForExistingItems()` |
+| `lib/modelLifecycleWorkItems.ts` | 신규 item에 `observedVia` 기록, 기존 item에 새 provider 관측 추가 |
+| `tests/model-lifecycle-work-item-core.test.ts` | 5건 추가 (총 26) |
+| `tests/integration/model-lifecycle-auto-disable.db.test.ts` | 3건 추가 (총 10) |
+
+**Root cause를 근원에서 고쳤습니다.** 후보 판정이 `where: { provider }`로 좁힌
+registry를 봤기 때문에, 다른 provider가 서빙하기 시작하면 이미 있는 모델이 새
+후보가 됐습니다. `kimi-k3`가 출시 3주 뒤까지 세 번 NEW로 보고된 이유입니다.
+이제 `candidateIdentity()`로 카탈로그 전체를 조회합니다.
+
+**두 질문을 분리했습니다.** "이 provider가 우리가 가진 모델을 서빙하는가"는
+provider 범위 질문이고 missing 탐지·reconciliation이 그것으로 동작하므로 그대로
+뒀습니다. "이 모델이 우리에게 새로운가"는 provider 범위가 아닙니다.
+
+**관측 행은 손대지 않았습니다** — 감사 권고대로. `ProviderModelCatalogEntry`의
+provider별 행은 사실이고, 묶는 것은 결정 계층의 일입니다.
+
+**묶되 버리지 않습니다.** `glm-5.3`을 하나로 collapse하는 것은 맞지만 collapse된
+둘을 버리는 것은 틀립니다 — 어느 provider가 서빙하는지가 추가 여부를 결정하는
+사람이 필요로 하는 바로 그 정보입니다. `observedVia`에 provider와 **원본
+apiModel 문자열**을 함께 남깁니다(`ZHIPU/GLM-5.3`은 Qwen이 실제로 반환한 것이고,
+확인하려는 사람은 정규화 키가 아니라 그 문자열이 필요합니다).
+
+**날짜를 건너뛴 관측도 붙습니다.** 월요일에 만든 item이 목요일에 provider 하나를
+얻습니다. 병합은 멱등이라 같은 provider만 다시 보이는 scan은 행을 건드리지
+않습니다(DB test가 `updatedAt` 불변으로 고정).

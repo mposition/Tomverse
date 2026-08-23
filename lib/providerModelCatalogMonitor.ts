@@ -9,6 +9,7 @@ import {
   resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
 import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
+import { candidateIdentity } from "@/lib/modelLifecycleWorkItemCore";
 import {
   catalogNextCursor,
   missingConfirmationRuns,
@@ -188,6 +189,27 @@ const runProviderCheck = async (
     },
   });
   const registryByApiModel = new Map(registry.map((model) => [model.apiModel, model]));
+
+  // Whether *this* provider serves a model we have is a provider-scoped
+  // question, and `registry` above answers it: that is what missing-detection
+  // and the reconciler act on.
+  //
+  // Whether a model is new to us is not. Judging it inside one provider's slice
+  // is what made the same model a fresh candidate every time another provider
+  // started serving it -- `kimi-k3` was reported as new three times, the last
+  // of them three weeks after it shipped, because Perplexity and Qwen list it
+  // and Moonshot is where we registered it (ML-12).
+  //
+  // The observation rows below stay per provider. They are facts. Collapsing
+  // belongs to the layer that decides, not the layer that records.
+  const catalogueIdentities = new Set(
+    (
+      await prisma.modelRegistryEntry.findMany({
+        where: { catalogDeleted: false },
+        select: { apiModel: true },
+      })
+    ).map((model) => candidateIdentity(model.apiModel))
+  );
   const observedById = new Map(observations.map((item) => [item.id, item]));
   const existingEntries = await prisma.providerModelCatalogEntry.findMany({
     where: { provider },
@@ -209,7 +231,10 @@ const runProviderCheck = async (
           ? "available"
           : "candidate";
       if (model) mapped.push(model.id);
-      else if (!observation.lifecycle) {
+      else if (
+        !observation.lifecycle &&
+        !catalogueIdentities.has(candidateIdentity(observation.id))
+      ) {
         candidates.push(observation.id);
         if (!existingByApiModel.has(observation.id)) newCandidates.push(observation.id);
       }
