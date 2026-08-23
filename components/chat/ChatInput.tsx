@@ -235,6 +235,181 @@ const fileToDataUrl = (file: File) =>
 const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
   Boolean(dataTransfer && Array.from(dataTransfer.types).includes("Files"));
 
+/**
+ * A drag one drop surface has already taken responsibility for.
+ *
+ * While a chat is empty the composer portals *into* the conversation canvas
+ * (ChatWelcomeScreen's input slot), so one drop travels through both drop
+ * surfaces. Marking the DOM event is what makes "handled once" a property of
+ * the event rather than of a containment test -- and containment is exactly
+ * what is stale for the render in which the composer moves between its two
+ * slots, because the portal host is moved in an effect. The canvas listens in
+ * the capture phase, so on a nested drop the canvas claims the event and the
+ * composer stands down: one overlay, one upload, wherever the pointer is.
+ */
+const claimedDragEvents = new WeakSet<Event>();
+const claimDragEvent = (event: Event) => {
+  if (claimedDragEvents.has(event)) return false;
+  claimedDragEvents.add(event);
+  return true;
+};
+const isDragEventClaimed = (event: Event) => claimedDragEvents.has(event);
+
+/**
+ * Regions inside the conversation canvas that own what a dropped file means.
+ * A dialog opened over the canvas is not part of the question being composed,
+ * and a surface that declares itself a dropzone has already answered.
+ */
+const DROP_EXCLUDED_SELECTOR =
+  '[data-chat-drop-exclude="true"],[role="dialog"],[role="alertdialog"]';
+
+const isExcludedDropTarget = (target: EventTarget | null) =>
+  target instanceof Element && Boolean(target.closest(DROP_EXCLUDED_SELECTOR));
+
+/**
+ * What a drop surface says while a file is over it. Shared by the composer's
+ * own zone and by the conversation canvas so the two cannot drift into saying
+ * different things about the same gesture.
+ */
+function DropGuidance({
+  title,
+  description,
+}: {
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-4">
+      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm shadow-blue-950/20">
+        <Paperclip className="h-5 w-5" />
+      </span>
+      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+        {title}
+      </span>
+      {description ? (
+        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          {description}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The conversation canvas as a drop target for the composer's own upload
+ * path.
+ *
+ * The listeners are native and are registered on an element this component
+ * does not render, which is the point: a shell hands over its answer canvas
+ * and gets the composer's format checks, size limits, attachment count, guest
+ * Turnstile step and error copy with it, instead of growing a second copy of
+ * all of them. Nothing about `window` changes -- the window-level handlers
+ * stay the safety net that stops the browser navigating to a dropped file,
+ * and uploading stays scoped to this element.
+ */
+function useConversationDropSurface({
+  surface,
+  canAttach,
+  onFiles,
+  onRefused,
+}: {
+  surface: HTMLElement | null;
+  canAttach: boolean;
+  onFiles: (files: FileList) => void;
+  onRefused: () => void;
+}) {
+  const [isDragActive, setIsDragActive] = useState(false);
+  // `dragenter`/`dragleave` fire for every element the pointer crosses, so a
+  // drag moving between children reports leaving one before entering the
+  // next. Counting depth rather than holding a boolean is what stops the
+  // overlay flickering on the way across the canvas.
+  const depthRef = useRef(0);
+  const latestRef = useRef({ canAttach, onFiles, onRefused });
+  useEffect(() => {
+    latestRef.current = { canAttach, onFiles, onRefused };
+  });
+
+  useEffect(() => {
+    if (!surface) return;
+
+    const reset = () => {
+      depthRef.current = 0;
+      setIsDragActive(false);
+    };
+
+    // Text, links and everything else that is not a file are somebody else's
+    // gesture, and so is anything over a region that owns its own drop.
+    const claim = (event: DragEvent) => {
+      if (!hasDraggedFiles(event.dataTransfer)) return false;
+      if (isExcludedDropTarget(event.target)) return false;
+      return claimDragEvent(event);
+    };
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!claim(event)) return;
+      event.preventDefault();
+      depthRef.current += 1;
+      setIsDragActive(true);
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+      if (!claim(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = latestRef.current.canAttach
+          ? "copy"
+          : "none";
+      }
+      // A drag already in progress when this surface mounted never reported
+      // an enter of its own, so the first `dragover` is the only evidence
+      // that the pointer is here.
+      if (depthRef.current === 0) depthRef.current = 1;
+      setIsDragActive(true);
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!claim(event)) return;
+      depthRef.current = Math.max(0, depthRef.current - 1);
+      if (depthRef.current === 0) setIsDragActive(false);
+    };
+
+    const handleDrop = (event: DragEvent) => {
+      if (!claim(event)) return;
+      event.preventDefault();
+      reset();
+      if (!latestRef.current.canAttach) {
+        latestRef.current.onRefused();
+        return;
+      }
+      const files = event.dataTransfer?.files;
+      if (files?.length) latestRef.current.onFiles(files);
+    };
+
+    surface.addEventListener("dragenter", handleDragEnter, true);
+    surface.addEventListener("dragover", handleDragOver, true);
+    surface.addEventListener("dragleave", handleDragLeave, true);
+    surface.addEventListener("drop", handleDrop, true);
+    // A drag can end without this element hearing about it: cancelled with
+    // Escape, dropped on another window, or the tab losing focus entirely.
+    window.addEventListener("dragend", reset);
+    window.addEventListener("blur", reset);
+
+    return () => {
+      surface.removeEventListener("dragenter", handleDragEnter, true);
+      surface.removeEventListener("dragover", handleDragOver, true);
+      surface.removeEventListener("dragleave", handleDragLeave, true);
+      surface.removeEventListener("drop", handleDrop, true);
+      window.removeEventListener("dragend", reset);
+      window.removeEventListener("blur", reset);
+      // A canvas that goes away mid-drag -- an image conversation replacing
+      // the chat surface, a shell swap -- must not leave its overlay behind.
+      reset();
+    };
+  }, [surface]);
+
+  return isDragActive;
+}
+
 // UI-STATE-002. An attachment that is still on its way in. `stage` is the
 // step actually running, so "uploading" (bytes leaving the browser) and
 // "processing" (server validating/extracting them) are two different states
@@ -428,6 +603,18 @@ type ChatInputProps = {
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
   isDeepResearchPending?: boolean;
   onDismissDeepResearchChip?: () => void;
+  /**
+   * The answer canvas of the conversation this composer is composing for.
+   * Files dropped anywhere on it run this composer's upload path and land in
+   * this composer's draft, so dropping on a message list, on the welcome
+   * surface or on one of several model panels all mean the same thing --
+   * attach to the next question -- rather than nothing at all.
+   *
+   * The shells pass the element itself rather than rendering their own
+   * handlers: the format table, size and count limits, guest verification
+   * step and error copy live here and stay in one place.
+   */
+  conversationDropSurface?: HTMLElement | null;
 };
 
 type GooglePickerConfig = {
@@ -543,6 +730,7 @@ export function ChatInput({
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
   onDismissDeepResearchChip,
+  conversationDropSurface = null,
 }: ChatInputProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -1953,7 +2141,30 @@ export function ChatInput({
     };
   }, []);
 
+  /**
+   * Refusal is the same sentence and the same toast wherever the file was
+   * dropped: the composer's own zone and the conversation canvas both end
+   * here rather than each writing their own.
+   */
+  const refuseAttachmentDrop = useCallback(() => {
+    dispatchAppToast(t("chat.loginToAttach"), "info");
+  }, [t]);
+
+  const isConversationDragActive = useConversationDropSurface({
+    surface: conversationDropSurface,
+    canAttach,
+    onFiles: (files) => {
+      void handleFilesSelected(files);
+    },
+    onRefused: refuseAttachmentDrop,
+  });
+
+  // Each of the four stands down for an event the canvas already claimed --
+  // which is every drag over the composer while it is portalled into the
+  // welcome surface, because the canvas listens in the capture phase. Without
+  // it, the same file would be uploaded twice from one drop.
   const handleDropZoneDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1961,6 +2172,7 @@ export function ChatInput({
   };
 
   const handleDropZoneDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1969,19 +2181,21 @@ export function ChatInput({
   };
 
   const handleDropZoneDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
       setIsDragActive(false);
     }
   };
 
   const handleDropZoneDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     setIsDragActive(false);
 
     if (!canAttach) {
-      dispatchAppToast(t("chat.loginToAttach"), "info");
+      refuseAttachmentDrop();
       return;
     }
 
@@ -2321,6 +2535,34 @@ export function ChatInput({
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
           }`
       }>
+          {/*
+            The canvas overlay is portalled into the surface itself rather
+            than drawn from here: it has to cover the whole answer area, which
+            is the shell's element, and it must not take part in that
+            element's layout. Absolutely positioned and `pointer-events-none`,
+            so nothing behind it moves and nothing behind it stops receiving
+            the drag.
+          */}
+          {conversationDropSurface && isConversationDragActive
+            ? createPortal(
+                <div
+                  data-testid="chat-conversation-drop-overlay"
+                  className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-white/80 text-center backdrop-blur-sm dark:bg-zinc-950/80"
+                >
+                  <div className="rounded-3xl border border-dashed border-blue-400 bg-white/90 px-8 py-6 shadow-sm dark:bg-zinc-900/90">
+                    <DropGuidance
+                      title={
+                        canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")
+                      }
+                      description={
+                        canAttach ? t("chat.dropFilesDescription") : undefined
+                      }
+                    />
+                  </div>
+                </div>,
+                conversationDropSurface
+              )
+            : null}
           <div
             data-testid="chat-input"
             onDragEnter={handleDropZoneDragEnter}
@@ -2334,20 +2576,14 @@ export function ChatInput({
             }`}
           >
           {isDragActive && (
-            <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-2xl border border-dashed border-blue-400 bg-white/85 text-center shadow-sm backdrop-blur-sm dark:bg-zinc-950/85">
-              <div className="flex flex-col items-center gap-2 px-4">
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm shadow-blue-950/20">
-                  <Paperclip className="h-5 w-5" />
-                </span>
-                <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                  {canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")}
-                </span>
-                {canAttach && (
-                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                    {t("chat.dropFilesDescription")}
-                  </span>
-                )}
-              </div>
+            <div
+              data-testid="chat-composer-drop-overlay"
+              className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-2xl border border-dashed border-blue-400 bg-white/85 text-center shadow-sm backdrop-blur-sm dark:bg-zinc-950/85"
+            >
+              <DropGuidance
+                title={canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")}
+                description={canAttach ? t("chat.dropFilesDescription") : undefined}
+              />
             </div>
           )}
           {addOnCreditsForRequest > 0 && (

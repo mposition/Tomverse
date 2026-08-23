@@ -18,9 +18,6 @@
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 import type { EvalBatch } from "@/lib/memoryEvalBatchRecord";
-import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch003AssistantKo";
-import { BATCH_004_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch004AssistantEn";
-import { BATCH_005_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch005SecretKo";
 import { BATCH_006_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch006SecretEn";
 import { BATCH_007_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch007InjectionKo";
 import { BATCH_008_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch008InjectionEn";
@@ -28,24 +25,6 @@ import { BATCH_008_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/bat
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
 export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
-    {
-        id: "batch-003",
-        cell: "assistant_only:ko",
-        record: "docs/ops/memory-extraction-eval-batches/batch-003-assistant-only-ko.md",
-        cases: BATCH_003_ASSISTANT_KO,
-    },
-    {
-        id: "batch-004",
-        cell: "assistant_only:en",
-        record: "docs/ops/memory-extraction-eval-batches/batch-004-assistant-only-en.md",
-        cases: BATCH_004_ASSISTANT_EN,
-    },
-    {
-        id: "batch-005",
-        cell: "sensitive_secrets:ko",
-        record: "docs/ops/memory-extraction-eval-batches/batch-005-sensitive-secrets-ko.md",
-        cases: BATCH_005_SECRET_KO,
-    },
     {
         id: "batch-006",
         cell: "sensitive_secrets:en",
