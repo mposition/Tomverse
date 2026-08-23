@@ -266,3 +266,30 @@ test("every candidate record carries the docs/ops/memory-extraction-eval-dataset
         );
     }
 });
+
+test("the batch report's outstanding count is the sum of its own batches", () => {
+    // The number a reviewer is actually being asked for. Sixteen lines each
+    // saying "0/10" do not add themselves up, and the total is the whole cost
+    // of the review -- everything else is already spent.
+    //
+    // Derived here rather than copied, so it cannot be quoted from memory and
+    // be wrong: batches at the bottom of the 25-50 range sample five, not ten,
+    // and a total that assumes ten everywhere overstates the ask.
+    const owed = CANDIDATE_BATCHES.map((batch) => {
+        const record = parseBatchRecord(
+            readFileSync(
+                fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
+                "utf8"
+            )
+        );
+        return record.cases.filter((entry) => entry.verdict === null).length;
+    });
+    for (const [index, count] of owed.entries()) {
+        const batch = CANDIDATE_BATCHES[index];
+        assert.equal(
+            count,
+            Math.max(1, Math.ceil(batch.cases.length * 0.2)),
+            `${batch.id} offers ${count} verdicts for ${batch.cases.length} cases`
+        );
+    }
+});
