@@ -289,6 +289,66 @@ test.describe("assistant profile settings", () => {
         expect(attempts).toBe(1);
     });
 
+    test("a refused save explains itself, and never in the server's words", async ({
+        page,
+    }) => {
+        // The report this came from: unticking the last model answered
+        // `Invalid request payload.` -- an operator's sentence, in English,
+        // on a Korean screen, naming no field. The screen reads `code` now
+        // and says something the reader can act on.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.route(
+            (url) => url.pathname.endsWith("/versions"),
+            (route) =>
+                route.fulfill({
+                    status: 422,
+                    contentType: "application/json",
+                    body: JSON.stringify({
+                        code: "ASSISTANT_PROFILE_MODEL_UNAVAILABLE",
+                        error: "One of those models is not available.",
+                    }),
+                })
+        );
+        await page.goto("/settings/assistants/p-published");
+        await page.getByTestId("assistant-publish").click();
+
+        const notice = page.getByTestId("assistants-notice-failed");
+        await expect(notice).toBeVisible();
+        await expect(notice).not.toContainText("One of those models");
+        // Its own sentence, in whichever language the page is showing: every
+        // locale's version names the plan, because that is the fact the
+        // reader has to act on.
+        await expect(notice).toContainText(/plan|plano|플랜|Tarif|offre|方案/i);
+    });
+
+    test("a refusal with no sentence of its own still says something", async ({
+        page,
+    }) => {
+        // A code this client does not name falls back to the generic notice
+        // rather than rendering the code, or the server's English beside it.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.route(
+            (url) => url.pathname.endsWith("/versions"),
+            (route) =>
+                route.fulfill({
+                    status: 500,
+                    contentType: "application/json",
+                    body: JSON.stringify({ error: "Failed to publish the profile." }),
+                })
+        );
+        await page.goto("/settings/assistants/p-published");
+        await page.getByTestId("assistant-publish").click();
+
+        const notice = page.getByTestId("assistants-notice-failed");
+        await expect(notice).toBeVisible();
+        await expect(notice).not.toContainText("Failed to publish");
+        // Something, rather than an empty box or a bare code.
+        await expect(notice).toHaveText(/\S/);
+        await expect(notice).not.toContainText("ASSISTANT_");
+    });
+
     test("a knowledge file that is not ready cannot be added to a revision", async ({
         page,
     }) => {

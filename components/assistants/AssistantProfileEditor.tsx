@@ -19,6 +19,7 @@ import {
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
 import { ASSISTANT_PROFILE_CHAT_PATH } from "@/lib/assistantProfileReturn";
+import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { ENABLED_MODELS } from "@/lib/models";
@@ -75,6 +76,27 @@ const interpolate = (
         template
     );
 
+/**
+ * What a failed response says, as a code this screen can translate.
+ *
+ * A 401 is the one case with no code to read: the route answers
+ * `{ error: "Unauthorized" }` before any handler runs, so the client names
+ * the case itself rather than falling back to "try again", which is the
+ * wrong advice for a session that expired mid-edit.
+ */
+const failureNotice = async (
+    response: Response
+): Promise<Extract<Notice, { kind: "failed" }>> => {
+    if (response.status === 401) {
+        await discardResponseBody(response);
+        return { kind: "failed", code: "UNAUTHENTICATED" };
+    }
+    const body = (await response.json().catch(() => null)) as {
+        code?: string;
+    } | null;
+    return { kind: "failed", code: body?.code };
+};
+
 const sectionClass =
     "rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60";
 const primaryButtonClass =
@@ -128,7 +150,18 @@ type Notice =
     | { kind: "published"; revision: number }
     | { kind: "unchanged" }
     | { kind: "stale" }
-    | { kind: "failed"; detail?: string };
+    /**
+     * The server's refusal *code*, never its message.
+     *
+     * This field held `detail` -- the `error` string the API returns -- and
+     * the screen printed it. Those strings are written for operators and
+     * exist only in English, so a Korean user saw `Invalid request payload.`
+     * with no field named and no next step. The code resolves to a sentence
+     * this product owns, in the reader's language
+     * (`lib/assistantProfileErrorCopy.ts`); an unmapped one falls back to the
+     * generic message rather than showing the code.
+     */
+    | { kind: "failed"; code?: string };
 
 /**
  * Whether this assistant names its own models, and which.
@@ -386,8 +419,7 @@ export function AssistantProfileEditor({
                 return;
             }
             if (!response.ok) {
-                await discardResponseBody(response);
-                setNotice({ kind: "failed" });
+                setNotice(await failureNotice(response));
                 return;
             }
             const data = (await response.json()) as { profile: LoadedProfile };
@@ -479,10 +511,7 @@ export function AssistantProfileEditor({
                 }),
             });
             if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { error?: string }
-                    | null;
-                setNotice({ kind: "failed", detail: data?.error });
+                setNotice(await failureNotice(response));
                 return;
             }
             const data = (await response.json()) as { profile: { id: string } };
@@ -522,10 +551,7 @@ export function AssistantProfileEditor({
                 }
             );
             if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { error?: string }
-                    | null;
-                setNotice({ kind: "failed", detail: data?.error });
+                setNotice(await failureNotice(response));
                 return;
             }
             await discardResponseBody(response);
@@ -568,16 +594,19 @@ export function AssistantProfileEditor({
                     }),
                 }
             );
-            if (response.status === 409) {
-                await discardResponseBody(response);
-                setNotice({ kind: "stale" });
-                return;
-            }
             if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { error?: string }
-                    | null;
-                setNotice({ kind: "failed", detail: data?.error });
+                const failure = await failureNotice(response);
+                // The stale conflict has its own notice, because its next
+                // step is a reload rather than a retry. Decided by the code
+                // and not by the 409 alone: the account ceiling answers 409
+                // too, and telling somebody at their profile limit that
+                // another tab edited this one would send them to reload a
+                // screen that is already current.
+                setNotice(
+                    failure.code === "ASSISTANT_PROFILE_VERSION_STALE"
+                        ? { kind: "stale" }
+                        : failure
+                );
                 return;
             }
             const data = (await response.json()) as
@@ -603,9 +632,12 @@ export function AssistantProfileEditor({
             const response = await fetch(`/api/assistant-profiles/${profileId}`, {
                 method: "DELETE",
             });
+            if (!response.ok) {
+                setNotice(await failureNotice(response));
+                return;
+            }
             await discardResponseBody(response);
-            if (response.ok) router.replace(ASSISTANT_PROFILE_LIST_PATH);
-            else setNotice({ kind: "failed" });
+            router.replace(ASSISTANT_PROFILE_LIST_PATH);
         } catch {
             setNotice({ kind: "failed" });
         } finally {
@@ -709,7 +741,10 @@ export function AssistantProfileEditor({
                                 t("assistantProfiles.noticeUnchanged")}
                             {notice.kind === "stale" && t("assistantProfiles.noticeStale")}
                             {notice.kind === "failed" &&
-                                (notice.detail || t("assistantProfiles.noticeFailed"))}
+                                t(
+                                    assistantProfileErrorCopyKey(notice.code) ??
+                                        "assistantProfiles.noticeFailed"
+                                )}
                         </p>
                     )}
 
