@@ -275,21 +275,20 @@ test("the batch report's outstanding count is the sum of its own batches", () =>
     // Derived here rather than copied, so it cannot be quoted from memory and
     // be wrong: batches at the bottom of the 25-50 range sample five, not ten,
     // and a total that assumes ten everywhere overstates the ask.
-    const owed = CANDIDATE_BATCHES.map((batch) => {
+    for (const batch of CANDIDATE_BATCHES) {
         const record = parseBatchRecord(
             readFileSync(
                 fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
                 "utf8"
             )
         );
-        return record.cases.filter((entry) => entry.verdict === null).length;
-    });
-    for (const [index, count] of owed.entries()) {
-        const batch = CANDIDATE_BATCHES[index];
+        // The sample the sheet *offers*, not the part still unjudged. Counting
+        // unjudged rows would make this fail the moment someone reviews a
+        // batch, which is the one event it should be indifferent to.
         assert.equal(
-            count,
+            record.cases.length,
             Math.max(1, Math.ceil(batch.cases.length * 0.2)),
-            `${batch.id} offers ${count} verdicts for ${batch.cases.length} cases`
+            `${batch.id} offers ${record.cases.length} verdicts for ${batch.cases.length} cases`
         );
     }
 });
