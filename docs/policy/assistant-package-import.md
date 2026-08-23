@@ -34,6 +34,13 @@ Profile로 **변환**하는 기능의 릴리스 차단 계약입니다.
 | `lib/assistantPackageImportAccess.ts` | rollout flag. 기본 off, fail-closed |
 | `components/assistants/import/AssistantPackageImportWizard.tsx` | 1~6단계 화면 |
 | `app/(site)/(application)/settings/assistants/import/page.tsx` | route. flag가 꺼져 있으면 404 |
+| `lib/assistantProfileImportCore.ts` | mode·status·예약 상태 어휘, 두 시계, 삭제 전제 조건 |
+| `lib/assistantProfileImportLocks.ts` | profile 잠금과 계정 quota 잠금, 그리고 잠금 순서 |
+| `lib/assistantProfileImportService.ts` | 생성·업로드·게시·취소 |
+| `lib/assistantProfileImportSweep.ts` | 만료 수거와 stale claim 회수 |
+| `lib/assistantProfileImportHttp.ts` | 네 route가 공유하는 flag 검사와 오류 변환 |
+| `app/api/assistant-profiles/imports/**` | 위 서비스의 HTTP 표면 |
+| `scripts/report-assistant-knowledge-invariants.mjs` | `NOT VALID` 제약의 survey |
 
 이 문서는 아래를 대체하지 않고 그 위에 쌓입니다.
 

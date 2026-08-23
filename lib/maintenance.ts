@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  reclaimStaleUploadClaims,
+  sweepExpiredProfileImports,
+} from "@/lib/assistantProfileImportSweep";
 import { prisma } from "@/lib/prisma";
 import {
   assertOAuthTokenEncryptionConfigured,
@@ -778,6 +782,20 @@ export async function cleanupExpiredData() {
     processPendingKnowledgeFiles(now)
   );
 
+  // Package imports nobody came back to (assistant-package-import policy
+  // §5.6). Two clocks, one query, and the collection is the owner's own
+  // cancel path -- including its refusal conditions, because this one runs
+  // unattended and "probably a draft" is not a reason to delete a profile.
+  const importExpiry = await step("assistant_import_expiry", () =>
+    sweepExpiredProfileImports(now)
+  );
+  // A finalize that died between claiming an upload key and writing the row.
+  // The claim is released, the reservation is not: the key is still ours, and
+  // the object behind it belongs to the orphan sweep above.
+  const importUploadClaims = await step("assistant_import_upload_claims", () =>
+    reclaimStaleUploadClaims(now)
+  );
+
   // A consumed §10 context bundle stops being worth remembering the moment
   // the bundle itself expires: past that, verification refuses it before
   // consumption is ever consulted. Swept here rather than on the request
@@ -837,6 +855,9 @@ export async function cleanupExpiredData() {
     assistantKnowledgeOrphansDeleted: knowledgeOrphans?.deleted ?? null,
     assistantKnowledgeReclaimed: knowledgeProcessing?.reclaimed ?? null,
     assistantKnowledgeProcessed: knowledgeProcessing?.processed ?? null,
+    assistantImportsExpired: importExpiry?.cancelled ?? null,
+    assistantImportsExpiryRefused: importExpiry?.refused ?? null,
+    assistantImportUploadClaimsReclaimed: importUploadClaims?.reclaimed ?? null,
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),

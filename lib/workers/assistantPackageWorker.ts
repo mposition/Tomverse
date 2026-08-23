@@ -30,11 +30,26 @@ import {
  * `Worker` and without a `File`.
  */
 
-export type WorkerRequest = { type: "parse"; file: File } | { type: "cancel" };
+export type WorkerRequest =
+    | { type: "parse"; file: File }
+    /**
+     * The bytes of entries the owner chose, read from the same container.
+     *
+     * The review deliberately carries no content -- it travels through
+     * `postMessage`, is held in React state and is rendered, and a document's
+     * text has no business in any of those. So when the upload step needs the
+     * bytes it asks for exactly the paths it is about to send, and the
+     * container is re-opened to get them. Re-inflating a handful of entries
+     * costs less than keeping every document in memory through a review that
+     * may be abandoned.
+     */
+    | { type: "extract"; file: File; paths: string[] }
+    | { type: "cancel" };
 
 export type WorkerResponse =
     | { type: "progress"; entriesRead: number; entriesPlanned: number }
     | { type: "review"; review: AssistantPackageReview }
+    | { type: "extracted"; entries: { path: string; bytes: Uint8Array }[] }
     | { type: "refused"; code: AssistantPackageRefusalCode; cause: string }
     | { type: "cancelled" };
 
@@ -113,6 +128,47 @@ async function parse(file: File): Promise<void> {
     post({ type: "review", review: result.review });
 }
 
+/**
+ * Re-opens the container and returns only the entries named.
+ *
+ * The plan is rebuilt rather than remembered, so an entry that was refused or
+ * skipped the first time is refused or skipped again: this path can never
+ * inflate something the review path decided not to.
+ */
+async function extract(file: File, paths: readonly string[]): Promise<void> {
+    const directory = await readPackageDirectoryFromBlob(file);
+    if (directory.outcome === "refused") {
+        post({ type: "refused", code: directory.code, cause: directory.cause });
+        return;
+    }
+    const plan = planPackageRead(directory.entries);
+    if (plan.packageRefusal) {
+        post({
+            type: "refused",
+            code: plan.packageRefusal.code,
+            cause: plan.packageRefusal.cause,
+        });
+        return;
+    }
+
+    const wanted = new Set(paths);
+    const entries: { path: string; bytes: Uint8Array }[] = [];
+    for (const read of plan.reads) {
+        if (!wanted.has(read.entry.path)) continue;
+        const bytes = await inflatePackageEntryFromBlob(read.entry, file);
+        if (bytes.outcome !== "read") {
+            post({
+                type: "refused",
+                code: "ASSISTANT_PACKAGE_FORMAT_UNSUPPORTED",
+                cause: bytes.outcome === "refused" ? bytes.reason : bytes.cause,
+            });
+            return;
+        }
+        entries.push({ path: read.entry.path, bytes: bytes.bytes });
+    }
+    post({ type: "extracted", entries });
+}
+
 scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     const message = event.data;
     if (message.type === "cancel") {
@@ -120,6 +176,16 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
         return;
     }
     cancelled = false;
+    if (message.type === "extract") {
+        void extract(message.file, message.paths).catch(() => {
+            post({
+                type: "refused",
+                code: "ASSISTANT_PACKAGE_FORMAT_UNSUPPORTED",
+                cause: "parser_error",
+            });
+        });
+        return;
+    }
     void parse(message.file).catch(() => {
         // A thrown error here is a parser fault, not a statement about the
         // package. It is reported as one, without the message: an exception

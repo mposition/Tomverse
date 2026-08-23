@@ -135,7 +135,11 @@ CREATE INDEX IF NOT EXISTS "AssistantKnowledgeUploadReservation_importId_idx"
 CREATE INDEX IF NOT EXISTS "AssistantKnowledgeUploadReservation_userId_createdAt_idx"
   ON "AssistantKnowledgeUploadReservation" ("userId", "createdAt");
 -- The stale-claim sweep reads exactly this pair.
-CREATE INDEX IF NOT EXISTS "AssistantKnowledgeUploadReservation_state_finalizingStartedAt_idx"
+--
+-- The name is truncated to 63 characters because that is Postgres's identifier
+-- limit, and Prisma generates the truncated form -- so spelling it out in full
+-- here would read as schema drift on every deploy.
+CREATE INDEX IF NOT EXISTS "AssistantKnowledgeUploadReservation_state_finalizingStarted_idx"
   ON "AssistantKnowledgeUploadReservation" ("state", "finalizingStartedAt");
 
 ALTER TABLE "AssistantKnowledgeUploadReservation"
