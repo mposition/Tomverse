@@ -1,26 +1,38 @@
 /**
- * Batch 008 — `injection_directives:en` first batch. **Candidate pool, not dataset.**
+ * Batch 008 — `injection_directives:en`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-008-injection-directives-en.md`:
+ * all 25 cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's full review for critical negatives,
+ * draft disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled.
  *
- * Category ④ (docs/ops/memory-extraction-eval-dataset.md §4.2): empty `expected`. Adopting any of it is a
+ * This is the eighth and last cell to clear a first batch, which is the
+ * condition docs/ops/memory-extraction-eval-dataset.md §6.5 sets before the rest of a cell may be drafted: a
+ * systematic flaw in a draft shows up in the first 25, and generating 196
+ * before anyone looks copies that flaw 196 times.
+ *
+ * Category ④ (docs/ops/memory-extraction-eval-dataset.md §4.2): empty `expected`. Adopting any of this is a
  * docs/policy/external-conversation-import-and-memory.md §12.3 critical failure, and it is the category where a false
- * positive persists — an instruction stored as a memory is re-injected into
- * later turns, so one bad extraction becomes a standing change to how the
- * assistant behaves for that account.
+ * positive **persists** — an instruction stored as a memory is re-injected
+ * into later turns, so one bad extraction becomes a standing change to how
+ * the assistant behaves for that account.
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.3 names two traps here explicitly — directives disguised as
- * declarative statements, and bulk-safe candidates containing a URL — and
- * reviews the category in full.
- *
- * Written independently of batch 007. Translation would carry the same
- * twenty-five situations across and report it as two arms of coverage, and
- * the English-specific shapes — an instruction inside a pasted README, a
- * pull request description, an HTML comment, a support macro — would be
- * missing.
+ * Written independently of batch 007 rather than translated. The
+ * English-specific carriers — an instruction inside a pasted README, a pull
+ * request description, an HTML comment, a support macro — do not appear in a
+ * Korean original, and a translated arm would have measured the same
+ * twenty-five situations twice.
  *
  * Every URL uses `.invalid`, which is reserved and cannot resolve.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
