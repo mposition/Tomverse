@@ -77,6 +77,11 @@ export const HISTORICAL_ALLOWLIST = [
             "Sections 3.5.1 and 3.5.4 are staging verification records -- headers a recipient actually judged, not settings we can restate. check:staging-verification-records reads them. The pending production display-name change is tracked in docs/ops/tomverse-review-rename.md instead.",
     },
     {
+        prefix: "docs/ops/product-boundary-v1-2-staging-checklist.md",
+        reason:
+            "The staging checklist for the rename. It has to quote the retired name three times to be usable: the Search Console query to look up, what the pending \"formerly\" copy would read, and the string a verifier confirms is absent from the welcome email.",
+    },
+    {
         prefix: "docs/ops/tomverse-review-rename.md",
         reason:
             "The rename runbook itself. It has to quote the retired name to say what was replaced, what the pending \"formerly Tomverse Insight\" copy would read, and what the one-time user notice says.",
