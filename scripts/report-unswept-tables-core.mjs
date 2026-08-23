@@ -61,6 +61,10 @@ export const RETAINED_TABLES = {
         "the record that a destructive cleanup was run, and by whom; written on demand, not on a cadence",
     AdminOperationReport:
         "operator-authored reports, written on demand rather than on a cadence",
+    ModelLifecycleWorkItem:
+        "the decision record for a discovered model; deleting one returns that model to the state this table was built to end, where nothing says whether it was reviewed",
+    ModelLifecycleWorkItemEvent:
+        "append-only history of who moved a work item and when; an entry removed from the middle makes the decision unanswerable",
     AdminNote: "support notes about a customer, deleted with the customer",
     BillingTransaction:
         "billing record; a subscription charge has to stay answerable long after it clears",

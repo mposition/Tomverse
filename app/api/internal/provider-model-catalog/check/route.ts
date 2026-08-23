@@ -3,6 +3,7 @@ export const maxDuration = 180;
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
@@ -48,9 +49,17 @@ export async function POST(request: Request) {
         return undefined;
       }
     );
+    // Read after the scan, so it counts the items this run just created as
+    // well as everything still waiting from previous days -- which is the
+    // number the report never had.
+    const openWorkItems = await countOpenWorkItems().catch((error) => {
+      console.error("Model lifecycle work item count failed:", error);
+      return undefined;
+    });
     const notification = await sendProviderModelCatalogReport({
       results,
       reconciliation,
+      openWorkItems,
       generatedAt,
       test: new URL(request.url).searchParams.get("test") === "true",
     });

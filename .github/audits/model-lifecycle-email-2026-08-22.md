@@ -921,6 +921,47 @@ ModelLifecycleWorkItemEvent   -- append-only
 | failed scan을 폐기 증거로 쓰지 않음 | 이미 `planCatalogReconciliation`이 `status !== "checked"`에서 return `[테스트]`. work item 생성도 같은 조건 |
 | raw discovery가 사용자 메일을 만들지 않음 | campaign은 `status === "approved"` 이후의 work item에서만 생성 가능(FK + CHECK) |
 
+### 9.5 구현 기록 (2026-08-22 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelLifecycleWorkItemCore.ts` | 11개 상태의 전이 규칙·불변조건·후보 identity. 순수 |
+| `prisma/schema.prisma` + `migrations/20260822120000_model_lifecycle_work_item/` | 두 테이블 + CHECK 11개 |
+| `lib/modelLifecycleWorkItems.ts` | DB 경계. 생성·전이·조회 |
+| `lib/providerModelCatalogMonitor.ts` | 스캔 후 큐 적재 |
+| `lib/providerModelCatalogReport.ts` + 내부 route | summary에 `awaiting review N` |
+| `scripts/backfill-model-lifecycle-work-items.mjs` | 과거 후보 seed (dry run 기본) |
+| `tests/model-lifecycle-work-item-core.test.ts` | 21건 |
+
+**ML-01의 실제 수정은 한 줄입니다: 큐를 `newCandidates`가 아니라 `candidates`로
+채웁니다.** 전자는 첫 실행 이후 항상 비어 있고(행이 없을 때만 채워지는데 같은
+스캔이 그 행을 씁니다) 그래서 모델이 한 번 불리고 사라졌습니다. 후자는 스캔이
+본 미매핑 모델 전체이고, 무엇이 새로운지는 큐가 판단합니다.
+
+**ML-12도 함께 닫혔습니다.** `candidateIdentity()`가 vendor 접두어를 떼고
+소문자화해, `glm-5.3`·`ZHIPU/GLM-5.3`·`perplexity/glm-5.3`이 한 결정이 됩니다.
+관측 테이블의 provider별 행은 그대로 둡니다 — 그것은 사실이고, 묶는 것은 결정
+계층의 일입니다.
+
+**강제되는 불변조건** (state machine과 DB CHECK 양쪽):
+- 이유 없는 결정 불가 (`decision_reason_check`)
+- 결정 없이 `approved` 불가 (`approved_needs_decision_check`)
+- `pendingValidations`가 남아 있으면 `rollout_pending` 불가
+- `communicationRequired`면 `communication_pending`을 거치지 않고 종료 불가
+- 종단 상태는 재개봉 불가 — `completed` 포함. 재개는 새 item입니다
+- 자동화는 생성만, 결정은 사람만 (`actor_required`)
+- 종단 timestamp는 정확히 하나 (`completed_at_check` / `closed_at_check`)
+
+**검증**: unit 4,161→4,182 · `check:enum-constraints` 통과(61 closed list) ·
+`report:unswept-tables`에 두 테이블 retained 등록 · typecheck · eslint.
+**실행하지 못한 것**: DB integration과 `db:compare-schema`는 DATABASE_URL이
+필요해 이 세션에서 돌리지 못했습니다. migration 적용은 배포 시점입니다.
+
+**아직 없는 것**: 조회 UI(P0-2). `listOpenWorkItems()`는 있고 화면이 없으므로,
+지금 큐를 읽는 경로는 일일 리포트의 `awaiting review N` 한 숫자뿐입니다.
+
+---
+
 ---
 
 ## 10. 관리자 Daily Lifecycle 이메일 v2
@@ -1929,7 +1970,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | # | 항목 | findings | 왜 지금인가 |
 |---|---|---|---|
 | P0-0 | 미처리 7건 triage 실행 (`model-lifecycle-triage-2026-08-22.md`) | ML-01 | 최대 28일째 방치. P0-1과 **병렬**로 — 순차로 하면 처리하는 동안 새 후보가 같은 방식으로 사라집니다 |
-| P0-1 | `ModelLifecycleWorkItem` + backfill | ML-01, ML-03 | 하루만 사는 후보가 계속 사라지고 있습니다 |
+| P0-1 | ~~`ModelLifecycleWorkItem` + backfill~~ **완료 (2026-08-22)** | ML-01, ML-03, ML-12 | 하루만 사는 후보가 계속 사라지고 있었습니다. §9.5 참조 |
 | P0-2 | `/admin/models?tab=discovery` + work-queue collector | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없습니다 |
 | P0-3 | Daily email v2 (NEW/PENDING 분리 + standard lane) | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호입니다 |
 | P0-4 | preference fail-closed + 전 계정 backfill | EM-02, EM-13 | marketing template이 생기는 순간 동의 없는 발송이 됩니다 |
