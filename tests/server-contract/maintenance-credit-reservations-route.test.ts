@@ -44,6 +44,8 @@ type World = {
   incidents: Incident[];
   failedRuns: number;
   completedRuns: number;
+  /** What the route wrote to `ScheduledJobRun.result` on the last run. */
+  completedResult: Record<string, unknown> | null;
 };
 
 const world: World = {
@@ -52,6 +54,7 @@ const world: World = {
   incidents: [],
   failedRuns: 0,
   completedRuns: 0,
+  completedResult: null,
 };
 
 const resetWorld = () => {
@@ -60,6 +63,7 @@ const resetWorld = () => {
   world.incidents = [];
   world.failedRuns = 0;
   world.completedRuns = 0;
+  world.completedResult = null;
 };
 
 /**
@@ -114,8 +118,11 @@ const loadRoute = () => {
     mock.module(mod("lib/scheduledJobs.ts"), {
       namedExports: {
         startScheduledJob: async () => ({ id: "run_1" }),
-        completeScheduledJob: async () => {
+        completeScheduledJob: async (input: {
+          result?: Record<string, unknown>;
+        }) => {
           world.completedRuns += 1;
+          world.completedResult = input?.result ?? null;
         },
         failScheduledJob: async () => {
           world.failedRuns += 1;
@@ -125,74 +132,97 @@ const loadRoute = () => {
     mock.module(mod("lib/infrastructureThresholdMonitor.ts"), {
       namedExports: {
         monitorInfrastructureThresholdsIfDue: quiet({
-          checked: false,
-          alerts: 0,
-          advisories: 0,
+          checked: true,
+          alerts: 11,
+          advisories: 12,
         }),
       },
     });
     mock.module(mod("lib/notificationDeliveryJob.ts"), {
-      namedExports: { drainNotificationDeliveriesQuietly: quiet({ delivered: 0 }) },
+      namedExports: {
+        drainNotificationDeliveriesQuietly: quiet({ delivered: 13 }),
+      },
     });
     mock.module(mod("lib/refundReconciliation.ts"), {
       namedExports: {
-        reconcileProcessingRefundRequestsQuietly: quiet({ reconciled: 0 }),
+        reconcileProcessingRefundRequestsQuietly: quiet({ reconciled: 14 }),
       },
     });
     mock.module(mod("lib/chatRequestLease.ts"), {
-      namedExports: { reconcileExpiredChatRequestLeases: quiet({ removed: 0 }) },
+      namedExports: { reconcileExpiredChatRequestLeases: quiet({ removed: 15 }) },
     });
     mock.module(mod("lib/imageAssetLifecycle.ts"), {
-      namedExports: { runImageAssetMaintenanceQuietly: quiet({ deleted: 0 }) },
+      namedExports: {
+        // The real shape, not `{ deleted }`: this mock used to claim a field
+        // `ImageAssetMaintenanceResult` does not have, so a test asserting the
+        // count reached the body would have been asserting about a shape the
+        // route never sees (lib/imageAssetLifecycle.ts).
+        runImageAssetMaintenanceQuietly: quiet({
+          cleanup: { examined: 16, deleted: 17, failed: 0, exhausted: 0 },
+          thumbnails: { examined: 0, repaired: 0, failed: 0 },
+          invariants: { examined: 0, incidents: 0 },
+          staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0 },
+        }),
+      },
     });
     mock.module(mod("lib/assistantKnowledgeLifecycle.ts"), {
       namedExports: {
         runKnowledgeMaintenanceQuietly: quiet({
-          cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
-          processing: { reclaimed: 0, processed: 0, ready: 0, failed: 0 },
+          cleanup: { examined: 18, deleted: 19, failed: 0, exhausted: 0 },
+          processing: { reclaimed: 20, processed: 21, ready: 0, failed: 0 },
         }),
       },
     });
     mock.module(mod("lib/generatedArtifactStorage.ts"), {
       namedExports: {
         runGeneratedArtifactMaintenanceQuietly: quiet({
-          cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
-          orphans: { examined: 0, deleted: 0, failed: 0 },
+          cleanup: { examined: 22, deleted: 23, failed: 0, exhausted: 0 },
+          orphans: { examined: 24, deleted: 25, failed: 0 },
+        }),
+      },
+    });
+    mock.module(mod("lib/messageAttachmentStorage.ts"), {
+      namedExports: {
+        // Not mocked before, so this sweep reached the real module in a test
+        // that has no database. It is mocked now for the same reason as the
+        // others: its count is part of the contract below.
+        runMessageAttachmentMaintenanceQuietly: quiet({
+          cleanup: { examined: 36, deleted: 37, failed: 0, exhausted: 0 },
         }),
       },
     });
     mock.module(mod("lib/externalImportService.ts"), {
       namedExports: {
-        reconcileExpiredExternalImportStaging: quiet({ expiredImports: 0 }),
+        reconcileExpiredExternalImportStaging: quiet({ expiredImports: 26 }),
       },
     });
     mock.module(mod("lib/memoryExpiryService.ts"), {
       namedExports: {
-        reconcileExpiredMemories: quiet({ expiredMemories: 0, truncated: false }),
+        reconcileExpiredMemories: quiet({ expiredMemories: 27, truncated: false }),
       },
     });
     mock.module(mod("lib/externalConversationLockService.ts"), {
       namedExports: {
         reconcileSourceLockedMemories: quiet({
-          memoriesSuspended: 0,
-          memoriesRestored: 0,
-          memoriesExpired: 0,
+          memoriesSuspended: 28,
+          memoriesRestored: 29,
+          memoriesExpired: 30,
           truncated: false,
         }),
       },
     });
     mock.module(mod("lib/memoryExtractionProviderCost.ts"), {
       namedExports: {
-        reconcileUnsettledExtractionProviderCalls: quiet({ settled: 0 }),
+        reconcileUnsettledExtractionProviderCalls: quiet({ settled: 31 }),
       },
     });
     mock.module(mod("lib/memoryExtractionWorker.ts"), {
       namedExports: {
         dispatchPendingMemoryExtractionRuns: quiet({
-          reclaimedRuns: 0,
-          dispatchedRuns: 0,
-          chunksProcessed: 0,
-          skippedForTime: 0,
+          reclaimedRuns: 32,
+          dispatchedRuns: 33,
+          chunksProcessed: 34,
+          skippedForTime: 35,
         }),
       },
     });
@@ -291,4 +321,85 @@ test("an unauthorized caller is refused before any reconciliation runs", async (
   assert.equal(response.status, 401);
   assert.equal(world.reconcileCalls, 0);
   assert.deepEqual(world.incidents, []);
+});
+
+test("every ride-along sweep's result reaches the response body and the run row", async () => {
+  // What a sweep deleted was computed, returned, written to a JSON column, and
+  // read by nobody: the cron script logged only `result.result` (the credit
+  // reservations), and the admin panel renders `processedCount`, which is the
+  // same object. Two of the sweeps were not even in the response body -- their
+  // counts existed and had no reader anywhere.
+  //
+  // Each collaborator above returns a distinct sentinel, so a field that stops
+  // being forwarded, or gets forwarded from the wrong sweep, fails here rather
+  // than going quiet in production.
+  resetWorld();
+
+  const response = await post();
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+
+  assert.deepEqual(body.result, {
+    examined: 3,
+    refunded: 1,
+    alreadyFinalized: 2,
+    failed: 0,
+  });
+  assert.deepEqual(body.infrastructureMonitor, {
+    checked: true,
+    alerts: 11,
+    advisories: 12,
+  });
+  assert.deepEqual(body.notificationDeliveries, { delivered: 13 });
+  assert.deepEqual(body.refundRequests, { reconciled: 14 });
+  assert.deepEqual(body.requestLeases, { removed: 15 });
+  assert.equal(body.imageAssets.cleanup.examined, 16);
+  assert.equal(body.imageAssets.cleanup.deleted, 17);
+  assert.equal(body.knowledge.cleanup.examined, 18);
+  assert.equal(body.knowledge.cleanup.deleted, 19);
+  assert.equal(body.knowledge.processing.reclaimed, 20);
+  assert.equal(body.knowledge.processing.processed, 21);
+  assert.equal(body.generatedArtifacts.cleanup.examined, 22);
+  assert.equal(body.generatedArtifacts.cleanup.deleted, 23);
+  assert.equal(body.generatedArtifacts.orphans.examined, 24);
+  assert.equal(body.generatedArtifacts.orphans.deleted, 25);
+  assert.deepEqual(body.externalImportStaging, { expiredImports: 26 });
+  assert.equal(body.messageAttachments.cleanup.examined, 36);
+  assert.equal(body.messageAttachments.cleanup.deleted, 37);
+  assert.deepEqual(body.memoryExtractionProviderCalls, { settled: 31 });
+  assert.equal(body.memoryExtractionDispatch.reclaimedRuns, 32);
+  assert.equal(body.memoryExtractionDispatch.dispatchedRuns, 33);
+
+  // These two were stored and not returned. A caller that logs the response --
+  // which is what the cron does -- could not see them at all.
+  assert.equal(body.memoryExpiry.expiredMemories, 27);
+  assert.equal(body.memorySourceLocks.memoriesSuspended, 28);
+  assert.equal(body.memorySourceLocks.memoriesRestored, 29);
+  assert.equal(body.memorySourceLocks.memoriesExpired, 30);
+
+  // And the row keeps everything the body does, so a run that is read back
+  // later says the same thing the caller saw at the time.
+  const stored = world.completedResult ?? {};
+  for (const key of [
+    "infrastructureMonitor",
+    "notificationDeliveries",
+    "refundRequests",
+    "requestLeases",
+    "imageAssets",
+    "generatedArtifacts",
+    "messageAttachments",
+    "knowledge",
+    "externalImportStaging",
+    "memoryExtractionProviderCalls",
+    "memoryExtractionDispatch",
+    "memoryExpiry",
+    "memorySourceLocks",
+  ]) {
+    assert.deepEqual(
+      stored[key],
+      body[key],
+      `${key} differs between the run row and the response body`
+    );
+  }
 });
