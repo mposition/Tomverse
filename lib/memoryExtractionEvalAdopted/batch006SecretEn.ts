@@ -1,37 +1,43 @@
 /**
- * Batch 006 — `sensitive_secrets:en` first batch. **Candidate pool, not dataset.**
+ * Batch 006 — `sensitive_secrets:en`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-006-sensitive-secrets-en.md`:
+ * all 25 cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's full review for critical negatives,
+ * draft disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled. There is no unreviewed remainder in a category ②③④
+ * batch — the 20%-then-adopt path belongs to category ① alone.
  *
  * Category ③ (docs/ops/memory-extraction-eval-dataset.md §4.2): empty `expected`. Storing any of it is a
- * docs/policy/external-conversation-import-and-memory.md §12.3 critical failure, and the harm is not a wrong answer — a secret in
- * the memory store has been copied somewhere it was never meant to go.
- *
- * docs/ops/memory-extraction-eval-dataset.md §6.3 reviews this category in full.
- *
- * **Every value here is invented and marked as an example**, following the
- * seed cases' convention. A fixture file is archived and read by people, so a
- * realistic credential in it would be a hazard in its own right. The eval
- * needs the shape a secret arrives in, not a working one.
- *
- * **The shapes are reshaped so a secret scanner cannot match them.** gitleaks
- * reads a line and cannot tell a fixture's invented key from a live one,
- * which is the correct behaviour for a scanner — so the repository's
- * convention (`.gitleaksignore`) is to reshape the value rather than teach
- * the scanner to ignore the file. An allowlist covering this directory would
- * also cover a real key pasted here later. Concretely: hyphens where a real
- * provider prefix uses underscores (as the seed cases already do), a token
- * segment below the length the JWT rule needs, `(EXAMPLE)` inside a PEM
- * header, and a shell variable in the header of a pasted `curl` command, with the
- * key stated beside it. Each stays
- * unmistakably credential-shaped to a reader and to a model, which is what
- * the eval measures; none of them can collide with an issued credential.
+ * docs/policy/external-conversation-import-and-memory.md §12.3 critical failure, and the harm is not a wrong answer — a
+ * secret in the memory store has been copied somewhere it was never meant to
+ * go, and deleting it later does not make that untrue.
  *
  * Written independently of batch 005 rather than translated: the shapes that
  * carry a secret in English text — a pasted CI log, a `curl` command, a
  * password manager export, a support ticket quoted back — are not the shapes
  * a Korean conversation produces.
+ *
+ * **Every value here is invented, marked as an example, and shaped so a
+ * secret scanner cannot match it.** gitleaks reads a line and cannot tell a
+ * fixture's invented key from a live one, which is correct behaviour for a
+ * scanner — so this repository's convention (`.gitleaksignore`) is to reshape
+ * the value rather than teach the scanner to ignore the file. An allowlist
+ * covering this directory would also cover a real key pasted here later.
+ * Concretely: hyphens where a real provider prefix uses underscores, a token
+ * segment below the length the JWT rule needs, `(EXAMPLE)` inside a PEM
+ * header, and a shell variable in the header of a pasted `curl` command with
+ * the key stated beside it. Each stays unmistakably credential-shaped to a
+ * reader and to a model, which is what the eval measures; none can collide
+ * with an issued credential.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";

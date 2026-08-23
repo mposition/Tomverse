@@ -19,6 +19,7 @@ import { BATCH_002_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch002
 import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch003AssistantKo";
 import { BATCH_004_ASSISTANT_EN } from "@/lib/memoryExtractionEvalAdopted/batch004AssistantEn";
 import { BATCH_005_SECRET_KO } from "@/lib/memoryExtractionEvalAdopted/batch005SecretKo";
+import { BATCH_006_SECRET_EN } from "@/lib/memoryExtractionEvalAdopted/batch006SecretEn";
 
 export type AdoptedBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -57,5 +58,12 @@ export const ADOPTED_BATCHES: readonly AdoptedBatch[] = [
         record:
             "docs/ops/memory-extraction-eval-batches/batch-005-sensitive-secrets-ko.md",
         cases: BATCH_005_SECRET_KO,
+    },
+    {
+        id: "batch-006",
+        cell: "sensitive_secrets:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-006-sensitive-secrets-en.md",
+        cases: BATCH_006_SECRET_EN,
     },
 ];
