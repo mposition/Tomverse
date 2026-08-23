@@ -39,10 +39,14 @@
    `EmailDelivery`도 `EmailTemplate`도 거치지 않으므로 발송 이력·재시도·
    suppression·bounce 처리가 전부 적용되지 않습니다.
    `[코드]` `lib/providerModelCatalogReport.ts:212-216`
+   — **2026-08-23 해결(P0-3, §10.10)**: 이메일은 standard lane으로 옮겼고
+   Slack은 direct로 남겼습니다. 이 문단은 감사 시점의 기록입니다.
 5. **사용자용 모델 lifecycle 이메일은 template이 0개입니다.** 등록된 template은
    5개(`auth_login_code`, `account_welcome`, `account_deletion_scheduled`,
    `account_restored`, `billing_welcome`)이고 그중 marketing도 service도
    없습니다. `[코드]` `lib/emailTemplateDefinitions.ts:83-131`
+   — 2026-08-23에 `ops_model_lifecycle_daily`가 추가돼 6개가 됐지만 그것은
+   운영자 메일입니다. **사용자용 모델 lifecycle template은 여전히 0개입니다.**
 6. **대량 발송 경로가 존재하지 않습니다.** `EmailEvent.audienceKind`의
    `user_segment` / `all_users`는 CHECK에만 있고 코드가 쓰지 않습니다. 두 lane
    모두 `single_user`를 하드코딩하며 fan-out worker가 없습니다.
@@ -244,7 +248,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **검증**: pure unit test(전이 그래프) + DB integration.
 - **파일**: `prisma/schema.prisma:1725`
 
-### ML-04 — 리포트가 행을 조용히 절단한다 (P1, Medium)
+### ML-04 — 리포트가 행을 조용히 절단한다 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `lib/providerModelCatalogReport.ts:27-33`
 - **현재 동작**: Slack 20행, 이메일 100행에서 `…and N more`. 잘린 항목이 무엇인지
@@ -677,7 +681,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **권고**: EM-02와 한 변경으로 처리.
 - **파일**: `lib/emailPreferences.ts:78-91`
 
-### EM-14 — Daily 모델 리포트가 이메일 시스템 밖에 있다 (P1, Medium)
+### EM-14 — Daily 모델 리포트가 이메일 시스템 밖에 있다 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `lib/providerModelCatalogReport.ts:137,212`
 - **현재 동작**: `sendTransactionalEmail()` 직접 호출, `AdminNotificationLog`
@@ -1187,6 +1191,56 @@ plain-text가 조용히 뒤처집니다.
   함께 출력(ML-04).
 - `AWAITING DECISION`이 50건을 넘으면 이메일은 provider별 집계만 내고 목록은
   전부 링크로 넘깁니다. 200줄짜리 이메일은 읽히지 않습니다.
+
+---
+
+### 10.10 구현 기록 (2026-08-23 · P0-3 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelLifecycleDailyReportCore.ts` | 리포트를 텍스트가 아니라 **구조**로 만드는 순수 module. subject 규칙·섹션 상한·digest 임계값 |
+| `lib/modelLifecycleDailyEmail.ts` | 그 구조에서 HTML과 plain-text를 함께 렌더 |
+| `lib/emailTemplateDefinitions.ts` | `ops_model_lifecycle_daily` 등록 (transactional · purpose 없음 · unsubscribe 없음) |
+| `lib/providerModelCatalogReport.ts` | payload 조립 + standard lane enqueue. Slack은 direct 유지 |
+| `lib/modelLifecycleWorkItems.ts` | `listLifecycleReportWorkItems()` · `summariseLifecycleChanges()` |
+| `app/api/internal/provider-model-catalog/check/route.ts` | 큐 행과 24시간 변화량 전달 |
+| `tests/modelLifecycleDailyReport.test.mjs` | 17건 |
+| `tests/integration/model-lifecycle-daily-report.db.test.ts` | 5건 (lane·template·버전·미설정·거부) |
+
+**10.1의 C안을 그대로 구현했습니다.** Slack은 요청 안에서 direct로 나가고,
+이메일은 `enqueueStandardEmail()`로 들어갑니다. 순환 의존은 성립하지 않습니다 —
+이 리포트는 provider catalog를 보고하지 이메일 subsystem을 보고하지 않습니다.
+`operationalMonitoring.ts`의 incident 알림은 direct로 남겨 두었습니다.
+
+**EM-14가 닫혔습니다.** 이제 리포트마다 `EmailDelivery` 행이 있고, 재시도되고,
+`/admin/email-delivery`에 보이며, 운영자 주소가 hard bounce면 조용히 사라지는
+대신 그 상태로 남습니다. 계정이 없는 주소이므로 `recipientKey`는 `addr:` 형태
+입니다.
+
+**ML-04도 닫혔습니다.** 절단은 남되 `…N more · 총 M건 · open work queue →`로
+바뀌었습니다. Slack·HTML·plain-text 세 곳 모두입니다. 이전 형태(`…and N more`)
+는 잘린 항목을 볼 곳이 없을 때 쓰던 것이고, P0-1 이후로는 볼 곳이 있습니다.
+
+**되돌아가지 않게 고정한 것**
+- HTML과 plain-text는 같은 구조에서 렌더합니다. test가 아홉 개 섹션 제목이
+  양쪽에 다 있는지 검사하므로 한쪽만 늘릴 수 없습니다.
+- render는 시계를 읽지 않습니다. lane이 snapshot에서 매 재시도마다 다시
+  렌더하므로, 시계를 읽으면 두 번째 시도가 다른 bytes가 되고 provider의
+  idempotency key가 중복을 막지 못합니다. 날짜·URL은 caller가 넣습니다.
+- Outlook 규칙(고정폭 중첩 table, `<td width="4" bgcolor>` severity 막대,
+  `border-left` 금지, flex/grid 금지, webfont 금지)을 test가 검사합니다.
+- severity는 색이 아니라 단어로 옵니다(`CRITICAL`/`HIGH`/`NORMAL`).
+- 조용한 날은 섹션 3~7을 렌더하지 않습니다. 매일 같은 길이인 리포트는 읽히지
+  않게 됩니다.
+- 큐 조회·변화량 조회는 실패해도 리포트를 잃지 않습니다. lane이 enqueue를
+  거부해도(`EMAIL_SNAPSHOT_KEYS` 미설정 등) 스캔 결과가 우선입니다.
+
+**cron 응답의 `emailDelivered`가 `emailQueued`·`emailFailed`로 바뀌었습니다.**
+이 요청은 더 이상 발송 여부를 알 수 없으므로 delivered를 보고하면 거짓입니다.
+
+**검증**: unit 4,511→4,528 · server-contract 436 · DB integration(로컬
+PostgreSQL 16) email 3개 suite 36건 + 신규 5건 · PR Fast Gate static 35개 ·
+typecheck · eslint.
 
 ---
 
@@ -2046,7 +2100,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | P0-0 | 미처리 7건 triage 실행 (`model-lifecycle-triage-2026-08-22.md`) | ML-01 | 최대 28일째 방치. P0-1과 **병렬**로 — 순차로 하면 처리하는 동안 새 후보가 같은 방식으로 사라집니다 |
 | P0-1 | ~~`ModelLifecycleWorkItem` + backfill~~ **완료 (2026-08-22)** | ML-01, ML-03, ML-12 | 하루만 사는 후보가 계속 사라지고 있었습니다. §9.5 참조 |
 | P0-2 | ~~`/admin/models?tab=discovery` + work-queue collector~~ **완료 (2026-08-22)** | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없었습니다 |
-| P0-3 | Daily email v2 (NEW/PENDING 분리 + standard lane) | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호입니다 |
+| P0-3 | ~~Daily email v2 (NEW/PENDING 분리 + standard lane)~~ **완료 (2026-08-23)** | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호였습니다. §10.10 참조 |
 | P0-4 | ~~preference fail-closed + 전 계정 backfill~~ **완료 (2026-08-22)** | EM-02, EM-13 | marketing template이 생기는 순간 동의 없는 발송이 될 상태였습니다 |
 | P0-5 | ~~audience 계산기 + `ModelMigrationRecord` + `newConversationModelIds` 동기화~~ **완료 (2026-08-22)** | ML-09, ML-11 | 이 셋이 없으면 폐기 안내를 사실대로 쓸 수 없었습니다 |
 

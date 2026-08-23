@@ -3,7 +3,11 @@ export const maxDuration = 180;
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
+import {
+  countOpenWorkItems,
+  listLifecycleReportWorkItems,
+  summariseLifecycleChanges,
+} from "@/lib/modelLifecycleWorkItems";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
@@ -56,10 +60,26 @@ export async function POST(request: Request) {
       console.error("Model lifecycle work item count failed:", error);
       return undefined;
     });
+    // The rows themselves, and what moved in the queue since yesterday's run.
+    // Both are degradable: the report renders its counts and its provider table
+    // without them, and a queue read that fails must not cost the scan its
+    // report -- that failure mode is the one this whole change exists to end.
+    const workItems = await listLifecycleReportWorkItems().catch((error) => {
+      console.error("Model lifecycle work item read failed:", error);
+      return undefined;
+    });
+    const changes = await summariseLifecycleChanges(
+      new Date(generatedAt.getTime() - 24 * 60 * 60 * 1000)
+    ).catch((error) => {
+      console.error("Model lifecycle change summary failed:", error);
+      return undefined;
+    });
     const notification = await sendProviderModelCatalogReport({
       results,
       reconciliation,
       openWorkItems,
+      workItems,
+      changes,
       generatedAt,
       test: new URL(request.url).searchParams.get("test") === "true",
     });
@@ -84,7 +104,13 @@ export async function POST(request: Request) {
       newCandidates,
       lifecycleWarnings,
       slackDelivered: notification.slack.delivered,
-      emailDelivered: notification.email.filter((item) => item.delivered).length,
+      // Queued, not delivered: the email now goes through the standard lane and
+      // the drain sends it. Reporting it as delivered here would be a claim this
+      // request cannot make.
+      emailQueued: notification.email.filter((item) => item.status === "queued")
+        .length,
+      emailFailed: notification.email.filter((item) => item.status === "failed")
+        .length,
       registryDisabled: reconciliation?.disabled.length ?? 0,
       registryRestored: reconciliation?.restored.length ?? 0,
       registryHeld: reconciliation?.held.length ?? 0,

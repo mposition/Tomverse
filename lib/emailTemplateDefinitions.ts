@@ -7,6 +7,8 @@ import {
 } from "@/lib/accountEmails";
 import { buildBillingWelcomeEmail } from "@/lib/billingEmails";
 import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
+import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
+import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 
 /**
  * Every message this system can send, and what kind of message each one is.
@@ -77,12 +79,22 @@ export type BillingWelcomePayload = {
   periodEnd: string | null;
 };
 export type LoginCodePayload = { code: string; verifyUrl: string };
+/**
+ * The whole report, as the structure both renderers read.
+ *
+ * Stored on the delivery row and re-rendered from there on every attempt, which
+ * is why the caller resolves the dates and the URL rather than the template
+ * reading a clock: a retry three hours later must produce the same bytes or the
+ * provider stops recognising it as the same message.
+ */
+export type OpsModelLifecycleDailyPayload = LifecycleReportInput;
 
 export const ACCOUNT_WELCOME_TEMPLATE = "account_welcome";
 export const ACCOUNT_DELETION_SCHEDULED_TEMPLATE = "account_deletion_scheduled";
 export const ACCOUNT_RESTORED_TEMPLATE = "account_restored";
 export const BILLING_WELCOME_TEMPLATE = "billing_welcome";
 export const AUTH_LOGIN_CODE_TEMPLATE = "auth_login_code";
+export const OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE = "ops_model_lifecycle_daily";
 
 const definitions: AnyDefinition[] = [
   {
@@ -122,6 +134,33 @@ const definitions: AnyDefinition[] = [
     requiresUnsubscribe: false,
     render: () => buildAccountRestoredEmail(),
     placeholderPayload: {},
+  },
+  {
+    key: OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE,
+    // Transactional, and the recipient is an operator rather than a customer:
+    // there is no preference that gates it and no unsubscribe link, because the
+    // person who receives it is on the address precisely to be interrupted.
+    //
+    // It goes through the standard lane rather than direct so it inherits the
+    // history, the retries and the suppression check. That is safe here for the
+    // reason the incident alerts are not: this report says nothing about the
+    // email system -- it reports the provider catalogue -- so routing it through
+    // the queue does not make it depend on the thing it would have to report on.
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: OpsModelLifecycleDailyPayload) =>
+      buildModelLifecycleDailyEmail(payload),
+    placeholderPayload: {
+      localDate: "{{localDate}}",
+      generatedLabel: "{{generatedLabel}}",
+      workQueueUrl: "{{workQueueUrl}}",
+      providers: [],
+      workItems: [],
+      lifecycleWarnings: [],
+      missing: [],
+      registry: { ran: false, disabled: [], restored: [], held: [] },
+    },
   },
   {
     key: BILLING_WELCOME_TEMPLATE,
