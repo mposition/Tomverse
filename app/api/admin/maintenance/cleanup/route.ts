@@ -15,6 +15,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { readKnowledgeCleanupQueueDryRun } from "@/lib/assistantKnowledgeLifecycle";
 import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { prisma } from "@/lib/prisma";
@@ -48,6 +49,7 @@ async function dryRunCleanup() {
     notificationLogs,
     productAnalyticsEvents,
     shareSnapshots,
+    assistantKnowledge,
   ] = await Promise.all([
     prisma.session.count({ where: { expires: { lte: now } } }),
     prisma.chatUsageBucket.count({
@@ -129,6 +131,13 @@ async function dryRunCleanup() {
           OR "shareExpiresAt" IS NOT NULL
         )
     `.then((rows) => Number(rows[0]?.count || 0)),
+    // `storageCleanupQueues` above is a different question and stays: it counts
+    // cleanup rows being garbage-collected long after their bytes went, and it
+    // merges images with knowledge. What an operator needs before typing RUN
+    // CLEANUP is how many objects this run will delete from R2 and whether
+    // anything is stuck, which is what this reports
+    // (lib/assistantKnowledgeCleanupDryRunCore.ts).
+    readKnowledgeCleanupQueueDryRun(),
   ]);
   return {
     sessions,
@@ -147,6 +156,7 @@ async function dryRunCleanup() {
     notificationLogs,
     productAnalyticsEvents,
     shareSnapshots,
+    assistantKnowledge,
   };
 }
 
