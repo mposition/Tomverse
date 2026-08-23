@@ -31,7 +31,7 @@ import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
-import { coveredByAnotherModal } from "@/components/useModalDialog";
+import { modalOpenedOnTop, registerOpenModal } from "@/components/useModalDialog";
 import {
   useCompactBottomDock,
   useKeyboardInset,
@@ -432,13 +432,17 @@ export function MobileChatShell({
     if (!isDrawerOpen) return;
 
     document.body.style.overflow = "hidden";
-    // Skipped when a dialog opened from inside the drawer in the meantime --
-    // the account footer's settings modal, and the delete-account dialog on
-    // top of that. Focus arriving after that would pull the person back out of
-    // the dialog they are in and into the drawer, which is inert underneath
-    // it. Same rule as `useModalDialog`, which is why it is the same function.
+    // Registered so the dialogs opened from inside the drawer -- the account
+    // footer's settings modal, and the delete-account dialog on top of that --
+    // can be seen to have opened after it. The frame is then skipped when one
+    // did: focus arriving after that would pull the person back out of the
+    // dialog they are in and into the drawer, which is inert underneath it.
+    // Same rule as `useModalDialog`, which is why it is the same functions.
+    const unregister = drawerDialogRef.current
+      ? registerOpenModal(drawerDialogRef.current)
+      : null;
     const focusFrame = requestAnimationFrame(() => {
-      if (coveredByAnotherModal(drawerDialogRef.current)) return;
+      if (modalOpenedOnTop(drawerDialogRef.current)) return;
       drawerCloseButtonRef.current?.focus();
     });
 
@@ -455,6 +459,7 @@ export function MobileChatShell({
 
     document.addEventListener("keydown", handleEscape);
     return () => {
+      unregister?.();
       cancelAnimationFrame(focusFrame);
       document.body.style.overflow = "";
       document.removeEventListener("keydown", handleEscape);
