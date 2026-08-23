@@ -98,8 +98,9 @@ const actionCard = (item: LifecycleReportWorkItem, url: string) => {
       <tr>
         <td width="4" bgcolor="${severityColour(item.severity)}" style="width:4px;font-size:0;line-height:0">&nbsp;</td>
         ${cell(
-          `<div style="font-size:12px;font-weight:700;letter-spacing:.06em;color:${severityColour(item.severity)}">${severityLabel(item.severity)} &middot; ${escapeHtml(item.action)} &middot; ${escapeHtml(item.provider)}</div>
+          `<div style="font-size:12px;font-weight:700;letter-spacing:.06em;color:${severityColour(item.severity)}">${severityLabel(item.severity)} &middot; ${escapeHtml(item.action)}</div>
            <div style="margin-top:4px">${mono(item.apiModel)}</div>
+           <div style="margin-top:2px;color:${MUTED};font-size:12px">${escapeHtml(provenance(item))}</div>
            <div style="margin-top:6px;color:${MUTED};font-size:13px">${facts}</div>
            ${blockers}${validations}${recommendation}
            <div style="margin-top:10px"><a href="${escapeHtml(url)}" style="color:#1d4ed8;text-decoration:underline">Review item &rarr;</a></div>`,
@@ -111,9 +112,28 @@ const actionCard = (item: LifecycleReportWorkItem, url: string) => {
   )}</tr>`;
 };
 
+/**
+ * Who made the model, and which catalogues carried it -- as two clauses rather
+ * than one label (ML-13).
+ *
+ * The catalogue list is dropped when it says nothing the reader does not
+ * already have: one sighting, from the provider the item was filed under, is
+ * the ordinary case and repeating it would bury the interesting rows.
+ */
+const provenance = (item: LifecycleReportWorkItem) => {
+  const seen = item.observedVia
+    .map((sighting) => sighting.displayName)
+    .filter((name, index, all) => all.indexOf(name) === index);
+  const onlyTheFilingScan =
+    seen.length === 1 && seen[0] === item.provider;
+  return onlyTheFilingScan
+    ? item.publisher
+    : `${item.publisher} · seen in ${seen.join(", ")}`;
+};
+
 const compactRow = (item: LifecycleReportWorkItem) =>
   `<tr>${cell(
-    `<span style="color:${MUTED};display:inline-block;min-width:44px">${ageLabel(item)}</span> ${escapeHtml(item.provider)} &nbsp; ${mono(item.apiModel)}`,
+    `<span style="color:${MUTED};display:inline-block;min-width:44px">${ageLabel(item)}</span> ${mono(item.apiModel)}<div style="color:${MUTED};font-size:12px;margin-left:44px">${escapeHtml(provenance(item))}</div>`,
     "padding:3px 24px;font-size:13px"
   )}</tr>`;
 
@@ -244,7 +264,7 @@ const renderHtml = (report: DailyLifecycleReport) => {
           report.inFlight,
           (item) =>
             `<tr>${cell(
-              `<span style="color:${MUTED};display:inline-block;min-width:44px">${escapeHtml(item.action)}</span> ${escapeHtml(item.provider)} &nbsp; ${mono(item.apiModel)}<div style="color:${MUTED};font-size:12px;margin-left:44px">${escapeHtml(item.status)}${item.pendingValidations.length ? ` &middot; pending: ${escapeHtml(item.pendingValidations.join(", "))}` : ""}</div>`,
+              `<span style="color:${MUTED};display:inline-block;min-width:44px">${escapeHtml(item.action)}</span> ${mono(item.apiModel)}<div style="color:${MUTED};font-size:12px;margin-left:44px">${escapeHtml(provenance(item))} &middot; ${escapeHtml(item.status)}${item.pendingValidations.length ? ` &middot; pending: ${escapeHtml(item.pendingValidations.join(", "))}` : ""}</div>`,
               "padding:3px 24px;font-size:13px"
             )}</tr>`,
           report.workQueueUrl
@@ -346,7 +366,8 @@ const renderText = (report: DailyLifecycleReport) => {
           report.actionRequired,
           (item) =>
             [
-              `  [${severityLabel(item.severity)}] ${item.action} | ${item.provider} | ${item.apiModel}`,
+              `  [${severityLabel(item.severity)}] ${item.action} | ${item.apiModel}`,
+              `    ${provenance(item)}`,
               `    first seen ${item.newToday ? "today" : `${item.ageDays} days ago`} | owner: ${item.ownerEmail || "unassigned"}${item.dueAt ? ` | due ${item.dueAt.slice(0, 10)}` : ""}`,
               item.blockers.length ? `    blocker: ${item.blockers.join("; ")}` : "",
               item.pendingValidations.length
@@ -366,20 +387,20 @@ const renderText = (report: DailyLifecycleReport) => {
           : textList(
               "New today",
               report.newToday,
-              (item) => `  ${item.provider} | ${item.apiModel}`,
+              (item) => `  ${item.apiModel} | ${provenance(item)}`,
               report.workQueueUrl
             ) +
             textList(
               "Pending",
               report.pending,
-              (item) => `  ${item.ageDays}d | ${item.provider} | ${item.apiModel}`,
+              (item) => `  ${item.ageDays}d | ${item.apiModel} | ${provenance(item)}`,
               report.workQueueUrl
             ),
         textList(
           "Approved - awaiting implementation",
           report.inFlight,
           (item) =>
-            `  ${item.action} | ${item.provider} | ${item.apiModel} | ${item.status}${item.pendingValidations.length ? ` | pending: ${item.pendingValidations.join(", ")}` : ""}`,
+            `  ${item.action} | ${item.apiModel} | ${provenance(item)} | ${item.status}${item.pendingValidations.length ? ` | pending: ${item.pendingValidations.join(", ")}` : ""}`,
           report.workQueueUrl
         ),
         textList(

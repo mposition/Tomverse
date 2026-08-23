@@ -5,7 +5,11 @@ import { OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE } from "@/lib/emailTemplateDefinitio
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
-import { workItemAgeDays } from "@/lib/modelLifecycleWorkItemCore";
+import {
+  candidateIdentity,
+  workItemAgeDays,
+} from "@/lib/modelLifecycleWorkItemCore";
+import { modelOwnerPhrase } from "@/lib/modelOwner";
 import type { LifecycleReportRow } from "@/lib/modelLifecycleWorkItems";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
 import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
@@ -79,6 +83,47 @@ const reconciliationRows = (
   ];
 };
 
+/**
+ * One line per model, saying who made it and where it was seen -- two different
+ * facts that the old single label conflated (ML-13).
+ *
+ * The old form printed the scanning provider in front of the identifier, so a
+ * model Qwen happened to list read as a model Qwen built. Grouping by the same
+ * identity the queue collapses on also stops one model occupying three lines
+ * because three catalogues carry it.
+ */
+export const candidateRowsFor = (results: ProviderModelCatalogResult[]) => {
+  const byIdentity = new Map<
+    string,
+    { apiModel: string; observedVia: Array<{ provider: string; apiModel: string }> }
+  >();
+  for (const result of results) {
+    for (const model of result.newCandidates) {
+      const identity = candidateIdentity(model);
+      const entry = byIdentity.get(identity);
+      const sighting = { provider: result.provider, apiModel: model };
+      if (entry) {
+        entry.observedVia.push(sighting);
+        continue;
+      }
+      byIdentity.set(identity, { apiModel: model, observedVia: [sighting] });
+    }
+  }
+  return [...byIdentity.values()].map((entry) => {
+    // The exact string each catalogue returned, not the normalised key:
+    // somebody checking the claim needs what was actually there. Repeated only
+    // when a catalogue named it differently, so the common case stays short.
+    const seen = entry.observedVia
+      .map((sighting) =>
+        sighting.apiModel === entry.apiModel
+          ? providerName(sighting.provider)
+          : `${providerName(sighting.provider)} as ${code(sighting.apiModel)}`
+      )
+      .join(", ");
+    return `• ${code(entry.apiModel)} · ${modelOwnerPhrase(entry.apiModel)} · seen in ${seen}`;
+  });
+};
+
 const reportParts = (
   results: ProviderModelCatalogResult[],
   reconciliation?: CatalogReconciliationResult,
@@ -99,11 +144,7 @@ const reportParts = (
         `• ${providerName(result.provider)} ${code(item.apiModel)}: successful catalog scans missing ×${item.consecutiveMissing}`
     )
   );
-  const candidates = results.flatMap((result) =>
-    result.newCandidates.map(
-      (model) => `• ${providerName(result.provider)} ${code(model)}`
-    )
-  );
+  const candidates = candidateRowsFor(results);
   const failures = [...failed, ...skipped].map(
     (result) =>
       `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`
@@ -240,6 +281,15 @@ const reportPayload = (input: {
   workItems: input.workItems.map((item) => ({
     id: item.id,
     provider: providerName(item.provider),
+    // Resolved from the model's own identifier, never from the scan that filed
+    // the item: the two answer different questions and conflating them is what
+    // produced "Qwen kimi-k3" (ML-13).
+    publisher: modelOwnerPhrase(item.apiModel),
+    observedVia: item.observedVia.map((sighting) => ({
+      provider: sighting.provider,
+      displayName: providerName(sighting.provider),
+      apiModel: sighting.apiModel,
+    })),
     apiModel: item.apiModel,
     action: item.action,
     status: item.status,
