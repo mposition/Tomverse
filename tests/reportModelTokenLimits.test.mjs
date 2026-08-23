@@ -9,6 +9,8 @@ import {
   MISSING_IN_DB,
   RESERVATION_DIVERGED,
   UNKNOWN_TO_CODE,
+  SCOPE_FULL,
+  SCOPE_OUTPUT_CAP_ONLY,
   compareTokenLimits,
   formatTokenLimitRow,
   tokenLimitFindings,
@@ -250,4 +252,97 @@ test("each row renders both columns and its provenance on one line", () => {
     formatTokenLimitRow(byId.get("claude-haiku-4-5")),
     /inherits-profile/
   );
+});
+
+// A cap-only entry fixes the cap and deliberately leaves the reservation
+// alone, so the report must not file that reservation under "corrected on the
+// next boot" -- nothing is going to correct it.
+test("a cap-only model's reservation difference is never reported as pending", () => {
+  const scoped = compareTokenLimits({
+    catalogueModels: [
+      {
+        id: "perplexity/sonar-reasoning-pro",
+        provider: "perplexity",
+        enabled: true,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 2_048,
+      },
+      {
+        id: "perplexity/sonar",
+        provider: "perplexity",
+        enabled: true,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 2_048,
+      },
+      {
+        id: "gpt-5-4-mini",
+        provider: "openai",
+        enabled: true,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+      },
+    ],
+    storedRows: [
+      // Cap stranded, reservation agrees: entirely fixed by the cap-only entry.
+      {
+        id: "perplexity/sonar-reasoning-pro",
+        provider: "perplexity",
+        enabled: true,
+        maxOutputTokens: 4_096,
+        reservationOutputTokens: 2_048,
+        updatedById: null,
+        updatedByEmail: null,
+      },
+      // Both differ, but only the cap will move.
+      {
+        id: "perplexity/sonar",
+        provider: "perplexity",
+        enabled: true,
+        maxOutputTokens: 4_096,
+        reservationOutputTokens: 1_024,
+        updatedById: null,
+        updatedByEmail: null,
+      },
+      // Full scope: both columns are carried, so both are pending.
+      {
+        id: "gpt-5-4-mini",
+        provider: "openai",
+        enabled: true,
+        maxOutputTokens: 8_192,
+        reservationOutputTokens: 2_048,
+        updatedById: null,
+        updatedByEmail: null,
+      },
+    ],
+    reconciledModelIds: [
+      "perplexity/sonar-reasoning-pro",
+      "perplexity/sonar",
+      "gpt-5-4-mini",
+    ],
+    outputCapOnlyModelIds: [
+      "perplexity/sonar-reasoning-pro",
+      "perplexity/sonar",
+    ],
+  });
+  const byModel = new Map(scoped.map((entry) => [entry.modelId, entry]));
+  assert.equal(
+    byModel.get("perplexity/sonar-reasoning-pro").reconciledScope,
+    SCOPE_OUTPUT_CAP_ONLY
+  );
+  assert.equal(byModel.get("gpt-5-4-mini").reconciledScope, SCOPE_FULL);
+
+  const findings = tokenLimitFindings(scoped);
+  // sonar-reasoning-pro's only difference is the cap, so it clears on boot.
+  // sonar's cap clears too, but its reservation does not, so it is NOT
+  // promised as pending -- it is reported as something nobody will fix.
+  assert.deepEqual(
+    findings.pendingReconciliation.map((entry) => entry.modelId).sort(),
+    ["gpt-5-4-mini", "perplexity/sonar-reasoning-pro"]
+  );
+  assert.deepEqual(
+    findings.unreconciledReservations.map((entry) => entry.modelId),
+    ["perplexity/sonar"]
+  );
+  // And neither counts as stranded: something does lift both caps.
+  assert.deepEqual(findings.strandedRequestCaps, []);
 });

@@ -16,6 +16,7 @@
 // does not pretend to have failed either.
 
 import {
+  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
   STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
   STATIC_RUNTIME_MODELS,
 } from "../lib/modelRegistryShared.ts";
@@ -85,6 +86,7 @@ const entries = compareTokenLimits({
   catalogueModels,
   storedRows,
   reconciledModelIds: STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
+  outputCapOnlyModelIds: OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
 });
 const findings = tokenLimitFindings(entries);
 
@@ -155,6 +157,14 @@ if (json) {
           `stored ${entry.storedMaxOutputTokens}/${entry.storedReservationOutputTokens}`
       );
     }
+  }
+
+  if (findings.unreconciledReservations.length > 0) {
+    console.log(
+      `\n  ${findings.unreconciledReservations.length} reservation figure(s) that no reconciliation covers.\n` +
+        "  A cap-only entry lifts the output cap and deliberately leaves the reservation alone, so\n" +
+        "  these do not clear on a restart. That is the intended state until someone decides them."
+    );
   }
 
   if (findings.missingInDb.length > 0) {

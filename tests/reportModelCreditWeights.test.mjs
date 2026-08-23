@@ -117,3 +117,48 @@ test("an empty registry reports every model missing rather than agreeing", () =>
   assert.equal(findings.missingInDb.length, catalogue.length);
   assert.equal(findings.diverged.length, 0);
 });
+
+// docs/policy/perplexity-sonar-credit-price-hold.md uses this report to scope
+// itself, so it must not say a held credit weight is about to be corrected.
+// A cap-only reconciliation entry writes `maxOutputTokens` and nothing else,
+// so a divergence here stays a stranded edit.
+test("a cap-only reconciliation entry does not make a credit weight 'pending'", async () => {
+  const { OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS, STATIC_CATALOG_RECONCILIATION_MODEL_IDS } =
+    await import("../lib/modelRegistryShared.ts");
+
+  assert.ok(
+    OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.includes("perplexity/sonar"),
+    "the held model is reconciled for its output cap"
+  );
+  assert.ok(
+    STATIC_CATALOG_RECONCILIATION_MODEL_IDS.includes("perplexity/sonar"),
+    "and therefore appears in the shared list"
+  );
+
+  // What the report must be handed: the list minus the cap-only scope.
+  const capOnly = new Set(OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS);
+  const creditWeightReconciled = STATIC_CATALOG_RECONCILIATION_MODEL_IDS.filter(
+    (id) => !capOnly.has(id)
+  );
+  assert.equal(creditWeightReconciled.includes("perplexity/sonar"), false);
+
+  const held = compareCreditWeights({
+    catalogueModels: [
+      {
+        id: "perplexity/sonar",
+        provider: "perplexity",
+        enabled: true,
+        creditWeight: 16,
+        explicitInCode: true,
+      },
+    ],
+    storedRows: [{ id: "perplexity/sonar", provider: "perplexity", creditWeight: 20 }],
+    reconciledModelIds: creditWeightReconciled,
+  });
+  const findings = creditWeightFindings(held);
+  assert.deepEqual(
+    findings.strandedEdits.map((entry) => entry.modelId),
+    ["perplexity/sonar"]
+  );
+  assert.deepEqual(findings.pendingReconciliation, []);
+});

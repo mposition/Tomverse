@@ -66,6 +66,16 @@ export const UNKNOWN_TO_CODE = "unknown_to_code";
 export const ACTOR_PRESENT = "operator";
 export const ACTOR_ABSENT = "seed_or_unknown";
 
+/** Reconciliation carries this model's whole reviewed metadata block. */
+export const SCOPE_FULL = "full";
+/**
+ * Reconciliation carries this model's output cap and nothing else, so a
+ * reservation difference on it is NOT going to be corrected by a restart --
+ * see OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS in lib/modelRegistryShared.ts.
+ * Reporting one as "pending" would promise a fix nothing is going to make.
+ */
+export const SCOPE_OUTPUT_CAP_ONLY = "output_cap_only";
+
 const stateFor = (maxAgrees, reservationAgrees) => {
   if (maxAgrees && reservationAgrees) return AGREES;
   if (!maxAgrees && !reservationAgrees) return BOTH_DIVERGED;
@@ -98,9 +108,17 @@ export const compareTokenLimits = ({
   catalogueModels,
   storedRows,
   reconciledModelIds = [],
+  outputCapOnlyModelIds = [],
 }) => {
   const stored = new Map(storedRows.map((row) => [row.id, row]));
   const reconciled = new Set(reconciledModelIds);
+  const capOnly = new Set(outputCapOnlyModelIds);
+  const scopeFor = (id) =>
+    !reconciled.has(id)
+      ? null
+      : capOnly.has(id)
+        ? SCOPE_OUTPUT_CAP_ONLY
+        : SCOPE_FULL;
   const seen = new Set();
   const entries = [];
 
@@ -121,6 +139,7 @@ export const compareTokenLimits = ({
         updatedByEmail: null,
         updatedAt: null,
         reconciled: reconciled.has(model.id),
+        reconciledScope: scopeFor(model.id),
         state: MISSING_IN_DB,
       });
       continue;
@@ -152,6 +171,7 @@ export const compareTokenLimits = ({
       updatedByEmail: row.updatedByEmail ?? null,
       updatedAt: row.updatedAt ? String(row.updatedAt) : null,
       reconciled: reconciled.has(model.id),
+      reconciledScope: scopeFor(model.id),
       state: stateFor(maxAgrees, reservationAgrees),
     });
   }
@@ -172,6 +192,7 @@ export const compareTokenLimits = ({
       updatedByEmail: row.updatedByEmail ?? null,
       updatedAt: row.updatedAt ? String(row.updatedAt) : null,
       reconciled: reconciled.has(row.id),
+      reconciledScope: scopeFor(row.id),
       state: UNKNOWN_TO_CODE,
     });
   }
@@ -217,7 +238,20 @@ export const tokenLimitFindings = (entries) => {
       (entry) =>
         entry.state === RESERVATION_DIVERGED || entry.state === BOTH_DIVERGED
     ),
-    pendingReconciliation: diverged.filter((entry) => entry.reconciled),
+    // Only what a restart will genuinely correct. A cap-only entry fixes the
+    // cap, so a reservation difference on the same row stays a finding rather
+    // than being filed under "corrected on the next boot".
+    pendingReconciliation: diverged.filter(
+      (entry) =>
+        (entry.reconciledScope === SCOPE_FULL) ||
+        (entry.reconciledScope === SCOPE_OUTPUT_CAP_ONLY &&
+          entry.state === MAX_OUTPUT_DIVERGED)
+    ),
+    unreconciledReservations: diverged.filter(
+      (entry) =>
+        entry.reconciledScope !== SCOPE_FULL &&
+        (entry.state === RESERVATION_DIVERGED || entry.state === BOTH_DIVERGED)
+    ),
     missingInDb: entries.filter((entry) => entry.state === MISSING_IN_DB),
     unknownToCode: entries.filter((entry) => entry.state === UNKNOWN_TO_CODE),
   };

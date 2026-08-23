@@ -3,6 +3,10 @@ import { after, test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma";
 import {
+  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  STATIC_RUNTIME_MODELS,
+} from "../../lib/modelRegistryShared";
+import {
   ensureModelRegistrySeeded,
   getEnabledRuntimeModel,
   getRuntimeModel,
@@ -421,6 +425,113 @@ test("bootstrapping lifts a stale Sonnet 5 output cap without touching price, cr
       sortOrder: before.sortOrder,
     },
   });
+});
+
+// The 2026-08-23 sweep found twelve more rows in the same shape, and one of
+// them is the model docs/policy/perplexity-sonar-credit-price-hold.md was
+// written about: source says creditWeight 16, production bills 20, and that
+// hold forbids moving either until finance/product decide. Full-scope
+// reconciliation writes creditWeight, so these twelve are reconciled for the
+// output cap alone. This plants both halves of that conflict and checks the
+// cap moves while the held credit weight does not.
+test("a cap-only reconciliation lifts the output cap and leaves the held credit weight alone", async () => {
+  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "perplexity/sonar" },
+  });
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "perplexity/sonar" },
+    data: {
+      // The pre-profile seed: FALLBACK_PRICING.research would have written
+      // 4,096 / 2,048 before the 2026-08-04 profile existed.
+      maxOutputTokens: 4_096,
+      reservationOutputTokens: 2_048,
+      // What production actually bills, and what the hold protects. The
+      // catalogue says 16; if this comes back 16, a price change nobody
+      // approved has shipped.
+      creditWeight: 20,
+      bestFor: "an operator's own wording",
+      sortOrder: 4_243,
+    },
+  });
+
+  await reconcileStaticCatalogMetadata();
+
+  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "perplexity/sonar" },
+  });
+
+  assert.equal(row.maxOutputTokens, 128_000);
+  assert.equal(
+    row.creditWeight,
+    20,
+    "the Perplexity Sonar credit hold forbids this row moving to the catalogue's 16"
+  );
+  // The reservation is an entitlement figure and is outside this scope, so it
+  // keeps whatever the row held rather than being refreshed alongside the cap.
+  assert.equal(row.reservationOutputTokens, 2_048);
+  // And nothing else in the metadata block is carried either.
+  assert.equal(row.bestFor, "an operator's own wording");
+  assert.equal(row.sortOrder, 4_243);
+  assert.equal(row.enabled, before.enabled);
+  assert.equal(row.publiclyListed, before.publiclyListed);
+
+  // What the request actually asks for, through the same path chat uses.
+  const model = await getEnabledRuntimeModel("perplexity/sonar");
+  assert.ok(model);
+  assert.equal(getModelBillingProfile(model).maxOutputTokens, 128_000);
+  assert.equal(getModelUsageProfile(model).credits, 20);
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "perplexity/sonar" },
+    data: {
+      creditWeight: before.creditWeight,
+      bestFor: before.bestFor,
+      sortOrder: before.sortOrder,
+      reservationOutputTokens: before.reservationOutputTokens,
+    },
+  });
+});
+
+// Every model in the narrow scope, end to end: a pre-profile row goes in, the
+// approved cap comes out, and the row's credit weight is untouched.
+test("every cap-only model has its stranded cap lifted by the bootstrap", async () => {
+  const ids = [...OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS];
+  const originals = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: ids } },
+  });
+  assert.equal(originals.length, ids.length, "all cap-only models must be seeded");
+
+  // A distinctive credit weight per row, so a reconciliation that reached the
+  // column would be visible rather than coincidentally correct.
+  const sentinelCreditWeight = 97;
+  await prisma.modelRegistryEntry.updateMany({
+    where: { id: { in: ids } },
+    data: { maxOutputTokens: 1_024, creditWeight: sentinelCreditWeight },
+  });
+
+  await reconcileStaticCatalogMetadata();
+
+  const rows = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: ids } },
+  });
+  for (const row of rows) {
+    const expected = STATIC_RUNTIME_MODELS.find((model) => model.id === row.id);
+    assert.ok(expected, row.id);
+    assert.equal(row.maxOutputTokens, expected.maxOutputTokens, row.id);
+    assert.ok(row.maxOutputTokens! > 1_024, row.id);
+    assert.equal(row.creditWeight, sentinelCreditWeight, row.id);
+  }
+
+  for (const original of originals) {
+    await prisma.modelRegistryEntry.update({
+      where: { id: original.id },
+      data: {
+        maxOutputTokens: original.maxOutputTokens,
+        creditWeight: original.creditWeight,
+      },
+    });
+  }
 });
 
 test("stores limited availability and operational notes in the registry", async () => {

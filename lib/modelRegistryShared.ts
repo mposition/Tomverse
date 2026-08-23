@@ -301,7 +301,12 @@ export const staticModelRegistrySeedRows = () =>
 // an already-existing runtime row. This is intentionally not a general seed
 // sync: operator-managed availability, catalogue deletion, ordering and
 // unrelated custom metadata remain untouched.
-export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
+//
+// Two scopes, because they answer different questions. This one carries the
+// whole reviewed metadata block -- display name, upstream API id, class,
+// credit weight, capabilities, token limits -- for models where a human has
+// checked that the catalogue is the authority on all of it.
+const FULL_METADATA_RECONCILIATION_MODEL_IDS = [
   "gpt-5-6-sol",
   "gpt-5-6-terra",
   "gpt-5-6-luna",
@@ -379,14 +384,92 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   "minimax-m3",
 ] as const;
 
+/**
+ * The narrow scope: carry the output cap onto an existing row, and nothing
+ * else.
+ *
+ * Added 2026-08-23, from the sweep that followed trace 2e4327a9. Every model
+ * here is in the shape claude-sonnet-5 was in -- its row was seeded while
+ * lib/modelPricing.ts still had no profile for it, so the row holds a
+ * FALLBACK_PRICING class cap between 4x and 64x below the profile that later
+ * landed, and nothing was ever going to carry the real number across.
+ *
+ * Why these do not simply join the list above, which would fix the same cap:
+ *
+ *   * **`creditWeight` is under a hold.** Full-scope reconciliation writes it,
+ *     and `perplexity/sonar` is the model docs/policy/perplexity-sonar-credit-price-hold.md
+ *     was written about -- source says 16, production bills 20, and that
+ *     document names *this list* as the mechanism that would move the row. It
+ *     forbids changing either value before finance/product approve, so an
+ *     entry here that wrote creditWeight would be a price cut on a live model
+ *     smuggled in as an incident fix.
+ *     docs/policy/perplexity-sonar-credit-price-hold.md §5 also records that
+ *     other models may sit in the same state and that only
+ *     `report:model-credit-weights` against production can say which -- so the
+ *     same objection stands for every id below, not just the Perplexity ones.
+ *   * **`reservationOutputTokens` is an entitlement figure.** It is what a
+ *     turn holds against a user's credits and against the provider budget.
+ *     For all twelve it happens to be identical to the class fallback the row
+ *     already carries, so writing it would be a no-op today -- but a no-op
+ *     that silently becomes a real write the first time a profile moves, or
+ *     the first time an administrator sets one by hand
+ *     (docs/policy/credit-and-cost-limits.md).
+ *
+ * So the payload is one field. An output cap is a capability: it decides how
+ * long an answer may be, and a stranded one truncates or -- with reasoning in
+ * front of the text -- empties it. Nothing about who is charged what moves
+ * with it.
+ *
+ * `gpt-5-5-thinking` is deliberately absent. Its cap already agrees (8,192
+ * both sides); only its reservation differs (4,096 -> 6,144). There is no cap
+ * to carry, and an entry that moved only the reservation would be exactly the
+ * entitlement change the paragraph above refuses.
+ */
+export const OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS = [
+  // fallback -> profile, and whether reasoning can fill the cap before any
+  // visible text (the acute, empty-answer form of the defect).
+  "claude-haiku-4-5", //               2,048 ->  64,000
+  "glm-5.2", //                        2,048 -> 131,072
+  "kimi-k2.7-code", //                 4,096 ->  32,768
+  "mistral-large-3", //                8,192 -> 128,000
+  "mistral-small-4", //                2,048 -> 128,000
+  "perplexity/sonar", //               4,096 -> 128,000
+  "perplexity/sonar-deep-research", // 8,192 -> 128,000   reasoning: high
+  "perplexity/sonar-pro", //           4,096 -> 128,000
+  "perplexity/sonar-reasoning-pro", // 4,096 -> 128,000   reasoning: high
+  "qwen3.6-flash", //                  2,048 ->  65,536
+  "qwen3.7-max", //                    8,192 -> 131,072
+  "qwen3.7-plus", //                   4,096 ->  65,536
+] as const;
+
+/**
+ * Every model an application restart will correct, whatever the scope. Read
+ * by the drift reports to tell "will be fixed on the next boot" apart from
+ * "nothing will ever fix this".
+ */
+export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
+  ...FULL_METADATA_RECONCILIATION_MODEL_IDS,
+  ...OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+] as const;
+
 const reconciliationModelIds = new Set<string>(
   STATIC_CATALOG_RECONCILIATION_MODEL_IDS
+);
+
+const outputCapOnlyModelIds = new Set<string>(
+  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS
 );
 
 export const staticModelRegistryReconciliationRows = () =>
   staticModelRegistrySeedRows()
     .filter((row) => reconciliationModelIds.has(row.id))
     .map((row) => {
+      // One field, by design -- see OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.
+      // Not even the lifecycle branch: a model whose row needs withdrawing is
+      // already handled by reconcileStaticWithdrawals().
+      if (outputCapOnlyModelIds.has(row.id)) {
+        return { id: row.id, data: { maxOutputTokens: row.maxOutputTokens } };
+      }
       const lifecycle = row.enabled
         ? {}
         : {
