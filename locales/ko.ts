@@ -301,6 +301,8 @@ export const ko = {
         archiveNoSupportedFiles: "압축파일에 처리 가능한 파일이 없습니다.",
         archiveTimeout: "압축파일을 처리하는 데 시간이 너무 오래 걸립니다.",
         archiveExcludedNotice: "일부 파일은 지원되지 않아 제외되었습니다: {count}개",
+        archiveReadSummary: "{count}개 읽음",
+        archiveExcludedSummary: "{count}개 제외",
         attachFormatGroupImage: "이미지",
         attachFormatGroupDocument: "문서",
         attachFormatGroupData: "데이터",

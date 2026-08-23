@@ -306,6 +306,8 @@ export const es = {
         archiveNoSupportedFiles: "El archivo comprimido no contiene archivos que esta aplicación pueda leer.",
         archiveTimeout: "El archivo comprimido tardó demasiado en procesarse.",
         archiveExcludedNotice: "Se excluyeron {count} archivo(s) porque no son compatibles.",
+        archiveReadSummary: "{count} archivo(s) leído(s)",
+        archiveExcludedSummary: "{count} omitido(s)",
         attachFormatGroupImage: "Imágenes",
         attachFormatGroupDocument: "Documentos",
         attachFormatGroupData: "Datos",
