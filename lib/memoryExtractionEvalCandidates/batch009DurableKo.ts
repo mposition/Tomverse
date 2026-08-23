@@ -2,7 +2,8 @@
  * Batch 009 — `durable_facts:ko`, second batch. **Candidate pool, not dataset.**
  *
  * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch). 50 here,
- * the top of that range: the cell's first batch has been reviewed (§6.5), so
+ * the top of that range: the cell's first batch has been reviewed
+ * (docs/ops/memory-extraction-eval-dataset.md §6.5), so
  * what is left is volume, and 50 halves the number of review sheets without
  * changing how many verdicts docs/ops/memory-extraction-eval-dataset.md §6.3's 20% sample asks for.
  *
