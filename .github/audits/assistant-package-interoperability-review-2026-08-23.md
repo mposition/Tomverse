@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **15** | **2026-08-23** | **리뷰 14회차 반영.** `VALIDATE CONSTRAINT`를 **별도 배포 경계(Slice 5B)로 분리** — `db:migrate`가 pending migration을 연속 적용하므로 함께 제출하면 survey 없이 즉시 validate되고 기존 음수 행이 있으면 배포가 실패합니다(§5.9.3f-5, §11). survey를 `.github/RELEASE_CHECKLIST.md`의 post-deploy 항목으로 두고, 검증 64c·64d를 **단계형 migration 테스트**로 고정. 고친 문단은 **[rev15]** |
 | **14** | **2026-08-23** | **리뷰 13회차 반영.** 두 CHECK의 **제약 이름을 계약으로 고정**하고 저장소의 `_check` 접미사 관례에 맞춤(§5.9.3f-5), `NOT VALID` 검증을 위한 **`report:assistant-knowledge-invariants`를 Slice 5 산출물로 추가**(§5.9.3f-5, §11, §12). 고친 문단은 **[rev14]** |
 | **13** | **2026-08-23** | **리뷰 12회차 반영.** §14.4 요약의 승인 항목 수와 차단 지점에 **A7 반영**, `extractedBytes`의 **export 포함·CHECK 검증 항목 추가**(64·64a·64b). 고친 문단은 **[rev13]** |
 | **12** | **2026-08-23** | **리뷰 11회차 반영.** Slice 5 선행 조건과 최종 요약에 **A7 추가**하고 이미 충족된 승인은 그렇게 표시(§11, §14.4), `extractedBytes`의 **export 포함 여부와 CHECK 확정**(§5.9.3f-5), 타인 예약 403의 **검증 항목 추가**, 63a·63b를 **정확한 기대값**으로, 문구·Markdown 잔여 오류 정정. 고친 문단은 **[rev12]** |
@@ -1573,7 +1574,9 @@ extractedBytesInAccount: extractedCharacters._sum.extractedCharacters ?? 0
 character as a byte would give CJK users triple the allowance the policy says
 they have."* 즉 알려진 상태이고 아직 고쳐지지 않았습니다.
 
-**이 보고서의 계약 다섯.**
+**이 보고서의 계약 다섯**입니다. 2번은 뒤따르는 개정에서 자란 항목이라
+`2-b`~`2-e`로 나뉘어 있고, **3~5번은 그 뒤에 이어집니다** — 읽을 때 2-e에서
+목록이 끝난 것으로 보지 마십시오.
 
 1. **`AssistantKnowledgeFile.extractedBytes Int?` 컬럼을 추가**하고
    processor가 이미 계산하는 `Buffer.byteLength(text, "utf8")`를 저장합니다.
@@ -1650,6 +1653,66 @@ npm run report:assistant-knowledge-invariants -- --json
   `VALIDATE CONSTRAINT` migration을 냅니다.
 - **gate가 아니라 report입니다.** PR Fast Gate에 넣지 않습니다 — production
   데이터를 읽어야 하고, 개발 DB의 0건은 아무것도 증명하지 않습니다.
+
+2-e. **[rev15] 두 migration을 같은 제출에 담으면 안 됩니다 — 배포 경계가
+필요합니다.**
+
+rev14는 절차 넷을 적으면서 `NOT VALID` migration과 `VALIDATE CONSTRAINT`
+migration을 **같은 Slice 5 산출물**에 넣었습니다. 그러면 절차가 성립하지
+않습니다.
+
+[저장소] `package.json`의 배포 명령은 이렇습니다.
+
+```
+db:migrate => node scripts/require-direct-database-url.mjs
+           && node scripts/baseline-existing-database.mjs
+           && prisma migrate deploy
+```
+
+`prisma migrate deploy`는 **pending migration을 전부 연속 적용**합니다. 둘을
+함께 제출하면 survey를 실행할 틈이 없고, `VALIDATE`가 기존 행을 전수
+검사하므로 **음수 행이 하나라도 있으면 배포 자체가 실패**합니다. 그것이
+`NOT VALID`로 나눈 이유를 정확히 되돌리는 결과입니다.
+
+**저장소에 같은 형태의 선례가 이미 있습니다** — 두 migration이 **3일 간격의
+별개 배포**입니다.
+
+```
+prisma/migrations/20260812070000_credit_lot_non_negative/          (1) NOT VALID
+prisma/migrations/20260815012000_validate_credit_lot_non_negative/ (3) VALIDATE
+```
+
+앞 migration의 주석이 그 사이에 무엇이 있어야 하는지 적어 두었고, 손으로
+validate하지 말라는 이유까지 남겼습니다.
+
+> Do NOT validate by hand in production between (1) and (3).
+> `scripts/compare-schema-to-migrations.mjs` compares `pg_get_constraintdef()`,
+> whose output carries the `NOT VALID` suffix, so a hand-validated production
+> would read as schema drift against the migration history for as long as the
+> follow-up migration is missing.
+
+**그래서 Slice 5를 둘로 나눕니다**(§11).
+
+| | 무엇 | 배포 |
+|---|---|---|
+| **Slice 5A** | `NOT VALID` migration + 코드 + `report:assistant-knowledge-invariants` | 한 배포 |
+| — | **production에서 survey 실행 → 0건 확인** | 배포 아님. 사람이 하는 관측 |
+| **Slice 5B** | `VALIDATE CONSTRAINT` migration **하나만** | 별개 배포 |
+
+**Slice 5B는 5A의 결과에 달려 있으므로 미리 작성해 두지 않습니다.** 파일이
+tree에 있으면 다음 배포가 그것을 집어 갑니다 — 의도와 무관하게, `db:migrate`가
+pending을 전부 적용하기 때문입니다.
+
+**survey는 `.github/RELEASE_CHECKLIST.md`의 post-deploy 항목으로 둡니다.**
+[저장소]의 §7.7이 credit lot에 대해 같은 자리를 갖고 있고, 그 문서가 이
+종류의 항목이 왜 checklist에 있어야 하는지를 적습니다 — *"It is not a gate.
+It exits 0 whether it finds zero violating rows or fifty … it has to be run by
+a named person against a deadline, not left to be 'caught by the next
+release'."* 같은 형태로 **담당자와 기한**을 적은 항목을 추가합니다.
+
+**`extractedBytes`의 CHECK는 이 분리와 무관합니다.** 새 컬럼이고 기존 행이
+전부 `NULL`이라 `NOT VALID`가 필요 없으며, Slice 5A에서 즉시 유효한 제약으로
+들어갑니다. 나뉘는 것은 `extractedCharacters` 쪽 하나뿐입니다.
 3. **기존 행 처리 방침을 정합니다** — 재처리하지 않고 `NULL`로 두되,
    합산에서 `NULL`은 `extractedCharacters`로 대체해 **현재와 같은(과소) 값**을
    쓰거나, 재처리 배치를 돌립니다. **어느 쪽이든 정책 결정이며 §10.1의
@@ -1663,7 +1726,7 @@ npm run report:assistant-knowledge-invariants -- --json
 > **[rev11] 범위 표시.** (1)(2)(3)은 **기존 릴리스 C의 결함**이고 이 기능이
 > 만든 것이 아닙니다. 그러나 이 기능은 **한 번에 여러 파일을 올리는 흐름**을
 > 처음 만들므로 두 결함이 처음으로 일상적으로 드러납니다. 그래서 여기에
-> 기록하고 §11의 Slice 5 선행 작업으로 둡니다 — **고치지 않고 그 위에
+> 기록하고 §11의 Slice 5A 선행 작업으로 둡니다 — **고치지 않고 그 위에
 > 얹으면, quota를 넘긴 계정이 가져오기 때문에 생겼다고 읽히게 됩니다.**
 
 **(3-b) [rev10] transaction 밖에서 끝내는 것은 "metadata·signature·digest
@@ -3009,8 +3072,8 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | **A4** flag rollback 계약 | **Slice 1** | 같음 |
 | **A5** secret 차단 vs 경고 | **Slice 2** | scanner를 브라우저·서버 공용 순수 모듈로 만들지가 이 답에 달렸습니다 |
 | **A6** instruction URL 처리 | **Slice 4** | UX 결정이므로 diff/review UI를 쓰기 직전입니다 |
-| **[rev11] A7** 기존 행의 `extractedBytes` | **Slice 5** | migration과 `knowledgeUsage()` 변경이 그 slice의 산출물입니다 |
-| **B1~B6** 수치 | **[rev8] Slice 1** | rev3은 Slice 5, rev6·rev7의 일부 문단은 Slice 2라고 적었는데 둘 다 늦습니다. **Slice 1의 산출물이 그 확정값을 문서에 기록하는 것**이므로 가장 먼저 필요합니다. Slice 2가 상수로 만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다 |
+| **[rev15] A7** 기존 행의 `extractedBytes` | **Slice 5A** | migration과 `knowledgeUsage()` 변경이 그 slice의 산출물입니다. Slice 5B는 승인이 아니라 **survey 결과**가 선행 조건입니다 |
+| **B1~B6** 수치 | **[rev8] Slice 1** | rev3은 Slice 5, rev6·rev7의 일부 문단은 Slice 2라고 적었는데 둘 다 늦습니다. **Slice 1의 산출물이 그 확정값을 문서에 기록하는 것**이므로 가장 먼저 필요합니다. Slice 2가 상수로 만들고, Slice 3의 parser가 쓰고, Slice 5A가 서버에서 다시 강제합니다 |
 | **C1** URL import | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C2** Gem HTML | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C3** flag 배치 | **[rev6] Slice 8** | Slice 1~7의 개발은 막지 않고 **rollout만** 막습니다 |
@@ -3027,7 +3090,8 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | Slice 2 (pure adapter · 상수 · scanner) | **A5** (B1~B6는 Slice 1에서 이미 확정) |
 | Slice 3 (parser) | 없음 (B는 Slice 2에서 이미 상수가 됨) |
 | Slice 4 (diff/review UI) | **A6** |
-| Slice 5 | **[rev11] A7** |
+| Slice 5A | **[rev15] A7** |
+| Slice 5B | 승인 아님 — **5A 배포 후 survey 0건**(§11) |
 | Slice 6~7 | 없음 |
 | Slice 8 (rollout) | **C3** |
 
@@ -3106,6 +3170,13 @@ B3을 **128MB**, B4를 **32MiB**(B5·knowledge와 같은 물리 제약), B6을
 각 slice는 [저장소] 정책 §1의 원칙 — "다음 릴리스의 schema·API·feature flag·
 UI placeholder를 선제 추가하지 않습니다" — 을 따릅니다.
 
+**[rev15] slice 경계와 배포 경계는 대부분 같지만 한 곳에서 다릅니다.**
+`5A → 5B` 사이에는 **사람이 production을 관측하는 단계**가 있고, 그 관측
+결과가 5B의 선행 조건입니다. 그래서 두 slice를 같은 제출에 담을 수 없습니다 —
+`db:migrate`가 pending migration을 전부 연속 적용하기 때문입니다(§5.9.3f-5의
+2-e). 나머지 경계는 전부 코드 의존성이며 한 릴리스에 여러 개가 들어가도
+무방합니다.
+
 ### Slice 1 — 정책 문서와 native manifest 정의 (규모 S)
 
 | | |
@@ -3142,7 +3213,7 @@ UI placeholder를 선제 추가하지 않습니다" — 을 따릅니다.
 | **선행 조건** | Slice 3, **§10.1의 A6 승인**(§10.1.2) |
 | **독립 rollback** | **가능.** flag 뒤에 있고, 진입점을 지우면 됩니다 |
 
-### Slice 5 — [rev2·rev6] import staging 상태 기계와 publish 통합 (규모 **L**)
+### Slice 5A — [rev2·rev6·rev15] import staging 상태 기계와 publish 통합 (규모 **L**)
 
 rev1은 이 slice를 M으로 적었습니다. §5.9의 정정으로 **staging 리소스·TTL·
 sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올립니다.
@@ -3150,27 +3221,42 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim + 결합 CHECK**(§5.9.3f-2) + **일반 finalize의 예약 거절**(§5.9.3f-3) + **`lockAccountKnowledgeQuota()`와 transaction 내 quota 재판정**(§5.9.3f-4, 일반 경로 포함) + **거절을 throw가 아닌 outcome으로**(§5.9.3f-4) + **`extractedBytes` 컬럼(+명명 CHECK, export 포함)·`extractedCharacters` 명명 CHECK(`NOT VALID`)·`report:assistant-knowledge-invariants`·후속 `VALIDATE CONSTRAINT` migration·processor 잠금·`knowledgeUsage()` 수정**(§5.9.3f-5) + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim + 결합 CHECK**(§5.9.3f-2) + **일반 finalize의 예약 거절**(§5.9.3f-3) + **`lockAccountKnowledgeQuota()`와 transaction 내 quota 재판정**(§5.9.3f-4, 일반 경로 포함) + **거절을 throw가 아닌 outcome으로**(§5.9.3f-4) + **[rev15]** `extractedBytes` 컬럼(+명명 CHECK, export 포함)·`extractedCharacters` 명명 CHECK(**`NOT VALID`**)·`report:assistant-knowledge-invariants`·`.github/RELEASE_CHECKLIST.md`의 post-deploy survey 항목·processor 잠금·`knowledgeUsage()` 수정(§5.9.3f-5). **`VALIDATE CONSTRAINT` migration은 여기 들어가지 않습니다 — Slice 5B입니다** + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | **[rev12] Slice 4 + §10.1의 A7 승인**(§10.1.2). A5는 Slice 2에서, B1~B6는 Slice 1에서 **이미 충족**돼 있으므로 여기서 다시 세지 않습니다 |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
+
+### Slice 5B — [rev15] `extractedCharacters` 제약의 validate (규모 **S**)
+
+**5A와 같은 제출에 담지 않습니다.** `db:migrate`는 `prisma migrate deploy`이고
+pending migration을 전부 연속 적용하므로, 두 파일이 함께 tree에 있으면 survey를
+실행할 틈 없이 validate가 돌고 기존 음수 행이 있으면 **배포가 실패**합니다
+(§5.9.3f-5의 2-e).
+
+| | |
+|---|---|
+| **입력** | 5A 배포 후 production에서 실행한 `npm run report:assistant-knowledge-invariants`의 **0건 보고** |
+| **산출물** | `ALTER TABLE "AssistantKnowledgeFile" VALIDATE CONSTRAINT "AssistantKnowledgeFile_extractedCharacters_non_negative_check";` 하나만 담은 migration. 주석에 **survey를 실행한 날짜·SHA·출력**을 적습니다 — [저장소] `20260815012000_validate_credit_lot_non_negative`가 그렇게 합니다 |
+| **선행 조건** | Slice 5A **배포 완료** + survey 0건. **코드 승인이 아니라 관측 결과가 선행 조건인 유일한 slice**입니다 |
+| **독립 rollback** | 사실상 해당 없음 — validate는 제약의 상태만 바꾸고 데이터를 건드리지 않습니다. 되돌리는 것은 drop 후 재추가이며, 그럴 이유가 생기는 경우는 survey가 틀렸을 때뿐입니다 |
+| **하지 말 것** | production에서 **손으로 `VALIDATE`하지 않습니다.** `scripts/compare-schema-to-migrations.mjs`가 `pg_get_constraintdef()`를 비교하고 그 문자열에 `NOT VALID` 접미사가 실리므로, 손으로 validate한 production은 **이 파일이 생길 때까지 drift로 보고**됩니다 |
 
 ### Slice 6 — native export / re-import (규모 M)
 
 | | |
 |---|---|
-| **입력** | Slice 5 |
+| **입력** | Slice 5A |
 | **산출물** | `GET /api/assistant-profiles/[profileId]/export`(신규), **[rev2]** §9.5의 `portableProfileEquals()` round-trip 계약 테스트(`unchanged` 등식이 아님) |
-| **선행 조건** | Slice 5 |
+| **선행 조건** | Slice 5A |
 | **독립 rollback** | **가능.** 읽기 전용 endpoint |
 
 ### Slice 7 — telemetry / admin observability (규모 S)
 
 | | |
 |---|---|
-| **입력** | Slice 4·5의 이벤트 지점 |
+| **입력** | Slice 4·5A의 이벤트 지점 |
 | **산출물** | §7.13의 4개 content-free 이벤트, Admin Console의 성공·실패·경고 유형 분포 |
-| **선행 조건** | Slice 5 |
+| **선행 조건** | Slice 5A |
 | **독립 rollback** | **가능** |
 
 ### Slice 8 — rollout / rollback (규모 S)
@@ -3185,12 +3271,17 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 ### 의존성 그래프
 
 ```
-1 ──▶ 2 ──▶ 3 ──▶ 4 ──▶ 5 ──▶ 6
+1 ──▶ 2 ──▶ 3 ──▶ 4 ──▶ 5A ──▶ 6
                           └──▶ 7 ──▶ 8
+
+5A ──(배포)──▶ [production survey: 0건]──▶ 5B      별개 배포 경계
 ```
 
-2·3·6·7은 개별 rollback이 자명하고, 4는 flag로, 5는 route flag로 되돌립니다.
-**5만 schema를 건드리며, 그것이 이 계획에서 유일하게 forward-only인 지점입니다.**
+2·3·6·7은 개별 rollback이 자명하고, 4는 flag로, 5A는 route flag로 되돌립니다.
+**[rev15] schema를 건드리는 것은 5A와 5B뿐이며, 둘 다 forward-only입니다.**
+5B는 5A와 **같은 릴리스에 들어갈 수 없습니다** — 그 사이에 사람이 production을
+관측하는 단계가 있고, 그것이 이 계획에서 유일하게 **코드가 아니라 관측이
+선행 조건인 경계**입니다.
 
 ---
 
@@ -3313,8 +3404,10 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **64** *(rev13)* | **계정 export에 `extractedBytes` 포함** | 계정 데이터 export의 `assistant_knowledge_files[].extractedBytes`가 **DB 값과 정확히 일치**. `extractedCharacters`와 나란히 나오고, 둘 중 하나만 빠지지 않음 |
 | **64a** *(rev14)* | **음수 `extractedBytes` 거절** | `extractedBytes = -1` insert·update가 **`AssistantKnowledgeFile_extractedBytes_non_negative_check`로 거절**됨(이름까지 assert). `NULL`과 `0`은 허용 |
 | **64b** *(rev14)* | **`extractedCharacters`의 CHECK** | `AssistantKnowledgeFile_extractedCharacters_non_negative_check`가 **새 write의 음수를 거절**(이름까지 assert). `NOT VALID`이므로 기존 행은 검사되지 않음 |
-| **64c** *(rev14)* | **`report:assistant-knowledge-invariants`** | 음수 행을 심으면 개수가 그만큼 보고되고, 지우면 0으로 돌아옴. `--json` 출력이 위반 수와 두 제약의 `convalidated` 상태를 담음. **어떤 행도 수정하지 않음**(읽기 전용) |
-| **64d** *(rev14)* | **validate migration** | report가 0을 보고한 뒤 `VALIDATE CONSTRAINT` migration을 적용하면 `convalidated = true`가 되고, 그 뒤 음수 insert가 여전히 거절됨 |
+| **64c** *(rev15)* | **`report:assistant-knowledge-invariants` — 단계형 migration 테스트** | **격리된 DB**에서: ① `NOT VALID` migration **직전까지** 적용하고 음수 `extractedCharacters` 행 1건 생성 → ② 그 migration만 적용(기존 행을 검사하지 않으므로 성공) → ③ report가 **위반 1건 · `convalidated=false`**를 보고 → ④ 시료 행 삭제 → ⑤ report가 **0건**. **어떤 단계에서도 report가 행을 수정하지 않음**(읽기 전용) |
+| **64d** *(rev15)* | **validate migration** | 64c의 ⑤ 상태에서 `VALIDATE CONSTRAINT` migration을 적용 → `convalidated = true`. 그 뒤 음수 insert는 여전히 거절 |
+| **64e** *(rev15)* | **음수 시료는 제약 이후에 만들 수 없음** | ② 이후 음수 `extractedCharacters` insert·update 시도 → **거절**. 이것이 64c의 시료를 ① 단계에서 만들어야 하는 이유이며, 최신 migration이 전부 적용된 평범한 테스트 DB에서는 시료 자체가 만들어지지 않음 |
+| **64f** *(rev15)* | **두 migration이 한 배포에 들어가지 않음** | tree에 `VALIDATE CONSTRAINT` migration이 있는 상태로 `prisma migrate deploy`를 돌리면 survey 없이 validate가 실행됨을 확인하는 **회귀 방지 검사** — Slice 5A 제출에 그 파일이 없어야 함(§11) |
 | **63b** *(rev12)* | **기존 행(`extractedBytes = NULL`)의 합산** | **권고 방침(§10.1 A7) 기준의 고정 기대값**: `NULL` 행은 **정확히 그 행의 `extractedCharacters` 값**으로 집계되고, 값이 있는 행은 그 값으로 집계됨. 합계가 두 값의 단순 합과 일치. *A7이 재처리 배치로 승인되면 이 항목을 그 기대값으로 교체합니다* |
 | **61c** *(rev10)* | **state 결합 CHECK** | `state='pending'`인데 `claimToken`이 있는 행, `state='finalizing'`인데 `finalizingStartedAt`이 없는 행을 insert 시도 → **DB 거절** |
 | **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
@@ -3336,7 +3429,10 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 
 ### 12.7 실행 명령
 
-[저장소] 정책 §24의 목록을 그대로 씁니다.
+[저장소] 정책 §24의 목록에 **[rev15]** `db:compare-schema` 하나를
+더합니다 — 이 기능은 §24가 쓰인 뒤에 생긴 **제약 추가와 `NOT VALID` 분리**를
+담고 있고, 그 drift 검사가 `pg_get_constraintdef()`를 비교하는 유일한
+수단입니다(§11 Slice 5B의 "하지 말 것").
 
 ```
 npm run test:unit
@@ -3351,6 +3447,7 @@ npm run check:doc-references
 npm run check:locale-translation
 npm run check:enum-constraints
 npm run check:data-domain-registry
+npm run db:compare-schema
 npm run security:regression
 npx playwright test tests/e2e/assistant-*.spec.ts
 npm run build
@@ -3359,8 +3456,9 @@ npm run build
 **실행하지 못한 검사는 통과로 보고하지 않습니다.**
 
 **[rev14] 아래는 gate가 아니라 production 대상 report이므로 위 목록에 넣지
-않습니다.** Slice 5 배포 뒤 사람이 read-only role로 실행하고, `0`을 확인한
-뒤에야 `VALIDATE CONSTRAINT` migration을 냅니다(§5.9.3f-5).
+않습니다.** **[rev15] Slice 5A 배포 뒤** 사람이 read-only role로 실행하고,
+`0`을 확인한 뒤에야 **Slice 5B**의 `VALIDATE CONSTRAINT` migration을
+작성·배포합니다(§5.9.3f-5의 2-e, §11).
 
 ```
 npm run report:assistant-knowledge-invariants
@@ -3495,7 +3593,8 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
 (§10.1.2). A1~A4는 **Slice 1**(정책 문서)을 막고, 그래서 그 뒤 전부가
 멈춥니다. **B1~B6도 Slice 1**(그 확정값을 문서에 기록하는 것이 Slice 1의
 산출물이므로 A1~A4와 같은 시점), A5는 **Slice 2**, A6는 **Slice 4**,
-**A7은 Slice 5**, C3는 **Slice 8(rollout)**을 각각 막습니다.
+**[rev15] A7은 Slice 5A**, C3는 **Slice 8(rollout)**을 각각 막습니다.
+**Slice 5B는 승인이 아니라 관측이 선행 조건**이므로 이 표에 없습니다(§11).
 
 | | 결정 | 이 보고서의 권고 |
 |---|---|---|
@@ -3507,7 +3606,7 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
 | **A6** *(rev2)* | instruction 안 URL의 처리 | **`PROFILE_INSTRUCTION_RULES`는 건드리지 않고 UX 고지 + `webSearch` 동시 활성화 시 추가 확인** |
 | **A7** *(rev11)* | 기존 knowledge 행의 `extractedBytes` 소급 처리 | **재처리하지 않고 `NULL`은 `extractedCharacters`로 대체, 새 파일부터 정확히 집계** |
 
-**[rev12] A7은 Slice 5 착수 전에** 정해져야 합니다 — `extractedBytes`
+**[rev15] A7은 Slice 5A 착수 전에** 정해져야 합니다 — `extractedBytes`
 migration과 `knowledgeUsage()` 변경이 그 slice의 산출물이고, 기존 행 방침이
 정해지지 않은 채 migration을 시작하면 **집계가 조용히 바뀌는 배포**가
 됩니다(§5.9.3f-5).
@@ -3520,14 +3619,14 @@ migration과 `knowledgeUsage()` 변경이 그 slice의 산출물이고, 기존 �
 Slice 5, rev6·rev7은 Slice 2라고 적었는데 둘 다 늦습니다 — **Slice 1의
 산출물이 그 확정값을 정책 문서에 기록하는 것**이므로, 승인되지 않은 수치는
 적을 것이 없습니다. Slice 2가 상수 module(`lib/assistantPackageLimits.ts`)로
-만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다.
+만들고, Slice 3의 parser가 쓰고, Slice 5A가 서버에서 다시 강제합니다.
 **따라서 B1~B6는 A1~A4와 같은 시점에 필요합니다.**
 기존 knowledge의 32MiB, import의 1GB/50,000/250MB를 "비슷하다"는 이유로
 패키지 한도로 재사용하지 않습니다 — 새 역할의 수치는 별도 정책 결정입니다.
 
 **§10.4의 C1~C3은 blocked on 상태로 남습니다.** C1(URL import)과 C2(Gem HTML)는
 MVP 범위 밖이라 아무것도 막지 않지만, **[rev4] C3(flag 배치)는 Slice 8의
-rollout을 막습니다** — Slice 1~7의 개발은 막지 않습니다.
+rollout을 막습니다** — Slice 1~7(5A·5B 포함)의 개발은 막지 않습니다.
 
 ---
 
