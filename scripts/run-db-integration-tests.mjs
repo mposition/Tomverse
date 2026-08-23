@@ -185,6 +185,9 @@ run(
     "tests/integration/email-webhook-suppression.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    // The snapshot purge: which rows lose their personalisation inputs, which
+    // keep them, and what survives either way.
+    "tests/integration/email-snapshot-retention.db.test.ts",
     // Which profile a queued message is composed against, which only a database
     // can answer: the row pins a policy version and activating a later one must
     // not change what an already-queued message says.

@@ -586,7 +586,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   (운영자 알림·테스트 메일 제외).
 - **파일**: `lib/billingEmails.ts:928,1010,1058`
 
-### EM-08 — 이메일 데이터가 무한 증가한다 (P1, Medium)
+### EM-08 — 이메일 데이터가 무한 증가한다 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[테스트]` `npm run report:unswept-tables` 실행 결과
   ```
@@ -2110,7 +2110,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §26
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
 - ~~EM-12 legal/transactional template 7개 언어~~ **완료 (2026-08-23)** — §27
-- EM-08 snapshot retention + 무한 증가 테이블 등록
+- ~~EM-08 snapshot retention + 무한 증가 테이블 등록~~ **완료 (2026-08-23)** — §29
 - ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §25
 - ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §28
 - ML-13 리포트에서 모델 소유자와 관측 경로 분리
@@ -2428,3 +2428,62 @@ apiModel 문자열**을 함께 남깁니다(`ZHIPU/GLM-5.3`은 Qwen이 실제로
 **날짜를 건너뛴 관측도 붙습니다.** 월요일에 만든 item이 목요일에 provider 하나를
 얻습니다. 병합은 멱등이라 같은 provider만 다시 보이는 scan은 행을 건드리지
 않습니다(DB test가 `updatedAt` 불변으로 고정).
+
+---
+
+## 29. EM-08 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailSnapshotRetentionCore.ts` | 분류별 보관 기간과 cutoff. 순수 |
+| `lib/emailSnapshotRetention.ts` | `purgeExpiredRenderSnapshots()` |
+| `lib/retentionPolicyCore.ts` | `emailDeliverySnapshots` 정책 (`clear`) |
+| `lib/maintenance.ts` | `email_render_snapshots` step |
+| `app/api/admin/retention/route.ts` | 관리자 화면의 계측 |
+| `scripts/report-unswept-tables-core.mjs` | 이메일 테이블 4개 등록 |
+| `tests/emailSnapshotRetention.test.mjs` | 7건 |
+| `tests/integration/email-snapshot-retention.db.test.ts` | 5건 |
+
+**AC 충족**: `report:unswept-tables`의 미결 목록에서 이메일 테이블이 사라졌습니다
+(6건 → 2건, 남은 둘은 `MessageArtifactCleanup`·`MessageAttachmentCleanup`으로
+이메일과 무관).
+
+**`delete`가 아니라 `clear`입니다.** 행은 남고 `renderDataSnapshot`만 비우며
+`snapshotPurgedAt`을 찍습니다. 발송 사실과 `renderedHash`가 남는 것이 §10.3
+규칙 4가 요구하는 것입니다 — 삭제 요청은 snapshot을 지우되 통지했다는 증명은
+남깁니다. 재현 가능 창에서 검증 전용 창으로 옮기는 것이지 기록을 없애는 것이
+아닙니다.
+
+**분류가 기간을 정합니다.** transactional·service·marketing 90일, **legal 7년**
+(잠정, §21 Q6). legal이 긴 이유는 그 메일이 통지 그 자체이기 때문입니다 — 계정
+삭제 통지가 무엇을 말했는지 나중에 물을 수 있어야 합니다. DB test에서 같은 날짜의
+welcome과 deletion 두 건이 같은 sweep에서 갈라지는 것으로 고정했습니다.
+
+**모르는 분류는 가장 짧은 창을 받습니다.** 실수로 개인정보를 7년 들고 있는 쪽이
+더 나쁜 실패입니다. DB CHECK가 분류 집합을 닫고 있으므로 이것은 바닥이지
+실제 경로가 아닙니다.
+
+**나이는 발송 시각 기준, 없으면 생성 시각입니다.** 발송되지 않은 delivery도 같은
+개인정보를 들고 있고, 실패했다는 이유로 영원히 두는 것은 방향이 반대입니다.
+
+**등록한 4개 테이블**: `EmailTemplate`은 bounded(키가 코드에 있음),
+`EmailEvent`·`ConsentRecord`·`EmailPolicyVersion`은 retained입니다. 셋 다
+지우면 답할 수 없게 되는 질문이 있습니다 — 왜 이 메일이 발송됐는가, 무엇에
+동의했는가, 어떤 표시 규칙 아래 렌더됐는가.
+
+**범위 밖**: `EmailDelivery` 행 자체의 보관 기간(§13.2의 분류별 삭제)은 이
+항목이 아닙니다. snapshot을 비우는 것과 행을 지우는 것은 다른 결정이고,
+후자는 legal 7년 확정(Q6) 이후의 일입니다.
+
+**cutoff은 TypeScript가 계산하고 SQL에는 timestamp로 바인딩합니다.** 처음에는
+`make_interval(days => $1)`로 SQL 안에서 만들었고, 그 인자는 text로 바인딩됩니다.
+purge의 평범한 형태에서는 planner가 타입을 추론해 통과했지만, admin 조회의
+`CASE` 안에서는 추론할 근거가 없어
+`function make_interval(days => text) does not exist`로 던졌습니다. **증상은
+그 오류가 아니라 retention 화면 전체가 비는 것**이었습니다 — 한 Promise.all이
+전부 실패했기 때문입니다(admin E2E `admin-read-surfaces.spec.ts`가 잡았습니다).
+이제 sweep과 admin 조회가 `snapshotPurgeCutoffs()` 하나에서 같은 `Date`를 받아
+씁니다.
+
+**`Prisma.JsonNull`이 아니라 `Prisma.DbNull`입니다.** `renderDataSnapshot`은
+`Json?`이고, 비운 상태는 컬럼 NULL이지 JSON `null` 값이 아닙니다.

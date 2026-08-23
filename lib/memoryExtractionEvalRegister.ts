@@ -75,16 +75,29 @@ export type MemoryExtractionEvalEntry = {
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
         {
-            // §12.5 first eval target. Candidate only: no decision-grade eval
-            // has been run, and the eval budget line below is the human entry
-            // point — smoke mode only until it is filled and this entry is
-            // moved to approved through the §12.4 procedure.
+            // §12.5 first eval target. **Still a candidate.** The budget below
+            // is filled, which is what opens `--live`; it is not approval of
+            // the pair. That is the §12.4 procedure — decision-grade run,
+            // artifact preservation, blind review, independent re-run, §12.3
+            // judgement, approver signature, register merge, staging
+            // verification — and none of it has happened.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
             status: "candidate",
             owner: "@mposition",
             registeredAt: "2026-08-03",
-            evalBudget: null,
+            evalBudget: {
+                approvedBy: "@mposition",
+                // US$17.36 is the worst case for three runs: §12.4 asks for two
+                // and the third absorbs one failed run without a second
+                // approval. The worst case prices every call at the harness's
+                // 4,096-token output ceiling, so a run that behaves cannot
+                // approach this — the typical figure for two runs is US$3.09.
+                // Derivation and what it does not measure: issue #837.
+                maxUsd: 20,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-23",
+            },
             evaluation: null,
         },
         {
@@ -146,6 +159,34 @@ export function findEvalRegisterProblems(
         seen.add(label);
         if (!entry.owner || !entry.registeredAt) {
             problems.push(`${label}: owner and registeredAt are required`);
+        }
+        // A budget is checked wherever it appears, not only on approved
+        // entries. Filling it is what opens `--live` (§12.5), so a candidate
+        // carrying a half-filled one is the dangerous state: spending is
+        // unlocked and the record that says who authorised it is incomplete.
+        // A missing budget stays the ordinary waiting state.
+        if (entry.evalBudget) {
+            const { approvedBy, maxUsd, ticket, approvedAt } = entry.evalBudget;
+            for (const [field, value] of [
+                ["approvedBy", approvedBy],
+                ["ticket", ticket],
+                ["approvedAt", approvedAt],
+            ] as const) {
+                if (!value || String(value).trim() === "") {
+                    problems.push(
+                        `${label}: eval budget has an empty ${field} ` +
+                            "(docs/policy/external-conversation-import-and-memory.md §12.5)"
+                    );
+                }
+            }
+            if (!Number.isFinite(maxUsd) || maxUsd <= 0) {
+                // The harness reads this as the spend ceiling. Zero would stop
+                // every live run at the first case, and a negative number is a
+                // ceiling nobody chose.
+                problems.push(
+                    `${label}: eval budget maxUsd must be a positive number (got ${maxUsd})`
+                );
+            }
         }
         if (entry.status !== "approved") continue;
 
