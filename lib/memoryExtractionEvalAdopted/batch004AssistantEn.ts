@@ -1,22 +1,29 @@
 /**
- * Batch 004 — `assistant_only:en` first batch. **Candidate pool, not dataset.**
+ * Batch 004 — `assistant_only:en`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-004-assistant-only-en.md`:
+ * all 25 cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's full review for critical negatives,
+ * draft disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled. There is no unreviewed remainder in a category ②③④
+ * batch — the 20%-then-adopt path belongs to category ① alone.
  *
- * Category ② (docs/ops/memory-extraction-eval-dataset.md §4.2): empty `expected`, and any bulk-safe adoption from
- * one of these is a docs/policy/external-conversation-import-and-memory.md §12.3 critical failure. Each case contains a
- * sentence that reads like a durable user fact and is not one.
+ * Category ② (docs/ops/memory-extraction-eval-dataset.md §4.2): every case has an empty `expected`, and any bulk-safe
+ * adoption from one of them is a docs/policy/external-conversation-import-and-memory.md §12.3 critical failure. Each contains a
+ * sentence that reads exactly like a durable user fact and is not one.
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.3 reviews this category in full rather than by sample.
+ * Written independently of batch 003 rather than translated. A translated arm
+ * measures the same twenty-five situations twice and reports it as two arms
+ * of coverage, and the English-specific shapes — dictation artefacts, quoted
+ * email threads, screenplay format — do not appear in a Korean original.
  *
- * The English arm is written independently rather than translated from batch
- * 003. A translated arm measures the same twenty-five situations twice and
- * reports it as two hundred cases of coverage; the failure modes English
- * text actually presents — dictation artefacts, quoted email threads,
- * screenplay format — do not appear in a Korean original.
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
  *
- * Names, places and numbers are invented.
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
