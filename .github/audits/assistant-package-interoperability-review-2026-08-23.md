@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **16** | **2026-08-23** | **리뷰 15회차 반영.** Slice 8의 선행 조건과 의존성 그래프에 **5B를 연결**해 survey 전 rollout 경로를 막음(§11), 64c~64f를 **임시 migration 디렉터리 기반의 지속 가능한 테스트**로 바꾸고 "파일 부재"를 영구 테스트가 아니라 **5A 배포 체크리스트 증거**로 옮김(§12). 고친 문단은 **[rev16]** |
 | **15** | **2026-08-23** | **리뷰 14회차 반영.** `VALIDATE CONSTRAINT`를 **별도 배포 경계(Slice 5B)로 분리** — `db:migrate`가 pending migration을 연속 적용하므로 함께 제출하면 survey 없이 즉시 validate되고 기존 음수 행이 있으면 배포가 실패합니다(§5.9.3f-5, §11). survey를 `.github/RELEASE_CHECKLIST.md`의 post-deploy 항목으로 두고, 검증 64c·64d를 **단계형 migration 테스트**로 고정. 고친 문단은 **[rev15]** |
 | **14** | **2026-08-23** | **리뷰 13회차 반영.** 두 CHECK의 **제약 이름을 계약으로 고정**하고 저장소의 `_check` 접미사 관례에 맞춤(§5.9.3f-5), `NOT VALID` 검증을 위한 **`report:assistant-knowledge-invariants`를 Slice 5 산출물로 추가**(§5.9.3f-5, §11, §12). 고친 문단은 **[rev14]** |
 | **13** | **2026-08-23** | **리뷰 12회차 반영.** §14.4 요약의 승인 항목 수와 차단 지점에 **A7 반영**, `extractedBytes`의 **export 포함·CHECK 검증 항목 추가**(64·64a·64b). 고친 문단은 **[rev13]** |
@@ -3093,7 +3094,7 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | Slice 5A | **[rev15] A7** |
 | Slice 5B | 승인 아님 — **5A 배포 후 survey 0건**(§11) |
 | Slice 6~7 | 없음 |
-| Slice 8 (rollout) | **C3** |
+| Slice 8 (rollout) | **C3** + **[rev16] Slice 5B 배포 완료**(승인이 아니라 배포 상태, §11) |
 
 **[rev12]** A5·A6·A7·C3는 Slice 1과 **병렬로** 결정할 수 있습니다. **B1~B6는
 Slice 1 자체를 막으므로 A1~A4와 같은 시점**입니다.
@@ -3239,6 +3240,7 @@ pending migration을 전부 연속 적용하므로, 두 파일이 함께 tree에
 | **산출물** | `ALTER TABLE "AssistantKnowledgeFile" VALIDATE CONSTRAINT "AssistantKnowledgeFile_extractedCharacters_non_negative_check";` 하나만 담은 migration. 주석에 **survey를 실행한 날짜·SHA·출력**을 적습니다 — [저장소] `20260815012000_validate_credit_lot_non_negative`가 그렇게 합니다 |
 | **선행 조건** | Slice 5A **배포 완료** + survey 0건. **코드 승인이 아니라 관측 결과가 선행 조건인 유일한 slice**입니다 |
 | **독립 rollback** | 사실상 해당 없음 — validate는 제약의 상태만 바꾸고 데이터를 건드리지 않습니다. 되돌리는 것은 drop 후 재추가이며, 그럴 이유가 생기는 경우는 survey가 틀렸을 때뿐입니다 |
+| **[rev16] 5A 제출 시 확인** | **`VALIDATE CONSTRAINT` migration 파일이 제출에 없을 것.** 이것은 **영구 테스트가 아니라 5A 배포 체크리스트의 증거 항목**입니다 — 5B가 완료된 뒤에는 그 파일이 있는 것이 정상이므로, 영구 검사로 두면 반드시 실패합니다(§12의 64f) |
 | **하지 말 것** | production에서 **손으로 `VALIDATE`하지 않습니다.** `scripts/compare-schema-to-migrations.mjs`가 `pg_get_constraintdef()`를 비교하고 그 문자열에 `NOT VALID` 접미사가 실리므로, 손으로 validate한 production은 **이 파일이 생길 때까지 drift로 보고**됩니다 |
 
 ### Slice 6 — native export / re-import (규모 M)
@@ -3265,17 +3267,24 @@ pending migration을 전부 연속 적용하므로, 두 파일이 함께 tree에
 |---|---|
 | **입력** | 전부 |
 | **산출물** | `AppSetting` flag(기본 `false`, fail-closed), staging 검증 체크리스트, §10.1.1의 rollback 계약 문서화 |
-| **선행 조건** | Slice 7, **§10.4의 C3 해소** |
+| **선행 조건** | **[rev16] Slice 7 + Slice 5B 배포 완료**(따라서 production survey 0건도 이미 참), **§10.4의 C3 해소** |
+| **[rev16] 왜 5B가 선행인가** | rollout은 이 기능을 사람들 앞에 여는 행위입니다. 5B 이전에는 `extractedCharacters`의 기존 행이 아직 조사되지 않았고, 그 값이 A7의 권고 방침에서 **quota 판정에 쓰입니다**(§5.9.3f-5). 집계가 검증되지 않은 채 여는 것은 **사용자에게 잘못된 한도를 적용한 채 여는 것**입니다 |
 | **독립 rollback** | 이 slice 자체가 rollback 수단 |
 
 ### 의존성 그래프
 
 ```
 1 ──▶ 2 ──▶ 3 ──▶ 4 ──▶ 5A ──▶ 6
-                          └──▶ 7 ──▶ 8
-
-5A ──(배포)──▶ [production survey: 0건]──▶ 5B      별개 배포 경계
+                          └──▶ 7 ──┐
+                                    ├──▶ 8
+5A ──(배포)──▶ [survey: 0건]──▶ 5B ──┘
 ```
+
+**[rev16] `5B → 8`이 있어야 합니다.** rev15의 그래프는 `7 → 8`만 그렸고,
+그러면 survey도 validate도 끝나지 않은 상태에서 rollout할 수 있습니다.
+rollout은 이 기능을 사람들 앞에 여는 행위이므로, **quota 집계가 아직
+믿을 수 없는 상태**에서 열면 안 됩니다 — §5.9.3f-5가 고치려는 것이 바로 그
+집계입니다.
 
 2·3·6·7은 개별 rollback이 자명하고, 4는 flag로, 5A는 route flag로 되돌립니다.
 **[rev15] schema를 건드리는 것은 5A와 5B뿐이며, 둘 다 forward-only입니다.**
@@ -3404,10 +3413,10 @@ pending migration을 전부 연속 적용하므로, 두 파일이 함께 tree에
 | **64** *(rev13)* | **계정 export에 `extractedBytes` 포함** | 계정 데이터 export의 `assistant_knowledge_files[].extractedBytes`가 **DB 값과 정확히 일치**. `extractedCharacters`와 나란히 나오고, 둘 중 하나만 빠지지 않음 |
 | **64a** *(rev14)* | **음수 `extractedBytes` 거절** | `extractedBytes = -1` insert·update가 **`AssistantKnowledgeFile_extractedBytes_non_negative_check`로 거절**됨(이름까지 assert). `NULL`과 `0`은 허용 |
 | **64b** *(rev14)* | **`extractedCharacters`의 CHECK** | `AssistantKnowledgeFile_extractedCharacters_non_negative_check`가 **새 write의 음수를 거절**(이름까지 assert). `NOT VALID`이므로 기존 행은 검사되지 않음 |
-| **64c** *(rev15)* | **`report:assistant-knowledge-invariants` — 단계형 migration 테스트** | **격리된 DB**에서: ① `NOT VALID` migration **직전까지** 적용하고 음수 `extractedCharacters` 행 1건 생성 → ② 그 migration만 적용(기존 행을 검사하지 않으므로 성공) → ③ report가 **위반 1건 · `convalidated=false`**를 보고 → ④ 시료 행 삭제 → ⑤ report가 **0건**. **어떤 단계에서도 report가 행을 수정하지 않음**(읽기 전용) |
-| **64d** *(rev15)* | **validate migration** | 64c의 ⑤ 상태에서 `VALIDATE CONSTRAINT` migration을 적용 → `convalidated = true`. 그 뒤 음수 insert는 여전히 거절 |
-| **64e** *(rev15)* | **음수 시료는 제약 이후에 만들 수 없음** | ② 이후 음수 `extractedCharacters` insert·update 시도 → **거절**. 이것이 64c의 시료를 ① 단계에서 만들어야 하는 이유이며, 최신 migration이 전부 적용된 평범한 테스트 DB에서는 시료 자체가 만들어지지 않음 |
-| **64f** *(rev15)* | **두 migration이 한 배포에 들어가지 않음** | tree에 `VALIDATE CONSTRAINT` migration이 있는 상태로 `prisma migrate deploy`를 돌리면 survey 없이 validate가 실행됨을 확인하는 **회귀 방지 검사** — Slice 5A 제출에 그 파일이 없어야 함(§11) |
+| **64c** *(rev16)* | **`report:assistant-knowledge-invariants` — 임시 migration 디렉터리 기반 단계형 테스트** | rev15는 "5A까지 적용된 DB"를 전제했지만, **5B가 tree에 들어온 뒤에는 평범한 `prisma migrate deploy`가 둘 다 적용**하므로 그 중간 상태를 만들 수 없습니다. 그래서 테스트가 **이력을 스스로 자릅니다**: ① 임시 디렉터리에 `prisma/migrations`의 **5A까지만** 복사 → ② 격리된 DB에 그 이력을 적용하기 **직전**에 음수 `extractedCharacters` 행 1건을 심을 수 있도록, 5A 직전까지 적용 → ③ 음수 행 생성 → ④ 5A 적용(기존 행 미검사이므로 성공) → ⑤ report가 **위반 1건 · `convalidated=false`** 보고 → ⑥ 시료 삭제 → ⑦ report **0건**. **어느 단계에서도 report가 행을 수정하지 않음**(읽기 전용) |
+| **64d** *(rev16)* | **validate migration** | 64c의 ⑦ 상태에서 **같은 임시 디렉터리에 5B migration을 추가**하고 적용 → `convalidated = true`. 그 뒤 음수 insert는 여전히 거절. 임시 디렉터리를 쓰므로 **5B가 저장소에 있든 없든 같은 결과** |
+| **64e** *(rev15)* | **음수 시료는 제약 이후에 만들 수 없음** | 5A 적용 이후 음수 `extractedCharacters` insert·update 시도 → **거절**. 이것이 64c의 시료를 5A **이전**에 만들어야 하는 이유이며, 최신 migration이 전부 적용된 평범한 테스트 DB에서는 시료 자체가 만들어지지 않음 |
+| **64f** *(rev16)* | **survey 증거가 기록됐는가 — 영구 회귀 테스트** | rev15의 "tree에 5B 파일이 없어야 함"은 **5B가 완료되면 반드시 실패하는 검사**였으므로 폐기합니다. 대신 지속 가능한 계약을 검사합니다: **`VALIDATE CONSTRAINT`를 담은 모든 migration은 주석에 survey 증거를 담아야 한다** — 실행 날짜, 실행한 릴리스, report 출력 전문. [저장소] `20260815012000_validate_credit_lot_non_negative`가 이미 그 형태입니다(*"run against production from the deployed release SHA on 2026-08-15 and reported … 0"*). 증거 없는 validate migration은 **누가 언제 무엇을 보고 이것을 냈는지 말하지 못하는 파일**입니다 |
 | **63b** *(rev12)* | **기존 행(`extractedBytes = NULL`)의 합산** | **권고 방침(§10.1 A7) 기준의 고정 기대값**: `NULL` 행은 **정확히 그 행의 `extractedCharacters` 값**으로 집계되고, 값이 있는 행은 그 값으로 집계됨. 합계가 두 값의 단순 합과 일치. *A7이 재처리 배치로 승인되면 이 항목을 그 기대값으로 교체합니다* |
 | **61c** *(rev10)* | **state 결합 CHECK** | `state='pending'`인데 `claimToken`이 있는 행, `state='finalizing'`인데 `finalizingStartedAt`이 없는 행을 insert 시도 → **DB 거절** |
 | **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
