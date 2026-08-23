@@ -1141,3 +1141,93 @@ export const formatArtifactSize = (bytes: number): string => {
   const megabytes = kilobytes / 1024;
   return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`;
 };
+
+/* ------------------------------------------------------------------------ */
+/* Display                                                                    */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The identity two artifacts have to share before one can be called the
+ * other's replacement.
+ *
+ * Filename, format and the model that produced it -- and the model is the
+ * *effective* one, because an artifact is allowed to name none and then
+ * belongs to the panel it is rendered in (the same fallback the card uses for
+ * its attribution line). Ignoring the model would let one panel's failure be
+ * silenced by another panel's success.
+ *
+ * The name is folded to lower case: a model that retries after a failure
+ * writes the same name back, and a difference of case is the same logical file
+ * everywhere this product's files are opened. The format is not folded -- it
+ * is a table id and already lower case.
+ */
+const artifactIdentityKey = (
+  artifact: ChatStreamArtifact,
+  fallbackModelId: string | null
+): string => {
+  const modelId = artifact.modelId ?? fallbackModelId ?? "";
+  // A JSON tuple rather than a delimited string: a file name may contain any
+  // separator this could otherwise pick, and two different triples must never
+  // collapse onto one key.
+  return JSON.stringify([
+    artifact.format,
+    artifact.filename.trim().toLowerCase(),
+    modelId,
+  ]);
+};
+
+/**
+ * The artifacts a turn should actually show (policy section 9).
+ *
+ * One turn can produce a failure and then a success for the same file: the
+ * model calls the tool, the specification is rejected, the model reads the
+ * refusal, fixes the specification and calls again. Both rows are real and
+ * both are kept -- the failure is the audit record of what the model was told,
+ * and nothing here touches the database. What this does is stop the answer
+ * from showing a finished download beside a card saying the file could not be
+ * made, with a "create the file again" button offering to redo work that has
+ * already succeeded.
+ *
+ * The rule is deliberately narrow, and each clause earns its place:
+ *
+ *   * only a `failed` artifact is ever hidden -- `blocked` is a sign-in call
+ *     to action that a later success does not answer, and a `ready` artifact
+ *     is a file the user can have;
+ *   * only when a `ready` artifact shares its **identity** (see
+ *     `artifactIdentityKey`), so a different name, a different format or
+ *     another model's success never silences this failure;
+ *   * only when that success came **after** it, compared by `ordinal` rather
+ *     than by array position, so the outcome does not depend on the order a
+ *     transport happened to deliver in -- a streamed trailer and a reloaded
+ *     conversation show the same cards. A failure that follows a success is
+ *     the newest thing the turn knows about that file and stays on screen.
+ *
+ * Nothing is merged: two `ready` artifacts with one name are two versions
+ * (policy section 9, a later edit is a new version) and both keep their card.
+ */
+export const visibleGeneratedArtifacts = (
+  artifacts: readonly ChatStreamArtifact[],
+  options: { fallbackModelId?: string | null } = {}
+): ChatStreamArtifact[] => {
+  const fallbackModelId = options.fallbackModelId ?? null;
+
+  /** The highest ordinal a `ready` artifact reached, per identity. */
+  const resolvedAt = new Map<string, number>();
+  for (const artifact of artifacts) {
+    if (artifact.status !== "ready") continue;
+    const key = artifactIdentityKey(artifact, fallbackModelId);
+    const previous = resolvedAt.get(key);
+    if (previous === undefined || artifact.ordinal > previous) {
+      resolvedAt.set(key, artifact.ordinal);
+    }
+  }
+  if (resolvedAt.size === 0) return [...artifacts];
+
+  return artifacts.filter((artifact) => {
+    if (artifact.status !== "failed") return true;
+    const readyOrdinal = resolvedAt.get(
+      artifactIdentityKey(artifact, fallbackModelId)
+    );
+    return readyOrdinal === undefined || readyOrdinal <= artifact.ordinal;
+  });
+};

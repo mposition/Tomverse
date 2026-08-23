@@ -344,9 +344,33 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   덮어쓰지 않는다.
 - **멀티 모델 비교**: artifact는 `modelId`를 들고 있고 카드가 그 모델 이름을
   표시한다. 세 패널이 각자의 messageId에 각자의 파일을 붙인다.
-- 320px에서 파일명 행과 버튼 행은 서로 다른 full-width 행이다(`flex-col`이
-  기본, `sm:flex-row`가 확장). 텍스트 열은 `min-w-0`이라야 `truncate`가 동작
-  한다.
+- **같은 turn에서 자동 복구된 실패는 카드로 보여 주지 않는다.** 모델이 명세를
+  거절당하고 고쳐서 다시 호출해 성공하면, 완성된 다운로드 옆에 "만들지
+  못했습니다" 카드와 "파일 다시 만들기" CTA가 같이 서게 된다 — 이미 있는 파일을
+  다시 만들라는 제안이다. **DB 행은 지우지 않는다**(실패는 모델이 무엇을
+  들었는지에 대한 감사 기록이다). 판정은 표시 단계 한 곳
+  (`visibleGeneratedArtifacts()`, `lib/generatedArtifactCore.ts`)에서만 하고,
+  규칙은 좁게 고정한다.
+  - `failed`만 숨긴다. `blocked`는 나중 성공이 답하지 못하는 로그인 요구이고
+    `ready`는 사용자가 가질 수 있는 파일이다.
+  - 동일성은 **파일명 + 형식 + 실효 모델**이다. 실효 모델은
+    `artifact.modelId ?? 패널의 fallbackModelId`이며, 파일명은 trim 후
+    소문자로 맞춘다. 다른 이름·다른 형식·다른 모델의 성공은 이 실패를
+    지우지 못한다.
+  - 그 성공의 `ordinal`이 **더 클 때만** 숨긴다. 배열 순서가 아니라 `ordinal`로
+    비교하므로 streaming trailer와 대화 재조회가 같은 카드를 보여 준다.
+    `ready` 뒤에 온 `failed`는 그 파일에 대해 turn이 아는 가장 최신 사실이므로
+    남는다.
+  - `ready`끼리는 합치지 않는다. 같은 이름이라도 위의 "후속 수정은 새
+    버전이다"에 따라 각자 카드를 갖는다.
+- 파일명 행과 버튼 행은 **카드가 좁을 때** 서로 다른 full-width 행이다
+  (`flex-col`이 기본, `@md/artifacts:flex-row`가 확장). 판정 기준은 viewport가
+  아니라 **카드가 속한 목록의 너비**다 — 1440px 창 안의 모델 패널은 폭이 300px
+  남짓인데 `sm:`은 거기서도 걸려 실패 설명이 몇 글자 폭으로 눌렸다. query
+  container는 `GeneratedArtifactList`의 `<ul>`(`@container/artifacts`)이고,
+  container가 없으면 어떤 variant도 걸리지 않아 stacked layout으로 남는다.
+  텍스트 열은 `min-w-0`이라야 `truncate`가 동작하고, row layout에서는 최소
+  너비를 함께 갖는다.
 - 버튼은 최소 44px 터치 영역과 `focus-visible` 링을 갖는다.
 - 스크린 리더는 하나의 accessible name으로 형식·파일명·크기·상태를 받는다.
 - 시각 role은 `accent-generated-artifact-*`(emerald)뿐이다. AI Review의
