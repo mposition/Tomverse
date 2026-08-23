@@ -613,7 +613,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/retentionPolicyCore.ts:53-285`,
   `prisma/schema.prisma:3735-3737`
 
-### EM-09 — marketing bounce/complaint kill switch가 없다 (P1, Medium)
+### EM-09 — marketing bounce/complaint kill switch가 없다 (P1, Medium) — **해결 (2026-08-23)** — §34
 
 - **Evidence**: `[코드]` — `killSwitch`는 auto-router에만 존재
   (`lib/autoCohort.ts:114`). 이메일에는 없습니다.
@@ -2118,6 +2118,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - EM-06 campaign이 templateVersion pin
 - EM-11 standard drain job key + backlog incident
 - EM-10 조건부 readiness
+- ~~EM-09 marketing bounce/complaint kill switch~~ **완료 (2026-08-23)** — §34
 - EM-15 `userVisibleNote` 다국어
 
 ### P2
@@ -2593,3 +2594,58 @@ prefix는 **이름이 아무것도 말하지 않을 때만** 봅니다. 그리�
 **범위 밖**: `missing`·`lifecycleWarnings` 줄의 provider 라벨. 그 둘은 **우리
 registry에 있는 모델**에 대한 것이고 거기서 provider는 우리가 실제로 요청을 보내는
 경로이므로 의미가 맞습니다.
+
+---
+
+## 34. EM-09 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/marketingSendHealthCore.ts` | 임계·최소 사건 수·판정. 순수, 새 파일 |
+| `lib/marketingSendHealth.ts` | window 집계, sticky halt 기록, incident |
+| `lib/standardEmailLane.ts` | marketing 분기에서 halt 확인 → `marketing_halted` |
+| `lib/emailWebhookProcessing.ts` | marketing 이벤트마다 재평가 |
+| `prisma/migrations/20260823230000_email_marketing_halt_skip_reason` | skipReason 값 추가 |
+| `tests/marketingSendHealth.test.mjs` | 15건 |
+| `tests/integration/marketing-lane.db.test.ts` | 4건 추가 (총 13) |
+
+**감사의 권고는 "campaign wave 단위"였지만 campaign이 없습니다**(EM-01 미구현).
+그런데 §14.5의 표는 **wave가 아니라 stream 단위**입니다 — bounce > 5%,
+complaint > 0.3%면 "marketing 발송 자동 중단". 그래서 stream 층에 구현했습니다.
+campaign이 생기면 wave 단위가 그 위에 얹히고, 이것은 바닥으로 남습니다.
+
+**rate만으로는 멈출 수 없습니다.** 100건 중 complaint 1건은 1%로 임계의 세
+배지만, 버튼을 누른 사람 하나입니다. 작은 분모 위의 비율은 비율이 아닙니다.
+그래서 halt에는 비율 **그리고** 패턴이라 부를 만한 사건 수가 필요합니다 —
+complaint 3건, bounce 10건.
+
+**분모 하한은 의도적으로 없습니다.** 0.3%가 산술적으로 도달 가능하려면 약
+1,000명이 필요한데, 그것을 요구하면 **작은 campaign에서는 스위치가 영원히
+작동하지 않습니다** — 그리고 이 시스템이 처음 보낼 것이 전부 작은 campaign입니다.
+200건에 complaint 3건이면 이미 문제를 찾은 것입니다.
+
+**warning에는 최소 사건 수가 없습니다.** warning은 로그 한 줄이고, 피해보다
+먼저 도착하는 유일한 신호입니다. 그것을 막으면 조기 경보를 늦추는 것뿐입니다.
+
+**halt는 sticky이고 사람이 해제합니다.** window는 굴러갑니다. 나쁜 발송이
+window 밖으로 나가면서 halt가 저절로 풀린다면, **보호하려던 바로 그 평판으로
+재개**합니다. incident에 무엇을 지워야 하는지(`AppSetting["email.marketingHalt"]`)
+적어 두었습니다 — 사람의 결정이지만 방법을 모르게 두지는 않습니다.
+
+**읽을 수 없는 halt 값은 halt로 셉니다.** "중단됐는지 알 수 없다"의 대안은
+발송이고, 발송이 되돌릴 수 없는 쪽입니다.
+
+**transactional은 절대 건드리지 않습니다.** 이것이 가장 중요한 경계입니다 —
+provider suppression이 이미 계정 전체 범위이므로(§5.3.1), transactional을 멈출
+수 있는 kill switch는 **로그인 코드가 안 오는 상태로 가는 두 번째 경로**가 됩니다.
+DB test가 halt된 상태에서 welcome 메일이 정상 발송됨을 고정합니다.
+
+**분모에 bounce·complaint를 포함합니다.** bounce된 메시지도 발송된 것이고,
+분모에서 빼면 측정 대상 자체만큼 모든 비율이 부풀려집니다.
+
+**평가 지점은 둘입니다** — 발송 직전(모든 marketing 전송)과 marketing webhook
+이벤트(임계를 넘긴 그 사건에서 즉시 트립, 다음 drain을 기다리지 않음). 멱등이고
+어느 쪽도 halt를 해제하지 않습니다.
+
+**범위 밖**: campaign wave 단위 집계(EM-01 대기), 그리고 halt 해제 UI. 오늘은
+`AppSetting` 행 삭제이고, admin 화면은 campaign 화면과 함께 오는 것이 맞습니다.
