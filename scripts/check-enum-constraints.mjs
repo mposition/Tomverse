@@ -176,6 +176,11 @@ const REGISTRY = {
     reason:
       "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
   },
+  ModelMigrationRecord_field_check: {
+    owner: "database",
+    reason:
+      "user_settings_default_model, new_conversation_model_ids, conversation_selected_models, app_setting_guest_default. Written as literals by the approved retirement reconciliation, which is the only writer; the completion notice reads them back to say which setting moved, so a fifth value would be a change nobody is told about.",
+  },
   ModelLifecycleWorkItem_status_check: {
     owner: "list",
     module: "lib/modelLifecycleWorkItemCore.ts",

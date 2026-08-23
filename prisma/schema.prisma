@@ -105,6 +105,7 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+  modelMigrationRecords ModelMigrationRecord[]
 }
 
 model UserSettings {
@@ -1872,6 +1873,50 @@ model ModelLifecycleWorkItemEvent {
   evidence   Json?
 
   @@index([workItemId, occurredAt])
+}
+
+/// What an approved retirement reconciliation actually changed, per user and
+/// per field. Append-only.
+///
+/// Without this a completion notice has no audience. The script reported
+/// aggregate counts to stdout and nothing else, so "we changed your default
+/// model" could only be sent to everybody or to nobody -- and both are wrong in
+/// a way that cannot be taken back once the mail has gone.
+///
+/// It is also the only thing that can answer a support question afterwards:
+/// what did this account hold before, and when did we change it.
+model ModelMigrationRecord {
+  id     String @id @default(cuid())
+  userId String
+  /// Cascades: the record exists to address a notice to this person and to
+  /// answer what their setting held before. Both questions die with the
+  /// account, so keeping the row afterwards would be keeping a user id for no
+  /// purpose. The aggregate ("this retirement moved N accounts") belongs to the
+  /// campaign, not to a row per person.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the change was to one conversation rather than to the account.
+  conversationId String?
+
+  /// The lifecycle item this ran for, when there is one.
+  workItemId String?
+
+  /// user_settings_default_model | new_conversation_model_ids
+  ///   | conversation_selected_models | app_setting_guest_default
+  field String
+
+  fromModelId String
+  toModelId   String
+
+  /// The approval the run carried: the ticket and the person who ran it.
+  ticket     String
+  actorEmail String
+
+  changedAt DateTime @default(now())
+
+  @@index([userId, changedAt])
+  @@index([fromModelId, toModelId, changedAt])
+  @@index([workItemId])
 }
 
 model AdminNotificationLog {

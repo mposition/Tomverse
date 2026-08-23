@@ -314,7 +314,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   전까지 열려 있다.
 - **파일**: `lib/providerModelCatalogReconciliation.ts:88-100`
 
-### ML-09 — reconciliation이 `newConversationModelIds`를 옮기지 않는다 (P0, High)
+### ML-09 — reconciliation이 `newConversationModelIds`를 옮기지 않는다 (P0, High) — **해결 (2026-08-22)**
 
 - **Evidence**: `[코드]`
 - **현재 동작**: script는 `AppSetting["guestDefaultModelId"]`,
@@ -354,7 +354,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `scripts/run-default-model-reconciliation.mjs:51-86`,
   `lib/reconciliationApprovalCore.ts:23-80`
 
-### ML-11 — 무엇이 바뀌었는지 사용자 단위로 남지 않는다 (P0, High)
+### ML-11 — 무엇이 바뀌었는지 사용자 단위로 남지 않는다 (P0, High) — **해결 (2026-08-22)**
 
 - **Evidence**: `[코드]` `scripts/run-default-model-reconciliation.mjs:187-200`
 - **현재 동작**: 출력은 stdout의 집계 카운트뿐입니다
@@ -1468,6 +1468,40 @@ migration 시점의 대상이 같다고 가정하지 않습니다 — 그 사이
 `--approved-retirement`·ticket·actor·CI 거부 계약을 완화하거나 대신 승인하지
 않습니다.
 
+### 13.5 구현 기록 (2026-08-22 · P0-5 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/defaultModelReconciliationCore.ts` | `rewriteNewConversationModelIds()` · `leadOutOfSync()` |
+| `prisma/.../20260822160000_model_migration_record/` | `ModelMigrationRecord` + CHECK 4개 + User cascade |
+| `scripts/run-default-model-reconciliation.mjs` | 조합 처리 + 변경 기록을 같은 transaction에 |
+| `lib/modelRetirementAudienceCore.ts` | cohort 합집합 · 제외 우선순위 · 요약 |
+| 테스트 17건 | `newConversationModelsReconciliation` 9 + `modelRetirementAudienceCore` 8 |
+
+**세 가지 판단**
+
+1. **lead 불일치는 보고만 하고 고치지 않습니다.** 조합의 첫 모델이 무엇이냐는
+   사용자의 선택이고, `defaultModel`에 맞춰 재정렬하는 것은 그 선택을 대신
+   하는 일입니다 — 폐기 pass가 할 일의 반대입니다.
+2. **malformed는 안내는 받되 자동 전환을 약속받지 않습니다.** parser가 읽지
+   못한 값은 보존되므로, 그 계정에 "자동으로 바꿔 드립니다"는 참이 아닙니다.
+   `autoMigratable`이 `noticeAudience`보다 항상 작거나 같은 이유입니다.
+3. **`ModelMigrationRecord`는 계정과 함께 삭제됩니다.** 이 행의 두 목적 —
+   완료 안내의 수신자, "내 설정이 전에 뭐였나" — 이 모두 계정과 함께 사라지므로,
+   남겨 두면 목적 없는 user id를 보관하는 것이 됩니다. 폐기 후에 필요한 집계
+   ("N개 계정이 옮겨졌다")는 campaign의 것이지 사람마다의 행이 아닙니다.
+
+**§13.3 truthfulness contract 상태**: 12개 조건 중 코드로 강제할 수 있는 것이
+채워졌습니다. `newConversationModelIds`가 실제로 옮겨지고(조건 4의 전제),
+무엇이 바뀌었는지 사용자 단위로 남습니다(조건 12의 전제). 나머지는 사람이
+확인할 운영 조건입니다.
+
+**검증**: unit 4,193→4,210 · typecheck · eslint · enum gate(62) ·
+data domain registry · unswept tables.
+**실행하지 못한 것**: DB integration과 migration 적용.
+
+---
+
 ---
 
 ## 14. 전문 이메일 템플릿과 ko/en sample
@@ -2014,7 +2048,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | P0-2 | ~~`/admin/models?tab=discovery` + work-queue collector~~ **완료 (2026-08-22)** | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없었습니다 |
 | P0-3 | Daily email v2 (NEW/PENDING 분리 + standard lane) | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호입니다 |
 | P0-4 | ~~preference fail-closed + 전 계정 backfill~~ **완료 (2026-08-22)** | EM-02, EM-13 | marketing template이 생기는 순간 동의 없는 발송이 될 상태였습니다 |
-| P0-5 | audience 계산기 + `ModelMigrationRecord` + `newConversationModelIds` 동기화 | ML-09, ML-11 | 이 셋이 없으면 폐기 안내를 사실대로 쓸 수 없습니다 |
+| P0-5 | ~~audience 계산기 + `ModelMigrationRecord` + `newConversationModelIds` 동기화~~ **완료 (2026-08-22)** | ML-09, ML-11 | 이 셋이 없으면 폐기 안내를 사실대로 쓸 수 없었습니다 |
 
 ### P1
 
