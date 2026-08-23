@@ -23,8 +23,9 @@
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 import { BATCH_001_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch001DurableKo";
 import { BATCH_002_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch002DurableEn";
+import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch003AssistantKo";
 
-export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-3";
+export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-4";
 
 /**
  * Whether this dataset is frozen for a decision-grade run (§12.2).
@@ -537,4 +538,5 @@ export const MEMORY_EVAL_CASES: readonly MemoryEvalCase[] = [
     ...injectionDirectives,
     ...BATCH_001_DURABLE_KO,
     ...BATCH_002_DURABLE_EN,
+    ...BATCH_003_ASSISTANT_KO,
 ];
