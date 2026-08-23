@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   ADMIN_NETWORK_FAILURE_MESSAGE,
@@ -167,4 +168,40 @@ test("no refund outcome claims money moved unless Stripe says it did", () => {
       `${status} must not claim Stripe refunded anything`
     );
   }
+});
+
+/* ------------------------------------ naming the remedy is not offering it -- */
+
+/**
+ * A 428 tells the operator their own sign-in is too old. Classifying it was
+ * already done here; what was missing is anywhere to go.
+ *
+ * Observed on 2026-08-23 in the retention panel: the notice appeared, named
+ * the remedy, and then the toast disappeared with no way to reach a sign-in.
+ * `AdminUserSecurityControls` already had the affordance, so this is adoption
+ * rather than a second implementation.
+ */
+
+test("the retention panel offers the sign-in its 428 notice asks for", () => {
+    const panel = readFileSync("components/admin/AdminRetentionPanel.tsx", "utf8");
+    // Classified rather than relayed: the raw server sentence names the
+    // remedy without the shared copy's context, and carries no flag to act on.
+    assert.match(panel, /describeAdminApiFailure\(/);
+    assert.match(panel, /failure\?\.requiresReauthentication/);
+    // The step-up URL, the same helper the security controls use.
+    assert.match(panel, /adminRecentAuthenticationHref\(pathname\)/);
+    assert.match(panel, /data-testid="admin-retention-reauthenticate-link"/);
+    // Cleared on success, so it cannot outlive the attempt it explains.
+    assert.match(panel, /setFailure\(null\);/);
+});
+
+test("the settings write is audited under a name that covers what it writes", () => {
+    const route = readFileSync("app/api/admin/app-settings/route.ts", "utf8");
+    // One handler writes eight settings in one transaction. Naming the
+    // completion after one of them misled an auditor twice on 2026-08-23:
+    // past the feature-flag change they were looking for, and into reading a
+    // guest-default change that had not happened.
+    assert.match(route, /action: "app_settings\.update_started"/);
+    assert.match(route, /action: "app_settings\.update_completed"/);
+    assert.doesNotMatch(route, /action: "app_settings\.guest_default_model\.updated"/);
 });
