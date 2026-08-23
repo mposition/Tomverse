@@ -323,6 +323,75 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
   );
 
   test(
+    "the dialog underneath does not reclaim focus when its own frame lands late",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await mockAuthenticatedApi(page);
+      // The other half of the race above. The Tab trap is only as good as how
+      // long the focus it placed survives: the settings dialog schedules its
+      // own initial focus a frame after *it* opened, and if the nested dialog
+      // opens before that frame lands, the frame arrives to find the user
+      // somewhere else entirely and pulls them back into the dialog now
+      // underneath -- with no key press to explain it.
+      //
+      // This is what actually failed on main at 11b98c9 (shard 2,
+      // desktop-compact, three attempts). The Tab was trapped correctly and
+      // the late frame undid it before the assertion read `activeElement`. A
+      // long rAF delay makes the same ordering deterministic instead of
+      // load-dependent: 2.5s is far longer than the clicks below take, so the
+      // settings dialog's frame is guaranteed to still be pending when the
+      // nested dialog opens.
+      await page.addInitScript(() => {
+        const original = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = (callback: FrameRequestCallback) =>
+          original(() => {
+            setTimeout(() => callback(performance.now()), 2500);
+          });
+      });
+      await page.goto("/chat?lang=en");
+
+      const accountTrigger = page.getByTestId("account-menu-trigger");
+      if ((page.viewportSize()?.width ?? 0) < 768) {
+        await page.getByRole("button", { name: "Open chat menu" }).click();
+      }
+      await expect(accountTrigger).toBeVisible();
+      await accountTrigger.click();
+      await page
+        .getByTestId("account-menu")
+        .getByTestId("account-settings")
+        .click();
+      const settings = page.getByRole("dialog", { name: "User Settings" });
+      await expect(settings).toBeVisible();
+
+      const deleteTrigger = settings.getByRole("button", { name: "Delete Account" });
+      await deleteTrigger.scrollIntoViewIfNeeded();
+      await deleteTrigger.click();
+      const nested = page.getByTestId("delete-account-dialog");
+      await expect(nested).toBeVisible();
+      await page.keyboard.press("Tab");
+      expect(
+        await nested.evaluate((node) => node.contains(document.activeElement))
+      ).toBe(true);
+
+      // Sample past the settings dialog's pending frame rather than checking
+      // once: the steal is a single moment, and a single later reading can
+      // miss it because the nested dialog's own frame puts focus back.
+      const escaped = await page.evaluate(async () => {
+        const nestedDialog = document.querySelector('[data-testid="delete-account-dialog"]');
+        for (let sample = 0; sample < 20; sample += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          if (!nestedDialog?.contains(document.activeElement)) {
+            const active = document.activeElement as HTMLElement | null;
+            return active?.outerHTML.slice(0, 120) ?? "<none>";
+          }
+        }
+        return null;
+      });
+      expect(escaped, "focus was pulled out of the nested dialog").toBeNull();
+    }
+  );
+
+  test(
     "Escape inside a popover closes the popover, not the dialog around it",
     { tag: "@ui-risk" },
     async ({ page }) => {
