@@ -340,7 +340,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `scripts/run-default-model-reconciliation.mjs:26-33`,
   `lib/newConversationModels.ts:15-19`
 
-### ML-10 — reconciliation script는 범용 도구가 아니다 (P1, Medium)
+### ML-10 — reconciliation script는 범용 도구가 아니다 (P1, Medium) — **해결 (2026-08-23)** — §33
 
 - **Evidence**: `[코드]` `scripts/run-default-model-reconciliation.mjs:51-52`
 - **현재 동작**: `FROM_MODEL_ID`/`TO_MODEL_ID`가 파일 상수이고, `--from`/`--to`는
@@ -2114,7 +2114,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §25
 - ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §28
 - ~~ML-13 리포트에서 모델 소유자와 관측 경로 분리~~ **완료 (2026-08-23)** — §31
-- ML-10 reconciliation script 범용화 + precondition 검사
+- ~~ML-10 reconciliation script 범용화 + precondition 검사~~ **완료 (2026-08-23)** — §33
 - EM-06 campaign이 templateVersion pin
 - EM-11 standard drain job key + backlog incident
 - EM-10 조건부 readiness
@@ -2593,3 +2593,55 @@ prefix는 **이름이 아무것도 말하지 않을 때만** 봅니다. 그리�
 **범위 밖**: `missing`·`lifecycleWarnings` 줄의 provider 라벨. 그 둘은 **우리
 registry에 있는 모델**에 대한 것이고 거기서 provider는 우리가 실제로 요청을 보내는
 경로이므로 의미가 맞습니다.
+
+---
+
+## 33. ML-10 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/reconciliationApprovalCore.ts` | `target_mismatch` 제거, `same_target` 추가, `findReconciliationTargetProblems()` 신설 |
+| `scripts/run-default-model-reconciliation.mjs` | 파일 상수 제거, registry precondition |
+| `docs/policy/default-model-luna-migration.md` | §7 서술을 실제 동작에 맞춤 |
+| `tests/reconciliationApprovalCore.test.ts` | 11건 추가 (총 19) |
+| `tests/integration/default-model-reconciliation.db.test.ts` | 7건, 새 파일 |
+
+**상수 두 개를 지우는 것이 절반이고, 그것이 지키던 것을 대체하는 것이
+나머지입니다.** `FROM_MODEL_ID`/`TO_MODEL_ID`가 파일에 박혀 있었고
+`--from`/`--to`는 그것과 일치하는지만 검사했습니다. 그래서 다음 은퇴는
+**스크립트를 복사해 고치는 일**이 되고, 그 복사본이 승인 gate를 함께
+가져온다는 보장이 없습니다. 이제 두 값은 진짜 파라미터입니다.
+
+**그런데 그 상수가 우연히 지키던 것이 있었습니다** — "이 스크립트는 gpt-5-4-mini
+은퇴에만 쓴다". 그것을 지우면 타이밍 규칙(정책 §7 "은퇴 배포와 함께")을
+아무것도 강제하지 않게 됩니다. 그래서 **prose를 검사로 바꿨습니다**:
+`--apply`는 쓰기 전에 `ModelRegistryEntry`를 읽고 `--from`이 아직
+`enabled`이거나 `publiclyListed`이면 거부합니다. 이것이 AC이고, 상수보다
+**강한** 보장입니다 — 상수는 그 한 번의 migration에 대해서만 참이었습니다.
+
+**행이 없으면 거부합니다**(`from_unknown`). 없는 행은 은퇴의 증거가 아니고,
+이 검사의 존재 이유가 증명이므로 fail-closed입니다.
+
+**파라미터를 풀면 새 footgun이 생깁니다.** 상수가 막고 있던 것들이라 함께
+막았습니다 — `--to`가 비활성·삭제면 거부(옮겨진 계정이 답 못 받는 모델에
+착지), `--from === --to`면 거부(바뀌는 것 없이 행마다 migration record가 남아
+"옮겼다"고 말함). `--to`가 공개 목록에 없으면 **경고만** 합니다: 모델은
+동작하고 의도된 선택일 수 있으며, 잃는 것은 picker에서 찾는 능력입니다.
+
+**정확히 무엇이 참인지 메시지가 말합니다.** `enabled and publicly listed`처럼
+남은 조건을 나열하므로, 반쯤 은퇴시킨 상태에서 어느 쪽을 더 해야 하는지
+운영자가 압니다.
+
+**DB test는 규칙이 아니라 규칙에 도달하는지를 봅니다.** 순수 함수 test 19건이
+판정을 고정하고, 통합 test 7건은 **실제 명령을 실행해** `--apply`가 스캔 전에
+registry를 읽고 거부하며 **어떤 행도 건드리지 않는지** 확인합니다. 아무도 부르지
+않는 규칙은 성립하지 않는 규칙입니다.
+
+**dry run은 여전히 아무 승인도 필요 없습니다.** precondition도 dry run에는
+적용되지 않습니다 — 무엇이 바뀔지 보는 것은 안전한 절반이고, 살아 있는 모델에
+대해서도 범위를 볼 수 있어야 은퇴를 결정할 수 있습니다. 다만 `--from`/`--to`는
+dry run에도 필요합니다(없으면 보고할 대상이 없습니다).
+
+**범위 밖**: reconciliation을 자동으로 실행하는 것. CI·lifecycle 거부는 그대로이고,
+`tests/reconciliationApprovalCore.test.ts`가 저장소 안 어떤 경로도 이 명령을
+스스로 부르지 않는지 계속 확인합니다.
