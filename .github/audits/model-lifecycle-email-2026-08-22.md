@@ -659,7 +659,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/notificationDeliveryJob.ts:78-100`,
   `lib/scheduledJobsCore.ts:159-220`
 
-### EM-12 — legal/transactional template의 다국어 누락 (P1, Medium)
+### EM-12 — legal/transactional template의 다국어 누락 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `lib/accountEmails.ts:17-33`
 - **현재 동작**: `buildAccountDeletionScheduledEmail`(classification `legal`)과
@@ -2109,7 +2109,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §21
 - ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §23
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
-- EM-12 legal/transactional template 7개 언어
+- ~~EM-12 legal/transactional template 7개 언어~~ **완료 (2026-08-23)** — §24
 - EM-08 snapshot retention + 무한 증가 테이블 등록
 - ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §22
 - ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §25
@@ -2361,6 +2361,39 @@ routing 문구에 대해 하는 검사와 같은 방식입니다.
 enqueue하는 코드가 없으며, marketing은 production에서 비활성입니다. **template
 등록은 발송이 아닙니다.** EM-16(발송 계정·region 분리, 도메인, warm-up)은 그대로
 남아 있습니다.
+
+---
+
+## 24. EM-12 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/accountEmails.ts` | 두 통지의 7개 언어 `Record<EmailLanguage, Copy>` |
+| `lib/emailTemplateDefinitions.ts` | render에 language 전달 |
+| `lib/accountDeletion.ts` | 예약 결과가 계정의 language를 함께 반환 |
+| `app/api/user/account/route.ts` · `app/api/admin/users/[userId]/security/route.ts` | enqueue에 language 전달 |
+| `tests/accountLifecycleEmails.test.mjs` | 7건 |
+| `tests/integration/account-deletion.db.test.ts` | 2건 추가 |
+
+**절반만 고치면 죽은 코드가 됩니다.** template에 7개 언어를 넣어도 **호출자가
+language를 넘기지 않으면** lane이 `resolveLanguage(undefined)` → `"en"`으로
+떨어져 번역이 도달하지 못합니다. 그래서 두 호출 경로가 계정의
+`UserSettings.language`를 싣도록 함께 고쳤습니다.
+
+**`Record<EmailLanguage, Copy>`를 쓴 이유**는 언어를 추가할 때 모든 메시지를 쓰기
+전까지 컴파일이 실패하기 때문입니다. 번역 집합을 완전하게 유지한 유일한 기제가
+그것입니다.
+
+**계정 설정 행이 없으면 `null`을 반환합니다, `"en"`이 아니라.** language 부재의
+해석은 lane 한 곳이 하는 결정이고, 호출자마다 기본값을 정하면 그 결정이 흩어집니다.
+
+**test가 강제하는 것**: 7개 언어 전부 렌더되고 제목이 서로 다를 것(조용한
+fallback이면 집합이 무너짐), 날짜와 support 주소가 모든 언어에 남을 것(취소가
+self-service가 아니므로 이 둘이 유일한 행동 경로), 문단 4개가 전부 존재할 것,
+어느 언어도 사과하거나 재촉하지 않을 것(§14.3).
+
+**범위**: `auth_login_code`·`account_welcome`·`billing_welcome`은 이미 다국어
+이고, `ops_model_lifecycle_daily`는 운영자 메일이라 영어 하나가 의도된 상태입니다.
 
 ---
 

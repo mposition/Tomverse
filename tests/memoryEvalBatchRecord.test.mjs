@@ -41,7 +41,16 @@ const sheet = (body) => `# batch-999 — \`durable_facts:ko\` 검수 시트
 | batch 채택 여부 | ${body.decision} |
 | 다양성 판정 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.5) | ${body.diversity ?? ""} |
 | 검수 완료일 | ${body.reviewedOn ?? ""} |
+| 초안 구성이 직전 batch와 같은가 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.3) | ${body.draftSetup ?? "같음"} |
 `;
+
+/** The same sheet with no docs/ops/memory-extraction-eval-dataset.md §6.3 row at all -- the shape records predating the
+ * 2026-08-23 amendment have. */
+const sheetWithoutSetupRow = (body) =>
+    sheet(body)
+        .split("\n")
+        .filter((line) => !line.includes("초안 구성이 직전 batch와 같은가"))
+        .join("\n");
 
 test("an unreviewed sheet reports no verdicts, not the table headers", () => {
     // The header row is a table row by shape. Reading `| 판정 | 사유 |` as a
@@ -161,6 +170,99 @@ test("the committed batch records parse", () => {
         assert.ok(
             record.cases.length > 0,
             `${batch.id}: no verdict table was found in its record`
+        );
+    }
+});
+
+test("a sampled batch may not be promoted until the docs/ops/memory-extraction-eval-dataset.md §6.3 setup row is answered", () => {
+    // The amendment of 2026-08-23 let categories ②③④ be judged on 20% as well,
+    // and the thing holding that up is this row: the first batch drafted with
+    // a changed tool, model or version goes back to full review. A blank row
+    // is not a yes -- only the reviewer knows whether the setup moved.
+    const blank = parseBatchRecord(
+        sheet({
+            a: "채택",
+            b: "채택",
+            decision: "채택",
+            diversity: "충분",
+            reviewedOn: "2026-08-23",
+            draftSetup: "",
+        })
+    );
+    assert.equal(blank.draftSetupSameAsPrevious, "");
+    assert.ok(
+        promotionBlockers(blank, 10).some((line) =>
+            line.includes("drafting-setup row is blank")
+        )
+    );
+
+    const unchanged = parseBatchRecord(
+        sheet({
+            a: "채택",
+            b: "채택",
+            decision: "채택",
+            diversity: "충분",
+            reviewedOn: "2026-08-23",
+            draftSetup: "같음",
+        })
+    );
+    assert.deepEqual(promotionBlockers(unchanged, 10), []);
+});
+
+test("a changed drafting setup sends a sampled batch back to full review", () => {
+    const changed = parseBatchRecord(
+        sheet({
+            a: "채택",
+            b: "채택",
+            decision: "채택",
+            diversity: "충분",
+            reviewedOn: "2026-08-23",
+            draftSetup: "다름",
+        })
+    );
+    // Two verdicts against a ten-case batch is a sample, and docs/ops/memory-extraction-eval-dataset.md §6.3 does not let
+    // a sample stand once the setup it was gathered under has changed.
+    assert.ok(
+        promotionBlockers(changed, 10).some((line) =>
+            line.includes("reviewed in full")
+        )
+    );
+    // The same answer on a batch whose every case was judged is fine: there is
+    // no unreviewed remainder for the sample to stand in for.
+    assert.deepEqual(promotionBlockers(changed, 2), []);
+});
+
+test("a record written before the row existed is not retroactively blocked", () => {
+    // docs/ops/memory-extraction-eval-dataset.md §6.3's row arrived on 2026-08-23. Records adopted before it were
+    // reviewed under the rule that stood then, and reading their silence as a
+    // refusal would un-license a review a person actually finished. An absent
+    // row and a blank one are different facts.
+    const old = parseBatchRecord(
+        sheetWithoutSetupRow({
+            a: "채택",
+            b: "채택",
+            decision: "채택",
+            diversity: "충분",
+            reviewedOn: "2026-08-20",
+        })
+    );
+    assert.equal(old.draftSetupSameAsPrevious, null);
+    assert.deepEqual(promotionBlockers(old, 10), []);
+});
+
+test("every candidate record carries the docs/ops/memory-extraction-eval-dataset.md §6.3 row", () => {
+    // `null` means "this record predates the row", and that reading is only
+    // safe while no current record can lose it. Deleting the row by hand from
+    // a generated sheet would otherwise be a way to skip the safeguard.
+    for (const batch of CANDIDATE_BATCHES) {
+        const markdown = readFileSync(
+            fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
+            "utf8"
+        );
+        assert.notEqual(
+            parseBatchRecord(markdown).draftSetupSameAsPrevious,
+            null,
+            `${batch.record} has no docs/ops/memory-extraction-eval-dataset.md §6.3 drafting-setup row`
         );
     }
 });

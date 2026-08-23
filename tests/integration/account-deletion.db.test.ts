@@ -67,6 +67,35 @@ test("scheduling a deletion sets pending_deletion and cancel-at-period-end witho
   assert.equal(reloaded.aiUsageRestricted, true);
 });
 
+// The notice that goes with the scheduling above. It says an account and
+// everything in it will be destroyed on a date, and until EM-12 it said so in
+// English to every account, whichever language they had chosen. The scheduler
+// is what has to carry the language: the template gained seven, but a caller
+// that does not pass one leaves the lane defaulting to English and the
+// translations unreachable.
+test("scheduling returns the account's own language for the notice", async () => {
+  const user = await createUser({});
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "ko" },
+  });
+
+  const result = await scheduleTomverseAccountDeletion(user.id);
+
+  assert.equal(result.scheduled, true);
+  assert.equal(result.scheduled === true ? result.language : null, "ko");
+});
+
+test("an account with no settings row yields no language rather than throwing", async () => {
+  const user = await createUser({});
+
+  const result = await scheduleTomverseAccountDeletion(user.id);
+
+  assert.equal(result.scheduled, true);
+  // Null, not "en": the lane decides what an absent language means, and it is
+  // the one place that decision belongs.
+  assert.equal(result.scheduled === true ? result.language : "unset", null);
+});
+
 test("restoring a pending-deletion account reactivates it and clears the AI restriction", async () => {
   const user = await createUser({ accountStatus: "pending_deletion", plan: "Pro" });
   await prisma.user.update({
