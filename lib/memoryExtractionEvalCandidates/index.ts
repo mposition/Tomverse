@@ -22,6 +22,8 @@ import { BATCH_009_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch
 import { BATCH_010_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch010DurableEn";
 import { BATCH_011_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch011DurableKo";
 import { BATCH_012_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch012DurableEn";
+import { BATCH_013_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch013DurableKo";
+import { BATCH_014_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch014DurableEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -49,5 +51,17 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
         cell: "durable_facts:en",
         record: "docs/ops/memory-extraction-eval-batches/batch-012-durable-facts-en.md",
         cases: BATCH_012_DURABLE_EN,
+    },
+    {
+        id: "batch-013",
+        cell: "durable_facts:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-013-durable-facts-ko.md",
+        cases: BATCH_013_DURABLE_KO,
+    },
+    {
+        id: "batch-014",
+        cell: "durable_facts:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-014-durable-facts-en.md",
+        cases: BATCH_014_DURABLE_EN,
     },
 ];
