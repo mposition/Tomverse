@@ -2474,3 +2474,16 @@ welcome과 deletion 두 건이 같은 sweep에서 갈라지는 것으로 고정�
 **범위 밖**: `EmailDelivery` 행 자체의 보관 기간(§13.2의 분류별 삭제)은 이
 항목이 아닙니다. snapshot을 비우는 것과 행을 지우는 것은 다른 결정이고,
 후자는 legal 7년 확정(Q6) 이후의 일입니다.
+
+**cutoff은 TypeScript가 계산하고 SQL에는 timestamp로 바인딩합니다.** 처음에는
+`make_interval(days => $1)`로 SQL 안에서 만들었고, 그 인자는 text로 바인딩됩니다.
+purge의 평범한 형태에서는 planner가 타입을 추론해 통과했지만, admin 조회의
+`CASE` 안에서는 추론할 근거가 없어
+`function make_interval(days => text) does not exist`로 던졌습니다. **증상은
+그 오류가 아니라 retention 화면 전체가 비는 것**이었습니다 — 한 Promise.all이
+전부 실패했기 때문입니다(admin E2E `admin-read-surfaces.spec.ts`가 잡았습니다).
+이제 sweep과 admin 조회가 `snapshotPurgeCutoffs()` 하나에서 같은 `Date`를 받아
+씁니다.
+
+**`Prisma.JsonNull`이 아니라 `Prisma.DbNull`입니다.** `renderDataSnapshot`은
+`Json?`이고, 비운 상태는 컬럼 NULL이지 JSON `null` 값이 아닙니다.

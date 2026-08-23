@@ -23,7 +23,11 @@ import { snapshotPurgeCutoffs } from "@/lib/emailSnapshotRetentionCore";
  */
 export async function purgeExpiredRenderSnapshots(now: Date = new Date()) {
   let cleared = 0;
-  for (const { classification, days } of snapshotPurgeCutoffs(now)) {
+  for (const { classification, cutoff } of snapshotPurgeCutoffs(now)) {
+    // The cutoff is computed in TypeScript and bound as a timestamp rather
+    // than assembled in SQL. `make_interval(days => $1)` binds its argument as
+    // text and fails wherever the planner cannot infer otherwise, which is how
+    // the same expression worked here and threw in the admin count query.
     const affected = await prisma.$executeRaw`
       UPDATE "EmailDelivery" AS d
          SET "renderDataSnapshot" = NULL,
@@ -33,8 +37,7 @@ export async function purgeExpiredRenderSnapshots(now: Date = new Date()) {
        WHERE d."templateVersionId" = v."id"
          AND t."classification" = ${classification}
          AND d."renderDataSnapshot" IS NOT NULL
-         AND COALESCE(d."sentAt", d."createdAt")
-               < ${now}::timestamptz - make_interval(days => ${days})
+         AND COALESCE(d."sentAt", d."createdAt") < ${cutoff}
     `;
     cleared += Number(affected);
   }

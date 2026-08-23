@@ -10,10 +10,7 @@ import {
 } from "@/lib/apiSecurity";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import {
-  DEFAULT_SNAPSHOT_RETENTION_DAYS,
-  SNAPSHOT_RETENTION_DAYS,
-} from "@/lib/emailSnapshotRetentionCore";
+import { snapshotPurgeCutoffs } from "@/lib/emailSnapshotRetentionCore";
 import { retentionCutoff, retentionPolicy } from "@/lib/retentionPolicyCore";
 
 /**
@@ -273,22 +270,29 @@ export async function GET(req: Request) {
       // Per classification, because the window is per classification: counting
       // every snapshot older than 90 days would report legal notices as
       // overdue for six and a half years before the sweep would touch them.
-      prisma
-        .$queryRaw<Array<{ count: bigint }>>`
-          SELECT COUNT(*)::bigint AS count
-            FROM "EmailDelivery" AS d
-            JOIN "TemplateVersion" AS v ON v."id" = d."templateVersionId"
-            JOIN "EmailTemplate" AS t ON t."id" = v."templateId"
-           WHERE d."renderDataSnapshot" IS NOT NULL
-             AND COALESCE(d."sentAt", d."createdAt")
-                   < NOW() - make_interval(days => CASE t."classification"
-                       WHEN 'legal' THEN ${SNAPSHOT_RETENTION_DAYS.legal}
-                       ELSE ${DEFAULT_SNAPSHOT_RETENTION_DAYS} END)
-        `
-        .then((rows) => Number(rows[0]?.count ?? 0)),
+      //
+      // The same cutoffs the sweep uses, from the same function, bound as
+      // timestamps. Computing them in SQL instead is what broke this route:
+      // `make_interval(days => $1)` binds its argument as text and the planner
+      // has nothing to infer from inside a CASE, so the query threw and the
+      // whole retention screen rendered empty.
+      Promise.all(
+        snapshotPurgeCutoffs(now).map(({ classification, cutoff }) =>
+          prisma.emailDelivery.count({
+            where: {
+              renderDataSnapshot: { not: Prisma.DbNull },
+              templateVersion: { template: { classification } },
+              OR: [
+                { sentAt: { lt: cutoff } },
+                { sentAt: null, createdAt: { lt: cutoff } },
+              ],
+            },
+          })
+        )
+      ).then((counts) => counts.reduce((total, count) => total + count, 0)),
       prisma.emailDelivery
         .findFirst({
-          where: { renderDataSnapshot: { not: Prisma.JsonNull } },
+          where: { renderDataSnapshot: { not: Prisma.DbNull } },
           orderBy: { createdAt: "asc" },
           select: { createdAt: true },
         })
