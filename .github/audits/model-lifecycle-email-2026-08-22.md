@@ -97,7 +97,7 @@ account deletion route, user settings(welcome). `[코드]`
 
 | 이전 가정 | 현재 사실 |
 |---|---|
-| "이메일은 fire-and-forget이라 유실된다" | 위 4개 경로는 outbox를 거칩니다. 다만 **전부는 아닙니다** — EM-07 참조 |
+| "이메일은 fire-and-forget이라 유실된다" | 사용자 대상 발송은 전부 outbox를 거칩니다(EM-07, 2026-08-23). 남은 직접 발송은 credential lane·운영자 test 발송·notification 재시도 큐 자신뿐이고, `tests/billingLifecycleEmails.test.mjs`가 그 셋을 allowlist로 고정합니다 |
 | "marketing은 flag 하나로 켤 수 있다" | ADR §15.2가 이름 댄 `feature.emailMarketingEnabled` / `feature.emailCampaignsEnabled`는 **코드에 없습니다**. 실제 차단은 (a) marketing template 0개, (b) `MARKETING_EMAIL_FROM` 미설정이라는 구조적 차단입니다 `[코드]` |
 | "template registry가 사람 승인을 담는다" | content hash 기반 자동 publish이고 `publishedById`/`publishedByEmail`은 아무도 쓰지 않습니다 `[코드]` `lib/emailTemplateRegistry.ts:118-133` |
 | "jurisdiction footer/제목 접두어가 발송에 적용된다" | `renderJurisdictionFooter()`와 `subjectPrefix`는 **어느 발송 경로에서도 호출되지 않습니다**. 테스트와 seed만 참조합니다 `[코드]` |
@@ -567,7 +567,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 승인 후 template 카피를 바꾸면 그 campaign의 발송이 거부된다.
 - **파일**: `lib/emailTemplateRegistry.ts:118-133`, `prisma/schema.prisma:3465-3467`
 
-### EM-07 — M1 이전이 끝나지 않았다 (P1, Medium)
+### EM-07 — M1 이전이 끝나지 않았다 (P1, Medium) — **해결 (2026-08-23)** — §30
 
 - **Evidence**: `[코드]`
 - **현재 동작**: ADR §2.4가 나열한 직접 발송 경로 중 아직 남은 사용자 대상 발송:
@@ -810,7 +810,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 | 질문 | 판정 |
 |---|---|
 | 새 공통 이메일 시스템은 MVP로 Mature한가? | **아니오, 그러나 근접.** EM-02와 EM-04 두 건이 남아 있고 둘 다 회수 불가 등급 |
-| transactional 사용자 이메일에 production-ready한가? | **예.** 단 EM-07의 4개 경로가 아직 큐 밖이고 EM-12의 legal 다국어가 미완 |
+| transactional 사용자 이메일에 production-ready한가? | **예.** EM-07의 4개 경로와 EM-12의 legal 다국어는 2026-08-23에 해결 |
 | marketing 이메일에 production-ready한가? | **아니오.** EM-03/04/05/09/10/16 |
 | 대량 campaign에 production-ready한가? | **아니오.** 코드가 0줄입니다 |
 | 모델 lifecycle 관리자 workflow에 ready한가? | **아니오.** 탐지만 있습니다 |
@@ -2108,7 +2108,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 - ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §24
 - ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §26
-- EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
+- ~~EM-07 Founding Tester ×3 + admin plan-adjust를 큐로~~ **완료 (2026-08-23)** — §30
 - ~~EM-12 legal/transactional template 7개 언어~~ **완료 (2026-08-23)** — §27
 - ~~EM-08 snapshot retention + 무한 증가 테이블 등록~~ **완료 (2026-08-23)** — §29
 - ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §25
@@ -2487,6 +2487,64 @@ purge의 평범한 형태에서는 planner가 타입을 추론해 통과했지�
 
 **`Prisma.JsonNull`이 아니라 `Prisma.DbNull`입니다.** `renderDataSnapshot`은
 `Json?`이고, 비운 상태는 컬럼 NULL이지 JSON `null` 값이 아닙니다.
+
+---
+
+## 30. EM-07 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/billingEmails.ts` | `passEmail`·`sendAdminPlanChangedEmail`을 순수 builder로 |
+| `lib/emailTemplateDefinitions.ts` | template 4개 등록 (전부 `transactional`) |
+| `app/api/billing/checkout/route.ts` | pass 시작 안내 enqueue |
+| `lib/maintenance.ts` | reminder·ended 두 sweep을 **claim과 한 transaction**으로 |
+| `app/api/admin/users/[userId]/plan-adjust/route.ts` | 플랜 변경 안내 enqueue |
+| `tests/billingLifecycleEmails.test.mjs` | 8건 |
+| `tests/integration/founding-tester-pass-emails.db.test.ts` | 7건 |
+
+**AC를 상태가 아니라 검사로 만들었습니다.** "직접 발송 경로가 0이 된다"는 한 번
+관측하고 끝나면 다음 사람이 다시 늘립니다. `tests/billingLifecycleEmails.test.mjs`
+마지막 test가 `git ls-files`로 `sendTransactionalEmail` 호출자를 세고 allowlist
+3개와 대조합니다. **양방향입니다** — 새 직접 호출도 실패시키고, allowlist에
+있는데 더 이상 직접 호출하지 않는 항목도 실패시킵니다(지키는 것이 없는 예외가
+남지 않도록).
+
+**allowlist 3개는 ADR이 이름 댄 것입니다.** admin test-email(운영자 자기
+발송), `lib/emailLoginEmails.ts`(credential synchronous lane — 10분짜리 코드를
+15분 주기 큐에 넣지 않습니다, §9.4a), `lib/notificationDeliveries.ts`(그 자체가
+재시도 큐).
+
+**죽은 직접 발송 경로 3개를 지웠습니다.** `sendRefundRequestReceived/Approved/
+RejectedEmail`은 호출자가 없었고(환불 메일은 `buildRefundRequestEmail`을 통해
+notification 큐가 보냅니다), 남겨 두면 AC가 세는 대상이 다시 늘어납니다.
+
+**큐 전환이 maintenance 두 경로의 실제 결함을 고쳤습니다.** 전환 전 reminder는
+`reminderSentAt`을 먼저 찍고 보낸 뒤 실패하면 되돌렸고, ended는 보내고 나서
+찍었습니다. 앞쪽은 되돌리기 직전에 죽으면 **보내지 않은 안내를 보냈다고
+기록**하고, 뒤쪽은 찍기 직전에 죽으면 **다음 sweep이 다시 보냅니다**. 이제 claim과
+outbox 행이 한 transaction에서 commit됩니다 — 이것이 큐가 여기서 사는 이유이고,
+DB test가 그 쌍을 고정합니다(단일 process test로는 관측되지 않습니다).
+
+**transaction timeout을 넓혔습니다**(`maxWait: 5s`, `timeout: 15s`).
+`enqueueStandardEmail`은 template version과 관할권을 자기 connection에서 먼저
+해석하고, 새로 등록한 template의 첫 발송은 행을 insert합니다.
+
+**template 3개이지 phase field 하나가 아닙니다.** `TemplateVersion`은 한 메시지
+카피의 해시입니다. 셋을 phase 변수 뒤로 접으면 해시가 하나가 되고, 감사 재현이
+어느 안내였는지 말하지 못하게 됩니다.
+
+**`periodEnd`는 `Date`가 아니라 ISO 문자열입니다.** snapshot이 JSON이라 `Date`가
+왕복을 견디지 못하고, renderer 안의 시계 읽기는 재시도가 다른 바이트를 만들어
+멱등성 키를 깨뜨립니다(§9.3).
+
+**`admin_plan_changed`에는 language를 넘기지 않습니다.** 이 카피는 영어
+하나뿐이므로, 계정 language를 실으면 **렌더되지 않는 언어를 delivery 행에 찍고**
+그 거짓을 감사 기록에 남깁니다. 번역은 별개 결정이며 EM-07의 범위가 아닙니다 —
+남은 다국어 공백으로 여기 적어 둡니다.
+
+**범위 밖**: `lib/notificationDeliveries.ts`의 자체 재시도 큐를 standard lane으로
+합치는 것. 두 큐가 공존하는 것은 별개 결정이고 이 항목의 AC가 묻는 것이
+아닙니다.
 
 ---
 

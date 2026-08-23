@@ -32,7 +32,8 @@ import {
   promotionValidationError,
 } from "@/lib/billingPromotionCore";
 import { checkoutPlanEligibilityBlock } from "@/lib/checkoutPlanEligibilityCore";
-import { sendFoundingTesterPassStartedEmail } from "@/lib/billingEmails";
+import { FOUNDING_TESTER_PASS_STARTED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { getStripe } from "@/lib/stripe";
@@ -584,12 +585,22 @@ export async function POST(req: Request) {
         clientIpHash: promotionClientIpHash,
         riskFlags: promotionRiskFlags,
       });
-      await sendFoundingTesterPassStartedEmail({
-        to: user.email,
-        periodEnd,
+      // Queued rather than sent here: a pass that activated and a welcome that
+      // never arrived leaves somebody with sixty days of Pro and no idea why
+      // (docs/policy/email-notifications.md §2.4).
+      await enqueueStandardEmail({
+        templateKey: FOUNDING_TESTER_PASS_STARTED_TEMPLATE,
+        emailAddress: user.email,
+        userId: user.id,
         language: user.settings?.language,
+        payload: { periodEnd: periodEnd.toISOString() },
+        referenceType: "User",
+        referenceId: user.id,
       }).catch((emailError) => {
-        console.error("Founding Tester Pass welcome email failed:", emailError);
+        console.error(
+          "Founding Tester Pass welcome email enqueue failed:",
+          emailError
+        );
       });
       if (trustedAnalytics) {
         const activationId = `pass-${randomUUID()}`;

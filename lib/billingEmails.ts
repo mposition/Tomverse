@@ -1,6 +1,5 @@
 import "server-only";
 
-import { sendTransactionalEmail } from "@/lib/email";
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
@@ -755,12 +754,6 @@ export function buildBillingWelcomeEmail(input: {
 }
 
 
-type FoundingTesterPassEmailInput = {
-  to: string | null | undefined;
-  periodEnd: Date | string;
-  language?: string | null;
-};
-
 const foundingTesterPassCopy: Record<
   EmailLanguage,
   {
@@ -890,11 +883,22 @@ const foundingTesterPassCopy: Record<
   },
 };
 
-const passEmail = async (
-  input: FoundingTesterPassEmailInput,
-  phase: "started" | "reminder" | "ended"
-) => {
-  if (!input.to) return { sent: false, skipped: true } as const;
+export type FoundingTesterPassPhase = "started" | "reminder" | "ended";
+
+/**
+ * Renders one of the three Founding Tester Pass notices without sending it.
+ *
+ * Pure, and taking the period end as a string rather than a Date, because the
+ * standard lane re-renders from the stored snapshot on every attempt and the
+ * snapshot is JSON. A Date would not survive the round trip, and a clock read
+ * in here would make a retry produce different bytes -- which stops the
+ * provider's idempotency key from recognising the retry as the same message
+ * (docs/policy/email-notifications.md §9.3, §10.3).
+ */
+export function buildFoundingTesterPassEmail(
+  phase: FoundingTesterPassPhase,
+  input: { periodEnd: string | null; language?: string | null }
+) {
   const language = normalizeLanguage(input.language);
   const copy = foundingTesterPassCopy[language];
   const periodEnd = formatDate(input.periodEnd, language);
@@ -925,20 +929,8 @@ const passEmail = async (
      <p><a href="${pricingLink}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:800;border-radius:12px;padding:12px 18px;">${escapeHtml(copy.upgrade)}</a></p>`,
     language
   );
-  return sendTransactionalEmail({ to: input.to, subject, text, html });
-};
-
-export const sendFoundingTesterPassStartedEmail = (
-  input: FoundingTesterPassEmailInput
-) => passEmail(input, "started");
-
-export const sendFoundingTesterPassReminderEmail = (
-  input: FoundingTesterPassEmailInput
-) => passEmail(input, "reminder");
-
-export const sendFoundingTesterPassEndedEmail = (
-  input: FoundingTesterPassEmailInput
-) => passEmail(input, "ended");
+  return { subject, text, html };
+}
 
 export type RefundEmailStage = "received" | "approved" | "rejected";
 
@@ -1001,32 +993,21 @@ export function buildRefundRequestEmail(
   };
 }
 
-const sendRefundEmail = async (
-  stage: RefundEmailStage,
-  input: RefundEmailInput
-) => {
-  if (!input.to) return;
-  const message = buildRefundRequestEmail(stage, input);
-  await sendTransactionalEmail({ to: input.to, ...message });
-};
-
-export const sendRefundRequestReceivedEmail = (input: RefundEmailInput) =>
-  sendRefundEmail("received", input);
-
-export const sendRefundRequestApprovedEmail = (input: RefundEmailInput) =>
-  sendRefundEmail("approved", input);
-
-export const sendRefundRequestRejectedEmail = (input: RefundEmailInput) =>
-  sendRefundEmail("rejected", input);
-
-export async function sendAdminPlanChangedEmail(input: {
-  to: string | null | undefined;
+/**
+ * Renders the notice that an operator changed somebody's plan by hand.
+ *
+ * English only, and deliberately not taking the account's language: the copy
+ * has never been translated, so passing one would stamp a delivery row with a
+ * language it does not render in and put that untruth in the audit record.
+ * Translating it is its own decision, not part of moving the send onto the
+ * queue.
+ */
+export function buildAdminPlanChangedEmail(input: {
   plan: string | null | undefined;
-  periodEnd?: Date | string | null;
+  periodEnd?: string | null;
   billingInterval?: string | null;
   reason?: string | null;
 }) {
-  if (!input.to) return;
   const plan = escapeHtml(input.plan || "Free");
   const periodEnd = formatDate(input.periodEnd, "en");
   const billingInterval = escapeHtml(input.billingInterval || "manual update");
@@ -1055,5 +1036,5 @@ export async function sendAdminPlanChangedEmail(input: {
     `,
     "en"
   );
-  await sendTransactionalEmail({ to: input.to, subject, text, html });
+  return { subject, text, html };
 }
