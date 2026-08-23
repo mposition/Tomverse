@@ -35,6 +35,10 @@ const autoConversation = (overrides = {}) => ({
 const input = (overrides = {}) => ({
   requestedModelId: "gpt-5-6-luna",
   conversation: autoConversation(),
+  // A routed conversation is a Chat conversation by definition (decision
+  // record v1.2 §3: Auto is offered in one product). Stated rather than left
+  // undefined so a case that means to test another product has to say so.
+  productKey: "chat",
   subjectKey: "user_abc",
   isGuest: false,
   plan: "Pro",

@@ -5,7 +5,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "Terms and Conditions",
   description:
-    "Read the terms governing accounts, acceptable use, AI outputs, third-party providers, paid plans, and access to Tomverse Insight.",
+    "Read the terms governing accounts, acceptable use, AI outputs, third-party providers, paid plans, and access to Tomverse Review.",
   path: "/terms",
 });
 

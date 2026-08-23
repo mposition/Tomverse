@@ -261,8 +261,47 @@ export const workItemForObservation = (input: {
  * under any provider" -- cannot be applied in one place and forgotten in the
  * other.
  */
+export type ModelObservation = { provider: string; apiModel: string };
+
+/**
+ * Where a model was seen, kept beside the decision about it.
+ *
+ * One decision, several sightings: `glm-5.3` arrived three times over three
+ * days -- as `glm-5.3` from Zhipu, `ZHIPU/GLM-5.3` from Qwen and
+ * `perplexity/glm-5.3` from Perplexity -- and each report said "new" without
+ * saying it was the one from the day before. Collapsing them to one item is
+ * right; throwing away the two it collapsed is not, because which providers
+ * serve a model is exactly what somebody deciding whether to add it needs.
+ */
+export type ObservedVia = ModelObservation[];
+
+const sameObservation = (a: ModelObservation, b: ModelObservation) =>
+    a.provider === b.provider && a.apiModel === b.apiModel;
+
+/**
+ * Adds sightings an item has not recorded, and changes nothing else.
+ *
+ * Order is preserved and duplicates are dropped, so re-running a scan is a
+ * no-op and a genuinely new provider appends. The exact `apiModel` is kept
+ * rather than the normalised key: `ZHIPU/GLM-5.3` is what Qwen actually
+ * returned, and an operator checking the claim needs the string that was there.
+ */
+export const mergeObservedVia = (
+    existing: readonly ModelObservation[],
+    incoming: readonly ModelObservation[]
+): { merged: ObservedVia; added: number } => {
+    const merged = [...existing];
+    let added = 0;
+    for (const observation of incoming) {
+        if (merged.some((entry) => sameObservation(entry, observation))) continue;
+        merged.push(observation);
+        added += 1;
+    }
+    return { merged, added };
+};
+
 export const newCandidatesForQueue = (input: {
-    observed: readonly { provider: string; apiModel: string }[];
+    observed: readonly ModelObservation[];
     /** Every apiModel the catalogue serves, any provider. */
     catalogueApiModels: readonly string[];
     /** Every apiModel that already has a work item, any provider. */
@@ -271,16 +310,50 @@ export const newCandidatesForQueue = (input: {
     const known = new Set(
         [...input.catalogueApiModels, ...input.queuedApiModels].map(candidateIdentity)
     );
-    const fresh: { provider: string; apiModel: string }[] = [];
+    const fresh: Array<ModelObservation & { observedVia: ObservedVia }> = [];
+    const byIdentity = new Map<string, (typeof fresh)[number]>();
     for (const observation of input.observed) {
         const identity = candidateIdentity(observation.apiModel);
+        const already = byIdentity.get(identity);
+        if (already) {
+            // Two providers listing the same new model on the same day is one
+            // candidate. It is also two facts, and both are kept.
+            already.observedVia = mergeObservedVia(already.observedVia, [observation]).merged;
+            continue;
+        }
         if (known.has(identity)) continue;
-        // Added as we go: two providers listing the same new model on the same
-        // day is one candidate, not two.
         known.add(identity);
-        fresh.push(observation);
+        const entry = { ...observation, observedVia: [observation] };
+        byIdentity.set(identity, entry);
+        fresh.push(entry);
     }
     return fresh;
+};
+
+/**
+ * Sightings of models the queue already holds, grouped by the item they belong
+ * to.
+ *
+ * The counterpart of the collapse above, across days rather than within one
+ * scan: a model somebody is already deciding about, appearing through a
+ * provider that had not served it before, is new information about that
+ * decision and belongs on that row.
+ */
+export const observationsForExistingItems = (input: {
+    observed: readonly ModelObservation[];
+    /** The identities the queue holds, from `candidateIdentity`. */
+    queuedIdentities: readonly string[];
+}) => {
+    const queued = new Set(input.queuedIdentities);
+    const byIdentity = new Map<string, ObservedVia>();
+    for (const observation of input.observed) {
+        const identity = candidateIdentity(observation.apiModel);
+        if (!queued.has(identity)) continue;
+        const existing = byIdentity.get(identity);
+        if (existing) byIdentity.set(identity, mergeObservedVia(existing, [observation]).merged);
+        else byIdentity.set(identity, [observation]);
+    }
+    return byIdentity;
 };
 
 /** How long an item has been waiting, in whole days. */

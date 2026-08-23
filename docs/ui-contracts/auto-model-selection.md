@@ -1,8 +1,13 @@
 # Auto model selection — UI contract
 
-- Status: **built, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off, and
-  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, so no
-  account is offered Auto today.
+- Status: **wired, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off,
+  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, and Auto
+  is offered in one product that no conversation belongs to yet — so no account
+  is offered Auto today. The controls are now mounted
+  (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
+  something executes rather than a claim about components nothing rendered.
+  Coverage: `tests/client/autoRoutingRender.test.tsx` and
+  `tests/e2e/auto-routing-toggle.spec.ts`.
 - Owner: Product, with Backend/AI as rollout owner
 - Server side: `docs/ops/tomverse-chat-auto-router-rollout.md`
 - Policy: `docs/policy/tomverse-chat-routing.md` §5
@@ -15,9 +20,39 @@ contract, not a styling decision.
 ## 1. Offered means it would actually route
 
 `autoSelection.offered` in the conversation response is one boolean, and it is
-already the conjunction of the feature flag and cohort eligibility
-(`lib/autoRoutingUi.ts`). The control renders when it is true and does not
-exist when it is false.
+the conjunction of the feature flag, **the conversation's product**, and
+cohort eligibility (`lib/autoRoutingUi.ts`). The control renders when it is
+true and does not exist when it is false.
+
+```
+offered =
+    uiFlagEnabled &&
+    product === "chat" &&   // written in the order it is decided
+    cohortEligible;         // readiness, kill switch, plan and bucket
+```
+
+The product condition is not a third clause bolted on — **it is answered
+before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one
+place that answers it. Three surfaces ask the question (surface entry,
+`offered`, and turn routing), and if each decided separately the screen and
+the execution would be free to disagree, which is exactly the control this
+section forbids.
+
+The order matters for the numbers as well as for correctness. A Review
+conversation is not *outside* the cohort; it was never a subject of the cohort
+question. Evaluating it anyway dilutes the rollout percentage with Review
+traffic until "what share of Chat users are being routed" stops being
+readable — the same argument `lib/autoCohort.ts` already makes about its own
+refusal order. So `product_not_chat` is an `AutoSelectionRefusal` and an
+`AutoUiRefusal`, never an `AutoCohortRefusal`, and the refusal carries no
+cohort at all.
+
+The product is the one stored on the row, read under an ownership check. Never
+a request body, a `Referer`, or the surface the client was on. A row whose
+`productKey` is still NULL resolves through `PRODUCT_KEY_READ_MODE` — Review
+during the transition, a reported defect under `strict` — and Auto refuses it
+either way. A turn with *no conversation at all* is a different thing:
+`no_conversation`, not a product refusal.
 
 There is no disabled state, no "coming soon", no greyed row. A control that
 flips, saves and changes nothing is worse than an absent one: the user cannot
@@ -28,8 +63,8 @@ reason, and the server refuses to store `auto` on the same condition.
 ## 2. The client is never told why not
 
 `offered: false` crosses the wire alone. Which bucket the account landed in,
-what share is enabled, which readiness gate is outstanding — none of it is
-disclosed, because a client that could read its own bucket could work out the
+what share is enabled, which readiness gate is outstanding, **and whether the
+refusal was the product at all** — none of it is disclosed, because a client that could read its own bucket could work out the
 rollout percentage, and one that knew the salt could work out anyone's. The
 operator-facing reason is logged server-side by `describeAutoCohortRefusal`.
 

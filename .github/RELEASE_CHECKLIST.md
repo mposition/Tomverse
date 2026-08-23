@@ -51,6 +51,16 @@ Date / timezone:    ____________________
       (`unapproved_push_infrastructure_components_in_v1`). The gate is met by an
       absence, so this is the artefact that states it; approving a use case is
       still a decision recorded on the gate itself
+- [ ] `npm run check:retired-product-name` — the Insight -> Review rename is
+      held by an absence, so this is the artefact that states it. Audit,
+      evidence and staging-verification paths keep the old name on purpose and
+      are allowlisted with a reason each; the bare word "Insight" is never a
+      signal (product boundary decision record v1.2, decision 1)
+- [ ] `npm run check:conversation-writers` — every production Conversation
+      write goes through `lib/conversationCreation.ts`, which takes productKey
+      as a required argument. The three NOT VALID CHECKs all pass
+      `productKey IS NULL`, so they stop wrong combinations and not omissions;
+      this is what stops omissions (decision record v1.2 §6)
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an

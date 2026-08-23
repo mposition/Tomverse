@@ -5,7 +5,11 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
     OPEN_WORK_ITEM_STATUSES,
+    candidateIdentity,
+    mergeObservedVia,
     newCandidatesForQueue,
+    observationsForExistingItems,
+    type ModelObservation,
     workItemTimestampField,
     workItemTransitionRefusal,
     type WorkItemStatus,
@@ -46,7 +50,9 @@ export async function recordDiscoveredWorkItems(input: {
             where: { catalogDeleted: false },
             select: { apiModel: true },
         }),
-        prisma.modelLifecycleWorkItem.findMany({ select: { apiModel: true } }),
+        prisma.modelLifecycleWorkItem.findMany({
+            select: { id: true, apiModel: true, evidence: true },
+        }),
     ]);
 
     const fresh = newCandidatesForQueue({
@@ -54,6 +60,12 @@ export async function recordDiscoveredWorkItems(input: {
         catalogueApiModels: catalogue.map((row) => row.apiModel),
         queuedApiModels: queued.map((row) => row.apiModel),
     });
+
+    // A model already in the queue, seen through a provider that had not served
+    // it before, is new information about a decision somebody is already
+    // making. Recording it on that row is the difference between "three reports
+    // of the same model" and "one model, three providers" (ML-12).
+    await recordAdditionalSightings(input.observed, queued);
 
     let created = 0;
     for (const candidate of fresh) {
@@ -71,6 +83,10 @@ export async function recordDiscoveredWorkItems(input: {
                             discoveredBy: "provider_model_catalog_monitor",
                             observedProvider: candidate.provider,
                             observedApiModel: candidate.apiModel,
+                            // Every provider that served it, not only the first
+                            // one iterated. Which providers offer a model is
+                            // what somebody deciding whether to add it needs.
+                            observedVia: candidate.observedVia,
                         },
                     },
                     select: { id: true },
@@ -194,6 +210,57 @@ export async function recordAutoDisableWorkItem(input: {
 
     return { created: true };
 }
+
+const storedObservedVia = (evidence: Prisma.JsonValue | null): ModelObservation[] => {
+    if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return [];
+    const value = (evidence as Record<string, unknown>).observedVia;
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+        (entry): entry is ModelObservation =>
+            typeof entry === "object" &&
+            entry !== null &&
+            typeof (entry as ModelObservation).provider === "string" &&
+            typeof (entry as ModelObservation).apiModel === "string"
+    );
+};
+
+/**
+ * Appends today's sightings to the items that already exist for them.
+ *
+ * Only writes when something was actually added, so a scan that sees the same
+ * providers as yesterday touches nothing. Failures are swallowed per item: this
+ * is an annotation on a decision, and losing it is a smaller loss than losing
+ * the scan.
+ */
+const recordAdditionalSightings = async (
+    observed: readonly ModelObservation[],
+    queued: readonly { id: string; apiModel: string; evidence: Prisma.JsonValue | null }[]
+) => {
+    const grouped = observationsForExistingItems({
+        observed,
+        queuedIdentities: queued.map((row) => candidateIdentity(row.apiModel)),
+    });
+    if (grouped.size === 0) return;
+
+    for (const row of queued) {
+        const sightings = grouped.get(candidateIdentity(row.apiModel));
+        if (!sightings) continue;
+        const { merged, added } = mergeObservedVia(storedObservedVia(row.evidence), sightings);
+        if (added === 0) continue;
+        const evidence =
+            row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence)
+                ? { ...(row.evidence as Record<string, unknown>) }
+                : {};
+        await prisma.modelLifecycleWorkItem
+            .update({
+                where: { id: row.id },
+                data: { evidence: { ...evidence, observedVia: merged } as Prisma.InputJsonValue },
+            })
+            .catch((error) =>
+                console.error("Model lifecycle sighting update failed:", error)
+            );
+    }
+};
 
 export type WorkItemTransitionResult =
     | { ok: true; status: WorkItemStatus }

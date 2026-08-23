@@ -107,6 +107,25 @@ export const drainImageAssetCleanupQueue = async (
     },
   });
 
+  // Same shape and gate as `message_attachment_cleanup_swept`
+  // (lib/messageAttachmentStorage.ts). Until this line existed the count went
+  // into the cron response and `ScheduledJobRun.result` and was read by
+  // nothing, so a run that deleted two hundred objects and a run that deleted
+  // none looked identical from outside. Silent on a no-op run: a line every
+  // fifteen minutes saying nothing happened buries the line that matters.
+  if (pending.length > 0 || exhausted > 0) {
+    console.info(
+      JSON.stringify({
+        event: "image_asset_cleanup_swept",
+        examined: pending.length,
+        deleted,
+        failed,
+        exhausted,
+        timestamp: now.toISOString(),
+      })
+    );
+  }
+
   return { examined: pending.length, deleted, failed, exhausted };
 };
 

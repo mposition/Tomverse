@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
+import { landingChatSurfaceAvailable } from "@/lib/landingWorkspaceEntry";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
   SEO_LOCALES,
@@ -76,10 +77,14 @@ export default async function LocalizedLandingPage({ params }: LocalePageProps) 
     redirect(`/${normalizedLocale}`);
   }
 
+  // Per visitor, on the server: a CTA that sends everybody to /chat starts
+  // bouncing everybody outside the cohort the day /chat is bound to it.
+  const { chatSurfaceAvailable } = await landingChatSurfaceAvailable();
+
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <LandingPageContent />
+        <LandingPageContent chatSurfaceAvailable={chatSurfaceAvailable} />
       </LanguageProvider>
     </div>
   );

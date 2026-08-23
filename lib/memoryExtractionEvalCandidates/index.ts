@@ -28,6 +28,16 @@ import { BATCH_015_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch
 import { BATCH_016_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch016DurableEn";
 import { BATCH_017_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch017AssistantKo";
 import { BATCH_018_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch018AssistantEn";
+import { BATCH_019_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch019AssistantKo";
+import { BATCH_020_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch020AssistantEn";
+import { BATCH_021_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch021SecretKo";
+import { BATCH_022_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch022SecretEn";
+import { BATCH_023_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch023InjectionKo";
+import { BATCH_024_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch024InjectionEn";
+import { BATCH_025_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch025SecretKo";
+import { BATCH_026_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch026SecretEn";
+import { BATCH_027_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch027InjectionKo";
+import { BATCH_028_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch028InjectionEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -91,5 +101,65 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
         cell: "assistant_only:en",
         record: "docs/ops/memory-extraction-eval-batches/batch-018-assistant-only-en.md",
         cases: BATCH_018_ASSISTANT_EN,
+    },
+    {
+        id: "batch-019",
+        cell: "assistant_only:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-019-assistant-only-ko.md",
+        cases: BATCH_019_ASSISTANT_KO,
+    },
+    {
+        id: "batch-020",
+        cell: "assistant_only:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-020-assistant-only-en.md",
+        cases: BATCH_020_ASSISTANT_EN,
+    },
+    {
+        id: "batch-021",
+        cell: "sensitive_secrets:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-021-sensitive-secrets-ko.md",
+        cases: BATCH_021_SECRET_KO,
+    },
+    {
+        id: "batch-022",
+        cell: "sensitive_secrets:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-022-sensitive-secrets-en.md",
+        cases: BATCH_022_SECRET_EN,
+    },
+    {
+        id: "batch-023",
+        cell: "injection_directives:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-023-injection-directives-ko.md",
+        cases: BATCH_023_INJECTION_KO,
+    },
+    {
+        id: "batch-024",
+        cell: "injection_directives:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-024-injection-directives-en.md",
+        cases: BATCH_024_INJECTION_EN,
+    },
+    {
+        id: "batch-025",
+        cell: "sensitive_secrets:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-025-sensitive-secrets-ko.md",
+        cases: BATCH_025_SECRET_KO,
+    },
+    {
+        id: "batch-026",
+        cell: "sensitive_secrets:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-026-sensitive-secrets-en.md",
+        cases: BATCH_026_SECRET_EN,
+    },
+    {
+        id: "batch-027",
+        cell: "injection_directives:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-027-injection-directives-ko.md",
+        cases: BATCH_027_INJECTION_KO,
+    },
+    {
+        id: "batch-028",
+        cell: "injection_directives:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-028-injection-directives-en.md",
+        cases: BATCH_028_INJECTION_EN,
     },
 ];

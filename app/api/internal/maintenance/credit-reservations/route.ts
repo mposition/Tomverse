@@ -234,6 +234,12 @@ export async function POST(request: Request) {
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
+        // Stored in `ScheduledJobRun.result` above but left out of the body
+        // until now, which meant the caller could not see them at all: the
+        // cron logs the response, not the row. Two sweeps whose counts existed
+        // and had no reader anywhere.
+        memoryExpiry,
+        memorySourceLocks,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

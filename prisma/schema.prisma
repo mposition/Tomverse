@@ -238,6 +238,24 @@ model Conversation {
   // by lib/imageAssetLifecycle.ts). See docs/policy/image-generation.md.
   kind String @default("chat")
 
+  /// "chat" | "review" | "studio" -- which Tomverse product this conversation
+  /// belongs to (product boundary decision record v1.2, decision 2). Allowlist
+  /// and cross-constraints live in the migration; the application copy is
+  /// lib/conversationProduct.ts.
+  ///
+  /// Orthogonal to `kind`, and deliberately not derived from it: `kind` is the
+  /// execution and permission modality that lib/conversationKindGuard.ts
+  /// enforces, `productKey` is the product task the user is performing. The
+  /// delivery plan §5 forbids reusing one as the other.
+  ///
+  /// Nullable and **without a default** during the expand phase. A `review`
+  /// default would answer "unknown" with "Review" for every writer that
+  /// omitted the column, which is the substitution the nullability exists to
+  /// prevent (20260814170000_attempt_cost_accrual). NULL means "not decided
+  /// yet", and that is the backfill's work list. NOT NULL is a later,
+  /// separate migration with its own evidence.
+  productKey String?
+
   /// Per-conversation memory mode (import/memory policy §8.1 invariant 1):
   /// "inherit" | "on" | "off" — allowlist CHECK lives in the migration.
   /// Server-stored and server-decided; "inherit" resolves to the account
@@ -296,6 +314,7 @@ model Conversation {
   shareRevokedAt DateTime?
 
   messages              Message[]
+  routingRuns           RoutingRun[]
   messageArtifacts      MessageArtifact[]
   messageAttachments    MessageAttachment[]
   comparisonReviews     ComparisonReview[]
@@ -3280,6 +3299,37 @@ model RoutingRun {
   reservationId     String?
   settlementOutcome String?
 
+  /// --- product attribution (decision record v1.2 §5) ----------------------
+
+  /// Which product this run executed for, snapshotted at execution time.
+  ///
+  /// A snapshot rather than a join, because the join can be broken: a user
+  /// deleting one conversation would otherwise take that turn's product out of
+  /// the evaluation segment with it. ROUTE-01's sample and ROUTE-07's
+  /// denominator would then shrink with user behaviour rather than with
+  /// anything about routing.
+  ///
+  /// Nullable because rows written before this column existed genuinely had no
+  /// product recorded, and a guessed value would claim an attribution nobody
+  /// made. Runs after the cutover must carry one -- how that is enforced is
+  /// decided in docs/policy/adr/2026-08-22-routing-run-product-attribution.md.
+  productKey String?
+
+  /// Which conversation this run belongs to.
+  ///
+  /// `beginInstrumentedDispatch` already received this and dropped it, so a
+  /// failed run -- which never gets an `assistantMessageId` -- had no way at
+  /// all of naming its conversation, and operational lookup was traceId only.
+  ///
+  /// SetNull, not Cascade: today these rows survive a conversation deletion
+  /// because there is no FK at all, and adding a cascade would delete
+  /// evaluation data every time a user tidies up. The same pattern as
+  /// ChatCreditReservation.userId. Deleting the *account* still takes the runs
+  /// with it -- userId -> User stays Cascade, which the data-domain policy
+  /// decided and this does not change.
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
   routingAttempts RoutingAttempt[] @relation("RunAttempts")
   updatedAt       DateTime         @default(now()) @updatedAt
 
@@ -3287,6 +3337,11 @@ model RoutingRun {
   @@index([mode, createdAt])
   @@index([userId, createdAt])
   @@index([finalModelId, createdAt])
+  @@index([productKey, createdAt])
+  /// Not optional. PostgreSQL does not index a referencing column for you, and
+  /// ON DELETE SET NULL has to find the referencing rows -- without this,
+  /// deleting one conversation scans every RoutingRun.
+  @@index([conversationId])
 }
 
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in

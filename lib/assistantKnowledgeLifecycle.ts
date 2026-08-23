@@ -148,6 +148,30 @@ export const drainKnowledgeCleanupQueue = async (
         },
     });
 
+    // What this sweep deleted had no reader. The count reached the route's
+    // response body and `ScheduledJobRun.result`, and nothing queried either:
+    // the cron script logs only the credit-reservation object, and the admin
+    // panel renders `processedCount`, which is credit reservations alone. So a
+    // run that deleted two hundred files and a run that deleted none were the
+    // same line in the log.
+    //
+    // Same shape and same gate as `message_attachment_cleanup_swept` in
+    // `lib/messageAttachmentStorage.ts`, which is the one sweep here that was
+    // already legible. Silent on a no-op run on purpose: a line every fifteen
+    // minutes saying nothing happened is what buries the line that matters.
+    if (pending.length > 0 || exhausted > 0) {
+        console.info(
+            JSON.stringify({
+                event: "assistant_knowledge_cleanup_swept",
+                examined: pending.length,
+                deleted,
+                failed,
+                exhausted,
+                timestamp: now.toISOString(),
+            })
+        );
+    }
+
     return { examined: pending.length, deleted, failed, exhausted };
 };
 

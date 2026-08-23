@@ -105,12 +105,18 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-const seedOwner = async () => {
+/**
+ * A Chat conversation, because Auto is offered in one product (decision record
+ * v1.2 §3). `productKey` is stated rather than left NULL: a NULL row resolves
+ * to Review through PRODUCT_KEY_READ_MODE and is refused, which is its own
+ * test below.
+ */
+const seedOwner = async (productKey: string | null = "chat") => {
   const user = await prisma.user.create({
     data: { email: `auto-ui-${randomUUID()}@example.test`, plan: "Pro" },
   });
   const conversation = await prisma.conversation.create({
-    data: { userId: user.id, title: "auto selection fixture" },
+    data: { userId: user.id, title: "auto selection fixture", productKey },
   });
   return { user, conversation };
 };
@@ -299,4 +305,60 @@ test("someone else's conversation cannot have its mode changed", async () => {
     where: { id: conversation.id },
   });
   assert.equal(stored.selectionMode, "manual");
+});
+
+test("a Review conversation is not offered Auto, however open the rollout is", async () => {
+  // The product is settled before the cohort (decision record v1.2 §3). What
+  // reaches the client is still one boolean -- the reason stays on the server.
+  openTheRollout();
+  readinessAttested = true;
+  const { user, conversation } = await seedOwner("review");
+
+  const { body } = await read(user.id, conversation.id);
+  assert.equal(body.autoSelection.offered, false);
+  assert.equal(body.autoSelection.reason, undefined);
+  assert.equal(body.autoSelection.cohort, undefined);
+});
+
+test("a Review conversation cannot be switched to Auto", async () => {
+  // There is no PATCH that changes a conversation's product either: turning a
+  // Review conversation into a Chat one is a fork, not an update.
+  openTheRollout();
+  readinessAttested = true;
+  const { user, conversation } = await seedOwner("review");
+
+  const { response } = await patch(user.id, conversation.id, { selectionMode: "auto" });
+  assert.equal(response.status, 403);
+
+  const stored = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversation.id },
+  });
+  assert.equal(stored.selectionMode, "manual");
+  assert.equal(stored.productKey, "review");
+});
+
+test("a conversation whose product is still NULL is treated as Review", async () => {
+  // Every conversation in the database is in this state until the backfill
+  // runs. Reading NULL as "unknown, proceed" would route Review traffic.
+  openTheRollout();
+  readinessAttested = true;
+  const { user, conversation } = await seedOwner(null);
+
+  const { body } = await read(user.id, conversation.id);
+  assert.equal(body.autoSelection.offered, false);
+
+  const { response } = await patch(user.id, conversation.id, { selectionMode: "auto" });
+  assert.equal(response.status, 403);
+});
+
+test("manual is still accepted on a Review conversation", async () => {
+  // UI contract §5: returning to manual is unconditional. A conversation must
+  // be able to leave a mode the account can no longer act on, and refusing
+  // here would strand rows the sticky-state constraint expects nothing to hold.
+  openTheRollout();
+  readinessAttested = true;
+  const { user, conversation } = await seedOwner("review");
+
+  const { response } = await patch(user.id, conversation.id, { selectionMode: "manual" });
+  assert.equal(response.status, 200);
 });

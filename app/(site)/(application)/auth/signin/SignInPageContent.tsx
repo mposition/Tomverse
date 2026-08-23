@@ -518,7 +518,7 @@ export function SignInPageContent() {
                     </div>
                     <div className="mt-5 text-center">
                         <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                            Tomverse Insight
+                            Tomverse Review
                         </h1>
                         <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
                             {t("auth.description")}

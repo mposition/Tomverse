@@ -56,10 +56,9 @@ import {
     selectionModeTransition,
     storedSelectionMode,
 } from "@/lib/conversationSelectionMode";
+import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import {
     autoSelectionCapability,
-    autoUiAvailability,
-    isAutoRouterUiEnabled,
     mayStoreSelectionMode,
 } from "@/lib/autoRoutingUi";
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
@@ -118,31 +117,6 @@ const safeParse = (data: unknown, fallback: string[]) => {
   return Array.isArray(parsed)
     ? parsed.filter((value): value is string => typeof value === "string")
     : fallback;
-};
-
-/**
- * Whether this account would be offered Auto.
- *
- * The flag is checked before the plan is fetched, so a deployment with the
- * rollout off pays nothing for it -- no extra query on a route that loads on
- * every conversation open. That is the difference between a feature that is
- * disabled and one that is merely hidden.
- *
- * Signed-in only: this route requires a session, so `isGuest` is always false
- * here. Guests are excluded from the cohort anyway (their conversation-scoped
- * sticky state does not survive), and saying so in one place beats threading
- * a constant through.
- */
-const autoAvailabilityFor = async (userId: string) => {
-  if (!isAutoRouterUiEnabled()) {
-    return { offered: false, reason: "ui_flag_off" as const, cohort: null };
-  }
-  const billingPlan = await getUserBillingPlan(userId);
-  return autoUiAvailability({
-    subjectKey: userId,
-    isGuest: false,
-    plan: billingPlan.tier,
-  });
 };
 
 type Params = {
@@ -225,6 +199,7 @@ export async function GET(
         disabledPanels: true,
         webSearchMode: true,
         memoryMode: true,
+        productKey: true,
         selectionMode: true,
         projectId: true,
         shareEnabled: true,
@@ -421,7 +396,11 @@ export async function GET(
         // that could read its own bucket could work out the rollout
         // percentage. See lib/autoRoutingUi.ts.
         selectionMode: storedSelectionMode(conversation.selectionMode),
-        autoSelection: autoSelectionCapability(await autoAvailabilityFor(userId)),
+        // The product comes before the cohort (decision record v1.2 §3), and
+        // it is the row's own -- never the surface the client was on.
+        autoSelection: autoSelectionCapability(
+          await autoAvailabilityFor(userId, { productKey: conversation.productKey })
+        ),
         isLocked: !!conversation.password,
         shareEnabled:
           conversation.shareEnabled &&
@@ -487,6 +466,11 @@ export async function PATCH(
                 selectedModels: true,
                 password: true,
                 memoryMode: true,
+                // The stored product is the authority for a PATCH: the request
+                // body cannot carry one, and §3 does not offer a PATCH that
+                // changes it. Turning a Review conversation into a Chat one is
+                // a fork, not an update.
+                productKey: true,
                 selectionMode: true,
                 routerModelId: true,
                 routerChallengerTurns: true,
@@ -690,7 +674,7 @@ export async function PATCH(
       // choosing their model every time. `manual` is always allowed --
       // including for an account that has left the cohort, which must be able
       // to leave the mode it can no longer act on (lib/autoRoutingUi.ts).
-      const availability = await autoAvailabilityFor(userId);
+      const availability = await autoAvailabilityFor(userId, { productKey: existingConv.productKey });
       if (!mayStoreSelectionMode(body.selectionMode, availability)) {
         console.warn(JSON.stringify({
           event: "conversation_selection_mode_denied",

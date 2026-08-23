@@ -268,3 +268,39 @@ test("an attachment's archive summary never leaves the browser", () => {
   assert.equal("archive" in attachment, false);
   assert.equal(attachment.uploadId, "up_1");
 });
+
+/**
+ * The Auto routing badge's inputs are read from a response header on the turn
+ * that produced them. Persisting them would let a reload show a routing
+ * decision the current answer may not have been given -- and sending them back
+ * in a transcript would be the client telling the server what the server
+ * decided.
+ */
+const routedAnswer: Message = {
+  id: "m-3",
+  role: "assistant",
+  content: "라우팅된 답변입니다.",
+  status: "normal",
+  modelId: "deepseek-v4-flash",
+  createdAt: "2026-08-22T00:00:00.000Z",
+  routedModelId: "deepseek-v4-flash",
+  routedReason: "quality_band",
+};
+
+test("the /api/chat transcript never carries the routed model or reason", () => {
+  const serialized = toChatRequestMessage(routedAnswer);
+  assert.equal("routedModelId" in serialized, false);
+  assert.equal("routedReason" in serialized, false);
+  // The model that answered is still transported: that is `modelId`, which is
+  // a fact about the message, not a claim about who chose it.
+  assert.equal(serialized.modelId, "deepseek-v4-flash");
+});
+
+test("the guest snapshot never carries the routed model or reason", () => {
+  // A guest is outside the cohort and can never be routed, so a persisted
+  // routing decision could only ever be wrong -- but the allowlist is what
+  // makes that structural rather than a thing to remember.
+  const persisted = toGuestPersistableMessage(routedAnswer);
+  assert.equal("routedModelId" in persisted, false);
+  assert.equal("routedReason" in persisted, false);
+});
