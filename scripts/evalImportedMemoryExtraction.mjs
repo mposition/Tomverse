@@ -192,6 +192,17 @@ const smokeAdapter = (testCase) => async () => {
 };
 
 let accruedCostUsd = 0;
+/**
+ * Calls whose price could not be resolved.
+ *
+ * It matters because `accruedCostUsd` is what the spend ceiling reads. Every
+ * unpriced call makes that figure a lower bound, and a ceiling compared
+ * against a lower bound is a ceiling that binds late or not at all -- the one
+ * direction that costs money. So the number is carried into the summary and
+ * the artifact rather than swallowed: a run whose ceiling never had a real
+ * figure behind it must not be presented as one that did.
+ */
+let pricingFailures = 0;
 let costStopped = false;
 let consecutiveFailures = 0;
 let abortedOnFailures = false;
@@ -218,14 +229,24 @@ const liveAdapter = async ({ prompt }) => {
     });
     const usage = result.usage ?? {};
     try {
-        const pricing = resolveModelPricing(modelId, usage.inputTokens ?? 0);
+        // `resolveModelPricing` takes the model and an options object, not an
+        // id and a bare number. Called with `(modelId, tokens)` it threw on
+        // every single call -- `model.id` on a string is undefined -- and the
+        // catch below swallowed it, so `accruedCostUsd` stayed at zero for a
+        // whole live run and the §12.5 spend ceiling never bound. The budget
+        // *refusal* worked; the ceiling did not.
+        const pricing = resolveModelPricing(model, {
+            estimatedPromptTokens: usage.inputTokens ?? 0,
+        });
         accruedCostUsd +=
             ((usage.inputTokens ?? 0) * pricing.inputUsdPerMillionTokens +
                 (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens) /
             1_000_000;
     } catch {
-        // Pricing is for the spend ceiling only; a resolution failure must not
-        // abort a run that is otherwise fine.
+        // Pricing is for the spend ceiling only, so a resolution failure does
+        // not abort a run that is otherwise fine. It is counted, though: see
+        // `pricingFailures`. Silence here is what hid the bug above.
+        pricingFailures += 1;
     }
     return { text: result.text ?? "" };
 };
@@ -393,6 +414,15 @@ if (runMode.mode === "live") {
     if (registerEntry.evalBudget) {
         line("approved ceiling (USD)", registerEntry.evalBudget.maxUsd);
     }
+    if (pricingFailures > 0) {
+        line("calls whose price did not resolve", pricingFailures);
+        console.log(
+            `\nCEILING NOT RELIABLE — ${pricingFailures} of ${outcomes.length} calls could not be\n` +
+                "priced, so the accrued figure above is a lower bound and the ceiling was\n" +
+                "compared against it. Treat the spend as unbounded for this run and settle it\n" +
+                "from the provider's own invoice before quoting a cost anywhere."
+        );
+    }
 }
 
 const artifact = {
@@ -410,6 +440,12 @@ const artifact = {
         truncatedByCostCeiling: costStopped,
         maxCostUsd,
         accruedCostUsd: runMode.mode === "live" ? accruedCostUsd : 0,
+        // How many calls the accrued figure is missing. Zero means the ceiling
+        // had a real number behind it for every call; anything else means the
+        // figure is a lower bound, and an artifact that did not say so would
+        // let an unbounded run be read as a bounded one.
+        pricingFailures: runMode.mode === "live" ? pricingFailures : 0,
+        spendCeilingReliable: runMode.mode !== "live" || pricingFailures === 0,
         // Decision-grade needs all three: a live run, a sample at the §12.2
         // floor, and a frozen dataset. Any one missing and the artifact says so.
         decisionGrade:
