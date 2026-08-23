@@ -5,8 +5,10 @@ import {
   isApprovedProviderApiKeyEnvName,
   isSafeProviderApiBaseUrl,
   normalizeApiBaseUrl,
+  NARROW_SCOPE_RECONCILIATION_MODEL_IDS,
   OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
   PROVIDER_API_CONFIGURATION,
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
   STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
   staticModelRegistryReconciliationRows,
 } from "../lib/modelRegistryShared.ts";
@@ -193,21 +195,67 @@ test("cap-only entries never write a credit weight or a price", () => {
   }
 });
 
-// A model whose cap already agrees has nothing for this scope to carry, and
-// an entry for it would move only its reservation -- an entitlement change.
-test("gpt-5-5-thinking is excluded: it has no stranded cap, only a reservation", () => {
+// gpt-5-5-thinking has nothing for the cap-only scope to carry -- its cap
+// already agrees -- so it gets the mirror-image scope instead. The figure it
+// does carry is approved: docs/policy/credit-and-cost-limits.md section 4 sets
+// the output reservation at "premium 4,096, reasoning 6,144", and this model
+// is premium-reasoning, so a row holding 4,096 is holding the premium class
+// fallback rather than a decision.
+test("gpt-5-5-thinking carries its approved reservation and nothing else", () => {
+  assert.deepEqual(
+    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
+    ["gpt-5-5-thinking"]
+  );
   assert.equal(
-    STATIC_CATALOG_RECONCILIATION_MODEL_IDS.includes("gpt-5-5-thinking"),
-    false
+    OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.includes("gpt-5-5-thinking"),
+    false,
+    "its cap agrees, so the cap-only scope would carry nothing"
   );
 
   const model = AVAILABLE_MODELS.find((entry) => entry.id === "gpt-5-5-thinking");
-  const pricing = resolveModelPricing({ ...model, maxOutputTokens: undefined });
-  // The premium class fallback and the profile agree on the cap and disagree
-  // on the reservation. If that ever stops being true, this model needs a
-  // decision rather than a silent inclusion.
+  const pricing = resolveModelPricing({
+    ...model,
+    maxOutputTokens: undefined,
+    reservationOutputTokens: undefined,
+  });
+  // The premium class fallback and the profile agree on the cap (8,192) and
+  // disagree on the reservation (4,096 vs 6,144). If the cap ever diverges
+  // too, this model needs the other scope as well rather than silently
+  // keeping a stranded ceiling.
   assert.equal(pricing.maxOutputTokens, 8_192);
   assert.equal(pricing.reservationOutputTokens, 6_144);
+
+  const row = staticModelRegistryReconciliationRows().find(
+    (entry) => entry.id === "gpt-5-5-thinking"
+  );
+  assert.ok(row);
+  assert.deepEqual(Object.keys(row.data), ["reservationOutputTokens"]);
+  assert.equal(row.data.reservationOutputTokens, 6_144);
+});
+
+// The narrow scopes exist to keep money columns out of a sweep. Neither may
+// write a credit weight, a price, or a lifecycle field
+// (docs/policy/perplexity-sonar-credit-price-hold.md).
+test("neither narrow scope writes a credit weight, a price or a lifecycle field", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  for (const modelId of NARROW_SCOPE_RECONCILIATION_MODEL_IDS) {
+    const row = rows.find((entry) => entry.id === modelId);
+    assert.ok(row, modelId);
+    assert.equal(Object.keys(row.data).length, 1, modelId);
+    for (const field of [
+      "creditWeight",
+      "inputUsdPerMillionTokens",
+      "outputUsdPerMillionTokens",
+      "cachedInputPriceMultiplier",
+      "enabled",
+      "publiclyListed",
+      "status",
+      "usageClass",
+      "minimumPlan",
+    ]) {
+      assert.equal(field in row.data, false, `${modelId}.${field}`);
+    }
+  }
 });
 
 test("the two reconciliation scopes are disjoint and both reach the shared list", () => {

@@ -324,8 +324,12 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   docs/policy/perplexity-sonar-credit-price-hold.md가 그 값을 묶어 두었으며 그
   문서가 이 목록을 위험 경로로 지목합니다
   (docs/policy/perplexity-sonar-credit-price-hold.md §5는 다른 모델도 같을 수
-  있다고 적습니다). 2026-08-23에 열두 모델이 좁은 scope로 들어갔고, 상한이 이미 맞는
-  `gpt-5-5-thinking`은 예약만 움직이게 되므로 제외했습니다.
+  있다고 적습니다). 2026-08-23에 열두 모델이 상한 전용 scope로 들어갔습니다.
+  `gpt-5-5-thinking`은 상한이 이미 맞고 예약만 어긋나서
+  `RESERVATION_ONLY_RECONCILIATION_MODEL_IDS`로 따로 들어갔으며, 그 6,144는
+  docs/policy/credit-and-cost-limits.md §4가 이미 확정한 값입니다 — **이미
+  내려진 결정을 옮기는 것이지 새로 정하는 것이 아닙니다.** p90 basis를 새로
+  적용하는 것은 여전히 별개이고 9개 조건이 필요합니다.
 - **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
   아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
   기본값은 `auto`). `npm run check:model-pricing`이 request-side tier 지정을

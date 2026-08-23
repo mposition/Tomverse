@@ -4,6 +4,7 @@ import test from "node:test";
 import { registryRowToModel } from "../lib/modelRegistry.ts";
 import {
   OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
   staticModelRegistryReconciliationRows,
   staticModelRegistrySeedRows,
 } from "../lib/modelRegistryShared.ts";
@@ -239,4 +240,68 @@ test("the two reasoning Perplexity models get room to answer after reasoning", (
       modelId
     );
   }
+});
+
+// The mirror image, and the one case where a reconciliation entry deliberately
+// does move a money figure. docs/policy/credit-and-cost-limits.md section 4
+// already fixed it -- "premium 4,096, reasoning 6,144" -- so a premium-reasoning
+// row holding 4,096 is holding the class fallback, not a decision.
+test("gpt-5-5-thinking's reservation rises to the approved figure, and its cap does not move", () => {
+  const modelId = "gpt-5-5-thinking";
+  assert.deepEqual([...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS], [modelId]);
+
+  const seeded = seedRowFor(modelId);
+  const model = registryRowToModel(seeded);
+  const fallback = FALLBACK_PRICING[getModelCostClass(model.usageClass)];
+  assert.equal(fallback.reservationOutputTokens, 4_096);
+  assert.equal(
+    fallback.maxOutputTokens,
+    seeded.maxOutputTokens,
+    "the cap agrees, which is why this model is not in the cap-only scope"
+  );
+
+  const stale = {
+    ...seeded,
+    maxOutputTokens: fallback.maxOutputTokens,
+    reservationOutputTokens: fallback.reservationOutputTokens,
+  };
+  const before = requestOutputCapFor(stale);
+  assert.equal(before.budget.reservedOutputTokens, 4_096);
+
+  const reconciliation = staticModelRegistryReconciliationRows().find(
+    (entry) => entry.id === modelId
+  );
+  assert.ok(reconciliation);
+  const after = requestOutputCapFor({ ...stale, ...reconciliation.data });
+
+  // The one number this entry exists to carry.
+  assert.equal(after.budget.reservedOutputTokens, 6_144);
+  // The request cap is untouched -- the answer may be exactly as long as
+  // before. This changes what a turn *holds*, not what it may produce.
+  assert.equal(after.budget.maxOutputTokens, before.budget.maxOutputTokens);
+  assert.equal(
+    after.requestMaxOutputTokens,
+    before.requestMaxOutputTokens
+  );
+
+  // Credits charged to the user are weighted by the conversation, not by the
+  // reservation, so the price of a turn is unchanged.
+  assert.equal(after.budget.usageCredits, before.budget.usageCredits);
+  assert.equal(
+    after.budget.inputUsdPerMillionTokens,
+    before.budget.inputUsdPerMillionTokens
+  );
+  assert.equal(
+    after.budget.outputUsdPerMillionTokens,
+    before.budget.outputUsdPerMillionTokens
+  );
+
+  // What does move: the internal cost held up front, refunded at settlement.
+  // Stating it as a number so the review is about a known quantity rather
+  // than about the direction alone.
+  const heldBefore =
+    before.budget.reservedOutputTokens * before.budget.outputUsdPerMillionTokens;
+  const heldAfter =
+    after.budget.reservedOutputTokens * after.budget.outputUsdPerMillionTokens;
+  assert.equal(heldAfter / heldBefore, 1.5);
 });
