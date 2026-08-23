@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Database, Loader2, RefreshCw } from "lucide-react";
+import { soleApproverUnavailableSentence } from "@/lib/adminSoleApproverCore";
 import { dispatchAppToast } from "@/lib/appToast";
 
 type RetentionItem = {
@@ -52,6 +53,14 @@ export function AdminRetentionPanel() {
   const [running, setRunning] = useState<"dry-run" | "execute" | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [preview, setPreview] = useState<DryRunPreview | null>(null);
+  /**
+   * Why an execution took the two-administrator path.
+   *
+   * Kept on screen rather than in the toast it arrives with: a toast is gone
+   * before the operator can act on it, and this is the sentence that answers
+   * the question the refusal raises.
+   */
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,11 +107,16 @@ export function AdminRetentionPanel() {
             run?: { id?: string; result?: unknown; createdAt?: string };
             resultDigest?: string;
             error?: string;
+            soleApproverUnavailable?: string;
           }
         | null;
       if (!response.ok || !payload?.run) {
+        setFallbackNote(
+          soleApproverUnavailableSentence(payload?.soleApproverUnavailable)
+        );
         throw new Error(payload?.error || "Cleanup operation failed.");
       }
+      setFallbackNote(null);
       dispatchAppToast(
         mode === "execute" ? "Cleanup executed." : "Cleanup dry run completed.",
         "success"
@@ -242,6 +256,14 @@ export function AdminRetentionPanel() {
             Execute cleanup
           </button>
         </div>
+        {fallbackNote ? (
+          <p
+            data-testid="sole-approver-unavailable"
+            className="mt-3 text-sm leading-6 text-amber-100/75"
+          >
+            {fallbackNote}
+          </p>
+        ) : null}
       </div>
     </section>
   );

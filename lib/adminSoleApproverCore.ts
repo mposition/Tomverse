@@ -108,6 +108,46 @@ export function decideSoleApproverEligibility(input: {
     return { allowed: true, approverIdentity: eligible[0] };
 }
 
+/**
+ * Why the sole-approver path did not open, in a sentence.
+ *
+ * The fallback used to be silent: an operator was told an approval was pending
+ * and nothing distinguished "two administrators are configured, so the usual
+ * path applies" from a misconfiguration. Working that out from the outside
+ * took three rounds of screenshots on 2026-08-23, and the answer was in
+ * configuration the operator could have read in five seconds if anything had
+ * pointed at it.
+ *
+ * These are statements of fact, not instructions. Two administrators is the
+ * ordinary, correct state for most organisations; the sentence says what is
+ * true, and leaves whether to change it to the person reading.
+ *
+ * Kept beside the decision rather than in the panel so a new reason cannot be
+ * added without a sentence for it (tests/adminSoleApprover.test.mjs).
+ */
+export const SOLE_APPROVER_UNAVAILABLE_SENTENCES: Record<
+    Exclude<SoleApproverEligibility, { allowed: true }>["reason"],
+    string
+> = {
+    action_not_eligible:
+        "This action always takes a second administrator's approval.",
+    no_eligible_approver:
+        "No active administrator holds the permission this action needs.",
+    multiple_eligible_approvers:
+        "Two or more administrators can approve here, so this action takes the usual second approval.",
+    requester_is_not_the_sole_approver:
+        "Only the single eligible administrator can execute this one alone.",
+};
+
+export const soleApproverUnavailableSentence = (
+    reason: string | null | undefined
+): string | null =>
+    reason && reason in SOLE_APPROVER_UNAVAILABLE_SENTENCES
+        ? SOLE_APPROVER_UNAVAILABLE_SENTENCES[
+              reason as keyof typeof SOLE_APPROVER_UNAVAILABLE_SENTENCES
+          ]
+        : null;
+
 export type DryRunBinding =
     | { bound: true }
     | {
