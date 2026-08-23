@@ -184,18 +184,44 @@ profile의 `maxOutputTokens`는 비용 계산에만 쓰이는 값이 아니라 *
 `:2636`·`:2658`의 provider 호출에 전달합니다. 신고가 사실이면 **긴 출력을
 요구하는 요청이 실패합니다.**
 
-**고칠 자리도 이미 있습니다.** `providerMaxOutputTokens`가 정확히 이 경우를 위한
-필드입니다 — "The provider's absolute settable ceiling for the request's output
-cap, **where it is verified** and differs from what this app asks for"
-(`lib/modelPricing.ts:118-121`). 선례는 `:869`의 `1_048_576` 한 건입니다.
+**`providerMaxOutputTokens`는 이 자리에 쓰면 안 됩니다.** 2026-08-22에 필드
+계약을 끝까지 읽고 앞선 판단을 정정했습니다. 두 가지 이유입니다.
 
-**이 세션에서는 실행할 수 없습니다.** 세 가지가 모두 막혀 있습니다.
-1. Google/Gemini API key가 이 세션에 없습니다.
-2. staging에 이 모델이 없습니다 — `GET https://staging.tomverse.app/api/models/catalog`가
-   모델 42건을 반환하고 gemini는 5건(`3-5-flash`·`3-1-pro`·`2-5-pro`·`2-5-flash`·`3-6-flash`)
-   뿐입니다. 이 브랜치는 아직 어디에도 병합되지 않았습니다.
-3. key를 얻는 경로(Railway 변수 읽기)는 권한 classifier가 이미 차단했고
-   우회하지 않습니다.
+1. 문서가 **"Undefined where no ceiling has been verified"**라고 못 박습니다
+   (`lib/modelPricing.ts:129-131`). 검증되지 않은 값을 넣으면 검증을 의미로
+   삼는 필드가 거짓을 말합니다.
+2. **의미가 반대입니다.** 선례인 Kimi K3는
+   `providerMaxOutputTokens: 1_048_576` > `maxOutputTokens: 131_072`입니다
+   (`:869`) — 이 필드는 **provider의 능력 상한**이고 우리가 요구하는 값은
+   그보다 작습니다. 32,768을 넣는 것은 "Google의 능력 상한이 32,768"이라는
+   주장이며, 공식 문서는 65,536이라고 합니다.
+
+**`maxOutputTokens`를 낮추는 것도 권하지 않습니다.**
+
+| | 신고가 사실 | 신고가 거짓 |
+|---|---|---|
+| 65,536 유지 | 긴 출력이 400 또는 절단 — **시끄럽게** 실패 | 정상 |
+| 32,768로 하향 | 정상 | 문서상 65,536인 모델이 **조용히** 절반에서 잘림 |
+
+증거는 읽지 못한 포럼 신고 하나이고 공식 모델 페이지는 65,536입니다. 그 근거로
+문서화된 능력을 절반으로 깎으면 조용한 품질 저하가 됩니다. **profile은 공식
+값 65,536을 유지합니다.**
+
+### 이 항목은 **병합 전 차단**입니다
+
+`gemini-3-7-flash`는 아직 어디에도 배포되지 않았습니다 — 브랜치가 병합되지
+않았고, `GET https://staging.tomverse.app/api/models/catalog`가 모델 42건을
+반환하는데 gemini는 5건(`3-5-flash`·`3-1-pro`·`2-5-pro`·`2-5-flash`·`3-6-flash`)
+뿐입니다. **배포 전까지 위험은 실현되지 않으므로, 추측해서 값을 넣는 대신
+병합 전에 확인합니다.**
+
+2026-08-22 실행 시도는 자격증명에서 두 번 막혔습니다.
+1. 이 세션에 Google API key가 없고, 얻는 경로(Railway 변수 읽기)는 권한
+   classifier가 차단했으며 우회하지 않았습니다.
+2. 로컬 `GOOGLE_GENERATIVE_AI_API_KEY`는 AI Studio 키 형식이 아니어서
+   `generativelanguage.googleapis.com`이 `ACCESS_TOKEN_TYPE_UNSUPPORTED`로
+   거절했습니다. 정상 키는 Railway에 있습니다 — production의 catalog monitor가
+   매일 `checked 12/12`로 Google을 호출합니다.
 
 **실행 절차 (배포 불필요, 사람이 직접):**
 
@@ -215,7 +241,7 @@ curl -sS https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flas
 
 | 결과 | 의미 | 코드 조치 |
 |---|---|---|
-| HTTP 400 + 한도 언급 | 요청 시점 거절. 가장 나쁨 | `providerMaxOutputTokens: 32_768` 추가 |
+| HTTP 400 + 한도 언급 | 요청 시점 거절. 가장 나쁨 | `maxOutputTokens: 32_768`로 하향 (요구값을 낮추는 것이지 능력 상한 주장이 아님) |
 | 200 · `finishReason: MAX_TOKENS` · `candidatesTokenCount` ≈ 32,768 | 조용한 절단 | 동일 |
 | 200 · `candidatesTokenCount` > 32,768 | 신고가 틀렸거나 이미 수정됨 | 변경 없음. 이 항목을 닫습니다 |
 
