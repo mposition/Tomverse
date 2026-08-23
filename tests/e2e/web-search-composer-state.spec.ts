@@ -162,7 +162,7 @@ test("partial support is the only case that earns a visible exception", async ({
   const detail = page.getByTestId("web-search-exception-detail");
   await expect(detail).toBeVisible();
   await expect(detail).toContainText("GPT-5.4 mini");
-  await expect(detail).toContainText("training knowledge only");
+  await expect(detail).toContainText("without a web search");
 });
 
 test("no capable model blocks with a way out instead of a silent fallback", async ({
