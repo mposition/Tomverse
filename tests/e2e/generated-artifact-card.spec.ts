@@ -326,6 +326,168 @@ test("a failed file fails inside its own card, not the whole answer @ui-risk", a
   await expect(page.getByTestId("chat-error-auxiliary-info")).toHaveCount(0);
 });
 
+/* -------------------------------------------------------------------------- */
+/* A file the answer began and never finished                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The reported turn, as the browser receives it.
+ *
+ * Claude Haiku 4.5 wrote a short preamble, began a `create_text_file` call for
+ * an HTML page, and hit its output ceiling while it was still writing the
+ * input. The server now records that as a `turn_incomplete` artifact
+ * (lib/generatedArtifactTurnTracker.ts) rather than letting the answer end on
+ * a promise with nothing after it.
+ */
+const TRUNCATED_ANSWER = "이 자료를 바탕으로 웹페이지를 만들겠습니다:";
+const INCOMPLETE_ARTIFACT: ChatStreamArtifact = {
+  id: "art_incomplete",
+  ordinal: 0,
+  // The fallback descriptor for the text kind: the model never finished naming
+  // a format or a filename, and neither is read back off a partial input.
+  format: "txt",
+  filename: "generated.txt",
+  mediaType: "text/plain",
+  byteSize: 0,
+  status: "failed",
+  failureCode: "turn_incomplete",
+  modelId: "claude-haiku-4-5",
+};
+
+const truncatedBody = (artifacts: ChatStreamArtifact[]) =>
+  TRUNCATED_ANSWER +
+  buildChatStreamTrailerChunk({
+    searchMetadata: null,
+    completion: { status: "incomplete", incompleteReason: "length" },
+    ...(artifacts.length ? { artifacts } : {}),
+  });
+
+test("an answer cut off mid file says so on its own card @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, truncatedBody([INCOMPLETE_ARTIFACT]));
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "이 PPT를 웹페이지로 만들어줘");
+
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  await expect(inCard(page, "generated-artifact-failure")).toHaveText(
+    "파일이 완성되기 전에 답변이 끝났습니다."
+  );
+  // The turn is still an incomplete turn, and still says so. The card explains
+  // the missing file; the notice explains the truncated answer. Scoped to the
+  // first panel for the reason every locator here is: a guest conversation
+  // renders three, and the mocked answer is served to all of them.
+  await expect(
+    page.getByTestId("response-incomplete-notice").first()
+  ).toBeVisible();
+  // And the preamble that promised the file is still shown, because it is what
+  // the model actually said.
+  await expect(page.getByTestId("chat-message").last()).toContainText(
+    TRUNCATED_ANSWER
+  );
+});
+
+test("the same truncation with no file begun draws no card at all", async ({
+  page,
+}, testInfo) => {
+  // The ordinary long answer that ran out of room. Nothing was promised, so
+  // nothing is owed: the generic notice on its own is the whole of it.
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, truncatedBody([]));
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "아주 긴 설명을 써줘");
+
+  await expect(
+    page.getByTestId("response-incomplete-notice").first()
+  ).toBeVisible();
+  await expect(page.getByTestId("generated-artifact-section")).toHaveCount(0);
+  await expect(page.getByTestId("generated-artifact-pending")).toHaveCount(0);
+});
+
+test("a signed-in account can retry the file the answer never finished @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page, { selectedModels: ["claude-haiku-4-5"] });
+  // A brand-new account, so the conversation the send creates starts empty and
+  // the panel resolves deterministically.
+  await page.route("**/api/conversations", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+
+  let chatRequests = 0;
+  await page.route("**/api/chat", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    chatRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/plain; charset=utf-8",
+      headers: { "X-Request-ID": "qa-trace-incomplete" },
+      body: truncatedBody([INCOMPLETE_ARTIFACT]),
+    });
+  });
+
+  await page.goto("/chat?lang=ko");
+  await sendChatMessage(page, testInfo, "이 PPT를 웹페이지로 만들어줘");
+
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  const retry = inCard(page, "generated-artifact-retry");
+  await expect(retry).toBeVisible();
+  await expect(retry).toHaveText("파일 다시 만들기");
+  // The existing retry behaviour, unchanged: it re-sends the prompt, and it
+  // does so only when the user asks.
+  expect(chatRequests).toBe(1);
+  await retry.click();
+  await expect.poll(() => chatRequests).toBe(2);
+});
+
+test("the turn_incomplete card comes back after a reload @ui-risk", async ({
+  page,
+}) => {
+  // The row went down in the assistant message's own transaction, so nothing
+  // has to stream for the card to be here: this one comes from the
+  // conversation endpoint.
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["claude-haiku-4-5"],
+    messages: [
+      { id: "m-user", role: "user", content: "이 PPT를 웹페이지로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: TRUNCATED_ANSWER,
+        modelId: "claude-haiku-4-5",
+        status: "incomplete",
+        artifacts: [INCOMPLETE_ARTIFACT],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  await expect(inCard(page, "generated-artifact-failure")).toHaveText(
+    "파일이 완성되기 전에 답변이 끝났습니다."
+  );
+
+  await page.reload();
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  await expect(inCard(page, "generated-artifact-failure")).toHaveText(
+    "파일이 완성되기 전에 답변이 끝났습니다."
+  );
+});
+
 test("a guest is shown a sign-in card, never a table pretending to be a file @ui-risk", async ({
   page,
 }, testInfo) => {
