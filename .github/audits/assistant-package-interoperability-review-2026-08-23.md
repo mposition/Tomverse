@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **4** | **2026-08-23** | **리뷰 3회차 반영.** 가져오기를 **`create` / `merge` 두 mode로 분리**하고 merge는 draft profile 없이 **대상 profile에 직접 staging**하도록 확정(§5.9.3) — 지적된 knowledge 이전·quota 역설이 함께 사라집니다. staging schema에 이어가기·만료·mode·병합 대상 필드 추가(§6.6), provenance를 **서버가 증명할 수 있는 것/주장인 것**으로 재명명(§9.3.1), B1~B6를 **Slice 2** 차단으로·C3를 **Slice 8** 차단으로 정정(§10.1.2), stale publish 후 staging 유지 계약 추가(§5.9.7), 취소 테스트를 rev3 상태에 맞게 수정, MVP 입력을 **ZIP + 단독 JSON으로 한정**(디렉터리 제외). 고친 문단은 **[rev4]** |
 | **3** | **2026-08-23** | **리뷰 2회차 반영.** staging 보유자를 **draft `AssistantProfile`로 확정**(§5.9.3), wizard 단계와 MVP 범위를 §5.2 하나로 통일, 취소 계약의 R2 삭제 시점을 §10.3까지 일치, 승인 항목 수(A1~A6)와 **slice별 차단**으로 정리, provenance schema에 Prisma 관계·cascade 명시, native package의 provenance를 **서버 관측/패키지 주장**으로 분리, `.strict()`이 secret을 막는다는 서술 정정, `display_name`/`display_title` **상류 문서 불일치**로 기록. 고친 문단은 **[rev3]** |
 | **2** | **2026-08-23** | **리뷰 1회차 반영.** P1 4건(§5.9 R2/DB transaction 불가 · §9.5 round-trip 등식 · §7.17 secret 서버 재검증 · §7.5 instruction URL 계약)과 P2 4건(§5.7 preview 미구현 · §6.6 provenance 개인정보 계약 · §2.5 `display_name` 위치 · §2.3 GPT export 표현 통일)을 고쳤습니다. 고친 문단은 **[rev2]** 표시로 찾을 수 있습니다. 승인 항목이 A5·A6 둘 늘었습니다(§10.1) |
 
@@ -564,7 +565,7 @@ static segment로 둡니다 — [저장소] 릴리스 A가 `/settings/imports/ne
 
 | # | 단계 | MVP | 서버에 무엇이 생기는가 |
 |---|---|---|---|
-| 1 | **source 선택** — 로컬 ZIP / 로컬 JSON. `<input type="file">`로만, **URL 입력 칸 없음**(§8) | **포함** | 없음 |
+| 1 | **[rev4] source 선택** — **로컬 ZIP** 또는 **단독 `.json`**(native manifest만). `<input type="file">`로만, **URL 입력 칸 없음**(§8) | **포함** | 없음 |
 | 2 | **형식 감지** — `SKILL.md` → Agent Skill, `assistant.json` → native, 그 외 **거절**(§5.4) | **포함** | 없음 |
 | 3 | **파일 inventory와 위험 경고**(§5.3) | **포함** | 없음 |
 | 4 | **필드별 변환 preview**(§5.5) — 각 필드에 [사용]/[수정]/[제외] | **포함** | 없음 |
@@ -574,6 +575,7 @@ static segment로 둡니다 — [저장소] 릴리스 A가 `/settings/imports/ne
 | 8 | **최종 확인 → publish**(§5.8) | **포함** | `AssistantProfileVersion` + provenance 확정 |
 | — | ~~직접 붙여 넣기(paste)~~ | **제외 — 후속**(§13, §14.2) | — |
 | — | ~~preview 실행~~ | **제외 — endpoint 미구현**(§5.7) | — |
+| — | ~~디렉터리 선택(폴더 업로드)~~ | **[rev4] 제외 — 아래 5.2.1** | — |
 
 **7단계가 서버 상태를 만드는 첫 지점입니다.** 1~6단계에서 취소하면 요청이 한
 번도 나가지 않았으므로 지울 것도 없고, 7단계 이후의 취소는 §5.9.4의 계약을
@@ -583,6 +585,23 @@ static segment로 둡니다 — [저장소] 릴리스 A가 `/settings/imports/ne
 **paste와 preview를 MVP에서 뺀 이유는 서로 다릅니다.** paste는 §2.3의 이유로
 형식 감지·inventory·손실 보고를 다시 설계해야 하는 **별개 입력 경로**이고,
 preview는 §5.7의 이유로 **부를 endpoint가 없습니다.**
+
+#### 5.2.1 [rev4] 디렉터리 입력은 MVP에서 제외합니다
+
+**리뷰 3회차 지적 7.** rev3의 결론(§14.1)은 "Agent Skills 패키지(ZIP 또는
+디렉터리)"라고 적었지만 단계표는 ZIP/JSON만 말했습니다. **ZIP만으로
+한정**합니다.
+
+- 디렉터리 선택은 `webkitdirectory`(비표준)나 File System Access API가 필요하고
+  브라우저별로 동작·권한 모델이 다릅니다. 이 저장소의 기존 파일 입력은 전부
+  단일 `<input type="file">`이며, 디렉터리 지원은 **자체 브라우저 매트릭스
+  검증을 요구하는 별개 작업**입니다.
+- 공식 문서가 확인해 준 배포 형태도 ZIP입니다 — claude.ai는 zip 업로드,
+  Skills API는 ZIP 또는 path-qualified 파일 집합(§2.5).
+- 사용자에게 요구하는 것은 한 줄입니다: "폴더를 zip으로 압축해 올려 주세요."
+
+디렉터리를 지원하기로 하면 그것은 **후속 slice**이며, directory picker와
+브라우저별 검증이 그 slice의 산출물입니다.
 
 ### 5.3 파일 inventory — 무엇을 보여 주는가
 
@@ -684,9 +703,10 @@ app/api/assistant-profiles/[profileId]/knowledge/[fileId]/route.ts
   선택.
 - 확인 버튼의 문구는 "가져오기"가 아니라 **"이 내용으로 어시스턴트를
   만듭니다"**입니다 — 사용자가 승인하는 것은 파일이 아니라 결과입니다.
-- **[rev2]** publish는 `planProfileVersionPublish()`를 통과하고, **DB 쓰기만**
-  한 transaction입니다 — profile 행 + version 행 + knowledge 행의 결속 +
-  provenance 행. **R2 업로드와 텍스트 추출은 그 transaction 밖에서 이미
+- **[rev4]** publish는 mode와 무관하게 `publishAssistantProfileVersion()`을
+  그대로 부릅니다 — `create`는 `expectedRevision: null`, `merge`는 시작 시점
+  revision(§5.9.3a). **DB 쓰기만** 한 transaction입니다 — version 행 +
+  manifest 결속 + provenance 확정. **R2 업로드와 텍스트 추출은 그 transaction 밖에서 이미
   끝나 있어야 합니다.** 이유와 상태 기계는 §5.9.
 
 ### 5.9 [rev2] 취소 계약과, R2를 한 transaction에 넣을 수 없다는 사실
@@ -799,6 +819,56 @@ models, tools, memory policy, knowledge manifest …" — 이 막으려는 바�
 `tx.assistantProfile.delete(...)`를 **한 transaction**에서 합니다. 새 삭제
 경로를 쓰지 않습니다.
 
+#### 5.9.3a [rev4] 위 흐름은 `create` mode 전용입니다 — `merge`는 다릅니다
+
+**리뷰 3회차 지적 1.** rev3은 draft profile 하나로 신규 생성과 기존 profile
+병합을 모두 처리하려 했고, 그러면 게시 때 **A의 knowledge를 B로 옮기는
+cross-profile transaction**이 필요해집니다. 게다가 profile 20개를 채운
+사용자는 **최종 개수가 늘지 않는 병합인데도** staging draft를 만들 수 없어
+막힙니다.
+
+**두 mode로 분리하고, `merge`는 draft profile을 쓰지 않습니다.** 근거는
+저장소가 이미 그렇게 만들어져 있다는 사실입니다.
+
+**(1) merge용 파일은 애초에 대상 profile에 있어야 합니다.**
+`publishAssistantProfileVersion()`은 manifest를 `resolveManifestEntries({
+userId, profileId, fileIds })`로 해석합니다. 조회가 `profileId`로 범위를
+잡으므로, **다른 profile에 있는 파일 id는 manifest에 넣을 수 없습니다.**
+따라서 "A에 올리고 B로 옮긴다"는 설계는 코드가 이미 거부합니다.
+
+**(2) 대상 profile에 미리 올려도 게시된 version은 그것을 보지 않습니다.**
+`resolveProfileKnowledgeFiles()`는 `manifestFileIds ∩ availableFileIds`
+입니다. **manifest는 후보 집합이고 현재 상태는 그 필터**이므로, profile B에
+존재하지만 B의 pinned version manifest에 이름이 없는 파일은 **retrieval에
+절대 들어가지 않습니다.** 즉 staging 중인 파일이 진행 중인 대화의 답을
+바꾸지 않습니다.
+
+**(3) quota는 정직하게 대상 profile에 계산됩니다.**
+`knowledgeUsage(userId, profileId)`가 `filesInProfile`을 그 profile로 세므로,
+B가 이미 20개를 갖고 있으면 병합이 거절됩니다 — 이는 역설이 아니라 실제
+한도입니다.
+
+정리하면 두 mode는 이렇습니다.
+
+| | `create` | `merge` |
+|---|---|---|
+| staging 보유자 | **draft `AssistantProfile`** (`currentVersionId = null`) | **대상 profile 자신.** 새 profile 행 없음 |
+| profile slot | 1개 점유 | **0개** — 20개를 채운 계정도 병합 가능 |
+| knowledge 업로드 대상 | draft의 `profileId` | **대상 profile의 `profileId`** |
+| 게시 전 대화 영향 | 없음(draft는 대화 불가) | **없음**(manifest에 없으므로 retrieval 제외) |
+| publish | `expectedRevision = null` → revision 1 | `expectedRevision = 시작 시점 revision` → 다음 revision |
+| 취소 | `deleteAssistantProfile()` | **이 import가 만든 fileId만** 삭제 + tombstone. 기존 파일은 건드리지 않음 |
+| cross-profile 이전 | 없음 | **없음** |
+
+**`merge`의 취소가 "이 import가 만든 파일만" 지울 수 있는 이유**는 §6.6의
+`AssistantProfileImport.stagedFileIds`가 그 목록을 들고 있기 때문입니다. 기존
+파일과 섞이지 않습니다.
+
+**둘 다 publish는 `publishAssistantProfileVersion()`을 그대로 부릅니다.**
+`create`는 `expectedRevision: null`, `merge`는 시작 시점 revision. 새 publish
+경로를 만들지 않으므로 stale 판정·`unchanged` 판정·manifest 해석이 손으로
+만든 편집과 **같은 코드**를 지납니다.
+
 계약 넷:
 
 1. **`ready`가 아닌 파일은 manifest에 들어가지 않습니다.** publish 요청이 담은
@@ -818,6 +888,9 @@ models, tools, memory policy, knowledge manifest …" — 이 막으려는 바�
    profile 삭제(cascade가 knowledge·chunk를 가져감) + tombstone 기록. R2 object는
    기존 15분 maintenance sweep이 가져갑니다. 즉 **새 sweep 로직이 아니라 기존
    두 sweep에 조회 하나가 추가되는 것**입니다.
+5. **[rev4] `merge`의 만료 sweep은 profile을 지우지 않습니다.** 만료된 merge
+   import는 `stagedFileIds`의 파일만 삭제하고 tombstone을 기록한 뒤 import 행을
+   지웁니다. 대상 profile과 그 기존 파일·revision은 그대로입니다.
 
 #### 5.9.4 취소 계약 — 정확한 문장으로 다시 씀
 
@@ -845,6 +918,30 @@ rev1의 "아무것도 남지 않습니다"는 R2까지 즉시 0이라는 뜻으�
 그러므로 사용자에게 보이는 상태는 취소 즉시 완전히 비어 있고, 저장소가
 회수하는 바이트만 15분 뒤에 사라집니다. **이것이 지킬 수 있는 계약이고,
 rev1의 문장은 지킬 수 없는 계약이었습니다.**
+
+#### 5.9.4a [rev4] stale publish가 났을 때 staging은 유지됩니다
+
+**리뷰 3회차 지적 5.** rev3의 검증표 31번은 stale이면 "아무것도 저장되지
+않는다"고 적었지만, rev3 이후로는 **이미 staging(파일 포함)이 존재**합니다.
+`merge` mode에서 다른 탭이 먼저 게시했을 때의 계약을 정합니다.
+
+> **`ASSISTANT_PROFILE_VERSION_STALE`(409)이 오면 staging을 유지합니다.**
+
+- **대상 profile에 새 revision이 생기지 않습니다.**
+  `planProfileVersionPublish()`가 stale에서 즉시 반환하므로 아무 write도
+  일어나지 않습니다.
+- **staging 파일은 그대로 남습니다.** 사용자가 올린 파일을 우리 쪽 경합
+  때문에 버리는 것은, 되돌릴 수 있는 실패를 되돌릴 수 없는 손실로 바꾸는
+  일입니다.
+- **UI는 최신 revision을 다시 읽어 §6.2의 충돌 화면을 다시 보여 줍니다.**
+  그 사이 상대 탭이 바꾼 필드가 무엇인지 보여 주고, 사용자가 다시 고릅니다.
+- **`expectedTargetRevision`을 새 값으로 갱신**하고 `candidateDigest`를 다시
+  계산합니다(§6.6). 그렇지 않으면 재시도가 같은 stale로 다시 실패합니다.
+- **TTL은 계속 흐릅니다.** stale 실패가 staging의 수명을 연장하지 않습니다 —
+  릴리스 A의 seal이 수명을 연장하지 않는 것과 같은 이유입니다(정책 §5.5).
+
+버리는 대안("staging 즉시 삭제 후 처음부터")은 적지만 채택하지 않습니다.
+사용자가 20개 파일을 다시 올려야 하고, 그 경합은 사용자가 만든 것이 아닙니다.
 
 #### 5.9.5 브라우저 메모리에 들고 있다가 마지막에 올리는 대안을 버린 이유
 
@@ -894,6 +991,10 @@ instructions
 세 번째 선택지가 반드시 있어야 합니다. 앞의 둘만 있으면 사용자는 "합치고
 싶다"는 흔한 요구에 대해 **우리가 금지한 방법(이어 붙이기)을 스스로 하게**
 됩니다 — 그때는 최소한 사용자가 순서를 정한 것이고, 편집 화면에 기록됩니다.
+
+**[rev4]** 이 화면은 `merge` mode에서만 나타나며, 그때 staging 파일은 이미
+대상 profile에 올라가 있되 **어느 게시된 version의 manifest에도 없으므로**
+진행 중인 대화에 영향을 주지 않습니다(§5.9.3a).
 
 `starters`와 `knowledgeManifest`는 집합이므로 **항목 단위 선택**입니다.
 `modelIds`는 순서가 의미를 가지므로(첫 항목이 기본) 항상 전체 교체이거나
@@ -950,7 +1051,7 @@ byte 동일 결과는 `unchanged`로 돌아오고 revision을 소비하지 않�
 못합니다.
 
 ```prisma
-/// 제안 — 승인 전 구현하지 않습니다.
+/// 제안 — 승인 전 구현하지 않습니다. [rev4]
 model AssistantProfileImport {
   id String @id @default(cuid())
 
@@ -958,33 +1059,70 @@ model AssistantProfileImport {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// 이 가져오기가 만든(또는 병합한) profile. profile이 사라지면 그 출처 기록도
-  /// 함께 사라집니다 -- provenance는 profile보다 오래 살 이유가 없습니다(§6.6.1).
+  /// "create" | "merge" (§5.9.3a). 두 mode의 staging 보유자가 다르므로,
+  /// 이 컬럼이 취소·만료 sweep의 분기이기도 합니다.
+  mode String
+
+  /// 이 가져오기가 쓰는 profile.
+  ///   create -- staging 동안에는 draft profile, 게시 후에도 같은 행
+  ///   merge  -- 처음부터 대상 profile 자신
+  /// 어느 mode든 cross-profile 이전이 없으므로 컬럼 하나로 충분합니다.
   profileId String
   profile   AssistantProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-  /// 어떤 adapter가 읽었는가. "agent-skill" | "tomverse-native" | "pasted-text"
-  sourceKind String
+  /// merge 전용. 시작 시점의 revision이며, publish가
+  /// planProfileVersionPublish()의 expectedRevision으로 넘깁니다.
+  /// stale 실패 시 최신 값으로 갱신됩니다(§5.9.4a). create에서는 NULL.
+  expectedTargetRevision Int?
 
-  /// 사용자가 본 이름. 패키지 디렉터리명 또는 frontmatter name.
-  /// 파일 경로가 아니라 표시용 이름입니다 -- 경로는 로그·오류에 넣지 않습니다(§7.13).
-  sourceName String
+  /// staging | published. 만료 sweep이 이 컬럼을 읽습니다.
+  status String @default("staging")
 
-  /// 사용자가 스스로 적어 넣은 출처(선택). 우리가 fetch하지 않습니다.
-  sourceUrl String?
+  /// 사용자가 wizard에서 고른 변환 결과 -- instructions, starters, modelIds,
+  /// toolPolicy, memoryPolicy, 선택한 knowledge 항목. 원본 ZIP을 보존하지
+  /// 않으므로(A2) 이어가기를 지원하려면 이 값이 있어야 합니다.
+  ///
+  /// 저장돼 있다는 것이 승인됐다는 뜻은 아닙니다 -- userApprovedAt이 NULL인
+  /// 동안 이 instructions는 owner instruction이 아니며, 어떤 prompt에도
+  /// 들어가지 않습니다(§3.2, A1).
+  stagingManifest Json?
 
-  /// 해석기의 version. 릴리스 A의 EXTERNAL_IMPORT_PARSER_VERSION과 같은 역할,
-  /// 별개 상수(§3.6).
-  adapterVersion String
+  /// 이 import가 만든 knowledge 파일. merge의 취소가 기존 파일을 건드리지
+  /// 않고 자기 것만 지울 수 있는 근거입니다(§5.9.3a).
+  stagedFileIds String[] @default([])
 
-  /// 사용자가 최종 확인한 대상의 digest. 확인 이후 내용이 바뀌면 다른 값.
-  approvedDigest String
-  digestVersion  Int
+  /// 현재 stagingManifest의 digest. 최종 확인 화면이 무엇을 보여 줬는지를
+  /// approvedDigest와 대조하기 위한 값입니다.
+  candidateDigest String?
 
-  importedAt     DateTime @default(now())
+  /// 사용자가 최종 확인한 대상의 digest. secret override 목록이 여기에
+  /// 결속됩니다(§7.7). 확인 전에는 NULL이므로 필수가 아닙니다.
+  approvedDigest String?
+  digestVersion  Int?
+
   /// 사용자가 최종 확인 버튼을 누른 시각. §3.2의 승격 시점.
-  /// staging 동안에는 NULL이고, publish가 채웁니다.
   userApprovedAt DateTime?
+
+  /* ---------- provenance: 증명할 수 있는 것과 주장인 것 (§9.3.1) ---------- */
+
+  /// 서버가 요청을 받은 시각. 서버의 시계입니다.
+  serverReceivedAt DateTime @default(now())
+
+  /// 이 요청을 처리한 서버 validator의 version.
+  validatorVersion String
+
+  /// 서버가 실제로 지난 입력 경로. "normalized-package-manifest" 하나뿐이며,
+  /// 원본 형식이 아니라 *우리가 무엇을 처리했는지*를 말합니다.
+  ingestPath String
+
+  /// 아래 셋은 전부 클라이언트·사용자의 주장입니다. 감사 근거가 아니며
+  /// 어떤 판정에도 쓰이지 않습니다(§9.3.1).
+  declaredSourceKind String?
+  declaredSourceName String?
+  declaredPreviousProvenance Json?
+
+  /// 사용자가 스스로 적어 넣은 출처. 우리가 fetch하지 않습니다(§7.5).
+  declaredSourceUrl String?
 
   /// 이 가져오기가 게시한 revision. staging 동안에는 NULL입니다.
   /// SetNull인 이유: version이 어떤 경로로 사라져도 "가져오기가 있었다"는
@@ -992,13 +1130,14 @@ model AssistantProfileImport {
   versionId String?
   version   AssistantProfileVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
 
-  /// staging | published. staging 만료 sweep이 이 컬럼을 읽습니다(§5.9.3).
-  status String @default("staging")
+  /// TTL은 컬럼이 아니라 이 둘에서 계산합니다 -- 아래 설명.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([userId, importedAt])
-  @@index([profileId, importedAt])
+  @@index([userId, createdAt])
+  @@index([profileId, createdAt])
   /// 만료 sweep의 조회가 정확히 이 쌍을 읽습니다.
-  @@index([status, importedAt])
+  @@index([status, updatedAt])
 }
 ```
 
@@ -1006,7 +1145,12 @@ model AssistantProfileImport {
 `AssistantProfile.imports`, `AssistantProfileVersion.imports`. Prisma는 양방향
 선언을 요구하고, cascade 유도도 그 선언을 읽습니다.
 
-**`importedAt`과 `userApprovedAt`이 둘 다 필요한 이유:** 전자는 서버가 행을 쓴
+**[rev4] `stagingManifest`는 사용자 데이터입니다.** §6.6.1의 여섯 가지가 그대로
+적용되며, 특히 **계정 export에 포함**돼야 합니다 — 사용자가 중단한 가져오기의
+내용도 그가 쓴 것입니다. `candidateDigest`·`approvedDigest`·`validatorVersion`·
+`ingestPath`·`stagedFileIds`는 내부값으로 withhold합니다.
+
+**`serverReceivedAt`과 `userApprovedAt`이 둘 다 필요한 이유:** 전자는 서버가 행을 쓴
 시각이고 후자는 사람이 결정한 시각입니다. 정상 흐름에서는 거의 같지만, 둘을
 하나로 합치면 "사람이 확인했다"가 서버 write의 부수 효과로 기록되어 §3.2의
 승격 근거로 쓸 수 없게 됩니다.
@@ -1021,7 +1165,7 @@ digest로 같은 문제를 푸는 방식(`lib/externalImportSelectionDigest.ts`,
 
 **리뷰 지적 P2-6. rev1은 cascade만 적었고, 그것으로는 부족합니다.**
 
-`sourceName` · `sourceUrl` · digest · 승인 시각을 영구 저장한다는 것은
+`declaredSourceName` · `declaredSourceUrl` · digest · 승인 시각 · `stagingManifest`를 영구 저장한다는 것은
 **새 user-linked 테이블을 만든다**는 뜻이고, 이 저장소에는 그것을 강제하는
 게이트가 이미 있습니다.
 
@@ -1041,10 +1185,10 @@ the promise is quietly untrue."* 따라서 `AssistantProfileImport`를 만들면
 
 | 필드 | export 상태 | 근거 |
 |---|---|---|
-| `sourceKind` · `sourceName` · `importedAt` · `userApprovedAt` | **포함** | 사용자가 자기 profile의 출처를 아는 것이 이 테이블의 존재 이유 |
-| `sourceUrl` | **포함**(저장하기로 결정한 경우) | 사용자가 직접 적은 값 |
-| `adapterVersion` | **withhold** | 내부 식별자. 기존 선언들이 `retrievalVersion`·`promptFormatVersion`을 withhold하는 것과 같은 이유 |
-| `approvedDigest` · `digestVersion` | **withhold** | 내부. 기존 `assistantKnowledgeFile` 선언이 content digest를 "internal"로 withhold하는 것과 같음 |
+| **[rev4]** `mode` · `declaredSourceKind` · `declaredSourceName` · `serverReceivedAt` · `userApprovedAt` · `stagingManifest` | **포함** | 사용자가 자기 profile의 출처와 중단된 가져오기의 내용을 아는 것이 이 테이블의 존재 이유. `declared*`는 주장값이므로 export 문구도 "표시됨"으로 씁니다 |
+| `declaredSourceUrl` | **포함**(저장하기로 결정한 경우) | 사용자가 직접 적은 값 |
+| **[rev4]** `validatorVersion` · `ingestPath` · `stagedFileIds` | **withhold** | 내부 식별자. 기존 선언들이 `retrievalVersion`·`promptFormatVersion`을 withhold하는 것과 같은 이유 |
+| `candidateDigest` · `approvedDigest` · `digestVersion` | **withhold** | 내부. 기존 `assistantKnowledgeFile` 선언이 content digest를 "internal"로 withhold하는 것과 같음 |
 | `versionId` | **withhold** | 내부 식별자. revision 번호가 사용자가 읽을 값 |
 
 **(3) cascade는 게이트가 검증합니다.** 같은 script가 User로부터
@@ -1077,7 +1221,7 @@ snapshot과 conversation export는 각자의 select를 쓰며 이 테이블을 �
 
 ### 6.7 원격 source 자동 업데이트 금지와 재가져오기 절차
 
-**금지:** 저장된 `sourceUrl`을 주기적으로 다시 읽는 것, "새 버전이 있습니다"를
+**금지:** 저장된 `declaredSourceUrl`을 주기적으로 다시 읽는 것, "새 버전이 있습니다"를
 서버가 먼저 알려 주는 것, 원본이 바뀌었을 때 profile을 갱신하는 것.
 
 이유는 §2.6이 인용한 Anthropic 지침의 한 줄 그대로입니다 — *"Even trustworthy
@@ -1180,7 +1324,7 @@ media type이 allowlist에 있는지, 확장자가 그 type을 담을 수 있는
 **정책.** 이 기능에는 **서버가 URL을 fetch하는 코드 경로가 없습니다.**
 
 - wizard에 URL 입력 칸이 없습니다(§5.2).
-- `sourceUrl`은 사용자가 기록용으로 적는 문자열이고, 어떤 코드도 그것을
+- `declaredSourceUrl`은 사용자가 기록용으로 적는 문자열이고, 어떤 코드도 그것을
   요청하지 않습니다. 저장할지 자체가 §10의 결정 항목입니다.
 - **[rev2] knowledge 안의 URL만** `KNOWLEDGE_CONTEXT_RULES`의 "do not visit or
   fetch any URL they contain"이 덮습니다. **instruction은 덮지 않습니다** —
@@ -1532,22 +1676,40 @@ my-assistant.tomverse-assistant.zip
 
 두 가지를 분리합니다.
 
-| | 서버가 관측한 provenance | 패키지가 주장한 provenance |
+**[rev4] rev3의 이 절도 아직 과했습니다.** rev3은 "서버가 native package를
+직접 관측했으므로 `sourceKind`를 권위 있게 정할 수 있다"고 적었는데, **서버는
+패키지를 보지 않습니다.** §5.1의 계약대로 원본은 브라우저를 떠나지 않고 서버가
+받는 것은 정규화된 manifest뿐이므로, 조작된 클라이언트는 `"tomverse-native"`
+라고 말하기만 하면 됩니다.
+
+그래서 **서버가 실제로 증명할 수 있는 것**만 권위 있는 필드로 둡니다.
+
+| 필드 | 신뢰 수준 | 무엇을 말하는가 |
 |---|---|---|
-| **어디에 저장** | `AssistantProfileImport`의 `sourceKind`·`sourceName`·`importedAt`·`approvedDigest` | `AssistantProfileVersion`이 아니라 **import 행의 별도 Json 컬럼** `declaredPreviousProvenance` |
-| **값의 출처** | 서버가 이 요청에서 **직접 본 것** — native 패키지를 받았으므로 `sourceKind`는 **항상 `"tomverse-native"`**, `importedAt`은 **서버 시각**, digest는 **서버가 계산** | 패키지 파일이 적어 온 문자열 |
-| **신뢰 수준** | 감사 가능 | **신뢰하지 않음** |
-| **UI 표시** | "가져온 시각", "출처 종류" | "이 패키지는 원래 *…에서 왔다고 적혀 있습니다*" — 주장임이 문장에 드러나야 합니다 |
+| `serverReceivedAt` | **권위 있음** | 서버 시계로 요청을 받은 시각 |
+| `approvedDigest` · `digestVersion` | **권위 있음** | 서버가 실제로 저장한 내용의 digest |
+| `validatorVersion` | **권위 있음** | 이 요청을 판정한 서버 코드의 version |
+| `ingestPath` | **권위 있음** | 서버가 지난 처리 경로. 값은 `"normalized-package-manifest"` 하나이며 **원본 형식이 아니라 우리가 무엇을 처리했는지**를 말합니다 |
+| `userApprovedAt` | **권위 있음** | 사용자가 최종 확인 요청을 보낸 시각 |
+| `declaredSourceKind` | **주장** | 원본이 Agent Skill인지 native인지 |
+| `declaredSourceName` | **주장** | 원본 패키지 이름 |
+| `declaredSourceUrl` | **주장** | 사용자가 적어 넣은 출처 |
+| `declaredPreviousProvenance` | **주장** | 패키지 파일이 적어 온 과거 출처 |
 
-**규칙 셋.**
+**규칙 넷.**
 
-1. **`sourceKind`는 서버가 정합니다.** native 패키지를 읽었으면
-   `"tomverse-native"`이고, 그 안에 무엇이 적혀 있든 바뀌지 않습니다.
-2. **`importedAt`은 서버 시각입니다.** 패키지의 시각을 쓰면 사용자가 과거로
-   날짜를 옮길 수 있습니다.
-3. **`declaredPreviousProvenance`는 표시 전용이고 판정에 쓰이지 않습니다.**
-   중복 판정·재가져오기 판정·digest 비교 어디에도 들어가지 않습니다 — 들어가는
-   순간 위조가 동작을 바꿉니다.
+1. **`declared*`는 전부 표시 전용입니다.** 중복 판정·재가져오기 판정·digest
+   비교·quota 어디에도 들어가지 않습니다 — 들어가는 순간 위조가 동작을
+   바꿉니다.
+2. **UI 문구가 주장임을 드러냅니다.** "Agent Skill에서 가져옴"이 아니라
+   **"Agent Skill에서 가져왔다고 표시됨"**입니다. 이 한 단어가 감사 기록의
+   신뢰 수준을 정확히 전달합니다.
+3. **시각은 서버 것만 씁니다.** 패키지가 적어 온 시각을 저장 시각으로 쓰면
+   사용자가 날짜를 과거로 옮길 수 있습니다.
+4. **원본 형식을 증명하려면 원본을 받아야 합니다.** 그것은 §5.1의 "원본을
+   전송하지 않는다"와 정면으로 충돌하므로 **MVP는 증명을 포기하고 신뢰 수준을
+   낮춰 기록하는 쪽을 택합니다.** 이 선택을 문서에 남기는 것이 "감사 가능한
+   출처"라고 잘못 주장하는 것보다 낫습니다.
 
 같은 논리가 `profile` 블록에도 적용됩니다: manifest의 profile 이름은 **표시용
 후보**이며, 서버가 그것으로 행을 찾지 않습니다(§9.3의 주석이 이미 그렇게
@@ -1568,7 +1730,7 @@ export가 그것을 파일로 내보내게 됩니다. 자리를 만들지 않으
 
 - `instructions` 문자열 안의 `Authorization: Bearer …`
 - knowledge 파일 **본문** 안의 `.env` 내용이나 키
-- 파일명·`sourceName`·`starters` 같은 **표시 문자열** 안의 토큰
+- 파일명·`declaredSourceName`·`starters` 같은 **표시 문자열** 안의 토큰
 
 이 셋은 전부 **schema가 허용하는 형태**입니다. 문자열 필드에 담긴 문자열이기
 때문입니다.
@@ -1948,9 +2110,10 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | 28 | starters 9개 / 201자 | 초과분에 대해 사용자 확인 요구, 자동 절단 없음 |
 | 29 | unsupported capability loss report | fixture별 정답 손실 목록과 **정확히 일치**. 개수가 아니라 항목 |
 | 30 | 복수 source conflict | 각 필드에 세 선택지 제시, 자동 판정 0건, 이어 붙이기 0건 |
-| 31 | **stale revision** | wizard 시작 후 다른 탭이 게시 → publish가 `ASSISTANT_PROFILE_VERSION_STALE`(409), 아무것도 저장 안 됨 |
+| **31** *(rev4)* | **stale revision** | `merge` 중 다른 탭이 먼저 게시 → publish가 `ASSISTANT_PROFILE_VERSION_STALE`(409). **대상 profile에 새 revision 없음**, **staging draft·파일·chunk는 그대로 유지**, 충돌 UI 재표시, `expectedTargetRevision` 갱신 후 재시도 성공, **TTL은 연장되지 않음**(§5.9.4a) |
 | 32 | **cross-account IDOR** | 남의 `profileId`로 병합 시도 → **404**(거절이 아니라 없음). 남의 import 행 조회 → 404 |
-| **33** *(rev2)* | **취소 시 남는 것** | wizard 취소·탭 종료·TTL 만료 각각에 대해: profile·version·provenance **0건(애초에 생성 안 됨)**, staging 행·knowledge 행·chunk **0건**, `AssistantKnowledgeCleanup` tombstone **존재**, sweep 1회 실행 후 R2 object **0건**(§5.9.4) |
+| **33** *(rev4)* | **`create` 취소 시 남는 것** | 취소 **전**: draft profile 1 · staging import 1 · knowledge N · chunk M. 취소 transaction **후**: draft profile 0 · import 0 · knowledge 0 · chunk 0 · **cleanup tombstone N**. 다음 object sweep **후**: R2 object 0. `AssistantProfileVersion`은 어느 시점에도 0(§5.9.4) |
+| **33g** *(rev4)* | **`merge` 취소 시 남는 것** | 취소 후: **대상 profile 그대로**, 기존 knowledge **그대로**, `stagedFileIds`의 파일만 0 + tombstone, 기존 revision 수 변화 없음 |
 | **33a** *(rev2)* | `pending` knowledge를 포함한 publish 시도 | **거절.** 부분 게시 없음(§5.9.3) |
 | **33b** *(rev2)* | 추출 `failed` 파일을 포함한 publish 시도 | **거절.** 사용자에게 제외/재시도 선택지 |
 | **33c** *(rev2)* | publish 직전 파일 하나가 `ready`→`failed`로 바뀜 | 서버 재검증이 잡아 **거절**. 클라이언트가 들고 있던 상태를 신뢰하지 않음 |
@@ -1961,12 +2124,12 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | 36 | **analytics / log privacy** | 이벤트 속성이 닫힌 enum뿐. instruction·filename·URL·digest·knowledge 원문 0건. `tests/assistantProfileAnalyticsPrivacy.test.mjs` 방식 |
 | 37 | schemaVersion 낮음/높음/없음 | migrate / 거절 / 거절 (§9.6) |
 | **33d** *(rev3)* | **draft profile이 대화를 시작할 수 없음** | staging 중인 draft의 `profileId`로 대화 생성 시도 → `activeProfileVersion()`이 null → `no_active_version`으로 거절 |
-| **33e** *(rev3)* | **draft가 profile slot을 소비함** | 20개 꽉 찬 계정이 가져오기를 시작하면 거절되고, staging 만료 뒤에는 시작됨 |
+| **33e** *(rev3·rev4)* | **draft가 profile slot을 소비함** | 20개 꽉 찬 계정의 **`create`**는 거절되고 staging 만료 뒤 시작됨. **[rev4] 같은 계정의 `merge`는 정상 진행**(§5.9.3a — merge는 profile 행을 만들지 않음) |
 | **33f** *(rev3)* | **staging 만료 sweep** | TTL 지난 draft profile·import 행·knowledge·chunk 삭제, tombstone 기록, 다음 sweep에서 R2 0건 |
-| **44** *(rev3)* | **native package의 provenance 위조** | `sourceKind: "agent-skill"`·과거 `importedAt`을 적은 native 패키지를 가져오면 → 저장된 `sourceKind`는 **`tomverse-native`**, `importedAt`은 **서버 시각**. 주장값은 `declaredPreviousProvenance`에만 있고 어떤 판정에도 쓰이지 않음(§9.3.1) |
+| **44** *(rev4)* | **provenance 주장의 위조** | 조작된 클라이언트가 `declaredSourceKind: "tomverse-native"`와 과거 시각을 보내면 → **`serverReceivedAt`은 서버 시각**, `ingestPath`는 서버가 지난 경로, `validatorVersion`은 서버 상수. 주장값은 `declared*`에만 남고 중복·재가져오기·digest·quota 어떤 판정에도 쓰이지 않음. **UI 문구가 "표시됨"인지 확인**(§9.3.1) |
 | **45** *(rev3)* | **secret이 instructions·knowledge 본문·파일명에 있을 때** | `.strict()`가 아니라 **서버 scanner**가 잡음. 세 위치 각각에 대해 케이스(§9.4) |
 | **38** *(rev2)* | **data-domain registry** | `npm run check:data-domain-registry` 통과. `AssistantProfileImport`가 export 도메인·cascade와 함께 선언돼 있음(§6.6.1) |
-| **39** *(rev2)* | **계정 데이터 export에 provenance 포함** | export 산출물에 `assistant_profile_imports`가 있고, `adapterVersion`·`approvedDigest`·`versionId`는 withhold |
+| **39** *(rev4)* | **계정 데이터 export에 provenance 포함** | export 산출물에 `assistant_profile_imports`가 있고 `stagingManifest`가 포함되며, `validatorVersion`·`ingestPath`·`stagedFileIds`·`candidateDigest`·`approvedDigest`·`versionId`는 withhold |
 | **40** *(rev2·rev3)* | **계정·profile 삭제 cascade** | profile 삭제 시 provenance 함께 삭제, 계정 삭제도 같음. **[rev3]** version 삭제는 `SetNull`이라 import 행이 남는지 별도 확인 |
 | **41** *(rev2)* | **share·conversation export 배제** | 제3자 경로 어디에도 provenance가 나타나지 않음(`tests/memoryReleaseContracts.test.mjs` 방식) |
 | **42** *(rev2)* | **instruction URL 고지** | instruction에 URL이 있는 fixture에서 host 목록이 표시되고, "방문하지 않습니다"라는 문구가 **나타나지 않음**(§7.5.1) |
@@ -2011,8 +2174,15 @@ npm run build
 **사람만 할 수 있는 것으로 남는 항목:**
 
 1. 실기기 파일 선택기의 MIME 보고 동작(합성 `File`로 재현되지 않음).
-2. **진짜 claude.ai에서 export한 skill zip**(우리가 만든 zip은 우리가 만든
-   것과 서로 동의한다는 것만 증명합니다).
+2. **[rev4] 우리가 만들지 않은 진짜 Agent Skill 패키지.** rev3은 "claude.ai에서
+   export한 skill zip"이라고 적었지만, 공식 문서가 확인해 준 것은 **업로드
+   경로**이고 claude.ai에서 skill을 **내려받는** 경로는 확인하지 못했습니다
+   (§2.5). 그래서 요구를 바꿉니다: **공개된 skill 저장소**
+   (예: `github.com/anthropics/skills`의 `skills/` 아래 항목)를 그대로 zip으로
+   묶은 것. 우리가 작성한 fixture만으로 검증하면 "우리 writer와 우리 parser가
+   서로 동의한다"만 증명되며, 그 문제는 남의 손이 쓴 패키지로만 풀립니다.
+   **이것은 에이전트가 준비할 수 있습니다**(공개 자료를 내려받아 압축) —
+   사람에게 넘기지 않습니다.
 3. 위 유료 turn과 그 답의 판정.
 4. 통과·조건부·실패의 서명.
 
@@ -2054,15 +2224,22 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
    함수라 knowledge가 있는 profile에서는 성립할 수 없습니다(§9.5).
 2. **Agent Skills 패키지**(ZIP 또는 디렉터리)의 가져오기 — `SKILL.md`
    frontmatter·본문·`references/`·`assets/`를 §4.1의 매핑으로 변환.
-3. `/settings/assistants/import` wizard — §5.2의 8단계. **[rev3]** 1~6단계는
-   서버에 아무것도 만들지 않고, **7단계에서 draft `AssistantProfile`
-   (`currentVersionId = null`)과 knowledge가 생기며**, `AssistantProfileVersion`은
-   **8단계에서 처음** 만들어집니다. draft로는 대화를 시작할 수 없습니다
-   (`no_active_version`). 취소·만료 시 DB는 즉시 0, R2 object는 다음
-   sweep(≈15분)(§5.9.4). **`ready`가 아닌 knowledge를 담은 게시는 거절합니다.**
-   paste 입력과 preview 실행은 **MVP 밖**입니다(§5.2).
-4. **provenance 기록** — source 이름, adapter version, digest, `importedAt`,
-   `userApprovedAt`.
+3. `/settings/assistants/import` wizard — §5.2의 8단계. **입력은 ZIP 또는
+   단독 `.json`이며 디렉터리 선택은 MVP 밖입니다**(§5.2.1). 1~6단계는 서버에
+   아무것도 만들지 않고, **7단계에서 knowledge가 올라가며**,
+   `AssistantProfileVersion`은 **8단계에서 처음** 만들어집니다.
+   **[rev4] 두 mode로 나뉩니다**(§5.9.3a) — `create`는 draft
+   `AssistantProfile`(`currentVersionId = null`, 대화 불가)을 staging 보유자로
+   쓰고, `merge`는 **profile 행을 만들지 않고 대상 profile에 직접** staging하되
+   그 파일은 어느 게시된 manifest에도 없어 진행 중인 대화에 영향을 주지
+   않습니다. 취소·만료 시 DB는 즉시 0, R2 object는 다음 sweep(≈15분)(§5.9.4).
+   **`ready`가 아닌 knowledge를 담은 게시는 거절**하고, **stale publish는
+   staging을 유지**합니다(§5.9.4a). paste 입력과 preview 실행은 **MVP
+   밖**입니다.
+4. **provenance 기록** — **[rev4]** 서버가 증명할 수 있는 것
+   (`serverReceivedAt` · `approvedDigest` · `validatorVersion` · `ingestPath` ·
+   `userApprovedAt`)과 사용자·클라이언트의 주장(`declared*`)을 **분리해서**
+   기록합니다.
 5. 서버가 최종 manifest와 모든 선택 항목을 **다시 검증**합니다. 브라우저 검사는
    UX일 뿐 보안 경계가 아닙니다. **[rev2]** 여기에는 secret scanner 재실행과
    override 목록 대조, instruction URL 개수·host 재산출, knowledge `ready`
@@ -2072,10 +2249,12 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
    등록하지 않으면 `npm run check:data-domain-registry`가 막습니다(§6.6.1).
    **[rev3]** schema는 문자열이 아니라 **Prisma 관계 + `onDelete`**로 씁니다 —
    cascade는 관계에서 유도되므로 관계가 없으면 약속이 성립하지 않습니다(§6.6).
-7. **[rev3]** 서버가 관측한 provenance와 패키지가 주장한 provenance를
-   분리합니다. native 패키지의 `sourceKind`·`importedAt`은 **서버가 정하고**,
-   패키지가 적어 온 값은 `declaredPreviousProvenance`로 표시만 하며 어떤
-   판정에도 쓰지 않습니다(§9.3.1).
+7. **[rev4]** provenance를 **서버가 증명할 수 있는 것**(`serverReceivedAt` ·
+   `approvedDigest` · `validatorVersion` · `ingestPath` · `userApprovedAt`)과
+   **주장인 것**(`declared*`)으로 나눕니다. 원본이 브라우저를 떠나지 않으므로
+   **서버는 원본 형식을 증명할 수 없고**, MVP는 그 증명을 포기하고 신뢰
+   수준을 낮춰 기록합니다. UI 문구도 "가져옴"이 아니라 **"가져왔다고 표시됨"**
+   입니다(§9.3.1).
 
 ### 14.2 무엇을 후속으로 미루는가
 
@@ -2099,10 +2278,10 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
 
 ### 14.4 구현 착수 전에 사람의 승인이 필요한 결정
 
-**[rev3] 승인 항목은 여섯 개이고, 막는 지점이 서로 다릅니다**(§10.1.2).
+**[rev4] 승인 항목은 여섯 개이고, 막는 지점이 서로 다릅니다**(§10.1.2).
 A1~A4는 **Slice 1**(정책 문서)을 막고, 그래서 그 뒤 전부가 멈춥니다.
-A5는 **Slice 2**, A6는 **Slice 4**, B1~B6는 **Slice 5**를 각각 막습니다 —
-이 셋은 앞 slice를 막지 않으므로 병렬로 결정할 수 있습니다.
+**A5와 B1~B6는 Slice 2**, A6는 **Slice 4**, C3는 **Slice 8(rollout)**을 각각
+막습니다.
 
 | | 결정 | 이 보고서의 권고 |
 |---|---|---|
@@ -2113,17 +2292,20 @@ A5는 **Slice 2**, A6는 **Slice 4**, B1~B6는 **Slice 5**를 각각 막습니�
 | **A5** *(rev2)* | secret 발견을 게시 차단으로 둘지 경고로 강등할지 | **차단 유지 + override를 `approvedDigest`에 결속** |
 | **A6** *(rev2)* | instruction 안 URL의 처리 | **`PROFILE_INSTRUCTION_RULES`는 건드리지 않고 UX 고지 + `webSearch` 동시 활성화 시 추가 확인** |
 
-**[rev2] A5는 Slice 2 착수 전에** 정해져야 합니다 — scanner를 브라우저·서버가
+**[rev4] A5는 Slice 2 착수 전에** 정해져야 합니다 — scanner를 브라우저·서버가
 공유하는 순수 모듈로 만들지 여부가 그 답에 달려 있습니다. A6는 Slice 4
 착수 전입니다.
 
-**그리고 §10.2의 수치 여섯 개(B1~B6)는 Slice 5 착수 전에 승인돼야 합니다.**
+**§10.2의 수치 여섯 개(B1~B6)도 Slice 2 착수 전입니다.** rev3은 Slice 5라고
+적었지만 틀렸습니다 — 상수 module(`lib/assistantPackageLimits.ts`)을 만드는
+것이 Slice 2이고, Slice 3의 parser가 그 값을 쓰며, Slice 5는 서버에서 다시
+강제할 뿐입니다. 따라서 **B1~B6는 A1~A4와 사실상 같은 시점에 필요합니다.**
 기존 knowledge의 32MiB, import의 1GB/50,000/250MB를 "비슷하다"는 이유로
 패키지 한도로 재사용하지 않습니다 — 새 역할의 수치는 별도 정책 결정입니다.
 
-**§10.4의 C1~C3은 blocked on 상태로 남습니다.** 이 세 가지는 저장소가 답할 수
-없는 사실(보안 리뷰 결정, Takeout 구조의 안정성, 활성화 순서 결정자)을
-기다리며, 모른 채 시작하면 추측이 곧 결과가 됩니다.
+**§10.4의 C1~C3은 blocked on 상태로 남습니다.** C1(URL import)과 C2(Gem HTML)는
+MVP 범위 밖이라 아무것도 막지 않지만, **[rev4] C3(flag 배치)는 Slice 8의
+rollout을 막습니다** — Slice 1~7의 개발은 막지 않습니다.
 
 ---
 
