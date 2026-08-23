@@ -7,6 +7,8 @@ import {
     decideSoleApproverEligibility,
     DRY_RUN_BINDING_MAX_AGE_MS,
     SOLE_APPROVER_ACTIONS,
+    SOLE_APPROVER_UNAVAILABLE_SENTENCES,
+    soleApproverUnavailableSentence,
 } from "../lib/adminSoleApproverCore.ts";
 
 /**
@@ -226,4 +228,80 @@ test("the execution has no parameter through which its scope could widen", () =>
     // The call site passes the function, never a call with arguments.
     assert.match(route, /\n\s+cleanupExpiredData\n/);
     assert.doesNotMatch(route, /cleanupExpiredData\([^)]/);
+});
+
+/* ------------------------------------------ why the fallback happened ----- */
+
+/**
+ * The fallback used to be silent. An operator was told an approval was
+ * pending, and nothing distinguished "two administrators are configured" --
+ * ordinary, and correct -- from a misconfiguration. Establishing which took
+ * three rounds of screenshots on 2026-08-23, against configuration that could
+ * be read in five seconds once anyone knew to look at it.
+ */
+
+test("every reason the decision can return has a sentence", () => {
+    // Driven into each branch rather than read off the type, so a new reason
+    // cannot be added with no sentence for the panel to show.
+    const reachable = new Set(
+        [
+            eligibility({ action: "user.delete" }),
+            eligibility({ eligibleApproverIdentities: [] }),
+            eligibility({
+                eligibleApproverIdentities: ["a@example.invalid", "b@example.invalid"],
+            }),
+            eligibility({ requesterIdentity: "other@example.invalid" }),
+        ].map((decision) => decision.reason)
+    );
+    assert.equal(reachable.size, 4);
+    assert.deepEqual(
+        Object.keys(SOLE_APPROVER_UNAVAILABLE_SENTENCES).sort(),
+        [...reachable].sort()
+    );
+    for (const sentence of Object.values(SOLE_APPROVER_UNAVAILABLE_SENTENCES)) {
+        assert.ok(sentence.length > 0);
+    }
+});
+
+test("the sentences state what is true, and do not instruct", () => {
+    // Two administrators is the ordinary state for most organisations. The
+    // sentence says what is so; whether to change it belongs to the reader.
+    for (const sentence of Object.values(SOLE_APPROVER_UNAVAILABLE_SENTENCES)) {
+        assert.doesNotMatch(sentence, /\b(please|must|should)\b/i);
+    }
+});
+
+test("an unknown reason renders nothing rather than breaking the panel", () => {
+    // The panel reads this from a server response, so a newer server naming a
+    // reason this build has never heard of must leave the screen unchanged.
+    for (const reason of [null, undefined, "", "something_added_later"]) {
+        assert.equal(soleApproverUnavailableSentence(reason), null);
+    }
+    assert.equal(
+        soleApproverUnavailableSentence("multiple_eligible_approvers"),
+        SOLE_APPROVER_UNAVAILABLE_SENTENCES.multiple_eligible_approvers
+    );
+});
+
+test("the reason travels from the route to the screen", () => {
+    const route = readFileSync(
+        "app/api/admin/maintenance/cleanup/route.ts",
+        "utf8"
+    );
+    // Captured outside the try, because the catch is where it is reported and
+    // the request body is not in scope there.
+    assert.match(route, /let soleApproverUnavailable: string \| null = null;/);
+    assert.match(route, /soleApproverUnavailable = soleApprover\.reason;/);
+    assert.match(
+        route,
+        /adminApprovalErrorResponse\(\s*error,\s*soleApproverUnavailable \? \{ soleApproverUnavailable \} : undefined\s*\)/
+    );
+
+    const panel = readFileSync("components/admin/AdminRetentionPanel.tsx", "utf8");
+    // On screen, not only in the toast it arrives with: a toast is gone before
+    // the operator can act on it.
+    assert.match(panel, /setFallbackNote\(\s*soleApproverUnavailableSentence\(/);
+    assert.match(panel, /data-testid="sole-approver-unavailable"/);
+    // Cleared on success, so it cannot outlive the attempt it explains.
+    assert.match(panel, /setFallbackNote\(null\);/);
 });
