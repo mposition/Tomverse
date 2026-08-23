@@ -16,7 +16,7 @@
 `product-boundary-v1-2-staging-verification-records/`에 **날짜와 전체 deploy
 SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-23b`
+- **template revision**: `2026-08-23c`
 - 실행 방법과 파일 이름 규칙:
   `product-boundary-v1-2-staging-verification-records/README.md`
 - 기록 template:
@@ -107,23 +107,56 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 - [ ] **A-1** production 데이터베이스에 대고 실행한다.
 
   ```
-  npm run report:routing-dispatch-readiness
+  ROUTING_READINESS_WINDOW_DAYS=3650 npm run report:routing-dispatch-readiness
   ```
 
-  판정은 **`RoutingRun` 행 수**로 합니다. 이 숫자는 데이터베이스에서 읽으니
-  그대로 믿을 수 있습니다.
+  **환경변수를 빼지 마십시오.** 기본 창은 7일이고
+  (`scripts/report-routing-dispatch-readiness.mjs`의 `WINDOW_DAYS`), 그러면
+  `Runs recorded`는 최근 7일에 쓰인 행 수가 됩니다. 이 항목이 묻는 것은
+  **테이블 전체 크기**입니다 — 인덱스 빌드와 FK 검증은 7일치가 아니라 전부를
+  훑기 때문입니다. 창을 넓히지 않고 읽은 숫자로 판정한 회차는 다른 질문에 답한
+  회차입니다.
 
-  preflight에 찍히는 `ROUTING_DISPATCH_INSTRUMENTATION` 줄은 **참고만**
-  하십시오. 리포트가 스스로 밝히듯(#839) 그 줄은 **리포트를 실행하는 프로세스의
-  환경**이지 행을 쓴 서버의 환경이 아닙니다 — 배포된 서버는 부팅 시점의 값을
-  들고 있습니다. 그러니 "off로 보이니 행이 없겠지"로 건너뛰지 말고 행 수를 직접
-  보십시오. 행이 0이면 이 항목은 여기서 끝납니다.
+  판정은 `Runs recorded` 세 줄의 **합**으로 합니다. 이 숫자는 데이터베이스에서
+  나오니 그대로 믿을 수 있습니다. 0이면 이 항목은 여기서 끝납니다.
 
-  판별 대상은 이것입니다. 마이그레이션
-  `20260822093000_routing_run_product_attribution`은 `RoutingRun`에 인덱스
-  **2개**를 `CONCURRENTLY` 없이 만들고, 그 다음 FK를 **즉시 검증**으로 겁니다.
-  `CREATE INDEX`는 SHARE 락을 잡아 **그 테이블의 쓰기를 막고**, `RoutingRun`은
-  **디스패치된 턴마다 한 행**입니다. 막히는 쓰기가 곧 채팅 턴입니다.
+  엄밀히 하려면 한 줄 더 봅니다. `mode`는 enum이 아니라 `String`이고
+  (`prisma/schema.prisma`의 `model RoutingRun`), 리포트는 `manual`·`shadow`·
+  `auto` 세 개만 출력하므로 다른 값의 행은 보이지 않습니다.
+
+  ```
+  psql "$DATABASE_URL" -c 'SELECT count(*) FROM "RoutingRun"'
+  ```
+
+  preflight의 `ROUTING_DISPATCH_INSTRUMENTATION` 줄은 **참고값**이고, 어디서
+  실행했는지에 따라 의미가 다릅니다. 컨테이너 안에서(Railway 콘솔이나
+  `railway ssh`) 돌렸다면 그 인스턴스의 실제 환경입니다. `railway run`으로
+  돌렸다면 배포의 *설정*이지 행을 쓴 서버의 환경이 아닙니다 — 서버는 부팅 시점
+  값을 들고 있습니다(#839). 어느 쪽이든 **"off로 보이니 행이 없겠지"로 건너뛰지
+  말고** 행 수를 직접 보십시오. 기록에는 어디서 실행했는지를 함께 적습니다.
+
+  ### 무엇이 얼마나 막히는가
+
+  마이그레이션 `20260822093000_routing_run_product_attribution`은 `RoutingRun`에
+  인덱스 **2개**를 `CONCURRENTLY` 없이 만들고, 그 다음 FK를 **즉시 검증**으로
+  겁니다. 락은 두 테이블에 걸립니다.
+
+  | 구문 | 락이 걸리는 테이블 | 막히는 것 |
+  |---|---|---|
+  | `ADD COLUMN` ×2 (nullable, default 없음) | — | metadata-only, 행을 안 봄 |
+  | `CREATE INDEX` ×2 | `RoutingRun` | `RoutingRun` 쓰기 |
+  | `ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES "Conversation"` | `RoutingRun` **과 `Conversation`** | 양쪽 쓰기 |
+  | `ADD CONSTRAINT ... CHECK ... NOT VALID` | — | 스캔 없음 |
+
+  **FK가 참조되는 테이블에도 락을 잡는다는 것이 이 항목의 핵심입니다.**
+  PostgreSQL은 검증되는 외래키를 걸 때 제약이 붙는 테이블과 참조되는 테이블
+  양쪽에 `SHARE ROW EXCLUSIVE`를 잡습니다. `RoutingRun`이 비어 있어도
+  `Conversation`은 비어 있지 않습니다 — **대화마다 한 행**이고, 그 쓰기가 막히면
+  새 대화와 대화 갱신이 막힙니다.
+
+  그래서 위험을 정하는 것은 `RoutingRun`의 크기 자체가 아니라 **검증 스캔이
+  얼마나 걸리는가**입니다. 스캔 대상이 `RoutingRun`이므로 그 크기가 곧 락을 쥐고
+  있는 시간이고, 그 시간 동안 멈추는 것은 `Conversation` 쪽 트래픽입니다.
 
   저장소가 이미 같은 판단을 문장으로 남겨두었습니다
   (`20260815030000_perplexity_async_job_updated_at_index`):
@@ -133,16 +166,21 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
   > worth splitting the migration over: **it holds one row per deep research
   > request, not per message.**
 
-  `RoutingRun`은 그 문장이 명시적으로 제외한 쪽입니다.
-
   | 관측 | 다음 행동 |
   |---|---|
-  | 행이 0이거나 적음 | 그대로 배포. 선례가 그대로 적용됨 |
+  | 행이 0이거나 적음 | 그대로 배포. 검증 스캔이 순간이므로 `Conversation` 락도 순간 |
   | 행이 많음 | **배포하지 말고 마이그레이션을 쪼갠다** — 인덱스를 별도 파일의 `CREATE INDEX CONCURRENTLY`로, FK를 `NOT VALID` + 후속 `VALIDATE`로 |
 
-  두 번째는 **코드 변경**입니다. 그래서 이 항목이 배포 전에 있습니다. "많음"의
-  경계는 이 저장소가 아니라 이 production의 쓰기량이 정하므로, 행 수와 함께
-  **평소 분당 턴 수**를 기록에 적고 사람이 판정합니다.
+  두 번째는 **코드 변경**입니다. 그래서 이 항목이 배포 전에 있습니다.
+
+  "많음"의 경계는 이 저장소가 아니라 이 production이 정하므로, 행 수와 함께
+  **분당 쓰기 두 가지**를 기록에 적고 사람이 판정합니다.
+
+  - `RoutingRun` 분당 쓰기 — `ROUTING_DISPATCH_INSTRUMENTATION`이 `observe`도
+    `enforce`도 아니면 **0**입니다. 아무도 안 쓰는 테이블의 쓰기 차단은 비용이
+    없습니다.
+  - `Conversation` 분당 쓰기 — 이쪽은 recording 설정과 무관합니다. FK 구문이
+    쥐는 락이 실제로 무엇을 멈추는지가 이 숫자입니다.
 
 - [ ] **A-2** staging에 `prisma migrate deploy`를 적용하고 **각 마이그레이션의
       소요 시간**을 적는다.
