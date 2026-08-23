@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **17** | **2026-08-23** | **리뷰 16회차 반영.** 64c의 임시 migration 절차를 **`prisma.config.ts`의 `migrations.path`로 실행 가능한 6단계**로 확정(§12), 64f의 survey 증거 계약을 **제약 하나로 좁히고 기록 field를 고정**해 report 전문·식별자가 migration에 들어가지 않게 함(§12, §11). 고친 문단은 **[rev17]** |
 | **16** | **2026-08-23** | **리뷰 15회차 반영.** Slice 8의 선행 조건과 의존성 그래프에 **5B를 연결**해 survey 전 rollout 경로를 막음(§11), 64c~64f를 **임시 migration 디렉터리 기반의 지속 가능한 테스트**로 바꾸고 "파일 부재"를 영구 테스트가 아니라 **5A 배포 체크리스트 증거**로 옮김(§12). 고친 문단은 **[rev16]** |
 | **15** | **2026-08-23** | **리뷰 14회차 반영.** `VALIDATE CONSTRAINT`를 **별도 배포 경계(Slice 5B)로 분리** — `db:migrate`가 pending migration을 연속 적용하므로 함께 제출하면 survey 없이 즉시 validate되고 기존 음수 행이 있으면 배포가 실패합니다(§5.9.3f-5, §11). survey를 `.github/RELEASE_CHECKLIST.md`의 post-deploy 항목으로 두고, 검증 64c·64d를 **단계형 migration 테스트**로 고정. 고친 문단은 **[rev15]** |
 | **14** | **2026-08-23** | **리뷰 13회차 반영.** 두 CHECK의 **제약 이름을 계약으로 고정**하고 저장소의 `_check` 접미사 관례에 맞춤(§5.9.3f-5), `NOT VALID` 검증을 위한 **`report:assistant-knowledge-invariants`를 Slice 5 산출물로 추가**(§5.9.3f-5, §11, §12). 고친 문단은 **[rev14]** |
@@ -3237,7 +3238,7 @@ pending migration을 전부 연속 적용하므로, 두 파일이 함께 tree에
 | | |
 |---|---|
 | **입력** | 5A 배포 후 production에서 실행한 `npm run report:assistant-knowledge-invariants`의 **0건 보고** |
-| **산출물** | `ALTER TABLE "AssistantKnowledgeFile" VALIDATE CONSTRAINT "AssistantKnowledgeFile_extractedCharacters_non_negative_check";` 하나만 담은 migration. 주석에 **survey를 실행한 날짜·SHA·출력**을 적습니다 — [저장소] `20260815012000_validate_credit_lot_non_negative`가 그렇게 합니다 |
+| **산출물** | `ALTER TABLE "AssistantKnowledgeFile" VALIDATE CONSTRAINT "AssistantKnowledgeFile_extractedCharacters_non_negative_check";` 하나만 담은 migration. 주석에 **[rev17]** survey의 실행 시각(UTC) · 배포 SHA · `violationCount=0` · 실행 당시 `convalidated=false`를 적습니다. **report 출력 전문이나 식별자는 적지 않습니다**(§12.6.2). [저장소] `20260815012000_validate_credit_lot_non_negative`가 같은 습관을 보여 줍니다 |
 | **선행 조건** | Slice 5A **배포 완료** + survey 0건. **코드 승인이 아니라 관측 결과가 선행 조건인 유일한 slice**입니다 |
 | **독립 rollback** | 사실상 해당 없음 — validate는 제약의 상태만 바꾸고 데이터를 건드리지 않습니다. 되돌리는 것은 drop 후 재추가이며, 그럴 이유가 생기는 경우는 survey가 틀렸을 때뿐입니다 |
 | **[rev16] 5A 제출 시 확인** | **`VALIDATE CONSTRAINT` migration 파일이 제출에 없을 것.** 이것은 **영구 테스트가 아니라 5A 배포 체크리스트의 증거 항목**입니다 — 5B가 완료된 뒤에는 그 파일이 있는 것이 정상이므로, 영구 검사로 두면 반드시 실패합니다(§12의 64f) |
@@ -3413,10 +3414,10 @@ rollout은 이 기능을 사람들 앞에 여는 행위이므로, **quota 집계
 | **64** *(rev13)* | **계정 export에 `extractedBytes` 포함** | 계정 데이터 export의 `assistant_knowledge_files[].extractedBytes`가 **DB 값과 정확히 일치**. `extractedCharacters`와 나란히 나오고, 둘 중 하나만 빠지지 않음 |
 | **64a** *(rev14)* | **음수 `extractedBytes` 거절** | `extractedBytes = -1` insert·update가 **`AssistantKnowledgeFile_extractedBytes_non_negative_check`로 거절**됨(이름까지 assert). `NULL`과 `0`은 허용 |
 | **64b** *(rev14)* | **`extractedCharacters`의 CHECK** | `AssistantKnowledgeFile_extractedCharacters_non_negative_check`가 **새 write의 음수를 거절**(이름까지 assert). `NOT VALID`이므로 기존 행은 검사되지 않음 |
-| **64c** *(rev16)* | **`report:assistant-knowledge-invariants` — 임시 migration 디렉터리 기반 단계형 테스트** | rev15는 "5A까지 적용된 DB"를 전제했지만, **5B가 tree에 들어온 뒤에는 평범한 `prisma migrate deploy`가 둘 다 적용**하므로 그 중간 상태를 만들 수 없습니다. 그래서 테스트가 **이력을 스스로 자릅니다**: ① 임시 디렉터리에 `prisma/migrations`의 **5A까지만** 복사 → ② 격리된 DB에 그 이력을 적용하기 **직전**에 음수 `extractedCharacters` 행 1건을 심을 수 있도록, 5A 직전까지 적용 → ③ 음수 행 생성 → ④ 5A 적용(기존 행 미검사이므로 성공) → ⑤ report가 **위반 1건 · `convalidated=false`** 보고 → ⑥ 시료 삭제 → ⑦ report **0건**. **어느 단계에서도 report가 행을 수정하지 않음**(읽기 전용) |
-| **64d** *(rev16)* | **validate migration** | 64c의 ⑦ 상태에서 **같은 임시 디렉터리에 5B migration을 추가**하고 적용 → `convalidated = true`. 그 뒤 음수 insert는 여전히 거절. 임시 디렉터리를 쓰므로 **5B가 저장소에 있든 없든 같은 결과** |
+| **64c** *(rev17)* | **`report:assistant-knowledge-invariants` — 임시 migration 디렉터리 기반 단계형 테스트** | 아래 6단계. rev16은 "5A 직전까지 적용"이라고 적었지만 **`prisma migrate deploy`에는 특정 migration 앞에서 멈추는 기능이 없습니다** — 디렉터리에 있으면 함께 적용됩니다. 그래서 **멈추는 것이 아니라 그 시점에 디렉터리에 없어야** 합니다. 절차는 셀 아래 상자 참조. **어느 단계에서도 report가 행을 수정하지 않음**(읽기 전용) |
+| **64d** *(rev17)* | **validate migration** | 64c의 6단계에 이어, 같은 임시 디렉터리에 5B 폴더를 추가하고 마지막 deploy → `convalidated = true`. 그 뒤 음수 insert는 여전히 거절. 임시 디렉터리를 쓰므로 **5B가 저장소에 있든 없든 같은 결과** |
 | **64e** *(rev15)* | **음수 시료는 제약 이후에 만들 수 없음** | 5A 적용 이후 음수 `extractedCharacters` insert·update 시도 → **거절**. 이것이 64c의 시료를 5A **이전**에 만들어야 하는 이유이며, 최신 migration이 전부 적용된 평범한 테스트 DB에서는 시료 자체가 만들어지지 않음 |
-| **64f** *(rev16)* | **survey 증거가 기록됐는가 — 영구 회귀 테스트** | rev15의 "tree에 5B 파일이 없어야 함"은 **5B가 완료되면 반드시 실패하는 검사**였으므로 폐기합니다. 대신 지속 가능한 계약을 검사합니다: **`VALIDATE CONSTRAINT`를 담은 모든 migration은 주석에 survey 증거를 담아야 한다** — 실행 날짜, 실행한 릴리스, report 출력 전문. [저장소] `20260815012000_validate_credit_lot_non_negative`가 이미 그 형태입니다(*"run against production from the deployed release SHA on 2026-08-15 and reported … 0"*). 증거 없는 validate migration은 **누가 언제 무엇을 보고 이것을 냈는지 말하지 못하는 파일**입니다 |
+| **64f** *(rev17)* | **survey 증거가 기록됐는가 — 영구 회귀 테스트** | rev15의 "tree에 5B 파일이 없어야 함"은 **5B가 완료되면 반드시 실패하는 검사**였으므로 폐기했고, rev16의 "모든 `VALIDATE CONSTRAINT` migration"은 **범위가 너무 넓었습니다**. 좁힌 계약은 셀 아래 상자 참조 |
 | **63b** *(rev12)* | **기존 행(`extractedBytes = NULL`)의 합산** | **권고 방침(§10.1 A7) 기준의 고정 기대값**: `NULL` 행은 **정확히 그 행의 `extractedCharacters` 값**으로 집계되고, 값이 있는 행은 그 값으로 집계됨. 합계가 두 값의 단순 합과 일치. *A7이 재처리 배치로 승인되면 이 항목을 그 기대값으로 교체합니다* |
 | **61c** *(rev10)* | **state 결합 CHECK** | `state='pending'`인데 `claimToken`이 있는 행, `state='finalizing'`인데 `finalizingStartedAt`이 없는 행을 insert 시도 → **DB 거절** |
 | **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
@@ -3435,6 +3436,59 @@ rollout은 이 기능을 사람들 앞에 여는 행위이므로, **quota 집계
 | **41** *(rev2)* | **share·conversation export 배제** | 제3자 경로 어디에도 provenance가 나타나지 않음(`tests/memoryReleaseContracts.test.mjs` 방식) |
 | **42** *(rev2)* | **instruction URL 고지** | instruction에 URL이 있는 fixture에서 host 목록이 표시되고, "방문하지 않습니다"라는 문구가 **나타나지 않음**(§7.5.1) |
 | **43** *(rev2)* | instruction URL + `webSearch` 활성화 | 추가 확인 없이는 게시 불가. 서버가 독립적으로 URL을 세어 판정 |
+
+#### 12.6.1 [rev17] 64c·64d의 실행 절차
+
+`prisma migrate deploy`는 디렉터리에 있는 pending migration을 **전부** 적용하고
+중간에서 멈추지 않습니다. 그러므로 "5A 직전까지"는 **적용을 멈추는 것이 아니라
+그 시점에 5A가 디렉터리에 없는 것**으로 만듭니다. [저장소]
+`prisma.config.ts`가 `migrations.path`를 설정으로 갖고 있어 그대로 가능합니다.
+
+```
+1. 임시 디렉터리를 만들고 `prisma/migrations/migration_lock.toml`과
+   **5A 이전 migration 폴더까지만** 복사한다.
+2. 임시 `prisma.config.ts`(또는 그 사본)의 `migrations.path`를 그 디렉터리로
+   지정한다.
+3. 격리된 DB에 deploy → 음수 `extractedCharacters` 행 1건을 생성한다.
+   (아직 제약이 없으므로 성공한다 — 이것이 64e가 고정하는 사실이다.)
+4. **5A 폴더를 임시 디렉터리에 추가**하고 다시 deploy.
+   기존 행을 검사하지 않으므로 성공한다.
+5. report 실행 → 위반 1건 · `convalidated=false`. 시료 행 삭제 →
+   report 재실행 → 0건.
+6. **5B 폴더를 추가**하고 마지막 deploy → `convalidated=true`.
+```
+
+- **격리된 DB**를 씁니다. 공용 테스트 DB를 쓰면 다른 테스트가 보는 schema가
+  중간 상태로 바뀝니다.
+- **저장소의 `prisma/migrations`를 수정하지 않습니다.** 복사본만 다룹니다.
+- 이 절차는 5B가 저장소에 있든 없든 같은 결과를 냅니다 — 그것이 rev16이
+  노렸으나 절차로 적지 못했던 성질입니다.
+
+#### 12.6.2 [rev17] 64f가 검사하는 것 — 좁힌 계약
+
+rev16은 "`VALIDATE CONSTRAINT`를 담은 **모든** migration"을 대상으로 삼았고,
+그것은 두 가지를 잘못 가정합니다.
+
+- **모든 validate가 production survey를 전제하지 않습니다.** 새 테이블에 처음부터
+  유효한 제약을 다는 경우처럼, 조사할 기존 행이 없는 validate도 있습니다.
+- **"report 출력 전문"을 migration에 넣는 것은 안전하지 않습니다.** 지금
+  report는 개수와 제약 상태만 내지만, 앞으로 다른 report가 식별자를 출력하면
+  그 문자열이 저장소에 영구히 남습니다. §7.13이 로그·telemetry에 대해 금지한
+  것과 같은 종류이고, migration 파일은 로그보다 지우기 어렵습니다.
+
+**대상과 기록 field를 고정합니다.**
+
+| 항목 | 값 |
+|---|---|
+| 대상 | `AssistantKnowledgeFile_extractedCharacters_non_negative_check` **하나** |
+| 필수 증거 | 실행 시각(**UTC**), 배포 **SHA**, `violationCount=0`, `convalidated=false`(실행 당시 상태) |
+| 기록하지 않는 것 | 원시 행, 계정·파일 식별자, report 출력 전문 |
+| 확장 | 다른 제약을 이 계약에 넣으려면 **명시적 allowlist에 추가**합니다. 목록에 없는 validate migration은 이 검사의 대상이 아닙니다 |
+
+**[저장소] 선례와의 관계.** `20260815012000_validate_credit_lot_non_negative`는
+날짜와 릴리스와 결과를 적었고, 그 출력이 마침 content-free였습니다(제약 이름과
+`0`). 우리는 그 **성질을 우연에 맡기지 않고 field로 고정**합니다 — 같은 습관을
+따르되, 무엇을 적을지가 report의 출력 형식에 좌우되지 않게 합니다.
 
 ### 12.7 실행 명령
 
