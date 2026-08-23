@@ -16,7 +16,7 @@
 `product-boundary-v1-2-staging-verification-records/`에 **날짜와 전체 deploy
 SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-23a`
+- **template revision**: `2026-08-23b`
 - 실행 방법과 파일 이름 규칙:
   `product-boundary-v1-2-staging-verification-records/README.md`
 - 기록 template:
@@ -36,7 +36,7 @@ SHA로 이름 붙인 별도 파일**로 남습니다.
 | 대화 생성 경로가 깨짐 | 고쳐서 배포하면 끝. 다만 **폭발 반경이 전체**이고 확인이 무료 | **차단 B** |
 | 이름이 바뀐 이메일 | **발송된 메일은 회수되지 않습니다.** `buildAccountWelcomeEmail`과 billing 계열은 render 테스트가 없습니다 | **차단 C** |
 | Stripe line item 이름 | 발행된 invoice는 수정 불가하나 크레딧노트·재발행이 성립. `AGENTS.md`가 잘못된 과금을 되돌릴 수 있음으로 분류 | 차단 아님 |
-| SEO·OG·`SITE_NAME` | 색인은 재크롤로 회복. 다만 **기준값은 배포 후에 찍을 수 없음** | **배포 전 선행 P-1** |
+| SEO·OG·`SITE_NAME` | 색인은 재크롤로 회복. 기준값도 16개월은 남으나, **property가 검증돼 있지 않으면 소급 수집이 없음** | **배포 전 선행 P-1** |
 | 생성 파일 `dc:creator` | 다운로드된 파일은 회수 불가하나, 아무 표면도 읽지 않는 메타데이터 | 차단 아님 |
 | 공유·export 표기 | 고쳐서 배포하면 끝 | 차단 아님 |
 | Auto 토글·배지 마운트 | 모든 계정에서 `offered=false`라 **아무것도 렌더하지 않음**. CI의 desktop·mobile `@ui-risk`가 증명 | 차단 아님 |
@@ -52,7 +52,7 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 
 | 항목 | 무엇을 판별하는가 | 비용 |
 |---|---|---|
-| **P-1** | Search Console 기준값 — **배포 후에는 영영 못 찍습니다** | 무료 · 배포 전 |
+| **P-1** | Search Console 기준값 — 깨끗한 시점에 찍어 두는 **순서**의 문제 | 무료 · 배포 전 |
 | **A-1** | `RoutingRun` 크기 → 인덱스 락이 턴 쓰기를 막는 시간 | 무료 |
 | **A-2** | 마이그레이션이 실제로 적용되고 얼마나 걸리는가 | 무료 |
 | **B-1** | 새 대화가 만들어지고 `productKey`가 실제로 저장되는가 | 무료 |
@@ -86,10 +86,17 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 - [ ] **P-1** Search Console에서 `Tomverse Insight`의 **최근 28일과 90일**
       노출·클릭·진입 페이지를 저장한다.
 
-  이것은 순서의 문제입니다. 이름이 바뀐 뒤에는 같은 질의의 과거 실적을 다시
-  찍을 수 없습니다. 결정을 미루려는 것이 아니라, `"Tomverse Review — formerly
-  Tomverse Insight"` 병기를 **얼마나 오래 유지할지**를 정하는 유일한 근거입니다
+  `"Tomverse Review — formerly Tomverse Insight"` 병기를 **얼마나 오래
+  유지할지**를 정하는 유일한 근거입니다
   (`docs/ops/tomverse-review-rename.md` §5.1–§5.2).
+
+  **먼저 §5.1을 보십시오.** 이미 확보된 회차가 있으면 다시 추출하지 않습니다.
+  이 항목이 다시 필요해지는 것은 그 뒤에 또 이름이 바뀔 때입니다.
+
+  순서의 문제이지 회수 불가는 아닙니다. 성능 데이터는 16개월 보존이고 이름이
+  바뀌어도 과거 질의 행은 남습니다. 소급이 불가능한 경우는 **property가 아직
+  검증돼 있지 않은 경우** 하나뿐이며, 그때는 검증 자체가 배포보다 먼저입니다 —
+  검증 이전 기간은 채워지지 않습니다.
 
   기록에는 숫자 자체가 아니라 **저장한 위치와 시각**을 적습니다.
 
