@@ -32,6 +32,8 @@ import { BATCH_019_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/bat
 import { BATCH_020_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch020AssistantEn";
 import { BATCH_021_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch021SecretKo";
 import { BATCH_022_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch022SecretEn";
+import { BATCH_023_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch023InjectionKo";
+import { BATCH_024_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch024InjectionEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -119,5 +121,17 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
         cell: "sensitive_secrets:en",
         record: "docs/ops/memory-extraction-eval-batches/batch-022-sensitive-secrets-en.md",
         cases: BATCH_022_SECRET_EN,
+    },
+    {
+        id: "batch-023",
+        cell: "injection_directives:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-023-injection-directives-ko.md",
+        cases: BATCH_023_INJECTION_KO,
+    },
+    {
+        id: "batch-024",
+        cell: "injection_directives:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-024-injection-directives-en.md",
+        cases: BATCH_024_INJECTION_EN,
     },
 ];
