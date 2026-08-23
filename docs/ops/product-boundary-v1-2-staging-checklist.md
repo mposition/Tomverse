@@ -16,7 +16,7 @@
 `product-boundary-v1-2-staging-verification-records/`에 **날짜와 전체 deploy
 SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-23b`
+- **template revision**: `2026-08-23d`
 - 실행 방법과 파일 이름 규칙:
   `product-boundary-v1-2-staging-verification-records/README.md`
 - 기록 template:
@@ -54,7 +54,7 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 |---|---|---|
 | **P-1** | Search Console 기준값 — 깨끗한 시점에 찍어 두는 **순서**의 문제 | 무료 · 배포 전 |
 | **A-1** | `RoutingRun` 크기 → 인덱스 락이 턴 쓰기를 막는 시간 | 무료 |
-| **A-2** | 마이그레이션이 실제로 적용되고 얼마나 걸리는가 | 무료 |
+| **A-2** | 마이그레이션이 실제로 적용됐는가, 그리고 얼마나 걸렸는가 | 무료 |
 | **B-1** | 새 대화가 만들어지고 `productKey`가 실제로 저장되는가 | 무료 |
 | **B-2** | 기존 대화가 계속 열리는가 | 무료 |
 | **B-3** | 턴이 실제로 답하는가 | **유료 1 turn** |
@@ -107,23 +107,56 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 - [ ] **A-1** production 데이터베이스에 대고 실행한다.
 
   ```
-  npm run report:routing-dispatch-readiness
+  ROUTING_READINESS_WINDOW_DAYS=3650 npm run report:routing-dispatch-readiness
   ```
 
-  판정은 **`RoutingRun` 행 수**로 합니다. 이 숫자는 데이터베이스에서 읽으니
-  그대로 믿을 수 있습니다.
+  **환경변수를 빼지 마십시오.** 기본 창은 7일이고
+  (`scripts/report-routing-dispatch-readiness.mjs`의 `WINDOW_DAYS`), 그러면
+  `Runs recorded`는 최근 7일에 쓰인 행 수가 됩니다. 이 항목이 묻는 것은
+  **테이블 전체 크기**입니다 — 인덱스 빌드와 FK 검증은 7일치가 아니라 전부를
+  훑기 때문입니다. 창을 넓히지 않고 읽은 숫자로 판정한 회차는 다른 질문에 답한
+  회차입니다.
 
-  preflight에 찍히는 `ROUTING_DISPATCH_INSTRUMENTATION` 줄은 **참고만**
-  하십시오. 리포트가 스스로 밝히듯(#839) 그 줄은 **리포트를 실행하는 프로세스의
-  환경**이지 행을 쓴 서버의 환경이 아닙니다 — 배포된 서버는 부팅 시점의 값을
-  들고 있습니다. 그러니 "off로 보이니 행이 없겠지"로 건너뛰지 말고 행 수를 직접
-  보십시오. 행이 0이면 이 항목은 여기서 끝납니다.
+  판정은 `Runs recorded` 세 줄의 **합**으로 합니다. 이 숫자는 데이터베이스에서
+  나오니 그대로 믿을 수 있습니다. 0이면 이 항목은 여기서 끝납니다.
 
-  판별 대상은 이것입니다. 마이그레이션
-  `20260822093000_routing_run_product_attribution`은 `RoutingRun`에 인덱스
-  **2개**를 `CONCURRENTLY` 없이 만들고, 그 다음 FK를 **즉시 검증**으로 겁니다.
-  `CREATE INDEX`는 SHARE 락을 잡아 **그 테이블의 쓰기를 막고**, `RoutingRun`은
-  **디스패치된 턴마다 한 행**입니다. 막히는 쓰기가 곧 채팅 턴입니다.
+  엄밀히 하려면 한 줄 더 봅니다. `mode`는 enum이 아니라 `String`이고
+  (`prisma/schema.prisma`의 `model RoutingRun`), 리포트는 `manual`·`shadow`·
+  `auto` 세 개만 출력하므로 다른 값의 행은 보이지 않습니다.
+
+  ```
+  psql "$DATABASE_URL" -c 'SELECT count(*) FROM "RoutingRun"'
+  ```
+
+  preflight의 `ROUTING_DISPATCH_INSTRUMENTATION` 줄은 **참고값**이고, 어디서
+  실행했는지에 따라 의미가 다릅니다. 컨테이너 안에서(Railway 콘솔이나
+  `railway ssh`) 돌렸다면 그 인스턴스의 실제 환경입니다. `railway run`으로
+  돌렸다면 배포의 *설정*이지 행을 쓴 서버의 환경이 아닙니다 — 서버는 부팅 시점
+  값을 들고 있습니다(#839). 어느 쪽이든 **"off로 보이니 행이 없겠지"로 건너뛰지
+  말고** 행 수를 직접 보십시오. 기록에는 어디서 실행했는지를 함께 적습니다.
+
+  ### 무엇이 얼마나 막히는가
+
+  마이그레이션 `20260822093000_routing_run_product_attribution`은 `RoutingRun`에
+  인덱스 **2개**를 `CONCURRENTLY` 없이 만들고, 그 다음 FK를 **즉시 검증**으로
+  겁니다. 락은 두 테이블에 걸립니다.
+
+  | 구문 | 락이 걸리는 테이블 | 막히는 것 |
+  |---|---|---|
+  | `ADD COLUMN` ×2 (nullable, default 없음) | — | metadata-only, 행을 안 봄 |
+  | `CREATE INDEX` ×2 | `RoutingRun` | `RoutingRun` 쓰기 |
+  | `ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES "Conversation"` | `RoutingRun` **과 `Conversation`** | 양쪽 쓰기 |
+  | `ADD CONSTRAINT ... CHECK ... NOT VALID` | — | 스캔 없음 |
+
+  **FK가 참조되는 테이블에도 락을 잡는다는 것이 이 항목의 핵심입니다.**
+  PostgreSQL은 검증되는 외래키를 걸 때 제약이 붙는 테이블과 참조되는 테이블
+  양쪽에 `SHARE ROW EXCLUSIVE`를 잡습니다. `RoutingRun`이 비어 있어도
+  `Conversation`은 비어 있지 않습니다 — **대화마다 한 행**이고, 그 쓰기가 막히면
+  새 대화와 대화 갱신이 막힙니다.
+
+  그래서 위험을 정하는 것은 `RoutingRun`의 크기 자체가 아니라 **검증 스캔이
+  얼마나 걸리는가**입니다. 스캔 대상이 `RoutingRun`이므로 그 크기가 곧 락을 쥐고
+  있는 시간이고, 그 시간 동안 멈추는 것은 `Conversation` 쪽 트래픽입니다.
 
   저장소가 이미 같은 판단을 문장으로 남겨두었습니다
   (`20260815030000_perplexity_async_job_updated_at_index`):
@@ -133,34 +166,92 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
   > worth splitting the migration over: **it holds one row per deep research
   > request, not per message.**
 
-  `RoutingRun`은 그 문장이 명시적으로 제외한 쪽입니다.
-
   | 관측 | 다음 행동 |
   |---|---|
-  | 행이 0이거나 적음 | 그대로 배포. 선례가 그대로 적용됨 |
+  | 행이 0이거나 적음 | 그대로 배포. 검증 스캔이 순간이므로 `Conversation` 락도 순간 |
   | 행이 많음 | **배포하지 말고 마이그레이션을 쪼갠다** — 인덱스를 별도 파일의 `CREATE INDEX CONCURRENTLY`로, FK를 `NOT VALID` + 후속 `VALIDATE`로 |
 
-  두 번째는 **코드 변경**입니다. 그래서 이 항목이 배포 전에 있습니다. "많음"의
-  경계는 이 저장소가 아니라 이 production의 쓰기량이 정하므로, 행 수와 함께
-  **평소 분당 턴 수**를 기록에 적고 사람이 판정합니다.
+  두 번째는 **코드 변경**입니다. 그래서 이 항목이 배포 전에 있습니다.
 
-- [ ] **A-2** staging에 `prisma migrate deploy`를 적용하고 **각 마이그레이션의
-      소요 시간**을 적는다.
+  "많음"의 경계는 이 저장소가 아니라 이 production이 정하므로, 행 수와 함께
+  **분당 쓰기 두 가지**를 기록에 적고 사람이 판정합니다.
 
-  `20260822090000_conversation_product_key_expand`는 nullable 컬럼과 NOT VALID
-  제약뿐이라 **테이블 크기와 무관하게 즉시**여야 합니다. 여기가 느리면 그
-  자체가 관측입니다 — 예상과 다른 무언가가 있다는 뜻이고, A-1의 판정을 다시
-  봐야 합니다.
+  - `RoutingRun` 분당 쓰기 — `ROUTING_DISPATCH_INSTRUMENTATION`이 `observe`도
+    `enforce`도 아니면 **0**입니다. 아무도 안 쓰는 테이블의 쓰기 차단은 비용이
+    없습니다.
+  - `Conversation` 분당 쓰기 — 이쪽은 recording 설정과 무관합니다. FK 구문이
+    쥐는 락이 실제로 무엇을 멈추는지가 이 숫자입니다.
 
-  적용 후 확인:
+- [ ] **A-2** staging 배포 로그에서 **마이그레이션이 적용된 것과 걸린 시간**을
+      확인하고, 제약 상태를 조회한다.
 
-  ```sql
-  SELECT conname, convalidated FROM pg_constraint
-   WHERE conrelid = '"Conversation"'::regclass AND conname LIKE '%product%';
+  **적용은 손으로 하지 않습니다. 이미 되어 있습니다.** staging 서비스는
+  `develop`에서 배포되고 `preDeployCommand`가
+  `npm run check:encoding:strict && npm run db:migrate`이며, `db:migrate`의
+  끝이 `prisma migrate deploy`입니다(`package.json`). 즉 **develop에 머지되는
+  순간 다음 배포가 적용합니다.** 이 항목은 그 일이 일어났는지를 확인하는
+  것이지 일어나게 하는 것이 아닙니다.
+
+  Railway에서 environment를 **staging**으로 두고, 마이그레이션이 develop에 들어온
+  **직후의 배포**를 열어 deploy 로그를 `migrat`로 거릅니다. 찾는 것은 이
+  네 줄입니다.
+
+  ```
+  N migrations found in prisma/migrations
+  Applying migration `20260822090000_conversation_product_key_expand`
+  Applying migration `20260822093000_routing_run_product_attribution`
+  All migrations have been successfully applied.
   ```
 
-  세 제약이 모두 `convalidated = false`여야 합니다. `true`가 하나라도 있으면
-  누군가 손으로 validate한 것이고, schema 비교가 drift로 잡습니다.
+  `Applying` 줄이 없는 배포는 이미 적용된 뒤의 배포입니다. **더 이전 배포를
+  찾으십시오** — 없다고 판단하기 전에.
+
+  ### 소요 시간은 합으로만 나옵니다
+
+  로그 줄마다 타임스탬프가 붙지만 **마이그레이션별 소요 시간은 얻을 수
+  없습니다.** `Applying` 두 줄과 `All migrations...` 줄의 타임스탬프가 마이크로초
+  단위까지 같게 찍힙니다 — 플랫폼이 각 줄을 찍힌 시점이 아니라 **flush된 배치
+  시점**으로 기록하기 때문입니다.
+
+  그래서 기록에 적는 것은 `N migrations found`부터 `All migrations have been
+  successfully applied.`까지의 **경과 시간 하나**이고, 그것은 두 마이그레이션을
+  합친 **상한**입니다. 이 값을 한쪽 마이그레이션의 소요로 적지 마십시오.
+
+  판별은 그 상한으로 충분합니다.
+  `20260822090000_conversation_product_key_expand`는 nullable 컬럼과 NOT VALID
+  제약뿐이라 **테이블 크기와 무관하게 즉시**여야 하고,
+  `20260822093000_routing_run_product_attribution`은 A-1이 잰 `RoutingRun` 크기만큼
+  걸립니다. 합이 짧으면 둘 다 짧습니다. **합이 예상보다 길면 그 자체가
+  관측입니다** — A-1의 판정을 다시 봐야 한다는 뜻이고, 그때는 각각을 갈라 보기
+  위해 staging에서 되돌린 뒤 하나씩 적용하는 별도 작업이 필요합니다.
+
+  ### 제약 상태
+
+  ```sql
+  SELECT conname, convalidated
+    FROM pg_constraint
+   WHERE conrelid IN ('"Conversation"'::regclass, '"RoutingRun"'::regclass)
+     AND (conname LIKE '%product%' OR conname = 'RoutingRun_conversationId_fkey')
+   ORDER BY conname;
+  ```
+
+  `%product%` 네 개는 전부 `NOT VALID`로 걸었으므로 `convalidated = false`여야
+  합니다. `true`가 하나라도 있으면 누군가 손으로 validate한 것이고, schema 비교가
+  drift로 잡습니다.
+
+  `RoutingRun_conversationId_fkey`만 `true`입니다 — 이것만 즉시 검증으로 걸린
+  제약이고, A-1이 `Conversation` 락을 따지는 이유가 바로 이 줄입니다.
+
+  ### 다음 항목으로 넘어가기 전에 — develop을 멈추십시오
+
+  **staging은 develop에 머지될 때마다 재배포됩니다.** 기록 파일 이름은 deploy
+  SHA **하나**인데, B와 C를 하는 동안 머지가 들어오면 항목마다 다른 SHA에서
+  관측하게 되고 그 기록은 어느 커밋을 덮는지 말할 수 없게 됩니다 — 이 체크리스트
+  구조가 존재하는 이유 그대로입니다(기록 README).
+
+  A-2에서 SHA를 확정하고, **B-1부터 C까지를 그 배포 하나의 수명 안에서**
+  끝내십시오. 중간에 재배포가 일어났다면 그 사실과 새 SHA를 기록에 적고, 앞선
+  항목이 다른 빌드에서 관측됐다는 것을 남깁니다.
 
 ---
 

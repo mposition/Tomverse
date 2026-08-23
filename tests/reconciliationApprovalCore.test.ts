@@ -5,8 +5,10 @@ import { test } from "node:test";
 
 import {
   findReconciliationApprovalProblems,
+  findReconciliationTargetProblems,
   readReconciliationEnvironment,
   type ReconciliationApproval,
+  type ReconciliationModelState,
 } from "@/lib/reconciliationApprovalCore";
 
 const EXPECTED = { fromModelId: "gpt-5-4-mini", toModelId: "gpt-5-6-luna" };
@@ -25,9 +27,7 @@ const approved = (
 });
 
 const codes = (approval: ReconciliationApproval) =>
-  findReconciliationApprovalProblems(approval, EXPECTED).map(
-    (problem) => problem.code
-  );
+  findReconciliationApprovalProblems(approval).map((problem) => problem.code);
 
 test("a dry run needs no approval at all", () => {
   // Reporting what would change has to stay one command away, or nobody looks
@@ -79,10 +79,23 @@ test("each missing field is reported on its own", () => {
   assert.deepEqual(codes(approved({ toModelId: null })), ["missing_target"]);
 });
 
-test("a run aimed at the wrong models is refused, not silently retargeted", () => {
+test("any pair of models is accepted, because this is every retirement's tool", () => {
+  // ML-10: --from and --to used to be checked against two constants naming one
+  // migration. The next retirement would have meant copying the script, and a
+  // copy carries no guarantee the approval gate comes with it.
   assert.deepEqual(
-    codes(approved({ fromModelId: "gpt-5-6-luna", toModelId: "gpt-5-4-mini" })),
-    ["target_mismatch"]
+    codes(approved({ fromModelId: "some-old-model", toModelId: "some-new-model" })),
+    []
+  );
+});
+
+test("moving a model onto itself is refused", () => {
+  // Not a harmless no-op: each "rewrite" files a ModelMigrationRecord, and the
+  // notice built from those records would tell people their setting moved to
+  // the model it was already on.
+  assert.deepEqual(
+    codes(approved({ fromModelId: "gpt-5-6-luna", toModelId: "gpt-5-6-luna" })),
+    ["same_target"]
   );
 });
 
@@ -195,5 +208,117 @@ test("nothing in the repository runs the reconciliation by itself", () => {
     offenders,
     [],
     "reconciliation must only ever be started by an operator typing the command"
+  );
+});
+
+// ML-10: the timing rule as a check rather than as prose.
+//
+// "Run with the retirement deploy" was enforced by two constants naming one
+// migration. Reading the registry makes it true for every migration.
+
+const retired = (
+  overrides: Partial<ReconciliationModelState> = {}
+): ReconciliationModelState => ({
+  modelId: "gpt-5-4-mini",
+  found: true,
+  enabled: false,
+  publiclyListed: false,
+  catalogDeleted: false,
+  ...overrides,
+});
+
+const live = (
+  overrides: Partial<ReconciliationModelState> = {}
+): ReconciliationModelState => ({
+  modelId: "gpt-5-6-luna",
+  found: true,
+  enabled: true,
+  publiclyListed: true,
+  catalogDeleted: false,
+  ...overrides,
+});
+
+const targetCodes = (
+  from: ReconciliationModelState,
+  to: ReconciliationModelState,
+  apply = true
+) =>
+  findReconciliationTargetProblems({ apply, from, to }).problems.map(
+    (problem) => problem.code
+  );
+
+test("a retired source and a live replacement pass", () => {
+  assert.deepEqual(targetCodes(retired(), live()), []);
+});
+
+test("an enabled model may not be moved off", () => {
+  // The acceptance criterion. Until it is retired, an account that named it
+  // named a model that still works.
+  assert.deepEqual(targetCodes(retired({ enabled: true }), live()), [
+    "from_not_retired",
+  ]);
+});
+
+test("a still-listed model may not be moved off either", () => {
+  // Disabled but still in the picker is a half-retirement, and the rows are
+  // not yet stale pointers.
+  assert.deepEqual(targetCodes(retired({ publiclyListed: true }), live()), [
+    "from_not_retired",
+  ]);
+});
+
+test("the refusal names which half is still true", () => {
+  const { problems } = findReconciliationTargetProblems({
+    apply: true,
+    from: retired({ enabled: true, publiclyListed: true }),
+    to: live(),
+  });
+  assert.match(problems[0].message, /enabled and publicly listed/);
+});
+
+test("an unknown source fails closed", () => {
+  // A missing row proves nothing about whether the model was retired, and
+  // proof is the entire point of this check.
+  assert.deepEqual(targetCodes(retired({ found: false }), live()), [
+    "from_unknown",
+  ]);
+});
+
+test("the replacement has to be one that can answer", () => {
+  assert.deepEqual(targetCodes(retired(), live({ found: false })), ["to_unknown"]);
+  assert.deepEqual(targetCodes(retired(), live({ enabled: false })), [
+    "to_not_usable",
+  ]);
+  assert.deepEqual(targetCodes(retired(), live({ catalogDeleted: true })), [
+    "to_not_usable",
+  ]);
+});
+
+test("an unlisted replacement warns rather than refusing", () => {
+  // The model works; what the accounts moved onto it lose is finding it in
+  // their own picker. That can be deliberate, so it is not this check's call.
+  const result = findReconciliationTargetProblems({
+    apply: true,
+    from: retired(),
+    to: live({ publiclyListed: false }),
+  });
+  assert.deepEqual(result.problems, []);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /model picker/);
+});
+
+test("both ends are reported together, not one per run", () => {
+  assert.deepEqual(
+    targetCodes(retired({ enabled: true }), live({ enabled: false })),
+    ["from_not_retired", "to_not_usable"]
+  );
+});
+
+test("a dry run reads the registry and refuses nothing", () => {
+  // Reporting what would change stays one command away, exactly as it does for
+  // the approval fields.
+  assert.deepEqual(
+    targetCodes(retired({ found: false, enabled: true }), live({ found: false }), false),
+    []
   );
 });
