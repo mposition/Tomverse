@@ -20,6 +20,11 @@ import {
   REFUSED_ARTIFACT_EXTENSIONS,
   formatIdsOfKind,
 } from "@/lib/generatedArtifactCore";
+import {
+  DOCX_MEDIA_TYPE,
+  XLSX_MEDIA_TYPE,
+  type TurnAttachmentDescriptor,
+} from "@/lib/messageAttachmentCore";
 
 /* ------------------------------------------------------------------------ */
 /* Model capability                                                           */
@@ -98,6 +103,14 @@ export type ArtifactToolPlan = {
   offReason?: ArtifactToolOffReason;
   /** Whether the tool is sent to the provider at all. */
   registerTool: boolean;
+  /**
+   * Whether `create_document_batch` is sent as well.
+   *
+   * Only on a turn that actually carries a Word template. A tool that has
+   * nothing to act on is priced input the request had no use for, and a model
+   * offered it anyway would eventually reach for it with an invented handle.
+   */
+  registerDocumentBatch: boolean;
   /** The system block this turn carries. Never empty. */
   systemPrompt: string;
 };
@@ -121,6 +134,14 @@ export type ArtifactToolPlanInput = {
   nativeSearchForced: boolean;
   /** "chat" conversations only; the image workspace has its own domain. */
   conversationKind: "chat" | "image";
+  /**
+   * The files the user attached to the turn being answered, in order.
+   *
+   * Handles only -- `att_1`, `att_2` -- plus the name and media type the card
+   * already shows. No key, no size in bytes of anything the model could ask
+   * for, and nothing that addresses a route.
+   */
+  turnAttachments?: readonly TurnAttachmentDescriptor[];
 };
 
 /**
@@ -180,7 +201,9 @@ const GENERATE_PROMPT = [
   `- \`create_document\` -- ${formatList("document")}`,
   `- \`create_presentation\` -- ${formatList("presentation")}`,
   `- \`create_text_file\` -- source code, markup and config: ${formatList("text")}`,
-  `- \`create_archive\` -- ${formatList("archive")}, for delivering several files at once`,
+  `- \`create_archive\` -- ${formatList("archive")}, for delivering several files at once. ` +
+    "Its entries are either authored text (`path`, `format`, `content`) or " +
+    "documents the application renders for you (`path`, `documentFormat`, `blocks`).",
   "",
   "Rules:",
   "- The format the user names is the format you produce. Never substitute CSV",
@@ -207,10 +230,16 @@ const GENERATE_PROMPT = [
     `columns per worksheet, ${ARTIFACT_LIMITS.maxCells} cells in total; ` +
     `${ARTIFACT_LIMITS.maxDocumentBlocks} document blocks; ` +
     `${ARTIFACT_LIMITS.maxSlides} slides; ` +
-    `${ARTIFACT_LIMITS.maxTextFileCharacters} characters per text file; ` +
-    `${ARTIFACT_LIMITS.maxArchiveEntries} files per archive; ` +
-    `${ARTIFACT_LIMITS.maxArtifactsPerMessage} files per answer. If the content does not ` +
-    "fit, say so and offer a narrower selection rather than truncating silently.",
+    `${ARTIFACT_LIMITS.maxTextFileCharacters} characters per text file. ` +
+    "If the content does not fit, say so and offer a narrower selection " +
+    "rather than truncating silently.",
+  `- **How many files.** You may attach at most ${ARTIFACT_LIMITS.maxArtifactsPerMessage} ` +
+    "**top-level** files to one answer. That is a limit on attachments, NOT on " +
+    "how many documents you can produce: an archive counts as one attachment " +
+    `and may contain up to ${ARTIFACT_LIMITS.maxArchiveEntries} files. So ten ` +
+    "spreadsheets, or fifty contracts, is one `create_archive` call -- it is " +
+    "something you can do, and refusing it as over the three-file limit would " +
+    "be wrong.",
   "- If the tool reports a failure, tell the user what failed. Do not describe",
   "  a file that does not exist.",
 ].join("\n");
@@ -255,6 +284,78 @@ const offPrompt = (reason: ArtifactToolOffReason): string => {
   ].join("\n");
 };
 
+/** Which formats the batch tool can read a template from, and records from. */
+const isBatchTemplate = (attachment: TurnAttachmentDescriptor) =>
+  attachment.mediaType === DOCX_MEDIA_TYPE;
+const isBatchData = (attachment: TurnAttachmentDescriptor) =>
+  attachment.mediaType === XLSX_MEDIA_TYPE || attachment.mediaType === "text/csv";
+
+/**
+ * Whether this turn can run a template batch at all.
+ *
+ * A Word template is the necessary half: without one there is nothing to fill,
+ * and registering the tool would be offering a capability with no input. The
+ * data file is not required here -- a user may attach the template first and
+ * the spreadsheet next turn, and the tool's own refusal names what is missing.
+ */
+export const turnSupportsDocumentBatch = (
+  attachments: readonly TurnAttachmentDescriptor[] | undefined
+): boolean => Boolean(attachments?.some(isBatchTemplate));
+
+/**
+ * The list of this turn's own files, as the model is allowed to see it.
+ *
+ * The handles are the whole point. A model that is asked to fill a template
+ * has to be able to say *which* file is the template, and the two ways of
+ * letting it -- a storage key or a database id -- are both things that must
+ * never reach a model. So it gets `att_1`, which is a name for a position in
+ * this request and nothing else.
+ */
+const attachmentSection = (
+  attachments: readonly TurnAttachmentDescriptor[]
+): string => {
+  const lines = [
+    "",
+    "## Files attached to this message",
+    "",
+    ...attachments.map(
+      (attachment) =>
+        `- \`${attachment.handle}\` -- "${attachment.name}" (${attachment.mediaType})`
+    ),
+    "",
+    "Refer to these files ONLY by the handle above. You do not have their",
+    "bytes, their base64, their XML, their storage key or a path, and there is",
+    "no way to ask for any of those -- a handle is the whole of what a tool",
+    "accepts.",
+  ];
+
+  if (turnSupportsDocumentBatch(attachments)) {
+    const template = attachments.find(isBatchTemplate);
+    const data = attachments.find(isBatchData);
+    lines.push(
+      "",
+      "`create_document_batch` is available for this message. Use it when the",
+      "user wants one document per row of a table: it fills the attached Word",
+      "template once per row and returns every finished document in one .zip.",
+      "It keeps the template's styles, tables, headers, footers, section setup",
+      "and images, because it copies the template rather than rewriting it.",
+      data
+        ? `Here that means \`templateAttachment: "${template!.handle}"\` and ` +
+          `\`dataAttachment: "${data.handle}"\`.`
+        : "It also needs a spreadsheet of rows; if the user has not attached " +
+          "one, ask for it rather than inventing the values.",
+      "Give `filenameTemplate` as a naming rule over the spreadsheet's own",
+      "column headers, for example \"{{name}}_contract\". Placeholders in the",
+      "template are written the same way and may be split across formatting;",
+      "the application handles that. If a value must never be blank, list its",
+      "column in `requiredPlaceholders` and the batch will refuse rather than",
+      "deliver an incomplete document."
+    );
+  }
+
+  return lines.join("\n");
+};
+
 /**
  * The whole decision for one turn.
  *
@@ -271,6 +372,7 @@ export const planGeneratedArtifactTool = (
       mode: "off",
       offReason: "not_a_chat_conversation",
       registerTool: false,
+      registerDocumentBatch: false,
       systemPrompt: offPrompt("not_a_chat_conversation"),
     };
   }
@@ -280,6 +382,7 @@ export const planGeneratedArtifactTool = (
       mode: "off",
       offReason: "model_unverified",
       registerTool: false,
+      registerDocumentBatch: false,
       systemPrompt: offPrompt("model_unverified"),
     };
   }
@@ -295,6 +398,7 @@ export const planGeneratedArtifactTool = (
       mode: "off",
       offReason: "native_search_conflict",
       registerTool: false,
+      registerDocumentBatch: false,
       systemPrompt: offPrompt("native_search_conflict"),
     };
   }
@@ -303,6 +407,7 @@ export const planGeneratedArtifactTool = (
     return {
       mode: "sign_in_required",
       registerTool: true,
+      registerDocumentBatch: false,
       systemPrompt: SIGN_IN_PROMPT,
     };
   }
@@ -312,11 +417,21 @@ export const planGeneratedArtifactTool = (
       mode: "off",
       offReason: "no_conversation",
       registerTool: false,
+      registerDocumentBatch: false,
       systemPrompt: offPrompt("no_conversation"),
     };
   }
 
-  return { mode: "generate", registerTool: true, systemPrompt: GENERATE_PROMPT };
+  const attachments = input.turnAttachments ?? [];
+  const registerDocumentBatch = turnSupportsDocumentBatch(attachments);
+  return {
+    mode: "generate",
+    registerTool: true,
+    registerDocumentBatch,
+    systemPrompt: attachments.length
+      ? `${GENERATE_PROMPT}\n${attachmentSection(attachments)}`
+      : GENERATE_PROMPT,
+  };
 };
 
 /**
@@ -332,3 +447,13 @@ export const planGeneratedArtifactTool = (
  * never short.
  */
 export const ARTIFACT_TOOL_DEFINITION_TOKENS = 2600;
+
+/**
+ * The extra allowance for `create_document_batch`'s own schema.
+ *
+ * Counted separately because the tool is registered on some turns and not
+ * others, and folding it into the constant above would price it into every
+ * request that never sends it. Measured against the rendered schema and
+ * rounded up, so the reservation is never short.
+ */
+export const ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS = 700;

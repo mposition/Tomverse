@@ -23,6 +23,7 @@ import { zipSync, type Zippable } from "fflate";
 import {
   ARTIFACT_LIMITS,
   csvCell,
+  isArchiveDocumentEntry,
   requireArtifactFormat,
   type ArchiveSpec,
   type ArtifactCellValue,
@@ -450,19 +451,57 @@ export const renderTextFile = (spec: TextFileSpec): Uint8Array =>
  * already refused-not-sanitised at admission (`isSafeArchivePath`), so nothing
  * here has to decide what `../` meant.
  */
-export const renderArchive = (spec: ArchiveSpec): Uint8Array => {
-  const files: Zippable = {};
-  const encoder = new TextEncoder();
+export const renderArchive = (spec: ArchiveSpec): Uint8Array =>
+  zipArchiveEntries(
+    spec.entries.map((entry) => {
+      if (isArchiveDocumentEntry(entry)) {
+        // Rendering a document needs the Word and PDF writers, which this
+        // module deliberately does not import: it is the *text* half of the
+        // domain. `renderArchiveArtifact` in lib/generatedArtifactRenderers.ts
+        // is the caller that has every writer in hand, and it is the one the
+        // tool actually goes through -- so reaching here means an archive with
+        // a rendered entry was zipped by the wrong path.
+        throw new TextContentError(
+          "CONTENT_MALFORMED",
+          "A rendered document entry must be built by the artifact renderer."
+        );
+      }
+      return {
+        path: entry.path,
+        bytes: archiveTextEntryBytes(entry),
+      };
+    })
+  );
 
-  for (const entry of spec.entries) {
-    const content = admitTextContent({
+/** One authored entry's bytes, with the same checks a direct request gets. */
+export const archiveTextEntryBytes = (entry: {
+  path: string;
+  format: string;
+  content: string;
+}): Uint8Array =>
+  new TextEncoder().encode(
+    admitTextContent({
       filename: entry.path,
       format: entry.format,
       content: entry.content,
-    });
-    files[entry.path] = encoder.encode(content);
-  }
+    })
+  );
 
+/**
+ * Zips entries whose bytes are already decided.
+ *
+ * The single place a `.zip` is written, so the fixed timestamp and the
+ * compression level cannot drift between the authored-text archive and the
+ * batch-rendered one -- two archives built from the same inputs are the same
+ * bytes.
+ */
+export const zipArchiveEntries = (
+  entries: Array<{ path: string; bytes: Uint8Array }>
+): Uint8Array => {
+  const files: Zippable = {};
+  for (const entry of entries) {
+    files[entry.path] = entry.bytes;
+  }
   return zipSync(files, { level: 6, mtime: FIXED_ENTRY_TIME });
 };
 

@@ -71,6 +71,27 @@ const REGISTRY = {
     reason:
       "ready and failed. ARTIFACT_STATUSES beside it carries a third value, `blocked`, which is a live-stream state for a guest who has not signed in: there is no account to write a row under, so a third database value would be a status nothing could ever query for. The split is what keeps the constraint and the transport union from being forced to agree about a state only one of them has.",
   },
+  MessageAttachment_kind_check: {
+    owner: "list",
+    module: "lib/messageAttachmentCore.ts",
+    list: "MESSAGE_ATTACHMENT_KINDS",
+    reason:
+      "file and text -- how the request layer reads an uploaded file. The server derives it from the media type (messageAttachmentKindFor), so a third value would be a kind nothing knows how to read, and a request cannot introduce one because it never supplies the field.",
+  },
+  MessageAttachmentUpload_kind_check: {
+    owner: "list",
+    module: "lib/messageAttachmentCore.ts",
+    list: "MESSAGE_ATTACHMENT_KINDS",
+    reason:
+      "The upload row's copy of the same two kinds, from the same list. The binding step copies the value straight across, so the two tables cannot be allowed to disagree about what a kind is -- which is why both constraints are held to one module's list rather than to each other.",
+  },
+  MessageAttachmentCleanup_reason_check: {
+    owner: "list",
+    module: "lib/messageAttachmentStorage.ts",
+    list: "MESSAGE_ATTACHMENT_CLEANUP_REASONS",
+    reason:
+      "conversation_deleted, account_deleted, message_deleted, upload_abandoned. Each names a distinct path that enqueues an object, and the operator reading a stuck queue needs to know which one wrote the row -- a reason the application could write and the constraint refuses would fail the deletion transaction rather than the sweep.",
+  },
   Conversation_memoryMode_check: {
     owner: "list",
     module: "lib/conversationMemoryMode.ts",

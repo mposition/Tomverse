@@ -34,6 +34,7 @@ import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJo
 import { reconcileProcessingRefundRequestsQuietly } from "@/lib/refundReconciliation";
 import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
+import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -114,6 +115,12 @@ export async function POST(request: Request) {
     // landed. Never throws, so it cannot turn a successful reconciliation
     // into a failed one (docs/policy/generated-artifacts.md section 8).
     const generatedArtifacts = await runGeneratedArtifactMaintenanceQuietly();
+    // And the tombstones for the files users uploaded. Same never-throws
+    // contract, same fifteen-minute cadence: a deletion that committed in the
+    // database is a deletion that has to reach object storage eventually, and
+    // this is the arm that retries until it does
+    // (docs/policy/user-attachment-persistence.md).
+    const messageAttachments = await runMessageAttachmentMaintenanceQuietly();
     // Staged external-import payloads carry user conversation content and a
     // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
     // batch/finalize are the primary guard; this sweep clears content whose
@@ -194,6 +201,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         generatedArtifacts,
+        messageAttachments,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
@@ -211,6 +219,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         generatedArtifacts,
+        messageAttachments,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,

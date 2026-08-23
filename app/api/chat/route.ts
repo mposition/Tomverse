@@ -24,7 +24,7 @@ import {
     ChatAttachmentValidationError,
     validateChatAttachmentUpload,
 } from "@/lib/chatAttachmentValidation";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import {
@@ -83,10 +83,10 @@ import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer"
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import {
     planGeneratedArtifactTool,
+    ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
     ARTIFACT_TOOL_DEFINITION_TOKENS,
 } from "@/lib/generatedArtifactToolPolicy";
 import {
-    ALL_ARTIFACT_TOOL_NAMES,
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
@@ -211,6 +211,20 @@ import {
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
+    messageAttachmentReferenceSchema,
+    turnAttachmentHandle,
+    type MessageAttachmentReference,
+    type TurnAttachmentDescriptor,
+} from "@/lib/messageAttachmentCore";
+import {
+    MessageAttachmentResolveError,
+    accountAttachmentPrefix,
+    discardUnboundUpload,
+    registerFinalizedUpload,
+    resolveMessageAttachmentReferences,
+    type ResolvedAttachment,
+} from "@/lib/messageAttachmentStorage";
+import {
     getGuestAttachmentSecret,
     guestAttachmentPrefix,
     isOwnGuestAttachmentKey,
@@ -273,9 +287,32 @@ const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
+    /**
+     * A guest's own ephemeral object, whose key is derived from their signed
+     * guest identity and is therefore self-authorising. Signed-in callers do
+     * not send this and are refused if they do -- they name an opaque id and
+     * the server resolves the key (docs/policy/user-attachment-persistence.md).
+     */
     objectKey?: unknown;
+    /** A `MessageAttachment` already bound to one of the caller's messages. */
+    attachmentId?: unknown;
+    /** A finalised upload that has not been bound to a message yet. */
+    uploadId?: unknown;
     data?: unknown;
     kind?: unknown;
+};
+
+/** How one attachment reference is keyed while a turn is being resolved. */
+const attachmentReferenceKey = (
+    attachment: IncomingAttachment
+): string | null => {
+    if (typeof attachment?.attachmentId === "string" && attachment.attachmentId) {
+        return `a:${attachment.attachmentId}`;
+    }
+    if (typeof attachment?.uploadId === "string" && attachment.uploadId) {
+        return `u:${attachment.uploadId}`;
+    }
+    return null;
 };
 
 const parseStoredModelIds = (value: unknown) => {
@@ -408,14 +445,18 @@ const uploadPreparationSchema = z.union([
         })
         .strict(),
 ]);
+// The composer discards a draft attachment by the id the finalisation step
+// gave it, never by a storage key. There is nothing for a caller to guess and
+// nothing for one to enumerate.
 const deleteAttachmentSchema = z
     .object({
-        key: z.string().min(1).max(512),
+        uploadId: z.string().trim().min(1).max(64),
     })
     .strict();
 const finalizeAttachmentSchema = z
     .object({
         key: z.string().min(1).max(512),
+        name: z.string().trim().min(1).max(200),
         mediaType: z.string().refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
         size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
     })
@@ -432,12 +473,8 @@ const sanitizeFilename = (filename: string) => {
 };
 
 const createAttachmentKey = (email: string, name: string) => {
-    const userHash = createHash("sha256")
-        .update(email.toLowerCase())
-        .digest("hex")
-        .slice(0, 20);
     const date = new Date().toISOString().slice(0, 10);
-    return `attachments/${userHash}/${date}/${randomUUID()}-${sanitizeFilename(name)}`;
+    return `${accountAttachmentPrefix(email)}${date}/${randomUUID()}-${sanitizeFilename(name)}`;
 };
 
 export async function GET() {
@@ -575,12 +612,25 @@ export async function PUT(req: Request) {
                 expectedSize: exportedFile.byteLength,
             });
 
-            return Response.json({
-                key,
+            // A Drive import is an upload that happened server-side, so it
+            // ends the same way an ordinary one does: with an opaque id, and
+            // without the key (docs/policy/user-attachment-persistence.md).
+            const registered = await registerFinalizedUpload({
+                userId,
+                objectKey: key,
+                ownPrefix: accountAttachmentPrefix(session.user.email),
                 name: exportedName,
                 mediaType: exportType.mediaType,
                 size: exportedFile.byteLength,
                 kind: exportType.kind,
+            });
+
+            return Response.json({
+                uploadId: registered.uploadId,
+                name: registered.name,
+                mediaType: registered.mediaType,
+                size: registered.size,
+                kind: registered.kind,
             });
         }
 
@@ -653,15 +703,12 @@ export async function PATCH(req: Request) {
             minute: 20,
             day: 300,
         });
-        const { key, mediaType, size } = await readLimitedJson(
+        const { key, name, mediaType, size } = await readLimitedJson(
             req,
             8 * 1024,
             finalizeAttachmentSchema
         );
-        const userPrefix = `attachments/${createHash("sha256")
-            .update(session.user.email.toLowerCase())
-            .digest("hex")
-            .slice(0, 20)}/`;
+        const userPrefix = accountAttachmentPrefix(session.user.email);
 
         if (!key.startsWith(userPrefix)) {
             return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -736,10 +783,35 @@ export async function PATCH(req: Request) {
             throw error;
         }
 
-        return Response.json({
-            key,
+        /*
+          The step that ends the browser's involvement with storage.
+
+          Everything after this names the upload by the opaque id below -- the
+          send, the pre-save that binds it to a message, a retry, a template
+          lookup. The key is not returned, so nothing downstream has to decide
+          whether a key in a request body can be believed
+          (docs/policy/user-attachment-persistence.md).
+
+          The size and the kind recorded are the ones this step established --
+          storage's measured size and the format table's own reading of the
+          file -- not the ones the client declared.
+        */
+        const registered = await registerFinalizedUpload({
+            userId,
+            objectKey: key,
+            ownPrefix: userPrefix,
+            name,
             mediaType,
             size: validated.size,
+            kind: attachmentKindForFormat(format),
+        });
+
+        return Response.json({
+            uploadId: registered.uploadId,
+            name: registered.name,
+            mediaType: registered.mediaType,
+            size: registered.size,
+            kind: registered.kind,
             // Counts only -- an entry path is text the uploader chose, and a
             // response is not a place to echo it back.
             ...(inspection.archive ? { archive: inspection.archive } : {}),
@@ -774,21 +846,31 @@ export async function DELETE(req: Request) {
             minute: 30,
             day: 500,
         });
-        const { key } = await readLimitedJson(
+        const { uploadId } = await readLimitedJson(
             req,
             4 * 1024,
             deleteAttachmentSchema
         );
-        const userPrefix = `attachments/${createHash("sha256")
-            .update(session.user.email.toLowerCase())
-            .digest("hex")
-            .slice(0, 20)}/`;
 
-        if (!key.startsWith(userPrefix)) {
-            return Response.json({ error: "Forbidden" }, { status: 403 });
+        /*
+          Removing a file from the *composer*, which is not the same act as
+          removing it from a message that was already sent. An upload a message
+          references is kept and reported as such: the user is editing a draft,
+          and a stored turn whose attachment card pointed at nothing would be
+          the failure this whole feature exists to remove
+          (docs/policy/user-attachment-persistence.md).
+
+          Ownership is part of the lookup rather than a comparison afterwards,
+          so another account's id is simply not found -- and the 204 says the
+          draft no longer has that file either way.
+        */
+        const outcome = await discardUnboundUpload({ userId, uploadId });
+        if (outcome.kept) {
+            return Response.json(
+                { kept: true, reason: "ATTACHMENT_ALREADY_SENT" },
+                { status: 200 }
+            );
         }
-
-        await deleteR2Object(key);
         return new Response(null, { status: 204 });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
@@ -971,11 +1053,66 @@ async function handleChatPost(
         // rule: a probe that measured any key would be an object-size oracle
         // over the whole bucket.
         const ownAttachmentPrefix = session?.user?.email
-            ? `attachments/${createHash("sha256")
-                .update(session.user.email.toLowerCase())
-                .digest("hex")
-                .slice(0, 20)}/`
+            ? accountAttachmentPrefix(session.user.email)
             : null;
+
+        /*
+          Every attachment this transcript references, resolved once, before
+          anything reads a file (docs/policy/user-attachment-persistence.md).
+
+          A signed-in caller names an opaque id -- an upload the finalisation
+          step issued, or an attachment already bound to one of their own
+          messages -- and this is where that id becomes a storage fact. Both
+          lookups scope by `userId` inside the query, so another account's id
+          is not found rather than refused, and the prefix is re-checked on
+          what comes back.
+
+          Guests are deliberately not here. Their objects are ephemeral, have
+          no owner row to hang an id on, and their keys are derived from their
+          own signed guest identity -- so the key *is* the authorisation, and
+          `isOwnGuestAttachmentKey` below is what checks it.
+        */
+        const resolvedAttachments = new Map<string, ResolvedAttachment>();
+        if (session?.user?.id && ownAttachmentPrefix) {
+            const references: MessageAttachmentReference[] = [];
+            const referenceKeys: string[] = [];
+            for (const message of messages) {
+                const attachments = Array.isArray(message.attachments)
+                    ? (message.attachments as IncomingAttachment[])
+                    : [];
+                for (const attachment of attachments) {
+                    const key = attachmentReferenceKey(attachment);
+                    if (!key || referenceKeys.includes(key)) continue;
+                    const parsed =
+                        messageAttachmentReferenceSchema.safeParse(attachment);
+                    if (!parsed.success) continue;
+                    references.push(parsed.data);
+                    referenceKeys.push(key);
+                }
+            }
+            if (references.length > 0) {
+                try {
+                    const resolved = await resolveMessageAttachmentReferences({
+                        userId: session.user.id,
+                        ownPrefix: ownAttachmentPrefix,
+                        conversationId: conversationId ?? null,
+                        references,
+                    });
+                    resolved.forEach((attachment, index) => {
+                        resolvedAttachments.set(referenceKeys[index], attachment);
+                    });
+                } catch (error) {
+                    if (error instanceof MessageAttachmentResolveError) {
+                        // 404-shaped rather than 403-shaped on purpose: the
+                        // lookup never learned whether the id belongs to
+                        // somebody else or to nobody, so neither can the
+                        // answer.
+                        throw new ChatAccessError(400, error.code, error.message);
+                    }
+                    throw error;
+                }
+            }
+        }
         // Only read when the cohort would admit this account. `decideAutoCohort`
         // costs nothing -- the plan is already in hand and readiness is read
         // from memory -- so while the rollout is off this query never runs and
@@ -1030,7 +1167,10 @@ async function handleChatPost(
         // requests.
         const measuredAttachments =
             autoCohort.eligible && turnCarriesAttachments(messages)
-                ? await measureTurnAttachments(messages, ownAttachmentPrefix)
+                ? measureTurnAttachments(
+                      Array.from(resolvedAttachments.values()),
+                      ownAttachmentPrefix
+                  )
                 : ({ measurable: true, descriptors: [] } as const);
         // Health and the measured tie-break signals, from one cached snapshot.
         // Read only for an account the cohort would actually route: a feature
@@ -1182,6 +1322,49 @@ async function handleChatPost(
         )
             ? latestMessage.attachments.length
             : 0;
+        /*
+          The handles the model is given for this turn's own files.
+
+          `att_1`, `att_2`, in the order the composer sent them. Minted per
+          request and meaningless outside it: not a row id, not a storage key,
+          and it addresses no route -- which is the whole reason it is safe to
+          put in a prompt at all. A model that could name a storage location
+          could quote one, and a quoted location is a link that looks real.
+
+          Built from the resolved rows for a signed-in caller, so the name and
+          the media type the model reads are the ones the server stored rather
+          than the ones the request declared.
+        */
+        const turnAttachmentDescriptors: TurnAttachmentDescriptor[] = (
+            Array.isArray(latestMessage?.attachments)
+                ? (latestMessage.attachments as IncomingAttachment[])
+                : []
+        ).map((attachment, index) => {
+            const key = attachmentReferenceKey(attachment);
+            const resolved = key ? resolvedAttachments.get(key) : undefined;
+            return {
+                handle: turnAttachmentHandle(index),
+                name:
+                    resolved?.name ??
+                    (typeof attachment.name === "string" ? attachment.name : "file"),
+                mediaType:
+                    resolved?.mediaType ??
+                    (typeof attachment.mediaType === "string"
+                        ? attachment.mediaType
+                        : "application/octet-stream"),
+                byteSize: resolved?.size ?? 0,
+            };
+        });
+        /**
+         * The bytes behind those handles, filled in as the message loop reads
+         * each file. Only the turn's own attachments, and only in memory for
+         * the length of the request -- the batch generator is the single
+         * reader.
+         */
+        const turnAttachmentBytes = new Map<
+            string,
+            { name: string; mediaType: string; bytes: Uint8Array }
+        >();
         if (latestMessageAttachmentCount > MAX_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
@@ -1196,7 +1379,16 @@ async function handleChatPost(
                 "This conversation has reached its attachment limit. Start a new chat to attach more files."
             );
         }
-        const objectKeys = new Set<string>();
+        /*
+          One attachment is named once per turn, whichever handle names it.
+
+          The set used to be storage keys, which is what the request carried.
+          It carries opaque ids now, so the identity being deduplicated is the
+          reference -- and the guest path, whose keys are derived from the
+          caller's own signed identity, keeps deduplicating on the key because
+          that is the only name a guest object has.
+        */
+        const attachmentIdentities = new Set<string>();
         for (const attachment of requestAttachments) {
             const hasObjectKey = typeof attachment?.objectKey === "string";
             const hasInlineData = typeof attachment?.data === "string";
@@ -1207,19 +1399,21 @@ async function handleChatPost(
                     "Attachments must be uploaded before sending."
                 );
             }
-            if (hasObjectKey) {
-                const objectKey = attachment.objectKey as string;
-                if (objectKeys.has(objectKey)) {
+            const identity =
+                attachmentReferenceKey(attachment) ??
+                (hasObjectKey ? `k:${attachment.objectKey as string}` : null);
+            if (identity) {
+                if (attachmentIdentities.has(identity)) {
                     throw new ChatAccessError(
                         400,
                         "DUPLICATE_ATTACHMENT_OBJECT",
                         "Duplicate attachment objects are not allowed."
                     );
                 }
-                objectKeys.add(objectKey);
+                attachmentIdentities.add(identity);
             }
         }
-        if (objectKeys.size > MAX_CONVERSATION_ATTACHMENTS) {
+        if (attachmentIdentities.size > MAX_CONVERSATION_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENT_OBJECTS",
@@ -1696,6 +1890,7 @@ async function handleChatPost(
                       nativeSearchEnabled &&
                       webSearchCapability.canForceExecution,
                   conversationKind: "chat",
+                  turnAttachments: turnAttachmentDescriptors,
               });
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
@@ -1717,6 +1912,11 @@ async function handleChatPost(
                 estimateTextTokens(artifactToolPlan.systemPrompt) +
                 (artifactToolPlan.registerTool
                     ? ARTIFACT_TOOL_DEFINITION_TOKENS
+                    : 0) +
+                // The batch tool's schema is only sent on a turn that carries
+                // a Word template, so it is priced only there.
+                (artifactToolPlan.registerDocumentBatch
+                    ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
                     : 0);
             estimatedInputTokens += artifactPromptTokens;
             inputEstimate.addTokens(artifactPromptTokens);
@@ -1742,6 +1942,7 @@ async function handleChatPost(
             ) as IncomingAttachment[];
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
+            const isLatestMessage = msg === latestMessage;
 
             /**
              * Reads one file into the turn -- attached directly, or lifted
@@ -2082,7 +2283,37 @@ async function handleChatPost(
                 return "ok";
             };
 
-            for (const attachment of attachments) {
+            for (const [attachmentIndex, incoming] of attachments.entries()) {
+                /*
+                  What this file actually is, decided by the server.
+
+                  For a signed-in caller every field comes from the row the
+                  opaque id resolved to -- name, media type, kind and key -- so
+                  a request that renamed a .docx to a .txt, understated a size
+                  or pointed somewhere else changes nothing about how the file
+                  is read. For a guest the request is still the source, because
+                  a guest object has no row: its key is derived from their own
+                  signed identity and checked as such below.
+                */
+                const referenceKey = attachmentReferenceKey(incoming);
+                const resolved = referenceKey
+                    ? resolvedAttachments.get(referenceKey)
+                    : undefined;
+                if (!resolved && typeof incoming?.objectKey !== "string") {
+                    throw new ChatAccessError(
+                        400,
+                        "ATTACHMENT_REFERENCE_REQUIRED",
+                        "Attachments must be referenced by the id the upload step issued."
+                    );
+                }
+                const attachment: IncomingAttachment = resolved
+                    ? {
+                          name: resolved.name,
+                          mediaType: resolved.mediaType,
+                          kind: resolved.kind,
+                          objectKey: resolved.objectKey,
+                      }
+                    : incoming;
                 if (
                     !attachment ||
                     typeof attachment.name !== "string" ||
@@ -2170,6 +2401,24 @@ async function handleChatPost(
                         413,
                         "ATTACHMENT_TOO_LARGE",
                         "An attachment exceeds the per-file size limit."
+                    );
+                }
+                /*
+                  The one place a tool can reach this turn's own files.
+
+                  Held only for the attachments of the message being answered,
+                  only for the length of this request, and keyed by the opaque
+                  handle the model was given. The bytes are already in memory
+                  because the prompt needs them; nothing is read twice for this.
+                */
+                if (isLatestMessage) {
+                    turnAttachmentBytes.set(
+                        turnAttachmentHandle(attachmentIndex),
+                        {
+                            name: attachment.name,
+                            mediaType: attachment.mediaType,
+                            bytes: new Uint8Array(attachmentBuffer),
+                        }
                     );
                 }
                 totalAttachmentBytes += attachmentBytes;
@@ -2706,10 +2955,18 @@ async function handleChatPost(
                               buildArtifactProgressChunk(format)
                           );
                       },
+                      // This turn's own files, by the handles the system block
+                      // named. Already read, already ownership-checked; the
+                      // batch tool is the only reader and it never sees a key.
+                      turnAttachments: turnAttachmentBytes,
                   })
                 : null;
         const artifactToolConfig = artifactCollector
-            ? buildGeneratedArtifactToolConfig(artifactCollector)
+            ? buildGeneratedArtifactToolConfig(artifactCollector, {
+                  registerDocumentBatch: Boolean(
+                      artifactToolPlan?.registerDocumentBatch
+                  ),
+              })
             : null;
         /*
           Tools from both features, merged rather than chosen between.
@@ -2841,7 +3098,13 @@ async function handleChatPost(
             toolConfig: artifactToolConfig
                 ? {
                       ...(webSearchToolConfig ?? {}),
-                      applicationTools: [...ALL_ARTIFACT_TOOL_NAMES],
+                      // The tools this request actually carries, not the full
+                      // catalogue of them. `create_document_batch` is
+                      // registered only on a turn with a Word template, so a
+                      // constant list here would hash two genuinely different
+                      // requests the same -- and the manifest exists to
+                      // describe the effective request.
+                      applicationTools: Object.keys(artifactToolConfig.tools).sort(),
                   }
                 : webSearchToolConfig,
             messages: manifestMessages,

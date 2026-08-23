@@ -13,22 +13,38 @@ const serializeAttachments = (
   { stripData }: { stripData: boolean }
 ): ChatAttachment[] | undefined => {
   if (!attachments?.length) return attachments;
-  return attachments.map((attachment) => ({
-    id: attachment.id,
-    name: attachment.name,
-    mediaType: attachment.mediaType,
-    size: attachment.size,
-    kind: attachment.kind,
-    // An objectKey means the bytes live in object storage; the inline data
-    // URL is only the preview and is dropped from requests and storage alike.
-    ...(attachment.data !== undefined &&
-    !(stripData && attachment.objectKey)
-      ? { data: attachment.data }
-      : {}),
-    ...(attachment.objectKey !== undefined
-      ? { objectKey: attachment.objectKey }
-      : {}),
-  }));
+  return attachments.map((attachment) => {
+    // Any of the three means the bytes live in storage: a durable attachment
+    // id, the upload id that will become one, or -- for a guest -- their own
+    // ephemeral object key. The inline data URL is only the preview, and it is
+    // dropped from requests and storage alike once the bytes are elsewhere.
+    const stored =
+      attachment.attachmentId !== undefined ||
+      attachment.uploadId !== undefined ||
+      attachment.objectKey !== undefined;
+    return {
+      id: attachment.id,
+      name: attachment.name,
+      mediaType: attachment.mediaType,
+      size: attachment.size,
+      kind: attachment.kind,
+      ...(attachment.data !== undefined && !(stripData && stored)
+        ? { data: attachment.data }
+        : {}),
+      // The durable id wins when both are known: after a save the upload id
+      // still identifies the same object, but the attachment row is the thing
+      // the conversation actually has, and a request that named both would be
+      // asking the server which of its own facts to prefer.
+      ...(attachment.attachmentId !== undefined
+        ? { attachmentId: attachment.attachmentId }
+        : attachment.uploadId !== undefined
+          ? { uploadId: attachment.uploadId }
+          : {}),
+      ...(attachment.objectKey !== undefined
+        ? { objectKey: attachment.objectKey }
+        : {}),
+    };
+  });
 };
 
 const pickTransportFields = (message: Message): Message => ({

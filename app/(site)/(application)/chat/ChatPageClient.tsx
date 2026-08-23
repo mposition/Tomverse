@@ -3354,6 +3354,22 @@ export function ChatPageClient({
         });
       }
 
+      /*
+        The user's turn is saved with its files, not with their names.
+
+        `content` used to fall back to the file names joined with commas when
+        the user sent files and no text, because the save endpoint demanded a
+        non-empty string. That is what made a file-only turn come back from a
+        reload as "a.docx, b.xlsx": the message said it *was* those words. It
+        is sent empty now, and the attachments travel as the opaque upload ids
+        the finalisation step issued -- the server binds them to this message
+        in the same transaction that writes it
+        (docs/policy/user-attachment-persistence.md).
+      */
+      const promptUploadIds = promptAttachments
+        .map((attachment) => attachment.uploadId)
+        .filter((uploadId): uploadId is string => Boolean(uploadId));
+      let savedAttachments: ChatAttachment[] = promptAttachments;
       if (!isGuestMode) {
       try {
         const saveResponse = await fetch(`/api/conversations/${activeChatId}/messages`, {
@@ -3363,13 +3379,40 @@ export function ChatPageClient({
             messages: [{
               id: userMsgId,
               role: "user",
-              content: trimmed || attachments.map((item) => item.name).join(", "),
+              content: trimmed,
+              ...(promptUploadIds.length
+                ? { attachmentUploadIds: promptUploadIds }
+                : {}),
             }]
           }),
         });
-        await discardResponseBody(saveResponse);
         if (!saveResponse.ok) {
+          await discardResponseBody(saveResponse);
           console.error("Failed to pre-save user message:", saveResponse.status);
+        } else {
+          /*
+            Swap the composer's upload ids for the durable attachment ids the
+            save just wrote, in place, so the cards already on screen are the
+            same cards a reload produces -- and so this turn's own request, and
+            every later one, names the row rather than the upload.
+          */
+          const saved = await saveResponse.json().catch(() => null);
+          const bound: Array<{ ordinal: number; id: string }> = Array.isArray(
+            saved?.attachments
+          )
+            ? saved.attachments.filter(
+                (item: { messageId?: string }) => item?.messageId === userMsgId
+              )
+            : [];
+          if (bound.length) {
+            const byOrdinal = new Map(
+              bound.map((item) => [item.ordinal, item.id])
+            );
+            savedAttachments = promptAttachments.map((attachment, index) => {
+              const attachmentId = byOrdinal.get(index);
+              return attachmentId ? { ...attachment, attachmentId } : attachment;
+            });
+          }
         }
       } catch (e) {
         console.error("Failed to pre-save user message:", e);
@@ -3398,7 +3441,7 @@ export function ChatPageClient({
         // barrier. A panel whose model is not in here was not part of this
         // send and must not answer it.
         modelIds: activeModelIds,
-        attachments: promptAttachments,
+        attachments: savedAttachments,
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),

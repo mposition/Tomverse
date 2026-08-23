@@ -499,7 +499,11 @@ test("every kind has a tool, and every tool a kind", async () => {
   const subject = await collector();
   const { tools } = buildGeneratedArtifactToolConfig(subject);
 
-  assert.deepEqual(Object.keys(tools).sort(), [...ALL_ARTIFACT_TOOL_NAMES].sort());
+  // The five kind tools go out on every turn that may make a file. The batch
+  // tool is the one exception and it is conditional by design -- it acts on an
+  // attached Word template, and a tool with nothing to act on is priced input
+  // the request had no use for (docs/policy/generated-artifacts.md section 13).
+  assert.deepEqual(Object.keys(tools).sort(), Object.values(ARTIFACT_TOOL_NAMES).sort());
   assert.deepEqual(Object.keys(ARTIFACT_TOOL_NAMES).sort(), [
     "archive",
     "document",
@@ -507,7 +511,14 @@ test("every kind has a tool, and every tool a kind", async () => {
     "spreadsheet",
     "text",
   ]);
-  for (const definition of Object.values(tools)) {
+  const withBatch = buildGeneratedArtifactToolConfig(subject, {
+    registerDocumentBatch: true,
+  });
+  assert.deepEqual(
+    Object.keys(withBatch.tools).sort(),
+    [...ALL_ARTIFACT_TOOL_NAMES].sort()
+  );
+  for (const definition of Object.values(withBatch.tools)) {
     const description = definition.description;
     assert.equal(typeof description, "string");
     assert.ok(definition.inputSchema);

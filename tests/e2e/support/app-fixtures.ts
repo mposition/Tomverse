@@ -502,6 +502,21 @@ export type QaConversationMessage = {
     failureCode?: string;
     modelId?: string;
   }>;
+  /**
+   * The files the *user* attached to this turn, exactly as the real endpoint
+   * returns them (docs/policy/user-attachment-persistence.md section 4).
+   * Public fields only -- there is no `objectKey` here because there is none
+   * in the response either.
+   */
+  attachments?: Array<{
+    id: string;
+    attachmentId?: string;
+    ordinal: number;
+    name: string;
+    mediaType: string;
+    size: number;
+    kind: "file" | "text";
+  }>;
 };
 
 export async function mockAuthenticatedApi(
@@ -936,18 +951,59 @@ export async function mockAuthenticatedApi(
   // the mock disagreeing with itself rather than anything the product does.
   const savedMessages: QaConversationMessage[] = [...(options.messages || [])];
 
+  // What the upload step recorded about each file, read back when the save
+  // binds it. In the real system this lives on the upload row and the client is
+  // never believed about it; here the two mocks share one page-scoped registry
+  // for the same reason -- the name on a restored card must come from the save,
+  // not from whatever the composer happened to be holding.
+  const uploadRegistry = finalizedUploadRegistry(page);
+
   await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
-        messages?: QaConversationMessage[];
+        messages?: Array<QaConversationMessage & { attachmentUploadIds?: string[] }>;
       };
+      /*
+        Binding, the way the real endpoint does it: the opaque upload ids
+        become durable attachment rows in the same step that saves the message,
+        and the response reports them back so the composer can swap its ids.
+
+        Modelled here rather than stubbed, because the property the specs are
+        about -- the card survives a reload -- is exactly the property a stub
+        that discarded the ids would hide.
+      */
+      const bound: Array<
+        { messageId: string } & NonNullable<QaConversationMessage["attachments"]>[number]
+      > = [];
       for (const message of body?.messages ?? []) {
-        if (!message?.id || savedMessages.some((saved) => saved.id === message.id)) {
-          continue;
-        }
-        savedMessages.push(message);
+        if (!message?.id) continue;
+        const attachments = (message.attachmentUploadIds ?? []).map(
+          (uploadId, ordinal) => ({
+            id: `ma-${message.id}-${ordinal}`,
+            // The same field the real conversation read repeats, under the
+            // name the next request uses.
+            attachmentId: `ma-${message.id}-${ordinal}`,
+            ordinal,
+            name: uploadRegistry.get(uploadId)?.name || `file-${ordinal}`,
+            mediaType:
+              uploadRegistry.get(uploadId)?.mediaType ||
+              "application/octet-stream",
+            size: 1,
+            kind: "file" as const,
+          })
+        );
+        bound.push(
+          ...attachments.map((attachment) => ({ messageId: message.id, ...attachment }))
+        );
+        if (savedMessages.some((saved) => saved.id === message.id)) continue;
+        savedMessages.push({
+          ...message,
+          ...(attachments.length ? { attachments } : {}),
+        });
       }
-      await route.fulfill(json({}, 201));
+      await route.fulfill(
+        json({ success: true, created: bound.length, attachments: bound }, 201)
+      );
       return;
     }
     await route.fulfill(json({}));
@@ -1140,9 +1196,43 @@ export type AttachmentUploadQaState = {
    * went wrong instead of "try again".
    */
   finalizeFailure: { status: number; code: string } | null;
+  deleteCount: number;
+  /** The opaque ids finalisation issued, in order. Never storage keys. */
+  uploadIds: string[];
+  /** What the composer asked to discard, so a spec can assert it named an id. */
+  deletedUploadIds: Array<string | null>;
   /** The archive summary a successful finalize reports, if any. */
   archive: { totalEntries: number; includedFiles: number; excludedFiles: number } | null;
 };
+
+/**
+ * What each finalised upload was, per page.
+ *
+ * `mockAttachmentUpload` writes it and `mockAuthenticatedApi`'s message save
+ * reads it, so the two mocks agree the way the two real endpoints do -- the
+ * upload row is what the binding step reads, not the request body. A WeakMap
+ * on the page so one test's uploads cannot name another test's files.
+ */
+const FINALIZED_UPLOADS = new WeakMap<
+  Page,
+  Map<string, { name: string; mediaType: string }>
+>();
+
+const finalizedUploadRegistry = (page: Page) => {
+  const existing = FINALIZED_UPLOADS.get(page);
+  if (existing) return existing;
+  const created = new Map<string, { name: string; mediaType: string }>();
+  FINALIZED_UPLOADS.set(page, created);
+  return created;
+};
+
+/** The media types the server reads as text rather than as bytes. */
+const TEXT_UPLOAD_TYPES = new Set([
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);
 
 export async function mockAttachmentUpload(page: Page): Promise<AttachmentUploadQaState> {
   const state: AttachmentUploadQaState = {
@@ -1151,6 +1241,9 @@ export async function mockAttachmentUpload(page: Page): Promise<AttachmentUpload
     uploadCount: 0,
     finalizeFailure: null,
     archive: null,
+    deleteCount: 0,
+    uploadIds: [],
+    deletedUploadIds: [],
   };
 
   await page.route("**/api/chat", async (route) => {
@@ -1181,13 +1274,39 @@ export async function mockAttachmentUpload(page: Page): Promise<AttachmentUpload
         });
         return;
       }
-      const body = route.request().postDataJSON() as { size?: number };
+      // The real contract: finalisation hands back an opaque id and never the
+      // storage key (docs/policy/user-attachment-persistence.md section 4). A
+      // mock that still returned `key` would let a regression that
+      // reintroduced key-passing keep passing its own tests.
+      const body = route.request().postDataJSON() as {
+        size?: number;
+        name?: string;
+        mediaType?: string;
+      };
+      const uploadId = `upl-qa-${state.finalizeCount}`;
+      state.uploadIds.push(uploadId);
+      finalizedUploadRegistry(page).set(uploadId, {
+        name: body.name || "file",
+        mediaType: body.mediaType || "application/octet-stream",
+      });
       await route.fulfill(
         json({
+          uploadId,
+          name: body.name || "file",
+          mediaType: body.mediaType || "application/octet-stream",
           size: body.size || 1,
+          kind: TEXT_UPLOAD_TYPES.has(body.mediaType || "") ? "text" : "file",
           ...(state.archive ? { archive: state.archive } : {}),
         })
       );
+      return;
+    }
+
+    if (method === "DELETE") {
+      state.deleteCount += 1;
+      const body = route.request().postDataJSON() as { uploadId?: string };
+      state.deletedUploadIds.push(body?.uploadId ?? null);
+      await route.fulfill({ status: 204, body: "" });
       return;
     }
 
@@ -1207,6 +1326,22 @@ export function createQaPngBuffer() {
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     "base64"
   );
+}
+
+/**
+ * The smallest thing the composer will accept as an .xlsx.
+ *
+ * A real zip local-file header, because the composer checks the signature
+ * before it uploads. Written from bytes rather than as a string literal so no
+ * control character reaches this file -- the source-control-character check
+ * fails the build on one, and a zip signature is two of them.
+ */
+export function createQaXlsxBuffer() {
+  return Buffer.from([
+    0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  ]);
 }
 
 export function createQaPdfBuffer() {
