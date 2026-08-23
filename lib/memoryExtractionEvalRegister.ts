@@ -21,6 +21,10 @@ import {
     type MemoryExtractionPairRef,
     type RevokedPairsState,
 } from "@/lib/memoryAccess";
+import {
+    MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL,
+    MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
+} from "@/lib/memoryExtractionEvalCore";
 
 /** The prompt contract version the B2 pipeline implements. */
 export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v1";
@@ -98,7 +102,10 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
 /** §12.3 acceptance thresholds — the register check re-verifies them. */
 export const MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN = 0.95;
 export const MEMORY_EVAL_RECALL_WILSON_LOWER_MIN = 0.85;
-export const MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM = 200;
+// The floor itself lives in `lib/memoryExtractionEvalCore.ts` and is imported
+// rather than restated. It used to be declared here too, and two copies of a
+// number that must agree is one edit away from the harness and the register
+// enforcing different §12.2 floors.
 export const MEMORY_EVAL_REQUIRED_LANGUAGES = ["ko", "en"] as const;
 
 /**
@@ -170,13 +177,17 @@ export function findEvalRegisterProblems(
             if (!evaluation.languages.includes(language)) {
                 problems.push(`${label}: missing required eval language ${language}`);
             }
-            for (const category of ["1", "2", "3", "4"]) {
+            for (const policyLabel of ["1", "2", "3", "4"] as const) {
                 const count =
-                    evaluation.sampleCounts[`${category}:${language}`] ?? 0;
-                if (count < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM) {
+                    evaluation.sampleCounts[`${policyLabel}:${language}`] ?? 0;
+                const minimum =
+                    MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[
+                        MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL[policyLabel]
+                    ];
+                if (count < minimum) {
                     problems.push(
-                        `${label}: sample count ${category}:${language}=${count} below ` +
-                            `${MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM} (§12.2)`
+                        `${label}: sample count ${policyLabel}:${language}=${count} below ` +
+                            `${minimum} (docs/policy/external-conversation-import-and-memory.md §12.2)`
                     );
                 }
             }
