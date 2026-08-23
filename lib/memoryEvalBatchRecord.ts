@@ -50,6 +50,20 @@ export type BatchRecord = {
     decision: BatchDecision | null;
     diversity: string;
     reviewedOn: string;
+    /**
+     * docs/ops/memory-extraction-eval-dataset.md §6.3's safeguard, verbatim
+     * from the record: `같음`, `다름`, `""` when the row is there and
+     * unanswered, and `null` when the record has no such row at all.
+     *
+     * The last case is not the same as an unanswered one. Records written
+     * before the docs/ops/memory-extraction-eval-dataset.md §6.3 amendment of 2026-08-23 have no row, and their review
+     * was completed under the rule that stood then; treating their silence as
+     * a refusal would retroactively un-license a review a person finished.
+     * `tests/memoryEvalBatchRecord.test.mjs` keeps the row present on every
+     * record the current generator writes, so `null` cannot be reached by
+     * deleting it from a new one.
+     */
+    draftSetupSameAsPrevious: string | null;
 };
 
 /**
@@ -109,6 +123,7 @@ export const parseBatchRecord = (markdown: string): BatchRecord => {
     let decision: BatchDecision | null = null;
     let diversity = "";
     let reviewedOn = "";
+    let draftSetupSameAsPrevious: string | null = null;
 
     for (const [index, line] of lines.entries()) {
         const heading = /^###\s+(\S+)\s*$/.exec(line.trim());
@@ -136,9 +151,17 @@ export const parseBatchRecord = (markdown: string): BatchRecord => {
         if (key === "batch 채택 여부") decision = asBatchDecision(value);
         else if (key.startsWith("다양성 판정")) diversity = value;
         else if (key === "검수 완료일") reviewedOn = value;
+        else if (key.startsWith("초안 구성이 직전 batch와 같은가"))
+            draftSetupSameAsPrevious = value;
     }
 
-    return { cases, decision, diversity, reviewedOn };
+    return {
+        cases,
+        decision,
+        diversity,
+        reviewedOn,
+        draftSetupSameAsPrevious,
+    };
 };
 
 /**
@@ -160,7 +183,15 @@ export const draftDisagreementRate = (record: BatchRecord) => {
  * the adoption line, so every reason here is a reason that line is not yet
  * standing on anything.
  */
-export const promotionBlockers = (record: BatchRecord): string[] => {
+export const promotionBlockers = (
+    record: BatchRecord,
+    /**
+     * How many cases the batch holds. Without it the docs/ops/memory-extraction-eval-dataset.md §6.3 safeguard below can
+     * see that the setup changed but not that the record covers every case,
+     * so it reports the weaker of the two facts rather than guessing.
+     */
+    totalCases?: number
+): string[] => {
     const blockers: string[] = [];
     const unjudged = record.cases.filter((entry) => entry.verdict === null);
     if (record.cases.length === 0)
@@ -194,5 +225,34 @@ export const promotionBlockers = (record: BatchRecord): string[] => {
                 "§7.1 requires it on the record"
         );
     if (record.reviewedOn === "") blockers.push("the review date is blank");
+    // docs/ops/memory-extraction-eval-dataset.md §6.3 lets a batch be judged on a sample only while the drafting setup is
+    // the one the sampling evidence was gathered on. A batch reviewed in full
+    // needs no such promise, so the row is asked for only when a sample is
+    // what is standing in for the rest -- and an unknown batch size counts as
+    // sampled, because the alternative is exempting the case we cannot see.
+    const sampled = totalCases === undefined || record.cases.length < totalCases;
+    if (sampled && record.draftSetupSameAsPrevious !== null) {
+        // An unanswered row is not a yes: the point of the safeguard is that
+        // nobody but the reviewer knows whether tool, model or version moved.
+        if (record.draftSetupSameAsPrevious === "")
+            blockers.push(
+                "the docs/ops/memory-extraction-eval-dataset.md §6.3 drafting-setup row is blank; a sample " +
+                    "stands for the rest of the batch only when the reviewer states the " +
+                    "setup is unchanged"
+            );
+        else if (record.draftSetupSameAsPrevious !== "같음") {
+            if (record.draftSetupSameAsPrevious !== "다름")
+                blockers.push(
+                    `the docs/ops/memory-extraction-eval-dataset.md §6.3 drafting-setup row reads ` +
+                        `「${record.draftSetupSameAsPrevious}」, which is neither 같음 nor 다름`
+                );
+            blockers.push(
+                "the drafting setup changed, so docs/ops/memory-extraction-eval-dataset.md §6.3 wants this batch " +
+                    `reviewed in full: ${record.cases.length}${
+                        totalCases === undefined ? "" : ` of ${totalCases}`
+                    } case(s) carry a verdict (regenerate the sheet with --full)`
+            );
+        }
+    }
     return blockers;
 };

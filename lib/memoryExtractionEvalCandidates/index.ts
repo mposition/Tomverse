@@ -20,6 +20,14 @@ import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 import type { EvalBatch } from "@/lib/memoryEvalBatchRecord";
 import { BATCH_009_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch009DurableKo";
 import { BATCH_010_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch010DurableEn";
+import { BATCH_011_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch011DurableKo";
+import { BATCH_012_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch012DurableEn";
+import { BATCH_013_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch013DurableKo";
+import { BATCH_014_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch014DurableEn";
+import { BATCH_015_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch015DurableKo";
+import { BATCH_016_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch016DurableEn";
+import { BATCH_017_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch017AssistantKo";
+import { BATCH_018_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch018AssistantEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -35,5 +43,53 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
         cell: "durable_facts:en",
         record: "docs/ops/memory-extraction-eval-batches/batch-010-durable-facts-en.md",
         cases: BATCH_010_DURABLE_EN,
+    },
+    {
+        id: "batch-011",
+        cell: "durable_facts:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-011-durable-facts-ko.md",
+        cases: BATCH_011_DURABLE_KO,
+    },
+    {
+        id: "batch-012",
+        cell: "durable_facts:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-012-durable-facts-en.md",
+        cases: BATCH_012_DURABLE_EN,
+    },
+    {
+        id: "batch-013",
+        cell: "durable_facts:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-013-durable-facts-ko.md",
+        cases: BATCH_013_DURABLE_KO,
+    },
+    {
+        id: "batch-014",
+        cell: "durable_facts:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-014-durable-facts-en.md",
+        cases: BATCH_014_DURABLE_EN,
+    },
+    {
+        id: "batch-015",
+        cell: "durable_facts:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-015-durable-facts-ko.md",
+        cases: BATCH_015_DURABLE_KO,
+    },
+    {
+        id: "batch-016",
+        cell: "durable_facts:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-016-durable-facts-en.md",
+        cases: BATCH_016_DURABLE_EN,
+    },
+    {
+        id: "batch-017",
+        cell: "assistant_only:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-017-assistant-only-ko.md",
+        cases: BATCH_017_ASSISTANT_KO,
+    },
+    {
+        id: "batch-018",
+        cell: "assistant_only:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-018-assistant-only-en.md",
+        cases: BATCH_018_ASSISTANT_EN,
     },
 ];

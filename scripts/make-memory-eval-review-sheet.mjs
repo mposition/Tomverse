@@ -19,7 +19,7 @@
  * handoff without anyone rewriting it.
  *
  * Usage:
- *   npm run make:memory-eval-review-sheet -- --batch=batch-001 [--write]
+ *   npm run make:memory-eval-review-sheet -- --batch=batch-001 [--write] [--full]
  *
  * Without `--write` it prints to stdout, so the diff can be read before it
  * lands on the record file.
@@ -65,13 +65,24 @@ const isCriticalNegative = cases.every(
 /**
  * How many cases the reviewer actually has to judge.
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.3: categories ②③④ are reviewed in full because a mislabelled critical
- * negative is the failure the whole eval exists to catch. Category ① may be
- * sampled at 20%.
+ * docs/ops/memory-extraction-eval-dataset.md §6.3 [개정 · 2026-08-23]: all four
+ * categories are sampled at 20%. It used to demand every case for ②③④, and
+ * the reason -- a mislabelled critical negative is the failure the whole eval
+ * exists to catch -- has not gone away; what changed is that a second layer
+ * now holds it, `lib/memoryValidatorProbeCorpus.ts` testing the rule itself on
+ * every commit, which docs/policy/external-conversation-import-and-memory.md
+ * §12.2 makes a condition of the lowered floor.
+ *
+ * An adopted critical-negative batch keeps its full sample. Its record is the
+ * audit trail of a review a person actually performed, under the rule that
+ * stood at the time; regenerating it at 20% would rewrite history to say only
+ * a fifth was looked at.
  */
-const sampleSize = isCriticalNegative
-    ? cases.length
-    : Math.max(1, Math.ceil(cases.length * 0.2));
+const forceFull = process.argv.includes("--full");
+const sampleSize =
+    forceFull || (isCriticalNegative && isAdopted)
+        ? cases.length
+        : Math.max(1, Math.ceil(cases.length * 0.2));
 
 /**
  * Which cases, chosen so the sample spreads across the batch AND across
@@ -81,8 +92,24 @@ const sampleSize = isCriticalNegative
  * reviewer can check the choice rather than trust it.
  */
 const pickSample = () => {
-    if (isCriticalNegative) return cases.map((_, index) => index);
+    if (sampleSize >= cases.length) return cases.map((_, index) => index);
     const stride = Math.max(1, Math.floor(cases.length / sampleSize));
+    // Categories ②③④ declare no kind, so the kind-spread pass below would see
+    // one `undefined`, treat every later case as a repeat, and fall through to
+    // the top-up loop -- which takes the first N and repeats a position, the
+    // very thing striding exists to avoid. With nothing to spread across,
+    // stride alone is the whole answer.
+    if (isCriticalNegative) {
+        const strided = [];
+        for (
+            let index = 0;
+            index < cases.length && strided.length < sampleSize;
+            index += stride
+        ) {
+            strided.push(index);
+        }
+        return strided;
+    }
     const chosen = [];
     const seenKinds = new Set();
     for (let start = 0; start < cases.length && chosen.length < sampleSize; start += stride) {
@@ -231,8 +258,14 @@ for (const pair of cellPairs.slice(0, 10)) {
 p();
 p("---");
 p();
+// The title says which of the two this is, and after the 2026-08-23
+// docs/ops/memory-extraction-eval-dataset.md §6.3 amendment that is no longer
+// decided by the category: a critical-negative
+// batch is sampled too unless it is adopted or `--full` was asked for. Titling
+// a 10-of-50 sheet 전건 would tell the reviewer the remainder had been looked
+// at.
 p(
-    isCriticalNegative
+    sampleSize >= cases.length
         ? `## 전건 — 판정할 ${sampleSize}건`
         : `## 표본 — 판정할 ${sampleSize}건`
 );
@@ -281,7 +314,15 @@ p("|---|---|");
 p("| 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | *(운영자 기입)* |");
 p("| 검수자 (사람 · 최초의 권위 있는 판정) | |");
 p("| 재작성 회차 | 1 (최초 초안) |");
+p("| 초안 구성이 직전 batch와 같은가 (`docs/ops/memory-extraction-eval-dataset.md` §6.3) | |");
 p(`| draft disagreement 비율 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.4) | 위 표본 ${sampleSize}건에서 계산 |`);
+p();
+p("「초안 구성이 직전 batch와 같은가」는 `같음` 또는 `다름`으로 적습니다.");
+p("`docs/ops/memory-extraction-eval-dataset.md` §6.3의 안전장치이고, 20% 표본이 성립하는 조건입니다 — 초안");
+p("도구·모델·버전이 바뀐 뒤의 첫 batch는 전건 검수로 돌아갑니다. `다름`이라고");
+p("적으면 이 batch는 표본이 아니라 전건을 판정해야 하며, 시트를");
+p("`--full`로 다시 생성하면 전건 판정란이 나옵니다. 칸이 비어 있으면 승격되지");
+p("않습니다 — 답을 안 한 것과 `같음`은 다릅니다.");
 p();
 p("초안 생성자 칸을 에이전트가 비워 두는 이유는 하나입니다 — 이 저장소에 남기는");
 p("산출물에 에이전트의 모델 식별자를 적지 않는다는 규칙이 있어서, 자기 이름을 적을");
