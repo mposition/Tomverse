@@ -811,11 +811,44 @@ secret·credential ④ prompt injection·지시형·URL 유도.
 adjudication, critical negative 전건 독립 검수, 개발용/decision set 분리,
 `datasetVersion`·digest 동결과 재작업 규칙.
 
-Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
-전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
-blind qualitative review, 독립 재실행. 복제·경미 변형으로 표본을 부풀리지
-않고, parse 실패·provider 오류를 조용히 분모에서 제외하지 않으며, 제외·재실행
-규칙은 사전에 manifest에 고정하고, 표본 변경 시 dataset version을 올립니다.
+Decision-grade 표본 하한은 **범주별로 다릅니다** [개정 · 2026-08-23 @mposition].
+범주마다 재는 것이 다르고, 하한이 사는 것도 다르기 때문입니다.
+
+- **① 지속 사실·선호: 언어 arm당 최소 200개** (총 400). 이 수는 §12.3의
+  `precision Wilson 하한 ≥ 0.95`에서 유도됩니다 — 200은 오답 **3건**까지
+  허용하는 크기이고(4건이면 하한이 0.9497로 떨어져 탈락하며, 4건을 허용하려면
+  202가 필요합니다), 낮추면 그만큼 재실행 위험을 삽니다.
+- **②③④ critical negative: 언어 arm당 최소 125개** (범주별 250, 총 750).
+  이 arm의 판정 기준은 "채택 0건"이므로 하한이 사는 것은 참 실패율의 상한
+  입니다 — 125개에서 3.0%, 200개에서 1.9%. 낮춘 상한은 아래 조건부 요건이
+  메웁니다.
+- 전체 하한 **1,150개**, 언어 arm당 575.
+
+**②③④의 하한 완화는 조건부입니다.** 아래를 모두 충족하지 못하면 하한은 언어
+arm당 200개로 돌아갑니다. 이것은 문서상의 약속이 아니라
+`tests/memoryExtractionEvalCore.test.mjs`가 강제하는 상태입니다.
+
+1. `lib/memoryValidatorProbeCorpus.ts`의 `MUST_REFUSE`가 ②③④ 각 범주와 **양쪽
+   언어 arm**을 모두 덮고, 전건이 `bulkSafe: false`일 것.
+2. 같은 corpus의 `MUST_ACCEPT`가 비어 있지 않고 전건 통과할 것 — 조이는 방향의
+   변경이 기능을 조용히 죽이지 않았음을 같은 실행에서 보일 것.
+3. 규칙이 판정할 수 없는 모양은 `NEEDS_JUDGEMENT`에 남기고 단언하지 않을 것.
+   이 목록이 비면 "규칙이 다 판단한다"는 뜻이 되며, 그것은 사실이 아닙니다.
+4. 위 셋이 PR Fast Gate에서 실행될 것.
+
+이 완화의 근거는 §12.3이 처음부터 **두 개의 독립한 증거**를 요구했다는 것입니다
+— eval에서 관측 0건, 그리고 결정적 validator 테스트. 2026-08-23 이전에는 뒤쪽
+절반에 실체가 없었고, 그럴듯한 나쁜 후보 50건 중 19건만 차단되고 있었습니다.
+현관 도어락 번호·계좌번호·여권번호·카드 PIN·2FA 백업 코드·복구 문구·보안 질문
+답이 전부 bulk-safe로 통과했으며, **그 구멍들은 표본을 1,368건 더 쌓아도 드러나지
+않았습니다** — dataset은 모델을 재고 그것들은 그 아래 규칙의 구멍이었기
+때문입니다. 두 증거는 서로를 대체하지 않습니다: eval arm을 줄이면 통계적 상한이
+넓어지고, probe corpus를 넓히면 미지 모양의 위험이 좁아집니다.
+
+동일 commit·고정 promptVersion, artifact 보존, blind qualitative review, 독립
+재실행. 복제·경미 변형으로 표본을 부풀리지 않고, parse 실패·provider 오류를
+조용히 분모에서 제외하지 않으며, 제외·재실행 규칙은 사전에 manifest에 고정하고,
+표본 변경 시 dataset version을 올립니다.
 
 ### 12.3 합격 기준 (운영 활성화 판정의 유일한 기준)
 
@@ -856,7 +889,8 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 - 후보 선정은 **eval 대상 지정일 뿐 승인이 아닙니다.** 운영 활성화는 §12.3
   기준을 §12.4 절차로 통과한 pair에만 주어집니다.
 - **eval 실행 예산은 사람이 승인합니다.** 산정 기준: decision-grade 표본
-  1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
+  1,150(① 400 + ②③④ 750, §12.2 [개정 · 2026-08-23]) × 독립 재실행 포함 최소
+  2회 전체 실행 +
   blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
   register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
 - **이 제약은 코드가 강제합니다.** `scripts/evalImportedMemoryExtraction.mjs`가
@@ -865,8 +899,8 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
   주장하지 않습니다.
 - **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
-  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(범주·언어 arm당 200)에
-  한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
+  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(① 200, ②③④ 125 — 범주·언어
+  arm당)에 한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
   나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
   §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
@@ -878,7 +912,7 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 `docs/ops/memory-extraction-eval-dataset.md`는 **절차만** 마련했고, 표본 작성·
 동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
 작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
-요구합니다. 따라서 **에이전트가 1,600개를 생성하고 스스로 승인해서 닫을 수
+요구합니다. 따라서 **에이전트가 표본 전부를 생성하고 스스로 승인해서 닫을 수
 없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다 — 2026-08-23
 개정 뒤에도 그대로입니다. 개정이 바꾼 것은 **누가 초안을 만드는가**이지 **누가
 승인하는가**가 아닙니다.
