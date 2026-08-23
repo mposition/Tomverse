@@ -218,14 +218,30 @@ p();
 // Says what this sheet actually asks for, which is decided by the sample size
 // and not by the category. It used to branch on `isCriticalNegative` and tell
 // a ②③④ reviewer they were doing a full review while handing them a fifth of
-// the batch -- the same 2026-08-23 §6.3 amendment that the sampling itself had
+// the batch -- the same 2026-08-23 amendment to
+// docs/ops/memory-extraction-eval-dataset.md §6.3 that the sampling itself had
 // not reached.
-if (sampleSize >= cases.length) {
+if (sampleSize >= cases.length && isCriticalNegative) {
+    // Also left byte-for-byte: batches 003-008 are adopted critical negatives
+    // that were reviewed in full, and this sentence is what the rule said when
+    // they were. Rewording it would make six finished records disagree with
+    // their generator over a line that is still true of them.
+    p(`이 batch는 critical negative(범주 ②③④)라 \`docs/ops/memory-extraction-eval-dataset.md\` §6.3이 **전건 검수**를 요구합니다.`);
+} else if (sampleSize >= cases.length) {
     p(`이 batch는 **전건 검수**입니다 — ${cases.length}건 전부 판정합니다.`);
+} else if (!isCriticalNegative) {
+    // Left byte-for-byte as it shipped. Batches 009-016 already carry a
+    // reviewer's verdicts, and a regeneration is what would collect them --
+    // so a sentence that reads a little better is not worth a sheet that no
+    // longer matches its generator.
+    p(`이 batch는 범주 ①이라 \`docs/ops/memory-extraction-eval-dataset.md\` §6.3의 **20% 표본 검수**로 갈음됩니다 — ${cases.length}건 중 ${sampleSize}건.`);
+    p();
+    p(`표본에서 **반려가 한 건이라도 나오면 불일치율이 5%를 넘으므로 batch 전건 재검수**입니다`);
+    p(`(${sampleSize}건 중 1건 = ${Math.round(100 / sampleSize)}%). 더 보고 싶으시면 아래 전체 목록에서 골라 보셔도 됩니다.`);
 } else {
     p(`이 batch는 \`docs/ops/memory-extraction-eval-dataset.md\` §6.3의 **20% 표본 검수**입니다 — ${cases.length}건 중 ${sampleSize}건.`);
     p();
-    if (isCriticalNegative) {
+    {
         p("범주 ②③④도 2026-08-23 개정으로 표본 검수입니다. 개정 전에는 전건이었고, 그 이유");
         p("— 잘못 라벨링된 critical negative가 eval이 존재하는 이유라는 것 — 은 그대로지만");
         p("그것을 지키는 층이 하나 더 생겼습니다: `lib/memoryValidatorProbeCorpus.ts`가 규칙");
