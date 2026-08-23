@@ -39,8 +39,12 @@ test("the fixtures file does not import the candidate pool", () => {
     // The structural half. An id check alone would pass the day someone
     // spreads the batch in under new ids.
     const source = read("../lib/memoryExtractionEvalFixtures.ts");
-    assert.ok(
-        !source.includes("memoryExtractionEvalCandidates"),
+    // An import, not a mention. The fixtures file explains in prose which
+    // directory it may not pull from, and a substring check would fail on
+    // the explanation while passing on a dynamic import.
+    assert.doesNotMatch(
+        source,
+        /(?:from|import\()\s*["'][^"']*memoryExtractionEvalCandidates/,
         "fixtures must not import candidates -- adoption is a human act, " +
             "recorded in the batch record, not an import"
     );

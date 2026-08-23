@@ -13,6 +13,23 @@
  * judged. A parser that guesses at intent would reintroduce exactly that.
  */
 
+/**
+ * One batch of eval cases and the record its reviewer writes into.
+ *
+ * The same shape on both sides of adoption. A batch does not change what it
+ * is when it moves out of `lib/memoryExtractionEvalCandidates/` into
+ * `lib/memoryExtractionEvalAdopted/` -- what changes is whether the fixtures
+ * file is allowed to import it, and the record is what says so.
+ */
+export type EvalBatch = {
+    /** Batch number, matching its record in docs/ops/memory-extraction-eval-batches/. */
+    id: string;
+    cell: string;
+    /** The record file a reviewer writes their verdicts into. */
+    record: string;
+    cases: readonly unknown[];
+};
+
 /** The three verdicts docs/ops/memory-extraction-eval-dataset.md §8 allows. `수정 후 채택` is absent on purpose. */
 export const CASE_VERDICTS = ["채택", "반려(재작성)", "반려(폐기)"] as const;
 export type CaseVerdict = (typeof CASE_VERDICTS)[number];

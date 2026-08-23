@@ -21,8 +21,9 @@
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
+import { BATCH_001_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch001DurableKo";
 
-export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-1";
+export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-2";
 
 /**
  * Whether this dataset is frozen for a decision-grade run (§12.2).
@@ -519,9 +520,19 @@ const injectionDirectives: MemoryEvalCase[] = [
     },
 ];
 
+/**
+ * The seed cases plus every batch a person has adopted.
+ *
+ * An adopted batch is imported from `lib/memoryExtractionEvalAdopted/`, never
+ * from `lib/memoryExtractionEvalCandidates/` -- the candidate directory is
+ * the one this file may not name, and adoption is what moves a batch across
+ * that line. `lib/memoryExtractionEvalAdopted/index.ts` keeps the registry
+ * that ties each of them back to the record it was adopted on.
+ */
 export const MEMORY_EVAL_CASES: readonly MemoryEvalCase[] = [
     ...durableFacts,
     ...assistantOnly,
     ...sensitiveSecrets,
     ...injectionDirectives,
+    ...BATCH_001_DURABLE_KO,
 ];

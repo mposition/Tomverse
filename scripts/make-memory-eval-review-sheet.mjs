@@ -27,6 +27,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
+import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
 import { findDuplicateCases } from "../lib/memoryExtractionEvalCore.ts";
 import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
 import { MEMORY_KINDS } from "../lib/memoryValidatorCore.ts";
@@ -38,14 +39,23 @@ const argValue = (name, fallback) => {
     return hit === undefined ? fallback : hit.slice(name.length + 3);
 };
 
+/**
+ * Adopted batches are renderable too, and on purpose: the record-matches-
+ * generator test is what keeps a record from drifting away from the cases it
+ * judged, and a batch needs that check most after it has become dataset.
+ * Writing to an adopted record is refused further down.
+ */
+const ALL_BATCHES = [...CANDIDATE_BATCHES, ...ADOPTED_BATCHES];
+
 const batchId = argValue("batch", "");
-const batch = CANDIDATE_BATCHES.find((entry) => entry.id === batchId);
+const batch = ALL_BATCHES.find((entry) => entry.id === batchId);
 if (!batch) {
     console.error(
-        `--batch must name a candidate batch. Known: ${CANDIDATE_BATCHES.map((entry) => entry.id).join(", ")}`
+        `--batch must name a batch. Known: ${ALL_BATCHES.map((entry) => entry.id).join(", ") || "(none)"}`
     );
     process.exit(1);
 }
+const isAdopted = ADOPTED_BATCHES.some((entry) => entry.id === batch.id);
 
 const cases = batch.cases;
 const isCriticalNegative = cases.every(
@@ -134,7 +144,15 @@ for (const entry of cases) {
     }
 }
 const duplicates = findDuplicateCases(cases);
-const cellPairs = nearDuplicatePairs([...MEMORY_EVAL_CASES, ...cases]).filter(
+/**
+ * Deduplicated by id: once a batch is adopted its cases are in
+ * `MEMORY_EVAL_CASES` as well as in `batch.cases`, and comparing a case with
+ * itself would report a 1.00 pair and bury the real neighbours.
+ */
+const universe = [...new Map(
+    [...MEMORY_EVAL_CASES, ...cases].map((entry) => [entry.id, entry])
+).values()];
+const cellPairs = nearDuplicatePairs(universe).filter(
     (pair) => pair.cell === batch.cell
 );
 
@@ -290,6 +308,14 @@ const rendered = `${out.join("\n")}\n`;
  * exists to avoid.
  */
 if (process.argv.includes("--write")) {
+    if (isAdopted) {
+        console.error(
+            `${batch.id} has been adopted; its record is settled and its cases are ` +
+                "in the dataset. Regenerating it would rewrite the document a " +
+                "reviewer signed. Print to stdout to compare."
+        );
+        process.exit(1);
+    }
     if (existsSync(batch.record)) {
         const existing = parseBatchRecord(readFileSync(batch.record, "utf8"));
         const filled = [

@@ -1,30 +1,25 @@
 /**
- * Batch 001 — `durable_facts:ko` first batch. **Candidate pool, not dataset.**
+ * Batch 001 — `durable_facts:ko`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-001-durable-facts-ko.md`:
+ * five sampled cases (docs/ops/memory-extraction-eval-dataset.md §6.3's 20% for category ①) all 채택, draft
+ * disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled — which is what admits the twenty cases nobody sampled
+ * (docs/ops/memory-extraction-eval-dataset.md §6.3: seeing the sample and saying nothing is not adoption).
  *
- * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 says whatever an agent makes is a
- * candidate pool, and the guidance docs/ops/memory-extraction-eval-dataset.md §6.2 says a draft carries no authority —
- * so this file is deliberately NOT imported by
- * `lib/memoryExtractionEvalFixtures.ts` and its cases are not in
- * `MEMORY_EVAL_CASES`. The harness cannot score them, the dataset digest does
- * not cover them, and nothing here counts toward a cell's floor.
+ * It moved out of `lib/memoryExtractionEvalCandidates/` rather than being
+ * imported from there, because the candidate directory is what
+ * `lib/memoryExtractionEvalFixtures.ts` is forbidden to import. Adoption has
+ * to change where a file lives, or the barrier is a promise again.
  *
- * That separation is structural rather than a promise:
- * `tests/memoryEvalCandidateIsolation.test.mjs` fails if a candidate id ever
- * appears in the dataset without passing through review.
+ * The `cand-` ids are kept. They are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
  *
- * Adoption is a human act (docs/ops/memory-extraction-eval-dataset.md §6.3, §6.4). A case moves into the fixtures file
- * only after the reviewer records `채택` for it in
- * `docs/ops/memory-extraction-eval-batches/batch-001-durable-facts-ko.md`.
- * A case rejected there is redrafted here and re-reviewed by the same person
- * — the reviewer does not edit it in place, because a reviewer who writes the
- * answer has authored it (docs/ops/memory-extraction-eval-dataset.md §6.4).
- *
- * Typing is the point of keeping this in TypeScript rather than in the record
- * file: `MemoryEvalCase` rejects a `kind` outside docs/ops/memory-extraction-eval-dataset.md §8.2's list, so a draft
- * cannot reach review with an invalid label.
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
