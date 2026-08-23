@@ -68,7 +68,7 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 붙인 별도 파일**로 `assistant-knowledge-staging-verification-records/` 아래에
 남습니다.
 
-- **template revision**: `2026-08-23a`
+- **template revision**: `2026-08-23b`
 - 실행 방법과 파일 이름 규칙:
   `assistant-knowledge-staging-verification-records/README.md`
 
@@ -156,10 +156,22 @@ R2 콘솔에서 합니다.**
 일간 `railway.maintenance.json`(`0 3 * * *`)도 같은 큐를 계속 비웁니다.
 멱등한 그물이며, 15분 경로가 어떤 이유로 멈춰도 하루 안에는 정리된다는 뜻입니다.
 
-두 번째 정각 run 이후에도 남아 있으면 그때가 결함입니다. 온디맨드
-실행(`retention.cleanup.execute`)은 2인 승인을 요구하고 자기 승인이 금지돼
-있어 관리자가 하나인 조직에서는 쓸 수 없으므로(`lib/adminApprovalCore.ts`),
-sweep을 앞당겨 재확인할 수단은 없습니다.
+두 번째 정각 run 이후에도 남아 있으면 그때가 결함입니다. 그때는 Admin
+Console의 retention 패널에서 dry-run을 돌려 `assistantKnowledge` 항목을
+봅니다 — `retryable`이 0이 아닌데 object가 남아 있다면 sweep이 큐를 비우지
+못하는 것이고, 0이라면 tombstone이 아예 만들어지지 않은 것이라 결함의 위치가
+다릅니다.
+
+**온디맨드 실행은 이제 관리자가 한 명이어도 됩니다.** 적격 관리자가 정확히
+한 명이면 `retention.cleanup.execute`가 방금 본 dry-run에 결속된 채로
+실행됩니다(`lib/adminSoleApproverCore.ts`, 2026-08-23 결정). preview 없이
+누르면 dry-run을 먼저 돌리라고 거절하고, preview가 15분보다 오래됐거나 그
+사이 새 run이 생겼으면 다시 돌리라고 거절합니다. 관리자가 둘 이상이 되면
+자동으로 기존 2인 승인으로 돌아갑니다.
+
+이전에는 이 경로가 1인 조직에서 닫혀 있었고(`canReviewAdminApproval()`이
+요구하는 `requestedById !== reviewerId`), `f3974ef`·`4380bc1` 두 회차가 그것을
+발견 사항으로 남겼습니다.
 
 ## D. 더 확인하고 싶다면 (전부 차단 아님)
 
