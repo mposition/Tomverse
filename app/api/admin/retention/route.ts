@@ -8,7 +8,12 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  DEFAULT_SNAPSHOT_RETENTION_DAYS,
+  SNAPSHOT_RETENTION_DAYS,
+} from "@/lib/emailSnapshotRetentionCore";
 import { retentionCutoff, retentionPolicy } from "@/lib/retentionPolicyCore";
 
 /**
@@ -88,6 +93,8 @@ export async function GET(req: Request) {
       oldestProviderCheck,
       oldestProviderError,
       oldestProductAnalytics,
+      staleSnapshots,
+      oldestSnapshot,
     ] = await Promise.all([
       prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
       prisma.chatRequestLease.count({ where: { expiresAt: { lt: leaseCutoff } } }),
@@ -263,6 +270,29 @@ export async function GET(req: Request) {
           select: { occurredAt: true },
         })
         .then((row) => row?.occurredAt.toISOString() || null),
+      // Per classification, because the window is per classification: counting
+      // every snapshot older than 90 days would report legal notices as
+      // overdue for six and a half years before the sweep would touch them.
+      prisma
+        .$queryRaw<Array<{ count: bigint }>>`
+          SELECT COUNT(*)::bigint AS count
+            FROM "EmailDelivery" AS d
+            JOIN "TemplateVersion" AS v ON v."id" = d."templateVersionId"
+            JOIN "EmailTemplate" AS t ON t."id" = v."templateId"
+           WHERE d."renderDataSnapshot" IS NOT NULL
+             AND COALESCE(d."sentAt", d."createdAt")
+                   < NOW() - make_interval(days => CASE t."classification"
+                       WHEN 'legal' THEN ${SNAPSHOT_RETENTION_DAYS.legal}
+                       ELSE ${DEFAULT_SNAPSHOT_RETENTION_DAYS} END)
+        `
+        .then((rows) => Number(rows[0]?.count ?? 0)),
+      prisma.emailDelivery
+        .findFirst({
+          where: { renderDataSnapshot: { not: Prisma.JsonNull } },
+          orderBy: { createdAt: "asc" },
+          select: { createdAt: true },
+        })
+        .then((row) => row?.createdAt.toISOString() || null),
     ]);
 
     const measured: Record<
@@ -317,6 +347,10 @@ export async function GET(req: Request) {
       providerModelCatalogRuns: {
         staleCount: oldCatalogRuns,
         oldestAt: oldestCatalogRun,
+      },
+      emailDeliverySnapshots: {
+        staleCount: staleSnapshots,
+        oldestAt: oldestSnapshot,
       },
     };
 

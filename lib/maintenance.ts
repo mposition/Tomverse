@@ -54,6 +54,7 @@ import {
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
+import { purgeExpiredRenderSnapshots } from "@/lib/emailSnapshotRetention";
 import { retentionCutoff } from "@/lib/retentionPolicyCore";
 import {
   drainKnowledgeCleanupQueue,
@@ -668,6 +669,18 @@ export async function cleanupExpiredData() {
   // has and for the same reason: a failed delivery nobody has acknowledged is
   // still on the work queue, oldest first. Sweeping it on age would take the
   // one row an operator has not dealt with and leave the ones they have.
+  // The personalisation inputs a message was rendered from, cleared once its
+  // classification's window has passed (docs/policy/email-notifications.md
+  // §10.3 rule 3). The row stays, `renderedHash` stays, and the proof that a
+  // notice was sent stays -- only the reproducible window closes.
+  //
+  // Age is measured from the send, falling back to when the row was written:
+  // a delivery that never sent still holds the same personal data, and leaving
+  // it forever because it failed would be the wrong way round.
+  const emailRenderSnapshots = await step("email_render_snapshots", () =>
+    purgeExpiredRenderSnapshots()
+  );
+
   const notificationLogs = await step("notification_logs", () =>
     prisma.adminNotificationLog.deleteMany({
       where: {
@@ -851,6 +864,7 @@ export async function cleanupExpiredData() {
     scheduledJobRuns: scheduledJobRuns?.count ?? null,
     providerModelCatalogRuns: providerModelCatalogRuns?.count ?? null,
     notificationLogs: notificationLogs?.count ?? null,
+    emailRenderSnapshots,
     traceErrorEvidence,
     autoFixCases,
     productAnalyticsEvents: productAnalyticsEvents?.count ?? null,
