@@ -44,6 +44,8 @@ export const BOUNDED_TABLES = {
     AdminSlackTemplate: "primary key is the template key",
     AdminAlertPolicy: "one row per alert policy, edited rather than appended",
     UserMemorySettings: "primary key is the user; grows with signups only",
+    EmailTemplate:
+        "one row per template key, and the keys are written in lib/emailTemplateDefinitions.ts",
     ProviderDailyUsage:
         "one row per (provider, model, source, day); the day makes it grow, but at a rate set by the catalogue rather than by traffic",
 };
@@ -86,6 +88,12 @@ export const RETAINED_TABLES = {
     AdminProviderIncident:
         "incident history; the record of what was wrong and when it was resolved",
     Feedback: "support record, deleted with the customer",
+    EmailEvent:
+        "the record that a message was owed and to whom it was expanded; a delivery row points at it, so removing one leaves a send with no reason it happened",
+    ConsentRecord:
+        "the evidence that somebody agreed, on which policy version and how it was captured; it is the answer to a regulator asking why a message was sent, and it has to outlive the consent it records",
+    EmailPolicyVersion:
+        "the labelling rules a delivery was rendered under, pinned by id on every EmailDelivery; deleting a version makes every message sent beneath it unexplainable",
 };
 
 /**
