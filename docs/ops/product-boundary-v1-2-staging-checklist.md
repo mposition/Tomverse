@@ -103,9 +103,14 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
   npm run report:routing-dispatch-readiness
   ```
 
-  읽을 것은 두 가지입니다 — **recording이 켜져 있는가**, 그리고 **`RoutingRun`
-  행 수**. `ROUTING_DISPATCH_INSTRUMENTATION`이 `observe`도 `enforce`도 아니면
-  행은 쌓이지 않았고, 이 항목은 여기서 끝납니다.
+  판정은 **`RoutingRun` 행 수**로 합니다. 이 숫자는 데이터베이스에서 읽으니
+  그대로 믿을 수 있습니다.
+
+  preflight에 찍히는 `ROUTING_DISPATCH_INSTRUMENTATION` 줄은 **참고만**
+  하십시오. 리포트가 스스로 밝히듯(#839) 그 줄은 **리포트를 실행하는 프로세스의
+  환경**이지 행을 쓴 서버의 환경이 아닙니다 — 배포된 서버는 부팅 시점의 값을
+  들고 있습니다. 그러니 "off로 보이니 행이 없겠지"로 건너뛰지 말고 행 수를 직접
+  보십시오. 행이 0이면 이 항목은 여기서 끝납니다.
 
   판별 대상은 이것입니다. 마이그레이션
   `20260822093000_routing_run_product_attribution`은 `RoutingRun`에 인덱스
@@ -125,7 +130,7 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 
   | 관측 | 다음 행동 |
   |---|---|
-  | recording off, 또는 행이 적음 | 그대로 배포. 선례가 그대로 적용됨 |
+  | 행이 0이거나 적음 | 그대로 배포. 선례가 그대로 적용됨 |
   | 행이 많음 | **배포하지 말고 마이그레이션을 쪼갠다** — 인덱스를 별도 파일의 `CREATE INDEX CONCURRENTLY`로, FK를 `NOT VALID` + 후속 `VALIDATE`로 |
 
   두 번째는 **코드 변경**입니다. 그래서 이 항목이 배포 전에 있습니다. "많음"의

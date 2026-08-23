@@ -50,7 +50,7 @@ flag를 켠 채로 실행했다면 그 사실을 여기 적습니다 — 기록 
 
 | 항목 | 관측 | 판정 |
 |---|---|---|
-| A-1 `ROUTING_DISPATCH_INSTRUMENTATION` (production) | | |
+| A-1 `ROUTING_DISPATCH_INSTRUMENTATION` (리포트 실행 프로세스 기준, 참고값) | | |
 | A-1 `RoutingRun` 행 수 (production) | | |
 | A-1 평소 분당 턴 수 | | |
 | A-1 결론 — 그대로 배포 / 마이그레이션 분리 | | |
