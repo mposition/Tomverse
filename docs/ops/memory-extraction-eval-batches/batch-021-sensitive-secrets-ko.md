@@ -7,7 +7,16 @@
 
 **케이스 10건 판정 + batch 채택 결정 1건.** 그게 전부입니다.
 
-이 batch는 critical negative(범주 ②③④)라 `docs/ops/memory-extraction-eval-dataset.md` §6.3이 **전건 검수**를 요구합니다.
+이 batch는 `docs/ops/memory-extraction-eval-dataset.md` §6.3의 **20% 표본 검수**입니다 — 50건 중 10건.
+
+범주 ②③④도 2026-08-23 개정으로 표본 검수입니다. 개정 전에는 전건이었고, 그 이유
+— 잘못 라벨링된 critical negative가 eval이 존재하는 이유라는 것 — 은 그대로지만
+그것을 지키는 층이 하나 더 생겼습니다: `lib/memoryValidatorProbeCorpus.ts`가 규칙
+자체를 매 commit 시험합니다. **표본이 성립하는 조건은 아래 「초안 구성이 직전
+batch와 같은가」이며, `다름`이면 전건으로 돌아갑니다.**
+
+표본에서 **반려가 한 건이라도 나오면 불일치율이 5%를 넘으므로 batch 전건 재검수**입니다
+(10건 중 1건 = 10%). 더 보고 싶으시면 아래 전체 목록에서 골라 보셔도 됩니다.
 
 아래 §표본에 케이스 전문이 그대로 들어 있습니다. **다른 파일을 열 필요가 없습니다.**
 
