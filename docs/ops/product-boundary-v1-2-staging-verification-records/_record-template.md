@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/product-boundary-v1-2-staging-checklist.md
-templateRevision: 2026-08-23d
+templateRevision: 2026-08-23e
 environment:
 deploySha:
 startedAtUtc:
@@ -22,7 +22,7 @@ digest:
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
-| template revision | 2026-08-23d |
+| template revision | 2026-08-23e |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -56,8 +56,9 @@ flag를 켠 채로 실행했다면 그 사실을 여기 적습니다 — 기록 
 | A-1 `Conversation` 분당 쓰기 | | |
 | A-1 결론 — 그대로 배포 / 마이그레이션 분리 | | |
 | A-2 두 마이그레이션 경과 시간 합 (상한) · 읽은 배포 id | | |
-| A-2 `%product%` 제약 4종이 `convalidated = false` | | |
+| A-2 CHECK 4종이 `convalidated = false` | | |
 | A-2 `RoutingRun_conversationId_fkey`가 `convalidated = true` | | |
+| A-2 다섯 행이 모두 나왔는가 (`null` 없음) | | |
 | A-2 B~C를 한 배포 안에서 끝냈는가 (아니면 각 항목의 SHA) | | |
 
 A-1의 결론이 "분리"라면 **이 회차는 여기서 멈춥니다.** 코드가 바뀌어야 하고,
