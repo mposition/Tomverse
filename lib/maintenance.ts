@@ -45,9 +45,10 @@ import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorke
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
 import {
-  sendFoundingTesterPassEndedEmail,
-  sendFoundingTesterPassReminderEmail,
-} from "@/lib/billingEmails";
+  FOUNDING_TESTER_PASS_ENDED_TEMPLATE,
+  FOUNDING_TESTER_PASS_REMINDER_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   FOUNDING_TESTER_PASS_EXPIRED_STATUS,
   FOUNDING_TESTER_PASS_STATUS,
@@ -107,13 +108,14 @@ export const deleteScheduledAccounts = async (now: Date) => {
   return deleted;
 };
 
-const resetReminderClaim = (id: string, claimedAt: Date) =>
-  prisma.billingPromotionRedemption.updateMany({
-    where: { id, reminderSentAt: claimedAt },
-    data: { reminderSentAt: null },
-  });
-
-const sendFoundingTesterPassReminders = async (now: Date) => {
+/**
+ * Exported for the DB integration test.
+ *
+ * The whole maintenance run needs a set of keys this one step does not, so a
+ * test that had to call `cleanupExpiredData()` to reach it would be testing the
+ * environment as much as the behaviour.
+ */
+export const sendFoundingTesterPassReminders = async (now: Date) => {
   const rows = await prisma.billingPromotionRedemption.findMany({
     where: {
       reminderSentAt: null,
@@ -131,6 +133,7 @@ const sendFoundingTesterPassReminders = async (now: Date) => {
       accessEndsAt: true,
       user: {
         select: {
+          id: true,
           email: true,
           settings: { select: { language: true } },
         },
@@ -140,26 +143,40 @@ const sendFoundingTesterPassReminders = async (now: Date) => {
   let sent = 0;
   for (const row of rows) {
     if (!row.accessEndsAt) continue;
-    const claimedAt = new Date();
-    const claimed = await prisma.billingPromotionRedemption.updateMany({
-      where: { id: row.id, reminderSentAt: null, expiredAt: null },
-      data: { reminderSentAt: claimedAt },
-    });
-    if (claimed.count !== 1) continue;
+    const accessEndsAt = row.accessEndsAt;
     try {
-      const result = await sendFoundingTesterPassReminderEmail({
-        to: row.user.email,
-        periodEnd: row.accessEndsAt,
-        language: row.user.settings?.language,
-      });
-      if (!result.sent) {
-        await resetReminderClaim(row.id, claimedAt);
-        continue;
-      }
-      sent += 1;
+      // The claim and the outbox row commit together, which is what the queue
+      // buys here. The old shape claimed first, sent second and undid the claim
+      // when the send threw -- and a crash in that window marked the reminder
+      // sent without one existing. Now either both rows are there or neither is
+      // (docs/policy/email-notifications.md §2.4).
+      const enqueued = await prisma.$transaction(
+        async (tx) => {
+          const claimed = await tx.billingPromotionRedemption.updateMany({
+            where: { id: row.id, reminderSentAt: null, expiredAt: null },
+            data: { reminderSentAt: new Date() },
+          });
+          if (claimed.count !== 1) return false;
+          await enqueueStandardEmail({
+            tx,
+            templateKey: FOUNDING_TESTER_PASS_REMINDER_TEMPLATE,
+            emailAddress: row.user.email,
+            userId: row.user.id,
+            language: row.user.settings?.language,
+            payload: { periodEnd: accessEndsAt.toISOString() },
+            referenceType: "BillingPromotionRedemption",
+            referenceId: row.id,
+          });
+          return true;
+        },
+        // Wider than the default because enqueueStandardEmail resolves the
+        // template version and the jurisdiction on its own connection first,
+        // and the very first send of a newly registered template inserts rows.
+        { maxWait: 5_000, timeout: 15_000 }
+      );
+      if (enqueued) sent += 1;
     } catch (error) {
-      await resetReminderClaim(row.id, claimedAt).catch(() => undefined);
-      console.error("Founding Tester Pass reminder email failed:", {
+      console.error("Founding Tester Pass reminder enqueue failed:", {
         redemptionId: row.id,
         errorName: error instanceof Error ? error.name : "UnknownError",
       });
@@ -216,7 +233,8 @@ const expireFoundingTesterPasses = async (now: Date) => {
   return { expired, downgraded };
 };
 
-const sendFoundingTesterPassEndedNotices = async (now: Date) => {
+/** Exported for the DB integration test; see above. */
+export const sendFoundingTesterPassEndedNotices = async (now: Date) => {
   const rows = await prisma.billingPromotionRedemption.findMany({
     where: {
       expiredAt: { not: null },
@@ -230,6 +248,7 @@ const sendFoundingTesterPassEndedNotices = async (now: Date) => {
       accessEndsAt: true,
       user: {
         select: {
+          id: true,
           email: true,
           settings: { select: { language: true } },
         },
@@ -239,20 +258,35 @@ const sendFoundingTesterPassEndedNotices = async (now: Date) => {
   let sent = 0;
   for (const row of rows) {
     if (!row.accessEndsAt) continue;
+    const accessEndsAt = row.accessEndsAt;
     try {
-      const result = await sendFoundingTesterPassEndedEmail({
-        to: row.user.email,
-        periodEnd: row.accessEndsAt,
-        language: row.user.settings?.language,
-      });
-      if (!result.sent) continue;
-      const marked = await prisma.billingPromotionRedemption.updateMany({
-        where: { id: row.id, expiryNoticeSentAt: null },
-        data: { expiryNoticeSentAt: now },
-      });
-      sent += marked.count;
+      // Same shape as the reminder, and for the same reason: the old order sent
+      // first and marked second, so a failure to mark sent the notice again on
+      // the next sweep.
+      const enqueued = await prisma.$transaction(
+        async (tx) => {
+          const marked = await tx.billingPromotionRedemption.updateMany({
+            where: { id: row.id, expiryNoticeSentAt: null },
+            data: { expiryNoticeSentAt: now },
+          });
+          if (marked.count !== 1) return false;
+          await enqueueStandardEmail({
+            tx,
+            templateKey: FOUNDING_TESTER_PASS_ENDED_TEMPLATE,
+            emailAddress: row.user.email,
+            userId: row.user.id,
+            language: row.user.settings?.language,
+            payload: { periodEnd: accessEndsAt.toISOString() },
+            referenceType: "BillingPromotionRedemption",
+            referenceId: row.id,
+          });
+          return true;
+        },
+        { maxWait: 5_000, timeout: 15_000 }
+      );
+      if (enqueued) sent += 1;
     } catch (error) {
-      console.error("Founding Tester Pass ended email failed:", {
+      console.error("Founding Tester Pass ended enqueue failed:", {
         redemptionId: row.id,
         errorName: error instanceof Error ? error.name : "UnknownError",
       });
