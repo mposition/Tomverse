@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **5** | **2026-08-23** | **리뷰 4회차 반영.** staging 파일을 `AssistantKnowledgeFile.importId` **관계로 격리**하고 일반 knowledge·versions route에서 차단(§5.9.3b), publish를 **transaction-aware helper로 분리**해 version 생성과 import 확정을 한 transaction에 묶음(§5.9.3c), `mode`·`status`에 **CHECK + cleanup fail-closed 조건**(§5.9.3d), idle/absolute TTL을 **명시 컬럼으로 분리**하고 시계 갱신 규칙 확정(§5.9.3e), `stagedFileIds String[]` **폐기**(§6.6). 고친 문단은 **[rev5]** |
 | **4** | **2026-08-23** | **리뷰 3회차 반영.** 가져오기를 **`create` / `merge` 두 mode로 분리**하고 merge는 draft profile 없이 **대상 profile에 직접 staging**하도록 확정(§5.9.3) — 지적된 knowledge 이전·quota 역설이 함께 사라집니다. staging schema에 이어가기·만료·mode·병합 대상 필드 추가(§6.6), provenance를 **서버가 증명할 수 있는 것/주장인 것**으로 재명명(§9.3.1), B1~B6를 **Slice 2** 차단으로·C3를 **Slice 8** 차단으로 정정(§10.1.2), stale publish 후 staging 유지 계약 추가(§5.9.7), 취소 테스트를 rev3 상태에 맞게 수정, MVP 입력을 **ZIP + 단독 JSON으로 한정**(디렉터리 제외). 고친 문단은 **[rev4]** |
 | **3** | **2026-08-23** | **리뷰 2회차 반영.** staging 보유자를 **draft `AssistantProfile`로 확정**(§5.9.3), wizard 단계와 MVP 범위를 §5.2 하나로 통일, 취소 계약의 R2 삭제 시점을 §10.3까지 일치, 승인 항목 수(A1~A6)와 **slice별 차단**으로 정리, provenance schema에 Prisma 관계·cascade 명시, native package의 provenance를 **서버 관측/패키지 주장**으로 분리, `.strict()`이 secret을 막는다는 서술 정정, `display_name`/`display_title` **상류 문서 불일치**로 기록. 고친 문단은 **[rev3]** |
 | **2** | **2026-08-23** | **리뷰 1회차 반영.** P1 4건(§5.9 R2/DB transaction 불가 · §9.5 round-trip 등식 · §7.17 secret 서버 재검증 · §7.5 instruction URL 계약)과 P2 4건(§5.7 preview 미구현 · §6.6 provenance 개인정보 계약 · §2.5 `display_name` 위치 · §2.3 GPT export 표현 통일)을 고쳤습니다. 고친 문단은 **[rev2]** 표시로 찾을 수 있습니다. 승인 항목이 A5·A6 둘 늘었습니다(§10.1) |
@@ -861,13 +862,200 @@ B가 이미 20개를 갖고 있으면 병합이 거절됩니다 — 이는 역�
 | cross-profile 이전 | 없음 | **없음** |
 
 **`merge`의 취소가 "이 import가 만든 파일만" 지울 수 있는 이유**는 §6.6의
-`AssistantProfileImport.stagedFileIds`가 그 목록을 들고 있기 때문입니다. 기존
+**[rev5]** `AssistantKnowledgeFile.importId` 관계가 그 결속을 들고 있기 때문입니다(§5.9.3b). 기존
 파일과 섞이지 않습니다.
 
-**둘 다 publish는 `publishAssistantProfileVersion()`을 그대로 부릅니다.**
-`create`는 `expectedRevision: null`, `merge`는 시작 시점 revision. 새 publish
-경로를 만들지 않으므로 stale 판정·`unchanged` 판정·manifest 해석이 손으로
-만든 편집과 **같은 코드**를 지납니다.
+**[rev5] publish는 planner와 검증을 공유하되 write helper를 나눕니다** —
+§5.9.3c. rev4의 "그대로 부릅니다"는 §5.9.3c가 설명하는 이유로 성립하지
+않습니다.
+
+#### 5.9.3b [rev5] staging 파일은 일반 편집기에서 보이면 안 됩니다
+
+**리뷰 4회차 지적 1.** rev4는 merge staging 파일을 대상 profile에 올려 두고
+"게시된 manifest에 없으니 안전하다"고 했습니다. **retrieval에 대해서는 참이고,
+편집기에 대해서는 거짓입니다.**
+
+[저장소] `listKnowledgeFiles(userId, profileId)`는 `where: { userId, profileId }`
+로 **그 profile의 파일을 전부** 돌려주고, `resolveManifestEntries()`도 같은
+범위로 조회합니다. 그래서 이런 경로가 열립니다.
+
+```
+import wizard에서 merge 시작 → 대상 profile에 staging 파일 업로드
+  → 다른 탭의 일반 편집기에 그 파일이 보임
+  → 사용자가 그것을 골라 일반 publish
+  → import는 최종 승인 전인데 파일은 이미 게시된 manifest에 들어감
+```
+
+`create`에도 대칭적인 구멍이 있습니다 — 일반 versions API로 draft를 게시하면
+`currentVersionId`가 채워지는데 `import.status`는 여전히 `staging`이고, 만료
+sweep이 그 profile을 **이미 게시된 상태로** 지울 수 있습니다.
+
+**격리를 관계로 만듭니다.** 리뷰의 제안을 채택하되 `onDelete`만 바꿉니다
+(아래 상자).
+
+```prisma
+model AssistantKnowledgeFile {
+  // ...
+  /// 이 파일을 staging으로 들고 있는 가져오기. NULL이면 평범한 파일입니다.
+  /// publish가 NULL로 바꾸는 것이 "승격"이고, 그 전까지 일반 경로는 이 파일을
+  /// 보지도 고르지도 못합니다.
+  importId String?
+  import   AssistantProfileImport? @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@index([importId])
+}
+```
+
+**`onDelete: Restrict`를 쓰지 않는 이유 — 계정 삭제가 막힙니다.** 리뷰는
+`Restrict`를 제안했지만, `User`는 `AssistantProfileImport`와
+`AssistantKnowledgeFile` **양쪽으로 각각 cascade**합니다. 두 삭제의 순서는
+보장되지 않으므로, import 행이 먼저 지워지는 순간 `Restrict`가 계정 삭제
+transaction 전체를 중단시킵니다. `Cascade`면 import가 사라질 때 그 staging
+파일 행도 함께 사라집니다.
+
+**그 대신 R2 tombstone은 애플리케이션 경로가 책임집니다.** 취소·만료 sweep은
+파일을 지우기 전에 `enqueueKnowledgeCleanupForFiles()`를 **먼저** 부르며,
+DB cascade는 그 경로가 도달하지 못한 경우의 backstop입니다. 남은 object는
+§14.2의 `upload_abandoned` 24시간 sweep이 가져갑니다.
+
+> **[rev5] 조사 중 발견한 인접 사실(이 기능의 범위 밖).** `accountDeletion.ts`는
+> image·artifact·message attachment에 대해서는 `account_deleted` tombstone을
+> 같은 transaction에서 enqueue하지만 **knowledge에 대해서는 하지 않습니다**.
+> `KNOWLEDGE_CLEANUP_REASONS`에 `account_deleted`가 선언돼 있는데 그것을 쓰는
+> 코드가 없습니다 — `imageAssetLifecycle`이 같은 이유로 고쳐졌던 것과 같은
+> 형태입니다. **이 보고서는 그것을 고치지 않고 기록만 합니다.** 다만 위 설계가
+> "계정 삭제가 knowledge를 tombstone한다"에 의존하지 않는 이유이기도 합니다.
+
+**따라오는 계약 여섯.**
+
+1. **일반 knowledge 목록은 `importId: null`만 반환**합니다
+   (`listKnowledgeFiles`의 `where`에 조건 추가).
+2. **일반 versions API는 `importId != null` 파일을 manifest에 넣을 수 없습니다**
+   — `resolveManifestEntries()`의 `where`에 `importId: null`을 추가하면, 기존
+   "names a file this profile does not have" 422가 그대로 답이 됩니다.
+3. **import publish만 자기 `importId`의 파일을 씁니다** —
+   `where: { importId: <이 import> }`.
+4. **승격은 publish transaction 안에서 `importId`를 `null`로** 바꾸는 것입니다.
+5. **활성 staging import가 있는 profile은 일반 publish를 거절**합니다. `create`
+   draft가 일반 경로로 게시되는 것을 막는 유일한 방법이고, §5.9.3d의 sweep
+   조건과 짝을 이룹니다.
+6. **취소·만료는 `importId`로 파일을 찾습니다** — 배열을 신뢰하지 않습니다.
+
+#### 5.9.3c [rev5] publish와 import 확정은 한 transaction이어야 합니다
+
+**리뷰 4회차 지적 2.** [저장소] `publishAssistantProfileVersion()`은 **자기
+`prisma.$transaction`을 열어** version 생성과 `currentVersionId` 갱신 **두
+write만** 처리하고 반환합니다. 그 뒤에 import 행을 따로 고치면 이 상태가
+가능합니다.
+
+```
+version 생성 성공 · currentVersionId 갱신 성공
+  → 프로세스 종료 또는 DB 오류
+  → import.status 갱신 실패
+```
+
+결과: profile은 게시됐는데 import는 `staging`이고, **만료 sweep의 대상**이
+되며(create면 게시된 profile을 지울 위험), provenance가 실제 version에
+결속되지 않습니다.
+
+**검증·planner는 공유하고 write helper만 나눕니다.**
+
+```ts
+// transaction을 열지 않는 내부 helper (신규)
+publishAssistantProfileVersionInTx(tx, input, plan)
+
+// 일반 편집 경로 -- 동작 변화 없음
+prisma.$transaction((tx) => publishAssistantProfileVersionInTx(tx, input, plan))
+
+// import 경로 -- 네 write가 한 transaction
+prisma.$transaction(async (tx) => {
+    const version = await publishAssistantProfileVersionInTx(tx, input, plan)
+    await promoteStagedFiles(tx, importId)      // importId -> null
+    await finalizeProfileImport(tx, importId, version.id)  // status·digest·userApprovedAt
+    return version
+})
+```
+
+**`resolveManifestEntries()`도 `tx`를 받아야 합니다.** 현재 `prisma`를 직접
+쓰므로, 같은 transaction 안에서 승격 전 파일을 조회하려면 client를 주입받는
+형태여야 합니다.
+
+이것은 기존 동작을 바꾸지 않는 **리팩터링**입니다 — 일반 편집 경로는 같은 두
+write를 같은 순서로 하고, 바뀌는 것은 transaction을 누가 여느냐뿐입니다.
+
+#### 5.9.3d [rev5] `mode`가 틀리면 남의 profile이 지워집니다
+
+**리뷰 4회차 지적 3.** `mode`는 표시 필드가 아니라 **sweep의 분기**입니다 —
+`create`는 profile 전체 삭제, `merge`는 파일만 삭제. 자유 문자열이면 잘못된
+값 하나가 기존 profile을 지웁니다.
+
+**(1) DB CHECK.** [저장소]가 이미 쓰는 방식입니다 —
+`KNOWLEDGE_PROCESSING_STATUSES`·`KNOWLEDGE_CLEANUP_REASONS`가 runtime 목록과
+migration CHECK를 함께 두고 `npm run check:enum-constraints`가 둘을
+대조합니다. 같은 형태로:
+
+```sql
+CHECK ("mode"   IN ('create', 'merge'))
+CHECK ("status" IN ('staging', 'published'))
+```
+
+**(2) CHECK만으로는 부족합니다.** CHECK는 값이 둘 중 하나임을 보장할 뿐
+**그 값이 이 행에 맞는지**는 모릅니다. cleanup 직전에 fail-closed로 다시
+확인합니다.
+
+| `create` cleanup 허용 조건 (**전부** 참일 때만) |
+|---|
+| `import.status == 'staging'` |
+| `import.mode == 'create'` |
+| `profile.currentVersionId IS NULL` |
+| profile의 version 수 == 0 |
+| profile이 이 import가 만든 draft (`import.profileId == profile.id`이고 그 profile을 가리키는 다른 import가 없음) |
+
+| `merge` cleanup |
+|---|
+| **profile 삭제 절대 금지** |
+| `importId`가 결속된 파일만 삭제 |
+
+**조건이 하나라도 어긋나면 아무것도 지우지 않고 구조화 오류를 남깁니다.**
+"아마 draft일 것"으로 profile을 지우는 것은 되돌릴 수 없고, 사람이 확인하는
+것은 되돌릴 수 있습니다. 이것이 [저장소]가 `IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS`
+소진 시 operator에게 보고하는 것과 같은 태도입니다.
+
+#### 5.9.3e [rev5] TTL 시계를 `updatedAt`에서 떼어냅니다
+
+**리뷰 4회차 지적 4.** rev4는 idle TTL을 `updatedAt`으로 계산했는데, Prisma의
+`@updatedAt`은 **어떤 write에서도** 갱신됩니다. §5.9.4a는 stale 실패 시
+`expectedTargetRevision`과 `candidateDigest`를 갱신한다고 했으므로, **stale
+실패가 idle TTL을 연장**합니다 — 같은 문서 안의 두 문장이 반대입니다.
+background 처리 결과 기록·오류 기록·내부 재시도도 같은 문제를 만듭니다.
+
+rev4가 `computeExternalImportExpiries()` 선례를 근거로 컬럼을 뺀 것은 **릴리스
+A에는 사용자 활동 외의 write가 없었기 때문**입니다. 이쪽은 background 추출이
+같은 행을 건드리므로 그 선례가 적용되지 않습니다. 명시 컬럼으로 바꿉니다.
+
+```prisma
+  createdAt          DateTime @default(now())
+  /// 사용자 행위만 갱신합니다. 아래 규칙 참조.
+  lastUserActivityAt DateTime @default(now())
+  /// 저장합니다 -- 계산하면 어느 시계로 계산할지가 다시 모호해집니다.
+  idleExpiresAt      DateTime
+  absoluteExpiresAt  DateTime
+  /// 진단용. TTL 계산에 쓰지 않습니다.
+  updatedAt          DateTime @updatedAt
+
+  @@index([status, idleExpiresAt])
+  @@index([status, absoluteExpiresAt])
+```
+
+**시계 갱신 규칙 다섯.**
+
+| 무엇 | idle 갱신 |
+|---|---|
+| 파일 추가·제외, manifest 편집, 단계 이동 | **함** |
+| background 추출 결과·오류 기록, 내부 재시도 | 안 함 |
+| stale publish 실패 | **안 함** (§5.9.4a의 계약이 이제 코드와 일치) |
+| absolute 만료 | **어떤 작업도 갱신하지 않음** |
+| 계산된 idle 만료 | `min(lastUserActivityAt + idleTtl, absoluteExpiresAt)` — **absolute를 넘지 않음** |
 
 계약 넷:
 
@@ -889,7 +1077,7 @@ B가 이미 20개를 갖고 있으면 병합이 거절됩니다 — 이는 역�
    기존 15분 maintenance sweep이 가져갑니다. 즉 **새 sweep 로직이 아니라 기존
    두 sweep에 조회 하나가 추가되는 것**입니다.
 5. **[rev4] `merge`의 만료 sweep은 profile을 지우지 않습니다.** 만료된 merge
-   import는 `stagedFileIds`의 파일만 삭제하고 tombstone을 기록한 뒤 import 행을
+   import는 **`importId`가 자기를 가리키는 파일만** 삭제하고 tombstone을 기록한 뒤 import 행을
    지웁니다. 대상 profile과 그 기존 파일·revision은 그대로입니다.
 
 #### 5.9.4 취소 계약 — 정확한 문장으로 다시 씀
@@ -939,6 +1127,10 @@ rev1의 문장은 지킬 수 없는 계약이었습니다.**
   계산합니다(§6.6). 그렇지 않으면 재시도가 같은 stale로 다시 실패합니다.
 - **TTL은 계속 흐릅니다.** stale 실패가 staging의 수명을 연장하지 않습니다 —
   릴리스 A의 seal이 수명을 연장하지 않는 것과 같은 이유입니다(정책 §5.5).
+  **[rev5]** 이 문장은 이제 코드와 일치합니다: `expectedTargetRevision`과
+  `candidateDigest`를 갱신해도 `lastUserActivityAt`은 건드리지 않습니다
+  (§5.9.3e). rev4처럼 `@updatedAt`을 시계로 쓰면 stale 실패가 오히려 수명을
+  연장했습니다.
 
 버리는 대안("staging 즉시 삭제 후 처음부터")은 적지만 채택하지 않습니다.
 사용자가 20개 파일을 다시 올려야 하고, 그 경합은 사용자가 만든 것이 아닙니다.
@@ -1087,9 +1279,12 @@ model AssistantProfileImport {
   /// 들어가지 않습니다(§3.2, A1).
   stagingManifest Json?
 
-  /// 이 import가 만든 knowledge 파일. merge의 취소가 기존 파일을 건드리지
-  /// 않고 자기 것만 지울 수 있는 근거입니다(§5.9.3a).
-  stagedFileIds String[] @default([])
+  /// [rev5] rev4의 `stagedFileIds String[]`는 폐기했습니다 -- FK가 아니라
+  /// 배열이라 남의 파일 id·삭제된 id·중복을 담을 수 있고, 무엇보다
+  /// check-data-domain-registry가 scalar list를 컬럼으로 세지 않아
+  /// (`if (RELATION_TYPES.has(type) || list) continue;`) field list에 적으면
+  /// "존재하지 않는 컬럼"으로 실패합니다. 결속은 반대편이 관계로 듭니다.
+  stagedFiles AssistantKnowledgeFile[]
 
   /// 현재 stagingManifest의 digest. 최종 확인 화면이 무엇을 보여 줬는지를
   /// approvedDigest와 대조하기 위한 값입니다.
@@ -1130,15 +1325,28 @@ model AssistantProfileImport {
   versionId String?
   version   AssistantProfileVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
 
-  /// TTL은 컬럼이 아니라 이 둘에서 계산합니다 -- 아래 설명.
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  /// [rev5] TTL은 명시 컬럼입니다 -- @updatedAt은 background write에도 움직여
+  /// stale 실패가 수명을 연장하게 만듭니다(§5.9.3e).
+  createdAt          DateTime @default(now())
+  lastUserActivityAt DateTime @default(now())
+  idleExpiresAt      DateTime
+  absoluteExpiresAt  DateTime
+  /// 진단용. TTL 계산에 쓰지 않습니다.
+  updatedAt          DateTime @updatedAt
 
   @@index([userId, createdAt])
   @@index([profileId, createdAt])
-  /// 만료 sweep의 조회가 정확히 이 쌍을 읽습니다.
-  @@index([status, updatedAt])
+  /// [rev5] 만료 sweep의 두 조회가 각각 이 쌍을 읽습니다.
+  @@index([status, idleExpiresAt])
+  @@index([status, absoluteExpiresAt])
 }
+```
+
+**[rev5] migration에는 CHECK 두 개와 반대편 관계가 함께 갑니다**(§5.9.3b·§5.9.3d).
+
+```sql
+CHECK ("mode"   IN ('create', 'merge'));
+CHECK ("status" IN ('staging', 'published'));
 ```
 
 **[rev3] 반대편 관계도 함께 추가해야 합니다** — `User.assistantProfileImports`,
@@ -1148,7 +1356,7 @@ model AssistantProfileImport {
 **[rev4] `stagingManifest`는 사용자 데이터입니다.** §6.6.1의 여섯 가지가 그대로
 적용되며, 특히 **계정 export에 포함**돼야 합니다 — 사용자가 중단한 가져오기의
 내용도 그가 쓴 것입니다. `candidateDigest`·`approvedDigest`·`validatorVersion`·
-`ingestPath`·`stagedFileIds`는 내부값으로 withhold합니다.
+`ingestPath`는 내부값으로 withhold합니다. **[rev5]** `stagedFiles`는 관계이므로 field list에 적지 않습니다 — registry는 scalar 컬럼만 셉니다.
 
 **`serverReceivedAt`과 `userApprovedAt`이 둘 다 필요한 이유:** 전자는 서버가 행을 쓴
 시각이고 후자는 사람이 결정한 시각입니다. 정상 흐름에서는 거의 같지만, 둘을
@@ -1187,7 +1395,7 @@ the promise is quietly untrue."* 따라서 `AssistantProfileImport`를 만들면
 |---|---|---|
 | **[rev4]** `mode` · `declaredSourceKind` · `declaredSourceName` · `serverReceivedAt` · `userApprovedAt` · `stagingManifest` | **포함** | 사용자가 자기 profile의 출처와 중단된 가져오기의 내용을 아는 것이 이 테이블의 존재 이유. `declared*`는 주장값이므로 export 문구도 "표시됨"으로 씁니다 |
 | `declaredSourceUrl` | **포함**(저장하기로 결정한 경우) | 사용자가 직접 적은 값 |
-| **[rev4]** `validatorVersion` · `ingestPath` · `stagedFileIds` | **withhold** | 내부 식별자. 기존 선언들이 `retrievalVersion`·`promptFormatVersion`을 withhold하는 것과 같은 이유 |
+| **[rev5]** `validatorVersion` · `ingestPath` | **withhold** | 내부 식별자. 기존 선언들이 `retrievalVersion`·`promptFormatVersion`을 withhold하는 것과 같은 이유 |
 | `candidateDigest` · `approvedDigest` · `digestVersion` | **withhold** | 내부. 기존 `assistantKnowledgeFile` 선언이 content digest를 "internal"로 withhold하는 것과 같음 |
 | `versionId` | **withhold** | 내부 식별자. revision 번호가 사용자가 읽을 값 |
 
@@ -1998,7 +2206,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). knowledge 업로드는 **기존 경로 그대로**(draft의 `profileId` 사용), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). knowledge 업로드는 **기존 경로 그대로**(draft의 `profileId` 사용), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5]** `AssistantKnowledgeFile.importId` migration + 일반 knowledge·versions route의 staging 차단 + `publishAssistantProfileVersionInTx()` 리팩터링 + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | Slice 4, **§10.2의 B1~B6 승인**, **§10.1의 A5 승인** |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
@@ -2113,7 +2321,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **31** *(rev4)* | **stale revision** | `merge` 중 다른 탭이 먼저 게시 → publish가 `ASSISTANT_PROFILE_VERSION_STALE`(409). **대상 profile에 새 revision 없음**, **staging draft·파일·chunk는 그대로 유지**, 충돌 UI 재표시, `expectedTargetRevision` 갱신 후 재시도 성공, **TTL은 연장되지 않음**(§5.9.4a) |
 | 32 | **cross-account IDOR** | 남의 `profileId`로 병합 시도 → **404**(거절이 아니라 없음). 남의 import 행 조회 → 404 |
 | **33** *(rev4)* | **`create` 취소 시 남는 것** | 취소 **전**: draft profile 1 · staging import 1 · knowledge N · chunk M. 취소 transaction **후**: draft profile 0 · import 0 · knowledge 0 · chunk 0 · **cleanup tombstone N**. 다음 object sweep **후**: R2 object 0. `AssistantProfileVersion`은 어느 시점에도 0(§5.9.4) |
-| **33g** *(rev4)* | **`merge` 취소 시 남는 것** | 취소 후: **대상 profile 그대로**, 기존 knowledge **그대로**, `stagedFileIds`의 파일만 0 + tombstone, 기존 revision 수 변화 없음 |
+| **33g** *(rev4·rev5)* | **`merge` 취소 시 남는 것** | 취소 후: **대상 profile 그대로**, `importId IS NULL`인 기존 knowledge **그대로**, `importId = 이 import`인 파일만 0 + tombstone, 기존 revision 수 변화 없음 |
 | **33a** *(rev2)* | `pending` knowledge를 포함한 publish 시도 | **거절.** 부분 게시 없음(§5.9.3) |
 | **33b** *(rev2)* | 추출 `failed` 파일을 포함한 publish 시도 | **거절.** 사용자에게 제외/재시도 선택지 |
 | **33c** *(rev2)* | publish 직전 파일 하나가 `ready`→`failed`로 바뀜 | 서버 재검증이 잡아 **거절**. 클라이언트가 들고 있던 상태를 신뢰하지 않음 |
@@ -2128,8 +2336,14 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **33f** *(rev3)* | **staging 만료 sweep** | TTL 지난 draft profile·import 행·knowledge·chunk 삭제, tombstone 기록, 다음 sweep에서 R2 0건 |
 | **44** *(rev4)* | **provenance 주장의 위조** | 조작된 클라이언트가 `declaredSourceKind: "tomverse-native"`와 과거 시각을 보내면 → **`serverReceivedAt`은 서버 시각**, `ingestPath`는 서버가 지난 경로, `validatorVersion`은 서버 상수. 주장값은 `declared*`에만 남고 중복·재가져오기·digest·quota 어떤 판정에도 쓰이지 않음. **UI 문구가 "표시됨"인지 확인**(§9.3.1) |
 | **45** *(rev3)* | **secret이 instructions·knowledge 본문·파일명에 있을 때** | `.strict()`가 아니라 **서버 scanner**가 잡음. 세 위치 각각에 대해 케이스(§9.4) |
+| **46** *(rev5)* | **staging 파일이 일반 편집기에 안 보임** | merge staging 중 `GET .../knowledge`가 그 파일을 반환하지 않음. 일반 versions API가 그 fileId를 manifest에 넣으려 하면 **422** |
+| **47** *(rev5)* | **활성 staging import가 있는 profile의 일반 publish** | 거절. `create` draft가 일반 경로로 게시돼 sweep의 삭제 대상이 되는 경로가 없음 |
+| **48** *(rev5)* | **publish 원자성** | `promoteStagedFiles` 직후 강제 실패를 주입 → version·`currentVersionId`·`importId` 승격·import 확정이 **전부 rollback**. profile이 게시됐는데 import가 `staging`인 상태가 만들어지지 않음 |
+| **49** *(rev5)* | **`mode` CHECK와 cleanup fail-closed** | `mode`에 임의 문자열 insert → DB 거절. `mode='create'`인데 `currentVersionId != NULL`인 행을 만들어 sweep 실행 → **profile 삭제 안 됨 + 구조화 오류 1건** |
+| **50** *(rev5)* | **TTL이 연장되지 않음** | stale 실패·background 추출 완료·오류 기록 각각 뒤에 `lastUserActivityAt`·`idleExpiresAt` 불변. 파일 추가 뒤에는 갱신됨. `idleExpiresAt <= absoluteExpiresAt` 항상 참 |
+| **51** *(rev5)* | **`importId` cascade가 계정 삭제를 막지 않음** | staging 중인 계정 삭제 → 성공(`Restrict`였다면 실패). 남은 R2 object는 `upload_abandoned` sweep 대상 |
 | **38** *(rev2)* | **data-domain registry** | `npm run check:data-domain-registry` 통과. `AssistantProfileImport`가 export 도메인·cascade와 함께 선언돼 있음(§6.6.1) |
-| **39** *(rev4)* | **계정 데이터 export에 provenance 포함** | export 산출물에 `assistant_profile_imports`가 있고 `stagingManifest`가 포함되며, `validatorVersion`·`ingestPath`·`stagedFileIds`·`candidateDigest`·`approvedDigest`·`versionId`는 withhold |
+| **39** *(rev5)* | **계정 데이터 export에 provenance 포함** | export 산출물에 `assistant_profile_imports`가 있고 `stagingManifest`가 포함되며, `validatorVersion`·`ingestPath`·`candidateDigest`·`approvedDigest`·`versionId`는 withhold. **관계인 `stagedFiles`는 field list에 이름을 대지 않음**(registry는 scalar 컬럼만 셈) |
 | **40** *(rev2·rev3)* | **계정·profile 삭제 cascade** | profile 삭제 시 provenance 함께 삭제, 계정 삭제도 같음. **[rev3]** version 삭제는 `SetNull`이라 import 행이 남는지 별도 확인 |
 | **41** *(rev2)* | **share·conversation export 배제** | 제3자 경로 어디에도 provenance가 나타나지 않음(`tests/memoryReleaseContracts.test.mjs` 방식) |
 | **42** *(rev2)* | **instruction URL 고지** | instruction에 URL이 있는 fixture에서 host 목록이 표시되고, "방문하지 않습니다"라는 문구가 **나타나지 않음**(§7.5.1) |
@@ -2234,8 +2448,11 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
    그 파일은 어느 게시된 manifest에도 없어 진행 중인 대화에 영향을 주지
    않습니다. 취소·만료 시 DB는 즉시 0, R2 object는 다음 sweep(≈15분)(§5.9.4).
    **`ready`가 아닌 knowledge를 담은 게시는 거절**하고, **stale publish는
-   staging을 유지**합니다(§5.9.4a). paste 입력과 preview 실행은 **MVP
-   밖**입니다.
+   staging을 유지**합니다(§5.9.4a). **[rev5] staging 파일은
+   `AssistantKnowledgeFile.importId`로 격리**되어 일반 편집기에 보이지 않고
+   일반 publish에 쓰일 수 없으며, 승격은 publish transaction 안에서
+   `importId`를 `null`로 바꾸는 것입니다(§5.9.3b~c). paste 입력과 preview
+   실행은 **MVP 밖**입니다.
 4. **provenance 기록** — **[rev4]** 서버가 증명할 수 있는 것
    (`serverReceivedAt` · `approvedDigest` · `validatorVersion` · `ingestPath` ·
    `userApprovedAt`)과 사용자·클라이언트의 주장(`declared*`)을 **분리해서**
