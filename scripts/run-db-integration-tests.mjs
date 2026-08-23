@@ -188,6 +188,10 @@ run(
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",
+    // The two Founding Tester Pass sweeps, whose point is that the redemption's
+    // bookkeeping column and the outbox row commit in one transaction -- which
+    // is not observable from a single process.
+    "tests/integration/founding-tester-pass-emails.db.test.ts",
     // Which profile a queued message is composed against, which only a database
     // can answer: the row pins a policy version and activating a later one must
     // not change what an already-queued message says.
