@@ -26,13 +26,28 @@
  * follows it.
  *
  * The second change is that a message with no `searchMetadata` gets no badge.
- * That field is written on every assistant message the current code persists
- * (`normalizeWebSearchExecution` always returns an object), so its absence
- * means exactly one thing: the row predates the field. The old fallback
- * guessed from the model's provider and usage class -- Perplexity research
- * models were reported as "executed" -- which is an assertion about a turn no
- * record survives for. A badge that has to guess is a badge that should not
- * render.
+ * That field is written on every assistant message the current code
+ * *persists* (`normalizeWebSearchExecution` always returns an object), so on a
+ * finished message its absence means exactly one thing: the row predates the
+ * field. The old fallback guessed from the model's provider and usage class --
+ * Perplexity research models were reported as "executed" -- which is an
+ * assertion about a turn no record survives for. A badge that has to guess is
+ * a badge that should not render.
+ *
+ * "Persists" is load-bearing, and reading it as "has" cost the Deep Research
+ * badge. `searchMetadata` reaches the client in the stream's trailer, at the
+ * end (`ChatApp.tsx`), so a turn that is still running has none -- and the
+ * `!meta` guard, written for rows older than the field, was hiding the badge
+ * on every in-flight answer as well. For a Deep Research turn that is the
+ * whole visible run: the job is asynchronous, so "still running" is the state
+ * the panel sits in for as long as the research takes.
+ *
+ * `generating` separates the two populations the absence of metadata covers.
+ * A running turn is a fact about *now*, so the mode it is running in can be
+ * reported from the model's usage class -- that is what the badge said before
+ * this module existed. A finished message with no record is still a row from
+ * before the field, and still gets nothing: this is not a way back in for the
+ * provider guess, which is why the mode is the only status reachable here.
  *
  * Pure, so the whole matrix is testable without a browser
  * (tests/webSearchStatusBadge.test.mjs).
@@ -64,17 +79,31 @@ export type WebSearchBadgeDecision =
 const HIDDEN: WebSearchBadgeDecision = { shown: false };
 
 export function decideWebSearchBadge(input: {
-    /** `Message.searchMetadata`; null/undefined only on rows older than the field. */
+    /**
+     * `Message.searchMetadata`. Absent on a turn that is still running -- it
+     * arrives in the stream trailer -- and on rows older than the field.
+     */
     searchMetadata: WebSearchBadgeMetadata | null | undefined;
     /** `modelInfo.usageClass` for the model that answered. */
     usageClass: string | null | undefined;
+    /** True while this turn is still streaming, so its trailer has not landed. */
+    generating?: boolean;
 }): WebSearchBadgeDecision {
     const meta = input.searchMetadata;
+    const isDeepResearch = input.usageClass === "deep-research";
     // Before the usage-class branch on purpose: with no record of the turn
     // there is nothing to report, and a Deep Research label on a row from
     // before the field would be describing the model rather than the answer.
-    if (!meta) return HIDDEN;
-    if (input.usageClass === "deep-research") {
+    //
+    // A turn still in flight is the exception, and only for the mode: the run
+    // is happening now, so naming it describes this answer rather than
+    // guessing at one nobody kept a record of.
+    if (!meta) {
+        return input.generating && isDeepResearch
+            ? { shown: true, status: "deep-research" }
+            : HIDDEN;
+    }
+    if (isDeepResearch) {
         return { shown: true, status: "deep-research" };
     }
     if (!meta.requested) return { shown: true, status: "not-searched" };
