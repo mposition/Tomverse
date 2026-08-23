@@ -17,7 +17,11 @@ import { useEffect, type RefObject } from "react";
  *
  * - **Initial focus** moves into the dialog on the next frame (after the
  *   portal has painted), preferring `initialFocusRef` and falling back to the
- *   first focusable element in the panel.
+ *   first focusable element in the panel -- unless another modal opened on top
+ *   in the meantime, in which case the frame does nothing. A frame is long
+ *   enough to open a nested dialog, and focus arriving late would drag the
+ *   user back down into a dialog that is now inert, with no key press to
+ *   explain it.
  * - **Tab and Shift+Tab cycle** within the panel, including when focus has
  *   escaped to the document.
  * - **Escape closes**, via `onClose`.
@@ -56,6 +60,25 @@ import { useEffect, type RefObject } from "react";
  * the Tab trap has to see the current one. `tests/modalFocusEffectDeps.test.mjs`
  * pins the split.
  */
+
+/**
+ * Whether another `aria-modal` dialog has opened on top of this one -- decided
+ * by document order, the last such element being the one on top. Both the key
+ * handlers and the deferred initial focus below ask this: a dialog that is
+ * covered is inert, and inert covers its focus as much as its keys.
+ *
+ * A `null` dialog is not covered. The caller has no element to compare, which
+ * is the un-mounted case, not the buried one.
+ *
+ * Exported because one modal surface predates this hook and still runs its own
+ * focus frame: the mobile drawer in `MobileChatShell`. It has to answer the
+ * same question, and answering it a second way is how the two drift apart.
+ */
+export const coveredByAnotherModal = (dialog: HTMLElement | null) =>
+  dialog !== null &&
+  (Array.from(
+    document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+  ).at(-1) ?? null) !== dialog;
 
 const focusableWithin = (panel: HTMLElement) =>
   Array.from(
@@ -97,7 +120,15 @@ export function useModalDialog({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
+    // The frame below is skipped when another modal opened on top in the
+    // meantime. A frame is long enough for that -- Settings -> Delete Account
+    // is two clicks -- and focus arriving late would pull the person out of
+    // the dialog they are now in and back into this one, which is inert, with
+    // no key press to explain it. Under CI load that is what failed "Tab
+    // pressed before the nested dialog's initial focus lands" on main at
+    // 11b98c9: the Tab was trapped correctly and this frame undid it.
     const focusFrame = requestAnimationFrame(() => {
+      if (coveredByAnotherModal(dialogRef.current)) return;
       const preferred = initialFocusRef?.current;
       if (preferred?.isConnected) {
         preferred.focus();
@@ -123,7 +154,7 @@ export function useModalDialog({
         if (document.activeElement !== returnTarget) returnTarget.focus();
       });
     };
-  }, [open, panelRef, initialFocusRef, returnFocusRef]);
+  }, [open, dialogRef, panelRef, initialFocusRef, returnFocusRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -135,10 +166,7 @@ export function useModalDialog({
       const dialog = dialogRef.current;
       if (!dialog || !panelRef.current) return false;
 
-      const modalDialogs = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
-      );
-      if (modalDialogs.at(-1) !== dialog) return false;
+      if (coveredByAnotherModal(dialog)) return false;
 
       const eventOwner =
         event.target instanceof Element
