@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **9** | **2026-08-23** | **리뷰 8회차 반영.** reservation의 export 선언을 실제 허용값(`excluded` + `exclusionReason` + registry `inUnifiedExport`)으로 정정(§5.9.3f-1), `finalizing` 상태의 **claim token·`finalizingStartedAt`·stale reclaim** 추가(§5.9.3f-2), 검증 56b의 R2 삭제 요구 제거. `importId` 확장 설명·§10 도입부·`unchanged` 필요충분조건 정정. 고친 문단은 **[rev9]** |
 | **8** | **2026-08-23** | **리뷰 7회차 반영.** upload reservation의 **User 역관계·data-domain 선언·publish 시 미소비 예약 정리**를 채우고 `importId`를 필수로(§5.9.3f-1), finalize를 **원자적 선점 + 삭제 없음**으로 바꿔 동시 재시도 경쟁을 제거(§5.9.3f-2), B1~B6 차단 시점을 **Slice 1로 전 문서 통일**, `unchanged` 조건을 **"새로 승격할 staged 파일 0개"**로 정정, §1.1의 채택 범위를 **MVP와 후속으로 분리**. 고친 문단은 **[rev8]** |
 | **7** | **2026-08-23** | **리뷰 6회차 반영.** finalize 재시도가 **게시된 R2 객체를 지우지 못하게** upload reservation 도입(§5.9.3f), 잠금 경로에 **일반 identity PATCH·profile DELETE 추가**하고 **plan을 잠금 안에서 계산**(§5.9.3g), 승격을 **승인된 fileId로 한정**하고 제외분은 같은 transaction에서 삭제(§5.9.3j), `unchanged`의 identity-only 계약(§5.9.3i). §6.6 canonical model에 `expectedTargetIdentityDigest` 누락 수정, Slice 1·2 선행 조건에 B1~B6 반영. 고친 문단은 **[rev7]** |
 | **6** | **2026-08-23** | **리뷰 5회차 반영.** import 전용 업로드 경로로 `importId`를 서버가 기록(§5.9.3f), 상태 전환 전체를 **profile advisory 잠금 하나로 직렬화**(§5.9.3g), merge의 **identity 충돌 검사와 원자적 갱신**(§5.9.3h), **`unchanged` 결과의 처리 계약**(§5.9.3i). §10.1.2·§12·§14의 잔여 불일치 정정. 고친 문단은 **[rev6]** |
@@ -1182,10 +1183,20 @@ model AssistantKnowledgeUploadReservation {
   /// CHECK ("state" IN ('pending', 'finalizing')).
   state String @default("pending")
 
+  /// [rev9] 현재 선점자의 token. pending일 때 NULL. 모든 상태 변경이 이 값으로
+  /// CAS하므로, 회수된 뒤 늦게 돌아온 요청은 아무것도 바꾸지 못합니다.
+  claimToken String?
+
+  /// [rev9] 선점 시각. stale reclaim이 이것만 봅니다 -- processor의
+  /// KNOWLEDGE_PROCESSING_STALE_MS와 같은 역할, 별개 상수.
+  finalizingStartedAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([importId])
   @@index([userId, createdAt])
+  /// [rev9] stale 회수 sweep의 조회가 정확히 이 쌍을 읽습니다.
+  @@index([state, finalizingStartedAt])
 }
 ```
 
@@ -1194,9 +1205,41 @@ model AssistantKnowledgeUploadReservation {
 `lib/accountDataExportDomains.ts`에 선언이 없으면 **CI가 막습니다**(§6.6.1).
 rev7은 `AssistantProfileImport`만 등록 대상으로 적었습니다. 제안:
 
-| 필드 | export 상태 | 근거 |
-|---|---|---|
-| 전부 | **withhold** (도메인은 선언하되 `state: excluded_internal` 계열) | 예약은 **진행 중인 업로드의 내부 부기**이며 사용자가 쓴 내용이 하나도 없습니다. `r2Key`는 §7.13이 금지하는 저장소 key 자체입니다 |
+**[rev9] rev8이 쓴 `excluded_internal`은 존재하지 않는 값입니다.** [저장소]
+`lib/accountDataExportDomains.ts`의 `ExportDomainState`는 네 개뿐입니다.
+
+```ts
+export type ExportDomainState =
+    "included" | "included_filtered" | "excluded" | "unverified";
+```
+
+그대로 구현하면 typecheck 또는 `check:data-domain-registry`가 실패합니다
+(검사기의 `ALLOWED_EXPORT_STATES`가 같은 네 값을 강제합니다). 그리고 이 표가
+말하려던 것은 **필드별 withhold가 아니라 도메인 전체 제외**입니다 — 그것은
+`included_filtered`가 아니라 `excluded`입니다.
+
+```ts
+{
+    domain: "assistantKnowledgeUploadReservation",
+    publicName: "…",            // 제외 도메인도 stable name을 갖습니다
+    prismaModel: "AssistantKnowledgeUploadReservation",
+    state: "excluded",
+    // excluded일 때 필수입니다.
+    exclusionReason:
+        "진행 중인 업로드의 내부 부기입니다. 사용자가 쓴 내용이 없고, " +
+        "`r2Key`는 저장소 객체 경로 자체라 §7.13이 응답에 싣는 것을 금지합니다. " +
+        "업로드가 끝나면 행 자체가 사라집니다.",
+}
+```
+
+**registry 쪽도 함께 맞춥니다.** `docs/policy/tomverse-chat-data-domain-registry.yaml`
+의 해당 행에 **`inUnifiedExport: excluded`**를 적습니다 — 검사기가 선언의
+`state`와 registry의 `inUnifiedExport`가 **같은지 대조**하므로 한쪽만 고치면
+실패합니다.
+
+`AssistantProfileImport` 쪽은 `included_filtered`이고 `withheldReason`을
+가집니다(§6.6.1) — 두 모델의 상태가 다른 것이 의도입니다. import 행에는
+사용자가 고른 `stagingManifest`가 있고, 예약에는 아무것도 없습니다.
 
 **정리 경로 넷 — 어느 것도 예약을 영구히 남기지 않습니다.**
 
@@ -1246,15 +1289,66 @@ finalize A (정상)          finalize B (MIME 불일치)
 changes a row, and the other sees zero and moves on."*
 
 ```ts
+// [rev9] token과 시각을 함께 씁니다 -- 이유는 아래 (1-b).
+const claimToken = randomUUID()
 const claimed = await tx.assistantKnowledgeUploadReservation.updateMany({
     where: { r2Key, userId, importId, state: "pending" },
-    data:  { state: "finalizing" },
+    data:  { state: "finalizing", claimToken, finalizingStartedAt: new Date() },
 })
 if (claimed.count === 0) {
     // 이미 다른 요청이 선점했습니다. 지우지 않고, 기존 파일 행을 다시 읽어
     // 있으면 200 멱등, 없으면 409 -- 어느 쪽도 객체를 건드리지 않습니다.
 }
 ```
+
+**(1-b) [rev9] 선점만으로는 부족합니다 — `finalizing`에서 죽으면 영원히
+`finalizing`입니다.** rev8은 선점을 도입하면서 회수를 빠뜨렸고, 그러면 프로세스
+종료 한 번이 그 `uploadKey`를 **영구히 잠급니다**. 사용자는 같은 파일을 다시
+올릴 수도, 이어갈 수도 없습니다.
+
+**rev8이 근거로 든 processor는 조건부 UPDATE만 쓰지 않습니다.** [저장소]
+`assistantKnowledgeProcessor.ts`는 `KNOWLEDGE_PROCESSING_STALE_MS = 10 * 60 *
+1000`과 그것을 읽는 reclaim sweep을 **함께** 갖고 있고, 주석이 이유를
+적습니다 — *"`processing` is a state nothing recovers from, because the reclaim
+below only looks at how long it has been there."* rev8은 그 절반만 인용했습니다.
+
+같은 형태를 그대로 씁니다.
+
+```prisma
+  /// [rev9] 선점 상태. "pending" | "finalizing".
+  /// CHECK ("state" IN ('pending', 'finalizing')).
+  state String @default("pending")
+
+  /// 현재 선점자의 token. pending일 때 NULL.
+  claimToken String?
+
+  /// 선점 시각. stale reclaim이 이것만 봅니다.
+  finalizingStartedAt DateTime?
+
+  @@index([state, finalizingStartedAt])
+```
+
+```ts
+/// processor의 상수와 같은 역할, 별개 결정입니다.
+export const KNOWLEDGE_UPLOAD_CLAIM_STALE_MS = 10 * 60 * 1000
+```
+
+**계약 넷.**
+
+1. **모든 상태 변경은 같은 token으로 CAS입니다.** 성공(예약 삭제)·실패(pending
+   복귀) 어느 쪽이든 `where: { r2Key, state: "finalizing", claimToken }`
+   입니다. `updateMany`/`deleteMany`가 0을 반환하면 **내 선점이 아니므로 아무것도
+   하지 않습니다.**
+2. **stale 회수는 maintenance가 합니다.** `state = 'finalizing'`이고
+   `finalizingStartedAt`이 상한을 넘은 행을 `pending`으로 되돌리며,
+   **`claimToken`을 `null`로 바꿉니다.** 그것이 늦게 돌아온 이전 요청을
+   무력화하는 장치입니다.
+3. **회수 뒤 늦게 돌아온 요청은 새 선점자의 상태를 바꾸지 못합니다.** 1번의
+   CAS가 그것을 보장합니다 — 옛 token은 어느 행과도 일치하지 않습니다.
+4. **회수해도 R2 객체는 지우지 않습니다.** §5.9.3f-2의 (2)가 그대로
+   적용됩니다. 객체는 24시간 sweep의 몫입니다.
+
+**"선점 직후 프로세스 종료"는 통합 테스트 대상입니다**(검증 59b).
 
 **(2) 그리고 finalize는 어떤 경우에도 R2 객체를 지우지 않습니다.**
 선점이 경쟁을 없애더라도, 삭제를 남겨 두면 선점 로직의 버그 하나가 다시
@@ -1278,8 +1372,11 @@ if (claimed.count === 0) {
 
 **reservation은 기존 일반 경로에도 이득입니다**(그 경로의 finalize도 지금은
 클라이언트가 보낸 key를 그대로 신뢰합니다). 다만 **이 기능의 범위는 import
-경로까지**이며, 일반 경로에 적용할지는 별개 판단입니다 — `importId = NULL`
-행이 그 자리를 비워 둡니다.
+경로까지**이며, 일반 경로에 적용할지는 별개 판단입니다. **[rev9]** rev8이
+`importId`를 필수로 만들었으므로 그 확장은 자리를 비워 두는 것이 아니라
+**향후 nullable migration**입니다 — 그때 §5.9.3f-1의 정리 규칙 네 줄도 함께
+다시 씁니다(`importId = NULL` 행에는 import cascade가 닿지 않으므로 자체
+TTL sweep이 필요해집니다).
 
 #### 5.9.3g [rev6] 상태 전환을 profile 잠금 하나로 직렬화합니다
 
@@ -1501,15 +1598,30 @@ rev5의 예시 코드는 `version.id`를 바로 썼으므로 `unchanged`에서 �
 - `create`는 **일어날 수 없습니다.** `planProfileVersionPublish()`가
   `unchanged`를 내는 것은 `state.currentDraft != null`일 때뿐인데, create의
   draft profile에는 published version이 없습니다.
-- `merge`에서, **새로 승격할 staged 파일이 0개일 때** 일어납니다.
-  **[rev8] "승인된 파일이 0개"가 아닙니다** — merge의 최종 manifest는 대상
-  profile이 **이미 갖고 있던 knowledge**를 포함하는 것이 정상이고, 그 파일들은
-  `importId = null`이라 승격 대상이 아닙니다. 판정을 가르는 것은 **manifest가
-  현재와 같은가**이고, 그것이 참이려면 새 `fileId`가 하나도 들어가지 않아야
-  합니다(§9.5.1).
+- `merge`에서, **정규화된 draft가 현재 version과 완전히 같을 때** 일어납니다.
 
-**[rev7·rev8] rev6은 "staged 파일이 0개", rev7은 "승인된 파일이 0개"라고
-적었고 둘 다 부정확했습니다.**
+**[rev9] 필요충분조건으로 적습니다.** rev8의 "새로 승격할 staged 파일 0개"는
+**필요조건일 뿐 충분조건이 아닙니다** — 파일을 하나도 안 올렸어도 지시문을
+고쳤으면 `unchanged`가 아닙니다. `draftsEqual()`이 비교하는 것 전부가 같아야
+합니다.
+
+| 조건 | 왜 |
+|---|---|
+| `instructions` 동일 | `draftsEqual()` |
+| `starters` 동일(순서 포함) | 같음 |
+| `modelIds` 동일(순서 포함) | 같음 |
+| `toolPolicy` · `memoryPolicy` 동일 | 같음 |
+| `knowledgeManifest`가 `(fileId, digest)` 순서까지 동일 | 같음 |
+| ⇒ 따라서 **승격 승인된 staged 파일이 0개** | 새 `fileId`가 하나라도 manifest에 들어가면 위 마지막 줄이 깨집니다(§9.5.1) |
+
+마지막 줄은 **앞의 조건들에서 따라 나오는 결과**이지 판정 기준이 아닙니다.
+그리고 merge의 최종 manifest가 대상 profile이 **이미 갖고 있던 knowledge**를
+포함하는 것은 정상이며, 그 파일들은 `importId = null`이라 승격 대상이
+아닙니다.
+
+**[rev7·rev8·rev9] rev6은 "staged 파일이 0개", rev7은 "승인된 파일이 0개",
+rev8은 "새로 승격할 staged 파일이 0개"라고 적었고 셋 다 부정확했습니다** —
+앞의 둘은 틀렸고, 셋째는 필요조건을 충분조건처럼 적었습니다.
 §5.9.3j가 밝히듯 staged 집합과 승인 집합은 다를 수 있습니다 — 사용자가 올린
 파일을 전부 [제외]하면 **staged 파일은 있는데 승인 파일은 0개**이고, manifest는
 현재와 같으므로 `unchanged`입니다. 그때도 §5.9.3j의 폐기 경로가 그 파일들을
@@ -2548,8 +2660,10 @@ revision을 만드는 것이 정상이고, `unchanged`는 **knowledge가 없는 
 
 ## 10. 정책 결정 필요 목록
 
-세 상태로 나눕니다. **`승인 필요`가 하나라도 열려 있으면 §11의 slice 1 이후는
-착수하지 않습니다.**
+세 상태로 나눕니다. **[rev9] 승인 항목은 서로 다른 slice를 막습니다** —
+"하나라도 열리면 전체 정지"가 아닙니다. **A1~A4와 B1~B6는 Slice 1을** 막고,
+그래서 그 뒤가 함께 멈춥니다. **A5는 Slice 2**, **A6는 Slice 4**, **C3는
+Slice 8(rollout)**만 막습니다. 유일한 기준은 §10.1.2의 표입니다.
 
 ### 10.1 승인 필요 — 사람이 정해야 착수 가능
 
@@ -2715,7 +2829,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점**(§5.9.3f-2) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim**(§5.9.3f-2) + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | Slice 4, **§10.2의 B1~B6 승인**, **§10.1의 A5 승인** |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
@@ -2862,12 +2976,13 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **55a** *(rev6)* | **`create`는 `unchanged`가 될 수 없음** | draft profile에 published version이 없으므로 항상 `published`. 이 사실을 assert |
 | **56** *(rev7)* | **publish 후 finalize 재시도** | 승격돼 현재 version이 쓰는 파일의 `uploadKey`로 finalize 재도착 → **409, R2 object 그대로**. 대화가 그 파일을 계속 씀 |
 | **56a** *(rev7)* | **예약 없는 uploadKey** | 임의 key로 finalize → 거절, **삭제 시도 없음** |
-| **56b** *(rev7)* | **예약된 key의 검사 실패** | 이 import의 예약이 있고 행이 없는 key가 형식 검사에 실패 → 거절 + **그때만 삭제** |
+| **56b** *(rev9)* | **예약된 key의 검사 실패** | 이 import의 예약이 있고 행이 없는 key가 형식 검사에 실패 → **거절 + 예약을 `pending`으로 복귀 + R2 객체는 그대로**. rev7의 "그때만 삭제"는 §5.9.3f-2의 계약("import finalize 경로에 `deleteR2Object()` 호출이 없다")과 충돌해 폐기 |
 | **59** *(rev8)* | **동시 finalize** | 같은 `uploadKey`로 정상 A와 MIME 불일치 B를 동시 실행 → 선점은 하나만 성공. **어느 경로도 R2 객체를 지우지 않음.** A가 이겼으면 파일 행 존재 + 바이트 존재, B가 이겼으면 예약은 `pending`으로 복귀하고 A는 200 멱등 또는 409 |
+| **59b** *(rev9)* | **선점 직후 프로세스 종료** | `finalizing` 선점 뒤 강제 종료 → 예약은 `finalizing`으로 남음. **stale 상한 경과 후 maintenance가 `pending`으로 회수하고 `claimToken`을 비움.** 사용자가 재시도하면 성공. 회수 뒤 **옛 요청이 늦게 돌아와도 CAS 불일치로 아무 상태도 바꾸지 못함** |
 | **59a** *(rev8)* | **동시 재시도의 P2002** | 같은 key로 두 finalize가 행을 만들려 함 → 뒤쪽은 **500이 아니라** 기존 행 재조회 후 200(일치) 또는 409(불일치) |
 | **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
 | **60a** *(rev8)* | **예약의 cascade** | 취소·만료(import 삭제) 후 예약 0개. 계정 삭제 후에도 0개 |
-| **60b** *(rev8)* | **예약도 registry 대상** | `npm run check:data-domain-registry` 통과 — `AssistantKnowledgeUploadReservation`이 선언돼 있고 모든 필드가 withhold |
+| **60b** *(rev9)* | **예약도 registry 대상** | `npm run check:data-domain-registry` 통과 — `AssistantKnowledgeUploadReservation`이 **`state: "excluded"` + `exclusionReason`**으로 선언돼 있고 registry YAML의 `inUnifiedExport`가 **`excluded`로 일치**. 계정 export 산출물에 이 도메인이 **없음** |
 | **57** *(rev7)* | **identity PATCH 경합** | publish가 digest 확인 후 대기하는 동안 일반 PATCH가 이름 변경 시도 → 잠금 대기. publish가 먼저면 PATCH는 새 값 위에서 동작하고, PATCH가 먼저면 publish는 **409** — 어느 쪽도 조용히 덮어쓰지 않음 |
 | **57a** *(rev7)* | **stale plan이 500이 되지 않음** | 두 publish 동시 실행 → 뒤쪽은 잠금 안에서 다시 읽어 **409 `ASSISTANT_PROFILE_VERSION_STALE`**. P2002 500이 나오지 않음 |
 | **58** *(rev7)* | **제외한 파일이 승격되지 않음** | 3개 올리고 1개 [제외] → 승격 2개(`importId = null`), 제외 1개는 **행 삭제 + tombstone**, 승격 후 이 import에 남은 파일 0개 |
