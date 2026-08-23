@@ -28,6 +28,10 @@ const WORK_QUEUE = "https://tomverse.app/admin/models?tab=discovery";
 const item = (overrides = {}) => ({
   id: "wi_1",
   provider: "OpenAI",
+  publisher: "OpenAI",
+  observedVia: [
+    { provider: "openai", displayName: "OpenAI", apiModel: "gpt-5-7-preview" },
+  ],
   apiModel: "gpt-5-7-preview",
   action: "add",
   status: "discovered",
@@ -369,4 +373,88 @@ test("the same payload renders the same bytes twice", () => {
   const first = buildModelLifecycleDailyEmail(payload);
   const second = buildModelLifecycleDailyEmail(payload);
   assert.deepEqual(first, second);
+});
+
+// ML-13: who made a model and which catalogue carried it are two different
+// facts, and the report must not print one as the other.
+
+const glm = (observedVia) =>
+  item({
+    // Filed by the Qwen scan, but Zhipu made it. The old report rendered
+    // "Qwen ZHIPU/GLM-5.3", which reads as a claim about authorship.
+    provider: "Qwen",
+    publisher: "Zhipu",
+    apiModel: "ZHIPU/GLM-5.3",
+    observedVia,
+    severity: "critical",
+    status: "communication_pending",
+  });
+
+test("a work item names the publisher, not the catalogue it was filed from", () => {
+  const { html, text } = buildModelLifecycleDailyEmail(
+    input({
+      workItems: [
+        glm([{ provider: "qwen", displayName: "Qwen", apiModel: "ZHIPU/GLM-5.3" }]),
+      ],
+    })
+  );
+  for (const rendered of [html, text]) {
+    assert.match(rendered, /Zhipu/);
+    // The identifier still appears -- it is what an operator searches for.
+    assert.match(rendered, /GLM-5\.3/);
+  }
+});
+
+test("a second catalogue is named as a sighting, beside the publisher", () => {
+  const { html, text } = buildModelLifecycleDailyEmail(
+    input({
+      workItems: [
+        glm([
+          { provider: "qwen", displayName: "Qwen", apiModel: "ZHIPU/GLM-5.3" },
+          {
+            provider: "perplexity",
+            displayName: "Perplexity",
+            apiModel: "perplexity/glm-5.3",
+          },
+        ]),
+      ],
+    })
+  );
+  for (const rendered of [html, text]) {
+    assert.match(rendered, /Zhipu/);
+    assert.match(rendered, /seen in/);
+    assert.match(rendered, /Perplexity/);
+  }
+});
+
+test("a single sighting from the filing scan adds no noise", () => {
+  // The ordinary case. Repeating "seen in OpenAI" under an item already filed
+  // by OpenAI would bury the rows where the sighting list says something.
+  const { text } = buildModelLifecycleDailyEmail(
+    input({
+      workItems: [item({ severity: "critical", status: "communication_pending" })],
+    })
+  );
+  assert.doesNotMatch(text, /seen in/);
+});
+
+test("an unrecognised model is reported as unknown, not as a provider", () => {
+  const { text } = buildModelLifecycleDailyEmail(
+    input({
+      workItems: [
+        item({
+          provider: "Groq",
+          publisher: "unknown owner",
+          apiModel: "aurora-9",
+          observedVia: [
+            { provider: "groq", displayName: "Groq", apiModel: "aurora-9" },
+          ],
+          severity: "critical",
+          status: "communication_pending",
+        }),
+      ],
+    })
+  );
+  assert.match(text, /unknown owner/);
+  assert.doesNotMatch(text, /Groq \| aurora-9/);
 });

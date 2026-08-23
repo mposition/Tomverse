@@ -4,7 +4,10 @@ import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
-import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
+import {
+  listLifecycleReportWorkItems,
+  recordDiscoveredWorkItems,
+} from "@/lib/modelLifecycleWorkItems";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 
 // What an automatic disable leaves behind (ML-08).
@@ -349,4 +352,37 @@ test("a provider losing its whole lineup is held, and opens nothing", async () =
   // Nothing was disabled, so nothing is owed an answer about a disable. The
   // hold has its own incident.
   assert.equal(await prisma.modelLifecycleWorkItem.count(), 0);
+});
+
+// ML-13: the report reads the sightings back, and falls back honestly when an
+// item predates them.
+
+test("the report row carries every catalogue the model was seen in", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [{ provider: "zhipu", apiModel: "glm-5.3" }],
+  });
+  await recordDiscoveredWorkItems({
+    observed: [{ provider: "qwen", apiModel: "ZHIPU/GLM-5.3" }],
+  });
+
+  const [row] = await listLifecycleReportWorkItems();
+  assert.deepEqual(row.observedVia, [
+    { provider: "zhipu", apiModel: "glm-5.3" },
+    { provider: "qwen", apiModel: "ZHIPU/GLM-5.3" },
+  ]);
+});
+
+test("an item written before sightings existed reports the scan that filed it", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [{ provider: "qwen", apiModel: "kimi-k3" }],
+  });
+  // What a row looks like from before ML-12 recorded where models were seen.
+  await prisma.modelLifecycleWorkItem.updateMany({ data: { evidence: {} } });
+
+  const [row] = await listLifecycleReportWorkItems();
+  // Not an empty list: that would say nothing has ever seen this model, which
+  // is a different and wronger claim than "we only know of the one scan".
+  assert.deepEqual(row.observedVia, [
+    { provider: "qwen", apiModel: "kimi-k3" },
+  ]);
 });

@@ -399,6 +399,14 @@ export type LifecycleReportRow = OpenWorkItem & {
     blockers: string[];
     pendingValidations: string[];
     recommendation: string | null;
+    /**
+     * Every catalogue this model was seen in, which is not the same question as
+     * `provider` answers (ML-13).
+     *
+     * `provider` is the scan that first filed the item. Reporting it as though
+     * it said who made the model produced lines like "Qwen kimi-k3".
+     */
+    observedVia: ModelObservation[];
 };
 
 const stringList = (value: Prisma.JsonValue | null): string[] => {
@@ -439,12 +447,19 @@ export async function listLifecycleReportWorkItems(options?: {
             blockers: true,
             pendingValidations: true,
             recommendation: true,
+            evidence: true,
         },
     });
-    return rows.map((row) => ({
+    return rows.map(({ evidence, ...row }) => ({
         ...row,
         blockers: stringList(row.blockers),
         pendingValidations: stringList(row.pendingValidations),
+        // Falls back to the filing scan when the item predates ML-12 and has no
+        // recorded sightings. An empty list would make an old item look like one
+        // nothing has ever seen, which is a different and wronger claim.
+        observedVia: storedObservedVia(evidence).length
+            ? storedObservedVia(evidence)
+            : [{ provider: row.provider, apiModel: row.apiModel }],
     }));
 }
 
