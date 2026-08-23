@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
+import { parseBatchRecord } from "../lib/memoryEvalBatchRecord.ts";
 
 /**
  * The review sheet exists so a one-person organisation reviews what
@@ -113,6 +114,40 @@ test("the committed record matches what the generator produces", () => {
             upTo(onDisk),
             upTo(sheet(batch.id)),
             `${batch.record} is stale -- regenerate it`
+        );
+    }
+});
+
+test("--write refuses to overwrite a sheet that already carries a verdict", () => {
+    // The sheet tells the reviewer their verdicts are the one thing they may
+    // hand-edit, and regeneration would delete exactly those cells. Losing a
+    // verdict means asking the reviewer to judge again, which is the single
+    // cost the generated sheet exists to remove.
+    const reviewed = CANDIDATE_BATCHES.filter((batch) => {
+        const record = parseBatchRecord(
+            readFileSync(
+                fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
+                "utf8"
+            )
+        );
+        return record.cases.some((entry) => entry.verdict !== null);
+    });
+    assert.ok(reviewed.length > 0, "expected at least one reviewed record");
+    for (const batch of reviewed) {
+        assert.throws(
+            () =>
+                execFileSync(
+                    "node",
+                    [
+                        "--import",
+                        "tsx",
+                        "scripts/make-memory-eval-review-sheet.mjs",
+                        `--batch=${batch.id}`,
+                        "--write",
+                    ],
+                    { cwd: root, encoding: "utf8", stdio: "pipe" }
+                ),
+            `${batch.id}: --write overwrote a reviewed record`
         );
     }
 });

@@ -25,12 +25,13 @@
  * lands on the record file.
  */
 
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 import { findDuplicateCases } from "../lib/memoryExtractionEvalCore.ts";
 import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
 import { MEMORY_KINDS } from "../lib/memoryValidatorCore.ts";
 import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
+import { parseBatchRecord } from "../lib/memoryEvalBatchRecord.ts";
 
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -239,6 +240,27 @@ p("| 검수 완료일 | |");
 p();
 p("---");
 p();
+p("## batch 기록 (`docs/ops/memory-extraction-eval-dataset.md` §8)");
+p();
+p("`docs/ops/memory-extraction-eval-dataset.md` §7.1은 동결 조건으로 초안 도구·모델·버전, 검수자, 판정 근거, draft");
+p("disagreement 비율을 요구합니다. 케이스마다 여섯 칸을 채우는 대신 batch에 한 번");
+p("적습니다 — 초안 생성자와 검수자는 batch 전체가 같고, 케이스별 draft");
+p("disagreement는 위 판정에서 그대로 계산되며, 채택된 케이스의 gold label 근거는");
+p("제안 라벨 그 자체입니다.");
+p();
+p("| 항목 | 값 |");
+p("|---|---|");
+p("| 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | *(운영자 기입)* |");
+p("| 검수자 (사람 · 최초의 권위 있는 판정) | |");
+p("| 재작성 회차 | 1 (최초 초안) |");
+p(`| draft disagreement 비율 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.4) | 위 표본 ${sampleSize}건에서 계산 |`);
+p();
+p("초안 생성자 칸을 에이전트가 비워 두는 이유는 하나입니다 — 이 저장소에 남기는");
+p("산출물에 에이전트의 모델 식별자를 적지 않는다는 규칙이 있어서, 자기 이름을 적을");
+p("수 있는 것은 운영자뿐입니다.");
+p();
+p("---");
+p();
 p(`## 전체 ${cases.length}건 (참고용 — 판정 불필요)`);
 p();
 p("| # | 제안 kind | 키워드 | 첫 사용자 발화 |");
@@ -256,7 +278,36 @@ for (const [index, entry] of cases.entries()) {
 p();
 
 const rendered = `${out.join("\n")}\n`;
+
+/**
+ * Regenerating over a reviewed sheet would delete the review.
+ *
+ * The sheet says "판정란 외에는 손으로 고치지 마세요 -- 다시 생성하면 덮어씁니다",
+ * and the verdicts live in exactly the cells that sentence protects. So the
+ * protection has to be here rather than in the sentence: once a verdict or the
+ * adoption line is filled, `--write` refuses. Recovering a lost verdict means
+ * asking the reviewer to judge again, which is the one cost this whole sheet
+ * exists to avoid.
+ */
 if (process.argv.includes("--write")) {
+    if (existsSync(batch.record)) {
+        const existing = parseBatchRecord(readFileSync(batch.record, "utf8"));
+        const filled = [
+            ...existing.cases
+                .filter((entry) => entry.verdict !== null)
+                .map((entry) => `${entry.caseId}=${entry.verdict}`),
+            ...(existing.decision === null ? [] : [`batch=${existing.decision}`]),
+        ];
+        if (filled.length > 0 && !process.argv.includes("--force")) {
+            console.error(
+                `${batch.record} already carries a review (${filled.join(", ")}).\n` +
+                    "Refusing to overwrite it. Print to stdout without --write to see " +
+                    "what a regeneration would say, or pass --force if the verdicts " +
+                    "are being deliberately discarded."
+            );
+            process.exit(1);
+        }
+    }
     writeFileSync(batch.record, rendered);
     console.error(`wrote ${batch.record}`);
 } else {
