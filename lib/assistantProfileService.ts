@@ -52,7 +52,7 @@ export class AssistantProfileError extends Error {
  * `(): never` does not do that, and the alternative is a `throw` repeated at
  * every call site.
  */
-function notFound(): never {
+export function notFound(): never {
     // 404 rather than 403 throughout: a profile the caller does not own is,
     // as far as they are entitled to know, a profile that does not exist.
     throw new AssistantProfileError(

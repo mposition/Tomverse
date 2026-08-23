@@ -41,6 +41,9 @@ Profile로 **변환**하는 기능의 릴리스 차단 계약입니다.
 | `lib/assistantProfileImportHttp.ts` | 네 route가 공유하는 flag 검사와 오류 변환 |
 | `app/api/assistant-profiles/imports/**` | 위 서비스의 HTTP 표면 |
 | `lib/assistantPackageImportClient.ts` | wizard가 부르는 요청들. 실행 순서가 여기 한 곳에 있습니다 |
+| `lib/assistantPackageExport.ts` | package를 쓰는 쪽. reader의 거울 |
+| `lib/assistantProfileExportService.ts` | 게시된 version을 package로 |
+| `app/api/assistant-profiles/[profileId]/export/route.ts` | 내려받기. 읽기 전용 |
 | `scripts/report-assistant-knowledge-invariants.mjs` | `NOT VALID` 제약의 survey |
 
 이 문서는 아래를 대체하지 않고 그 위에 쌓입니다.
