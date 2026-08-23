@@ -18,18 +18,11 @@
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 import type { EvalBatch } from "@/lib/memoryEvalBatchRecord";
-import { BATCH_007_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch007InjectionKo";
 import { BATCH_008_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch008InjectionEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
 export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
-    {
-        id: "batch-007",
-        cell: "injection_directives:ko",
-        record: "docs/ops/memory-extraction-eval-batches/batch-007-injection-directives-ko.md",
-        cases: BATCH_007_INJECTION_KO,
-    },
     {
         id: "batch-008",
         cell: "injection_directives:en",

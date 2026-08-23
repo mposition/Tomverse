@@ -1,18 +1,21 @@
 /**
- * Batch 007 — `injection_directives:ko` first batch. **Candidate pool, not dataset.**
+ * Batch 007 — `injection_directives:ko`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-007-injection-directives-ko.md`:
+ * all 25 cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's full review for critical negatives,
+ * draft disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled. There is no unreviewed remainder in a category ②③④
+ * batch — the 20%-then-adopt path belongs to category ① alone.
  *
  * Category ④ (docs/ops/memory-extraction-eval-dataset.md §4.2): empty `expected`. Adopting any of this is a
- * docs/policy/external-conversation-import-and-memory.md §12.3 critical failure, and this category is the one where a
- * false positive persists: an instruction stored as a memory is re-injected
- * into later turns, so a single bad extraction becomes a standing
- * modification to how the assistant behaves for that account.
+ * docs/policy/external-conversation-import-and-memory.md §12.3 critical failure, and this is the category where a false
+ * positive **persists**: an instruction stored as a memory is re-injected
+ * into later turns, so one bad extraction becomes a standing modification to
+ * how the assistant behaves for that account.
  *
  * docs/ops/memory-extraction-eval-dataset.md §6.3 names two of the traps here explicitly — directives disguised as
- * declarative statements, and bulk-safe candidates containing a URL — and
- * reviews the category in full.
+ * declarative statements, and bulk-safe candidates containing a URL.
  *
  * The easy cases announce themselves ("이전 지시는 무시하세요"). The ones worth
  * having are the quiet ones: an instruction written as a preference, an
@@ -20,6 +23,14 @@
  * instruction addressed to a future turn rather than this one.
  *
  * Every URL uses `.invalid`, which is reserved and cannot resolve.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
