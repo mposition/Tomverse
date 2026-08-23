@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **13** | **2026-08-23** | **리뷰 12회차 반영.** §14.4 요약의 승인 항목 수와 차단 지점에 **A7 반영**, `extractedBytes`의 **export 포함·CHECK 검증 항목 추가**(64·64a·64b). 고친 문단은 **[rev13]** |
 | **12** | **2026-08-23** | **리뷰 11회차 반영.** Slice 5 선행 조건과 최종 요약에 **A7 추가**하고 이미 충족된 승인은 그렇게 표시(§11, §14.4), `extractedBytes`의 **export 포함 여부와 CHECK 확정**(§5.9.3f-5), 타인 예약 403의 **검증 항목 추가**, 63a·63b를 **정확한 기대값**으로, 문구·Markdown 잔여 오류 정정. 고친 문단은 **[rev12]** |
 | **11** | **2026-08-23** | **리뷰 10회차 반영.** quota 거절이 **throw가 아니라 outcome 반환**이 되도록 고쳐 예약 복귀가 rollback되지 않게 함(§5.9.3f-4), `maxExtractedBytesPerAccount`가 **processor에서 잠금 없이 증가**하고 **문자 수를 byte로 집계**하는 두 결함을 기록하고 계약 추가(§5.9.3f-5). 일반 finalize의 **타인 예약 403 분기**, `§5.9.3f-4` 제목 승격, 검증 59b 보강. 고친 문단은 **[rev11]** |
 | **10** | **2026-08-23** | **리뷰 9회차 반영.** 일반 finalize가 **import reservation이 걸린 key를 거절**하도록 해 격리 우회를 차단(§5.9.3f-3), quota 재판정을 **account 잠금 안으로** 옮겨 동시 업로드의 한도 초과를 제거(§5.9.3f-4). `state`·`claimToken`·`finalizingStartedAt` 결합 CHECK, `publicName` 확정, "추출은 행 생성 후"로 정정. 고친 문단은 **[rev10]** |
@@ -1583,13 +1584,32 @@ they have."* 즉 알려진 상태이고 아직 고쳐지지 않았습니다.
    설명할 수 없는 비대칭이 됩니다. 도메인은 그대로 `included_filtered`이고
    `withheldReason`은 손대지 않습니다 — 이 컬럼은 withhold 대상이 아니라
    **추가 포함**이기 때문입니다.
-2-c. **[rev12] migration에 CHECK를 답니다.**
+2-c. **[rev12·rev13] migration에 CHECK를 답니다.**
 
 ```sql
+-- 새 컬럼. 기존 행이 전부 NULL이므로 즉시 유효합니다.
 CHECK ("extractedBytes" IS NULL OR "extractedBytes" >= 0)
 ```
 
    `NULL`은 "아직 세지 않은 기존 행"이고 음수는 어떤 의미도 없습니다.
+
+   **[rev13] `extractedCharacters`에도 같은 CHECK를 답니다.** A7의 권고
+   방침에서 그 컬럼은 `NULL` 행의 **quota 값으로 쓰이므로**, 음수가 들어가면
+   계정 한도를 늘려 주는 값이 됩니다 — 지금까지는 표시용에 가까웠던 컬럼이
+   판정에 쓰이게 되는 것이 이 변경입니다.
+
+```sql
+-- 기존 컬럼. 기존 행을 검사하지 않고 배포한 뒤,
+-- 위반 0건을 확인하고 별도 migration에서 validate합니다.
+ALTER TABLE "AssistantKnowledgeFile"
+  ADD CONSTRAINT "AssistantKnowledgeFile_extractedCharacters_non_negative"
+  CHECK ("extractedCharacters" IS NULL OR "extractedCharacters" >= 0) NOT VALID;
+```
+
+   **`NOT VALID` → 확인 → 별도 validate**는 [저장소] `AGENTS.md`가
+   `CreditLot`의 non-negative CHECK에 대해 정한 절차 그대로입니다 —
+   *"validate는 … 0을 보고한 뒤 별도 migration으로 합니다. production에서 손으로
+   validate하면 schema 비교가 drift로 잡습니다."*
 3. **기존 행 처리 방침을 정합니다** — 재처리하지 않고 `NULL`로 두되,
    합산에서 `NULL`은 `extractedCharacters`로 대체해 **현재와 같은(과소) 값**을
    쓰거나, 재처리 배치를 돌립니다. **어느 쪽이든 정책 결정이며 §10.1의
@@ -3090,7 +3110,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim + 결합 CHECK**(§5.9.3f-2) + **일반 finalize의 예약 거절**(§5.9.3f-3) + **`lockAccountKnowledgeQuota()`와 transaction 내 quota 재판정**(§5.9.3f-4, 일반 경로 포함) + **거절을 throw가 아닌 outcome으로**(§5.9.3f-4) + **`extractedBytes` 컬럼·processor 잠금·`knowledgeUsage()` 수정**(§5.9.3f-5) + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim + 결합 CHECK**(§5.9.3f-2) + **일반 finalize의 예약 거절**(§5.9.3f-3) + **`lockAccountKnowledgeQuota()`와 transaction 내 quota 재판정**(§5.9.3f-4, 일반 경로 포함) + **거절을 throw가 아닌 outcome으로**(§5.9.3f-4) + **`extractedBytes` 컬럼(+CHECK, export 포함)·`extractedCharacters` CHECK(`NOT VALID`)·processor 잠금·`knowledgeUsage()` 수정**(§5.9.3f-5) + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | **[rev12] Slice 4 + §10.1의 A7 승인**(§10.1.2). A5는 Slice 2에서, B1~B6는 Slice 1에서 **이미 충족**돼 있으므로 여기서 다시 세지 않습니다 |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
@@ -3250,6 +3270,9 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **62a** *(rev11)* | **`claim_lost` 경로** | 선점이 회수된 뒤 옛 요청이 돌아와 예약 삭제를 시도 → `count === 0`이라 **파일 행을 만들지 않고** R2 객체도 그대로 |
 | **63** *(rev11)* | **동시 추출이 추출 텍스트 한도를 넘지 않음** | `maxExtractedBytesPerAccount` 직전에서 **서로 다른 profile**의 파일 둘을 동시에 처리 → 하나만 `ready`, 다른 하나는 `ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED`로 `failed` |
 | **63a** *(rev12)* | **UTF-8 멀티바이트 집계** | 한국어 텍스트를 처리 → 저장된 `extractedBytes`가 **`Buffer.byteLength(text, "utf8")`와 정확히 일치**(근사가 아님). 같은 텍스트의 `extractedCharacters`는 `[...text].length`와 일치하며 **두 값이 서로 다름**. `knowledgeUsage().extractedBytesInAccount`가 전자를 합산 |
+| **64** *(rev13)* | **계정 export에 `extractedBytes` 포함** | 계정 데이터 export의 `assistant_knowledge_files[].extractedBytes`가 **DB 값과 정확히 일치**. `extractedCharacters`와 나란히 나오고, 둘 중 하나만 빠지지 않음 |
+| **64a** *(rev13)* | **음수 `extractedBytes` 거절** | `extractedBytes = -1` insert·update가 **명명된 CHECK로 거절**됨. `NULL`과 `0`은 허용 |
+| **64b** *(rev13)* | **`extractedCharacters`의 CHECK** | 같은 migration이 추가한 `NULL 또는 >= 0` CHECK가 음수를 거절. **`NOT VALID`로 배포한 뒤 위반 0건을 확인하고 별도 migration에서 validate** — 기존 행이 있는 컬럼이므로 `AGENTS.md`의 `CreditLot` 선례와 같은 절차 |
 | **63b** *(rev12)* | **기존 행(`extractedBytes = NULL`)의 합산** | **권고 방침(§10.1 A7) 기준의 고정 기대값**: `NULL` 행은 **정확히 그 행의 `extractedCharacters` 값**으로 집계되고, 값이 있는 행은 그 값으로 집계됨. 합계가 두 값의 단순 합과 일치. *A7이 재처리 배치로 승인되면 이 항목을 그 기대값으로 교체합니다* |
 | **61c** *(rev10)* | **state 결합 CHECK** | `state='pending'`인데 `claimToken`이 있는 행, `state='finalizing'`인데 `finalizingStartedAt`이 없는 행을 insert 시도 → **DB 거절** |
 | **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
@@ -3418,11 +3441,11 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
 
 ### 14.4 구현 착수 전에 사람의 승인이 필요한 결정
 
-**[rev4] 승인 항목은 여섯 개이고, 막는 지점이 서로 다릅니다**(§10.1.2).
-A1~A4는 **Slice 1**(정책 문서)을 막고, 그래서 그 뒤 전부가 멈춥니다.
-**[rev8] B1~B6는 Slice 1**(그 확정값을 문서에 기록하는 것이 Slice 1의
+**[rev13] 승인 항목은 일곱 개(A1~A7)이고, 막는 지점이 서로 다릅니다**
+(§10.1.2). A1~A4는 **Slice 1**(정책 문서)을 막고, 그래서 그 뒤 전부가
+멈춥니다. **B1~B6도 Slice 1**(그 확정값을 문서에 기록하는 것이 Slice 1의
 산출물이므로 A1~A4와 같은 시점), A5는 **Slice 2**, A6는 **Slice 4**,
-C3는 **Slice 8(rollout)**을 각각 막습니다.
+**A7은 Slice 5**, C3는 **Slice 8(rollout)**을 각각 막습니다.
 
 | | 결정 | 이 보고서의 권고 |
 |---|---|---|
