@@ -59,8 +59,14 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 - `userId`·`conversationId`는 `message`를 거치지 않고 직접 들고 있다. 모든
   해석이 소유권 검사이고, 먼저 join해야 하는 검사는 403이 되어야 할 것을 500으로
   만든다.
-- `kind`는 `mediaType`에서 **서버가** 정한다(`messageAttachmentKindFor`).
-  요청이 `.docx`를 "text"라고 불러도 읽는 방식은 바뀌지 않는다.
+- `kind`는 **서버가** 정한다. 업로드 완료 단계가
+  `resolveChatAttachmentFormat()`으로 형식을 판정하고
+  `attachmentKindForFormat()`이 그 판정에서 읽어 낸다
+  (`lib/chatAttachmentFormats.ts`). 요청이 `.docx`를 "text"라고 불러도
+  읽는 방식은 바뀌지 않는다.
+- **`mediaType`만 보고 다시 유도하지 않는다.** 형식표는 이름을 먼저
+  읽고 media type을 힌트로만 쓰므로, 확장자로 자리가 정해지는 형식에서
+  두 번째 유도는 첫 번째와 어긋난다.
 - `size`는 업로드 완료 시점에 **저장소가 보고한 값**이다. 선언값이 아니다.
 
 `MessageAttachmentUpload` — 아직 메시지에 결속되지 않은 완료된 업로드.
