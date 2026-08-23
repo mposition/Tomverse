@@ -6,6 +6,13 @@ import {
   AdminApprovalRequiredError,
   runWithAdminApproval,
 } from "@/lib/adminApproval";
+import { approvalPayloadHash } from "@/lib/adminApprovalCore";
+import {
+  AdminSoleApproverRefusedError,
+  runAsSoleApprover,
+  soleApproverIsAvailable,
+} from "@/lib/adminSoleApproverExecution";
+import { DRY_RUN_BINDING_MAX_AGE_MS } from "@/lib/adminSoleApproverCore";
 import { AdminReauthenticationRequiredError } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
@@ -16,6 +23,7 @@ const resetAdminSecurityData = () =>
     TRUNCATE TABLE
       "AdminActionApproval",
       "AdminAuditLog",
+      "AdminRetentionRun",
       "ScheduledJobRun",
       "User"
     RESTART IDENTITY CASCADE
@@ -270,4 +278,241 @@ test("a run still inside its silence budget is not reported delayed", async () =
   );
   assert.equal(reconciliation?.delayed, false);
   assert.equal(reconciliation?.status, "succeeded");
+});
+
+/* --------------------------------- the single-administrator exception ----- */
+
+/**
+ * `retention.cleanup.execute` for an organisation with one administrator.
+ *
+ * The pure decisions are covered exhaustively without a database
+ * (tests/adminSoleApprover.test.mjs). What only a database can show is the
+ * wiring: that the eligible set really is read from configuration, that the
+ * binding really is checked against the stored dry run, and that the audit
+ * rows the sixth condition requires are actually written before and after the
+ * operation.
+ *
+ * This is where the path is proven at all. Staging cannot do it -- its
+ * `ADMIN_OWNER_EMAILS` names two addresses, so the exception correctly stays
+ * shut there (observed 2026-08-23); production names one.
+ */
+
+const withSoleAdmin = async <T>(
+  emails: string[],
+  run: () => Promise<T>
+): Promise<T> => {
+  const previous = {
+    admins: process.env.ADMIN_EMAILS,
+    owners: process.env.ADMIN_OWNER_EMAILS,
+    expiry: process.env.ADMIN_ACCESS_EXPIRY_JSON,
+  };
+  process.env.ADMIN_EMAILS = emails.join(",");
+  process.env.ADMIN_OWNER_EMAILS = emails.join(",");
+  delete process.env.ADMIN_ACCESS_EXPIRY_JSON;
+  try {
+    return await run();
+  } finally {
+    // Restored rather than left set: the surrounding suite reads the same
+    // variables, and a test that widens who is an administrator must not do it
+    // for the tests after it.
+    if (previous.admins === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = previous.admins;
+    if (previous.owners === undefined) delete process.env.ADMIN_OWNER_EMAILS;
+    else process.env.ADMIN_OWNER_EMAILS = previous.owners;
+    if (previous.expiry !== undefined)
+      process.env.ADMIN_ACCESS_EXPIRY_JSON = previous.expiry;
+  }
+};
+
+const DRY_RUN_RESULT = {
+  sessions: 0,
+  assistantKnowledge: {
+    pendingTombstones: 2,
+    retryable: 2,
+    exhausted: 0,
+    oldestPendingAt: "2026-08-23T04:58:00.000Z",
+    executionLimit: 200,
+    truncated: false,
+    orphanScan: {
+      status: "not_run",
+      reason: "A dry run does not list the object store.",
+    },
+  },
+};
+
+const seedDryRun = async (
+  actor: AdminTestActor,
+  overrides: { createdAt?: Date; mode?: string; result?: unknown } = {}
+) => {
+  const run = await prisma.adminRetentionRun.create({
+    data: {
+      mode: overrides.mode ?? "dry-run",
+      status: "completed",
+      result: (overrides.result ?? DRY_RUN_RESULT) as never,
+      createdById: actor.session.user?.id,
+      createdByEmail: actor.session.user?.email,
+      ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
+    },
+  });
+  return { run, digest: approvalPayloadHash(run.result) };
+};
+
+const executeAsSoleApprover = (
+  actor: AdminTestActor,
+  submittedRunId: string,
+  submittedDigest: string,
+  operation: () => Promise<unknown>
+) =>
+  runAsSoleApprover(
+    {
+      session: actor.session,
+      request: actor.request,
+      action: "retention.cleanup.execute",
+      targetType: "Retention",
+      targetId: "expired-data",
+      submittedRunId,
+      submittedDigest,
+    },
+    operation
+  );
+
+test("the sole administrator executes, and the audit says why one was enough", async () => {
+  const admin = await createAdminSession("sole-admin");
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    assert.equal(
+      soleApproverIsAvailable("retention.cleanup.execute", admin.session),
+      true
+    );
+    const { run, digest } = await seedDryRun(admin);
+    let executions = 0;
+    const result = await executeAsSoleApprover(admin, run.id, digest, async () => {
+      executions += 1;
+      return { assistantKnowledgeObjectsDeleted: 2 };
+    });
+    assert.equal(executions, 1);
+    assert.deepEqual(result, { assistantKnowledgeObjectsDeleted: 2 });
+
+    const audit = await prisma.adminAuditLog.findMany({
+      where: { action: { startsWith: "admin_sole_approver." } },
+      orderBy: { createdAt: "asc" },
+    });
+    assert.deepEqual(
+      audit.map((entry) => entry.action),
+      ["admin_sole_approver.execution_started", "admin_sole_approver.executed"]
+    );
+    const started = audit[0].metadata as Record<string, unknown>;
+    // Named in the record rather than left to be worked out from
+    // configuration that may have changed by the time anyone reads it.
+    assert.equal(started.eligibleApproverCount, 1);
+    assert.equal(started.dryRunId, run.id);
+    assert.equal(started.dryRunDigest, digest);
+    const executed = audit[1].metadata as Record<string, unknown>;
+    assert.deepEqual(executed.result, { assistantKnowledgeObjectsDeleted: 2 });
+
+    // The exception is not an approval: nothing is written to the approval
+    // table, so it cannot be mistaken for one that somebody granted.
+    assert.equal(await prisma.adminActionApproval.count(), 0);
+  });
+});
+
+test("a second eligible administrator closes the path without being asked", async () => {
+  const admin = await createAdminSession("first-admin");
+  const other = await createAdminSession("second-admin");
+  await withSoleAdmin(
+    [admin.session.user?.email as string, other.session.user?.email as string],
+    async () => {
+      // Condition 6, read from configuration on this call -- there is no
+      // stored mode to migrate and no flag anyone has to remember to clear.
+      assert.equal(
+        soleApproverIsAvailable("retention.cleanup.execute", admin.session),
+        false
+      );
+      const { run, digest } = await seedDryRun(admin);
+      let executions = 0;
+      await assert.rejects(
+        () =>
+          executeAsSoleApprover(admin, run.id, digest, async () => {
+            executions += 1;
+          }),
+        AdminSoleApproverRefusedError
+      );
+      assert.equal(executions, 0);
+    }
+  );
+});
+
+test("every way the binding can fail refuses before anything is deleted", async () => {
+  const admin = await createAdminSession("binding-admin");
+  const other = await createAdminSession("binding-other");
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    const attempt = async (
+      runId: string,
+      digest: string,
+      expected: string
+    ) => {
+      let executions = 0;
+      await assert.rejects(
+        () =>
+          executeAsSoleApprover(admin, runId, digest, async () => {
+            executions += 1;
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof AdminSoleApproverRefusedError);
+          assert.equal(error.reason, expected);
+          return true;
+        }
+      );
+      assert.equal(executions, 0, `${expected} must not execute`);
+    };
+
+    await attempt("", "", "preview_missing");
+
+    const fresh = await seedDryRun(admin);
+    await attempt(fresh.run.id, "b".repeat(64), "preview_digest_mismatch");
+
+    // A newer run of any mode supersedes it. Reported as superseded rather
+    // than as a bad digest: the submitted id does exist.
+    const newer = await seedDryRun(admin, { mode: "execute" });
+    await attempt(fresh.run.id, fresh.digest, "preview_superseded");
+    await attempt(newer.run.id, newer.digest, "preview_not_a_dry_run");
+
+    await prisma.adminRetentionRun.deleteMany({});
+    const theirs = await seedDryRun(other);
+    await attempt(
+      theirs.run.id,
+      theirs.digest,
+      "preview_belongs_to_another_administrator"
+    );
+
+    await prisma.adminRetentionRun.deleteMany({});
+    const old = await seedDryRun(admin, {
+      createdAt: new Date(Date.now() - DRY_RUN_BINDING_MAX_AGE_MS - 60_000),
+    });
+    await attempt(old.run.id, old.digest, "preview_expired");
+
+    // A refusal is not an event worth an audit row of its own: nothing
+    // happened, and the request is already rate limited.
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: { action: { startsWith: "admin_sole_approver." } },
+      }),
+      0
+    );
+  });
+});
+
+test("a stale session is refused before the binding is even read", async () => {
+  const admin = await createAdminSession("stale-admin", staleAuthenticatedAt());
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    const { run, digest } = await seedDryRun(admin);
+    let executions = 0;
+    await assert.rejects(
+      () =>
+        executeAsSoleApprover(admin, run.id, digest, async () => {
+          executions += 1;
+        }),
+      AdminReauthenticationRequiredError
+    );
+    assert.equal(executions, 0);
+  });
 });
