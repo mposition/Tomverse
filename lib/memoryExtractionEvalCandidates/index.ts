@@ -30,6 +30,8 @@ import { BATCH_017_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/bat
 import { BATCH_018_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch018AssistantEn";
 import { BATCH_019_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch019AssistantKo";
 import { BATCH_020_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch020AssistantEn";
+import { BATCH_021_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch021SecretKo";
+import { BATCH_022_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch022SecretEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -105,5 +107,17 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
         cell: "assistant_only:en",
         record: "docs/ops/memory-extraction-eval-batches/batch-020-assistant-only-en.md",
         cases: BATCH_020_ASSISTANT_EN,
+    },
+    {
+        id: "batch-021",
+        cell: "sensitive_secrets:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-021-sensitive-secrets-ko.md",
+        cases: BATCH_021_SECRET_KO,
+    },
+    {
+        id: "batch-022",
+        cell: "sensitive_secrets:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-022-sensitive-secrets-en.md",
+        cases: BATCH_022_SECRET_EN,
     },
 ];
