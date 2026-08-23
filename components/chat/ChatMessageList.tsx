@@ -39,6 +39,7 @@ import {
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
+import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -800,28 +801,47 @@ export function ChatMessageList({
                       />
                     )}
                     {/*
-                      §13.4: what this answer was given, shown to its owner
-                      and counted by the server. Rendered only above zero --
-                      the policy forbids a misleading indication, and
-                      "0 memories used" on an answer that never had any is
-                      one. It is a statement about this answer, so it sits
-                      with the answer rather than in any dock or rail, and
-                      touches neither the mobile composer contract nor the
-                      comparison rail's.
+                      docs/policy/external-conversation-import-and-memory.md
+                      §13.4 and §14.3: what this answer was given, shown to its
+                      owner and counted by the server. Rendered only above zero
+                      -- the policy forbids a misleading indication, and
+                      "0 memories used" on an answer that never had any is one.
+                      It is a statement about this answer, so it sits with the
+                      answer rather than in any dock or rail, and touches
+                      neither the mobile composer contract nor the comparison
+                      rail's.
+
+                      One sentence for two facts, each named: an answer built
+                      from the user's own uploaded files and one built from
+                      their stored memories are different claims, and a single
+                      merged count would state neither.
                     */}
                     {!isUser &&
-                      typeof msg.memoryUsedCount === "number" &&
-                      msg.memoryUsedCount > 0 && (
-                        <p
-                          data-testid="memory-usage-disclosure"
-                          className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
-                        >
-                          {t("chat.memoryUsedDisclosure").replaceAll(
-                            "{count}",
-                            String(msg.memoryUsedCount)
-                          )}
-                        </p>
-                      )}
+                      (() => {
+                        const disclosure = decideAnswerContextDisclosure({
+                          memoryUsedCount: msg.memoryUsedCount,
+                          knowledgeChunkCount: msg.knowledgeChunkCount,
+                        });
+                        if (!disclosure.shown) return null;
+                        return (
+                          <p
+                            data-testid="memory-usage-disclosure"
+                            className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
+                          >
+                            {t("chat.answerContextLabel")}
+                            {": "}
+                            {disclosure.parts
+                              .map((part) =>
+                                t(
+                                  part.kind === "memory"
+                                    ? "chat.answerContextMemory"
+                                    : "chat.answerContextKnowledge"
+                                ).replaceAll("{count}", String(part.count))
+                              )
+                              .join(" · ")}
+                          </p>
+                        );
+                      })()}
                     {/*
                       The files this answer produced
                       (docs/policy/generated-artifacts.md section 9).

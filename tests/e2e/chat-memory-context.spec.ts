@@ -101,6 +101,70 @@ test.describe("chat memory context", () => {
     await expect(disclosure).toContainText("3");
   });
 
+  test("an answer names memory and profile knowledge separately @ui-risk", async ({
+    page,
+  }) => {
+    // docs/policy/external-conversation-import-and-memory.md §14.3. The two counts are
+    // different claims about where the answer came
+    // from, so the sentence has to carry both numbers rather than a sum --
+    // 2 and 3 are chosen so that a merged "5" fails this outright.
+    await mockContextPreparation(page);
+    await enterConversation(page, {
+      theme: "light",
+      lang: "en",
+      viewport: DESKTOP_VIEWPORT,
+      selectedModels: [MODEL_A],
+      modelStub: {
+        [MODEL_A]: {
+          kind: "success",
+          chunks: [ANSWER],
+          intervalMs: 5,
+          memoryUsedCount: 2,
+          knowledgeChunkCount: 3,
+        },
+      },
+    });
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await submitComposer(page, "What does my document say?", DESKTOP_VIEWPORT.width);
+
+    await expect(panel(page, 0)).toContainText(ANSWER);
+    const disclosure = page.getByTestId("memory-usage-disclosure");
+    await expect(disclosure).toBeVisible();
+    await expect(disclosure).toContainText("2");
+    await expect(disclosure).toContainText("3");
+    await expect(disclosure).not.toContainText("5");
+  });
+
+  test("an answer given only profile knowledge says only that @ui-risk", async ({
+    page,
+  }) => {
+    // The header for memory is absent here, which is not the same as zero:
+    // the sentence must name knowledge and must not claim any memory.
+    await mockContextPreparation(page);
+    await enterConversation(page, {
+      theme: "light",
+      lang: "en",
+      viewport: DESKTOP_VIEWPORT,
+      selectedModels: [MODEL_A],
+      modelStub: {
+        [MODEL_A]: {
+          kind: "success",
+          chunks: [ANSWER],
+          intervalMs: 5,
+          knowledgeChunkCount: 4,
+        },
+      },
+    });
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await submitComposer(page, "What does my document say?", DESKTOP_VIEWPORT.width);
+
+    await expect(panel(page, 0)).toContainText(ANSWER);
+    const disclosure = page.getByTestId("memory-usage-disclosure");
+    await expect(disclosure).toBeVisible();
+    await expect(disclosure).toContainText("4");
+    await expect(disclosure).not.toContainText("account memories");
+  });
+
   test("an answer that used no memories says nothing at all", async ({
     page,
   }) => {

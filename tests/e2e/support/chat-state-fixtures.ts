@@ -36,6 +36,12 @@ export type StreamAttempt =
        * deliberately different from a header reading 0.
        */
       memoryUsedCount?: number;
+      /**
+       * Sets `X-Chat-Knowledge-Used`, the
+       * docs/policy/external-conversation-import-and-memory.md §14.3 count. Same rule as the line
+       * above: omitted means absent, which is not a header reading 0.
+       */
+      knowledgeChunkCount?: number;
     }
   // Fetch never settles -- represents "still connecting, no token yet".
   // Bounded by the test/page lifetime, not an unbounded token generator.
@@ -171,6 +177,9 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
           "X-Request-ID": traceId,
           ...(typeof attempt.memoryUsedCount === "number"
             ? { "X-Chat-Memory-Used": String(attempt.memoryUsedCount) }
+            : {}),
+          ...(typeof attempt.knowledgeChunkCount === "number"
+            ? { "X-Chat-Knowledge-Used": String(attempt.knowledgeChunkCount) }
             : {}),
         },
       });

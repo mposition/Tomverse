@@ -108,18 +108,25 @@ const memoryAnswer: Message = {
   modelId: "gpt-5-6-luna",
   createdAt: "2026-08-04T00:00:00.000Z",
   memoryUsedCount: 3,
+  knowledgeChunkCount: 2,
 };
 
-test("the /api/chat transcript never carries the memory-used count", () => {
+test("the /api/chat transcript never carries the context counts", () => {
   const serialized = toChatRequestMessage(memoryAnswer);
   assert.equal("memoryUsedCount" in serialized, false);
+  // docs/policy/external-conversation-import-and-memory.md §14.3: the same exclusion,
+  // and it needs no code of its own --
+  // pickTransportFields is an allowlist, so a new runtime-only field is out
+  // by default. This asserts that property rather than a line of code.
+  assert.equal("knowledgeChunkCount" in serialized, false);
   assert.equal(serialized.content, memoryAnswer.content);
 });
 
-test("the guest snapshot never carries the memory-used count", () => {
-  // A guest has no account memory at all, so a persisted count could only
-  // ever be wrong -- but the allowlist is what makes that structural rather
-  // than a thing to remember.
+test("the guest snapshot never carries the context counts", () => {
+  // A guest has no account memory and no assistant profile at all, so a
+  // persisted count could only ever be wrong -- but the allowlist is what
+  // makes that structural rather than a thing to remember.
   const persisted = toGuestPersistableMessage(memoryAnswer);
   assert.equal("memoryUsedCount" in persisted, false);
+  assert.equal("knowledgeChunkCount" in persisted, false);
 });
