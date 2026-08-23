@@ -18,7 +18,6 @@
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 import type { EvalBatch } from "@/lib/memoryEvalBatchRecord";
-import { BATCH_002_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch002DurableEn";
 import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch003AssistantKo";
 import { BATCH_004_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch004AssistantEn";
 import { BATCH_005_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch005SecretKo";
@@ -29,12 +28,6 @@ import { BATCH_008_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/bat
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
 export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
-    {
-        id: "batch-002",
-        cell: "durable_facts:en",
-        record: "docs/ops/memory-extraction-eval-batches/batch-002-durable-facts-en.md",
-        cases: BATCH_002_DURABLE_EN,
-    },
     {
         id: "batch-003",
         cell: "assistant_only:ko",

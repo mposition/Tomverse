@@ -15,6 +15,22 @@ import { parseBatchRecord } from "../lib/memoryEvalBatchRecord.ts";
 const ALL_BATCHES = [...CANDIDATE_BATCHES, ...ADOPTED_BATCHES];
 
 /**
+ * Which batch a test should read depends on its category, not on position.
+ * `ALL_BATCHES[0]` used to be a `durable_facts` batch and stopped being one
+ * the moment batch-002 was adopted and batch-003 took the front of the
+ * candidate list -- three tests then asserted category ① properties against a
+ * critical negative, which has no kinds at all.
+ */
+const isDurable = (batch) =>
+    batch.cases.every((testCase) => testCase.category === "durable_facts");
+const durableBatch = () => {
+    const batch = ALL_BATCHES.find(isDurable);
+    assert.ok(batch, "expected a durable_facts batch to exist");
+    return batch;
+};
+const criticalBatch = () => ALL_BATCHES.find((batch) => !isDurable(batch));
+
+/**
  * The review sheet exists so a one-person organisation reviews what
  * docs/ops/memory-extraction-eval-dataset.md §6.3 actually requires, with
  * everything else already done for them.
@@ -40,10 +56,7 @@ const sheet = (batchId) =>
     );
 
 test("a category ① batch asks for 20% of its cases, not all of them", () => {
-    const batch = ALL_BATCHES.find((entry) =>
-        entry.cases.every((testCase) => testCase.category === "durable_facts")
-    );
-    assert.ok(batch, "expected a durable_facts batch to exist");
+    const batch = durableBatch();
     const expected = Math.ceil(batch.cases.length * 0.2);
     const rendered = sheet(batch.id);
     assert.match(
@@ -58,7 +71,7 @@ test("a category ① batch asks for 20% of its cases, not all of them", () => {
 });
 
 test("every sampled case is reproduced in full, so no other file is needed", () => {
-    const batch = ALL_BATCHES[0];
+    const batch = durableBatch();
     const rendered = sheet(batch.id);
     // Each case whose verdict is asked for must have all of its turns in the
     // sheet -- an excerpt sends the reviewer to the source file.
@@ -85,7 +98,7 @@ test("every sampled case is reproduced in full, so no other file is needed", () 
 test("the sample spreads across kinds rather than repeating one", () => {
     // A sample of five that lands on three `preference` cases measures
     // `preference` and reports it as the batch.
-    const batch = ALL_BATCHES[0];
+    const batch = durableBatch();
     const rendered = sheet(batch.id);
     const sampled = batch.cases.filter((testCase) =>
         rendered.includes(`### ${testCase.id}\n`)
@@ -99,13 +112,22 @@ test("the sample spreads across kinds rather than repeating one", () => {
 });
 
 test("the sheet states the automated checks rather than a command to run", () => {
-    const rendered = sheet(ALL_BATCHES[0].id);
     // docs/ops/memory-extraction-eval-dataset.md §6.5's near-duplicate figures belong in the sheet. Telling the reviewer
     // to run a script is handing them the work the rule assigns to the agent.
+    const rendered = sheet(durableBatch().id);
     assert.match(rendered, /exact duplicate/);
     assert.match(rendered, /kind 분포/);
     assert.match(rendered, /near-duplicate 상위 쌍/);
     assert.match(rendered, /\| \d\.\d{2} \| \d\.\d{2} \|/, "expected scored pairs");
+
+    // A critical negative has no kinds to spread, so it states the property
+    // that does apply: every case declares nothing to extract.
+    const critical = criticalBatch();
+    if (!critical) return;
+    const criticalSheet = sheet(critical.id);
+    assert.doesNotMatch(criticalSheet, /kind 분포/);
+    assert.match(criticalSheet, /기대 결과 없음/);
+    assert.match(criticalSheet, /near-duplicate 상위 쌍/);
 });
 
 test("the committed record matches what the generator produces", () => {
