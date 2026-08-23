@@ -179,6 +179,14 @@ export function AdminOverviewSummary({
           <div className="mt-4 grid gap-2">
             {missingEnv.map((check) => (
               // `min-w-0` on the card, not only on the text beside the icon.
+              //
+              // Not covered by a test. A page-width assertion cannot hold here
+              // -- /admin/overview overflows for reasons this section does not
+              // control (419 against 412 on CI, 367 against 320 on develop from
+              // the quick access panel) -- and a card-width assertion does not
+              // fail when the bug is reintroduced, because the card is sized by
+              // the page rather than by its own content. The measurement is in
+              // the commit: document 457 before, 412 after, at 412px.
               // A grid item's automatic minimum size is its min-content, and a
               // `truncate` descendant still contributes its full nowrap width
               // to that -- `overflow: hidden` exempts the item itself, not an
