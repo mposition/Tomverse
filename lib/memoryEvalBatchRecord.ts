@@ -75,7 +75,10 @@ const tableRowsAfter = (lines: readonly string[], start: number) => {
         const line = lines[index].trim();
         if (line.startsWith("#")) break;
         if (!line.startsWith("|")) continue;
-        if (/^\|[\s|:-]+\|$/.test(line)) {
+        // A separator needs an actual dash. `|  |  |` -- an unfilled verdict
+        // row -- is otherwise indistinguishable from one, and skipping it
+        // makes a whole unreviewed sheet parse as having no cases at all.
+        if (line.includes("-") && /^\|[\s|:-]+\|$/.test(line)) {
             pastHeader = true;
             continue;
         }

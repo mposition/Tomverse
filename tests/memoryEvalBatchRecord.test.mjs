@@ -26,13 +26,13 @@ const sheet = (body) => `# batch-999 — \`durable_facts:ko\` 검수 시트
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-| ${body.a} | ${body.aReason ?? "—"} |
+| ${body.a} | ${body.aReason ?? ""} |
 
 ### case-b
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-| ${body.b} | ${body.bReason ?? "—"} |
+| ${body.b} | ${body.bReason ?? ""} |
 
 ## batch 채택 결정
 
@@ -57,6 +57,12 @@ test("an unreviewed sheet reports no verdicts, not the table headers", () => {
     );
     assert.equal(record.decision, null);
     assert.equal(draftDisagreementRate(record), null);
+    // The rows above are literally `|  |  |`, which is also what a markdown
+    // separator looks like once you allow one made only of spaces and pipes.
+    // Reading them as separators made an entire unreviewed batch parse as
+    // having no cases -- an empty record and a record of blanks are not the
+    // same fact, and only one of them means "the sheet was never filled in".
+    assert.equal(record.cases[0].caseId, "case-a");
 });
 
 test("a transcription marker qualifies a verdict, it does not become one", () => {

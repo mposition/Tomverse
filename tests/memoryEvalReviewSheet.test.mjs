@@ -116,8 +116,11 @@ test("the committed record matches what the generator produces", () => {
             fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
             "utf8"
         );
-        // Verdict cells are the reviewer's; compare everything up to them.
-        const upTo = (value) => value.slice(0, value.indexOf("## 표본"));
+        // Verdict cells are the reviewer's; compare everything up to the
+        // first case heading, which is the last line the generator owns
+        // outright. Slicing on a section title would break the day a title
+        // changes for one category.
+        const upTo = (value) => value.slice(0, value.indexOf("\n### "));
         assert.equal(
             upTo(onDisk),
             upTo(sheet(batch.id)),

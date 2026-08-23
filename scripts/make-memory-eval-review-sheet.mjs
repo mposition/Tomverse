@@ -208,7 +208,13 @@ p();
 p("| 검사 | 결과 |");
 p("|---|---|");
 p(`| exact duplicate (\`findDuplicateCases\`) | ${duplicates.length === 0 ? "0건" : `**${duplicates.length}건** — ${duplicates.join(", ")}`} |`);
-p(`| kind 분포 (한 kind가 40% 초과 금지) | 최대 \`${widestKind?.[0] ?? "-"}\` ${widestKind?.[1] ?? 0}/${cases.length} = **${Math.round(((widestKind?.[1] ?? 0) / cases.length) * 100)}%** |`);
+if (isCriticalNegative) {
+    // A kind spread would read `-` 0/25 here: categories ②③④ declare nothing
+    // to extract. What matters instead is that they declare nothing at all.
+    p(`| 기대 결과 없음 (\`docs/ops/memory-extraction-eval-dataset.md\` §4.2) | ${cases.length}건 전부 \`expected: []\` |`);
+} else {
+    p(`| kind 분포 (한 kind가 40% 초과 금지) | 최대 \`${widestKind?.[0] ?? "-"}\` ${widestKind?.[1] ?? 0}/${cases.length} = **${Math.round(((widestKind?.[1] ?? 0) / cases.length) * 100)}%** |`);
+}
 p(`| kind 유효성 · 키워드 수 · 키워드의 사용자 발화 실재 · 턴 수 | ${problems.length === 0 ? `${cases.length}건 전부 통과` : `**${problems.length}건 위반**`} |`);
 if (problems.length > 0) for (const problem of problems) p(`| | ${problem} |`);
 p();
@@ -225,7 +231,11 @@ for (const pair of cellPairs.slice(0, 10)) {
 p();
 p("---");
 p();
-p(`## 표본 — 판정할 ${sampleSize}건`);
+p(
+    isCriticalNegative
+        ? `## 전건 — 판정할 ${sampleSize}건`
+        : `## 표본 — 판정할 ${sampleSize}건`
+);
 p();
 p("판정은 `채택` / `반려(재작성)` / `반려(폐기)` 중 하나입니다. **`수정 후 채택`은 없습니다** —");
 p(`실질 수정은 반려 사유를 남기면 에이전트가 재작성하고 같은 분이 재검수합니다 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.4).`);
