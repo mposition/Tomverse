@@ -41,12 +41,13 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-21 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **32개 파일, 738 test**를 선택합니다.
+실측: 2026-08-23 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **33개 파일, 752 test**를 선택합니다.
 
 | Spec |
 |---|
 | `account-flow.spec.ts` |
+| `answer-header-layout.spec.ts` |
 | `chat-analytics-settings-placement.spec.ts` |
 | `chat-welcome-flicker.spec.ts` |
 | `chat-memory-context.spec.ts` |
@@ -74,9 +75,16 @@ mobile-chromium 두 project에서 **32개 파일, 738 test**를 선택합니다.
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-21, `--list`): **32개 파일 738 test** (두 project 합계).
-`generated-artifact-card.spec.ts`(+16 — 이 spec을 빼고 다시 재면 31개 파일
-722 test입니다)가 합류했습니다. 직전 기록인 2026-08-21의 31개 파일 696 test는
+검토 시점 실측(2026-08-23, `--list`): **33개 파일 752 test** (두 project 합계).
+`answer-header-layout.spec.ts`(+8 — 이 spec을 빼고 다시 재면 32개 파일
+744 test입니다)가 합류했습니다 — 답변 헤더가 좁은 폭에서 한 줄을 유지하는지,
+그리고 그 한 줄이 실행 모드 배지를 버려서 얻어진 것이 아닌지는 화면에서만
+확인되고, 배지가 사라지는 회귀는 #792에서 실제로 한 번 일어났으므로 tier에
+넣었습니다. 같은 변경에서 `modal-focus-contract.spec.ts`도 태그된 test가
+하나 늘었습니다(+2) — 덮인 dialog가 나중에 focus를 도로 가져가는 결함이며,
+이 spec은 이미 tier에 있습니다. 나머지 +4는 그 사이 다른 tier spec이
+자란 것입니다. 그 이전에는 `generated-artifact-card.spec.ts`(+16)가
+합류했습니다. 직전 기록인 2026-08-21의 31개 파일 696 test는
 그 사이 다른 tier spec이 자라면서 이미 26 test만큼 뒤처져 있었으므로, 위
 숫자는 그 기록에 더한 값이 아니라 병합 시점에 다시 잰 값입니다. 그 이전에는
 `chat-context-menu-shape.spec.ts`(+34)가 합류했습니다 — 컴포저 Context 메뉴의
