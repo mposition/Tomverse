@@ -126,8 +126,8 @@ const definitions: AnyDefinition[] = [
     classification: "legal",
     purpose: null,
     requiresUnsubscribe: false,
-    render: (payload: AccountDeletionScheduledPayload) =>
-      buildAccountDeletionScheduledEmail(payload),
+    render: (payload: AccountDeletionScheduledPayload, language) =>
+      buildAccountDeletionScheduledEmail({ ...payload, language }),
     placeholderPayload: { scheduledFor: "{{scheduledFor}}" },
   },
   {
@@ -135,7 +135,8 @@ const definitions: AnyDefinition[] = [
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
-    render: () => buildAccountRestoredEmail(),
+    render: (_payload: AccountRestoredPayload, language) =>
+      buildAccountRestoredEmail({ language }),
     placeholderPayload: {},
   },
   {
