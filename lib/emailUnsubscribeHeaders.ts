@@ -19,14 +19,24 @@ import { createUnsubscribeToken, readUnsubscribeKeyring } from "@/lib/unsubscrib
  * must.
  */
 
-export const unsubscribeHeaders = (input: {
+export type UnsubscribeTarget = {
   requiresUnsubscribe: boolean;
   userId: string | null;
   purpose: string | null;
   deliveryId: string;
   appUrl: string;
-}): Record<string, string> => {
-  if (!input.requiresUnsubscribe || !input.userId || !input.purpose) return {};
+};
+
+/**
+ * The one-click URL, or null for a message that has no unsubscribe at all.
+ *
+ * Split out so the footer link and the `List-Unsubscribe` header are the same
+ * URL rather than two independently built ones. A footer that unsubscribes from
+ * a different thing than the header does is worse than either alone: whichever
+ * one the recipient uses, they have reason to believe the other worked too.
+ */
+export const unsubscribeUrl = (input: UnsubscribeTarget): string | null => {
+  if (!input.requiresUnsubscribe || !input.userId || !input.purpose) return null;
 
   const keyring = readUnsubscribeKeyring(process.env);
   if (!keyring) {
@@ -43,7 +53,14 @@ export const unsubscribeHeaders = (input: {
     { userId: input.userId, purpose: input.purpose, deliveryId: input.deliveryId },
     keyring
   );
-  const url = `${input.appUrl}/unsubscribe?t=${encodeURIComponent(token)}`;
+  return `${input.appUrl}/unsubscribe?t=${encodeURIComponent(token)}`;
+};
+
+export const unsubscribeHeaders = (
+  input: UnsubscribeTarget & { url?: string | null }
+): Record<string, string> => {
+  const url = input.url === undefined ? unsubscribeUrl(input) : input.url;
+  if (!url) return {};
 
   return {
     // The URL form rather than a mailto: the one-click POST goes to the API

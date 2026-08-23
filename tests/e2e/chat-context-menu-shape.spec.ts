@@ -115,6 +115,14 @@ test.describe("chat context menu shape", () => {
     // The limits moved with the control they describe rather than being
     // deleted: they are supporting text here instead of a card in the root.
     await expect(page.getByTestId("attach-limits")).toBeVisible();
+    // ...and so does which formats, now that the list is long enough that
+    // "images, PDFs and Office documents" no longer answers the question.
+    // Derived from the shared registry, so it cannot fall behind the picker.
+    const formats = page.getByTestId("attach-supported-formats");
+    await expect(formats).toBeVisible();
+    await expect(formats).toContainText("zip");
+    await expect(formats).toContainText("gif");
+    await expect(formats).toContainText("py");
   });
 
   test("choosing an assistant opens its own view, which is the one that scrolls", async ({

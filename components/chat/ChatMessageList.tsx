@@ -39,6 +39,8 @@ import {
 } from "@/lib/chatAutoScroll";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
+import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
+import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -526,30 +528,41 @@ export function ChatMessageList({
                 className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
               >
                 {!isUser && modelInfo && (
-                  <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
+                  // Every control on this row states something the reader
+                  // cannot recover from anywhere else -- the run mode, that
+                  // the turn is live, how to stop it -- so none of them may
+                  // wrap or shrink their own label. Only the model name
+                  // gives way, and it keeps the full string in `title`
+                  // beside a logo that already names the provider.
+                  <div
+                    data-testid="assistant-message-header"
+                    className="mb-1.5 ml-1 flex max-w-full select-none items-center gap-2"
+                  >
                     <ModelLogo model={modelInfo} size="sm" />
-                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                    <span
+                      data-testid="assistant-message-model-name"
+                      title={modelInfo.name}
+                      className="min-w-0 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
+                    >
                       {modelInfo.name}
                     </span>
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
-                      const meta = msg.searchMetadata;
-                      // meta is only absent for messages persisted before this
-                      // field existed -- fall back to the old provider/usageClass
-                      // heuristic so historical Perplexity answers don't regress
-                      // to "training knowledge".
-                      const status = !meta
-                        ? modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
-                          ? "executed"
-                          : "training-knowledge"
-                        : !meta.requested
-                          ? "training-knowledge"
-                          : !meta.supported
-                            ? "unsupported"
-                            : meta.failureCode
-                              ? "failed"
-                              : meta.executed
-                                ? "executed"
-                                : "requested-not-executed";
+                      // The badge reports web search and nothing else. Why it
+                      // no longer says "training knowledge", and why a message
+                      // with no metadata gets no badge at all, is in
+                      // lib/webSearchStatusBadge.ts.
+                      const decision = decideWebSearchBadge({
+                        searchMetadata: msg.searchMetadata,
+                        usageClass: modelInfo.usageClass,
+                        // The trailer that carries `searchMetadata` arrives at
+                        // the end of the stream, so a running turn has none.
+                        // Without this the Deep Research badge is absent for
+                        // the whole run -- which, the job being asynchronous,
+                        // is the state the panel is in the entire time.
+                        generating: isActivelyGenerating,
+                      });
+                      if (!decision.shown) return null;
+                      const status = decision.status;
                       // "requested-not-executed" only ever occurs for native
                       // (surcharge-eligible) capability -- unsupported/unverified
                       // models are routed to the "unsupported" status instead,
@@ -558,7 +571,7 @@ export function ChatMessageList({
                         status === "executed" &&
                         getWebSearchCapability(modelInfo.id).support === "native";
                       const label =
-                        modelInfo.usageClass === "deep-research"
+                        status === "deep-research"
                           ? t("chat.searchStatusDeepResearch")
                           : status === "unsupported"
                             ? t("chat.searchStatusUnsupported")
@@ -570,7 +583,7 @@ export function ChatMessageList({
                                   : t("chat.searchStatusWebSearch")
                                 : status === "requested-not-executed"
                                   ? t("chat.searchStatusRequestedNotExecuted")
-                                  : t("chat.searchStatusTrainingKnowledge");
+                                  : t("chat.searchStatusNotSearched");
                       const detail =
                         status === "requested-not-executed"
                           ? t("chat.searchStatusRefundDetail")
@@ -578,19 +591,17 @@ export function ChatMessageList({
                       return (
                         <span
                           data-testid="search-status-badge"
-                          data-search-status={
-                            modelInfo.usageClass === "deep-research" ? "deep-research" : status
-                          }
+                          data-search-status={status}
                           title={detail}
                           aria-label={detail ? `${label} — ${detail}` : undefined}
-                          className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          className="shrink-0 whitespace-nowrap rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                         >
                           {label}
                         </span>
                       );
                     })()}
                     {isActivelyGenerating && msg.content && (
-                      <span className="text-[11px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                      <span className="shrink-0 whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
                         {t("chat.generatingStatus")}
                       </span>
                     )}
@@ -601,7 +612,7 @@ export function ChatMessageList({
                         onClick={onStopGenerating}
                         title={t("chat.stopThisResponse")}
                         aria-label={t("chat.stopThisResponse")}
-                        className="ml-auto flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+                        className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
                       >
                         <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
                         {t("chat.stop")}
@@ -810,28 +821,47 @@ export function ChatMessageList({
                       />
                     )}
                     {/*
-                      §13.4: what this answer was given, shown to its owner
-                      and counted by the server. Rendered only above zero --
-                      the policy forbids a misleading indication, and
-                      "0 memories used" on an answer that never had any is
-                      one. It is a statement about this answer, so it sits
-                      with the answer rather than in any dock or rail, and
-                      touches neither the mobile composer contract nor the
-                      comparison rail's.
+                      docs/policy/external-conversation-import-and-memory.md
+                      §13.4 and §14.3: what this answer was given, shown to its
+                      owner and counted by the server. Rendered only above zero
+                      -- the policy forbids a misleading indication, and
+                      "0 memories used" on an answer that never had any is one.
+                      It is a statement about this answer, so it sits with the
+                      answer rather than in any dock or rail, and touches
+                      neither the mobile composer contract nor the comparison
+                      rail's.
+
+                      One sentence for two facts, each named: an answer built
+                      from the user's own uploaded files and one built from
+                      their stored memories are different claims, and a single
+                      merged count would state neither.
                     */}
                     {!isUser &&
-                      typeof msg.memoryUsedCount === "number" &&
-                      msg.memoryUsedCount > 0 && (
-                        <p
-                          data-testid="memory-usage-disclosure"
-                          className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
-                        >
-                          {t("chat.memoryUsedDisclosure").replaceAll(
-                            "{count}",
-                            String(msg.memoryUsedCount)
-                          )}
-                        </p>
-                      )}
+                      (() => {
+                        const disclosure = decideAnswerContextDisclosure({
+                          memoryUsedCount: msg.memoryUsedCount,
+                          knowledgeChunkCount: msg.knowledgeChunkCount,
+                        });
+                        if (!disclosure.shown) return null;
+                        return (
+                          <p
+                            data-testid="memory-usage-disclosure"
+                            className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
+                          >
+                            {t("chat.answerContextLabel")}
+                            {": "}
+                            {disclosure.parts
+                              .map((part) =>
+                                t(
+                                  part.kind === "memory"
+                                    ? "chat.answerContextMemory"
+                                    : "chat.answerContextKnowledge"
+                                ).replaceAll("{count}", String(part.count))
+                              )
+                              .join(" · ")}
+                          </p>
+                        );
+                      })()}
                     {/*
                       Which model answered, on a turn Auto routed
                       (docs/ui-contracts/auto-model-selection.md).

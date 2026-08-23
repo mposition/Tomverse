@@ -14,22 +14,30 @@ import "server-only";
 
 import {
   ARTIFACT_LIMITS,
+  isArchiveDocumentEntry,
   requireArtifactFormat,
   type ArchiveSpec,
+  type ArtifactArchiveDocumentEntry,
+  type DocumentBatchSpec,
   type DocumentSpec,
   type PresentationSpec,
   type SupportedArtifactFormat,
   type TextFileSpec,
   type WorkbookSpec,
 } from "@/lib/generatedArtifactCore";
+import {
+  DocxBatchError,
+  buildDocxBatchEntries,
+} from "@/lib/generatedArtifactDocxBatch";
 import { renderDocumentDocx } from "@/lib/generatedArtifactDocx";
 import { renderDocumentPdf } from "@/lib/generatedArtifactPdf";
 import { renderPresentationPptx } from "@/lib/generatedArtifactPptx";
 import {
-  renderArchive,
+  archiveTextEntryBytes,
   renderDocumentMarkdown,
   renderDocumentText,
   renderTextFile,
+  zipArchiveEntries,
 } from "@/lib/generatedArtifactText";
 import { renderWorkbook } from "@/lib/generatedArtifactXlsx";
 
@@ -106,5 +114,86 @@ export const renderPresentationArtifact = (
 export const renderTextArtifact = (spec: TextFileSpec): RenderedArtifact =>
   bounded(spec.format, renderTextFile(spec));
 
+/**
+ * One archive entry the server renders rather than the model authoring.
+ *
+ * Reuses the same four document writers a top-level document uses, so a `.docx`
+ * inside a zip and a `.docx` on its own are the same file made the same way.
+ */
+const renderArchiveDocumentEntry = (
+  entry: ArtifactArchiveDocumentEntry
+): Uint8Array => {
+  const spec: DocumentSpec = {
+    // The entry's path is its name inside the archive; the writers take a
+    // filename only to put it in document properties, and the path is the
+    // honest answer to what this document is called.
+    filename: entry.path,
+    format: entry.documentFormat,
+    ...(entry.title !== undefined ? { title: entry.title } : {}),
+    ...(entry.subtitle !== undefined ? { subtitle: entry.subtitle } : {}),
+    blocks: entry.blocks,
+  };
+  return renderDocumentArtifact(spec).bytes;
+};
+
 export const renderArchiveArtifact = (spec: ArchiveSpec): RenderedArtifact =>
-  bounded(spec.format, renderArchive(spec));
+  bounded(
+    spec.format,
+    zipArchiveEntries(
+      spec.entries.map((entry) =>
+        isArchiveDocumentEntry(entry)
+          ? { path: entry.path, bytes: renderArchiveDocumentEntry(entry) }
+          : { path: entry.path, bytes: archiveTextEntryBytes(entry) }
+      )
+    )
+  );
+
+/** What the batch renderer needs that the specification cannot carry. */
+export type DocumentBatchInputs = {
+  templateBytes: Uint8Array;
+  dataBytes: Uint8Array;
+  dataMediaType: string;
+  now?: Date;
+};
+
+/**
+ * The template batch: one archive, one document per data row.
+ *
+ * The bytes come from the turn's own attachments, resolved and
+ * ownership-checked by the request layer before they reach here. Nothing in
+ * `spec` is a path, a key or a URL -- it is two handles and a naming rule.
+ */
+export const renderDocumentBatchArtifact = (
+  spec: DocumentBatchSpec,
+  inputs: DocumentBatchInputs
+): RenderedArtifact & { entryCount: number; sheetName: string } => {
+  let built;
+  try {
+    built = buildDocxBatchEntries({
+      templateBytes: inputs.templateBytes,
+      dataBytes: inputs.dataBytes,
+      dataMediaType: inputs.dataMediaType,
+      ...(spec.sheet !== undefined ? { sheet: spec.sheet } : {}),
+      filenameTemplate: spec.filenameTemplate,
+      ...(spec.requiredPlaceholders
+        ? { requiredPlaceholders: spec.requiredPlaceholders }
+        : {}),
+      ...(inputs.now ? { now: inputs.now } : {}),
+    });
+  } catch (error) {
+    if (error instanceof DocxBatchError) {
+      // Reported as a rendering failure with the batch's own message: the
+      // model is told which row and which placeholder, because that is the
+      // part it can put right on a second attempt.
+      throw new ArtifactRenderError("GENERATION_FAILED", error.message);
+    }
+    throw error;
+  }
+
+  const rendered = bounded(spec.format, zipArchiveEntries(built.entries));
+  return {
+    ...rendered,
+    entryCount: built.entries.length,
+    sheetName: built.sheetName,
+  };
+};

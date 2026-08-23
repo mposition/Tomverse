@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ARCHIVE_EXPANSION_ESTIMATE,
+  EXTRACTED_ATTACHMENT_ESTIMATED_TOKEN_CAP,
   estimateNativeAttachmentTokens,
   estimatePreflightAttachmentTokens,
 } from "../lib/chatAttachmentTokens.ts";
@@ -48,5 +50,25 @@ test("native and extracted attachments are estimated independently", () => {
       { mediaType: "text/plain", size: 4_000 },
     ]),
     17_000
+  );
+});
+
+test("an archive is estimated at what it expands to, not at what it weighs", () => {
+  // A ZIP's readable contents are the point of it: estimating one at its
+  // compressed size tells the router a 200KB upload is a small turn.
+  const target = model(false);
+  const zip = estimatePreflightAttachmentTokens(target, [
+    { mediaType: "application/zip", size: 40_000 },
+  ]);
+  const text = estimatePreflightAttachmentTokens(target, [
+    { mediaType: "text/plain", size: 40_000 },
+  ]);
+  assert.equal(zip, text * ARCHIVE_EXPANSION_ESTIMATE);
+  // Still bounded by the shared cap rather than growing without limit.
+  assert.equal(
+    estimatePreflightAttachmentTokens(target, [
+      { mediaType: "application/zip", size: 10 * 1024 * 1024 },
+    ]),
+    EXTRACTED_ATTACHMENT_ESTIMATED_TOKEN_CAP
   );
 });

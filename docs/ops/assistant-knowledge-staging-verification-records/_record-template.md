@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/assistant-knowledge-staging-checklist.md
-templateRevision: 2026-08-22
+templateRevision: 2026-08-23b
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 knowledge 표면 diff 결과 | |
-| template revision | 2026-08-22 |
+| template revision | 2026-08-22d |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -32,20 +32,21 @@ digest:
 | `memoryInjectionEnabled` (시작 시점) | |
 | staging R2 bucket이 production과 분리됨 | |
 
-## §B 실행 전 파일 배치
+## 실행 전 파일 배치
 
-§B는 계정 하나로 판별할 수 없습니다. **실행 전에** 어느 계정의 어느 profile에
-어떤 파일이 있었는지 적습니다. 파일 내용은 적지 않고 이름과 크기만 적습니다 —
-판별 대상은 경계이지 내용이 아닙니다.
+**실행 전에** 어느 계정의 어느 profile에 어떤 파일을 두었는지 적습니다. 파일
+내용은 적지 않고 이름과 크기만 적습니다 — 판별 대상은 경계이지 내용이
+아닙니다.
+
+§C만 한다면 한 줄이면 됩니다. §D-1을 한다면 계정이 둘 필요합니다.
 
 | 계정 | profile | 파일 (이름 · byte) | `processingStatus` |
 |---|---|---|---|
 | 1 | | | |
-| 2 | | | |
 
 ## 항목별 결과
 
-체크리스트의 A–G 구획을 그대로 옮기고, 각 항목에 다음 중 하나를 적습니다.
+체크리스트의 A–D 구획을 그대로 옮기고, 각 항목에 다음 중 하나를 적습니다.
 
 - `pass` — 확인함. 증거 참조를 함께 적습니다.
 - `fail` — 확인했고 실패했습니다. 후속 티켓을 적습니다.
@@ -63,12 +64,12 @@ digest:
 
 ## 사용한 크레딧
 
-업로드·추출·삭제·sweep은 0크레딧입니다. 유료는 §B·§D의 chat turn뿐입니다.
+업로드·추출·삭제·sweep은 0크레딧입니다. 유료는 §C-2 한 턴이고, §D-1을 하면 한 턴 더입니다.
 
 | 구획 | 모델 | turn 수 | 크레딧 |
 |---|---|---|---|
-| B | | | |
-| D | | | |
+| C-2 | | | |
+| D-1 (선택) | | | |
 | 합계 | | | |
 
 ## 판정

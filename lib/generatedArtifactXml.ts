@@ -89,7 +89,11 @@ export const CORE_PROPERTIES_OVERRIDE =
   `ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>`;
 
 export const CORE_PROPERTIES_RELATIONSHIP = relationship(
-  "rIdCore",
+  // `rId2`, not a name: the package root already carries `rId1` for the main
+  // document, and `Id` is an xsd:ID so a word like `rIdCore` is legal -- but
+  // nothing else in the ecosystem writes one, so nothing else is tested
+  // against one.
+  "rId2",
   "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
-  "docProps/core.xml"
+  "docProps/core.xml",
 );

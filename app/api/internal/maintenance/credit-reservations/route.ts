@@ -33,7 +33,9 @@ import { monitorInfrastructureThresholdsIfDue } from "@/lib/infrastructureThresh
 import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJob";
 import { reconcileProcessingRefundRequestsQuietly } from "@/lib/refundReconciliation";
 import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
+import { runKnowledgeMaintenanceQuietly } from "@/lib/assistantKnowledgeLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
+import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -114,6 +116,20 @@ export async function POST(request: Request) {
     // landed. Never throws, so it cannot turn a successful reconciliation
     // into a failed one (docs/policy/generated-artifacts.md section 8).
     const generatedArtifacts = await runGeneratedArtifactMaintenanceQuietly();
+    // And the tombstones for the files users uploaded. Same never-throws
+    // contract, same fifteen-minute cadence: a deletion that committed in the
+    // database is a deletion that has to reach object storage eventually, and
+    // this is the arm that retries until it does
+    // (docs/policy/user-attachment-persistence.md).
+    const messageAttachments = await runMessageAttachmentMaintenanceQuietly();
+    // And the assistant knowledge files. docs/policy/external-conversation-import-and-memory.md §14.2
+    // says knowledge follows the image asset pattern -- DB-first tombstone
+    // plus this sweep -- and it
+    // followed only the tombstone half: the drain sat on the daily job, so a
+    // deleted file kept its bytes for up to a day and an extraction that died
+    // stayed dead for the same, against a ten-minute staleness threshold.
+    // The bucket-listing arm is deliberately not here; it stays daily.
+    const knowledge = await runKnowledgeMaintenanceQuietly();
     // Staged external-import payloads carry user conversation content and a
     // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
     // batch/finalize are the primary guard; this sweep clears content whose
@@ -194,6 +210,8 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         generatedArtifacts,
+        messageAttachments,
+        knowledge,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
@@ -211,6 +229,8 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         generatedArtifacts,
+        messageAttachments,
+        knowledge,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,

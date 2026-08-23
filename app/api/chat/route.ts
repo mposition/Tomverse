@@ -2,9 +2,29 @@ import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
     buildAttachmentPromptText,
+    inertFilename,
     type ExtractedAttachment,
 } from "@/lib/attachmentContextPrompt";
-import { createHash, randomUUID } from "node:crypto";
+import {
+    attachmentKindForFormat,
+    CHAT_ATTACHMENT_MEDIA_TYPES,
+    formatByMediaType,
+    providerMediaTypeForFormat,
+    resolveChatAttachmentFormat,
+    type ChatAttachmentFormat,
+} from "@/lib/chatAttachmentFormats";
+import { decodeAttachmentText } from "@/lib/chatAttachmentText";
+import { ChatArchiveError, expandChatArchive } from "@/lib/chatArchive";
+import {
+    CHAT_ARCHIVE_ERROR_CODES,
+    chatArchiveLimits,
+} from "@/lib/chatArchiveLimits";
+import { totalArchiveExclusions } from "@/lib/chatArchivePlan";
+import {
+    ChatAttachmentValidationError,
+    validateChatAttachmentUpload,
+} from "@/lib/chatAttachmentValidation";
+import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import {
@@ -63,10 +83,10 @@ import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer"
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import {
     planGeneratedArtifactTool,
+    ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
     ARTIFACT_TOOL_DEFINITION_TOKENS,
 } from "@/lib/generatedArtifactToolPolicy";
 import {
-    ALL_ARTIFACT_TOOL_NAMES,
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
@@ -92,10 +112,14 @@ import {
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
+import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
+import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
+    AnimatedImageError,
     extractPdfTextSafely,
     normalizeImageSafely,
     validatePdfSafely,
+    type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
 import {
     extractPdfTextWithMistralOcr,
@@ -187,6 +211,20 @@ import {
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
+    messageAttachmentReferenceSchema,
+    turnAttachmentHandle,
+    type MessageAttachmentReference,
+    type TurnAttachmentDescriptor,
+} from "@/lib/messageAttachmentCore";
+import {
+    MessageAttachmentResolveError,
+    accountAttachmentPrefix,
+    discardUnboundUpload,
+    registerFinalizedUpload,
+    resolveMessageAttachmentReferences,
+    type ResolvedAttachment,
+} from "@/lib/messageAttachmentStorage";
+import {
     getGuestAttachmentSecret,
     guestAttachmentPrefix,
     isOwnGuestAttachmentKey,
@@ -249,9 +287,32 @@ const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
+    /**
+     * A guest's own ephemeral object, whose key is derived from their signed
+     * guest identity and is therefore self-authorising. Signed-in callers do
+     * not send this and are refused if they do -- they name an opaque id and
+     * the server resolves the key (docs/policy/user-attachment-persistence.md).
+     */
     objectKey?: unknown;
+    /** A `MessageAttachment` already bound to one of the caller's messages. */
+    attachmentId?: unknown;
+    /** A finalised upload that has not been bound to a message yet. */
+    uploadId?: unknown;
     data?: unknown;
     kind?: unknown;
+};
+
+/** How one attachment reference is keyed while a turn is being resolved. */
+const attachmentReferenceKey = (
+    attachment: IncomingAttachment
+): string | null => {
+    if (typeof attachment?.attachmentId === "string" && attachment.attachmentId) {
+        return `a:${attachment.attachmentId}`;
+    }
+    if (typeof attachment?.uploadId === "string" && attachment.uploadId) {
+        return `u:${attachment.uploadId}`;
+    }
+    return null;
 };
 
 const parseStoredModelIds = (value: unknown) => {
@@ -332,28 +393,15 @@ const tracedJsonError = (
         },
     });
 };
-const OFFICE_ATTACHMENT_TYPES = new Set([
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.oasis.opendocument.text",
-    "application/vnd.oasis.opendocument.spreadsheet",
-    "application/vnd.oasis.opendocument.presentation",
-]);
-const IMAGE_ATTACHMENT_TYPES = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-]);
-const BINARY_ATTACHMENT_TYPES = new Set([
-    ...IMAGE_ATTACHMENT_TYPES,
-    "application/pdf",
-    ...OFFICE_ATTACHMENT_TYPES,
-]);
-const isImageAttachmentType = (
-    mediaType: string
-): mediaType is "image/png" | "image/jpeg" | "image/webp" =>
-    IMAGE_ATTACHMENT_TYPES.has(mediaType);
+/**
+ * Everything this route used to answer from four hand-kept literals now comes
+ * from `lib/chatAttachmentFormats.ts`. The sets below are views onto that
+ * table, not a second copy of it -- adding a format must not require an edit
+ * here.
+ */
+const isImageAttachmentMediaType = (mediaType: string) =>
+    formatByMediaType(mediaType)?.category === "image";
+
 const GOOGLE_EXPORT_TYPES: Record<
     string,
     { mediaType: string; extension: string; kind: "file" | "text" }
@@ -376,17 +424,6 @@ const GOOGLE_EXPORT_TYPES: Record<
         kind: "file",
     },
 };
-const ALLOWED_ATTACHMENT_TYPES = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "application/json",
-    ...OFFICE_ATTACHMENT_TYPES,
-]);
 const uploadPreparationSchema = z.union([
     z
         .object({
@@ -403,20 +440,24 @@ const uploadPreparationSchema = z.union([
             name: z.string().trim().min(1).max(120),
             mediaType: z
                 .string()
-                .refine((value) => ALLOWED_ATTACHMENT_TYPES.has(value)),
+                .refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
             size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
         })
         .strict(),
 ]);
+// The composer discards a draft attachment by the id the finalisation step
+// gave it, never by a storage key. There is nothing for a caller to guess and
+// nothing for one to enumerate.
 const deleteAttachmentSchema = z
     .object({
-        key: z.string().min(1).max(512),
+        uploadId: z.string().trim().min(1).max(64),
     })
     .strict();
 const finalizeAttachmentSchema = z
     .object({
         key: z.string().min(1).max(512),
-        mediaType: z.string().refine((value) => ALLOWED_ATTACHMENT_TYPES.has(value)),
+        name: z.string().trim().min(1).max(200),
+        mediaType: z.string().refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
         size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
     })
     .strict();
@@ -432,12 +473,8 @@ const sanitizeFilename = (filename: string) => {
 };
 
 const createAttachmentKey = (email: string, name: string) => {
-    const userHash = createHash("sha256")
-        .update(email.toLowerCase())
-        .digest("hex")
-        .slice(0, 20);
     const date = new Date().toISOString().slice(0, 10);
-    return `attachments/${userHash}/${date}/${randomUUID()}-${sanitizeFilename(name)}`;
+    return `${accountAttachmentPrefix(email)}${date}/${randomUUID()}-${sanitizeFilename(name)}`;
 };
 
 export async function GET() {
@@ -575,12 +612,25 @@ export async function PUT(req: Request) {
                 expectedSize: exportedFile.byteLength,
             });
 
-            return Response.json({
-                key,
+            // A Drive import is an upload that happened server-side, so it
+            // ends the same way an ordinary one does: with an opaque id, and
+            // without the key (docs/policy/user-attachment-persistence.md).
+            const registered = await registerFinalizedUpload({
+                userId,
+                objectKey: key,
+                ownPrefix: accountAttachmentPrefix(session.user.email),
                 name: exportedName,
                 mediaType: exportType.mediaType,
                 size: exportedFile.byteLength,
                 kind: exportType.kind,
+            });
+
+            return Response.json({
+                uploadId: registered.uploadId,
+                name: registered.name,
+                mediaType: registered.mediaType,
+                size: registered.size,
+                kind: registered.kind,
             });
         }
 
@@ -588,9 +638,17 @@ export async function PUT(req: Request) {
         const mediaType = body.mediaType;
         const size = body.size;
 
-        if (!name || !ALLOWED_ATTACHMENT_TYPES.has(mediaType)) {
+        // The name and the declared type have to agree, here and not only at
+        // send: the presigned URL that follows fixes the object's stored
+        // Content-Type, so a disagreement accepted now becomes an object that
+        // fails its own read later, minutes after the person moved on.
+        const preparedFormat = resolveChatAttachmentFormat({
+            filename: name,
+            declaredMediaType: mediaType,
+        });
+        if (!name || !preparedFormat || preparedFormat.mediaType !== mediaType) {
             return Response.json(
-                { error: "Unsupported attachment." },
+                { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
                 { status: 400 }
             );
         }
@@ -645,15 +703,12 @@ export async function PATCH(req: Request) {
             minute: 20,
             day: 300,
         });
-        const { key, mediaType, size } = await readLimitedJson(
+        const { key, name, mediaType, size } = await readLimitedJson(
             req,
             8 * 1024,
             finalizeAttachmentSchema
         );
-        const userPrefix = `attachments/${createHash("sha256")
-            .update(session.user.email.toLowerCase())
-            .digest("hex")
-            .slice(0, 20)}/`;
+        const userPrefix = accountAttachmentPrefix(session.user.email);
 
         if (!key.startsWith(userPrefix)) {
             return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -665,17 +720,108 @@ export async function PATCH(req: Request) {
             expectedSize: size,
         });
 
-        return Response.json({
-            key,
+        // Metadata is a claim the uploader made. This step used to stop here,
+        // so the first thing that looked at an actual byte was the send that
+        // happened minutes later -- and a corrupt PDF, a renamed executable or
+        // an animated GIF surfaced as a failed chat turn rather than a
+        // rejected file. The object is read back and put through the same
+        // parsers the guest path has always run.
+        const format = formatByMediaType(mediaType);
+        if (!format) {
+            return Response.json(
+                { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
+                { status: 400 }
+            );
+        }
+
+        let uploaded: Buffer;
+        try {
+            uploaded = await readR2Object(key, {
+                maxBytes: MAX_ATTACHMENT_SIZE,
+                expectedContentType: mediaType,
+            });
+        } catch (error) {
+            await deleteR2Object(key).catch(() => {});
+            if (error instanceof BoundedBufferError) {
+                return Response.json(
+                    { error: "Uploaded attachment failed validation.", code: "ATTACHMENT_TYPE_MISMATCH" },
+                    { status: 400 }
+                );
+            }
+            throw error;
+        }
+
+        let inspection;
+        try {
+            inspection = await validateChatAttachmentUpload({
+                buffer: uploaded,
+                format,
+                scope: "account",
+            });
+        } catch (error) {
+            // An object that failed its own contents check is removed rather
+            // than left for the sweep: it is unusable, it counts against the
+            // account's stored bytes, and leaving it there while telling the
+            // person the upload failed is two different answers.
+            await deleteR2Object(key).catch((cleanupError) =>
+                console.error("Attachment cleanup after failed validation failed:", {
+                    cleanupError,
+                })
+            );
+            if (error instanceof ChatAttachmentValidationError) {
+                return Response.json(
+                    { error: "Uploaded attachment failed validation.", code: error.code },
+                    { status: error.status }
+                );
+            }
+            if (error instanceof ChatArchiveError) {
+                return Response.json(
+                    { error: "The archive could not be read.", code: error.code },
+                    { status: error.status }
+                );
+            }
+            throw error;
+        }
+
+        /*
+          The step that ends the browser's involvement with storage.
+
+          Everything after this names the upload by the opaque id below -- the
+          send, the pre-save that binds it to a message, a retry, a template
+          lookup. The key is not returned, so nothing downstream has to decide
+          whether a key in a request body can be believed
+          (docs/policy/user-attachment-persistence.md).
+
+          The size and the kind recorded are the ones this step established --
+          storage's measured size and the format table's own reading of the
+          file -- not the ones the client declared.
+        */
+        const registered = await registerFinalizedUpload({
+            userId,
+            objectKey: key,
+            ownPrefix: userPrefix,
+            name,
             mediaType,
             size: validated.size,
+            kind: attachmentKindForFormat(format),
+        });
+
+        return Response.json({
+            uploadId: registered.uploadId,
+            name: registered.name,
+            mediaType: registered.mediaType,
+            size: registered.size,
+            kind: registered.kind,
+            // Counts only -- an entry path is text the uploader chose, and a
+            // response is not a place to echo it back.
+            ...(inspection.archive ? { archive: inspection.archive } : {}),
         });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
         if (error instanceof BoundedBufferError) {
             return Response.json(
-                { error: "Uploaded attachment failed validation." },
+                { error: "Uploaded attachment failed validation.", code: "ATTACHMENT_TYPE_MISMATCH" },
                 { status: 400 }
             );
         }
@@ -700,21 +846,31 @@ export async function DELETE(req: Request) {
             minute: 30,
             day: 500,
         });
-        const { key } = await readLimitedJson(
+        const { uploadId } = await readLimitedJson(
             req,
             4 * 1024,
             deleteAttachmentSchema
         );
-        const userPrefix = `attachments/${createHash("sha256")
-            .update(session.user.email.toLowerCase())
-            .digest("hex")
-            .slice(0, 20)}/`;
 
-        if (!key.startsWith(userPrefix)) {
-            return Response.json({ error: "Forbidden" }, { status: 403 });
+        /*
+          Removing a file from the *composer*, which is not the same act as
+          removing it from a message that was already sent. An upload a message
+          references is kept and reported as such: the user is editing a draft,
+          and a stored turn whose attachment card pointed at nothing would be
+          the failure this whole feature exists to remove
+          (docs/policy/user-attachment-persistence.md).
+
+          Ownership is part of the lookup rather than a comparison afterwards,
+          so another account's id is simply not found -- and the 204 says the
+          draft no longer has that file either way.
+        */
+        const outcome = await discardUnboundUpload({ userId, uploadId });
+        if (outcome.kept) {
+            return Response.json(
+                { kept: true, reason: "ATTACHMENT_ALREADY_SENT" },
+                { status: 200 }
+            );
         }
-
-        await deleteR2Object(key);
         return new Response(null, { status: 204 });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
@@ -898,11 +1054,66 @@ async function handleChatPost(
         // rule: a probe that measured any key would be an object-size oracle
         // over the whole bucket.
         const ownAttachmentPrefix = session?.user?.email
-            ? `attachments/${createHash("sha256")
-                .update(session.user.email.toLowerCase())
-                .digest("hex")
-                .slice(0, 20)}/`
+            ? accountAttachmentPrefix(session.user.email)
             : null;
+
+        /*
+          Every attachment this transcript references, resolved once, before
+          anything reads a file (docs/policy/user-attachment-persistence.md).
+
+          A signed-in caller names an opaque id -- an upload the finalisation
+          step issued, or an attachment already bound to one of their own
+          messages -- and this is where that id becomes a storage fact. Both
+          lookups scope by `userId` inside the query, so another account's id
+          is not found rather than refused, and the prefix is re-checked on
+          what comes back.
+
+          Guests are deliberately not here. Their objects are ephemeral, have
+          no owner row to hang an id on, and their keys are derived from their
+          own signed guest identity -- so the key *is* the authorisation, and
+          `isOwnGuestAttachmentKey` below is what checks it.
+        */
+        const resolvedAttachments = new Map<string, ResolvedAttachment>();
+        if (session?.user?.id && ownAttachmentPrefix) {
+            const references: MessageAttachmentReference[] = [];
+            const referenceKeys: string[] = [];
+            for (const message of messages) {
+                const attachments = Array.isArray(message.attachments)
+                    ? (message.attachments as IncomingAttachment[])
+                    : [];
+                for (const attachment of attachments) {
+                    const key = attachmentReferenceKey(attachment);
+                    if (!key || referenceKeys.includes(key)) continue;
+                    const parsed =
+                        messageAttachmentReferenceSchema.safeParse(attachment);
+                    if (!parsed.success) continue;
+                    references.push(parsed.data);
+                    referenceKeys.push(key);
+                }
+            }
+            if (references.length > 0) {
+                try {
+                    const resolved = await resolveMessageAttachmentReferences({
+                        userId: session.user.id,
+                        ownPrefix: ownAttachmentPrefix,
+                        conversationId: conversationId ?? null,
+                        references,
+                    });
+                    resolved.forEach((attachment, index) => {
+                        resolvedAttachments.set(referenceKeys[index], attachment);
+                    });
+                } catch (error) {
+                    if (error instanceof MessageAttachmentResolveError) {
+                        // 404-shaped rather than 403-shaped on purpose: the
+                        // lookup never learned whether the id belongs to
+                        // somebody else or to nobody, so neither can the
+                        // answer.
+                        throw new ChatAccessError(400, error.code, error.message);
+                    }
+                    throw error;
+                }
+            }
+        }
         // Only read when the cohort would admit this account. `decideAutoCohort`
         // costs nothing -- the plan is already in hand and readiness is read
         // from memory -- so while the rollout is off this query never runs and
@@ -968,7 +1179,10 @@ async function handleChatPost(
         // requests.
         const measuredAttachments =
             autoCohort.eligible && turnCarriesAttachments(messages)
-                ? await measureTurnAttachments(messages, ownAttachmentPrefix)
+                ? measureTurnAttachments(
+                      Array.from(resolvedAttachments.values()),
+                      ownAttachmentPrefix
+                  )
                 : ({ measurable: true, descriptors: [] } as const);
         // Health and the measured tie-break signals, from one cached snapshot.
         // Read only for an account the cohort would actually route: a feature
@@ -1125,6 +1339,49 @@ async function handleChatPost(
         )
             ? latestMessage.attachments.length
             : 0;
+        /*
+          The handles the model is given for this turn's own files.
+
+          `att_1`, `att_2`, in the order the composer sent them. Minted per
+          request and meaningless outside it: not a row id, not a storage key,
+          and it addresses no route -- which is the whole reason it is safe to
+          put in a prompt at all. A model that could name a storage location
+          could quote one, and a quoted location is a link that looks real.
+
+          Built from the resolved rows for a signed-in caller, so the name and
+          the media type the model reads are the ones the server stored rather
+          than the ones the request declared.
+        */
+        const turnAttachmentDescriptors: TurnAttachmentDescriptor[] = (
+            Array.isArray(latestMessage?.attachments)
+                ? (latestMessage.attachments as IncomingAttachment[])
+                : []
+        ).map((attachment, index) => {
+            const key = attachmentReferenceKey(attachment);
+            const resolved = key ? resolvedAttachments.get(key) : undefined;
+            return {
+                handle: turnAttachmentHandle(index),
+                name:
+                    resolved?.name ??
+                    (typeof attachment.name === "string" ? attachment.name : "file"),
+                mediaType:
+                    resolved?.mediaType ??
+                    (typeof attachment.mediaType === "string"
+                        ? attachment.mediaType
+                        : "application/octet-stream"),
+                byteSize: resolved?.size ?? 0,
+            };
+        });
+        /**
+         * The bytes behind those handles, filled in as the message loop reads
+         * each file. Only the turn's own attachments, and only in memory for
+         * the length of the request -- the batch generator is the single
+         * reader.
+         */
+        const turnAttachmentBytes = new Map<
+            string,
+            { name: string; mediaType: string; bytes: Uint8Array }
+        >();
         if (latestMessageAttachmentCount > MAX_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
@@ -1139,7 +1396,16 @@ async function handleChatPost(
                 "This conversation has reached its attachment limit. Start a new chat to attach more files."
             );
         }
-        const objectKeys = new Set<string>();
+        /*
+          One attachment is named once per turn, whichever handle names it.
+
+          The set used to be storage keys, which is what the request carried.
+          It carries opaque ids now, so the identity being deduplicated is the
+          reference -- and the guest path, whose keys are derived from the
+          caller's own signed identity, keeps deduplicating on the key because
+          that is the only name a guest object has.
+        */
+        const attachmentIdentities = new Set<string>();
         for (const attachment of requestAttachments) {
             const hasObjectKey = typeof attachment?.objectKey === "string";
             const hasInlineData = typeof attachment?.data === "string";
@@ -1150,19 +1416,21 @@ async function handleChatPost(
                     "Attachments must be uploaded before sending."
                 );
             }
-            if (hasObjectKey) {
-                const objectKey = attachment.objectKey as string;
-                if (objectKeys.has(objectKey)) {
+            const identity =
+                attachmentReferenceKey(attachment) ??
+                (hasObjectKey ? `k:${attachment.objectKey as string}` : null);
+            if (identity) {
+                if (attachmentIdentities.has(identity)) {
                     throw new ChatAccessError(
                         400,
                         "DUPLICATE_ATTACHMENT_OBJECT",
                         "Duplicate attachment objects are not allowed."
                     );
                 }
-                objectKeys.add(objectKey);
+                attachmentIdentities.add(identity);
             }
         }
-        if (objectKeys.size > MAX_CONVERSATION_ATTACHMENTS) {
+        if (attachmentIdentities.size > MAX_CONVERSATION_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENT_OBJECTS",
@@ -1351,6 +1619,10 @@ async function handleChatPost(
         let totalExtractedCharacters = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
+        // Paid OCR reached from inside an archive, and how much of it this
+        // request has been allowed. See `maxOcrPdfs` in lib/chatArchiveLimits.
+        let archiveOcrBudget = 0;
+        let archiveOcrUsed = 0;
         // Shared with the composer estimate and the comparison preflight so a
         // Korean conversation is not reserved several times too small here and
         // correctly elsewhere -- see lib/chatTokenEstimate.ts.
@@ -1450,6 +1722,7 @@ async function handleChatPost(
         // memory.
         let contextSystemPrompt: string | null = null;
         let memoryUsedCount = 0;
+        let knowledgeChunkCount = 0;
         // §22 attribution, written onto the answer rather than counted.
         //
         // The day counters beside this already report the injection *ratio*.
@@ -1459,9 +1732,16 @@ async function handleChatPost(
         // while no bundle accompanies the request, which is what "memory was
         // not possible here" means; §8.1 invariant 4 permits the used count
         // and forbids the context itself, which is never written.
-        let memoryAttribution: {
+        //
+        // Knowledge rides in the same object (§14.3) rather than a second
+        // one, because it is the same fact about the same answer and shares
+        // the null: no bundle means neither was possible. Keeping them
+        // together is also what stops one Message create from being updated
+        // for a new column and the other from being missed.
+        let contextAttribution: {
             memoryUsedCount: number;
             memoryTokens: number;
+            knowledgeChunkCount: number;
         } | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
@@ -1567,9 +1847,14 @@ async function handleChatPost(
             // builder that priced it.
             contextSystemPrompt = turnContext.systemPrompt;
             memoryUsedCount = turnContext.memory.prompt.usedCount;
-            memoryAttribution = {
+            // §14.3. The builder has always produced this; until now nothing
+            // read it, so an answer assembled from the user's own uploaded
+            // files said nothing about where it came from.
+            knowledgeChunkCount = turnContext.profile.knowledgeChunkCount;
+            contextAttribution = {
                 memoryUsedCount,
                 memoryTokens: verification.payload.memoryTokens,
+                knowledgeChunkCount,
             };
             // Memory's own presence, not the block's: a turn whose system
             // message carries only a profile's instructions has no memory in
@@ -1641,6 +1926,7 @@ async function handleChatPost(
                       nativeSearchEnabled &&
                       webSearchCapability.canForceExecution,
                   conversationKind: "chat",
+                  turnAttachments: turnAttachmentDescriptors,
               });
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
@@ -1662,6 +1948,11 @@ async function handleChatPost(
                 estimateTextTokens(artifactToolPlan.systemPrompt) +
                 (artifactToolPlan.registerTool
                     ? ARTIFACT_TOOL_DEFINITION_TOKENS
+                    : 0) +
+                // The batch tool's schema is only sent on a turn that carries
+                // a Word template, so it is priced only there.
+                (artifactToolPlan.registerDocumentBatch
+                    ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
                     : 0);
             estimatedInputTokens += artifactPromptTokens;
             inputEstimate.addTokens(artifactPromptTokens);
@@ -1687,108 +1978,36 @@ async function handleChatPost(
             ) as IncomingAttachment[];
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
+            const isLatestMessage = msg === latestMessage;
 
-            for (const attachment of attachments) {
-                if (
-                    !attachment ||
-                    typeof attachment.name !== "string" ||
-                    typeof attachment.mediaType !== "string" ||
-                    !ALLOWED_ATTACHMENT_TYPES.has(attachment.mediaType)
-                ) {
-                    throw new Error("Unsupported attachment.");
-                }
-                if (
-                    (BINARY_ATTACHMENT_TYPES.has(attachment.mediaType) &&
-                        attachment.kind !== "file") ||
-                    (!BINARY_ATTACHMENT_TYPES.has(attachment.mediaType) &&
-                        attachment.kind !== "text")
-                ) {
-                    throw new ChatAccessError(
-                        400,
-                        "INVALID_ATTACHMENT_KIND",
-                        "The attachment kind does not match its media type."
-                    );
-                }
-
-                let attachmentData: string;
-                let attachmentBytes: number;
-                let attachmentBuffer: Buffer | undefined;
-                let extractedPdfText: string | undefined;
-                let pdfFilePartBuffer: Buffer | undefined;
-
-                const isGuestObject =
-                    typeof attachment.objectKey === "string" &&
-                    Boolean(guestObjectPrefix) &&
-                    isOwnGuestAttachmentKey(
-                        attachment.objectKey,
-                        access.subjectKey,
-                        getGuestAttachmentSecret()
-                    );
-                if (isGuestObject && !GUEST_ATTACHMENT_TYPES[attachment.mediaType]) {
-                    throw new ChatAccessError(
-                        400,
-                        "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
-                        "This file type cannot be attached as a guest."
-                    );
-                }
-                const attachmentSizeLimit = isGuestObject
-                    ? GUEST_MAX_ATTACHMENT_BYTES
-                    : MAX_ATTACHMENT_SIZE;
-
-                if (typeof attachment.objectKey === "string") {
-                    const isOwnUserObject =
-                        Boolean(userObjectPrefix) &&
-                        attachment.objectKey.startsWith(userObjectPrefix!);
-                    if (!isOwnUserObject && !isGuestObject) {
-                        throw new Error("Attachment access denied.");
-                    }
-
-                    try {
-                        attachmentBuffer = await readR2Object(
-                            attachment.objectKey,
-                            {
-                                maxBytes: attachmentSizeLimit,
-                                expectedContentType: attachment.mediaType,
-                            }
-                        );
-                    } catch (error) {
-                        // A guest object is ephemeral by design, so "gone" is
-                        // an ordinary outcome (the TTL sweep took it), not a
-                        // server fault. Say so instead of returning a 500 the
-                        // user cannot act on.
-                        if (isGuestObject) {
-                            logRequestError(
-                                "guest_attachment_unavailable",
-                                traceId,
-                                error,
-                                requestedModelId
-                            );
-                            throw new ChatAccessError(
-                                410,
-                                "GUEST_ATTACHMENT_EXPIRED",
-                                "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
-                            );
-                        }
-                        throw error;
-                    }
-                    attachmentBytes = attachmentBuffer.byteLength;
-                    attachmentData =
-                        attachment.kind === "text"
-                            ? attachmentBuffer.toString("utf8")
-                            : attachmentBuffer.toString("base64");
-                } else {
-                    throw new Error("Attachment data is missing.");
-                }
-
-                if (attachmentBytes > attachmentSizeLimit) {
-                    throw new ChatAccessError(
-                        413,
-                        "ATTACHMENT_TOO_LARGE",
-                        "An attachment exceeds the per-file size limit."
-                    );
-                }
-
-                if (isImageAttachmentType(attachment.mediaType)) {
+            /**
+             * Reads one file into the turn -- attached directly, or lifted
+             * out of an archive.
+             *
+             * Factored out for the archive, not for tidiness: an entry inside
+             * a ZIP has to be treated *exactly* the way the same file would
+             * be if it had been dragged in on its own, or a container becomes
+             * a way round the image limits, the OCR path and the text budget.
+             * One function is how that stays true.
+             *
+             * Returns `"no-text"` instead of throwing when an archived
+             * document turns out to have nothing readable in it: one
+             * unreadable entry out of twenty is a line in the exclusion
+             * notice, while the same file attached on its own is a failed
+             * upload the person needs to hear about.
+             */
+            const ingestAttachmentFile = async ({
+                format,
+                name,
+                buffer,
+                fromArchive,
+            }: {
+                format: ChatAttachmentFormat;
+                name: string;
+                buffer: Buffer;
+                fromArchive: boolean;
+            }): Promise<"ok" | "no-text" | "unreadable"> => {
+                if (format.category === "image") {
                     if (!modelSupportsImageInput(modelConfig)) {
                         throw new ChatAccessError(
                             400,
@@ -1796,27 +2015,32 @@ async function handleChatPost(
                             `${modelConfig.name} does not support image input. Choose an image-capable model or retry without attachments.`
                         );
                     }
+                    let normalized: Buffer;
                     try {
-                        attachmentBuffer = await normalizeImageSafely(
-                            attachmentBuffer ||
-                                Buffer.from(attachmentData, "base64"),
-                            attachment.mediaType,
+                        normalized = await normalizeImageSafely(
+                            buffer,
+                            format.mediaType as NormalizableImageMediaType,
                             MAX_ATTACHMENT_SIZE
                         );
-                    } catch {
+                    } catch (error) {
+                        if (error instanceof AnimatedImageError) {
+                            throw new ChatAccessError(
+                                400,
+                                "ATTACHMENT_ANIMATED_IMAGE",
+                                "Animated images are not supported. Attach a still image instead."
+                            );
+                        }
+                        if (fromArchive) return "unreadable";
                         throw new ChatAccessError(
                             400,
                             "INVALID_IMAGE_ATTACHMENT",
                             "The attached image is invalid or unsupported."
                         );
                     }
-                    attachmentBytes = attachmentBuffer.byteLength;
-                    attachmentData = attachmentBuffer.toString("base64");
+
+                    const encoded = normalized.toString("base64");
                     totalImageCount += 1;
-                    totalBase64ImagePayloadBytes += Buffer.byteLength(
-                        attachmentData,
-                        "utf8"
-                    );
+                    totalBase64ImagePayloadBytes += Buffer.byteLength(encoded, "utf8");
                     const imageCapabilities = modelConfig.inputCapabilities;
                     if (
                         imageCapabilities?.maxImages &&
@@ -1839,23 +2063,49 @@ async function handleChatPost(
                             `${modelConfig.name} accepts up to 4 MB of base64 image data per request. Use a smaller image.`
                         );
                     }
-                } else if (attachment.mediaType === "application/pdf") {
-                    const pdfBuffer =
-                        attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    const remainingCharacters =
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS -
-                        totalExtractedCharacters;
-                    if (remainingCharacters <= 64) {
+
+                    fileParts.push({
+                        type: "file",
+                        data: { type: "data", data: new Uint8Array(normalized) },
+                        // A GIF left this process as a PNG; telling the
+                        // provider otherwise would describe bytes that are no
+                        // longer there.
+                        mediaType: providerMediaTypeForFormat(format),
+                        filename: name,
+                    });
+                    return "ok";
+                }
+
+                const remainingCharacters =
+                    MAX_EXTRACTED_ATTACHMENT_CHARACTERS - totalExtractedCharacters;
+                if (remainingCharacters <= 64) {
+                    throw new ChatAccessError(
+                        413,
+                        "ATTACHMENT_TEXT_TOO_LARGE",
+                        "Extracted attachment text exceeds the request limit."
+                    );
+                }
+
+                const addExtractedText = (kind: string, text: string) => {
+                    totalExtractedCharacters += text.length;
+                    if (
+                        totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                    ) {
                         throw new ChatAccessError(
                             413,
                             "ATTACHMENT_TEXT_TOO_LARGE",
                             "Extracted attachment text exceeds the request limit."
                         );
                     }
+                    textAttachments.push({ name, kind, text });
+                };
+
+                if (format.category === "pdf") {
+                    let extractedPdfText = "";
                     let pdfValidated = false;
                     try {
                         extractedPdfText = await extractPdfTextSafely(
-                            pdfBuffer,
+                            buffer,
                             remainingCharacters - 64
                         );
                     } catch (error) {
@@ -1866,9 +2116,10 @@ async function handleChatPost(
                             requestedModelId
                         );
                         try {
-                            await validatePdfSafely(pdfBuffer);
+                            await validatePdfSafely(buffer);
                             pdfValidated = true;
                         } catch {
+                            if (fromArchive) return "unreadable";
                             throw new ChatAccessError(
                                 400,
                                 "INVALID_PDF_ATTACHMENT",
@@ -1882,12 +2133,19 @@ async function handleChatPost(
                     // as a backend conversion model. It is never exposed in
                     // the Tomverse Review model picker and never consumes user model
                     // credits; its page cost is recorded as internal usage.
+                    //
+                    // An archived PDF only reaches OCR while the archive's own
+                    // allowance lasts (`maxOcrPdfs`): one PDF dragged in is a
+                    // deliberate act, twenty arriving inside a container the
+                    // person did not enumerate is a bill nothing in the
+                    // request asked about.
                     if (!extractedPdfText) {
                         if (!pdfValidated) {
                             try {
-                                await validatePdfSafely(pdfBuffer);
+                                await validatePdfSafely(buffer);
                                 pdfValidated = true;
                             } catch {
+                                if (fromArchive) return "unreadable";
                                 throw new ChatAccessError(
                                     400,
                                     "INVALID_PDF_ATTACHMENT",
@@ -1896,9 +2154,15 @@ async function handleChatPost(
                             }
                         }
 
+                        const ocrAllowance = fromArchive
+                            ? archiveOcrBudget > archiveOcrUsed
+                            : true;
+                        if (!ocrAllowance) return "no-text";
+                        if (fromArchive) archiveOcrUsed += 1;
+
                         try {
                             const ocrResult = await extractPdfTextWithMistralOcr(
-                                pdfBuffer,
+                                buffer,
                                 remainingCharacters - 64
                             );
                             if (ocrResult?.text) {
@@ -1933,7 +2197,8 @@ async function handleChatPost(
                                         traceId,
                                         backendModelId: ocrResult.modelId,
                                         pageCount: ocrResult.pageCount,
-                                        attachmentBytes: pdfBuffer.byteLength,
+                                        attachmentBytes: buffer.byteLength,
+                                        fromArchive,
                                         timestamp: new Date().toISOString(),
                                     })
                                 );
@@ -1945,6 +2210,7 @@ async function handleChatPost(
                                 error,
                                 requestedModelId
                             );
+                            if (fromArchive) return "no-text";
                             if (!modelSupportsNativePdfInput(modelConfig)) {
                                 throw new ChatAccessError(
                                     502,
@@ -1955,19 +2221,242 @@ async function handleChatPost(
                         }
                     }
 
-                    if (!extractedPdfText) {
-                        if (modelSupportsNativePdfInput(modelConfig)) {
-                            pdfFilePartBuffer = pdfBuffer;
-                        } else {
-                            throw new ChatAccessError(
-                                400,
-                                "PDF_TEXT_UNREADABLE",
-                                "The attached PDF does not contain readable text."
-                            );
-                        }
+                    if (extractedPdfText) {
+                        addExtractedText(format.promptKind, extractedPdfText);
+                        return "ok";
                     }
+                    if (fromArchive) return "no-text";
+                    if (modelSupportsNativePdfInput(modelConfig)) {
+                        fileParts.push({
+                            type: "file",
+                            data: { type: "data", data: new Uint8Array(buffer) },
+                            mediaType: format.mediaType,
+                            filename: name,
+                        });
+                        return "ok";
+                    }
+                    throw new ChatAccessError(
+                        400,
+                        "PDF_TEXT_UNREADABLE",
+                        "The attached PDF does not contain readable text."
+                    );
                 }
 
+                if (format.category === "legacy-office") {
+                    // Word/Excel/PowerPoint 97-2003 and RTF, read by this
+                    // repository's own parsers. Bounded by the same remaining
+                    // character budget every other extractor answers to, so a
+                    // legacy document cannot spend more of the turn than a
+                    // modern one.
+                    let extractedText: string;
+                    try {
+                        extractedText = extractLegacyOfficeText(
+                            new Uint8Array(
+                                buffer.buffer,
+                                buffer.byteOffset,
+                                buffer.byteLength
+                            ),
+                            format.id as LegacyOfficeFormatId,
+                            { maxCharacters: remainingCharacters - 64 }
+                        ).text;
+                    } catch (error) {
+                        if (fromArchive) return "unreadable";
+                        const code = legacyOfficeValidationCode(error);
+                        throw new ChatAccessError(
+                            code === "ATTACHMENT_TEXT_TOO_LARGE" ? 413 : 400,
+                            code,
+                            code === "ATTACHMENT_ENCRYPTED"
+                                ? "The attached document is password-protected."
+                                : "The attached document could not be read."
+                        );
+                    }
+                    addExtractedText(format.promptKind, extractedText);
+                    return "ok";
+                }
+
+                if (format.category === "office") {
+                    let extractedText = "";
+                    try {
+                        extractedText = await parseOfficeSafely(
+                            buffer,
+                            format.mediaType,
+                            remainingCharacters - 64
+                        );
+                    } catch (error) {
+                        if (fromArchive) return "unreadable";
+                        throw error;
+                    }
+                    if (!extractedText) {
+                        if (fromArchive) return "no-text";
+                        throw new Error(`No readable text found in ${name}.`);
+                    }
+                    addExtractedText(format.promptKind, extractedText);
+                    return "ok";
+                }
+
+                // Text. Decoded strictly rather than with
+                // `Buffer.toString("utf8")`, which repairs a broken encoding
+                // into U+FFFD and hands the damage to the model as content.
+                const decoded = decodeAttachmentText(
+                    new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+                );
+                if (!decoded.ok) {
+                    if (fromArchive) return "unreadable";
+                    throw new ChatAccessError(
+                        400,
+                        decoded.reason === "binary"
+                            ? "ATTACHMENT_TYPE_MISMATCH"
+                            : "ATTACHMENT_ENCODING_UNREADABLE",
+                        decoded.reason === "binary"
+                            ? "The file's contents do not match its type."
+                            : "The file's character encoding could not be read."
+                    );
+                }
+                if (!decoded.text) {
+                    if (fromArchive) return "no-text";
+                }
+                addExtractedText(format.promptKind, decoded.text);
+                return "ok";
+            };
+
+            for (const [attachmentIndex, incoming] of attachments.entries()) {
+                /*
+                  What this file actually is, decided by the server.
+
+                  For a signed-in caller every field comes from the row the
+                  opaque id resolved to -- name, media type, kind and key -- so
+                  a request that renamed a .docx to a .txt, understated a size
+                  or pointed somewhere else changes nothing about how the file
+                  is read. For a guest the request is still the source, because
+                  a guest object has no row: its key is derived from their own
+                  signed identity and checked as such below.
+                */
+                const referenceKey = attachmentReferenceKey(incoming);
+                const resolved = referenceKey
+                    ? resolvedAttachments.get(referenceKey)
+                    : undefined;
+                if (!resolved && typeof incoming?.objectKey !== "string") {
+                    throw new ChatAccessError(
+                        400,
+                        "ATTACHMENT_REFERENCE_REQUIRED",
+                        "Attachments must be referenced by the id the upload step issued."
+                    );
+                }
+                const attachment: IncomingAttachment = resolved
+                    ? {
+                          name: resolved.name,
+                          mediaType: resolved.mediaType,
+                          kind: resolved.kind,
+                          objectKey: resolved.objectKey,
+                      }
+                    : incoming;
+                if (
+                    !attachment ||
+                    typeof attachment.name !== "string" ||
+                    typeof attachment.mediaType !== "string"
+                ) {
+                    throw new Error("Unsupported attachment.");
+                }
+                // The shared table decides, and the name has to agree with the
+                // declared type: a `.png` sent as `application/pdf` is a
+                // disagreement, not something to resolve in either direction.
+                const format = resolveChatAttachmentFormat({
+                    filename: attachment.name,
+                    declaredMediaType: attachment.mediaType,
+                });
+                if (!format || format.mediaType !== attachment.mediaType) {
+                    throw new Error("Unsupported attachment.");
+                }
+                if (attachment.kind !== attachmentKindForFormat(format)) {
+                    throw new ChatAccessError(
+                        400,
+                        "INVALID_ATTACHMENT_KIND",
+                        "The attachment kind does not match its media type."
+                    );
+                }
+
+                const isGuestObject =
+                    typeof attachment.objectKey === "string" &&
+                    Boolean(guestObjectPrefix) &&
+                    isOwnGuestAttachmentKey(
+                        attachment.objectKey,
+                        access.subjectKey,
+                        getGuestAttachmentSecret()
+                    );
+                if (isGuestObject && !GUEST_ATTACHMENT_TYPES[attachment.mediaType]) {
+                    throw new ChatAccessError(
+                        400,
+                        "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
+                        "This file type cannot be attached as a guest."
+                    );
+                }
+                const attachmentSizeLimit = isGuestObject
+                    ? GUEST_MAX_ATTACHMENT_BYTES
+                    : MAX_ATTACHMENT_SIZE;
+
+                if (typeof attachment.objectKey !== "string") {
+                    throw new Error("Attachment data is missing.");
+                }
+                const isOwnUserObject =
+                    Boolean(userObjectPrefix) &&
+                    attachment.objectKey.startsWith(userObjectPrefix!);
+                if (!isOwnUserObject && !isGuestObject) {
+                    throw new Error("Attachment access denied.");
+                }
+
+                let attachmentBuffer: Buffer;
+                try {
+                    attachmentBuffer = await readR2Object(attachment.objectKey, {
+                        maxBytes: attachmentSizeLimit,
+                        expectedContentType: attachment.mediaType,
+                    });
+                } catch (error) {
+                    // A guest object is ephemeral by design, so "gone" is
+                    // an ordinary outcome (the TTL sweep took it), not a
+                    // server fault. Say so instead of returning a 500 the
+                    // user cannot act on.
+                    if (isGuestObject) {
+                        logRequestError(
+                            "guest_attachment_unavailable",
+                            traceId,
+                            error,
+                            requestedModelId
+                        );
+                        throw new ChatAccessError(
+                            410,
+                            "GUEST_ATTACHMENT_EXPIRED",
+                            "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
+                        );
+                    }
+                    throw error;
+                }
+
+                const attachmentBytes = attachmentBuffer.byteLength;
+                if (attachmentBytes > attachmentSizeLimit) {
+                    throw new ChatAccessError(
+                        413,
+                        "ATTACHMENT_TOO_LARGE",
+                        "An attachment exceeds the per-file size limit."
+                    );
+                }
+                /*
+                  The one place a tool can reach this turn's own files.
+
+                  Held only for the attachments of the message being answered,
+                  only for the length of this request, and keyed by the opaque
+                  handle the model was given. The bytes are already in memory
+                  because the prompt needs them; nothing is read twice for this.
+                */
+                if (isLatestMessage) {
+                    turnAttachmentBytes.set(
+                        turnAttachmentHandle(attachmentIndex),
+                        {
+                            name: attachment.name,
+                            mediaType: attachment.mediaType,
+                            bytes: new Uint8Array(attachmentBuffer),
+                        }
+                    );
+                }
                 totalAttachmentBytes += attachmentBytes;
                 if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
                     throw new ChatAccessError(
@@ -1977,110 +2466,82 @@ async function handleChatPost(
                     );
                 }
 
-                if (attachment.mediaType === "application/pdf") {
-                    if (pdfFilePartBuffer) {
-                        fileParts.push({
-                            type: "file",
-                            data: {
-                                type: "data",
-                                data: new Uint8Array(pdfFilePartBuffer),
-                            },
-                            mediaType: attachment.mediaType,
-                            filename: attachment.name,
-                        });
-                    } else {
-                        const pdfText = extractedPdfText || "";
-                        totalExtractedCharacters += pdfText.length;
-                        if (
-                            totalExtractedCharacters >
-                            MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                        ) {
-                            throw new ChatAccessError(
-                                413,
-                                "ATTACHMENT_TEXT_TOO_LARGE",
-                                "Extracted attachment text exceeds the request limit."
-                            );
-                        }
-
-                        textAttachments.push({
-                            name: attachment.name,
-                            kind: "PDF file",
-                            text: pdfText,
-                        });
-                    }
-                } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
-                    const officeBuffer =
-                        attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    const remainingCharacters =
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS -
-                        totalExtractedCharacters;
-                    if (remainingCharacters <= 64) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
-                        );
-                    }
-                    const extractedText = await parseOfficeSafely(
-                        officeBuffer,
-                        attachment.mediaType,
-                        remainingCharacters - 64
-                    );
-
-                    if (!extractedText) {
-                        throw new Error(`No readable text found in ${attachment.name}.`);
-                    }
-                    totalExtractedCharacters += extractedText.length;
-                    if (
-                        totalExtractedCharacters >
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                    ) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
-                        );
-                    }
-
-                    textAttachments.push({
+                if (format.category !== "archive") {
+                    await ingestAttachmentFile({
+                        format,
                         name: attachment.name,
-                        kind: "office file",
-                        text: extractedText,
+                        buffer: attachmentBuffer,
+                        fromArchive: false,
                     });
-                } else if (attachment.kind === "text") {
-                    totalExtractedCharacters += attachmentData.length;
-                    if (
-                        totalExtractedCharacters >
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                    ) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
-                        );
-                    }
-                    textAttachments.push({
-                        name: attachment.name,
-                        kind: "file",
-                        text: attachmentData,
-                    });
-                } else {
-                    const binaryData =
-                        attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    fileParts.push({
-                        type: "file",
-                        data: {
-                            type: "data",
-                            data: new Uint8Array(binaryData),
-                        },
-                        mediaType: attachment.mediaType,
-                        filename: attachment.name,
-                    });
+                    continue;
                 }
+
+                // An archive is expanded here and its entries go through the
+                // same reader as any other attachment, so nothing inside it
+                // escapes the image count, the payload ceiling, the text
+                // budget or the OCR allowance.
+                const scope = isGuestObject ? "guest" : "account";
+                archiveOcrBudget += chatArchiveLimits(scope).maxOcrPdfs;
+                let expanded;
+                try {
+                    expanded = await expandChatArchive(attachmentBuffer, scope);
+                } catch (error) {
+                    if (error instanceof ChatArchiveError) {
+                        // The code travels; the entry path that produced it
+                        // never does.
+                        throw new ChatAccessError(
+                            error.status,
+                            error.code,
+                            "The attached archive could not be read."
+                        );
+                    }
+                    throw error;
+                }
+                const archiveName = inertFilename(attachment.name);
+                const readPaths: string[] = [];
+                let unreadableCount = 0;
+
+                for (const file of expanded.files) {
+                    const outcome = await ingestAttachmentFile({
+                        format: file.entry.format,
+                        name: `${archiveName}/${file.entry.path}`,
+                        buffer: file.bytes,
+                        fromArchive: true,
+                    });
+                    if (outcome === "ok") readPaths.push(file.entry.path);
+                    else unreadableCount += 1;
+                }
+
+                if (readPaths.length === 0) {
+                    throw new ChatAccessError(
+                        400,
+                        CHAT_ARCHIVE_ERROR_CODES.noSupportedFiles,
+                        "No file inside the archive could be read."
+                    );
+                }
+
+                // Stated to the model rather than left implicit: without it,
+                // an answer about "the files you sent" silently describes a
+                // subset, and neither side knows which one.
+                const skipped =
+                    totalArchiveExclusions(expanded.plan.exclusions) + unreadableCount;
+                textAttachments.push({
+                    name: attachment.name,
+                    kind: "archive listing",
+                    text: [
+                        `Files read from this archive (${readPaths.length}):`,
+                        ...readPaths.map((path) => `- ${path}`),
+                        skipped > 0
+                            ? `${skipped} other entr${skipped === 1 ? "y" : "ies"} in this archive could not be read by this product and are not included below.`
+                            : "",
+                    ]
+                        .filter(Boolean)
+                        .join("\n"),
+                });
             }
 
             const hasUnsupportedFilePart = fileParts.some((part) =>
-                isImageAttachmentType(part.mediaType)
+                isImageAttachmentMediaType(part.mediaType)
                     ? !modelSupportsImageInput(modelConfig)
                     : part.mediaType === "application/pdf"
                       ? !modelSupportsNativePdfInput(modelConfig)
@@ -2359,7 +2820,7 @@ async function handleChatPost(
                             status: "pending",
                             modelId: requestedModelId,
                             pendingJobId: perplexityJobId,
-                            ...memoryAttribution,
+                            ...contextAttribution,
                         },
                     });
                     await tx.perplexityAsyncJob.create({
@@ -2530,10 +2991,18 @@ async function handleChatPost(
                               buildArtifactProgressChunk(format)
                           );
                       },
+                      // This turn's own files, by the handles the system block
+                      // named. Already read, already ownership-checked; the
+                      // batch tool is the only reader and it never sees a key.
+                      turnAttachments: turnAttachmentBytes,
                   })
                 : null;
         const artifactToolConfig = artifactCollector
-            ? buildGeneratedArtifactToolConfig(artifactCollector)
+            ? buildGeneratedArtifactToolConfig(artifactCollector, {
+                  registerDocumentBatch: Boolean(
+                      artifactToolPlan?.registerDocumentBatch
+                  ),
+              })
             : null;
         /*
           Tools from both features, merged rather than chosen between.
@@ -2669,7 +3138,13 @@ async function handleChatPost(
             toolConfig: artifactToolConfig
                 ? {
                       ...(webSearchToolConfig ?? {}),
-                      applicationTools: [...ALL_ARTIFACT_TOOL_NAMES],
+                      // The tools this request actually carries, not the full
+                      // catalogue of them. `create_document_batch` is
+                      // registered only on a turn with a Word template, so a
+                      // constant list here would hash two genuinely different
+                      // requests the same -- and the manifest exists to
+                      // describe the effective request.
+                      applicationTools: Object.keys(artifactToolConfig.tools).sort(),
                   }
                 : webSearchToolConfig,
             messages: manifestMessages,
@@ -3860,7 +4335,7 @@ async function handleChatPost(
                                             // Spread, so an answer with no
                                             // bundle writes neither column
                                             // and both stay NULL (§22).
-                                            ...memoryAttribution,
+                                            ...contextAttribution,
                                         },
                                     });
                                     if (providerContext) {
@@ -4164,6 +4639,14 @@ async function handleChatPost(
         // is one.
         if (memoryUsedCount > 0) {
             headers.set("X-Chat-Memory-Used", String(memoryUsedCount));
+        }
+        // §14.3, on exactly the memory header's terms: sent only above zero,
+        // so the renderer is never handed a number it must know not to show.
+        // A separate header rather than a combined one because the two are
+        // separate facts -- an answer can carry either, both or neither, and
+        // one field would have to encode "absent" twice.
+        if (knowledgeChunkCount > 0) {
+            headers.set("X-Chat-Knowledge-Used", String(knowledgeChunkCount));
         }
         // Which model answered, on a turn Auto routed. A header rather than
         // something in the body for the same reason as the memory count: the

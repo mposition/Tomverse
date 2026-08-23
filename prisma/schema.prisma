@@ -70,6 +70,8 @@ model User {
   chatCreditReservations             ChatCreditReservation[]
   imageGenerations                   ImageGeneration[]
   messageArtifacts                   MessageArtifact[]
+  messageAttachments                 MessageAttachment[]
+  messageAttachmentUploads           MessageAttachmentUpload[]
   imageGenerationGroups              ImageGenerationGroup[]
   imageCreditReservations            ImageCreditReservation[]
   memoryExtractionCreditReservations MemoryExtractionCreditReservation[]
@@ -105,6 +107,7 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+  modelMigrationRecords ModelMigrationRecord[]
 }
 
 model UserSettings {
@@ -313,6 +316,7 @@ model Conversation {
   messages              Message[]
   routingRuns           RoutingRun[]
   messageArtifacts      MessageArtifact[]
+  messageAttachments    MessageAttachment[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
@@ -365,12 +369,36 @@ model Message {
   memoryUsedCount Int?
   memoryTokens    Int?
 
+  /// How many assistant-profile knowledge excerpts this answer's prompt
+  /// carried (docs/policy/external-conversation-import-and-memory.md §14.3). The same
+  /// shape and the same permission as the two
+  /// columns above: a count and nothing else, never the excerpt text and
+  /// never which files it came from. NULL means no
+  /// docs/policy/external-conversation-import-and-memory.md §10 context bundle
+  /// accompanied the request, so no profile knowledge was possible; 0 means
+  /// a bundle was verified and knowledge retrieval selected nothing.
+  ///
+  /// Named for chunks rather than for use, because that is what the server
+  /// actually knows. It counts the excerpts placed in the prompt, not
+  /// whether the model drew on them -- nothing here can observe the latter,
+  /// and a name that implied it would make the disclosure claim more than
+  /// the number supports.
+  knowledgeChunkCount Int?
+
   /// Files this answer produced (docs/policy/generated-artifacts.md). Empty
   /// for every message written before the feature and for every message that
   /// asked for no file, which is almost all of them -- an artifact is an
   /// addition to an answer, never a replacement for one, so a message with
   /// none is a complete message.
   artifacts MessageArtifact[]
+
+  /// Files the *user* attached to this message
+  /// (docs/policy/user-attachment-persistence.md). Empty for every message
+  /// sent without a file, which is most of them. Distinct from `artifacts` in
+  /// both direction and lifecycle: an artifact is produced by the answer and
+  /// downloadable, an attachment is supplied by the person and is only ever
+  /// re-read server-side to build a later prompt.
+  attachments MessageAttachment[]
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -464,6 +492,116 @@ model MessageArtifactCleanup {
   id          String    @id @default(cuid())
   objectKey   String    @unique
   /// conversation_deleted | account_deleted | message_deleted | storage_rollback
+  reason      String
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completedAt, createdAt])
+}
+
+/// One file the *user* attached to one of their own messages.
+///
+/// Policy: docs/policy/user-attachment-persistence.md.
+///
+/// Before this table an attachment existed only in browser memory: it was
+/// uploaded, sent, read once by the request that carried it, and then lost on
+/// the next reload. The message it belonged to was stored with the file names
+/// pasted into its text, so a file-only turn came back as a comma-separated
+/// list of names and no later turn could read the file again.
+///
+/// `userId` and `conversationId` are denormalised for the same reason
+/// `MessageArtifact` denormalises them: every resolution is an ownership
+/// check, and an ownership check that needs a join first is a 500 waiting to
+/// be a 403.
+///
+/// The bytes are not here. `objectKey` names an object in private storage and
+/// never leaves the server -- no route returns it, the conversation read
+/// selects around it, and nothing accepts one from a client.
+model MessageAttachment {
+  id String @id @default(cuid())
+
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Position within the message. With `messageId` this is the idempotency
+  /// key: the composer re-posting the same pre-save (a retried fetch, a
+  /// double submit) writes the same pair and the unique index refuses the
+  /// second copy instead of duplicating the card.
+  ordinal Int @default(0)
+
+  /// The name the user's own file had. Displayed, never used as a path.
+  name      String
+  mediaType String
+  /// Bytes, as measured in storage at upload finalisation -- not as declared.
+  size      Int    @default(0)
+  /// "file" | "text", decided by the server from `mediaType`.
+  kind      String
+
+  /// Private storage key. Server-only, and unique so two messages can never
+  /// claim the same object.
+  objectKey String @unique
+
+  /// The upload this was bound from, kept so a rebind of the same upload is
+  /// recognisable and so an operator can trace a stored file back to the
+  /// request that accepted it.
+  uploadId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, ordinal])
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// A finalised upload that has not been bound to a message yet.
+///
+/// This row is the reason no route has to trust a storage key from a browser.
+/// The upload endpoint validates the object it just accepted and hands back
+/// this row's opaque id; every later reference -- the send, a retry, a
+/// template lookup -- names that id, and the server resolves the key itself.
+///
+/// It outlives binding rather than being consumed, because a draft can be sent
+/// twice and a failed send is retried with the same composer state. Binding is
+/// therefore idempotent on (messageId, ordinal), not on this row.
+model MessageAttachmentUpload {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  mediaType String
+  size      Int
+  kind      String
+
+  objectKey String @unique
+
+  /// When this upload was first bound to a message. Informational: a second
+  /// send of the same draft is legitimate and is not refused here.
+  boundAt   DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// DB-first deletion tombstone for user-supplied attachments, mirroring
+/// `MessageArtifactCleanup` exactly and for the same reason: the row and the
+/// object cannot be removed in one transaction, so the row's removal enqueues
+/// the object's and the maintenance sweep drains the queue.
+model MessageAttachmentCleanup {
+  id String @id @default(cuid())
+
+  objectKey   String    @unique
+  /// conversation_deleted | account_deleted | message_deleted | upload_abandoned
   reason      String
   attempts    Int       @default(0)
   lastError   String?
@@ -1784,6 +1922,157 @@ model ProviderModelCatalogRun {
 
   @@index([provider, startedAt])
   @@index([status, startedAt])
+}
+
+/// What we decided to do about a model a provider listed, and how far that has
+/// got. Separate from ProviderModelCatalogEntry on purpose.
+///
+/// The catalogue entry is an observation and the monitor overwrites its
+/// `status` on every scan, so a decision recorded there is erased by the next
+/// run. This is the other half: written by discovery, changed only by a person,
+/// and never re-derived from today's scan.
+///
+/// The unique key is (provider, apiModel, action) rather than the model alone:
+/// adding a model and later retiring it are two decisions at two times, but two
+/// open "add"s for one model is a duplicate.
+model ModelLifecycleWorkItem {
+  id       String @id @default(cuid())
+  provider String
+  apiModel String
+
+  /// The mapped ModelRegistryEntry, once one exists.
+  modelId String?
+  /// The observation this came from. Not a foreign key: the catalogue row is
+  /// upserted every scan and may be swept, while the decision outlives it.
+  catalogEntryId String?
+
+  /// add | upgrade | replace | retire | monitor | no_action
+  action String
+  /// The eleven states in lib/modelLifecycleWorkItemCore.ts.
+  status String @default("discovered")
+  /// critical | high | normal
+  severity String @default("normal")
+
+  predecessorModelId String?
+  replacementModelId String?
+
+  /// The automatic suggestion, which a person may overwrite. Never a decision.
+  recommendation String?
+  /// high | medium | low, for the suggestion above.
+  confidence String?
+
+  /// Observation evidence: lifecycle strings, consecutive-miss counts, run ids.
+  evidence Json?
+  /// Facts still needed before this can be decided.
+  unknowns Json?
+  /// Named things being waited on, in the sense report-issue-backlog uses:
+  /// something the repository cannot answer by itself.
+  blockers Json?
+  /// Verifications owed before rollout, e.g. ["pricing","access","staging"].
+  /// One list rather than three states because they run in parallel.
+  pendingValidations Json?
+
+  reviewerId     String?
+  reviewerEmail  String?
+  /// approve | reject | defer
+  decision       String?
+  decisionReason String?
+  decidedAt      DateTime?
+
+  ownerEmail    String?
+  dueAt         DateTime?
+  deferredUntil DateTime?
+
+  linkedIssueUrl     String?
+  linkedPrUrl        String?
+  linkedDeploymentId String?
+
+  implementationEvidence Json?
+  validationEvidence     Json?
+
+  /// Whether users have to be told before this closes. A retirement that moves
+  /// somebody's stored model owes a notice; an addition does not.
+  communicationRequired Boolean @default(false)
+
+  firstSeenAt DateTime  @default(now())
+  completedAt DateTime?
+  closedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ModelLifecycleWorkItemEvent[]
+
+  @@unique([provider, apiModel, action])
+  @@index([status, severity, firstSeenAt])
+  @@index([ownerEmail, dueAt])
+  @@index([modelId])
+}
+
+/// Append-only history of one work item. Never updated, never deleted.
+///
+/// The item says what is true now; this says how it got there and who moved it.
+/// A queue whose decisions can be edited without a trace cannot answer "why is
+/// this model not in the catalogue", which is the question the audit could not
+/// answer for seven models.
+model ModelLifecycleWorkItemEvent {
+  id         String                 @id @default(cuid())
+  workItemId String
+  workItem   ModelLifecycleWorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  occurredAt DateTime @default(now())
+  /// Null only for the automatic creation event; every other row names a person.
+  actorEmail String?
+  fromStatus String?
+  toStatus   String
+  note       String?
+  evidence   Json?
+
+  @@index([workItemId, occurredAt])
+}
+
+/// What an approved retirement reconciliation actually changed, per user and
+/// per field. Append-only.
+///
+/// Without this a completion notice has no audience. The script reported
+/// aggregate counts to stdout and nothing else, so "we changed your default
+/// model" could only be sent to everybody or to nobody -- and both are wrong in
+/// a way that cannot be taken back once the mail has gone.
+///
+/// It is also the only thing that can answer a support question afterwards:
+/// what did this account hold before, and when did we change it.
+model ModelMigrationRecord {
+  id     String @id @default(cuid())
+  userId String
+  /// Cascades: the record exists to address a notice to this person and to
+  /// answer what their setting held before. Both questions die with the
+  /// account, so keeping the row afterwards would be keeping a user id for no
+  /// purpose. The aggregate ("this retirement moved N accounts") belongs to the
+  /// campaign, not to a row per person.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the change was to one conversation rather than to the account.
+  conversationId String?
+
+  /// The lifecycle item this ran for, when there is one.
+  workItemId String?
+
+  /// user_settings_default_model | new_conversation_model_ids
+  ///   | conversation_selected_models | app_setting_guest_default
+  field String
+
+  fromModelId String
+  toModelId   String
+
+  /// The approval the run carried: the ticket and the person who ran it.
+  ticket     String
+  actorEmail String
+
+  changedAt DateTime @default(now())
+
+  @@index([userId, changedAt])
+  @@index([fromModelId, toModelId, changedAt])
+  @@index([workItemId])
 }
 
 model AdminNotificationLog {

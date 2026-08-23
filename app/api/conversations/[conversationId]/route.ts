@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
+import { PUBLIC_MESSAGE_ATTACHMENT_SELECT } from "@/lib/messageAttachmentCore";
+import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
@@ -248,6 +250,10 @@ export async function GET(
         // how many memories an answer was given, and a token figure would
         // say something about their length without being asked for.
         memoryUsedCount: true,
+        // docs/policy/external-conversation-import-and-memory.md §14.3, selected on the same terms and for the
+        // same reason: the
+        // owner's own read is the one place this count is admissible.
+        knowledgeChunkCount: true,
         /*
           The files this answer produced
           (docs/policy/generated-artifacts.md section 5).
@@ -271,13 +277,57 @@ export async function GET(
             modelId: true,
           },
         },
+        /*
+          The files the *user* attached to this message
+          (docs/policy/user-attachment-persistence.md).
+
+          A named select for the same reason the artifacts above use one, and
+          it matters more here: `objectKey` is on this row and is the private
+          storage location of a file the user uploaded. `include` would send
+          it. What the card needs is the name, the type and the size, which is
+          exactly `PUBLIC_MESSAGE_ATTACHMENT_SELECT` -- the bytes, the
+          extracted text, the paths inside an uploaded archive and any signed
+          URL are all absent because none of them is on this list.
+        */
+        attachments: {
+          orderBy: { ordinal: "asc" },
+          select: PUBLIC_MESSAGE_ATTACHMENT_SELECT,
+        },
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
     const messages = (
       hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
-    ).map(({ memoryUsedCount, artifacts, ...message }) => ({
+    ).map(
+      ({
+        memoryUsedCount,
+        knowledgeChunkCount,
+        artifacts,
+        attachments,
+        ...message
+      }) => ({
       ...message,
+      /*
+        Absent, not empty, when the user attached nothing -- the same shape a
+        live send produces, so a restored message and one that has just been
+        sent are indistinguishable to the renderer.
+
+        `attachmentId` repeats the row id under the name the *request* uses.
+        The card keys on `id`; the next turn has to name the file for the
+        server to re-read, and it names it with `attachmentId`
+        (docs/policy/user-attachment-persistence.md section 4). Sending the
+        one field twice is what stops the client having to know that the two
+        are the same thing -- a piece of knowledge that would only ever live
+        in one place until somebody moved it.
+      */
+      ...(attachments.length
+        ? {
+            attachments: attachments.map((attachment) => ({
+              ...attachment,
+              attachmentId: attachment.id,
+            })),
+          }
+        : {}),
       // Absent, not empty, when the answer produced no file -- the same
       // shape the streaming trailer uses, so a restored message and a live
       // one are indistinguishable to the renderer.
@@ -301,7 +351,18 @@ export async function GET(
       ...(typeof memoryUsedCount === "number" && memoryUsedCount > 0
         ? { memoryUsedCount }
         : {}),
-    }));
+      /*
+        docs/policy/external-conversation-import-and-memory.md §14.3: the knowledge half of the same
+        disclosure, on the identical
+        condition. Destructured above so that a `null` or `0` is dropped
+        here rather than reaching the client -- the field is absent, never a
+        number the renderer has to know not to show.
+      */
+      ...(typeof knowledgeChunkCount === "number" && knowledgeChunkCount > 0
+        ? { knowledgeChunkCount }
+        : {}),
+      })
+    );
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])
@@ -812,6 +873,12 @@ export async function DELETE(req: Request, { params }: Params) {
       // Generated files follow the same order for the same reason
       // (docs/policy/generated-artifacts.md section 8).
       await enqueueArtifactCleanupForConversations(tx, [conversationId]);
+      // And the files the user uploaded into it. Deleting the conversation is
+      // the only ordinary act that removes them: clearing one model's answers
+      // must not, because the attachment belongs to the question every model
+      // in the comparison shares
+      // (docs/policy/user-attachment-persistence.md).
+      await enqueueMessageAttachmentCleanupForConversations(tx, [conversationId]);
       await deleteDeepResearchJobsForConversations(tx, [conversationId]);
       await tx.conversation.delete({
         where: { id: conversationId },

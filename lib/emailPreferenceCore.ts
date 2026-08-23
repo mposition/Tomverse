@@ -64,6 +64,56 @@ export const isEmailPurpose = (value: unknown): value is EmailPurpose =>
 export const defaultPreferenceEnabled = (purpose: EmailPurpose) =>
   !CONSENT_REQUIRED_PURPOSES.has(purpose);
 
+/**
+ * Whether a queued message may go out, given what this account has actually
+ * agreed to.
+ *
+ * Contract: docs/policy/email-notifications.md §5.1 C1, §11.2, §17.1.
+ *
+ * The rule that matters is what an **absent row** means, and it is not one
+ * answer for every purpose:
+ *
+ *   * For a consent-based purpose it means *nobody has agreed to anything*,
+ *     which is a refusal. `ensureDefaultPreferences` runs on a settings read,
+ *     so an account that has never opened the preference centre has no rows at
+ *     all -- and the previous `preference && !preference.enabled` treated that
+ *     silence as a yes. Sending advertising on that basis is not recoverable
+ *     once it has gone.
+ *   * For `service_status` it means the default, which is on. An outage notice
+ *     is contract performance and §5.1 does not ask consent for it, so refusing
+ *     it because a row was never materialised would withhold mail we owe.
+ *
+ * Marketing to an address with no account is refused outright. Consent attaches
+ * to a person and there is nobody here to have given it -- and no unsubscribe
+ * token can be minted for a delivery with no `userId` either, so the message
+ * could not carry the link its classification requires.
+ */
+export type ConsentGateInput = {
+    classification: string;
+    /** The preference this template is gated by, or null when it is not gated. */
+    purpose: string | null;
+    /** Whether this delivery is bound to an account at all. */
+    hasAccount: boolean;
+    /** The stored preference, or null when no row exists for it. */
+    storedEnabled: boolean | null;
+};
+
+export type ConsentGateVerdict =
+    | { allowed: true }
+    | { allowed: false; skipReason: "no_consent" };
+
+const REFUSED: ConsentGateVerdict = { allowed: false, skipReason: "no_consent" };
+
+export const consentGateVerdict = (input: ConsentGateInput): ConsentGateVerdict => {
+    if (input.classification === "marketing" && !input.hasAccount) return REFUSED;
+    if (!input.purpose || !isEmailPurpose(input.purpose)) return { allowed: true };
+    if (input.storedEnabled !== null) {
+        return input.storedEnabled ? { allowed: true } : REFUSED;
+    }
+    // No row. What that means depends on whether the purpose needed consent.
+    return CONSENT_REQUIRED_PURPOSES.has(input.purpose) ? REFUSED : { allowed: true };
+};
+
 export type PreferenceChangeRefusal =
   | { allowed: false; reason: "unknown_purpose" }
   | { allowed: false; reason: "locked" }

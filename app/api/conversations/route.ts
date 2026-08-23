@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
+import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
@@ -194,6 +195,7 @@ export async function DELETE(req: Request) {
       );
       await enqueueImageAssetCleanupForConversations(tx, conversationIds);
       await enqueueArtifactCleanupForConversations(tx, conversationIds);
+      await enqueueMessageAttachmentCleanupForConversations(tx, conversationIds);
       await deleteDeepResearchJobsForConversations(tx, conversationIds);
       return tx.conversation.deleteMany({
         where: {

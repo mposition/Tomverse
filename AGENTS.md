@@ -175,6 +175,50 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
    `docs/ops/assistant-profile-staging-checklist.md`의
    "무엇이 flag를 막고, 무엇이 막지 않는가".
 
+## 사람에게 남기는 것은 사람만 할 수 있는 것뿐입니다
+
+범위를 줄이는 것과 **준비를 떠넘기지 않는 것**은 다른 규칙이고, 1인 조직에서는
+뒤쪽이 더 자주 검증을 멈춥니다. 항목이 세 개여도 그 셋을 하려면 시료를 만들고
+숫자를 세고 기록 파일을 만들어야 한다면, 실제 비용은 세 개가 아닙니다.
+
+**에이전트가 만들 수 있는 것을 사람에게 만들라고 하지 않습니다.**
+
+- **시료는 에이전트가 만들어 건넵니다.** zip, GIF(정지·애니메이션), 대용량
+  파일, 텍스트·코드·마크업, 암호 걸린 문서까지 전부 이 컨테이너에서 만들
+  수 있습니다. "이런 파일들을 준비하세요" 목록은 준비를 떠넘긴 것입니다.
+- **셈과 대조는 에이전트가 합니다.** 제외 개수 검산, digest 계산, 기록 파일
+  생성, SHA 대조는 script이지 사람의 판단이 아닙니다. 사람에게 PowerShell을
+  붙여 주는 것은 그 일을 넘긴 것이지 도운 것이 아닙니다.
+- **시료에는 정답지를 같이 냅니다.** 무엇이 들어 있고 무엇이 왜 빠져야 하는지
+  적힌 manifest가 없으면, 사람은 답을 판정할 근거 없이 판정하게 됩니다.
+
+**사람만 할 수 있는 것**은 이 넷뿐이고, 항목을 남길 근거도 이 넷입니다.
+
+1. **실기기·실제 OS** — 파일 선택기의 MIME 보고처럼 합성 `File`로 재현되지
+   않는 것.
+2. **이 컨테이너가 만들 수 없는 시료** — 진짜 Microsoft Office가 저장한
+   파일처럼, 만들 수 있는 도구가 여기 없는 것. LibreOffice로 만든 것은
+   대체물이 아닙니다.
+3. **유료 turn과 그 답의 판정** — 크레딧을 쓰는 결정과, 답이 문서 내용과
+   맞는지 보는 눈.
+4. **판정과 서명** — 통과·조건부·실패의 결정.
+
+**여기에 안 들어가는 것을 사람에게 요구할 때는 왜 못 하는지 한 줄로 적습니다.**
+적을 수 없으면 그 일은 에이전트 것입니다.
+
+### 기록을 채우는 경계는 관측과 판정입니다
+
+4번이 덮는 것은 **판정과 서명**이지 기록 파일 전체가 아닙니다. 사람이 실행하며
+보고한 것 — 무엇이 나왔고 어떤 오류 코드였고 몇 크레딧을 썼는지 — 을 항목·증거·
+크레딧 칸에 옮겨 적어 초안을 만드는 것은 에이전트가 합니다. 본 것을 다시
+타이핑하게 만드는 것은 준비를 떠넘기는 일이고, 1인 조직에서 그 비용이 기록을
+미루게 만듭니다.
+
+"토스트에 2개라고 떴다"는 관측이고 "그러므로 이 회차는 통과다"는 판정입니다.
+**지어낸 관측을 적는 것은 어느 쪽에서도 허용되지 않으며**, 초안은 그것이
+초안임을 문서 안에서 밝히고 실행자가 각 줄을 확인한 뒤 commit 합니다.
+자세한 규칙은 각 기능의 `*-staging-verification-records/README.md` 5번입니다.
+
 ## 검증을 건너뛴다는 뜻이 아닙니다
 
 차단 항목은 줄이지 않습니다. 줄이는 것은 **차단이 아닌 항목을 지금 할지
@@ -575,6 +619,61 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - 표준 `tsc` project를 build matrix라고 부르지 않습니다. bundler가 아닙니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
+# 채팅 첨부 형식과 압축파일
+
+채팅 입력으로 받는 파일 — 형식 목록, MIME 판정, 업로드 검증, ZIP 해제 — 을
+건드리기 전에 읽습니다.
+
+- `docs/policy/chat-attachment-formats.md`
+
+절대 조건:
+
+- **형식은 표 하나입니다.** `lib/chatAttachmentFormats.ts`의
+  `CHAT_ATTACHMENT_FORMATS`에서 picker의 `accept`, 클라이언트의 확장자→MIME
+  정규화, 업로드 준비·finalize 허용 목록, 메시지 처리 분기, 게스트 부분집합,
+  사용자 안내가 전부 파생됩니다. 두 번째 목록을 만들지 않습니다 — 목록이
+  넷으로 갈라져 있던 것이 이 정책을 만든 사고입니다.
+- **목록에 있다는 것은 실제로 읽을 수 있다는 뜻입니다.** 확장자만 허용하고
+  분석에 실패하는 가짜 지원은 금지입니다. 그래서 `.doc`·`.xls`·`.ppt`·`.rtf`는
+  안전한 파서가 없어 목록에 없습니다.
+- **이름이 정하고 MIME은 힌트입니다.** 브라우저가 MIME을 비워도 알려진
+  확장자면 처리하고, 이름과 MIME이 각각 다른 형식을 가리키면 거절합니다.
+  확장자가 없으면 거절합니다.
+- **거절 기준은 "열면 실행되는가"입니다.** `.sh`·`.ps1`·`.py`는 지원하고
+  `.exe`·`.msi`·`.bat`은 거절합니다. 어떤 소스코드도 실행·컴파일·동적 import
+  하지 않습니다.
+- **finalize는 실제 바이트를 봅니다.** 로그인 경로도 R2 메타데이터가 아니라
+  `validateChatAttachmentUpload()`를 통과해야 하고, 실패한 객체는 즉시
+  삭제합니다.
+- **깨진 인코딩은 오류이지 복구 대상이 아닙니다.** U+FFFD로 조용히 치환하지
+  않습니다. BOM이 있는 UTF-16은 변환합니다.
+- **애니메이션 GIF는 첫 프레임으로 대체하지 않고 거절합니다.** 판정은
+  `lib/gifStructure.ts`의 블록 walk이며 libvips의 페이지 수가 아닙니다.
+- **ZIP은 중앙 디렉터리를 먼저 읽고, 거절하거나 고르고, 그 다음에만 풉니다.**
+  푼 크기는 디렉터리가 약속한 크기와 대조하고, 어긋나면 거절입니다. 디스크에
+  쓰지 않습니다. 중첩 깊이는 0입니다.
+- **압축 한도는 외부 대화 가져오기의 한도와 다릅니다.** 그쪽은 브라우저에서
+  열고 서버에 보내지 않으며, 이쪽은 채팅 요청 안에서 서버가 풉니다.
+  `lib/externalImportLimits.ts`의 숫자를 빌려오지 않습니다.
+- **내부 항목은 일반 첨부와 같은 함수를 지납니다.** 컨테이너가 이미지 개수,
+  payload 상한, 추출 텍스트 예산, OCR 허용량을 우회하는 길이 되어서는 안 됩니다.
+- **오류에 항목 경로·파서 메시지·R2 key·파일 내용을 싣지 않습니다.** 코드만
+  전달하고 문장은 `lib/chatAttachmentErrorCopy.ts`가 locale로 옮깁니다.
+- **Office 97-2003과 RTF는 자체 파서로 읽습니다**(`lib/legacyOffice/**`,
+  진입점 `lib/legacyOfficeText.ts`). 복호화하지 않고(암호 문서는
+  `ATTACHMENT_ENCRYPTED`), 매크로 저장소·임베디드 객체·그림을 열지 않으며,
+  아무것도 실행·평가·fetch 하지 않습니다. 파싱했는데 텍스트가 없으면 거절이지
+  빈 문자열이 아닙니다.
+- **이 네 파서는 워커가 아니라 예산으로 묶습니다.** eval된 워커는 저장소
+  `lib/`의 모듈을 `require`할 수 없으므로 `sharp`·`officeparser`·`pdfjs`의
+  방식을 쓸 수 없습니다. 대신 `lib/legacyOffice/budget.ts`의 deadline·byte
+  상한·문자 상한·iteration backstop이 모든 루프에 걸립니다. 이 파일들에 새
+  루프를 넣을 때 `budget.tick()`을 빼면 그 방어가 사라집니다.
+- **바이너리 파서의 정상 경로는 진짜 문서로 테스트합니다**
+  (`tests/fixtures/legacyOffice/`). 자체 writer가 만든 파일로만 검증하면 둘이
+  서로 동의한다는 것만 증명합니다. 거절 경로는
+  `tests/support/compoundFile.mjs`로 바이트 단위로 만듭니다.
+
 # 이미지 생성 (v2: 멀티 모델 비교)
 
 이미지 생성 관련 코드를 건드리기 전에 읽습니다.
@@ -604,6 +703,36 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   금지입니다.
 - **v1 flag는 staging 검증 전용입니다.** 멀티 모델 UX 완성 전 production
   공개 활성화 금지, Google 모델은 가격 검증 통과 전 활성화 금지.
+
+# 사용자 입력 첨부파일
+
+사용자가 보낸 파일의 저장, 참조, 조회 응답, 삭제를 건드리기 전에 읽습니다.
+
+- `docs/policy/user-attachment-persistence.md`
+
+절대 조건:
+
+- **클라이언트는 저장 위치를 말하지 않습니다.** 업로드 완료 단계가 발급한
+  불투명한 `uploadId`, 또는 저장된 메시지의 `attachmentId`로만 참조합니다.
+  `messageAttachmentReferenceSchema`는 `.strict()`이며 `objectKey`·`data`·
+  `bytes`·`path`가 실린 참조를 파싱 단계에서 거절합니다. 게스트만 예외이고,
+  그 key는 게스트 자신의 서명된 신원에서 유도되므로 key가 곧 권한입니다.
+- **해석은 `userId`를 `where` 안에 넣습니다.** 남의 id는 "거절"이 아니라
+  "없음"이고, 차이를 보고할 분기가 존재하지 않습니다.
+- **`objectKey`·바이트·data URL·추출 본문·서명 URL은 어떤 응답에도 넣지
+  않습니다.** 대화 조회는 `PUBLIC_MESSAGE_ATTACHMENT_SELECT` 6개 필드만
+  이름 대며 `include`를 쓰지 않습니다. 입력 첨부에는 다운로드 route가 없습니다.
+- **메시지 저장과 첨부 결속은 한 트랜잭션입니다.** `(messageId, ordinal)`
+  unique가 멱등성 키이므로 재전송된 pre-save가 카드를 복제하지 않습니다.
+- **첨부만 있는 메시지를 파일명 문자열로 대체하지 않습니다.** `content`는 비어
+  있을 수 있고, 그것이 이 정책이 고친 결함입니다.
+- **한 모델의 assistant history 초기화는 공통 사용자 첨부를 지우지 않습니다.**
+  첨부는 세 패널이 공유하는 질문에 속합니다. 삭제는 대화·계정 전체에서만
+  일어나고, DB 트랜잭션에서 tombstone을 먼저 남긴 뒤 15분 cron이 객체를
+  지웁니다. 실패·재시도·최종 상태는 구조화 로그로 남깁니다.
+- **모델에게는 요청 범위 handle(`att_1`)만 줍니다.** row id도 storage key도
+  주지 않습니다.
+- guest localStorage 대화의 기존 첨부 동작은 바뀌지 않습니다.
 
 # AI 생성 파일 (Generated Artifact)
 
@@ -662,6 +791,24 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
   내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
   docs/policy/generated-artifacts.md §11.
+- **"최대 3개"는 top-level artifact 상한입니다**(docs/policy/generated-artifacts.md §13). 문서 개수 상한이 아니며,
+  archive는 그중 하나로 세면서 100개를 담습니다. 이 상한을 올려 batch 요구를
+  해결하지 않습니다 — archive 안에 서버 렌더링 문서를 넣는 것이 답입니다.
+  system prompt에서 `N files per answer` 같은 문장은 금지이며
+  `tests/generatedArtifactToolPolicy.test.mjs`가 이를 강제합니다.
+- **첨부된 DOCX 템플릿은 복사해서 채웁니다**(docs/policy/generated-artifacts.md §13.4). 추출 텍스트로 다시 쓰면
+  styles·theme·표·header/footer·section·이미지가 사라집니다. 매크로·OLE·
+  external relationship·altChunk·외부를 읽는 field code·비정상 ZIP entry는
+  **제거가 아니라 거절**입니다. 필수 placeholder 누락과 미해결 placeholder는
+  배치 전체를 실패시킵니다 — 부분 성공은 없습니다.
+- **batch tool은 handle 두 개와 이름 규칙만 받습니다.** bytes·base64·XML·
+  objectKey·로컬 경로를 담을 field가 schema에 없고 `.strict()`이므로 추가할 수도
+  없습니다. 행 값은 서버가 스프레드시트에서 직접 읽습니다.
+- **OOXML package 변경은 검사기가 아니라 대상 application에서 확인합니다.**
+  master마다 theme part를 하나씩 쓰고, `<a:spLocks noGrp="1"/>`를 쓰는 shape는
+  자기 `<p:ph>`를 갖습니다. theme을 공유한 deck은 ECMA-376 XSD와 Microsoft
+  OpenXmlValidator를 Office 2007~2021 여섯 버전 모두에서 통과하면서 PowerPoint가
+  열지 못했습니다: docs/policy/generated-artifacts.md §4.
 
 # Trace 기반 오류 신고 자동화
 

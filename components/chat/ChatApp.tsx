@@ -771,6 +771,7 @@ function ChatAppComponent({
     // so "absent" already means "no routing decision to show".
     let routedModelId: string | null = null;
     let routedReason: string | null = null;
+    let knowledgeChunkCount = 0;
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
@@ -817,6 +818,18 @@ function ChatAppComponent({
         memoryUsedCount =
           Number.isSafeInteger(reportedMemoryUsed) && reportedMemoryUsed > 0
             ? reportedMemoryUsed
+            : 0;
+        // docs/policy/external-conversation-import-and-memory.md §14.3, read exactly as the line
+        // above: a missing header is not a
+        // zero, and both collapse to 0 here because the renderer states
+        // neither.
+        const reportedKnowledgeUsed = Number(
+          res.headers.get("X-Chat-Knowledge-Used")
+        );
+        knowledgeChunkCount =
+          Number.isSafeInteger(reportedKnowledgeUsed) &&
+          reportedKnowledgeUsed > 0
+            ? reportedKnowledgeUsed
             : 0;
         // Always this response's own header (or null): the token must never
         // outlive the trace it was signed for, or a retried request would
@@ -1080,6 +1093,7 @@ function ChatAppComponent({
             ...(routedModelId && !retryingWithModelId
               ? { routedModelId, routedReason }
               : {}),
+            ...(knowledgeChunkCount > 0 ? { knowledgeChunkCount } : {}),
             // §7: when the server fell back mid-response, the model that
             // answered is not the one this request was sent to. Recording the
             // request's model here would attribute the answer to a model that

@@ -39,7 +39,8 @@ export type AdminNavBadgeKey =
   | "refunds"
   | "providers"
   | "automation"
-  | "alerts";
+  | "alerts"
+  | "modelLifecycle";
 
 export type AdminNavTab = {
   id: string;
@@ -253,10 +254,34 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "models",
     label: "Models",
     href: "/admin/models",
-    description: "Model registry, availability, and API configuration",
+    description: "Model registry, availability, and what discovery has found",
     group: "AI Platform",
     writeRoles: ["owner", "ops"],
-    aliases: ["registry", "catalogue", "catalog", "gpt", "claude", "gemini"],
+    badge: "modelLifecycle",
+    aliases: [
+      "registry",
+      "catalogue",
+      "catalog",
+      "gpt",
+      "claude",
+      "gemini",
+      "discovery",
+      "candidates",
+      "lifecycle",
+      "backlog",
+    ],
+    tabs: [
+      {
+        id: "registry",
+        label: "Registry",
+        description: "Availability, pricing overrides, and API configuration",
+      },
+      {
+        id: "discovery",
+        label: "Discovery",
+        description: "Models a provider listed that nobody has decided about",
+      },
+    ],
   },
   {
     id: "routing",

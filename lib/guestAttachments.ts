@@ -2,6 +2,13 @@ import "server-only";
 
 import { createHash, createHmac } from "node:crypto";
 
+import {
+  CHAT_ATTACHMENT_FORMATS,
+  REFUSED_ATTACHMENT_EXTENSIONS,
+  resolveChatAttachmentFormat,
+} from "@/lib/chatAttachmentFormats";
+import { decodeAttachmentText } from "@/lib/chatAttachmentText";
+
 /**
  * Guest file attachments: policy, naming and storage scoping.
  *
@@ -51,60 +58,46 @@ export const GUEST_ATTACHMENT_PREFIX = "guest-attachments/";
  * The media types a guest may send, each with the extensions that are allowed
  * to carry it. Both directions are checked: an `.exe` renamed to `.pdf` fails
  * the signature check downstream, and a genuine PDF named `.zip` fails here.
+ *
+ * Derived from the shared format table rather than written out again -- this
+ * map and the signed-in allowlist had to be edited together, and nothing said
+ * so.
  */
-export const GUEST_ATTACHMENT_TYPES: Record<string, readonly string[]> = {
-  "text/plain": ["txt", "text", "log"],
-  "text/markdown": ["md", "markdown"],
-  "text/csv": ["csv"],
-  "application/json": ["json"],
-  "application/pdf": ["pdf"],
-  "image/png": ["png"],
-  "image/jpeg": ["jpg", "jpeg"],
-  "image/webp": ["webp"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ["docx"],
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ["xlsx"],
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ["pptx"],
-  "application/vnd.oasis.opendocument.text": ["odt"],
-  "application/vnd.oasis.opendocument.spreadsheet": ["ods"],
-  "application/vnd.oasis.opendocument.presentation": ["odp"],
-};
+export const GUEST_ATTACHMENT_TYPES: Record<string, readonly string[]> =
+  Object.fromEntries(
+    CHAT_ATTACHMENT_FORMATS.filter((format) => format.guestAllowed).map(
+      (format) => [format.mediaType, format.extensions]
+    )
+  );
 
-export const GUEST_OFFICE_TYPES = new Set([
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.oasis.opendocument.text",
-  "application/vnd.oasis.opendocument.spreadsheet",
-  "application/vnd.oasis.opendocument.presentation",
-]);
+const guestMediaTypesForCategory = (category: string) =>
+  new Set(
+    CHAT_ATTACHMENT_FORMATS.filter(
+      (format) => format.guestAllowed && format.category === category
+    ).map((format) => format.mediaType)
+  );
 
-export const GUEST_IMAGE_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-]);
+export const GUEST_OFFICE_TYPES = guestMediaTypesForCategory("office");
 
-export const GUEST_TEXT_TYPES = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-]);
+export const GUEST_IMAGE_TYPES = guestMediaTypesForCategory("image");
+
+export const GUEST_TEXT_TYPES = guestMediaTypesForCategory("text");
+
+export const GUEST_ARCHIVE_TYPES = guestMediaTypesForCategory("archive");
 
 /**
- * Extensions refused outright, whatever media type is claimed. Archives are
- * refused because a guest upload is not a container to unpack, and executables
- * because nothing here should ever look like something to run. The Office
- * formats above are technically ZIP containers, which is exactly why they go
- * through `assertSafeOfficeArchive`'s bomb/traversal checks instead of this
- * list.
+ * Extensions refused outright, whatever media type is claimed.
+ *
+ * Now one list, in `lib/chatAttachmentFormats.ts`, shared with the signed-in
+ * path: executables because nothing here should ever look like something to
+ * run, and every archive format except ZIP because exactly one container
+ * shape is supported and renaming is not how you add another. ZIP itself is
+ * absent on purpose -- it is a supported format with its own expansion
+ * contract (`lib/chatArchivePlan.ts`), not a hole in this list. The Office
+ * formats are ZIP containers too, which is why they go through
+ * `assertSafeOfficeArchive` rather than either list.
  */
-const REFUSED_EXTENSIONS = new Set([
-  "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "lz", "lzma", "cab", "iso", "dmg",
-  "exe", "dll", "so", "dylib", "bin", "com", "scr", "msi", "apk", "jar", "app",
-  "sh", "bash", "zsh", "bat", "cmd", "ps1", "vbs", "js", "mjs", "cjs", "wasm",
-  "deb", "rpm", "pkg", "run", "elf",
-]);
+const REFUSED_EXTENSIONS = REFUSED_ATTACHMENT_EXTENSIONS;
 
 export class GuestAttachmentError extends Error {
   constructor(
@@ -165,13 +158,14 @@ export const guestFileExtension = (filename: string) => {
 };
 
 /**
- * Checks the declared media type against the allowlist and against the
- * filename's own extension. A mismatch is refused rather than resolved in
- * either direction: trusting the extension would let a caller rename their way
- * into a parser, and trusting the media type would let them hide the file's
- * real shape from the user.
+ * Resolves what a guest is actually sending, or refuses it.
+ *
+ * The name leads and the declared media type is checked against it, so a
+ * caller can neither rename their way into a parser nor hide a file's real
+ * shape behind a type the picker never reported. Both refusals keep the codes
+ * they had, because the composer already translates them.
  */
-export const assertGuestAttachmentType = (
+export const resolveGuestAttachmentFormat = (
   filename: string,
   mediaType: string
 ) => {
@@ -183,75 +177,64 @@ export const assertGuestAttachmentType = (
       "This file type cannot be attached."
     );
   }
-  const allowedExtensions = GUEST_ATTACHMENT_TYPES[mediaType];
-  if (!allowedExtensions) {
+  if (!GUEST_ATTACHMENT_TYPES[mediaType]) {
     throw new GuestAttachmentError(
       400,
       "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
       "This file type cannot be attached."
     );
   }
-  if (!extension || !allowedExtensions.includes(extension)) {
+  const format = resolveChatAttachmentFormat({
+    filename,
+    declaredMediaType: mediaType,
+  });
+  if (!format || !format.guestAllowed || format.mediaType !== mediaType) {
     throw new GuestAttachmentError(
       400,
       "GUEST_ATTACHMENT_TYPE_MISMATCH",
       "The file extension does not match its file type."
     );
   }
+  return format;
+};
+
+/** The refusal half of `resolveGuestAttachmentFormat`, kept for callers that only assert. */
+export const assertGuestAttachmentType = (
+  filename: string,
+  mediaType: string
+) => {
+  resolveGuestAttachmentFormat(filename, mediaType);
 };
 
 /**
- * Text files get a signature check of their own: the binary formats above are
- * verified by their parsers (PDF header, image signature, Office archive), but
+ * Text files get a check of their own: the binary formats above are verified
+ * by their parsers (PDF header, image signature, Office archive), but
  * "text/plain" has no signature, so a renamed binary would otherwise be
  * base64'd straight into a prompt.
+ *
+ * The decision now lives in `lib/chatAttachmentText.ts` and is shared with
+ * the signed-in path. Two behaviours changed with it, both deliberate: a
+ * UTF-16 file with a byte order mark is converted rather than refused, and a
+ * file that is not valid UTF-8 is refused *as* an encoding failure instead of
+ * being decoded with U+FFFD scattered through it and then noticed by a
+ * substring search for the replacement character.
  */
-const BINARY_SIGNATURES: readonly (readonly number[])[] = [
-  [0x50, 0x4b, 0x03, 0x04], // ZIP / OOXML
-  [0x50, 0x4b, 0x05, 0x06],
-  [0x1f, 0x8b], // gzip
-  [0x52, 0x61, 0x72, 0x21], // RAR
-  [0x37, 0x7a, 0xbc, 0xaf], // 7z
-  [0x7f, 0x45, 0x4c, 0x46], // ELF
-  [0x4d, 0x5a], // PE / DOS
-  [0xca, 0xfe, 0xba, 0xbe], // Mach-O fat / Java class
-  [0x25, 0x50, 0x44, 0x46], // PDF
-  [0x89, 0x50, 0x4e, 0x47], // PNG
-];
-
 export const assertGuestTextPayload = (buffer: Buffer) => {
-  for (const signature of BINARY_SIGNATURES) {
-    if (
-      buffer.length >= signature.length &&
-      signature.every((byte, index) => buffer[index] === byte)
-    ) {
-      throw new GuestAttachmentError(
-        400,
-        "GUEST_ATTACHMENT_TYPE_MISMATCH",
-        "The file contents do not match its file type."
-      );
-    }
-  }
-  if (buffer.includes(0x00)) {
+  const decoded = decodeAttachmentText(
+    new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+  );
+  if (!decoded.ok) {
     throw new GuestAttachmentError(
       400,
-      "GUEST_ATTACHMENT_TYPE_MISMATCH",
-      "The file contents do not match its file type."
+      decoded.reason === "binary"
+        ? "GUEST_ATTACHMENT_TYPE_MISMATCH"
+        : "GUEST_ATTACHMENT_UNREADABLE",
+      decoded.reason === "binary"
+        ? "The file contents do not match its file type."
+        : "The file could not be read as text."
     );
   }
-  const text = buffer.toString("utf8");
-  // Buffer.toString replaces every invalid sequence with U+FFFD, so a file
-  // that was not UTF-8 to begin with comes back visibly damaged. Written as an
-  // escape rather than the literal glyph so the repository's encoding check
-  // does not read this guard as its own bug.
-  if (text.includes("\uFFFD")) {
-    throw new GuestAttachmentError(
-      400,
-      "GUEST_ATTACHMENT_UNREADABLE",
-      "The file could not be read as text."
-    );
-  }
-  return text;
+  return decoded.text;
 };
 
 /**

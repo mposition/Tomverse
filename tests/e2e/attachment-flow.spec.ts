@@ -1,4 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type JSHandle,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import {
   createQaPdfBuffer,
   createQaPngBuffer,
@@ -50,9 +57,14 @@ async function pasteFile(page: Page, fileName: string, mimeType: string, buffer:
   );
 }
 
-async function dropFile(page: Page, fileName: string, mimeType: string, buffer: Buffer) {
+async function fileTransfer(
+  page: Page,
+  fileName: string,
+  mimeType: string,
+  buffer: Buffer
+) {
   const bytes = Array.from(buffer);
-  const transfer = await page.evaluateHandle(
+  return page.evaluateHandle(
     ({ bytes: fileBytes, fileName: name, mimeType: type }) => {
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(
@@ -62,11 +74,58 @@ async function dropFile(page: Page, fileName: string, mimeType: string, buffer: 
     },
     { bytes, fileName, mimeType }
   );
+}
 
-  const input = page.getByTestId("chat-input");
-  await input.dispatchEvent("dragover", { dataTransfer: transfer });
-  await input.dispatchEvent("drop", { dataTransfer: transfer });
+// A link or a text selection dragged across the canvas is somebody else's
+// gesture: `types` never contains "Files", and nothing may react to it.
+async function textTransfer(page: Page) {
+  return page.evaluateHandle(() => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", "https://example.com/not-a-file");
+    return dataTransfer;
+  });
+}
+
+async function dragOver(target: Locator, transfer: JSHandle<DataTransfer>) {
+  await target.dispatchEvent("dragenter", { dataTransfer: transfer });
+  await target.dispatchEvent("dragover", { dataTransfer: transfer });
+}
+
+async function dropOn(target: Locator, transfer: JSHandle<DataTransfer>) {
+  await dragOver(target, transfer);
+  await target.dispatchEvent("drop", { dataTransfer: transfer });
+}
+
+async function dropFile(page: Page, fileName: string, mimeType: string, buffer: Buffer) {
+  const transfer = await fileTransfer(page, fileName, mimeType, buffer);
+  await dropOn(page.getByTestId("chat-input"), transfer);
   await transfer.dispose();
+}
+
+/**
+ * The answer canvas of whichever shell is on screen. Both shells hand the
+ * same element to the composer, so the drop contract below is one contract
+ * asserted twice rather than two implementations.
+ */
+const conversationSurface = (page: Page, testInfo: TestInfo) =>
+  page.getByTestId(
+    testInfo.project.name.startsWith("mobile")
+      ? "mobile-conversation-surface"
+      : "desktop-conversation-surface"
+  );
+
+/** A region of the same screen that is deliberately not a chat drop target. */
+const outsideConversationSurface = (page: Page, testInfo: TestInfo) =>
+  page.getByTestId(
+    testInfo.project.name.startsWith("mobile")
+      ? "mobile-chat-header"
+      : "chat-sidebar"
+  );
+
+async function sendMessage(page: Page, prompt: string, answer: string) {
+  await page.getByTestId("chat-textarea").fill(prompt);
+  await page.getByRole("button", { name: /전송|Send|发送/ }).click();
+  await expect(page.getByText(answer, { exact: true }).first()).toBeVisible();
 }
 
 test.describe("attachment UX", () => {
@@ -119,6 +178,133 @@ test.describe("attachment UX", () => {
     await expect(page.getByText("Attachment QA response", { exact: true })).toBeVisible();
   });
 
+  test("a ZIP is attachable, and the files it left out are said out loud", async ({
+    page,
+  }) => {
+    // The bug this change started from: attaching a ZIP answered
+    // "지원하지 않는 파일 형식입니다." An archive is now a supported format,
+    // and what could not be read inside it is reported rather than silently
+    // missing from the answer.
+    uploadState.archive = { totalEntries: 9, includedFiles: 6, excludedFiles: 3 };
+    await attachFromComputer(page, {
+      name: "project.zip",
+      mimeType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]),
+    });
+
+    await expect(page.getByTestId("attachment-complete")).toBeVisible();
+    await expect(page.getByTestId("attachment-failed")).toHaveCount(0);
+    expect(uploadState.finalizeCount).toBe(1);
+    await expect(page.getByTestId("app-toast")).toHaveText(
+      "일부 파일은 지원되지 않아 제외되었습니다: 3개"
+    );
+
+    // The toast clears itself after four seconds. What it said has to survive
+    // that, or a person who looked away learns nothing until the answer comes
+    // back without the files they attached.
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveText(
+      "6개 읽음 · 3개 제외"
+    );
+    await expect(page.getByTestId("app-toast")).toHaveCount(0, {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveText(
+      "6개 읽음 · 3개 제외"
+    );
+  });
+
+  test("an archive with nothing skipped says so without a skipped count", async ({
+    page,
+  }) => {
+    // Zero is not a number worth putting on screen next to "skipped": it
+    // invites the reader to look for something that did not happen.
+    uploadState.archive = { totalEntries: 4, includedFiles: 4, excludedFiles: 0 };
+    await attachFromComputer(page, {
+      name: "clean.zip",
+      mimeType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]),
+    });
+
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveText(
+      "4개 읽음"
+    );
+    await expect(page.getByTestId("app-toast")).toHaveCount(0);
+  });
+
+  test("a file that is not an archive carries no summary", async ({ page }) => {
+    await attachFromComputer(page, {
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("hello\n", "utf8"),
+    });
+
+    await expect(page.getByTestId("attachment-complete")).toBeVisible();
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveCount(0);
+  });
+
+  test("a text file whose browser type is empty is still attachable", async ({
+    page,
+  }) => {
+    // Windows and several Android pickers report no media type at all for a
+    // .md, and the composer used to refuse it before the server saw a byte.
+    await attachFromComputer(page, {
+      name: "notes.md",
+      mimeType: "",
+      buffer: Buffer.from("# hello\n", "utf8"),
+    });
+
+    await expect(page.getByTestId("attachment-complete")).toBeVisible();
+    await expect(page.getByTestId("attachment-failed")).toHaveCount(0);
+    expect(uploadState.uploadCount).toBe(1);
+  });
+
+  test("an unsupported format is refused before anything is uploaded", async ({
+    page,
+  }) => {
+    await attachFromComputer(page, {
+      name: "clip.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from([0, 1, 2, 3]),
+    });
+
+    await expect(page.getByTestId("attachment-failed")).toBeVisible();
+    await expect(page.getByTestId("attachment-failed-reason")).toHaveText(
+      "지원하지 않는 파일 형식입니다."
+    );
+    expect(uploadState.prepareCount).toBe(0);
+    expect(uploadState.uploadCount).toBe(0);
+  });
+
+  test("the server's reason reaches the user instead of a generic retry", async ({
+    page,
+  }) => {
+    // The signed-in path used to throw the server's answer away: a corrupt
+    // PDF, an encrypted archive and a rate limit all produced
+    // "파일을 업로드하지 못했습니다. 다시 시도해 주세요."
+    uploadState.finalizeFailure = { status: 400, code: "ARCHIVE_ENCRYPTED" };
+    await attachFromComputer(page, {
+      name: "locked.zip",
+      mimeType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+    });
+
+    await expect(page.getByTestId("attachment-failed-reason")).toHaveText(
+      "암호화된 ZIP 파일은 지원하지 않습니다."
+    );
+
+    uploadState.finalizeFailure = { status: 400, code: "ATTACHMENT_ANIMATED_IMAGE" };
+    await page.getByTestId("attachment-failed-dismiss").click();
+    await attachFromComputer(page, {
+      name: "loop.gif",
+      mimeType: "image/gif",
+      buffer: Buffer.from("GIF89a", "ascii"),
+    });
+
+    await expect(page.getByTestId("attachment-failed-reason")).toHaveText(
+      "애니메이션 GIF는 지원하지 않습니다. 정지 이미지로 변환해 주세요."
+    );
+  });
+
   test("clipboard image paste creates one preview and upload pair", async ({ page }) => {
     await pasteFile(page, "clipboard.png", "image/png", createQaPngBuffer());
 
@@ -138,6 +324,137 @@ test.describe("attachment UX", () => {
     await expect.poll(() => uploadState.prepareCount).toBe(1);
     expect(uploadState.uploadCount).toBe(1);
     expect(uploadState.finalizeCount).toBe(1);
+  });
+
+  test("a file dropped on the empty conversation's welcome canvas is attached", async ({
+    page,
+  }, testInfo) => {
+    // The canvas used to swallow this: the handlers lived on the composer
+    // alone, so a file dropped on the screen a new chat actually shows -- the
+    // welcome surface -- did nothing at all.
+    await expect(page.getByTestId("chat-empty-state")).toBeVisible();
+    await expect(conversationSurface(page, testInfo)).toBeVisible();
+
+    const beforeUrl = page.url();
+    const transfer = await fileTransfer(
+      page,
+      "welcome-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+    await dropOn(page.getByTestId("chat-empty-state"), transfer);
+    await transfer.dispose();
+
+    await expect(page.getByAltText("welcome-drop.png")).toBeVisible();
+    await expect(page).toHaveURL(beforeUrl);
+    await expect.poll(() => uploadState.prepareCount).toBe(1);
+    expect(uploadState.uploadCount).toBe(1);
+    expect(uploadState.finalizeCount).toBe(1);
+  });
+
+  test("a file dropped on the message list of a conversation with answers is attached", async ({
+    page,
+  }, testInfo) => {
+    await sendMessage(page, "Canvas drop QA", "Attachment QA response");
+    await expect(conversationSurface(page, testInfo)).toBeVisible();
+
+    const messageList = page.getByTestId("chat-message-list").first();
+    await expect(messageList).toBeVisible();
+
+    const transfer = await fileTransfer(
+      page,
+      "transcript-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+    await dropOn(messageList, transfer);
+    await transfer.dispose();
+
+    await expect(
+      page.locator('[data-testid="chat-input"] img[alt="transcript-drop.png"]')
+    ).toBeVisible();
+    await expect.poll(() => uploadState.prepareCount).toBe(1);
+    expect(uploadState.uploadCount).toBe(1);
+    expect(uploadState.finalizeCount).toBe(1);
+  });
+
+  test("the canvas raises one drop overlay, holds it across children, and clears it on drop", async ({
+    page,
+  }, testInfo) => {
+    const surface = conversationSurface(page, testInfo);
+    const overlay = page.getByTestId("chat-conversation-drop-overlay");
+    const composerOverlay = page.getByTestId("chat-composer-drop-overlay");
+    await expect(overlay).toHaveCount(0);
+
+    const transfer = await fileTransfer(
+      page,
+      "overlay-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+
+    await dragOver(surface, transfer);
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toContainText("파일을 놓으면 첨부됩니다");
+    // The composer portals into this same canvas while the chat is empty. One
+    // drag must raise one overlay, or the same drop is handled twice.
+    await expect(composerOverlay).toHaveCount(0);
+
+    // Crossing into a child and back out of it is enter/leave traffic the
+    // overlay must sit still through.
+    const child = page.getByTestId("chat-empty-state");
+    await child.dispatchEvent("dragenter", { dataTransfer: transfer });
+    await surface.dispatchEvent("dragleave", { dataTransfer: transfer });
+    await expect(overlay).toBeVisible();
+
+    await surface.dispatchEvent("drop", { dataTransfer: transfer });
+    await transfer.dispose();
+
+    await expect(overlay).toHaveCount(0);
+    await expect(page.getByAltText("overlay-drop.png")).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+  });
+
+  test("a drag that carries no file leaves the canvas alone", async ({
+    page,
+  }, testInfo) => {
+    const surface = conversationSurface(page, testInfo);
+    const transfer = await textTransfer(page);
+
+    await dragOver(surface, transfer);
+    await expect(page.getByTestId("chat-conversation-drop-overlay")).toHaveCount(0);
+
+    await surface.dispatchEvent("drop", { dataTransfer: transfer });
+    await transfer.dispose();
+
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
+    expect(uploadState.prepareCount).toBe(0);
+    expect(uploadState.uploadCount).toBe(0);
+  });
+
+  test("a file dropped outside the conversation canvas uploads nothing", async ({
+    page,
+  }, testInfo) => {
+    const outside = outsideConversationSurface(page, testInfo);
+    await expect(outside).toBeVisible();
+
+    const beforeUrl = page.url();
+    const transfer = await fileTransfer(
+      page,
+      "stray-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+    await dropOn(outside, transfer);
+    await transfer.dispose();
+
+    // The window-level guard still stops the browser opening the file; what
+    // it must not do is turn every drop on the page into an attachment.
+    await expect(page).toHaveURL(beforeUrl);
+    await expect(page.getByTestId("chat-conversation-drop-overlay")).toHaveCount(0);
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
+    expect(uploadState.prepareCount).toBe(0);
+    expect(uploadState.uploadCount).toBe(0);
   });
 
   test("image attachments disable text-only models and keep a vision model available", { tag: ["@smoke", "@review-parity"] }, async ({ page }) => {

@@ -6,6 +6,11 @@ import {
     ASSISTANT_KNOWLEDGE_RETENTION,
     type KnowledgeCleanupReason,
 } from "@/lib/assistantKnowledgeLimits";
+import {
+    describeKnowledgeCleanupQueue,
+    type KnowledgeCleanupDryRun,
+} from "@/lib/assistantKnowledgeCleanupDryRunCore";
+import type { KnowledgeProcessingSweepResult } from "@/lib/assistantKnowledgeProcessor";
 import { prisma } from "@/lib/prisma";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 
@@ -82,8 +87,17 @@ export type KnowledgeCleanupSweepResult = {
  * Failures are recorded, never thrown: a storage outage must not take the rest
  * of the maintenance run down with it.
  */
+/**
+ * How many tombstones one execution takes.
+ *
+ * Exported because the dry run reports it: a cap quoted from a second literal
+ * is a cap that can drift from the one the run actually uses, and the operator
+ * reading "200" would have no way to tell.
+ */
+export const KNOWLEDGE_CLEANUP_EXECUTION_LIMIT = 200;
+
 export const drainKnowledgeCleanupQueue = async (
-    limit = 200,
+    limit = KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
     now = new Date()
 ): Promise<KnowledgeCleanupSweepResult> => {
     const pending = await prisma.assistantKnowledgeCleanup.findMany({
@@ -136,6 +150,43 @@ export const drainKnowledgeCleanupQueue = async (
 
     return { examined: pending.length, deleted, failed, exhausted };
 };
+
+/**
+ * Counts the tombstone queue for a retention dry run.
+ *
+ * Two counts and one timestamp, never the rows: `select` names `createdAt` and
+ * nothing else, so an object key cannot reach the audit log through here even
+ * by accident. The split is queried rather than derived because the ceiling is
+ * what separates a backlog the run will clear from one waiting on an operator.
+ */
+export const readKnowledgeCleanupQueueDryRun =
+    async (): Promise<KnowledgeCleanupDryRun> => {
+        const [retryable, exhausted, oldest] = await Promise.all([
+            prisma.assistantKnowledgeCleanup.count({
+                where: {
+                    completedAt: null,
+                    attempts: { lt: ASSISTANT_KNOWLEDGE_RETENTION.cleanupMaxAttempts },
+                },
+            }),
+            prisma.assistantKnowledgeCleanup.count({
+                where: {
+                    completedAt: null,
+                    attempts: { gte: ASSISTANT_KNOWLEDGE_RETENTION.cleanupMaxAttempts },
+                },
+            }),
+            prisma.assistantKnowledgeCleanup.findFirst({
+                where: { completedAt: null },
+                orderBy: { createdAt: "asc" },
+                select: { createdAt: true },
+            }),
+        ]);
+        return describeKnowledgeCleanupQueue({
+            retryable,
+            exhausted,
+            oldestPendingAt: oldest?.createdAt ?? null,
+            executionLimit: KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
+        });
+    };
 
 export type AbandonedKnowledgeSweepResult = {
     deleted: number;
@@ -219,4 +270,60 @@ export const sweepAbandonedKnowledgeObjects = async (
     }
 
     return { deleted, failed, listed: true };
+};
+
+
+export type KnowledgeMaintenanceResult = {
+    cleanup: KnowledgeCleanupSweepResult;
+    processing: KnowledgeProcessingSweepResult;
+};
+
+/**
+ * The ride-along for the fifteen-minute maintenance cron.
+ *
+ * §14.2 says knowledge follows the image asset pattern -- DB-first tombstone
+ * plus the fifteen-minute sweep -- and for a while it followed only half of
+ * that. The tombstone shape was right and the drain was wired to the daily
+ * `cleanupExpiredData()` instead, so a deleted file kept its bytes for up to
+ * twenty-four hours and a stalled extraction stayed stalled for the same,
+ * despite a ten-minute staleness threshold that only makes sense against a
+ * much shorter cadence. See
+ * `.github/audits/knowledge-sweep-cadence-2026-08-23.md`.
+ *
+ * Two of the three knowledge arms belong here. The third does not:
+ * `sweepAbandonedKnowledgeObjects()` lists a bucket prefix, which is the
+ * expensive one and answers a question -- "is there an object no row ever
+ * claimed" -- that nobody is waiting on. It stays daily.
+ *
+ * Never throws, the same contract every other ride-along on this route holds:
+ * a failure here cannot turn a successful credit reconciliation into a failed
+ * one.
+ */
+export const runKnowledgeMaintenanceQuietly = async (
+    now = new Date()
+): Promise<KnowledgeMaintenanceResult> => {
+    const empty = {
+        cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
+        processing: { reclaimed: 0, processed: 0, ready: 0, failed: 0 },
+    };
+    try {
+        const cleanup = await drainKnowledgeCleanupQueue(
+            KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
+            now
+        );
+        // Bounded well below the drain, for the reason the image thumbnail
+        // repair is: each one reads a whole object and extracts its text, so
+        // this is the expensive arm and must not stretch the cadence it runs
+        // on. The daily job keeps its own larger pass.
+        const { processPendingKnowledgeFiles } = await import(
+            "@/lib/assistantKnowledgeProcessor"
+        );
+        const processing = await processPendingKnowledgeFiles(now, 5).catch(
+            () => empty.processing
+        );
+        return { cleanup, processing };
+    } catch (error) {
+        console.error("Assistant knowledge maintenance failed:", error);
+        return empty;
+    }
 };

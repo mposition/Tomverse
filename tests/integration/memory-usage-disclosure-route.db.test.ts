@@ -83,7 +83,8 @@ const seedOwner = async () => {
 const seedAnswer = (
     conversationId: string,
     memoryUsedCount: number | null,
-    createdAt: Date
+    createdAt: Date,
+    knowledgeChunkCount: number | null = null
 ) =>
     prisma.message.create({
         data: {
@@ -93,6 +94,7 @@ const seedAnswer = (
             createdAt,
             memoryUsedCount,
             memoryTokens: memoryUsedCount === null ? null : 120,
+            knowledgeChunkCount,
         },
     });
 
@@ -115,6 +117,34 @@ test("reopening a conversation restates how many memories an answer was given", 
     assert.equal(body.messages[0].memoryUsedCount, 3);
 });
 
+test("reopening a conversation restates the profile knowledge too", async () => {
+    // docs/policy/external-conversation-import-and-memory.md §14.3. Two counts on one
+    // answer, each restated as itself -- the point
+    // of the pair is that a reader can tell an answer built from their own
+    // uploaded files from one built from their stored memories.
+    const { user, conversation } = await seedOwner();
+    await seedAnswer(conversation.id, 2, new Date("2026-08-06T00:00:00.000Z"), 3);
+
+    const { response, body } = await readConversation(user.id, conversation.id);
+    assert.equal(response.status, 200);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].memoryUsedCount, 2);
+    assert.equal(body.messages[0].knowledgeChunkCount, 3);
+});
+
+test("profile knowledge is restated even when no memory reached the answer", async () => {
+    // The two are independent: a profile with knowledge files can answer an
+    // account whose memory is off, and the disclosure has to say so without
+    // inventing a memory count.
+    const { user, conversation } = await seedOwner();
+    await seedAnswer(conversation.id, null, new Date("2026-08-06T00:00:00.000Z"), 4);
+
+    const { body } = await readConversation(user.id, conversation.id);
+    assert.equal(body.messages.length, 1);
+    assert.equal("memoryUsedCount" in body.messages[0], false);
+    assert.equal(body.messages[0].knowledgeChunkCount, 4);
+});
+
 test("an answer that was given nothing carries no count at all", async () => {
     // `null` (the request could not inject) and `0` (retrieval chose nothing)
     // are different facts, and §13.4 forbids indicating either. The field is
@@ -132,7 +162,29 @@ test("an answer that was given nothing carries no count at all", async () => {
             false,
             "an answer with nothing to disclose must not carry the key"
         );
+        // docs/policy/external-conversation-import-and-memory.md §14.3 reads `null` and
+        // `0` the same way, and seedAnswer leaves the
+        // knowledge column NULL here, so both answers must also be silent
+        // about knowledge.
+        assert.equal(
+            "knowledgeChunkCount" in message,
+            false,
+            "an answer with no knowledge to disclose must not carry the key"
+        );
     }
+});
+
+test("a knowledge count of zero is silence, not a zero on the wire", async () => {
+    // The distinction the column exists to keep: 0 means a bundle was
+    // verified and knowledge retrieval selected nothing, which
+    // docs/policy/external-conversation-import-and-memory.md §14.3 forbids
+    // indicating just as firmly as it forbids indicating NULL.
+    const { user, conversation } = await seedOwner();
+    await seedAnswer(conversation.id, null, new Date("2026-08-06T00:00:00.000Z"), 0);
+
+    const { body } = await readConversation(user.id, conversation.id);
+    assert.equal(body.messages.length, 1);
+    assert.equal("knowledgeChunkCount" in body.messages[0], false);
 });
 
 test("the token figure is never part of the read", async () => {

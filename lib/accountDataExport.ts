@@ -412,6 +412,26 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // What an approved retirement did to their stored model settings. The
+  // person is entitled to know we changed a setting of theirs and what it held
+  // before; the operator who ran it and the ticket that authorised it are an
+  // internal decision about the catalogue, not a fact about them. workItemId
+  // names a row in the lifecycle queue, which they cannot read either.
+  modelMigrationRecord: (userId) =>
+    prisma.modelMigrationRecord.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        field: true,
+        fromModelId: true,
+        toModelId: true,
+        changedAt: true,
+      },
+      orderBy: { changedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   emailPreference: (userId) =>
     prisma.emailPreference.findMany({
       where: { userId },
@@ -637,6 +657,47 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         status: true,
         failureCode: true,
         modelId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // The files this account attached to its own messages. Same shape of gap as
+  // the generated files above -- the bytes are in object storage, so the
+  // export describes what exists rather than pretending it was delivered --
+  // and `objectKey` is absent for the same reason: it is Tomverse's address
+  // for the object and means nothing to the person holding the original.
+  messageAttachment: (userId) =>
+    prisma.messageAttachment.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        messageId: true,
+        conversationId: true,
+        ordinal: true,
+        name: true,
+        mediaType: true,
+        size: true,
+        kind: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // Uploads that were never sent. Usually empty: an upload becomes a message
+  // attachment the moment the message it belongs to is saved.
+  messageAttachmentUpload: (userId) =>
+    prisma.messageAttachmentUpload.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        name: true,
+        mediaType: true,
+        size: true,
+        kind: true,
+        boundAt: true,
         createdAt: true,
       },
       orderBy: { createdAt: "asc" },

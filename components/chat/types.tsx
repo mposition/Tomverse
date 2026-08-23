@@ -7,8 +7,54 @@ export type ChatAttachment = {
   name: string;
   mediaType: string;
   size: number;
+  /**
+   * A local preview only -- a `data:` or `blob:` URL for an image thumbnail.
+   * Never sent to the server and never stored: the serializers in
+   * lib/chatMessageSerialization.ts drop it.
+   */
   data?: string;
+  /**
+   * The opaque id the upload finalisation step issued, before this attachment
+   * has been bound to a saved message.
+   *
+   * This replaced the storage key the composer used to hold. A key in browser
+   * memory is a key in a request body, and a key in a request body is
+   * something a route has to decide whether to believe
+   * (docs/policy/user-attachment-persistence.md).
+   */
+  uploadId?: string;
+  /**
+   * The `MessageAttachment` id, once the message this file belongs to has been
+   * saved. What a reloaded conversation carries, and what a later turn names
+   * to have the server read the file again.
+   */
+  attachmentId?: string;
+  /**
+   * A guest's ephemeral object key. Guests have no account to hang a durable
+   * row on, so their key is derived from their own signed guest identity and
+   * is self-authorising; a signed-in composer never sets this.
+   */
   objectKey?: string;
+  /**
+   * What the server made of an archive: how many entries it will read and how
+   * many it left out.
+   *
+   * Runtime only, and display only. The count used to exist solely in a
+   * four-second toast, so a person who looked away never learned that two of
+   * the files they attached were not going to be read -- and later saw an
+   * answer that did not mention them, with nothing on screen to explain why.
+   * The chip carries it for as long as the file is attached.
+   *
+   * It is not sent anywhere: `lib/chatMessageSerialization.ts` is an
+   * allowlist, so this field is dropped from every request and every stored
+   * message without needing a rule of its own. The server recomputes the plan
+   * on the turn that sends the archive; this is a copy of what it already
+   * said, not an input to it.
+   */
+  archive?: {
+    includedFiles: number;
+    excludedFiles: number;
+  };
   kind: "file" | "text";
 };
 
@@ -67,6 +113,14 @@ export type Message = {
    */
   routedModelId?: string;
   routedReason?: string | null;
+  /**
+   * docs/policy/external-conversation-import-and-memory.md §14.3: how many
+   * assistant-profile knowledge excerpts this answer's prompt
+   * carried. Same provenance and same handling as `memoryUsedCount` directly
+   * above -- the server's own count, absent below one, and outside the
+   * serializer allowlists so it never rides a transcript or localStorage.
+   */
+  knowledgeChunkCount?: number;
   /**
    * Files this answer produced (docs/policy/generated-artifacts.md).
    *

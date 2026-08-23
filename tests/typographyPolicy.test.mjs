@@ -201,7 +201,10 @@ test("every email template shares one web-safe font policy", () => {
     "lib/billingEmails.ts",
     "lib/feedbackLifecycleEmails.ts",
     "lib/emailLoginEmails.ts",
-    "lib/providerModelCatalogReport.ts",
+    // The daily model lifecycle report moved its rendering here when it moved
+    // onto the standard lane: providerModelCatalogReport.ts now builds the
+    // payload and enqueues, and renders no HTML of its own.
+    "lib/modelLifecycleDailyEmail.ts",
     "app/api/admin/test-email/route.ts",
     // The support notification moved out of app/api/feedback/route.ts when it
     // gained a retry queue: the same mail is now rendered by the submission

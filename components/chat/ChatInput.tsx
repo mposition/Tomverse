@@ -58,6 +58,13 @@ import type {
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  attachmentKindForFormat,
+  chatAttachmentAcceptAttribute,
+  chatAttachmentExtensionsByGroup,
+  resolveChatAttachmentFormat,
+} from "@/lib/chatAttachmentFormats";
+import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
 import {
   CONVERSATION_MEMORY_MODES,
@@ -113,10 +120,7 @@ import {
   draftKeyFor,
   type AttachmentsChangeHandler,
 } from "@/components/chat/useConversationDrafts";
-import {
-  GUEST_ACCEPTED_MEDIA_TYPES,
-  type ChatAttachmentCapabilities,
-} from "@/lib/guestAttachmentPolicy";
+import { type ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -176,45 +180,18 @@ const interpolateCopy = (
     (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
     template
   );
-const TEXT_FILE_TYPES = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-]);
-const OFFICE_FILE_TYPES = new Set([
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.oasis.opendocument.text",
-  "application/vnd.oasis.opendocument.spreadsheet",
-  "application/vnd.oasis.opendocument.presentation",
-]);
-const OFFICE_EXTENSION_TYPES: Record<string, string> = {
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  odt: "application/vnd.oasis.opendocument.text",
-  ods: "application/vnd.oasis.opendocument.spreadsheet",
-  odp: "application/vnd.oasis.opendocument.presentation",
-};
-const ACCEPTED_FILE_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "application/pdf",
-  ...TEXT_FILE_TYPES,
-  ...OFFICE_FILE_TYPES,
-  ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
-].join(",");
+/**
+ * Everything about which files may be picked now comes from the shared
+ * registry (`lib/chatAttachmentFormats.ts`). What used to live here was four
+ * literals -- a text set, an Office set, an Office extension repair map and a
+ * joined `accept` string -- and the repair map covered only the six Office
+ * extensions. A `.txt`, `.md`, `.csv` or `.json` whose browser-reported type
+ * came back empty therefore failed this component's own guard before the
+ * server was ever asked, which is a rejection the server would not have made.
+ */
+const ACCEPTED_FILE_TYPES = chatAttachmentAcceptAttribute();
 
-// A guest's picker offers the same formats minus nothing the server would
-// refuse anyway; the extension aliases stay so a `.docx` whose browser-reported
-// type is empty is still selectable.
-const GUEST_ACCEPT_ATTRIBUTE = [
-  ...GUEST_ACCEPTED_MEDIA_TYPES,
-  ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
-].join(",");
+const GUEST_ACCEPT_ATTRIBUTE = chatAttachmentAcceptAttribute({ guest: true });
 
 /**
  * A signed-in account with an attachment-capable plan. The composer is used in
@@ -229,17 +206,17 @@ const DEFAULT_ATTACHMENT_CAPABILITIES: ChatAttachmentCapabilities = {
   attachmentPersistence: "account",
 };
 
-const getFileMediaType = (file: File) => {
-  if (TEXT_FILE_TYPES.has(file.type) || OFFICE_FILE_TYPES.has(file.type)) {
-    return file.type;
-  }
-  if (["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(file.type)) {
-    return file.type;
-  }
-
-  const extension = file.name.split(".").pop()?.toLowerCase() || "";
-  return OFFICE_EXTENSION_TYPES[extension] || file.type || "application/octet-stream";
-};
+/**
+ * What this file actually is, from its name and whatever the browser managed
+ * to say about it. `File.type` is a hint here exactly as it is on the server:
+ * the same function decides in both places, so the client can pre-empt a
+ * rejection without being able to invent one.
+ */
+const getFileFormat = (file: File) =>
+  resolveChatAttachmentFormat({
+    filename: file.name,
+    declaredMediaType: file.type,
+  });
 
 const fileToDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -257,6 +234,181 @@ const fileToDataUrl = (file: File) =>
 
 const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
   Boolean(dataTransfer && Array.from(dataTransfer.types).includes("Files"));
+
+/**
+ * A drag one drop surface has already taken responsibility for.
+ *
+ * While a chat is empty the composer portals *into* the conversation canvas
+ * (ChatWelcomeScreen's input slot), so one drop travels through both drop
+ * surfaces. Marking the DOM event is what makes "handled once" a property of
+ * the event rather than of a containment test -- and containment is exactly
+ * what is stale for the render in which the composer moves between its two
+ * slots, because the portal host is moved in an effect. The canvas listens in
+ * the capture phase, so on a nested drop the canvas claims the event and the
+ * composer stands down: one overlay, one upload, wherever the pointer is.
+ */
+const claimedDragEvents = new WeakSet<Event>();
+const claimDragEvent = (event: Event) => {
+  if (claimedDragEvents.has(event)) return false;
+  claimedDragEvents.add(event);
+  return true;
+};
+const isDragEventClaimed = (event: Event) => claimedDragEvents.has(event);
+
+/**
+ * Regions inside the conversation canvas that own what a dropped file means.
+ * A dialog opened over the canvas is not part of the question being composed,
+ * and a surface that declares itself a dropzone has already answered.
+ */
+const DROP_EXCLUDED_SELECTOR =
+  '[data-chat-drop-exclude="true"],[role="dialog"],[role="alertdialog"]';
+
+const isExcludedDropTarget = (target: EventTarget | null) =>
+  target instanceof Element && Boolean(target.closest(DROP_EXCLUDED_SELECTOR));
+
+/**
+ * What a drop surface says while a file is over it. Shared by the composer's
+ * own zone and by the conversation canvas so the two cannot drift into saying
+ * different things about the same gesture.
+ */
+function DropGuidance({
+  title,
+  description,
+}: {
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-4">
+      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm shadow-blue-950/20">
+        <Paperclip className="h-5 w-5" />
+      </span>
+      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+        {title}
+      </span>
+      {description ? (
+        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          {description}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The conversation canvas as a drop target for the composer's own upload
+ * path.
+ *
+ * The listeners are native and are registered on an element this component
+ * does not render, which is the point: a shell hands over its answer canvas
+ * and gets the composer's format checks, size limits, attachment count, guest
+ * Turnstile step and error copy with it, instead of growing a second copy of
+ * all of them. Nothing about `window` changes -- the window-level handlers
+ * stay the safety net that stops the browser navigating to a dropped file,
+ * and uploading stays scoped to this element.
+ */
+function useConversationDropSurface({
+  surface,
+  canAttach,
+  onFiles,
+  onRefused,
+}: {
+  surface: HTMLElement | null;
+  canAttach: boolean;
+  onFiles: (files: FileList) => void;
+  onRefused: () => void;
+}) {
+  const [isDragActive, setIsDragActive] = useState(false);
+  // `dragenter`/`dragleave` fire for every element the pointer crosses, so a
+  // drag moving between children reports leaving one before entering the
+  // next. Counting depth rather than holding a boolean is what stops the
+  // overlay flickering on the way across the canvas.
+  const depthRef = useRef(0);
+  const latestRef = useRef({ canAttach, onFiles, onRefused });
+  useEffect(() => {
+    latestRef.current = { canAttach, onFiles, onRefused };
+  });
+
+  useEffect(() => {
+    if (!surface) return;
+
+    const reset = () => {
+      depthRef.current = 0;
+      setIsDragActive(false);
+    };
+
+    // Text, links and everything else that is not a file are somebody else's
+    // gesture, and so is anything over a region that owns its own drop.
+    const claim = (event: DragEvent) => {
+      if (!hasDraggedFiles(event.dataTransfer)) return false;
+      if (isExcludedDropTarget(event.target)) return false;
+      return claimDragEvent(event);
+    };
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!claim(event)) return;
+      event.preventDefault();
+      depthRef.current += 1;
+      setIsDragActive(true);
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+      if (!claim(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = latestRef.current.canAttach
+          ? "copy"
+          : "none";
+      }
+      // A drag already in progress when this surface mounted never reported
+      // an enter of its own, so the first `dragover` is the only evidence
+      // that the pointer is here.
+      if (depthRef.current === 0) depthRef.current = 1;
+      setIsDragActive(true);
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!claim(event)) return;
+      depthRef.current = Math.max(0, depthRef.current - 1);
+      if (depthRef.current === 0) setIsDragActive(false);
+    };
+
+    const handleDrop = (event: DragEvent) => {
+      if (!claim(event)) return;
+      event.preventDefault();
+      reset();
+      if (!latestRef.current.canAttach) {
+        latestRef.current.onRefused();
+        return;
+      }
+      const files = event.dataTransfer?.files;
+      if (files?.length) latestRef.current.onFiles(files);
+    };
+
+    surface.addEventListener("dragenter", handleDragEnter, true);
+    surface.addEventListener("dragover", handleDragOver, true);
+    surface.addEventListener("dragleave", handleDragLeave, true);
+    surface.addEventListener("drop", handleDrop, true);
+    // A drag can end without this element hearing about it: cancelled with
+    // Escape, dropped on another window, or the tab losing focus entirely.
+    window.addEventListener("dragend", reset);
+    window.addEventListener("blur", reset);
+
+    return () => {
+      surface.removeEventListener("dragenter", handleDragEnter, true);
+      surface.removeEventListener("dragover", handleDragOver, true);
+      surface.removeEventListener("dragleave", handleDragLeave, true);
+      surface.removeEventListener("drop", handleDrop, true);
+      window.removeEventListener("dragend", reset);
+      window.removeEventListener("blur", reset);
+      // A canvas that goes away mid-drag -- an image conversation replacing
+      // the chat surface, a shell swap -- must not leave its overlay behind.
+      reset();
+    };
+  }, [surface]);
+
+  return isDragActive;
+}
 
 // UI-STATE-002. An attachment that is still on its way in. `stage` is the
 // step actually running, so "uploading" (bytes leaving the browser) and
@@ -281,6 +433,26 @@ type FailedAttachment = {
   reason: string;
   file: File;
   scopeId: string;
+};
+
+/**
+ * The archive summary a chip carries, from whichever upload path answered.
+ *
+ * Both endpoints report the same three counts, and both may omit the block
+ * entirely -- a `.txt` has no plan. Read through one function so the chip and
+ * the toast cannot disagree about what the server said.
+ */
+const archiveSummaryOf = (archive?: {
+  includedFiles?: number;
+  excludedFiles?: number;
+} | null) => {
+  const included = Number(archive?.includedFiles);
+  const excluded = Number(archive?.excludedFiles);
+  if (!Number.isFinite(included) && !Number.isFinite(excluded)) return undefined;
+  return {
+    includedFiles: Number.isFinite(included) ? included : 0,
+    excludedFiles: Number.isFinite(excluded) ? excluded : 0,
+  };
 };
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
@@ -443,6 +615,18 @@ type ChatInputProps = {
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
   isDeepResearchPending?: boolean;
   onDismissDeepResearchChip?: () => void;
+  /**
+   * The answer canvas of the conversation this composer is composing for.
+   * Files dropped anywhere on it run this composer's upload path and land in
+   * this composer's draft, so dropping on a message list, on the welcome
+   * surface or on one of several model panels all mean the same thing --
+   * attach to the next question -- rather than nothing at all.
+   *
+   * The shells pass the element itself rather than rendering their own
+   * handlers: the format table, size and count limits, guest verification
+   * step and error copy live here and stay in one place.
+   */
+  conversationDropSurface?: HTMLElement | null;
 };
 
 type GooglePickerConfig = {
@@ -562,6 +746,7 @@ export function ChatInput({
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
   onDismissDeepResearchChip,
+  conversationDropSurface = null,
 }: ChatInputProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -658,35 +843,97 @@ export function ChatInput({
       ? GUEST_ACCEPT_ATTRIBUTE
       : ACCEPTED_FILE_TYPES;
     const { requestToken: requestGuestVerificationToken } = useGuestVerification();
-    // Every guest upload rejection the server can produce, mapped to the one
-    // sentence that tells the user what to do about it. An unrecognised code
-    // falls back to the generic "could not be processed" rather than surfacing
-    // a server string.
+    /**
+     * Every upload rejection the server can produce, mapped to the one
+     * sentence that tells the user what to do about it.
+     *
+     * Shared by both upload paths now. The guest path always had a switch
+     * like this; the signed-in path threw the server's answer away and showed
+     * "Couldn't upload the file. Please try again." for a corrupt PDF, an
+     * animated GIF, an encrypted archive and a rate limit alike -- and "try
+     * again" was wrong advice for all four. The code-to-key map lives in
+     * `lib/chatAttachmentErrorCopy.ts` so a new refusal code cannot ship
+     * without a sentence.
+     */
+    const attachmentErrorMessage = useCallback(
+      (code?: string | null, fallbackKey = "chat.attachmentUploadError") => {
+        const key = chatAttachmentErrorCopyKey(code);
+        if (!key) return t(fallbackKey);
+        if (
+          key === "chat.guestAttachmentSizeError" ||
+          key === "chat.attachmentSizeError"
+        ) {
+          return isEphemeralAttachment
+            ? interpolateCopy(t("chat.guestAttachmentSizeError"), {
+                megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
+              })
+            : t("chat.attachmentSizeError");
+        }
+        return t(key);
+      },
+      [isEphemeralAttachment, maxAttachmentBytes, t]
+    );
     const guestAttachmentErrorMessage = useCallback(
       (code?: string) => {
-        switch (code) {
-          case "GUEST_ATTACHMENT_UNSUPPORTED_TYPE":
-          case "GUEST_ATTACHMENT_TYPE_MISMATCH":
-            return t("chat.guestAttachmentUnsupported");
-          case "GUEST_ATTACHMENT_TOO_LARGE":
-            return interpolateCopy(t("chat.guestAttachmentSizeError"), {
-              megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
-            });
-          case "GUEST_ATTACHMENT_TEXT_TOO_LARGE":
-            return t("chat.guestAttachmentTextTooLarge");
-          case "GUEST_ATTACHMENT_NO_TEXT":
-          case "GUEST_ATTACHMENT_UNREADABLE":
-            return t("chat.guestAttachmentUnreadable");
-          case "API_RATE_LIMITED":
-            return t("chat.compareRateLimited");
-          case "ATTACHMENTS_DISABLED_BY_ADMIN":
-            return t("chat.guestAttachmentUnavailable");
-          default:
-            return t("chat.guestAttachmentFailed");
+        if (code === "GUEST_ATTACHMENT_TOO_LARGE") {
+          return interpolateCopy(t("chat.guestAttachmentSizeError"), {
+            megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
+          });
         }
+        return attachmentErrorMessage(code, "chat.guestAttachmentFailed");
       },
-      [maxAttachmentBytes, t]
+      [attachmentErrorMessage, maxAttachmentBytes, t]
     );
+    /**
+     * An archive that arrived with entries this product cannot read is not a
+     * failure -- the readable ones are attached and usable -- but it is also
+     * not nothing. Said once, at upload, while the person is still looking at
+     * the file they picked, rather than left for them to notice missing from
+     * an answer.
+     */
+    const noticeArchiveExclusions = useCallback(
+      (archive?: { includedFiles?: number; excludedFiles?: number } | null) => {
+        const excluded = Number(archive?.excludedFiles) || 0;
+        if (excluded <= 0) return;
+        dispatchAppToast(
+          interpolateCopy(t("chat.archiveExcludedNotice"), { count: excluded }),
+          "info"
+        );
+      },
+      [t]
+    );
+    /**
+     * What may be attached, grouped, derived from the shared registry rather
+     * than typed next to it -- so a format cannot be added to the picker and
+     * left out of the sentence that tells people it exists.
+     *
+     * The long groups are capped on screen and given in full in the tooltip:
+     * forty source-code extensions is a list nobody reads, and "+28 more"
+     * says the same thing in a line.
+     */
+    const supportedFormatGroups = useMemo(() => {
+      const groups = chatAttachmentExtensionsByGroup({
+        guest: isEphemeralAttachment,
+      });
+      const labels: Record<string, string> = {
+        image: t("chat.attachFormatGroupImage"),
+        document: t("chat.attachFormatGroupDocument"),
+        data: t("chat.attachFormatGroupData"),
+        markup: t("chat.attachFormatGroupMarkup"),
+        code: t("chat.attachFormatGroupCode"),
+        archive: t("chat.attachFormatGroupArchive"),
+      };
+      const VISIBLE = 10;
+      return Object.entries(groups)
+        .filter(([, extensions]) => extensions.length > 0)
+        .map(([group, extensions]) => ({
+          group,
+          label: labels[group] || group,
+          shown: extensions.slice(0, VISIBLE).join(", "),
+          overflow: Math.max(0, extensions.length - VISIBLE),
+          all: extensions.join(", "),
+        }));
+    }, [isEphemeralAttachment, t]);
   const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
@@ -1611,7 +1858,8 @@ export function ChatInput({
    */
   const uploadOneFile = useCallback(
     async (file: File, trackingId: string, scopeId: string) => {
-      const mediaType = getFileMediaType(file);
+      const format = getFileFormat(file);
+      const mediaType = format?.mediaType || file.type || "application/octet-stream";
       const fail = (reason: string) => {
         setPendingAttachments((current) =>
           current.filter((item) => item.id !== trackingId)
@@ -1622,11 +1870,10 @@ export function ChatInput({
         ]);
       };
 
-      const isTypeAccepted = isEphemeralAttachment
-        ? (GUEST_ACCEPTED_MEDIA_TYPES as readonly string[]).includes(mediaType)
-        : ACCEPTED_FILE_TYPES.split(",").includes(mediaType) ||
-          OFFICE_FILE_TYPES.has(mediaType);
-      if (!isTypeAccepted) {
+      const isTypeAccepted = Boolean(
+        format && (!isEphemeralAttachment || format.guestAllowed)
+      );
+      if (!format || !isTypeAccepted) {
         fail(t("chat.attachmentTypeError"));
         return;
       }
@@ -1700,6 +1947,7 @@ export function ChatInput({
             mediaType: string;
             size: number;
             kind: "text" | "file";
+            archive?: { includedFiles?: number; excludedFiles?: number };
           };
           const guestAttachment: ChatAttachment = {
             id: crypto.randomUUID(),
@@ -1711,11 +1959,13 @@ export function ChatInput({
               ? await fileToDataUrl(file)
               : undefined,
             kind: uploaded.kind,
+            archive: archiveSummaryOf(uploaded.archive),
           };
           setPendingAttachments((current) =>
             current.filter((item) => item.id !== trackingId)
           );
           onAttachmentsChange((current) => [...current, guestAttachment], scopeId);
+          noticeArchiveExclusions(uploaded.archive);
           return;
         }
 
@@ -1729,8 +1979,11 @@ export function ChatInput({
           }),
         });
         if (!prepareResponse.ok) {
-          await discardResponseBody(prepareResponse);
-          throw new Error("Failed to prepare upload.");
+          const prepared = (await prepareResponse
+            .json()
+            .catch(() => null)) as { code?: string } | null;
+          fail(attachmentErrorMessage(prepared?.code));
+          return;
         }
 
         const { key, uploadUrl, uploadHeaders } = await prepareResponse.json();
@@ -1761,26 +2014,49 @@ export function ChatInput({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             key,
+            name: file.name,
             mediaType,
             size: file.size,
           }),
         });
         if (!finalizeResponse.ok) {
-          await discardResponseBody(finalizeResponse);
-          throw new Error(`R2 validation failed: ${finalizeResponse.status}`);
+          // The server said why. Until now this threw the answer away and the
+          // catch below showed "try again" for every cause there is.
+          const finalizeError = (await finalizeResponse
+            .json()
+            .catch(() => null)) as { code?: string } | null;
+          fail(attachmentErrorMessage(finalizeError?.code));
+          return;
         }
-        const finalized = await finalizeResponse.json();
+        const finalized = (await finalizeResponse.json()) as {
+          uploadId?: string;
+          name?: string;
+          size?: number;
+          kind?: "file" | "text";
+          archive?: { includedFiles?: number; excludedFiles?: number };
+        };
 
+        /*
+          The storage key stops here.
+
+          Finalisation is the last step that knows one; what it hands back is
+          an opaque upload id, and that is what the composer holds, what the
+          send carries, and what the message save binds. A key the browser
+          keeps is a key a request body carries, and a key in a request body is
+          something a route then has to decide whether to believe
+          (docs/policy/user-attachment-persistence.md).
+        */
         const attachment: ChatAttachment = {
           id: crypto.randomUUID(),
-          name: file.name,
+          name: finalized.name || file.name,
           mediaType,
           size: finalized.size || file.size,
-          objectKey: key,
+          uploadId: finalized.uploadId,
           data: mediaType.startsWith("image/")
             ? await fileToDataUrl(file)
             : undefined,
-          kind: TEXT_FILE_TYPES.has(mediaType) ? "text" : "file",
+          kind: finalized.kind || attachmentKindForFormat(format),
+          archive: archiveSummaryOf(finalized.archive),
         };
         setPendingAttachments((current) =>
           current.filter((item) => item.id !== trackingId)
@@ -1792,15 +2068,18 @@ export function ChatInput({
         // to the conversation the file was picked in, which may no longer be
         // the one on screen.
         onAttachmentsChange((current) => [...current, attachment], scopeId);
+        noticeArchiveExclusions(finalized.archive);
       } catch (error) {
         console.error("Attachment upload failed:", error);
         fail(t("chat.attachmentUploadError"));
       }
     },
     [
+      attachmentErrorMessage,
       guestAttachmentErrorMessage,
       isEphemeralAttachment,
       maxAttachmentBytes,
+      noticeArchiveExclusions,
       onAttachmentsChange,
       requestGuestVerificationToken,
       t,
@@ -1878,7 +2157,30 @@ export function ChatInput({
     };
   }, []);
 
+  /**
+   * Refusal is the same sentence and the same toast wherever the file was
+   * dropped: the composer's own zone and the conversation canvas both end
+   * here rather than each writing their own.
+   */
+  const refuseAttachmentDrop = useCallback(() => {
+    dispatchAppToast(t("chat.loginToAttach"), "info");
+  }, [t]);
+
+  const isConversationDragActive = useConversationDropSurface({
+    surface: conversationDropSurface,
+    canAttach,
+    onFiles: (files) => {
+      void handleFilesSelected(files);
+    },
+    onRefused: refuseAttachmentDrop,
+  });
+
+  // Each of the four stands down for an event the canvas already claimed --
+  // which is every drag over the composer while it is portalled into the
+  // welcome surface, because the canvas listens in the capture phase. Without
+  // it, the same file would be uploaded twice from one drop.
   const handleDropZoneDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1886,6 +2188,7 @@ export function ChatInput({
   };
 
   const handleDropZoneDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1894,19 +2197,21 @@ export function ChatInput({
   };
 
   const handleDropZoneDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
       setIsDragActive(false);
     }
   };
 
   const handleDropZoneDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isDragEventClaimed(event.nativeEvent)) return;
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     setIsDragActive(false);
 
     if (!canAttach) {
-      dispatchAppToast(t("chat.loginToAttach"), "info");
+      refuseAttachmentDrop();
       return;
     }
 
@@ -2055,7 +2360,7 @@ export function ChatInput({
           name: imported.name,
           mediaType: imported.mediaType,
           size: imported.size,
-          objectKey: imported.key,
+          uploadId: imported.uploadId,
           kind: imported.kind,
         });
       }
@@ -2076,19 +2381,29 @@ export function ChatInput({
       attachments.filter((item) => item.id !== attachment.id)
     );
 
-    if (!attachment.objectKey) return;
+    // Nothing to reclaim: a file that never finished uploading, or one whose
+    // message is already saved. The second case is deliberate -- removing a
+    // card from the composer is editing a draft, and a stored turn keeps the
+    // files it was sent with (docs/policy/user-attachment-persistence.md).
+    if (!attachment.objectKey && !attachment.uploadId) return;
+    if (attachment.attachmentId) return;
 
     try {
       // A guest object lives on its own endpoint, scoped to the guest session
       // that uploaded it. Deleting it here is what keeps the common case --
       // pick a file, change your mind -- from leaving an orphan for the TTL
-      // sweep to find an hour later.
+      // sweep to find an hour later. A signed-in account names the upload id
+      // instead: the composer has no storage key to send.
       const response = await fetch(
         isEphemeralAttachment ? "/api/chat/guest-attachment" : "/api/chat",
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: attachment.objectKey }),
+          body: JSON.stringify(
+            isEphemeralAttachment
+              ? { key: attachment.objectKey }
+              : { uploadId: attachment.uploadId }
+          ),
         }
       );
       await discardResponseBody(response);
@@ -2236,6 +2551,34 @@ export function ChatInput({
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
           }`
       }>
+          {/*
+            The canvas overlay is portalled into the surface itself rather
+            than drawn from here: it has to cover the whole answer area, which
+            is the shell's element, and it must not take part in that
+            element's layout. Absolutely positioned and `pointer-events-none`,
+            so nothing behind it moves and nothing behind it stops receiving
+            the drag.
+          */}
+          {conversationDropSurface && isConversationDragActive
+            ? createPortal(
+                <div
+                  data-testid="chat-conversation-drop-overlay"
+                  className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-white/80 text-center backdrop-blur-sm dark:bg-zinc-950/80"
+                >
+                  <div className="rounded-3xl border border-dashed border-blue-400 bg-white/90 px-8 py-6 shadow-sm dark:bg-zinc-900/90">
+                    <DropGuidance
+                      title={
+                        canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")
+                      }
+                      description={
+                        canAttach ? t("chat.dropFilesDescription") : undefined
+                      }
+                    />
+                  </div>
+                </div>,
+                conversationDropSurface
+              )
+            : null}
           <div
             data-testid="chat-input"
             onDragEnter={handleDropZoneDragEnter}
@@ -2249,20 +2592,14 @@ export function ChatInput({
             }`}
           >
           {isDragActive && (
-            <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-2xl border border-dashed border-blue-400 bg-white/85 text-center shadow-sm backdrop-blur-sm dark:bg-zinc-950/85">
-              <div className="flex flex-col items-center gap-2 px-4">
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm shadow-blue-950/20">
-                  <Paperclip className="h-5 w-5" />
-                </span>
-                <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                  {canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")}
-                </span>
-                {canAttach && (
-                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                    {t("chat.dropFilesDescription")}
-                  </span>
-                )}
-              </div>
+            <div
+              data-testid="chat-composer-drop-overlay"
+              className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-2xl border border-dashed border-blue-400 bg-white/85 text-center shadow-sm backdrop-blur-sm dark:bg-zinc-950/85"
+            >
+              <DropGuidance
+                title={canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")}
+                description={canAttach ? t("chat.dropFilesDescription") : undefined}
+              />
             </div>
           )}
           {addOnCreditsForRequest > 0 && (
@@ -2639,6 +2976,36 @@ export function ChatInput({
                         <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
                           {getAttachmentLabel(attachment)}
                         </span>
+                        {attachment.archive ? (
+                          /*
+                            The archive's own contents, for as long as the file
+                            is attached. This used to be a four-second toast and
+                            nothing else, so a skipped file became visible only
+                            as an absence in the answer.
+                          */
+                          <span
+                            data-testid="attachment-archive-summary"
+                            className={`text-[11px] font-medium ${
+                              attachment.archive.excludedFiles > 0
+                                ? "text-amber-700 dark:text-amber-400"
+                                : "text-zinc-400 dark:text-zinc-500"
+                            }`}
+                          >
+                            {[
+                              interpolateCopy(t("chat.archiveReadSummary"), {
+                                count: attachment.archive.includedFiles,
+                              }),
+                              ...(attachment.archive.excludedFiles > 0
+                                ? [
+                                    interpolateCopy(
+                                      t("chat.archiveExcludedSummary"),
+                                      { count: attachment.archive.excludedFiles }
+                                    ),
+                                  ]
+                                : []),
+                            ].join(" · ")}
+                          </span>
+                        ) : null}
                       </span>
                     </>
                   )}
@@ -3401,6 +3768,31 @@ export function ChatInput({
                   >
                     {canAttach ? t("chat.attachLimitsSummary") : t("chat.loginToAttach")}
                   </p>
+                  {/*
+                    Which formats, before the picker opens. Derived from the
+                    shared registry, so this cannot fall behind what the
+                    picker actually accepts.
+                  */}
+                  {canAttach && (
+                    <ul
+                      data-testid="attach-supported-formats"
+                      className="space-y-0.5 px-3 text-xs leading-5 text-zinc-500"
+                    >
+                      {supportedFormatGroups.map((group) => (
+                        <li key={group.group} title={`${group.label}: ${group.all}`}>
+                          <span className="font-semibold text-zinc-600 dark:text-zinc-300">
+                            {group.label}
+                          </span>{" "}
+                          {group.shown}
+                          {group.overflow > 0
+                            ? ` ${interpolateCopy(t("chat.attachFormatsOverflow"), {
+                                count: group.overflow,
+                              })}`
+                            : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {/*
                     A guest's files are held for a short time and are never
                     added to a saved chat, a project, a share link or an

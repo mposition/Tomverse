@@ -31,6 +31,7 @@ import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
+import { modalOpenedOnTop, registerOpenModal } from "@/components/useModalDialog";
 import {
   useCompactBottomDock,
   useKeyboardInset,
@@ -445,7 +446,17 @@ export function MobileChatShell({
     if (!isDrawerOpen) return;
 
     document.body.style.overflow = "hidden";
+    // Registered so the dialogs opened from inside the drawer -- the account
+    // footer's settings modal, and the delete-account dialog on top of that --
+    // can be seen to have opened after it. The frame is then skipped when one
+    // did: focus arriving after that would pull the person back out of the
+    // dialog they are in and into the drawer, which is inert underneath it.
+    // Same rule as `useModalDialog`, which is why it is the same functions.
+    const unregister = drawerDialogRef.current
+      ? registerOpenModal(drawerDialogRef.current)
+      : null;
     const focusFrame = requestAnimationFrame(() => {
+      if (modalOpenedOnTop(drawerDialogRef.current)) return;
       drawerCloseButtonRef.current?.focus();
     });
 
@@ -462,6 +473,7 @@ export function MobileChatShell({
 
     document.addEventListener("keydown", handleEscape);
     return () => {
+      unregister?.();
       cancelAnimationFrame(focusFrame);
       document.body.style.overflow = "";
       document.removeEventListener("keydown", handleEscape);
@@ -599,6 +611,13 @@ export function MobileChatShell({
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
+  // The answer canvas, handed to the composer as a drop target. State rather
+  // than a ref so the composer re-registers its listeners when the section
+  // mounts, and loses them when an image conversation replaces it
+  // (docs/policy/image-generation.md §1) -- chat attachment drops must not be
+  // live in the image workspace.
+  const [conversationDropSurface, setConversationDropSurface] =
+    useState<HTMLElement | null>(null);
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   const inputPortalTarget = isConversationEmpty
@@ -1050,6 +1069,7 @@ export function MobileChatShell({
       )}
 
       <section
+        ref={setConversationDropSurface}
         data-testid="mobile-conversation-surface"
         data-surface={showWelcomeSurface ? "welcome" : "conversation"}
         // A conversation with answers in it is still `min-h-0 flex-1`. A
@@ -1279,6 +1299,7 @@ export function MobileChatShell({
             variant={isConversationEmpty ? "floating" : "bar"}
             hideTopBorder={comparisonReadiness.isVisible}
             hideDisclaimer
+            conversationDropSurface={conversationDropSurface}
           />,
           composerPortalHost
         )}

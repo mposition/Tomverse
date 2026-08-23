@@ -46,7 +46,8 @@ try {
       newCandidates: result?.newCandidates,
       lifecycleWarnings: result?.lifecycleWarnings,
       slackDelivered: result?.slackDelivered,
-      emailDelivered: result?.emailDelivered,
+      emailQueued: result?.emailQueued,
+      emailFailed: result?.emailFailed,
     });
   }
 } catch (error) {

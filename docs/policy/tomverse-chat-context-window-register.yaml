@@ -197,6 +197,30 @@ models:
     catalogueDeclaredTokens: null
     notes: ""
 
+  - modelId: "gemini-3-7-flash"
+    apiModel: "gemini-3.7-flash"
+    provider: google
+    status: unverified
+    contextWindowTokens: null
+    contextWindowIncludesOutput: null
+    maxInputTokens: null
+    maxOutputTokens: null
+    aliasOrLatest: null
+    sourceUrl: null
+    sourceTitle: null
+    verifiedAt: null
+    verifiedBy: null
+    catalogueDeclaredTokens: 1048576
+    notes: >-
+      Left unverified deliberately, though a source exists. The model page at
+      ai.google.dev states an input token limit of 1,048,576 and an output token
+      limit of 65,536 as two separate figures, and does not say whether the
+      window covers input alone or input plus output. contextWindowIncludesOutput
+      has to be stated explicitly and deciding it from the shape of the table
+      would be inferring it, which is what the rules above refuse. Whoever
+      verifies this needs that one answer; the numbers themselves are on
+      https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash.
+
   - modelId: "gemini-3-6-flash"
     apiModel: "gemini-3.6-flash"
     provider: google

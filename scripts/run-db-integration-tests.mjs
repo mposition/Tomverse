@@ -174,13 +174,33 @@ run(
     // rather than a convention, and the tombstone ordering every deletion
     // path depends on. Neither can be checked without Postgres.
     "tests/integration/generated-artifacts.db.test.ts",
+    // The unique index that turns a re-posted pre-save into a no-op, the
+    // ownership-scoped resolution that makes another account's id "not found",
+    // and the tombstone ordering every deletion path depends on -- including
+    // the one that must NOT fire when a single model's answers are cleared.
+    "tests/integration/message-attachments.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
     "tests/integration/credential-email-lane.db.test.ts",
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    // Which profile a queued message is composed against, which only a database
+    // can answer: the row pins a policy version and activating a later one must
+    // not change what an already-queued message says.
+    "tests/integration/email-jurisdiction-composition.db.test.ts",
+    // The marketing branches of the standard lane, which no transactional
+    // message can reach: the jurisdiction re-check, the one-click headers and
+    // the marketing sending stream.
+    "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
+    // The daily model lifecycle report on the standard lane: that it enqueues
+    // rather than sends, that the operator address is its own recipient
+    // identity, and that a lane refusal costs the mail and not the scan.
+    "tests/integration/model-lifecycle-daily-report.db.test.ts",
+    // What an automatic disable leaves behind: the queue row, its notice
+    // requirement, and the account count that decides it.
+    "tests/integration/model-lifecycle-auto-disable.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

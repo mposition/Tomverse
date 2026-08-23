@@ -39,7 +39,6 @@ import {
 } from "@/lib/chatAttachmentTokens";
 import { estimateRawTextTokens } from "@/lib/chatTokenEstimate";
 import type { AiModel } from "@/lib/models";
-import { measureR2Object } from "@/lib/r2";
 
 /** The shape the chat payload validator has already guaranteed. */
 export type PreflightMessage = {
@@ -114,53 +113,55 @@ export const preflightInputEstimate = (
 
 export type MeasuredAttachments =
   | { measurable: true; descriptors: readonly AttachmentTokenDescriptor[] }
-  | { measurable: false; reason: "no_object_key" | "not_own_object" | "unmeasurable" };
+  | {
+      measurable: false;
+      reason: "unresolved" | "not_own_object" | "unmeasurable";
+    };
 
-type PreflightAttachment = {
-  mediaType?: unknown;
-  objectKey?: unknown;
+/** One attachment as the request layer has already resolved it. */
+export type ResolvedTurnAttachment = {
+  mediaType: string;
+  /** Bytes, as measured in storage when the upload was finalised. */
+  size: number;
+  /** Private storage key, so the caller's own prefix can be re-checked here. */
+  objectKey: string;
 };
 
 /**
  * Every attachment in the turn, as `{ mediaType, size }`, or a refusal.
  *
- * All or nothing on purpose. A partial measurement would let the Router
- * choose a model on the strength of the files it could see, and the one it
- * could not is exactly the one likely to be a scanned PDF that does not fit.
+ * All or nothing on purpose. A partial measurement would let the Router choose
+ * a model on the strength of the files it could see, and the one it could not
+ * is exactly the one likely to be a scanned PDF that does not fit.
  *
- * `ownObjectPrefix` is the caller's own storage prefix. A key outside it is
- * refused rather than measured: without that rule this is an object-size
- * oracle over the whole bucket, answerable by anyone who can guess a key.
+ * Takes what the request layer resolved rather than reading the request. The
+ * sizes are the ones storage reported when the upload was finalised, so no
+ * HEAD request is made here at all -- which also settles the object-size
+ * oracle this function used to have to defend against by hand: there is no
+ * key from a client to measure. The prefix check stays as the second line: a
+ * row that somehow named a key outside its owner's storage is refused rather
+ * than measured.
  */
-export const measureTurnAttachments = async (
-  messages: readonly PreflightMessage[],
+export const measureTurnAttachments = (
+  attachments: readonly ResolvedTurnAttachment[],
   ownObjectPrefix: string | null
-): Promise<MeasuredAttachments> => {
-  const attachments = messages.flatMap((message) =>
-    Array.isArray(message?.attachments)
-      ? (message.attachments as PreflightAttachment[])
-      : []
-  );
-
+): MeasuredAttachments => {
   const descriptors: AttachmentTokenDescriptor[] = [];
   for (const attachment of attachments) {
-    const objectKey = attachment?.objectKey;
-    if (typeof objectKey !== "string" || objectKey === "") {
-      return { measurable: false, reason: "no_object_key" };
+    if (!attachment.objectKey) {
+      return { measurable: false, reason: "unresolved" };
     }
-    if (!ownObjectPrefix || !objectKey.startsWith(ownObjectPrefix)) {
+    if (!ownObjectPrefix || !attachment.objectKey.startsWith(ownObjectPrefix)) {
       return { measurable: false, reason: "not_own_object" };
     }
-    const size = await measureR2Object(objectKey);
-    if (size === null) {
+    if (!Number.isFinite(attachment.size) || attachment.size <= 0) {
       return { measurable: false, reason: "unmeasurable" };
     }
     descriptors.push({
-      mediaType: typeof attachment.mediaType === "string" ? attachment.mediaType : "",
-      size,
+      mediaType: attachment.mediaType,
+      size: attachment.size,
     });
   }
-
   return { measurable: true, descriptors };
 };
 

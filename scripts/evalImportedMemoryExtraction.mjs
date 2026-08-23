@@ -336,8 +336,10 @@ for (const [language, arm] of Object.entries(verdict.byLanguage)) {
 
 console.log("\nSample adequacy (§12.2)");
 for (const [cell, count] of Object.entries(verdict.adequacy.counts)) {
-    const short = count < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM;
-    line(cell, `${count}${short ? `  (needs ${MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM})` : ""}`);
+    // The floor is per category now, so the cell has to carry its own number.
+    const minimum =
+        MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[cell.split(":")[0]];
+    line(cell, `${count}${count < minimum ? `  (needs ${minimum})` : ""}`);
 }
 
 if (verdict.failures.length > 0) {
@@ -356,11 +358,14 @@ if (runMode.mode !== "live") {
     );
 }
 if (!verdict.adequacy.decisionGrade) {
+    const floors = Object.entries(MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM)
+        .map(([category, minimum]) => `${category} ${minimum}`)
+        .join(", ");
     console.log(
-        `\nUNDERPOWERED — the sample is below the §12.2 floor of ` +
-            `${MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM} cases per category per language arm,\n` +
-            "so no verdict is available at any quality. Authoring the remaining cases is a\n" +
-            "data task: §12.2 forbids reaching the floor by copying or lightly varying the\n" +
+        `\nUNDERPOWERED — a cell is below the §12.2 floor (${floors} per language arm),\n` +
+            "so no verdict is available at any quality. The cells short of it are listed\n" +
+            "above with the number each one needs. Authoring the remaining cases is a data\n" +
+            "task: §12.2 forbids reaching the floor by copying or lightly varying the\n" +
             "existing ones, and the duplicate check refuses a dataset that tries."
     );
 }
