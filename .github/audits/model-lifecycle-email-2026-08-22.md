@@ -2106,13 +2106,13 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 ### P1
 
-- ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §21
-- ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §23
+- ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §24
+- ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §26
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
-- ~~EM-12 legal/transactional template 7개 언어~~ **완료 (2026-08-23)** — §24
+- ~~EM-12 legal/transactional template 7개 언어~~ **완료 (2026-08-23)** — §27
 - EM-08 snapshot retention + 무한 증가 테이블 등록
-- ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §22
-- ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §25
+- ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §25
+- ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §28
 - ML-13 리포트에서 모델 소유자와 관측 경로 분리
 - ML-10 reconciliation script 범용화 + precondition 검사
 - EM-06 campaign이 templateVersion pin
@@ -2226,7 +2226,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 ---
 
-## 21. EM-04 구현 기록 (2026-08-23 · 완료)
+## 24. EM-04 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2289,7 +2289,7 @@ policy reader만 읽었습니다.
 
 ---
 
-## 22. ML-08 구현 기록 (2026-08-23 · 완료)
+## 25. ML-08 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2322,7 +2322,7 @@ policy reader만 읽었습니다.
 
 ---
 
-## 23. EM-03 구현 기록 (2026-08-23 · 완료)
+## 26. EM-03 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2364,7 +2364,7 @@ enqueue하는 코드가 없으며, marketing은 production에서 비활성입니
 
 ---
 
-## 24. EM-12 구현 기록 (2026-08-23 · 완료)
+## 27. EM-12 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2397,7 +2397,7 @@ self-service가 아니므로 이 둘이 유일한 행동 경로), 문단 4개가
 
 ---
 
-## 25. ML-12 구현 기록 (2026-08-23 · 완료)
+## 28. ML-12 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
