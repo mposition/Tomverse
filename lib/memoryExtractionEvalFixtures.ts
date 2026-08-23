@@ -25,8 +25,9 @@ import { BATCH_001_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch001
 import { BATCH_002_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch002DurableEn";
 import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch003AssistantKo";
 import { BATCH_004_ASSISTANT_EN } from "@/lib/memoryExtractionEvalAdopted/batch004AssistantEn";
+import { BATCH_005_SECRET_KO } from "@/lib/memoryExtractionEvalAdopted/batch005SecretKo";
 
-export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-5";
+export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-6";
 
 /**
  * Whether this dataset is frozen for a decision-grade run (§12.2).
@@ -541,4 +542,5 @@ export const MEMORY_EVAL_CASES: readonly MemoryEvalCase[] = [
     ...BATCH_002_DURABLE_EN,
     ...BATCH_003_ASSISTANT_KO,
     ...BATCH_004_ASSISTANT_EN,
+    ...BATCH_005_SECRET_KO,
 ];
