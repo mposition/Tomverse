@@ -40,9 +40,13 @@ const publishSchema = z
         instructions: z
             .string()
             .max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters),
+        // An empty list is a real answer, not a missing one: it means "this
+        // assistant names no model of its own", and a conversation started
+        // from it opens on the account's own new-conversation default. A
+        // floor of one here made that state unexpressible and refused the
+        // save with a payload error naming no field.
         modelIds: z
             .array(z.string().trim().min(1).max(120))
-            .min(1)
             .max(ASSISTANT_PROFILE_LIMITS.maxModels),
         toolPolicy: z
             .object({ webSearch: z.boolean(), deepResearch: z.boolean() })

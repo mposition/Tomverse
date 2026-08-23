@@ -221,6 +221,48 @@ test.describe("assistant profile settings", () => {
         expect(published!.knowledgeFileIds).toEqual([]);
     });
 
+    test("an assistant can stop naming a model and follow the account", async ({
+        page,
+    }) => {
+        // Policy §14.0a, and the defect this replaced: the only way to say
+        // "no model of my own" was to untick every box, which the publish
+        // route refused as an invalid payload. The radio says it instead, and
+        // an empty list is what gets stored.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        let published: Record<string, unknown> | null = null;
+        await page.route(
+            (url) => url.pathname.endsWith("/versions"),
+            (route) => {
+                published = route.request().postDataJSON();
+                return route.fulfill(
+                    json({
+                        outcome: "published",
+                        version: { revision: 4 },
+                    })
+                );
+            }
+        );
+        await page.goto("/settings/assistants/p-published");
+
+        // The stored revision names one, so the screen opens on "choose".
+        await expect(
+            page.getByTestId("assistant-model-mode-explicit")
+        ).toBeChecked();
+        await page.getByTestId("assistant-model-mode-default").check();
+        await expect(
+            page.getByTestId("assistant-model-gpt-5-6-luna")
+        ).toHaveCount(0);
+
+        await page.getByTestId("assistant-publish").click();
+
+        await expect(
+            page.getByTestId("assistants-notice-published")
+        ).toBeVisible();
+        expect(published).not.toBeNull();
+        expect(published!.modelIds).toEqual([]);
+    });
+
     test("a stale publish is reported, never retried", async ({ page }) => {
         // The other tab's edit is somebody's work; picking a winner here would
         // discard it without anyone seeing what was lost.
@@ -349,11 +391,15 @@ test.describe("assistant profile settings", () => {
         await toggle.click();
         await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
-        // The model control is a selector over named models, not a text field
-        // asking for internal ids.
+        // The model control names its two states -- follow the account, or
+        // choose -- and opens on the first. The list of named models (never a
+        // text field asking for internal ids) appears inside the second.
         const models = page.getByTestId("assistant-models");
         await expect(models).toBeVisible();
-        await expect(models.locator("input[type=checkbox]").first()).toBeVisible();
+        await expect(
+            page.getByTestId("assistant-model-mode-default")
+        ).toBeChecked();
+        await expect(models.locator("input[type=checkbox]")).toHaveCount(0);
         await expect(page.getByTestId("assistant-icon")).toBeVisible();
     });
 
@@ -412,11 +458,39 @@ test.describe("assistant profile settings", () => {
         await page.getByTestId("assistant-name").fill("Picky");
         await page.getByTestId("assistant-instructions").fill("Be brief.");
         await page.getByTestId("assistant-advanced-toggle").click();
+
+        // The list appears only once the user has said they want to choose:
+        // §14.0a's default is to name no model, and two checkboxes cannot
+        // express "follow the account" on their own.
+        await expect(
+            page.getByTestId("assistant-model-gpt-5-6-luna")
+        ).toHaveCount(0);
+        await page.getByTestId("assistant-model-mode-explicit").check();
         await page.getByTestId("assistant-model-gpt-5-6-luna").check();
         await page.getByTestId("assistant-create").click();
 
         await expect(page).toHaveURL(/\/settings\/assistants\/p-new$/);
         expect(createRequests[0].modelIds).toContain("gpt-5-6-luna");
+    });
+
+    test("choosing models seeds one, and the last cannot be unticked", async ({
+        page,
+    }) => {
+        // The empty explicit selection is not a state this screen has -- it is
+        // the other radio. Leaving it reachable is what sent `modelIds: []` to
+        // a server that required one, and answered `Invalid request payload.`
+        // with no field named.
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        await page.getByTestId("assistant-advanced-toggle").click();
+        await page.getByTestId("assistant-model-mode-explicit").check();
+
+        const seeded = page.getByTestId("assistant-model-gpt-5-6-luna");
+        await expect(seeded).toBeChecked();
+        await expect(seeded).toBeDisabled();
+        await expect(page.getByTestId("assistant-models-keep-one")).toBeVisible();
     });
 
     test("arriving from the chat returns there instead of the edit page", async ({

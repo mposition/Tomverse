@@ -11,6 +11,7 @@ import {
     readAssistantProfile,
     updateAssistantProfileIdentity,
 } from "@/lib/assistantProfileService";
+import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -521,6 +522,45 @@ test("a create carrying a first version publishes revision 1 with it", async () 
     assert.equal(stored.currentVersionId, active.id);
 });
 
+test("a version naming no model stores an empty list and stays readable", async () => {
+    // Policy §14.0a. The empty list has to survive the round trip as itself:
+    // a write path that turned it back into the account's default would put
+    // the pin this removed straight back, and one that stored `null` would
+    // make every reader guess which of the two it meant.
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity("Follows the account"),
+        firstVersion: draft({ modelIds: [] }),
+    });
+
+    const active = await activeProfileVersion(user.id, profile.id);
+    assert.ok(active, "a created profile must have a version to pin to");
+    assert.deepEqual(active.models, []);
+
+    const read = await readAssistantProfile(user.id, profile.id);
+    assert.deepEqual(read.currentVersion?.models, []);
+
+    // And it is reachable from the other direction: an assistant that named a
+    // model can stop naming one, which is what the editor's two radios do.
+    const withModel = await createAssistantProfile({
+        userId: user.id,
+        identity: identity("Named one, then stopped"),
+        firstVersion: draft({ modelIds: ["gpt-5-6-luna"] }),
+    });
+    const published = await publishAssistantProfileVersion({
+        userId: user.id,
+        profileId: withModel.id,
+        expectedRevision: 1,
+        draft: draft({ modelIds: [] }),
+    });
+    assert.equal(published.outcome, "published");
+    assert.deepEqual(
+        (await activeProfileVersion(user.id, withModel.id))?.models,
+        []
+    );
+});
+
 test("a create with no first version still makes an identity-only profile", async () => {
     // The two-step flow is still a legitimate call and this is the only test
     // that says so: removing the optional path would break the existing API.
@@ -538,7 +578,14 @@ test("a first version that fails validation leaves no profile behind", async () 
         createAssistantProfile({
             userId: user.id,
             identity: identity("Never stored"),
-            firstVersion: draft({ modelIds: [] }),
+            firstVersion: draft({
+                // Over the ceiling. An empty list is valid now (§14.0a), so
+                // the invalid draft this test needs is the other end.
+                modelIds: Array.from(
+                    { length: ASSISTANT_PROFILE_LIMITS.maxModels + 1 },
+                    (_, index) => `model-${index}`
+                ),
+            }),
         }),
         (error: unknown) =>
             error instanceof AssistantProfileError &&

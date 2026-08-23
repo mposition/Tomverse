@@ -94,6 +94,16 @@ type KnowledgeFile = {
 
 type VersionSummary = { id: string; revision: number; createdAt: string };
 
+/**
+ * Whether the profile names its own models (§14.0a).
+ *
+ * `account-default` stores an empty list — the assistant makes no model
+ * choice and a conversation started from it opens on the account's own
+ * new-conversation selection, resolved when the conversation is created
+ * rather than pinned when the profile was.
+ */
+type ModelMode = "account-default" | "explicit";
+
 type LoadedProfile = {
     id: string;
     name: string;
@@ -121,57 +131,134 @@ type Notice =
     | { kind: "failed"; detail?: string };
 
 /**
- * The models a profile runs, chosen from the catalogue.
+ * Whether this assistant names its own models, and which.
  *
- * A checkbox list rather than a `<select multiple>`: the maximum is three, the
- * list is short, and a multi-select is the control users most often fail to
- * operate without a mouse. Each row names the model the way the rest of the
- * product names it, so nobody has to recognise an internal id.
+ * ## Why "no model" is a choice and not an empty selection
+ *
+ * A profile's model list is a *starting* selection: §14.0 applies it when a
+ * conversation is created and nowhere else, and the user is free to change
+ * models afterwards without touching the assistant. So naming none is the
+ * ordinary case — the conversation opens on the account's own default, and it
+ * keeps doing that after that default changes.
+ *
+ * That state used to be unreachable. The create screen filled the account's
+ * default in, so every assistant pinned whatever model the account had on the
+ * day it was made; unticking the last box then sent an empty list to a server
+ * that required one and answered `Invalid request payload.`, with no field
+ * named. Two checkboxes cannot express "follow the account" either — an empty
+ * list reads as an unanswered question, not an answer.
+ *
+ * Hence a radio: the two states are named, the default one is selected, and
+ * the list appears only when the user has said they want to choose. Inside
+ * that mode the last model cannot be unticked — the way out is the other
+ * radio, which says what unticking everything was trying to say.
  */
 function ModelSelector({
     label,
     hint,
+    mode,
+    onModeChange,
     selected,
     onChange,
+    t,
 }: {
     label: string;
     hint: string;
+    mode: ModelMode;
+    onModeChange: (next: ModelMode) => void;
     selected: string[];
     onChange: (next: string[]) => void;
+    t: (key: string) => string;
 }) {
     const atLimit = selected.length >= ASSISTANT_PROFILE_LIMITS.maxModels;
+    const modeName = useId();
     return (
         <fieldset className="flex flex-col gap-2" data-testid="assistant-models">
             <legend className="text-sm font-semibold">{label}</legend>
             <p className="text-xs text-zinc-500">{hint}</p>
-            {ENABLED_MODELS.map((model) => {
-                const checked = selected.includes(model.id);
-                return (
-                    <label
-                        key={model.id}
-                        className="flex items-center gap-2 text-sm"
+
+            <label className="flex items-start gap-2 text-sm">
+                <input
+                    type="radio"
+                    name={modeName}
+                    className="mt-1"
+                    checked={mode === "account-default"}
+                    onChange={() => onModeChange("account-default")}
+                    data-testid="assistant-model-mode-default"
+                />
+                <span>
+                    {t("assistantProfiles.modelModeDefault")}
+                    <span className="block text-xs font-normal text-zinc-500">
+                        {t("assistantProfiles.modelModeDefaultHint")}
+                    </span>
+                </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-sm">
+                <input
+                    type="radio"
+                    name={modeName}
+                    className="mt-1"
+                    checked={mode === "explicit"}
+                    onChange={() => onModeChange("explicit")}
+                    data-testid="assistant-model-mode-explicit"
+                />
+                <span>{t("assistantProfiles.modelModeExplicit")}</span>
+            </label>
+
+            {mode === "explicit" && (
+                <div className="ml-6 flex flex-col gap-2">
+                    <p className="text-xs text-zinc-500">
+                        {interpolate(t("assistantProfiles.modelsLimitHint"), {
+                            max: ASSISTANT_PROFILE_LIMITS.maxModels,
+                        })}
+                    </p>
+                    {ENABLED_MODELS.map((model) => {
+                        const checked = selected.includes(model.id);
+                        // The last one cannot be unticked, because an empty
+                        // explicit selection is not a state this screen has:
+                        // it is the other radio.
+                        const isLastSelected = checked && selected.length === 1;
+                        return (
+                            <label
+                                key={model.id}
+                                className="flex items-center gap-2 text-sm"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    // The ceiling is enforced by refusing to
+                                    // add, not by dropping silently: a user
+                                    // who ticks one model too many should
+                                    // find out here rather than discover
+                                    // later that one of their choices went
+                                    // missing.
+                                    disabled={
+                                        isLastSelected || (!checked && atLimit)
+                                    }
+                                    onChange={(event) =>
+                                        onChange(
+                                            event.target.checked
+                                                ? [...selected, model.id]
+                                                : selected.filter(
+                                                      (id) => id !== model.id
+                                                  )
+                                        )
+                                    }
+                                    data-testid={`assistant-model-${model.id}`}
+                                />
+                                <span>{model.name}</span>
+                            </label>
+                        );
+                    })}
+                    <p
+                        className="text-xs text-zinc-500"
+                        data-testid="assistant-models-keep-one"
                     >
-                        <input
-                            type="checkbox"
-                            checked={checked}
-                            // The ceiling is enforced by refusing to add, not
-                            // by dropping silently: a user who ticks a fourth
-                            // model should find out here rather than discover
-                            // later that one of their choices went missing.
-                            disabled={!checked && atLimit}
-                            onChange={(event) =>
-                                onChange(
-                                    event.target.checked
-                                        ? [...selected, model.id]
-                                        : selected.filter((id) => id !== model.id)
-                                )
-                            }
-                            data-testid={`assistant-model-${model.id}`}
-                        />
-                        <span>{model.name}</span>
-                    </label>
-                );
-            })}
+                        {t("assistantProfiles.modelsKeepOne")}
+                    </p>
+                </div>
+            )}
         </fieldset>
     );
 }
@@ -213,6 +300,13 @@ export function AssistantProfileEditor({
      * exist when they did not.
      */
     const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+    /**
+     * Naming no model is the default, and it is what a created profile now
+     * stores. The old create screen resolved the account's default and wrote
+     * it into revision 1, which pinned it: changing the account default later
+     * left every existing assistant starting conversations on the old one.
+     */
+    const [modelMode, setModelMode] = useState<ModelMode>("account-default");
     const [webSearch, setWebSearch] = useState(false);
     const [deepResearch, setDeepResearch] = useState(false);
     // §14's narrow-only default. A new profile asks for nothing it was not
@@ -225,6 +319,29 @@ export function AssistantProfileEditor({
     const [invalidField, setInvalidField] = useState<
         "name" | "instructions" | null
     >(null);
+
+    /**
+     * Switching modes, with the selection kept coherent with the mode.
+     *
+     * Entering `explicit` seeds the account's default so the mode always has
+     * at least one model in it, and leaving it keeps the ticks so a user who
+     * flips back and forth does not lose what they chose — the stored value is
+     * decided by the mode at save time, not by what is still ticked.
+     */
+    const changeModelMode = (next: ModelMode) => {
+        setModelMode(next);
+        if (next === "explicit" && selectedModelIds.length === 0) {
+            const seed =
+                ENABLED_MODELS.find(
+                    (model) => model.id === APP_DEFAULTS.defaultModelId
+                ) ?? ENABLED_MODELS[0];
+            if (seed) setSelectedModelIds([seed.id]);
+        }
+    };
+
+    /** What the mode says to store, rather than what is still ticked. */
+    const modelIdsForSave = () =>
+        modelMode === "explicit" ? selectedModelIds : [];
 
     // "Create and use in this chat" only when there is a chat to go back to.
     // Promising it from the settings page would name a destination the button
@@ -282,8 +399,10 @@ export function AssistantProfileEditor({
             const version = loaded.currentVersion;
             setLoadedRevision(version?.revision ?? null);
             setInstructions(version?.instructions ?? "");
-            setSelectedModelIds(
-                version?.models ?? [APP_DEFAULTS.defaultModelId]
+            const storedModels = version?.models ?? [];
+            setSelectedModelIds(storedModels);
+            setModelMode(
+                storedModels.length > 0 ? "explicit" : "account-default"
             );
             setWebSearch(version?.toolPolicy.webSearch ?? false);
             setDeepResearch(version?.toolPolicy.deepResearch ?? false);
@@ -349,12 +468,13 @@ export function AssistantProfileEditor({
                     icon: icon.trim() === "" ? null : icon,
                     description: description.trim() === "" ? null : description,
                     instructions,
-                    // Omitted rather than guessed when the user never opened
-                    // advanced: the server resolves the account's own default,
-                    // and a client-supplied one would be the client deciding
-                    // what this account may run.
-                    ...(selectedModelIds.length > 0
-                        ? { modelIds: selectedModelIds }
+                    // Omitted, not guessed, when the profile names no model:
+                    // the account's own new-conversation selection is
+                    // resolved when a conversation is actually created, and a
+                    // client-supplied default would pin today's answer to a
+                    // question asked later.
+                    ...(modelIdsForSave().length > 0
+                        ? { modelIds: modelIdsForSave() }
                         : {}),
                 }),
             });
@@ -437,7 +557,7 @@ export function AssistantProfileEditor({
                     body: JSON.stringify({
                         expectedRevision: loadedRevision,
                         instructions,
-                        modelIds: selectedModelIds,
+                        modelIds: modelIdsForSave(),
                         toolPolicy: { webSearch, deepResearch },
                         memoryPolicy: { useAccountMemory },
                         starters: starters
@@ -768,8 +888,11 @@ export function AssistantProfileEditor({
                                     <ModelSelector
                                         label={t("assistantProfiles.modelsLabel")}
                                         hint={t("assistantProfiles.modelsHint")}
+                                        mode={modelMode}
+                                        onModeChange={changeModelMode}
                                         selected={selectedModelIds}
                                         onChange={setSelectedModelIds}
+                                        t={t}
                                     />
                                 </div>
                             </details>
@@ -827,8 +950,11 @@ export function AssistantProfileEditor({
                                     <ModelSelector
                                         label={t("assistantProfiles.modelsLabel")}
                                         hint={t("assistantProfiles.modelsHint")}
+                                        mode={modelMode}
+                                        onModeChange={changeModelMode}
                                         selected={selectedModelIds}
                                         onChange={setSelectedModelIds}
+                                        t={t}
                                     />
                                     <label className={labelClass}>
                                         {t("assistantProfiles.startersLabel")}
