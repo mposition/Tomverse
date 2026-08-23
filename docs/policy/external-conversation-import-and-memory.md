@@ -807,8 +807,9 @@ secret·credential ④ prompt injection·지시형·URL 유도.
 
 표본을 실제로 만들고 검수하고 동결하는 절차는
 `docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
-작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
-개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
+초안 생성자(AI)와 검수자(사람)의 분리, 두 사람의 판정이 충돌할 때만 적용하는
+adjudication, critical negative 전건 독립 검수, 개발용/decision set 분리,
+`datasetVersion`·digest 동결과 재작업 규칙.
 
 Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
 전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
@@ -878,16 +879,30 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
 작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
 요구합니다. 따라서 **에이전트가 1,600개를 생성하고 스스로 승인해서 닫을 수
-없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다.
+없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다 — 2026-08-23
+개정 뒤에도 그대로입니다. 개정이 바꾼 것은 **누가 초안을 만드는가**이지 **누가
+승인하는가**가 아닙니다.
 
-작성을 시작하기 전에 사람이 정해야 하는 것:
+작성을 시작하기 전에 사람이 정해야 하는 것 — [개정 · 2026-08-23 @mposition]:
 
-1. 데이터셋 책임자와 8개 cell별 작성자 지정
-2. 작성자와 다른 검수자 지정
-3. adjudicator 지정
-4. AI 초안 도구 허용 범위와 기록 방식 확정
-5. 지침 자체의 사람 승인 기록 작성
+1. 데이터셋 책임자 지정
+2. 검수자 지정 — 사람이며, 채택·반려가 **최초의 권위 있는 판정**입니다
+3. AI 초안 도구 허용 범위와 batch별 기록 방식 확정
+4. 지침 자체의 사람 승인 기록 작성
    (`docs/ops/memory-extraction-eval-dataset.md` 맨 아래)
+
+개정 전에는 여기에 "8개 cell별 작성자"와 "adjudicator 지정"이 있었습니다. 둘 다
+**AI를 사람 작성자의 자리에 두지 않는다**는 전제에서 나온 것이고, 그 전제를
+`docs/ops/memory-extraction-eval-dataset.md` §6.2가 바꿨습니다 — AI는 작성자가
+아니라 **비권위 초안 생성자**이고, 사람의 검수가 최초의 권위 있는 판정입니다.
+adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 때만** 적용하므로
+(`docs/ops/memory-extraction-eval-dataset.md` §6.4), 검수자가 한 명인 동안에는
+지정할 대상이 없습니다.
+
+**줄어든 것은 사람 머릿수뿐입니다.** 시료를 만든 주체와 승인한 주체의 분리는
+그대로이고 — 만드는 쪽이 AI, 승인하는 쪽이 사람입니다 — critical negative
+1,200건 전건 검수도 그대로입니다. 에이전트가 만든 것이 candidate pool이라는 이
+절의 규정도 그대로입니다: 초안은 사람이 채택해야 dataset이 됩니다.
 
 1,600개는 50개 단위로도 최소 32개 batch이므로 일반 코드 PR이 아니라 **별도 데이터
 프로그램**으로 관리합니다. 동결 전에는 live eval 예산도 승인하지 않는 §12.5의
