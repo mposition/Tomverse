@@ -491,7 +491,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **검증**: DB integration. **release-blocking**.
 - **파일**: `lib/standardEmailLane.ts:466`, `lib/emailPreferences.ts:78-91`
 
-### EM-03 — marketing 경로가 end-to-end로 증명되지 않는다 (P0, High)
+### EM-03 — marketing 경로가 end-to-end로 증명되지 않는다 (P0, High) — **해결 (2026-08-23)**
 
 - **Evidence**: `[테스트]`
 - **현재 동작**: marketing classification의 template이 0개이므로
@@ -2107,7 +2107,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 ### P1
 
 - ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §21
-- EM-03 marketing 경로 end-to-end 테스트
+- ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §23
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
 - EM-12 legal/transactional template 7개 언어
 - EM-08 snapshot retention + 무한 증가 테이블 등록
@@ -2319,3 +2319,45 @@ policy reader만 읽었습니다.
 **범위 밖**: `replacementModelId`와 `userVisibleNote`는 설정하지 않습니다. 대체
 모델 선택은 결정이고, 이 항목은 그 결정을 **요구**하는 것이지 대신하는 것이
 아닙니다. `recommendation`이 그것을 문장으로 적습니다.
+
+---
+
+## 23. EM-03 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelLaunchEmail.ts` | template A. 7개 언어 `Record<Language, Copy>` |
+| `lib/emailTemplateDefinitions.ts` | `model_launch` 등록 (marketing · `product_updates` · unsubscribe 필수) |
+| `tests/modelLaunchEmail.test.mjs` | 8건 (카피 규칙·언어·escaping·결정성) |
+| `tests/integration/marketing-lane.db.test.ts` | 9건 |
+
+**권고대로 test 전용 fixture를 만들지 않았습니다.** §7-A의 `model_launch`를 실제로
+만들고 그것으로 증명했습니다. fixture로 증명하면 **아무도 보내지 않는 메시지에
+대해** lane을 증명하는 것이고, 첫 실제 발송이 여전히 그 분기들의 첫 실행이 됩니다.
+
+**증명된 분기 세 개** — 전부 marketing만 도달할 수 있어 그때까지 죽은 코드였습니다.
+관할권 재검사(미확인 → `jurisdiction_unconfirmed`), one-click header(RFC 8058,
+Resend는 요청 **본문**의 `headers`로 싣습니다), marketing stream(자기 도메인·자기 키,
+transactional로 fallback하지 않음).
+
+**감사 AC와 실제 동작이 갈리는 지점을 하나 찾았습니다.** AC는
+"`MARKETING_EMAIL_FROM` 미설정 → `failed:identity_marketing_from_missing`"인데,
+키(`MARKETING_RESEND_API_KEY`)까지 없으면 provider가 키에서 먼저 멈춰
+`not_configured` **transient**가 되어 메시지가 큐에 남습니다. 오늘 production이
+바로 그 상태입니다. 둘은 다른 결과이고 — 하나는 영구 실패, 하나는 재시도 —
+합치면 메시지를 잃거나 거절을 영원히 재시도합니다. test를 둘로 나눴습니다.
+
+**EM-04의 marketing 거절 분기도 여기서 처음 실행됩니다.** KR 구독자 제목이
+`(광고)`로 시작하고 US는 아니며, 사업자 정보가 불완전하면
+`jurisdiction_footer_incomplete`로 보류됩니다. EM-04 때는 등록된 marketing
+template이 없어 순수 test로만 덮여 있던 경로입니다.
+
+**카피 규칙을 test가 강제합니다.** 최상급 표현("최고"·"가장 빠른"·`best`·
+`fastest` …)을 7개 언어에서 검사합니다. 이 저장소는 어느 모델이 최고인지 측정한
+적이 없으므로 그것은 근거 없는 주장입니다. `tests/autoRoutingUi.test.mjs`가 auto
+routing 문구에 대해 하는 검사와 같은 방식입니다.
+
+**여전히 발송되지 않습니다.** `MARKETING_EMAIL_FROM`이 없고, 이 template을
+enqueue하는 코드가 없으며, marketing은 production에서 비활성입니다. **template
+등록은 발송이 아닙니다.** EM-16(발송 계정·region 분리, 도메인, warm-up)은 그대로
+남아 있습니다.
