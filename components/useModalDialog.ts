@@ -62,23 +62,64 @@ import { useEffect, type RefObject } from "react";
  */
 
 /**
- * Whether another `aria-modal` dialog has opened on top of this one -- decided
- * by document order, the last such element being the one on top. Both the key
- * handlers and the deferred initial focus below ask this: a dialog that is
- * covered is inert, and inert covers its focus as much as its keys.
+ * Whether another `aria-modal` dialog is later in document order.
+ *
+ * Only the key handlers ask this, and only as one half of the question:
+ * document order is not stacking order, so a dialog can be last in the DOM and
+ * underneath, or first and on top. `ownsEvent` survives that because it has a
+ * second signal -- where the event came from -- to decide with. Nothing that
+ * lacks that second signal may use this.
  *
  * A `null` dialog is not covered. The caller has no element to compare, which
  * is the un-mounted case, not the buried one.
- *
- * Exported because one modal surface predates this hook and still runs its own
- * focus frame: the mobile drawer in `MobileChatShell`. It has to answer the
- * same question, and answering it a second way is how the two drift apart.
  */
-export const coveredByAnotherModal = (dialog: HTMLElement | null) =>
+const laterInDocumentOrder = (dialog: HTMLElement | null) =>
   dialog !== null &&
   (Array.from(
     document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
   ).at(-1) ?? null) !== dialog;
+
+/**
+ * The open modals, in the order they opened.
+ *
+ * The deferred initial focus needs to know whether something opened *on top of*
+ * this dialog since its frame was scheduled, and two cheaper-looking signals
+ * both answer a different question:
+ *
+ * - **Document order** is not stacking order. The mobile drawer stays mounted
+ *   behind the model finder and renders after it, so the finder read itself as
+ *   covered and never took focus at all.
+ * - **Where focus currently is** is not it either. A nested dialog is opened by
+ *   a trigger inside the dialog underneath, so at the moment the *new* dialog's
+ *   frame fires, focus is legitimately still in the old one -- and skipping
+ *   there leaves the new dialog with no focus.
+ *
+ * Open order is the thing itself, and nothing infers it: each dialog records
+ * its own opening. `lastIndexOf` rather than `indexOf` because the same element
+ * can be re-registered across a remount before the stale entry is removed.
+ */
+const openModals: HTMLElement[] = [];
+
+/**
+ * Records `dialog` as open and returns the matching removal. Exported for the
+ * one modal surface that predates this hook and still runs its own focus frame,
+ * the mobile drawer in `MobileChatShell`: a surface that does not register is
+ * invisible to every other surface's guard.
+ */
+export const registerOpenModal = (dialog: HTMLElement) => {
+  openModals.push(dialog);
+  return () => {
+    const index = openModals.lastIndexOf(dialog);
+    if (index >= 0) openModals.splice(index, 1);
+  };
+};
+
+/** Whether a modal opened after `dialog` and is still open. */
+export const modalOpenedOnTop = (dialog: HTMLElement | null) => {
+  if (!dialog) return false;
+  const index = openModals.lastIndexOf(dialog);
+  return index >= 0 && index < openModals.length - 1;
+};
 
 const focusableWithin = (panel: HTMLElement) =>
   Array.from(
@@ -120,15 +161,19 @@ export function useModalDialog({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // The frame below is skipped when another modal opened on top in the
-    // meantime. A frame is long enough for that -- Settings -> Delete Account
-    // is two clicks -- and focus arriving late would pull the person out of
-    // the dialog they are now in and back into this one, which is inert, with
-    // no key press to explain it. Under CI load that is what failed "Tab
-    // pressed before the nested dialog's initial focus lands" on main at
-    // 11b98c9: the Tab was trapped correctly and this frame undid it.
+    // Registered before the frame is scheduled, so a dialog that opens after
+    // this one can be seen to have opened after it. The frame below is then
+    // skipped when that happened: a frame is long enough for it -- Settings ->
+    // Delete Account is two clicks -- and focus arriving late would pull the
+    // person out of the dialog they are now in and back into this one, which
+    // is inert, with no key press to explain it. Under CI load that is what
+    // failed "Tab pressed before the nested dialog's initial focus lands" on
+    // main at 11b98c9: the Tab was trapped correctly and this frame undid it.
+    const unregister = dialogRef.current
+      ? registerOpenModal(dialogRef.current)
+      : null;
     const focusFrame = requestAnimationFrame(() => {
-      if (coveredByAnotherModal(dialogRef.current)) return;
+      if (modalOpenedOnTop(dialogRef.current)) return;
       const preferred = initialFocusRef?.current;
       if (preferred?.isConnected) {
         preferred.focus();
@@ -140,6 +185,7 @@ export function useModalDialog({
     });
 
     return () => {
+      unregister?.();
       cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
       requestAnimationFrame(() => {
@@ -166,7 +212,7 @@ export function useModalDialog({
       const dialog = dialogRef.current;
       if (!dialog || !panelRef.current) return false;
 
-      if (coveredByAnotherModal(dialog)) return false;
+      if (laterInDocumentOrder(dialog)) return false;
 
       const eventOwner =
         event.target instanceof Element
