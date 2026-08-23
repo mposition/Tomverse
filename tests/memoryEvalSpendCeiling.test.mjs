@@ -7,7 +7,8 @@ import { getModel } from "../lib/models.ts";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 
 /**
- * §12.5 says the eval budget is enforced by code. Two things enforce it and
+ * docs/policy/external-conversation-import-and-memory.md §12.5 says the eval
+ * budget is enforced by code. Two things enforce it and
  * only one of them worked.
  *
  * The refusal worked: a pair with no `evalBudget` cannot run live. The
