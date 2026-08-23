@@ -317,6 +317,15 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   entitlement입니다. `npm run report:model-token-limits`가 차이를 actor 유무와
   함께 나열하며, `report:model-credit-weights`와 같이 **gate가 아니라
   보고입니다**: docs/policy/credit-and-cost-limits.md.
+- **reconciliation에는 scope가 둘입니다.** 기본은 검토된 메타데이터 블록 전체를
+  쓰고, `OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS`는 `maxOutputTokens` 한
+  필드만 씁니다. 상한 하나 때문에 전체 scope로 등록하지 않습니다 —
+  `creditWeight`가 함께 쓰이고, `perplexity/sonar`는
+  docs/policy/perplexity-sonar-credit-price-hold.md가 그 값을 묶어 두었으며 그
+  문서가 이 목록을 위험 경로로 지목합니다
+  (docs/policy/perplexity-sonar-credit-price-hold.md §5는 다른 모델도 같을 수
+  있다고 적습니다). 2026-08-23에 열두 모델이 좁은 scope로 들어갔고, 상한이 이미 맞는
+  `gpt-5-5-thinking`은 예약만 움직이게 되므로 제외했습니다.
 - **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
   아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
   기본값은 `auto`). `npm run check:model-pricing`이 request-side tier 지정을

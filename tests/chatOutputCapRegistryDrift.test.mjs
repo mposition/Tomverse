@@ -3,9 +3,11 @@ import test from "node:test";
 
 import { registryRowToModel } from "../lib/modelRegistry.ts";
 import {
+  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
   staticModelRegistryReconciliationRows,
   staticModelRegistrySeedRows,
 } from "../lib/modelRegistryShared.ts";
+import { FALLBACK_PRICING, getModelCostClass } from "../lib/modelPricing.ts";
 import { createChatBudget } from "../lib/chatSecurity.ts";
 import { fitChatOutputToContextWindow } from "../lib/chatContextWindow.ts";
 
@@ -144,4 +146,97 @@ test("a NULL token column still inherits the pricing profile", () => {
     budget.reservedOutputTokens,
     APPROVED_RESERVATION_OUTPUT_TOKENS
   );
+});
+
+// The 2026-08-23 sweep: twelve more models in the same shape. Same proof, run
+// over each of them -- the pre-profile row caps the request, the reconciled
+// row does not, and nothing about what the turn costs moves in between.
+const seedRowFor = (modelId) => {
+  const row = staticModelRegistrySeedRows().find((entry) => entry.id === modelId);
+  assert.ok(row, `${modelId} must be in the bootstrap catalogue`);
+  return { ...row, updatedById: null, updatedByEmail: null };
+};
+
+for (const modelId of OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS) {
+  test(`${modelId}: the stranded class cap is lifted, and nothing else moves`, () => {
+    const seeded = seedRowFor(modelId);
+    const model = registryRowToModel(seeded);
+    const fallback = FALLBACK_PRICING[getModelCostClass(model.usageClass)];
+    const approvedCap = seeded.maxOutputTokens;
+
+    // The row a pre-profile seed left behind.
+    assert.ok(
+      fallback.maxOutputTokens < approvedCap,
+      `${modelId} must actually have a cap to lift`
+    );
+    const before = requestOutputCapFor({
+      ...seeded,
+      maxOutputTokens: fallback.maxOutputTokens,
+      reservationOutputTokens: fallback.reservationOutputTokens,
+    });
+    assert.equal(before.budget.maxOutputTokens, fallback.maxOutputTokens);
+
+    const reconciliation = staticModelRegistryReconciliationRows().find(
+      (entry) => entry.id === modelId
+    );
+    assert.ok(reconciliation, modelId);
+    const after = requestOutputCapFor({
+      ...seeded,
+      maxOutputTokens: fallback.maxOutputTokens,
+      reservationOutputTokens: fallback.reservationOutputTokens,
+      ...reconciliation.data,
+    });
+
+    assert.equal(after.budget.maxOutputTokens, approvedCap);
+    assert.ok(after.requestMaxOutputTokens > before.requestMaxOutputTokens);
+
+    // The cap is a capability. Credits, the reservation and the unit prices
+    // are entitlement and cost, and this change does not touch them.
+    assert.equal(after.budget.usageCredits, before.budget.usageCredits);
+    assert.equal(
+      after.budget.reservedOutputTokens,
+      before.budget.reservedOutputTokens
+    );
+    assert.equal(
+      after.budget.inputUsdPerMillionTokens,
+      before.budget.inputUsdPerMillionTokens
+    );
+    assert.equal(
+      after.budget.outputUsdPerMillionTokens,
+      before.budget.outputUsdPerMillionTokens
+    );
+    assert.equal(after.budget.pricingVersion, before.budget.pricingVersion);
+  });
+}
+
+// The acute pair: reasoning can fill the whole cap before a word of visible
+// text, which is how the defect turns into an empty answer rather than a
+// truncated one.
+test("the two reasoning Perplexity models get room to answer after reasoning", () => {
+  for (const modelId of [
+    "perplexity/sonar-reasoning-pro",
+    "perplexity/sonar-deep-research",
+  ]) {
+    const seeded = seedRowFor(modelId);
+    const model = registryRowToModel(seeded);
+    assert.equal(model.reasoning, "high", modelId);
+
+    const fallback = FALLBACK_PRICING[getModelCostClass(model.usageClass)];
+    const reconciliation = staticModelRegistryReconciliationRows().find(
+      (entry) => entry.id === modelId
+    );
+    const { requestMaxOutputTokens } = requestOutputCapFor({
+      ...seeded,
+      maxOutputTokens: fallback.maxOutputTokens,
+      ...reconciliation.data,
+    });
+
+    // Trace 2e4327a9 spent 4,095 reasoning tokens and had nothing left. Every
+    // one of these now clears that by more than an order of magnitude.
+    assert.ok(requestMaxOutputTokens > 100_000, modelId);
+    assert.ok(
+      requestMaxOutputTokens - 4_095 > fallback.maxOutputTokens,
+      modelId
+    );
+  }
 });
