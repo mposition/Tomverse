@@ -28,6 +28,8 @@ import { BATCH_015_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch
 import { BATCH_016_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch016DurableEn";
 import { BATCH_017_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch017AssistantKo";
 import { BATCH_018_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch018AssistantEn";
+import { BATCH_019_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch019AssistantKo";
+import { BATCH_020_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch020AssistantEn";
 
 export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
 
@@ -91,5 +93,17 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
         cell: "assistant_only:en",
         record: "docs/ops/memory-extraction-eval-batches/batch-018-assistant-only-en.md",
         cases: BATCH_018_ASSISTANT_EN,
+    },
+    {
+        id: "batch-019",
+        cell: "assistant_only:ko",
+        record: "docs/ops/memory-extraction-eval-batches/batch-019-assistant-only-ko.md",
+        cases: BATCH_019_ASSISTANT_KO,
+    },
+    {
+        id: "batch-020",
+        cell: "assistant_only:en",
+        record: "docs/ops/memory-extraction-eval-batches/batch-020-assistant-only-en.md",
+        cases: BATCH_020_ASSISTANT_EN,
     },
 ];
