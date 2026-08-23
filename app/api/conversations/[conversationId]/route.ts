@@ -275,6 +275,10 @@ export async function GET(
         // how many memories an answer was given, and a token figure would
         // say something about their length without being asked for.
         memoryUsedCount: true,
+        // docs/policy/external-conversation-import-and-memory.md §14.3, selected on the same terms and for the
+        // same reason: the
+        // owner's own read is the one place this count is admissible.
+        knowledgeChunkCount: true,
         /*
           The files this answer produced
           (docs/policy/generated-artifacts.md section 5).
@@ -319,7 +323,14 @@ export async function GET(
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
     const messages = (
       hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
-    ).map(({ memoryUsedCount, artifacts, attachments, ...message }) => ({
+    ).map(
+      ({
+        memoryUsedCount,
+        knowledgeChunkCount,
+        artifacts,
+        attachments,
+        ...message
+      }) => ({
       ...message,
       /*
         Absent, not empty, when the user attached nothing -- the same shape a
@@ -365,7 +376,18 @@ export async function GET(
       ...(typeof memoryUsedCount === "number" && memoryUsedCount > 0
         ? { memoryUsedCount }
         : {}),
-    }));
+      /*
+        docs/policy/external-conversation-import-and-memory.md §14.3: the knowledge half of the same
+        disclosure, on the identical
+        condition. Destructured above so that a `null` or `0` is dropped
+        here rather than reaching the client -- the field is absent, never a
+        number the renderer has to know not to show.
+      */
+      ...(typeof knowledgeChunkCount === "number" && knowledgeChunkCount > 0
+        ? { knowledgeChunkCount }
+        : {}),
+      })
+    );
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])

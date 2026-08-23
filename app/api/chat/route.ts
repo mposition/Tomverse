@@ -1699,6 +1699,7 @@ async function handleChatPost(
         // memory.
         let contextSystemPrompt: string | null = null;
         let memoryUsedCount = 0;
+        let knowledgeChunkCount = 0;
         // §22 attribution, written onto the answer rather than counted.
         //
         // The day counters beside this already report the injection *ratio*.
@@ -1708,9 +1709,16 @@ async function handleChatPost(
         // while no bundle accompanies the request, which is what "memory was
         // not possible here" means; §8.1 invariant 4 permits the used count
         // and forbids the context itself, which is never written.
-        let memoryAttribution: {
+        //
+        // Knowledge rides in the same object (§14.3) rather than a second
+        // one, because it is the same fact about the same answer and shares
+        // the null: no bundle means neither was possible. Keeping them
+        // together is also what stops one Message create from being updated
+        // for a new column and the other from being missed.
+        let contextAttribution: {
             memoryUsedCount: number;
             memoryTokens: number;
+            knowledgeChunkCount: number;
         } | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
@@ -1816,9 +1824,14 @@ async function handleChatPost(
             // builder that priced it.
             contextSystemPrompt = turnContext.systemPrompt;
             memoryUsedCount = turnContext.memory.prompt.usedCount;
-            memoryAttribution = {
+            // §14.3. The builder has always produced this; until now nothing
+            // read it, so an answer assembled from the user's own uploaded
+            // files said nothing about where it came from.
+            knowledgeChunkCount = turnContext.profile.knowledgeChunkCount;
+            contextAttribution = {
                 memoryUsedCount,
                 memoryTokens: verification.payload.memoryTokens,
+                knowledgeChunkCount,
             };
             // Memory's own presence, not the block's: a turn whose system
             // message carries only a profile's instructions has no memory in
@@ -2784,7 +2797,7 @@ async function handleChatPost(
                             status: "pending",
                             modelId: requestedModelId,
                             pendingJobId: perplexityJobId,
-                            ...memoryAttribution,
+                            ...contextAttribution,
                         },
                     });
                     await tx.perplexityAsyncJob.create({
@@ -4295,7 +4308,7 @@ async function handleChatPost(
                                             // Spread, so an answer with no
                                             // bundle writes neither column
                                             // and both stay NULL (§22).
-                                            ...memoryAttribution,
+                                            ...contextAttribution,
                                         },
                                     });
                                     if (providerContext) {
@@ -4599,6 +4612,14 @@ async function handleChatPost(
         // is one.
         if (memoryUsedCount > 0) {
             headers.set("X-Chat-Memory-Used", String(memoryUsedCount));
+        }
+        // §14.3, on exactly the memory header's terms: sent only above zero,
+        // so the renderer is never handed a number it must know not to show.
+        // A separate header rather than a combined one because the two are
+        // separate facts -- an answer can carry either, both or neither, and
+        // one field would have to encode "absent" twice.
+        if (knowledgeChunkCount > 0) {
+            headers.set("X-Chat-Knowledge-Used", String(knowledgeChunkCount));
         }
         // Which model answered, on a turn Auto routed. A header rather than
         // something in the body for the same reason as the memory count: the

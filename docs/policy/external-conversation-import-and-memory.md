@@ -1141,6 +1141,44 @@ audit에 남지 않습니다.
 승인자가 결정해야 하는 것은 위 네 개의 기간과, **활성 파일에 만료를 두지 않는다**는
 방향입니다.
 
+### 14.3 Knowledge 사용 투명성 — 답변별 귀속
+
+§13.4가 memory에 대해 정한 것과 같은 계약을 profile knowledge에 적용합니다.
+**두 개의 다른 사실이므로 하나의 숫자로 합치지 않습니다** — 사용자 자신이 올린
+파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장이고, 합친 count는 둘 중
+어느 것도 말하지 않습니다.
+
+- 값의 출처는 두 곳이며 §13.4와 대칭입니다. 생성 중에는 `/api/chat`의
+  `X-Chat-Knowledge-Used` header, 다시 열었을 때는
+  `GET /api/conversations/[conversationId]`가 돌려주는
+  `Message.knowledgeChunkCount`입니다.
+- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 §10 context
+  bundle이 없어 profile knowledge 자체가 불가능했던 요청이고, `0`은 bundle은
+  있었지만 retrieval이 아무 발췌도 고르지 않은 경우입니다. 둘 다 표시를
+  금지하며, 숫자를 보내고 renderer가 숨기는 대신 **필드를 빼서** 보냅니다.
+- **이름이 `knowledgeChunkCount`인 것은 서버가 아는 것이 그것이기 때문입니다.**
+  서버는 prompt에 넣은 발췌 수를 알 뿐 모델이 그것을 실제로 활용했는지는 알지
+  못합니다. `knowledgeUsedCount`는 관측하지 못하는 것을 주장하는 이름입니다.
+  같은 한계가 `memoryUsedCount`에도 있으며, 그 컬럼은 추가 시점부터 약한 의미로
+  읽어 왔습니다.
+- **저장하는 것은 count뿐입니다.** §8.1 불변식 4의 논리가 그대로 적용됩니다 —
+  발췌 본문도, 어느 파일에서 왔는지도 Message 행에 쓰지 않습니다.
+- **읽는 쪽은 소유자 자신의 조회뿐입니다.** share snapshot과 conversation
+  export는 각자의 select를 쓰며 이 컬럼을 이름조차 대지 않습니다(§13.3). 제3자에게
+  이 숫자는 "이 작성자가 개인 파일로 답을 만든다"는 사실을 알려 주며, 그것이
+  §13.3이 막으려는 것입니다.
+- **client 직렬화 allowlist에 넣지 않습니다.** `lib/chatMessageSerialization.ts`의
+  `pickTransportFields()`가 allowlist이므로 이 필드는 요청 transcript와 guest
+  localStorage에 실리지 않습니다. 거기 실린 값은 stale한 주장일 수밖에 없습니다.
+- 표시는 §13.4의 memory 표시와 한 문장을 공유합니다
+  (`ChatMessageList`의 `memory-usage-disclosure`). 판정은
+  `lib/answerContextDisclosure.ts`의 `decideAnswerContextDisclosure()` 한 곳이며,
+  memory가 먼저 오는 순서는 §9.1 system block이 조립되는 순서와 같습니다.
+- 검증: `tests/answerContextDisclosure.test.mjs`(판정 행렬),
+  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
+  `tests/chatMessageSerialization.test.ts`(allowlist 배제),
+  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+
 ## 15. Feature flag와 롤아웃 · rollback
 
 AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:

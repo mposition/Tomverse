@@ -69,6 +69,11 @@ const FORBIDDEN = [
     // which is precisely what §13.3's notice is worded to avoid.
     "memoryUsedCount",
     "memoryTokens",
+    // docs/policy/external-conversation-import-and-memory.md §14.3's half of the
+    // same disclosure, excluded for the same reason: to a
+    // viewer the count says the author answers from their own uploaded files
+    // and how much of one went in.
+    "knowledgeChunkCount",
 ];
 
 const validSnapshot = () => ({
@@ -272,11 +277,15 @@ test("the memory count is selected for the owner's read and for no one else", ()
     const read = (path) =>
         readFileSync(new URL(path, import.meta.url), "utf8");
 
+    const ownerRead = read("../app/api/conversations/[conversationId]/route.ts");
     assert.ok(
-        read("../app/api/conversations/[conversationId]/route.ts").includes(
-            "memoryUsedCount: true"
-        ),
+        ownerRead.includes("memoryUsedCount: true"),
         "the owner's conversation read must select memoryUsedCount (§13.4)"
+    );
+    assert.ok(
+        ownerRead.includes("knowledgeChunkCount: true"),
+        "the owner's conversation read must select knowledgeChunkCount " +
+            "(docs/policy/external-conversation-import-and-memory.md §14.3)"
     );
 
     for (const path of [
@@ -285,7 +294,11 @@ test("the memory count is selected for the owner's read and for no one else", ()
         "../app/api/public/shares/[shareToken]/route.ts",
     ]) {
         const source = read(path);
-        for (const column of ["memoryUsedCount", "memoryTokens"]) {
+        for (const column of [
+            "memoryUsedCount",
+            "memoryTokens",
+            "knowledgeChunkCount",
+        ]) {
             assert.ok(
                 !source.includes(column),
                 `${path} must not read ${column} (§13.3)`
