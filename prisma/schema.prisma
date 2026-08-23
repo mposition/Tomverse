@@ -346,6 +346,22 @@ model Message {
   memoryUsedCount Int?
   memoryTokens    Int?
 
+  /// How many assistant-profile knowledge excerpts this answer's prompt
+  /// carried (docs/policy/external-conversation-import-and-memory.md §14.3). The same
+  /// shape and the same permission as the two
+  /// columns above: a count and nothing else, never the excerpt text and
+  /// never which files it came from. NULL means no
+  /// docs/policy/external-conversation-import-and-memory.md §10 context bundle
+  /// accompanied the request, so no profile knowledge was possible; 0 means
+  /// a bundle was verified and knowledge retrieval selected nothing.
+  ///
+  /// Named for chunks rather than for use, because that is what the server
+  /// actually knows. It counts the excerpts placed in the prompt, not
+  /// whether the model drew on them -- nothing here can observe the latter,
+  /// and a name that implied it would make the disclosure claim more than
+  /// the number supports.
+  knowledgeChunkCount Int?
+
   /// Files this answer produced (docs/policy/generated-artifacts.md). Empty
   /// for every message written before the feature and for every message that
   /// asked for no file, which is almost all of them -- an artifact is an
