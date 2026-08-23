@@ -58,11 +58,13 @@ import {
     sha256Hex,
 } from "@/lib/assistantPackageImportClient";
 import { findingKey } from "@/lib/assistantPackageSecretScan";
+import { trackProductEvent, trackProductEventOnce } from "@/lib/productAnalyticsClient";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import {
     ASSISTANT_PROFILE_LIST_PATH,
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
+import type { AssistantPackageReview } from "@/lib/assistantPackageReview";
 import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPackageWorker";
 
 /**
@@ -202,6 +204,28 @@ const RUN_FAILURE_KEY: Record<string, string> = {
 const runFailureKey = (code: string): string =>
     RUN_FAILURE_KEY[code] ?? "assistantPackageImport.failureGeneric";
 
+/**
+ * The warnings worth counting across many imports.
+ *
+ * Derived from the review rather than from the screen, so the count does not
+ * depend on what the owner happened to scroll past. Each one is a closed enum
+ * value and nothing else travels with it: a package carries somebody else's
+ * filenames and instructions, and this is the boundary where those stop.
+ */
+const reviewWarnings = (
+    review: AssistantPackageReview
+): NonNullable<Parameters<typeof trackProductEvent>[2]>["package_import_warning"][] => {
+    const warnings: string[] = [];
+    if (review.secretFindings.length > 0) warnings.push("secret_finding");
+    for (const loss of review.losses) {
+        if (loss.kind === "scripts") warnings.push("scripts_skipped");
+        if (loss.kind === "knowledge_over_limit") warnings.push("documents_over_limit");
+        if (loss.kind === "license_absent") warnings.push("license_absent");
+        if (loss.kind === "relative_links") warnings.push("relative_links");
+    }
+    return warnings as ReturnType<typeof reviewWarnings>;
+};
+
 /** Why a step cannot be left, for the kinds that carry no data of their own. */
 const BLOCK_KEY: Record<ImportBlock["kind"], string> = {
     no_file: "assistantPackageImport.blockNoFile",
@@ -288,17 +312,53 @@ export function AssistantPackageImportWizard() {
      * and two publishes would race for the same revision.
      */
     const busyRef = useRef(false);
+    /**
+     * The step to report as abandoned, or `null` once there is nothing to
+     * abandon. Read by the unmount handler, which cannot see the state.
+     */
+    const stepAtUnmountRef = useRef<AssistantPackageImportStep | null>(null);
 
     // In an effect rather than during render: writing a ref while rendering is
     // a write React may throw away, and the run reads this across awaits where
     // a discarded write would be a decision made from a state that never was.
     useEffect(() => {
         stateRef.current = state;
+        // Nothing to abandon before a file is chosen, and nothing to abandon
+        // once it is published.
+        stepAtUnmountRef.current =
+            state.file === null || state.run.kind === "published" ? null : state.step;
     }, [state]);
+
+    /**
+     * Each step, once, as it is reached.
+     *
+     * `trackProductEventOnce` rather than an effect that fires on every
+     * render: going back and forward between two steps is one funnel position
+     * visited twice, and counting it twice would make the drop-off between
+     * consecutive steps read as negative.
+     */
+    useEffect(() => {
+        trackProductEventOnce(
+            `assistant-package-import-step:${state.step}`,
+            "assistant_package_import_step_entered",
+            0,
+            { package_import_step: state.step }
+        );
+    }, [state.step]);
 
     useEffect(
         () => () => {
             goneRef.current = true;
+            // A deliberate exit. A browser close is not observable here, so
+            // `abandoned` counts are a floor rather than the real drop-off --
+            // which is the difference between consecutive steps' `entered`
+            // counts, exactly as the conversation import's funnel works.
+            const step = stepAtUnmountRef.current;
+            if (step !== null) {
+                trackProductEvent("assistant_package_import_step_abandoned", 0, {
+                    package_import_step: step,
+                });
+            }
             workerRef.current?.terminate();
             workerRef.current = null;
         },
@@ -353,11 +413,23 @@ export function AssistantPackageImportWizard() {
                 }
                 if (message.type === "review") {
                     dispatch({ type: "parse_succeeded", review: message.review });
+                    // One event per warning kind, when the package is read
+                    // rather than when a screen renders it: what is being
+                    // counted is what packages contain, not what anybody
+                    // scrolled past.
+                    for (const warning of reviewWarnings(message.review)) {
+                        trackProductEvent("assistant_package_import_warning", 0, {
+                            package_import_warning: warning,
+                        });
+                    }
                 } else if (message.type === "refused") {
                     dispatch({
                         type: "parse_refused",
                         code: message.code,
                         cause: message.cause,
+                    });
+                    trackProductEvent("assistant_package_import_warning", 0, {
+                        package_import_warning: "package_refused",
                     });
                 }
                 return true;
@@ -536,6 +608,12 @@ export function AssistantPackageImportWizard() {
                 if (
                     snapshot.files.some((entry) => entry.processingStatus === "failed")
                 ) {
+                    trackProductEventOnce(
+                        `assistant-package-import-unreadable:${created.id}`,
+                        "assistant_package_import_warning",
+                        0,
+                        { package_import_warning: "document_unreadable" }
+                    );
                     // Stop watching, but do not fail the run: a document that
                     // could not be read is the owner's decision to make.
                     return;
@@ -614,6 +692,14 @@ export function AssistantPackageImportWizard() {
                 });
                 return;
             }
+            trackProductEvent("assistant_package_import_completed", 0, {
+                // What the parser read the package as, never what it claimed
+                // to be: the claim is display-only and this is a measurement.
+                package_import_source:
+                    current.review?.kind === "tomverse-native"
+                        ? "tomverse-native"
+                        : "agent-skill",
+            });
             dispatch({
                 type: "publish_succeeded",
                 revision:

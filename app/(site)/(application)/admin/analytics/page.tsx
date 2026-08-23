@@ -2,10 +2,12 @@ export const dynamic = "force-dynamic";
 
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
 import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevocationPanel";
+import { AdminPackageImportPanel } from "@/components/admin/AdminPackageImportPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
 import { LaunchFunnelPanel } from "@/components/admin/AdminRiskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { getAssistantPackageImportMetrics } from "@/lib/assistantPackageImportMetrics";
 import { getAdminUserStats } from "@/lib/adminUsers";
 import { prisma } from "@/lib/prisma";
 import { getProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
@@ -41,10 +43,18 @@ export default async function AdminAnalyticsPage({
   );
 
   if (tab.id === "imports") {
+    const packageImports = await getAssistantPackageImportMetrics();
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         <AdminMemoryImportPanel />
+        {/*
+          Read here rather than fetched by the panel: this one is a single
+          grouped query over the event ledger, and the tab is already a server
+          component. The memory panel above fetches because its two reports are
+          separate endpoints that can each be unavailable.
+        */}
+        <AdminPackageImportPanel metrics={packageImports} />
         {/*
           The §12.1 revocation control sits under the report it reacts to: the
           per-pair failure table above is where an operator sees one pair
