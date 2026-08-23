@@ -231,4 +231,88 @@ export async function countOpenWorkItems(): Promise<number> {
     });
 }
 
+/** The queue rows the daily report reads, with the fields the report shows. */
+export type LifecycleReportRow = OpenWorkItem & {
+    blockers: string[];
+    pendingValidations: string[];
+    recommendation: string | null;
+};
+
+const stringList = (value: Prisma.JsonValue | null): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is string => typeof entry === "string");
+};
+
+/**
+ * Everything the daily report lists: open items *and* decided ones that have
+ * not shipped.
+ *
+ * A separate reader from `listOpenWorkItems` rather than more fields on it. The
+ * admin panel's list is served to a browser and its shape is a contract; the
+ * report needs blockers and pending validations, which nothing in that panel
+ * displays. Widening the shared reader would have put them in a response that
+ * has no use for them.
+ */
+export async function listLifecycleReportWorkItems(options?: {
+    limit?: number;
+}): Promise<LifecycleReportRow[]> {
+    const rows = await prisma.modelLifecycleWorkItem.findMany({
+        // Every non-terminal state, which is more than `listOpenWorkItems`
+        // means by "open" in the panel: the report also shows what has been
+        // decided and not yet shipped, and that is the same set.
+        where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
+        orderBy: [{ firstSeenAt: "asc" }],
+        take: options?.limit ?? 200,
+        select: {
+            id: true,
+            provider: true,
+            apiModel: true,
+            action: true,
+            status: true,
+            severity: true,
+            ownerEmail: true,
+            dueAt: true,
+            firstSeenAt: true,
+            blockers: true,
+            pendingValidations: true,
+            recommendation: true,
+        },
+    });
+    return rows.map((row) => ({
+        ...row,
+        blockers: stringList(row.blockers),
+        pendingValidations: stringList(row.pendingValidations),
+    }));
+}
+
+/**
+ * What moved in the queue since `since`, from the append-only history.
+ *
+ * Counted from events rather than from the items' own timestamps because an
+ * item that was discovered, decided and shipped in one day would otherwise
+ * appear in exactly one of those counts.
+ */
+export async function summariseLifecycleChanges(since: Date): Promise<{
+    discovered: number;
+    decided: number;
+    transitions: number;
+    completed: number;
+}> {
+    const events = await prisma.modelLifecycleWorkItemEvent.findMany({
+        where: { occurredAt: { gte: since } },
+        select: { fromStatus: true, toStatus: true },
+    });
+    let discovered = 0;
+    let decided = 0;
+    let completed = 0;
+    for (const event of events) {
+        if (event.fromStatus === null) discovered += 1;
+        if (["approved", "rejected", "deferred"].includes(event.toStatus)) decided += 1;
+        if (event.toStatus === "completed" || event.toStatus === "closed_no_action") {
+            completed += 1;
+        }
+    }
+    return { discovered, decided, transitions: events.length - discovered, completed };
+}
+
 export type { Prisma };
