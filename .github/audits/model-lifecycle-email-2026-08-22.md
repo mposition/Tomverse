@@ -957,8 +957,35 @@ ModelLifecycleWorkItemEvent   -- append-only
 **실행하지 못한 것**: DB integration과 `db:compare-schema`는 DATABASE_URL이
 필요해 이 세션에서 돌리지 못했습니다. migration 적용은 배포 시점입니다.
 
-**아직 없는 것**: 조회 UI(P0-2). `listOpenWorkItems()`는 있고 화면이 없으므로,
-지금 큐를 읽는 경로는 일일 리포트의 `awaiting review N` 한 숫자뿐입니다.
+### 9.6 조회·triage 경로 (2026-08-22 · P0-2 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminNavigation.ts` | `models` entry에 `registry`/`discovery` 탭 + `modelLifecycle` badge |
+| `components/admin/adminNavigationIcons.ts` | 기존 `models: Bot` 재사용 (신규 route 세그먼트 없음) |
+| `app/(site)/(application)/admin/models/page.tsx` | `?tab=` 서버 판정, 열린 섹션만 mount |
+| `components/admin/AdminModelDiscoveryPanel.tsx` | 백로그 표 + triage 3동작 |
+| `app/api/admin/model-lifecycle/route.ts` | GET 목록 · PATCH 전이 |
+| `lib/adminNavigationBadges.ts` / `Counts.ts` | `openModelLifecycle` 배지 |
+| `lib/adminWorkQueue.ts` | `Model lifecycle` collector (8번째 카테고리) |
+
+**IA 계약 준수**: `?tab=`은 `<Link>`이고 서버 컴포넌트가 `searchParams`를 읽으며
+열린 섹션만 fetch합니다. catch-all route를 만들지 않았고 새 route 세그먼트가
+없으므로 icon 등록도 기존 것을 씁니다. 배지는 알 수 없으면 0이 아니라 아무것도
+렌더하지 않습니다(`settled()` → `null`).
+
+**승인 gate를 두지 않은 이유**: 이중 승인은 되돌리기 어려운 행위
+(suppression 해제, 관할권 정책 활성화)의 것이고 triage는 그렇지 않습니다.
+위험한 형태는 전이 규칙이 이미 거절하고, 모든 이동이 사람 이름과 함께
+append-only 이력에 남습니다. 이 화면이 바꾸는 것은 **모델에 대한 결정**이지
+모델 자체가 아니며, 뒤따르는 registry 쓰기는 자기 gate를 그대로 유지합니다.
+
+**읽기 실패와 빈 목록을 구분합니다.** 조회가 실패하면 "아무것도 기다리지
+않는다"고 말하지 않고 실패했다고 말합니다 — 빈 표와 실패한 읽기는 화면에서
+같아 보이지만 둘 중 하나만 "할 일 없음"입니다.
+
+**검증**: unit 4,182→4,183(nav 15건) · typecheck · eslint · enum gate.
+**실행하지 못한 것**: `tests/e2e-admin/**`은 `npm run build`와 DB가 필요합니다.
 
 ---
 
@@ -1971,7 +1998,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 |---|---|---|---|
 | P0-0 | 미처리 7건 triage 실행 (`model-lifecycle-triage-2026-08-22.md`) | ML-01 | 최대 28일째 방치. P0-1과 **병렬**로 — 순차로 하면 처리하는 동안 새 후보가 같은 방식으로 사라집니다 |
 | P0-1 | ~~`ModelLifecycleWorkItem` + backfill~~ **완료 (2026-08-22)** | ML-01, ML-03, ML-12 | 하루만 사는 후보가 계속 사라지고 있었습니다. §9.5 참조 |
-| P0-2 | `/admin/models?tab=discovery` + work-queue collector | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없습니다 |
+| P0-2 | ~~`/admin/models?tab=discovery` + work-queue collector~~ **완료 (2026-08-22)** | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없었습니다 |
 | P0-3 | Daily email v2 (NEW/PENDING 분리 + standard lane) | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호입니다 |
 | P0-4 | preference fail-closed + 전 계정 backfill | EM-02, EM-13 | marketing template이 생기는 순간 동의 없는 발송이 됩니다 |
 | P0-5 | audience 계산기 + `ModelMigrationRecord` + `newConversationModelIds` 동기화 | ML-09, ML-11 | 이 셋이 없으면 폐기 안내를 사실대로 쓸 수 없습니다 |

@@ -1,3 +1,4 @@
+import { OPEN_WORK_ITEM_STATUSES } from "@/lib/modelLifecycleWorkItemCore";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 
@@ -60,6 +61,7 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
     incidents,
     webhooks,
     alerts,
+    modelLifecycle,
     jobs,
   ] = await Promise.allSettled([
     prisma.adminActionApproval.findMany({
@@ -127,6 +129,21 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
       orderBy: { createdAt: "asc" },
       take: WORK_QUEUE_SOURCE_LIMIT,
       select: { id: true, title: true, channel: true, createdAt: true },
+    }),
+    prisma.modelLifecycleWorkItem.findMany({
+      where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
+      orderBy: { firstSeenAt: "asc" },
+      take: WORK_QUEUE_SOURCE_LIMIT,
+      select: {
+        id: true,
+        provider: true,
+        apiModel: true,
+        action: true,
+        status: true,
+        severity: true,
+        ownerEmail: true,
+        firstSeenAt: true,
+      },
     }),
     getScheduledJobsDashboard(now),
   ]);
@@ -217,6 +234,24 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
     }`,
     href: "/admin/automation?tab=webhooks",
     openedAt: row.receivedAt.toISOString(),
+  }));
+
+  collect("Model lifecycle", modelLifecycle, (row) => ({
+    id: `model-lifecycle:${row.id}`,
+    category: "Model",
+    // The item carries its own severity; a discovery nobody has looked at is
+    // ordinary work, an auto-disabled model with users on it is not.
+    severity: (["critical", "high", "normal"] as const).includes(
+      row.severity as WorkQueueSeverity
+    )
+      ? (row.severity as WorkQueueSeverity)
+      : "normal",
+    title: `${row.action} ${row.apiModel} (${row.provider})`,
+    detail: `${row.status.replace(/_/g, " ")} · ${
+      row.ownerEmail ? `owner ${row.ownerEmail}` : "no owner"
+    }`,
+    href: "/admin/models?tab=discovery",
+    openedAt: row.firstSeenAt.toISOString(),
   }));
 
   collect("Alerts", alerts, (row) => ({
