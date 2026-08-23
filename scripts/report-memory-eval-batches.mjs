@@ -28,7 +28,7 @@ import {
 
 const rows = [...ADOPTED_BATCHES, ...CANDIDATE_BATCHES].map((batch) => {
     const record = parseBatchRecord(readFileSync(batch.record, "utf8"));
-    const blockers = promotionBlockers(record);
+    const blockers = promotionBlockers(record, batch.cases.length);
     const judged = record.cases.filter((entry) => entry.verdict !== null);
     const adopted = ADOPTED_BATCHES.some((entry) => entry.id === batch.id);
     return { batch, record, blockers, judged, adopted };

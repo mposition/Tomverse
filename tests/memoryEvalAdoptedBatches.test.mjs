@@ -31,7 +31,7 @@ const recordOf = (batch) =>
 
 test("every adopted batch's record still adopts it", () => {
     for (const batch of ADOPTED_BATCHES) {
-        const blockers = promotionBlockers(recordOf(batch));
+        const blockers = promotionBlockers(recordOf(batch), batch.cases.length);
         assert.deepEqual(
             blockers,
             [],
