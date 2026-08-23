@@ -223,6 +223,64 @@ owner instruction이 됩니다.
 - `icon`은 이모지 또는 짧은 토큰만 가능하고 **URL·data 참조는 거절**됩니다
   (`profileIdentityProblems()`가 이미 강제).
 
+### 5.4 8단계와 서버 상태의 경계
+
+가져오기는 8단계이고, **7단계가 서버에 무언가를 만드는 첫 지점**입니다.
+
+| # | 단계 | 서버에 생기는 것 |
+|---|---|---|
+| 1 | source 선택 — 로컬 `.zip` 또는 단독 `.json` | 없음 |
+| 2 | 형식 감지 | 없음 |
+| 3 | 내용 목록과 위험 경고 | 없음 |
+| 4 | 필드별 변환 검토 | 없음 |
+| 5 | 손실 보고서 | 없음 |
+| 6 | 대상 선택 (새로 만들기 / 기존에 합치기) | 없음 |
+| 7 | knowledge 업로드와 처리 대기 | **import 행 + knowledge 행·chunk + 저장소 객체**(`create`면 draft profile도) |
+| 8 | 최종 확인 → publish | `AssistantProfileVersion` + provenance 확정 |
+
+- **1~6단계에서 취소하면 지울 것이 없습니다.** 요청이 한 번도 나가지 않았기
+  때문입니다. 그러므로 그 사실을 **6→7 전환에서 명시**합니다 — 사용자가 저장이
+  시작되는 지점을 모르면 취소가 무엇을 뜻하는지도 알 수 없습니다.
+- **이 경계는 한 곳에서만 정합니다.** 경계의 위치에 대한 두 번째 의견이 생기면
+  그중 하나는 틀리고, 틀린 쪽이 취소 계약입니다.
+
+### 5.5 staging을 무엇이 보유하는가 — mode가 정합니다
+
+| | `create` | `merge` |
+|---|---|---|
+| staging 보유자 | **draft `AssistantProfile`**(`currentVersionId = NULL`) | **대상 profile 자신.** 새 profile 행 없음 |
+| profile slot | 1개 점유 | **0개** |
+| 게시 전 대화 영향 | 없음 — draft로는 대화를 시작할 수 없습니다 | 없음 — manifest에 없으므로 retrieval에서 제외됩니다 |
+| 취소 | draft profile 삭제 | **이 import가 만든 파일만** 삭제. 기존 파일·revision은 그대로 |
+
+- **`mode`는 표시 필드가 아니라 취소·만료의 분기입니다.** 값이 틀리면 남이
+  만든 profile이 지워지므로, DB CHECK로 어휘를 닫고 **삭제 직전에 전제 조건을
+  다시 확인**합니다. 하나라도 어긋나면 아무것도 지우지 않고 구조화 오류를
+  남깁니다 — profile을 지우는 것은 되돌릴 수 없고, 사람이 확인하는 것은 되돌릴
+  수 있습니다.
+- **cross-profile 이전은 없습니다.** version의 manifest는 그 profile이 가진
+  파일로만 해석되므로, "A에 올리고 B로 옮긴다"는 표현할 수조차 없습니다.
+
+### 5.6 격리·취소·만료
+
+- **staging 파일은 일반 경로에서 보이지 않습니다.** `AssistantKnowledgeFile.importId`
+  가 결속을 들고 있고, 일반 knowledge 목록과 일반 manifest 해석은 `importId`가
+  NULL인 파일만 봅니다. publish가 그 값을 NULL로 바꾸는 것이 **승격**입니다.
+  이 격리가 없으면, 검토 중인 파일을 다른 탭이 게시할 수 있습니다.
+- **활성 staging import가 있는 profile은 일반 publish를 거절합니다.** draft가
+  일반 경로로 게시되는 것을 막는 유일한 방법입니다.
+- **업로드 key는 서버가 발급을 기억합니다.** key는 무작위 UUID라 key만 보고는
+  누가 요청한 것인지 알 수 없으므로, 예약 행이 없으면 finalize는 클라이언트의
+  주장만으로 객체를 지울지 판단하게 됩니다. **우리가 발급하지 않은 key의
+  객체는 지우지 않습니다.**
+- **일반 finalize도 예약을 봅니다.** 그러지 않으면 import가 받은 key를 일반
+  경로에 보내는 것만으로 격리 전체가 한 요청에 우회됩니다.
+- **만료는 두 시계입니다** — 마지막 사용자 행위 기준의 idle, 생성 기준의
+  absolute. 두 값은 컬럼이며 `updatedAt`에서 계산하지 않습니다: background
+  추출과 실패한 publish도 그 컬럼을 움직이므로, 그것으로 계산한 idle 시계는
+  **아무도 없다는 뜻인 사건들이 수명을 연장**하게 됩니다.
+- **idle 만료는 absolute를 넘지 않습니다.**
+
 ## 6. Native package 형식
 
 ### 6.1 형식

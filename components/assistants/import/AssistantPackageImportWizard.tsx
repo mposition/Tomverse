@@ -57,7 +57,7 @@ import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPacka
  * Two contracts this component is responsible for keeping:
  *
  *   * the container is opened by the worker and never uploaded. Steps 1 to 6
- *     make no request at all (§5.2), which is why there is no loading state
+ *     make no request at all (§5.4), which is why there is no loading state
  *     here that is not the worker;
  *   * the 6 -> 7 boundary is stated before it is crossed. The owner ticks a
  *     box that says files start being stored, and `uploadAcknowledged` is

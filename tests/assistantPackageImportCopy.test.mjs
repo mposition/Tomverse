@@ -156,7 +156,7 @@ test("the reason there is no address box is stated where the field would be", ()
 });
 
 test("the boundary between reading and storing is stated on the step before it", () => {
-    // §5.2: the owner has to know where storing begins, or cancelling has no
+    // §5.4: the owner has to know where storing begins, or cancelling has no
     // meaning they can reason about. Step 6 is the last step where knowing it
     // still changes what they can do.
     const body = stepBody("TargetStep");

@@ -134,6 +134,27 @@ const REGISTRY = {
     reason:
       "The knowledge processing lifecycle. The status decides two different things in two different places -- the worker claims 'pending', retrieval reads 'ready' -- so a value in one and not the other is a row invisible to both while looking fine in a list.",
   },
+  AssistantProfileImport_mode_check: {
+    owner: "list",
+    module: "lib/assistantProfileImportCore.ts",
+    list: "ASSISTANT_PROFILE_IMPORT_MODES",
+    reason:
+      "create or merge (docs/policy/assistant-package-import.md \u00a75). Not a label: it is the branch cancellation and expiry take, and the two branches differ by whether a profile is deleted. A third value would reach a sweep that has no case for it, which is the one place a wrong answer is unrecoverable.",
+  },
+  AssistantProfileImport_status_check: {
+    owner: "list",
+    module: "lib/assistantProfileImportCore.ts",
+    list: "ASSISTANT_PROFILE_IMPORT_STATUSES",
+    reason:
+      "staging or published. The expiry sweeps filter on it, so a status they do not recognise is an import nothing ever collects -- and a published import collected as staging is a published profile deleted.",
+  },
+  AssistantKnowledgeUploadReservation_state_check: {
+    owner: "list",
+    module: "lib/assistantProfileImportCore.ts",
+    list: "ASSISTANT_KNOWLEDGE_RESERVATION_STATES",
+    reason:
+      "pending or finalizing. Whether an upload key is currently claimed by a finalize in flight; the compare-and-set that takes a claim and the sweep that reclaims a stale one both read it.",
+  },
   AssistantKnowledgeCleanup_reason_allowed: {
     owner: "list",
     module: "lib/assistantKnowledgeLimits.ts",

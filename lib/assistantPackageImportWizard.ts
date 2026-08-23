@@ -12,7 +12,7 @@
  *
  * ## Steps 1 to 6 write nothing
  *
- * §5.2: the first server row appears at step 7. Cancelling before that has
+ * §5.4: the first server row appears at step 7. Cancelling before that has
  * nothing to undo because no request was ever made, and the wizard says so at
  * the 6 -> 7 boundary rather than leaving the owner to guess when their file
  * started being stored. `stepWritesToServer()` is that fact as code, and the
@@ -79,7 +79,7 @@ export const importStepNumber = (step: AssistantPackageImportStep): number =>
     ASSISTANT_PACKAGE_IMPORT_STEPS.indexOf(step) + 1;
 
 /**
- * The first step that creates anything on the server (§5.2).
+ * The first step that creates anything on the server (§5.4).
  *
  * Named rather than hard-coded at each call site: the whole cancellation
  * contract is "before this, there is nothing to undo", and a second place
@@ -248,7 +248,7 @@ const stepBefore = (
 /**
  * Going back is allowed while nothing has been written, and not after.
  *
- * §5.9.4 gives step 7 onward its own cancellation contract precisely because
+ * §5.6 gives step 7 onward its own cancellation contract precisely because
  * there is state to release; a plain "back" there would leave a staged upload
  * with nothing pointing at it.
  */
