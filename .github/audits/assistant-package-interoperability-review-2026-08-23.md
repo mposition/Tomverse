@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **7** | **2026-08-23** | **리뷰 6회차 반영.** finalize 재시도가 **게시된 R2 객체를 지우지 못하게** upload reservation 도입(§5.9.3f), 잠금 경로에 **일반 identity PATCH·profile DELETE 추가**하고 **plan을 잠금 안에서 계산**(§5.9.3g), 승격을 **승인된 fileId로 한정**하고 제외분은 같은 transaction에서 삭제(§5.9.3j), `unchanged`의 identity-only 계약(§5.9.3i). §6.6 canonical model에 `expectedTargetIdentityDigest` 누락 수정, Slice 1·2 선행 조건에 B1~B6 반영. 고친 문단은 **[rev7]** |
 | **6** | **2026-08-23** | **리뷰 5회차 반영.** import 전용 업로드 경로로 `importId`를 서버가 기록(§5.9.3f), 상태 전환 전체를 **profile advisory 잠금 하나로 직렬화**(§5.9.3g), merge의 **identity 충돌 검사와 원자적 갱신**(§5.9.3h), **`unchanged` 결과의 처리 계약**(§5.9.3i). §10.1.2·§12·§14의 잔여 불일치 정정. 고친 문단은 **[rev6]** |
 | **5** | **2026-08-23** | **리뷰 4회차 반영.** staging 파일을 `AssistantKnowledgeFile.importId` **관계로 격리**하고 일반 knowledge·versions route에서 차단(§5.9.3b), publish를 **transaction-aware helper로 분리**해 version 생성과 import 확정을 한 transaction에 묶음(§5.9.3c), `mode`·`status`에 **CHECK + cleanup fail-closed 조건**(§5.9.3d), idle/absolute TTL을 **명시 컬럼으로 분리**하고 시계 갱신 규칙 확정(§5.9.3e), `stagedFileIds String[]` **폐기**(§6.6). 고친 문단은 **[rev5]** |
 | **4** | **2026-08-23** | **리뷰 3회차 반영.** 가져오기를 **`create` / `merge` 두 mode로 분리**하고 merge는 draft profile 없이 **대상 profile에 직접 staging**하도록 확정(§5.9.3) — 지적된 knowledge 이전·quota 역설이 함께 사라집니다. staging schema에 이어가기·만료·mode·병합 대상 필드 추가(§6.6), provenance를 **서버가 증명할 수 있는 것/주장인 것**으로 재명명(§9.3.1), B1~B6를 **Slice 2** 차단으로·C3를 **Slice 8** 차단으로 정정(§10.1.2), stale publish 후 staging 유지 계약 추가(§5.9.7), 취소 테스트를 rev3 상태에 맞게 수정, MVP 입력을 **ZIP + 단독 JSON으로 한정**(디렉터리 제외). 고친 문단은 **[rev4]** |
@@ -705,11 +706,15 @@ app/api/assistant-profiles/[profileId]/knowledge/[fileId]/route.ts
   선택.
 - 확인 버튼의 문구는 "가져오기"가 아니라 **"이 내용으로 어시스턴트를
   만듭니다"**입니다 — 사용자가 승인하는 것은 파일이 아니라 결과입니다.
-- **[rev4]** publish는 mode와 무관하게 `publishAssistantProfileVersion()`을
-  그대로 부릅니다 — `create`는 `expectedRevision: null`, `merge`는 시작 시점
-  revision(§5.9.3a). **DB 쓰기만** 한 transaction입니다 — version 행 +
-  manifest 결속 + provenance 확정. **R2 업로드와 텍스트 추출은 그 transaction 밖에서 이미
-  끝나 있어야 합니다.** 이유와 상태 기계는 §5.9.
+- **[rev7]** publish는 mode와 무관하게 **profile 잠금을 먼저 잡고**
+  (§5.9.3g), 그 **안에서** 현재 version·identity·manifest를 다시 읽고 planner를
+  돌린 뒤 씁니다 — plan을 밖에서 만들어 넘기지 않습니다.
+  `create`는 `expectedRevision: null`, `merge`는 시작 시점 revision(§5.9.3a).
+  한 transaction의 순서는 **잠금 → 재읽기·planner → identity 충돌 확인
+  (§5.9.3h) → version → identity → 승인된 파일만 승격 + 나머지 폐기(§5.9.3j)
+  → import 확정**이고, `unchanged`도 성공 경로이며 그때도 identity는
+  갱신됩니다(§5.9.3i). **DB 쓰기만** 들어갑니다 — **R2 업로드와 텍스트 추출은
+  그 transaction 밖에서 이미 끝나 있어야 합니다.** 이유와 상태 기계는 §5.9.
 
 ### 5.9 [rev2] 취소 계약과, R2를 한 transaction에 넣을 수 없다는 사실
 
@@ -796,8 +801,9 @@ models, tools, memory policy, knowledge manifest …" — 이 막으려는 바�
 [2] draft 생성      POST /api/assistant-profiles/imports
                     → draft AssistantProfile (currentVersionId = null)
                     + AssistantProfileImport (status = staging)
-[3] 파일 업로드     기존 prepare → R2 PUT → finalize → 추출 경로 그대로
-                    (draft profile의 profileId를 씁니다)
+[3] 파일 업로드     [rev7] import 전용 경로(§5.9.3f):
+                    POST .../imports/{importId}/knowledge
+                    prepare(예약 생성) → R2 PUT → finalize(importId 기록) → 추출
 [4] 전원 ready 대기  진행률 표시. failed면 그 파일만 제외/재시도
 [5] publish         POST .../imports/{importId}/publish
                     → planProfileVersionPublish() → revision 1
@@ -959,27 +965,28 @@ version 생성 성공 · currentVersionId 갱신 성공
 되며(create면 게시된 profile을 지울 위험), provenance가 실제 version에
 결속되지 않습니다.
 
-**검증·planner는 공유하고 write helper만 나눕니다.**
+**[rev7] 검증·planner를 공유하되, 그 전부가 transaction 안으로 들어갑니다.**
+rev6은 여기서 `plan`을 밖에서 만들어 넘기는 형태로 적었고, §5.9.3g가 그것이
+왜 안 되는지 설명합니다.
 
 ```ts
-// transaction을 열지 않는 내부 helper (신규)
-publishAssistantProfileVersionInTx(tx, input, plan)
+// transaction을 열지 않는 내부 helper (신규).
+// plan이 아니라 input을 받습니다 -- 읽기와 planner가 이 안에 있습니다.
+publishAssistantProfileVersionInTx(tx, input): Promise<PublishOutcome>
 
-// 일반 편집 경로 -- 동작 변화 없음
-prisma.$transaction((tx) => publishAssistantProfileVersionInTx(tx, input, plan))
-
-// import 경로 -- 네 write가 한 transaction
+// 일반 편집 경로 -- 잠금이 추가되고, 나머지는 같은 두 write
 prisma.$transaction(async (tx) => {
-    const version = await publishAssistantProfileVersionInTx(tx, input, plan)
-    await promoteStagedFiles(tx, importId)      // importId -> null
-    await finalizeProfileImport(tx, importId, version.id)  // status·digest·userApprovedAt
-    return version
+    await lockProfileImport(tx, input.profileId)
+    await assertNoActiveStagingImport(tx, input.profileId)   // §5.9.3b
+    return publishAssistantProfileVersionInTx(tx, input)
 })
+
+// import 경로 -- 전체 예시는 §5.9.3h
 ```
 
 **`resolveManifestEntries()`도 `tx`를 받아야 합니다.** 현재 `prisma`를 직접
 쓰므로, 같은 transaction 안에서 승격 전 파일을 조회하려면 client를 주입받는
-형태여야 합니다.
+형태여야 합니다. `readProfileForPublish()`도 같습니다.
 
 이것은 기존 동작을 바꾸지 않는 **리팩터링**입니다 — 일반 편집 경로는 같은 두
 write를 같은 순서로 하고, 바뀌는 것은 transaction을 누가 여느냐뿐입니다.
@@ -1102,12 +1109,81 @@ POST /api/assistant-profiles/imports/{importId}/knowledge
 **기존 `POST .../{profileId}/knowledge`는 바뀌지 않습니다.** 그 경로가 만드는
 파일은 계속 `importId = null`이고, 그것이 "평범한 파일"의 정의입니다.
 
+##### 5.9.3f-1 [rev7] finalize 재시도가 게시된 파일을 지우면 안 됩니다
+
+**리뷰 6회차 지적 1. rev6의 §5.9.3g는 위험한 지시를 담고 있었습니다** —
+"import가 `published`이거나 없으면 R2 object를 즉시 삭제한다". 이 순서를 보면
+왜 위험한지 보입니다.
+
+```
+finalize(uploadKey=K) 성공 → 파일 행 생성
+publish → 승격(importId = null) → 현재 version의 manifest가 K를 가리킴
+네트워크 재시도로 같은 finalize(uploadKey=K)가 뒤늦게 도착
+  → import.status = 'published'
+  → rev6 지시대로 K를 삭제
+  → DB 행과 manifest는 남고 바이트만 사라짐
+```
+
+**증상은 "지식 파일이 조용히 답에서 빠지는 것"이고, 원인을 추적할 단서가
+없습니다.**
+
+게다가 삭제 판단의 전제 자체가 성립하지 않습니다. [저장소]
+`knowledgeKey()`는 `assistant-knowledge/${randomUUID()}`이므로 **key만 보고는
+그것이 이 import의 prepare가 발급한 것인지 알 수 없습니다.** 클라이언트가
+보낸 key를 근거로 객체를 지우는 것은 어느 경우에도 안전하지 않습니다.
+
+**세 단계로 고칩니다.**
+
+**(1) 행이 있으면 절대 지우지 않습니다.** finalize는 무엇을 하기 전에
+`r2Key`로 기존 파일 행을 찾습니다(`r2Key`는 이미 `@unique`입니다).
+
+| 기존 행 | 판정 |
+|---|---|
+| 있고 `profileId`·`importId`가 이 요청과 일치 | **200 멱등** — 아무것도 만들지 않고 아무것도 지우지 않음 |
+| 있고 하나라도 불일치 (승격된 `importId = null` 포함) | **409** — **삭제 금지** |
+| 없음 | (2)로 |
+
+**(2) 발급 증명을 둡니다 — upload reservation.**
+
+```prisma
+/// 제안 [rev7]. prepare가 발급한 key와 그 용도를 서버가 기억합니다.
+model AssistantKnowledgeUploadReservation {
+  r2Key    String @id
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 이 key가 어느 import를 위해 발급됐는가. 일반 경로는 NULL.
+  importId String?
+  import   AssistantProfileImport? @relation(fields: [importId], references: [id], onDelete: Cascade)
+  profileId String
+  createdAt DateTime @default(now())
+
+  @@index([importId])
+  @@index([userId, createdAt])
+}
+```
+
+- prepare가 행을 만들고, finalize 성공이 행을 지웁니다.
+- **예약이 없거나 이 import의 것이 아니면 finalize는 거절하고, 객체를 지우지
+  않습니다.** 우리가 발급하지 않은 key일 수 있기 때문입니다.
+- 예약이 **이 import의 것이고 파일 행이 없으면**, 그때만 §5.9.3f의 검사를
+  진행하고 실패 시 객체를 지웁니다 — 그 객체는 우리가 이 import를 위해
+  발급했고 아직 아무 행도 가리키지 않는 것이 증명됩니다.
+
+**(3) 증명이 없으면 sweep에 맡깁니다.** 위 어느 경우에도 애매하면 삭제하지
+않고 §14.2의 `upload_abandoned` 24시간 sweep이 가져가게 둡니다. **늦게
+지우는 것은 되돌릴 수 있고, 잘못 지우는 것은 되돌릴 수 없습니다.**
+
+**reservation은 기존 일반 경로에도 이득입니다**(그 경로의 finalize도 지금은
+클라이언트가 보낸 key를 그대로 신뢰합니다). 다만 **이 기능의 범위는 import
+경로까지**이며, 일반 경로에 적용할지는 별개 판단입니다 — `importId = NULL`
+행이 그 자리를 비워 둡니다.
+
 #### 5.9.3g [rev6] 상태 전환을 profile 잠금 하나로 직렬화합니다
 
 **리뷰 5회차 지적 2.** publish 한 건이 원자적이어도(§5.9.3c) **전환들 사이의
 경합**은 남습니다. 두 가지가 실재합니다.
 
-- **승격 직후의 finalize.** `promoteStagedFiles()`가 `importId = null`로 바꾼
+- **승격 직후의 finalize.** 승격이 `importId = null`로 바꾼
   뒤 같은 import에 finalize가 도착하면, 새 파일이 **`published` import에
   결속된 채** 남습니다. 그 파일은 일반 목록에 안 보이고(§5.9.3b의 1번) staging
   sweep도 `status='staging'`만 보므로 **영구 고립**됩니다.
@@ -1129,7 +1205,7 @@ export const lockProfileImport = (tx: Prisma.TransactionClient, profileId: strin
 import와 **일반 편집기**이고, 일반 편집기는 import id를 모릅니다. profile을
 잠가야 둘이 같은 문에서 만납니다.
 
-**이 잠금을 잡아야 하는 경로 여섯.**
+**[rev7] 이 잠금을 잡아야 하는 경로 여덟.**
 
 | 경로 | 잠금 안에서 하는 일 |
 |---|---|
@@ -1139,17 +1215,60 @@ import와 **일반 편집기**이고, 일반 편집기는 import id를 모릅니
 | expiry sweep | 같음 |
 | staged-file 개별 삭제 | `importId` 확인 후 삭제 |
 | **일반 publish** | 활성 staging import 유무 확인 후 게시 |
+| **[rev7] 일반 identity PATCH** | `updateAssistantProfileIdentity()`. 아래 이유 |
+| **[rev7] 일반 profile DELETE** | `deleteAssistantProfile()`. staging 중인 profile이 그 아래에서 사라지는 것을 막습니다 |
 
 **순서도 계약입니다.** [저장소] `AGENTS.md`가 크레딧 경로에 대해 정한 것과
 같은 형태로 적습니다 — **`lockProfileImport()`를 transaction의 가장 먼저**
 잡고, 조건 분기 **안**에서 잡지 않으며, 다른 잠금(계정 storage lock 등)이
 같은 transaction에 있으면 **profile 잠금이 먼저**입니다.
 
+**[rev7] identity PATCH가 잠금에 들어가야 하는 이유.** §5.9.3h는 publish가
+`expectedTargetIdentityDigest`를 확인한 뒤 identity를 씁니다. 그 확인과 쓰기
+사이에 일반 PATCH가 끼어들면 **import가 남의 변경을 조용히 덮어씁니다** —
+digest 검사를 통과했는데도 그렇습니다. 검사와 쓰기가 같은 잠금 안에 있어야
+검사가 의미를 갖습니다. `deleteAssistantProfile()`도 같은 이유입니다.
+
+**[rev7] `plan`을 transaction 밖에서 계산하면 안 됩니다.** rev6의 예시는
+`publishAssistantProfileVersionInTx(tx, input, plan)`처럼 **미리 만든 plan을
+넘겼습니다.** 잠금을 기다리는 동안 다른 publish가 끝나면, 그 plan은 이미 지난
+상태를 근거로 만든 것입니다. 결과는 두 가지입니다.
+
+- `plan.revision`이 이미 존재하는 번호가 되어 **`(profileId, revision)` unique
+  충돌**이 납니다. 그것은 Prisma의 P2002이고, 우리가 의도한 409
+  `ASSISTANT_PROFILE_VERSION_STALE`이 아니라 **500**으로 나갑니다.
+- manifest도 낡습니다 — 그 사이 지워진 파일을 가리킬 수 있습니다.
+
+**그래서 helper는 plan이 아니라 입력을 받고, 잠금 뒤에 읽고 계산합니다.**
+
+```ts
+prisma.$transaction(async (tx) => {
+    await lockProfileImport(tx, profileId)
+
+    // 여기서부터가 잠금 안입니다 -- 전부 다시 읽습니다.
+    const profile  = await readProfileForPublish(tx, { userId, profileId })  // currentVersion + identity
+    const manifest = await resolveManifestEntries(tx, { userId, profileId, fileIds: approvedFileIds })
+    const plan     = planProfileVersionPublish({ state: fromProfile(profile), draft, expectedRevision })
+
+    if (plan.outcome === "stale")   throw stale409
+    if (plan.outcome === "invalid") throw invalid422
+    // identity 충돌도 여기서 (§5.9.3h)
+
+    …write…
+})
+```
+
+**일반 편집 경로도 같은 형태로 바뀝니다.** 지금은 읽기·planner가 transaction
+밖이고 write만 안이므로, 두 탭이 동시에 게시하면 같은 P2002 500이 이미
+가능합니다. 이 리팩터링은 그 결함도 함께 고칩니다 — **동작 변화가 아니라
+오류 코드의 정확성**입니다.
+
 **잠금만으로 부족한 두 가지를 더 둡니다.**
 
 - **finalize는 잠금 안에서 `status`를 다시 읽습니다.** `published`이거나 행이
-  없으면 파일 행을 만들지 않고 **R2 object를 즉시 삭제**합니다 —
-  `finalizeKnowledgeUpload()`의 `failUpload()`가 이미 하는 일입니다.
+  없으면 파일 행을 만들지 않습니다. **[rev7] 그러나 R2 object를 지우지는
+  않습니다** — 그 바이트는 방금 승격된 파일의 것일 수 있습니다. 삭제가 안전한
+  경우는 §5.9.3f-1이 정합니다.
 - **불변식 검사를 sweep에 추가합니다:** `importId`가 `published` import를
   가리키는 파일이 있으면 그것은 **일어나서는 안 되는 상태**입니다. 조용히
   고치지 않고 구조화 오류로 보고합니다(§5.9.3d와 같은 태도).
@@ -1180,13 +1299,25 @@ import와 **일반 편집기**이고, 일반 편집기는 import id를 모릅니
 2. **publish transaction 안에서 확인하고 함께 씁니다.**
 
 ```ts
+// [rev7] plan을 밖에서 만들지 않습니다(§5.9.3g). outcome이 union이므로
+// version id는 분기 뒤에 정합니다(§5.9.3i).
 prisma.$transaction(async (tx) => {
     await lockProfileImport(tx, profileId)
-    await assertTargetIdentityUnchanged(tx, importId)   // 다르면 409
-    const version = await publishAssistantProfileVersionInTx(tx, input, plan)
-    await updateAssistantProfileIdentityInTx(tx, identityInput)  // 선택된 경우에만
-    await promoteStagedFiles(tx, importId)
-    await finalizeProfileImport(tx, importId, versionIdOrCurrent)
+
+    const profile = await readProfileForPublish(tx, { userId, profileId })
+    await assertTargetIdentityUnchanged(tx, importRow, profile)   // 다르면 409
+
+    const outcome = await publishAssistantProfileVersionInTx(tx, input)  // 읽기·planner·write 전부 안에서
+    // identity는 outcome과 무관하게 씁니다 -- unchanged여도 이름 변경은 살아야 합니다
+    await updateAssistantProfileIdentityInTx(tx, identityInput)
+
+    await promoteApprovedFiles(tx, importId, approvedFileIds)      // §5.9.3j
+    await discardUnapprovedStagedFiles(tx, importId, approvedFileIds)
+
+    const versionId = outcome.outcome === "published"
+        ? outcome.version.id
+        : profile.currentVersionId                                  // §5.9.3i
+    await finalizeProfileImport(tx, importId, versionId)
 })
 ```
 
@@ -1199,7 +1330,56 @@ prisma.$transaction(async (tx) => {
 하되 값을 쓰지 않습니다 — 건너뛰면 "바꾸지 않음"이 "무엇으로 덮어써도 좋음"이
 됩니다.
 
-#### 5.9.3i [rev6] `unchanged`가 돌아왔을 때
+#### 5.9.3j [rev7] 승격은 **승인된 파일만** 대상입니다
+
+**리뷰 6회차 지적 3.** rev6의 `promoteStagedFiles(tx, importId)`는 이름 그대로
+**이 import의 파일 전부**를 `importId = null`로 바꿉니다. 그런데 staged 집합과
+승인 집합은 같지 않습니다.
+
+- **정상 흐름에서 다릅니다.** 사용자가 §5.5의 preview에서 [제외]를 고른 파일은
+  이미 업로드돼 있지만 manifest에 없습니다.
+- **조작된 요청에서도 다릅니다.** 최종 manifest에 일부만 담아 보내면 나머지는
+  승인 없이 승격됩니다.
+
+어느 쪽이든 결과는 같습니다 — **사용자가 승인하지 않은 파일이 일반 knowledge로
+노출**되고, quota를 먹고, 이후 편집에서 선택 가능해집니다.
+
+**승격과 폐기를 같은 transaction에서 함께 합니다.**
+
+```ts
+// 승인 집합 = 최종 manifest의 fileId (서버가 §7.17에서 재검증한 것)
+const approved = new Set(manifest.map((entry) => entry.fileId))
+const staged   = await tx.assistantKnowledgeFile.findMany({
+    where: { importId, userId }, select: { id: true },
+})
+
+// 1. 승인된 것만 승격
+await tx.assistantKnowledgeFile.updateMany({
+    where: { importId, userId, id: { in: [...approved] } },
+    data:  { importId: null },
+})
+
+// 2. 나머지는 tombstone 남기고 삭제 -- 같은 transaction
+const discarded = staged.filter((file) => !approved.has(file.id)).map((f) => f.id)
+if (discarded.length > 0) {
+    await enqueueKnowledgeCleanupForFiles(tx, { id: { in: discarded } }, "file_deleted")
+    await tx.assistantKnowledgeFile.deleteMany({ where: { id: { in: discarded } } })
+}
+```
+
+**추가로 강제하는 두 가지.**
+
+1. **승인 집합 ⊆ staged 집합.** manifest가 이 import의 것이 아닌 fileId를
+   담고 있으면 **422**입니다. `resolveManifestEntries()`가 `profileId`로 이미
+   거르지만, `merge`에서는 **대상 profile의 기존 파일도 그 범위 안**이므로
+   그것만으로는 부족합니다 — import publish는 `importId` 조건을 함께
+   겁니다. (기존 파일을 manifest에 유지하는 것은 정상이므로, 정확히는
+   "`importId != null`인 fileId는 전부 이 import의 것이어야 한다"입니다.)
+2. **승격 후 이 import에 남은 파일이 0개**임을 같은 transaction에서
+   확인합니다. 아니면 rollback입니다 — §5.9.3g의 고립 파일이 생기는 두 번째
+   경로를 막습니다.
+
+#### 5.9.3i [rev7] `unchanged`가 돌아왔을 때
 
 **리뷰 5회차 지적 4.** [저장소] `PublishOutcome`은 union입니다.
 
@@ -1211,15 +1391,19 @@ export type PublishOutcome =
 
 rev5의 예시 코드는 `version.id`를 바로 썼으므로 `unchanged`에서 깨집니다.
 
-**언제 일어나는가 — 범위가 좁습니다.**
+**언제 일어나는가.**
 
 - `create`는 **일어날 수 없습니다.** `planProfileVersionPublish()`가
   `unchanged`를 내는 것은 `state.currentDraft != null`일 때뿐인데, create의
   draft profile에는 published version이 없습니다.
-- `merge`에서만, 그리고 **staged 파일이 0개일 때만** 일어납니다. 파일이 하나라도
-  있으면 새 `fileId`가 manifest를 바꾸므로(§9.5.1) 절대 `unchanged`가 아닙니다.
+- `merge`에서, **승인된 파일이 0개일 때** 일어납니다.
 
-그 결과 **승격할 파일도 고립될 파일도 없습니다.** 그래서 계약이 단순해집니다.
+**[rev7] rev6은 여기서 "staged 파일이 0개"라고 적었고 그것은 틀렸습니다.**
+§5.9.3j가 밝히듯 staged 집합과 승인 집합은 다를 수 있습니다 — 사용자가 올린
+파일을 전부 [제외]하면 **staged 파일은 있는데 승인 파일은 0개**이고, manifest는
+현재와 같으므로 `unchanged`입니다. 그때도 §5.9.3j의 폐기 경로가 그 파일들을
+같은 transaction에서 tombstone과 함께 지웁니다. 즉 `unchanged`에서도 **승격은
+0건이지만 폐기는 0건이 아닐 수 있습니다.**
 
 > **`unchanged`는 성공입니다.** import를 `published`로 닫고 provenance를
 > **현재 `currentVersionId`에 결속**하며, `userApprovedAt`과 `approvedDigest`를
@@ -1234,6 +1418,19 @@ rev5의 예시 코드는 `version.id`를 바로 썼으므로 `unchanged`에서 �
   적습니다.
 - 대안(명시적 no-op 응답 + staging 삭제)은 채택하지 않습니다 — 사용자가
   승인한 행위의 기록이 사라지고, 재시도가 같은 결과를 다시 만듭니다.
+
+**[rev7] identity만 바꾸는 merge도 `unchanged`입니다.** identity는 version
+snapshot 밖이므로(§5.9.3h) 이름·아이콘·설명만 바꾼 merge는 version 내용이
+동일해 `planProfileVersionPublish()`가 `unchanged`를 냅니다. 계약을 명시합니다.
+
+> **`unchanged`여도 identity는 갱신됩니다.** 새 revision만 만들지 않습니다.
+
+- publish transaction은 `plan.outcome`과 무관하게 identity 충돌 확인과 identity
+  write를 **같은 순서로** 지납니다(§5.9.3h). `unchanged`에서 identity write를
+  건너뛰면, **사용자가 승인한 이름 변경이 조용히 사라집니다.**
+- 사용자에게는 그 사실대로 말합니다 — "이름을 바꿨고, 지시문은 같아서 새
+  개정을 만들지 않았습니다."
+- 검증 항목 55b가 이것을 고정합니다.
 
 계약 넷:
 
@@ -1445,6 +1642,11 @@ model AssistantProfileImport {
   /// stale 실패 시 최신 값으로 갱신됩니다(§5.9.4a). create에서는 NULL.
   expectedTargetRevision Int?
 
+  /// [rev7] merge 전용. 시작 시점 대상 profile의 identity(name·icon·description)
+  /// digest. identity는 version 밖이라 revision을 소비하지 않으므로 자기
+  /// 시계가 필요합니다(§5.9.3h). create에서는 NULL.
+  expectedTargetIdentityDigest String?
+
   /// staging | published. 만료 sweep이 이 컬럼을 읽습니다.
   status String @default("staging")
 
@@ -1456,6 +1658,9 @@ model AssistantProfileImport {
   /// 동안 이 instructions는 owner instruction이 아니며, 어떤 prompt에도
   /// 들어가지 않습니다(§3.2, A1).
   stagingManifest Json?
+
+  /// [rev7] prepare가 발급한 upload key의 예약(§5.9.3f-1).
+  uploadReservations AssistantKnowledgeUploadReservation[]
 
   /// [rev5] rev4의 `stagedFileIds String[]`는 폐기했습니다 -- FK가 아니라
   /// 배열이라 남의 파일 id·삭제된 id·중복을 담을 수 있고, 무엇보다
@@ -1573,7 +1778,7 @@ the promise is quietly untrue."* 따라서 `AssistantProfileImport`를 만들면
 |---|---|---|
 | **[rev4]** `mode` · `declaredSourceKind` · `declaredSourceName` · `serverReceivedAt` · `userApprovedAt` · `stagingManifest` | **포함** | 사용자가 자기 profile의 출처와 중단된 가져오기의 내용을 아는 것이 이 테이블의 존재 이유. `declared*`는 주장값이므로 export 문구도 "표시됨"으로 씁니다 |
 | `declaredSourceUrl` | **포함**(저장하기로 결정한 경우) | 사용자가 직접 적은 값 |
-| **[rev5]** `validatorVersion` · `ingestPath` | **withhold** | 내부 식별자. 기존 선언들이 `retrievalVersion`·`promptFormatVersion`을 withhold하는 것과 같은 이유 |
+| **[rev7]** `validatorVersion` · `ingestPath` · `expectedTargetRevision` · `expectedTargetIdentityDigest` | **withhold** | 내부 식별자. 기존 선언들이 `retrievalVersion`·`promptFormatVersion`을 withhold하는 것과 같은 이유 |
 | `candidateDigest` · `approvedDigest` · `digestVersion` | **withhold** | 내부. 기존 `assistantKnowledgeFile` 선언이 content digest를 "internal"로 withhold하는 것과 같음 |
 | `versionId` | **withhold** | 내부 식별자. revision 번호가 사용자가 읽을 값 |
 
@@ -2260,7 +2465,7 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | **A4** flag rollback 계약 | **Slice 1** | 같음 |
 | **A5** secret 차단 vs 경고 | **Slice 2** | scanner를 브라우저·서버 공용 순수 모듈로 만들지가 이 답에 달렸습니다 |
 | **A6** instruction URL 처리 | **Slice 4** | UX 결정이므로 diff/review UI를 쓰기 직전입니다 |
-| **B1~B6** 수치 | **[rev6] Slice 2** | rev3은 Slice 5라고 적었지만 틀렸습니다. Slice 2가 `lib/assistantPackageLimits.ts`를 **만들고**, Slice 3의 parser가 그 값을 **쓰며**, Slice 5는 서버에서 **다시 강제**할 뿐입니다 |
+| **B1~B6** 수치 | **[rev7] Slice 1** | rev3은 Slice 5, rev6은 Slice 2라고 적었는데 둘 다 늦습니다. **Slice 1의 산출물이 그 확정값을 문서에 기록하는 것**이므로 가장 먼저 필요합니다. Slice 2가 상수로 만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다 |
 | **C1** URL import | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C2** Gem HTML | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C3** flag 배치 | **[rev6] Slice 8** | Slice 1~7의 개발은 막지 않고 **rollout만** 막습니다 |
@@ -2273,7 +2478,7 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 
 | 무엇을 시작하려면 | 먼저 있어야 하는 승인 |
 |---|---|
-| Slice 1 (정책 문서) | **A1 · A2 · A3 · A4** |
+| Slice 1 (정책 문서) | **A1 · A2 · A3 · A4 · [rev7] B1~B6** |
 | Slice 2 (pure adapter · 상수 · scanner) | **A5 · B1~B6** |
 | Slice 3 (parser) | 없음 (B는 Slice 2에서 이미 상수가 됨) |
 | Slice 4 (diff/review UI) | **A6** |
@@ -2361,7 +2566,7 @@ UI placeholder를 선제 추가하지 않습니다" — 을 따릅니다.
 |---|---|
 | **입력** | 이 보고서, §10.1·§10.2의 승인 결과 |
 | **산출물** | `docs/policy/assistant-package-import.md` (신규). §10.3의 확정값 + 승인된 A1~A4·B1~B6을 확정값으로 기록. native manifest schema를 문서에 고정 |
-| **선행 조건** | **§10.1의 A1~A4 승인**(§10.1.2). 이것 없이는 시작하지 않으며, Slice 1이 막히면 그 뒤 전부가 멈춥니다 |
+| **선행 조건** | **[rev7] §10.1의 A1~A4 승인 + §10.2의 B1~B6 승인**(§10.1.2). 이 slice의 산출물이 그 확정값을 **문서에 기록**하는 것이므로, 승인되지 않은 수치는 적을 것이 없습니다. Slice 1이 막히면 그 뒤 전부가 멈춥니다 |
 | **독립 rollback** | 해당 없음 (문서) |
 
 ### Slice 2 — pure adapter / validator (규모 M)
@@ -2370,7 +2575,7 @@ UI placeholder를 선제 추가하지 않습니다" — 을 따릅니다.
 |---|---|
 | **입력** | Slice 1의 문서 |
 | **산출물** | `lib/assistantPackageManifest.ts`**(신규)**(native schema, Zod `.strict()`, **[rev2]** `PortableProfile`과 `portableProfileEquals()`), `lib/assistantPackageAdapter.ts`**(신규)**(SKILL.md frontmatter + 본문 → draft, 손실 목록 산출), `lib/assistantPackageLimits.ts`**(신규)**(B1~B6 상수), **[rev2]** `lib/assistantPackageSecretScan.ts`**(신규)**(브라우저·서버가 **같은 코드**를 씀 — 두 scanner가 다르면 override 대조가 성립하지 않습니다). **순수 — Prisma·R2·clock·fetch 없음.** |
-| **선행 조건** | Slice 1, **§10.1의 A5 승인**(§10.1.2) |
+| **선행 조건** | Slice 1, **[rev7] §10.1의 A5 승인 + §10.2의 B1~B6 승인**(§10.1.2) — 이 slice가 `lib/assistantPackageLimits.ts`에 그 수치를 상수로 씁니다 |
 | **독립 rollback** | **가능.** 아무 route도 부르지 않는 모듈이므로 되돌려도 제품이 바뀌지 않습니다 |
 
 ### Slice 3 — 안전한 package parser (브라우저) (규모 M)
@@ -2399,7 +2604,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). knowledge 업로드는 **기존 경로 그대로**(draft의 `profileId` 사용), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6]** `AssistantKnowledgeFile.importId` migration + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 6개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기**(§5.9.3j) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | Slice 4, **§10.2의 B1~B6 승인**, **§10.1의 A5 승인** |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
@@ -2532,18 +2737,28 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **45** *(rev3)* | **secret이 instructions·knowledge 본문·파일명에 있을 때** | `.strict()`가 아니라 **서버 scanner**가 잡음. 세 위치 각각에 대해 케이스(§9.4) |
 | **46** *(rev5)* | **staging 파일이 일반 편집기에 안 보임** | merge staging 중 `GET .../knowledge`가 그 파일을 반환하지 않음. 일반 versions API가 그 fileId를 manifest에 넣으려 하면 **422** |
 | **47** *(rev5)* | **활성 staging import가 있는 profile의 일반 publish** | 거절. `create` draft가 일반 경로로 게시돼 sweep의 삭제 대상이 되는 경로가 없음 |
-| **48** *(rev5)* | **publish 원자성** | `promoteStagedFiles` 직후 강제 실패를 주입 → version·`currentVersionId`·`importId` 승격·import 확정이 **전부 rollback**. profile이 게시됐는데 import가 `staging`인 상태가 만들어지지 않음 |
+| **48** *(rev5·rev7)* | **publish 원자성** | 승격 직후 강제 실패를 주입 → version·`currentVersionId`·`importId` 승격·import 확정이 **전부 rollback**. profile이 게시됐는데 import가 `staging`인 상태가 만들어지지 않음 |
 | **49** *(rev5)* | **`mode` CHECK와 cleanup fail-closed** | `mode`에 임의 문자열 insert → DB 거절. `mode='create'`인데 `currentVersionId != NULL`인 행을 만들어 sweep 실행 → **profile 삭제 안 됨 + 구조화 오류 1건** |
 | **50** *(rev5)* | **TTL이 연장되지 않음** | stale 실패·background 추출 완료·오류 기록 각각 뒤에 `lastUserActivityAt`·`idleExpiresAt` 불변. 파일 추가 뒤에는 갱신됨. `idleExpiresAt <= absoluteExpiresAt` 항상 참 |
 | **51** *(rev5)* | **`importId` cascade가 계정 삭제를 막지 않음** | staging 중인 계정 삭제 → 성공(`Restrict`였다면 실패). 남은 R2 object는 `upload_abandoned` sweep 대상 |
 | **52** *(rev6)* | **import 업로드가 `importId`를 기록함** | import 전용 경로로 올린 파일은 `importId != null`이고 일반 목록에 안 보임. **기존 `POST .../{profileId}/knowledge`로 올린 파일은 `importId = null`** — 두 경로가 섞이지 않음(§5.9.3f) |
 | **52a** *(rev6)* | **finalize 재시도** | 같은 `uploadKey` 재요청이 같은 `profileId`·`importId`면 200 멱등. 하나라도 다르면 **409**, 파일이 옮겨지지 않음 |
-| **53** *(rev6)* | **승격 직후 finalize** | publish의 `promoteStagedFiles()` 직후 같은 import에 finalize 도착 → 잠금 대기 후 `status='published'`를 보고 **거절 + R2 object 삭제**. `published` import에 결속된 파일이 만들어지지 않음(§5.9.3g) |
+| **53** *(rev6·rev7)* | **승격 직후 finalize** | publish의 승격 직후 같은 import에 finalize 도착 → 잠금 대기 후 `status='published'`를 보고 **거절**. **[rev7] R2 object는 지우지 않습니다** — 그 바이트는 방금 승격된 파일의 것일 수 있습니다(§5.9.3f-1). `published` import에 결속된 파일이 만들어지지 않음 |
 | **53a** *(rev6)* | **검증과 삭제 사이의 publish** | cancel/sweep이 조건 확인 후 대기하는 동안 publish 완료 → **profile 삭제 안 됨**. 잠금 안에서 조건을 다시 읽어 §5.9.3d가 막음 |
 | **53b** *(rev6)* | **고립 파일 불변식** | `importId`가 `published` import를 가리키는 행을 강제로 만든 뒤 sweep 실행 → 조용히 고치지 않고 **구조화 오류 1건** |
 | **54** *(rev6)* | **merge의 identity 원자성** | 이름을 바꾸는 merge를 publish 중 identity write 직후 실패 주입 → version·identity·승격·확정이 **전부 rollback**. identity만 바뀐 상태가 없음(§5.9.3h) |
 | **55** *(rev6)* | **`unchanged` merge** | staged 파일 0개 + 모든 필드가 현재와 동일한 merge → **새 revision 없음**, import는 `published`, `versionId`는 **기존 `currentVersionId`**, `userApprovedAt` 기록됨, 사용자에게 "새 개정을 만들지 않았습니다"(§5.9.3i) |
 | **55a** *(rev6)* | **`create`는 `unchanged`가 될 수 없음** | draft profile에 published version이 없으므로 항상 `published`. 이 사실을 assert |
+| **56** *(rev7)* | **publish 후 finalize 재시도** | 승격돼 현재 version이 쓰는 파일의 `uploadKey`로 finalize 재도착 → **409, R2 object 그대로**. 대화가 그 파일을 계속 씀 |
+| **56a** *(rev7)* | **예약 없는 uploadKey** | 임의 key로 finalize → 거절, **삭제 시도 없음** |
+| **56b** *(rev7)* | **예약된 key의 검사 실패** | 이 import의 예약이 있고 행이 없는 key가 형식 검사에 실패 → 거절 + **그때만 삭제** |
+| **57** *(rev7)* | **identity PATCH 경합** | publish가 digest 확인 후 대기하는 동안 일반 PATCH가 이름 변경 시도 → 잠금 대기. publish가 먼저면 PATCH는 새 값 위에서 동작하고, PATCH가 먼저면 publish는 **409** — 어느 쪽도 조용히 덮어쓰지 않음 |
+| **57a** *(rev7)* | **stale plan이 500이 되지 않음** | 두 publish 동시 실행 → 뒤쪽은 잠금 안에서 다시 읽어 **409 `ASSISTANT_PROFILE_VERSION_STALE`**. P2002 500이 나오지 않음 |
+| **58** *(rev7)* | **제외한 파일이 승격되지 않음** | 3개 올리고 1개 [제외] → 승격 2개(`importId = null`), 제외 1개는 **행 삭제 + tombstone**, 승격 후 이 import에 남은 파일 0개 |
+| **58a** *(rev7)* | **조작된 manifest** | manifest에서 파일을 빼고 publish → 그 파일은 승격되지 않고 폐기됨. 일반 목록에 나타나지 않음 |
+| **58b** *(rev7)* | **남의 파일 id를 manifest에 넣음** | `importId != null`이면서 이 import의 것이 아닌 fileId → **422**, 아무것도 승격·폐기되지 않음 |
+| **55b** *(rev7)* | **identity만 바꾸는 merge** | version 내용 동일 + 이름 변경 → `unchanged`. **새 revision 없음, 이름은 갱신됨**, import는 `published`, `versionId`는 기존 `currentVersionId`(§5.9.3i) |
+| **55c** *(rev7)* | **`unchanged`인데 staged 파일이 있음** | 올린 파일을 전부 [제외] → `unchanged`이면서 폐기 N건 + tombstone N건. 승격 0건 |
 | **38** *(rev2)* | **data-domain registry** | `npm run check:data-domain-registry` 통과. `AssistantProfileImport`가 export 도메인·cascade와 함께 선언돼 있음(§6.6.1) |
 | **39** *(rev5)* | **계정 데이터 export에 provenance 포함** | export 산출물에 `assistant_profile_imports`가 있고 `stagingManifest`가 포함되며, `validatorVersion`·`ingestPath`·`candidateDigest`·`approvedDigest`·`versionId`는 withhold. **관계인 `stagedFiles`는 field list에 이름을 대지 않음**(registry는 scalar 컬럼만 셈) |
 | **40** *(rev2·rev3)* | **계정·profile 삭제 cascade** | profile 삭제 시 provenance 함께 삭제, 계정 삭제도 같음. **[rev3]** version 삭제는 `SetNull`이라 import 행이 남는지 별도 확인 |
