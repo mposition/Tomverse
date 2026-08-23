@@ -208,6 +208,10 @@ run(
     // What an automatic disable leaves behind: the queue row, its notice
     // requirement, and the account count that decides it.
     "tests/integration/model-lifecycle-auto-disable.db.test.ts",
+    // The reconciliation script's preconditions, run through the real command:
+    // the rules have unit coverage, but only this shows --apply actually
+    // reaches them before it touches a row.
+    "tests/integration/default-model-reconciliation.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

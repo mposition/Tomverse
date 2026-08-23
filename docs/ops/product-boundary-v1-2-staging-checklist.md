@@ -16,7 +16,7 @@
 `product-boundary-v1-2-staging-verification-records/`에 **날짜와 전체 deploy
 SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-23c`
+- **template revision**: `2026-08-23d`
 - 실행 방법과 파일 이름 규칙:
   `product-boundary-v1-2-staging-verification-records/README.md`
 - 기록 template:
@@ -54,7 +54,7 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 |---|---|---|
 | **P-1** | Search Console 기준값 — 깨끗한 시점에 찍어 두는 **순서**의 문제 | 무료 · 배포 전 |
 | **A-1** | `RoutingRun` 크기 → 인덱스 락이 턴 쓰기를 막는 시간 | 무료 |
-| **A-2** | 마이그레이션이 실제로 적용되고 얼마나 걸리는가 | 무료 |
+| **A-2** | 마이그레이션이 실제로 적용됐는가, 그리고 얼마나 걸렸는가 | 무료 |
 | **B-1** | 새 대화가 만들어지고 `productKey`가 실제로 저장되는가 | 무료 |
 | **B-2** | 기존 대화가 계속 열리는가 | 무료 |
 | **B-3** | 턴이 실제로 답하는가 | **유료 1 turn** |
@@ -182,23 +182,76 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
   - `Conversation` 분당 쓰기 — 이쪽은 recording 설정과 무관합니다. FK 구문이
     쥐는 락이 실제로 무엇을 멈추는지가 이 숫자입니다.
 
-- [ ] **A-2** staging에 `prisma migrate deploy`를 적용하고 **각 마이그레이션의
-      소요 시간**을 적는다.
+- [ ] **A-2** staging 배포 로그에서 **마이그레이션이 적용된 것과 걸린 시간**을
+      확인하고, 제약 상태를 조회한다.
 
-  `20260822090000_conversation_product_key_expand`는 nullable 컬럼과 NOT VALID
-  제약뿐이라 **테이블 크기와 무관하게 즉시**여야 합니다. 여기가 느리면 그
-  자체가 관측입니다 — 예상과 다른 무언가가 있다는 뜻이고, A-1의 판정을 다시
-  봐야 합니다.
+  **적용은 손으로 하지 않습니다. 이미 되어 있습니다.** staging 서비스는
+  `develop`에서 배포되고 `preDeployCommand`가
+  `npm run check:encoding:strict && npm run db:migrate`이며, `db:migrate`의
+  끝이 `prisma migrate deploy`입니다(`package.json`). 즉 **develop에 머지되는
+  순간 다음 배포가 적용합니다.** 이 항목은 그 일이 일어났는지를 확인하는
+  것이지 일어나게 하는 것이 아닙니다.
 
-  적용 후 확인:
+  Railway에서 environment를 **staging**으로 두고, 마이그레이션이 develop에 들어온
+  **직후의 배포**를 열어 deploy 로그를 `migrat`로 거릅니다. 찾는 것은 이
+  네 줄입니다.
 
-  ```sql
-  SELECT conname, convalidated FROM pg_constraint
-   WHERE conrelid = '"Conversation"'::regclass AND conname LIKE '%product%';
+  ```
+  N migrations found in prisma/migrations
+  Applying migration `20260822090000_conversation_product_key_expand`
+  Applying migration `20260822093000_routing_run_product_attribution`
+  All migrations have been successfully applied.
   ```
 
-  세 제약이 모두 `convalidated = false`여야 합니다. `true`가 하나라도 있으면
-  누군가 손으로 validate한 것이고, schema 비교가 drift로 잡습니다.
+  `Applying` 줄이 없는 배포는 이미 적용된 뒤의 배포입니다. **더 이전 배포를
+  찾으십시오** — 없다고 판단하기 전에.
+
+  ### 소요 시간은 합으로만 나옵니다
+
+  로그 줄마다 타임스탬프가 붙지만 **마이그레이션별 소요 시간은 얻을 수
+  없습니다.** `Applying` 두 줄과 `All migrations...` 줄의 타임스탬프가 마이크로초
+  단위까지 같게 찍힙니다 — 플랫폼이 각 줄을 찍힌 시점이 아니라 **flush된 배치
+  시점**으로 기록하기 때문입니다.
+
+  그래서 기록에 적는 것은 `N migrations found`부터 `All migrations have been
+  successfully applied.`까지의 **경과 시간 하나**이고, 그것은 두 마이그레이션을
+  합친 **상한**입니다. 이 값을 한쪽 마이그레이션의 소요로 적지 마십시오.
+
+  판별은 그 상한으로 충분합니다.
+  `20260822090000_conversation_product_key_expand`는 nullable 컬럼과 NOT VALID
+  제약뿐이라 **테이블 크기와 무관하게 즉시**여야 하고,
+  `20260822093000_routing_run_product_attribution`은 A-1이 잰 `RoutingRun` 크기만큼
+  걸립니다. 합이 짧으면 둘 다 짧습니다. **합이 예상보다 길면 그 자체가
+  관측입니다** — A-1의 판정을 다시 봐야 한다는 뜻이고, 그때는 각각을 갈라 보기
+  위해 staging에서 되돌린 뒤 하나씩 적용하는 별도 작업이 필요합니다.
+
+  ### 제약 상태
+
+  ```sql
+  SELECT conname, convalidated
+    FROM pg_constraint
+   WHERE conrelid IN ('"Conversation"'::regclass, '"RoutingRun"'::regclass)
+     AND (conname LIKE '%product%' OR conname = 'RoutingRun_conversationId_fkey')
+   ORDER BY conname;
+  ```
+
+  `%product%` 네 개는 전부 `NOT VALID`로 걸었으므로 `convalidated = false`여야
+  합니다. `true`가 하나라도 있으면 누군가 손으로 validate한 것이고, schema 비교가
+  drift로 잡습니다.
+
+  `RoutingRun_conversationId_fkey`만 `true`입니다 — 이것만 즉시 검증으로 걸린
+  제약이고, A-1이 `Conversation` 락을 따지는 이유가 바로 이 줄입니다.
+
+  ### 다음 항목으로 넘어가기 전에 — develop을 멈추십시오
+
+  **staging은 develop에 머지될 때마다 재배포됩니다.** 기록 파일 이름은 deploy
+  SHA **하나**인데, B와 C를 하는 동안 머지가 들어오면 항목마다 다른 SHA에서
+  관측하게 되고 그 기록은 어느 커밋을 덮는지 말할 수 없게 됩니다 — 이 체크리스트
+  구조가 존재하는 이유 그대로입니다(기록 README).
+
+  A-2에서 SHA를 확정하고, **B-1부터 C까지를 그 배포 하나의 수명 안에서**
+  끝내십시오. 중간에 재배포가 일어났다면 그 사실과 새 SHA를 기록에 적고, 앞선
+  항목이 다른 빌드에서 관측됐다는 것을 남깁니다.
 
 ---
 

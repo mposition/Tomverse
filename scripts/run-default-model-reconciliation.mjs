@@ -1,21 +1,29 @@
-// Moves stored *selection* state off gpt-5-4-mini and onto gpt-5-6-luna.
+// Moves stored *selection* state off one retired model and onto its
+// replacement. Both are named on the command line: this is the tool for every
+// retirement, not for one of them (ML-10).
 //
-// Run with the RETIREMENT deploy, not with the default switch. While
-// gpt-5-4-mini is still enabled and publicly listed it is a working model that
-// some users may have picked deliberately, and rewriting their setting on no
-// evidence would be overriding a live choice. Once 5.4 mini is disabled and
+// Run with the RETIREMENT deploy, not with the default switch. While the old
+// model is still enabled and publicly listed it is a working model that some
+// users may have picked deliberately, and rewriting their setting on no
+// evidence would be overriding a live choice. Once it is disabled and
 // delisted, the same rows become stale pointers that every read path has to
 // resolve through the replacement chain on every request -- that is the point
 // at which flattening them is a fix rather than an override.
+//
+// That timing is checked rather than trusted: --apply reads the registry and
+// refuses if --from is still enabled or still listed. It used to be enforced by
+// a pair of constants naming one migration, which made the rule true by
+// accident for that one and unavailable for the next.
 //
 // Safe to run repeatedly and safe to run early: it is idempotent, and it makes
 // no change at all once no row names the old id. Defaults to a dry run.
 //
 // Usage:
-//   node --import tsx scripts/run-default-model-reconciliation.mjs
+//   node --import tsx scripts/run-default-model-reconciliation.mjs \
+//     --from=<retired model id> --to=<replacement model id>
 //   node --import tsx scripts/run-default-model-reconciliation.mjs \
 //     --apply --approved-retirement --ticket="<url>" --actor="<name>" \
-//     --from=gpt-5-4-mini --to=gpt-5-6-luna
+//     --from=<retired model id> --to=<replacement model id>
 //
 // A dry run needs nothing: reporting what would change is the safe half and
 // stays one command away. A write needs the whole line above, because
@@ -53,11 +61,10 @@ import {
 } from "../lib/defaultModelReconciliationCore.ts";
 import {
   findReconciliationApprovalProblems,
+  findReconciliationTargetProblems,
   readReconciliationEnvironment,
 } from "../lib/reconciliationApprovalCore.ts";
 
-const FROM_MODEL_ID = "gpt-5-4-mini";
-const TO_MODEL_ID = "gpt-5-6-luna";
 const GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId";
 const CONVERSATION_PAGE_SIZE = 500;
 
@@ -79,26 +86,64 @@ const approval = {
   environment: readReconciliationEnvironment(process.env),
 };
 
-const approvalProblems = findReconciliationApprovalProblems(approval, {
-  fromModelId: FROM_MODEL_ID,
-  toModelId: TO_MODEL_ID,
-});
-if (approvalProblems.length > 0) {
+const refuse = (problems) => {
   console.error(
-    `\nRefusing to write. ${approvalProblems.length} requirement(s) not met:\n` +
-      approvalProblems
+    `\nRefusing to write. ${problems.length} requirement(s) not met:\n` +
+      problems
         .map((problem) => `  - [${problem.code}] ${problem.message}`)
         .join("\n") +
       "\n\nRun without --apply to see what would change. See section 7 of\n" +
       "docs/policy/default-model-luna-migration.md before writing anything."
   );
   process.exit(1);
+};
+
+const approvalProblems = findReconciliationApprovalProblems(approval);
+if (approvalProblems.length > 0) refuse(approvalProblems);
+
+// A dry run needs the pair too -- without them there is nothing to report on --
+// but it needs no approval, so this is the first point both are known good.
+if (!approval.fromModelId || !approval.toModelId) {
+  console.error(
+    "--from=<model id> and --to=<model id> are required, including for a dry run."
+  );
+  process.exit(1);
 }
+const FROM_MODEL_ID = approval.fromModelId;
+const TO_MODEL_ID = approval.toModelId;
 
 if (!process.env.DATABASE_URL?.trim()) {
   console.error("DATABASE_URL is required.");
   process.exit(1);
 }
+
+// The precondition, read from the registry rather than assumed from a
+// constant. Runs before anything is scanned so a refusal costs one query
+// rather than a full table walk.
+const registryState = async (modelId) => {
+  const row = await prisma.modelRegistryEntry.findUnique({
+    where: { id: modelId },
+    select: { enabled: true, publiclyListed: true, catalogDeleted: true },
+  });
+  return {
+    modelId,
+    found: Boolean(row),
+    enabled: row?.enabled ?? false,
+    publiclyListed: row?.publiclyListed ?? false,
+    catalogDeleted: row?.catalogDeleted ?? false,
+  };
+};
+
+const targets = findReconciliationTargetProblems({
+  apply,
+  from: await registryState(FROM_MODEL_ID),
+  to: await registryState(TO_MODEL_ID),
+});
+if (targets.problems.length > 0) {
+  await prisma.$disconnect();
+  refuse(targets.problems);
+}
+for (const warning of targets.warnings) console.warn(`  ! ${warning}`);
 
 const malformedConversations = [];
 const warnings = [];
