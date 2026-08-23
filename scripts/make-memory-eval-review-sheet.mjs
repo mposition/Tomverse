@@ -73,16 +73,33 @@ const isCriticalNegative = cases.every(
  * every commit, which docs/policy/external-conversation-import-and-memory.md
  * §12.2 makes a condition of the lowered floor.
  *
- * An adopted critical-negative batch keeps its full sample. Its record is the
- * audit trail of a review a person actually performed, under the rule that
- * stood at the time; regenerating it at 20% would rewrite history to say only
- * a fifth was looked at.
+ * A record that already exists keeps the sample it was reviewed under. The
+ * record is the audit trail of a review a person actually performed, and
+ * regenerating it at a different size rewrites what they were shown -- in
+ * either direction. Batches 003-008 were reviewed in full under the pre-2026-08-23
+ * rule and must not come back saying only a fifth was looked at; batches
+ * 021-028 are adopted critical negatives reviewed at 20% under the amended
+ * rule, and must not come back claiming a full review nobody did.
+ *
+ * Reading it off the record rather than off adoption status is what makes both
+ * true at once. An earlier version keyed on `isAdopted`, which was right for
+ * the first six and wrong for the next eight the moment they were promoted.
  */
 const forceFull = process.argv.includes("--full");
-const sampleSize =
-    forceFull || (isCriticalNegative && isAdopted)
-        ? cases.length
-        : Math.max(1, Math.ceil(cases.length * 0.2));
+const reviewedSampleSize = (() => {
+    try {
+        const existing = parseBatchRecord(readFileSync(batch.record, "utf8"));
+        return existing.cases.length;
+    } catch {
+        // No record yet: this is the first generation for the batch.
+        return 0;
+    }
+})();
+const sampleSize = forceFull
+    ? cases.length
+    : reviewedSampleSize > 0
+      ? reviewedSampleSize
+      : Math.max(1, Math.ceil(cases.length * 0.2));
 
 /**
  * Which cases, chosen so the sample spreads across the batch AND across

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
     MEMORY_EVAL_CASES,
+    MEMORY_EVAL_DATASET_FROZEN,
     MEMORY_EVAL_DATASET_VERSION,
 } from "../lib/memoryExtractionEvalFixtures.ts";
 import {
@@ -296,11 +297,22 @@ test("the shipped fixtures are synthetic, distinct and cover every cell", () => 
     for (const [cell, count] of Object.entries(adequacy.counts)) {
         assert.ok(count > 0, `${cell} must have at least one seed case`);
     }
-    // Honest about what it is: the seed set is deliberately below the floor.
+    // Every cell now sits at its §12.2 floor: the 918 drafted cases were
+    // reviewed and promoted on 2026-08-23, so the sample-size half of the
+    // question is answered.
     assert.equal(
         adequacy.decisionGrade,
+        true,
+        "every cell should now be at or above its floor"
+    );
+    // And that half is not the whole. `adequacy.decisionGrade` speaks only to
+    // sample size; the harness additionally requires a live run and a frozen
+    // dataset before it will call a run decision-grade. The dataset is not
+    // frozen, so nothing here may be cited as one.
+    assert.equal(
+        MEMORY_EVAL_DATASET_FROZEN,
         false,
-        "the seed set must not claim to be decision-grade"
+        "an unfrozen dataset cannot back a decision-grade claim"
     );
 });
 

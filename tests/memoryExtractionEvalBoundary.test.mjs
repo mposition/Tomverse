@@ -259,12 +259,24 @@ test("a funded pair still refuses, and still reaches no network", () => {
 
 test("a smoke run completes without touching the network", () => {
     const result = runHarness([]);
-    // Exit 1 because an underpowered sample is not a pass — that is the
-    // verdict, not a failure to run.
-    assert.equal(result.status, 1);
+    // Exit 0 since the 2026-08-23 promotion: every cell is at its §12.2 floor,
+    // so the run is no longer UNDERPOWERED. It used to exit 1 on that rule,
+    // and the change is the dataset's, not the harness's.
+    assert.equal(result.status, 0);
     assert.match(result.output, /SMOKE RUN/);
-    assert.match(result.output, /UNDERPOWERED/);
+    assert.doesNotMatch(result.output, /UNDERPOWERED/);
     assert.doesNotMatch(result.output, /QA_EXTERNAL_NETWORK_BLOCKED/);
+});
+
+test("a smoke run that passes every rule still says it proves nothing", () => {
+    // The dangerous shape now that the floor is met: a stub agreeing with
+    // itself prints "Every §12.3 rule passed", and without the caveat beside
+    // it that reads like a result. Two independent facts have to stay on the
+    // page -- no provider was called, and the dataset is not frozen.
+    const result = runHarness([]);
+    assert.match(result.output, /SMOKE RUN — NOT an eval result/);
+    assert.match(result.output, /No provider was called/);
+    assert.match(result.output, /not frozen/);
 });
 
 /* ---------------------------------------------------------------- static -- */

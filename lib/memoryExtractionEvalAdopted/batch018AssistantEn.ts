@@ -1,13 +1,27 @@
 /**
- * Batch 018 — `assistant_only:en`, second batch. **Candidate pool, not dataset.**
+ * Batch 018 — `assistant_only:en`. **Adopted. This is dataset.**
+ *
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-018-assistant-only-en.md`:
+ * all 10 sampled cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's 20% sample review,
+ * draft disagreement 0%, diversity judged sufficient, the drafting setup
+ * recorded as unchanged, and the explicit batch adoption line filled.
+ *
+ * The other 40 cases enter the dataset on that adoption line rather than on a
+ * verdict of their own. docs/ops/memory-extraction-eval-dataset.md §6.3 is explicit that this is what the line is for:
+ * seeing the sample and saying nothing is not adoption.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  *
  * 50 cases, the top of docs/ops/memory-extraction-eval-dataset.md §6.1's 25-50 range. The cell is
  * 96 short of the 125 floor docs/policy/external-conversation-import-and-memory.md §12.2 sets for it, so 50
  * here and 46 in the next batch lands on 125 exactly.
- *
- * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 keeps them a candidate pool
- * until a person adopts them, and this file is deliberately not imported by
- * `lib/memoryExtractionEvalFixtures.ts`.
  *
  * Category ② (docs/ops/memory-extraction-eval-dataset.md §4.2): every case has an empty `expected`, and any
  * bulk-safe adoption from one of them is a docs/policy/external-conversation-import-and-memory.md §12.3 critical failure.

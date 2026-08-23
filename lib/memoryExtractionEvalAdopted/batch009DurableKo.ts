@@ -1,15 +1,29 @@
 /**
- * Batch 009 — `durable_facts:ko`, second batch. **Candidate pool, not dataset.**
+ * Batch 009 — `durable_facts:ko`. **Adopted. This is dataset.**
+ *
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-009-durable-facts-ko.md`:
+ * all 10 sampled cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's 20% sample review,
+ * draft disagreement 0%, diversity judged sufficient, the drafting setup
+ * recorded as unchanged, and the explicit batch adoption line filled.
+ *
+ * The other 40 cases enter the dataset on that adoption line rather than on a
+ * verdict of their own. docs/ops/memory-extraction-eval-dataset.md §6.3 is explicit that this is what the line is for:
+ * seeing the sample and saying nothing is not adoption.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  *
  * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch). 50 here,
  * the top of that range: the cell's first batch has been reviewed
  * (docs/ops/memory-extraction-eval-dataset.md §6.5), so
  * what is left is volume, and 50 halves the number of review sheets without
  * changing how many verdicts docs/ops/memory-extraction-eval-dataset.md §6.3's 20% sample asks for.
- *
- * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 keeps them a candidate pool
- * until a person adopts them, and this file is deliberately not imported by
- * `lib/memoryExtractionEvalFixtures.ts`.
  *
  * **Written against what the cell already holds.** The 29 adopted cases cover
  * 간호사, 세무사, 통계, 용접, 부산, 1986, 갑각류, 휠체어, 예산 300, postgres,
