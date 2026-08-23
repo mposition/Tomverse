@@ -13,23 +13,158 @@ type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
  * duplicate when the retried payload is byte-identical, and an audit that
  * re-renders differently from what was sent proves nothing
  * (docs/policy/email-notifications.md §9.3, §10.3).
+ *
+ * Seven languages, because the alternative was that the least reversible notice
+ * this system sends -- your account and everything in it will be destroyed on
+ * this date -- arrived in English for the accounts that had chosen otherwise
+ * (EM-12). The welcome mail in this same file has had all seven since it was
+ * written; the notice that matters had one.
+ *
+ * `Record<EmailLanguage, Copy>` rather than a lookup with a fallback: adding a
+ * language then fails to compile until every message has been written, which is
+ * the only mechanism that has ever kept a translation set complete.
  */
+
+type DeletionCopy = {
+  subject: string;
+  stopped: (date: string) => string;
+  renewal: string;
+  cancel: string;
+  notYou: string;
+};
+
+const SUPPORT = "support@tomverse.app";
+
+const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
+  en: {
+    subject: "Tomverse account deletion scheduled",
+    stopped: (date) =>
+      `Your Tomverse account access has been stopped immediately, and permanent deletion (including all data) is scheduled for ${date}.`,
+    renewal:
+      "If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending.",
+    cancel: `Cancelling this request is not self-service. Contact ${SUPPORT} before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored.`,
+    notYou: `If you did not request this, contact ${SUPPORT} immediately.`,
+  },
+  ko: {
+    subject: "Tomverse 계정 삭제가 예정되었습니다",
+    stopped: (date) =>
+      `Tomverse 계정 접근이 즉시 중지되었으며, 모든 데이터를 포함한 영구 삭제가 ${date}에 예정되어 있습니다.`,
+    renewal:
+      "유료 플랜을 사용 중이셨다면 자동 갱신이 중지되었습니다. 삭제가 진행되는 동안에는 어느 경우에도 접근이 차단됩니다.",
+    cancel: `이 요청은 직접 취소하실 수 없습니다. 해당 날짜 이전에 ${SUPPORT}로 연락하시면 계정을 복구해 드립니다. 복구되면 플랜은 원래 만료일까지만 유지되며 자동 갱신은 복구되지 않습니다.`,
+    notYou: `요청하신 적이 없다면 즉시 ${SUPPORT}로 연락해 주십시오.`,
+  },
+  zh: {
+    subject: "您的 Tomverse 账户已安排删除",
+    stopped: (date) =>
+      `您的 Tomverse 账户访问已立即停止，包含全部数据的永久删除安排在 ${date}。`,
+    renewal:
+      "如果您使用付费方案，自动续订已停止；在删除处理期间，访问都会保持关闭。",
+    cancel: `此请求无法自助取消。请在该日期之前联系 ${SUPPORT}，我们的团队会为您恢复账户。恢复后，方案仅保留至原到期日，自动续订不会恢复。`,
+    notYou: `如果这不是您本人的请求，请立即联系 ${SUPPORT}。`,
+  },
+  fr: {
+    subject: "Suppression de votre compte Tomverse programmée",
+    stopped: (date) =>
+      `L'accès à votre compte Tomverse a été interrompu immédiatement, et la suppression définitive (données comprises) est programmée pour le ${date}.`,
+    renewal:
+      "Si vous aviez une formule payante, le renouvellement automatique a été arrêté ; dans tous les cas, l'accès reste bloqué pendant la procédure.",
+    cancel: `Cette demande ne peut pas être annulée en libre-service. Contactez ${SUPPORT} avant cette date et notre équipe rétablira votre compte. En cas de rétablissement, la formule reprend jusqu'à sa date d'expiration initiale uniquement ; le renouvellement automatique n'est pas rétabli.`,
+    notYou: `Si vous n'êtes pas à l'origine de cette demande, contactez ${SUPPORT} immédiatement.`,
+  },
+  de: {
+    subject: "Löschung Ihres Tomverse-Kontos geplant",
+    stopped: (date) =>
+      `Der Zugang zu Ihrem Tomverse-Konto wurde sofort gesperrt, und die endgültige Löschung einschließlich aller Daten ist für den ${date} vorgesehen.`,
+    renewal:
+      "Bei einem kostenpflichtigen Tarif wurde die automatische Verlängerung beendet; der Zugang bleibt während des Löschvorgangs in jedem Fall gesperrt.",
+    cancel: `Diese Anfrage lässt sich nicht selbst zurücknehmen. Wenden Sie sich vor diesem Datum an ${SUPPORT}, dann stellt unser Team Ihr Konto wieder her. Nach einer Wiederherstellung läuft der Tarif nur bis zum ursprünglichen Ablaufdatum weiter; die automatische Verlängerung wird nicht wiederhergestellt.`,
+    notYou: `Wenn diese Anfrage nicht von Ihnen stammt, wenden Sie sich sofort an ${SUPPORT}.`,
+  },
+  es: {
+    subject: "Eliminación programada de su cuenta de Tomverse",
+    stopped: (date) =>
+      `El acceso a su cuenta de Tomverse se ha detenido de inmediato y la eliminación permanente, incluidos todos los datos, está prevista para el ${date}.`,
+    renewal:
+      "Si tenía un plan de pago, la renovación automática se ha detenido; en cualquier caso, el acceso permanece bloqueado mientras la eliminación esté pendiente.",
+    cancel: `Esta solicitud no se puede cancelar por su cuenta. Escriba a ${SUPPORT} antes de esa fecha y nuestro equipo restaurará su cuenta. Si se restaura, el plan continúa solo hasta su fecha de vencimiento original; la renovación automática no se restablece.`,
+    notYou: `Si usted no solicitó esto, escriba a ${SUPPORT} de inmediato.`,
+  },
+  pt: {
+    subject: "Exclusão da sua conta Tomverse agendada",
+    stopped: (date) =>
+      `O acesso à sua conta Tomverse foi interrompido imediatamente, e a exclusão permanente, incluindo todos os dados, está agendada para ${date}.`,
+    renewal:
+      "Se você tinha um plano pago, a renovação automática foi interrompida; de qualquer forma, o acesso permanece bloqueado enquanto a exclusão estiver pendente.",
+    cancel: `Esta solicitação não pode ser cancelada por conta própria. Entre em contato com ${SUPPORT} antes dessa data e nossa equipe restaurará a sua conta. Se restaurada, o plano segue apenas até a data de expiração original; a renovação automática não é restabelecida.`,
+    notYou: `Se você não fez esta solicitação, entre em contato com ${SUPPORT} imediatamente.`,
+  },
+};
+
 export function buildAccountDeletionScheduledEmail(input: {
   scheduledFor: string;
+  language?: string | null;
 }) {
+  const copy = DELETION_COPY[normalizeLanguage(input.language)];
   const date = input.scheduledFor;
   return {
-    subject: "Tomverse account deletion scheduled",
-    text: `Your Tomverse account access has been stopped immediately and permanent deletion (including all data) is scheduled for ${date}. If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending. Cancelling this request is not self-service -- contact support@tomverse.app before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored. If you did not request this, contact support@tomverse.app immediately.`,
-    html: `<p>Your Tomverse account access has been stopped immediately, and permanent deletion (including all data) is scheduled for <strong>${escapeHtml(date)}</strong>.</p><p>If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending.</p><p>Cancelling this request is <strong>not self-service</strong> -- contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored.</p><p>If you did not request this, contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> immediately.</p>`,
+    subject: copy.subject,
+    text: [copy.stopped(date), copy.renewal, copy.cancel, copy.notYou].join("\n\n"),
+    html: [
+      `<p>${copy.stopped(`<strong>${escapeHtml(date)}</strong>`)}</p>`,
+      `<p>${escapeHtml(copy.renewal)}</p>`,
+      `<p>${escapeHtml(copy.cancel).replace(SUPPORT, `<a href="mailto:${SUPPORT}">${SUPPORT}</a>`)}</p>`,
+      `<p>${escapeHtml(copy.notYou).replace(SUPPORT, `<a href="mailto:${SUPPORT}">${SUPPORT}</a>`)}</p>`,
+    ].join(""),
   };
 }
 
-export function buildAccountRestoredEmail() {
-  return {
+type RestoredCopy = { subject: string; active: string; plan: string };
+
+const RESTORED_COPY: Record<EmailLanguage, RestoredCopy> = {
+  en: {
     subject: "Your Tomverse account has been restored",
-    text: `Your Tomverse account is active again and you can sign in. If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.`,
-    html: `<p>Your Tomverse account is active again and you can sign in.</p><p>If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.</p>`,
+    active: "Your Tomverse account is active again and you can sign in.",
+    plan: "If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.",
+  },
+  ko: {
+    subject: "Tomverse 계정이 복구되었습니다",
+    active: "Tomverse 계정이 다시 활성화되어 로그인하실 수 있습니다.",
+    plan: "유료 플랜을 사용 중이셨다면 원래 만료일까지 유지되지만 자동 갱신은 복구되지 않았습니다. 그 이후에도 플랜을 유지하시려면 다시 구독하셔야 합니다.",
+  },
+  zh: {
+    subject: "您的 Tomverse 账户已恢复",
+    active: "您的 Tomverse 账户已重新启用，可以登录了。",
+    plan: "如果您有付费方案，它会保留到原到期日，但自动续订未恢复。若希望在该日期之后继续使用，需要重新订阅。",
+  },
+  fr: {
+    subject: "Votre compte Tomverse a été rétabli",
+    active: "Votre compte Tomverse est de nouveau actif et vous pouvez vous connecter.",
+    plan: "Si vous aviez une formule payante, elle se poursuit jusqu'à sa date d'expiration initiale, mais le renouvellement automatique n'a pas été rétabli : il faudra vous réabonner pour la conserver au-delà de cette date.",
+  },
+  de: {
+    subject: "Ihr Tomverse-Konto wurde wiederhergestellt",
+    active: "Ihr Tomverse-Konto ist wieder aktiv und Sie können sich anmelden.",
+    plan: "Ein kostenpflichtiger Tarif läuft bis zum ursprünglichen Ablaufdatum weiter, die automatische Verlängerung wurde jedoch nicht wiederhergestellt. Um den Tarif darüber hinaus zu behalten, ist ein neues Abonnement nötig.",
+  },
+  es: {
+    subject: "Su cuenta de Tomverse ha sido restaurada",
+    active: "Su cuenta de Tomverse vuelve a estar activa y puede iniciar sesión.",
+    plan: "Si tenía un plan de pago, continúa hasta su fecha de vencimiento original, pero la renovación automática no se restableció: tendrá que volver a suscribirse para conservarlo después de esa fecha.",
+  },
+  pt: {
+    subject: "Sua conta Tomverse foi restaurada",
+    active: "Sua conta Tomverse está ativa novamente e você pode entrar.",
+    plan: "Se você tinha um plano pago, ele continua até a data de expiração original, mas a renovação automática não foi restabelecida: será preciso assinar de novo para mantê-lo depois dessa data.",
+  },
+};
+
+export function buildAccountRestoredEmail(input?: { language?: string | null }) {
+  const copy = RESTORED_COPY[normalizeLanguage(input?.language)];
+  return {
+    subject: copy.subject,
+    text: [copy.active, copy.plan].join("\n\n"),
+    html: `<p>${escapeHtml(copy.active)}</p><p>${escapeHtml(copy.plan)}</p>`,
   };
 }
 
