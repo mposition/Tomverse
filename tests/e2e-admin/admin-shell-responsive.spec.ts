@@ -240,6 +240,40 @@ test.describe("admin console on a narrow viewport", () => {
     }
   });
 
+  // The overview is the console's landing page and the one that renders every
+  // tracked environment variable by name. A name longer than the column made
+  // the page wider than the screen, and a page wider than the screen carries
+  // the command palette's own controls off it -- so the check belongs here,
+  // beside the page that first paid for its absence.
+  // 412 only, and the narrower widths are absent rather than passing.
+  //
+  // At 320px the quick access panel overflows on develop as well (367 against a
+  // 320px viewport, measured 2026-08-23), and at 390px the page overflows or
+  // not depending on what the preceding test seeded -- 405 in a full-suite run,
+  // 390 in isolation -- because the width is set by whichever provider error
+  // code or audit summary happens to be the longest. Both are other components'
+  // bugs. Asserting them here would either fail for reasons this page cannot
+  // fix or pass by luck, and neither is a guard.
+  //
+  // 412 is the admin-mobile viewport, it is the width the environment list
+  // broke, and it holds regardless of seeded content.
+  test("the overview page does not overflow horizontally", async ({ page }) => {
+    for (const width of [412]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/admin/overview");
+      await expect(consoleHeading(page)).toHaveText("Overview");
+
+      const overflow = await page.evaluate(() => ({
+        viewport: document.documentElement.clientWidth,
+        content: document.documentElement.scrollWidth,
+      }));
+      expect(
+        overflow.content,
+        `horizontal overflow at ${width}px`
+      ).toBeLessThanOrEqual(overflow.viewport + 1);
+    }
+  });
+
   test("a consolidated page's tab strip is reachable and does not overflow", async ({
     page,
   }) => {
