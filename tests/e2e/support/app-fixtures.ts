@@ -486,6 +486,13 @@ export type QaConversationMessage = {
    */
   memoryUsedCount?: number;
   /**
+   * docs/policy/external-conversation-import-and-memory.md §14.3's half of the same
+   * disclosure, also as a *stored* fact. Seeded
+   * separately from `memoryUsedCount` because the point of the pair is that
+   * an answer can carry either, both or neither.
+   */
+  knowledgeChunkCount?: number;
+  /**
    * The files this answer produced, exactly as the real endpoint returns them
    * (docs/policy/generated-artifacts.md section 5). Seeded so a spec can ask
    * the question a reload asks: does the download card come back, or did it

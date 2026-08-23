@@ -48,6 +48,14 @@ export type Message = {
    */
   memoryUsedCount?: number;
   /**
+   * docs/policy/external-conversation-import-and-memory.md §14.3: how many
+   * assistant-profile knowledge excerpts this answer's prompt
+   * carried. Same provenance and same handling as `memoryUsedCount` directly
+   * above -- the server's own count, absent below one, and outside the
+   * serializer allowlists so it never rides a transcript or localStorage.
+   */
+  knowledgeChunkCount?: number;
+  /**
    * Files this answer produced (docs/policy/generated-artifacts.md).
    *
    * Absent on every message that made none, which is almost all of them --

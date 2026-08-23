@@ -1,0 +1,16 @@
+-- §14.3: per-answer attribution for assistant-profile knowledge.
+--
+-- The memory half of this already exists ("Message.memoryUsedCount", added in
+-- 20260805060000_message_memory_attribution) and the knowledge half did not,
+-- which meant an answer built from the user's own uploaded files stated
+-- nothing about where it came from. The server already computed the figure --
+-- `knowledgeChunkCount` on the profile context -- and then discarded it.
+--
+-- A count and nothing else. §8.1 invariant 4's reasoning applies unchanged:
+-- the excerpt text is never written to a Message row, and neither is which
+-- file it came from.
+--
+-- Nullable, so this is a catalogue-only change on an existing table: NULL is
+-- the correct reading for every answer written before it, which is "no context
+-- bundle accompanied this request".
+ALTER TABLE "Message" ADD COLUMN "knowledgeChunkCount" INTEGER;
