@@ -331,7 +331,8 @@ test("an executable is refused however it is labelled", async () => {
   for (const [name, mediaType] of [
     ["tool.exe", "application/pdf"],
     ["tool.exe", "text/plain"],
-    ["run.sh", "text/plain"],
+    ["setup.msi", "text/plain"],
+    ["macro.bat", "text/plain"],
   ] as const) {
     const response = await POST(upload(name, mediaType, "MZ\u0000\u0000"));
     assert.equal(response.status, 400, name);
@@ -344,26 +345,89 @@ test("an executable is refused however it is labelled", async () => {
   assert.equal(world.objects.size, 0);
 });
 
-test("an archive is refused, including a ZIP wearing a document's name", async () => {
+test("a shell script is text now, but only as itself and only if it is text", async () => {
+  // `.sh` left the refusal list when source files became readable: nothing
+  // here runs it, and the test the list applies is "does opening this run
+  // it". It still cannot borrow another format's media type, and its bytes
+  // still have to be text.
   const { POST } = await loadRoute();
+
+  const mislabelled = await POST(upload("run.sh", "text/plain", "echo hi\n"));
+  assert.equal(mislabelled.status, 400);
+  assert.equal(
+    (await readJson(mislabelled)).code,
+    "GUEST_ATTACHMENT_TYPE_MISMATCH"
+  );
+
+  const renamedBinary = await POST(
+    upload("run.sh", "application/x-sh", "MZ\u0000\u0000")
+  );
+  assert.equal(renamedBinary.status, 400);
+  assert.equal(
+    (await readJson(renamedBinary)).code,
+    "GUEST_ATTACHMENT_TYPE_MISMATCH"
+  );
+  assert.equal(world.objects.size, 0);
+
+  const accepted = await POST(
+    upload("run.sh", "application/x-sh", "#!/bin/sh\necho hi\n")
+  );
+  assert.equal(accepted.status, 200);
+  assert.equal((await readJson(accepted)).kind, "text");
+});
+
+test("a ZIP is a supported format now, but still cannot wear another type's name", async () => {
+  const { POST } = await loadRoute();
+  // Eight bytes of a local file header and nothing else: enough to look like
+  // a ZIP, not enough to be one.
   const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
 
   const byName = await POST(upload("bundle.zip", "text/plain", zip));
   assert.equal(byName.status, 400);
   assert.equal(
     (await readJson(byName)).code,
-    "GUEST_ATTACHMENT_UNSUPPORTED_TYPE"
+    "GUEST_ATTACHMENT_TYPE_MISMATCH"
   );
 
-  // ...and renaming it to something allowed does not get it past the content
-  // check either.
+  // Renaming it to something allowed does not get it past the content check.
   const byContent = await POST(upload("bundle.txt", "text/plain", zip));
   assert.equal(byContent.status, 400);
   assert.equal(
     (await readJson(byContent)).code,
     "GUEST_ATTACHMENT_TYPE_MISMATCH"
   );
+
+  // And declared honestly it is read as an archive -- and refused as a
+  // truncated one, with the archive's own code rather than a generic failure.
+  const asArchive = await POST(upload("bundle.zip", "application/zip", zip));
+  assert.equal(asArchive.status, 400);
+  assert.equal((await readJson(asArchive)).code, "ARCHIVE_CORRUPT");
   assert.equal(world.objects.size, 0);
+});
+
+test("a guest may attach a real archive, and is told what was left out", async () => {
+  const { POST } = await loadRoute();
+  const { zipSync, strToU8 } = await import("fflate");
+  const archive = Buffer.from(
+    zipSync({
+      "src/main.py": strToU8("print(1)\n"),
+      "README.md": strToU8("# hi\n"),
+      "clip.mp4": strToU8("unsupported"),
+    })
+  );
+
+  const response = await POST(upload("project.zip", "application/zip", archive));
+  assert.equal(response.status, 200);
+  const body = await readJson(response);
+  assert.equal(body.mediaType, "application/zip");
+  assert.equal(body.kind, "file");
+  assert.deepEqual(body.archive, {
+    totalEntries: 3,
+    includedFiles: 2,
+    excludedFiles: 1,
+  });
+  // Counts only: an entry path is text the uploader chose.
+  assert.equal(JSON.stringify(body).includes("main.py"), false);
 });
 
 test("an extension that disagrees with the media type is refused", async () => {
@@ -446,10 +510,27 @@ test("text longer than a guest turn can carry is refused at upload", async () =>
 test("a file that is not UTF-8 text is refused rather than mangled", async () => {
   const { POST } = await loadRoute();
   const response = await POST(
-    upload("notes.txt", "text/plain", Buffer.from([0xff, 0xfe, 0x41, 0x30]))
+    upload("notes.txt", "text/plain", Buffer.from([0x41, 0xc3, 0x28, 0x42]))
   );
   assert.equal(response.status, 400);
   assert.equal((await readJson(response)).code, "GUEST_ATTACHMENT_UNREADABLE");
+});
+
+test("a UTF-16 file with a byte order mark is converted, not refused", async () => {
+  // A Windows editor writes this without being asked, and the old guard read
+  // its NUL bytes as evidence of a binary.
+  const { POST } = await loadRoute();
+  const response = await POST(
+    upload(
+      "notes.txt",
+      "text/plain",
+      Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("hello", "utf16le")])
+    )
+  );
+  assert.equal(response.status, 200);
+  const body = await readJson(response);
+  // Stored as UTF-8, so every later reader gets plain text.
+  assert.equal(body.size, 5);
 });
 
 // --- isolation, cleanup and identity ----------------------------------------

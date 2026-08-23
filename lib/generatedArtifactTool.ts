@@ -33,12 +33,14 @@ import type { ToolSet } from "ai";
 import {
   ARTIFACT_LIMITS,
   admitArchiveSpec,
+  admitDocumentBatchSpec,
   admitDocumentSpec,
   admitPresentationSpec,
   admitTextFileSpec,
   admitWorkbookSpecSafely,
   archiveSpecSchema,
   artifactFormat,
+  documentBatchSpecSchema,
   documentSpecSchema,
   presentationSpecSchema,
   requireArtifactFormat,
@@ -50,6 +52,7 @@ import {
   type ArchiveSpec,
   type ArtifactKind,
   type ChatStreamArtifact,
+  type DocumentBatchSpec,
   type DocumentSpec,
   type PresentationSpec,
   type SupportedArtifactFormat,
@@ -60,6 +63,7 @@ import {
   ArtifactRenderError,
   renderArchiveArtifact,
   renderDocumentArtifact,
+  renderDocumentBatchArtifact,
   renderPresentationArtifact,
   renderSpreadsheetArtifact,
   renderTextArtifact,
@@ -94,8 +98,21 @@ export const ARTIFACT_TOOL_NAMES = {
 
 export const CREATE_SPREADSHEET_TOOL_NAME = ARTIFACT_TOOL_NAMES.spreadsheet;
 
-export const ALL_ARTIFACT_TOOL_NAMES: readonly string[] =
-  Object.values(ARTIFACT_TOOL_NAMES);
+/**
+ * The batch tool, which is not one of the five.
+ *
+ * It is not keyed by kind because it is not a sixth kind of file: it produces
+ * an `archive`, exactly like `create_archive`, from inputs the model does not
+ * author. Registered only on a turn that actually carries a Word template, so
+ * its schema is not priced into every request and a model with nothing to fill
+ * cannot reach for it.
+ */
+export const CREATE_DOCUMENT_BATCH_TOOL_NAME = "create_document_batch";
+
+export const ALL_ARTIFACT_TOOL_NAMES: readonly string[] = [
+  ...Object.values(ARTIFACT_TOOL_NAMES),
+  CREATE_DOCUMENT_BATCH_TOOL_NAME,
+];
 
 /**
  * Steps one turn may take when the tools are registered.
@@ -116,6 +133,16 @@ const FALLBACK_FORMAT = {
   text: "txt",
   archive: "zip",
 } as const satisfies Record<ArtifactKind, string>;
+
+/** The template a batch fills. Word only -- there is no other template shape. */
+const DOCX_MEDIA_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** What a batch may read records from: a workbook, or a plain CSV. */
+const BATCH_DATA_MEDIA_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+]);
 
 type FailedArtifact = {
   ordinal: number;
@@ -231,11 +258,16 @@ const HANDLERS: Record<ArtifactKind, KindHandler> = {
     render: renderArchiveArtifact,
     describe: (spec: ArchiveSpec) => plural(spec.entries.length, "entry"),
     description:
-      "Create a real, downloadable .zip archive of several text files and " +
-      "attach it to your reply. Use this when the user asks for a project, a " +
-      "starter, a set of files, or anything that is more than one file. Each " +
-      "entry has a relative path inside the archive and its own text " +
-      "content. Never write file bytes, base64 or a download link yourself.",
+      "Create a real, downloadable .zip archive of several files and attach " +
+      "it to your reply. Use this whenever the user asks for more than one " +
+      "file -- a project, a starter, a set of reports. Each entry is either " +
+      "an authored text file (`path`, `format`, `content`) or a document the " +
+      "application renders for you (`path`, `documentFormat` such as docx or " +
+      "pdf, and `blocks`). One archive may hold up to " +
+      `${ARTIFACT_LIMITS.maxArchiveEntries} entries and counts as ONE of the ` +
+      `${ARTIFACT_LIMITS.maxArtifactsPerMessage} files an answer may attach, ` +
+      "so this is how you deliver ten documents at once. Never write file " +
+      "bytes, base64 or a download link yourself.",
   },
 };
 
@@ -276,6 +308,21 @@ export type GeneratedArtifactCollectorOptions = {
    * is still true.
    */
   emitProgress?: (format: SupportedArtifactFormat) => void;
+  /**
+   * The files the user attached to the turn being answered, by opaque handle.
+   *
+   * Resolved and ownership-checked by the request layer before the collector
+   * exists, which is the only reason the batch tool can be synchronous and the
+   * only reason a handle is safe to give a model: it addresses this map and
+   * nothing else. Empty on a turn with no attachments, which is almost all of
+   * them.
+   */
+  turnAttachments?: ReadonlyMap<
+    string,
+    { name: string; mediaType: string; bytes: Uint8Array }
+  >;
+  /** Injectable so a test can assert the date folder in a batch path. */
+  now?: Date;
 };
 
 /**
@@ -487,8 +534,10 @@ export class GeneratedArtifactCollector {
         status: "failed",
         reason: "too_many_files",
         note:
-          `This answer already has ${ARTIFACT_LIMITS.maxArtifactsPerMessage} files. ` +
-          "Tell the user, and offer to put the rest in a follow-up message.",
+          `This answer already has ${ARTIFACT_LIMITS.maxArtifactsPerMessage} ` +
+          "top-level files, which is the limit. It is not a limit on how many " +
+          "documents you can deliver: put them in one archive instead, which " +
+          `holds up to ${ARTIFACT_LIMITS.maxArchiveEntries} files.`,
       };
     }
 
@@ -536,13 +585,212 @@ export class GeneratedArtifactCollector {
       };
     }
 
+    return this.renderAndStore({
+      kind,
+      format,
+      filename,
+      specHash,
+      render: () => handler.render(spec),
+      describe: () => handler.describe(spec),
+    });
+  }
+
+  /**
+   * `create_document_batch`: one archive, one document per spreadsheet row.
+   *
+   * Shares the whole lifecycle above -- the per-answer ceiling, the ordinal,
+   * the idempotency hash, storage, failure recording -- and differs only in
+   * where the bytes come from. The model supplies two opaque handles and a
+   * naming rule; the files themselves are the user's own, resolved before this
+   * collector was constructed.
+   */
+  async runDocumentBatch(rawInput: unknown): Promise<ArtifactToolReport> {
+    this.invocations += 1;
+
+    if (this.options.mode === "sign_in_required") {
+      const filename = sanitizeArtifactFilename("documents", "zip");
+      this.recordFailure(filename, "zip", "sign_in_required", null);
+      return {
+        status: "sign_in_required",
+        note:
+          "File generation requires a signed-in account. Tell the user that, " +
+          "briefly. Do not write the contents as a table, as code, or as a link.",
+      };
+    }
+    if (!this.options.userId || !this.options.conversationId) {
+      return {
+        status: "failed",
+        reason: "no_conversation",
+        note: "The file could not be attached to this conversation. Say so.",
+      };
+    }
+    if (
+      this.storedArtifacts.length + this.failedArtifacts.length >=
+      ARTIFACT_LIMITS.maxArtifactsPerMessage
+    ) {
+      return {
+        status: "failed",
+        reason: "too_many_files",
+        note:
+          `This answer already has ${ARTIFACT_LIMITS.maxArtifactsPerMessage} files. ` +
+          "That is the limit on top-level files, not on documents: one archive " +
+          "can hold up to " +
+          `${ARTIFACT_LIMITS.maxArchiveEntries} of them.`,
+      };
+    }
+
+    const admission = admitDocumentBatchSpec(rawInput);
+    if (!admission.ok) {
+      this.recordFailure(
+        sanitizeArtifactFilename("documents", "zip"),
+        "zip",
+        "spec_rejected",
+        null
+      );
+      return {
+        status: "failed",
+        reason: admission.detail.slice(0, 300),
+        note:
+          "The files were not created. Tell the user what went wrong. Do not " +
+          "describe files that do not exist.",
+      };
+    }
+
+    const spec: DocumentBatchSpec = admission.spec;
+    const attachments = this.options.turnAttachments;
+    const template = attachments?.get(spec.templateAttachment);
+    const data = attachments?.get(spec.dataAttachment);
+    const missing = !template
+      ? spec.templateAttachment
+      : !data
+        ? spec.dataAttachment
+        : null;
+    if (missing || !template || !data) {
+      const available = attachments ? Array.from(attachments.keys()) : [];
+      this.recordFailure(
+        sanitizeArtifactFilename(spec.filename, "zip"),
+        "zip",
+        "spec_rejected",
+        null
+      );
+      return {
+        status: "failed",
+        reason: `attachment_not_on_turn:${missing}`,
+        note:
+          `There is no file called ${missing} on this message. ` +
+          (available.length
+            ? `The files attached here are: ${available.join(", ")}. `
+            : "No files are attached to this message. ") +
+          "Ask the user to attach the template and the data, and do not invent a file.",
+      };
+    }
+    if (template.mediaType !== DOCX_MEDIA_TYPE) {
+      this.recordFailure(
+        sanitizeArtifactFilename(spec.filename, "zip"),
+        "zip",
+        "spec_rejected",
+        null
+      );
+      return {
+        status: "failed",
+        reason: "template_not_docx",
+        note:
+          `${spec.templateAttachment} ("${template.name}") is not a Word document. ` +
+          "The template has to be a .docx file. Say so.",
+      };
+    }
+    if (!BATCH_DATA_MEDIA_TYPES.has(data.mediaType)) {
+      this.recordFailure(
+        sanitizeArtifactFilename(spec.filename, "zip"),
+        "zip",
+        "spec_rejected",
+        null
+      );
+      return {
+        status: "failed",
+        reason: "data_not_tabular",
+        note:
+          `${spec.dataAttachment} ("${data.name}") is not a spreadsheet. ` +
+          "The data has to be an .xlsx or a .csv with one row per document. Say so.",
+      };
+    }
+
+    const filename = sanitizeArtifactFilename(spec.filename, "zip");
+    const specHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          kind: "documentBatch",
+          ...spec,
+          filename,
+          template: template.name,
+          data: data.name,
+        })
+      )
+      .digest("hex");
+    const already = this.seenSpecHashes.get(specHash);
+    if (already) {
+      return {
+        status: "unchanged",
+        filename: already.filename,
+        note:
+          "That exact archive was already created for this answer. Do not call " +
+          "the tool again for it; just describe it.",
+      };
+    }
+
+    let entryCount = 0;
+    let sheetName = "";
+    return this.renderAndStore({
+      kind: "archive",
+      format: "zip",
+      filename,
+      specHash,
+      render: () => {
+        const rendered = renderDocumentBatchArtifact(spec, {
+          templateBytes: template.bytes,
+          dataBytes: data.bytes,
+          dataMediaType: data.mediaType,
+          ...(this.options.now ? { now: this.options.now } : {}),
+        });
+        entryCount = rendered.entryCount;
+        sheetName = rendered.sheetName;
+        return rendered;
+      },
+      describe: () =>
+        `${plural(entryCount, "document")} from "${sheetName}"`,
+      createdNote:
+        "The archive is attached to your message and the user has a download " +
+        "button. Say how many documents it contains and where they came from, " +
+        "in one or two sentences. Do not list every file and do not write a link.",
+    });
+  }
+
+  /**
+   * Everything that happens once a specification has been accepted.
+   *
+   * Shared by the five kind tools and by the batch tool, so the ordering that
+   * makes a tool call survivable -- progress signal, render, store bytes, take
+   * the ordinal, record the hash -- is written once and cannot drift between
+   * them.
+   */
+  private async renderAndStore(job: {
+    kind: ArtifactKind;
+    format: SupportedArtifactFormat;
+    filename: string;
+    specHash: string;
+    render: () => RenderedArtifact;
+    describe: (rendered: RenderedArtifact) => string;
+    createdNote?: string;
+  }): Promise<ArtifactToolReport> {
+    const { kind, format, filename, specHash } = job;
+
     // Before the work, not after: a status that appears once the file is
     // finished is a status nobody needed.
     this.options.emitProgress?.(format);
 
     let rendered: RenderedArtifact;
     try {
-      rendered = handler.render(spec);
+      rendered = job.render();
     } catch (error) {
       this.recordFailure(filename, format, renderFailureCode(error), specHash);
       console.error("Generated artifact rendering failed:", {
@@ -565,8 +813,8 @@ export class GeneratedArtifactCollector {
     let storedArtifact: StoredArtifact;
     try {
       storedArtifact = await putArtifactObject({
-        userId: this.options.userId,
-        conversationId: this.options.conversationId,
+        userId: this.options.userId!,
+        conversationId: this.options.conversationId!,
         ordinal: this.nextOrdinal,
         format,
         filename,
@@ -594,7 +842,7 @@ export class GeneratedArtifactCollector {
     this.storedArtifacts.push(storedArtifact);
     this.seenSpecHashes.set(specHash, storedArtifact);
 
-    const parts = handler.describe(spec);
+    const parts = job.describe(rendered);
     console.info(
       JSON.stringify({
         event: "generated_artifact_created",
@@ -615,9 +863,10 @@ export class GeneratedArtifactCollector {
       format,
       parts,
       note:
+        job.createdNote ??
         "The file is attached to your message and the user has a download " +
-        "button. Do not repeat the table, the CSV text, the code, or a link. " +
-        "Write one or two short sentences about what it contains.",
+          "button. Do not repeat the table, the CSV text, the code, or a link. " +
+          "Write one or two short sentences about what it contains.",
     };
   }
 }
@@ -632,8 +881,32 @@ export class GeneratedArtifactCollector {
  * enforces a JSON schema it was handed, which is not a property any of them
  * promises.
  */
+/**
+ * What the provider is told `create_document_batch` is for.
+ *
+ * Written to close the exact refusal this feature exists to remove: a model
+ * that had been told "at most three files" concluded it could not make ten
+ * contracts, and said so. The limit is real and unchanged; what it bounds is
+ * top-level attachments, and one archive is one of them.
+ */
+const DOCUMENT_BATCH_TOOL_DESCRIPTION =
+  "Fill an attached Word template once per row of an attached spreadsheet, " +
+  "and deliver the finished documents as one .zip. Use this whenever the " +
+  "user attaches a .docx template with {{placeholder}} fields and a table of " +
+  "people, orders or items and asks for one document per row -- contracts, " +
+  "certificates, letters, invoices. You never read or write the files: you " +
+  "name them by the handles listed in this turn's attachment section " +
+  "(att_1, att_2, ...) and give a naming rule such as " +
+  '"{{name}}_contract"; the application reads the spreadsheet, fills the ' +
+  "template run by run, keeps the template's styles, tables, headers, " +
+  "footers, sections and images, and writes every document. The archive " +
+  "counts as ONE attached file, so a hundred documents is one call. Never " +
+  "write file bytes, base64, XML, a storage key or a local path yourself, " +
+  "and never ask for them: a handle is the whole of what this tool accepts.";
+
 export const buildGeneratedArtifactToolConfig = (
-  collector: GeneratedArtifactCollector
+  collector: GeneratedArtifactCollector,
+  { registerDocumentBatch = false }: { registerDocumentBatch?: boolean } = {}
 ): { tools: ToolSet } => ({
   tools: {
     [ARTIFACT_TOOL_NAMES.spreadsheet]: tool({
@@ -661,5 +934,14 @@ export const buildGeneratedArtifactToolConfig = (
       inputSchema: archiveSpecSchema,
       execute: async (input) => collector.run("archive", input),
     }),
+    ...(registerDocumentBatch
+      ? {
+          [CREATE_DOCUMENT_BATCH_TOOL_NAME]: tool({
+            description: DOCUMENT_BATCH_TOOL_DESCRIPTION,
+            inputSchema: documentBatchSpecSchema,
+            execute: async (input) => collector.runDocumentBatch(input),
+          }),
+        }
+      : {}),
   },
 });

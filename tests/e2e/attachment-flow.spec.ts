@@ -119,6 +119,91 @@ test.describe("attachment UX", () => {
     await expect(page.getByText("Attachment QA response", { exact: true })).toBeVisible();
   });
 
+  test("a ZIP is attachable, and the files it left out are said out loud", async ({
+    page,
+  }) => {
+    // The bug this change started from: attaching a ZIP answered
+    // "지원하지 않는 파일 형식입니다." An archive is now a supported format,
+    // and what could not be read inside it is reported rather than silently
+    // missing from the answer.
+    uploadState.archive = { totalEntries: 9, includedFiles: 6, excludedFiles: 3 };
+    await attachFromComputer(page, {
+      name: "project.zip",
+      mimeType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]),
+    });
+
+    await expect(page.getByTestId("attachment-complete")).toBeVisible();
+    await expect(page.getByTestId("attachment-failed")).toHaveCount(0);
+    expect(uploadState.finalizeCount).toBe(1);
+    await expect(page.getByTestId("app-toast")).toHaveText(
+      "일부 파일은 지원되지 않아 제외되었습니다: 3개"
+    );
+  });
+
+  test("a text file whose browser type is empty is still attachable", async ({
+    page,
+  }) => {
+    // Windows and several Android pickers report no media type at all for a
+    // .md, and the composer used to refuse it before the server saw a byte.
+    await attachFromComputer(page, {
+      name: "notes.md",
+      mimeType: "",
+      buffer: Buffer.from("# hello\n", "utf8"),
+    });
+
+    await expect(page.getByTestId("attachment-complete")).toBeVisible();
+    await expect(page.getByTestId("attachment-failed")).toHaveCount(0);
+    expect(uploadState.uploadCount).toBe(1);
+  });
+
+  test("an unsupported format is refused before anything is uploaded", async ({
+    page,
+  }) => {
+    await attachFromComputer(page, {
+      name: "clip.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from([0, 1, 2, 3]),
+    });
+
+    await expect(page.getByTestId("attachment-failed")).toBeVisible();
+    await expect(page.getByTestId("attachment-failed-reason")).toHaveText(
+      "지원하지 않는 파일 형식입니다."
+    );
+    expect(uploadState.prepareCount).toBe(0);
+    expect(uploadState.uploadCount).toBe(0);
+  });
+
+  test("the server's reason reaches the user instead of a generic retry", async ({
+    page,
+  }) => {
+    // The signed-in path used to throw the server's answer away: a corrupt
+    // PDF, an encrypted archive and a rate limit all produced
+    // "파일을 업로드하지 못했습니다. 다시 시도해 주세요."
+    uploadState.finalizeFailure = { status: 400, code: "ARCHIVE_ENCRYPTED" };
+    await attachFromComputer(page, {
+      name: "locked.zip",
+      mimeType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+    });
+
+    await expect(page.getByTestId("attachment-failed-reason")).toHaveText(
+      "암호화된 ZIP 파일은 지원하지 않습니다."
+    );
+
+    uploadState.finalizeFailure = { status: 400, code: "ATTACHMENT_ANIMATED_IMAGE" };
+    await page.getByTestId("attachment-failed-dismiss").click();
+    await attachFromComputer(page, {
+      name: "loop.gif",
+      mimeType: "image/gif",
+      buffer: Buffer.from("GIF89a", "ascii"),
+    });
+
+    await expect(page.getByTestId("attachment-failed-reason")).toHaveText(
+      "애니메이션 GIF는 지원하지 않습니다. 정지 이미지로 변환해 주세요."
+    );
+  });
+
   test("clipboard image paste creates one preview and upload pair", async ({ page }) => {
     await pasteFile(page, "clipboard.png", "image/png", createQaPngBuffer());
 

@@ -218,3 +218,89 @@ test("Perplexity's models stay out of the registry", () => {
     assert.ok(!modelId.startsWith("perplexity/"), modelId);
   }
 });
+
+/* -------------------------------------------------------------------------- */
+/* Turn attachments and the document batch                                      */
+/* -------------------------------------------------------------------------- */
+
+// docs/policy/generated-artifacts.md section 13.
+
+const DOCX =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const attached = (...types) =>
+  types.map((mediaType, index) => ({
+    handle: `att_${index + 1}`,
+    name: `file-${index + 1}`,
+    mediaType,
+    byteSize: 1024,
+  }));
+
+test("a turn with no attachments does not register the batch tool", () => {
+  const result = plan();
+  assert.equal(result.registerDocumentBatch, false);
+  assert.equal(result.systemPrompt.includes("create_document_batch"), false);
+});
+
+test("a Word template on the turn registers the batch tool", () => {
+  const result = plan({ turnAttachments: attached(DOCX, XLSX) });
+  assert.equal(result.registerDocumentBatch, true);
+  assert.match(result.systemPrompt, /create_document_batch/);
+  assert.match(result.systemPrompt, /templateAttachment: "att_1"/);
+  assert.match(result.systemPrompt, /dataAttachment: "att_2"/);
+});
+
+// A spreadsheet on its own has nothing to fill. Registering the tool would be
+// offering a capability with no input, and a model offered one eventually
+// reaches for it with an invented handle.
+test("a spreadsheet with no template does not register the batch tool", () => {
+  const result = plan({ turnAttachments: attached(XLSX) });
+  assert.equal(result.registerDocumentBatch, false);
+});
+
+test("a template with no data still registers, and the prompt asks for the data", () => {
+  const result = plan({ turnAttachments: attached(DOCX) });
+  assert.equal(result.registerDocumentBatch, true);
+  assert.match(result.systemPrompt, /has not attached/);
+});
+
+// The rule the whole handle scheme exists for: a model's handle can end up
+// quoted in an answer, so it must not be a storage key or a row id.
+test("the attachment section names handles and forbids everything else", () => {
+  const result = plan({ turnAttachments: attached(DOCX, XLSX) });
+  assert.match(result.systemPrompt, /`att_1` -- "file-1"/);
+  assert.match(result.systemPrompt, /storage key/);
+  assert.match(result.systemPrompt, /Refer to these files ONLY by the handle/);
+});
+
+test("a guest turn never registers the batch tool, whatever is attached", () => {
+  const result = plan({
+    isAuthenticated: false,
+    turnAttachments: attached(DOCX, XLSX),
+  });
+  assert.equal(result.registerDocumentBatch, false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* What "three files" means                                                     */
+/* -------------------------------------------------------------------------- */
+
+// The refusal this wording exists to remove: a model told "3 files per answer"
+// concluded it could not produce ten documents. Three is the ceiling on
+// top-level attachments; an archive is one of them and holds a hundred.
+test("the prompt says three is a top-level limit and an archive holds a hundred", () => {
+  const prompt = plan().systemPrompt;
+  assert.match(prompt, /top-level/);
+  assert.match(prompt, /an archive counts as one attachment/);
+  assert.match(prompt, /100 files/);
+  assert.match(prompt, /refusing it as over the three-file limit would/);
+});
+
+test("the prompt never states a bare per-answer file limit", () => {
+  const prompt = plan().systemPrompt;
+  // The old wording was "3 files per answer", which is the sentence a model
+  // read as "you cannot make ten documents".
+  assert.equal(/\d+ files per answer/.test(prompt), false);
+});

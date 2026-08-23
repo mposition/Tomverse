@@ -4,10 +4,10 @@
 정책 근거는 `docs/policy/external-conversation-import-and-memory.md` §14(지식
 파일), §14.2(보존·R2 lifecycle), §15.1(활성화 순서)입니다.
 
-**6항목, 유료 1턴입니다.** 짧은 것이 이 문서의 요점이므로 왜 짧은지부터
+**8항목, 유료 1턴입니다.** 짧은 것이 이 문서의 요점이므로 왜 짧은지부터
 적습니다.
 
-## 왜 6항목인가 — CI가 증명하지 못하는 것만 남깁니다
+## 왜 8항목인가 — CI가 증명하지 못하는 것만 남깁니다
 
 이 기능의 계약은 대부분 **이미 CI에서, 실제 PostgreSQL을 상대로** 증명되고
 있습니다. `tests/integration/assistant-knowledge-pipeline.db.test.ts`,
@@ -37,8 +37,8 @@ deliberately does [not exercise]"*. DB test는 `r2Key` 문자열을 만들 뿐 b
 
 그래서 이 회차가 판별하는 것은 셋뿐입니다.
 
-1. **배포된 빌드에서 flag가 실제로 닫는가** — test는 함수를 부르고, 여기서는
-   배포된 route가 답합니다
+1. **배포된 빌드에서 flag가 무엇을 닫고 무엇을 닫지 않는가** — test는
+   함수를 부르고, 여기서는 배포된 route가 답합니다
 2. **R2 왕복이 실제로 일어나는가** — 업로드된 bytes가 추출되고, 검색되고,
    삭제 후 정말로 사라지는가
 3. **전환이 감사 기록에 남는가** — Admin Console과 해시 체인
@@ -68,7 +68,7 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 붙인 별도 파일**로 `assistant-knowledge-staging-verification-records/` 아래에
 남습니다.
 
-- **template revision**: `2026-08-22a`
+- **template revision**: `2026-08-22d`
 - 실행 방법과 파일 이름 규칙:
   `assistant-knowledge-staging-verification-records/README.md`
 
@@ -94,16 +94,37 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 
 ## A. 켜기 전 (0크레딧)
 
-- [ ] A-1. flag가 꺼진 상태에서 `POST`(`action: "prepare"`)·`GET`·`DELETE`
-      세 경로가 모두 403 `ASSISTANT_KNOWLEDGE_DISABLED`. 켠 뒤에는 이 상태를
-      다시 만들기 어렵다
+켠 뒤에는 이 상태를 다시 만들기 어려우므로 먼저 합니다.
+
+- [ ] A-1. flag가 꺼진 상태에서 `POST`(`action: "prepare"`)와 `GET`이 403
+      `ASSISTANT_KNOWLEDGE_DISABLED`
+- [ ] A-2. **같은 상태에서 `DELETE`는 열려 있다.** 403이 아니어야 한다 —
+      403이면 그것이 결함이다
+
+`DELETE`가 예외인 것은 실수가 아니라 §15 rollback의 결과입니다. flag를 끄는
+것은 기능을 닫는 일이지 **이미 저장한 데이터를 지울 능력을 뺏는 일이
+아닙니다.** 그래서 삭제는 `assistantKnowledgeEnabled`와
+`assistantProfilesEnabled`가 **둘 다** 꺼졌을 때만 닫힙니다
+(`app/api/assistant-profiles/[profileId]/knowledge/[fileId]/route.ts`).
+
+이 회차의 사전 조건은 profiles가 켜져 있는 것이므로, `DELETE`는 열려 있는
+쪽이 정상입니다.
 
 ## B. 전환 (0크레딧)
 
 - [ ] B-1. Admin Console(`PATCH /api/admin/app-settings`)로 전환했고
       `AdminAuditLog`에 시작·완료 두 행이 남았다
-- [ ] B-2. `GET /api/admin/audit-integrity`가 `valid: true`이고
-      `checkedEntries`가 전환 전보다 크다
+- [ ] B-2. 전환 **전에** 읽어 둔 `GET /api/admin/audit-integrity`와 비교해
+      `checkedEntries`가 2 늘고 **`firstInvalidId`가 움직이지 않는다**
+
+`valid: true`를 staging에서 기대하지 않습니다. staging 체인은 과거의 키 교체
+이후 `valid: false`이고, 그것이 이 회차의 결함이 아닙니다 — 검사기에 key
+epoch이 없어 키를 한 번 바꾸면 그 이전 전부가 영구히 무효로 보입니다
+(`9c91042` 회차 발견 사항 5). `valid: true`는 production에서 전환할 때
+확인하며, 그것이 그 회차의 조건 (1)이 한 일입니다.
+
+**여기서 판별하는 것은 "체인이 건강한가"가 아니라 "이 전환이 새 파손을
+만들지 않았는가"입니다.** `firstInvalidId`가 그대로면 새 두 행은 정상입니다.
 
 ## C. R2 왕복 (유료 1턴) — 이 회차의 이유
 
@@ -111,9 +132,23 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
       `processingStatus`가 `ready`가 되고 chunk가 생긴다
 - [ ] C-2. 그 파일에만 있는 내용을 묻는 turn 1건에서, 답이 그 내용을 쓴다.
       **판별 대상은 답의 품질이 아니라 excerpt가 prompt에 닿았다는 사실이다**
-- [ ] C-3. 그 파일을 삭제하면 tombstone이 생기고, **sweep이 돈 뒤 R2 object가
-      실제로 사라진다.** DB 쪽 순서는 CI가 이미 증명하므로, 여기서 보는 것은
-      bytes다
+- [ ] C-3a. 그 파일을 삭제하면 목록에서 사라지고 잔여 용량이 돌아온다.
+      **이 시점에 R2 object는 아직 남아 있어야 한다** — DB-first가 지켜졌다는
+      뜻이고, 없으면 그것이 결함이다
+- [ ] C-3b. **다음 03:00 UTC sweep 이후** R2 object가 사라진다
+
+**sweep은 15분이 아니라 하루 한 번입니다.** 이 회차에서 실제로 틀린 적이 있어
+적어 둡니다 — `railway.maintenance.json`의 `cronSchedule`이 `0 3 * * *`이고,
+그 job이 `cleanupExpiredData()`를 통해 knowledge tombstone을 비웁니다. `*/15`인
+것은 `railway.credit-reconciliation.json`이며 object 정리와 무관합니다.
+
+그래서 **C-3b는 같은 날 안에 관측되지 않습니다.** 몇 분 기다렸다가 결함으로
+적지 마십시오. 온디맨드 실행(`retention.cleanup.execute`)은 2인 승인을 요구하고
+자기 승인이 금지돼 있어 관리자가 하나인 조직에서는 쓸 수 없습니다
+(`lib/adminApprovalCore.ts`).
+
+회차를 하루 안에 닫아야 한다면 C-3b를 `미기록`으로 두고 판정에 그 이유를
+적습니다. 그것이 이 항목을 통과로 적는 것보다 정확합니다.
 
 ## D. 더 확인하고 싶다면 (전부 차단 아님)
 

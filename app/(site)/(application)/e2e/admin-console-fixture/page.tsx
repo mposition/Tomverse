@@ -180,6 +180,15 @@ export default async function AdminConsoleFixturePage({
             externalConversationImportEnabled={false}
             assistantProfilesEnabled={false}
             assistantKnowledgeEnabled={false}
+            /*
+              Release B, reported and not editable. The values are the real
+              ones rather than placeholders: both flags are off and no
+              extraction pair is approved, so the fixture renders the blocked
+              notice and the E2E covers the state an operator actually sees.
+            */
+            memoryExtractionEnabled={false}
+            memoryInjectionEnabled={false}
+            memoryApprovedPairCount={0}
           />
         </section>
       ) : null}

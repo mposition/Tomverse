@@ -69,6 +69,11 @@ const FORBIDDEN = [
     // which is precisely what §13.3's notice is worded to avoid.
     "memoryUsedCount",
     "memoryTokens",
+    // docs/policy/external-conversation-import-and-memory.md §14.3's half of the
+    // same disclosure, excluded for the same reason: to a
+    // viewer the count says the author answers from their own uploaded files
+    // and how much of one went in.
+    "knowledgeChunkCount",
 ];
 
 const validSnapshot = () => ({
@@ -272,11 +277,15 @@ test("the memory count is selected for the owner's read and for no one else", ()
     const read = (path) =>
         readFileSync(new URL(path, import.meta.url), "utf8");
 
+    const ownerRead = read("../app/api/conversations/[conversationId]/route.ts");
     assert.ok(
-        read("../app/api/conversations/[conversationId]/route.ts").includes(
-            "memoryUsedCount: true"
-        ),
+        ownerRead.includes("memoryUsedCount: true"),
         "the owner's conversation read must select memoryUsedCount (§13.4)"
+    );
+    assert.ok(
+        ownerRead.includes("knowledgeChunkCount: true"),
+        "the owner's conversation read must select knowledgeChunkCount " +
+            "(docs/policy/external-conversation-import-and-memory.md §14.3)"
     );
 
     for (const path of [
@@ -285,7 +294,11 @@ test("the memory count is selected for the owner's read and for no one else", ()
         "../app/api/public/shares/[shareToken]/route.ts",
     ]) {
         const source = read(path);
-        for (const column of ["memoryUsedCount", "memoryTokens"]) {
+        for (const column of [
+            "memoryUsedCount",
+            "memoryTokens",
+            "knowledgeChunkCount",
+        ]) {
             assert.ok(
                 !source.includes(column),
                 `${path} must not read ${column} (§13.3)`
@@ -332,6 +345,59 @@ test("every chat entry point passes the conversation's memory mode", () => {
         assert.ok(
             code.slice(index, index + 600).includes("conversationMode:"),
             `${path} must pass conversationMode to buildChatTurnContext`
+        );
+    }
+});
+
+/* ---------------- §12.4: the two flags are reported, never written here --- */
+
+test("the admin settings endpoint reports the memory flags without writing them", () => {
+    // Two halves of the same decision, and each one fails differently.
+    //
+    // The *write* half is the one already registered in
+    // tests/appSettingWriters.test.mjs: enabling account memory is the §12.4
+    // human procedure, so no screen may offer it. The failure mode is a
+    // checkbox appearing beside the four rollout flags this endpoint does
+    // write, which is the procedure's last step without its first six.
+    //
+    // The *read* half was the cost of that decision, and it is not one the
+    // policy asks anyone to pay: with nothing reporting the flags, the only
+    // way to see them was a query against production. An operator who cannot
+    // see a flag cannot notice it is wrong.
+    const source = readFileSync(
+        new URL("../app/api/admin/app-settings/route.ts", import.meta.url),
+        "utf8"
+    );
+    const schema = source.slice(
+        source.indexOf("const updateAppSettingsSchema"),
+        source.indexOf(".strict();")
+    );
+    assert.notEqual(schema.length, 0, "the update schema must still be findable");
+    for (const flag of ["memoryExtractionEnabled", "memoryInjectionEnabled"]) {
+        // `.strict()` turns absence into a refusal rather than a silent drop,
+        // so a request naming one of these is rejected outright.
+        assert.ok(
+            !schema.includes(`${flag}:`),
+            `${flag} must not be an accepted field of the update schema`
+        );
+        assert.ok(
+            source.includes(flag),
+            `${flag} must still be reported, or the flags become invisible`
+        );
+    }
+    assert.ok(
+        source.includes("injectableExtractionPairs"),
+        "the report must carry the approved-pair count: with none, both flags " +
+            "are inert whatever they read, and reporting them alone would show " +
+            "two switches whose position explains nothing"
+    );
+    for (const writer of [
+        "setMemoryExtractionEnabled",
+        "setMemoryInjectionEnabled",
+    ]) {
+        assert.ok(
+            !source.includes(writer),
+            `${writer} must not exist or be called from an admin screen`
         );
     }
 });

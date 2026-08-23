@@ -141,8 +141,15 @@ const ENGLISH_STRING_CEILING = {
   // merge and every one of them still holds: the merged tree carries both the
   // exit control and the assistant/preference-centre copy, so the counts are
   // the sum rather than either side's.
+  //
+  // +2 fr on 2026-08-22 from the composer's supported-format groups, which
+  // name what may be attached now that the list is long enough to need
+  // grouping. French spells "Images" and "Documents" exactly as English does;
+  // the other four groups are translated ("Donnees", "Balisage", "Code
+  // source", "Fichiers compresses"), and German takes all six
+  // ("Auszeichnung", "Quellcode") so it did not move.
   zh: 10,
-  fr: 32,
+  fr: 34,
   de: 27,
   es: 18,
   pt: 16,

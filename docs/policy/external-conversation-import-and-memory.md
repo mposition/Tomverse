@@ -807,8 +807,9 @@ secret·credential ④ prompt injection·지시형·URL 유도.
 
 표본을 실제로 만들고 검수하고 동결하는 절차는
 `docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
-작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
-개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
+초안 생성자(AI)와 검수자(사람)의 분리, 두 사람의 판정이 충돌할 때만 적용하는
+adjudication, critical negative 전건 독립 검수, 개발용/decision set 분리,
+`datasetVersion`·digest 동결과 재작업 규칙.
 
 Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
 전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
@@ -878,16 +879,30 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
 작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
 요구합니다. 따라서 **에이전트가 1,600개를 생성하고 스스로 승인해서 닫을 수
-없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다.
+없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다 — 2026-08-23
+개정 뒤에도 그대로입니다. 개정이 바꾼 것은 **누가 초안을 만드는가**이지 **누가
+승인하는가**가 아닙니다.
 
-작성을 시작하기 전에 사람이 정해야 하는 것:
+작성을 시작하기 전에 사람이 정해야 하는 것 — [개정 · 2026-08-23 @mposition]:
 
-1. 데이터셋 책임자와 8개 cell별 작성자 지정
-2. 작성자와 다른 검수자 지정
-3. adjudicator 지정
-4. AI 초안 도구 허용 범위와 기록 방식 확정
-5. 지침 자체의 사람 승인 기록 작성
+1. 데이터셋 책임자 지정
+2. 검수자 지정 — 사람이며, 채택·반려가 **최초의 권위 있는 판정**입니다
+3. AI 초안 도구 허용 범위와 batch별 기록 방식 확정
+4. 지침 자체의 사람 승인 기록 작성
    (`docs/ops/memory-extraction-eval-dataset.md` 맨 아래)
+
+개정 전에는 여기에 "8개 cell별 작성자"와 "adjudicator 지정"이 있었습니다. 둘 다
+**AI를 사람 작성자의 자리에 두지 않는다**는 전제에서 나온 것이고, 그 전제를
+`docs/ops/memory-extraction-eval-dataset.md` §6.2가 바꿨습니다 — AI는 작성자가
+아니라 **비권위 초안 생성자**이고, 사람의 검수가 최초의 권위 있는 판정입니다.
+adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 때만** 적용하므로
+(`docs/ops/memory-extraction-eval-dataset.md` §6.4), 검수자가 한 명인 동안에는
+지정할 대상이 없습니다.
+
+**줄어든 것은 사람 머릿수뿐입니다.** 시료를 만든 주체와 승인한 주체의 분리는
+그대로이고 — 만드는 쪽이 AI, 승인하는 쪽이 사람입니다 — critical negative
+1,200건 전건 검수도 그대로입니다. 에이전트가 만든 것이 candidate pool이라는 이
+절의 규정도 그대로입니다: 초안은 사람이 채택해야 dataset이 됩니다.
 
 1,600개는 50개 단위로도 최소 32개 batch이므로 일반 코드 PR이 아니라 **별도 데이터
 프로그램**으로 관리합니다. 동결 전에는 live eval 예산도 승인하지 않는 §12.5의
@@ -1140,6 +1155,44 @@ audit에 남지 않습니다.
 
 승인자가 결정해야 하는 것은 위 네 개의 기간과, **활성 파일에 만료를 두지 않는다**는
 방향입니다.
+
+### 14.3 Knowledge 사용 투명성 — 답변별 귀속
+
+§13.4가 memory에 대해 정한 것과 같은 계약을 profile knowledge에 적용합니다.
+**두 개의 다른 사실이므로 하나의 숫자로 합치지 않습니다** — 사용자 자신이 올린
+파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장이고, 합친 count는 둘 중
+어느 것도 말하지 않습니다.
+
+- 값의 출처는 두 곳이며 §13.4와 대칭입니다. 생성 중에는 `/api/chat`의
+  `X-Chat-Knowledge-Used` header, 다시 열었을 때는
+  `GET /api/conversations/[conversationId]`가 돌려주는
+  `Message.knowledgeChunkCount`입니다.
+- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 §10 context
+  bundle이 없어 profile knowledge 자체가 불가능했던 요청이고, `0`은 bundle은
+  있었지만 retrieval이 아무 발췌도 고르지 않은 경우입니다. 둘 다 표시를
+  금지하며, 숫자를 보내고 renderer가 숨기는 대신 **필드를 빼서** 보냅니다.
+- **이름이 `knowledgeChunkCount`인 것은 서버가 아는 것이 그것이기 때문입니다.**
+  서버는 prompt에 넣은 발췌 수를 알 뿐 모델이 그것을 실제로 활용했는지는 알지
+  못합니다. `knowledgeUsedCount`는 관측하지 못하는 것을 주장하는 이름입니다.
+  같은 한계가 `memoryUsedCount`에도 있으며, 그 컬럼은 추가 시점부터 약한 의미로
+  읽어 왔습니다.
+- **저장하는 것은 count뿐입니다.** §8.1 불변식 4의 논리가 그대로 적용됩니다 —
+  발췌 본문도, 어느 파일에서 왔는지도 Message 행에 쓰지 않습니다.
+- **읽는 쪽은 소유자 자신의 조회뿐입니다.** share snapshot과 conversation
+  export는 각자의 select를 쓰며 이 컬럼을 이름조차 대지 않습니다(§13.3). 제3자에게
+  이 숫자는 "이 작성자가 개인 파일로 답을 만든다"는 사실을 알려 주며, 그것이
+  §13.3이 막으려는 것입니다.
+- **client 직렬화 allowlist에 넣지 않습니다.** `lib/chatMessageSerialization.ts`의
+  `pickTransportFields()`가 allowlist이므로 이 필드는 요청 transcript와 guest
+  localStorage에 실리지 않습니다. 거기 실린 값은 stale한 주장일 수밖에 없습니다.
+- 표시는 §13.4의 memory 표시와 한 문장을 공유합니다
+  (`ChatMessageList`의 `memory-usage-disclosure`). 판정은
+  `lib/answerContextDisclosure.ts`의 `decideAnswerContextDisclosure()` 한 곳이며,
+  memory가 먼저 오는 순서는 §9.1 system block이 조립되는 순서와 같습니다.
+- 검증: `tests/answerContextDisclosure.test.mjs`(판정 행렬),
+  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
+  `tests/chatMessageSerialization.test.ts`(allowlist 배제),
+  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
 
 ## 15. Feature flag와 롤아웃 · rollback
 

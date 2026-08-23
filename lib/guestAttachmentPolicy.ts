@@ -10,6 +10,11 @@
  * below is re-checked server-side.
  */
 
+import {
+  CHAT_ATTACHMENT_FORMATS,
+  chatAttachmentAcceptAttribute,
+} from "@/lib/chatAttachmentFormats";
+
 /** One file per message for guests. */
 export const GUEST_MAX_ATTACHMENTS_PER_MESSAGE = 1;
 
@@ -17,29 +22,21 @@ export const GUEST_MAX_ATTACHMENTS_PER_MESSAGE = 1;
 export const GUEST_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 /**
- * The media types a guest may attach -- a subset of the signed-in allowlist,
- * limited to what the existing security pipeline can validate and parse end to
- * end. Archives, executables and anything without a parser are absent by
- * construction rather than by a deny-list.
+ * The media types a guest may attach.
+ *
+ * Derived from `guestAllowed` in `lib/chatAttachmentFormats.ts` rather than
+ * written out again: this list existed as its own literal, and keeping it in
+ * step with the signed-in list was manual work that nothing checked. A guest
+ * subset is a *property of a format*, so it belongs on the format.
  */
-export const GUEST_ACCEPTED_MEDIA_TYPES = [
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.oasis.opendocument.text",
-  "application/vnd.oasis.opendocument.spreadsheet",
-  "application/vnd.oasis.opendocument.presentation",
-] as const;
+export const GUEST_ACCEPTED_MEDIA_TYPES: readonly string[] =
+  CHAT_ATTACHMENT_FORMATS.filter((format) => format.guestAllowed).map(
+    (format) => format.mediaType
+  );
 
-export const GUEST_ACCEPTED_FILE_TYPES = GUEST_ACCEPTED_MEDIA_TYPES.join(",");
+export const GUEST_ACCEPTED_FILE_TYPES = chatAttachmentAcceptAttribute({
+  guest: true,
+});
 
 /**
  * What happens to an attached file after the turn that used it.

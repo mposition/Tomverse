@@ -38,6 +38,8 @@ import {
 } from "@/lib/chatAutoScroll";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
+import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
+import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -531,24 +533,16 @@ export function ChatMessageList({
                       {modelInfo.name}
                     </span>
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
-                      const meta = msg.searchMetadata;
-                      // meta is only absent for messages persisted before this
-                      // field existed -- fall back to the old provider/usageClass
-                      // heuristic so historical Perplexity answers don't regress
-                      // to "training knowledge".
-                      const status = !meta
-                        ? modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
-                          ? "executed"
-                          : "training-knowledge"
-                        : !meta.requested
-                          ? "training-knowledge"
-                          : !meta.supported
-                            ? "unsupported"
-                            : meta.failureCode
-                              ? "failed"
-                              : meta.executed
-                                ? "executed"
-                                : "requested-not-executed";
+                      // The badge reports web search and nothing else. Why it
+                      // no longer says "training knowledge", and why a message
+                      // with no metadata gets no badge at all, is in
+                      // lib/webSearchStatusBadge.ts.
+                      const decision = decideWebSearchBadge({
+                        searchMetadata: msg.searchMetadata,
+                        usageClass: modelInfo.usageClass,
+                      });
+                      if (!decision.shown) return null;
+                      const status = decision.status;
                       // "requested-not-executed" only ever occurs for native
                       // (surcharge-eligible) capability -- unsupported/unverified
                       // models are routed to the "unsupported" status instead,
@@ -557,7 +551,7 @@ export function ChatMessageList({
                         status === "executed" &&
                         getWebSearchCapability(modelInfo.id).support === "native";
                       const label =
-                        modelInfo.usageClass === "deep-research"
+                        status === "deep-research"
                           ? t("chat.searchStatusDeepResearch")
                           : status === "unsupported"
                             ? t("chat.searchStatusUnsupported")
@@ -569,7 +563,7 @@ export function ChatMessageList({
                                   : t("chat.searchStatusWebSearch")
                                 : status === "requested-not-executed"
                                   ? t("chat.searchStatusRequestedNotExecuted")
-                                  : t("chat.searchStatusTrainingKnowledge");
+                                  : t("chat.searchStatusNotSearched");
                       const detail =
                         status === "requested-not-executed"
                           ? t("chat.searchStatusRefundDetail")
@@ -577,9 +571,7 @@ export function ChatMessageList({
                       return (
                         <span
                           data-testid="search-status-badge"
-                          data-search-status={
-                            modelInfo.usageClass === "deep-research" ? "deep-research" : status
-                          }
+                          data-search-status={status}
                           title={detail}
                           aria-label={detail ? `${label} — ${detail}` : undefined}
                           className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
@@ -809,28 +801,47 @@ export function ChatMessageList({
                       />
                     )}
                     {/*
-                      §13.4: what this answer was given, shown to its owner
-                      and counted by the server. Rendered only above zero --
-                      the policy forbids a misleading indication, and
-                      "0 memories used" on an answer that never had any is
-                      one. It is a statement about this answer, so it sits
-                      with the answer rather than in any dock or rail, and
-                      touches neither the mobile composer contract nor the
-                      comparison rail's.
+                      docs/policy/external-conversation-import-and-memory.md
+                      §13.4 and §14.3: what this answer was given, shown to its
+                      owner and counted by the server. Rendered only above zero
+                      -- the policy forbids a misleading indication, and
+                      "0 memories used" on an answer that never had any is one.
+                      It is a statement about this answer, so it sits with the
+                      answer rather than in any dock or rail, and touches
+                      neither the mobile composer contract nor the comparison
+                      rail's.
+
+                      One sentence for two facts, each named: an answer built
+                      from the user's own uploaded files and one built from
+                      their stored memories are different claims, and a single
+                      merged count would state neither.
                     */}
                     {!isUser &&
-                      typeof msg.memoryUsedCount === "number" &&
-                      msg.memoryUsedCount > 0 && (
-                        <p
-                          data-testid="memory-usage-disclosure"
-                          className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
-                        >
-                          {t("chat.memoryUsedDisclosure").replaceAll(
-                            "{count}",
-                            String(msg.memoryUsedCount)
-                          )}
-                        </p>
-                      )}
+                      (() => {
+                        const disclosure = decideAnswerContextDisclosure({
+                          memoryUsedCount: msg.memoryUsedCount,
+                          knowledgeChunkCount: msg.knowledgeChunkCount,
+                        });
+                        if (!disclosure.shown) return null;
+                        return (
+                          <p
+                            data-testid="memory-usage-disclosure"
+                            className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
+                          >
+                            {t("chat.answerContextLabel")}
+                            {": "}
+                            {disclosure.parts
+                              .map((part) =>
+                                t(
+                                  part.kind === "memory"
+                                    ? "chat.answerContextMemory"
+                                    : "chat.answerContextKnowledge"
+                                ).replaceAll("{count}", String(part.count))
+                              )
+                              .join(" · ")}
+                          </p>
+                        );
+                      })()}
                     {/*
                       The files this answer produced
                       (docs/policy/generated-artifacts.md section 9).
