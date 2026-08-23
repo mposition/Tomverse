@@ -19,7 +19,10 @@ import {
   createUnsubscribeToken,
   readUnsubscribeKeyring,
 } from "@/lib/unsubscribeToken";
-import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
+import {
+  unsubscribeHeaders,
+  unsubscribeUrl,
+} from "@/lib/emailUnsubscribeHeaders";
 import {
   ACCOUNT_WELCOME_TEMPLATE,
   emailTemplateDefinition,
@@ -431,24 +434,30 @@ test("transactional mail never carries an unsubscribe header", async () => {
   // login code that button unsubscribes somebody from their own
   // authentication, so the rule is keyed on the template flag the database
   // holds against the classification.
+  const transactional = unsubscribeUrl({
+    requiresUnsubscribe: definition.requiresUnsubscribe,
+    userId: "user_1",
+    purpose: definition.purpose,
+    deliveryId: "del_1",
+    appUrl: "https://tomverse.app",
+  });
+  assert.equal(transactional.ok, true);
   assert.deepEqual(
-    unsubscribeHeaders({
-      requiresUnsubscribe: definition.requiresUnsubscribe,
-      userId: "user_1",
-      purpose: definition.purpose,
-      deliveryId: "del_1",
-      appUrl: "https://tomverse.app",
-    }),
+    unsubscribeHeaders(transactional.ok ? transactional.url : null),
     {}
   );
 
-  const marketing = unsubscribeHeaders({
+  const marketingLink = unsubscribeUrl({
     requiresUnsubscribe: true,
     userId: "user_1",
     purpose: "newsletter",
     deliveryId: "del_1",
     appUrl: "https://tomverse.app",
   });
+  assert.equal(marketingLink.ok, true);
+  const marketing = unsubscribeHeaders(
+    marketingLink.ok ? marketingLink.url : null
+  );
   assert.match(marketing["List-Unsubscribe"], /^<https:\/\/tomverse\.app\/unsubscribe\?t=/);
   assert.equal(marketing["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
 
@@ -471,18 +480,18 @@ test("marketing without a working unsubscribe key is refused, not sent bare", as
   delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
 
   // A marketing message with no working unsubscribe link is one that must not
-  // go out at all.
-  assert.throws(
-    () =>
-      unsubscribeHeaders({
-        requiresUnsubscribe: true,
-        userId: "user_1",
-        purpose: "newsletter",
-        deliveryId: "del_1",
-        appUrl: "https://tomverse.app",
-      }),
-    /cannot be sent without one/
-  );
+  // go out at all. Reported as a named refusal rather than a throw, so the
+  // drain records "the key is missing" instead of "rendering failed" (EM-10).
+  const refused = unsubscribeUrl({
+    requiresUnsubscribe: true,
+    userId: "user_1",
+    purpose: "newsletter",
+    deliveryId: "del_1",
+    appUrl: "https://tomverse.app",
+  });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.refusal, "unsubscribe_keys_missing");
+  assert.match(refused.ok === false ? refused.message : "", /cannot be sent without one/);
 });
 
 test("a token names one subject and one purpose and nothing else", async () => {
