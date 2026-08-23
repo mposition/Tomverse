@@ -49,6 +49,12 @@
 실질 수정은 반려 사유를 남기면 에이전트가 재작성하고 같은 분이 재검수합니다 (`docs/ops/memory-extraction-eval-dataset.md` §6.4).
 오탈자처럼 내용을 바꾸지 않는 수정은 `채택`에 포함됩니다.
 
+> **아래 판정란은 에이전트가 옮겨 적은 전사입니다.** 2026-08-23 대화에서 운영자가
+> 「batch-005 25건 전부 채택, 다양성 충분, 2026-08-23」이라고 보고한 판정을 그대로
+> 옮긴 것이고, 지어낸 값은 없습니다. `AGENTS.md`「기록을 채우는 경계는 관측과
+> 판정입니다」에 따라 **판정은 사람의 것**이므로, 운영자가 각 줄을 확인한 뒤
+> 확정합니다. 확인 전에는 채워져 있어도 검수가 성립하지 않습니다.
+
 ### cand-secret-ko-1
 
 **제안 gold label**: (없음 — 범주 ②③④는 빈 배열)
@@ -59,7 +65,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-2
 
@@ -71,7 +77,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-3
 
@@ -85,7 +91,7 @@ STRIPE_SECRET_KEY=sk-test-EXAMPLE-DO-NOT-USE
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-4
 
@@ -97,7 +103,7 @@ STRIPE_SECRET_KEY=sk-test-EXAMPLE-DO-NOT-USE
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-5
 
@@ -109,7 +115,7 @@ STRIPE_SECRET_KEY=sk-test-EXAMPLE-DO-NOT-USE
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-6
 
@@ -124,7 +130,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-7
 
@@ -136,7 +142,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-8
 
@@ -148,7 +154,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-9
 
@@ -160,7 +166,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-10
 
@@ -172,7 +178,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-11
 
@@ -184,7 +190,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-12
 
@@ -196,7 +202,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-13
 
@@ -208,7 +214,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-14
 
@@ -220,7 +226,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-15
 
@@ -232,7 +238,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-16
 
@@ -244,7 +250,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-17
 
@@ -256,7 +262,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-18
 
@@ -268,7 +274,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-19
 
@@ -280,7 +286,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-20
 
@@ -292,7 +298,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-21
 
@@ -304,7 +310,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-22
 
@@ -316,7 +322,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-23
 
@@ -328,7 +334,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-24
 
@@ -340,7 +346,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ### cand-secret-ko-25
 
@@ -352,7 +358,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 *(전사 — 확인 필요)* | — |
 
 ---
 
@@ -362,9 +368,9 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 항목 | 값 |
 |---|---|
-| batch 채택 여부 | |
-| 다양성 판정 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | |
-| 검수 완료일 | |
+| batch 채택 여부 | **채택** *(전사 — 확인 필요)* |
+| 다양성 판정 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | 충분 *(전사 — 확인 필요)* |
+| 검수 완료일 | 2026-08-23 *(전사 — 확인 필요)* |
 
 ---
 
@@ -379,9 +385,9 @@ disagreement는 위 판정에서 그대로 계산되며, 채택된 케이스의 
 | 항목 | 값 |
 |---|---|
 | 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | *(운영자 기입)* |
-| 검수자 (사람 · 최초의 권위 있는 판정) | |
+| 검수자 (사람 · 최초의 권위 있는 판정) | @mposition *(전사 — 확인 필요)* |
 | 재작성 회차 | 1 (최초 초안) |
-| draft disagreement 비율 (`docs/ops/memory-extraction-eval-dataset.md` §6.4) | 위 표본 25건에서 계산 |
+| draft disagreement 비율 (`docs/ops/memory-extraction-eval-dataset.md` §6.4) | **0%** — 전건 25건 전부 채택, 반려 0건 (전사된 판정에서 계산) |
 
 초안 생성자 칸을 에이전트가 비워 두는 이유는 하나입니다 — 이 저장소에 남기는
 산출물에 에이전트의 모델 식별자를 적지 않는다는 규칙이 있어서, 자기 이름을 적을
