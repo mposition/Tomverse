@@ -35,7 +35,8 @@
  *
  * Nothing here carries an object key, a file name, or any file content: the
  * result is written to `AdminRetentionRun.result` and to the audit log
- * (import/memory policy §14), and counts are what those records are for.
+ * (docs/policy/external-conversation-import-and-memory.md §14), and counts
+ * are what those records are for.
  */
 
 export type KnowledgeCleanupQueueCounts = {
