@@ -8,18 +8,21 @@
 // the right answer is -- a sample without an answer key asks someone to judge a
 // model's reply against nothing.
 //
+// The legacy Office samples are produced here, and what they prove is a
+// narrower claim than the one §C makes -- but it is not nothing, and the two
+// were conflated once already. CI runs the parsers over
+// `tests/fixtures/legacyOffice/` in isolation; it never carries a legacy file
+// through upload, R2, finalize and into a prompt on a deployed build. These
+// files verify that wiring. Only a file Word itself saved verifies the parser
+// against Word's own byte layout, and that is the human's part.
+//
 // What this deliberately does NOT produce:
 //
-//   * a file saved by real Microsoft Office. LibreOffice output is what
-//     `tests/fixtures/legacyOffice/` already runs in CI, so a round that used
-//     it would be repeating CI by hand rather than verifying anything.
 //   * a genuinely encrypted legacy document. LibreOffice accepts
 //     `Password=` on the MS Word 97 and MS Excel 97 filters and silently
 //     writes an unencrypted file -- verified 2026-08-23, both parsed straight
 //     through. Shipping that as an "encrypted" sample would test the opposite
 //     of what it claims.
-//
-// Both are named in the manifest as the human's part, with the reason.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
@@ -206,6 +209,131 @@ for (let i = 0; i < 120_000; i += 1) {
 }
 writeFileSync(join(out, "large-ledger-log.txt"), rows.join("\n"));
 
+/* ------------------------------------------------------- legacy Office, RTF */
+
+// Written as flat ODF and converted, so the source of every sentence in the
+// sample is readable in this file. Korean throughout on purpose: the parsers
+// take a different path for it (UTF-16 in `.doc`, the SST in `.xls`,
+// TextCharsAtom rather than TextBytesAtom in `.ppt`) than they do for Latin
+// text, and a sample that never leaves ASCII never walks it.
+const LEGACY_BODY = {
+  headline: "원장 서비스 운영 정책 2026년 3분기",
+  balance:
+    "계좌 잔액은 어떤 경로로도 음수가 될 수 없습니다. 예약과 환급은 같은 " +
+    "트랜잭션에서 계좌 잠금을 가장 먼저 잡고, 잠금 없이 잔액을 읽어 판정하는 " +
+    "경로는 금지합니다.",
+  plans:
+    "Free 요금제는 월 100 크레딧에 동시 대화 1개, Pro는 월 5000 크레딧에 3개, " +
+    "Max는 월 20000 크레딧에 5개입니다. 이 숫자는 관리자 콘솔에서만 바꿉니다.",
+  timeout:
+    "계좌 잠금의 시간 초과는 5000밀리초입니다. 초과하면 트랜잭션을 되돌리고 " +
+    "사용자에게는 다시 시도하라고 안내합니다. 부분 적용된 상태를 남기지 않습니다.",
+};
+
+const FODT = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:h text:outline-level="1">${LEGACY_BODY.headline}</text:h>
+<text:p>이 문서는 채팅 첨부 검증에 쓰이는 견본입니다. 아래 세 문단이 답에 인용되어야 합니다.</text:p>
+<text:h text:outline-level="2">1. 잔액 불변식</text:h>
+<text:p>${LEGACY_BODY.balance}</text:p>
+<text:h text:outline-level="2">2. 플랜별 한도</text:h>
+<text:p>${LEGACY_BODY.plans}</text:p>
+<text:h text:outline-level="2">3. 잠금 시간 초과</text:h>
+<text:p>${LEGACY_BODY.timeout}</text:p>
+</office:text></office:body></office:document>
+`;
+
+const cell = (value, numeric) =>
+  numeric
+    ? `<table:table-cell office:value-type="float" office:value="${value}"><text:p>${value}</text:p></table:table-cell>`
+    : `<table:table-cell office:value-type="string"><text:p>${value}</text:p></table:table-cell>`;
+const row = (cells) => `<table:table-row>${cells}</table:table-row>`;
+
+const FODS = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.spreadsheet">
+<office:body><office:spreadsheet>
+<table:table table:name="플랜한도">
+${row(cell("플랜") + cell("월 크레딧") + cell("동시 대화"))}
+${row(cell("무료") + cell(100, true) + cell(1, true))}
+${row(cell("프로") + cell(5000, true) + cell(3, true))}
+${row(cell("맥스") + cell(20000, true) + cell(5, true))}
+</table:table>
+<table:table table:name="잠금설정">
+${row(cell("잠금 시간 초과(밀리초)") + cell(5000, true))}
+${row(cell("최소 잔액") + cell(0, true))}
+</table:table>
+</office:spreadsheet></office:body></office:document>
+`;
+
+const slide = (title, lines) =>
+  `<draw:page draw:name="${title}">` +
+  `<draw:frame svg:x="2cm" svg:y="3cm" svg:width="20cm" svg:height="3cm"><draw:text-box><text:p>${title}</text:p></draw:text-box></draw:frame>` +
+  `<draw:frame svg:x="2cm" svg:y="7cm" svg:width="20cm" svg:height="8cm"><draw:text-box>` +
+  lines.map((line) => `<text:p>${line}</text:p>`).join("") +
+  `</draw:text-box></draw:frame></draw:page>`;
+
+const FODP = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.presentation">
+<office:body><office:presentation>
+${slide("원장 서비스 운영 정책", ["2026년 3분기 검토"])}
+${slide("잔액 불변식", ["계좌 잔액은 음수가 될 수 없다", "예약과 환급은 계좌 잠금을 먼저 잡는다", "잠금 시간 초과는 5000밀리초"])}
+${slide("플랜별 한도", ["무료 월 100 크레딧 동시 대화 1개", "프로 월 5000 크레딧 동시 대화 3개", "맥스 월 20000 크레딧 동시 대화 5개"])}
+</office:presentation></office:body></office:document>
+`;
+
+// RTF is written directly: it is text, and going through a converter would
+// hide which escapes the sample actually carries. `\\uN` with a `?` fallback
+// is what a real word processor emits for Korean, so that is what this emits.
+const rtfEscape = (text) =>
+  [...text]
+    .map((character) => {
+      const code = character.codePointAt(0);
+      if (code < 128) return character.replace(/([\\{}])/g, "\\$1");
+      return `\\u${code}?`;
+    })
+    .join("");
+
+const RTF =
+  `{\\rtf1\\ansi\\ansicpg1252\\deff0` +
+  `{\\fonttbl{\\f0\\fnil Malgun Gothic;}}` +
+  `{\\stylesheet{\\s0 Normal;}}` +
+  `\\f0\\fs24 ` +
+  [LEGACY_BODY.headline, LEGACY_BODY.balance, LEGACY_BODY.plans, LEGACY_BODY.timeout]
+    .map((paragraph) => rtfEscape(paragraph))
+    .join("\\par ") +
+  `\\par }`;
+
+writeFileSync(join(out, "policy-libreoffice.rtf"), RTF, "latin1");
+
+const office = mkdtempSync(join(tmpdir(), "attachment-office-"));
+const legacyMade = [];
+try {
+  const convert = (source, body, filter, produced, final) => {
+    writeFileSync(join(office, source), body);
+    execFileSync(
+      "soffice",
+      ["--headless", `--convert-to`, filter, "--outdir", office, join(office, source)],
+      { env: { ...process.env, HOME: office }, stdio: "ignore" }
+    );
+    writeFileSync(join(resolve(out), final), readFileSync(join(office, produced)));
+    legacyMade.push(final);
+  };
+  convert("policy.fodt", FODT, "doc:MS Word 97", "policy.doc", "policy-libreoffice.doc");
+  convert("policy.fods", FODS, "xls:MS Excel 97", "policy.xls", "policy-libreoffice.xls");
+  convert("policy.fodp", FODP, "ppt:MS PowerPoint 97", "policy.ppt", "policy-libreoffice.ppt");
+
+  // LibreOffice writes a ~450KB preview bitmap into `SummaryInformation`
+  // that no parser here opens. It is stripped out of the committed test
+  // fixture, which has to stay small; this kit is a throwaway that already
+  // ships an 8.5MB log, and stripping it would mean importing the repo's own
+  // CFBF reader -- a `@/`-aliased TypeScript module that plain `node` cannot
+  // resolve. Left in.
+} finally {
+  rmSync(office, { recursive: true, force: true });
+}
+legacyMade.push("policy-libreoffice.rtf");
+
 /* ----------------------------------------------------------------- manifest */
 
 const size = (name) => readFileSync(join(out, name)).length;
@@ -255,11 +383,38 @@ ${SKIPPED_BY_THE_ARCHIVE.map((p) => `- \`${p}\``).join("\n")}
 \`large-ledger-log.txt\` (${size("large-ledger-log.txt")} bytes) — finalize(PATCH)
 응답 시간 측정용.
 
+## 레거시 Office · RTF
+
+| 파일 | bytes |
+|---|---|
+| \`policy-libreoffice.doc\` | ${size("policy-libreoffice.doc")} |
+| \`policy-libreoffice.xls\` | ${size("policy-libreoffice.xls")} |
+| \`policy-libreoffice.ppt\` | ${size("policy-libreoffice.ppt")} |
+| \`policy-libreoffice.rtf\` | ${size("policy-libreoffice.rtf")} |
+
+넷 다 같은 내용입니다. 답이 인용해야 하는 것:
+
+- 계좌 잔액은 **음수가 될 수 없다**
+- 예약·환급은 **계좌 잠금을 가장 먼저** 잡는다
+- 무료 **100** / 프로 **5000** / 맥스 **20000** 크레딧, 동시 대화 **1 / 3 / 5**
+- 잠금 시간 초과 **5000밀리초**
+
+\`.xls\`는 시트가 둘(\`플랜한도\`, \`잠금설정\`)이고, \`.ppt\`는 슬라이드가 셋입니다.
+
+### 이 넷이 증명하는 것과 증명하지 않는 것
+
+**증명합니다** — 배포된 빌드에서 업로드 → R2 → finalize → 파서 → 프롬프트 배선이
+legacy 형식에 대해 실제로 동작한다는 것. CI는 파서만 단독으로 돌리므로 이
+배선을 지나지 않습니다.
+
+**증명하지 않습니다** — 파서가 **Word 자신이 쓴 바이트 배치**를 읽는다는 것.
+그건 Word가 저장한 파일로만 확인됩니다. 그래서 §C-2는 여전히 사람 몫이고,
+이 넷은 그 앞에서 배선을 먼저 걸러 내는 용도입니다.
+
 ## 이 kit이 만들지 않는 것
 
-- **진짜 Microsoft Office가 저장한 \`.doc\`·\`.xls\`·\`.ppt\`.** LibreOffice가
-  만든 파일은 \`tests/fixtures/legacyOffice/\`로 CI가 이미 돌리고 있어서,
-  그것으로 검증하면 CI를 손으로 반복하는 것이 됩니다.
+- **진짜 Microsoft Office가 저장한 \`.doc\`·\`.xls\`·\`.ppt\`** — 위 §C-2 이유.
+  Word에서 다른 이름으로 저장 → Word 97-2003 문서로 만드시면 됩니다.
 - **암호가 걸린 legacy 문서.** LibreOffice는 MS Word 97·MS Excel 97 필터에
   \`Password=\`를 받고도 암호화하지 않은 파일을 씁니다(2026-08-23 확인, 둘 다
   그대로 파싱됨). 암호화되지 않은 파일을 "암호 문서"라고 내면 주장과 반대되는
@@ -279,6 +434,7 @@ for (const name of [
   "picker-config.json",
   "picker-ledger.py",
   "large-ledger-log.txt",
+  ...legacyMade,
 ]) {
   console.log(`  ${name}  ${size(name)} bytes`);
 }
