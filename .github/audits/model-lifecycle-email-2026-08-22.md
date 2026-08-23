@@ -301,7 +301,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   "retirement cannot be proven from this endpoint"를 명시.
 - **파일**: `lib/providerModelCatalogMonitor.ts:250-252`
 
-### ML-08 — auto-disable이 사용자 영향을 남기지 않는다 (P1, Medium)
+### ML-08 — auto-disable이 사용자 영향을 남기지 않는다 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `lib/providerModelCatalogReconciliation.ts:88-100`
 - **현재 동작**: `enabled=false` + `status="disabled"` +
@@ -2111,7 +2111,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
 - EM-12 legal/transactional template 7개 언어
 - EM-08 snapshot retention + 무한 증가 테이블 등록
-- ML-08 auto-disable → work item 생성
+- ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §22
 - ML-12 provider 무관 후보 dedup (이미 있는 모델을 NEW로 보고하지 않기)
 - ML-13 리포트에서 모델 소유자와 관측 경로 분리
 - ML-10 reconciliation script 범용화 + precondition 검사
@@ -2286,3 +2286,36 @@ policy reader만 읽었습니다.
 
 **검증**: unit(신규 15) · DB integration 이메일 6개 suite 63건(신규 7 포함) ·
 `check:enum-constraints` 65 closed list · typecheck · eslint · doc/policy 참조 검사.
+
+---
+
+## 22. ML-08 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelUsageFootprint.ts` | 모델이 저장된 세 곳의 계정 수와 **distinct 계정 수** |
+| `lib/modelLifecycleWorkItems.ts` | `recordAutoDisableWorkItem()` |
+| `lib/providerModelCatalogReconciliation.ts` | registry 비활성화와 queue 행을 **한 transaction**에서 |
+| `tests/integration/model-lifecycle-auto-disable.db.test.ts` | 7건 |
+
+**`discovered`로 만듭니다, `communication_pending`이 아니라.** 자동화는 만들 뿐
+결정하지 않는다는 것이 §9.2의 규칙이고, 세 단계 앞에서 시작하는 것은 이 스캔이
+"사용자에게 알려야 한다"를 결정하는 일입니다. 스캔이 말할 수 있는 것은 **몇 개
+계정이 이 모델을 들고 있는가**이고, `communicationRequired`를 거기서 정합니다 —
+아무도 안 들고 있으면 안내 없이 닫을 수 있고, 들고 있으면 상태 기계가 막습니다.
+
+**계정 수는 JSON 배열 원소로 셉니다.** `gpt-5-4`가 `gpt-5-4-mini`를 잡으면 은퇴
+대상이 아닌 후속 모델 사용자에게 안내가 갑니다. distinct는 SQL `UNION` 한 번으로
+구하며, 세 곳에 다 들어 있는 한 사람이 세 번 세어지지 않습니다.
+
+**두 write가 한 transaction입니다.** 사이에서 죽으면 모델은 꺼졌는데 왜 껐는지도
+누가 영향받는지도 없는 상태가 남고, 그것이 ML-08이 말하는 상태입니다. 계정 수
+읽기는 transaction **밖**입니다 — 이 transaction이 건드리지 않는 테이블 세 개를
+읽는 동안 write transaction을 열어 두면 야간 스캔이 실사용과 경합합니다.
+
+**이메일은 만들지 않습니다**(§10 금지 항목). 만들어지는 것은 사람이 답해야 하는
+큐 행 하나입니다.
+
+**범위 밖**: `replacementModelId`와 `userVisibleNote`는 설정하지 않습니다. 대체
+모델 선택은 결정이고, 이 항목은 그 결정을 **요구**하는 것이지 대신하는 것이
+아닙니다. `recommendation`이 그것을 문장으로 적습니다.

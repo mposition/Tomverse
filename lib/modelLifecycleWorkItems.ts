@@ -99,6 +99,102 @@ export async function recordDiscoveredWorkItems(input: {
     return { created, skipped: input.observed.length - created };
 }
 
+/**
+ * The queue row an automatic disable owes.
+ *
+ * The monitor could already prove a provider had stopped serving a model, and
+ * the reconciler could already switch it off. What neither did was leave
+ * anything a person has to answer: `enabled=false` and an `operationalReason`
+ * string, and the accounts holding that model found out by watching their
+ * default quietly resolve to something else (ML-08).
+ *
+ * Created at `discovered`, not at `communication_pending`. Automation may
+ * create and may never decide -- the audit's rule and the state machine's --
+ * and starting a row three states along would be this scan deciding that the
+ * users are owed a notice, which is a person's call. What the scan *can* say is
+ * how many accounts hold the model, and that is what
+ * `communicationRequired` is set from: with nobody holding it the item can
+ * close without a notice, and with somebody holding it the state machine will
+ * not let it.
+ *
+ * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §9.2,
+ * docs/policy/default-model-luna-migration.md §4.7.
+ */
+export async function recordAutoDisableWorkItem(input: {
+    tx: Prisma.TransactionClient;
+    provider: string;
+    apiModel: string;
+    modelId: string;
+    consecutiveMissing: number;
+    usage: {
+        defaultModelAccounts: number;
+        newConversationAccounts: number;
+        conversationAccounts: number;
+        distinctAccounts: number;
+    };
+    now?: Date;
+}): Promise<{ created: boolean }> {
+    const now = input.now ?? new Date();
+
+    // An open retirement item for this model is the item this disable would
+    // have created. A second row would split one decision across two, and the
+    // queue would show two things to do where there is one.
+    const existing = await input.tx.modelLifecycleWorkItem.findFirst({
+        where: {
+            apiModel: input.apiModel,
+            action: "retire",
+            status: { in: [...OPEN_WORK_ITEM_STATUSES] },
+        },
+        select: { id: true },
+    });
+    if (existing) return { created: false };
+
+    const affected = input.usage.distinctAccounts;
+    const item = await input.tx.modelLifecycleWorkItem.create({
+        data: {
+            provider: input.provider,
+            apiModel: input.apiModel,
+            modelId: input.modelId,
+            action: "retire",
+            status: "discovered",
+            // An operational disable that nobody selected is a catalogue
+            // correction; the same disable under somebody's default model is
+            // their next message failing to send.
+            severity: affected > 0 ? "critical" : "high",
+            communicationRequired: affected > 0,
+            recommendation:
+                affected > 0
+                    ? `Choose a replacement and decide what the ${affected} account${affected === 1 ? "" : "s"} holding this model are told.`
+                    : "Confirm the retirement, or restore the model if the provider's catalogue was at fault.",
+            confidence: "medium",
+            firstSeenAt: now,
+            evidence: {
+                disabledBy: "provider_model_catalog_reconciliation",
+                consecutiveMissing: input.consecutiveMissing,
+                storedUsage: input.usage,
+            },
+            unknowns: [
+                "Whether the provider retired this model or the catalogue response was incomplete.",
+            ],
+        },
+        select: { id: true },
+    });
+
+    await input.tx.modelLifecycleWorkItemEvent.create({
+        data: {
+            workItemId: item.id,
+            occurredAt: now,
+            // Null actor: a scan observed something. Nobody decided.
+            actorEmail: null,
+            fromStatus: null,
+            toStatus: "discovered",
+            note: `Disabled automatically after ${input.consecutiveMissing} consecutive scans without it. ${affected} account${affected === 1 ? "" : "s"} hold it.`,
+        },
+    });
+
+    return { created: true };
+}
+
 export type WorkItemTransitionResult =
     | { ok: true; status: WorkItemStatus }
     | { ok: false; refusal: WorkItemTransitionRefusal }

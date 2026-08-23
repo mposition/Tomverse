@@ -194,6 +194,9 @@ run(
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
     "tests/integration/model-lifecycle-daily-report.db.test.ts",
+    // What an automatic disable leaves behind: the queue row, its notice
+    // requirement, and the account count that decides it.
+    "tests/integration/model-lifecycle-auto-disable.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

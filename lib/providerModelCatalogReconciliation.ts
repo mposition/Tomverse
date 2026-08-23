@@ -1,6 +1,8 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { recordAutoDisableWorkItem } from "@/lib/modelLifecycleWorkItems";
+import { countStoredModelUsage } from "@/lib/modelUsageFootprint";
 import {
   AUTO_DISABLE_REASON,
   missingConfirmationRuns,
@@ -78,17 +80,35 @@ export async function reconcileCatalogWithRegistry(input: {
     });
 
     for (const item of plan.disable) {
-      await prisma.modelRegistryEntry.update({
-        where: { id: item.modelId },
-        data: {
-          enabled: false,
-          status: "disabled",
-          operationalReason:
-            `${AUTO_DISABLE_REASON} Missing from ${item.consecutiveMissing} consecutive scans as ${item.apiModel}.`.slice(
-              0,
-              500
-            ),
-        },
+      // Read before the transaction: it is three counts over tables this
+      // transaction does not touch, and holding a write transaction open
+      // across them would make a nightly scan contend with live traffic.
+      const usage = await countStoredModelUsage(item.modelId);
+
+      // The switch-off and the record of it commit together. A crash between
+      // them would leave a model disabled with nothing saying why or who is
+      // affected, which is the state ML-08 is about.
+      await prisma.$transaction(async (tx) => {
+        await tx.modelRegistryEntry.update({
+          where: { id: item.modelId },
+          data: {
+            enabled: false,
+            status: "disabled",
+            operationalReason:
+              `${AUTO_DISABLE_REASON} Missing from ${item.consecutiveMissing} consecutive scans as ${item.apiModel}.`.slice(
+                0,
+                500
+              ),
+          },
+        });
+        await recordAutoDisableWorkItem({
+          tx,
+          provider: result.provider,
+          apiModel: item.apiModel,
+          modelId: item.modelId,
+          consecutiveMissing: item.consecutiveMissing,
+          usage,
+        });
       });
       disabled.push(item);
     }
