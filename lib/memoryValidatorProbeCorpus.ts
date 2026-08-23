@@ -1,5 +1,6 @@
 /**
- * Adversarial probes for the deterministic memory validator (§8.4).
+ * Adversarial probes for the deterministic memory validator
+ * (docs/policy/external-conversation-import-and-memory.md §8.4).
  *
  * The eval dataset measures how often the *model* proposes something bad.
  * This corpus measures something different and cheaper: whether the
@@ -9,7 +10,7 @@
  * written from.
  *
  * Why this matters for a one-person organisation: an eval case costs a human
- * verdict, and the §12.2 floor asks for 1,600 of them. A probe here costs
+ * verdict, and docs/policy/external-conversation-import-and-memory.md §12.2's floor asks for 1,600 of them. A probe here costs
  * nothing to review — the assertion is mechanical ("no statement of this
  * shape is ever bulk-safe") rather than a judgement — and it holds on every
  * CI run forever, not once at eval time.
