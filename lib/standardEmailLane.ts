@@ -24,7 +24,7 @@ import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
-import { isEmailPurpose } from "@/lib/emailPreferenceCore";
+import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
@@ -456,19 +456,39 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // about the mailbox, a preference is about what this person asked for. Both
   // are checked at send time, because a message queued yesterday may be for a
   // purpose switched off this morning.
-  if (definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)) {
-    const preference = await prisma.emailPreference.findUnique({
-      where: {
-        userId_purpose: { userId: delivery.userId, purpose: definition.purpose },
-      },
-      select: { enabled: true },
+  //
+  // The decision is `consentGateVerdict`, not a comparison here, because the
+  // interesting case is the row that does not exist. `preference &&
+  // !preference.enabled` treated an absent row as a yes, and rows are created
+  // lazily on a settings read -- so every account that never opened the
+  // preference centre was one marketing template away from being sent
+  // advertising it had never agreed to.
+  {
+    const stored =
+      definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)
+        ? await prisma.emailPreference.findUnique({
+            where: {
+              userId_purpose: {
+                userId: delivery.userId,
+                purpose: definition.purpose,
+              },
+            },
+            select: { enabled: true },
+          })
+        : null;
+
+    const consent = consentGateVerdict({
+      classification: definition.classification,
+      purpose: definition.purpose,
+      hasAccount: Boolean(delivery.userId),
+      storedEnabled: stored ? stored.enabled : null,
     });
-    if (preference && !preference.enabled) {
+    if (!consent.allowed) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {
           status: "skipped",
-          skipReason: "no_consent",
+          skipReason: consent.skipReason,
           attempts: delivery.attempts,
           nextAttemptAt: null,
           claimedAt: null,

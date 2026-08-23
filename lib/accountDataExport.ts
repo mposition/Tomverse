@@ -407,6 +407,26 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // What an approved retirement did to their stored model settings. The
+  // person is entitled to know we changed a setting of theirs and what it held
+  // before; the operator who ran it and the ticket that authorised it are an
+  // internal decision about the catalogue, not a fact about them. workItemId
+  // names a row in the lifecycle queue, which they cannot read either.
+  modelMigrationRecord: (userId) =>
+    prisma.modelMigrationRecord.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        field: true,
+        fromModelId: true,
+        toModelId: true,
+        changedAt: true,
+      },
+      orderBy: { changedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   emailPreference: (userId) =>
     prisma.emailPreference.findMany({
       where: { userId },

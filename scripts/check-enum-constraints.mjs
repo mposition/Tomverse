@@ -197,6 +197,60 @@ const REGISTRY = {
     reason:
       "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
   },
+  ModelMigrationRecord_field_check: {
+    owner: "database",
+    reason:
+      "user_settings_default_model, new_conversation_model_ids, conversation_selected_models, app_setting_guest_default. Written as literals by the approved retirement reconciliation, which is the only writer; the completion notice reads them back to say which setting moved, so a fifth value would be a change nobody is told about.",
+  },
+  ModelLifecycleWorkItem_status_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_STATUSES",
+    reason:
+      "The eleven states of the model lifecycle queue. The transition rules read the same array, so a state added to one and not the other is a transition the machine allows and the database refuses.",
+  },
+  ModelLifecycleWorkItem_action_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_ACTIONS",
+    reason:
+      "add, upgrade, replace, retire, monitor, no_action. Part of the item's unique key with provider and apiModel, so a value the application does not know about is a duplicate nobody can see.",
+  },
+  ModelLifecycleWorkItem_severity_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_SEVERITIES",
+    reason:
+      "critical, high, normal. Orders the daily report's action section; an unknown value would sort somewhere arbitrary.",
+  },
+  ModelLifecycleWorkItem_confidence_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_CONFIDENCES",
+    reason:
+      "high, medium, low, describing the automatic recommendation rather than the decision. Nullable: an item nobody has suggested anything about has no confidence to report.",
+  },
+  ModelLifecycleWorkItem_decision_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_DECISIONS",
+    reason:
+      "approve, reject, defer. Paired with ModelLifecycleWorkItem_decision_reason_check, which refuses a decision with no reason and no timestamp, and with the approved_needs_decision check.",
+  },
+  ModelLifecycleWorkItemEvent_toStatus_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_STATUSES",
+    reason:
+      "The same eleven states, on the append-only history. Recorded separately from the item's own column because the history outlives the state it describes.",
+  },
+  ModelLifecycleWorkItemEvent_fromStatus_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_STATUSES",
+    reason:
+      "The same eleven states. Nullable for exactly one row per item -- the creation event, which comes from nowhere.",
+  },
   ContextManifest_state_check: {
     owner: "database",
     reason:

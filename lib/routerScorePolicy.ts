@@ -158,6 +158,7 @@ export const ROUTER_SCORE_SNAPSHOT: readonly RouterScoreSnapshotEntry[] = [
     { modelId: "claude-sonnet-5", providerId: "anthropic" },
     { modelId: "claude-haiku-4-5", providerId: "anthropic" },
 
+    { modelId: "gemini-3-7-flash", providerId: "google" },
     { modelId: "gemini-3-6-flash", providerId: "google" },
     { modelId: "gemini-3-1-pro", providerId: "google" },
     { modelId: "gemini-2-5-flash", providerId: "google" },

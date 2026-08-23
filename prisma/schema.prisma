@@ -107,6 +107,7 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+  modelMigrationRecords ModelMigrationRecord[]
 }
 
 model UserSettings {
@@ -1902,6 +1903,157 @@ model ProviderModelCatalogRun {
 
   @@index([provider, startedAt])
   @@index([status, startedAt])
+}
+
+/// What we decided to do about a model a provider listed, and how far that has
+/// got. Separate from ProviderModelCatalogEntry on purpose.
+///
+/// The catalogue entry is an observation and the monitor overwrites its
+/// `status` on every scan, so a decision recorded there is erased by the next
+/// run. This is the other half: written by discovery, changed only by a person,
+/// and never re-derived from today's scan.
+///
+/// The unique key is (provider, apiModel, action) rather than the model alone:
+/// adding a model and later retiring it are two decisions at two times, but two
+/// open "add"s for one model is a duplicate.
+model ModelLifecycleWorkItem {
+  id       String @id @default(cuid())
+  provider String
+  apiModel String
+
+  /// The mapped ModelRegistryEntry, once one exists.
+  modelId String?
+  /// The observation this came from. Not a foreign key: the catalogue row is
+  /// upserted every scan and may be swept, while the decision outlives it.
+  catalogEntryId String?
+
+  /// add | upgrade | replace | retire | monitor | no_action
+  action String
+  /// The eleven states in lib/modelLifecycleWorkItemCore.ts.
+  status String @default("discovered")
+  /// critical | high | normal
+  severity String @default("normal")
+
+  predecessorModelId String?
+  replacementModelId String?
+
+  /// The automatic suggestion, which a person may overwrite. Never a decision.
+  recommendation String?
+  /// high | medium | low, for the suggestion above.
+  confidence String?
+
+  /// Observation evidence: lifecycle strings, consecutive-miss counts, run ids.
+  evidence Json?
+  /// Facts still needed before this can be decided.
+  unknowns Json?
+  /// Named things being waited on, in the sense report-issue-backlog uses:
+  /// something the repository cannot answer by itself.
+  blockers Json?
+  /// Verifications owed before rollout, e.g. ["pricing","access","staging"].
+  /// One list rather than three states because they run in parallel.
+  pendingValidations Json?
+
+  reviewerId     String?
+  reviewerEmail  String?
+  /// approve | reject | defer
+  decision       String?
+  decisionReason String?
+  decidedAt      DateTime?
+
+  ownerEmail    String?
+  dueAt         DateTime?
+  deferredUntil DateTime?
+
+  linkedIssueUrl     String?
+  linkedPrUrl        String?
+  linkedDeploymentId String?
+
+  implementationEvidence Json?
+  validationEvidence     Json?
+
+  /// Whether users have to be told before this closes. A retirement that moves
+  /// somebody's stored model owes a notice; an addition does not.
+  communicationRequired Boolean @default(false)
+
+  firstSeenAt DateTime  @default(now())
+  completedAt DateTime?
+  closedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ModelLifecycleWorkItemEvent[]
+
+  @@unique([provider, apiModel, action])
+  @@index([status, severity, firstSeenAt])
+  @@index([ownerEmail, dueAt])
+  @@index([modelId])
+}
+
+/// Append-only history of one work item. Never updated, never deleted.
+///
+/// The item says what is true now; this says how it got there and who moved it.
+/// A queue whose decisions can be edited without a trace cannot answer "why is
+/// this model not in the catalogue", which is the question the audit could not
+/// answer for seven models.
+model ModelLifecycleWorkItemEvent {
+  id         String                 @id @default(cuid())
+  workItemId String
+  workItem   ModelLifecycleWorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  occurredAt DateTime @default(now())
+  /// Null only for the automatic creation event; every other row names a person.
+  actorEmail String?
+  fromStatus String?
+  toStatus   String
+  note       String?
+  evidence   Json?
+
+  @@index([workItemId, occurredAt])
+}
+
+/// What an approved retirement reconciliation actually changed, per user and
+/// per field. Append-only.
+///
+/// Without this a completion notice has no audience. The script reported
+/// aggregate counts to stdout and nothing else, so "we changed your default
+/// model" could only be sent to everybody or to nobody -- and both are wrong in
+/// a way that cannot be taken back once the mail has gone.
+///
+/// It is also the only thing that can answer a support question afterwards:
+/// what did this account hold before, and when did we change it.
+model ModelMigrationRecord {
+  id     String @id @default(cuid())
+  userId String
+  /// Cascades: the record exists to address a notice to this person and to
+  /// answer what their setting held before. Both questions die with the
+  /// account, so keeping the row afterwards would be keeping a user id for no
+  /// purpose. The aggregate ("this retirement moved N accounts") belongs to the
+  /// campaign, not to a row per person.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the change was to one conversation rather than to the account.
+  conversationId String?
+
+  /// The lifecycle item this ran for, when there is one.
+  workItemId String?
+
+  /// user_settings_default_model | new_conversation_model_ids
+  ///   | conversation_selected_models | app_setting_guest_default
+  field String
+
+  fromModelId String
+  toModelId   String
+
+  /// The approval the run carried: the ticket and the person who ran it.
+  ticket     String
+  actorEmail String
+
+  changedAt DateTime @default(now())
+
+  @@index([userId, changedAt])
+  @@index([fromModelId, toModelId, changedAt])
+  @@index([workItemId])
 }
 
 model AdminNotificationLog {

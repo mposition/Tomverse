@@ -53,7 +53,8 @@ const reconciliationRows = (
 
 const reportParts = (
   results: ProviderModelCatalogResult[],
-  reconciliation?: CatalogReconciliationResult
+  reconciliation?: CatalogReconciliationResult,
+  openWorkItems?: number
 ) => {
   const checked = results.filter((result) => result.status === "checked");
   const failed = results.filter((result) => result.status === "failed");
@@ -99,7 +100,16 @@ const reportParts = (
     failures,
     registryUpdates,
     variables: {
-      summary: `*Summary* · checked ${checked.length}/${results.length} · lifecycle warnings ${lifecycle.length} · catalog missing ${missing.length} · new candidates ${candidates.length}${registrySummary}`,
+      // The backlog is folded into the summary string rather than added as a
+      // new template variable, for the same reason the registry counts are:
+      // the stored Slack template renders a fixed set of keys and silently
+      // drops one it does not reference.
+      //
+      // It is the number the report did not have. "New candidates 0" was true
+      // every day that seven reviewed-by-nobody models sat in the queue.
+      summary: `*Summary* · checked ${checked.length}/${results.length} · lifecycle warnings ${lifecycle.length} · catalog missing ${missing.length} · new candidates ${candidates.length}${
+        typeof openWorkItems === "number" ? ` · awaiting review ${openWorkItems}` : ""
+      }${registrySummary}`,
       lifecycleRows: `*Lifecycle warning*\n${cappedRows(lifecycle, "None")}`,
       missingRows: `*Missing from successful provider catalogs*\n${cappedRows(missing, "None")}`,
       candidateRows: `*New model candidates found today*\n${cappedRows(candidates, "None")}`,
@@ -152,11 +162,13 @@ const recordEmail = async (input: {
 export async function sendProviderModelCatalogReport(input: {
   results: ProviderModelCatalogResult[];
   reconciliation?: CatalogReconciliationResult;
+  /** Items still waiting on a person. Omitted leaves the line off entirely. */
+  openWorkItems?: number;
   generatedAt?: Date;
   test?: boolean;
 }) {
   const generatedAt = input.generatedAt || new Date();
-  const parts = reportParts(input.results, input.reconciliation);
+  const parts = reportParts(input.results, input.reconciliation, input.openWorkItems);
   const localDate = new Intl.DateTimeFormat("en-AU", {
     dateStyle: "medium",
     timeZone: "Australia/Brisbane",
