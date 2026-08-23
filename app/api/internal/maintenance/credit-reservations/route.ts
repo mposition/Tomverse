@@ -122,8 +122,9 @@ export async function POST(request: Request) {
     // this is the arm that retries until it does
     // (docs/policy/user-attachment-persistence.md).
     const messageAttachments = await runMessageAttachmentMaintenanceQuietly();
-    // And the assistant knowledge files. §14.2 says knowledge follows the
-    // image asset pattern -- DB-first tombstone plus this sweep -- and it
+    // And the assistant knowledge files. docs/policy/external-conversation-import-and-memory.md §14.2
+    // says knowledge follows the image asset pattern -- DB-first tombstone
+    // plus this sweep -- and it
     // followed only the tombstone half: the drain sat on the daily job, so a
     // deleted file kept its bytes for up to a day and an extraction that died
     // stayed dead for the same, against a ten-minute staleness threshold.
