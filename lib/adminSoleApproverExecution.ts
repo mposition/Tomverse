@@ -84,8 +84,13 @@ export const eligibleApproverIdentities = (permission: "ops:write") =>
         )
         .map((row) => row.identity);
 
-/** Whether the sole-approver path is open, without attempting it. */
-export const soleApproverIsAvailable = (
+/**
+ * Whether the sole-approver path is open, and when it is not, why.
+ *
+ * The reason is returned rather than discarded because the caller reports it:
+ * a fallback the operator cannot account for is the defect this closed.
+ */
+export const soleApproverAvailability = (
     action: SoleApproverAction,
     session: Session
 ) =>
@@ -93,7 +98,13 @@ export const soleApproverIsAvailable = (
         action,
         eligibleApproverIdentities: eligibleApproverIdentities("ops:write"),
         requesterIdentity: session.user?.email,
-    }).allowed;
+    });
+
+/** Whether the sole-approver path is open, without attempting it. */
+export const soleApproverIsAvailable = (
+    action: SoleApproverAction,
+    session: Session
+) => soleApproverAvailability(action, session).allowed;
 
 export async function runAsSoleApprover<T>(
     input: {
