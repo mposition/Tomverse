@@ -290,6 +290,10 @@ export const CHAT_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
         "text/rtf",
         "text/richtext",
         "application/x-rtf",
+        // Windows answers with whichever application owns the extension, not
+        // with what the bytes are, so an installed Word makes every `.rtf`
+        // arrive as `application/msword`. See ASSOCIATION_OWNER_MEDIA_TYPES.
+        "application/msword",
     ]),
 
     // -- Archive ------------------------------------------------------------
@@ -340,10 +344,14 @@ export const CHAT_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
     text("csv", ["csv"], "text/csv", "data", "CSV file", [
         "application/csv",
         "text/comma-separated-values",
+        // An installed Excel owns `.csv` on Windows. See
+        // ASSOCIATION_OWNER_MEDIA_TYPES.
+        "application/vnd.ms-excel",
     ]),
     text("tsv", ["tsv"], "text/tab-separated-values", "data", "TSV file", [
         "text/tsv",
         "application/x-tsv",
+        "application/vnd.ms-excel",
     ]),
     text("json", ["json"], "application/json", "data", "JSON file", ["text/json"]),
     text("ndjson", ["jsonl", "ndjson"], "application/x-ndjson", "data", "JSON Lines file", [
@@ -605,6 +613,40 @@ export const formatByMediaType = (mediaType: string) =>
  * name and the declared type each name a *different* supported format. That
  * disagreement is the one case where guessing would be actively wrong.
  */
+/**
+ * Extensions whose declared media type, on a machine where an Office
+ * application owns the association, names that application rather than the
+ * file.
+ *
+ * Windows serves `File.type` from `HKCR\<ext>\Content Type`, which records
+ * *what opens this*, not *what this is*. Install Word and every `.rtf` is
+ * announced as `application/msword`; install Excel and every `.csv` and
+ * `.tsv` is announced as `application/vnd.ms-excel`. Both are true statements
+ * about the desktop and false statements about the bytes.
+ *
+ * Without the aliases below the resolver reads that as a name and a type
+ * naming two different formats and refuses -- on the client, before the
+ * server sees a byte. That is the same shape as the failure this registry was
+ * built to end, arriving from the other side: not a missing type this time
+ * but a confidently wrong one.
+ *
+ * Each pair is listed in the owning format's `mediaTypeAliases`;
+ * `tests/chatAttachmentFormats.test.mjs` walks this table so a row cannot
+ * lose its alias silently. Found on 2026-08-23 by a staging round that
+ * attached the samples through a real Windows file picker -- which is the
+ * whole reason that item exists, and it paid for itself before the first
+ * paid turn of its own section.
+ */
+export const ASSOCIATION_OWNER_MEDIA_TYPES: ReadonlyArray<{
+    readonly extension: string;
+    readonly declared: string;
+    readonly owner: string;
+}> = [
+    { extension: "rtf", declared: "application/msword", owner: "Word" },
+    { extension: "csv", declared: "application/vnd.ms-excel", owner: "Excel" },
+    { extension: "tsv", declared: "application/vnd.ms-excel", owner: "Excel" },
+];
+
 export function resolveChatAttachmentFormat({
     filename,
     declaredMediaType,

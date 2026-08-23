@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ARCHIVE_FATAL_EXTENSIONS,
+  ASSOCIATION_OWNER_MEDIA_TYPES,
   ARCHIVE_TOLERATED_BINARY_EXTENSIONS,
   CHAT_ATTACHMENT_FORMATS,
   CHAT_ATTACHMENT_MEDIA_TYPES,
@@ -290,4 +291,45 @@ test("the extension reader ignores directories and dotfiles correctly", () => {
   assert.equal(attachmentFileExtension("a\\b\\c.MD"), "md");
   assert.equal(attachmentFileExtension(".gitignore"), "");
   assert.equal(attachmentFileExtension("plain"), "");
+});
+
+// Windows serves `File.type` from the registry's `Content Type`, which names
+// the application that owns the extension rather than the bytes. Word owning
+// `.rtf` and Excel owning `.csv` made both refuse on the client, before the
+// server saw anything -- found on staging 2026-08-23 through a real file
+// picker. Walked from the table so a row cannot quietly lose its alias.
+test("an extension owned by an Office application still resolves by name", () => {
+    for (const { extension, declared, owner } of ASSOCIATION_OWNER_MEDIA_TYPES) {
+        const format = resolveChatAttachmentFormat({
+            filename: `report.${extension}`,
+            declaredMediaType: declared,
+        });
+        assert.ok(
+            format,
+            `.${extension} announced as ${declared} (${owner} owns it) was refused`
+        );
+        assert.ok(
+            format.extensions.includes(extension),
+            `.${extension} announced as ${declared} resolved to ${format.id}`
+        );
+    }
+});
+
+// The alias must not become a way to attach the owner's own format under a
+// name that says otherwise: the declared type is a hint, and the name leads.
+test("the owning application's own extension is unaffected", () => {
+    assert.equal(
+        resolveChatAttachmentFormat({
+            filename: "report.doc",
+            declaredMediaType: "application/msword",
+        })?.id,
+        "doc"
+    );
+    assert.equal(
+        resolveChatAttachmentFormat({
+            filename: "report.xls",
+            declaredMediaType: "application/vnd.ms-excel",
+        })?.id,
+        "xls"
+    );
 });
