@@ -441,6 +441,20 @@ export type AuthenticatedQaState = {
   disabledPanels: string[];
   /** The conversation's stored memory mode, updated by PATCH like the rest. */
   memoryMode: "inherit" | "on" | "off";
+  /**
+   * The conversation's stored Auto state, updated by PATCH like the rest, and
+   * whether the "server" offers Auto at all.
+   *
+   * Two fields because they are two decisions: `offered` is the server's own
+   * conjunction of flag, product and cohort (UI contract §1), and
+   * `selectionMode` is what this conversation stores. A spec that needs an
+   * account which has *left* the cohort sets `offered: false` with
+   * `selectionMode: "auto"` -- a state a PATCH in the same session can never
+   * produce, and the one the contract's unconditional return to manual exists
+   * for.
+   */
+  selectionMode: "manual" | "auto";
+  autoSelectionOffered: boolean;
   assistantProfile: {
     profileId: string;
     name: string;
@@ -485,6 +499,45 @@ export type QaConversationMessage = {
    * it only ever exist in the streaming response header?
    */
   memoryUsedCount?: number;
+  /**
+   * docs/policy/external-conversation-import-and-memory.md §14.3's half of the same
+   * disclosure, also as a *stored* fact. Seeded
+   * separately from `memoryUsedCount` because the point of the pair is that
+   * an answer can carry either, both or neither.
+   */
+  knowledgeChunkCount?: number;
+  /**
+   * The files this answer produced, exactly as the real endpoint returns them
+   * (docs/policy/generated-artifacts.md section 5). Seeded so a spec can ask
+   * the question a reload asks: does the download card come back, or did it
+   * only ever exist in the streaming trailer?
+   */
+  artifacts?: Array<{
+    id: string;
+    ordinal: number;
+    format: "xlsx" | "csv";
+    filename: string;
+    mediaType: string;
+    byteSize: number;
+    status: "ready" | "failed" | "blocked";
+    failureCode?: string;
+    modelId?: string;
+  }>;
+  /**
+   * The files the *user* attached to this turn, exactly as the real endpoint
+   * returns them (docs/policy/user-attachment-persistence.md section 4).
+   * Public fields only -- there is no `objectKey` here because there is none
+   * in the response either.
+   */
+  attachments?: Array<{
+    id: string;
+    attachmentId?: string;
+    ordinal: number;
+    name: string;
+    mediaType: string;
+    size: number;
+    kind: "file" | "text";
+  }>;
 };
 
 export async function mockAuthenticatedApi(
@@ -513,6 +566,14 @@ export async function mockAuthenticatedApi(
     webSearchMode?: "off" | "auto" | "always";
     /** The conversation's stored memory mode (§8.1 invariant 1). */
     memoryMode?: "inherit" | "on" | "off";
+    /**
+     * Auto model selection (UI contract auto-model-selection.md §1). Absent
+     * leaves Auto unoffered and the conversation manual, which is what every
+     * spec written before the wiring expects -- and what every real account
+     * gets today.
+     */
+    selectionMode?: "manual" | "auto";
+    autoSelectionOffered?: boolean;
     /**
      * §14. The account's published profiles, served at
      * `/api/assistant-profiles`. Absent leaves that route unmocked, which is
@@ -592,6 +653,8 @@ export async function mockAuthenticatedApi(
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
     memoryMode: options.memoryMode || "inherit",
+    selectionMode: options.selectionMode || "manual",
+    autoSelectionOffered: options.autoSelectionOffered ?? false,
     assistantProfile: options.assistantProfile ?? null,
     theme: "dark",
     timeZone: "UTC",
@@ -609,6 +672,11 @@ export async function mockAuthenticatedApi(
     // §8.1 invariant 1. Stored, not resolved: the fixture has to be able to
     // show the difference between "follows the account" and an override.
     memoryMode: state.memoryMode,
+    // The stored mode, and one boolean for availability. The real response
+    // carries no reason at all -- which bucket, what share, which gate stay on
+    // the server -- so neither does this.
+    selectionMode: state.selectionMode,
+    autoSelection: { offered: state.autoSelectionOffered },
     // §14. Server-computed, including whether the profile has published past
     // this conversation -- the screen never works the revision out itself.
     assistantProfile: state.assistantProfile,
@@ -868,11 +936,40 @@ export async function mockAuthenticatedApi(
     state.deleted = false;
     state.locked = false;
     state.shared = false;
-    const body = route.request().postDataJSON() as { title?: unknown };
+    const body = route.request().postDataJSON() as {
+      title?: unknown;
+      selectedModels?: unknown;
+      disabledPanels?: unknown;
+      assistantProfileId?: unknown;
+    };
     state.title =
       typeof body.title === "string" && body.title.trim()
         ? body.title
         : "New QA conversation";
+    // The create takes the caller's selection, as the real endpoint does. The
+    // client reads its model list back out of this response rather than
+    // keeping what it sent -- it has to, because a create carrying a profile
+    // comes back with the profile's models instead (policy section 14.0) --
+    // so a mock that answered with a canned default silently replaced every
+    // selection a spec had made in the picker, turning a two-model comparison
+    // into a one-model send that never reaches /api/chat/preflight.
+    //
+    // A spec exercising the profile case overrides this route and answers with
+    // the profile's models, which is the one time the two legitimately differ.
+    if (
+      !body.assistantProfileId &&
+      Array.isArray(body.selectedModels) &&
+      body.selectedModels.length > 0
+    ) {
+      state.selectedModels = Array.from(
+        new Set(body.selectedModels.filter((id): id is string => typeof id === "string"))
+      );
+    }
+    if (Array.isArray(body.disabledPanels)) {
+      state.disabledPanels = body.disabledPanels.filter(
+        (id): id is string => typeof id === "string"
+      );
+    }
     await route.fulfill(json(conversation(), 201));
   });
 
@@ -890,18 +987,59 @@ export async function mockAuthenticatedApi(
   // the mock disagreeing with itself rather than anything the product does.
   const savedMessages: QaConversationMessage[] = [...(options.messages || [])];
 
+  // What the upload step recorded about each file, read back when the save
+  // binds it. In the real system this lives on the upload row and the client is
+  // never believed about it; here the two mocks share one page-scoped registry
+  // for the same reason -- the name on a restored card must come from the save,
+  // not from whatever the composer happened to be holding.
+  const uploadRegistry = finalizedUploadRegistry(page);
+
   await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
-        messages?: QaConversationMessage[];
+        messages?: Array<QaConversationMessage & { attachmentUploadIds?: string[] }>;
       };
+      /*
+        Binding, the way the real endpoint does it: the opaque upload ids
+        become durable attachment rows in the same step that saves the message,
+        and the response reports them back so the composer can swap its ids.
+
+        Modelled here rather than stubbed, because the property the specs are
+        about -- the card survives a reload -- is exactly the property a stub
+        that discarded the ids would hide.
+      */
+      const bound: Array<
+        { messageId: string } & NonNullable<QaConversationMessage["attachments"]>[number]
+      > = [];
       for (const message of body?.messages ?? []) {
-        if (!message?.id || savedMessages.some((saved) => saved.id === message.id)) {
-          continue;
-        }
-        savedMessages.push(message);
+        if (!message?.id) continue;
+        const attachments = (message.attachmentUploadIds ?? []).map(
+          (uploadId, ordinal) => ({
+            id: `ma-${message.id}-${ordinal}`,
+            // The same field the real conversation read repeats, under the
+            // name the next request uses.
+            attachmentId: `ma-${message.id}-${ordinal}`,
+            ordinal,
+            name: uploadRegistry.get(uploadId)?.name || `file-${ordinal}`,
+            mediaType:
+              uploadRegistry.get(uploadId)?.mediaType ||
+              "application/octet-stream",
+            size: 1,
+            kind: "file" as const,
+          })
+        );
+        bound.push(
+          ...attachments.map((attachment) => ({ messageId: message.id, ...attachment }))
+        );
+        if (savedMessages.some((saved) => saved.id === message.id)) continue;
+        savedMessages.push({
+          ...message,
+          ...(attachments.length ? { attachments } : {}),
+        });
       }
-      await route.fulfill(json({}, 201));
+      await route.fulfill(
+        json({ success: true, created: bound.length, attachments: bound }, 201)
+      );
       return;
     }
     await route.fulfill(json({}));
@@ -943,6 +1081,7 @@ export async function mockAuthenticatedApi(
         selectedModels?: string[];
         disabledPanels?: string[];
         memoryMode?: "inherit" | "on" | "off";
+        selectionMode?: "manual" | "auto";
         assistantProfileId?: string | null;
       };
 
@@ -969,6 +1108,29 @@ export async function mockAuthenticatedApi(
       // and returns the stored values; so does this.
       if (typeof body.memoryMode === "string") {
         state.memoryMode = body.memoryMode;
+      }
+      // The same rule the real endpoint applies (`mayStoreSelectionMode`):
+      // `manual` is accepted unconditionally, including for an account that
+      // has left the cohort -- that is how a conversation leaves a mode the
+      // account can no longer act on -- and `auto` only when the server would
+      // actually route it. A mock that stored `auto` anyway would let a spec
+      // pass on the exact state the contract forbids: a conversation marked
+      // Auto that every turn answers manually.
+      if (body.selectionMode === "manual") {
+        state.selectionMode = "manual";
+      } else if (body.selectionMode === "auto") {
+        if (!state.autoSelectionOffered) {
+          return route.fulfill(
+            json(
+              {
+                error: "Automatic model selection is not available for this account.",
+                code: "AUTO_SELECTION_UNAVAILABLE",
+              },
+              403
+            )
+          );
+        }
+        state.selectionMode = "auto";
       }
       // §14. The request names a profile; the *fixture* decides which
       // revision that was, exactly as the server does -- a mock that echoed a
@@ -1085,13 +1247,63 @@ export type AttachmentUploadQaState = {
   finalizeCount: number;
   prepareCount: number;
   uploadCount: number;
+  /**
+   * What finalize answers. Left null it succeeds, which is what every test
+   * that is not about a refusal wants.
+   *
+   * Set to a code, the route answers the way the real one does -- a status
+   * and a `code` -- so a test can assert that the composer says what actually
+   * went wrong instead of "try again".
+   */
+  finalizeFailure: { status: number; code: string } | null;
+  deleteCount: number;
+  /** The opaque ids finalisation issued, in order. Never storage keys. */
+  uploadIds: string[];
+  /** What the composer asked to discard, so a spec can assert it named an id. */
+  deletedUploadIds: Array<string | null>;
+  /** The archive summary a successful finalize reports, if any. */
+  archive: { totalEntries: number; includedFiles: number; excludedFiles: number } | null;
 };
+
+/**
+ * What each finalised upload was, per page.
+ *
+ * `mockAttachmentUpload` writes it and `mockAuthenticatedApi`'s message save
+ * reads it, so the two mocks agree the way the two real endpoints do -- the
+ * upload row is what the binding step reads, not the request body. A WeakMap
+ * on the page so one test's uploads cannot name another test's files.
+ */
+const FINALIZED_UPLOADS = new WeakMap<
+  Page,
+  Map<string, { name: string; mediaType: string }>
+>();
+
+const finalizedUploadRegistry = (page: Page) => {
+  const existing = FINALIZED_UPLOADS.get(page);
+  if (existing) return existing;
+  const created = new Map<string, { name: string; mediaType: string }>();
+  FINALIZED_UPLOADS.set(page, created);
+  return created;
+};
+
+/** The media types the server reads as text rather than as bytes. */
+const TEXT_UPLOAD_TYPES = new Set([
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);
 
 export async function mockAttachmentUpload(page: Page): Promise<AttachmentUploadQaState> {
   const state: AttachmentUploadQaState = {
     finalizeCount: 0,
     prepareCount: 0,
     uploadCount: 0,
+    finalizeFailure: null,
+    archive: null,
+    deleteCount: 0,
+    uploadIds: [],
+    deletedUploadIds: [],
   };
 
   await page.route("**/api/chat", async (route) => {
@@ -1111,8 +1323,50 @@ export async function mockAttachmentUpload(page: Page): Promise<AttachmentUpload
 
     if (method === "PATCH") {
       state.finalizeCount += 1;
-      const body = route.request().postDataJSON() as { size?: number };
-      await route.fulfill(json({ size: body.size || 1 }));
+      if (state.finalizeFailure) {
+        await route.fulfill({
+          status: state.finalizeFailure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "Uploaded attachment failed validation.",
+            code: state.finalizeFailure.code,
+          }),
+        });
+        return;
+      }
+      // The real contract: finalisation hands back an opaque id and never the
+      // storage key (docs/policy/user-attachment-persistence.md section 4). A
+      // mock that still returned `key` would let a regression that
+      // reintroduced key-passing keep passing its own tests.
+      const body = route.request().postDataJSON() as {
+        size?: number;
+        name?: string;
+        mediaType?: string;
+      };
+      const uploadId = `upl-qa-${state.finalizeCount}`;
+      state.uploadIds.push(uploadId);
+      finalizedUploadRegistry(page).set(uploadId, {
+        name: body.name || "file",
+        mediaType: body.mediaType || "application/octet-stream",
+      });
+      await route.fulfill(
+        json({
+          uploadId,
+          name: body.name || "file",
+          mediaType: body.mediaType || "application/octet-stream",
+          size: body.size || 1,
+          kind: TEXT_UPLOAD_TYPES.has(body.mediaType || "") ? "text" : "file",
+          ...(state.archive ? { archive: state.archive } : {}),
+        })
+      );
+      return;
+    }
+
+    if (method === "DELETE") {
+      state.deleteCount += 1;
+      const body = route.request().postDataJSON() as { uploadId?: string };
+      state.deletedUploadIds.push(body?.uploadId ?? null);
+      await route.fulfill({ status: 204, body: "" });
       return;
     }
 
@@ -1132,6 +1386,22 @@ export function createQaPngBuffer() {
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     "base64"
   );
+}
+
+/**
+ * The smallest thing the composer will accept as an .xlsx.
+ *
+ * A real zip local-file header, because the composer checks the signature
+ * before it uploads. Written from bytes rather than as a string literal so no
+ * control character reaches this file -- the source-control-character check
+ * fails the build on one, and a zip signature is two of them.
+ */
+export function createQaXlsxBuffer() {
+  return Buffer.from([
+    0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  ]);
 }
 
 export function createQaPdfBuffer() {

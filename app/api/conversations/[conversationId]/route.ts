@@ -3,6 +3,9 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
+import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
+import { PUBLIC_MESSAGE_ATTACHMENT_SELECT } from "@/lib/messageAttachmentCore";
+import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
@@ -53,10 +56,9 @@ import {
     selectionModeTransition,
     storedSelectionMode,
 } from "@/lib/conversationSelectionMode";
+import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import {
     autoSelectionCapability,
-    autoUiAvailability,
-    isAutoRouterUiEnabled,
     mayStoreSelectionMode,
 } from "@/lib/autoRoutingUi";
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
@@ -115,31 +117,6 @@ const safeParse = (data: unknown, fallback: string[]) => {
   return Array.isArray(parsed)
     ? parsed.filter((value): value is string => typeof value === "string")
     : fallback;
-};
-
-/**
- * Whether this account would be offered Auto.
- *
- * The flag is checked before the plan is fetched, so a deployment with the
- * rollout off pays nothing for it -- no extra query on a route that loads on
- * every conversation open. That is the difference between a feature that is
- * disabled and one that is merely hidden.
- *
- * Signed-in only: this route requires a session, so `isGuest` is always false
- * here. Guests are excluded from the cohort anyway (their conversation-scoped
- * sticky state does not survive), and saying so in one place beats threading
- * a constant through.
- */
-const autoAvailabilityFor = async (userId: string) => {
-  if (!isAutoRouterUiEnabled()) {
-    return { offered: false, reason: "ui_flag_off" as const, cohort: null };
-  }
-  const billingPlan = await getUserBillingPlan(userId);
-  return autoUiAvailability({
-    subjectKey: userId,
-    isGuest: false,
-    plan: billingPlan.tier,
-  });
 };
 
 type Params = {
@@ -222,6 +199,7 @@ export async function GET(
         disabledPanels: true,
         webSearchMode: true,
         memoryMode: true,
+        productKey: true,
         selectionMode: true,
         projectId: true,
         shareEnabled: true,
@@ -272,13 +250,88 @@ export async function GET(
         // how many memories an answer was given, and a token figure would
         // say something about their length without being asked for.
         memoryUsedCount: true,
+        // docs/policy/external-conversation-import-and-memory.md §14.3, selected on the same terms and for the
+        // same reason: the
+        // owner's own read is the one place this count is admissible.
+        knowledgeChunkCount: true,
+        /*
+          The files this answer produced
+          (docs/policy/generated-artifacts.md section 5).
+
+          A named select rather than `include: { artifacts: true }`, because
+          `objectKey` is on that row and an include would send it. The client
+          needs the id to build a download URL and nothing else about where
+          the bytes live.
+        */
+        artifacts: {
+          orderBy: { ordinal: "asc" },
+          select: {
+            id: true,
+            ordinal: true,
+            format: true,
+            filename: true,
+            mediaType: true,
+            byteSize: true,
+            status: true,
+            failureCode: true,
+            modelId: true,
+          },
+        },
+        /*
+          The files the *user* attached to this message
+          (docs/policy/user-attachment-persistence.md).
+
+          A named select for the same reason the artifacts above use one, and
+          it matters more here: `objectKey` is on this row and is the private
+          storage location of a file the user uploaded. `include` would send
+          it. What the card needs is the name, the type and the size, which is
+          exactly `PUBLIC_MESSAGE_ATTACHMENT_SELECT` -- the bytes, the
+          extracted text, the paths inside an uploaded archive and any signed
+          URL are all absent because none of them is on this list.
+        */
+        attachments: {
+          orderBy: { ordinal: "asc" },
+          select: PUBLIC_MESSAGE_ATTACHMENT_SELECT,
+        },
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
     const messages = (
       hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
-    ).map(({ memoryUsedCount, ...message }) => ({
+    ).map(
+      ({
+        memoryUsedCount,
+        knowledgeChunkCount,
+        artifacts,
+        attachments,
+        ...message
+      }) => ({
       ...message,
+      /*
+        Absent, not empty, when the user attached nothing -- the same shape a
+        live send produces, so a restored message and one that has just been
+        sent are indistinguishable to the renderer.
+
+        `attachmentId` repeats the row id under the name the *request* uses.
+        The card keys on `id`; the next turn has to name the file for the
+        server to re-read, and it names it with `attachmentId`
+        (docs/policy/user-attachment-persistence.md section 4). Sending the
+        one field twice is what stops the client having to know that the two
+        are the same thing -- a piece of knowledge that would only ever live
+        in one place until somebody moved it.
+      */
+      ...(attachments.length
+        ? {
+            attachments: attachments.map((attachment) => ({
+              ...attachment,
+              attachmentId: attachment.id,
+            })),
+          }
+        : {}),
+      // Absent, not empty, when the answer produced no file -- the same
+      // shape the streaming trailer uses, so a restored message and a live
+      // one are indistinguishable to the renderer.
+      ...(artifacts.length ? { artifacts } : {}),
       /*
         §13.4: a durable fact about the answer, so reopening the conversation
         has to state it again. Until this it lived only in the streaming
@@ -298,7 +351,18 @@ export async function GET(
       ...(typeof memoryUsedCount === "number" && memoryUsedCount > 0
         ? { memoryUsedCount }
         : {}),
-    }));
+      /*
+        docs/policy/external-conversation-import-and-memory.md §14.3: the knowledge half of the same
+        disclosure, on the identical
+        condition. Destructured above so that a `null` or `0` is dropped
+        here rather than reaching the client -- the field is absent, never a
+        number the renderer has to know not to show.
+      */
+      ...(typeof knowledgeChunkCount === "number" && knowledgeChunkCount > 0
+        ? { knowledgeChunkCount }
+        : {}),
+      })
+    );
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])
@@ -332,7 +396,11 @@ export async function GET(
         // that could read its own bucket could work out the rollout
         // percentage. See lib/autoRoutingUi.ts.
         selectionMode: storedSelectionMode(conversation.selectionMode),
-        autoSelection: autoSelectionCapability(await autoAvailabilityFor(userId)),
+        // The product comes before the cohort (decision record v1.2 §3), and
+        // it is the row's own -- never the surface the client was on.
+        autoSelection: autoSelectionCapability(
+          await autoAvailabilityFor(userId, { productKey: conversation.productKey })
+        ),
         isLocked: !!conversation.password,
         shareEnabled:
           conversation.shareEnabled &&
@@ -398,6 +466,11 @@ export async function PATCH(
                 selectedModels: true,
                 password: true,
                 memoryMode: true,
+                // The stored product is the authority for a PATCH: the request
+                // body cannot carry one, and §3 does not offer a PATCH that
+                // changes it. Turning a Review conversation into a Chat one is
+                // a fork, not an update.
+                productKey: true,
                 selectionMode: true,
                 routerModelId: true,
                 routerChallengerTurns: true,
@@ -601,7 +674,7 @@ export async function PATCH(
       // choosing their model every time. `manual` is always allowed --
       // including for an account that has left the cohort, which must be able
       // to leave the mode it can no longer act on (lib/autoRoutingUi.ts).
-      const availability = await autoAvailabilityFor(userId);
+      const availability = await autoAvailabilityFor(userId, { productKey: existingConv.productKey });
       if (!mayStoreSelectionMode(body.selectionMode, availability)) {
         console.warn(JSON.stringify({
           event: "conversation_selection_mode_denied",
@@ -797,6 +870,15 @@ export async function DELETE(req: Request, { params }: Params) {
     // objects whenever the second step failed.
     await prisma.$transaction(async (tx) => {
       await enqueueImageAssetCleanupForConversations(tx, [conversationId]);
+      // Generated files follow the same order for the same reason
+      // (docs/policy/generated-artifacts.md section 8).
+      await enqueueArtifactCleanupForConversations(tx, [conversationId]);
+      // And the files the user uploaded into it. Deleting the conversation is
+      // the only ordinary act that removes them: clearing one model's answers
+      // must not, because the attachment belongs to the question every model
+      // in the comparison shares
+      // (docs/policy/user-attachment-persistence.md).
+      await enqueueMessageAttachmentCleanupForConversations(tx, [conversationId]);
       await deleteDeepResearchJobsForConversations(tx, [conversationId]);
       await tx.conversation.delete({
         where: { id: conversationId },

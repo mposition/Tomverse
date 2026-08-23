@@ -26,6 +26,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 | Spec | 태그된 test | 관련 이슈 | Project |
 |---|---|---|---|
 | `model-picker-responsive.spec.ts` | `model selection can be finished at 390x844 / 320x568 with the keyboard open`, `the picker footer clears the safe area with no keyboard` | UI-001 | mobile-chromium (desktop은 skip) |
+| `auto-routing-toggle.spec.ts` | `the switch stays reachable and legible at 320px and 200% text scaling`, `the composer keeps its dedicated textarea row while the picker is open` | 제품 경계 v1.2 §7 | 양쪽 |
 | `analytics-settings-target.spec.ts` | 44px target ×3 route, content intersection ×3 route, keyboard 도달, light/dark AA | UI-002 | 양쪽 |
 | `ui-state-contrast.spec.ts` | full/partial error, mobile header·composer, sidebar, desktop model panel의 light/dark AA, 11px floor ×2 | UI-003, UI-007 | desktop-chromium (다른 project는 skip) |
 | `korean-typography.spec.ts` | display heading 어절 보존 ×4 viewport, 150% zoom | UI-006 | 양쪽 |
@@ -41,12 +42,13 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-21 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **31개 파일, 696 test**를 선택합니다.
+실측: 2026-08-23 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **33개 파일, 752 test**를 선택합니다.
 
 | Spec |
 |---|
 | `account-flow.spec.ts` |
+| `answer-header-layout.spec.ts` |
 | `chat-analytics-settings-placement.spec.ts` |
 | `chat-welcome-flicker.spec.ts` |
 | `chat-memory-context.spec.ts` |
@@ -54,6 +56,7 @@ mobile-chromium 두 project에서 **31개 파일, 696 test**를 선택합니다.
 | `csp-eval-free.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
+| `generated-artifact-card.spec.ts` |
 | `keyboard-and-heading-structure.spec.ts` |
 | `marketing-language-analytics.spec.ts` |
 | `marketing-language-focus.spec.ts` |
@@ -73,8 +76,18 @@ mobile-chromium 두 project에서 **31개 파일, 696 test**를 선택합니다.
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-21, `--list`): **31개 파일 696 test** (두 project 합계).
-직전 값은 2026-08-20의 30개 파일 662 test였고, 그 뒤
+검토 시점 실측(2026-08-23, `--list`): **33개 파일 752 test** (두 project 합계).
+`answer-header-layout.spec.ts`(+8 — 이 spec을 빼고 다시 재면 32개 파일
+744 test입니다)가 합류했습니다 — 답변 헤더가 좁은 폭에서 한 줄을 유지하는지,
+그리고 그 한 줄이 실행 모드 배지를 버려서 얻어진 것이 아닌지는 화면에서만
+확인되고, 배지가 사라지는 회귀는 #792에서 실제로 한 번 일어났으므로 tier에
+넣었습니다. 같은 변경에서 `modal-focus-contract.spec.ts`도 태그된 test가
+하나 늘었습니다(+2) — 덮인 dialog가 나중에 focus를 도로 가져가는 결함이며,
+이 spec은 이미 tier에 있습니다. 나머지 +4는 그 사이 다른 tier spec이
+자란 것입니다. 그 이전에는 `generated-artifact-card.spec.ts`(+16)가
+합류했습니다. 직전 기록인 2026-08-21의 31개 파일 696 test는
+그 사이 다른 tier spec이 자라면서 이미 26 test만큼 뒤처져 있었으므로, 위
+숫자는 그 기록에 더한 값이 아니라 병합 시점에 다시 잰 값입니다. 그 이전에는
 `chat-context-menu-shape.spec.ts`(+34)가 합류했습니다 — 컴포저 Context 메뉴의
 항목 수·순서와 일곱 개 viewport의 "스크롤 없음" 계약은 화면에서만 확인되고, 이
 메뉴는 채팅의 모든 도구 진입점이므로 tier에 넣었습니다. 그 이전에는
@@ -162,3 +175,13 @@ push의 무필터 실행에서만 잡히는데, 승격 후에 말하는 보안 �
 3. mobile/coarse-pointer 측정에는 `hasTouch: true`가 필요합니다. viewport 폭만
    줄인 desktop project 결과는 44px 근거로 인정하지 않습니다
    (`useIsMobileShell`은 `(max-width: 767px) AND (pointer: coarse)`).
+
+`generated-artifact-card.spec.ts`는 2026-08-21에 합류했습니다(32개 파일,
++16 test — desktop·mobile 각 8). AI 생성 파일의 다운로드 카드가 tier에 드는
+이유는 세 가지가 전부 레이아웃·입력·접근성 회귀이기 때문입니다: 320px에서
+파일명 행과 다운로드 버튼이 겹치지 않는가, 버튼이 44px 터치 영역과 키보드
+`:focus-visible` 링을 갖는가, 스크린 리더가 형식·파일명·크기·상태를 하나의
+이름으로 받는가. 나머지 case(게스트 로그인 CTA, 실패 카드, 재조회 복원,
+본문에 코드·base64가 없을 것)는 같은 파일이 이미 열어 둔 브라우저에서
+따라오므로 tier 비용이 사실상 추가되지 않습니다.
+정책: `docs/policy/generated-artifacts.md`.

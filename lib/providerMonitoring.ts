@@ -7,6 +7,11 @@ import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { PROVIDER_API_KEY_ENV_NAMES } from "@/lib/modelRegistryShared";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import { emailProvider } from "@/lib/emailProviderPort";
+import type { ProviderSendResult } from "@/lib/emailProviderPortCore";
+import {
+  operatorAlertProbeResult,
+  type OperatorAlertProbeResult,
+} from "@/lib/operatorAlertProbeCore";
 import {
   getProviderCreditSummaries,
   type ProviderCreditSummary,
@@ -523,8 +528,8 @@ const sendEmailAlert = async (
   title: string,
   detail: string,
   log: { targetType: string; targetId: string }
-) => {
-  const to = process.env.ADMIN_ALERT_EMAIL;
+): Promise<{ to: string | null; send: ProviderSendResult | null }> => {
+  const to = process.env.ADMIN_ALERT_EMAIL?.trim() || null;
   if (!to) {
     await recordNotificationLog({
       channel: "email",
@@ -535,7 +540,7 @@ const sendEmailAlert = async (
       targetId: log.targetId,
       error: "ADMIN_ALERT_EMAIL is not configured.",
     });
-    return;
+    return { to: null, send: null };
   }
 
   // Sent through the one provider port (docs/policy/email-notifications.md
@@ -565,7 +570,7 @@ const sendEmailAlert = async (
       targetType: log.targetType,
       targetId: log.targetId,
     });
-    return;
+    return { to, send: result };
   }
 
   if (result.notConfigured) {
@@ -585,7 +590,7 @@ const sendEmailAlert = async (
       targetId: log.targetId,
       error: "Email provider is not configured.",
     });
-    return;
+    return { to, send: result };
   }
 
   // Recorded and returned rather than thrown: this is one delivery channel
@@ -604,7 +609,30 @@ const sendEmailAlert = async (
     targetId: log.targetId,
     error: reason,
   });
+  return { to, send: result };
 };
+
+/**
+ * Sends one test message through this path, on purpose.
+ *
+ * Runs the real `sendEmailAlert`, so the `AdminNotificationLog` row is written
+ * exactly as a genuine provider alert writes one. That is the point rather than
+ * a side effect: if this path fails, the failure belongs in the operator's
+ * alert log and on the badge that counts unacknowledged failures, which is
+ * where a real failure would have gone (lib/operatorAlertProbeCore.ts).
+ */
+export const probeProviderAlertEmail =
+  async (): Promise<OperatorAlertProbeResult> => {
+    const { to, send } = await sendEmailAlert(
+      "Sending path test",
+      [
+        "This is a test of the provider alert email path.",
+        "It was requested from the Admin Console and reports no real provider problem.",
+      ].join("\n"),
+      { targetType: "sending-path-probe", targetId: "provider-alert-email" }
+    );
+    return operatorAlertProbeResult({ path: "provider", recipient: to, send });
+  };
 
 const sendProviderAlert = async (
   provider: AiProvider,

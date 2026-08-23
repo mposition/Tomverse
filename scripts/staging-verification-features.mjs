@@ -28,10 +28,28 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/image-generation-staging-verification-records",
     },
     {
+        key: "generated-artifacts",
+        label: "generated artifacts (real files)",
+        checklist: "docs/ops/generated-artifacts-staging-checklist.md",
+        records: "docs/ops/generated-artifacts-staging-verification-records",
+    },
+    {
         key: "assistant-profile",
         label: "assistant profiles (release C)",
         checklist: "docs/ops/assistant-profile-staging-checklist.md",
         records: "docs/ops/assistant-profile-staging-verification-records",
+    },
+    {
+        key: "assistant-knowledge",
+        label: "assistant knowledge files (release C)",
+        checklist: "docs/ops/assistant-knowledge-staging-checklist.md",
+        records: "docs/ops/assistant-knowledge-staging-verification-records",
+    },
+    {
+        key: "chat-attachment",
+        label: "chat attachment formats (archives, legacy Office, GIF)",
+        checklist: "docs/ops/chat-attachment-staging-checklist.md",
+        records: "docs/ops/chat-attachment-staging-verification-records",
     },
 ];
 

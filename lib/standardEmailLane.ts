@@ -20,11 +20,13 @@ import {
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
-import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
+import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
+import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
+import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
-import { isEmailPurpose } from "@/lib/emailPreferenceCore";
+import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
@@ -37,7 +39,9 @@ import {
   type ProviderSendOutcome,
 } from "@/lib/emailSendRetryCore";
 import {
+  RETRY_CLASSIFICATIONS,
   STANDARD_LANE_CLAIM_TTL_MS,
+  abandonmentEscalation,
   nextStandardAttempt,
 } from "@/lib/standardEmailRetryCore";
 
@@ -226,6 +230,14 @@ export type StandardDrainResult = {
   abandoned: number;
   suppressed: number;
   pending: number;
+  /**
+   * Abandonments by classification.
+   *
+   * A total on its own cannot be escalated correctly: §9.4 gives each
+   * classification its own answer to running out of attempts, and "three
+   * messages were abandoned" does not say whether a person has to be woken.
+   */
+  abandonedByClassification: Record<EmailClassification, number>;
 };
 
 type ClaimedDelivery = {
@@ -236,6 +248,8 @@ type ClaimedDelivery = {
   attempts: number;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
+  policyVersionId: string;
+  jurisdictionProfileKey: string;
   templateVersion: {
     template: { key: string; classification: string; requiresUnsubscribe: boolean };
   };
@@ -284,6 +298,9 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       attempts: true,
       idempotencyKey: true,
       renderDataSnapshot: true,
+      // Pinned at enqueue, read here: this is the step the pin exists for.
+      policyVersionId: true,
+      jurisdictionProfileKey: true,
       templateVersion: {
         select: {
           template: {
@@ -424,7 +441,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         claimedAt: null,
       },
     });
-    return "suppressed" as const;
+    return { outcome: "suppressed" as const, classification: definition.classification };
   }
   if (verdict.raiseIncident === "transactional_complaint") {
     await reportOperationalIncident({
@@ -446,25 +463,45 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // about the mailbox, a preference is about what this person asked for. Both
   // are checked at send time, because a message queued yesterday may be for a
   // purpose switched off this morning.
-  if (definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)) {
-    const preference = await prisma.emailPreference.findUnique({
-      where: {
-        userId_purpose: { userId: delivery.userId, purpose: definition.purpose },
-      },
-      select: { enabled: true },
+  //
+  // The decision is `consentGateVerdict`, not a comparison here, because the
+  // interesting case is the row that does not exist. `preference &&
+  // !preference.enabled` treated an absent row as a yes, and rows are created
+  // lazily on a settings read -- so every account that never opened the
+  // preference centre was one marketing template away from being sent
+  // advertising it had never agreed to.
+  {
+    const stored =
+      definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)
+        ? await prisma.emailPreference.findUnique({
+            where: {
+              userId_purpose: {
+                userId: delivery.userId,
+                purpose: definition.purpose,
+              },
+            },
+            select: { enabled: true },
+          })
+        : null;
+
+    const consent = consentGateVerdict({
+      classification: definition.classification,
+      purpose: definition.purpose,
+      hasAccount: Boolean(delivery.userId),
+      storedEnabled: stored ? stored.enabled : null,
     });
-    if (preference && !preference.enabled) {
+    if (!consent.allowed) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {
           status: "skipped",
-          skipReason: "no_consent",
+          skipReason: consent.skipReason,
           attempts: delivery.attempts,
           nextAttemptAt: null,
           claimedAt: null,
         },
       });
-      return "suppressed" as const;
+      return { outcome: "suppressed" as const, classification: definition.classification };
     }
   }
 
@@ -490,18 +527,18 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
           claimedAt: null,
         },
       });
-      return "suppressed" as const;
+      return { outcome: "suppressed" as const, classification: definition.classification };
     }
   }
 
   const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
-  const rendered = definition.render(payload, delivery.language);
+  const templateRendered = definition.render(payload, delivery.language);
   const attempts = delivery.attempts + 1;
 
   // Only marketing carries these, and the template's own flag decides -- which
   // the database holds as a CHECK against the classification, so a message
   // cannot acquire an unsubscribe header by being sent from the wrong place.
-  const headers = unsubscribeHeaders({
+  const unsubscribeTarget = {
     requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
     userId: delivery.userId,
     purpose: definition.purpose,
@@ -510,7 +547,103 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       process.env.PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
       "https://tomverse.app",
+  };
+  const unsubscribeLink = unsubscribeUrl(unsubscribeTarget);
+  const headers = unsubscribeHeaders({ ...unsubscribeTarget, url: unsubscribeLink });
+
+  // The subject prefix and the jurisdiction footer, from the profile this row
+  // was pinned to at enqueue (EM-04). Read from the pinned policy version and
+  // not the active one: a message enqueued under one set of labelling rules
+  // must not be sent under another, or the delivery row records the first while
+  // the recipient receives the second.
+  const profile = await prisma.jurisdictionProfile.findUnique({
+    where: {
+      profileKey_policyVersionId: {
+        profileKey: delivery.jurisdictionProfileKey,
+        policyVersionId: delivery.policyVersionId,
+      },
+    },
+    select: {
+      profileKey: true,
+      subjectPrefix: true,
+      footerBlocks: true,
+      unsubscribeSlaBusinessDays: true,
+    },
   });
+
+  const composed = composeJurisdictionalMessage({
+    classification: definition.classification,
+    requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
+    profile: profile
+      ? {
+          profileKey: profile.profileKey,
+          subjectPrefix: profile.subjectPrefix,
+          footerBlocks: Array.isArray(profile.footerBlocks)
+            ? profile.footerBlocks.filter(
+                (block): block is string => typeof block === "string"
+              )
+            : [],
+          unsubscribeSlaBusinessDays: profile.unsubscribeSlaBusinessDays,
+        }
+      : null,
+    identity: readBusinessIdentity(process.env),
+    language: delivery.language,
+    unsubscribeUrl: unsubscribeLink,
+    rendered: templateRendered,
+  });
+
+  if (composed.ok === false) {
+    // Marketing only. An advertisement that cannot be labelled the way its
+    // recipient's jurisdiction requires is not sent, because the violation is
+    // not recoverable by fixing configuration afterwards -- the message has
+    // already arrived unlabelled.
+    await reportOperationalIncident({
+      code: "EMAIL_JURISDICTION_LABELLING_UNAVAILABLE",
+      title: "A marketing message was held because it could not be labelled",
+      severity: "error",
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        profileKey: delivery.jurisdictionProfileKey,
+        skipReason: composed.skipReason,
+        missing: composed.missing.join(","),
+        setInstead: composed.missing
+          .map((block) => BLOCK_ENV_VARIABLE[block])
+          .filter(Boolean)
+          .join(","),
+      },
+    });
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "skipped",
+        skipReason: composed.skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+      },
+    });
+    return { outcome: "suppressed" as const, classification: definition.classification };
+  }
+
+  if (composed.degraded.length > 0) {
+    // Not an incident: the message is correct and going out, and holding an
+    // account-deletion notice for an unset variable would be the worse failure.
+    // Loud anyway -- the footer is still owed, and a silent omission is one
+    // nobody ever fixes.
+    console.warn(
+      JSON.stringify({
+        event: "email_jurisdiction_footer_degraded",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+        profileKey: delivery.jurisdictionProfileKey,
+        reasons: composed.degraded,
+        sent: "without_footer",
+      })
+    );
+  }
+
+  const rendered = composed.rendered;
 
   const response = await deliverEmailOnce({
     to: delivery.emailAddress,
@@ -553,13 +686,14 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         ? classifyTransportError(response.transportError)
         : classifyProviderStatus(response.status);
 
-  return recordOutcome(delivery, outcome, {
+  const recorded = await recordOutcome(delivery, outcome, {
     now,
     attempts,
     classification: definition.classification,
     rendered,
     status: response.ok ? null : (response.status ?? null),
   });
+  return { outcome: recorded, classification: definition.classification };
 };
 
 /**
@@ -585,6 +719,12 @@ export async function drainStandardEmailDeliveries(options?: {
     abandoned: 0,
     suppressed: 0,
     pending: 0,
+    abandonedByClassification: {
+      transactional: 0,
+      service: 0,
+      legal: 0,
+      marketing: 0,
+    },
   };
 
   while (result.claimed < limit && Date.now() < deadline) {
@@ -594,11 +734,13 @@ export async function drainStandardEmailDeliveries(options?: {
     result.claimed += 1;
 
     try {
-      const outcome = await sendClaimedDelivery(delivery, now);
+      const { outcome, classification } = await sendClaimedDelivery(delivery, now);
       if (outcome === "sent") result.sent += 1;
       else if (outcome === "failed") result.failed += 1;
-      else if (outcome === "abandoned") result.abandoned += 1;
-      else if (outcome === "suppressed") result.suppressed += 1;
+      else if (outcome === "abandoned") {
+        result.abandoned += 1;
+        result.abandonedByClassification[classification] += 1;
+      } else if (outcome === "suppressed") result.suppressed += 1;
     } catch (error) {
       // A render or decrypt failure, not a provider failure. Retrying it will
       // not help -- the snapshot is what it is -- so the row stops here rather
@@ -641,19 +783,34 @@ export async function drainStandardEmailDeliveries(options?: {
     where: { lane: "standard", status: "pending" },
   });
 
-  if (result.abandoned > 0) {
-    // Abandonment is the outcome nobody else notices: the account was created,
-    // the subscription started, the deletion was scheduled -- the product looks
-    // fine while the person was never told.
+  // Abandonment is the outcome nobody else notices: the account was created,
+  // the subscription started, the deletion was scheduled -- the product looks
+  // fine while the person was never told.
+  //
+  // Raised per classification rather than as one total, because §9.4 answers
+  // "what happens when it runs out of attempts" per classification and a total
+  // cannot carry that answer. It also keeps the cooldowns separate: they are
+  // keyed by incident code, so a single code would let a marketing abandonment
+  // -- the one the policy asks us to keep quiet about -- start a window that
+  // swallows a legal one minutes later.
+  for (const classification of RETRY_CLASSIFICATIONS) {
+    const abandoned = result.abandonedByClassification[classification];
+    if (abandoned === 0) continue;
+    const escalation = abandonmentEscalation(classification);
+    // Marketing. Counted above and carried in the drain's log line; §9.4 asks
+    // for a quiet surrender, and persistence is the failure mode here.
+    if (!escalation.notify) continue;
     await reportOperationalIncident({
-      code: "EMAIL_DELIVERY_ABANDONED",
-      title: "User email was abandoned after repeated failures",
-      error: `${result.abandoned} message(s) exhausted their retries`,
-      severity: "error",
+      code: escalation.code,
+      title: escalation.title,
+      error: `${abandoned} ${classification} message(s) exhausted their retries`,
+      severity: escalation.severity,
       cooldownMs: 30 * 60 * 1_000,
+      forceNotification: escalation.forceNotification,
       context: {
         component: "standard-email-lane",
-        abandoned: result.abandoned,
+        classification,
+        abandoned,
         pending: result.pending,
       },
     });

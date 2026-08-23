@@ -9,6 +9,7 @@ import {
     MEMORY_EVAL_CRITICAL_CATEGORIES,
     MEMORY_EVAL_LANGUAGES,
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
+    MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN,
     aggregateOutcomes,
     assessSampleAdequacy,
     findDuplicateCases,
@@ -185,7 +186,8 @@ const perfectOutcomes = () => {
     const outcomes = [];
     for (const category of MEMORY_EVAL_CATEGORIES) {
         for (const language of MEMORY_EVAL_LANGUAGES) {
-            for (let index = 0; index < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM; index += 1) {
+            const floor = MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[category];
+            for (let index = 0; index < floor; index += 1) {
                 const isDurable = category === "durable_facts";
                 outcomes.push({
                     caseId: `${category}-${language}-${index}`,
@@ -323,4 +325,71 @@ test("duplicate fixtures are refused by content, not by id", () => {
     const first = durableCase("dup-a");
     const second = { ...durableCase("dup-b"), conversations: first.conversations };
     assert.equal(findDuplicateCases([first, second]).length, 1);
+});
+
+test("a reduced critical-negative floor is conditional on the probe corpus", async () => {
+    // docs/policy/external-conversation-import-and-memory.md §12.2 [개정 · 2026-08-23]: ②③④ may sit below 200 per arm only
+    // while the deterministic half §12.3 always required actually holds. The
+    // policy says "conditional"; without this test that word costs nothing.
+    const { MUST_REFUSE, MUST_ACCEPT, NEEDS_JUDGEMENT } = await import(
+        "../lib/memoryValidatorProbeCorpus.ts"
+    );
+    const { validateMemoryCandidate } = await import(
+        "../lib/memoryValidatorCore.ts"
+    );
+
+    const reduced = MEMORY_EVAL_CATEGORIES.filter(
+        (category) =>
+            category !== "durable_facts" &&
+            MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[category] < 200
+    );
+    if (reduced.length === 0) return;
+
+    const bulkSafe = (probe) =>
+        validateMemoryCandidate({
+            kind: "identity",
+            statement: probe.statement,
+            confidence: 0.9,
+            evidence: [{ role: probe.role ?? "user", sourceType: "conversation" }],
+        }).bulkSafe;
+
+    // Condition 1: nothing the corpus calls refusable is bulk-safe.
+    assert.deepEqual(MUST_REFUSE.filter(bulkSafe).map((p) => p.statement), []);
+    // Condition 2: the accept side is non-empty and intact, so a tightening
+    // that silently stopped the feature remembering anything cannot buy the
+    // reduced floor.
+    assert.ok(MUST_ACCEPT.length > 0);
+    assert.deepEqual(
+        MUST_ACCEPT.filter((probe) => !bulkSafe(probe)).map((p) => p.statement),
+        []
+    );
+    // Condition 3: what a rule cannot decide stays undecided. An empty list
+    // would claim the rules cover the judgement cases, which is not true.
+    assert.ok(NEEDS_JUDGEMENT.length > 0);
+    // Condition 4: both language arms, since the reduction applies per arm.
+    const hangul = /[ㄱ-힝]/;
+    const ko = MUST_REFUSE.filter((probe) => hangul.test(probe.statement)).length;
+    assert.ok(ko > 0 && MUST_REFUSE.length - ko > 0);
+});
+
+test("the durable_facts floor is derived from §12.3, not chosen", () => {
+    // docs/policy/external-conversation-import-and-memory.md §12.2 takes ①'s floor from §12.3's own threshold: it is the
+    // sample size at which a run can be wrong a stated number of times and
+    // still clear `precision >= 0.95`.
+    //
+    // At 200 that number is THREE. Four misses land on 0.9497 and fail, and
+    // 202 is where four would pass — so 200 sits two cases short of the next
+    // step up, not on it. The first draft of this amendment said "four", and
+    // this assertion is why that did not survive.
+    const floor = MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM.durable_facts;
+    assert.ok(
+        wilsonInterval(floor - 3, floor).lower >=
+            MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN,
+        `${floor} does not tolerate three misses at the §12.3 precision threshold`
+    );
+    assert.ok(
+        wilsonInterval(floor - 4, floor).lower <
+            MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN,
+        `${floor} tolerates four misses, so the policy's stated tolerance is stale`
+    );
 });

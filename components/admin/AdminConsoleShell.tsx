@@ -185,7 +185,19 @@ function AdminConsoleChrome({
         />
       </aside>
       {mobileNavOpen ? (
-        <div className="fixed inset-0 z-[70] lg:hidden">
+        // Above the analytics consent notice, which is page furniture fixed to
+        // the bottom of the viewport at z-[100]. This drawer is modal -- it has
+        // a backdrop, it traps focus, and the page behind it does not scroll --
+        // so a banner painting over it is the wrong order.
+        //
+        // It stayed wrong for as long as it did because it was invisible: the
+        // notice covers the bottom ~100px, and the last navigation entry
+        // happened to sit above that. Adding an eighteenth entry moved it
+        // underneath, and the drawer's reachability spec at 320px caught it --
+        // the entry was scrolled correctly into view and still could not be
+        // clicked. Below the model registry (120) and feedback (140) dialogs,
+        // which open over this and should stay on top.
+        <div className="fixed inset-0 z-[105] lg:hidden">
           <button
             type="button"
             className="absolute inset-0 bg-black/70"

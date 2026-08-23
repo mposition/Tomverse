@@ -29,6 +29,7 @@ import {
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { ImageModelTabPanel } from "@/components/chat/ImageModelTabPanel";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { AutoRoutingToggle } from "@/components/chat/AutoRoutingToggle";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -139,6 +140,24 @@ export type ModelPickerPanelProps = {
     event: ModelPickerAnalyticsEvent,
     properties?: { model_id?: string; recommendation_rank?: number }
   ) => void;
+  /**
+   * Auto model selection (UI contract auto-model-selection.md §1).
+   *
+   * One boolean, already the conjunction of the feature flag, the
+   * conversation's product and cohort eligibility. False means the control
+   * does not exist -- not that it is disabled, greyed, or replaced by a
+   * "coming soon". A switch that flips, saves and changes nothing cannot be
+   * told apart from Auto agreeing with the user every time.
+   *
+   * Auto is a mode, so it sits *above* the list rather than in it. Putting it
+   * in the catalogue beside real models would make it look like something
+   * with a context window, a price and a provider, and the footer's credit
+   * estimate would have nothing to show for it.
+   */
+  autoSelectionOffered?: boolean;
+  selectionMode?: "manual" | "auto";
+  selectionModePending?: boolean;
+  onSelectionModeChange?: (next: boolean) => void;
   comboFinderSlot?: React.ReactNode;
   /**
    * Image generation entry (policy v2 section 13). Absent when the feature flag
@@ -175,6 +194,10 @@ export function ModelPickerPanel({
   onBackToActions,
   onDone,
   onTrackEvent,
+  autoSelectionOffered = false,
+  selectionMode = "manual",
+  selectionModePending = false,
+  onSelectionModeChange,
   comboFinderSlot,
   onSelectImageModel,
   imageGenerationLock = null,
@@ -658,6 +681,30 @@ export function ModelPickerPanel({
         />
       ) : (
       <>
+      {/*
+        Above the list, and inside the keyboard-scroll region rather than
+        pinned: UI-001 already has ~390px of pinned rows competing for 352
+        visible px at 320x568 with the keyboard up, and a pinned toggle would
+        take model rows off the screen entirely. Scrolling with the middle band
+        keeps it reachable without costing anything the sheet cannot spare.
+
+        The wrapper is inside the condition, not around it: the component
+        returns null on `offered: false` by itself, but a wrapper rendered
+        anyway would leave an empty div carrying `mb-2` -- a margin and a row
+        height for a control that does not exist. "Renders nothing" has to mean
+        nothing, which is what the contract test measures.
+      */}
+      {autoSelectionOffered && onSelectionModeChange && (
+        <div className="mb-2 shrink-0 px-1">
+          <AutoRoutingToggle
+            offered={autoSelectionOffered}
+            enabled={selectionMode === "auto"}
+            pending={selectionModePending}
+            language={language}
+            onChange={onSelectionModeChange}
+          />
+        </div>
+      )}
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
           <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400">

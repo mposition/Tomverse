@@ -295,7 +295,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     }
   });
 
-  test("off mode sends no webSearchMode and every panel reads as training knowledge", async ({
+  test("off mode sends no webSearchMode and every panel reads as not searched", async ({
     page,
   }, testInfo) => {
     const models = ["gpt-5-5", "claude-sonnet-5"];
@@ -335,9 +335,12 @@ test.describe("native web search (webSearchMode: always)", () => {
 
     await expect(page.getByText("Plain answer, no search.").first()).toBeVisible();
     expect(sawWebSearchModeField).toBe(false);
+    // The badge reports the search and stops there. It used to say "training
+    // knowledge" here, which is a claim about the source of the answer that
+    // nothing on this path checks -- see lib/webSearchStatusBadge.ts.
     await expect(assistantBadge(page, "gpt-5-5")).toHaveAttribute(
       "data-search-status",
-      "training-knowledge"
+      "not-searched"
     );
   });
 
@@ -418,7 +421,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     const detail = page.getByTestId("web-search-exception-detail");
     await expect(detail).toBeVisible();
     await expect(detail).toContainText("GPT-5.4 mini");
-    await expect(detail).toContainText("training knowledge only");
+    await expect(detail).toContainText("without a web search");
 
     await sendChatMessage(page, testInfo, "Any current news?");
 

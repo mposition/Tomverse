@@ -125,6 +125,9 @@ const selection = (overrides = {}) =>
       routerModelId: null,
       routerChallengerTurns: 0,
     },
+    // A routed conversation is a Chat conversation: Auto is offered in one
+    // product (decision record v1.2 §3).
+    productKey: "chat",
     subjectKey: "user_abc",
     isGuest: false,
     plan: "Pro",
@@ -160,16 +163,17 @@ test("a measured attachment turn routes", () => {
 
 // --- measurement ---
 
-// The rule that stops this being an object-size oracle over the whole bucket.
-test("an attachment outside the caller's own prefix is refused, not measured", async () => {
-  const measured = await measureTurnAttachments(
+// Sizes come from the attachment rows the request layer resolved, so nothing
+// here is a figure a client stated and nothing here reads object storage. The
+// prefix check survives as the second line of defence: a row that somehow
+// named a key outside its owner's storage is refused rather than measured.
+test("an attachment outside the caller's own prefix is refused, not measured", () => {
+  const measured = measureTurnAttachments(
     [
       {
-        role: "user",
-        content: "look at this",
-        attachments: [
-          { mediaType: "application/pdf", objectKey: "attachments/someone-else/a.pdf" },
-        ],
+        mediaType: "application/pdf",
+        size: 1024,
+        objectKey: "attachments/someone-else/a.pdf",
       },
     ],
     "attachments/mine/"
@@ -178,13 +182,13 @@ test("an attachment outside the caller's own prefix is refused, not measured", a
   assert.equal(measured.reason, "not_own_object");
 });
 
-test("a caller with no prefix of their own measures nothing", async () => {
-  const measured = await measureTurnAttachments(
+test("a caller with no prefix of their own measures nothing", () => {
+  const measured = measureTurnAttachments(
     [
       {
-        role: "user",
-        content: "look",
-        attachments: [{ mediaType: "application/pdf", objectKey: "attachments/mine/a.pdf" }],
+        mediaType: "application/pdf",
+        size: 1024,
+        objectKey: "attachments/mine/a.pdf",
       },
     ],
     null
@@ -193,19 +197,54 @@ test("a caller with no prefix of their own measures nothing", async () => {
   assert.equal(measured.reason, "not_own_object");
 });
 
-test("an attachment with no object key cannot be measured", async () => {
-  const measured = await measureTurnAttachments(
-    [{ role: "user", content: "look", attachments: [{ mediaType: "image/png" }] }],
+test("an attachment that resolved to no storage key cannot be measured", () => {
+  const measured = measureTurnAttachments(
+    [{ mediaType: "image/png", size: 10, objectKey: "" }],
     "attachments/mine/"
   );
   assert.equal(measured.measurable, false);
-  assert.equal(measured.reason, "no_object_key");
+  assert.equal(measured.reason, "unresolved");
 });
 
-test("a turn with no attachment measures as an empty, measurable set", async () => {
-  const measured = await measureTurnAttachments([text("hello")], "attachments/mine/");
+// A stored size of zero is not a small file -- the finalisation step refuses
+// an empty object -- so it means the row does not know, and all-or-nothing
+// applies.
+test("an attachment with no recorded size cannot be measured", () => {
+  const measured = measureTurnAttachments(
+    [{ mediaType: "image/png", size: 0, objectKey: "attachments/mine/a.png" }],
+    "attachments/mine/"
+  );
+  assert.equal(measured.measurable, false);
+  assert.equal(measured.reason, "unmeasurable");
+});
+
+test("a turn with no attachment measures as an empty, measurable set", () => {
+  const measured = measureTurnAttachments([], "attachments/mine/");
   assert.equal(measured.measurable, true);
   assert.deepEqual(measured.descriptors, []);
+});
+
+test("resolved attachments measure to their stored sizes, in order", () => {
+  const measured = measureTurnAttachments(
+    [
+      {
+        mediaType: "application/pdf",
+        size: 2048,
+        objectKey: "attachments/mine/a.pdf",
+      },
+      {
+        mediaType: "image/png",
+        size: 512,
+        objectKey: "attachments/mine/b.png",
+      },
+    ],
+    "attachments/mine/"
+  );
+  assert.equal(measured.measurable, true);
+  assert.deepEqual(measured.descriptors, [
+    { mediaType: "application/pdf", size: 2048 },
+    { mediaType: "image/png", size: 512 },
+  ]);
 });
 
 // --- per-model cost ---

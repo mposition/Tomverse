@@ -11,14 +11,36 @@ const r2Origin = (() => {
   }
 })();
 
-// Deliberately absent: static.cloudflareinsights.com / cloudflareinsights.com.
-// Cloudflare Browser Insights injects its beacon at the edge with no nonce, so
-// it is reported as a violation here (FINAL-F005). Allowlisting the host would
-// only ever help the static marketing policy below -- the app policy uses
-// 'strict-dynamic', which makes host sources inert -- and it would put a
-// third-party RUM script outside the analytics consent gate that GA4 is
-// explicitly held behind. The agreed resolution is to disable Browser Insights
-// in Cloudflare rather than loosen this policy.
+// Cloudflare edge features that inject a script are turned off in Cloudflare,
+// not allowlisted here. Two have hit this policy so far:
+//
+//   Browser Insights          static.cloudflareinsights.com/beacon.min.js
+//   Email Address Obfuscation /cdn-cgi/scripts/*/cloudflare-static/email-decode.min.js
+//
+// Neither tag carries the nonce, because neither exists at build time -- the
+// edge adds it to the response on the way out. So the rule is the same for any
+// future one, whatever the host: an injected script has no nonce, and a policy
+// that admits it has stopped being a nonce policy.
+//
+// The two failed differently, which is worth knowing before reading a report:
+//
+// - Browser Insights loads from a third-party host, so `'self'` never covered
+//   it and both policies reported it (FINAL-F005). Allowlisting the host would
+//   have helped only the static marketing policy below -- 'strict-dynamic'
+//   makes host sources inert -- and would have put a third-party RUM script
+//   outside the analytics consent gate GA4 is explicitly held behind.
+//
+// - Email Address Obfuscation loads same-origin, so the static marketing
+//   policy's `'self'` already admitted it and it ran there unreported; only
+//   the strict policy, where 'strict-dynamic' voids `'self'`, saw it. It was
+//   found on 2026-08-22 through the operational alert for a real
+//   CSP_VIOLATION_DETECTED on /auth/admin-reauthenticate, which renders the
+//   signed-in operator's address. With the decode script blocked that address
+//   stayed `[email protected]` on screen. Cloudflare enables this feature by
+//   default at signup, so it was never switched on deliberately; it was
+//   switched off zone-wide instead (docs/ops/email-sending-domains.md
+//   section 3.5.7). Same-origin is therefore not a reason to leave one of these
+//   alone -- it only decides which of the two policies reports it.
 const directives = (
   scriptDirective: string,
   styleDirective: string,

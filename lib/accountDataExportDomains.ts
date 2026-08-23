@@ -85,6 +85,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
 
   // --- the user's data mixed with Tomverse's internals ----------------------
   {
+    domain: "modelMigrationRecord",
+    publicName: "model_changes",
+    prismaModel: "ModelMigrationRecord",
+    state: "included_filtered",
+    withheldReason:
+      "Which of their stored model settings an approved retirement moved, from what to what, and when. Held back: the operator's email and the internal ticket that authorised the run, and the lifecycle work item the run belonged to. The person is entitled to know we changed their model and what it held before, not to the staff identity behind an internal decision or to the queue row that tracked it.",
+  },
+  {
     domain: "consentRecord",
     publicName: "email_consent_history",
     prismaModel: "ConsentRecord",
@@ -346,6 +354,30 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "CreditDebtEntry",
     state: "included_filtered",
     withheldReason: "Same cost basis and metadata bag as credit_ledger.",
+  },
+  {
+    domain: "messageArtifact",
+    publicName: "generated_files",
+    prismaModel: "MessageArtifact",
+    state: "included_filtered",
+    withheldReason:
+      "The files an assistant answer produced for the user: name, format, size, which answer and which model made each one. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and they remain downloadable from the conversation while it exists. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+  },
+  {
+    domain: "messageAttachment",
+    publicName: "message_attachments",
+    prismaModel: "MessageAttachment",
+    state: "included_filtered",
+    withheldReason:
+      "The files the user attached to their own messages: name, type, size and which message each belongs to. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and the person already holds the originals they uploaded. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+  },
+  {
+    domain: "messageAttachmentUpload",
+    publicName: "pending_attachment_uploads",
+    prismaModel: "MessageAttachmentUpload",
+    state: "included_filtered",
+    withheldReason:
+      "Files the user uploaded in the composer and never sent: name, type, size and when. Withheld for the same reason as above: the bytes are in object storage and the storage key is an internal address. Rows here are usually transient -- an upload becomes a message attachment the moment the message is saved.",
   },
   {
     domain: "imageGeneration",

@@ -32,6 +32,10 @@ import {
   selectionDistributionKeys,
 } from "../lib/routingShadowReport.ts";
 import { prisma } from "../lib/prisma.ts";
+import {
+  ROUTER_SHADOW_FLAG,
+  isRouterShadowEnabled,
+} from "../lib/routingShadow.ts";
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
@@ -39,6 +43,7 @@ const flag = (name, fallback) => {
   return found ? found.slice(name.length + 3) : fallback;
 };
 const asJson = args.includes("--json");
+const recording = isRouterShadowEnabled();
 const compareBy =
   flag("compare-by", "selectionPolicyVersion") === "selectionVersion"
     ? "selectionVersion"
@@ -113,6 +118,7 @@ if (asJson) {
       {
         windowDays: days,
         since: since.toISOString(),
+        recording,
         ...report,
         distributionGroups,
         selectionDistributionComparison: comparison,
@@ -123,12 +129,19 @@ if (asJson) {
   );
 } else {
   console.log(`Shadow routing — last ${days} day(s), since ${since.toISOString()}`);
+  // Whether recording is on, before any count of what it recorded. A zero row
+  // count reads as "Auto would have agreed with everyone" until you know
+  // whether anything was ever written down.
+  console.log(`${ROUTER_SHADOW_FLAG}: ${recording ? "true" : "off"}`);
   console.log(`Runs read: ${num(report.rows)}`);
   console.log("");
 
   if (report.rows === 0) {
-    console.log("No shadow runs. TOMVERSE_ROUTER_SHADOW_ENABLED is off, or no");
-    console.log("chat traffic reached the recorder in this window.");
+    console.log(
+      recording
+        ? `No shadow runs, and ${ROUTER_SHADOW_FLAG} is on. Either no chat traffic\nreached the recorder in this window, or every turn was routed by Auto --\nshadow deliberately skips a turn Auto actually decided, because a row there\nwould enter one decision twice.`
+        : `No shadow runs. ${ROUTER_SHADOW_FLAG} is off, so nothing was recorded;\nthis is not a measurement of agreement.`
+    );
     await prisma.$disconnect();
     process.exit(0);
   }

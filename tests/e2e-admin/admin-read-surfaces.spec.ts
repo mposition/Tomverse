@@ -577,6 +577,61 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByTestId("email-domain-findings")).toBeEmpty();
   });
 
+  test("the operator alert paths can be tested, and say what a pass means", async ({
+    page,
+  }) => {
+    // These paths run only when something is wrong, so nothing exercises them
+    // in ordinary operation -- which is how three of four senders stayed on the
+    // old sending domain through a cutover
+    // (docs/ops/email-sending-domains.md §1.2).
+    await page.goto("/admin/alerts?tab=templates");
+
+    const probe = page.getByTestId("operator-alert-probe");
+    await expect(
+      probe.getByRole("heading", { name: "Operator alert paths" })
+    ).toBeVisible();
+    await expect(page.getByTestId("operator-alert-probe-operational")).toBeVisible();
+    await expect(page.getByTestId("operator-alert-probe-provider")).toBeVisible();
+
+    // The limit of what a passing test proves is on screen, not in a comment.
+    await expect(probe).toContainText("does not show that the condition");
+  });
+
+  test("the delivery history opens on what did not arrive, and says so", async ({
+    page,
+  }) => {
+    // §9.5 keeps abandoned rows in place rather than moving them to a
+    // dead-letter table, because moving them scatters the attempt count and the
+    // error. Until this screen existed nothing read them back, so the reasoning
+    // had never paid off -- and the badge §9.5 asks for had nowhere to lead.
+    await page.goto("/admin/email-delivery");
+
+    await expect(
+      page.getByRole("heading", { name: "Deliveries" })
+    ).toBeVisible();
+    // A filtered view that does not name what it excludes reads as a total.
+    await expect(page.getByTestId("email-delivery-scope")).toContainText(
+      "abandoned"
+    );
+    await expect(
+      page.getByTestId("email-delivery-filter-abandoned")
+    ).toBeVisible();
+  });
+
+  test("the suppression tab says whose list it is not", async ({ page }) => {
+    // Resend's suppression is account- and region-wide (§5.3.1), so an operator
+    // who lifts an entry here and expects mail to flow is an operator who will
+    // conclude the lift did not work.
+    await page.goto("/admin/email-delivery?tab=suppressions");
+
+    await expect(
+      page.getByRole("heading", { name: "Suppressions" })
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("email-suppression-provider-notice")
+    ).toContainText("not the provider");
+  });
+
   test("retention renders its cleanup controls", async ({ page }) => {
     await page.goto("/admin/retention");
 

@@ -51,7 +51,7 @@ export const SHARED_STRING_ALLOWLIST = [
   {
     key: "sidebar.title",
     locales: "all",
-    reason: "The product name. Tomverse Insight is not translated anywhere.",
+    reason: "The product name. Tomverse Review is not translated anywhere.",
   },
   {
     key: "chat.toolsDeepResearch",

@@ -162,7 +162,7 @@ marketing을 포함하지 않는다는 범위 결정.
   같은 key + **동일 payload**여야 중복이 억제되므로, 재시도 주체가 안정적인 key를
   쓰고 매 시도 동일 렌더 결과를 만들어야 합니다.
 - From 주소는 `TRANSACTIONAL_EMAIL_FROM` -> `EMAIL_FROM` -> 하드코딩 기본값
-  `Tomverse Insight <hello@tomverse.app>` 순. **스트림/도메인 분리 개념 없음.**
+  `Tomverse Review <hello@tomverse.app>` 순. **스트림/도메인 분리 개념 없음.**
 - `RESEND_API_KEY`가 없으면 `{ sent: false, skipped: true }`로 조용히 넘어감.
 - 실패는 `throw`. 호출자가 처리하지 않으면 그대로 유실.
 
@@ -1092,7 +1092,15 @@ idempotencyKey = hash(eventId, recipientKey, templateVersionId, policyVersionId)
 | transactional (P0) | standard | 8 | 10s, 30s, 1m, 5m, 15m, 1h, 4h | incident + 앱 내 대체 경로 |
 | legal (P0) | standard | 10 | 위 + 12h, 24h | **incident(critical) + 수동 후속 + 대체 채널** |
 | service (P1) | standard | 6 | 현행과 동일 | incident |
-| marketing (P3) | standard | 2 | 5m, 1h | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+| marketing (P3) | standard | 2 | 5m | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+
+**"최대 시도"는 최초 발송을 포함한 총 횟수입니다.** 따라서 백오프 개수는 항상
+`최대 시도 − 1`입니다 — transactional 7개/8회, service 5개/6회, legal 9개/10회.
+marketing 행은 2026-08-21까지 `2`와 `5m, 1h`를 함께 적고 있어 이 규칙만 어겼고,
+구현은 백오프를 따라 3회를 시도하고 있었습니다. **상한 쪽을 남겼습니다** — 아래
+문단이 논증하는 숫자가 그것이고, 나머지 세 행과 계산 방식이 일치해야 합니다.
+`tests/standardEmailRetryCore.test.mjs`가 이 표 전체를 그대로 옮겨 적어 고정하며,
+`delays.length === maxAttempts - 1` 불변식도 함께 검사합니다.
 
 **marketing의 관대한 재시도가 중요합니다.** 실패한 프로모션을 끈질기게 재시도하면
 일시적 차단이 영구적 평판 손상이 됩니다.
@@ -2068,6 +2076,33 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 - `EmailPolicyVersion` 생성/활성화
 - 테스트 발송
 - 사용자 preference의 **관리자에 의한** 변경
+
+#### 13.7.1 지금 무엇이 기록되고, 무엇이 기록할 행위가 없는가
+
+이 목록은 **관리자 행위**의 목록입니다. `AdminAuditLog`의 모든 행에는 행위자가
+있으므로, 관리자가 하지 않는 일은 이 표에 넣을 수 없습니다. 여섯 항목의 현재
+상태를 적어 둡니다 — "M14 완료"가 "여섯 개 모두 기록 중"으로 읽히지 않도록.
+
+| 항목 | 상태 | action |
+|---|---|---|
+| `EmailPolicyVersion` 생성/활성화 | 기록됨 | `email_policy.draft_created`, `email_policy.activated` |
+| 테스트 발송 | 기록됨 | `app/api/admin/test-email` |
+| 억제 항목 추가/제거 | 기록됨 (2026-08-21) | `email_suppression.added`, `email_suppression.removed` |
+| 캠페인 생성/승인/발송/취소 | **행위 없음** | 캠페인 기능이 없습니다(15.2, `feature.emailCampaignsEnabled`) |
+| 템플릿 버전 게시/폐기 | **관리자 행위 아님** | 발송 경로가 content hash로 자동 게시합니다(`lib/emailTemplateRegistry.ts`). 행위자가 없으므로 `AdminAuditLog`가 아니라 행 자체(`TemplateVersion.publishedAt`)가 기록입니다 |
+| 사용자 preference의 관리자 변경 | **경로 없음** | 관리자가 남의 preference를 바꾸는 API가 없습니다. 생기면 그때 기록합니다 |
+
+**억제 제거의 사유는 세 층입니다**(`app/api/admin/email-suppressions`). 추가는
+mail을 멈추고 제거는 mail을 다시 시작시키므로 비대칭이 요점입니다.
+
+- `privacy_request`는 **거절**합니다. 법적 권리 행사의 기록이고, 그것을 해제할
+  자격이 있는 절차는 그것을 만든 privacy 절차이지 운영 화면의 버튼이 아닙니다.
+- `hard_bounce`·`complaint`는 **2인 승인**이 필요합니다. 13.3이 영구로 부르는
+  항목이고, complaint는 수신자가 발송 도메인을 평가하는 지표이며(14.5) 도메인
+  평판은 이 시스템에서 가장 늦게 회복되는 부분입니다.
+- 나머지는 **내용 있는 사유**와 감사 기록입니다. `suppressionRemovalProblem()`이
+  길이와 상투어를 함께 거절합니다 — 필수 항목에 "test"라고 답하면 그 필수 항목은
+  무력화된 것입니다.
 
 ---
 

@@ -430,7 +430,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500" />
           <div>
-            <div className="text-lg font-black">Tomverse Insight</div>
+            <div className="text-lg font-black">Tomverse Review</div>
             <div className="mt-1 h-2 w-20 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
           </div>
         </div>
@@ -443,7 +443,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800 md:hidden">
           <div className="h-9 w-9 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
-          <span className="text-lg font-black">Tomverse Insight</span>
+          <span className="text-lg font-black">Tomverse Review</span>
         </header>
         <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
           <div className="h-11 w-56 max-w-[70vw] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
@@ -747,6 +747,23 @@ export function ChatPageClient({
   const [memoryMode, setMemoryMode] = useState<ConversationMemoryMode>(
     DEFAULT_CONVERSATION_MEMORY_MODE
   );
+  /**
+   * The conversation's stored Auto state, and whether this account is offered
+   * Auto at all (UI contract auto-model-selection.md §1).
+   *
+   * `autoSelectionOffered` starts false and is only ever set from a confirmed
+   * conversation read. Two reasons, and the second is the one that matters:
+   *
+   *  - the conversation list's optimistic seeding does not carry it, so a
+   *    default of anything but false would show a control on a guess;
+   *  - a conversation that has not been created yet has no product to read,
+   *    and the server refuses `auto` for one, so offering the switch there
+   *    would be a control that saves and changes nothing -- the exact failure
+   *    §1 exists to prevent.
+   */
+  const [selectionMode, setSelectionMode] = useState<"manual" | "auto">("manual");
+  const [autoSelectionOffered, setAutoSelectionOffered] = useState(false);
+  const [selectionModePending, setSelectionModePending] = useState(false);
   // What `inherit` currently resolves to, so the menu can say which way that
   // choice points rather than only that it follows something. Fetched once
   // per signed-in session; "on" until it answers, matching the server's own
@@ -1809,6 +1826,8 @@ export function ChatPageClient({
         disabledPanels?: unknown;
         webSearchMode?: unknown;
         memoryMode?: unknown;
+        selectionMode?: unknown;
+        autoSelection?: { offered?: unknown } | null;
         assistantProfile?: ChatAssistantProfile | null;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
@@ -1845,6 +1864,24 @@ export function ChatPageClient({
                 ? data.memoryMode
                 : DEFAULT_CONVERSATION_MEMORY_MODE
         );
+        // Anything the server did not say is `manual`, which is also what an
+        // unrecognised stored value reads as on the server
+        // (`storedSelectionMode`). The two agreeing is the point: a screen
+        // that guessed differently would show Auto for a conversation every
+        // turn answers manually.
+        setSelectionMode(data.selectionMode === "auto" ? "auto" : "manual");
+        // Only a confirmed read may set this. `targetChatId` is what tells a
+        // server confirmation from the list's optimistic seeding, and the
+        // seeding carries no `autoSelection` at all -- so without this guard
+        // opening a conversation from the sidebar would clear a `true` the
+        // detail read had just established, and the control would flicker.
+        if (targetChatId) {
+            setAutoSelectionOffered(
+                typeof data.autoSelection?.offered === "boolean"
+                    ? data.autoSelection.offered
+                    : false
+            );
+        }
         // §14. Server-computed, including whether the profile has published
         // past this conversation -- a screen that worked the revision out for
         // itself would be a second implementation of the pinning rule.
@@ -3354,6 +3391,22 @@ export function ChatPageClient({
         });
       }
 
+      /*
+        The user's turn is saved with its files, not with their names.
+
+        `content` used to fall back to the file names joined with commas when
+        the user sent files and no text, because the save endpoint demanded a
+        non-empty string. That is what made a file-only turn come back from a
+        reload as "a.docx, b.xlsx": the message said it *was* those words. It
+        is sent empty now, and the attachments travel as the opaque upload ids
+        the finalisation step issued -- the server binds them to this message
+        in the same transaction that writes it
+        (docs/policy/user-attachment-persistence.md).
+      */
+      const promptUploadIds = promptAttachments
+        .map((attachment) => attachment.uploadId)
+        .filter((uploadId): uploadId is string => Boolean(uploadId));
+      let savedAttachments: ChatAttachment[] = promptAttachments;
       if (!isGuestMode) {
       try {
         const saveResponse = await fetch(`/api/conversations/${activeChatId}/messages`, {
@@ -3363,13 +3416,40 @@ export function ChatPageClient({
             messages: [{
               id: userMsgId,
               role: "user",
-              content: trimmed || attachments.map((item) => item.name).join(", "),
+              content: trimmed,
+              ...(promptUploadIds.length
+                ? { attachmentUploadIds: promptUploadIds }
+                : {}),
             }]
           }),
         });
-        await discardResponseBody(saveResponse);
         if (!saveResponse.ok) {
+          await discardResponseBody(saveResponse);
           console.error("Failed to pre-save user message:", saveResponse.status);
+        } else {
+          /*
+            Swap the composer's upload ids for the durable attachment ids the
+            save just wrote, in place, so the cards already on screen are the
+            same cards a reload produces -- and so this turn's own request, and
+            every later one, names the row rather than the upload.
+          */
+          const saved = await saveResponse.json().catch(() => null);
+          const bound: Array<{ ordinal: number; id: string }> = Array.isArray(
+            saved?.attachments
+          )
+            ? saved.attachments.filter(
+                (item: { messageId?: string }) => item?.messageId === userMsgId
+              )
+            : [];
+          if (bound.length) {
+            const byOrdinal = new Map(
+              bound.map((item) => [item.ordinal, item.id])
+            );
+            savedAttachments = promptAttachments.map((attachment, index) => {
+              const attachmentId = byOrdinal.get(index);
+              return attachmentId ? { ...attachment, attachmentId } : attachment;
+            });
+          }
         }
       } catch (e) {
         console.error("Failed to pre-save user message:", e);
@@ -3398,7 +3478,7 @@ export function ChatPageClient({
         // barrier. A panel whose model is not in here was not part of this
         // send and must not answer it.
         modelIds: activeModelIds,
-        attachments: promptAttachments,
+        attachments: savedAttachments,
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -3931,6 +4011,53 @@ export function ChatPageClient({
         setMemoryMode(previous);
         showToast(t("chat.memoryModeFailed"), "error");
       });
+  };
+
+  /**
+   * Turning Auto on or off for this conversation.
+   *
+   * Optimistic and then corrected, like the memory mode above, but with one
+   * extra rule that is not cosmetic: a **failed** attempt to turn Auto on must
+   * put the switch back to manual. UI contract §1 -- a control that flips,
+   * saves and changes nothing cannot be told apart from Auto agreeing with the
+   * user every time, and the server refuses `auto` for an account it would not
+   * route (`mayStoreSelectionMode`). Leaving the switch on after that refusal
+   * would be exactly the lie the contract forbids.
+   *
+   * Going back to manual is accepted unconditionally by the server, including
+   * for an account that has left the cohort, so that direction only fails on a
+   * transport error.
+   */
+  const handleSelectionModeChange = (next: boolean) => {
+    const targetId = accountConversationId(currentChatId);
+    if (!targetId || !sessionUserId) return;
+    const mode = next ? "auto" : "manual";
+    const previous = selectionMode;
+    if (mode === previous) return;
+
+    setSelectionMode(mode);
+    setSelectionModePending(true);
+    void fetch(`/api/conversations/${targetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectionMode: mode }),
+    })
+      .then(async (response) => {
+        await discardResponseBody(response);
+        if (response.ok) return;
+        setSelectionMode(previous);
+        // A refusal means the server would not route this account after all.
+        // Hiding the control is the honest correction: it is the same state
+        // `offered: false` describes, and leaving it visible invites the user
+        // to try again at something that cannot succeed.
+        if (response.status === 403) setAutoSelectionOffered(false);
+        showToast(t("chat.autoSelectionFailed"), "error");
+      })
+      .catch(() => {
+        setSelectionMode(previous);
+        showToast(t("chat.autoSelectionFailed"), "error");
+      })
+      .finally(() => setSelectionModePending(false));
   };
 
   /**
@@ -4718,6 +4845,21 @@ export function ChatPageClient({
               : undefined
           }
           onMemoryModeChange={handleMemoryModeChange}
+          // One boolean, and it is already false unless a confirmed read said
+          // otherwise. The control renders when it is true and does not exist
+          // when it is false -- no disabled state, no greyed row (UI contract
+          // auto-model-selection.md §1). Also false before a conversation
+          // exists: the server refuses `auto` for one, so a switch there could
+          // only ever save nothing.
+          autoSelectionOffered={
+            autoSelectionOffered &&
+            !isGuestMode &&
+            Boolean(currentChatId) &&
+            !isGuestConversationId(currentChatId ?? "")
+          }
+          selectionMode={selectionMode}
+          selectionModePending={selectionModePending}
+          onSelectionModeChange={handleSelectionModeChange}
           accountMemoryDefault={accountMemoryDefault}
           assistantProfile={
             assistantProfileOptions ? effectiveAssistantProfile : undefined
@@ -4796,6 +4938,21 @@ export function ChatPageClient({
               : undefined
           }
           onMemoryModeChange={handleMemoryModeChange}
+          // One boolean, and it is already false unless a confirmed read said
+          // otherwise. The control renders when it is true and does not exist
+          // when it is false -- no disabled state, no greyed row (UI contract
+          // auto-model-selection.md §1). Also false before a conversation
+          // exists: the server refuses `auto` for one, so a switch there could
+          // only ever save nothing.
+          autoSelectionOffered={
+            autoSelectionOffered &&
+            !isGuestMode &&
+            Boolean(currentChatId) &&
+            !isGuestConversationId(currentChatId ?? "")
+          }
+          selectionMode={selectionMode}
+          selectionModePending={selectionModePending}
+          onSelectionModeChange={handleSelectionModeChange}
           accountMemoryDefault={accountMemoryDefault}
           assistantProfile={
             assistantProfileOptions ? effectiveAssistantProfile : undefined

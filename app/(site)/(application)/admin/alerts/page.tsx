@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel";
 import { AdminNotificationsPanel } from "@/components/admin/AdminNotificationsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminOperatorAlertProbePanel } from "@/components/admin/AdminOperatorAlertProbePanel";
 import { AdminSlackTemplatesPanel } from "@/components/admin/AdminSlackTemplatesPanel";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 
@@ -29,7 +30,12 @@ export default async function AdminAlertsPage({
         label="Alert sections"
         query={query}
       />
-      {tab.id === "templates" ? <AdminSlackTemplatesPanel /> : null}
+      {tab.id === "templates" ? (
+        <>
+          <AdminSlackTemplatesPanel />
+          <AdminOperatorAlertProbePanel />
+        </>
+      ) : null}
       {tab.id === "deliveries" ? <AdminNotificationsPanel /> : null}
       {tab.id === "policy" ? <AdminAlertPolicyPanel /> : null}
     </div>

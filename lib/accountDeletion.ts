@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
+import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
+import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
@@ -40,7 +42,16 @@ async function scheduleStripeSubscriptionCancellation(
 export async function scheduleTomverseAccountDeletion(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, stripeSubscriptionId: true },
+    select: {
+      id: true,
+      email: true,
+      stripeSubscriptionId: true,
+      // Returned so the notice goes out in the language this account chose.
+      // The message says an account and everything in it will be destroyed on
+      // a date; it is the last one that should arrive in a language its
+      // recipient did not pick (EM-12).
+      settings: { select: { language: true } },
+    },
   });
   if (!user) return { scheduled: false as const };
 
@@ -69,6 +80,7 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   return {
     scheduled: true as const,
     email: user.email,
+    language: user.settings?.language ?? null,
     requestedAt,
     scheduledFor,
   };
@@ -224,6 +236,14 @@ export async function deleteTomverseAccount(
       conversationIds,
       "account_deleted"
     );
+    // By account rather than by conversation: an artifact row carries its own
+    // `userId`, so this collects every generated file the account owns even if
+    // a conversation list were ever incomplete.
+    await enqueueArtifactCleanupForUser(tx, user.id, "account_deleted");
+    // The files the account uploaded, by account for the same reason -- and
+    // including the uploads it finalised and never sent, which no conversation
+    // would ever have named (docs/policy/user-attachment-persistence.md).
+    await enqueueMessageAttachmentCleanupForUser(tx, user.id, "account_deleted");
 
     // Not covered by any cascade: PerplexityAsyncJob names a conversationId
     // but declares no relation, so deleting the conversations would leave the

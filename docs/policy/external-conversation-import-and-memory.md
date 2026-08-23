@@ -807,14 +807,49 @@ secret·credential ④ prompt injection·지시형·URL 유도.
 
 표본을 실제로 만들고 검수하고 동결하는 절차는
 `docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
-작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
+초안 생성자(AI)와 검수자(사람)의 분리, 두 사람의 판정이 충돌할 때만 적용하는
+adjudication, 네 범주 공통 20% 표본 검수와 그 안전장치
+(`docs/ops/memory-extraction-eval-dataset.md` §6.3 [개정 · 2026-08-23]),
 개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
 
-Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
-전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
-blind qualitative review, 독립 재실행. 복제·경미 변형으로 표본을 부풀리지
-않고, parse 실패·provider 오류를 조용히 분모에서 제외하지 않으며, 제외·재실행
-규칙은 사전에 manifest에 고정하고, 표본 변경 시 dataset version을 올립니다.
+Decision-grade 표본 하한은 **범주별로 다릅니다** [개정 · 2026-08-23 @mposition].
+범주마다 재는 것이 다르고, 하한이 사는 것도 다르기 때문입니다.
+
+- **① 지속 사실·선호: 언어 arm당 최소 200개** (총 400). 이 수는 §12.3의
+  `precision Wilson 하한 ≥ 0.95`에서 유도됩니다 — 200은 오답 **3건**까지
+  허용하는 크기이고(4건이면 하한이 0.9497로 떨어져 탈락하며, 4건을 허용하려면
+  202가 필요합니다), 낮추면 그만큼 재실행 위험을 삽니다.
+- **②③④ critical negative: 언어 arm당 최소 125개** (범주별 250, 총 750).
+  이 arm의 판정 기준은 "채택 0건"이므로 하한이 사는 것은 참 실패율의 상한
+  입니다 — 125개에서 3.0%, 200개에서 1.9%. 낮춘 상한은 아래 조건부 요건이
+  메웁니다.
+- 전체 하한 **1,150개**, 언어 arm당 575.
+
+**②③④의 하한 완화는 조건부입니다.** 아래를 모두 충족하지 못하면 하한은 언어
+arm당 200개로 돌아갑니다. 이것은 문서상의 약속이 아니라
+`tests/memoryExtractionEvalCore.test.mjs`가 강제하는 상태입니다.
+
+1. `lib/memoryValidatorProbeCorpus.ts`의 `MUST_REFUSE`가 ②③④ 각 범주와 **양쪽
+   언어 arm**을 모두 덮고, 전건이 `bulkSafe: false`일 것.
+2. 같은 corpus의 `MUST_ACCEPT`가 비어 있지 않고 전건 통과할 것 — 조이는 방향의
+   변경이 기능을 조용히 죽이지 않았음을 같은 실행에서 보일 것.
+3. 규칙이 판정할 수 없는 모양은 `NEEDS_JUDGEMENT`에 남기고 단언하지 않을 것.
+   이 목록이 비면 "규칙이 다 판단한다"는 뜻이 되며, 그것은 사실이 아닙니다.
+4. 위 셋이 PR Fast Gate에서 실행될 것.
+
+이 완화의 근거는 §12.3이 처음부터 **두 개의 독립한 증거**를 요구했다는 것입니다
+— eval에서 관측 0건, 그리고 결정적 validator 테스트. 2026-08-23 이전에는 뒤쪽
+절반에 실체가 없었고, 그럴듯한 나쁜 후보 50건 중 19건만 차단되고 있었습니다.
+현관 도어락 번호·계좌번호·여권번호·카드 PIN·2FA 백업 코드·복구 문구·보안 질문
+답이 전부 bulk-safe로 통과했으며, **그 구멍들은 표본을 1,368건 더 쌓아도 드러나지
+않았습니다** — dataset은 모델을 재고 그것들은 그 아래 규칙의 구멍이었기
+때문입니다. 두 증거는 서로를 대체하지 않습니다: eval arm을 줄이면 통계적 상한이
+넓어지고, probe corpus를 넓히면 미지 모양의 위험이 좁아집니다.
+
+동일 commit·고정 promptVersion, artifact 보존, blind qualitative review, 독립
+재실행. 복제·경미 변형으로 표본을 부풀리지 않고, parse 실패·provider 오류를
+조용히 분모에서 제외하지 않으며, 제외·재실행 규칙은 사전에 manifest에 고정하고,
+표본 변경 시 dataset version을 올립니다.
 
 ### 12.3 합격 기준 (운영 활성화 판정의 유일한 기준)
 
@@ -855,7 +890,8 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 - 후보 선정은 **eval 대상 지정일 뿐 승인이 아닙니다.** 운영 활성화는 §12.3
   기준을 §12.4 절차로 통과한 pair에만 주어집니다.
 - **eval 실행 예산은 사람이 승인합니다.** 산정 기준: decision-grade 표본
-  1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
+  1,150(① 400 + ②③④ 750, §12.2 [개정 · 2026-08-23]) × 독립 재실행 포함 최소
+  2회 전체 실행 +
   blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
   register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
 - **이 제약은 코드가 강제합니다.** `scripts/evalImportedMemoryExtraction.mjs`가
@@ -863,9 +899,11 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   전에 거부합니다. smoke mode는 예산 없이도 실행되며, deterministic stub으로
   prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
   주장하지 않습니다.
-- **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
-  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(범주·언어 arm당 200)에
-  한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
+- **fixture 세트는 아직 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`의
+  `MEMORY_EVAL_DATASET_VERSION`. 값은 채택이 있을 때마다 올라가므로 여기에 옮겨
+  적지 않습니다 — 옮겨 적은 숫자는 다음 채택에서 틀린 것이 됩니다).
+  §12.2 하한(① 200, ②③④ 125 — 범주·언어
+  arm당)에 한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
   나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
   §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
@@ -876,18 +914,32 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 
 `docs/ops/memory-extraction-eval-dataset.md`는 **절차만** 마련했고, 표본 작성·
 동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
-작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
-요구합니다. 따라서 **에이전트가 1,600개를 생성하고 스스로 승인해서 닫을 수
-없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다.
+작성자·검수자 분리, 네 범주 공통 20% 표본 검수와 batch별 명시적 채택 기록을
+요구하고, 서로 다른 두 사람의 판정이 충돌할 때에 한해 adjudicator를 둡니다. 따라서 **에이전트가 표본 전부를 생성하고 스스로 승인해서 닫을 수
+없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다 — 2026-08-23
+개정 뒤에도 그대로입니다. 개정이 바꾼 것은 **누가 초안을 만드는가**이지 **누가
+승인하는가**가 아닙니다.
 
-작성을 시작하기 전에 사람이 정해야 하는 것:
+작성을 시작하기 전에 사람이 정해야 하는 것 — [개정 · 2026-08-23 @mposition]:
 
-1. 데이터셋 책임자와 8개 cell별 작성자 지정
-2. 작성자와 다른 검수자 지정
-3. adjudicator 지정
-4. AI 초안 도구 허용 범위와 기록 방식 확정
-5. 지침 자체의 사람 승인 기록 작성
+1. 데이터셋 책임자 지정
+2. 검수자 지정 — 사람이며, 채택·반려가 **최초의 권위 있는 판정**입니다
+3. AI 초안 도구 허용 범위와 batch별 기록 방식 확정
+4. 지침 자체의 사람 승인 기록 작성
    (`docs/ops/memory-extraction-eval-dataset.md` 맨 아래)
+
+개정 전에는 여기에 "8개 cell별 작성자"와 "adjudicator 지정"이 있었습니다. 둘 다
+**AI를 사람 작성자의 자리에 두지 않는다**는 전제에서 나온 것이고, 그 전제를
+`docs/ops/memory-extraction-eval-dataset.md` §6.2가 바꿨습니다 — AI는 작성자가
+아니라 **비권위 초안 생성자**이고, 사람의 검수가 최초의 권위 있는 판정입니다.
+adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 때만** 적용하므로
+(`docs/ops/memory-extraction-eval-dataset.md` §6.4), 검수자가 한 명인 동안에는
+지정할 대상이 없습니다.
+
+**줄어든 것은 사람 머릿수뿐입니다.** 시료를 만든 주체와 승인한 주체의 분리는
+그대로이고 — 만드는 쪽이 AI, 승인하는 쪽이 사람입니다 — critical negative
+1,200건 전건 검수도 그대로입니다. 에이전트가 만든 것이 candidate pool이라는 이
+절의 규정도 그대로입니다: 초안은 사람이 채택해야 dataset이 됩니다.
 
 1,600개는 50개 단위로도 최소 32개 batch이므로 일반 코드 PR이 아니라 **별도 데이터
 프로그램**으로 관리합니다. 동결 전에는 live eval 예산도 승인하지 않는 §12.5의
@@ -1141,6 +1193,44 @@ audit에 남지 않습니다.
 승인자가 결정해야 하는 것은 위 네 개의 기간과, **활성 파일에 만료를 두지 않는다**는
 방향입니다.
 
+### 14.3 Knowledge 사용 투명성 — 답변별 귀속
+
+§13.4가 memory에 대해 정한 것과 같은 계약을 profile knowledge에 적용합니다.
+**두 개의 다른 사실이므로 하나의 숫자로 합치지 않습니다** — 사용자 자신이 올린
+파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장이고, 합친 count는 둘 중
+어느 것도 말하지 않습니다.
+
+- 값의 출처는 두 곳이며 §13.4와 대칭입니다. 생성 중에는 `/api/chat`의
+  `X-Chat-Knowledge-Used` header, 다시 열었을 때는
+  `GET /api/conversations/[conversationId]`가 돌려주는
+  `Message.knowledgeChunkCount`입니다.
+- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 §10 context
+  bundle이 없어 profile knowledge 자체가 불가능했던 요청이고, `0`은 bundle은
+  있었지만 retrieval이 아무 발췌도 고르지 않은 경우입니다. 둘 다 표시를
+  금지하며, 숫자를 보내고 renderer가 숨기는 대신 **필드를 빼서** 보냅니다.
+- **이름이 `knowledgeChunkCount`인 것은 서버가 아는 것이 그것이기 때문입니다.**
+  서버는 prompt에 넣은 발췌 수를 알 뿐 모델이 그것을 실제로 활용했는지는 알지
+  못합니다. `knowledgeUsedCount`는 관측하지 못하는 것을 주장하는 이름입니다.
+  같은 한계가 `memoryUsedCount`에도 있으며, 그 컬럼은 추가 시점부터 약한 의미로
+  읽어 왔습니다.
+- **저장하는 것은 count뿐입니다.** §8.1 불변식 4의 논리가 그대로 적용됩니다 —
+  발췌 본문도, 어느 파일에서 왔는지도 Message 행에 쓰지 않습니다.
+- **읽는 쪽은 소유자 자신의 조회뿐입니다.** share snapshot과 conversation
+  export는 각자의 select를 쓰며 이 컬럼을 이름조차 대지 않습니다(§13.3). 제3자에게
+  이 숫자는 "이 작성자가 개인 파일로 답을 만든다"는 사실을 알려 주며, 그것이
+  §13.3이 막으려는 것입니다.
+- **client 직렬화 allowlist에 넣지 않습니다.** `lib/chatMessageSerialization.ts`의
+  `pickTransportFields()`가 allowlist이므로 이 필드는 요청 transcript와 guest
+  localStorage에 실리지 않습니다. 거기 실린 값은 stale한 주장일 수밖에 없습니다.
+- 표시는 §13.4의 memory 표시와 한 문장을 공유합니다
+  (`ChatMessageList`의 `memory-usage-disclosure`). 판정은
+  `lib/answerContextDisclosure.ts`의 `decideAnswerContextDisclosure()` 한 곳이며,
+  memory가 먼저 오는 순서는 §9.1 system block이 조립되는 순서와 같습니다.
+- 검증: `tests/answerContextDisclosure.test.mjs`(판정 행렬),
+  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
+  `tests/chatMessageSerialization.test.ts`(allowlist 배제),
+  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+
 ## 15. Feature flag와 롤아웃 · rollback
 
 AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
@@ -1172,7 +1262,7 @@ AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
 |---|---|---|
 | 1 | `externalConversationImportEnabled` | ON (2026-08-19) |
 | 2 | `imageGenerationEnabled` | ON (2026-08-20) — 이 정책이 아니라 `docs/policy/image-generation.md`가 통제합니다 |
-| 3 | `assistantProfilesEnabled` | |
+| 3 | `assistantProfilesEnabled` | ON (2026-08-22) |
 | 4 | `assistantKnowledgeEnabled` | |
 | 5 | `memoryExtractionEnabled` | |
 | 6 | `memoryInjectionEnabled` | |

@@ -26,6 +26,7 @@ import {
   parseChatStreamTrailer,
   splitSearchMetadataTrailer,
 } from "@/lib/webSearchStreamTrailer";
+import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
@@ -765,6 +766,12 @@ function ChatAppComponent({
     let activeContextBundle = contextBundle ?? null;
     let contextBundleRetries = 0;
     let memoryUsedCount = 0;
+    // Set only on a turn the Router actually chose the model for. The server
+    // omits both headers on a manual turn and on an Auto turn that fell back,
+    // so "absent" already means "no routing decision to show".
+    let routedModelId: string | null = null;
+    let routedReason: string | null = null;
+    let knowledgeChunkCount = 0;
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
@@ -812,9 +819,27 @@ function ChatAppComponent({
           Number.isSafeInteger(reportedMemoryUsed) && reportedMemoryUsed > 0
             ? reportedMemoryUsed
             : 0;
+        // docs/policy/external-conversation-import-and-memory.md §14.3, read exactly as the line
+        // above: a missing header is not a
+        // zero, and both collapse to 0 here because the renderer states
+        // neither.
+        const reportedKnowledgeUsed = Number(
+          res.headers.get("X-Chat-Knowledge-Used")
+        );
+        knowledgeChunkCount =
+          Number.isSafeInteger(reportedKnowledgeUsed) &&
+          reportedKnowledgeUsed > 0
+            ? reportedKnowledgeUsed
+            : 0;
         // Always this response's own header (or null): the token must never
         // outlive the trace it was signed for, or a retried request would
         // pair a stale token with a fresh trace and verify as a mismatch.
+        // The badge on the reply is what makes the Auto toggle's promise --
+        // "the one that answered is shown on the reply" -- keepable. Read from
+        // this response rather than remembered, so a retry cannot pair a stale
+        // routing decision with a fresh answer.
+        routedModelId = res.headers.get("X-Chat-Routed-Model");
+        routedReason = res.headers.get("X-Chat-Routed-Reason");
         requestErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
 
         if (!res.ok) {
@@ -947,6 +972,12 @@ function ChatAppComponent({
       // finished message can say which model actually answered -- the routed
       // header named the model that was asked first, and it is no longer true.
       let retryingWithModelId: string | null = null;
+      // Set by the out-of-band "generating" marker and cleared when the
+      // trailer says what actually happened. Held on the message rather than
+      // in component state because three panels stream at once and the status
+      // belongs to one of them.
+      let isGeneratingArtifact = false;
+      let generatingArtifactFormat: string | null = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -960,13 +991,39 @@ function ChatAppComponent({
         // is a marker the user reads.
         const routing = splitRoutingRetrySignal(rawStreamText);
         if (routing.signal) retryingWithModelId = routing.signal.modelId;
-        assistantText = splitSearchMetadataTrailer(routing.text).displayText;
-		setAssistantMessage(assistantMessageId, assistantText, "normal");
+        // The "creating the Excel file" marker, stripped on every pass for
+        // the same reason the routing one is: the answer is rendered as it
+        // streams, and a marker left in for even one frame is a marker the
+        // user reads.
+        const artifactProgress = splitArtifactProgressSignal(routing.text);
+        if (artifactProgress.signal) {
+          isGeneratingArtifact = true;
+          generatingArtifactFormat = artifactProgress.signal.format;
+        }
+        assistantText = splitSearchMetadataTrailer(
+          artifactProgress.text
+        ).displayText;
+		setAssistantMessage(
+          assistantMessageId,
+          assistantText,
+          "normal",
+          undefined,
+          isGeneratingArtifact
+            ? {
+                isGeneratingArtifact: true,
+                ...(generatingArtifactFormat
+                  ? { generatingArtifactFormat }
+                  : {}),
+              }
+            : undefined
+        );
       }
 
       const finalRouting = splitRoutingRetrySignal(rawStreamText);
       if (finalRouting.signal) retryingWithModelId = finalRouting.signal.modelId;
-      const { searchMetadataJson } = splitSearchMetadataTrailer(finalRouting.text);
+      const { searchMetadataJson } = splitSearchMetadataTrailer(
+        splitArtifactProgressSignal(finalRouting.text).text
+      );
       const trailer = parseChatStreamTrailer(searchMetadataJson);
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
@@ -976,6 +1033,15 @@ function ChatAppComponent({
       // answer must not read as finished. No follow-up request is sent from
       // here -- continuing costs credits and is the user's decision.
       const completionStatus = trailer?.completion?.status ?? "normal";
+      /*
+        The files this turn produced, as the server recorded them.
+
+        `?? []` rather than `?? undefined`: a turn that announced it was
+        generating and then sent no artifacts in the trailer failed somewhere
+        the collector could not name, and the honest end state is no card at
+        all rather than a spinner that never resolves.
+      */
+      const artifacts = trailer?.artifacts ?? [];
 
 	  if (!assistantText.trim()) {
         if (requestTraceId && typeof window !== "undefined") {
@@ -1014,7 +1080,20 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
+            // Always written, so a retry that produces no file clears the
+            // cards the previous attempt left behind.
+            artifacts,
+            isGeneratingArtifact: false,
+            generatingArtifactFormat: undefined,
             ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
+            // Only when the Router chose it, and only when the answer did not
+            // then fall back to something else: `retryingWithModelId` means a
+            // different model produced the text, so a badge naming the routed
+            // one would attribute the answer to a model that wrote none of it.
+            ...(routedModelId && !retryingWithModelId
+              ? { routedModelId, routedReason }
+              : {}),
+            ...(knowledgeChunkCount > 0 ? { knowledgeChunkCount } : {}),
             // §7: when the server fell back mid-response, the model that
             // answered is not the one this request was sent to. Recording the
             // request's model here would attribute the answer to a model that

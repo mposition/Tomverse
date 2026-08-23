@@ -8,6 +8,12 @@ import {
   adminApprovalErrorResponse,
   runWithAdminApproval,
 } from "@/lib/adminApproval";
+import { approvalPayloadHash } from "@/lib/adminApprovalCore";
+import {
+  adminSoleApproverErrorResponse,
+  runAsSoleApprover,
+  soleApproverAvailability,
+} from "@/lib/adminSoleApproverExecution";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
@@ -15,15 +21,26 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { readKnowledgeCleanupQueueDryRun } from "@/lib/assistantKnowledgeLifecycle";
 import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { prisma } from "@/lib/prisma";
 import { retentionCutoff } from "@/lib/retentionPolicyCore";
 
+// `.strict()` is load-bearing rather than tidy: `cleanupExpiredData()` takes
+// no arguments and reads every cutoff from `lib/retentionPolicyCore.ts`, so
+// there is no parameter through which a caller could widen what gets deleted.
+// Refusing unknown keys here is what keeps it that way when somebody adds one
+// (condition 4, lib/adminSoleApproverCore.ts).
 const cleanupSchema = z
   .object({
     mode: z.enum(["dry-run", "execute"]),
     confirmText: z.string().trim().max(64).optional(),
+    // Echoed back from the dry run being confirmed. Only the sole-approver
+    // path reads them; with two administrators configured the ordinary
+    // approval applies and these are ignored.
+    dryRunId: z.string().trim().min(1).max(64).optional(),
+    dryRunDigest: z.string().trim().regex(/^[0-9a-f]{64}$/).optional(),
   })
   .strict();
 
@@ -48,6 +65,7 @@ async function dryRunCleanup() {
     notificationLogs,
     productAnalyticsEvents,
     shareSnapshots,
+    assistantKnowledge,
   ] = await Promise.all([
     prisma.session.count({ where: { expires: { lte: now } } }),
     prisma.chatUsageBucket.count({
@@ -129,6 +147,13 @@ async function dryRunCleanup() {
           OR "shareExpiresAt" IS NOT NULL
         )
     `.then((rows) => Number(rows[0]?.count || 0)),
+    // `storageCleanupQueues` above is a different question and stays: it counts
+    // cleanup rows being garbage-collected long after their bytes went, and it
+    // merges images with knowledge. What an operator needs before typing RUN
+    // CLEANUP is how many objects this run will delete from R2 and whether
+    // anything is stuck, which is what this reports
+    // (lib/assistantKnowledgeCleanupDryRunCore.ts).
+    readKnowledgeCleanupQueueDryRun(),
   ]);
   return {
     sessions,
@@ -147,10 +172,16 @@ async function dryRunCleanup() {
     notificationLogs,
     productAnalyticsEvents,
     shareSnapshots,
+    assistantKnowledge,
   };
 }
 
 export async function POST(req: Request) {
+  // Declared out here so the catch can report it. "An approval is required" is
+  // true and useless on its own: it does not say whether two administrators
+  // are configured, which is ordinary, or something is misconfigured, and
+  // working that out from the outside took three rounds on 2026-08-23.
+  let soleApproverUnavailable: string | null = null;
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) {
@@ -173,21 +204,59 @@ export async function POST(req: Request) {
       );
     }
 
+    // A single-administrator organisation cannot satisfy
+    // `requestedById !== reviewerId`, so `retention.cleanup.execute` -- the
+    // recovery path for a sweep that has fallen behind -- was unreachable for
+    // it. The exception is scoped to this action and bound to the dry run the
+    // operator just looked at (lib/adminSoleApproverCore.ts). With a second
+    // administrator configured this condition is false and the ordinary
+    // two-person path runs, which is condition 6 needing no migration.
+    // Not conditioned on the binding being present: with one administrator
+    // this is the only path there is, so an execution that skipped the dry run
+    // must be told to run one rather than fall through to an approval nobody
+    // can grant.
+    const soleApprover = soleApproverAvailability(
+      "retention.cleanup.execute",
+      session
+    );
+    const asSoleApprover = body.mode === "execute" && soleApprover.allowed;
+    if (body.mode === "execute" && !soleApprover.allowed) {
+      soleApproverUnavailable = soleApprover.reason;
+    }
+
     const result =
-      body.mode === "execute"
-        ? await runWithAdminApproval(
-            {
-              session,
-              request: req,
-              action: "retention.cleanup.execute",
-              targetType: "Retention",
-              targetId: "expired-data",
-              payload: body,
-              reason: "Execute destructive retention cleanup.",
-            },
-            cleanupExpiredData
-          )
-        : await dryRunCleanup();
+      body.mode !== "execute"
+        ? await dryRunCleanup()
+        : asSoleApprover
+          ? await runAsSoleApprover(
+              {
+                session,
+                request: req,
+                action: "retention.cleanup.execute",
+                targetType: "Retention",
+                targetId: "expired-data",
+                submittedRunId: body.dryRunId || "",
+                submittedDigest: body.dryRunDigest || "",
+              },
+              cleanupExpiredData
+            )
+          : await runWithAdminApproval(
+              {
+                session,
+                request: req,
+                action: "retention.cleanup.execute",
+                targetType: "Retention",
+                targetId: "expired-data",
+                // Deliberately not `body`. The approval is matched by this
+                // hash, and the retry that follows a second administrator's
+                // approval carries whatever dry run is current by then --
+                // including the binding would make every retry look like a
+                // new request and consume no approval at all.
+                payload: { mode: body.mode, confirmText: body.confirmText },
+                reason: "Execute destructive retention cleanup.",
+              },
+              cleanupExpiredData
+            );
     // An execution whose steps run in isolation can finish with some of them
     // failed. Recording that as "completed" would tell the operator who typed
     // RUN CLEANUP that the sweep ran, when part of it did not.
@@ -217,10 +286,21 @@ export async function POST(req: Request) {
       metadata: result,
     });
 
-    return NextResponse.json({ success: true, run });
+    // Hashed from the stored row rather than the in-memory result, because
+    // that is the value the execution reads back when it checks the binding.
+    return NextResponse.json({
+      success: true,
+      run,
+      resultDigest: approvalPayloadHash(run.result),
+    });
   } catch (error) {
-    const approvalResponse = adminApprovalErrorResponse(error);
+    const approvalResponse = adminApprovalErrorResponse(
+      error,
+      soleApproverUnavailable ? { soleApproverUnavailable } : undefined
+    );
     if (approvalResponse) return approvalResponse;
+    const soleApproverResponse = adminSoleApproverErrorResponse(error);
+    if (soleApproverResponse) return soleApproverResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin cleanup run failed:", error);

@@ -119,6 +119,98 @@ export const rewriteSelectedModels = (
   };
 };
 
+/**
+ * The third stored selection state, and the one the reconciliation script has
+ * never touched.
+ *
+ * `UserSettings.newConversationModelIds` is the source of truth for what a
+ * signed-in account's next conversation starts with
+ * (docs/policy/default-model-luna-migration.md §1.2), and
+ * lib/newConversationModels.ts says in as many words that persisting a change
+ * to it is "only ever an explicit user save or an approved retirement
+ * reconciliation". The reconciliation did not do it, so a retirement moved
+ * `defaultModel` and left this column pointing at the retired id -- which makes
+ * a "we changed your settings" notice untrue for the field users actually see
+ * on a new conversation.
+ *
+ * Takes the parsed JSON rather than a string: this column is `Json?`, unlike
+ * `Conversation.selectedModels`, which is TEXT holding JSON.
+ */
+export type NewConversationModelsRewrite =
+  | { status: "unset" }
+  | { status: "unchanged" }
+  | { status: "malformed"; reason: "not_a_non_empty_string_array" }
+  | {
+      status: "rewritten";
+      models: string[];
+      /** True when the rewrite changed which model leads the combination. */
+      leadChanged: boolean;
+      warning?: string;
+    };
+
+export const rewriteNewConversationModelIds = (
+  raw: unknown,
+  {
+    from,
+    to,
+    maxSelectedModels = DEFAULT_MAX_SELECTED_MODELS,
+  }: { from: string; to: string; maxSelectedModels?: number }
+): NewConversationModelsRewrite => {
+  // NULL means "[defaultModel]" and is not stale: it follows whatever
+  // defaultModel becomes, so a retirement has nothing to rewrite here.
+  if (raw === null || raw === undefined) return { status: "unset" };
+
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { status: "malformed", reason: "not_a_non_empty_string_array" };
+  }
+  const original: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      // Reported, never repaired. A value the parser cannot understand is a
+      // value whose intent we do not know.
+      return { status: "malformed", reason: "not_a_non_empty_string_array" };
+    }
+    original.push(entry.trim());
+  }
+  if (!original.includes(from)) return { status: "unchanged" };
+
+  const rewritten: string[] = [];
+  for (const modelId of original) {
+    const mapped = modelId === from ? to : modelId;
+    // Collapsing a duplicate is the point: a combination that already held the
+    // replacement would otherwise end up naming it twice.
+    if (!rewritten.includes(mapped)) rewritten.push(mapped);
+  }
+
+  return {
+    status: "rewritten",
+    models: rewritten,
+    leadChanged: original[0] !== rewritten[0],
+    ...(rewritten.length > maxSelectedModels
+      ? {
+          warning: `holds ${rewritten.length} models, above the ${maxSelectedModels} the picker allows`,
+        }
+      : {}),
+  };
+};
+
+/**
+ * Whether a stored combination and a stored `defaultModel` still agree after a
+ * rewrite, and the two are supposed to.
+ *
+ * Reported rather than corrected. The lead of the combination is a user's
+ * choice about which model speaks first, and a reconciliation that reordered it
+ * to match `defaultModel` would be making that choice for them -- which is the
+ * opposite of what a retirement pass is for.
+ */
+export const leadOutOfSync = (
+  storedModelIds: readonly string[] | null,
+  defaultModel: string
+): boolean =>
+  storedModelIds !== null &&
+  storedModelIds.length > 0 &&
+  storedModelIds[0] !== defaultModel;
+
 export type ReconciliationCounts = {
   scanned: number;
   rewritten: number;

@@ -3,6 +3,8 @@ import "server-only";
 import { Worker } from "node:worker_threads";
 import path from "node:path";
 
+import { GifStructureError, readGifStructure } from "@/lib/gifStructure";
+
 // pdfjs-dist needs a base path for its bundled standard (non-embedded) font
 // metrics and CJK CMaps. Without these, parsing throws for any PDF that uses
 // a standard font without embedding it — which is true of most real-world
@@ -47,7 +49,39 @@ const IMAGE_SIGNATURES: Record<string, (buffer: Buffer) => boolean> = {
         buffer.length >= 12 &&
         buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
         buffer.subarray(8, 12).toString("ascii") === "WEBP",
+    "image/gif": (buffer) =>
+        buffer.length >= 6 &&
+        ["GIF87a", "GIF89a"].includes(buffer.subarray(0, 6).toString("ascii")),
 };
+
+/** The media type the provider is sent, which is not always the one uploaded. */
+export type NormalizableImageMediaType =
+    | "image/png"
+    | "image/jpeg"
+    | "image/webp"
+    | "image/gif";
+
+/**
+ * A GIF is re-encoded to PNG rather than forwarded: not every provider that
+ * accepts images accepts GIF, and the one this product can guarantee about
+ * the bytes it sends is that they are the still frame it validated.
+ */
+export const normalizedImageMediaType = (
+    mediaType: NormalizableImageMediaType
+) => (mediaType === "image/gif" ? "image/png" : mediaType);
+
+/**
+ * Raised for the one GIF failure a person can act on. Every other invalid
+ * image is "invalid or unsupported"; this one has an answer -- export a still
+ * frame -- and saying so is the difference between a dead end and a next
+ * step.
+ */
+export class AnimatedImageError extends Error {
+    constructor() {
+        super("Animated images are not supported.");
+        this.name = "AnimatedImageError";
+    }
+}
 
 const imageWorkerSource = `
 const { parentPort, workerData } = require("node:worker_threads");
@@ -66,6 +100,7 @@ const sharp = require("sharp");
             "image/png": "png",
             "image/jpeg": "jpeg",
             "image/webp": "webp",
+            "image/gif": "gif",
         }[workerData.mediaType];
 
         if (
@@ -80,7 +115,9 @@ const sharp = require("sharp");
         }
 
         let pipeline = sharp(input, options).rotate();
-        if (expectedFormat === "png") {
+        if (expectedFormat === "png" || expectedFormat === "gif") {
+            // A GIF leaves as a PNG: lossless, universally accepted by the
+            // providers that take images at all, and no palette to preserve.
             pipeline = pipeline.png({ compressionLevel: 9 });
         } else if (expectedFormat === "jpeg") {
             pipeline = pipeline.jpeg({ quality: 90, mozjpeg: true });
@@ -263,12 +300,30 @@ const runWorker = <T>(
 
 export async function normalizeImageSafely(
     buffer: Buffer,
-    mediaType: "image/png" | "image/jpeg" | "image/webp",
+    mediaType: NormalizableImageMediaType,
     maxOutputBytes: number
 ) {
     const signatureMatches = IMAGE_SIGNATURES[mediaType]?.(buffer) || false;
     if (!signatureMatches) {
         throw new Error("The image signature does not match its media type.");
+    }
+
+    if (mediaType === "image/gif") {
+        // Decided here, from the block structure, rather than from whatever
+        // page count the installed libvips happens to report -- see
+        // `lib/gifStructure.ts`. A malformed GIF fails here too, before any
+        // decoder touches it.
+        let frames: number;
+        try {
+            frames = readGifStructure(
+                new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            ).frames;
+        } catch (error) {
+            throw error instanceof GifStructureError
+                ? new Error("The GIF structure is invalid.")
+                : error;
+        }
+        if (frames > 1) throw new AnimatedImageError();
     }
 
     const transferableBuffer = Uint8Array.from(buffer).buffer;

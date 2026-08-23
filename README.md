@@ -1289,24 +1289,56 @@ The comparison rail's state matrix also runs as fast unit tests
 (`npm run test:unit`, `tests/comparisonReadiness.test.mjs`) — see
 [docs/ui-contracts/comparison-action-rail.md](docs/ui-contracts/comparison-action-rail.md).
 
-Configure these GitHub repository **Actions secrets** (Railway variables are not
-automatically available to GitHub Actions):
+Configure these in the GitHub repository (Railway variables are not
+automatically available to GitHub Actions). **Secrets and variables are two
+different settings pages, and the sender belongs in the second one.**
+
+Settings -> Secrets and variables -> Actions -> **Secrets**:
 
 ```text
 SECURITY_AUDIT_SLACK_WEBHOOK_URL=<Slack incoming webhook URL>
 SECURITY_AUDIT_EMAILS=security@example.com,owner@example.com
-SECURITY_AUDIT_EMAIL_FROM=Tomverse Security <hello@tomverse.app>
 RESEND_API_KEY=<Resend API key>
 ```
 
+Settings -> Secrets and variables -> Actions -> **Variables**:
+
+```text
+TRANSACTIONAL_EMAIL_FROM=Tomverse Review <hello@mail.tomverse.app>
+```
+
+The display name follows the Insight -> Review rename (product boundary
+decision record v1.2, decision 1). **Production still carries the old one**:
+this variable wins over the compiled default, so the code change alone does not
+move it, and changing a From display name invalidates the filters recipients
+have built. `docs/ops/tomverse-review-rename.md` §5.4 tracks that as an
+outstanding human step, together with the one-time notice it ships beside.
+
+The From address is a variable, not a secret: it is printed on every message
+the service sends, so hiding it buys nothing, and the workflow reads it as
+`vars.TRANSACTIONAL_EMAIL_FROM` -- stored as a secret it resolves to empty and
+the run falls back to the compiled default without saying so.
+
 The Slack webhook can fall back to `OPS_ALERT_SLACK_WEBHOOK_URL` or
-`SLACK_WEBHOOK_URL`. Email recipients can fall back to `OPS_ALERT_EMAIL` or
-`ADMIN_ALERT_EMAIL`, and the sender can fall back to
-`TRANSACTIONAL_EMAIL_FROM` or `EMAIL_FROM`. Both Slack and email delivery are
-required for scheduled/manual reports; a missing or failed channel marks the
-workflow as failed rather than silently dropping the report. Use **Run workflow**
-on the Daily Security Audit workflow once after adding the secrets to verify both
-deliveries.
+`SLACK_WEBHOOK_URL`, and email recipients to `OPS_ALERT_EMAIL` or
+`ADMIN_ALERT_EMAIL`. The sender resolves through
+`SENDING_IDENTITY_ENV_KEYS.transactional` in `lib/emailSendingIdentityCore.ts`:
+`TRANSACTIONAL_EMAIL_FROM`, then `EMAIL_FROM`, then a compiled fallback. That
+one resolver decides the From address for every sender in the service, this
+workflow included.
+
+**Do not add `SECURITY_AUDIT_EMAIL_FROM` or `ADMIN_ALERT_FROM`.** Both were
+retired when the senders were unified, nothing reads them, and
+`npm run check:sending-identity` fails the build if either name reappears in a
+workflow or a source file -- a second way to name a sender is how three of four
+senders stayed on the old domain through a cutover that moved the fourth
+(docs/ops/email-sending-domains.md section 1.2).
+
+Both Slack and email delivery are required for scheduled/manual reports; a
+missing or failed channel marks the workflow as failed rather than silently
+dropping the report. The workflow also runs `check:sending-identity --env`
+immediately after installing dependencies, so a misconfigured sender is
+reported in the first minute rather than after the end-to-end suite.
 
 ## Railway Healthcheck
 

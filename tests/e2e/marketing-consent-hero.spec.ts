@@ -15,7 +15,7 @@ import { prepareGuestPage } from "./support/app-fixtures";
 //
 // F004 -- the brand was the only shrinkable item in the header row, so the
 // language switcher's 10.5rem cap squeezed it until `truncate` rendered
-// "Tomverse Insight" as "T." at 320px. The brand is now shrink-0 and drops
+// "Tomverse Review" as "T." at 320px. The brand is now shrink-0 and drops
 // the qualifier (never a partial word) below sm, and the switcher absorbs
 // the shrink instead.
 
@@ -206,7 +206,7 @@ for (const viewport of MARKETING_VIEWPORTS) {
       "brand text is not clipped by its own box"
     ).toBeLessThanOrEqual(measured.clientWidth + 1);
     expect(
-      ["Tomverse", "Tomverse Insight"],
+      ["Tomverse", "Tomverse Review"],
       "brand renders a whole word, never a truncated fragment"
     ).toContain(measured.visibleText);
 

@@ -228,16 +228,13 @@ test("a badge with no known count renders nothing rather than zero", () => {
 });
 
 test("every badge key a navigation entry declares is one the resolver knows", () => {
-  const counts = {
-    openFeedback: 1,
-    openPrivacyRequests: 1,
-    pendingRefunds: 1,
-    pendingApprovals: 1,
-    activeIncidents: 1,
-    failedWebhooks: 1,
-    delayedJobs: 1,
-    failedAlerts: 1,
-  };
+  // Built from the shape rather than written out. A hand-listed object here
+  // goes stale the moment a count is added, and it fails as "the new badge
+  // resolves to nothing" -- which is what an unregistered badge key looks like
+  // too, so the failure would not say which of the two happened.
+  const counts = Object.fromEntries(
+    Object.keys(EMPTY_ADMIN_NAVIGATION_COUNTS).map((key) => [key, 1])
+  );
   for (const item of ADMIN_NAVIGATION) {
     if (!item.badge) continue;
     assert.notEqual(
@@ -246,4 +243,21 @@ test("every badge key a navigation entry declares is one the resolver knows", ()
       `${item.label} declares badge "${item.badge}", which resolves to nothing`
     );
   }
+});
+
+test("the discovery backlog keeps a way in", () => {
+  // The finding this whole surface answers is that discovery wrote its results
+  // to a table nothing read. A tab removed, a badge unwired or a renamed id
+  // would put it back there, so the path is pinned rather than assumed.
+  const models = ADMIN_NAVIGATION.find((item) => item.id === "models");
+  assert.ok(models, "the models entry exists");
+  assert.equal(models.badge, "modelLifecycle");
+  assert.deepEqual(
+    models.tabs?.map((tab) => tab.id),
+    ["registry", "discovery"]
+  );
+  // The registry stays the default: an operator opening /admin/models is far
+  // more often there for the catalogue than for the backlog.
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), undefined).id, "registry");
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), "discovery").id, "discovery");
 });

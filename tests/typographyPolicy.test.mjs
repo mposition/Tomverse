@@ -107,7 +107,7 @@ test("font-black is reserved for headline-sized customer text", () => {
     // lines when the credit-pack checkout-return handler added its imports,
     // then down nineteen more when UX-010 gave ConfirmDialog its focus trap.
     "app/(site)/(application)/chat/ChatPageClient.tsx:357",
-    // Same "Tomverse Insight" brand span; it moved down four lines when the
+    // Same "Tomverse Review" brand span; it moved down four lines when the
     // superseded walkthrough embed above it was replaced by a stage diagram.
     "components/marketing/ChatWorkspaceGuide.tsx:190",
   ]);
@@ -201,7 +201,10 @@ test("every email template shares one web-safe font policy", () => {
     "lib/billingEmails.ts",
     "lib/feedbackLifecycleEmails.ts",
     "lib/emailLoginEmails.ts",
-    "lib/providerModelCatalogReport.ts",
+    // The daily model lifecycle report moved its rendering here when it moved
+    // onto the standard lane: providerModelCatalogReport.ts now builds the
+    // payload and enqueues, and renders no HTML of its own.
+    "lib/modelLifecycleDailyEmail.ts",
     "app/api/admin/test-email/route.ts",
     // The support notification moved out of app/api/feedback/route.ts when it
     // gained a retry queue: the same mail is now rendered by the submission

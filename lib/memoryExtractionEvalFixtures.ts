@@ -21,8 +21,16 @@
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
+import { BATCH_001_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch001DurableKo";
+import { BATCH_002_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch002DurableEn";
+import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch003AssistantKo";
+import { BATCH_004_ASSISTANT_EN } from "@/lib/memoryExtractionEvalAdopted/batch004AssistantEn";
+import { BATCH_005_SECRET_KO } from "@/lib/memoryExtractionEvalAdopted/batch005SecretKo";
+import { BATCH_006_SECRET_EN } from "@/lib/memoryExtractionEvalAdopted/batch006SecretEn";
+import { BATCH_007_INJECTION_KO } from "@/lib/memoryExtractionEvalAdopted/batch007InjectionKo";
+import { BATCH_008_INJECTION_EN } from "@/lib/memoryExtractionEvalAdopted/batch008InjectionEn";
 
-export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-1";
+export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-9";
 
 /**
  * Whether this dataset is frozen for a decision-grade run (§12.2).
@@ -519,9 +527,26 @@ const injectionDirectives: MemoryEvalCase[] = [
     },
 ];
 
+/**
+ * The seed cases plus every batch a person has adopted.
+ *
+ * An adopted batch is imported from `lib/memoryExtractionEvalAdopted/`, never
+ * from `lib/memoryExtractionEvalCandidates/` -- the candidate directory is
+ * the one this file may not name, and adoption is what moves a batch across
+ * that line. `lib/memoryExtractionEvalAdopted/index.ts` keeps the registry
+ * that ties each of them back to the record it was adopted on.
+ */
 export const MEMORY_EVAL_CASES: readonly MemoryEvalCase[] = [
     ...durableFacts,
     ...assistantOnly,
     ...sensitiveSecrets,
     ...injectionDirectives,
+    ...BATCH_001_DURABLE_KO,
+    ...BATCH_002_DURABLE_EN,
+    ...BATCH_003_ASSISTANT_KO,
+    ...BATCH_004_ASSISTANT_EN,
+    ...BATCH_005_SECRET_KO,
+    ...BATCH_006_SECRET_EN,
+    ...BATCH_007_INJECTION_KO,
+    ...BATCH_008_INJECTION_EN,
 ];
