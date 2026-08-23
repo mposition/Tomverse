@@ -540,6 +540,12 @@ export function ChatMessageList({
                       const decision = decideWebSearchBadge({
                         searchMetadata: msg.searchMetadata,
                         usageClass: modelInfo.usageClass,
+                        // The trailer that carries `searchMetadata` arrives at
+                        // the end of the stream, so a running turn has none.
+                        // Without this the Deep Research badge is absent for
+                        // the whole run -- which, the job being asynchronous,
+                        // is the state the panel is in the entire time.
+                        generating: isActivelyGenerating,
                       });
                       if (!decision.shown) return null;
                       const status = decision.status;
