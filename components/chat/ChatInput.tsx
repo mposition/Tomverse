@@ -260,6 +260,26 @@ type FailedAttachment = {
   scopeId: string;
 };
 
+/**
+ * The archive summary a chip carries, from whichever upload path answered.
+ *
+ * Both endpoints report the same three counts, and both may omit the block
+ * entirely -- a `.txt` has no plan. Read through one function so the chip and
+ * the toast cannot disagree about what the server said.
+ */
+const archiveSummaryOf = (archive?: {
+  includedFiles?: number;
+  excludedFiles?: number;
+} | null) => {
+  const included = Number(archive?.includedFiles);
+  const excluded = Number(archive?.excludedFiles);
+  if (!Number.isFinite(included) && !Number.isFinite(excluded)) return undefined;
+  return {
+    includedFiles: Number.isFinite(included) ? included : 0,
+    excludedFiles: Number.isFinite(excluded) ? excluded : 0,
+  };
+};
+
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
   return extension && extension !== attachment.name
@@ -668,7 +688,7 @@ export function ChatInput({
      * an answer.
      */
     const noticeArchiveExclusions = useCallback(
-      (archive?: { excludedFiles?: number } | null) => {
+      (archive?: { includedFiles?: number; excludedFiles?: number } | null) => {
         const excluded = Number(archive?.excludedFiles) || 0;
         if (excluded <= 0) return;
         dispatchAppToast(
@@ -1723,7 +1743,7 @@ export function ChatInput({
             mediaType: string;
             size: number;
             kind: "text" | "file";
-            archive?: { excludedFiles?: number };
+            archive?: { includedFiles?: number; excludedFiles?: number };
           };
           const guestAttachment: ChatAttachment = {
             id: crypto.randomUUID(),
@@ -1735,6 +1755,7 @@ export function ChatInput({
               ? await fileToDataUrl(file)
               : undefined,
             kind: uploaded.kind,
+            archive: archiveSummaryOf(uploaded.archive),
           };
           setPendingAttachments((current) =>
             current.filter((item) => item.id !== trackingId)
@@ -1808,7 +1829,7 @@ export function ChatInput({
           name?: string;
           size?: number;
           kind?: "file" | "text";
-          archive?: { excludedFiles?: number };
+          archive?: { includedFiles?: number; excludedFiles?: number };
         };
 
         /*
@@ -1831,6 +1852,7 @@ export function ChatInput({
             ? await fileToDataUrl(file)
             : undefined,
           kind: finalized.kind || attachmentKindForFormat(format),
+          archive: archiveSummaryOf(finalized.archive),
         };
         setPendingAttachments((current) =>
           current.filter((item) => item.id !== trackingId)
@@ -2702,6 +2724,36 @@ export function ChatInput({
                         <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
                           {getAttachmentLabel(attachment)}
                         </span>
+                        {attachment.archive ? (
+                          /*
+                            The archive's own contents, for as long as the file
+                            is attached. This used to be a four-second toast and
+                            nothing else, so a skipped file became visible only
+                            as an absence in the answer.
+                          */
+                          <span
+                            data-testid="attachment-archive-summary"
+                            className={`text-[11px] font-medium ${
+                              attachment.archive.excludedFiles > 0
+                                ? "text-amber-700 dark:text-amber-400"
+                                : "text-zinc-400 dark:text-zinc-500"
+                            }`}
+                          >
+                            {[
+                              interpolateCopy(t("chat.archiveReadSummary"), {
+                                count: attachment.archive.includedFiles,
+                              }),
+                              ...(attachment.archive.excludedFiles > 0
+                                ? [
+                                    interpolateCopy(
+                                      t("chat.archiveExcludedSummary"),
+                                      { count: attachment.archive.excludedFiles }
+                                    ),
+                                  ]
+                                : []),
+                            ].join(" · ")}
+                          </span>
+                        ) : null}
                       </span>
                     </>
                   )}

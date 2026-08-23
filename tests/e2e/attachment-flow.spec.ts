@@ -139,6 +139,48 @@ test.describe("attachment UX", () => {
     await expect(page.getByTestId("app-toast")).toHaveText(
       "일부 파일은 지원되지 않아 제외되었습니다: 3개"
     );
+
+    // The toast clears itself after four seconds. What it said has to survive
+    // that, or a person who looked away learns nothing until the answer comes
+    // back without the files they attached.
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveText(
+      "6개 읽음 · 3개 제외"
+    );
+    await expect(page.getByTestId("app-toast")).toHaveCount(0, {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveText(
+      "6개 읽음 · 3개 제외"
+    );
+  });
+
+  test("an archive with nothing skipped says so without a skipped count", async ({
+    page,
+  }) => {
+    // Zero is not a number worth putting on screen next to "skipped": it
+    // invites the reader to look for something that did not happen.
+    uploadState.archive = { totalEntries: 4, includedFiles: 4, excludedFiles: 0 };
+    await attachFromComputer(page, {
+      name: "clean.zip",
+      mimeType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]),
+    });
+
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveText(
+      "4개 읽음"
+    );
+    await expect(page.getByTestId("app-toast")).toHaveCount(0);
+  });
+
+  test("a file that is not an archive carries no summary", async ({ page }) => {
+    await attachFromComputer(page, {
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("hello\n", "utf8"),
+    });
+
+    await expect(page.getByTestId("attachment-complete")).toBeVisible();
+    await expect(page.getByTestId("attachment-archive-summary")).toHaveCount(0);
   });
 
   test("a text file whose browser type is empty is still attachable", async ({
