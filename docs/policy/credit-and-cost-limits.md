@@ -345,6 +345,48 @@ override**가 남아 있으면 실패합니다. 그런 override는 오늘 아무
   쓰지 않으므로, 둘 다 비어 있는 행의 차이는 관리자 결정일 가능성이 낮습니다.
   증거이지 증명은 아닙니다.
 
+#### reconciliation에는 두 개의 scope가 있습니다
+
+`STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에 등록한다는 것은 원래 **검토된
+메타데이터 블록 전체**(이름·apiModel·등급·`creditWeight`·capability·토큰 한도)를
+행에 쓴다는 뜻입니다. 상한 하나를 고치려고 그 전체를 쓰면 안 되는 이유가
+있습니다.
+
+**`creditWeight`가 hold 중입니다.** `perplexity/sonar`는 소스 16, production
+청구 20이고, `docs/policy/perplexity-sonar-credit-price-hold.md`는 승인 전
+어느 쪽도 바꾸지 말라고 하면서 **바로 이 목록을 그 행을 움직일 수 있는
+경로로 지목**합니다. 전체 scope로 등록하면 다음 부팅에 20이 16이 되고, 그것은
+사고 대응에 섞여 들어간 승인 없는 가격 인하입니다. docs/policy/perplexity-sonar-credit-price-hold.md §5는 다른 모델도
+같은 상태일 수 있고 production 대상 `report:model-credit-weights`만 그 범위를
+정할 수 있다고 적어 두었으므로, 이 반대는 Perplexity 두 모델만이 아니라 아래
+열두 개 전부에 적용됩니다.
+
+그래서 2026-08-23에 좁은 scope를 두었습니다 —
+`OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS`. payload는 `maxOutputTokens`
+**한 필드**입니다.
+
+| | 전체 scope | 상한 전용 scope |
+|---|---|---|
+| 쓰는 것 | 검토된 메타데이터 블록 | `maxOutputTokens` |
+| `creditWeight` | 씁니다 | 쓰지 않습니다 |
+| `reservationOutputTokens` | 씁니다 | 쓰지 않습니다 |
+| 근거 | 카탈로그가 그 모두의 authority임을 사람이 확인함 | 상한은 능력이고, 나머지는 결정이 필요함 |
+
+대상 열두 개는 전부 Sonnet 5와 같은 모양입니다 — profile이 생기기 전에 seed돼
+class fallback 상한(profile의 1/4 ~ 1/64)을 들고 있습니다:
+`claude-haiku-4-5`, `glm-5.2`, `kimi-k2.7-code`, `mistral-large-3`,
+`mistral-small-4`, `perplexity/sonar`, `perplexity/sonar-deep-research`,
+`perplexity/sonar-pro`, `perplexity/sonar-reasoning-pro`, `qwen3.6-flash`,
+`qwen3.7-max`, `qwen3.7-plus`.
+
+**`gpt-5-5-thinking`은 제외합니다.** 상한은 이미 일치하고(양쪽 8,192) 예약만
+다릅니다(4,096 → 6,144). 옮길 상한이 없고, 예약만 옮기는 등록은 위 규칙이
+거부하는 바로 그 entitlement 변경입니다.
+
+`reservationOutputTokens`를 좁은 scope에서도 빼는 이유는, 열두 개 모두 오늘은
+class fallback과 값이 같아 write가 no-op이지만 **profile이 움직이거나 관리자가
+손으로 넣는 순간 조용히 진짜 write가 되기 때문**입니다.
+
 확인: `npm run report:model-token-limits`(읽기 전용). 모델별로 catalogue와
 저장 행의 두 컬럼을 나란히 놓고, 행이 reconciliation 대상인지와 actor 유무를
 함께 보고합니다. **gate가 아니라 보고입니다** — 행이 카탈로그와 다른 것은
