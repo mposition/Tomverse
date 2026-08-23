@@ -4,8 +4,8 @@
  * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
  * (each cell's first batch is reviewed before the rest is generated).
  *
- * These are AI drafts. Policy §12.6 says whatever an agent makes is a
- * candidate pool, and the guidance §6.2 says a draft carries no authority —
+ * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 says whatever an agent makes is a
+ * candidate pool, and the guidance docs/ops/memory-extraction-eval-dataset.md §6.2 says a draft carries no authority —
  * so this file is deliberately NOT imported by
  * `lib/memoryExtractionEvalFixtures.ts` and its cases are not in
  * `MEMORY_EVAL_CASES`. The harness cannot score them, the dataset digest does
@@ -15,15 +15,15 @@
  * `tests/memoryEvalCandidateIsolation.test.mjs` fails if a candidate id ever
  * appears in the dataset without passing through review.
  *
- * Adoption is a human act (§6.3, §6.4). A case moves into the fixtures file
+ * Adoption is a human act (docs/ops/memory-extraction-eval-dataset.md §6.3, §6.4). A case moves into the fixtures file
  * only after the reviewer records `채택` for it in
  * `docs/ops/memory-extraction-eval-batches/batch-001-durable-facts-ko.md`.
  * A case rejected there is redrafted here and re-reviewed by the same person
  * — the reviewer does not edit it in place, because a reviewer who writes the
- * answer has authored it (§6.4).
+ * answer has authored it (docs/ops/memory-extraction-eval-dataset.md §6.4).
  *
  * Typing is the point of keeping this in TypeScript rather than in the record
- * file: `MemoryEvalCase` rejects a `kind` outside §8.2's list, so a draft
+ * file: `MemoryEvalCase` rejects a `kind` outside docs/ops/memory-extraction-eval-dataset.md §8.2's list, so a draft
  * cannot reach review with an invalid label.
  */
 
@@ -51,14 +51,14 @@ const conversation = (
 /**
  * 25 drafts for `durable_facts:ko`.
  *
- * Kind spread (§3.2: no kind above 40% of the cell) — the widest of the two
+ * Kind spread (docs/ops/memory-extraction-eval-dataset.md §3.2: no kind above 40% of the cell) — the widest of the two
  * here is 3/25 = 12%:
  *   constraint 3, preference 3, identity 2, occupation 2, expertise 2,
  *   long_term_goal 2, project 2, decision 2, relationship 2,
  *   recurring_context 1, communication_style 1, verbosity 1, language 1,
  *   code_style 1.
  *
- * §3.1 asks for deliberate spread in length, register and topic: there are
+ * docs/ops/memory-extraction-eval-dataset.md §3.1 asks for deliberate spread in length, register and topic: there are
  * one-line requests, long background dumps, a message with typos, one with an
  * emoji, and formal and casual registers. Names, emails and numbers are all
  * invented.

@@ -2,7 +2,7 @@
 
 `docs/ops/memory-extraction-eval-dataset.md` §8의 케이스별 기록입니다. 판정란은
 검수자가 채웁니다. **에이전트는 판정란을 기입하지 않습니다** — 초안 생성자가 자기
-초안을 채택하는 것이 §6.2가 막는 것입니다.
+초안을 채택하는 것이 `docs/ops/memory-extraction-eval-dataset.md` §6.2가 막는 것입니다.
 
 ## batch 정보
 
@@ -10,12 +10,12 @@
 |---|---|
 | batch id | `batch-001` |
 | cell | `durable_facts:ko` |
-| 케이스 수 | 25 (§6.1의 25~50 범위) |
+| 케이스 수 | 25 (`docs/ops/memory-extraction-eval-dataset.md` §6.1의 25~50 범위) |
 | 상태 | **검수 대기** — candidate pool, dataset 아님 |
 | 초안 위치 | `lib/memoryExtractionEvalCandidates/batch001DurableKo.ts` |
 | 초안 도구 | Claude Code (Anthropic) |
-| 초안 모델·버전 | **미기입** — §6.5는 모델·버전 기록을 요구하고, 이 에이전트는 저장소에 남기는 산출물에 모델 식별자를 쓰지 않도록 설정돼 있습니다. 운영자가 기입해 주세요. |
-| 초안 계열이 평가 대상과 같은가 | **아니오.** 평가 대상은 `gpt-5-6-luna`(OpenAI), 초안은 Anthropic 계열이므로 §6.5의 "비 OpenAI 계열 우선"을 만족합니다 |
+| 초안 모델·버전 | **미기입** — `docs/ops/memory-extraction-eval-dataset.md` §6.5는 모델·버전 기록을 요구하고, 이 에이전트는 저장소에 남기는 산출물에 모델 식별자를 쓰지 않도록 설정돼 있습니다. 운영자가 기입해 주세요. |
+| 초안 계열이 평가 대상과 같은가 | **아니오.** 평가 대상은 `gpt-5-6-luna`(OpenAI), 초안은 Anthropic 계열이므로 `docs/ops/memory-extraction-eval-dataset.md` §6.5의 "비 OpenAI 계열 우선"을 만족합니다 |
 | 작성일 | 2026-08-23 |
 | 검수자 | @mposition *(전사 — 확인 필요)* |
 | 검수 완료일 | |
@@ -23,7 +23,7 @@
 
 ## 이 batch가 왜 25건인가
 
-§6.5는 cell마다 첫 batch를 사람이 검수한 뒤 나머지를 생성하라고 합니다. 8개 cell의
+`docs/ops/memory-extraction-eval-dataset.md` §6.5는 cell마다 첫 batch를 사람이 검수한 뒤 나머지를 생성하라고 합니다. 8개 cell의
 첫 batch를 한꺼번에 내면 200건이 한 번에 검수 대상이 되고, 초안에 체계적 결함이
 있으면 그 결함이 200번 복제된 상태로 발견됩니다. **한 cell만 먼저 낸 것은 지침보다
 더 좁게 잡은 것이고, 의도한 것입니다** — 이 25건에 대한 판정이 나머지 7개 cell의
@@ -31,7 +31,7 @@
 
 나머지 7개 cell의 첫 batch를 기다리지 않고 바로 받고 싶으시면 그렇게 하겠습니다.
 
-## 자동 검사 결과 (에이전트가 수행 — §6.5)
+## 자동 검사 결과 (에이전트가 수행 — `docs/ops/memory-extraction-eval-dataset.md` §6.5)
 
 사람이 셈이나 대조를 하지 않도록, 형식 요건은 전부 기계로 확인했습니다. 검수자는
 **케이스가 좋은 케이스인가**만 보면 됩니다.
@@ -39,13 +39,13 @@
 | 검사 | 결과 |
 |---|---|
 | exact duplicate (`findDuplicateCases`) | 0건 |
-| kind 분포 (§3.2, 한 kind가 40% 초과 금지) | 최대 `constraint`·`preference` 각 3/25 = **12%** |
-| kind 유효성 (§8.2 목록) | 25건 전부 유효 |
-| `expected` 개수 (§4.1, 1~3개) | 전부 1개 |
-| `mustInclude` 키워드 수 (§4.1, 2개 이하 권장) | 전부 1~2개 |
-| 키워드가 **사용자 발화**에 실재하는가 (§3.2) | 25건 전부 확인 — assistant 발화에만 있는 키워드 없음 |
-| 턴 수 · 사용자 발화 (§3.1, 각 ≥2 / ≥1) | 전부 충족 |
-| near-duplicate 상위 쌍 (§6.5) | 이 cell 최고 token 0.25 / shape 0.14 — 아래 참조 |
+| kind 분포 (`docs/ops/memory-extraction-eval-dataset.md` §3.2, 한 kind가 40% 초과 금지) | 최대 `constraint`·`preference` 각 3/25 = **12%** |
+| kind 유효성 (`docs/ops/memory-extraction-eval-dataset.md` §8.2 목록) | 25건 전부 유효 |
+| `expected` 개수 (`docs/ops/memory-extraction-eval-dataset.md` §4.1, 1~3개) | 전부 1개 |
+| `mustInclude` 키워드 수 (`docs/ops/memory-extraction-eval-dataset.md` §4.1, 2개 이하 권장) | 전부 1~2개 |
+| 키워드가 **사용자 발화**에 실재하는가 (`docs/ops/memory-extraction-eval-dataset.md` §3.2) | 25건 전부 확인 — assistant 발화에만 있는 키워드 없음 |
+| 턴 수 · 사용자 발화 (`docs/ops/memory-extraction-eval-dataset.md` §3.1, 각 ≥2 / ≥1) | 전부 충족 |
+| near-duplicate 상위 쌍 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | 이 cell 최고 token 0.25 / shape 0.14 — 아래 참조 |
 
 near-duplicate 보고서 실행:
 
@@ -54,10 +54,10 @@ npm run report:memory-eval-near-duplicates -- --candidates --top=15
 ```
 
 **이 보고서는 권고입니다.** 통과·불통과를 정하지 않으며, 다양성 판정은 검수자가
-합니다(§6.5). 참고로 검출기는 같은 틀에 단어만 바꾼 쌍에서 shape 1.00, 같은 주제의
+합니다(`docs/ops/memory-extraction-eval-dataset.md` §6.5). 참고로 검출기는 같은 틀에 단어만 바꾼 쌍에서 shape 1.00, 같은 주제의
 다른 문장에서 0.10을 냅니다(`tests/memoryEvalNearDuplicates.test.mjs`가 고정).
 
-## §3.1 분산 — 무엇을 의도적으로 섞었는가
+## `docs/ops/memory-extraction-eval-dataset.md` §3.1 분산 — 무엇을 의도적으로 섞었는가
 
 검수자가 "고르게 분산됐는가"를 판정할 때 볼 지점입니다.
 
@@ -72,10 +72,10 @@ npm run report:memory-eval-near-duplicates -- --candidates --top=15
 
 판정은 `채택` / `반려(재작성)` / `반려(폐기)` 중 하나입니다. **`수정 후 채택`은
 없습니다** — 실질 수정은 반려 사유를 남기면 에이전트가 재작성하고 같은 사람이
-재검수합니다(§6.4). 내용을 바꾸지 않는 표기 수정은 `채택`에 포함됩니다.
+재검수합니다(`docs/ops/memory-extraction-eval-dataset.md` §6.4). 내용을 바꾸지 않는 표기 수정은 `채택`에 포함됩니다.
 
 `draft disagreement`는 제안과 채택된 판정이 다른 경우 `Y`입니다. adjudication이
-아니며(§6.4), batch별 비율만 집계합니다.
+아니며(`docs/ops/memory-extraction-eval-dataset.md` §6.4), batch별 비율만 집계합니다.
 
 | # | 제안 kind | 제안 키워드 | 사용자 발화 발췌 | 판정 | 사유 / draft disagreement |
 |---|---|---|---|---|---|
@@ -113,11 +113,11 @@ npm run report:memory-eval-near-duplicates -- --candidates --top=15
 | 반려(재작성) | |
 | 반려(폐기) | |
 | draft disagreement 비율 | |
-| 다양성 판정 (§6.5) | |
+| 다양성 판정 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | |
 
 ## 다음 단계
 
-1. 위 판정란 기입 → **batch 채택 여부** 기록 (§6.3: 표본 검수는 명시적 batch
+1. 위 판정란 기입 → **batch 채택 여부** 기록 (`docs/ops/memory-extraction-eval-dataset.md` §6.3: 표본 검수는 명시적 batch
    채택으로 이어집니다)
 2. `반려(재작성)`이 있으면 에이전트가 재작성 → 같은 검수자가 재검수
 3. 채택된 케이스를 `lib/memoryExtractionEvalFixtures.ts`로 이동하고

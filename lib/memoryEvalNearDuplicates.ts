@@ -2,13 +2,13 @@
  * Near-duplicate detection over memory-eval cases
  * (docs/ops/memory-extraction-eval-dataset.md §6.5).
  *
- * `findDuplicateCases()` catches only byte-identical conversations. §3.1 says
+ * `findDuplicateCases()` catches only byte-identical conversations. docs/ops/memory-extraction-eval-dataset.md §3.1 says
  * what that leaves uncaught — "같은 틀에 단어만 바꾼 200개는 200개가 아니라
  * 1개입니다" — and hands the judgement to the reviewer. This ranks where to
  * look so that judgement is over a shortlist rather than every pair.
  *
  * **Advisory.** Nothing here passes or fails a dataset. A high score is a
- * place to look; diversity remains the reviewer's call (§6.5).
+ * place to look; diversity remains the reviewer's call (docs/ops/memory-extraction-eval-dataset.md §6.5).
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
@@ -62,7 +62,7 @@ export function tokenFeatures(testCase: MemoryEvalCase): Set<string> {
  *     would call every polite Korean sentence identical.
  *   * Turn count and the user/assistant sequence are features of their own:
  *     reusing a two-turn call-and-response frame is itself the repetition
- *     §3.1 is about.
+ *     docs/ops/memory-extraction-eval-dataset.md §3.1 is about.
  */
 export function shapeFeatures(testCase: MemoryEvalCase): Set<string> {
     const features: string[] = [];
@@ -93,7 +93,7 @@ export function shapeFeatures(testCase: MemoryEvalCase): Set<string> {
  * Every within-cell pair, most similar first.
  *
  * Cross-cell pairs are excluded: two cells are meant to differ, so their
- * similarity says nothing about the repetition §3.1 forbids.
+ * similarity says nothing about the repetition docs/ops/memory-extraction-eval-dataset.md §3.1 forbids.
  */
 export function nearDuplicatePairs(
     cases: readonly MemoryEvalCase[]

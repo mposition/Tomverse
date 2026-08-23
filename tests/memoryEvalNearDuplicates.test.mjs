@@ -8,7 +8,7 @@ import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 
 /**
- * The report exists to give a reviewer a shortlist for the judgement §3.1
+ * The report exists to give a reviewer a shortlist for the judgement docs/ops/memory-extraction-eval-dataset.md §3.1
  * hands them: "같은 틀에 단어만 바꾼 200개는 200개가 아니라 1개입니다".
  *
  * A detector has two ways to be useless, and the first version was the second
@@ -45,7 +45,7 @@ const ORIGINAL = testCase("a", [
     ["user", "저는 간호사로 일한 지 12년 됐습니다."],
     ["assistant", "오래 하셨네요. 어떤 부분을 도와드릴까요?"],
 ]);
-/** The exact failure §3.1 names: one frame, the noun swapped. */
+/** The exact failure docs/ops/memory-extraction-eval-dataset.md §3.1 names: one frame, the noun swapped. */
 const TEMPLATE_CLONE = testCase("b", [
     ["user", "저는 세무사로 일한 지 12년 됐습니다."],
     ["assistant", "오래 하셨네요. 어떤 부분을 도와드릴까요?"],

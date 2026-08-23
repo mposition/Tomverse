@@ -2,7 +2,7 @@
  * Candidate batches awaiting human review
  * (docs/ops/memory-extraction-eval-dataset.md §6.2, §6.5).
  *
- * Nothing here is dataset. These are AI drafts, and policy §12.6 says an
+ * Nothing here is dataset. These are AI drafts, and policy docs/policy/external-conversation-import-and-memory.md §12.6 says an
  * agent's output is a candidate pool until a person adopts it. The barrier is
  * structural: `lib/memoryExtractionEvalFixtures.ts` does not import this file,
  * so no candidate can be scored, counted toward a cell's floor, or covered by
