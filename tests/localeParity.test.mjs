@@ -156,8 +156,13 @@ const ENGLISH_STRING_CEILING = {
   // choosing a different one to make this number smaller would make the label
   // worse. The wizard's other hundred-odd strings are translated in all six,
   // and Korean, Chinese, Spanish and Portuguese share none of them.
+  //
+  // +1 fr from the same wizard's confirmation screen, which labels the list of
+  // files it is about to publish. French writes "Documents" exactly as English
+  // does; the row beside it ("Modeles") and the heading above it are
+  // translated, so this is the word rather than a skipped line.
   zh: 10,
-  fr: 38,
+  fr: 39,
   de: 29,
   es: 18,
   pt: 16,

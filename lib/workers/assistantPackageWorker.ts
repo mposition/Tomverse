@@ -154,7 +154,13 @@ async function extract(file: File, paths: readonly string[]): Promise<void> {
     const wanted = new Set(paths);
     const entries: { path: string; bytes: Uint8Array }[] = [];
     for (const read of plan.reads) {
-        if (!wanted.has(read.entry.path)) continue;
+        // The paths arrive from the main thread, so they are a request rather
+        // than a decision. A script is not in `plan.reads` at all and could
+        // never be named, but the manifest and the skill document are -- and
+        // the upload step has no business with either. Narrowing to the role
+        // keeps "what may be extracted" the same question the plan already
+        // answered.
+        if (read.role !== "knowledge" || !wanted.has(read.entry.path)) continue;
         const bytes = await inflatePackageEntryFromBlob(read.entry, file);
         if (bytes.outcome !== "read") {
             post({

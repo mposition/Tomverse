@@ -36,6 +36,7 @@ import {
 import type { AssistantPackageReview } from "@/lib/assistantPackageReview";
 import {
     findingKey,
+    secretOverrideFingerprint,
     type AssistantPackageSecretFinding,
 } from "@/lib/assistantPackageSecretScan";
 import {
@@ -166,6 +167,54 @@ export type ImportParseState =
 /** What is known about the chosen file. Never the `File` itself. */
 export type ImportFileSummary = { name: string; bytes: number };
 
+/* ------------------------------------------------- steps 7 and 8: the run */
+
+/**
+ * One document on its way to the server.
+ *
+ * `waiting` and `uploading` are the browser's own reading; `processing`,
+ * `ready` and `failed` are the server's, read back from the import. The two
+ * are separate words on purpose -- a file the browser finished uploading is
+ * not a file that has been read, and merging them would let a screen say
+ * "done" while extraction was still running.
+ */
+export type ImportUploadFile = {
+    /** The path inside the container, which is the wizard's identity for it. */
+    path: string;
+    name: string;
+    status: "waiting" | "uploading" | "processing" | "ready" | "failed";
+    /** The server's file id, once finalize has produced one. */
+    fileId: string | null;
+    failureCode: string | null;
+};
+
+/**
+ * Where the run has got to.
+ *
+ * Distinct from `step`, and both are needed: the step is where the owner is
+ * looking, and this is what the server holds. A single field would have to
+ * answer "which screen" and "what exists" at once, and the interesting states
+ * are exactly the ones where those differ -- a failed publish leaves the owner
+ * on step 8 with an import that is still staging.
+ */
+export type ImportRunState =
+    | { kind: "idle" }
+    | { kind: "creating" }
+    | { kind: "uploading"; importId: string }
+    | { kind: "processing"; importId: string }
+    /** Every document is `ready`. The only state publishing may start from. */
+    | { kind: "ready"; importId: string }
+    | { kind: "publishing"; importId: string }
+    | {
+          kind: "published";
+          importId: string;
+          revision: number;
+          /** The publish found nothing new to record. Not a failure (§5.6). */
+          unchanged: boolean;
+      }
+    /** `importId` is null when the failure happened before one existed. */
+    | { kind: "failed"; importId: string | null; code: string };
+
 export type AssistantPackageImportState = {
     step: AssistantPackageImportStep;
     file: ImportFileSummary | null;
@@ -181,6 +230,10 @@ export type AssistantPackageImportState = {
     target: ImportTarget | null;
     /** The 6 -> 7 boundary: uploading was explicitly agreed to. */
     uploadAcknowledged: boolean;
+    /** What the server holds, from step 7 onward. */
+    run: ImportRunState;
+    /** One row per document being brought across, in selection order. */
+    uploads: readonly ImportUploadFile[];
 };
 
 const defaultDecisions = (): Record<ImportFieldKey, ImportFieldDecision> => ({
@@ -208,6 +261,8 @@ export const initialImportState = (): AssistantPackageImportState => ({
     lossesAcknowledged: false,
     target: null,
     uploadAcknowledged: false,
+    run: { kind: "idle" },
+    uploads: [],
 });
 
 /* ---------------------------------------------------------------- actions */
@@ -229,6 +284,27 @@ export type AssistantPackageImportAction =
     | { type: "losses_acknowledged"; acknowledged: boolean }
     | { type: "target_chosen"; target: ImportTarget }
     | { type: "upload_acknowledged" }
+    | { type: "run_started" }
+    | { type: "import_created"; importId: string; uploads: ImportUploadFile[] }
+    | {
+          type: "upload_progressed";
+          path: string;
+          status: ImportUploadFile["status"];
+          fileId?: string | null;
+          failureCode?: string | null;
+      }
+    /** The server's own reading of every staged file, from the import. */
+    | {
+          type: "processing_observed";
+          files: readonly {
+              id: string;
+              processingStatus: string;
+              failureCode: string | null;
+          }[];
+      }
+    | { type: "publish_started" }
+    | { type: "publish_succeeded"; revision: number; unchanged: boolean }
+    | { type: "run_failed"; code: string }
     | { type: "advanced" }
     | { type: "went_back" }
     | { type: "restarted" };
@@ -350,6 +426,96 @@ export function assistantPackageImportReducer(
             return { ...state, target: action.target };
         case "upload_acknowledged":
             return { ...state, uploadAcknowledged: true };
+        case "run_started":
+            return { ...state, run: { kind: "creating" } };
+        case "import_created":
+            return {
+                ...state,
+                run: { kind: "uploading", importId: action.importId },
+                uploads: action.uploads,
+            };
+        case "upload_progressed":
+            return {
+                ...state,
+                uploads: state.uploads.map((upload) =>
+                    upload.path === action.path
+                        ? {
+                              ...upload,
+                              status: action.status,
+                              fileId:
+                                  action.fileId === undefined
+                                      ? upload.fileId
+                                      : action.fileId,
+                              failureCode:
+                                  action.failureCode === undefined
+                                      ? upload.failureCode
+                                      : action.failureCode,
+                          }
+                        : upload
+                ),
+            };
+        case "processing_observed": {
+            const byId = new Map(action.files.map((file) => [file.id, file]));
+            const uploads = state.uploads.map((upload) => {
+                const observed = upload.fileId ? byId.get(upload.fileId) : undefined;
+                if (!observed) return upload;
+                // The server's word replaces the browser's guess, and only for
+                // the three states the server owns. A row still uploading has
+                // no id yet, so it cannot be overwritten from here.
+                const status: ImportUploadFile["status"] =
+                    observed.processingStatus === "ready"
+                        ? "ready"
+                        : observed.processingStatus === "failed"
+                          ? "failed"
+                          : "processing";
+                return { ...upload, status, failureCode: observed.failureCode };
+            });
+            const importId =
+                state.run.kind === "uploading" ||
+                state.run.kind === "processing" ||
+                state.run.kind === "ready"
+                    ? state.run.importId
+                    : null;
+            if (importId === null) return { ...state, uploads };
+            const everyReady =
+                uploads.length > 0 &&
+                uploads.every((upload) => upload.status === "ready");
+            const emptyRun = uploads.length === 0;
+            return {
+                ...state,
+                uploads,
+                run:
+                    everyReady || emptyRun
+                        ? { kind: "ready", importId }
+                        : { kind: "processing", importId },
+            };
+        }
+        case "publish_started":
+            return state.run.kind === "ready"
+                ? { ...state, run: { kind: "publishing", importId: state.run.importId } }
+                : state;
+        case "publish_succeeded":
+            return state.run.kind === "publishing"
+                ? {
+                      ...state,
+                      run: {
+                          kind: "published",
+                          importId: state.run.importId,
+                          revision: action.revision,
+                          unchanged: action.unchanged,
+                      },
+                  }
+                : state;
+        case "run_failed":
+            return {
+                ...state,
+                run: {
+                    kind: "failed",
+                    importId:
+                        "importId" in state.run ? (state.run.importId as string) : null,
+                    code: action.code,
+                },
+            };
         case "advanced":
             return advanceProblems(state).length === 0
                 ? { ...state, step: stepAfter(state.step) }
@@ -476,7 +642,10 @@ export type ImportBlock =
     | { kind: "too_many_knowledge_files"; limit: number }
     | { kind: "losses_unacknowledged" }
     | { kind: "no_target" }
-    | { kind: "upload_unacknowledged" };
+    | { kind: "upload_unacknowledged" }
+    | { kind: "run_failed"; code: string }
+    | { kind: "documents_pending"; pending: number }
+    | { kind: "documents_failed"; failed: number };
 
 export function advanceProblems(
     state: AssistantPackageImportState
@@ -551,11 +720,35 @@ export function advanceProblems(
                 blocks.push({ kind: "upload_unacknowledged" });
             }
             break;
-        case "upload":
+        case "upload": {
+            if (state.run.kind === "failed") {
+                blocks.push({ kind: "run_failed", code: state.run.code });
+                break;
+            }
+            const failed = state.uploads.filter(
+                (upload) => upload.status === "failed"
+            ).length;
+            if (failed > 0) {
+                // Not "carry on without it". A document that could not be read
+                // is the owner's choice to remove or replace, and a publish
+                // that quietly dropped it is the failure the loss report
+                // exists to prevent -- except invisible.
+                blocks.push({ kind: "documents_failed", failed });
+            }
+            const pending = state.uploads.filter(
+                (upload) => upload.status !== "ready" && upload.status !== "failed"
+            ).length;
+            if (pending > 0) blocks.push({ kind: "documents_pending", pending });
+            // An import with no documents has nothing to wait for, so nothing
+            // blocks it: the poll moves it on by itself, and a "still reading"
+            // line while there is nothing to read would be a sentence about
+            // documents that do not exist.
+            break;
+        }
         case "confirm":
-            // These two are Slice 5A's: they depend on server state this file
-            // knows nothing about, and guessing at their preconditions here
-            // would produce a gate that agrees with nothing.
+            // Step 8 has no next: publishing is its own action with its own
+            // outcome, and an "advance" that published would be a second way
+            // to trigger the one thing on this screen that cannot be undone.
             break;
     }
     return blocks;
@@ -563,3 +756,52 @@ export function advanceProblems(
 
 export const canAdvance = (state: AssistantPackageImportState): boolean =>
     advanceProblems(state).length === 0;
+
+/* --------------------------------------------------- what gets published */
+
+/** The version of the approval payload's shape, stored beside the digest. */
+export const IMPORT_APPROVAL_DIGEST_VERSION = 1;
+
+/** The server file ids to keep. Anything staged and not listed is discarded. */
+export const keepFileIds = (state: AssistantPackageImportState): string[] =>
+    state.uploads
+        .filter((upload) => upload.status === "ready" && upload.fileId !== null)
+        .map((upload) => upload.fileId as string);
+
+/**
+ * Exactly what the confirmation screen showed, as one string.
+ *
+ * Its digest is the only thing that can prove afterwards that what was stored
+ * is what a person looked at and agreed to. So it carries the fields, the
+ * documents *and* the credential findings that were waived: a payload that
+ * omitted the waivers would let an approval be replayed against a package
+ * whose secrets nobody had decided about.
+ *
+ * Built from the resolved draft rather than from the review, because the
+ * owner may have changed any of it -- the review is the proposal and this is
+ * the answer.
+ */
+export function importApprovalPayload(
+    state: AssistantPackageImportState
+): string {
+    const draft = resolveImportDraft(state);
+    const documents = state.uploads
+        .filter((upload) => upload.status === "ready")
+        .map((upload) => upload.name)
+        .sort();
+    return [
+        `digestVersion=${IMPORT_APPROVAL_DIGEST_VERSION}`,
+        `mode=${state.target?.kind ?? "none"}`,
+        `name=${draft.name}`,
+        `icon=${draft.icon ?? ""}`,
+        `description=${draft.description ?? ""}`,
+        `instructions=${draft.instructions}`,
+        `modelIds=${draft.modelIds.join(",")}`,
+        `starters=${JSON.stringify(draft.starters)}`,
+        `webSearch=${draft.toolPolicy.webSearch}`,
+        `deepResearch=${draft.toolPolicy.deepResearch}`,
+        `useAccountMemory=${draft.memoryPolicy.useAccountMemory}`,
+        `documents=${JSON.stringify(documents)}`,
+        `waivedSecrets=${secretOverrideFingerprint(state.secretWaivers)}`,
+    ].join("\n");
+}

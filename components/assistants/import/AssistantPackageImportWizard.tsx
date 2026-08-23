@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, Upload } from "lucide-react";
 
@@ -19,29 +20,49 @@ import type {
 } from "@/lib/assistantPackageAdapter";
 import {
     ASSISTANT_PACKAGE_LIMITS,
+    packageEntryExtension,
     type AssistantPackageRefusalCode,
     type AssistantPackageSkipReason,
 } from "@/lib/assistantPackageLimits";
+import { knowledgeMimeForExtension } from "@/lib/assistantKnowledgeLimits";
 import {
     ASSISTANT_PACKAGE_IMPORT_STEPS,
+    IMPORT_APPROVAL_DIGEST_VERSION,
     IMPORT_FIELDS,
     IMPORT_STEP_COUNT,
     advanceProblems,
     assistantPackageImportReducer,
     canAdvance,
     canGoBack,
+    importApprovalPayload,
     importStepNumber,
     initialImportState,
+    keepFileIds,
     resolveImportDraft,
-    stepWritesToServer,
     unwaivedFindings,
+    type AssistantPackageImportState,
     type AssistantPackageImportStep,
     type ImportBlock,
     type ImportFieldKey,
+    type ImportUploadFile,
 } from "@/lib/assistantPackageImportWizard";
+import {
+    ImportRequestError,
+    cancelImport,
+    createImport,
+    finalizeImportUpload,
+    prepareImportUpload,
+    publishImport,
+    putImportObject,
+    readImport,
+    sha256Hex,
+} from "@/lib/assistantPackageImportClient";
 import { findingKey } from "@/lib/assistantPackageSecretScan";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
-import { assistantProfileHierarchy } from "@/lib/settingsNavigation";
+import {
+    ASSISTANT_PROFILE_LIST_PATH,
+    assistantProfileHierarchy,
+} from "@/lib/settingsNavigation";
 import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPackageWorker";
 
 /**
@@ -152,6 +173,35 @@ const REFUSAL_KEY: Record<AssistantPackageRefusalCode, string> = {
     ASSISTANT_PACKAGE_SECRET_PRESENT: "assistantPackageImport.refusalSecretPresent",
 };
 
+const UPLOAD_STATUS_KEY: Record<ImportUploadFile["status"], string> = {
+    waiting: "assistantPackageImport.uploadStatusWaiting",
+    uploading: "assistantPackageImport.uploadStatusUploading",
+    processing: "assistantPackageImport.uploadStatusProcessing",
+    ready: "assistantPackageImport.uploadStatusReady",
+    failed: "assistantPackageImport.uploadStatusFailed",
+};
+
+/**
+ * A sentence for a failure the server named.
+ *
+ * The known codes get their own line; anything else gets one that says the
+ * import stopped without pretending to know why. The server's message is never
+ * shown -- it is written for a developer and can name a path.
+ */
+const RUN_FAILURE_KEY: Record<string, string> = {
+    ASSISTANT_PROFILE_VERSION_STALE: "assistantPackageImport.failureStale",
+    ASSISTANT_PROFILE_IMPORT_IN_PROGRESS: "assistantPackageImport.failureInProgress",
+    ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED: "assistantPackageImport.failureQuota",
+    ASSISTANT_KNOWLEDGE_KEY_RESERVED_FOR_IMPORT:
+        "assistantPackageImport.failureKeyInUse",
+    ASSISTANT_PACKAGE_UPLOAD_FAILED: "assistantPackageImport.failureUpload",
+    ASSISTANT_PACKAGE_ENTRY_MISSING: "assistantPackageImport.failureEntryMissing",
+    ASSISTANT_PACKAGE_DOCUMENTS_NOT_READY: "assistantPackageImport.failureNotReady",
+};
+
+const runFailureKey = (code: string): string =>
+    RUN_FAILURE_KEY[code] ?? "assistantPackageImport.failureGeneric";
+
 /** Why a step cannot be left, for the kinds that carry no data of their own. */
 const BLOCK_KEY: Record<ImportBlock["kind"], string> = {
     no_file: "assistantPackageImport.blockNoFile",
@@ -163,6 +213,9 @@ const BLOCK_KEY: Record<ImportBlock["kind"], string> = {
     losses_unacknowledged: "assistantPackageImport.blockLossesUnacknowledged",
     no_target: "assistantPackageImport.blockNoTarget",
     upload_unacknowledged: "assistantPackageImport.blockUploadUnacknowledged",
+    run_failed: "assistantPackageImport.blockRunFailed",
+    documents_pending: "assistantPackageImport.blockDocumentsPending",
+    documents_failed: "assistantPackageImport.blockDocumentsFailed",
 };
 
 /**
@@ -186,20 +239,19 @@ const PROBLEM_KEY: Record<string, string> = {
 
 const ACCEPT = ".zip,.json";
 
-export function AssistantPackageImportWizard({
-    onBeginUpload,
-}: {
-    /**
-     * What crossing the 6 -> 7 boundary does.
-     *
-     * A port rather than a call, because crossing it uploads files and this
-     * component has nothing to upload with until the endpoints exist. Absent,
-     * the wizard stops at step 6 and says so, which is the honest rendering:
-     * a wizard that walked into step 7 with no way forward and no way back
-     * would be a dead end wearing a progress indicator.
-     */
-    onBeginUpload?: () => void;
-} = {}) {
+/**
+ * How long step 7 watches before it stops asking.
+ *
+ * Two seconds is short enough that a small document looks immediate and long
+ * enough that a hundred of them do not become a request per second. The cap is
+ * ten minutes, which is past any extraction this accepts; reaching it leaves
+ * the documents in whatever state the server last reported rather than
+ * declaring a failure the server has not.
+ */
+const POLL_INTERVAL_MS = 2_000;
+const POLL_ATTEMPTS = 300;
+
+export function AssistantPackageImportWizard() {
     const { t } = useLanguage();
     const [state, dispatch] = useReducer(
         assistantPackageImportReducer,
@@ -207,61 +259,381 @@ export function AssistantPackageImportWizard({
         initialImportState
     );
     const workerRef = useRef<Worker | null>(null);
+    /**
+     * The chosen file, kept out of the state machine.
+     *
+     * A `File` is not something a reducer should hold: it is not serialisable,
+     * it cannot be compared, and the machine's whole value is that it can be
+     * driven from a test. The run needs the bytes again at step 7 -- the
+     * review carries none -- so the handle lives here instead.
+     */
+    const fileRef = useRef<File | null>(null);
+    /**
+     * The state as of this render, for the async run to read across awaits.
+     *
+     * The run loop spans several requests, so a closure over `state` would be
+     * reading whatever was true when it started. It reads through here and
+     * writes only by dispatching, so the reducer stays the only thing that
+     * decides what the state becomes.
+     */
+    const stateRef = useRef(state);
+    /** Set on unmount, so a poll in flight stops instead of dispatching. */
+    const goneRef = useRef(false);
+    /**
+     * Whether a run or a publish is already in flight.
+     *
+     * A ref rather than the state, because the state this reads through is
+     * updated in an effect and a second click can land before that runs. Two
+     * runs would create two imports -- in `create` mode, two draft profiles --
+     * and two publishes would race for the same revision.
+     */
+    const busyRef = useRef(false);
+
+    // In an effect rather than during render: writing a ref while rendering is
+    // a write React may throw away, and the run reads this across awaits where
+    // a discarded write would be a decision made from a state that never was.
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
 
     useEffect(
         () => () => {
+            goneRef.current = true;
             workerRef.current?.terminate();
             workerRef.current = null;
         },
         []
     );
 
-    const openPackage = useCallback((file: File) => {
-        workerRef.current?.terminate();
-        const worker = new Worker(
-            new URL("../../../lib/workers/assistantPackageWorker.ts", import.meta.url),
-            { type: "module" }
-        );
-        workerRef.current = worker;
-        dispatch({ type: "file_selected", file: { name: file.name, bytes: file.size } });
+    /** A worker for one request, ended when it answers. */
+    const askWorker = useCallback(
+        (request: WorkerRequest, onMessage: (message: WorkerResponse) => boolean) => {
+            workerRef.current?.terminate();
+            const worker = new Worker(
+                new URL("../../../lib/workers/assistantPackageWorker.ts", import.meta.url),
+                { type: "module" }
+            );
+            workerRef.current = worker;
+            worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+                if (onMessage(event.data)) {
+                    worker.terminate();
+                    if (workerRef.current === worker) workerRef.current = null;
+                }
+            };
+            worker.onerror = () => {
+                onMessage({
+                    type: "refused",
+                    code: "ASSISTANT_PACKAGE_FORMAT_UNSUPPORTED",
+                    cause: "parser_error",
+                });
+                worker.terminate();
+                if (workerRef.current === worker) workerRef.current = null;
+            };
+            worker.postMessage(request);
+            return worker;
+        },
+        []
+    );
 
-        worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-            const message = event.data;
-            if (message.type === "progress") {
+    const openPackage = useCallback(
+        (file: File) => {
+            fileRef.current = file;
+            dispatch({
+                type: "file_selected",
+                file: { name: file.name, bytes: file.size },
+            });
+            askWorker({ type: "parse", file }, (message) => {
+                if (message.type === "progress") {
+                    dispatch({
+                        type: "parse_progress",
+                        entriesRead: message.entriesRead,
+                        entriesPlanned: message.entriesPlanned,
+                    });
+                    return false;
+                }
+                if (message.type === "review") {
+                    dispatch({ type: "parse_succeeded", review: message.review });
+                } else if (message.type === "refused") {
+                    dispatch({
+                        type: "parse_refused",
+                        code: message.code,
+                        cause: message.cause,
+                    });
+                }
+                return true;
+            });
+        },
+        [askWorker]
+    );
+
+    /** The bytes of the chosen documents, asked for once, at upload time. */
+    const extractSelected = useCallback(
+        (file: File, paths: string[]) =>
+            new Promise<{ path: string; bytes: Uint8Array }[]>((resolve, reject) => {
+                askWorker({ type: "extract", file, paths }, (message) => {
+                    if (message.type === "extracted") {
+                        resolve(message.entries);
+                        return true;
+                    }
+                    if (message.type === "refused") {
+                        reject(new ImportRequestError(0, message.code));
+                        return true;
+                    }
+                    return false;
+                });
+            }),
+        [askWorker]
+    );
+
+    /**
+     * Steps 7 and 8's first half: create the import, send the documents, and
+     * watch until the server has read them all.
+     *
+     * The order is the contract. The import row exists before any object does,
+     * so every stored byte has something accounting for it; each document is
+     * prepared, put and finalized one at a time, because a failure halfway
+     * through a batch would leave objects nothing has claimed; and the wait is
+     * a poll of the import rather than of each file, so "all of them are
+     * ready" is answered by the server that owns it.
+     */
+    const runImport = useCallback(async () => {
+        const file = fileRef.current;
+        const current = stateRef.current;
+        const target = current.target;
+        if (!file || !current.review || !target || busyRef.current) return;
+
+        busyRef.current = true;
+        dispatch({ type: "run_started" });
+        try {
+            const draft = resolveImportDraft(current);
+            const chosen = current.review.knowledgeCandidates.filter((candidate) =>
+                current.knowledgeSelection.includes(candidate.path)
+            );
+
+            const created = await createImport({
+                // The wizard calls the first case "new" because that is what
+                // the owner chose; the server calls it "create" because that
+                // is what it does. Translated here rather than renaming
+                // either -- both words are right where they are.
+                mode: target.kind === "new" ? "create" : "merge",
+                targetProfileId:
+                    target.kind === "merge" ? target.profileId : undefined,
+                identity: {
+                    name: draft.name,
+                    icon: draft.icon,
+                    description: draft.description,
+                },
+                // Enough to resume an interrupted import, and no more: the
+                // container is not kept, so this is the only record of what
+                // the owner assembled.
+                stagingManifest: {
+                    kind: current.review.kind,
+                    adapterVersion: current.review.adapterVersion,
+                    draft,
+                    documents: chosen.map((candidate) => ({
+                        name: candidate.name,
+                        bytes: candidate.bytes,
+                        digest: candidate.digest,
+                    })),
+                },
+                declared: {
+                    sourceKind: current.review.declaredProvenance?.sourceKind ?? null,
+                    sourceName: current.review.declaredProvenance?.sourceName ?? null,
+                    sourceUrl: current.review.declaredProvenance?.sourceUrl ?? null,
+                    previousProvenance: null,
+                },
+            });
+            if (goneRef.current) return;
+
+            const uploads: ImportUploadFile[] = chosen.map((candidate) => ({
+                path: candidate.path,
+                name: candidate.name,
+                status: "waiting",
+                fileId: null,
+                failureCode: null,
+            }));
+            dispatch({ type: "import_created", importId: created.id, uploads });
+
+            const bytesByPath = new Map(
+                (await extractSelected(
+                    file,
+                    chosen.map((candidate) => candidate.path)
+                )).map((entry) => [entry.path, entry.bytes])
+            );
+            if (goneRef.current) return;
+
+            for (const candidate of chosen) {
+                const bytes = bytesByPath.get(candidate.path);
+                if (!bytes) {
+                    // The container no longer holds what the review described.
+                    // Refusing beats uploading something else under a name the
+                    // owner already approved.
+                    dispatch({
+                        type: "upload_progressed",
+                        path: candidate.path,
+                        status: "failed",
+                        failureCode: "ASSISTANT_PACKAGE_ENTRY_MISSING",
+                    });
+                    continue;
+                }
+                // Derived from the name, because a document out of an archive
+                // has no browser to report its type. The knowledge table is
+                // the one authority for the mapping, and the server checks the
+                // bytes regardless of what this says.
+                const mime = knowledgeMimeForExtension(
+                    packageEntryExtension(candidate.name)
+                );
+                if (mime === null) {
+                    dispatch({
+                        type: "upload_progressed",
+                        path: candidate.path,
+                        status: "failed",
+                        failureCode: "ASSISTANT_PACKAGE_UNSUPPORTED_DOCUMENT",
+                    });
+                    continue;
+                }
                 dispatch({
-                    type: "parse_progress",
-                    entriesRead: message.entriesRead,
-                    entriesPlanned: message.entriesPlanned,
+                    type: "upload_progressed",
+                    path: candidate.path,
+                    status: "uploading",
+                });
+                const prepared = await prepareImportUpload(created.id, {
+                    filename: candidate.name,
+                    mime,
+                    bytes: bytes.byteLength,
+                });
+                await putImportObject({
+                    uploadUrl: prepared.uploadUrl,
+                    uploadHeaders: prepared.uploadHeaders,
+                    bytes,
+                    mime,
+                });
+                const stored = await finalizeImportUpload(created.id, {
+                    uploadKey: prepared.uploadKey,
+                    filename: candidate.name,
+                    mime,
+                });
+                if (goneRef.current) return;
+                dispatch({
+                    type: "upload_progressed",
+                    path: candidate.path,
+                    status: "processing",
+                    fileId: stored.id,
+                });
+            }
+
+            // Watching the import rather than each file: "every document is
+            // ready" is a fact about the import, and the server is the one
+            // that holds it.
+            for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
+                if (goneRef.current) return;
+                const snapshot = await readImport(created.id);
+                dispatch({ type: "processing_observed", files: snapshot.files });
+                if (snapshot.ready) {
+                    dispatch({ type: "advanced" });
+                    return;
+                }
+                if (
+                    snapshot.files.some((entry) => entry.processingStatus === "failed")
+                ) {
+                    // Stop watching, but do not fail the run: a document that
+                    // could not be read is the owner's decision to make.
+                    return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+            }
+        } catch (error) {
+            if (goneRef.current) return;
+            dispatch({
+                type: "run_failed",
+                code:
+                    error instanceof ImportRequestError
+                        ? error.code
+                        : "ASSISTANT_PACKAGE_IMPORT_FAILED",
+            });
+        } finally {
+            busyRef.current = false;
+        }
+    }, [extractSelected]);
+
+    /**
+     * Taking the import back.
+     *
+     * The only way out from step 7 onward, and it has to exist: a document
+     * that could not be read stops the step, and going back is not available
+     * once anything is stored. Without this the owner would be left holding
+     * staged files with nothing to do about them.
+     */
+    const cancelRun = useCallback(async () => {
+        const current = stateRef.current;
+        const importId =
+            "importId" in current.run ? (current.run.importId as string | null) : null;
+        try {
+            if (importId) await cancelImport(importId);
+        } catch {
+            // A cancellation that could not be delivered is not worth a second
+            // error screen: the expiry sweep takes an abandoned import anyway,
+            // and the owner's intent was to leave.
+        }
+        if (goneRef.current) return;
+        busyRef.current = false;
+        dispatch({ type: "restarted" });
+    }, []);
+
+    /** Step 8: the one action on the screen, and the only one that publishes. */
+    const publish = useCallback(async () => {
+        const current = stateRef.current;
+        if (current.run.kind !== "ready" || busyRef.current) return;
+        const importId = current.run.importId;
+        busyRef.current = true;
+        dispatch({ type: "publish_started" });
+        try {
+            const draft = resolveImportDraft(current);
+            const outcome = await publishImport(importId, {
+                approvedDigest: await sha256Hex(importApprovalPayload(current)),
+                digestVersion: IMPORT_APPROVAL_DIGEST_VERSION,
+                keepFileIds: keepFileIds(current),
+                identity: {
+                    name: draft.name,
+                    icon: draft.icon,
+                    description: draft.description,
+                },
+                draft: {
+                    instructions: draft.instructions,
+                    modelIds: draft.modelIds,
+                    toolPolicy: draft.toolPolicy,
+                    memoryPolicy: draft.memoryPolicy,
+                    starters: draft.starters,
+                },
+            });
+            if (goneRef.current) return;
+            if (outcome.outcome === "not_ready") {
+                dispatch({
+                    type: "run_failed",
+                    code: "ASSISTANT_PACKAGE_DOCUMENTS_NOT_READY",
                 });
                 return;
             }
-            if (message.type === "review") {
-                dispatch({ type: "parse_succeeded", review: message.review });
-            } else if (message.type === "refused") {
-                dispatch({
-                    type: "parse_refused",
-                    code: message.code,
-                    cause: message.cause,
-                });
-            }
-            worker.terminate();
-            workerRef.current = null;
-        };
-        worker.onerror = () => {
-            // The worker failing is this app failing, not a statement about
-            // the package -- and the error object can carry a file path, so
-            // none of it is shown or kept.
             dispatch({
-                type: "parse_refused",
-                code: "ASSISTANT_PACKAGE_FORMAT_UNSUPPORTED",
-                cause: "parser_error",
+                type: "publish_succeeded",
+                revision:
+                    outcome.outcome === "published"
+                        ? outcome.version.revision
+                        : outcome.revision,
+                unchanged: outcome.outcome === "unchanged",
             });
-            worker.terminate();
-            workerRef.current = null;
-        };
-
-        const request: WorkerRequest = { type: "parse", file };
-        worker.postMessage(request);
+        } catch (error) {
+            if (goneRef.current) return;
+            dispatch({
+                type: "run_failed",
+                code:
+                    error instanceof ImportRequestError
+                        ? error.code
+                        : "ASSISTANT_PACKAGE_PUBLISH_FAILED",
+            });
+        } finally {
+            busyRef.current = false;
+        }
     }, []);
 
     const review = state.review;
@@ -325,10 +697,16 @@ export function AssistantPackageImportWizard({
                     <LossesStep state={state} dispatch={dispatch} t={t} />
                 )}
                 {state.step === "target" && (
-                    <TargetStep
+                    <TargetStep state={state} dispatch={dispatch} t={t} />
+                )}
+                {state.step === "upload" && (
+                    <UploadStep state={state} onCancel={cancelRun} t={t} />
+                )}
+                {state.step === "confirm" && (
+                    <ConfirmStep
                         state={state}
-                        dispatch={dispatch}
-                        uploadAvailable={Boolean(onBeginUpload)}
+                        onPublish={publish}
+                        onCancel={cancelRun}
                         t={t}
                     />
                 )}
@@ -370,16 +748,19 @@ export function AssistantPackageImportWizard({
                 <button
                     type="button"
                     className={primaryButtonClass}
-                    // The boundary is the only place the port matters: every
-                    // other step is decided entirely in the browser.
-                    disabled={
-                        !canAdvance(state) ||
-                        stepWritesToServer(state.step) ||
-                        (state.step === "target" && !onBeginUpload)
-                    }
+                    // Step 8 has no next: publishing is its own control, and a
+                    // second way to trigger the one irreversible thing on the
+                    // screen is a second way to do it by accident.
+                    disabled={!canAdvance(state) || state.step === "confirm"}
                     onClick={() => {
                         if (state.step === "target") {
-                            onBeginUpload?.();
+                            // Crossing the boundary advances *and* starts the
+                            // run: the step and the work are the same event,
+                            // and separating them would let one happen without
+                            // the other.
+                            dispatch({ type: "advanced" });
+                            void runImport();
+                            return;
                         }
                         dispatch({ type: "advanced" });
                     }}
@@ -396,7 +777,7 @@ export function AssistantPackageImportWizard({
 /* ------------------------------------------------------------- the steps */
 
 type Translate = (key: string) => string;
-type WizardState = ReturnType<typeof initialImportState>;
+type WizardState = AssistantPackageImportState;
 type Dispatch = (action: Parameters<typeof assistantPackageImportReducer>[1]) => void;
 
 function SourceStep({
@@ -911,12 +1292,10 @@ function LossesStep({
 function TargetStep({
     state,
     dispatch,
-    uploadAvailable,
     t,
 }: {
     state: WizardState;
     dispatch: Dispatch;
-    uploadAvailable: boolean;
     t: Translate;
 }) {
     return (
@@ -963,15 +1342,233 @@ function TargetStep({
                     />
                     {t("assistantPackageImport.uploadBoundaryAcknowledge")}
                 </label>
-                {!uploadAvailable && (
-                    <p
-                        className="mt-2 text-sm"
-                        data-testid="assistant-package-import-upload-unavailable"
-                    >
-                        {t("assistantPackageImport.uploadNotConfigured")}
-                    </p>
-                )}
             </div>
         </section>
+    );
+}
+
+
+/**
+ * Step 7. Every document, and what the server has managed to do with it.
+ *
+ * The rows are the browser's list and the statuses are the server's answer,
+ * which is why a file that finished uploading still says "reading": the upload
+ * is this side's fact and the extraction is the other side's, and collapsing
+ * them would let the screen report a document as done before anything had read
+ * it.
+ */
+function UploadStep({
+    state,
+    onCancel,
+    t,
+}: {
+    state: WizardState;
+    onCancel: () => void;
+    t: Translate;
+}) {
+    const failed = state.uploads.filter((upload) => upload.status === "failed");
+    return (
+        <section className={sectionClass} data-testid="assistant-package-import-upload">
+            <h2 className="text-sm font-semibold">
+                {t("assistantPackageImport.uploadHeading")}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+                {t("assistantPackageImport.uploadBody")}
+            </p>
+
+            {state.uploads.length === 0 ? (
+                <p className="mt-2 text-sm text-zinc-500">
+                    {t("assistantPackageImport.uploadNoDocuments")}
+                </p>
+            ) : (
+                <ul className="mt-3 flex flex-col gap-1 text-sm">
+                    {state.uploads.map((upload) => (
+                        <li
+                            key={upload.path}
+                            className="flex items-center gap-2"
+                            data-testid={`assistant-package-upload-${upload.name}`}
+                        >
+                            {(upload.status === "uploading" ||
+                                upload.status === "processing") && (
+                                <Loader2
+                                    className="h-4 w-4 animate-spin"
+                                    aria-hidden="true"
+                                />
+                            )}
+                            <span className="flex-1">{upload.name}</span>
+                            <span
+                                className={
+                                    upload.status === "failed"
+                                        ? "text-red-600"
+                                        : "text-zinc-500"
+                                }
+                            >
+                                {t(UPLOAD_STATUS_KEY[upload.status])}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {failed.length > 0 && (
+                <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
+                    {t("assistantPackageImport.uploadFailedBody")}
+                </p>
+            )}
+
+            {state.run.kind === "failed" && (
+                <p
+                    className="mt-3 text-sm text-red-600"
+                    data-testid="assistant-package-import-run-failed"
+                >
+                    {t(runFailureKey(state.run.code))}
+                </p>
+            )}
+
+            <CancelRun onCancel={onCancel} t={t} />
+        </section>
+    );
+}
+
+/**
+ * The way out, from step 7 onward.
+ *
+ * Present on both steps rather than only on the one that failed: going back is
+ * gone once anything is stored, so this is the only control that can undo it,
+ * and a control that appears only after something breaks is one nobody knows
+ * is there.
+ */
+function CancelRun({ onCancel, t }: { onCancel: () => void; t: Translate }) {
+    return (
+        <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+            <button
+                type="button"
+                className={secondaryButtonClass}
+                onClick={onCancel}
+                data-testid="assistant-package-import-cancel"
+            >
+                {t("assistantPackageImport.runCancel")}
+            </button>
+            <p className="mt-1 text-xs text-zinc-500">
+                {t("assistantPackageImport.runCancelHint")}
+            </p>
+        </div>
+    );
+}
+
+/**
+ * Step 8. What is about to be published, and the one button that does it.
+ *
+ * The summary is rendered from the resolved draft rather than from the review,
+ * because the owner may have changed any of it -- and because the digest sent
+ * with the publish is computed from the same values. A screen that showed the
+ * proposal while approving the draft would make the record meaningless.
+ */
+function ConfirmStep({
+    state,
+    onPublish,
+    onCancel,
+    t,
+}: {
+    state: WizardState;
+    onPublish: () => void;
+    onCancel: () => void;
+    t: Translate;
+}) {
+    const draft = resolveImportDraft(state);
+    const kept = state.uploads.filter((upload) => upload.status === "ready");
+    const run = state.run;
+
+    if (run.kind === "published") {
+        return (
+            <section
+                className={sectionClass}
+                data-testid="assistant-package-import-published"
+            >
+                <h2 className="text-sm font-semibold">
+                    {t(
+                        run.unchanged
+                            ? "assistantPackageImport.publishedUnchangedHeading"
+                            : "assistantPackageImport.publishedHeading"
+                    )}
+                </h2>
+                <p className="mt-1 text-sm">
+                    {interpolate(
+                        t(
+                            run.unchanged
+                                ? "assistantPackageImport.publishedUnchangedBody"
+                                : "assistantPackageImport.publishedBody"
+                        ),
+                        { revision: run.revision }
+                    )}
+                </p>
+                <Link
+                    href={ASSISTANT_PROFILE_LIST_PATH}
+                    className={`mt-3 ${secondaryButtonClass}`}
+                    data-testid="assistant-package-import-done"
+                >
+                    {t("assistantPackageImport.publishedGoToList")}
+                </Link>
+            </section>
+        );
+    }
+
+    return (
+        <section className={sectionClass} data-testid="assistant-package-import-confirm">
+            <h2 className="text-sm font-semibold">
+                {t("assistantPackageImport.confirmHeading")}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+                {t("assistantPackageImport.confirmBody")}
+            </p>
+            <dl className="mt-3 flex flex-col gap-1 text-sm">
+                <SummaryRow label={t("assistantPackageImport.fieldName")} value={draft.name} />
+                <SummaryRow
+                    label={t("assistantPackageImport.fieldModelIds")}
+                    value={draft.modelIds.join(", ")}
+                />
+                <SummaryRow
+                    label={t("assistantPackageImport.confirmDocuments")}
+                    value={
+                        kept.length === 0
+                            ? t("assistantPackageImport.inventoryKnowledgeEmpty")
+                            : kept.map((upload) => upload.name).join(", ")
+                    }
+                />
+            </dl>
+
+            {run.kind === "failed" && (
+                <p
+                    className="mt-3 text-sm text-red-600"
+                    data-testid="assistant-package-import-publish-failed"
+                >
+                    {t(runFailureKey(run.code))}
+                </p>
+            )}
+
+            <button
+                type="button"
+                className={`mt-4 ${primaryButtonClass}`}
+                disabled={run.kind !== "ready"}
+                onClick={onPublish}
+                data-testid="assistant-package-import-publish"
+            >
+                {run.kind === "publishing" && (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                )}
+                {t("assistantPackageImport.confirmPublish")}
+            </button>
+
+            <CancelRun onCancel={onCancel} t={t} />
+        </section>
+    );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="flex gap-2">
+            <dt className="w-40 shrink-0 text-zinc-500">{label}</dt>
+            <dd className="flex-1">{value}</dd>
+        </div>
     );
 }

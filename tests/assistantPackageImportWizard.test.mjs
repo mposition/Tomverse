@@ -19,13 +19,19 @@ import {
     assistantPackageImportReducer as reduce,
     canAdvance,
     canGoBack,
+    importApprovalPayload,
     importStepNumber,
     initialImportState,
+    keepFileIds,
     resolveImportDraft,
     stepWritesToServer,
     unwaivedFindings,
 } from "../lib/assistantPackageImportWizard.ts";
-import { ASSISTANT_PACKAGE_LIMITS } from "../lib/assistantPackageLimits.ts";
+import {
+    ASSISTANT_PACKAGE_KNOWLEDGE_EXTENSIONS,
+    ASSISTANT_PACKAGE_LIMITS,
+} from "../lib/assistantPackageLimits.ts";
+import { knowledgeMimeForExtension } from "../lib/assistantKnowledgeLimits.ts";
 import { ASSISTANT_PROFILE_LIMITS } from "../lib/assistantProfileVersioning.ts";
 
 const proposed = (value, disposition = "automatic") => ({
@@ -329,4 +335,198 @@ test("the target step needs a target and an explicit yes to uploading", () => {
 test("restarting returns to an untouched first step", () => {
     const state = reduce(at("target"), { type: "restarted" });
     assert.deepEqual(state, initialImportState());
+});
+
+/* ------------------------------------------------------- steps 7 and 8 */
+
+const uploads = (...statuses) =>
+    statuses.map((status, index) => ({
+        path: `references/${index}.md`,
+        name: `${index}.md`,
+        status,
+        fileId: status === "waiting" ? null : `f${index}`,
+        failureCode: null,
+    }));
+
+const running = (run, uploadRows) => ({
+    ...at("upload"),
+    run,
+    uploads: uploadRows,
+});
+
+test("creating the import moves the run to uploading and lists the documents", () => {
+    const state = reduce(at("upload"), {
+        type: "import_created",
+        importId: "imp1",
+        uploads: uploads("waiting", "waiting"),
+    });
+    assert.deepEqual(state.run, { kind: "uploading", importId: "imp1" });
+    assert.equal(state.uploads.length, 2);
+});
+
+test("progress touches one document and leaves the others alone", () => {
+    const state = reduce(running({ kind: "uploading", importId: "i" }, uploads("waiting", "waiting")), {
+        type: "upload_progressed",
+        path: "references/0.md",
+        status: "processing",
+        fileId: "server-id",
+    });
+    assert.equal(state.uploads[0].status, "processing");
+    assert.equal(state.uploads[0].fileId, "server-id");
+    assert.equal(state.uploads[1].status, "waiting");
+});
+
+test("the server's reading replaces the browser's, and only for its own states", () => {
+    // A row that has no server id yet cannot be overwritten from here: the
+    // browser is the only one that knows an upload is in flight.
+    const state = reduce(
+        running({ kind: "uploading", importId: "i" }, uploads("processing", "waiting")),
+        {
+            type: "processing_observed",
+            files: [{ id: "f0", processingStatus: "ready", failureCode: null }],
+        }
+    );
+    assert.equal(state.uploads[0].status, "ready");
+    assert.equal(state.uploads[1].status, "waiting");
+    assert.equal(state.run.kind, "processing");
+});
+
+test("every document ready is what makes the run ready", () => {
+    const state = reduce(
+        running({ kind: "uploading", importId: "i" }, uploads("processing", "processing")),
+        {
+            type: "processing_observed",
+            files: [
+                { id: "f0", processingStatus: "ready", failureCode: null },
+                { id: "f1", processingStatus: "ready", failureCode: null },
+            ],
+        }
+    );
+    assert.deepEqual(state.run, { kind: "ready", importId: "i" });
+    assert.equal(canAdvance(state), true);
+});
+
+test("a document that could not be read stops the step rather than being dropped", () => {
+    // Publishing without it would be the failure the loss report exists to
+    // prevent, except invisible.
+    const state = reduce(
+        running({ kind: "uploading", importId: "i" }, uploads("processing", "processing")),
+        {
+            type: "processing_observed",
+            files: [
+                { id: "f0", processingStatus: "ready", failureCode: null },
+                { id: "f1", processingStatus: "failed", failureCode: "EXTRACT" },
+            ],
+        }
+    );
+    assert.deepEqual(blockKinds(state), ["documents_failed"]);
+    assert.equal(state.uploads[1].failureCode, "EXTRACT");
+});
+
+test("an import with no documents waits for nothing", () => {
+    const state = reduce(running({ kind: "uploading", importId: "i" }, []), {
+        type: "processing_observed",
+        files: [],
+    });
+    assert.deepEqual(state.run, { kind: "ready", importId: "i" });
+    assert.deepEqual(blockKinds(state), []);
+});
+
+test("a failed run blocks the step and says so", () => {
+    const state = reduce(running({ kind: "uploading", importId: "i" }, uploads("waiting")), {
+        type: "run_failed",
+        code: "ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED",
+    });
+    assert.equal(state.run.kind, "failed");
+    assert.equal(state.run.importId, "i");
+    assert.deepEqual(
+        advanceProblems(state).map((block) => block.kind),
+        ["run_failed"]
+    );
+});
+
+test("publishing can only start from ready, and only finish from publishing", () => {
+    const notReady = running({ kind: "processing", importId: "i" }, uploads("processing"));
+    assert.equal(reduce(notReady, { type: "publish_started" }).run.kind, "processing");
+
+    const ready = running({ kind: "ready", importId: "i" }, uploads("ready"));
+    const publishing = reduce(ready, { type: "publish_started" });
+    assert.equal(publishing.run.kind, "publishing");
+
+    // A success that arrives without a publish having started is not a
+    // success this wizard asked for.
+    assert.equal(
+        reduce(ready, {
+            type: "publish_succeeded",
+            revision: 1,
+            unchanged: false,
+        }).run.kind,
+        "ready"
+    );
+    const published = reduce(publishing, {
+        type: "publish_succeeded",
+        revision: 3,
+        unchanged: false,
+    });
+    assert.deepEqual(published.run, {
+        kind: "published",
+        importId: "i",
+        revision: 3,
+        unchanged: false,
+    });
+});
+
+test("only documents the server read are kept", () => {
+    const state = running(
+        { kind: "ready", importId: "i" },
+        [...uploads("ready", "failed"), { path: "x", name: "x", status: "ready", fileId: null, failureCode: null }]
+    );
+    assert.deepEqual(keepFileIds(state), ["f0"]);
+});
+
+test("the approval payload carries the draft, the documents and the waivers", () => {
+    const base = running({ kind: "ready", importId: "i" }, uploads("ready"));
+    const payload = importApprovalPayload(base);
+    assert.match(payload, /digestVersion=1/);
+    assert.match(payload, /name=code-reviewer/);
+    assert.match(payload, /documents=\["0\.md"\]/);
+    assert.match(payload, /waivedSecrets=none/);
+
+    // A waiver is part of what was approved: without it an approval could be
+    // replayed against a package whose credentials nobody decided about.
+    const waived = reduce(base, { type: "secret_waived", finding: finding() });
+    assert.notEqual(importApprovalPayload(waived), payload);
+
+    // And so is every field the owner could have changed.
+    const edited = reduce(
+        reduce(base, { type: "field_decided", field: "instructions", decision: "edit" }),
+        { type: "field_edited", edits: { instructions: "Different." } }
+    );
+    assert.notEqual(importApprovalPayload(edited), payload);
+});
+
+test("there is no way back once anything has been stored", () => {
+    assert.equal(canGoBack(running({ kind: "uploading", importId: "i" }, [])), false);
+    assert.equal(canGoBack({ ...at("confirm"), run: { kind: "ready", importId: "i" } }), false);
+});
+
+test("every extension a package may offer has a media type to send it as", () => {
+    // The two lists are separate decisions -- one is what a package may carry,
+    // the other is what the knowledge store accepts -- so this is what keeps
+    // them from disagreeing. A candidate with no media type would be a
+    // document the wizard offers and then cannot upload.
+    for (const extension of ASSISTANT_PACKAGE_KNOWLEDGE_EXTENSIONS) {
+        assert.equal(
+            typeof knowledgeMimeForExtension(extension),
+            "string",
+            `${extension} has no knowledge media type`
+        );
+    }
+});
+
+test("an unknown extension has no media type rather than a guessed one", () => {
+    assert.equal(knowledgeMimeForExtension("exe"), null);
+    assert.equal(knowledgeMimeForExtension(""), null);
+    // Case is not a different file type.
+    assert.equal(knowledgeMimeForExtension("PDF"), "application/pdf");
 });
