@@ -339,6 +339,27 @@ jobs:
         timeout-minutes: 5
         run: npm run check:push-scope
 
+      # The Insight -> Review rename (product boundary decision record v1.2,
+      # decision 1) is held by an absence too, and the way the old name comes
+      # back is not malice: a locale key copied from an old one, a template
+      # pasted out of an audit. The bare word "Insight" is never the signal --
+      # the decision demotes it to an output term and keeps it in use -- so
+      # this looks for the two-word brand only, and the audit and evidence
+      # paths that must keep it are allowlisted with a reason each.
+      - name: Retired product name
+        timeout-minutes: 5
+        run: npm run check:retired-product-name
+
+      # The three productKey CHECKs all pass `productKey IS NULL`, because the
+      # transition requires it -- so a writer that simply forgets the column
+      # produces a row the database accepts and stores as NULL, and the expand
+      # sequence's "every writer names a productKey" becomes a claim with
+      # nothing behind it. The constraints stop wrong combinations; the shared
+      # creation service and this check stop omissions.
+      - name: Conversation writer coverage
+        timeout-minutes: 5
+        run: npm run check:conversation-writers
+
       # The readiness register is the only thing standing between "Auto works
       # in shadow" and "Auto answers a real person", which makes it worth
       # attacking, and the attack is one word: pending -> passed. So a passed

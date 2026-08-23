@@ -574,6 +574,18 @@ type ChatInputProps = {
   memoryMode?: ConversationMemoryMode;
   onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
   /**
+   * Auto model selection (UI contract auto-model-selection.md §1).
+   *
+   * `autoSelectionOffered` is the server's single boolean: it already folds
+   * the feature flag, the conversation's product and cohort eligibility
+   * together, so nothing here may derive availability from any of them
+   * separately. False renders no control at all -- not a disabled one.
+   */
+  autoSelectionOffered?: boolean;
+  selectionMode?: "manual" | "auto";
+  selectionModePending?: boolean;
+  onSelectionModeChange?: (next: boolean) => void;
+  /**
    * The assistant this conversation runs under (§14), or null when it runs
    * under none. Undefined when the control does not apply at all — a guest,
    * or an account with the feature switched off.
@@ -719,6 +731,10 @@ export function ChatInput({
   webSearchMode = "off",
   memoryMode,
   onMemoryModeChange,
+  autoSelectionOffered = false,
+  selectionMode = "manual",
+  selectionModePending = false,
+  onSelectionModeChange,
   assistantProfile,
   assistantProfileOptions = [],
   onAssistantProfileChange,
@@ -4116,6 +4132,15 @@ export function ChatInput({
                               }
                             : undefined
                         }
+                        autoSelectionOffered={
+                          // Both halves, because either alone would be a
+                          // control that cannot act: no handler means nothing
+                          // to save to.
+                          autoSelectionOffered && Boolean(onSelectionModeChange)
+                        }
+                        selectionMode={selectionMode}
+                        selectionModePending={selectionModePending}
+                        onSelectionModeChange={onSelectionModeChange}
                         imageGenerationLock={imageGenerationLock}
                         onLockedImageGenerationClick={(lock) => {
                           closeMenu(false);

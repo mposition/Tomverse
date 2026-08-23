@@ -320,7 +320,7 @@ export const auditDefaultModels = (
       message:
         `The shared resolver (lib/newConversationModels.ts) is not used by ` +
         `${nc.settingsRouteUsesResolver ? "" : "app/api/user/settings/route.ts "}` +
-        `${nc.conversationsRouteUsesResolver ? "" : "app/api/conversations/route.ts "}` +
+        `${nc.conversationsRouteUsesResolver ? "" : "lib/conversationCreateHandler.ts "}` +
         `-- per-route fallbacks drift.`,
     });
   }

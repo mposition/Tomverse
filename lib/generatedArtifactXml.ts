@@ -79,8 +79,8 @@ export const CORE_PROPERTIES_PART: OoxmlPart = {
     `<cp:coreProperties ` +
     `xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ` +
     `xmlns:dc="http://purl.org/dc/elements/1.1/">` +
-    `<dc:creator>Tomverse Insight</dc:creator>` +
-    `<cp:lastModifiedBy>Tomverse Insight</cp:lastModifiedBy>` +
+    `<dc:creator>Tomverse Review</dc:creator>` +
+    `<cp:lastModifiedBy>Tomverse Review</cp:lastModifiedBy>` +
     `</cp:coreProperties>`,
 };
 

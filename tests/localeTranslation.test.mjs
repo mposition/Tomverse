@@ -24,7 +24,7 @@ const english = flat({
     title: "Download your account data",
     short: "Download",
     counter: "{count} / {max}",
-    brand: "Tomverse Insight",
+    brand: "Tomverse Review",
   },
 });
 
@@ -51,7 +51,7 @@ test("an English sentence repeated in another locale is reported", () => {
           title: "Download your account data",
           short: "Download",
           counter: "{count} / {max}",
-          brand: "Tomverse Insight",
+          brand: "Tomverse Review",
         },
       }),
     },
@@ -75,7 +75,7 @@ test("a translated locale reports nothing", () => {
             title: "Kontodaten herunterladen",
             short: "Download",
             counter: "{count} / {max}",
-            brand: "Tomverse Insight",
+            brand: "Tomverse Review",
           },
         }),
       },

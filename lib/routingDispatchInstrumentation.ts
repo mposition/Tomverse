@@ -206,7 +206,26 @@ export type BeginDispatchInput = {
   reservedInputTokens: number;
   requestOutputCapTokens: number;
   reservationId?: string | null;
+  /**
+   * The conversation this turn belongs to, when there is one.
+   *
+   * Stored, not merely accepted. It was dropped before, so a run that failed
+   * -- and therefore never got an `assistantMessageId` -- had no way at all of
+   * naming what it belonged to, and ROUTE-07 counts those terminations.
+   */
   conversationId?: string | null;
+  /**
+   * The product this run executed for, snapshotted here.
+   *
+   * Read from the stored `Conversation.productKey` by the caller, never
+   * derived from a surface: the join is allowed to break (SET NULL on
+   * conversation deletion) and the snapshot is what survives it.
+   *
+   * Null for a turn with no conversation -- a guest turn has no row to read a
+   * product from, and writing one anyway would be a claim about a conversation
+   * that does not exist.
+   */
+  productKey?: string | null;
 };
 
 /**
@@ -267,6 +286,8 @@ export const beginInstrumentedDispatch = async (
         decisionMicros: record ? Math.round(record.decisionLatencyMs * 1_000) : 0,
         initialModelId: input.modelId,
         reservationId: input.reservationId ?? null,
+        conversationId: input.conversationId ?? null,
+        productKey: input.productKey ?? null,
       },
       select: { id: true },
     });

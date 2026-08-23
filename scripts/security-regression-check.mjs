@@ -2526,14 +2526,14 @@ const checks = [
     },
   },
   {
-    name: "Landing hero carries Tomverse Insight brand messaging and no stale single-model guest copy",
+    name: "Landing hero carries Tomverse Review brand messaging and no stale single-model guest copy",
     file: "components/marketing/LandingPageContent.tsx",
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
       return (
-        copy.includes('badge: "Tomverse Insight · Multi-AI Comparison & Review"') &&
+        copy.includes('badge: "Tomverse Review · Multi-AI Comparison & Review"') &&
         copy.includes(
-          'brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse."'
+          'brandNote: "Tomverse Review is the multi-AI comparison and review experience from Tomverse."'
         ) &&
         copy.includes(
           'heroSignupNote: "No sign-up required—start with three models."'
