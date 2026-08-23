@@ -59,9 +59,11 @@ if (!CASE_VERDICTS.includes(verdict)) {
     problems.push(`--verdict must be one of ${CASE_VERDICTS.join(" / ")}`);
 }
 if (verdict !== "채택") {
-    // A rejection is not a bulk operation: §6.4 wants a reason per case so the
-    // redraft has something to answer, and §6.3 sends the whole batch back to
-    // full review. Both are decisions a per-case sheet has to carry.
+    // A rejection is not a bulk operation. Two rules make it per-case work:
+    // docs/ops/memory-extraction-eval-dataset.md §6.4 wants a reason on the
+    // case so the redraft has something to answer, and
+    // docs/ops/memory-extraction-eval-dataset.md §6.3 sends the whole batch
+    // back to full review. Both are decisions a per-case sheet has to carry.
     problems.push(
         "this script writes a uniform 채택 only. A rejection needs its reason " +
             "on the case, and it sends the batch to full re-review " +
@@ -72,15 +74,17 @@ if (verdict !== "채택") {
 if (!BATCH_DECISIONS.includes(argValue("decision") || verdict)) {
     problems.push(`the batch decision must be one of ${BATCH_DECISIONS.join(" / ")}`);
 }
-if (!diversity) problems.push("--diversity is required (§6.5 is a person's call)");
+if (!diversity) problems.push(
+        "--diversity is required (docs/ops/memory-extraction-eval-dataset.md §6.5 is a person's call)"
+    );
 if (!["같음", "다름"].includes(setup)) {
-    problems.push("--setup must be 같음 or 다름 (§6.3)");
+    problems.push(`--setup must be 같음 or 다름 (docs/ops/memory-extraction-eval-dataset.md §6.3)`);
 }
 if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewedOn)) {
     problems.push("--reviewed-on must be YYYY-MM-DD");
 }
-if (!reviewer) problems.push("--reviewer is required (§7.1)");
-if (!drafter) problems.push("--drafter is required (§7.1)");
+if (!reviewer) problems.push("--reviewer is required (docs/ops/memory-extraction-eval-dataset.md §7.1)");
+if (!drafter) problems.push("--drafter is required (docs/ops/memory-extraction-eval-dataset.md §7.1)");
 if (problems.length > 0) {
     for (const problem of problems) console.error(`error: ${problem}`);
     process.exit(1);
