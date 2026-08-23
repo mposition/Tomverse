@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, PackageSearch } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * The discovery backlog, and the three things an operator can do to an item.
@@ -61,7 +62,14 @@ export function AdminModelDiscoveryPanel() {
       const response = await fetch("/api/admin/model-lifecycle", {
         cache: "no-store",
       });
-      if (!response.ok) throw new Error(String(response.status));
+      if (!response.ok) {
+        // The body is drained even though nothing reads it: `/api/*` answers
+        // `private, no-store`, under which an unconsumed body was measured not
+        // to reach `requestfinished` on Chromium. The obligation is on every
+        // path, not only the one whose value gets parsed.
+        await discardResponseBody(response);
+        throw new Error(String(response.status));
+      }
       const data = (await response.json()) as { items: ModelWorkItemRow[] };
       setRows(data.items);
       setFailed(false);

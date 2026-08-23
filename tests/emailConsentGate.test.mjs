@@ -130,7 +130,8 @@ test("the backfill migration writes exactly what the code would have", () => {
     );
   }
 
-  // The one thing §17.1 asks the backfill not to do. A `granted` row for a
+  // The one thing docs/policy/email-notifications.md §17.1 asks the backfill
+  // not to do. A `granted` row for a
   // default is a false statement in the table whose purpose is to be true
   // about consent, and it is the sender who has to prove consent.
   assert.doesNotMatch(
