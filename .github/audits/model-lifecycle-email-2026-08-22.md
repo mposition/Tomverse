@@ -445,7 +445,20 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   (`@@unique([eventId, recipientKey])`가 이미 강제).
 - **파일**: `prisma/schema.prisma:3622-3631`, `lib/standardEmailLane.ts:140`
 
-### EM-02 — preference row 부재가 동의로 해석된다 (P0, High)
+### EM-02 — preference row 부재가 동의로 해석된다 (P0, High) — **해결 (2026-08-22)**
+
+> **수정**: 판정이 `lib/emailPreferenceCore.ts`의 `consentGateVerdict()` 순수
+> 함수로 옮겨졌고, 행 부재의 의미가 purpose마다 갈립니다 — consent 대상은
+> **거절**, `service_status`는 **기본값(ON)**. marketing이면서 계정이 없는
+> delivery도 거절합니다(동의 주체가 없고, `userId` 없이는 unsubscribe token도
+> 발급되지 않아 분류가 요구하는 링크를 실을 수 없습니다).
+> 전 계정 backfill은 `20260822140000_email_preference_backfill`이며 §17.1의
+> 값 그대로이고 **`ConsentRecord`를 만들지 않습니다**.
+> `tests/emailConsentGate.test.mjs` 9건이 고정하고, 그중 하나는 migration의
+> 하드코딩 값을 `defaultPreferenceEnabled()`와 대조합니다.
+>
+> **오늘 production 동작은 바뀌지 않습니다** — gated template(marketing·service)이
+> 아직 0개이므로, 이것은 기능보다 먼저 설치한 guard입니다.
 
 - **Evidence**: `[코드]` `lib/standardEmailLane.ts:464-480`
 - **현재 동작**:
@@ -654,7 +667,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   기능을 얹기 전에 기존 계약을 맞추는 쪽이 순서입니다.
 - **파일**: `lib/accountEmails.ts:17-33`
 
-### EM-13 — EmailPreference backfill migration이 없다 (P0, High — EM-02와 결합)
+### EM-13 — EmailPreference backfill migration이 없다 (P0, High) — **해결 (2026-08-22)**
 
 - **Evidence**: `[코드]` `grep "INSERT INTO \"EmailPreference\"" prisma/migrations/` → 0건
 - **현재 동작**: `ensureDefaultPreferences()`가 `readPreferences()`에서만
@@ -2000,7 +2013,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | P0-1 | ~~`ModelLifecycleWorkItem` + backfill~~ **완료 (2026-08-22)** | ML-01, ML-03, ML-12 | 하루만 사는 후보가 계속 사라지고 있었습니다. §9.5 참조 |
 | P0-2 | ~~`/admin/models?tab=discovery` + work-queue collector~~ **완료 (2026-08-22)** | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없었습니다 |
 | P0-3 | Daily email v2 (NEW/PENDING 분리 + standard lane) | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호입니다 |
-| P0-4 | preference fail-closed + 전 계정 backfill | EM-02, EM-13 | marketing template이 생기는 순간 동의 없는 발송이 됩니다 |
+| P0-4 | ~~preference fail-closed + 전 계정 backfill~~ **완료 (2026-08-22)** | EM-02, EM-13 | marketing template이 생기는 순간 동의 없는 발송이 될 상태였습니다 |
 | P0-5 | audience 계산기 + `ModelMigrationRecord` + `newConversationModelIds` 동기화 | ML-09, ML-11 | 이 셋이 없으면 폐기 안내를 사실대로 쓸 수 없습니다 |
 
 ### P1
