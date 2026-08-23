@@ -66,6 +66,31 @@ ZIP 첨부는 "지원하지 않는 파일 형식입니다."로 끝났다. 원인
 - **확장자가 없으면 거절한다.** `report`가 `application/pdf`라고 주장해도
   받지 않는다. 확장자는 업로드에서 사람이 볼 수 있는 유일한 형식 표시다.
 
+### 2.1.1 연결 프로그램이 답하는 MIME
+
+Windows는 `File.type`을 registry의 `HKCR\<확장자>\Content Type`에서 냅니다.
+그 값은 **무엇이 이 파일을 여는가**이지 **이것이 무엇인가**가 아닙니다. Word가
+깔려 있으면 모든 `.rtf`가 `application/msword`로, Excel이 깔려 있으면 모든
+`.csv`·`.tsv`가 `application/vnd.ms-excel`로 도착합니다. 둘 다 데스크톱에
+대해서는 참이고 바이트에 대해서는 거짓입니다.
+
+별칭이 없으면 §2.1의 마지막 규칙이 이것을 "이름과 MIME이 다른 형식을 가리킴"
+으로 읽고 **클라이언트에서, 서버가 바이트를 보기 전에** 거절합니다. 이 registry가
+없애려던 실패와 같은 모양이 반대쪽에서 온 것입니다 — 이번엔 MIME이 비어서가
+아니라 확신을 갖고 틀려서입니다.
+
+대상 쌍은 `lib/chatAttachmentFormats.ts`의 `ASSOCIATION_OWNER_MEDIA_TYPES`에
+표로 있고, 각 쌍은 소유 형식의 `mediaTypeAliases`에 들어 있으며
+`tests/chatAttachmentFormats.test.mjs`가 그 표를 순회합니다.
+
+**이 별칭은 §2.1의 불일치 규칙을 넓히지 않습니다.** 이름이 여전히 정하므로
+`.doc`은 `doc`으로, `.xls`는 `xls`로 그대로 해석되고, `.txt`가
+`application/msword`라고 주장하는 것은 계속 거절입니다.
+
+2026-08-23 staging 회차에서 실제 Windows 파일 선택기로 견본을 올리다 발견했습니다.
+그 항목(§E)이 존재하는 이유가 정확히 이것이고, 자기 구획의 첫 유료 turn을 쓰기도
+전에 값을 했습니다.
+
 ### 2.2 추가한 형식
 
 압축: `zip`. 이미지: `gif`(정지 이미지만). 데이터: `tsv`, `jsonl`/`ndjson`,
