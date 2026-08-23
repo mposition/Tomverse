@@ -1,7 +1,14 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Database, Loader2, RefreshCw } from "lucide-react";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { soleApproverUnavailableSentence } from "@/lib/adminSoleApproverCore";
 import { dispatchAppToast } from "@/lib/appToast";
 
@@ -61,6 +68,17 @@ export function AdminRetentionPanel() {
    * the question the refusal raises.
    */
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  /**
+   * The last refusal, classified.
+   *
+   * A 428 says the administrator's own sign-in is too old, and the panel used
+   * to relay that as a toast and stop -- correct, and useless, because it named
+   * the remedy without offering it and then disappeared. Observed on
+   * 2026-08-23. `AdminUserSecurityControls` already had the affordance; this
+   * reuses it rather than inventing a second one.
+   */
+  const [failure, setFailure] = useState<AdminApiFailure | null>(null);
+  const pathname = usePathname();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +125,7 @@ export function AdminRetentionPanel() {
             run?: { id?: string; result?: unknown; createdAt?: string };
             resultDigest?: string;
             error?: string;
+            code?: string;
             soleApproverUnavailable?: string;
           }
         | null;
@@ -114,9 +133,17 @@ export function AdminRetentionPanel() {
         setFallbackNote(
           soleApproverUnavailableSentence(payload?.soleApproverUnavailable)
         );
-        throw new Error(payload?.error || "Cleanup operation failed.");
+        const described = describeAdminApiFailure({
+          status: response.status,
+          error: payload?.error,
+          code: payload?.code,
+          fallback: "Cleanup operation failed.",
+        });
+        setFailure(described);
+        throw new Error(described.message);
       }
       setFallbackNote(null);
+      setFailure(null);
       dispatchAppToast(
         mode === "execute" ? "Cleanup executed." : "Cleanup dry run completed.",
         "success"
@@ -263,6 +290,26 @@ export function AdminRetentionPanel() {
           >
             {fallbackNote}
           </p>
+        ) : null}
+        {failure?.requiresReauthentication ? (
+          <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="admin-retention-reauthentication"
+            className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs font-bold text-red-100"
+          >
+            <p>{failure.message}</p>
+            <Link
+              // The step-up URL rather than the console-session one: the
+              // console session is still valid, and this page redirects
+              // straight back here once the sign-in is recent again.
+              href={adminRecentAuthenticationHref(pathname)}
+              data-testid="admin-retention-reauthenticate-link"
+              className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-red-400/50 px-2.5 py-1.5 font-bold text-red-50 underline-offset-4 transition hover:bg-red-500/20 hover:underline"
+            >
+              Sign in again to continue
+            </Link>
+          </div>
         ) : null}
       </div>
     </section>

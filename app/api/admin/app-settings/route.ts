@@ -164,7 +164,15 @@ export async function PATCH(req: Request) {
     await writeAdminAuditLog({
       session,
       request: req,
-      action: "app_settings.guest_default_model.updated",
+      // Renamed from `app_settings.guest_default_model.updated`. That name
+      // described one of the eight settings this handler writes, while the
+      // summary beside it described all of them, so an auditor filtering by
+      // action was misled twice over: past the feature-flag change they were
+      // looking for, and into reading a guest-default change that had not
+      // happened. Observed on 2026-08-23 while turning
+      // `assistantKnowledgeEnabled` on in production. Rows written before this
+      // keep the old action, which is what an audit log is for.
+      action: "app_settings.update_completed",
       targetType: "AppSettings",
       targetId: "public",
       summary: `Updated platform defaults and operational feature flags.`,
