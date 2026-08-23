@@ -5,8 +5,9 @@ import { readFileSync } from "node:fs";
 /**
  * Which sweep each knowledge arm rides on.
  *
- * §14.2 says knowledge follows the image asset pattern -- DB-first tombstone
- * plus the fifteen-minute maintenance sweep. It followed only the tombstone
+ * docs/policy/external-conversation-import-and-memory.md §14.2 says knowledge
+ * follows the image asset pattern -- DB-first tombstone plus the
+ * fifteen-minute maintenance sweep. It followed only the tombstone
  * half for a while: the drain sat on the daily `cleanupExpiredData()`, so a
  * deleted file kept its bytes for up to twenty-four hours and an extraction
  * that died stayed dead for the same, against a ten-minute staleness
@@ -24,6 +25,8 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
+const KNOWLEDGE_POLICY =
+    "docs/policy/external-conversation-import-and-memory.md";
 const FIFTEEN_MINUTE_ROUTE =
     "app/api/internal/maintenance/credit-reservations/route.ts";
 const DAILY_JOB = "lib/maintenance.ts";
@@ -39,7 +42,7 @@ test("the fifteen-minute route drains knowledge tombstones", () => {
         /await runKnowledgeMaintenanceQuietly\(/,
         `${FIFTEEN_MINUTE_ROUTE} does not run the knowledge sweep. A deletion that ` +
             `committed in the database has to reach object storage on the cadence ` +
-            `§14.2 promises, not once a day.`
+            `${KNOWLEDGE_POLICY} §14.2 promises, not once a day.`
     );
 });
 
