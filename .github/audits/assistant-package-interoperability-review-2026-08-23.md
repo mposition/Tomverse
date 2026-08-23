@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **8** | **2026-08-23** | **리뷰 7회차 반영.** upload reservation의 **User 역관계·data-domain 선언·publish 시 미소비 예약 정리**를 채우고 `importId`를 필수로(§5.9.3f-1), finalize를 **원자적 선점 + 삭제 없음**으로 바꿔 동시 재시도 경쟁을 제거(§5.9.3f-2), B1~B6 차단 시점을 **Slice 1로 전 문서 통일**, `unchanged` 조건을 **"새로 승격할 staged 파일 0개"**로 정정, §1.1의 채택 범위를 **MVP와 후속으로 분리**. 고친 문단은 **[rev8]** |
 | **7** | **2026-08-23** | **리뷰 6회차 반영.** finalize 재시도가 **게시된 R2 객체를 지우지 못하게** upload reservation 도입(§5.9.3f), 잠금 경로에 **일반 identity PATCH·profile DELETE 추가**하고 **plan을 잠금 안에서 계산**(§5.9.3g), 승격을 **승인된 fileId로 한정**하고 제외분은 같은 transaction에서 삭제(§5.9.3j), `unchanged`의 identity-only 계약(§5.9.3i). §6.6 canonical model에 `expectedTargetIdentityDigest` 누락 수정, Slice 1·2 선행 조건에 B1~B6 반영. 고친 문단은 **[rev7]** |
 | **6** | **2026-08-23** | **리뷰 5회차 반영.** import 전용 업로드 경로로 `importId`를 서버가 기록(§5.9.3f), 상태 전환 전체를 **profile advisory 잠금 하나로 직렬화**(§5.9.3g), merge의 **identity 충돌 검사와 원자적 갱신**(§5.9.3h), **`unchanged` 결과의 처리 계약**(§5.9.3i). §10.1.2·§12·§14의 잔여 불일치 정정. 고친 문단은 **[rev6]** |
 | **5** | **2026-08-23** | **리뷰 4회차 반영.** staging 파일을 `AssistantKnowledgeFile.importId` **관계로 격리**하고 일반 knowledge·versions route에서 차단(§5.9.3b), publish를 **transaction-aware helper로 분리**해 version 생성과 import 확정을 한 transaction에 묶음(§5.9.3c), `mode`·`status`에 **CHECK + cleanup fail-closed 조건**(§5.9.3d), idle/absolute TTL을 **명시 컬럼으로 분리**하고 시계 갱신 규칙 확정(§5.9.3e), `stagedFileIds String[]` **폐기**(§6.6). 고친 문단은 **[rev5]** |
@@ -77,10 +78,22 @@ GPT의 knowledge 파일 개수 상한)는 검색 요약으로만 확인됐습니
 
 **채택하는 것은 "가져오기·변환"이지 "호환"이 아닙니다.** 정확히는:
 
-> 사용자가 **자기 기기에서 고른 로컬 파일**(Agent Skills 패키지, Tomverse
-> native 패키지, 사용자가 직접 붙여 넣은 설정 텍스트)을 읽어, **필드 단위로
-> 사람이 검토·수정한 뒤에만** Tomverse Assistant Profile의 새 version으로
-> 게시하는 기능.
+> 사용자가 **자기 기기에서 고른 로컬 파일**을 읽어, **필드 단위로 사람이
+> 검토·수정한 뒤에만** Tomverse Assistant Profile의 새 version으로 게시하는
+> 기능.
+
+**[rev8] 그 안에서 MVP와 후속을 나눕니다.** rev7까지는 이 문단이 붙여 넣기까지
+포함해 §5.2·§13·§14와 어긋났습니다.
+
+| 입력 | 판정 |
+|---|---|
+| **Agent Skills 패키지(ZIP)** | **MVP 채택** |
+| **Tomverse native 패키지**(`.tomverse-assistant.zip` / 단독 `.json`) | **MVP 채택** |
+| 사용자가 직접 붙여 넣은 설정 텍스트(Gem·GPT) | **후속 검토** — §2.3의 이유로 형식 감지·inventory·손실 보고를 다시 설계해야 하는 별개 입력 경로입니다(§5.2, §13, §14.2) |
+| 디렉터리(폴더) 선택 | **후속 검토** — §5.2.1 |
+
+"조건부 채택"이 덮는 것은 위 네 줄 전부의 **방향**이고, **MVP 구현 범위는 위
+두 줄**입니다.
 
 조건부인 이유는 §10의 미결정 항목 때문이며, **[rev3]** 그중 **여섯 개(A1~A6)가
 사람의 승인 대상**입니다. 여섯이 한 덩어리로 전부를 막는 것은 아니고 **slice별로
@@ -1146,15 +1159,29 @@ publish → 승격(importId = null) → 현재 version의 manifest가 K를 가�
 **(2) 발급 증명을 둡니다 — upload reservation.**
 
 ```prisma
-/// 제안 [rev7]. prepare가 발급한 key와 그 용도를 서버가 기억합니다.
+/// 제안 [rev8]. prepare가 발급한 key와 그 용도를 서버가 기억합니다.
 model AssistantKnowledgeUploadReservation {
-  r2Key    String @id
-  userId   String
-  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// 이 key가 어느 import를 위해 발급됐는가. 일반 경로는 NULL.
-  importId String?
-  import   AssistantProfileImport? @relation(fields: [importId], references: [id], onDelete: Cascade)
+  r2Key String @id
+
+  /// 소유자. User 쪽에 `assistantKnowledgeUploadReservations` 역관계를
+  /// 함께 선언해야 Prisma가 검증하고, cascade 유도도 그 선언을 읽습니다.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// [rev8] 이 key가 어느 import를 위해 발급됐는가. **필수입니다** --
+  /// MVP에서 예약을 만드는 것은 import 경로뿐이고, nullable로 두면 어떤
+  /// cascade도 닿지 않는 행이 생길 수 있습니다(§5.9.3f-1의 정리 규칙).
+  /// 일반 업로드 경로로 넓힐 때 nullable migration을 하면 됩니다.
+  importId String
+  import   AssistantProfileImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  /// 진단용. 소유권 판정은 userId와 import 행이 합니다.
   profileId String
+
+  /// [rev8] 선점 상태. "pending" | "finalizing" -- §5.9.3f-2.
+  /// CHECK ("state" IN ('pending', 'finalizing')).
+  state String @default("pending")
+
   createdAt DateTime @default(now())
 
   @@index([importId])
@@ -1162,16 +1189,92 @@ model AssistantKnowledgeUploadReservation {
 }
 ```
 
+**[rev8] 이 모델도 data-domain registry 대상입니다.** `userId`가 있으므로
+`check:data-domain-registry`가 **자동으로 user-linked 모델로 탐지**하고,
+`lib/accountDataExportDomains.ts`에 선언이 없으면 **CI가 막습니다**(§6.6.1).
+rev7은 `AssistantProfileImport`만 등록 대상으로 적었습니다. 제안:
+
+| 필드 | export 상태 | 근거 |
+|---|---|---|
+| 전부 | **withhold** (도메인은 선언하되 `state: excluded_internal` 계열) | 예약은 **진행 중인 업로드의 내부 부기**이며 사용자가 쓴 내용이 하나도 없습니다. `r2Key`는 §7.13이 금지하는 저장소 key 자체입니다 |
+
+**정리 경로 넷 — 어느 것도 예약을 영구히 남기지 않습니다.**
+
+| 시점 | 무엇이 지우는가 |
+|---|---|
+| finalize 성공 | 그 예약 행을 **같은 transaction에서 삭제**(§5.9.3f-2) |
+| **publish** | **[rev8]** 소비되지 않고 남은 이 import의 예약을 **publish transaction에서 전부 삭제**합니다. rev7은 이것을 빠뜨렸고, import 행은 게시 후에도 provenance로 남으므로 cascade가 닿지 않아 **영구 잔존**했습니다 |
+| 취소·만료 | import 행 삭제 → `onDelete: Cascade` |
+| 계정 삭제 | `User` cascade |
+
+**남은 R2 객체는 어떻게 되는가.** 예약만 지우고 객체를 지우지 않는 것이
+의도입니다 — §14.2의 `upload_abandoned` 24시간 sweep이 행 없는 객체를
+가져갑니다. **예약은 "지워도 되는지"를 판단하는 근거이지 객체의 수명이
+아닙니다.**
+
 - prepare가 행을 만들고, finalize 성공이 행을 지웁니다.
 - **예약이 없거나 이 import의 것이 아니면 finalize는 거절하고, 객체를 지우지
   않습니다.** 우리가 발급하지 않은 key일 수 있기 때문입니다.
 - 예약이 **이 import의 것이고 파일 행이 없으면**, 그때만 §5.9.3f의 검사를
-  진행하고 실패 시 객체를 지웁니다 — 그 객체는 우리가 이 import를 위해
-  발급했고 아직 아무 행도 가리키지 않는 것이 증명됩니다.
+  진행합니다.
 
 **(3) 증명이 없으면 sweep에 맡깁니다.** 위 어느 경우에도 애매하면 삭제하지
 않고 §14.2의 `upload_abandoned` 24시간 sweep이 가져가게 둡니다. **늦게
 지우는 것은 되돌릴 수 있고, 잘못 지우는 것은 되돌릴 수 없습니다.**
+
+##### 5.9.3f-2 [rev8] 같은 key에 finalize가 둘 오면
+
+**리뷰 7회차 지적 2. rev7의 "예약이 있으면 검사 실패 시 삭제해도 안전하다"는
+동시성 아래에서 거짓입니다.**
+
+```
+finalize A (정상)          finalize B (MIME 불일치)
+  파일 행 없음 확인            파일 행 없음 확인
+  예약 유효 확인               예약 유효 확인
+                             검사 실패 → R2 객체 삭제
+  검사 통과 → 파일 행 생성
+  ⇒ DB에는 파일이 있고 바이트는 없음
+```
+
+증상은 §5.9.3f-1이 막으려던 것과 **똑같습니다** — 행과 manifest는 멀쩡한데
+파일이 사라집니다. 두 가지를 함께 겁니다.
+
+**(1) 예약을 원자적으로 선점합니다.** [저장소]가 이미 쓰는 방식입니다 —
+`assistantKnowledgeProcessor.ts`가 파일을 `pending → processing`으로 옮길 때
+**이전 상태를 WHERE에 넣은 조건부 UPDATE**를 쓰고, 주석이 그 이유를 적습니다:
+*"Two workers racing on the same row both issue the update; exactly one
+changes a row, and the other sees zero and moves on."*
+
+```ts
+const claimed = await tx.assistantKnowledgeUploadReservation.updateMany({
+    where: { r2Key, userId, importId, state: "pending" },
+    data:  { state: "finalizing" },
+})
+if (claimed.count === 0) {
+    // 이미 다른 요청이 선점했습니다. 지우지 않고, 기존 파일 행을 다시 읽어
+    // 있으면 200 멱등, 없으면 409 -- 어느 쪽도 객체를 건드리지 않습니다.
+}
+```
+
+**(2) 그리고 finalize는 어떤 경우에도 R2 객체를 지우지 않습니다.**
+선점이 경쟁을 없애더라도, 삭제를 남겨 두면 선점 로직의 버그 하나가 다시
+바이트를 지웁니다. 검사에 실패한 객체는 **예약을 `pending`으로 되돌리고**
+(재시도가 가능하도록) 24시간 sweep에 맡깁니다.
+
+> **[rev8] 계약: finalize 경로에는 `deleteR2Object()` 호출이 없습니다.**
+> 이것은 현재 `finalizeKnowledgeUpload()`의 `failUpload()`와 다른 선택이며,
+> **import 경로에만** 적용합니다. 기존 일반 경로는 바꾸지 않습니다.
+
+**(3) 파일 행 생성과 예약 삭제는 한 transaction입니다.** 짧게 잡습니다 —
+바이트 읽기·형식 검사·추출은 그 밖에서 끝내고, transaction 안에는 행 생성과
+예약 삭제만 둡니다.
+
+**(4) 동시 재시도는 P2002가 아니라 200이어야 합니다.** `r2Key`가 `@unique`
+이므로 두 요청이 같은 행을 만들려 하면 뒤쪽은 P2002를 받습니다. 그것을 그대로
+500으로 내보내지 않고 **잡아서 기존 행을 다시 읽고**, §5.9.3f-1의 표대로
+일치하면 200 멱등·불일치하면 409로 답합니다. [저장소]의 릴리스 A가 같은
+형태를 씁니다 — 같은 idempotency key의 재요청은 오류가 아니라 200 replay
+입니다(정책 §5.5).
 
 **reservation은 기존 일반 경로에도 이득입니다**(그 경로의 finalize도 지금은
 클라이언트가 보낸 key를 그대로 신뢰합니다). 다만 **이 기능의 범위는 import
@@ -1266,9 +1369,10 @@ prisma.$transaction(async (tx) => {
 **잠금만으로 부족한 두 가지를 더 둡니다.**
 
 - **finalize는 잠금 안에서 `status`를 다시 읽습니다.** `published`이거나 행이
-  없으면 파일 행을 만들지 않습니다. **[rev7] 그러나 R2 object를 지우지는
-  않습니다** — 그 바이트는 방금 승격된 파일의 것일 수 있습니다. 삭제가 안전한
-  경우는 §5.9.3f-1이 정합니다.
+  없으면 파일 행을 만들지 않습니다. **[rev8] 그리고 어떤 경우에도 R2 object를
+  지우지 않습니다** — 그 바이트는 방금 승격된 파일의 것일 수도, 동시에 진행
+  중인 정상 finalize의 것일 수도 있습니다(§5.9.3f-2). 회수는 24시간 sweep의
+  몫입니다.
 - **불변식 검사를 sweep에 추가합니다:** `importId`가 `published` import를
   가리키는 파일이 있으면 그것은 **일어나서는 안 되는 상태**입니다. 조용히
   고치지 않고 구조화 오류로 보고합니다(§5.9.3d와 같은 태도).
@@ -1313,6 +1417,7 @@ prisma.$transaction(async (tx) => {
 
     await promoteApprovedFiles(tx, importId, approvedFileIds)      // §5.9.3j
     await discardUnapprovedStagedFiles(tx, importId, approvedFileIds)
+    await deleteUnconsumedReservations(tx, importId)               // [rev8] §5.9.3f-1
 
     const versionId = outcome.outcome === "published"
         ? outcome.version.id
@@ -1396,9 +1501,15 @@ rev5의 예시 코드는 `version.id`를 바로 썼으므로 `unchanged`에서 �
 - `create`는 **일어날 수 없습니다.** `planProfileVersionPublish()`가
   `unchanged`를 내는 것은 `state.currentDraft != null`일 때뿐인데, create의
   draft profile에는 published version이 없습니다.
-- `merge`에서, **승인된 파일이 0개일 때** 일어납니다.
+- `merge`에서, **새로 승격할 staged 파일이 0개일 때** 일어납니다.
+  **[rev8] "승인된 파일이 0개"가 아닙니다** — merge의 최종 manifest는 대상
+  profile이 **이미 갖고 있던 knowledge**를 포함하는 것이 정상이고, 그 파일들은
+  `importId = null`이라 승격 대상이 아닙니다. 판정을 가르는 것은 **manifest가
+  현재와 같은가**이고, 그것이 참이려면 새 `fileId`가 하나도 들어가지 않아야
+  합니다(§9.5.1).
 
-**[rev7] rev6은 여기서 "staged 파일이 0개"라고 적었고 그것은 틀렸습니다.**
+**[rev7·rev8] rev6은 "staged 파일이 0개", rev7은 "승인된 파일이 0개"라고
+적었고 둘 다 부정확했습니다.**
 §5.9.3j가 밝히듯 staged 집합과 승인 집합은 다를 수 있습니다 — 사용자가 올린
 파일을 전부 [제외]하면 **staged 파일은 있는데 승인 파일은 0개**이고, manifest는
 현재와 같으므로 `unchanged`입니다. 그때도 §5.9.3j의 폐기 경로가 그 파일들을
@@ -2465,7 +2576,7 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | **A4** flag rollback 계약 | **Slice 1** | 같음 |
 | **A5** secret 차단 vs 경고 | **Slice 2** | scanner를 브라우저·서버 공용 순수 모듈로 만들지가 이 답에 달렸습니다 |
 | **A6** instruction URL 처리 | **Slice 4** | UX 결정이므로 diff/review UI를 쓰기 직전입니다 |
-| **B1~B6** 수치 | **[rev7] Slice 1** | rev3은 Slice 5, rev6은 Slice 2라고 적었는데 둘 다 늦습니다. **Slice 1의 산출물이 그 확정값을 문서에 기록하는 것**이므로 가장 먼저 필요합니다. Slice 2가 상수로 만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다 |
+| **B1~B6** 수치 | **[rev8] Slice 1** | rev3은 Slice 5, rev6·rev7의 일부 문단은 Slice 2라고 적었는데 둘 다 늦습니다. **Slice 1의 산출물이 그 확정값을 문서에 기록하는 것**이므로 가장 먼저 필요합니다. Slice 2가 상수로 만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다 |
 | **C1** URL import | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C2** Gem HTML | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C3** flag 배치 | **[rev6] Slice 8** | Slice 1~7의 개발은 막지 않고 **rollout만** 막습니다 |
@@ -2479,14 +2590,14 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | 무엇을 시작하려면 | 먼저 있어야 하는 승인 |
 |---|---|
 | Slice 1 (정책 문서) | **A1 · A2 · A3 · A4 · [rev7] B1~B6** |
-| Slice 2 (pure adapter · 상수 · scanner) | **A5 · B1~B6** |
+| Slice 2 (pure adapter · 상수 · scanner) | **A5** (B1~B6는 Slice 1에서 이미 확정) |
 | Slice 3 (parser) | 없음 (B는 Slice 2에서 이미 상수가 됨) |
 | Slice 4 (diff/review UI) | **A6** |
 | Slice 5~7 | 없음 |
 | Slice 8 (rollout) | **C3** |
 
-A5·A6·B1~B6·C3는 Slice 1과 **병렬로** 결정할 수 있습니다 — 다만 B1~B6는
-Slice 2 착수 전까지이므로 **A1~A4와 사실상 같은 시점에 필요**합니다.
+**[rev8]** A5·A6·C3는 Slice 1과 **병렬로** 결정할 수 있습니다. **B1~B6는
+Slice 1 자체를 막으므로 A1~A4와 같은 시점**입니다.
 
 #### 10.1.1 A4에 대한 권고 — flag off일 때 생성된 profile
 
@@ -2575,7 +2686,7 @@ UI placeholder를 선제 추가하지 않습니다" — 을 따릅니다.
 |---|---|
 | **입력** | Slice 1의 문서 |
 | **산출물** | `lib/assistantPackageManifest.ts`**(신규)**(native schema, Zod `.strict()`, **[rev2]** `PortableProfile`과 `portableProfileEquals()`), `lib/assistantPackageAdapter.ts`**(신규)**(SKILL.md frontmatter + 본문 → draft, 손실 목록 산출), `lib/assistantPackageLimits.ts`**(신규)**(B1~B6 상수), **[rev2]** `lib/assistantPackageSecretScan.ts`**(신규)**(브라우저·서버가 **같은 코드**를 씀 — 두 scanner가 다르면 override 대조가 성립하지 않습니다). **순수 — Prisma·R2·clock·fetch 없음.** |
-| **선행 조건** | Slice 1, **[rev7] §10.1의 A5 승인 + §10.2의 B1~B6 승인**(§10.1.2) — 이 slice가 `lib/assistantPackageLimits.ts`에 그 수치를 상수로 씁니다 |
+| **선행 조건** | Slice 1, **§10.1의 A5 승인**(§10.1.2). **[rev8]** B1~B6는 Slice 1이 이미 요구하므로 여기 도달했다면 확정돼 있습니다 — 이 slice는 그 수치를 `lib/assistantPackageLimits.ts`에 상수로 옮깁니다 |
 | **독립 rollback** | **가능.** 아무 route도 부르지 않는 모듈이므로 되돌려도 제품이 바뀌지 않습니다 |
 
 ### Slice 3 — 안전한 package parser (브라우저) (규모 M)
@@ -2604,7 +2715,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기**(§5.9.3j) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점**(§5.9.3f-2) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | Slice 4, **§10.2의 B1~B6 승인**, **§10.1의 A5 승인** |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
@@ -2752,6 +2863,11 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **56** *(rev7)* | **publish 후 finalize 재시도** | 승격돼 현재 version이 쓰는 파일의 `uploadKey`로 finalize 재도착 → **409, R2 object 그대로**. 대화가 그 파일을 계속 씀 |
 | **56a** *(rev7)* | **예약 없는 uploadKey** | 임의 key로 finalize → 거절, **삭제 시도 없음** |
 | **56b** *(rev7)* | **예약된 key의 검사 실패** | 이 import의 예약이 있고 행이 없는 key가 형식 검사에 실패 → 거절 + **그때만 삭제** |
+| **59** *(rev8)* | **동시 finalize** | 같은 `uploadKey`로 정상 A와 MIME 불일치 B를 동시 실행 → 선점은 하나만 성공. **어느 경로도 R2 객체를 지우지 않음.** A가 이겼으면 파일 행 존재 + 바이트 존재, B가 이겼으면 예약은 `pending`으로 복귀하고 A는 200 멱등 또는 409 |
+| **59a** *(rev8)* | **동시 재시도의 P2002** | 같은 key로 두 finalize가 행을 만들려 함 → 뒤쪽은 **500이 아니라** 기존 행 재조회 후 200(일치) 또는 409(불일치) |
+| **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
+| **60a** *(rev8)* | **예약의 cascade** | 취소·만료(import 삭제) 후 예약 0개. 계정 삭제 후에도 0개 |
+| **60b** *(rev8)* | **예약도 registry 대상** | `npm run check:data-domain-registry` 통과 — `AssistantKnowledgeUploadReservation`이 선언돼 있고 모든 필드가 withhold |
 | **57** *(rev7)* | **identity PATCH 경합** | publish가 digest 확인 후 대기하는 동안 일반 PATCH가 이름 변경 시도 → 잠금 대기. publish가 먼저면 PATCH는 새 값 위에서 동작하고, PATCH가 먼저면 publish는 **409** — 어느 쪽도 조용히 덮어쓰지 않음 |
 | **57a** *(rev7)* | **stale plan이 500이 되지 않음** | 두 publish 동시 실행 → 뒤쪽은 잠금 안에서 다시 읽어 **409 `ASSISTANT_PROFILE_VERSION_STALE`**. P2002 500이 나오지 않음 |
 | **58** *(rev7)* | **제외한 파일이 승격되지 않음** | 3개 올리고 1개 [제외] → 승격 2개(`importId = null`), 제외 1개는 **행 삭제 + tombstone**, 승격 후 이 import에 남은 파일 0개 |
@@ -2759,7 +2875,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **58b** *(rev7)* | **남의 파일 id를 manifest에 넣음** | `importId != null`이면서 이 import의 것이 아닌 fileId → **422**, 아무것도 승격·폐기되지 않음 |
 | **55b** *(rev7)* | **identity만 바꾸는 merge** | version 내용 동일 + 이름 변경 → `unchanged`. **새 revision 없음, 이름은 갱신됨**, import는 `published`, `versionId`는 기존 `currentVersionId`(§5.9.3i) |
 | **55c** *(rev7)* | **`unchanged`인데 staged 파일이 있음** | 올린 파일을 전부 [제외] → `unchanged`이면서 폐기 N건 + tombstone N건. 승격 0건 |
-| **38** *(rev2)* | **data-domain registry** | `npm run check:data-domain-registry` 통과. `AssistantProfileImport`가 export 도메인·cascade와 함께 선언돼 있음(§6.6.1) |
+| **38** *(rev2·rev8)* | **data-domain registry** | `npm run check:data-domain-registry` 통과. **`AssistantProfileImport`와 `AssistantKnowledgeUploadReservation` 둘 다** export 도메인·cascade와 함께 선언돼 있음(§6.6.1, §5.9.3f-1) |
 | **39** *(rev5)* | **계정 데이터 export에 provenance 포함** | export 산출물에 `assistant_profile_imports`가 있고 `stagingManifest`가 포함되며, `validatorVersion`·`ingestPath`·`candidateDigest`·`approvedDigest`·`versionId`는 withhold. **관계인 `stagedFiles`는 field list에 이름을 대지 않음**(registry는 scalar 컬럼만 셈) |
 | **40** *(rev2·rev3)* | **계정·profile 삭제 cascade** | profile 삭제 시 provenance 함께 삭제, 계정 삭제도 같음. **[rev3]** version 삭제는 `SetNull`이라 import 행이 남는지 별도 확인 |
 | **41** *(rev2)* | **share·conversation export 배제** | 제3자 경로 어디에도 provenance가 나타나지 않음(`tests/memoryReleaseContracts.test.mjs` 방식) |
@@ -2917,8 +3033,9 @@ adapter를 그 manifest로 **번역하는** 코드로 씁니다.
 
 **[rev4] 승인 항목은 여섯 개이고, 막는 지점이 서로 다릅니다**(§10.1.2).
 A1~A4는 **Slice 1**(정책 문서)을 막고, 그래서 그 뒤 전부가 멈춥니다.
-**A5와 B1~B6는 Slice 2**, A6는 **Slice 4**, C3는 **Slice 8(rollout)**을 각각
-막습니다.
+**[rev8] B1~B6는 Slice 1**(그 확정값을 문서에 기록하는 것이 Slice 1의
+산출물이므로 A1~A4와 같은 시점), A5는 **Slice 2**, A6는 **Slice 4**,
+C3는 **Slice 8(rollout)**을 각각 막습니다.
 
 | | 결정 | 이 보고서의 권고 |
 |---|---|---|
@@ -2933,10 +3050,12 @@ A1~A4는 **Slice 1**(정책 문서)을 막고, 그래서 그 뒤 전부가 멈�
 공유하는 순수 모듈로 만들지 여부가 그 답에 달려 있습니다. A6는 Slice 4
 착수 전입니다.
 
-**§10.2의 수치 여섯 개(B1~B6)도 Slice 2 착수 전입니다.** rev3은 Slice 5라고
-적었지만 틀렸습니다 — 상수 module(`lib/assistantPackageLimits.ts`)을 만드는
-것이 Slice 2이고, Slice 3의 parser가 그 값을 쓰며, Slice 5는 서버에서 다시
-강제할 뿐입니다. 따라서 **B1~B6는 A1~A4와 사실상 같은 시점에 필요합니다.**
+**[rev8] §10.2의 수치 여섯 개(B1~B6)는 Slice 1 착수 전입니다.** rev3은
+Slice 5, rev6·rev7은 Slice 2라고 적었는데 둘 다 늦습니다 — **Slice 1의
+산출물이 그 확정값을 정책 문서에 기록하는 것**이므로, 승인되지 않은 수치는
+적을 것이 없습니다. Slice 2가 상수 module(`lib/assistantPackageLimits.ts`)로
+만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다.
+**따라서 B1~B6는 A1~A4와 같은 시점에 필요합니다.**
 기존 knowledge의 32MiB, import의 1GB/50,000/250MB를 "비슷하다"는 이유로
 패키지 한도로 재사용하지 않습니다 — 새 역할의 수치는 별도 정책 결정입니다.
 
