@@ -448,6 +448,284 @@ test("at 320px the name and the download button never overlap @ui-risk", async (
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+/**
+ * The width that actually decides the card's layout.
+ *
+ * A model panel inside a 1440px window is around 300px wide, so a card in it
+ * has to stack -- and the 320px test above cannot ask that question, because
+ * it shrinks the *window*. Constraining the artifact area alone, with the
+ * window left wide, is the regression: with the layout keyed to `sm:` the row
+ * variant applied here anyway and squeezed the text column to ~80px.
+ */
+const NARROW_PANEL_CSS = `
+  [data-testid="generated-artifact-section"] {
+    width: 320px !important;
+    max-width: 320px !important;
+  }
+`;
+
+test("a narrow panel in a wide window stacks the card @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await prepareGuestPage(page, "ko");
+  await mockChat(
+    page,
+    answerWith([
+      {
+        ...ARTIFACT,
+        filename: "2026년_분기별_매출_상세_집계_최종본_확정.xlsx",
+      },
+    ])
+  );
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
+  await expect(card(page)).toBeVisible();
+  await page.addStyleTag({ content: NARROW_PANEL_CSS });
+
+  const box = (await card(page).boundingBox())!;
+  const name = (await inCard(page, "generated-artifact-filename").boundingBox())!;
+  const button = (await inCard(page, "generated-artifact-download").boundingBox())!;
+
+  // The panel really is narrow while the window is not.
+  expect(box.width).toBeLessThanOrEqual(322);
+  expect(page.viewportSize()!.width).toBe(1440);
+
+  // Separate rows, and the name keeps a column it can be read in.
+  expect(button.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
+  expect(name.width).toBeGreaterThanOrEqual(200);
+  // The stacked layout, not a row that merely wrapped: the control takes the
+  // card's whole content width (320px less the 12px padding on each side).
+  expect(button.width).toBeGreaterThanOrEqual(box.width - 26);
+
+  // Nothing escapes the card on either side.
+  for (const element of [name, button]) {
+    expect(element.x).toBeGreaterThanOrEqual(box.x - 1);
+    expect(element.x + element.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  }
+  expect(button.height).toBeGreaterThanOrEqual(44);
+});
+
+test("a failure in a narrow panel keeps a readable sentence and its own row @ui-risk", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: [
+      { id: "m-user", role: "user", content: "엑셀로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: "파일을 만들지 못했습니다.",
+        modelId: "gpt-5-6-luna",
+        artifacts: [
+          {
+            ...ARTIFACT,
+            id: "art_failed",
+            byteSize: 0,
+            status: "failed",
+            failureCode: "generation_failed",
+            modelId: "gpt-5-6-luna",
+          },
+        ],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+  await expect(card(page)).toBeVisible();
+  await page.addStyleTag({ content: NARROW_PANEL_CSS });
+
+  const box = (await card(page).boundingBox())!;
+  const failure = (await inCard(page, "generated-artifact-failure").boundingBox())!;
+  const retry = (await inCard(page, "generated-artifact-retry").boundingBox())!;
+
+  // The description is a sentence, not a vertical ribbon of single characters.
+  expect(failure.width).toBeGreaterThanOrEqual(200);
+  expect(retry.y).toBeGreaterThanOrEqual(failure.y + failure.height - 1);
+  expect(retry.width).toBeGreaterThanOrEqual(box.width - 26);
+  expect(retry.x).toBeGreaterThanOrEqual(box.x - 1);
+  expect(retry.x + retry.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  expect(retry.height).toBeGreaterThanOrEqual(44);
+});
+
+/* -------------------------------------------------------------------------- */
+/* A failure the same turn fixed                                                */
+/* -------------------------------------------------------------------------- */
+
+/** One artifact for the recovery cases, named by the fields identity reads. */
+const recoveryArtifact = (
+  ordinal: number,
+  status: "ready" | "failed",
+  overrides: {
+    filename?: string;
+    /** The fixture's stored-conversation shape carries these two formats. */
+    format?: "xlsx" | "csv";
+    modelId?: string;
+  } = {}
+) => ({
+  ...ARTIFACT,
+  id: `art_${status}_${ordinal}`,
+  ordinal,
+  filename: "분기별_매출.xlsx",
+  byteSize: status === "ready" ? 3053 : 0,
+  status,
+  ...(status === "failed" ? { failureCode: "spec_rejected" as const } : {}),
+  modelId: "gpt-5-6-luna",
+  ...overrides,
+});
+
+const firstSection = (page: Page) =>
+  page.getByTestId("generated-artifact-section").first();
+
+test("a failure the model fixed in the same turn leaves one card @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(
+    page,
+    answerWith([
+      { ...recoveryArtifact(0, "failed"), modelId: "gemini-2-5-flash" },
+      { ...recoveryArtifact(1, "ready"), modelId: "gemini-2-5-flash" },
+    ])
+  );
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "분기별 매출을 엑셀로 만들어줘");
+
+  const cards = firstSection(page).getByTestId("generated-artifact-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "ready");
+  // No apology, and no offer to redo work that already succeeded.
+  await expect(firstSection(page).getByTestId("generated-artifact-failure")).toHaveCount(0);
+  await expect(firstSection(page).getByTestId("generated-artifact-retry")).toHaveCount(0);
+  await expect(
+    firstSection(page).getByTestId("generated-artifact-download")
+  ).toBeVisible();
+});
+
+test("the same turn shows the same one card after a reload @ui-risk", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: [
+      { id: "m-user", role: "user", content: "분기별 매출을 엑셀로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: "요청하신 Excel 파일을 만들었습니다.",
+        modelId: "gpt-5-6-luna",
+        artifacts: [recoveryArtifact(0, "failed"), recoveryArtifact(1, "ready")],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  const cards = firstSection(page).getByTestId("generated-artifact-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "ready");
+
+  // The streamed answer and the stored one are the same set of rows, so they
+  // have to reach the same cards.
+  await page.reload();
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "ready");
+});
+
+test("a failure nothing fixed keeps its card and its retry @ui-risk", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: [
+      { id: "m-user", role: "user", content: "엑셀로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: "파일을 만들지 못했습니다.",
+        modelId: "gpt-5-6-luna",
+        artifacts: [recoveryArtifact(0, "failed")],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  const cards = firstSection(page).getByTestId("generated-artifact-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "failed");
+  await expect(
+    firstSection(page).getByTestId("generated-artifact-retry")
+  ).toBeVisible();
+});
+
+/**
+ * The four turns the hiding rule must *not* fire on.
+ *
+ * One conversation, one panel, four answers -- each renders its own section,
+ * so a single load asks all four questions.
+ */
+const KEPT_FAILURES = [
+  {
+    name: "another file's success",
+    artifacts: [
+      recoveryArtifact(0, "failed"),
+      recoveryArtifact(1, "ready", { filename: "월별_매출.xlsx" }),
+    ],
+  },
+  {
+    name: "another format's success",
+    artifacts: [
+      recoveryArtifact(0, "failed"),
+      recoveryArtifact(1, "ready", { format: "csv", filename: "분기별_매출.csv" }),
+    ],
+  },
+  {
+    name: "another model's success",
+    artifacts: [
+      recoveryArtifact(0, "failed"),
+      recoveryArtifact(1, "ready", { modelId: "gemini-2-5-flash" }),
+    ],
+  },
+  {
+    name: "a failure that came after the success",
+    artifacts: [recoveryArtifact(0, "ready"), recoveryArtifact(1, "failed")],
+  },
+];
+
+test("only the same file, format and model resolves a failure @ui-risk", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: KEPT_FAILURES.flatMap((turn, index) => [
+      { id: `m-user-${index}`, role: "user" as const, content: `${index}번 요청` },
+      {
+        id: `m-assistant-${index}`,
+        role: "assistant" as const,
+        content: `${index}번 답변`,
+        modelId: "gpt-5-6-luna",
+        artifacts: turn.artifacts,
+      },
+    ]),
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  const sections = page.getByTestId("generated-artifact-section");
+  await expect(sections).toHaveCount(KEPT_FAILURES.length);
+  for (const [index, turn] of KEPT_FAILURES.entries()) {
+    const cards = sections.nth(index).getByTestId("generated-artifact-card");
+    await expect(cards, turn.name).toHaveCount(2);
+    await expect(
+      sections.nth(index).getByTestId("generated-artifact-failure"),
+      turn.name
+    ).toBeVisible();
+  }
+});
+
 test("the download button meets the touch target and shows a focus ring @ui-risk", async ({
   page,
 }, testInfo) => {
