@@ -24,19 +24,25 @@
   "losses": [
     {
       "kind": "scripts",
-      "detail": "4 executable file(s): examples/console_logging.py, examples/element_discovery.py, examples/static_html_automation.py, scripts/with_server.py. Tomverse does not run scripts and did not read them."
+      "count": 4,
+      "items": [
+        "examples/console_logging.py",
+        "examples/element_discovery.py",
+        "examples/static_html_automation.py",
+        "scripts/with_server.py"
+      ]
     },
     {
-      "kind": "license",
-      "detail": "Licence stated as \"Complete terms in LICENSE.txt\". Licences are not stored on a profile."
+      "kind": "license_stated",
+      "items": [
+        "Complete terms in LICENSE.txt"
+      ]
     },
     {
-      "kind": "icon",
-      "detail": "Any icon image in the package is not carried over. A profile icon is an emoji."
+      "kind": "icon"
     },
     {
-      "kind": "model",
-      "detail": "The package does not choose a Tomverse model, and none is chosen for you. Pick one before publishing."
+      "kind": "model"
     }
   ],
   "skips": [

@@ -30,6 +30,10 @@ Profile로 **변환**하는 기능의 릴리스 차단 계약입니다.
 | `lib/assistantPackageArchive.ts` | 중앙 디렉터리 판독, 읽기 계획, entry 해제 |
 | `lib/assistantPackageReview.ts` | 열린 패키지를 사용자가 검토할 제안으로 |
 | `lib/workers/assistantPackageWorker.ts` | 위 둘을 main thread 밖에서 실행 |
+| `lib/assistantPackageImportWizard.ts` | 8단계의 상태 기계. 6→7 경계가 여기 있습니다 |
+| `lib/assistantPackageImportAccess.ts` | rollout flag. 기본 off, fail-closed |
+| `components/assistants/import/AssistantPackageImportWizard.tsx` | 1~6단계 화면 |
+| `app/(site)/(application)/settings/assistants/import/page.tsx` | route. flag가 꺼져 있으면 404 |
 
 이 문서는 아래를 대체하지 않고 그 위에 쌓입니다.
 

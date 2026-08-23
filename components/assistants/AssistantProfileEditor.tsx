@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { KnowledgeFilesPanel } from "@/components/assistants/KnowledgeFilesPanel";
+import { ModelSelector } from "@/components/assistants/ModelSelector";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     ASSISTANT_PROFILE_LIST_PATH,
@@ -21,7 +22,6 @@ import {
 import { ASSISTANT_PROFILE_CHAT_PATH } from "@/lib/assistantProfileReturn";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ENABLED_MODELS } from "@/lib/models";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 
@@ -128,54 +128,6 @@ type Notice =
  * operate without a mouse. Each row names the model the way the rest of the
  * product names it, so nobody has to recognise an internal id.
  */
-function ModelSelector({
-    label,
-    hint,
-    selected,
-    onChange,
-}: {
-    label: string;
-    hint: string;
-    selected: string[];
-    onChange: (next: string[]) => void;
-}) {
-    const atLimit = selected.length >= ASSISTANT_PROFILE_LIMITS.maxModels;
-    return (
-        <fieldset className="flex flex-col gap-2" data-testid="assistant-models">
-            <legend className="text-sm font-semibold">{label}</legend>
-            <p className="text-xs text-zinc-500">{hint}</p>
-            {ENABLED_MODELS.map((model) => {
-                const checked = selected.includes(model.id);
-                return (
-                    <label
-                        key={model.id}
-                        className="flex items-center gap-2 text-sm"
-                    >
-                        <input
-                            type="checkbox"
-                            checked={checked}
-                            // The ceiling is enforced by refusing to add, not
-                            // by dropping silently: a user who ticks a fourth
-                            // model should find out here rather than discover
-                            // later that one of their choices went missing.
-                            disabled={!checked && atLimit}
-                            onChange={(event) =>
-                                onChange(
-                                    event.target.checked
-                                        ? [...selected, model.id]
-                                        : selected.filter((id) => id !== model.id)
-                                )
-                            }
-                            data-testid={`assistant-model-${model.id}`}
-                        />
-                        <span>{model.name}</span>
-                    </label>
-                );
-            })}
-        </fieldset>
-    );
-}
-
 export function AssistantProfileEditor({
     profileId,
     onCreated,

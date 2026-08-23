@@ -29,6 +29,7 @@ import {
     convertSkillPackage,
     parseSkillDocument,
     type ConversionLoss,
+    type ImportFieldNote,
     type ProposedField,
 } from "@/lib/assistantPackageAdapter";
 import {
@@ -134,7 +135,7 @@ const automatic = <T,>(value: T): ProposedField<T> => ({
     note: null,
 });
 
-const needsReview = <T,>(value: T, note: string): ProposedField<T> => ({
+const needsReview = <T,>(value: T, note: ImportFieldNote): ProposedField<T> => ({
     value,
     disposition: "needs_review",
     note,
@@ -427,10 +428,7 @@ async function buildNativeReview(input: {
         // Not a refusal: an extra document in the container is not a lie about
         // the profile. It is reported because the owner would otherwise see a
         // file count that does not match the archive they built.
-        losses.push({
-            kind: "skipped_entries",
-            detail: `${unlisted.length} file(s) in the container are not listed in the manifest and were not offered.`,
-        });
+        losses.push({ kind: "skipped_entries", count: unlisted.length });
     }
 
     return {
@@ -442,10 +440,7 @@ async function buildNativeReview(input: {
                 // A native package was written by this app from a profile the
                 // owner already approved, so nothing here is a guess. The name
                 // still wants a look because two profiles may not share one.
-                name: needsReview(
-                    manifest.data.profile.name,
-                    "Names are not unique; confirm or change it."
-                ),
+                name: needsReview(manifest.data.profile.name, "name_may_collide"),
                 icon: automatic(manifest.data.profile.icon),
                 description: automatic(manifest.data.profile.description),
             },
@@ -454,10 +449,7 @@ async function buildNativeReview(input: {
             // Still not chosen for the owner: the models a package names may
             // not be models this account can use, and §5.3 puts entitlement at
             // runtime rather than here.
-            modelIds: needsReview(
-                [...version.modelIds],
-                "Confirm the models this profile should start with."
-            ),
+            modelIds: needsReview([...version.modelIds], "confirm_models"),
             toolPolicy: automatic(version.toolPolicy),
             memoryPolicy: automatic(version.memoryPolicy),
             knowledgeCandidates: candidates,

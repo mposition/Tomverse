@@ -99,6 +99,8 @@ test("an instruction body over the limit is refused and never truncated", () => 
     });
     assert.equal(conversion.refusals.length, 1);
     assert.equal(conversion.refusals[0].code, "ASSISTANT_PACKAGE_INSTRUCTIONS_TOO_LONG");
+    assert.equal(conversion.refusals[0].limit, ASSISTANT_PACKAGE_LIMITS.maxInstructionCharacters);
+    assert.equal(conversion.refusals[0].characters, body.length);
     // The refusal is the point, but so is this: the value still carries the
     // whole body, so nothing downstream can mistake a shortened string for
     // what the package said.
@@ -168,21 +170,32 @@ test("scripts are named in the loss report and never treated as knowledge", () =
     });
     const scripts = conversion.losses.find((loss) => loss.kind === "scripts");
     assert.ok(scripts);
-    assert.match(scripts.detail, /scripts\/lint\.py/);
-    assert.match(scripts.detail, /scripts\/fetch\.sh/);
+    // Data, not a sentence: the sentence is in the locales, and a loss that
+    // carried English prose is a loss somebody renders untranslated.
+    assert.equal(scripts.count, 2);
+    assert.deepEqual(scripts.items, ["scripts/lint.py", "scripts/fetch.sh"]);
     assert.deepEqual(conversion.knowledgeCandidates, []);
 });
 
-test("a missing licence warns and does not refuse", () => {
-    const conversion = convertSkillPackage({
+test("a stated licence and a missing one are different things to say", () => {
+    // One kind with two meanings would force every reader to look inside the
+    // message to find out which it got.
+    const absent = convertSkillPackage({
         frontmatter: { name: "a", description: null, license: null, allowedTools: null, unknownKeys: [] },
         body: "Body.",
         inventory: EMPTY_INVENTORY,
     });
-    assert.deepEqual(conversion.refusals, []);
-    const licence = conversion.losses.find((loss) => loss.kind === "license");
+    assert.deepEqual(absent.refusals, []);
+    assert.ok(lossKinds(absent).includes("license_absent"));
+
+    const stated = convertSkillPackage({
+        frontmatter: { name: "a", description: null, license: "MIT", allowedTools: null, unknownKeys: [] },
+        body: "Body.",
+        inventory: EMPTY_INVENTORY,
+    });
+    const licence = stated.losses.find((loss) => loss.kind === "license_stated");
     assert.ok(licence);
-    assert.match(licence.detail, /no licence/i);
+    assert.deepEqual(licence.items, ["MIT"]);
 });
 
 test("unrecognised frontmatter keys are counted and named, not dropped", () => {
@@ -197,8 +210,8 @@ test("unrecognised frontmatter keys are counted and named, not dropped", () => {
     });
     const unknown = conversion.losses.find((loss) => loss.kind === "unknown_frontmatter");
     assert.ok(unknown);
-    assert.match(unknown.detail, /wat/);
-    assert.match(unknown.detail, /zzz/);
+    assert.equal(unknown.count, 2);
+    assert.deepEqual(unknown.items, ["wat", "zzz"]);
 });
 
 test("knowledge candidates past the limit are reported rather than silently cut", () => {

@@ -152,25 +152,68 @@ export type FieldDisposition = "automatic" | "needs_review";
 export type ProposedField<T> = {
     value: T;
     disposition: FieldDisposition;
-    /** Why this needs a look, when it does. Rendered next to the field. */
-    note: string | null;
+    /**
+     * Why this needs a look, when it does. A code, not a sentence -- the
+     * sentence belongs to whichever language the reader has.
+     */
+    note: ImportFieldNote | null;
 };
 
-/** One thing the target cannot hold. Named, not counted (§5.1). */
+/**
+ * One thing the target cannot hold (§5.1).
+ *
+ * Data, not a sentence. The sentence is in `locales/*.ts`, because this
+ * module is imported by the browser and by the server and neither of them
+ * knows what language the reader has -- and because an English `detail` field
+ * is a field somebody eventually renders, which is exactly how a surface ends
+ * up shipping English to six locales.
+ *
+ * `items` names the things when naming them helps: script paths, unrecognised
+ * frontmatter keys, the licence the package stated. It never carries file
+ * content.
+ */
 export type ConversionLoss = {
-    kind:
-        | "scripts"
-        | "icon"
-        | "model"
-        | "license"
-        | "unknown_frontmatter"
-        | "allowed_tools"
-        | "relative_links"
-        | "skipped_entries"
-        | "knowledge_over_limit";
-    /** One line the owner reads. No paths, no secrets. */
-    detail: string;
+    kind: ConversionLossKind;
+    /** How many things this is about, when a count is meaningful. */
+    count?: number;
+    /** The things themselves, when naming them helps. Never content. */
+    items?: string[];
 };
+
+export const CONVERSION_LOSS_KINDS = [
+    "scripts",
+    "icon",
+    "model",
+    /** The package names a licence. Profiles do not store one. */
+    "license_stated",
+    /** The package names none, which is its own thing to say. */
+    "license_absent",
+    "unknown_frontmatter",
+    "allowed_tools",
+    "relative_links",
+    "skipped_entries",
+    "knowledge_over_limit",
+] as const;
+
+export type ConversionLossKind = (typeof CONVERSION_LOSS_KINDS)[number];
+
+/**
+ * Why a proposed field wants a look, as a code rather than a sentence.
+ *
+ * Same reason as `ConversionLoss`: this is read by a UI that has a language,
+ * and this module does not.
+ */
+export const IMPORT_FIELD_NOTES = [
+    "name_is_a_slug",
+    "name_shortened",
+    "description_shortened",
+    "read_the_instructions",
+    "choose_a_model",
+    "name_may_collide",
+    "confirm_models",
+] as const;
+
+export type ImportFieldNote = (typeof IMPORT_FIELD_NOTES)[number];
 
 export type SkillConversion = {
     identity: {
@@ -190,7 +233,11 @@ export type SkillConversion = {
     /** A6: what the instruction points at, by host. */
     instructionUrls: { count: number; hosts: string[] };
     /** Refusals that stop the conversion rather than reduce it. */
-    refusals: { code: "ASSISTANT_PACKAGE_INSTRUCTIONS_TOO_LONG"; detail: string }[];
+    refusals: {
+        code: "ASSISTANT_PACKAGE_INSTRUCTIONS_TOO_LONG";
+        characters: number;
+        limit: number;
+    }[];
 };
 
 /** What the archive scan hands over. Paths only -- no bytes for scripts. */
@@ -238,58 +285,40 @@ export function convertSkillPackage(input: {
     if (codePoints(body) > ASSISTANT_PACKAGE_LIMITS.maxInstructionCharacters) {
         refusals.push({
             code: "ASSISTANT_PACKAGE_INSTRUCTIONS_TOO_LONG",
-            detail: `The instructions are ${codePoints(body)} characters; the limit is ${ASSISTANT_PACKAGE_LIMITS.maxInstructionCharacters}. Shorten them in the package and import it again.`,
+            characters: codePoints(body),
+            limit: ASSISTANT_PACKAGE_LIMITS.maxInstructionCharacters,
         });
     }
 
     if (inventory.scriptPaths.length > 0) {
         losses.push({
             kind: "scripts",
-            detail: `${inventory.scriptPaths.length} executable file(s): ${inventory.scriptPaths.join(", ")}. Tomverse does not run scripts and did not read them.`,
+            count: inventory.scriptPaths.length,
+            items: [...inventory.scriptPaths],
         });
     }
     if (frontmatter.allowedTools !== null) {
-        losses.push({
-            kind: "allowed_tools",
-            detail: `The package requests tools (${frontmatter.allowedTools}). Tool access is decided by your plan and this profile's own settings, not by the package.`,
-        });
+        losses.push({ kind: "allowed_tools", items: [frontmatter.allowedTools] });
     }
-    if (frontmatter.license !== null) {
-        losses.push({
-            kind: "license",
-            detail: `Licence stated as "${frontmatter.license}". Licences are not stored on a profile.`,
-        });
-    } else {
-        losses.push({
-            kind: "license",
-            detail: "The package states no licence. Check that you may use its contents.",
-        });
-    }
+    losses.push(
+        frontmatter.license !== null
+            ? { kind: "license_stated", items: [frontmatter.license] }
+            : { kind: "license_absent" }
+    );
     if (frontmatter.unknownKeys.length > 0) {
         losses.push({
             kind: "unknown_frontmatter",
-            detail: `${frontmatter.unknownKeys.length} setting(s) this import does not understand: ${frontmatter.unknownKeys.join(", ")}.`,
+            count: frontmatter.unknownKeys.length,
+            items: [...frontmatter.unknownKeys],
         });
     }
     if (/\]\((?!https?:)[^)\s]+\)/.test(body)) {
-        losses.push({
-            kind: "relative_links",
-            detail: "The instructions link to files inside the package. Those links will not resolve; add the files as knowledge if you need them.",
-        });
+        losses.push({ kind: "relative_links" });
     }
-    losses.push({
-        kind: "icon",
-        detail: "Any icon image in the package is not carried over. A profile icon is an emoji.",
-    });
-    losses.push({
-        kind: "model",
-        detail: "The package does not choose a Tomverse model, and none is chosen for you. Pick one before publishing.",
-    });
+    losses.push({ kind: "icon" });
+    losses.push({ kind: "model" });
     if (inventory.skippedCount > 0) {
-        losses.push({
-            kind: "skipped_entries",
-            detail: `${inventory.skippedCount} file(s) in the package are of a kind this import does not use.`,
-        });
+        losses.push({ kind: "skipped_entries", count: inventory.skippedCount });
     }
 
     const candidates = inventory.knowledgeCandidates.slice(
@@ -297,9 +326,12 @@ export function convertSkillPackage(input: {
         ASSISTANT_PACKAGE_LIMITS.maxKnowledgeFiles
     );
     if (inventory.knowledgeCandidates.length > candidates.length) {
+        // The limit itself is not carried: it is one constant both sides
+        // already import, and a copy in the message is a copy that can be
+        // stale by the time it is read.
         losses.push({
             kind: "knowledge_over_limit",
-            detail: `The package offers ${inventory.knowledgeCandidates.length} documents; at most ${ASSISTANT_PACKAGE_LIMITS.maxKnowledgeFiles} can be imported at once.`,
+            count: inventory.knowledgeCandidates.length,
         });
     }
 
@@ -308,28 +340,24 @@ export function convertSkillPackage(input: {
             name: {
                 value: name,
                 disposition: "needs_review",
-                note: nameTruncated
-                    ? "Shortened to fit. A package name is a slug -- give it a name you would recognise in a list."
-                    : "A package name is a slug -- give it a name you would recognise in a list.",
+                note: nameTruncated ? "name_shortened" : "name_is_a_slug",
             },
             description: {
                 value: description,
                 disposition: "needs_review",
-                note: descriptionTruncated
-                    ? "Shortened to fit. A package description says when to use the skill; a profile description is just a label."
-                    : null,
+                note: descriptionTruncated ? "description_shortened" : null,
             },
         },
         instructions: {
             value: body,
             disposition: "needs_review",
-            note: "Read this in full before approving. It came from a file, not from you.",
+            note: "read_the_instructions",
         },
         starters: { value: [], disposition: "automatic", note: null },
         modelIds: {
             value: [],
             disposition: "needs_review",
-            note: "Choose a model. Nothing here is chosen for you.",
+            note: "choose_a_model",
         },
         toolPolicy: {
             value: { webSearch: false, deepResearch: false },
