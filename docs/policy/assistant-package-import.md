@@ -13,10 +13,23 @@
 Profile로 **변환**하는 기능의 릴리스 차단 계약입니다.
 
 **이 문서가 구현보다 먼저 있습니다.** 계약이 먼저 확정되고 코드가 그것을
-따르는 순서이므로, 이 시점에서 구현 모듈의 경로를 나열하지 않습니다 —
-`npm run check:doc-references`가 존재하지 않는 경로를 정당하게 거절하고,
-그것을 피하려고 미리 빈 파일을 만드는 것은 게이트를 무력화하는 일입니다.
-모듈이 생기는 slice에서 그 경로를 여기 추가합니다.
+따르는 순서이므로, 이 문서를 쓴 시점에는 구현 모듈의 경로를 나열하지
+않았습니다 — `npm run check:doc-references`가 존재하지 않는 경로를 정당하게
+거절하고, 그것을 피하려고 미리 빈 파일을 만드는 것은 게이트를 무력화하는
+일입니다. 모듈이 생기는 slice에서 그 경로를 여기 추가합니다.
+
+지금까지 생긴 것은 아래이며, 남은 slice의 모듈은 그 slice가 이 목록에
+추가합니다.
+
+| 모듈 | 하는 일 |
+|---|---|
+| `lib/assistantPackageLimits.ts` | B1–B6 한도, 거절·건너뜀 사유, 확장자 분류 |
+| `lib/assistantPackageSecretScan.ts` | A5 scanner. 브라우저와 서버가 같은 것을 import |
+| `lib/assistantPackageManifest.ts` | native manifest schema, `portableProfileEquals()` |
+| `lib/assistantPackageAdapter.ts` | Agent Skill 변환과 손실 보고 |
+| `lib/assistantPackageArchive.ts` | 중앙 디렉터리 판독, 읽기 계획, entry 해제 |
+| `lib/assistantPackageReview.ts` | 열린 패키지를 사용자가 검토할 제안으로 |
+| `lib/workers/assistantPackageWorker.ts` | 위 둘을 main thread 밖에서 실행 |
 
 이 문서는 아래를 대체하지 않고 그 위에 쌓입니다.
 

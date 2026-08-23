@@ -36,6 +36,8 @@
  * the browser and Node reach SHA-256 by different names.
  */
 
+import { packageEntryExtension } from "@/lib/assistantPackageLimits";
+
 export const ASSISTANT_PACKAGE_SECRET_RULES = [
     {
         id: "aws-access-key-id",
@@ -128,8 +130,15 @@ export type AssistantPackageSecretFinding = {
     matchDigest: string;
 };
 
-/** SHA-256 over a string, as lowercase hex. Injected -- see the header. */
-export type Sha256Hex = (input: string) => Promise<string>;
+/**
+ * SHA-256 as lowercase hex. Injected -- see the header.
+ *
+ * Bytes as well as strings, because the same hasher digests a matched
+ * substring here and a knowledge file's contents in the review builder, and
+ * two injected hashers is two things a caller can wire up differently. Strings
+ * are encoded as UTF-8, which is what both platforms do by default.
+ */
+export type Sha256Hex = (input: string | Uint8Array) => Promise<string>;
 
 /**
  * Every finding in one piece of text.
@@ -251,4 +260,78 @@ export function collectUrlHosts(text: string): {
         match = pattern.exec(text);
     }
     return { count, hosts: [...hosts].filter((host) => host !== "").sort() };
+}
+
+/* ------------------------------------------------------- what gets scanned */
+
+/**
+ * Extensions whose bytes are text this scanner can read.
+ *
+ * A PDF or a DOCX is a compressed container; running these rules over its
+ * bytes finds nothing a credential is actually in and reports whatever random
+ * base64 the compression produced. The server sees the extracted text of those
+ * files and scans that instead, which is the same content read the right way.
+ */
+export const ASSISTANT_PACKAGE_TEXT_SCAN_EXTENSIONS = new Set([
+    "txt",
+    "text",
+    "log",
+    "md",
+    "markdown",
+    "csv",
+    "json",
+]);
+
+export const isTextScannable = (name: string): boolean =>
+    ASSISTANT_PACKAGE_TEXT_SCAN_EXTENSIONS.has(packageEntryExtension(name));
+
+export type AssistantPackageScanInput = {
+    name: string;
+    description: string | null;
+    instructions: string;
+    starters: readonly string[];
+    /** Only entries whose text is available. Omit the rest -- see below. */
+    knowledge: readonly { name: string; text: string }[];
+};
+
+/**
+ * The list of things to scan, in a fixed order, named the same way on both
+ * sides.
+ *
+ * This exists so that "the server scans the same text" is a property of one
+ * function rather than of two call sites agreeing. `source` is part of a
+ * finding's identity, so a side that spells a field differently produces
+ * findings the other cannot match, and every waiver silently stops working.
+ *
+ * A side that has less to scan is safe: the comparison only refuses on
+ * findings the *server* has, so a client that scanned more just waived more
+ * than it needed to.
+ */
+export function assistantPackageScanSources(
+    input: AssistantPackageScanInput
+): { source: string; text: string }[] {
+    const sources: { source: string; text: string }[] = [
+        { source: "profile.name", text: input.name },
+        { source: "profile.description", text: input.description ?? "" },
+        { source: "instructions", text: input.instructions },
+    ];
+    input.starters.forEach((starter, index) => {
+        sources.push({ source: `starters[${index}]`, text: starter });
+    });
+    for (const entry of input.knowledge) {
+        sources.push({ source: `knowledge:${entry.name}`, text: entry.text });
+    }
+    return sources.filter((source) => source.text !== "");
+}
+
+/** Every source scanned, flattened and sorted. */
+export async function scanAssistantPackage(
+    input: AssistantPackageScanInput,
+    sha256Hex: Sha256Hex
+): Promise<AssistantPackageSecretFinding[]> {
+    const findings: AssistantPackageSecretFinding[] = [];
+    for (const source of assistantPackageScanSources(input)) {
+        findings.push(...(await scanForSecrets(source, sha256Hex)));
+    }
+    return sortFindings(findings);
 }
