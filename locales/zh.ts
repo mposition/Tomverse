@@ -315,6 +315,8 @@ export const zh = {
         archiveNoSupportedFiles: "压缩包中没有本应用可读取的文件。",
         archiveTimeout: "处理该压缩包耗时过长。",
         archiveExcludedNotice: "有 {count} 个文件因不受支持而被排除。",
+        archiveReadSummary: "已读取 {count} 个文件",
+        archiveExcludedSummary: "已跳过 {count} 个",
         attachFormatGroupImage: "图片",
         attachFormatGroupDocument: "文档",
         attachFormatGroupData: "数据",

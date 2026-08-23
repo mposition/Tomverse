@@ -306,6 +306,8 @@ export const de = {
         archiveNoSupportedFiles: "Das Archiv enthält keine Dateien, die diese App lesen kann.",
         archiveTimeout: "Die Verarbeitung des Archivs hat zu lange gedauert.",
         archiveExcludedNotice: "{count} Datei(en) wurden übersprungen, weil sie nicht unterstützt werden.",
+        archiveReadSummary: "{count} Datei(en) gelesen",
+        archiveExcludedSummary: "{count} übersprungen",
         attachFormatGroupImage: "Bilder",
         attachFormatGroupDocument: "Dokumente",
         attachFormatGroupData: "Daten",

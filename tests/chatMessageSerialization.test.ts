@@ -238,3 +238,33 @@ test("a message with attachments and no text keeps its empty content", () => {
   assert.equal(serialized.content, "");
   assert.equal(serialized.content.includes("명단"), false);
 });
+
+// The archive summary is a display fact the composer holds so a chip can keep
+// saying what the four-second toast said once. It is not an input to anything:
+// the server recomputes the plan on the turn that sends the archive, and a
+// count arriving from the client would be a number the route has to decide
+// whether to believe. The allowlist is what keeps it out, so this asserts the
+// allowlist rather than a rule of its own.
+test("an attachment's archive summary never leaves the browser", () => {
+  const message: Message = {
+    id: "m-8",
+    role: "user",
+    content: "이 압축파일 내용 알려줘",
+    attachments: [
+      {
+        id: "local-1",
+        name: "project.zip",
+        mediaType: "application/zip",
+        size: 4096,
+        uploadId: "up_1",
+        kind: "file",
+        archive: { includedFiles: 6, excludedFiles: 3 },
+      },
+    ],
+  };
+  const serialized = toChatRequestMessage(message);
+  const attachment = serialized.attachments?.[0];
+  assert.ok(attachment);
+  assert.equal("archive" in attachment, false);
+  assert.equal(attachment.uploadId, "up_1");
+});

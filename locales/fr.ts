@@ -306,6 +306,8 @@ export const fr = {
         archiveNoSupportedFiles: "L'archive ne contient aucun fichier lisible par cette application.",
         archiveTimeout: "Le traitement de l'archive a pris trop de temps.",
         archiveExcludedNotice: "{count} fichier(s) ont été exclus car ils ne sont pas pris en charge.",
+        archiveReadSummary: "{count} fichier(s) lu(s)",
+        archiveExcludedSummary: "{count} ignoré(s)",
         attachFormatGroupImage: "Images",
         attachFormatGroupDocument: "Documents",
         attachFormatGroupData: "Données",
