@@ -20,7 +20,9 @@ import {
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
-import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
+import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
+import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
+import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
@@ -246,6 +248,8 @@ type ClaimedDelivery = {
   attempts: number;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
+  policyVersionId: string;
+  jurisdictionProfileKey: string;
   templateVersion: {
     template: { key: string; classification: string; requiresUnsubscribe: boolean };
   };
@@ -294,6 +298,9 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       attempts: true,
       idempotencyKey: true,
       renderDataSnapshot: true,
+      // Pinned at enqueue, read here: this is the step the pin exists for.
+      policyVersionId: true,
+      jurisdictionProfileKey: true,
       templateVersion: {
         select: {
           template: {
@@ -525,13 +532,13 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   }
 
   const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
-  const rendered = definition.render(payload, delivery.language);
+  const templateRendered = definition.render(payload, delivery.language);
   const attempts = delivery.attempts + 1;
 
   // Only marketing carries these, and the template's own flag decides -- which
   // the database holds as a CHECK against the classification, so a message
   // cannot acquire an unsubscribe header by being sent from the wrong place.
-  const headers = unsubscribeHeaders({
+  const unsubscribeTarget = {
     requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
     userId: delivery.userId,
     purpose: definition.purpose,
@@ -540,7 +547,103 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       process.env.PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
       "https://tomverse.app",
+  };
+  const unsubscribeLink = unsubscribeUrl(unsubscribeTarget);
+  const headers = unsubscribeHeaders({ ...unsubscribeTarget, url: unsubscribeLink });
+
+  // The subject prefix and the jurisdiction footer, from the profile this row
+  // was pinned to at enqueue (EM-04). Read from the pinned policy version and
+  // not the active one: a message enqueued under one set of labelling rules
+  // must not be sent under another, or the delivery row records the first while
+  // the recipient receives the second.
+  const profile = await prisma.jurisdictionProfile.findUnique({
+    where: {
+      profileKey_policyVersionId: {
+        profileKey: delivery.jurisdictionProfileKey,
+        policyVersionId: delivery.policyVersionId,
+      },
+    },
+    select: {
+      profileKey: true,
+      subjectPrefix: true,
+      footerBlocks: true,
+      unsubscribeSlaBusinessDays: true,
+    },
   });
+
+  const composed = composeJurisdictionalMessage({
+    classification: definition.classification,
+    requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
+    profile: profile
+      ? {
+          profileKey: profile.profileKey,
+          subjectPrefix: profile.subjectPrefix,
+          footerBlocks: Array.isArray(profile.footerBlocks)
+            ? profile.footerBlocks.filter(
+                (block): block is string => typeof block === "string"
+              )
+            : [],
+          unsubscribeSlaBusinessDays: profile.unsubscribeSlaBusinessDays,
+        }
+      : null,
+    identity: readBusinessIdentity(process.env),
+    language: delivery.language,
+    unsubscribeUrl: unsubscribeLink,
+    rendered: templateRendered,
+  });
+
+  if (composed.ok === false) {
+    // Marketing only. An advertisement that cannot be labelled the way its
+    // recipient's jurisdiction requires is not sent, because the violation is
+    // not recoverable by fixing configuration afterwards -- the message has
+    // already arrived unlabelled.
+    await reportOperationalIncident({
+      code: "EMAIL_JURISDICTION_LABELLING_UNAVAILABLE",
+      title: "A marketing message was held because it could not be labelled",
+      severity: "error",
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        profileKey: delivery.jurisdictionProfileKey,
+        skipReason: composed.skipReason,
+        missing: composed.missing.join(","),
+        setInstead: composed.missing
+          .map((block) => BLOCK_ENV_VARIABLE[block])
+          .filter(Boolean)
+          .join(","),
+      },
+    });
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "skipped",
+        skipReason: composed.skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+      },
+    });
+    return { outcome: "suppressed" as const, classification: definition.classification };
+  }
+
+  if (composed.degraded.length > 0) {
+    // Not an incident: the message is correct and going out, and holding an
+    // account-deletion notice for an unset variable would be the worse failure.
+    // Loud anyway -- the footer is still owed, and a silent omission is one
+    // nobody ever fixes.
+    console.warn(
+      JSON.stringify({
+        event: "email_jurisdiction_footer_degraded",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+        profileKey: delivery.jurisdictionProfileKey,
+        reasons: composed.degraded,
+        sent: "without_footer",
+      })
+    );
+  }
+
+  const rendered = composed.rendered;
 
   const response = await deliverEmailOnce({
     to: delivery.emailAddress,

@@ -178,9 +178,17 @@ export function AdminOverviewSummary({
           </p>
           <div className="mt-4 grid gap-2">
             {missingEnv.map((check) => (
+              // `min-w-0` on the card, not only on the text beside the icon.
+              // A grid item's automatic minimum size is its min-content, and a
+              // `truncate` descendant still contributes its full nowrap width
+              // to that -- `overflow: hidden` exempts the item itself, not an
+              // element inside it. So the longest variable name set the track's
+              // width and pushed the whole page into horizontal overflow, which
+              // on a 412px viewport is enough to carry a dialog's controls off
+              // the screen.
               <div
                 key={check.name}
-                className="flex items-start justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2"
+                className="flex min-w-0 items-start justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2"
               >
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold text-amber-100">
@@ -207,7 +215,7 @@ export function AdminOverviewSummary({
               {envChecks.map((check) => (
                 <div
                   key={check.name}
-                  className="flex items-start justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2"
+                  className="flex min-w-0 items-start justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-xs font-bold text-zinc-200">

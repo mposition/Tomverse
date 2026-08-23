@@ -512,7 +512,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   `EMAIL_SENDING_IDENTITY_REFUSED` incident가 1회 발생.
 - **파일**: `lib/standardEmailLane.ts:481-535`
 
-### EM-04 — jurisdiction footer와 제목 접두어가 발송에 적용되지 않는다 (P0, High)
+### EM-04 — jurisdiction footer와 제목 접두어가 발송에 적용되지 않는다 (P0, High) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `renderJurisdictionFooter()`는 `tests/emailFooterRenderer.test.mjs`
@@ -2106,7 +2106,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 ### P1
 
-- EM-04 jurisdiction footer/접두어 발송 경로 연결 (marketing 활성화 전 필수)
+- ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §21
 - EM-03 marketing 경로 end-to-end 테스트
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
 - EM-12 legal/transactional template 7개 언어
@@ -2224,3 +2224,65 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
   아니오 — 이메일 플랫폼은 3~4 수준이지만 모델 lifecycle vertical은 탐지 이후가
   전부 0이므로, 닫힌 loop가 존재하지 않습니다.
 
+---
+
+## 21. EM-04 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailJurisdictionComposition.ts` | 렌더와 발송 사이의 합성 단계. 순수 |
+| `lib/emailBusinessIdentity.ts` | footer가 찍을 사업자 정보를 환경변수에서 읽습니다 |
+| `lib/emailUnsubscribeHeaders.ts` | `unsubscribeUrl()` 분리 — footer 링크와 헤더가 같은 URL |
+| `lib/standardEmailLane.ts` | 고정된 policy version에서 profile을 읽어 합성. 거부 또는 저하 |
+| `lib/adminEnvironmentChecks.ts` | 신원 변수 6개 노출 |
+| `prisma/migrations/20260823060000_email_jurisdiction_labelling_skip_reasons/` | skipReason 2개 추가 |
+| `docs/ops/email-business-identity.md` | 무엇을 설정하고, 설정하지 않으면 무엇이 일어나는지 |
+| `tests/emailJurisdictionComposition.test.mjs` | 15건 (profile 8 × 언어 7 포함) |
+| `tests/integration/email-jurisdiction-composition.db.test.ts` | 7건 |
+
+**Root cause는 감사가 적은 그대로였습니다.** M7이 renderer를 만들고 M2가
+template을 만들었는데 둘을 잇는 단계가 어느 쪽 범위에도 없었습니다.
+`renderJurisdictionFooter()`는 자기 test에서만 불렸고 `subjectPrefix`는 seed와
+policy reader만 읽었습니다.
+
+**AC 충족**: KR/marketing subject는 `(광고)`로 시작하고 같은 template의 US 발송은
+그렇지 않으며, transactional은 어느 관할권에서도 접두어가 없습니다. SG는
+`<ADV> `이고 seed의 뒤따르는 공백이 보존됩니다.
+
+**세 가지 결정**
+
+1. **광고 표시는 marketing 전용입니다.** 정보통신망법 제50조와 Second Schedule은
+   영리목적 광고성 정보에 붙습니다. 영수증에 `(광고)`를 붙이는 것은 과잉 준수가
+   아니라 그 메일이 무엇인지에 대한 **거짓 진술**이고, 표시가 꼭 필요한 메일에서
+   수신자가 표시를 무시하도록 훈련시킵니다.
+2. **비대칭 실패**: marketing은 표시할 수 없으면 **보내지 않습니다**(도착한 뒤
+   되돌릴 수 없음). transactional은 footer 없이 **보내되 매번 경고**합니다 —
+   계정 삭제 예정 안내를 환경변수 하나 때문에 붙잡는 것이 더 나쁩니다.
+3. **수신거부 block은 `requiresUnsubscribe`가 정합니다**, 분류가 아니라. 같은
+   값이 `List-Unsubscribe` 헤더도 정하므로 footer 링크와 헤더가 어긋날 수
+   없고, DB가 그 flag를 분류에 대한 CHECK로 들고 있습니다. ZZ profile은 의도적
+   으로 완전한 marketing profile이므로(transactional도 그 신원 footer가 필요),
+   수신거부 block만 걸러 냅니다.
+
+**고정(pin)이 이 단계를 위해 존재합니다.** profile은 delivery에 고정된
+`policyVersionId`에서 읽고 활성 버전에서 읽지 않습니다. 그렇지 않으면 한 표시
+규칙 아래 큐에 들어간 메시지가 다른 규칙으로 나가고, delivery 행은 전자를
+기록하는데 수신자는 후자를 받습니다. DB test가 이것을 직접 확인합니다 — 나중에
+활성화된 후속 정책이 대기 중 메시지의 footer를 바꾸지 못합니다.
+
+**아직 남은 것**
+
+- **신원 값 6개가 설정되지 않았습니다.** 이 저장소가 답할 수 없는 사실이며
+  (§Q8), 그래서 기본값을 넣지 않았습니다. 오늘 production의 transactional
+  메일은 footer 없이 나가고 매번 `email_jurisdiction_footer_degraded`를 남깁니다.
+  이전과 같은 결과이되 **조용하지 않다**는 점이 다릅니다.
+- **관할권 정책이 활성화되지 않았습니다.** bootstrap 버전에는 profile이 없으므로
+  활성화 전까지 `profile_missing`입니다. 활성화는 사람이 승인해 registry에
+  기록하는 행위입니다(§12.5).
+- **marketing 거부 경로는 end-to-end로 실행되지 않았습니다.** 등록된 marketing
+  template이 하나도 없기 때문이며, 그것을 만드는 것은 제품 결정입니다. 순수
+  test가 seed의 실제 profile 8개로 거부 두 갈래를 모두 덮고, DB test는 CHECK가
+  그 두 skipReason을 받는지 확인합니다.
+
+**검증**: unit(신규 15) · DB integration 이메일 6개 suite 63건(신규 7 포함) ·
+`check:enum-constraints` 65 closed list · typecheck · eslint · doc/policy 참조 검사.
