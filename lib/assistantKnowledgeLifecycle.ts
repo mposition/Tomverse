@@ -6,6 +6,10 @@ import {
     ASSISTANT_KNOWLEDGE_RETENTION,
     type KnowledgeCleanupReason,
 } from "@/lib/assistantKnowledgeLimits";
+import {
+    describeKnowledgeCleanupQueue,
+    type KnowledgeCleanupDryRun,
+} from "@/lib/assistantKnowledgeCleanupDryRunCore";
 import type { KnowledgeProcessingSweepResult } from "@/lib/assistantKnowledgeProcessor";
 import { prisma } from "@/lib/prisma";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
@@ -83,8 +87,17 @@ export type KnowledgeCleanupSweepResult = {
  * Failures are recorded, never thrown: a storage outage must not take the rest
  * of the maintenance run down with it.
  */
+/**
+ * How many tombstones one execution takes.
+ *
+ * Exported because the dry run reports it: a cap quoted from a second literal
+ * is a cap that can drift from the one the run actually uses, and the operator
+ * reading "200" would have no way to tell.
+ */
+export const KNOWLEDGE_CLEANUP_EXECUTION_LIMIT = 200;
+
 export const drainKnowledgeCleanupQueue = async (
-    limit = 200,
+    limit = KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
     now = new Date()
 ): Promise<KnowledgeCleanupSweepResult> => {
     const pending = await prisma.assistantKnowledgeCleanup.findMany({
@@ -137,6 +150,43 @@ export const drainKnowledgeCleanupQueue = async (
 
     return { examined: pending.length, deleted, failed, exhausted };
 };
+
+/**
+ * Counts the tombstone queue for a retention dry run.
+ *
+ * Two counts and one timestamp, never the rows: `select` names `createdAt` and
+ * nothing else, so an object key cannot reach the audit log through here even
+ * by accident. The split is queried rather than derived because the ceiling is
+ * what separates a backlog the run will clear from one waiting on an operator.
+ */
+export const readKnowledgeCleanupQueueDryRun =
+    async (): Promise<KnowledgeCleanupDryRun> => {
+        const [retryable, exhausted, oldest] = await Promise.all([
+            prisma.assistantKnowledgeCleanup.count({
+                where: {
+                    completedAt: null,
+                    attempts: { lt: ASSISTANT_KNOWLEDGE_RETENTION.cleanupMaxAttempts },
+                },
+            }),
+            prisma.assistantKnowledgeCleanup.count({
+                where: {
+                    completedAt: null,
+                    attempts: { gte: ASSISTANT_KNOWLEDGE_RETENTION.cleanupMaxAttempts },
+                },
+            }),
+            prisma.assistantKnowledgeCleanup.findFirst({
+                where: { completedAt: null },
+                orderBy: { createdAt: "asc" },
+                select: { createdAt: true },
+            }),
+        ]);
+        return describeKnowledgeCleanupQueue({
+            retryable,
+            exhausted,
+            oldestPendingAt: oldest?.createdAt ?? null,
+            executionLimit: KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
+        });
+    };
 
 export type AbandonedKnowledgeSweepResult = {
     deleted: number;
@@ -257,7 +307,10 @@ export const runKnowledgeMaintenanceQuietly = async (
         processing: { reclaimed: 0, processed: 0, ready: 0, failed: 0 },
     };
     try {
-        const cleanup = await drainKnowledgeCleanupQueue(200, now);
+        const cleanup = await drainKnowledgeCleanupQueue(
+            KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
+            now
+        );
         // Bounded well below the drain, for the reason the image thumbnail
         // repair is: each one reads a whole object and extracts its text, so
         // this is the expensive arm and must not stretch the cadence it runs
