@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
+import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 
 // What an automatic disable leaves behind (ML-08).
@@ -269,6 +270,63 @@ test("a second disable of the same model does not open a second item", async () 
   await reconcileCatalogWithRegistry({ results, confirmationRuns: 3 });
 
   assert.equal(await prisma.modelLifecycleWorkItem.count(), 1);
+});
+
+// ML-12: one model, several providers, one decision -- and the sightings kept.
+//
+// The cross-day half only exists against a database: an item written on Monday
+// gains a provider on Thursday, and that is an update to a stored row rather
+// than anything a pure function can hold.
+
+test("a sighting through a second provider lands on the existing item", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [{ provider: "zhipu", apiModel: "glm-5.3" }],
+  });
+  const first = await prisma.modelLifecycleWorkItem.findFirstOrThrow();
+  assert.deepEqual((first.evidence as { observedVia: unknown }).observedVia, [
+    { provider: "zhipu", apiModel: "glm-5.3" },
+  ]);
+
+  // Three days later, Qwen starts serving it under its own spelling.
+  await recordDiscoveredWorkItems({
+    observed: [{ provider: "qwen", apiModel: "ZHIPU/GLM-5.3" }],
+  });
+
+  assert.equal(await prisma.modelLifecycleWorkItem.count(), 1, "no second item");
+  const after = await prisma.modelLifecycleWorkItem.findFirstOrThrow();
+  assert.deepEqual((after.evidence as { observedVia: unknown }).observedVia, [
+    { provider: "zhipu", apiModel: "glm-5.3" },
+    { provider: "qwen", apiModel: "ZHIPU/GLM-5.3" },
+  ]);
+});
+
+test("re-running the same scan changes nothing", async () => {
+  const observed = [
+    { provider: "zhipu", apiModel: "glm-5.3" },
+    { provider: "qwen", apiModel: "ZHIPU/GLM-5.3" },
+  ];
+  await recordDiscoveredWorkItems({ observed });
+  const first = await prisma.modelLifecycleWorkItem.findFirstOrThrow();
+
+  await recordDiscoveredWorkItems({ observed });
+
+  const again = await prisma.modelLifecycleWorkItem.findFirstOrThrow();
+  assert.equal(await prisma.modelLifecycleWorkItem.count(), 1);
+  assert.deepEqual(again.evidence, first.evidence);
+  assert.equal(again.updatedAt.getTime(), first.updatedAt.getTime(), "row untouched");
+});
+
+test("a model the catalogue already serves opens nothing, whichever provider lists it", async () => {
+  await seedModel("moonshotai/kimi-k3");
+
+  await recordDiscoveredWorkItems({
+    observed: [
+      { provider: "perplexity", apiModel: "perplexity/kimi-k3" },
+      { provider: "qwen", apiModel: "kimi-k3" },
+    ],
+  });
+
+  assert.equal(await prisma.modelLifecycleWorkItem.count(), 0);
 });
 
 test("a provider losing its whole lineup is held, and opens nothing", async () => {
