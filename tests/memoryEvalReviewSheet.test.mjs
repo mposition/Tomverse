@@ -11,7 +11,7 @@ import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.t
  * everything else already done for them.
  *
  * The first record was hand-written and failed at exactly that: it asked for
- * a verdict on all 25 cases when §6.3 samples category ① at 20%, and it
+ * a verdict on all 25 cases when docs/ops/memory-extraction-eval-dataset.md §6.3 samples category ① at 20%, and it
  * carried a 42-character excerpt so judging a case meant opening the
  * TypeScript file. Both are pinned here, because both are the kind of
  * regression that looks like diligence.
@@ -91,7 +91,7 @@ test("the sample spreads across kinds rather than repeating one", () => {
 
 test("the sheet states the automated checks rather than a command to run", () => {
     const rendered = sheet(CANDIDATE_BATCHES[0].id);
-    // §6.5's near-duplicate figures belong in the sheet. Telling the reviewer
+    // docs/ops/memory-extraction-eval-dataset.md §6.5's near-duplicate figures belong in the sheet. Telling the reviewer
     // to run a script is handing them the work the rule assigns to the agent.
     assert.match(rendered, /exact duplicate/);
     assert.match(rendered, /kind 분포/);

@@ -6,7 +6,7 @@
  * in the same direction -- work handed to the reviewer that did not have to
  * be theirs:
  *
- *   1. It asked for a verdict on all 25 cases. §6.3 lets category ① be
+ *   1. It asked for a verdict on all 25 cases. docs/ops/memory-extraction-eval-dataset.md §6.3 lets category ① be
  *      sample-reviewed at 20%, so five was the requirement and twenty-five
  *      was what the sheet demanded.
  *   2. It carried a 42-character excerpt per case, so judging one meant
@@ -32,7 +32,6 @@ import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
 import { MEMORY_KINDS } from "../lib/memoryValidatorCore.ts";
 import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
 
-const GUIDANCE = "docs/ops/memory-extraction-eval-dataset.md";
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
     return hit === undefined ? fallback : hit.slice(name.length + 3);
@@ -55,7 +54,7 @@ const isCriticalNegative = cases.every(
 /**
  * How many cases the reviewer actually has to judge.
  *
- * §6.3: categories ②③④ are reviewed in full because a mislabelled critical
+ * docs/ops/memory-extraction-eval-dataset.md §6.3: categories ②③④ are reviewed in full because a mislabelled critical
  * negative is the failure the whole eval exists to catch. Category ① may be
  * sampled at 20%.
  */
@@ -124,7 +123,7 @@ for (const entry of cases) {
         problems.push(`${entry.id}: no user turn`);
     for (const expectation of entry.expected) {
         if (!MEMORY_KINDS.includes(expectation.kind))
-            problems.push(`${entry.id}: ${expectation.kind} is not a §8.2 kind`);
+            problems.push(`${entry.id}: ${expectation.kind} is not a docs/ops/memory-extraction-eval-dataset.md §8.2 kind`);
         if (expectation.mustInclude.length > 2)
             problems.push(`${entry.id}: more than two keywords`);
         for (const keyword of expectation.mustInclude) {
@@ -171,9 +170,9 @@ p();
 p(`**케이스 ${sampleSize}건 판정 + batch 채택 결정 1건.** 그게 전부입니다.`);
 p();
 if (isCriticalNegative) {
-    p(`이 batch는 critical negative(범주 ②③④)라 \`${GUIDANCE}\` §6.3이 **전건 검수**를 요구합니다.`);
+    p(`이 batch는 critical negative(범주 ②③④)라 \`docs/ops/memory-extraction-eval-dataset.md\` §6.3이 **전건 검수**를 요구합니다.`);
 } else {
-    p(`이 batch는 범주 ①이라 \`${GUIDANCE}\` §6.3의 **20% 표본 검수**로 갈음됩니다 — ${cases.length}건 중 ${sampleSize}건.`);
+    p(`이 batch는 범주 ①이라 \`docs/ops/memory-extraction-eval-dataset.md\` §6.3의 **20% 표본 검수**로 갈음됩니다 — ${cases.length}건 중 ${sampleSize}건.`);
     p();
     p(`표본에서 **반려가 한 건이라도 나오면 불일치율이 5%를 넘으므로 batch 전건 재검수**입니다`);
     p(`(${sampleSize}건 중 1건 = ${Math.round(100 / sampleSize)}%). 더 보고 싶으시면 아래 전체 목록에서 골라 보셔도 됩니다.`);
@@ -194,7 +193,7 @@ p(`| kind 분포 (한 kind가 40% 초과 금지) | 최대 \`${widestKind?.[0] ??
 p(`| kind 유효성 · 키워드 수 · 키워드의 사용자 발화 실재 · 턴 수 | ${problems.length === 0 ? `${cases.length}건 전부 통과` : `**${problems.length}건 위반**`} |`);
 if (problems.length > 0) for (const problem of problems) p(`| | ${problem} |`);
 p();
-p(`### near-duplicate 상위 쌍 (\`${GUIDANCE}\` §6.5)`);
+p(`### near-duplicate 상위 쌍 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.5)`);
 p();
 p("**권고입니다.** 통과·불통과를 정하지 않으며, 다양성 판정은 검수자가 합니다.");
 p("같은 틀에 단어만 바꾼 쌍은 shape가 1.00에 가깝고, 같은 주제의 다른 문장은 0.1 안팎입니다.");
@@ -210,7 +209,7 @@ p();
 p(`## 표본 — 판정할 ${sampleSize}건`);
 p();
 p("판정은 `채택` / `반려(재작성)` / `반려(폐기)` 중 하나입니다. **`수정 후 채택`은 없습니다** —");
-p(`실질 수정은 반려 사유를 남기면 에이전트가 재작성하고 같은 분이 재검수합니다 (\`${GUIDANCE}\` §6.4).`);
+p(`실질 수정은 반려 사유를 남기면 에이전트가 재작성하고 같은 분이 재검수합니다 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.4).`);
 p("오탈자처럼 내용을 바꾸지 않는 수정은 `채택`에 포함됩니다.");
 p();
 for (const index of sample) {
@@ -230,12 +229,12 @@ p("---");
 p();
 p("## batch 채택 결정");
 p();
-p(`\`${GUIDANCE}\` §6.3: 표본만 보고 넘어가는 것은 채택이 아닙니다. 아래에 적어야 나머지가 dataset에 들어갑니다.`);
+p(`\`docs/ops/memory-extraction-eval-dataset.md\` §6.3: 표본만 보고 넘어가는 것은 채택이 아닙니다. 아래에 적어야 나머지가 dataset에 들어갑니다.`);
 p();
 p("| 항목 | 값 |");
 p("|---|---|");
 p("| batch 채택 여부 | |");
-p(`| 다양성 판정 (\`${GUIDANCE}\` §6.5) | |`);
+p(`| 다양성 판정 (\`docs/ops/memory-extraction-eval-dataset.md\` §6.5) | |`);
 p("| 검수 완료일 | |");
 p();
 p("---");
