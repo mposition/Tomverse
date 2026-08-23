@@ -6,6 +6,7 @@ import {
   ensureModelRegistrySeeded,
   getEnabledRuntimeModel,
   getRuntimeModel,
+  reconcileStaticCatalogMetadata,
   reconcileStaticWithdrawals,
 } from "../../lib/modelRegistry";
 import { assertModelRuntimeAvailable } from "../../lib/modelAvailability";
@@ -193,7 +194,7 @@ test("an already-withdrawn row with a stale replacement is still corrected", asy
 // who deletes a catalogue entry finds it here rather than in production.
 //
 // Both replay paths iterate the static catalogue -- reconcileStaticWithdrawals
-// over STATIC_WITHDRAWN_MODELS, applyScopedStaticCatalogReconciliation over
+// over STATIC_WITHDRAWN_MODELS, reconcileStaticCatalogMetadata over
 // filtered seed rows -- so an id removed outright leaves nothing to iterate,
 // while getRuntimeModels keeps answering from the row. Deleting an entry
 // therefore does NOT withdraw the model from an environment that already
@@ -312,6 +313,113 @@ test("persists and resolves a newly registered model without a source catalogue 
     inputUsdPerMillionTokens: 2.5,
     outputUsdPerMillionTokens: 8.5,
     cachedInputPriceMultiplier: 0.5,
+  });
+});
+
+// Trace 2e4327a9: claude-sonnet-5 returned no answer at all and reported
+// AI_EMPTY_RESPONSE.MAX_TOKENS. 16,314 input tokens went out, 4,096 output
+// tokens were allowed, 4,095 of them went to reasoning, and the turn ended
+// before a word of visible text or a single tool call.
+//
+// 4,096 was FALLBACK_PRICING.advanced, written into the row when it was seeded
+// on 2026-07-17 -- claude-sonnet-5 had no pricing profile then. The profile
+// arrived on 2026-08-04 saying 128,000 and never reached the row:
+// `createMany({ skipDuplicates: true })` does not revisit an existing row, and
+// the model was not in STATIC_CATALOG_RECONCILIATION_MODEL_IDS. Unlike the
+// three price columns there is no NULL-means-inherit rule here to save it --
+// `registryRowToModel()` simply obeys the stored number.
+//
+// This plants the production shape and checks the bootstrap corrects it,
+// including the fields it must NOT touch on the way past.
+test("bootstrapping lifts a stale Sonnet 5 output cap without touching price, credits or availability", async () => {
+  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "claude-sonnet-5" },
+  });
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "claude-sonnet-5" },
+    data: {
+      // The fossil.
+      maxOutputTokens: 4_096,
+      reservationOutputTokens: 2_048,
+      // Fields an operator owns, planted so a reconciliation that reached too
+      // far is caught here rather than in production. The price columns are a
+      // stored number, which by contract means "an administrator overrode this
+      // model" and beats the profile including its tiers.
+      inputUsdPerMillionTokens: 9.5,
+      outputUsdPerMillionTokens: 42.5,
+      cachedInputPriceMultiplier: 0.25,
+      updatedById: null,
+      updatedByEmail: "ops@tomverse.app",
+      sortOrder: 4_242,
+      catalogDeleted: false,
+    },
+  });
+
+  // The bootstrap memoises, so the reconciliation is invoked directly -- which
+  // is also how an operator repairs one environment without a deploy.
+  await reconcileStaticCatalogMetadata();
+
+  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "claude-sonnet-5" },
+  });
+
+  // The one number this is for.
+  assert.equal(row.maxOutputTokens, 128_000);
+  // And the one that must not move with it: what a turn reserves against the
+  // user's credits and the provider budget is an entitlement decision, not
+  // something an incident fix carries along
+  // (docs/policy/credit-and-cost-limits.md).
+  assert.equal(row.reservationOutputTokens, 2_048);
+
+  // The administrator's price override survives, tiers and all.
+  assert.equal(Number(row.inputUsdPerMillionTokens), 9.5);
+  assert.equal(Number(row.outputUsdPerMillionTokens), 42.5);
+  assert.equal(Number(row.cachedInputPriceMultiplier), 0.25);
+  // As does everything else the operator owns.
+  assert.equal(row.updatedByEmail, "ops@tomverse.app");
+  assert.equal(row.sortOrder, 4_242);
+  assert.equal(row.catalogDeleted, false);
+  // Sonnet 5 is enabled, so the lifecycle branch is not taken and the model
+  // stays exactly as available as it was.
+  assert.equal(row.enabled, before.enabled);
+  assert.equal(row.publiclyListed, before.publiclyListed);
+  assert.equal(row.status, before.status);
+  assert.equal(row.creditWeight, 4);
+
+  // What the request actually asks for, read back through the same path the
+  // chat route uses. The stored override is what makes this worth asserting:
+  // resolveModelPricing() prefers row values, so a run that only checked the
+  // profile would pass while production still capped at 4,096.
+  const model = await getEnabledRuntimeModel("claude-sonnet-5");
+  assert.ok(model);
+  assert.equal(model.maxOutputTokens, 128_000);
+  assert.equal(getModelBillingProfile(model).maxOutputTokens, 128_000);
+  assert.equal(getModelBillingProfile(model).reservationOutputTokens, 2_048);
+  assert.equal(getModelUsageProfile(model).credits, 4);
+
+  // Idempotent: a second pass writes nothing and changes nothing.
+  await reconcileStaticCatalogMetadata();
+  const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "claude-sonnet-5" },
+  });
+  assert.equal(again.maxOutputTokens, 128_000);
+  assert.equal(again.reservationOutputTokens, 2_048);
+  assert.equal(Number(again.inputUsdPerMillionTokens), 9.5);
+
+  // Put the row back the way the suite found it: the price columns are NULL
+  // in a real deployment, and leaving an override behind would quietly change
+  // what every later test in this database is priced at.
+  await prisma.modelRegistryEntry.update({
+    where: { id: "claude-sonnet-5" },
+    data: {
+      inputUsdPerMillionTokens: before.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: before.outputUsdPerMillionTokens,
+      cachedInputPriceMultiplier: before.cachedInputPriceMultiplier,
+      updatedById: before.updatedById,
+      updatedByEmail: before.updatedByEmail,
+      sortOrder: before.sortOrder,
+    },
   });
 });
 
