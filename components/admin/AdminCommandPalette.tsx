@@ -290,13 +290,22 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
             placeholder="Search records or type a page name..."
             className="h-14 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
           />
-          {searching ? (
-            <Loader2 className="h-4 w-4 animate-spin text-zinc-500" aria-hidden />
-          ) : null}
+          {/*
+            The slot is always present, so the spinner appearing does not move
+            the close button out from under a pointer already aimed at it.
+            Mounting it shifted that button 28px left -- its own width plus the
+            row gap -- which is most of a 32px target, and on a slow first
+            search the shift landed between the hit test and the click.
+          */}
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            {searching ? (
+              <Loader2 className="h-4 w-4 animate-spin text-zinc-500" aria-hidden />
+            ) : null}
+          </span>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-zinc-900"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-zinc-900"
             aria-label="Close"
           >
             <X className="h-4 w-4" aria-hidden />
