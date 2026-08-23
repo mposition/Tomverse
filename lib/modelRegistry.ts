@@ -214,7 +214,13 @@ export async function reconcileStaticWithdrawals() {
 // excludes catalogDeleted, sortOrder, provider connection settings, actor
 // metadata and active-model lifecycle fields so an operator's incident switch
 // is never turned back on by an application restart.
-async function applyScopedStaticCatalogReconciliation() {
+/**
+ * Exported for the same reason `reconcileStaticWithdrawals` is: the bootstrap
+ * memoises itself, so a test -- or an operator repairing one environment
+ * without waiting for a deploy -- has no other way to run this deliberately.
+ * Idempotent: it reads first and writes only rows that actually differ.
+ */
+export async function reconcileStaticCatalogMetadata() {
   const changes = staticModelRegistryReconciliationRows();
   if (changes.length === 0) return;
 
@@ -257,7 +263,7 @@ export async function ensureModelRegistrySeeded() {
       })
       .then(async () => {
         await reconcileStaticWithdrawals();
-        await applyScopedStaticCatalogReconciliation();
+        await reconcileStaticCatalogMetadata();
       })
       .catch((error) => {
         bootstrapPromise = null;

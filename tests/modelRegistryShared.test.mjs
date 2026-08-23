@@ -85,6 +85,51 @@ test("catalog reconciliation is exact-ID scoped and preserves operator-owned fie
   assert.equal("status" in grok45.data, false);
 });
 
+// Trace 2e4327a9: claude-sonnet-5 answered nothing and reported
+// AI_EMPTY_RESPONSE.MAX_TOKENS because production still served it under the
+// 4,096-token `advanced` class fallback its row was seeded with on
+// 2026-07-17, five weeks before the 128,000 profile landed. Reconciliation is
+// what carries the profile across to a row that already exists.
+test("claude-sonnet-5 reconciles its output cap without moving credits or price", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  const sonnet = rows.find((row) => row.id === "claude-sonnet-5");
+  assert.ok(sonnet, "claude-sonnet-5 must be reconciled, or the 4,096 row stands");
+
+  // The one number this entry exists to move.
+  assert.equal(sonnet.data.maxOutputTokens, 128_000);
+  // And the one it must not: the reservation is what a turn holds against the
+  // user's credits and the provider budget, so it stays where the profile and
+  // the row already agree. Raising it here would be an entitlement change
+  // smuggled in as an incident fix (docs/policy/credit-and-cost-limits.md).
+  assert.equal(sonnet.data.reservationOutputTokens, 2_048);
+
+  // Sonnet 5 is enabled, so the lifecycle branch is not taken: an operator's
+  // incident switch is not turned back on by an application restart.
+  for (const field of [
+    "enabled",
+    "publiclyListed",
+    "status",
+    "operationalReason",
+    "userVisibleNote",
+    "replacementModelId",
+  ]) {
+    assert.equal(field in sonnet.data, false, field);
+  }
+
+  // Price stays NULL-means-inherit, and the credit weight stays the Advanced
+  // class default the row was already billing at.
+  for (const field of [
+    "inputUsdPerMillionTokens",
+    "outputUsdPerMillionTokens",
+    "cachedInputPriceMultiplier",
+    "updatedById",
+    "updatedByEmail",
+  ]) {
+    assert.equal(field in sonnet.data, false, field);
+  }
+  assert.equal(sonnet.data.creditWeight, 4);
+});
+
 test("model registry URL validation blocks SSRF-oriented endpoints", () => {
   for (const value of [
     "http://api.example.com/v1",

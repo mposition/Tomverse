@@ -303,6 +303,20 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   아니라 보고입니다**: 행이 카탈로그와 다른 것은 `PUT /api/admin/models`가 만들라고
   있는 상태이고, 의도된 override와 편집 실패는 컬럼만 봐서 구분되지 않습니다.
   새 모델의 크레딧을 바꿀 때는 코드만 고치지 말고 이 보고로 실제 행을 확인합니다.
+- **`maxOutputTokens`·`reservationOutputTokens`에도 그 `NULL` 구분이 없습니다.**
+  가격 컬럼과 달리 seed가 해석된 숫자를 써 넣으므로, 저장된 숫자는 관리자
+  override일 수도 그때의 profile 화석일 수도 있고 컬럼은 둘을 구분하지 못합니다.
+  `registryRowToModel()`이 그 숫자를 신뢰하고 chat route가
+  `streamText({ maxOutputTokens })`로 넘기므로 **화석은 낡은 표시가 아니라 모든
+  답변에 걸리는 상한입니다.** 2026-08-23에 `claude-sonnet-5`가 이 상태로
+  발견됐습니다 — profile 128,000, 운영 행 4,096(2026-07-17 seed 당시의
+  `advanced` fallback), trace `2e4327a9`가 reasoning으로 4,095 토큰을 쓰고
+  `AI_EMPTY_RESPONSE.MAX_TOKENS`로 끝났습니다. profile의 출력 한도를 바꾸면
+  모델을 `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에 등록해야 기존 행에
+  도달합니다. **상한과 예약을 함께 움직이지 않습니다** — 앞은 능력이고 뒤는
+  entitlement입니다. `npm run report:model-token-limits`가 차이를 actor 유무와
+  함께 나열하며, `report:model-credit-weights`와 같이 **gate가 아니라
+  보고입니다**: docs/policy/credit-and-cost-limits.md.
 - **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
   아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
   기본값은 `auto`). `npm run check:model-pricing`이 request-side tier 지정을

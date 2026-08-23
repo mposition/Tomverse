@@ -339,6 +339,41 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   "mistral-medium-3-1",
   "claude-fable-5",
   "claude-opus-4-8",
+  // Added 2026-08-23 after trace 2e4327a9 answered nothing and reported
+  // AI_EMPTY_RESPONSE.MAX_TOKENS: 16,314 input tokens in, 4,096 output tokens
+  // allowed, 4,095 of them spent on reasoning, no visible text and no tool
+  // call. The request cap was 4,096 because the production row still said so.
+  //
+  // Why the row said so, and why nothing corrected it:
+  //
+  //   * The row was seeded 2026-07-17, when lib/modelPricing.ts carried no
+  //     profile for claude-sonnet-5. `getModelBillingProfile()` therefore
+  //     returned FALLBACK_PRICING.advanced -- 4,096 / 2,048 -- and the seed
+  //     wrote those two numbers into the row like any other.
+  //   * The real profile landed 2026-08-04 with maxOutputTokens 128,000. It
+  //     reached every environment that had no row yet, and no environment
+  //     that had one: `createMany({ skipDuplicates: true })` never revisits an
+  //     existing row, and claude-sonnet-5 was not in this list.
+  //   * Unlike the three price columns, the two token columns have no
+  //     NULL-means-inherit rule to fall back on. `registryRowToModel()` reads
+  //     `row.maxOutputTokens` and prefers it, `createChatBudget()` carries it
+  //     into the request, and app/api/chat/route.ts hands it to
+  //     `streamText({ maxOutputTokens })`. A stale seed value is not a stale
+  //     display string here -- it is the live ceiling on every answer.
+  //
+  // So this entry reaches exactly one changed number: the 128,000 output cap.
+  // `reservationOutputTokens` is reconciled to 2,048, which is what both the
+  // profile and the row already say -- the credit reservation and the cost
+  // reservation do not move, and neither does the price, the credit weight or
+  // the model's availability. Sonnet 5 is enabled, so the `lifecycle` branch
+  // below is not taken for it.
+  //
+  // `npm run report:model-token-limits` is how the same drift is found next
+  // time without an incident: it lists every model whose row disagrees with
+  // STATIC_RUNTIME_MODELS on either token column, and says whether a row
+  // carries actor metadata (an administrator decided) or none (a seed wrote
+  // it and nothing has revisited it since).
+  "claude-sonnet-5",
   "codestral",
   "kimi-k3",
   "minimax-m3",

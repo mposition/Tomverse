@@ -648,7 +648,7 @@ mini로 생성된 것이라면, 둘 중 하나만 허용됩니다.
 
 1. **`ModelRegistryEntry`** — `gpt-5-4-mini`를
    `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에 추가했습니다. 부팅 시
-   `applyScopedStaticCatalogReconciliation()`이 이 exact ID에 대해서만 가격,
+   `reconcileStaticCatalogMetadata()`이 이 exact ID에 대해서만 가격,
    `maxOutputTokens`, `reservationOutputTokens`, `contextWindowTokens`,
    capability, display metadata를 갱신합니다. mini는 아직 enabled이므로
    lifecycle 필드(`enabled/publiclyListed/status`)는 건드리지 않습니다.
@@ -731,7 +731,7 @@ favorites, recent models, 클라이언트 local storage는 DB migration으로 �
 
 1. `npm run db:migrate` — `20260801200000_default_model_gpt_5_6_luna` 적용.
 2. 앱 배포. 첫 요청 시 `ensureModelRegistrySeeded()`가
-   `applyScopedStaticCatalogReconciliation()`을 실행하고
+   `reconcileStaticCatalogMetadata()`을 실행하고
    `"Model registry: reconciled provider-verified static metadata."` 로그에
    `gpt-5-4-mini`가 나타나는지 확인.
 3. 8절 대조.
