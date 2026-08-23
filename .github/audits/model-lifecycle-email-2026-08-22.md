@@ -416,7 +416,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/providerModelCatalogMonitor.ts:186-196,203-216`,
   `prisma/schema.prisma:1745`
 
-### ML-13 — provider 라벨이 모델 소유자가 아니라 스캔한 provider다 (P1, Medium)
+### ML-13 — provider 라벨이 모델 소유자가 아니라 스캔한 provider다 (P1, Medium) — **해결 (2026-08-23)** — §31
 
 - **Evidence**: `[코드]` `[측정]`
 - **현재 동작**: `providerName(result.provider)`는 **카탈로그를 스캔한 쪽**을
@@ -2113,7 +2113,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~EM-08 snapshot retention + 무한 증가 테이블 등록~~ **완료 (2026-08-23)** — §29
 - ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §25
 - ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §28
-- ML-13 리포트에서 모델 소유자와 관측 경로 분리
+- ~~ML-13 리포트에서 모델 소유자와 관측 경로 분리~~ **완료 (2026-08-23)** — §31
 - ML-10 reconciliation script 범용화 + precondition 검사
 - EM-06 campaign이 templateVersion pin
 - EM-11 standard drain job key + backlog incident
@@ -2545,3 +2545,51 @@ DB test가 그 쌍을 고정합니다(단일 process test로는 관측되지 않
 **범위 밖**: `lib/notificationDeliveries.ts`의 자체 재시도 큐를 standard lane으로
 합치는 것. 두 큐가 공존하는 것은 별개 결정이고 이 항목의 AC가 묻는 것이
 아닙니다.
+
+---
+
+## 31. ML-13 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelOwner.ts` | 식별자 → 제작사. 순수, 새 파일 |
+| `lib/modelLifecycleWorkItems.ts` | report row가 `observedVia`를 함께 반환 |
+| `lib/modelLifecycleDailyReportCore.ts` | `publisher` · `observedVia` 필드 |
+| `lib/providerModelCatalogReport.ts` | 후보 줄을 모델 단위로 묶고 제작사·관측 경로를 분리 |
+| `lib/modelLifecycleDailyEmail.ts` | `provenance()` — HTML·plain text 양쪽 |
+| `tests/modelOwner.test.mjs` | 12건 |
+| `tests/modelLifecycleDailyReport.test.mjs` | 4건 추가 (총 21) |
+| `tests/integration/model-lifecycle-auto-disable.db.test.ts` | 2건 추가 (총 12) |
+
+**감사가 실측한 세 줄을 test가 고정합니다** — `Qwen ZHIPU/GLM-5.3`,
+`Qwen kimi-k3`, `Perplexity perplexity/deepseek-v4-pro-0813`. 지금은 각각 Zhipu ·
+Moonshot · DeepSeek입니다.
+
+**이름의 family token이 경로 prefix를 이깁니다.** aggregator의 경로는 namespace이지
+저작 주장이 아닙니다 — `perplexity/deepseek-v4-pro`는 Perplexity 경로 위의 DeepSeek
+모델이고, prefix를 소유권으로 읽으면 업계 모델 절반이 Perplexity 것이 됩니다.
+prefix는 **이름이 아무것도 말하지 않을 때만** 봅니다. 그리고 `groq/`·`perplexity/`·
+`openrouter/`는 prefix 표에 **없습니다**(남의 모델을 서빙하는 host).
+
+**`unknown`은 진짜 답입니다.** 이름이 아무 token에도 안 맞으면 스캔한 provider로
+떨어지지 않고 `unknown owner`로 남습니다. 라벨의 존재 이유가 triage 첫 줄을 믿을
+수 있게 하는 것인데, 사실처럼 꾸민 추측은 아무도 나중에 고치지 않습니다.
+
+**필드 이름은 `owner`가 아니라 `publisher`입니다.** 같은 타입에 이미
+`ownerEmail`(담당자)이 있고, 한 행에 owner가 둘이면 renderer가 틀린 쪽을 고릅니다.
+
+**Slack 후보 줄은 모델 단위로 묶습니다.** `candidateIdentity`로 같은 모델을
+한 줄에 모으고, 카탈로그가 다르게 부른 경우에만 그 문자열을 함께 적습니다
+(`Qwen as \`ZHIPU/GLM-5.3\``) — 확인하려는 사람은 정규화 키가 아니라 실제 반환된
+문자열이 필요합니다.
+
+**한 곳에서만 본 항목은 관측 경로를 적지 않습니다.** 자기가 접수된 provider 하나만
+보인 것이 보통이고, 매 줄에 반복하면 정작 의미 있는 줄이 묻힙니다.
+
+**ML-12 이전 행은 접수 scan으로 대체합니다.** `evidence.observedVia`가 없으면 빈
+목록이 아니라 `[{provider, apiModel}]`을 돌려줍니다 — 빈 목록은 "아무도 본 적 없는
+모델"이라는 다른, 더 틀린 주장입니다.
+
+**범위 밖**: `missing`·`lifecycleWarnings` 줄의 provider 라벨. 그 둘은 **우리
+registry에 있는 모델**에 대한 것이고 거기서 provider는 우리가 실제로 요청을 보내는
+경로이므로 의미가 맞습니다.

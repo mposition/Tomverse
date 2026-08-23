@@ -50,7 +50,24 @@ export const AWAITING_DIGEST_THRESHOLD = 50;
 
 export type LifecycleReportWorkItem = {
   id: string;
+  /**
+   * The catalogue the scan that filed this item was reading.
+   *
+   * Kept because it is a fact about the item, but it is not the answer to "who
+   * made this model" and no renderer may present it as one (ML-13). That is
+   * what `owner` is for.
+   */
   provider: string;
+  /**
+   * Display name of the organisation that publishes the model, or "unknown".
+   *
+   * Named `publisher` rather than `owner` because `ownerEmail` on this same
+   * type means the person the item is assigned to. Two different owners on one
+   * row is how a renderer picks the wrong one.
+   */
+  publisher: string;
+  /** Every catalogue the model has been seen in, newest sighting appended. */
+  observedVia: Array<{ provider: string; displayName: string; apiModel: string }>;
   apiModel: string;
   action: string;
   status: string;
