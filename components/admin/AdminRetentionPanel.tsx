@@ -22,6 +22,23 @@ type RetentionResponse = {
   items: RetentionItem[];
 };
 
+/**
+ * The dry run the operator is looking at.
+ *
+ * Kept because the execution is bound to it: a single-administrator
+ * organisation cannot satisfy the two-person rule, so the preview's digest is
+ * what stands in for the second reviewer (lib/adminSoleApproverCore.ts). With
+ * two administrators configured the server ignores these and asks for the
+ * usual approval, so the panel sends them either way rather than trying to
+ * work out which path applies.
+ */
+type DryRunPreview = {
+  id: string;
+  digest: string;
+  ranAt: string;
+  result: unknown;
+};
+
 const dateLabel = (value: string | null) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -34,6 +51,7 @@ export function AdminRetentionPanel() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState<"dry-run" | "execute" | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [preview, setPreview] = useState<DryRunPreview | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,10 +89,16 @@ export function AdminRetentionPanel() {
         body: JSON.stringify({
           mode,
           confirmText: mode === "execute" ? confirmText : undefined,
+          dryRunId: mode === "execute" ? preview?.id : undefined,
+          dryRunDigest: mode === "execute" ? preview?.digest : undefined,
         }),
       });
       const payload = (await response.json().catch(() => null)) as
-        | { run?: { result?: unknown }; error?: string }
+        | {
+            run?: { id?: string; result?: unknown; createdAt?: string };
+            resultDigest?: string;
+            error?: string;
+          }
         | null;
       if (!response.ok || !payload?.run) {
         throw new Error(payload?.error || "Cleanup operation failed.");
@@ -84,6 +108,19 @@ export function AdminRetentionPanel() {
         "success"
       );
       setConfirmText("");
+      // A dry run replaces the preview; an execution consumes it. Either way
+      // the old one is gone, and the server would refuse it as superseded
+      // rather than act on numbers nobody is still looking at.
+      setPreview(
+        mode === "dry-run" && payload.run.id && payload.resultDigest
+          ? {
+              id: payload.run.id,
+              digest: payload.resultDigest,
+              ranAt: payload.run.createdAt || new Date().toISOString(),
+              result: payload.run.result ?? null,
+            }
+          : null
+      );
       await load();
     } catch (error) {
       dispatchAppToast(
@@ -169,6 +206,16 @@ export function AdminRetentionPanel() {
         <p className="mt-2 text-sm leading-6 text-amber-100/75">
           Run a dry run first. To execute cleanup, type RUN CLEANUP exactly.
         </p>
+        {preview ? (
+          <div className="mt-4 rounded-xl border border-zinc-700 bg-zinc-950/80 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
+              Dry run {dateLabel(preview.ranAt)} UTC
+            </p>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-zinc-300">
+              {JSON.stringify(preview.result, null, 2)}
+            </pre>
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]">
           <input
             value={confirmText}
