@@ -263,7 +263,18 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/75 px-4 pt-[8vh] backdrop-blur-sm"
+      /*
+        `w-screen` rather than relying on `inset-0` alone. A fixed element is
+        sized by its containing block, and the admin shell's own filtered and
+        transformed ancestors make that the document rather than the viewport --
+        so on a page with any horizontal overflow the overlay stretched to the
+        document width, and everything centred inside it drifted right. At 412px
+        that put the close button's own centre off the screen.
+
+        The palette is the one surface that must work on the narrowest viewport
+        we support, so it measures itself against the viewport and clips.
+      */
+      className="fixed inset-0 z-[100] flex w-screen max-w-[100vw] items-start justify-center overflow-hidden bg-black/75 px-4 pt-[8vh] backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Admin command palette"
