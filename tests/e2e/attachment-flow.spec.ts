@@ -1,4 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type JSHandle,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import {
   createQaPdfBuffer,
   createQaPngBuffer,
@@ -50,9 +57,14 @@ async function pasteFile(page: Page, fileName: string, mimeType: string, buffer:
   );
 }
 
-async function dropFile(page: Page, fileName: string, mimeType: string, buffer: Buffer) {
+async function fileTransfer(
+  page: Page,
+  fileName: string,
+  mimeType: string,
+  buffer: Buffer
+) {
   const bytes = Array.from(buffer);
-  const transfer = await page.evaluateHandle(
+  return page.evaluateHandle(
     ({ bytes: fileBytes, fileName: name, mimeType: type }) => {
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(
@@ -62,11 +74,58 @@ async function dropFile(page: Page, fileName: string, mimeType: string, buffer: 
     },
     { bytes, fileName, mimeType }
   );
+}
 
-  const input = page.getByTestId("chat-input");
-  await input.dispatchEvent("dragover", { dataTransfer: transfer });
-  await input.dispatchEvent("drop", { dataTransfer: transfer });
+// A link or a text selection dragged across the canvas is somebody else's
+// gesture: `types` never contains "Files", and nothing may react to it.
+async function textTransfer(page: Page) {
+  return page.evaluateHandle(() => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", "https://example.com/not-a-file");
+    return dataTransfer;
+  });
+}
+
+async function dragOver(target: Locator, transfer: JSHandle<DataTransfer>) {
+  await target.dispatchEvent("dragenter", { dataTransfer: transfer });
+  await target.dispatchEvent("dragover", { dataTransfer: transfer });
+}
+
+async function dropOn(target: Locator, transfer: JSHandle<DataTransfer>) {
+  await dragOver(target, transfer);
+  await target.dispatchEvent("drop", { dataTransfer: transfer });
+}
+
+async function dropFile(page: Page, fileName: string, mimeType: string, buffer: Buffer) {
+  const transfer = await fileTransfer(page, fileName, mimeType, buffer);
+  await dropOn(page.getByTestId("chat-input"), transfer);
   await transfer.dispose();
+}
+
+/**
+ * The answer canvas of whichever shell is on screen. Both shells hand the
+ * same element to the composer, so the drop contract below is one contract
+ * asserted twice rather than two implementations.
+ */
+const conversationSurface = (page: Page, testInfo: TestInfo) =>
+  page.getByTestId(
+    testInfo.project.name.startsWith("mobile")
+      ? "mobile-conversation-surface"
+      : "desktop-conversation-surface"
+  );
+
+/** A region of the same screen that is deliberately not a chat drop target. */
+const outsideConversationSurface = (page: Page, testInfo: TestInfo) =>
+  page.getByTestId(
+    testInfo.project.name.startsWith("mobile")
+      ? "mobile-chat-header"
+      : "chat-sidebar"
+  );
+
+async function sendMessage(page: Page, prompt: string, answer: string) {
+  await page.getByTestId("chat-textarea").fill(prompt);
+  await page.getByRole("button", { name: /전송|Send|发送/ }).click();
+  await expect(page.getByText(answer, { exact: true }).first()).toBeVisible();
 }
 
 test.describe("attachment UX", () => {
@@ -265,6 +324,137 @@ test.describe("attachment UX", () => {
     await expect.poll(() => uploadState.prepareCount).toBe(1);
     expect(uploadState.uploadCount).toBe(1);
     expect(uploadState.finalizeCount).toBe(1);
+  });
+
+  test("a file dropped on the empty conversation's welcome canvas is attached", async ({
+    page,
+  }, testInfo) => {
+    // The canvas used to swallow this: the handlers lived on the composer
+    // alone, so a file dropped on the screen a new chat actually shows -- the
+    // welcome surface -- did nothing at all.
+    await expect(page.getByTestId("chat-empty-state")).toBeVisible();
+    await expect(conversationSurface(page, testInfo)).toBeVisible();
+
+    const beforeUrl = page.url();
+    const transfer = await fileTransfer(
+      page,
+      "welcome-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+    await dropOn(page.getByTestId("chat-empty-state"), transfer);
+    await transfer.dispose();
+
+    await expect(page.getByAltText("welcome-drop.png")).toBeVisible();
+    await expect(page).toHaveURL(beforeUrl);
+    await expect.poll(() => uploadState.prepareCount).toBe(1);
+    expect(uploadState.uploadCount).toBe(1);
+    expect(uploadState.finalizeCount).toBe(1);
+  });
+
+  test("a file dropped on the message list of a conversation with answers is attached", async ({
+    page,
+  }, testInfo) => {
+    await sendMessage(page, "Canvas drop QA", "Attachment QA response");
+    await expect(conversationSurface(page, testInfo)).toBeVisible();
+
+    const messageList = page.getByTestId("chat-message-list").first();
+    await expect(messageList).toBeVisible();
+
+    const transfer = await fileTransfer(
+      page,
+      "transcript-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+    await dropOn(messageList, transfer);
+    await transfer.dispose();
+
+    await expect(
+      page.locator('[data-testid="chat-input"] img[alt="transcript-drop.png"]')
+    ).toBeVisible();
+    await expect.poll(() => uploadState.prepareCount).toBe(1);
+    expect(uploadState.uploadCount).toBe(1);
+    expect(uploadState.finalizeCount).toBe(1);
+  });
+
+  test("the canvas raises one drop overlay, holds it across children, and clears it on drop", async ({
+    page,
+  }, testInfo) => {
+    const surface = conversationSurface(page, testInfo);
+    const overlay = page.getByTestId("chat-conversation-drop-overlay");
+    const composerOverlay = page.getByTestId("chat-composer-drop-overlay");
+    await expect(overlay).toHaveCount(0);
+
+    const transfer = await fileTransfer(
+      page,
+      "overlay-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+
+    await dragOver(surface, transfer);
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toContainText("파일을 놓으면 첨부됩니다");
+    // The composer portals into this same canvas while the chat is empty. One
+    // drag must raise one overlay, or the same drop is handled twice.
+    await expect(composerOverlay).toHaveCount(0);
+
+    // Crossing into a child and back out of it is enter/leave traffic the
+    // overlay must sit still through.
+    const child = page.getByTestId("chat-empty-state");
+    await child.dispatchEvent("dragenter", { dataTransfer: transfer });
+    await surface.dispatchEvent("dragleave", { dataTransfer: transfer });
+    await expect(overlay).toBeVisible();
+
+    await surface.dispatchEvent("drop", { dataTransfer: transfer });
+    await transfer.dispose();
+
+    await expect(overlay).toHaveCount(0);
+    await expect(page.getByAltText("overlay-drop.png")).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+  });
+
+  test("a drag that carries no file leaves the canvas alone", async ({
+    page,
+  }, testInfo) => {
+    const surface = conversationSurface(page, testInfo);
+    const transfer = await textTransfer(page);
+
+    await dragOver(surface, transfer);
+    await expect(page.getByTestId("chat-conversation-drop-overlay")).toHaveCount(0);
+
+    await surface.dispatchEvent("drop", { dataTransfer: transfer });
+    await transfer.dispose();
+
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
+    expect(uploadState.prepareCount).toBe(0);
+    expect(uploadState.uploadCount).toBe(0);
+  });
+
+  test("a file dropped outside the conversation canvas uploads nothing", async ({
+    page,
+  }, testInfo) => {
+    const outside = outsideConversationSurface(page, testInfo);
+    await expect(outside).toBeVisible();
+
+    const beforeUrl = page.url();
+    const transfer = await fileTransfer(
+      page,
+      "stray-drop.png",
+      "image/png",
+      createQaPngBuffer()
+    );
+    await dropOn(outside, transfer);
+    await transfer.dispose();
+
+    // The window-level guard still stops the browser opening the file; what
+    // it must not do is turn every drop on the page into an attachment.
+    await expect(page).toHaveURL(beforeUrl);
+    await expect(page.getByTestId("chat-conversation-drop-overlay")).toHaveCount(0);
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
+    expect(uploadState.prepareCount).toBe(0);
+    expect(uploadState.uploadCount).toBe(0);
   });
 
   test("image attachments disable text-only models and keep a vision model available", { tag: ["@smoke", "@review-parity"] }, async ({ page }) => {
