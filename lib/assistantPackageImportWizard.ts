@@ -152,11 +152,31 @@ export type ImportFieldEdits = {
 export type ImportTarget =
     | { kind: "new" }
     /**
-     * `expectedRevision` is read when the wizard starts and sent at publish,
-     * so a profile edited in another tab meanwhile is a stale publish rather
-     * than a silent overwrite.
+     * Only the profile's id. The revision to publish from is *not* carried
+     * here: the server reads the target's current revision and identity digest
+     * when the import is created and checks both again at publish, so a
+     * profile edited in another tab meanwhile is a stale publish rather than a
+     * silent overwrite. A revision sent by this side would be a second opinion
+     * about the same fact, and the one nobody could trust.
      */
-    | { kind: "merge"; profileId: string; expectedRevision: number };
+    | { kind: "merge"; profileId: string };
+
+/**
+ * A profile the owner may merge into.
+ *
+ * Read on the server when the page loads and handed to the wizard as a prop,
+ * so steps 1 to 6 still make no request of their own (§5.4). Everything here
+ * is display: what is sent is the id, and every fact the publish depends on is
+ * read again by the server.
+ */
+export type ImportMergeTarget = {
+    id: string;
+    name: string;
+    icon: string | null;
+    /** `null` for a profile that has never been published. */
+    currentRevision: number | null;
+    knowledgeFileCount: number;
+};
 
 export type ImportParseState =
     | { kind: "idle" }
@@ -422,8 +442,24 @@ export function assistantPackageImportReducer(
         }
         case "losses_acknowledged":
             return { ...state, lossesAcknowledged: action.acknowledged };
-        case "target_chosen":
-            return { ...state, target: action.target };
+        case "target_chosen": {
+            // Changing the target un-ticks the boundary acknowledgement. The
+            // sentence beside that box is not the same sentence for the two
+            // targets -- a create stores a draft assistant, a merge stores
+            // files against one that already exists -- so an acknowledgement
+            // carried across would be the owner having agreed to the other one.
+            const same =
+                state.target !== null &&
+                state.target.kind === action.target.kind &&
+                (action.target.kind !== "merge" ||
+                    (state.target.kind === "merge" &&
+                        state.target.profileId === action.target.profileId));
+            return {
+                ...state,
+                target: action.target,
+                uploadAcknowledged: same ? state.uploadAcknowledged : false,
+            };
+        }
         case "upload_acknowledged":
             return { ...state, uploadAcknowledged: true };
         case "run_started":

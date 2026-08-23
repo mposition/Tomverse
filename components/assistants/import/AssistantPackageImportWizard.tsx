@@ -44,6 +44,7 @@ import {
     type AssistantPackageImportStep,
     type ImportBlock,
     type ImportFieldKey,
+    type ImportMergeTarget,
     type ImportUploadFile,
 } from "@/lib/assistantPackageImportWizard";
 import {
@@ -86,15 +87,18 @@ import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPacka
  *     box that says files start being stored, and `uploadAcknowledged` is
  *     state rather than a rendering detail so a redesign cannot lose it.
  *
- * Step 7 (upload) and step 8 (publish) need server endpoints that do not exist
- * yet. The state machine already knows those steps; this component stops at
- * the boundary, and the route stays behind a flag that is off.
+ * Steps 7 and 8 run against the import endpoints, and the whole route stays
+ * behind a flag that is off until the rollout in §15 says otherwise.
+ *
+ * `mergeTargets` arrives as a prop rather than being fetched here, and that is
+ * the same contract from the other side: a list request made from step 6 would
+ * be a request made before the boundary that says none has been made.
  *
  * The step bodies are local components rather than files of their own. Each is
  * short because the decisions are elsewhere -- unlike the external import's
  * steps, which carry a virtualized list and a provider guide -- and splitting
- * six thirty-line renderers across six files would spread one screen over
- * seven of them.
+ * eight thirty-line renderers across eight files would spread one screen over
+ * nine of them.
  *
  * Formatting helpers are imported from the external import's folder rather
  * than copied. They are pure and locale-agnostic by their own header, both
@@ -275,7 +279,12 @@ const ACCEPT = ".zip,.json";
 const POLL_INTERVAL_MS = 2_000;
 const POLL_ATTEMPTS = 300;
 
-export function AssistantPackageImportWizard() {
+export function AssistantPackageImportWizard({
+    mergeTargets,
+}: {
+    /** The owner's existing assistants, read by the page. May be empty. */
+    mergeTargets: readonly ImportMergeTarget[];
+}) {
     const { t } = useLanguage();
     const [state, dispatch] = useReducer(
         assistantPackageImportReducer,
@@ -783,7 +792,12 @@ export function AssistantPackageImportWizard() {
                     <LossesStep state={state} dispatch={dispatch} t={t} />
                 )}
                 {state.step === "target" && (
-                    <TargetStep state={state} dispatch={dispatch} t={t} />
+                    <TargetStep
+                        state={state}
+                        dispatch={dispatch}
+                        mergeTargets={mergeTargets}
+                        t={t}
+                    />
                 )}
                 {state.step === "upload" && (
                     <UploadStep state={state} onCancel={cancelRun} t={t} />
@@ -793,6 +807,7 @@ export function AssistantPackageImportWizard() {
                         state={state}
                         onPublish={publish}
                         onCancel={cancelRun}
+                        mergeTargets={mergeTargets}
                         t={t}
                     />
                 )}
@@ -1375,15 +1390,34 @@ function LossesStep({
     );
 }
 
+/**
+ * Step 6. A new assistant, or a revision of one that exists.
+ *
+ * Merging is the destructive-looking half, so what it does is stated on the
+ * screen that offers it rather than at the end: the new revision carries what
+ * was reviewed here, and the documents the assistant already has stay attached
+ * to it without being named by that revision. Both are consequences the owner
+ * cannot see from the word "merge", and neither can be undone by going back
+ * once step 8 has run.
+ *
+ * A profile that has never been published is offered too. It is a legitimate
+ * target -- the merge publishes its first revision -- and hiding it would be
+ * this screen inventing a rule the server does not have. If it is a profile
+ * another import is already staging into, the server refuses at step 7 with a
+ * code this wizard renders.
+ */
 function TargetStep({
     state,
     dispatch,
+    mergeTargets,
     t,
 }: {
     state: WizardState;
     dispatch: Dispatch;
+    mergeTargets: readonly ImportMergeTarget[];
     t: Translate;
 }) {
+    const target = state.target;
     return (
         <section className={sectionClass} data-testid="assistant-package-import-target">
             <h2 className="text-sm font-semibold">
@@ -1393,7 +1427,7 @@ function TargetStep({
                 <input
                     type="radio"
                     name="assistant-package-target"
-                    checked={state.target?.kind === "new"}
+                    checked={target?.kind === "new"}
                     onChange={() =>
                         dispatch({ type: "target_chosen", target: { kind: "new" } })
                     }
@@ -1401,22 +1435,93 @@ function TargetStep({
                 />
                 {t("assistantPackageImport.targetNew")}
             </label>
-            {/*
-              Merging into an existing profile needs that profile's current
-              revision, which comes from the list endpoint the upload step
-              uses. Until that step exists there is nothing to merge into that
-              this screen could name honestly.
-            */}
-            <p className="mt-2 text-xs text-zinc-500">
-                {t("assistantPackageImport.targetMergeLater")}
-            </p>
+
+            <h3 className="mt-4 text-sm font-semibold">
+                {t("assistantPackageImport.targetMerge")}
+            </h3>
+            {mergeTargets.length === 0 ? (
+                <p
+                    className="mt-1 text-sm text-zinc-500"
+                    data-testid="assistant-package-target-merge-none"
+                >
+                    {t("assistantPackageImport.targetMergeNone")}
+                </p>
+            ) : (
+                <ul className="mt-1 flex flex-col gap-1">
+                    {mergeTargets.map((profile) => (
+                        <li key={profile.id}>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="radio"
+                                    name="assistant-package-target"
+                                    checked={
+                                        target?.kind === "merge" &&
+                                        target.profileId === profile.id
+                                    }
+                                    onChange={() =>
+                                        dispatch({
+                                            type: "target_chosen",
+                                            target: {
+                                                kind: "merge",
+                                                profileId: profile.id,
+                                            },
+                                        })
+                                    }
+                                    data-testid={`assistant-package-target-merge-${profile.id}`}
+                                />
+                                <span className="flex-1">
+                                    {profile.icon ? `${profile.icon} ` : ""}
+                                    {profile.name}
+                                </span>
+                                <span className="text-xs text-zinc-500">
+                                    {profile.currentRevision === null
+                                        ? t(
+                                              "assistantPackageImport.targetMergeUnpublished"
+                                          )
+                                        : interpolate(
+                                              t(
+                                                  "assistantPackageImport.targetMergeRevision"
+                                              ),
+                                              { revision: profile.currentRevision }
+                                          )}
+                                    {" · "}
+                                    {interpolate(
+                                        t("assistantPackageImport.targetMergeDocuments"),
+                                        { count: profile.knowledgeFileCount }
+                                    )}
+                                </span>
+                            </label>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {target?.kind === "merge" && (
+                <p
+                    className="mt-2 text-sm text-amber-700 dark:text-amber-400"
+                    data-testid="assistant-package-target-merge-consequence"
+                >
+                    {t("assistantPackageImport.targetMergeConsequence")}
+                </p>
+            )}
 
             <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
                 <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
                     {t("assistantPackageImport.uploadBoundaryHeading")}
                 </h3>
                 <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
-                    {t("assistantPackageImport.uploadBoundaryBody")}
+                    {/*
+                      Two sentences, because the two targets store different
+                      things: a create makes a draft assistant that cancelling
+                      deletes, a merge stores files against one that already
+                      exists and that cancelling must leave alone. One sentence
+                      covering both would be wrong about whichever the owner
+                      picked.
+                    */}
+                    {t(
+                        target?.kind === "merge"
+                            ? "assistantPackageImport.uploadBoundaryBodyMerge"
+                            : "assistantPackageImport.uploadBoundaryBody"
+                    )}
                 </p>
                 <label className="mt-2 flex items-center gap-2 text-sm">
                     <input
@@ -1432,7 +1537,6 @@ function TargetStep({
         </section>
     );
 }
-
 
 /**
  * Step 7. Every document, and what the server has managed to do with it.
@@ -1554,11 +1658,13 @@ function ConfirmStep({
     state,
     onPublish,
     onCancel,
+    mergeTargets,
     t,
 }: {
     state: WizardState;
     onPublish: () => void;
     onCancel: () => void;
+    mergeTargets: readonly ImportMergeTarget[];
     t: Translate;
 }) {
     const draft = resolveImportDraft(state);
@@ -1608,6 +1714,15 @@ function ConfirmStep({
                 {t("assistantPackageImport.confirmBody")}
             </p>
             <dl className="mt-3 flex flex-col gap-1 text-sm">
+                {/*
+                  Which assistant this lands on, named before the button that
+                  lands it. A merge publishes over something the owner already
+                  has, and step 6 may be several minutes behind them by now.
+                */}
+                <SummaryRow
+                    label={t("assistantPackageImport.confirmTarget")}
+                    value={confirmTargetValue(state, mergeTargets, t)}
+                />
                 <SummaryRow label={t("assistantPackageImport.fieldName")} value={draft.name} />
                 <SummaryRow
                     label={t("assistantPackageImport.fieldModelIds")}
@@ -1648,6 +1763,29 @@ function ConfirmStep({
             <CancelRun onCancel={onCancel} t={t} />
         </section>
     );
+}
+
+/**
+ * The target, as a sentence.
+ *
+ * A merge whose profile is not in the list falls back to naming the merge
+ * without the assistant: the list is a snapshot from page load, and a profile
+ * deleted in another tab meanwhile would otherwise render as a blank row that
+ * reads like "no target". The publish will refuse it either way.
+ */
+function confirmTargetValue(
+    state: WizardState,
+    mergeTargets: readonly ImportMergeTarget[],
+    t: Translate
+): string {
+    const target = state.target;
+    if (target?.kind !== "merge") return t("assistantPackageImport.targetNew");
+    const profile = mergeTargets.find((entry) => entry.id === target.profileId);
+    return profile
+        ? interpolate(t("assistantPackageImport.confirmTargetMerge"), {
+              name: profile.name,
+          })
+        : t("assistantPackageImport.targetMerge");
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) {

@@ -322,7 +322,7 @@ test("a loss report must be acknowledged, and an empty one need not be", () => {
 test("the target step needs a target and an explicit yes to uploading", () => {
     const chosen = reduce(at("target"), {
         type: "target_chosen",
-        target: { kind: "merge", profileId: "p1", expectedRevision: 3 },
+        target: { kind: "merge", profileId: "p1" },
     });
     assert.deepEqual(blockKinds(chosen), ["upload_unacknowledged"]);
     assert.equal(
@@ -330,6 +330,69 @@ test("the target step needs a target and an explicit yes to uploading", () => {
         true
     );
     assert.deepEqual(blockKinds(at("target")), ["no_target", "upload_unacknowledged"]);
+});
+
+test("a merge target carries the profile id and nothing else", () => {
+    // The revision to publish from is deliberately absent: the server reads
+    // the target's own revision when the import is created and checks it again
+    // at publish, so a copy held here could only ever be the stale one.
+    const chosen = reduce(at("target"), {
+        type: "target_chosen",
+        target: { kind: "merge", profileId: "p1" },
+    });
+    assert.deepEqual(chosen.target, { kind: "merge", profileId: "p1" });
+});
+
+test("changing the target takes back the boundary acknowledgement", () => {
+    // The box says what continuing stores, and that is a different sentence
+    // for a create than for a merge. Keeping the tick across a change would
+    // record an agreement to text the owner never saw.
+    const acknowledged = reduce(
+        reduce(at("target"), { type: "target_chosen", target: { kind: "new" } }),
+        { type: "upload_acknowledged" }
+    );
+    assert.equal(acknowledged.uploadAcknowledged, true);
+    const merged = reduce(acknowledged, {
+        type: "target_chosen",
+        target: { kind: "merge", profileId: "p1" },
+    });
+    assert.equal(merged.uploadAcknowledged, false);
+    assert.deepEqual(blockKinds(merged), ["upload_unacknowledged"]);
+});
+
+test("re-choosing the target already chosen keeps the acknowledgement", () => {
+    // A radio that is already checked does not fire a change, so this is not
+    // a path a click takes -- but a reducer that cleared on every dispatch
+    // would make a re-render of the same choice look like a new one.
+    const ready = reduce(
+        reduce(at("target"), {
+            type: "target_chosen",
+            target: { kind: "merge", profileId: "p1" },
+        }),
+        { type: "upload_acknowledged" }
+    );
+    const again = reduce(ready, {
+        type: "target_chosen",
+        target: { kind: "merge", profileId: "p1" },
+    });
+    assert.equal(again.uploadAcknowledged, true);
+});
+
+test("choosing a different target replaces the previous one", () => {
+    // One radio group on screen, so two targets can never both be chosen --
+    // but the state has to say so as well, or a merge left behind by an
+    // earlier click would be sent alongside a create.
+    const merged = reduce(at("target"), {
+        type: "target_chosen",
+        target: { kind: "merge", profileId: "p1" },
+    });
+    const other = reduce(merged, {
+        type: "target_chosen",
+        target: { kind: "merge", profileId: "p2" },
+    });
+    assert.deepEqual(other.target, { kind: "merge", profileId: "p2" });
+    const back = reduce(other, { type: "target_chosen", target: { kind: "new" } });
+    assert.deepEqual(back.target, { kind: "new" });
 });
 
 test("restarting returns to an untouched first step", () => {
