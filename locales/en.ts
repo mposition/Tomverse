@@ -297,6 +297,8 @@ export const en = {
         archiveNoSupportedFiles: "The archive contains no files this app can read.",
         archiveTimeout: "The archive took too long to process.",
         archiveExcludedNotice: "{count} file(s) were skipped because they are not supported.",
+        archiveReadSummary: "{count} file(s) read",
+        archiveExcludedSummary: "{count} skipped",
         attachFormatGroupImage: "Images",
         attachFormatGroupDocument: "Documents",
         attachFormatGroupData: "Data",

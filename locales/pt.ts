@@ -306,6 +306,8 @@ export const pt = {
         archiveNoSupportedFiles: "O arquivo compactado não contém arquivos que este aplicativo consiga ler.",
         archiveTimeout: "O processamento do arquivo compactado demorou demais.",
         archiveExcludedNotice: "{count} arquivo(s) foram excluídos por não serem compatíveis.",
+        archiveReadSummary: "{count} arquivo(s) lido(s)",
+        archiveExcludedSummary: "{count} ignorado(s)",
         attachFormatGroupImage: "Imagens",
         attachFormatGroupDocument: "Documentos",
         attachFormatGroupData: "Dados",

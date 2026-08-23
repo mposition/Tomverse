@@ -35,6 +35,26 @@ export type ChatAttachment = {
    * is self-authorising; a signed-in composer never sets this.
    */
   objectKey?: string;
+  /**
+   * What the server made of an archive: how many entries it will read and how
+   * many it left out.
+   *
+   * Runtime only, and display only. The count used to exist solely in a
+   * four-second toast, so a person who looked away never learned that two of
+   * the files they attached were not going to be read -- and later saw an
+   * answer that did not mention them, with nothing on screen to explain why.
+   * The chip carries it for as long as the file is attached.
+   *
+   * It is not sent anywhere: `lib/chatMessageSerialization.ts` is an
+   * allowlist, so this field is dropped from every request and every stored
+   * message without needing a rule of its own. The server recomputes the plan
+   * on the turn that sends the archive; this is a copy of what it already
+   * said, not an input to it.
+   */
+  archive?: {
+    includedFiles: number;
+    excludedFiles: number;
+  };
   kind: "file" | "text";
 };
 
