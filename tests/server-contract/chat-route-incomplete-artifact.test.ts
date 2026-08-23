@@ -4,6 +4,18 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
+/*
+  The real `ai`, imported statically rather than through `createRequire`.
+
+  Everything but `streamText` is passed through, and the passthrough has to be
+  complete: `lib/generatedArtifactTool.ts` imports `tool` and the route imports
+  `stepCountIs`, so a namespace missing either one leaves the route unable to
+  link -- which surfaces as a module with no `POST`, not as an import error.
+  A static import is the only form guaranteed to yield the module's whole
+  export list on every runtime.
+*/
+import * as aiModule from "ai";
+
 /**
  * What POST /api/chat leaves behind when a file was begun and the answer ran
  * out of room.
@@ -122,7 +134,7 @@ mock.module("next-auth/next", {
 */
 mock.module("ai", {
   namedExports: {
-    ...(require("ai") as Record<string, unknown>),
+    ...aiModule,
     streamText: (options: Record<string, unknown>) => {
       lastStreamTextOptions = options;
       const onChunk = options.onChunk as
@@ -312,8 +324,16 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
   },
 });
 
+/*
+  `lib/prisma.ts` exports `prisma` and nothing else, so that is the whole of
+  what the mock may declare. Adding a `default` here would describe a module
+  the application does not have, and a synthetic module whose export list
+  disagrees with its importers is a link failure -- which reaches a test as a
+  namespace missing the export it came for, never as an error naming the
+  cause.
+*/
 mock.module(mod("lib/prisma.ts"), {
-  namedExports: { prisma: prismaProxy, default: prismaProxy },
+  namedExports: { prisma: prismaProxy },
 });
 
 /* -------------------------------------------------------------------------- */
@@ -357,13 +377,21 @@ mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: { getActiveAiModel: () => ({ modelId: MODEL_ID }) },
 });
 
-// The object store: an artifact that succeeds must not reach a real bucket.
+/*
+  The object store: an artifact that succeeds must not reach a real bucket.
+
+  The three exports the chat turn actually reaches are named rather than
+  spread from the real module, for the reason above -- a mock's export list is
+  a claim about the module, and the narrowest true claim is the one that
+  cannot drift.
+*/
+const realArtifactStorage = require(
+  resolve(ROOT, "lib/generatedArtifactStorage.ts")
+) as { persistArtifactRows: unknown };
+
 mock.module(mod("lib/generatedArtifactStorage.ts"), {
   namedExports: {
-    ...(require(resolve(ROOT, "lib/generatedArtifactStorage.ts")) as Record<
-      string,
-      unknown
-    >),
+    persistArtifactRows: realArtifactStorage.persistArtifactRows,
     putArtifactObject: async (input: {
       ordinal: number;
       format: string;
@@ -394,8 +422,47 @@ globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof f
 
 type RouteModule = { POST: (request: Request) => Promise<Response> };
 
-const loadRoute = async (): Promise<RouteModule> =>
-  (await import(`${mod("app/api/chat/route.ts")}?artifact-incomplete`)) as RouteModule;
+/**
+ * The route handler, imported once.
+ *
+ * No query suffix: the neighbouring suites carry one to name their own spy
+ * generation, tsx normalises it away regardless, and this file wants the one
+ * shared instance rather than a fresh one. Memoised so a failure to load is
+ * reported once instead of once per test.
+ *
+ * The `POST` check is not defensive padding. A mocked module whose declared
+ * export list disagrees with its importers does not throw -- the graph fails
+ * to link and the namespace simply arrives without what it was imported for.
+ * Read raw, that reaches the assertions as `POST is not a function`, which
+ * names neither the module at fault nor the export that went missing.
+ */
+let routePromise: Promise<RouteModule> | null = null;
+
+const loadRoute = async (): Promise<RouteModule> => {
+  routePromise ??= (async () => {
+    // The mocked `ai`, checked before the route rather than after it. The
+    // route and `lib/generatedArtifactTool.ts` link against `stepCountIs` and
+    // `tool`; if the passthrough above ever fails to carry them, this names
+    // the cause instead of leaving the route to fail for it.
+    const ai = (await import("ai")) as Record<string, unknown>;
+    for (const name of ["tool", "stepCountIs", "streamText"]) {
+      assert.equal(
+        typeof ai[name],
+        "function",
+        `the mocked \`ai\` module lost \`${name}\`, so the route cannot link`
+      );
+    }
+    const loaded = (await import(mod("app/api/chat/route.ts"))) as Partial<RouteModule>;
+    if (typeof loaded.POST !== "function") {
+      throw new Error(
+        "app/api/chat/route.ts exported no POST. Its module graph did not " +
+          `link. The namespace carried: [${Object.keys(loaded).join(", ")}]`
+      );
+    }
+    return loaded as RouteModule;
+  })();
+  return routePromise;
+};
 
 const ask = async (
   next: Partial<StreamScript>,
