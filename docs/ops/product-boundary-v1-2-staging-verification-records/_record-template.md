@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/product-boundary-v1-2-staging-checklist.md
-templateRevision: 2026-08-23a
+templateRevision: 2026-08-23b
 environment:
 deploySha:
 startedAtUtc:
@@ -22,7 +22,7 @@ digest:
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
-| template revision | 2026-08-23a |
+| template revision | 2026-08-23b |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -41,7 +41,7 @@ flag를 켠 채로 실행했다면 그 사실을 여기 적습니다 — 기록 
 
 | 항목 | 관측 | 판정 |
 |---|---|---|
-| P-1 Search Console 28·90일 기준값 | 저장 위치 · 시각: | |
+| P-1 Search Console 28·90일 기준값 | 저장 위치 · 시각, 또는 이미 확보된 회차(rename 런북 §5.1): | |
 
 숫자는 적지 않습니다(기록 README 8번). P-1은 staging 구획이 아니라 순서의
 문제이므로 letter가 없습니다.
