@@ -14,6 +14,7 @@
 | rev | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-08-23 | 최초 작성 |
+| **11** | **2026-08-23** | **리뷰 10회차 반영.** quota 거절이 **throw가 아니라 outcome 반환**이 되도록 고쳐 예약 복귀가 rollback되지 않게 함(§5.9.3f-4), `maxExtractedBytesPerAccount`가 **processor에서 잠금 없이 증가**하고 **문자 수를 byte로 집계**하는 두 결함을 기록하고 계약 추가(§5.9.3f-5). 일반 finalize의 **타인 예약 403 분기**, `§5.9.3f-4` 제목 승격, 검증 59b 보강. 고친 문단은 **[rev11]** |
 | **10** | **2026-08-23** | **리뷰 9회차 반영.** 일반 finalize가 **import reservation이 걸린 key를 거절**하도록 해 격리 우회를 차단(§5.9.3f-3), quota 재판정을 **account 잠금 안으로** 옮겨 동시 업로드의 한도 초과를 제거(§5.9.3f-4). `state`·`claimToken`·`finalizingStartedAt` 결합 CHECK, `publicName` 확정, "추출은 행 생성 후"로 정정. 고친 문단은 **[rev10]** |
 | **9** | **2026-08-23** | **리뷰 8회차 반영.** reservation의 export 선언을 실제 허용값(`excluded` + `exclusionReason` + registry `inUnifiedExport`)으로 정정(§5.9.3f-1), `finalizing` 상태의 **claim token·`finalizingStartedAt`·stale reclaim** 추가(§5.9.3f-2), 검증 56b의 R2 삭제 요구 제거. `importId` 확장 설명·§10 도입부·`unchanged` 필요충분조건 정정. 고친 문단은 **[rev9]** |
 | **8** | **2026-08-23** | **리뷰 7회차 반영.** upload reservation의 **User 역관계·data-domain 선언·publish 시 미소비 예약 정리**를 채우고 `importId`를 필수로(§5.9.3f-1), finalize를 **원자적 선점 + 삭제 없음**으로 바꿔 동시 재시도 경쟁을 제거(§5.9.3f-2), B1~B6 차단 시점을 **Slice 1로 전 문서 통일**, `unchanged` 조건을 **"새로 승격할 staged 파일 0개"**로 정정, §1.1의 채택 범위를 **MVP와 후속으로 분리**. 고친 문단은 **[rev8]** |
@@ -97,7 +98,7 @@ GPT의 knowledge 파일 개수 상한)는 검색 요약으로만 확인됐습니
 "조건부 채택"이 덮는 것은 위 네 줄 전부의 **방향**이고, **MVP 구현 범위는 위
 두 줄**입니다.
 
-조건부인 이유는 §10의 미결정 항목 때문이며, **[rev3]** 그중 **여섯 개(A1~A6)가
+조건부인 이유는 §10의 미결정 항목 때문이며, **[rev11]** 그중 **일곱 개(A1~A7)가
 사람의 승인 대상**입니다. 여섯이 한 덩어리로 전부를 막는 것은 아니고 **slice별로
 막습니다** — 어느 승인이 어느 slice를 막는지는 §10.1.2의 표 하나가 정합니다.
 
@@ -1156,11 +1157,19 @@ key를 알 방법이 없었지만, 이제는 서버가 알 수 있는데 **보�
 | 그 key의 예약 | 판정 |
 |---|---|
 | 없음 | 정상 — 기존 동작 그대로 |
-| 있음(`importId`가 채워짐) | **409** `ASSISTANT_KNOWLEDGE_KEY_RESERVED_FOR_IMPORT` — 파일을 만들지 않고 **R2 객체도 지우지 않습니다**(§5.9.3f-2와 같은 이유) |
+| 있고 **`reservation.userId === 호출자`** | **409** `ASSISTANT_KNOWLEDGE_KEY_RESERVED_FOR_IMPORT` — 파일을 만들지 않고 **R2 객체도 지우지 않습니다**(§5.9.3f-2와 같은 이유) |
+| 있고 **`reservation.userId !== 호출자`** | **[rev11] 403** `ASSISTANT_KNOWLEDGE_KEY_FORBIDDEN` — 기존 계약 그대로. **R2 객체를 읽지도 지우지도 않습니다** |
 
-**403이 아니라 409인 이유:** 소유권 문제가 아닙니다. 그 key는 같은 사용자의
-것이고, 다만 **다른 흐름이 쓰고 있는 중**입니다. 403은 "당신 것이 아니다"라고
-말하게 되고, 사용자는 자기 파일에 대해 그 답을 받습니다.
+**[rev11] 두 분기를 나눈 이유.** rev10은 "예약이 있으면 무조건 409"라고
+적었고, 그것은 **예약의 주인이 호출자와 같다고 가정**한 것입니다. 남의 key로
+찌르는 요청에 409를 주면 "그 key는 존재하고 지금 사용 중"이라는 사실을
+알려 주게 됩니다. [저장소] `finalizeKnowledgeUpload()`가 남의 파일 행에
+대해 이미 403 `ASSISTANT_KNOWLEDGE_KEY_FORBIDDEN`을 쓰므로, 같은 답을
+같은 코드로 씁니다.
+
+**409를 쓰는 경우에 403이 아닌 이유:** 소유권 문제가 아닙니다. 그 key는 같은
+사용자의 것이고, 다만 **다른 흐름이 쓰고 있는 중**입니다. 403은 "당신 것이
+아니다"라고 말하게 되고, 사용자는 자기 파일에 대해 그 답을 받습니다.
 
 **MVP에서 예약을 만드는 것은 import 경로뿐이므로**(§5.9.3f-1의 `importId`
 필수) 이 검사는 "예약이 존재하는가" 한 줄입니다. 일반 경로로 예약을 넓히면
@@ -1413,7 +1422,11 @@ export const KNOWLEDGE_UPLOAD_CLAIM_STALE_MS = 10 * 60 * 1000
 > 이것은 현재 `finalizeKnowledgeUpload()`의 `failUpload()`와 다른 선택이며,
 > **import 경로에만** 적용합니다. 기존 일반 경로는 바꾸지 않습니다.
 
-**(3) [rev10] 짧은 transaction의 내용 — quota 재판정이 그 안에 들어갑니다.**
+##### 5.9.3f-4 [rev10·rev11] 짧은 transaction의 내용 — quota 재판정이 그 안에 들어갑니다
+
+**[rev11] rev10은 이 구획을 §5.9.3f-2의 "(3)"으로 두고 다른 곳에서
+`§5.9.3f-4`로 참조했습니다.** 존재하지 않는 제목을 가리키고 있었으므로
+제목으로 승격합니다.
 
 rev8·rev9는 "행 생성과 예약 삭제만"이라고 적었는데, 그러면 **quota가 낡은
 값으로 판정됩니다.** [저장소] `finalizeKnowledgeUpload()`는 지금
@@ -1449,9 +1462,59 @@ export const lockAccountKnowledgeQuota = (tx: Prisma.TransactionClient, userId: 
 1. `lockProfileImport(tx, profileId)` (§5.9.3g)
 2. `lockAccountKnowledgeQuota(tx, userId)`
 3. `knowledgeUsage(tx, userId, profileId)` **재조회**
-4. `knowledgeQuotaRefusal()` **재판정** — 실패하면 예약을 `pending`으로 되돌리고 거절
+4. `knowledgeQuotaRefusal()` **재판정**
 5. claim token CAS 확인 (§5.9.3f-2)
 6. 파일 행 생성 + 예약 삭제
+
+**[rev11] 4번에서 거절할 때 예외를 던지면 안 됩니다.** rev10은 "실패하면
+예약을 `pending`으로 되돌리고 거절"이라고 적었는데, 그 둘을 같은 transaction
+안에서 하면 **되돌린 UPDATE가 throw와 함께 rollback**되어 예약이 계속
+`finalizing`으로 남습니다. 그러면 §5.9.3f-2가 막으려던 바로 그 상태 —
+stale 회수를 기다리는 10분간 그 key가 잠긴 상태 — 가 **정상적인 quota
+거절마다** 발생합니다.
+
+**거절은 commit되는 결과여야 합니다.**
+
+```ts
+// transaction 안: 던지지 않고 결과를 반환합니다.
+const outcome = await prisma.$transaction(async (tx) => {
+    await lockProfileImport(tx, profileId)
+    await lockAccountKnowledgeQuota(tx, userId)
+
+    const usage   = await knowledgeUsage(tx, userId, profileId)
+    const refusal = knowledgeQuotaRefusal({ usage, incomingBytes })
+    if (refusal) {
+        // 세 컬럼을 함께 되돌립니다(결합 CHECK). 내 선점일 때만.
+        await tx.assistantKnowledgeUploadReservation.updateMany({
+            where: { r2Key, state: "finalizing", claimToken },
+            data:  { state: "pending", claimToken: null, finalizingStartedAt: null },
+        })
+        return { kind: "quota_refused", refusal } as const   // ← commit
+    }
+
+    // 성공 경로: token 조건부 삭제가 정확히 1건인지 확인한 뒤에 행을 만듭니다.
+    const consumed = await tx.assistantKnowledgeUploadReservation.deleteMany({
+        where: { r2Key, state: "finalizing", claimToken },
+    })
+    if (consumed.count !== 1) return { kind: "claim_lost" } as const   // ← commit
+
+    const file = await tx.assistantKnowledgeFile.create({ data: { … } })
+    return { kind: "created", file } as const
+})
+
+// transaction 밖에서 응답을 만듭니다.
+if (outcome.kind === "quota_refused") throw new AssistantKnowledgeError(409, …)
+if (outcome.kind === "claim_lost")    throw new AssistantKnowledgeError(409, …)
+```
+
+**규칙 셋.**
+
+1. **transaction 안에서는 던지지 않습니다.** 되돌려야 할 상태를 함께 되돌리기
+   때문입니다. 오류는 밖에서 만듭니다.
+2. **`consumed.count === 1`을 확인한 뒤에 행을 만듭니다.** 삭제가 0건이면
+   내 선점이 아니므로(§5.9.3f-2의 CAS) 행을 만들면 안 됩니다.
+3. **`claim_lost`도 R2 객체를 지우지 않습니다** — 이긴 요청이 그 바이트를 쓰고
+   있습니다.
 
 **잠금 순서는 전역 규칙입니다: profile 잠금이 먼저, account quota 잠금이
 나중.** 반대로 잡는 경로가 하나라도 있으면 교착이 가능합니다.
@@ -1466,6 +1529,66 @@ export const lockAccountKnowledgeQuota = (tx: Prisma.TransactionClient, userId: 
 
 **`knowledgeUsage()`도 `tx`를 받아야 합니다** — 지금은 `prisma`를 직접 쓰므로
 transaction 밖의 스냅샷을 읽습니다.
+
+##### 5.9.3f-5 [rev11] `maxExtractedBytesPerAccount`는 이 잠금이 지키지 못합니다
+
+**리뷰 10회차 지적 2.** 위 §5.9.3f-4는 계정 단위 한도 셋을 함께 적었지만,
+그중 **`maxExtractedBytesPerAccount`는 finalize에서 증가하지 않습니다.**
+추출은 행이 생긴 뒤 `processKnowledgeFile()`이 하고, 그 값이 quota를 움직입니다.
+[저장소]를 읽으면 결함이 **둘** 있고 둘 다 이 기능 이전부터 있습니다.
+
+**(1) processor의 quota 판정이 transaction 밖입니다.**
+
+```ts
+const extractedBytes = Buffer.byteLength(text, "utf8");
+const usage   = await knowledgeUsage(file.userId, file.profileId);   // ← 잠금 없음
+const refusal = knowledgeExtractedTextRefusal({ … });
+if (refusal) { … }
+await prisma.$transaction(async (tx) => { …chunks + file.update… });  // ← 판정과 별개
+```
+
+서로 다른 profile의 추출 두 건이 동시에 돌면 **둘 다 같은 usage를 읽고 둘 다
+통과**합니다. finalize에 잠금을 걸어도 이 경로는 그 잠금을 잡지 않습니다.
+
+**(2) 축적된 usage가 byte가 아니라 문자 수입니다.**
+
+processor는 `extractedBytes`를 **계산해서 판정에는 쓰지만 저장하지 않습니다** —
+`file.update`가 기록하는 것은 `extractedCharacters`뿐이고,
+`prisma/schema.prisma`의 `AssistantKnowledgeFile`에도 추출 byte 컬럼이
+없습니다. 그래서 `knowledgeUsage()`는 이렇게 됩니다.
+
+```ts
+extractedBytesInAccount: extractedCharacters._sum.extractedCharacters ?? 0
+```
+
+**들어오는 파일은 byte로 판정하고, 쌓인 총량은 문자 수로 셉니다.** 한국어
+문서는 UTF-8에서 문자당 약 3 byte이므로, 동시성이 전혀 없는 직렬 실행에서도
+**실제 사용량의 약 1/3만 계산**됩니다. 같은 함수의 주석이 그 사실을 이미
+적어 두었습니다 — *"Characters are counted, bytes are budgeted … treating a
+character as a byte would give CJK users triple the allowance the policy says
+they have."* 즉 알려진 상태이고 아직 고쳐지지 않았습니다.
+
+**이 보고서의 계약 다섯.**
+
+1. **`AssistantKnowledgeFile.extractedBytes Int?` 컬럼을 추가**하고
+   processor가 이미 계산하는 `Buffer.byteLength(text, "utf8")`를 저장합니다.
+2. **`knowledgeUsage()`는 그 컬럼을 합산**합니다. 이름과 값이 처음으로
+   일치하게 됩니다.
+3. **기존 행 처리 방침을 정합니다** — 재처리하지 않고 `NULL`로 두되,
+   합산에서 `NULL`은 `extractedCharacters`로 대체해 **현재와 같은(과소) 값**을
+   쓰거나, 재처리 배치를 돌립니다. **어느 쪽이든 정책 결정이며 §10.1의
+   승인 대상입니다**(아래 A7).
+4. **processor의 최종 transaction도 `lockAccountKnowledgeQuota()`를 잡고**,
+   그 안에서 usage를 재조회해 `knowledgeExtractedTextRefusal()`을 **다시**
+   판정합니다. 잠금 순서는 §5.9.3f-4와 같습니다.
+5. **거절은 §5.9.3f-4와 같은 형태** — transaction 안에서 던지지 않고 결과를
+   반환해 commit한 뒤 밖에서 `markFailed()`를 부릅니다.
+
+> **[rev11] 범위 표시.** (1)(2)(3)은 **기존 릴리스 C의 결함**이고 이 기능이
+> 만든 것이 아닙니다. 그러나 이 기능은 **한 번에 여러 파일을 올리는 흐름**을
+> 처음 만들므로 두 결함이 처음으로 일상적으로 드러납니다. 그래서 여기에
+> 기록하고 §11의 Slice 5 선행 작업으로 둡니다 — **고치지 않고 그 위에
+> 얹으면, quota를 넘긴 계정이 가져오기 때문에 생겼다고 읽히게 됩니다.**
 
 **(3-b) [rev10] transaction 밖에서 끝내는 것은 "metadata·signature·digest
 검증"입니다.** rev8·rev9는 "바이트 읽기·형식 검사·**추출**"이라고 적었는데,
@@ -2786,7 +2909,7 @@ Slice 8(rollout)**만 막습니다. 유일한 기준은 §10.1.2의 표입니다
 
 ### 10.1 승인 필요 — 사람이 정해야 착수 가능
 
-**[rev3] 승인 항목은 여섯 개(A1~A6)이고, 전체를 일괄 차단하지 않습니다.**
+**[rev11] 승인 항목은 일곱 개(A1~A7)이고, 전체를 일괄 차단하지 않습니다.**
 rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불가"라고 쓰고 §11은
 단계별 승인을 허용해 서로 달랐습니다. **§10.1.2의 표가 유일한 기준**입니다.
 
@@ -2797,6 +2920,7 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | **A3** | **license 없음·불명 package의 거부 또는 경고** | 제품 판단이지 기술 판단이 아님 | **경고.** §7.15 |
 | **A4** | **가져오기 flag와 rollback 시 생성된 profile의 접근 계약** | flag를 끄면 이미 만들어진 profile이 어떻게 되는가 — 사용자 데이터의 가시성 결정 | 아래 10.1.1 |
 | **A5** *(rev2)* | **secret 발견을 게시 차단으로 둘지, 경고로 강등할지** | 차단은 오탐 하나가 기능을 막고, 경고는 자격증명이 저장될 수 있게 합니다. 어느 쪽이 나은지는 제품 판단이며 기술로 결정되지 않습니다 | **차단 유지 + override를 `approvedDigest`에 결속**(§7.7). 서버가 독립적으로 scan하고 override 목록과 대조 |
+| **A7** *(rev11)* | **기존 knowledge 행의 `extractedBytes` 소급 처리** | 재처리 배치는 계정마다 저장된 파일 전부를 다시 읽는 일이고, 하지 않으면 **기존 계정만 계속 과소 집계**됩니다. 어느 쪽이든 사용자에게 보이는 결과(갑자기 quota가 찬 것처럼 보이는 것)가 다르므로 제품 판단입니다 | **재처리하지 않고 `NULL`은 `extractedCharacters`로 대체**해 현재 동작을 유지하되, **새 파일부터 정확히 셉니다.** 소급 재처리는 별도 결정 |
 | **A6** *(rev2)* | **instruction 안 URL을 어떻게 다룰지** | `PROFILE_INSTRUCTION_RULES`에 URL 금지를 넣으면 **손으로 쓴 기존 profile 전부의 동작이 바뀝니다.** 넣지 않으면 가져온 instruction의 URL이 `webSearch`로 방문될 수 있습니다 | **규칙은 건드리지 않고 UX로 처리**(§7.5.1): host 고지 + `webSearch` 동시 활성화 시 추가 확인. 규칙 변경은 별도 결정 |
 
 #### 10.1.2 [rev3·rev6] 어느 승인이 어느 slice를 막는가 — 유일한 기준
@@ -2809,6 +2933,7 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | **A4** flag rollback 계약 | **Slice 1** | 같음 |
 | **A5** secret 차단 vs 경고 | **Slice 2** | scanner를 브라우저·서버 공용 순수 모듈로 만들지가 이 답에 달렸습니다 |
 | **A6** instruction URL 처리 | **Slice 4** | UX 결정이므로 diff/review UI를 쓰기 직전입니다 |
+| **[rev11] A7** 기존 행의 `extractedBytes` | **Slice 5** | migration과 `knowledgeUsage()` 변경이 그 slice의 산출물입니다 |
 | **B1~B6** 수치 | **[rev8] Slice 1** | rev3은 Slice 5, rev6·rev7의 일부 문단은 Slice 2라고 적었는데 둘 다 늦습니다. **Slice 1의 산출물이 그 확정값을 문서에 기록하는 것**이므로 가장 먼저 필요합니다. Slice 2가 상수로 만들고, Slice 3의 parser가 쓰고, Slice 5가 서버에서 다시 강제합니다 |
 | **C1** URL import | 막지 않음 | MVP 범위 밖(§10.4) |
 | **C2** Gem HTML | 막지 않음 | MVP 범위 밖(§10.4) |
@@ -2826,7 +2951,8 @@ rev2는 §10이 "하나라도 열려 있으면 Slice 2 이후 전체 착수 불�
 | Slice 2 (pure adapter · 상수 · scanner) | **A5** (B1~B6는 Slice 1에서 이미 확정) |
 | Slice 3 (parser) | 없음 (B는 Slice 2에서 이미 상수가 됨) |
 | Slice 4 (diff/review UI) | **A6** |
-| Slice 5~7 | 없음 |
+| Slice 5 | **[rev11] A7** |
+| Slice 6~7 | 없음 |
 | Slice 8 (rollout) | **C3** |
 
 **[rev8]** A5·A6·C3는 Slice 1과 **병렬로** 결정할 수 있습니다. **B1~B6는
@@ -2948,7 +3074,7 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | | |
 |---|---|
 | **입력** | Slice 4가 만든 최종 manifest |
-| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim + 결합 CHECK**(§5.9.3f-2) + **일반 finalize의 예약 거절**(§5.9.3f-3) + **`lockAccountKnowledgeQuota()`와 transaction 내 quota 재판정**(§5.9.3f-4, 일반 경로 포함) + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
+| **산출물** | `POST /api/assistant-profiles/imports`(신규 — **draft `AssistantProfile` + import 행 생성**, §5.9.3), `.../imports/{importId}/publish`(신규), `.../imports/{importId}` DELETE(취소 — `deleteAssistantProfile()` 재사용). **[rev7]** knowledge 업로드는 **import 전용 경로**(§5.9.3f, 예약 포함), **`ready` 전원 조건**, staging TTL 두 시계 + 만료 sweep(`status='staging'` 인덱스), 서버 재검증 전부(§7.17), **[rev5·rev6·rev7]** `AssistantKnowledgeFile.importId` + `AssistantKnowledgeUploadReservation` migration(**User 역관계·`state` CHECK·registry 선언 포함**) + 일반 knowledge·versions route의 staging 차단 + **import 전용 업로드 경로**(§5.9.3f) + `publishAssistantProfileVersionInTx()`·`updateAssistantProfileIdentityInTx()`·`resolveManifestEntries(tx, …)` 리팩터링 + **`lockProfileImport()`와 8개 경로 적용**(§5.9.3g) + `expectedTargetIdentityDigest` 충돌 검사(§5.9.3h) + **승인 파일만 승격 + 나머지 폐기 + 미소비 예약 정리**(§5.9.3j, §5.9.3f-1) + **예약 원자적 선점 + claim token·stale reclaim + 결합 CHECK**(§5.9.3f-2) + **일반 finalize의 예약 거절**(§5.9.3f-3) + **`lockAccountKnowledgeQuota()`와 transaction 내 quota 재판정**(§5.9.3f-4, 일반 경로 포함) + **거절을 throw가 아닌 outcome으로**(§5.9.3f-4) + **`extractedBytes` 컬럼·processor 잠금·`knowledgeUsage()` 수정**(§5.9.3f-5) + **예약 도메인의 `excluded` 선언과 registry `inUnifiedExport`**(§5.9.3f-1) + `unchanged` 처리(§5.9.3i) + `mode`·`status` CHECK + cleanup fail-closed 조건 + 명시 TTL 컬럼. `planProfileVersionPublish()` 경유, **DB만** 한 transaction. `AssistantProfileImport` migration(forward only, **관계·`onDelete` 포함**, §6.6) + **data-domain registry 등록**(§6.6.1) |
 | **선행 조건** | Slice 4, **§10.2의 B1~B6 승인**, **§10.1의 A5 승인** |
 | **독립 rollback** | **부분적.** migration은 forward only이므로 되돌리는 것은 route를 flag로 끄는 것입니다. 테이블은 남습니다 |
 | **[rev2] 게이트** | `npm run check:data-domain-registry`가 이 slice에서 반드시 통과해야 합니다 — 새 user-linked 테이블이 registry에 없으면 fail-closed |
@@ -3098,11 +3224,16 @@ sweep·처리 실패 경로**가 이 slice 안에 들어오므로 **L**로 올�
 | **56a** *(rev7)* | **예약 없는 uploadKey** | 임의 key로 finalize → 거절, **삭제 시도 없음** |
 | **56b** *(rev9)* | **예약된 key의 검사 실패** | 이 import의 예약이 있고 행이 없는 key가 형식 검사에 실패 → **거절 + 예약을 `pending`으로 복귀 + R2 객체는 그대로**. rev7의 "그때만 삭제"는 §5.9.3f-2의 계약("import finalize 경로에 `deleteR2Object()` 호출이 없다")과 충돌해 폐기 |
 | **59** *(rev8)* | **동시 finalize** | 같은 `uploadKey`로 정상 A와 MIME 불일치 B를 동시 실행 → 선점은 하나만 성공. **어느 경로도 R2 객체를 지우지 않음.** A가 이겼으면 파일 행 존재 + 바이트 존재, B가 이겼으면 예약은 `pending`으로 복귀하고 A는 200 멱등 또는 409 |
-| **59b** *(rev9)* | **선점 직후 프로세스 종료** | `finalizing` 선점 뒤 강제 종료 → 예약은 `finalizing`으로 남음. **stale 상한 경과 후 maintenance가 `pending`으로 회수하고 `claimToken`을 비움.** 사용자가 재시도하면 성공. 회수 뒤 **옛 요청이 늦게 돌아와도 CAS 불일치로 아무 상태도 바꾸지 못함** |
+| **59b** *(rev9)* | **선점 직후 프로세스 종료** | `finalizing` 선점 뒤 강제 종료 → 예약은 `finalizing`으로 남음. **stale 상한 경과 후 maintenance가 `pending`으로 회수하고 `claimToken`·`finalizingStartedAt`을 **둘 다** `null`로 비움**(결합 CHECK가 강제). 사용자가 재시도하면 성공. 회수 뒤 **옛 요청이 늦게 돌아와도 CAS 불일치로 아무 상태도 바꾸지 못함** |
 | **59a** *(rev8)* | **동시 재시도의 P2002** | 같은 key로 두 finalize가 행을 만들려 함 → 뒤쪽은 **500이 아니라** 기존 행 재조회 후 200(일치) 또는 409(불일치) |
 | **61** *(rev10)* | **동시 업로드가 계정 한도를 넘지 않음** | `maxFilesPerAccount` 직전에서 **서로 다른 profile**로 두 finalize 동시 실행 → 하나만 성공, 다른 하나는 `ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED`. 계정 파일 수가 한도를 넘지 않음 |
 | **61a** *(rev10)* | **import와 일반이 같은 quota 잠금을 씀** | import finalize와 일반 finalize를 동시에 한도 직전에서 실행 → 합계가 한도를 넘지 않음 |
 | **61b** *(rev10)* | **잠금 순서** | profile → account 순서를 뒤집은 경로가 없음(코드 검사 또는 계약 테스트). 교착 없이 두 경로가 동시에 완주 |
+| **62** *(rev11)* | **quota 거절 뒤 예약 복귀** | 계정 한도 직전에서 finalize → 409. 그 뒤 예약이 **`state='pending'` · `claimToken=null` · `finalizingStartedAt=null`**로 복귀해 있고, 파일 하나를 지운 뒤 **같은 key로 재시도하면 성공**. 예약이 `finalizing`으로 남지 않음 |
+| **62a** *(rev11)* | **`claim_lost` 경로** | 선점이 회수된 뒤 옛 요청이 돌아와 예약 삭제를 시도 → `count === 0`이라 **파일 행을 만들지 않고** R2 객체도 그대로 |
+| **63** *(rev11)* | **동시 추출이 추출 텍스트 한도를 넘지 않음** | `maxExtractedBytesPerAccount` 직전에서 **서로 다른 profile**의 파일 둘을 동시에 처리 → 하나만 `ready`, 다른 하나는 `ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED`로 `failed` |
+| **63a** *(rev11)* | **UTF-8 멀티바이트 집계** | 한국어 1,000자(≈3,000 byte) 파일을 처리 → `extractedBytes`가 **3,000 근처**로 저장되고 `knowledgeUsage()`가 그 값을 합산. 문자 수(1,000)로 세지 않음 |
+| **63b** *(rev11)* | **기존 행(`extractedBytes = NULL`)의 합산** | 승인된 방침(§10.1 A7)대로 동작하고, 그 방침이 무엇이든 **합산이 조용히 0이 되지 않음** |
 | **61c** *(rev10)* | **state 결합 CHECK** | `state='pending'`인데 `claimToken`이 있는 행, `state='finalizing'`인데 `finalizingStartedAt`이 없는 행을 insert 시도 → **DB 거절** |
 | **60** *(rev8)* | **미소비 예약이 publish에서 정리됨** | 예약 3개 중 2개만 finalize 후 publish → 남은 예약 1개가 **publish transaction에서 삭제**됨. 게시 후 이 import의 예약 0개 |
 | **60a** *(rev8)* | **예약의 cascade** | 취소·만료(import 삭제) 후 예약 0개. 계정 삭제 후에도 0개 |
@@ -3284,6 +3415,7 @@ C3는 **Slice 8(rollout)**을 각각 막습니다.
 | **A4** | flag rollback 시 생성된 profile의 접근 계약 | **profile은 정상 동작, 가져오기 경로만 사라짐. provenance 행 보존** |
 | **A5** *(rev2)* | secret 발견을 게시 차단으로 둘지 경고로 강등할지 | **차단 유지 + override를 `approvedDigest`에 결속** |
 | **A6** *(rev2)* | instruction 안 URL의 처리 | **`PROFILE_INSTRUCTION_RULES`는 건드리지 않고 UX 고지 + `webSearch` 동시 활성화 시 추가 확인** |
+| **A7** *(rev11)* | 기존 knowledge 행의 `extractedBytes` 소급 처리 | **재처리하지 않고 `NULL`은 `extractedCharacters`로 대체, 새 파일부터 정확히 집계** |
 
 **[rev4] A5는 Slice 2 착수 전에** 정해져야 합니다 — scanner를 브라우저·서버가
 공유하는 순수 모듈로 만들지 여부가 그 답에 달려 있습니다. A6는 Slice 4
