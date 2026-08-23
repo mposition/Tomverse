@@ -31,6 +31,7 @@ import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
+import { coveredByAnotherModal } from "@/components/useModalDialog";
 import {
   useCompactBottomDock,
   useKeyboardInset,
@@ -431,7 +432,13 @@ export function MobileChatShell({
     if (!isDrawerOpen) return;
 
     document.body.style.overflow = "hidden";
+    // Skipped when a dialog opened from inside the drawer in the meantime --
+    // the account footer's settings modal, and the delete-account dialog on
+    // top of that. Focus arriving after that would pull the person back out of
+    // the dialog they are in and into the drawer, which is inert underneath
+    // it. Same rule as `useModalDialog`, which is why it is the same function.
     const focusFrame = requestAnimationFrame(() => {
+      if (coveredByAnotherModal(drawerDialogRef.current)) return;
       drawerCloseButtonRef.current?.focus();
     });
 
