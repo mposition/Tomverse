@@ -1789,6 +1789,7 @@ export function ChatInput({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             key,
+            name: file.name,
             mediaType,
             size: file.size,
           }),
@@ -1803,20 +1804,33 @@ export function ChatInput({
           return;
         }
         const finalized = (await finalizeResponse.json()) as {
+          uploadId?: string;
+          name?: string;
           size?: number;
+          kind?: "file" | "text";
           archive?: { excludedFiles?: number };
         };
 
+        /*
+          The storage key stops here.
+
+          Finalisation is the last step that knows one; what it hands back is
+          an opaque upload id, and that is what the composer holds, what the
+          send carries, and what the message save binds. A key the browser
+          keeps is a key a request body carries, and a key in a request body is
+          something a route then has to decide whether to believe
+          (docs/policy/user-attachment-persistence.md).
+        */
         const attachment: ChatAttachment = {
           id: crypto.randomUUID(),
-          name: file.name,
+          name: finalized.name || file.name,
           mediaType,
           size: finalized.size || file.size,
-          objectKey: key,
+          uploadId: finalized.uploadId,
           data: mediaType.startsWith("image/")
             ? await fileToDataUrl(file)
             : undefined,
-          kind: attachmentKindForFormat(format),
+          kind: finalized.kind || attachmentKindForFormat(format),
         };
         setPendingAttachments((current) =>
           current.filter((item) => item.id !== trackingId)
@@ -2094,7 +2108,7 @@ export function ChatInput({
           name: imported.name,
           mediaType: imported.mediaType,
           size: imported.size,
-          objectKey: imported.key,
+          uploadId: imported.uploadId,
           kind: imported.kind,
         });
       }
@@ -2115,19 +2129,29 @@ export function ChatInput({
       attachments.filter((item) => item.id !== attachment.id)
     );
 
-    if (!attachment.objectKey) return;
+    // Nothing to reclaim: a file that never finished uploading, or one whose
+    // message is already saved. The second case is deliberate -- removing a
+    // card from the composer is editing a draft, and a stored turn keeps the
+    // files it was sent with (docs/policy/user-attachment-persistence.md).
+    if (!attachment.objectKey && !attachment.uploadId) return;
+    if (attachment.attachmentId) return;
 
     try {
       // A guest object lives on its own endpoint, scoped to the guest session
       // that uploaded it. Deleting it here is what keeps the common case --
       // pick a file, change your mind -- from leaving an orphan for the TTL
-      // sweep to find an hour later.
+      // sweep to find an hour later. A signed-in account names the upload id
+      // instead: the composer has no storage key to send.
       const response = await fetch(
         isEphemeralAttachment ? "/api/chat/guest-attachment" : "/api/chat",
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: attachment.objectKey }),
+          body: JSON.stringify(
+            isEphemeralAttachment
+              ? { key: attachment.objectKey }
+              : { uploadId: attachment.uploadId }
+          ),
         }
       );
       await discardResponseBody(response);

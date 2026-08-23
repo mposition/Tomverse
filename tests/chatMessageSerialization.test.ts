@@ -130,3 +130,111 @@ test("the guest snapshot never carries the context counts", () => {
   assert.equal("memoryUsedCount" in persisted, false);
   assert.equal("knowledgeChunkCount" in persisted, false);
 });
+
+/**
+ * The attachment reference boundary (docs/policy/user-attachment-persistence.md).
+ *
+ * A signed-in composer holds an opaque id, never a storage key, and the
+ * transcript carries whichever id actually identifies the file: the durable
+ * attachment row once the message is saved, the upload before that. Sending
+ * both would be asking the server which of its own facts to prefer.
+ */
+test("a signed-in attachment travels as an opaque id, never as a key", () => {
+  const message: Message = {
+    id: "m-4",
+    role: "user",
+    content: "",
+    attachments: [
+      {
+        id: "local-1",
+        name: "계약서.docx",
+        mediaType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size: 2048,
+        uploadId: "upl_1",
+        kind: "file",
+      },
+    ],
+  };
+  const serialized = toChatRequestMessage(message);
+  assert.equal(serialized.attachments?.[0].uploadId, "upl_1");
+  assert.equal(serialized.attachments?.[0].objectKey, undefined);
+  assert.equal(JSON.stringify(serialized).includes("attachments/"), false);
+});
+
+test("the durable attachment id wins once the message has been saved", () => {
+  const message: Message = {
+    id: "m-5",
+    role: "user",
+    content: "이 파일 봐 주세요",
+    attachments: [
+      {
+        id: "local-1",
+        name: "보고서.pdf",
+        mediaType: "application/pdf",
+        size: 4096,
+        uploadId: "upl_1",
+        attachmentId: "ma_1",
+        kind: "file",
+      },
+    ],
+  };
+  const serialized = toChatRequestMessage(message);
+  assert.equal(serialized.attachments?.[0].attachmentId, "ma_1");
+  assert.equal(serialized.attachments?.[0].uploadId, undefined);
+});
+
+test("an image preview is dropped once the bytes are in storage, by any id", () => {
+  const message: Message = {
+    id: "m-6",
+    role: "user",
+    content: "",
+    attachments: [
+      {
+        id: "local-1",
+        name: "photo.png",
+        mediaType: "image/png",
+        size: 10,
+        data: "data:image/png;base64,AAAA",
+        uploadId: "upl_2",
+        kind: "file",
+      },
+      {
+        id: "local-2",
+        name: "shot.png",
+        mediaType: "image/png",
+        size: 10,
+        data: "data:image/png;base64,BBBB",
+        attachmentId: "ma_2",
+        kind: "file",
+      },
+    ],
+  };
+  const serialized = toChatRequestMessage(message);
+  assert.equal(serialized.attachments?.[0].data, undefined);
+  assert.equal(serialized.attachments?.[1].data, undefined);
+});
+
+// A file-only turn is a complete turn. It used to be stored as the file names
+// joined with commas, because the save endpoint demanded text.
+test("a message with attachments and no text keeps its empty content", () => {
+  const message: Message = {
+    id: "m-7",
+    role: "user",
+    content: "",
+    attachments: [
+      {
+        id: "local-1",
+        name: "명단.xlsx",
+        mediaType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size: 512,
+        attachmentId: "ma_3",
+        kind: "file",
+      },
+    ],
+  };
+  const serialized = toChatRequestMessage(message);
+  assert.equal(serialized.content, "");
+  assert.equal(serialized.content.includes("명단"), false);
+});

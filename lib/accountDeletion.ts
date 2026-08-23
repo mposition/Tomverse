@@ -5,6 +5,7 @@ import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
+import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
@@ -229,6 +230,10 @@ export async function deleteTomverseAccount(
     // `userId`, so this collects every generated file the account owns even if
     // a conversation list were ever incomplete.
     await enqueueArtifactCleanupForUser(tx, user.id, "account_deleted");
+    // The files the account uploaded, by account for the same reason -- and
+    // including the uploads it finalised and never sent, which no conversation
+    // would ever have named (docs/policy/user-attachment-persistence.md).
+    await enqueueMessageAttachmentCleanupForUser(tx, user.id, "account_deleted");
 
     // Not covered by any cascade: PerplexityAsyncJob names a conversationId
     // but declares no relation, so deleting the conversations would leave the

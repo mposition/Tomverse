@@ -657,6 +657,36 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **v1 flag는 staging 검증 전용입니다.** 멀티 모델 UX 완성 전 production
   공개 활성화 금지, Google 모델은 가격 검증 통과 전 활성화 금지.
 
+# 사용자 입력 첨부파일
+
+사용자가 보낸 파일의 저장, 참조, 조회 응답, 삭제를 건드리기 전에 읽습니다.
+
+- `docs/policy/user-attachment-persistence.md`
+
+절대 조건:
+
+- **클라이언트는 저장 위치를 말하지 않습니다.** 업로드 완료 단계가 발급한
+  불투명한 `uploadId`, 또는 저장된 메시지의 `attachmentId`로만 참조합니다.
+  `messageAttachmentReferenceSchema`는 `.strict()`이며 `objectKey`·`data`·
+  `bytes`·`path`가 실린 참조를 파싱 단계에서 거절합니다. 게스트만 예외이고,
+  그 key는 게스트 자신의 서명된 신원에서 유도되므로 key가 곧 권한입니다.
+- **해석은 `userId`를 `where` 안에 넣습니다.** 남의 id는 "거절"이 아니라
+  "없음"이고, 차이를 보고할 분기가 존재하지 않습니다.
+- **`objectKey`·바이트·data URL·추출 본문·서명 URL은 어떤 응답에도 넣지
+  않습니다.** 대화 조회는 `PUBLIC_MESSAGE_ATTACHMENT_SELECT` 6개 필드만
+  이름 대며 `include`를 쓰지 않습니다. 입력 첨부에는 다운로드 route가 없습니다.
+- **메시지 저장과 첨부 결속은 한 트랜잭션입니다.** `(messageId, ordinal)`
+  unique가 멱등성 키이므로 재전송된 pre-save가 카드를 복제하지 않습니다.
+- **첨부만 있는 메시지를 파일명 문자열로 대체하지 않습니다.** `content`는 비어
+  있을 수 있고, 그것이 이 정책이 고친 결함입니다.
+- **한 모델의 assistant history 초기화는 공통 사용자 첨부를 지우지 않습니다.**
+  첨부는 세 패널이 공유하는 질문에 속합니다. 삭제는 대화·계정 전체에서만
+  일어나고, DB 트랜잭션에서 tombstone을 먼저 남긴 뒤 15분 cron이 객체를
+  지웁니다. 실패·재시도·최종 상태는 구조화 로그로 남깁니다.
+- **모델에게는 요청 범위 handle(`att_1`)만 줍니다.** row id도 storage key도
+  주지 않습니다.
+- guest localStorage 대화의 기존 첨부 동작은 바뀌지 않습니다.
+
 # AI 생성 파일 (Generated Artifact)
 
 채팅 답변이 만들어 내는 실제 파일 — tool 정의, 명세, 형식 표, 생성기, 저장,
@@ -714,6 +744,19 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
   내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
   docs/policy/generated-artifacts.md §11.
+- **"최대 3개"는 top-level artifact 상한입니다**(docs/policy/generated-artifacts.md §13). 문서 개수 상한이 아니며,
+  archive는 그중 하나로 세면서 100개를 담습니다. 이 상한을 올려 batch 요구를
+  해결하지 않습니다 — archive 안에 서버 렌더링 문서를 넣는 것이 답입니다.
+  system prompt에서 `N files per answer` 같은 문장은 금지이며
+  `tests/generatedArtifactToolPolicy.test.mjs`가 이를 강제합니다.
+- **첨부된 DOCX 템플릿은 복사해서 채웁니다**(docs/policy/generated-artifacts.md §13.4). 추출 텍스트로 다시 쓰면
+  styles·theme·표·header/footer·section·이미지가 사라집니다. 매크로·OLE·
+  external relationship·altChunk·외부를 읽는 field code·비정상 ZIP entry는
+  **제거가 아니라 거절**입니다. 필수 placeholder 누락과 미해결 placeholder는
+  배치 전체를 실패시킵니다 — 부분 성공은 없습니다.
+- **batch tool은 handle 두 개와 이름 규칙만 받습니다.** bytes·base64·XML·
+  objectKey·로컬 경로를 담을 field가 schema에 없고 `.strict()`이므로 추가할 수도
+  없습니다. 행 값은 서버가 스프레드시트에서 직접 읽습니다.
 - **OOXML package 변경은 검사기가 아니라 대상 application에서 확인합니다.**
   master마다 theme part를 하나씩 쓰고, `<a:spLocks noGrp="1"/>`를 쓰는 shape는
   자기 `<p:ph>`를 갖습니다. theme을 공유한 deck은 ECMA-376 XSD와 Microsoft

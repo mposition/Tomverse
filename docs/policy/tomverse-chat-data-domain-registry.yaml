@@ -266,6 +266,36 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  # The files a person attached to their own messages
+  # (docs/policy/user-attachment-persistence.md). The row cascades from the
+  # account; the object it names is enqueued on MessageAttachmentCleanup in the
+  # same transaction and removed by the maintenance sweep, which is why
+  # `immediate` is honest here rather than optimistic.
+  - domain: messageAttachment
+    prismaModel: MessageAttachment
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  # A finalised upload that has not been bound to a message yet. It holds the
+  # file name the person chose and the key of the object they uploaded, so it
+  # is their data even before any message references it -- and account deletion
+  # enqueues these objects too, which no conversation-shaped sweep would have
+  # reached.
+  - domain: messageAttachmentUpload
+    prismaModel: MessageAttachmentUpload
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: imageGeneration
     prismaModel: ImageGeneration
     userLinkageRole: subject
