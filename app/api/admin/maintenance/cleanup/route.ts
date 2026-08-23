@@ -12,7 +12,7 @@ import { approvalPayloadHash } from "@/lib/adminApprovalCore";
 import {
   adminSoleApproverErrorResponse,
   runAsSoleApprover,
-  soleApproverIsAvailable,
+  soleApproverAvailability,
 } from "@/lib/adminSoleApproverExecution";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -177,6 +177,11 @@ async function dryRunCleanup() {
 }
 
 export async function POST(req: Request) {
+  // Declared out here so the catch can report it. "An approval is required" is
+  // true and useless on its own: it does not say whether two administrators
+  // are configured, which is ordinary, or something is misconfigured, and
+  // working that out from the outside took three rounds on 2026-08-23.
+  let soleApproverUnavailable: string | null = null;
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) {
@@ -210,9 +215,14 @@ export async function POST(req: Request) {
     // this is the only path there is, so an execution that skipped the dry run
     // must be told to run one rather than fall through to an approval nobody
     // can grant.
-    const asSoleApprover =
-      body.mode === "execute" &&
-      soleApproverIsAvailable("retention.cleanup.execute", session);
+    const soleApprover = soleApproverAvailability(
+      "retention.cleanup.execute",
+      session
+    );
+    const asSoleApprover = body.mode === "execute" && soleApprover.allowed;
+    if (body.mode === "execute" && !soleApprover.allowed) {
+      soleApproverUnavailable = soleApprover.reason;
+    }
 
     const result =
       body.mode !== "execute"
@@ -284,7 +294,10 @@ export async function POST(req: Request) {
       resultDigest: approvalPayloadHash(run.result),
     });
   } catch (error) {
-    const approvalResponse = adminApprovalErrorResponse(error);
+    const approvalResponse = adminApprovalErrorResponse(
+      error,
+      soleApproverUnavailable ? { soleApproverUnavailable } : undefined
+    );
     if (approvalResponse) return approvalResponse;
     const soleApproverResponse = adminSoleApproverErrorResponse(error);
     if (soleApproverResponse) return soleApproverResponse;
