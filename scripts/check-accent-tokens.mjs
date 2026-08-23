@@ -18,6 +18,11 @@ const GUARDED_FILES = [
   "components/auth/AuthButton.tsx",
   "components/billing/PlanChangeDialog.tsx",
   "components/chat/ChatInput.tsx",
+  // Auto is a mode with no reserved accent of its own: it uses the neutral
+  // primary. Guarded so the AI Review gradient cannot come back the way it
+  // arrived -- in a file nothing had mounted yet.
+  "components/chat/AutoRoutedByBadge.tsx",
+  "components/chat/AutoRoutingToggle.tsx",
   "components/chat/ComparisonActionRail.tsx",
   "components/chat/ComparisonReviewDialog.tsx",
   "components/chat/DeepResearchSetupSheet.tsx",

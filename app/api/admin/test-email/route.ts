@@ -41,15 +41,15 @@ export async function POST(req: Request) {
 
     const result = await sendTransactionalEmail({
       to: session.user.email,
-      subject: "Tomverse Insight test email",
+      subject: "Tomverse Review test email",
       text: [
-        "This is a Tomverse Insight transactional email test.",
+        "This is a Tomverse Review transactional email test.",
         "If you received this message, RESEND_API_KEY and TRANSACTIONAL_EMAIL_FROM are working.",
       ].join("\n"),
       html: `
         <div style="font-family:${EMAIL_FONT_STACK};max-width:560px;margin:0 auto;padding:24px;color:#111827;">
-          <h1 style="font-size:24px;margin:0 0 12px;">Tomverse Insight test email</h1>
-          <p>This is a Tomverse Insight transactional email test.</p>
+          <h1 style="font-size:24px;margin:0 0 12px;">Tomverse Review test email</h1>
+          <p>This is a Tomverse Review transactional email test.</p>
           <p>If you received this message, <strong>RESEND_API_KEY</strong> and <strong>TRANSACTIONAL_EMAIL_FROM</strong> are working.</p>
         </div>
       `,

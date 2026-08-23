@@ -79,7 +79,7 @@ const ENGLISH_STRING_CEILING = {
   //
   // What is left in each locale is one of three things, and each was checked
   // rather than assumed: a product name Tomverse does not translate anywhere
-  // ("Tomverse Insight", "Deep Research"), a format string with no words in it
+  // ("Tomverse Review", "Deep Research"), a format string with no words in it
   // ("{count} / {max}"), or a true cognate. Cognates are per-locale, which is
   // why these five numbers differ: French keeps "Portrait", "Sources", "Auto"
   // and "{count} messages"; German keeps "Standard", "Status" and "Feedback";

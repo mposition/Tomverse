@@ -71,6 +71,20 @@ const REGISTRY = {
     reason:
       "ready and failed. ARTIFACT_STATUSES beside it carries a third value, `blocked`, which is a live-stream state for a guest who has not signed in: there is no account to write a row under, so a third database value would be a status nothing could ever query for. The split is what keeps the constraint and the transport union from being forced to agree about a state only one of them has.",
   },
+  RoutingRun_product_key_check: {
+    owner: "list",
+    module: "lib/conversationProduct.ts",
+    list: "CONVERSATION_PRODUCT_KEYS",
+    reason:
+      "The same three products as Conversation.productKey, snapshotted at execution time (decision record v1.2 \u00a75). Deliberately the same list rather than a second one: a run's product is copied from the conversation's, so two lists that could drift would let a run claim a product no conversation can hold. Also NULL-permitting, because rows written before the column existed had no product recorded and a guessed value would be an attribution nobody made.",
+  },
+  Conversation_product_key_check: {
+    owner: "list",
+    module: "lib/conversationProduct.ts",
+    list: "CONVERSATION_PRODUCT_KEYS",
+    reason:
+      "chat, review, studio -- which Tomverse product a conversation belongs to (product boundary decision record v1.2, decision 2). The brand axis has a fourth product, `code`, deliberately absent: Tomverse Code writes no Conversation rows, so admitting it would make a row with no execution surface a legal value. It joins both the list and the constraint on the day Code starts writing conversations, which is why the two are compared here rather than left to agree by memory.",
+  },
   MessageAttachment_kind_check: {
     owner: "list",
     module: "lib/messageAttachmentCore.ts",

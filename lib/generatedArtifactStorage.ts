@@ -366,6 +366,23 @@ export const drainArtifactCleanupQueue = async (
     },
   });
 
+  // Same shape and gate as `message_attachment_cleanup_swept`
+  // (lib/messageAttachmentStorage.ts). The count reached the cron response and
+  // `ScheduledJobRun.result` and nothing read either, so what this sweep
+  // deleted was invisible. Silent on a no-op run on purpose.
+  if (pending.length > 0 || exhausted > 0) {
+    console.info(
+      JSON.stringify({
+        event: "generated_artifact_cleanup_swept",
+        examined: pending.length,
+        deleted,
+        failed,
+        exhausted,
+        timestamp: now.toISOString(),
+      })
+    );
+  }
+
   return { examined: pending.length, deleted, failed, exhausted };
 };
 

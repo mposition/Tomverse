@@ -42,7 +42,16 @@ async function scheduleStripeSubscriptionCancellation(
 export async function scheduleTomverseAccountDeletion(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, stripeSubscriptionId: true },
+    select: {
+      id: true,
+      email: true,
+      stripeSubscriptionId: true,
+      // Returned so the notice goes out in the language this account chose.
+      // The message says an account and everything in it will be destroyed on
+      // a date; it is the last one that should arrive in a language its
+      // recipient did not pick (EM-12).
+      settings: { select: { language: true } },
+    },
   });
   if (!user) return { scheduled: false as const };
 
@@ -71,6 +80,7 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   return {
     scheduled: true as const,
     email: user.email,
+    language: user.settings?.language ?? null,
     requestedAt,
     scheduledFor,
   };

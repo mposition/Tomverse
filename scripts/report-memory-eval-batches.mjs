@@ -75,3 +75,33 @@ console.log(
         "Nothing here moves a case into the dataset -- that is a separate, " +
         "reviewed change."
 );
+
+// What the reviewer is actually being asked for, as one number.
+//
+// The per-batch lines above each say "0/10", and reading sixteen of them to
+// learn the total is work the report should have done. The reason it matters
+// is that this number is the whole cost of the review: everything else here --
+// drafting, sampling, the automated checks -- is already spent.
+const outstanding = rows
+    .filter((row) => !row.adopted)
+    .map((row) => ({
+        row,
+        owed: row.record.cases.filter((entry) => entry.verdict === null).length,
+    }))
+    .filter((entry) => entry.owed > 0);
+const owedTotal = outstanding.reduce((sum, entry) => sum + entry.owed, 0);
+
+if (owedTotal > 0) {
+    const next = outstanding[0];
+    console.log(
+        `\n${owedTotal} verdict(s) outstanding across ${outstanding.length} batch(es). ` +
+            `Start here:\n  ${next.row.batch.record}  (${next.owed} to judge)`
+    );
+} else if (rows.some((row) => !row.adopted)) {
+    // Verdicts are in and something still blocks: an unfilled adoption line, a
+    // blank diversity call, a rejection. The blockers above name which.
+    console.log(
+        "\nEvery sampled case carries a verdict. What is left is on the batch " +
+            "lines above."
+    );
+}

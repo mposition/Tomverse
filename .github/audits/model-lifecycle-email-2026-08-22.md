@@ -376,7 +376,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **검증**: DB integration.
 - **파일**: `scripts/run-default-model-reconciliation.mjs:127-200`
 
-### ML-12 — 같은 모델이 provider마다 별개의 후보가 된다 (P1, Medium)
+### ML-12 — 같은 모델이 provider마다 별개의 후보가 된다 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `[측정]`
 - **현재 동작**: 후보의 identity는 `@@unique([provider, apiModel])`입니다
@@ -659,7 +659,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/notificationDeliveryJob.ts:78-100`,
   `lib/scheduledJobsCore.ts:159-220`
 
-### EM-12 — legal/transactional template의 다국어 누락 (P1, Medium)
+### EM-12 — legal/transactional template의 다국어 누락 (P1, Medium) — **해결 (2026-08-23)**
 
 - **Evidence**: `[코드]` `lib/accountEmails.ts:17-33`
 - **현재 동작**: `buildAccountDeletionScheduledEmail`(classification `legal`)과
@@ -2106,13 +2106,13 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 ### P1
 
-- ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §21
-- ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §23
+- ~~EM-04 jurisdiction footer/접두어 발송 경로 연결~~ **완료 (2026-08-23)** — §24
+- ~~EM-03 marketing 경로 end-to-end 테스트~~ **완료 (2026-08-23)** — §26
 - EM-07 Founding Tester ×3 + admin plan-adjust를 큐로
-- EM-12 legal/transactional template 7개 언어
+- ~~EM-12 legal/transactional template 7개 언어~~ **완료 (2026-08-23)** — §27
 - EM-08 snapshot retention + 무한 증가 테이블 등록
-- ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §22
-- ML-12 provider 무관 후보 dedup (이미 있는 모델을 NEW로 보고하지 않기)
+- ~~ML-08 auto-disable → work item 생성~~ **완료 (2026-08-23)** — §25
+- ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §28
 - ML-13 리포트에서 모델 소유자와 관측 경로 분리
 - ML-10 reconciliation script 범용화 + precondition 검사
 - EM-06 campaign이 templateVersion pin
@@ -2226,7 +2226,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 ---
 
-## 21. EM-04 구현 기록 (2026-08-23 · 완료)
+## 24. EM-04 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2289,7 +2289,7 @@ policy reader만 읽었습니다.
 
 ---
 
-## 22. ML-08 구현 기록 (2026-08-23 · 완료)
+## 25. ML-08 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2322,7 +2322,7 @@ policy reader만 읽었습니다.
 
 ---
 
-## 23. EM-03 구현 기록 (2026-08-23 · 완료)
+## 26. EM-03 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
 |---|---|
@@ -2361,3 +2361,70 @@ routing 문구에 대해 하는 검사와 같은 방식입니다.
 enqueue하는 코드가 없으며, marketing은 production에서 비활성입니다. **template
 등록은 발송이 아닙니다.** EM-16(발송 계정·region 분리, 도메인, warm-up)은 그대로
 남아 있습니다.
+
+---
+
+## 27. EM-12 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/accountEmails.ts` | 두 통지의 7개 언어 `Record<EmailLanguage, Copy>` |
+| `lib/emailTemplateDefinitions.ts` | render에 language 전달 |
+| `lib/accountDeletion.ts` | 예약 결과가 계정의 language를 함께 반환 |
+| `app/api/user/account/route.ts` · `app/api/admin/users/[userId]/security/route.ts` | enqueue에 language 전달 |
+| `tests/accountLifecycleEmails.test.mjs` | 7건 |
+| `tests/integration/account-deletion.db.test.ts` | 2건 추가 |
+
+**절반만 고치면 죽은 코드가 됩니다.** template에 7개 언어를 넣어도 **호출자가
+language를 넘기지 않으면** lane이 `resolveLanguage(undefined)` → `"en"`으로
+떨어져 번역이 도달하지 못합니다. 그래서 두 호출 경로가 계정의
+`UserSettings.language`를 싣도록 함께 고쳤습니다.
+
+**`Record<EmailLanguage, Copy>`를 쓴 이유**는 언어를 추가할 때 모든 메시지를 쓰기
+전까지 컴파일이 실패하기 때문입니다. 번역 집합을 완전하게 유지한 유일한 기제가
+그것입니다.
+
+**계정 설정 행이 없으면 `null`을 반환합니다, `"en"`이 아니라.** language 부재의
+해석은 lane 한 곳이 하는 결정이고, 호출자마다 기본값을 정하면 그 결정이 흩어집니다.
+
+**test가 강제하는 것**: 7개 언어 전부 렌더되고 제목이 서로 다를 것(조용한
+fallback이면 집합이 무너짐), 날짜와 support 주소가 모든 언어에 남을 것(취소가
+self-service가 아니므로 이 둘이 유일한 행동 경로), 문단 4개가 전부 존재할 것,
+어느 언어도 사과하거나 재촉하지 않을 것(§14.3).
+
+**범위**: `auth_login_code`·`account_welcome`·`billing_welcome`은 이미 다국어
+이고, `ops_model_lifecycle_daily`는 운영자 메일이라 영어 하나가 의도된 상태입니다.
+
+---
+
+## 28. ML-12 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/providerModelCatalogMonitor.ts` | 후보 판정을 provider slice가 아니라 **카탈로그 전체**의 정규화 키로 |
+| `lib/modelLifecycleWorkItemCore.ts` | `observedVia` 그룹핑, `mergeObservedVia()`, `observationsForExistingItems()` |
+| `lib/modelLifecycleWorkItems.ts` | 신규 item에 `observedVia` 기록, 기존 item에 새 provider 관측 추가 |
+| `tests/model-lifecycle-work-item-core.test.ts` | 5건 추가 (총 26) |
+| `tests/integration/model-lifecycle-auto-disable.db.test.ts` | 3건 추가 (총 10) |
+
+**Root cause를 근원에서 고쳤습니다.** 후보 판정이 `where: { provider }`로 좁힌
+registry를 봤기 때문에, 다른 provider가 서빙하기 시작하면 이미 있는 모델이 새
+후보가 됐습니다. `kimi-k3`가 출시 3주 뒤까지 세 번 NEW로 보고된 이유입니다.
+이제 `candidateIdentity()`로 카탈로그 전체를 조회합니다.
+
+**두 질문을 분리했습니다.** "이 provider가 우리가 가진 모델을 서빙하는가"는
+provider 범위 질문이고 missing 탐지·reconciliation이 그것으로 동작하므로 그대로
+뒀습니다. "이 모델이 우리에게 새로운가"는 provider 범위가 아닙니다.
+
+**관측 행은 손대지 않았습니다** — 감사 권고대로. `ProviderModelCatalogEntry`의
+provider별 행은 사실이고, 묶는 것은 결정 계층의 일입니다.
+
+**묶되 버리지 않습니다.** `glm-5.3`을 하나로 collapse하는 것은 맞지만 collapse된
+둘을 버리는 것은 틀립니다 — 어느 provider가 서빙하는지가 추가 여부를 결정하는
+사람이 필요로 하는 바로 그 정보입니다. `observedVia`에 provider와 **원본
+apiModel 문자열**을 함께 남깁니다(`ZHIPU/GLM-5.3`은 Qwen이 실제로 반환한 것이고,
+확인하려는 사람은 정규화 키가 아니라 그 문자열이 필요합니다).
+
+**날짜를 건너뛴 관측도 붙습니다.** 월요일에 만든 item이 목요일에 provider 하나를
+얻습니다. 병합은 멱등이라 같은 provider만 다시 보이는 scan은 행을 건드리지
+않습니다(DB test가 `updatedAt` 불변으로 고정).

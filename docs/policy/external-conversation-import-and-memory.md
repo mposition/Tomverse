@@ -808,8 +808,9 @@ secret·credential ④ prompt injection·지시형·URL 유도.
 표본을 실제로 만들고 검수하고 동결하는 절차는
 `docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
 초안 생성자(AI)와 검수자(사람)의 분리, 두 사람의 판정이 충돌할 때만 적용하는
-adjudication, critical negative 전건 독립 검수, 개발용/decision set 분리,
-`datasetVersion`·digest 동결과 재작업 규칙.
+adjudication, 네 범주 공통 20% 표본 검수와 그 안전장치
+(`docs/ops/memory-extraction-eval-dataset.md` §6.3 [개정 · 2026-08-23]),
+개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
 
 Decision-grade 표본 하한은 **범주별로 다릅니다** [개정 · 2026-08-23 @mposition].
 범주마다 재는 것이 다르고, 하한이 사는 것도 다르기 때문입니다.
@@ -898,8 +899,10 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   전에 거부합니다. smoke mode는 예산 없이도 실행되며, deterministic stub으로
   prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
   주장하지 않습니다.
-- **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
-  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(① 200, ②③④ 125 — 범주·언어
+- **fixture 세트는 아직 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`의
+  `MEMORY_EVAL_DATASET_VERSION`. 값은 채택이 있을 때마다 올라가므로 여기에 옮겨
+  적지 않습니다 — 옮겨 적은 숫자는 다음 채택에서 틀린 것이 됩니다).
+  §12.2 하한(① 200, ②③④ 125 — 범주·언어
   arm당)에 한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
   나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
   §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
@@ -911,8 +914,8 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 
 `docs/ops/memory-extraction-eval-dataset.md`는 **절차만** 마련했고, 표본 작성·
 동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
-작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
-요구합니다. 따라서 **에이전트가 표본 전부를 생성하고 스스로 승인해서 닫을 수
+작성자·검수자 분리, 네 범주 공통 20% 표본 검수와 batch별 명시적 채택 기록을
+요구하고, 서로 다른 두 사람의 판정이 충돌할 때에 한해 adjudicator를 둡니다. 따라서 **에이전트가 표본 전부를 생성하고 스스로 승인해서 닫을 수
 없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다 — 2026-08-23
 개정 뒤에도 그대로입니다. 개정이 바꾼 것은 **누가 초안을 만드는가**이지 **누가
 승인하는가**가 아닙니다.
