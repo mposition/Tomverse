@@ -981,7 +981,8 @@ domains:
       aggregate a retirement needs afterwards ("this moved N accounts") belongs
       to the campaign record, not to a row per person. Exported filtered: the
       person is entitled to know we changed their model and what it was, and not
-      to the operator email and internal ticket that authorised the run.
+      to the operator email, the internal ticket that authorised the run, or the
+      lifecycle work item it belonged to.
 
   - domain: consentRecord
     prismaModel: ConsentRecord

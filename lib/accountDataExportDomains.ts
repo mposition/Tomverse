@@ -90,7 +90,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "ModelMigrationRecord",
     state: "included_filtered",
     withheldReason:
-      "Which of their stored model settings an approved retirement moved, from what to what, and when. The operator's email and the internal ticket that authorised the run are withheld: the person is entitled to know we changed their model and what it held before, not to the staff identity behind an internal decision.",
+      "Which of their stored model settings an approved retirement moved, from what to what, and when. Held back: the operator's email and the internal ticket that authorised the run, and the lifecycle work item the run belonged to. The person is entitled to know we changed their model and what it held before, not to the staff identity behind an internal decision or to the queue row that tracked it.",
   },
   {
     domain: "consentRecord",
