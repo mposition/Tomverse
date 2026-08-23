@@ -310,6 +310,13 @@ export function DesktopChatShell({
     hasComparableConversation: !isConversationEmpty && Boolean(currentChatId),
     isBusy: isCompareSummaryLoading,
   });
+  // The answer canvas, handed to the composer as a drop target. Held in state
+  // rather than in a ref so the composer re-registers its listeners when the
+  // element appears, and loses them when an image conversation replaces the
+  // whole chat surface (docs/policy/image-generation.md §1) and this branch
+  // stops rendering.
+  const [conversationDropSurface, setConversationDropSurface] =
+    useState<HTMLDivElement | null>(null);
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   const inputPortalTarget = isConversationEmpty
@@ -591,7 +598,11 @@ export function DesktopChatShell({
             })}
           </div>
         )}
-        <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
+        <div
+          ref={setConversationDropSurface}
+          data-testid="desktop-conversation-surface"
+          className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950"
+        >
           {isConversationEmpty && (
             // UI-EMPTY-001. The light overlay has always been translucent, so
             // the three comparison panels stay legible behind the welcome
@@ -904,6 +915,7 @@ export function DesktopChatShell({
               maxGuestMessages={maxGuestMessages}
               variant={isConversationEmpty ? "floating" : "bar"}
               hideTopBorder={comparisonReadiness.isVisible}
+              conversationDropSurface={conversationDropSurface}
             />,
             composerPortalHost
           )}

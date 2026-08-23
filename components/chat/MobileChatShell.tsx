@@ -585,6 +585,13 @@ export function MobileChatShell({
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
+  // The answer canvas, handed to the composer as a drop target. State rather
+  // than a ref so the composer re-registers its listeners when the section
+  // mounts, and loses them when an image conversation replaces it
+  // (docs/policy/image-generation.md §1) -- chat attachment drops must not be
+  // live in the image workspace.
+  const [conversationDropSurface, setConversationDropSurface] =
+    useState<HTMLElement | null>(null);
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   const inputPortalTarget = isConversationEmpty
@@ -1036,6 +1043,7 @@ export function MobileChatShell({
       )}
 
       <section
+        ref={setConversationDropSurface}
         data-testid="mobile-conversation-surface"
         data-surface={showWelcomeSurface ? "welcome" : "conversation"}
         // A conversation with answers in it is still `min-h-0 flex-1`. A
@@ -1261,6 +1269,7 @@ export function MobileChatShell({
             variant={isConversationEmpty ? "floating" : "bar"}
             hideTopBorder={comparisonReadiness.isVisible}
             hideDisclaimer
+            conversationDropSurface={conversationDropSurface}
           />,
           composerPortalHost
         )}
