@@ -1,13 +1,11 @@
 /**
- * Batch 002 — `durable_facts:en` first batch. **Candidate pool, not dataset.**
+ * Batch 002 — `durable_facts:en`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
- *
- * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 says whatever an agent makes
- * is a candidate pool, and docs/ops/memory-extraction-eval-dataset.md §6.2 says a draft carries no authority
- * — so this file is not imported by `lib/memoryExtractionEvalFixtures.ts`.
- * Adoption moves it into `lib/memoryExtractionEvalAdopted/`.
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-002-durable-facts-en.md`:
+ * five sampled cases (docs/ops/memory-extraction-eval-dataset.md §6.3's 20% for category ①) all 채택, draft
+ * disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled — which is what admits the twenty nobody sampled.
  *
  * Written to be distinct from the four `durable_facts:en` seed cases, which
  * already cover a backend engineer, short answers, lactose intolerance and a
@@ -20,10 +18,13 @@
  *   recurring_context 1, communication_style 1, verbosity 1, language 1,
  *   code_style 1.
  *
- * docs/ops/memory-extraction-eval-dataset.md §3.1 asks for deliberate spread in length, register and topic: there are
- * two-turn exchanges and longer ones, a message with typos, one with an
- * emoji, clipped notes and full paragraphs. Names, places, dates and numbers
- * are invented.
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
