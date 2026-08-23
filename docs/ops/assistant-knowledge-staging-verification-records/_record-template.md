@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/assistant-knowledge-staging-checklist.md
-templateRevision: 2026-08-23a
+templateRevision: 2026-08-23b
 environment:
 deploySha:
 startedAtUtc:
