@@ -57,6 +57,7 @@ import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
 import { retentionCutoff } from "@/lib/retentionPolicyCore";
 import {
   drainKnowledgeCleanupQueue,
+  KNOWLEDGE_CLEANUP_EXECUTION_LIMIT,
   sweepAbandonedKnowledgeObjects,
 } from "@/lib/assistantKnowledgeLifecycle";
 import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor";
@@ -766,7 +767,7 @@ export async function cleanupExpiredData() {
   // claimed. An active knowledge file is deliberately not swept at all -- it
   // has no expiry, which is the policy's decision rather than a gap here.
   const knowledgeCleanup = await step("assistant_knowledge_cleanup", () =>
-    drainKnowledgeCleanupQueue(200, now)
+    drainKnowledgeCleanupQueue(KNOWLEDGE_CLEANUP_EXECUTION_LIMIT, now)
   );
   const knowledgeOrphans = await step("assistant_knowledge_orphans", () =>
     sweepAbandonedKnowledgeObjects(now)

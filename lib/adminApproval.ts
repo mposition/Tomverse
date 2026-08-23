@@ -208,7 +208,17 @@ export async function runWithAdminApproval<T>(
   return result;
 }
 
-export const adminApprovalErrorResponse = (error: unknown) =>
+/**
+ * `extra` is merged into the approval-required body only.
+ *
+ * It exists for the one case where "an approval is required" is a true but
+ * useless answer: an action that has a single-administrator path which did not
+ * open. The caller knows why and nothing else does.
+ */
+export const adminApprovalErrorResponse = (
+  error: unknown,
+  extra?: Record<string, unknown>
+) =>
   isAdminReauthenticationError(error)
     ? NextResponse.json(
         {
@@ -224,6 +234,7 @@ export const adminApprovalErrorResponse = (error: unknown) =>
           code: "ADMIN_APPROVAL_REQUIRED",
           approvalId: error.approvalId,
           approvalStatus: error.approvalStatus,
+          ...(extra || {}),
         },
         { status: 409 }
       )
