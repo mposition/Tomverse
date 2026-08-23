@@ -1608,7 +1608,7 @@ External import (릴리스 A / A2):
 - `tests/e2e/assistant-profile-response-guard.spec.ts`
 - `tests/e2e/external-import-settings.spec.ts`
 
-## 부록 B — 외부 공식 문서 링크과 확인 방법
+## 부록 B — 외부 공식 문서 링크와 확인 방법
 
 ### B.1 직접 가져와 읽은 것 [공식·직접확인]
 
