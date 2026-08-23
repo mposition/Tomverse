@@ -754,6 +754,13 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   않습니다. Anthropic 검색은 공존합니다.
 - **요청한 형식으로 만듭니다.** xlsx를 csv로, docx를 md로 대체하지 않습니다.
   표에 없는 확장자는 지원하지 않는다고 말합니다.
+- **시작만 하고 실행되지 못한 tool 호출도 카드를 남깁니다**(docs/policy/generated-artifacts.md §9).
+  출력 길이 제한으로 끝난 turn(`incomplete`/`length`)에서 `tool-input-start`는
+  났지만 실행에 도달하지 못한 artifact tool 호출은 `turn_incomplete` 실패로
+  기록합니다. 추적은 `lib/generatedArtifactTurnTracker.ts`, 기록은
+  `recordIncompleteToolCalls()`입니다. **native tool은 세지 않고**, 부분 tool
+  input은 읽지도 남기지도 않으며, 상한과 ordinal·persistence 계약은 그대로입니다.
+  `maxOutputTokens`나 `ARTIFACT_LIMITS`를 올리는 것은 이 결함의 답이 아닙니다.
 - **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
   내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
   docs/policy/generated-artifacts.md §11.
