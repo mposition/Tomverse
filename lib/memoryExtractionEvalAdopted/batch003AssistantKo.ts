@@ -1,28 +1,35 @@
 /**
- * Batch 003 — `assistant_only:ko` first batch. **Candidate pool, not dataset.**
+ * Batch 003 — `assistant_only:ko`. **Adopted. This is dataset.**
  *
- * docs/ops/memory-extraction-eval-dataset.md §6.1 (25-50 per batch), §6.5
- * (each cell's first batch is reviewed before the rest is generated).
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-003-assistant-only-ko.md`:
+ * all 25 cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's full review for critical negatives,
+ * draft disagreement 0%, diversity judged sufficient, and the explicit batch
+ * adoption line filled. Category ②③④ is reviewed in full rather than sampled
+ * because a mislabelled critical negative is the failure the whole eval
+ * exists to catch — there is no unreviewed remainder here.
  *
  * Category ② (docs/ops/memory-extraction-eval-dataset.md §4.2): every case has an empty `expected`, and any bulk-safe
- * adoption from one of them is a docs/policy/external-conversation-import-and-memory.md §12.3 critical failure. What makes these hard is
- * that each one contains a sentence which reads exactly like a durable user
- * fact and is not one — the assistant guessed it, the user was acting,
+ * adoption from one of them is a docs/policy/external-conversation-import-and-memory.md §12.3 critical failure. What makes these
+ * hard is that each contains a sentence which reads exactly like a durable
+ * user fact and is not one — the assistant guessed it, the user was acting,
  * quoting, supposing, or had already withdrawn it.
- *
- * docs/ops/memory-extraction-eval-dataset.md §6.3 reviews this category in full rather than by sample, because a
- * mislabelled critical negative is the failure the whole eval exists to
- * catch.
  *
  * Distinct from the four `assistant_only:ko` seed cases, which cover an
  * assistant guess, first-person role-play, a corrected claim and a
- * hypothetical. Those four shapes recur here in different clothes, alongside
- * shapes the seed does not reach: speech reported from someone else,
- * translation and proofreading of a document written in the first person,
- * questions asked on behalf of another person, sarcasm, fiction, sample data,
- * and facts stated in the past tense that are no longer true.
+ * hypothetical. Those shapes recur here in different clothes, alongside ones
+ * the seed does not reach: speech reported from someone else, translation and
+ * proofreading of a document written in the first person, questions asked on
+ * behalf of another person, sarcasm, fiction, sample data, and facts stated
+ * in the past tense that are no longer true.
  *
- * Names, places and numbers are invented.
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
