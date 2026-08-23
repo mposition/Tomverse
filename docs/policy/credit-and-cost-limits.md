@@ -302,6 +302,56 @@ cached multiplier는 double이라 등가 비교 대신 허용오차로 맞추고
 override**가 남아 있으면 실패합니다. 그런 override는 오늘 아무 숫자도 바꾸지
 않으면서 밑의 tier를 꺼 둡니다.
 
+### 토큰 한도 컬럼에는 그 NULL 구분이 없습니다 (2026-08-23)
+
+`ModelRegistryEntry.maxOutputTokens`와 `reservationOutputTokens`는 바로 위
+세 가격 컬럼과 **다르게** 동작합니다. 이름이 비슷하고 같은 seed가 같은 시점에
+쓰기 때문에 같은 계약일 것처럼 보이지만, 아닙니다.
+
+| | 가격 세 컬럼 | 토큰 두 컬럼 |
+|---|---|---|
+| seed가 쓰는 값 | 항상 `NULL` | `getModelBillingProfile()`이 해석한 숫자 |
+| 저장된 숫자의 뜻 | 관리자 override | 관리자 override **또는** 그때의 profile 화석 |
+| 둘을 구분하는 근거 | `NULL` 여부 | 없음 |
+
+`registryRowToModel()`은 저장된 숫자를 그대로 신뢰하고, `resolveModelPricing()`
+의 `model.maxOutputTokens ?? <profile>`이 그것을 먼저 읽으며,
+`createChatBudget()`을 지나 `app/api/chat/route.ts`가
+`streamText({ maxOutputTokens })`로 넘깁니다. **그래서 이 컬럼의 화석은 낡은
+표시 문구가 아니라 모든 답변에 걸리는 살아 있는 상한입니다.**
+
+2026-08-23에 그 상태가 발견됐습니다. Trace `2e4327a9`의 `claude-sonnet-5`
+요청이 `AI_EMPTY_RESPONSE.MAX_TOKENS`로 끝났습니다 — 입력 16,314 토큰, 허용
+출력 4,096 토큰, 그중 4,095가 reasoning, 보이는 텍스트 0, tool 호출 0.
+4,096은 `FALLBACK_PRICING.advanced`의 값이고, 행이 seed된 2026-07-17에는
+`claude-sonnet-5`에 profile이 없었습니다. 128,000을 가진 profile은
+2026-08-04에 도착해 **행이 없던 환경에만** 도달했습니다
+(`createMany({ skipDuplicates: true })`는 기존 행을 다시 보지 않고,
+`STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에도 없었습니다).
+
+규칙:
+
+- **profile의 출력 한도를 바꾸면 기존 행에는 반영되지 않습니다.** 반영하려면
+  모델을 `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에 등록합니다. 코드만 고치고
+  끝내면 소스는 새 숫자를 말하고 운영은 옛 숫자로 답합니다.
+- **`maxOutputTokens`와 `reservationOutputTokens`를 함께 움직이지 않습니다.**
+  앞의 것은 능력(capability) — 답변이 얼마나 길 수 있는가 — 이고, 뒤의 것은
+  entitlement — 한 turn이 사용자 크레딧과 provider 예산에서 얼마를 잡아 두는가
+  — 입니다. 상한을 고치는 변경이 예약을 따라 올리면 그것은 사고 대응이 아니라
+  과금 변경입니다. `reservationOutputBasis`를 `conservative_default`에서
+  옮기는 조건은 `docs/policy/default-model-luna-migration.md` 3.1에 있습니다.
+- **화석과 결정을 구분할 근거는 actor 컬럼뿐입니다.** `updatedById`/
+  `updatedByEmail`은 `PUT /api/admin/models`만 씁니다 — seed도 reconciliation도
+  쓰지 않으므로, 둘 다 비어 있는 행의 차이는 관리자 결정일 가능성이 낮습니다.
+  증거이지 증명은 아닙니다.
+
+확인: `npm run report:model-token-limits`(읽기 전용). 모델별로 catalogue와
+저장 행의 두 컬럼을 나란히 놓고, 행이 reconciliation 대상인지와 actor 유무를
+함께 보고합니다. **gate가 아니라 보고입니다** — 행이 카탈로그와 다른 것은
+`PUT /api/admin/models`가 만들라고 있는 상태이고, 예약 토큰 차이는 위 규칙
+때문에 일괄 수정 대상이 아닙니다. `DATABASE_URL`이 없으면 비교할 대상이 없다고
+밝히고 카탈로그 숫자만 출력합니다.
+
 ### 처리 경로: `service_tier`와 `/v1/models`
 
 `MODEL_PRICING`의 모든 항목은 `processingTier: "standard"`입니다. 이것은 선호가
