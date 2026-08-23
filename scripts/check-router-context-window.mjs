@@ -11,13 +11,18 @@
 // routing makes worse: today a person chooses those models deliberately, but a
 // router would select them on the user's behalf.
 //
-// 16 of the 30 enabled catalogue models declare no window today, several of
-// them on the Guest tier. Failing on all of them would only turn a real gap
-// into a red build, so this is a ratchet rather than a cliff: the list below
-// is a measurement of the gap as it stands, it may only shrink, and any model
-// added or enabled from now on must declare a window. ESTIMATE-03 is the
-// deadline -- the release gate is what these entries block, so they do not
-// also need an invented expiry date.
+// Ten of the enabled catalogue models declare no window today, several of them
+// on the Guest tier. Failing on all of them would only turn a real gap into a
+// red build, so this is a ratchet rather than a cliff: the list below is a
+// measurement of the gap as it stands, it may only shrink, and any model added
+// or enabled from now on must declare a window. ESTIMATE-03 is the deadline --
+// the release gate is what these entries block, so they do not also need an
+// invented expiry date.
+//
+// `npm run report:model-context-window-evidence` is how entries leave it: it
+// prints what each provider published about its own model, so a window is
+// declared from a figure rather than recalled. What remains here is what no
+// provider list endpoint answers.
 //
 // Scope note: ModelRegistryEntry rows decide what a request actually reads.
 // `getRuntimeModels` does not merge a row with the catalogue entry of the same
@@ -30,17 +35,12 @@
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 
-// Measured on 2026-08-05 against develop. Entries may be removed, never added.
+// Measured on 2026-08-05 against develop, shrunk on 2026-08-23. Entries may be
+// removed, never added.
 // Removing one means the model now declares a window -- that is the point.
 const KNOWN_UNDECLARED_CONTEXT_WINDOW = [
   "gpt-5-5",
   "gpt-5-5-thinking",
-  "claude-sonnet-5",
-  "claude-haiku-4-5",
-  "gemini-3-1-pro",
-  "mistral-small-4",
-  "mistral-large-3",
-  "kimi-k2.7-code",
   "qwen3.7-max",
   "qwen3.7-plus",
   "qwen3.6-flash",
