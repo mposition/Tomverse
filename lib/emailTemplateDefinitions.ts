@@ -7,6 +7,8 @@ import {
 } from "@/lib/accountEmails";
 import { buildBillingWelcomeEmail } from "@/lib/billingEmails";
 import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
+import { buildModelLaunchEmail } from "@/lib/modelLaunchEmail";
+import type { ModelLaunchPayload } from "@/lib/modelLaunchEmail";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 
@@ -95,6 +97,7 @@ export const ACCOUNT_RESTORED_TEMPLATE = "account_restored";
 export const BILLING_WELCOME_TEMPLATE = "billing_welcome";
 export const AUTH_LOGIN_CODE_TEMPLATE = "auth_login_code";
 export const OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE = "ops_model_lifecycle_daily";
+export const MODEL_LAUNCH_TEMPLATE = "model_launch";
 
 const definitions: AnyDefinition[] = [
   {
@@ -134,6 +137,29 @@ const definitions: AnyDefinition[] = [
     requiresUnsubscribe: false,
     render: () => buildAccountRestoredEmail(),
     placeholderPayload: {},
+  },
+  {
+    key: MODEL_LAUNCH_TEMPLATE,
+    // A product announcement to people nothing has happened to. That is
+    // marketing, whatever else it is about, and the alternative -- calling it
+    // `service` so it reaches an audience that never opted in -- is the failure
+    // docs/policy/email-notifications.md §3.2 names first.
+    //
+    // Registered before anything sends it, on purpose. The lane's three
+    // marketing branches had never executed because no marketing template
+    // existed, so the first real send would have been their first run (EM-03).
+    classification: "marketing",
+    purpose: "product_updates",
+    requiresUnsubscribe: true,
+    render: (payload: ModelLaunchPayload, language) =>
+      buildModelLaunchEmail(payload, language),
+    placeholderPayload: {
+      modelName: "{{modelName}}",
+      plans: "{{plans}}",
+      highlights: ["{{highlight}}"],
+      creditLine: "{{creditLine}}",
+      ctaUrl: "{{ctaUrl}}",
+    },
   },
   {
     key: OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE,

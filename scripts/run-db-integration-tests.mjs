@@ -189,6 +189,10 @@ run(
     // can answer: the row pins a policy version and activating a later one must
     // not change what an already-queued message says.
     "tests/integration/email-jurisdiction-composition.db.test.ts",
+    // The marketing branches of the standard lane, which no transactional
+    // message can reach: the jurisdiction re-check, the one-click headers and
+    // the marketing sending stream.
+    "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
