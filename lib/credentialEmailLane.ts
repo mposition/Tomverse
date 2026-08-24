@@ -270,6 +270,21 @@ export async function sendCredentialEmailNow(input: {
           });
 
     if (outcome.kind === "delivered") {
+      // Both axes and the address the provider accepted. Nothing here that
+      // could carry the credential: the code and the link token are the entire
+      // content of this message and neither the subject nor the body is logged
+      // (docs/policy/email-notifications.md §14.1a, §10.3).
+      console.info(
+        JSON.stringify({
+          event: "credential_email_sent",
+          deliveryId: input.deliveryId,
+          templateKey: CREDENTIAL_TEMPLATE_KEY,
+          stream: "transactional",
+          senderRole: CREDENTIAL_SENDER_ROLE,
+          ...(response.ok ? { from: response.from } : {}),
+          attempts: attemptsMade,
+        })
+      );
       await prisma.emailDelivery.update({
         where: { id: input.deliveryId },
         data: {

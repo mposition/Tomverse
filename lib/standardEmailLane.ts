@@ -772,6 +772,27 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     });
   }
 
+  if (response.ok) {
+    // One line per delivered message, naming both axes and the address the
+    // provider accepted. "Which sender did this go out as" had no answer here
+    // before: the lane records an outcome on the row and the wire call logs
+    // nothing, so a message that left as the wrong sender left no trace of
+    // having done so (docs/policy/email-notifications.md §14.1a). No recipient
+    // and no rendered content -- `from` is our own address.
+    console.info(
+      JSON.stringify({
+        event: "standard_email_sent",
+        deliveryId: delivery.id,
+        templateKey: delivery.templateVersion.template.key,
+        classification: definition.classification,
+        stream: streamForClassification(definition.classification),
+        senderRole: definition.senderRole,
+        from: response.from,
+        id: response.providerMessageId,
+      })
+    );
+  }
+
   const outcome: ProviderSendOutcome = response.ok
     ? { kind: "delivered", providerMessageId: response.providerMessageId }
     : response.identityRefusal
