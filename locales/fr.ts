@@ -1533,6 +1533,7 @@ export const fr = {
         lossAllowedTools: "Le paquet demande des outils. Leur accès dépend de votre offre et des réglages de cet assistant.",
         lossRelativeLinks: "Les instructions renvoient à des fichiers du paquet. Ces liens ne mèneront nulle part ; ajoutez ces fichiers comme documents si vous en avez besoin.",
         lossSkippedEntries: "{count} fichier(s) d'un type que cet import n'utilise pas.",
+        lossItemsMore: "et {count} de plus.",
         lossKnowledgeOverLimit: "Le paquet propose {count} documents ; un import en accepte {limit} au plus.",
         targetHeading: "Où va cet assistant",
         targetNew: "Créer un nouvel assistant",

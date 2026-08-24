@@ -1533,6 +1533,7 @@ export const pt = {
         lossAllowedTools: "O pacote pede ferramentas. O acesso a elas é decidido pelo seu plano e pelas definições deste assistente.",
         lossRelativeLinks: "As instruções ligam a ficheiros dentro do pacote. Essas ligações não vão dar a lado nenhum; adicione os ficheiros como documentos se precisar deles.",
         lossSkippedEntries: "{count} ficheiro(s) de um tipo que esta importação não usa.",
+        lossItemsMore: "e mais {count}.",
         lossKnowledgeOverLimit: "O pacote oferece {count} documentos; numa importação cabem no máximo {limit}.",
         targetHeading: "Onde fica este assistente",
         targetNew: "Criar um assistente novo",

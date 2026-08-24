@@ -1547,6 +1547,7 @@ export const en = {
         lossAllowedTools: "The package asks for tools. Tool access is decided by your plan and this assistant's own settings.",
         lossRelativeLinks: "The instructions link to files inside the package. Those links will not resolve; add the files as documents if you need them.",
         lossSkippedEntries: "{count} file(s) of a kind this import does not use.",
+        lossItemsMore: "and {count} more.",
         lossKnowledgeOverLimit: "The package offers {count} documents; at most {limit} can come with one import.",
         targetHeading: "Where this assistant goes",
         targetNew: "Create a new assistant",
