@@ -9,6 +9,16 @@
 
 ## 개정 이력
 
+**v6 (2026-08-24, 5차 검토 반영 — `attachmentIntent` 재설계 4건).**
+
+| # | v5의 문제 | v6 |
+|---|---|---|
+| 1 | `attachmentIntent`의 출처를 `turnAttachmentDescriptors`로 적음 — **descriptor는 C(편집)와 D(분석)를 구분하지 못함** | §5.1에 `classifyImageIntent({ text, attachments })` 도입, **L0·L1이 공유**(B-6). 첨부만 보면 D 요청에도 불필요한 고지가 붙습니다 |
+| 2 | 세 문단을 다 싣고 **마지막이 앞을 정정**하는 구조 — 모델에게 상충 지시 | **배타 분기**로 교체. 편집 분기는 handoff·SVG를 처음부터 넣지 않습니다. 상한 382 → **351토큰** |
+| 3 | `CORE`의 "cannot generate images"와 artifact 문단의 "create an SVG"가 **한 요청 안에서 모순** | `CORE`를 **raster workflow·인라인 raster**로 한정, A-3이 "내려받는 파일"임을 명시 |
+| 4 | 편집 문안이 "앱 어디에서도 지원 안 함"이라고 **범위를 과장** | **image workspace의 한계**로 좁히고, 첨부를 보고 답하는 것은 계속 가능하다고 명시 — D 분류를 막지 않는 장치 |
+| 5 | "16조합"이라는 표현이 부정확 | 상태는 **24개**, `artifact`의 두 값이 같은 문안을 내고 편집 분기가 나머지와 무관해 **고유 문안 9개**로 정정 |
+
 **v5 (2026-08-24, 4차 검토 반영 — 정합성 3건 + 구현 확인 항목).**
 
 | # | v4의 문제 | v5 |
@@ -273,22 +283,67 @@ v3까지의 후보 문안은 "이미지 생성은 도구 메뉴에 있습니다"
 합니다.
 
 ```
-imageHandoff:     hidden | sign_in | upgrade | available
-artifact:         unavailable | sign_in | available
-attachmentIntent: none | edit_or_reference
+intent:       none | edit_or_reference        <- 배타 분기 (가산 축이 아님)
+imageHandoff: hidden | sign_in | upgrade | available
+artifact:     unavailable | sign_in | available
 ```
 
-| 축 | 입력 | 오늘의 출처 |
-|---|---|---|
-| `imageHandoff` | flag + 플랜 entitlement | `isImageGenerationEnabled()`(`lib/appSettings.ts`) + `planAllowsImageGeneration(tier)`(`lib/imageGenerationAccess.ts`)`[코드]` |
-| `artifact` | 이미 계산돼 있음 | `planGeneratedArtifactTool()`의 `mode`·`offReason``[코드]` |
-| `attachmentIntent` | 이 turn의 첨부 | route가 이미 만드는 `turnAttachmentDescriptors``[코드]` |
+| 입력 | 오늘의 출처 |
+|---|---|
+| `intent` | **분류기 결과** — 아래 참조 |
+| `imageHandoff` | `isImageGenerationEnabled()`(`lib/appSettings.ts`) + `planAllowsImageGeneration(tier)`(`lib/imageGenerationAccess.ts`)`[코드]` |
+| `artifact` | `planGeneratedArtifactTool()`의 `mode`·`offReason``[코드]` |
 
-**세 번째 축은 C-②(§5.4)의 귀결입니다.** 첨부 편집을 L0에서 고지하기로 하면,
-`imageHandoff`가 `available`이어도 그 turn에서는 workspace를 가리키면 안 됩니다 —
-workspace는 text-to-image 전용이라 편집·참조를 지원하지 않습니다`[정책]`. 축 없이
-`available` 문단만 손보면 "편집은 안 되지만 workspace로 가라"는 모순된 안내가
-남습니다.
+#### `intent`는 첨부가 아니라 **분류 결과**입니다
+
+v5는 이 값을 `turnAttachmentDescriptors`에서 얻는다고 적었는데, descriptor가
+아는 것은 **이미지 첨부가 있다는 사실뿐**입니다. 아래 둘의 descriptor는
+동일합니다.
+
+| 요청 | 분류 |
+|---|---|
+| 이미지 첨부 + "배경을 바꿔 줘" | **C** (편집) |
+| 이미지 첨부 + "이 사진을 설명해 줘" | **D** (분석 — 채팅이 잘하는 일) |
+
+첨부만 보고 판정하면 **D 요청에도 "편집은 지원하지 않는다"는 불필요한 고지**가
+붙습니다. 그래서 입력은 프롬프트와 첨부를 함께 읽은 분류기여야 합니다.
+
+```ts
+classifyImageIntent({
+  text: latestUserMessage,
+  attachments: turnAttachmentDescriptors,
+})
+```
+
+**이 순수 분류기를 L1(클라이언트)과 L0(서버)이 공유합니다.** §5.3이 말한 "사전과
+판정은 한 순수 모듈"이 바로 이것이고, 두 벌을 두면 칩이 뜨는 조건과 블록이 붙는
+조건이 서로 다르게 흘러갑니다.
+
+#### 배타 분기이지 가산 축이 아닙니다
+
+v5는 세 문단을 모두 싣고 **마지막 문단이 앞의 안내를 정정**하게 했습니다. 그것은
+모델에게 상충하는 지시를 준 뒤 뒤엣것이 이기기를 기대하는 구조입니다. 상호
+배제가 안전합니다.
+
+```
+if intent == edit_or_reference:
+    CORE + EDIT_LIMITATION
+else:
+    CORE + IMAGE_HANDOFF[state] + ARTIFACT[state]
+```
+
+편집 분기에서는 handoff·SVG 문단을 **처음부터 넣지 않습니다.** 결과로 상한이
+382 → **351토큰**으로 내려가고, 상태 24개가 만드는 **고유 문안은 9개**뿐입니다
+(편집 분기 1 + 그 외 8).
+
+**받아들인 손실 하나**: 편집 분기에서는 artifact가 `available`이어도 SVG를
+제안하지 않습니다. 그 turn의 요청은 *첨부에 대한 것*이지 새 도표를 만드는 것이
+아니므로 지금은 단순함을 택합니다. 관측에서 "첨부 편집 요청 뒤 SVG를 원했다"가
+보이면 그때 되돌아봅니다.
+
+**`hidden` + artifact off에서는 대안이 하나도 없습니다.** 그래서 공통 문단은
+"무엇을 하면 얻을 수 있는지 말하라"고 무조건 지시하지 않고, **아래에 주어진
+대안만 제시하고 없으면 지어내지 말라**고 지시합니다(부록 A-1).
 
 **`hidden` + artifact off에서는 대안이 하나도 없습니다.** 그래서 공통 문단은
 "무엇을 하면 얻을 수 있는지 말하라"고 무조건 지시하지 않고, **아래에 주어진
@@ -325,27 +380,35 @@ v1의 "그 화면은 사라집니다"는 과장이었습니다. system block은 
 
 `estimateTextTokens`는 비CJK 4바이트/토큰입니다(`lib/chatTokenEstimate.ts:112`)`[코드]`.
 
-전체 16조합은 §9 부록 A-5에 있습니다. 대표값만 옮기면(비교용: 기존 artifact
-`offPrompt`는 422바이트 / 106토큰):
+고유 문안 9개 전체는 §9 부록 A-5에 있습니다. 대표값만 옮기면(비교용: 기존
+artifact `offPrompt`는 422바이트 / 106토큰):
 
-| 조합 | 바이트 | 추정 토큰 |
+| 문안 | 바이트 | 추정 토큰 |
 |---|---:|---:|
-| `none` · `hidden` · artifact off — **최소** | 814 | **204** |
-| `none` · `upgrade` · artifact **on** (Free의 흔한 상태) | 1,150 | 288 |
-| `none` · `available` · artifact on | 1,287 | 322 |
-| `edit_or_reference` · `available` · artifact on — **최대** | 1,527 | **382** |
+| `hidden` · artifact off — **최소** | 923 | **231** |
+| `upgrade` · artifact **on** (Free의 흔한 상태) | 1,267 | 317 |
+| `edit_or_reference` (handoff·artifact 무관) | 1,205 | 302 |
+| `available` · artifact on — **최대** | 1,404 | **351** |
 
-turn당 **204~382 토큰**입니다. 수치가 개정마다 오른 이유는 문안이 길어져서가
-아니라 **축이 늘어서**입니다: v3 150~192(축 0개) → v4 177~293(축 2개) →
-v5 204~382(축 3개). 대표 모델의 입력가로 환산하면:
+turn당 **231~351 토큰**입니다. 하한이 v5(204)보다 오른 것은 `CORE`가 범위를
+정확히 말하도록 길어졌기 때문이고(§9 A-1), 상한이 내려간 것은 배타 분기 덕분입니다.
+
+| 개정 | 구조 | 범위 |
+|---|---|---:|
+| v3 | 단일 문안 | 150~192 |
+| v4 | 2축 가산 | 177~293 |
+| v5 | 3축 가산 | 204~382 |
+| **v6** | **2축 + 배타 분기** | **231~351** |
+
+대표 모델의 입력가로 환산하면:
 
 | 모델 | 입력가 | turn당(최소~최대) | 월 100k turn |
 |---|---:|---:|---:|
-| `gpt-5-6-luna` | $0.20/1M | 41~76µUSD | 약 $4.1~7.6 |
-| `grok-4-5` | $2.00/1M | 408~764µUSD | 약 $41~76 |
+| `gpt-5-6-luna` | $0.20/1M | 46~70µUSD | 약 $4.6~7.0 |
+| `grok-4-5` | $2.00/1M | 462~702µUSD | 약 $46~70 |
 
-**축을 하나 더 붙일 때마다 상한이 올라갑니다.** 새 축은 그것이 사용자의 행동을
-실제로 바꿀 때만 추가하고, 그렇지 않으면 CORE를 짧게 유지하는 쪽을 택합니다.
+**가산 축을 늘리면 상한이 곱으로 오릅니다.** 새 상태는 가능하면 배타 분기로
+표현하고, 가산 축은 사용자의 행동을 실제로 바꿀 때만 추가합니다.
 
 `[코드]` `lib/modelPricing.ts` · 월 turn 수는 `[확인 불가]`이므로 100k는 예시입니다.
 
@@ -353,10 +416,10 @@ v5 204~382(축 3개). 대표 모델의 입력가로 환산하면:
 `getInputCreditMultiplier()`가 입력 토큰이 **16,000 · 50,000 · 100,000을 초과할
 때**(`> threshold`, 도달이 아니라 초과) 1.5×·2×·3×로 계단을 올립니다
 (`lib/models.ts`의 `INPUT_CREDIT_MULTIPLIERS`)`[코드]`. 즉 경계 바로 아래
-**204~382토큰 구간**에 있던 turn은 이 블록 때문에 배수가 올라갑니다. 드물지만
-존재하며, "비용 없음"이라고 쓰면 안 되는 이유입니다. 완화책은 **최소 조합을 짧게
-유지하는 것**(CORE 단독 = 204토큰)이고, 그래서 CORE에 문장을 더하는 것이 가장
-비싼 편집입니다 — 모든 조합에 실립니다.
+**231~351토큰 구간**에 있던 turn은 이 블록 때문에 배수가 올라갑니다. 드물지만
+존재하며, "비용 없음"이라고 쓰면 안 되는 이유입니다. 완화책은 **최소 문안을 짧게
+유지하는 것**(CORE 단독 = 231토큰)이고, 그래서 CORE에 문장을 더하는 것이 가장
+비싼 편집입니다 — 모든 문안에 실립니다.
 
 ### 5.2 L1 — composer 제안 칩, **명백한 raster 생성 의도에만**
 
@@ -462,12 +525,11 @@ L1과 무관한 UI·문구·테스트를 새로 요구하므로 "명백한 raste
 범위 축소와 모순됩니다. L0이 이미 그 turn에서 이유를 말하므로 사용자는 **적어도
 침묵당하지는 않습니다.**
 
-다만 C-②를 고르면 **L0의 조립 축에 하나가 더 붙습니다** — 그것이 §5.1의
-`attachmentIntent`이고, 문단은 §9 A-4입니다. `imageHandoff`가 `available`이어도
-첨부가 있는 turn에서는 workspace를 가리키면 안 되므로, 그 문단이 앞의 안내를
-정정하도록 **조립 순서를 고정**합니다(A-4). 축이 하나 늘면서 블록 상한이
-293 → 382토큰이 되었고, 이것이 C-②의 실제 가격입니다 — 추가 UI는 없지만
-**공짜는 아닙니다.**
+다만 C-②는 공짜가 아닙니다. **L0에 배타 분기가 하나 생기고**(§5.1),
+`classifyImageIntent`가 C와 D를 갈라 줘야 하며(첨부 유무로는 갈리지 않습니다),
+그 분기의 문안이 302토큰입니다(§9 A-4). **추가 UI는 없지만 분류기와 문단은
+필요합니다.** 대신 편집 분기에서 handoff·SVG 문단을 빼므로 블록 상한은 오히려
+382 → 351토큰으로 내려갑니다.
 
 C-①·③을 고른다면 **별도 작업으로 뺍니다**. L1에 얹으면 L1의 범위가 다시
 넓어집니다.
@@ -549,22 +611,28 @@ v1은 SVG를 기술적으로 우월한 기본 경로처럼 서술했습니다. �
 
 ## 9. 부록 A — L0 블록 측정 원문과 재현 절차
 
-§5.1의 204~382토큰은 아래 **후보 문안**을 잰 값입니다. 문안이 바뀌면 수치도
+§5.1의 231~351토큰은 아래 **후보 문안**을 잰 값입니다. 문안이 바뀌면 수치도
 바뀌므로 C-5(재측정)와 함께 읽습니다. 이 문안은 **측정을 재현하기 위한 초안**이며
 확정된 제품 문구가 아닙니다.
 
-블록은 고정 문안 하나가 아니라 **공통 문단 + 상태별 문단**으로 조립합니다(§5.1).
-문단 사이는 빈 줄(`\n\n`) 하나로 잇습니다 — 이 빈 줄을 빼면 바이트가 맞지
-않습니다.
+블록은 고정 문안 하나가 아니라 **배타 분기 + 공통 문단 + 상태별 문단**으로
+조립합니다(§5.1). 문단 사이는 빈 줄(`\n\n`) 하나로 잇습니다 — 이 빈 줄을 빼면
+바이트가 맞지 않습니다.
 
-### A-1. 공통 문단 `CORE` (814 bytes / 204 tokens) — 항상 실림
+```
+if intent == edit_or_reference:  CORE + EDIT_LIMITATION
+else:                            CORE + IMAGE_HANDOFF[state] + ARTIFACT[state]
+```
+
+### A-1. 공통 문단 `CORE` (923 bytes / 231 tokens) — 항상 실림
 
 ```text
 # Images
 
-You cannot generate images in this conversation. If the user asks for a
-picture, an illustration, a diagram or an infographic, say so plainly in
-the user's language.
+This chat cannot run the raster image-generation workflow, and cannot
+return a generated raster image inside the message. If the user asks for
+a picture, an illustration, a diagram or an infographic, say plainly what
+this chat can and cannot produce, in the user's language.
 
 Offer only an alternative described below. If no alternative is provided,
 state the limitation without inventing or recommending another path.
@@ -579,15 +647,19 @@ You may still answer the question itself in words, and you may still use
 ordinary formatting -- a table is a table, not a drawing.
 ```
 
-두 번째 문단이 v4에서 바뀐 부분입니다. v4의 `CORE`는 **항상** "무엇을 하면 얻을
-수 있는지 말하라"고 지시했는데, `hidden` + artifact off 조합에는 말할 경로가
-없습니다. 그 지시를 받은 모델은 외부 제품이나 없는 메뉴를 지어냅니다. 이제
-`CORE`는 **주어진 대안만 제시하고, 없으면 한계만 말하라**고 지시합니다.
+**첫 문단이 v5에서 바뀐 부분입니다.** v5는 "You cannot generate images in this
+conversation"이라고 넓게 말했는데, 같은 요청에 SVG 문단이 함께 실립니다 —
+**SVG도 이미지이므로 모델이 받는 지시가 서로 모순**입니다. 이제 `CORE`가 부정하는
+것은 **raster 생성 workflow와 메시지 안에 그려지는 raster 이미지**로 한정되고,
+파일로 내려받는 SVG는 A-3 문단이 따로 설명합니다.
 
-문자 그림 금지의 **예외**도 문안 안에 있습니다 — 본문에만 적고 재는 값에서
-빠뜨리면 재는 값과 보낼 값이 달라집니다.
+두 번째 문단은 **주어진 대안만 제시하고, 없으면 한계만 말하라**입니다. 대안이
+하나도 없는 조합(`hidden` + artifact off)에서 "무엇을 하면 얻을 수 있는지 말하라"고
+지시하면 모델이 외부 제품이나 없는 메뉴를 지어냅니다.
 
-### A-2. `imageHandoff` 문단
+문자 그림 금지의 **예외**도 문안 안에 있습니다.
+
+### A-2. `imageHandoff` 문단 — 편집 분기가 아닐 때만
 
 **`hidden`** — 문단 없음. flag가 꺼진 배포에서는 그 기능이 아무에게도 존재하지
 않으므로 언급 자체가 없습니다.
@@ -620,59 +692,59 @@ path's current scope -- do not point there for one.
 검증되지 않은 품질 주장이고, 이 저장소는 근거 없는 품질 문구를 문구 검사로
 막습니다`[정책]`.
 
-### A-3. `artifact` 문단
-
-**`available`일 때만** (208 bytes / 52 tokens)
+### A-3. `artifact` 문단 — 편집 분기가 아니고 `available`일 때만 (216 bytes / 54 tokens)
 
 ```text
 For a chart or diagram whose text must be exact, you can instead create a
-downloadable SVG file with the file tool. It arrives as a download rather
-than a picture inside the message; say so when you offer it.
+downloadable SVG file with the file tool. That is a file the user
+downloads, not a picture drawn inside the message; say so when you offer
+it.
 ```
+
+두 번째 문장이 `CORE`와의 정합을 유지합니다 — `CORE`가 부정한 것은 *메시지 안에
+그려지는 raster 이미지*이고, 이것은 *내려받는 파일*이라 서로 다른 것입니다.
 
 `unavailable`·`sign_in`에서는 **문단 없음** — artifact 블록이 같은 turn에서 이미
 자기 사정을 말합니다(§5.1).
 
-### A-4. `attachmentIntent` 문단
-
-**`edit_or_reference`일 때만** (238 bytes / 60 tokens)
+### A-4. `EDIT_LIMITATION` — 편집 분기일 때만 (280 bytes / 70 tokens)
 
 ```text
-This turn carries an image the user attached. Editing an attached image,
-or using one as a reference, is not supported anywhere in this app --
-the image workspace starts from text only. Say that plainly rather than
-sending the user there.
+This turn carries an image the user attached. The image-generation
+workspace cannot edit an attached image or use one as a reference; it
+starts from text only. Say that plainly rather than sending the user
+there. You may still look at the attachment and answer questions about it.
 ```
 
-`none`에서는 문단 없음. 이 문단이 **`available` 문단의 안내를 그 turn에 한해
-무효화**하므로, 조립 순서는 `CORE` → `imageHandoff` → `artifact` →
-`attachmentIntent`로 고정합니다 — 마지막에 오는 문단이 앞의 안내를 정정합니다.
+**범위가 v5에서 좁혀졌습니다.** v5는 "not supported anywhere in this app"이라고
+했는데, 정책이 확정한 것은 **image workspace가 text-to-image 전용**이라는
+사실뿐입니다`[정책]`. 채팅 모델은 첨부 이미지를 볼 수 있고(`inputCapabilities.
+image`), artifact 가능 모델이라면 본 내용을 바탕으로 파일을 만들 여지도
+있습니다`[코드]`. 마지막 문장이 그 여지를 닫지 않으며, 이것이 D 분류(분석)를
+막지 않는 장치입니다.
 
-### A-5. 조합별 측정값 (16조합 전체)
+이 문단이 실리는 turn에는 A-2·A-3 문단을 **넣지 않습니다.**
 
-| `attachmentIntent` | `imageHandoff` | `artifact` | 바이트 | 토큰 |
+### A-5. 문안별 측정값
+
+상태 조합은 `imageHandoff` 4 × `artifact` 3 × `intent` 2 = **24개**이지만,
+`artifact`의 `unavailable`과 `sign_in`은 같은 문안(문단 없음)을 내고 편집
+분기는 나머지 두 축과 무관하므로 **고유 문안은 9개**입니다.
+
+| 분기 | `imageHandoff` | `artifact` | 바이트 | 토큰 |
 |---|---|---|---:|---:|
-| `none` | `hidden` | off | 814 | **204** |
-| `none` | `hidden` | on | 1,024 | 256 |
-| `none` | `sign_in` | off | 925 | 232 |
-| `none` | `sign_in` | on | 1,135 | 284 |
-| `none` | `upgrade` | off | 940 | 235 |
-| `none` | `upgrade` | on | 1,150 | 288 |
-| `none` | `available` | off | 1,077 | 270 |
-| `none` | `available` | on | 1,287 | 322 |
-| `edit_or_reference` | `hidden` | off | 1,054 | 264 |
-| `edit_or_reference` | `hidden` | on | 1,264 | 316 |
-| `edit_or_reference` | `sign_in` | off | 1,165 | 292 |
-| `edit_or_reference` | `sign_in` | on | 1,375 | 344 |
-| `edit_or_reference` | `upgrade` | off | 1,180 | 295 |
-| `edit_or_reference` | `upgrade` | on | 1,390 | 348 |
-| `edit_or_reference` | `available` | off | 1,317 | 330 |
-| `edit_or_reference` | `available` | on | 1,527 | **382** |
+| `none` | `hidden` | off | 923 | **231** |
+| `none` | `hidden` | on | 1,141 | 286 |
+| `none` | `sign_in` | off | 1,034 | 259 |
+| `none` | `sign_in` | on | 1,252 | 313 |
+| `none` | `upgrade` | off | 1,049 | 263 |
+| `none` | `upgrade` | on | 1,267 | 317 |
+| `none` | `available` | off | 1,186 | 297 |
+| `none` | `available` | on | 1,404 | **351** |
+| `edit_or_reference` | — | — | 1,205 | 302 |
 
-**16조합이 전부 도달 가능한 것은 아닙니다.** 다만 v4가 빠뜨렸던
-**`upgrade` + artifact `available`은 실재하는 조합**입니다 — Free 계정은 이미지
-생성에 업그레이드가 필요하지만 파일 생성은 쓸 수 있습니다. 표에서 제외해도 되는
-조합을 정하는 것은 구현 시점의 일이고, 이 표는 **상한을 알기 위한 것**입니다.
+`upgrade` + artifact `on`은 **Free 계정의 실재 상태**입니다 — 이미지 생성에는
+업그레이드가 필요하지만 파일 생성은 쓸 수 있습니다.
 
 ### A-6. 재현 명령
 
@@ -699,7 +771,7 @@ console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
 §5.1 표와 C-5를 함께 갱신합니다.
 
 **주의**: 이 블록은 turn마다 실려 나가므로, 문안을 늘리는 것은 문서 편집이 아니라
-**단가 인상**입니다. 특히 `CORE`는 모든 조합에 실리므로 가장 비싼 편집 대상입니다.
+**단가 인상**입니다. 특히 `CORE`는 모든 문안에 실리므로 가장 비싼 편집 대상입니다.
 
 ---
 
@@ -714,7 +786,9 @@ console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
 | B-2 | **`setImageGenerationEnabled()`가 snapshot을 무효화하도록 할 것.** 오늘 이 함수는 `invalidatePublicSnapshot()`을 부르지 않습니다 — 같은 파일의 `updateGuestDefaultModel()`은 부릅니다. snapshot에 넣기 전이라 지금은 결함이 아니지만, 넣는 순간 **관리자가 끈 기능이 TTL 동안 계속 안내되는** 상태가 됩니다. | `lib/appSettings.ts``[코드]` |
 | B-3 | **전송 route와 `/api/chat/preflight`가 같은 builder·같은 토큰 값을 쓰도록 할 것.** 오늘 preflight는 artifact 블록을 아예 세지 않습니다(`app/api/chat/preflight/route.ts`에 artifact 관련 코드 없음). **즉 이 어긋남은 이미 존재하고**, 이미지 블록을 route에만 추가하면 그 격차가 커집니다. 표시·예약·실제 전송의 입력 배수가 달라질 수 있습니다. | `app/api/chat/route.ts`, `app/api/chat/preflight/route.ts``[코드]` |
 | B-4 | **품질 주장을 문안에 넣지 말 것.** A-2의 `available` 문단은 "범위 밖"으로 씁니다. | §9 A-2 |
-| B-5 | **조립 순서를 고정할 것.** `CORE` → `imageHandoff` → `artifact` → `attachmentIntent`. 마지막 문단이 앞의 안내를 정정합니다. | §9 A-4 |
+| B-5 | **정정이 아니라 배제로 조립할 것.** 편집 분기에서는 handoff·SVG 문단을 **넣지 않습니다.** 세 문단을 다 싣고 마지막이 이기기를 기대하는 구조는 모델에게 상충 지시를 주는 것입니다. | §5.1, §9 A-4 |
+| B-6 | **분류기를 L0·L1이 공유할 것.** `classifyImageIntent({ text, attachments })` 하나를 서버 블록과 클라이언트 칩이 함께 씁니다. 두 벌이면 칩이 뜨는 조건과 블록이 붙는 조건이 갈라집니다. 특히 **첨부 유무만으로 C와 D를 가르면 안 됩니다** — descriptor는 둘을 구분하지 못합니다. | §5.1 |
+| B-7 | **`CORE`가 부정하는 범위를 SVG와 어긋나게 두지 말 것.** "이미지를 만들 수 없다"와 "SVG 파일을 만들 수 있다"가 한 요청에 같이 들어가면 모순입니다. raster workflow·인라인 raster로 한정합니다. | §9 A-1·A-3 |
 
 ---
 
@@ -728,14 +802,16 @@ console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
   권하지 않습니다. 자동 **생성 제출(D-3b)**은 가격 고지 계약과 충돌합니다.
 - 이 제안이 겨냥한 화면은 전환 기능이 아니라 **고지 부재**의 결과이며, 같은 결함을
   파일에 대해서는 이미 해결해 두었습니다. **L0이 1순위**이되 효과는 best-effort이고
-  turn당 **204~382토큰**의 실비가 들며, 문안은 단일 고정이 아니라
-  `imageHandoff`·`artifact`·`attachmentIntent` **세 축으로 조립**해야 합니다(§5.1).
-  대안이 하나도 없는 조합에서는 **없는 경로를 지어내지 말라**고 지시해야 합니다.
+  turn당 **231~351토큰**의 실비가 들며, 문안은 단일 고정이 아니라
+  **배타 분기(`intent`) + 2축(`imageHandoff`·`artifact`)**으로 조립해야
+  합니다(§5.1) — 상태 24개, 고유 문안 9개. 대안이 하나도 없는 조합에서는
+  **없는 경로를 지어내지 말라**고 지시해야 합니다.
 - L1은 **명백한 raster 생성 의도로 범위를 좁혀** 시작하고, 첨부 화면 같은 텍스트
   밀집 인포그래픽은 **L3에서 SVG/이미지 선택 UX로 따로** 설계합니다.
 - 착수 전 **`image-generation.md` §13과 UI 계약 둘 다** 개정해야 하고, 구현에서는
-  **부록 B의 5건**(snapshot default-off 보존, 관리자 토글의 snapshot 무효화,
-  preflight와 전송 route의 동일 builder, 품질 주장 금지, 조립 순서)을 확인합니다.
+  **부록 B의 7건**(snapshot default-off 보존, 관리자 토글의 snapshot 무효화,
+  preflight와 전송 route의 동일 builder, 품질 주장 금지, 정정이 아닌 배제,
+  L0·L1 분류기 공유, `CORE` 범위와 SVG의 정합)을 확인합니다.
 - **관측된 사례는 B 분류입니다.** 따라서 L0만 배포하면 재발 **가능성을 낮출 뿐**이고,
   L3(텍스트 밀집 도표의 SVG/이미지 선택 UX)가 마련되기 전까지 첨부 화면의 요청은
   **결정적으로 해결되지 않습니다.** L0을 1순위로 두는 것은 그것이 완결이어서가
