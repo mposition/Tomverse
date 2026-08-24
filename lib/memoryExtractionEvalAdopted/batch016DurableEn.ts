@@ -1,15 +1,29 @@
 /**
- * Batch 016 — `durable_facts:en`, fifth and final batch. **Candidate pool.**
+ * Batch 016 — `durable_facts:en`. **Adopted. This is dataset.**
+ *
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-016-durable-facts-en.md`:
+ * all 5 sampled cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's 20% sample review,
+ * draft disagreement 0%, diversity judged sufficient, the drafting setup
+ * recorded as unchanged, and the explicit batch adoption line filled.
+ *
+ * The other 20 cases enter the dataset on that adoption line rather than on a
+ * verdict of their own. docs/ops/memory-extraction-eval-dataset.md §6.3 is explicit that this is what the line is for:
+ * seeing the sample and saying nothing is not adoption.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  *
  * 25 cases, the bottom of docs/ops/memory-extraction-eval-dataset.md §6.1's 25-50 range. That
  * is the exact remainder: 29 adopted plus batches 010, 012, 014 and this one
  * is 200, the floor docs/policy/external-conversation-import-and-memory.md §12.2 sets for this arm. Nothing
  * beyond it is drafted, because a case past the floor still costs a reviewer
  * a verdict and buys no coverage the floor asked for.
- *
- * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 keeps them a candidate pool
- * until a person adopts them, and this file is deliberately not imported by
- * `lib/memoryExtractionEvalFixtures.ts`.
  *
  * **Written against the 175 cases the cell already holds.** No `mustInclude`
  * topic repeats (docs/ops/memory-extraction-eval-dataset.md §3.2).

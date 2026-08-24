@@ -100,6 +100,8 @@
     "report:email-domains": "node --conditions=react-server --import tsx scripts/report-email-sending-domains.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "make:memory-eval-review-sheet": "node --import tsx scripts/make-memory-eval-review-sheet.mjs",
+    "record:memory-eval-drafter": "node --import tsx scripts/record-memory-eval-drafter.mjs",
+    "record:memory-eval-review": "node --import tsx scripts/record-memory-eval-review.mjs",
     "report:memory-eval-batches": "node --import tsx scripts/report-memory-eval-batches.mjs",
     "report:memory-eval-cost-estimate": "node --conditions=react-server --import tsx scripts/report-memory-eval-cost-estimate.mjs",
     "report:memory-eval-near-duplicates": "node --import tsx scripts/report-memory-eval-near-duplicates.mjs",
