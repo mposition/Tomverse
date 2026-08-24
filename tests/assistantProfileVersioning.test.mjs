@@ -79,7 +79,12 @@ test("staleness is decided before validity", () => {
     // how a client ends up showing the wrong one.
     const plan = planProfileVersionPublish({
         state: publishedState(2, draft()),
-        draft: draft({ modelIds: [] }),
+        draft: draft({
+            modelIds: Array.from(
+                { length: ASSISTANT_PROFILE_LIMITS.maxModels + 1 },
+                (_, index) => `model-${index}`
+            ),
+        }),
         expectedRevision: 1,
     });
     assert.equal(plan.outcome, "stale");
@@ -161,15 +166,29 @@ test("reordering models IS an edit", () => {
 
 /* ---------------------------------------------------------- validation */
 
-test("a version must name at least one model and at most the limit", () => {
+test("a version may name no model at all", () => {
+    // Policy §14.0a. An empty list is the profile saying it names no model of
+    // its own: a conversation started from it opens on the account's own
+    // new-conversation selection, resolved then rather than pinned now. This
+    // was a floor of one, which made the state unreachable and turned
+    // unticking the last box into a payload error naming no field.
     assert.deepEqual(
+        profileVersionProblems(
+            normalizeProfileVersionDraft(draft({ modelIds: [] }))
+        ),
+        []
+    );
+    assert.equal(
         planProfileVersionPublish({
             state: { currentRevision: null, currentDraft: null },
             draft: draft({ modelIds: [] }),
             expectedRevision: null,
         }).outcome,
-        "invalid"
+        "publish"
     );
+});
+
+test("a version may name at most the limit", () => {
     const tooMany = Array.from(
         { length: ASSISTANT_PROFILE_LIMITS.maxModels + 1 },
         (_, index) => `model-${index}`

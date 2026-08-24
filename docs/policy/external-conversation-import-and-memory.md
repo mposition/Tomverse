@@ -1098,6 +1098,45 @@ composer·comparison rail contract를 침범하지 않습니다.
 
 계약 테스트: `tests/server-contract/conversation-profile-binding-models.test.ts`.
 
+### 14.0a profile은 model을 지정하지 않을 수 있습니다 — [확정 · 2026-08-23 @mposition]
+
+`AssistantProfileVersion.models`의 **빈 배열은 유효한 값**이며 "이 assistant는
+자기 model을 지정하지 않는다"는 뜻입니다. 하한은 없고 상한
+(`ASSISTANT_PROFILE_LIMITS.maxModels`)만 규칙입니다.
+
+지정하지 않은 profile로 새 대화를 시작하면 §14.0의 채택이 일어나지 않고 계정의
+new-conversation 선택(`lib/newConversationModels.ts`)이 그대로 섭니다. 해석
+시점이 **대화 생성 시점**이라는 것이 요점입니다 — 계정 기본 모델을 나중에 바꾸면
+이미 만들어 둔 assistant도 함께 따라갑니다.
+
+이전에는 그 상태를 만들 수 없었습니다. 생성 route가 `modelIds` 미지정 시 계정
+기본 모델을 revision 1에 채워 넣었으므로 **모든 assistant가 만들어진 날의 모델을
+고정**했고, 편집 화면에서 마지막 체크를 해제하면 publish 스키마의 하한에 걸려
+필드 이름 없는 `Invalid request payload.`가 나갔습니다.
+
+- **생성은 채우지 않습니다.** `modelIds` 미지정 또는 빈 배열은 빈 배열로
+  저장합니다(`resolveCreateModelIds`). 명시된 목록은 지금처럼 runtime catalogue와
+  대조하고 하나라도 해석되지 않으면 거절합니다.
+- **runtime은 지정이 없으면 model 판정을 하지 않습니다.**
+  `decideProfileRuntime`의 `namedModel`이 `null`이면 `model_unavailable`을
+  판정하지 않습니다. `null`은 "쓸 수 있는 모델이 없다"가 아니라 "이 profile은
+  model을 고르지 않았다"이며, 그 turn이 실제로 도는 모델의 활성 상태·plan
+  entitlement는 다른 모든 turn과 같은 자리에서 검사됩니다. §14의 요구는 profile이
+  entitlement를 **넓히지 못한다**는 것이고, 이 분기는 그것을 어기지 않습니다.
+  지정이 있는 profile의 판정(첫 model 기준)은 그대로입니다.
+- **UI는 두 상태를 이름으로 구분합니다.** "계정 기본 모델 따르기"(기본값)와
+  "직접 지정"의 radio이며, 체크박스를 전부 해제하는 것으로 전자를 표현하지
+  않습니다. 직접 지정 안에서는 마지막 하나를 해제할 수 없습니다 — 그 동작이
+  말하려는 것은 다른 radio입니다.
+- **기존 revision은 소급 변경하지 않습니다.** 이미 model이 박힌 version은 그대로
+  두고, 소유자가 편집 화면에서 "따르기"로 바꿔 새 revision을 게시하면 그때부터
+  적용됩니다.
+
+계약 테스트: `tests/assistantProfileVersioning.test.mjs`,
+`tests/assistantProfileRuntime.test.mjs`,
+`tests/integration/assistant-profile-service.db.test.ts`,
+`tests/e2e/assistant-profiles-settings.spec.ts`.
+
 ### 14.1 Knowledge quota 수치 — [확정 · 2026-08-13 @mposition]
 
 §23의 "릴리스 C scope 승인 전에 확정해야 하는 항목" 1번이었고, frontmatter의

@@ -75,9 +75,16 @@ export const ASSISTANT_PROFILE_LIMITS = {
     maxStarters: 8,
     maxStarterCharacters: 200,
     /**
-     * §14 gives a profile a default model, and the picker allows a small set
-     * so a profile-started comparison stays within the same admission
-     * contract every other comparison uses.
+     * §14 lets a profile name the models it starts a conversation on, and the
+     * picker allows a small set so a profile-started comparison stays within
+     * the same admission contract every other comparison uses.
+     *
+     * There is no matching floor. Naming none is the ordinary case: the
+     * profile then starts a conversation on whatever the account's own
+     * new-conversation default is, and keeps working after that default
+     * changes. A profile that named one because the create screen filled it in
+     * would pin the model the account happened to have on the day it was made
+     * (§14.0a).
      */
     maxModels: 4,
     /** An emoji or short token — never a URL (see the schema comment). */
@@ -257,9 +264,10 @@ export function profileVersionProblems(
             reason: `must be at most ${maxInstructionsCharacters} characters`,
         });
     }
-    if (draft.modelIds.length === 0) {
-        problems.push({ field: "modelIds", reason: "must name at least one model" });
-    } else if (draft.modelIds.length > maxModels) {
+    // No floor. An empty list is the profile saying it names no model of its
+    // own, and the conversation's own selection stands -- see the `maxModels`
+    // comment. Only the ceiling is a rule.
+    if (draft.modelIds.length > maxModels) {
         problems.push({
             field: "modelIds",
             reason: `must name at most ${maxModels} models`,

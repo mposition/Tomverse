@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, Trash2, Upload } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
@@ -60,7 +61,7 @@ type Capacity = {
 type UploadState =
     | { kind: "idle" }
     | { kind: "working" }
-    | { kind: "refused"; code: string; detail?: string }
+    | { kind: "refused"; code: string }
     | { kind: "failed" };
 
 const megabytes = (bytes: number) => Math.floor(bytes / (1024 * 1024));
@@ -144,12 +145,8 @@ export function KnowledgeFilesPanel({
                 if (!prepared.ok) {
                     const body = (await prepared
                         .json()
-                        .catch(() => null)) as { code?: string; error?: string } | null;
-                    setUpload({
-                        kind: "refused",
-                        code: body?.code ?? "UNKNOWN",
-                        detail: body?.error,
-                    });
+                        .catch(() => null)) as { code?: string } | null;
+                    setUpload({ kind: "refused", code: body?.code ?? "UNKNOWN" });
                     return;
                 }
                 const { uploadKey, uploadUrl, uploadHeaders } =
@@ -185,12 +182,8 @@ export function KnowledgeFilesPanel({
                 if (!finalized.ok) {
                     const body = (await finalized
                         .json()
-                        .catch(() => null)) as { code?: string; error?: string } | null;
-                    setUpload({
-                        kind: "refused",
-                        code: body?.code ?? "UNKNOWN",
-                        detail: body?.error,
-                    });
+                        .catch(() => null)) as { code?: string } | null;
+                    setUpload({ kind: "refused", code: body?.code ?? "UNKNOWN" });
                     return;
                 }
                 await discardResponseBody(finalized);
@@ -353,12 +346,16 @@ export function KnowledgeFilesPanel({
                     role="alert"
                     data-testid="knowledge-upload-error"
                 >
-                    {upload.code === "ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED"
-                        ? t("assistantProfiles.knowledgeQuotaExceeded")
-                        : upload.code === "ASSISTANT_KNOWLEDGE_UNSUPPORTED_FILE"
-                          ? t("assistantProfiles.knowledgeUnsupported")
-                          : (upload.detail ??
-                            t("assistantProfiles.knowledgeUploadFailed"))}
+                    {/* The shared table, not a chain of its own: this panel
+                        sits behind the same guards as the editor above it, so
+                        a profile that is gone or an account at its rate limit
+                        reaches here too. The old fallback printed
+                        `upload.detail` -- the server's English -- for every
+                        code it did not name itself. */}
+                    {t(
+                        assistantProfileErrorCopyKey(upload.code) ??
+                            "assistantProfiles.knowledgeUploadFailed"
+                    )}
                 </p>
             )}
             {upload.kind === "failed" && (
