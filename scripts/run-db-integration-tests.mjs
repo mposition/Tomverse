@@ -206,6 +206,7 @@ run(
     "tests/integration/email-campaign.db.test.ts",
     "tests/integration/campaign-audience.db.test.ts",
     "tests/integration/campaign-scheduling.db.test.ts",
+    "tests/integration/campaign-attestations.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.

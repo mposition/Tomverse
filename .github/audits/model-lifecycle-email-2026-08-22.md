@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~4차 해결 (2026-08-24)** — §36 · §37 · §38 · §41. admin 화면과 승인 연결은 5차
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~5차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42. admin 화면은 6차
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -3139,3 +3139,64 @@ tick이 아니라.
 
 **5차 범위**: admin API와 화면, `runWithAdminApproval` 연결, attestation을
 사람이 입력하는 경로.
+
+---
+
+## 42. EM-01 5차 구현 기록 — attestation 저장과 admin API (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailCampaignAttestationCore.ts` | attestation 판정. 순수, 새 파일 |
+| `prisma/schema.prisma` · `migrations/20260824080000_email_campaign_attestation` | `EmailCampaignAttestation` |
+| `lib/emailCampaignCore.ts` | `transition_unproven` 거부 |
+| `lib/emailCampaignService.ts` | 기록·철회·상태·12조건 종합 |
+| `app/api/admin/email-campaigns/**` | 목록·생성·상세·수정·승인·attestation·wave |
+| `tests/emailCampaignAttestationCore.test.mjs` | 12건 |
+| `tests/integration/campaign-attestations.db.test.ts` | 15건, 새 파일 |
+
+**4차가 이름만 붙이고 저장하지 않은 것을 저장합니다.** 살 곳이 없는
+attestation은 **호출자가 `true`를 넘길 수 있는 매개변수**입니다. 값어치를
+만드는 것은 누가 언제 말했는가이므로 boolean이 아니라 컬럼입니다.
+
+**셋 중 하나만 상합니다.** `differences_stated`는 **본문**에 대한 주장입니다 —
+누군가 문구를 읽고 capability·크레딧 차이가 적혀 있음을 확인한 것. 문구를 바꾸면
+그 읽기는 발송될 것을 더 이상 설명하지 않으며, 이것이 EM-06이 존재하는 실패와
+정확히 같은 모양입니다. 그래서 만들어진 시점의 content digest를 들고 다니고
+digest가 움직이면 세지 않습니다.
+
+`staging_verified`와 `reconciliation_ready`는 **migration**에 대한 것 — 예행과
+rollback입니다. 문구 수정이 둘 중 어느 것도 되돌리지 않으며, 그것으로 만료시키면
+**운영자가 다시 확인하지 않고 다시 서명하도록 훈련**됩니다. 묻지 않는 것보다
+나쁩니다.
+
+**digest는 요청이 아니라 campaign에서 가져옵니다.** 작성자가 제출한 digest에
+묶인 attestation은 **그가 문구라고 믿은 것**에 묶인 것이고, 검사 대상이 바로 그
+믿음입니다.
+
+**상했다는 것과 없다는 것을 구분합니다.** 상한 것도 서명자를 그대로 들고
+있으므로 화면이 "이것은 상했습니다"라고 말할 수 있습니다 — "아무도 이것을
+말하지 않았습니다"와 다른 문장이고, 일을 한 사람에 대해 뒤쪽은 틀렸습니다.
+
+**게이트가 발송을 실제로 막습니다**(`transition_unproven`). 이것이 없으면 12개
+조건은 권고입니다. 그리고 **약한 문장으로 조용히 낮추지 않습니다** — 그것은
+안전한 문구를 아무도 쓰기로 결정하지 않은 채 보내는 것이고, 운영자는 자기가 쓴
+약속이 나가지 않았다는 사실을 영원히 모릅니다.
+
+**승인만 2인 경로입니다.** draft는 아무것도 보내지 않고, 예약도 보내지
+않습니다(승인되지 않은 campaign의 예약은 due 시점에 거부됩니다). 이미 승인된
+campaign의 wave 실행은 **여기서 승인된 결정의 수행**이고, 그것에 두 번째 승인을
+요구하면 검토 대상이 문구가 아니라 발송 행위가 됩니다. 사람이 문구를 읽는 곳이
+승인이고, EM-06이 그 문구를 거기에 pin합니다.
+
+**승인 payload에 언어 목록을 넣습니다.** 그래야 요청과 승인 사이에 locale이
+움직이면 payload hash가 달라져 **옛 승인을 물려받지 못합니다.** 그리고 언어
+불일치는 승인을 claim하기 **전에** 거부합니다 — 잘못된 언어 목록에 대해 소비된
+승인은 이미 써 버린 것이고, 운영자의 다음 시도는 처음부터 시작합니다.
+
+**CHECK를 `owner: "list"`로 등록했습니다.** `ATTESTATION_KINDS`와 DB CHECK가
+서로 비교되므로 어긋날 수 없습니다 — 여기 있고 저기 없는 kind는 게이트가 결코
+묻지 않는 attestation입니다.
+
+**6차 범위**: admin 화면. `lib/adminNavigation.ts` 항목·icon·route segment를
+한 번에 추가해야 하고(admin IA 계약), E2E가 따로 필요합니다. API에 nav 항목만
+먼저 넣으면 그 계약을 깹니다.

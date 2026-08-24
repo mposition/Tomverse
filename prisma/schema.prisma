@@ -4038,8 +4038,9 @@ model EmailCampaign {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  waves      EmailCampaignWave[]
-  recipients EmailCampaignRecipient[]
+  waves        EmailCampaignWave[]
+  recipients   EmailCampaignRecipient[]
+  attestations EmailCampaignAttestation[]
 
   @@index([status, createdAt])
   @@index([templateKey])
@@ -4084,6 +4085,41 @@ model EmailCampaignWave {
   @@unique([campaignId, kind, sequence])
   @@index([status, createdAt])
   @@index([status, scheduledAt])
+}
+
+/// The three conditions of section 13.3 that no field holds, recorded as
+/// somebody having said them.
+///
+/// An attestation with nowhere to live is a parameter a caller could pass
+/// `true` for. What makes it worth anything is who said it and when, so those
+/// are columns rather than a boolean.
+///
+/// `differences_stated` carries the body digest it was made against and stops
+/// counting when the copy moves -- it is a claim about the words, and the words
+/// moved. The other two are about the migration, which a copy edit does not
+/// undo. See lib/emailCampaignAttestationCore.ts.
+model EmailCampaignAttestation {
+  id         String        @id @default(cuid())
+  campaignId String
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  /// differences_stated | staging_verified | reconciliation_ready
+  kind String
+
+  attestedByEmail String
+  attestedAt      DateTime @default(now())
+
+  /// What the person wants the next reader to know. Never required: an empty
+  /// note is honest, an invented one is not.
+  note String?
+
+  /// The body digest at the moment this was made. NULL for kinds that are not
+  /// about the body.
+  contentDigest String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([campaignId, kind])
 }
 
 /// The campaign's record of who was in the audience, including the people it

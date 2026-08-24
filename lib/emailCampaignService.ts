@@ -11,6 +11,15 @@ import {
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
+  attestationStates,
+  attestationsForClaim,
+  campaignContentDigest,
+  isContentBound,
+  type AttestationKind,
+  type StoredAttestation,
+} from "@/lib/emailCampaignAttestationCore";
+import { automaticTransitionClaim } from "@/lib/automaticTransitionClaim";
+import {
   scheduleProblems,
   scheduleRefusal,
   type ScheduleRefusalDetail,
@@ -151,14 +160,25 @@ export const campaignSendRefusal = async (
       templateKey: true,
       locales: true,
       templateVersionIds: true,
+      claimsAutomaticTransition: true,
     },
   });
   const locales = readLocales(campaign.locales);
+  // Read only when the campaign makes the promise. The twelve conditions cost
+  // half a dozen queries, and a campaign that promises nothing owes none of
+  // them.
+  const transition = campaign.claimsAutomaticTransition
+    ? (await campaignTransitionClaim(campaignId)).claim
+    : null;
   return campaignRunRefusal({
     status: campaign.status,
     locales,
     pinned: readPinnedVersions(campaign.templateVersionIds),
     currentHashes: await currentHashes(campaign.templateKey, locales),
+    transitionClaim: {
+      claimed: campaign.claimsAutomaticTransition,
+      unmet: transition?.unmet ?? [],
+    },
   });
 };
 
@@ -502,4 +522,189 @@ export const runDueCampaignWaves = async (input?: {
     });
   }
   return outcomes;
+};
+
+
+/**
+ * The digest the campaign's copy hashes to right now.
+ *
+ * The same numbers `campaignSendRefusal` compares against the pin, folded into
+ * one value so an attestation about the body has something to be bound to.
+ */
+export const campaignDigest = async (campaignId: string) => {
+  const campaign = await prisma.emailCampaign.findUniqueOrThrow({
+    where: { id: campaignId },
+    select: { templateKey: true, locales: true },
+  });
+  return campaignContentDigest(
+    await currentHashes(campaign.templateKey, readLocales(campaign.locales))
+  );
+};
+
+/**
+ * Records one attestation, replacing any standing one of the same kind.
+ *
+ * Replacing rather than stacking, so "who says this is true" has one answer.
+ * The digest is captured here rather than passed in: an attestation bound to a
+ * digest its author supplied would be bound to whatever they believed the copy
+ * was, which is the belief being checked.
+ */
+export const recordCampaignAttestation = async (input: {
+  campaignId: string;
+  kind: AttestationKind;
+  attestedByEmail: string;
+  note?: string | null;
+}) => {
+  const contentDigest = isContentBound(input.kind)
+    ? await campaignDigest(input.campaignId)
+    : null;
+  if (isContentBound(input.kind) && !contentDigest) {
+    // Refused rather than stored with a null digest: an attestation about words
+    // nobody can hash is one nothing can ever invalidate.
+    throw new Error(
+      `${input.kind} cannot be attested while the campaign's copy has no digest -- its template renders nothing for the languages it lists.`
+    );
+  }
+  return prisma.emailCampaignAttestation.upsert({
+    where: {
+      campaignId_kind: { campaignId: input.campaignId, kind: input.kind },
+    },
+    create: {
+      campaignId: input.campaignId,
+      kind: input.kind,
+      attestedByEmail: input.attestedByEmail,
+      note: input.note ?? null,
+      contentDigest,
+    },
+    update: {
+      attestedByEmail: input.attestedByEmail,
+      attestedAt: new Date(),
+      note: input.note ?? null,
+      contentDigest,
+    },
+    select: { id: true, kind: true, attestedByEmail: true, attestedAt: true },
+  });
+};
+
+/** Withdraws one. Deleting is the whole operation: absent is unmet. */
+export const withdrawCampaignAttestation = (input: {
+  campaignId: string;
+  kind: AttestationKind;
+}) =>
+  prisma.emailCampaignAttestation.deleteMany({
+    where: { campaignId: input.campaignId, kind: input.kind },
+  });
+
+export const campaignAttestationStates = async (campaignId: string) => {
+  const [stored, currentDigest] = await Promise.all([
+    prisma.emailCampaignAttestation.findMany({
+      where: { campaignId },
+      select: {
+        kind: true,
+        attestedByEmail: true,
+        attestedAt: true,
+        contentDigest: true,
+      },
+    }),
+    campaignDigest(campaignId),
+  ]);
+  return attestationStates({
+    stored: stored as StoredAttestation[],
+    currentDigest,
+  });
+};
+
+/**
+ * Whether this campaign may promise an automatic transition, and what is
+ * missing if not.
+ *
+ * Every fact is read here and judged in `lib/automaticTransitionClaim.ts`. The
+ * split is the point: the twelve conditions are worth reading in one place
+ * without a database in the way.
+ */
+export const campaignTransitionClaim = async (campaignId: string) => {
+  const campaign = await prisma.emailCampaign.findUniqueOrThrow({
+    where: { id: campaignId },
+    select: {
+      workItemId: true,
+      replacementModelId: true,
+      effectiveAt: true,
+      timezoneLabel: true,
+      approvalId: true,
+    },
+  });
+
+  const workItem = campaign.workItemId
+    ? await prisma.modelLifecycleWorkItem.findUnique({
+        where: { id: campaign.workItemId },
+        select: {
+          action: true,
+          status: true,
+          linkedIssueUrl: true,
+          ownerEmail: true,
+        },
+      })
+    : null;
+
+  const replacement = campaign.replacementModelId
+    ? await prisma.modelRegistryEntry.findUnique({
+        where: { id: campaign.replacementModelId },
+        select: { enabled: true, publiclyListed: true, catalogDeleted: true },
+      })
+    : null;
+
+  // Only a consumed approval counts. One that was merely requested is a
+  // question somebody asked, not an answer they got.
+  const approvalConsumed = campaign.approvalId
+    ? (
+        await prisma.adminActionApproval.findUnique({
+          where: { id: campaign.approvalId },
+          select: { status: true },
+        })
+      )?.status === "consumed"
+    : false;
+
+  const [dryRunWave, completionWave, planIncompatibleCount] = await Promise.all([
+    prisma.emailCampaignWave.findFirst({
+      where: { campaignId, dryRun: true, expandedCount: { gt: 0 } },
+      orderBy: { createdAt: "desc" },
+      select: { expandedCount: true },
+    }),
+    prisma.emailCampaignWave.findFirst({
+      where: { campaignId, kind: "completion", scheduledAt: { not: null } },
+      select: { scheduledAt: true },
+    }),
+    prisma.emailCampaignRecipient.count({
+      where: { campaignId, excludedReason: "plan_incompatible" },
+    }),
+  ]);
+
+  const states = await campaignAttestationStates(campaignId);
+
+  return {
+    claim: automaticTransitionClaim({
+      workItem: workItem
+        ? {
+            found: true,
+            action: workItem.action,
+            status: workItem.status,
+            retirementTicketUrl: workItem.linkedIssueUrl,
+            ownerEmail: workItem.ownerEmail,
+          }
+        : null,
+      effectiveAt: campaign.effectiveAt,
+      timezoneLabel: campaign.timezoneLabel,
+      replacement: replacement
+        ? { found: true, ...replacement }
+        : campaign.replacementModelId
+          ? { found: false, enabled: false, publiclyListed: false, catalogDeleted: false }
+          : null,
+      planIncompatibleCount,
+      dryRunRecipientCount: dryRunWave?.expandedCount ?? null,
+      communicationApprovalConsumed: approvalConsumed,
+      completionWaveScheduledAt: completionWave?.scheduledAt ?? null,
+      attestations: attestationsForClaim(states),
+    }),
+    attestations: states,
+  };
 };
