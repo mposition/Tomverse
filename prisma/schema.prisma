@@ -96,6 +96,7 @@ model User {
   emailPreferences                   EmailPreference[]
   consentRecords                     ConsentRecord[]
   emailDeliveries                    EmailDelivery[]
+  campaignRecipients                 EmailCampaignRecipient[]
   modelMigrationRecords              ModelMigrationRecord[]
 
   @@index([plan, id])
@@ -3793,7 +3794,8 @@ model EmailCampaign {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  waves EmailCampaignWave[]
+  waves      EmailCampaignWave[]
+  recipients EmailCampaignRecipient[]
 
   @@index([status, createdAt])
   @@index([templateKey])
@@ -3826,8 +3828,66 @@ model EmailCampaignWave {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  recipients EmailCampaignRecipient[]
+
   @@unique([campaignId, kind, sequence])
   @@index([status, createdAt])
+}
+
+/// The campaign's record of who was in the audience, including the people it
+/// wrote nothing for.
+///
+/// `EmailDelivery` records what was sent. This answers the opposite question --
+/// who was considered and got nothing, and why -- which no other table can,
+/// because the reasons somebody is skipped are exactly the reasons no delivery
+/// row exists for them
+/// (.github/audits/model-lifecycle-email-2026-08-22.md §12.2).
+///
+/// `malformed` is a column rather than an `excludedReason`: an unreadable
+/// stored value means the account cannot be migrated automatically, not that it
+/// should be left uninformed. See lib/emailCampaignRecipientCore.ts.
+model EmailCampaignRecipient {
+  id         String        @id @default(cuid())
+  campaignId String
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  waveId String
+  wave   EmailCampaignWave @relation(fields: [waveId], references: [id], onDelete: Cascade)
+
+  /// Cascaded, unlike EmailDelivery's SetNull. A delivery row is evidence that
+  /// a required notice was delivered and outlives the account for that reason;
+  /// this row is the record that one was *not*, which nothing obliges anybody
+  /// to keep -- and it holds the address, so keeping it unlinked would be the
+  /// worse of the two outcomes rather than the safer one.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Recorded as it was at expansion, so the ledger still reads correctly after
+  /// the account changes address or language.
+  emailAddress        String?
+  language            String?
+  jurisdictionCountry String?
+
+  /// default_model | new_conversation_lead | conversation_selection
+  /// The strongest link when several apply; NULL only when the person is no
+  /// longer in any cohort, which is what `already_changed` means.
+  eligibilityReason String?
+
+  /// no_email | account_inactive | suppressed | no_consent | plan_incompatible
+  ///  | already_changed. NULL means a delivery row was written.
+  excludedReason String?
+
+  /// Set when this person did receive a row, so the ledger and the outbox can
+  /// be reconciled without matching on address.
+  deliveryId String? @unique
+
+  /// A stored value the parser could not read. Reported, never rewritten.
+  malformed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([waveId, userId])
+  @@index([campaignId, excludedReason])
 }
 
 model EmailTemplate {

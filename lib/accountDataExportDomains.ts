@@ -101,6 +101,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "When they agreed to what, on which policy version, and how it was captured -- returned in full. Held back: ipHash and userAgentHash, which are salted digests kept to prove a consent event happened and are not readable by the person they describe, and the evidence blob, which holds the consent wording's hash and an internal screen identifier rather than anything they wrote.",
   },
   {
+    domain: "emailCampaignRecipient",
+    publicName: "email_campaign_audience",
+    prismaModel: "EmailCampaignRecipient",
+    state: "included_filtered",
+    withheldReason:
+      "Which announcement audiences they were part of, and -- when nothing was sent -- why: no address, a suppression, a plan the replacement model does not reach, or that they had already changed the setting the notice was about. Held back: the campaign and wave ids and the delivery id, which are internal handles onto the send rather than facts about them, and the malformed flag, which describes a stored value this system could not read rather than anything they did.",
+  },
+  {
     domain: "emailDelivery",
     publicName: "email_deliveries",
     prismaModel: "EmailDelivery",

@@ -1049,6 +1049,27 @@ domains:
       holds the consent wording's hash and a screen identifier, never the
       request.
 
+  - domain: emailCampaignRecipient
+    prismaModel: EmailCampaignRecipient
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The campaign's record of who was in an audience and who received nothing,
+      which EmailDelivery cannot hold: the reasons somebody is skipped are
+      exactly the reasons no delivery row is written for them. Cascaded rather
+      than SetNull like emailDelivery, and the difference is what the two rows
+      are. A delivery is evidence that a required notice was delivered and
+      outlives the account for that reason; this is the record that one was
+      *not*, which nothing obliges anybody to keep -- and it holds the address,
+      so keeping it unlinked would be the worse outcome rather than the safer
+      one. The campaign's own reach survives in EmailCampaignWave.expandedCount,
+      which names nobody.
+
   - domain: emailDelivery
     prismaModel: EmailDelivery
     userLinkageRole: subject
