@@ -134,6 +134,7 @@
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",
     "check:conversation-writers": "node scripts/check-conversation-writers.mjs",
+    "report:model-window-probe-trial": "node --conditions=react-server --import tsx scripts/report-model-window-probe-trial.mjs",
     "report:model-max-output-probe": "node --conditions=react-server --import tsx scripts/report-model-max-output-probe.mjs",
     "report:model-context-window-evidence": "node --conditions=react-server --import tsx scripts/report-model-context-window-evidence.mjs",
     "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs",
