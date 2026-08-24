@@ -122,7 +122,7 @@ PACKAGES.push({
         "**거절되지 않습니다.** 검토를 거쳐 8단계까지 갑니다.",
         "지식 후보 **2개**: `references/checklist.md`, `references/glossary.md`.",
         "손실 보고서에 **script 2개** — 개수와 **경로**가 나오고, **내용은 나오지 않습니다.** 경로 표시는 `docs/policy/assistant-package-import.md` §7 표(`scripts/**` 행)가 요구하는 동작입니다: `scripts/build.sh, scripts/publish.sh`.",
-        "손실 보고서에 **이 가져오기가 쓰지 않는 종류 1건** — `assets/icon.png`입니다.",
+        "손실 보고서에 **이 가져오기가 쓰지 않는 종류 1건** — 5단계에는 **개수만** 나오고 파일 이름은 붙지 않습니다(`skipped_entries` loss가 `items`를 싣지 않음). 그 파일이 `assets/icon.png`라는 것은 3단계 '읽지 않은 파일'에서 확인합니다.",
         "아이콘·모델 문장은 **package 내용과 무관하게 항상** 나옵니다 (assistant 아이콘은 emoji이고, 모델은 사용자가 고릅니다). P6에도 같은 두 줄이 있으므로 그것으로 대조할 수 있습니다.",
         "손실 보고서에 **라이선스 명시됨** 문장 (`Apache-2.0`).",
         "URL 공개는 **`style.example.com` 한 host뿐** — 경로·query·`token=`이 화면에 없어야 합니다(§B-4).",
