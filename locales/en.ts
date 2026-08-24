@@ -1511,7 +1511,7 @@ export const en = {
         noticeModelUnavailable: "One of the models you chose is unavailable on your plan right now. Choose another, or follow the account default.",
         noticeNotFound: "This assistant no longer exists. Open it again from the list.",
         noticeRateLimited: "Too many requests in a row. Wait a moment and try again.",
-        noticeSignedOut: "You have been signed out, so nothing was saved. Sign in again and your edits are still on this screen.",
+        noticeSignedOut: "You are not signed in, so nothing was saved. Sign in and your edits are still on this screen.",
         fileStatus: {
             pending: "waiting",
             processing: "processing",

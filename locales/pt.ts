@@ -1502,7 +1502,7 @@ export const pt = {
         noticeModelUnavailable: "Um dos modelos que escolheu não está disponível no seu plano neste momento. Escolha outro ou siga a predefinição da conta.",
         noticeNotFound: "Este assistente já não existe. Abra-o novamente a partir da lista.",
         noticeRateLimited: "Demasiados pedidos seguidos. Aguarde um momento e tente novamente.",
-        noticeSignedOut: "A sua sessão terminou, por isso nada foi guardado. Inicie sessão novamente — as suas edições continuam neste ecrã.",
+        noticeSignedOut: "Não tem sessão iniciada, por isso nada foi guardado. Inicie sessão — as suas edições continuam neste ecrã.",
         fileStatus: {
             pending: "aguardando",
             processing: "processando",

@@ -1502,7 +1502,7 @@ export const fr = {
         noticeModelUnavailable: "L'un des modèles choisis n'est pas disponible dans votre offre actuelle. Choisissez-en un autre ou suivez la valeur par défaut du compte.",
         noticeNotFound: "Cet assistant n'existe plus. Rouvrez-le depuis la liste.",
         noticeRateLimited: "Trop de requêtes d'affilée. Patientez un instant et réessayez.",
-        noticeSignedOut: "Vous avez été déconnecté, rien n'a été enregistré. Reconnectez-vous : vos modifications sont toujours sur cet écran.",
+        noticeSignedOut: "Vous n'êtes pas connecté, rien n'a donc été enregistré. Connectez-vous : vos modifications sont toujours sur cet écran.",
         fileStatus: {
             pending: "en attente",
             processing: "en cours",

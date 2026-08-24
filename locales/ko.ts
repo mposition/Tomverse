@@ -1504,7 +1504,7 @@ export const ko = {
         noticeModelUnavailable: "고른 모델 중 지금 플랜에서 쓸 수 없는 것이 있습니다. 다른 모델을 고르거나 계정 기본 모델을 따르게 하세요.",
         noticeNotFound: "이 어시스턴트가 더 이상 없습니다. 목록에서 다시 열어 주세요.",
         noticeRateLimited: "요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요.",
-        noticeSignedOut: "로그인이 풀려 아무것도 저장되지 않았습니다. 다시 로그인하면 편집하던 내용은 이 화면에 그대로 있습니다.",
+        noticeSignedOut: "로그인 상태가 아니어서 아무것도 저장되지 않았습니다. 로그인하면 편집하던 내용은 이 화면에 그대로 있습니다.",
         fileStatus: {
             pending: "대기 중",
             processing: "처리 중",

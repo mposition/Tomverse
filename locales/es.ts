@@ -1502,7 +1502,7 @@ export const es = {
         noticeModelUnavailable: "Uno de los modelos que elegiste no está disponible en tu plan ahora mismo. Elige otro o sigue el valor predeterminado de la cuenta.",
         noticeNotFound: "Este asistente ya no existe. Ábrelo de nuevo desde la lista.",
         noticeRateLimited: "Demasiadas solicitudes seguidas. Espera un momento e inténtalo de nuevo.",
-        noticeSignedOut: "Se cerró tu sesión, así que no se guardó nada. Vuelve a iniciar sesión: tus cambios siguen en esta pantalla.",
+        noticeSignedOut: "No has iniciado sesión, así que no se guardó nada. Inicia sesión: tus cambios siguen en esta pantalla.",
         fileStatus: {
             pending: "en espera",
             processing: "procesando",

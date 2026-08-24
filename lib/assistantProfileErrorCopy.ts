@@ -72,8 +72,14 @@ export const ASSISTANT_PROFILE_ERROR_COPY_KEYS: Readonly<
     API_RATE_LIMITED: "assistantProfiles.noticeRateLimited",
     // Not a server code: a 401 answers `{ error: "Unauthorized" }` with no
     // `code` at all, so the client names the case itself. Worth naming --
-    // a session that expired mid-edit is the one failure where "try again"
-    // is actively wrong advice.
+    // it is the one failure where "try again" is actively wrong advice.
+    //
+    // Two readers see it, and the copy has to be true for both. A session can
+    // expire mid-edit, but the create screen also renders for somebody who
+    // never signed in at all -- only the save is refused -- so the sentence
+    // says "you are not signed in" rather than claiming a session ended. It
+    // also promises what the screen actually does: the form still holds what
+    // they typed.
     UNAUTHENTICATED: "assistantProfiles.noticeSignedOut",
 };
 

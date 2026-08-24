@@ -1505,7 +1505,7 @@ export const de = {
         noticeModelUnavailable: "Eines der gewählten Modelle ist in deinem Tarif derzeit nicht verfügbar. Wähle ein anderes oder übernimm den Standard des Kontos.",
         noticeNotFound: "Diesen Assistenten gibt es nicht mehr. Öffne ihn erneut aus der Liste.",
         noticeRateLimited: "Zu viele Anfragen hintereinander. Warte einen Moment und versuche es erneut.",
-        noticeSignedOut: "Du wurdest abgemeldet, es wurde nichts gespeichert. Melde dich erneut an – deine Änderungen stehen weiterhin auf dieser Seite.",
+        noticeSignedOut: "Du bist nicht angemeldet, deshalb wurde nichts gespeichert. Melde dich an – deine Änderungen stehen weiterhin auf dieser Seite.",
         fileStatus: {
             pending: "wartet",
             processing: "in Arbeit",
