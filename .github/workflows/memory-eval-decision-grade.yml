@@ -17,6 +17,12 @@ name: Memory eval — decision-grade run
 #   * the artifact is preserved by the platform, which is what §12.1 means by
 #     an immutable artifactRef: the run URL is the reference.
 #
+# `limit` makes the run a compatibility probe instead: the first N cases and
+# stop. It exists because three dispatches went one failure at a time
+# discovering the request was malformed, and ten cases answer that as well as
+# 1,150 do. A probe is never a result -- the artifact records `probeLimit` and
+# `decisionGrade` is false whatever the numbers say.
+#
 # What it does not do: approve anything. It computes a verdict and preserves
 # the evidence. Moving the register entry to `approved` is the human procedure
 # in §12.4 and never happens from CI.
@@ -36,6 +42,10 @@ on:
         description: "Per-run ceiling in USD. May only narrow the approved budget."
         required: true
         default: "6"
+      limit:
+        description: "Compatibility probe: run only the first N cases. Empty means a full run."
+        required: false
+        default: ""
       confirm:
         description: "Type SPEND to confirm this dispatch will call a paid provider"
         required: true
@@ -78,8 +88,13 @@ jobs:
       # a branch that cannot run it, and `npm run` would answer with "Missing
       # script" -- a message that says nothing about which branch to pick.
       - name: The selected ref can run this
+        env:
+          # Through the environment, never interpolated into the shell line:
+          # an input that lands inside the command is an input that can end it.
+          LIMIT: ${{ inputs.limit }}
         run: |
           node -e '
+            const fs = require("node:fs");
             const scripts = require("./package.json").scripts ?? {};
             const missing = [
               "eval:memory-extraction",
@@ -87,10 +102,25 @@ jobs:
               "check:memory-eval-run",
               "make:memory-eval-blind-review",
             ].filter((name) => !(name in scripts));
-            if (missing.length === 0) process.exit(0);
+            if (missing.length > 0) {
+              console.log(
+                "::error::This branch does not carry " + missing.join(", ") +
+                  ". Re-dispatch with Branch: develop, or a branch that has them."
+              );
+              process.exit(1);
+            }
+            if (!process.env.LIMIT) process.exit(0);
+            // A harness predating --limit drops the flag silently, so a
+            // request for ten cases would run all 1150 and bill for them. An
+            // unknown flag is not a smaller run, it is a full one.
+            const harness = fs.readFileSync(
+              "scripts/evalImportedMemoryExtraction.mjs",
+              "utf8"
+            );
+            if (harness.includes("argValue(\"limit\"")) process.exit(0);
             console.log(
-              `::error::This branch does not carry ${missing.join(", ")}. ` +
-                "Re-dispatch with Branch: develop, or a branch that has them."
+              "::error::A limit was requested but this branch does not support --limit. " +
+                "It would ignore the flag and run every case."
             );
             process.exit(1);
           '
@@ -106,13 +136,18 @@ jobs:
       - name: Live run (this is the step that spends)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Read through the environment rather than interpolated into the
+          # command: an input that lands inside the shell line is an input
+          # that can end it.
+          LIMIT: ${{ inputs.limit }}
         run: |
           mkdir -p artifacts
           npm run eval:memory-extraction -- \
             --live \
             --model='${{ inputs.model }}' \
             --json=artifacts/mem-eval-${{ inputs.run_label }}.json \
-            --max-cost-usd='${{ inputs.max_cost_usd }}'
+            --max-cost-usd='${{ inputs.max_cost_usd }}' \
+            ${LIMIT:+--limit="$LIMIT"}
 
       # Before the admissibility check, and before anything that can fail:
       # a run that paid for 1,150 calls must not lose its records because a
@@ -130,12 +165,21 @@ jobs:
       # (docs/ops/memory-extraction-decision-grade-run.md §3). Failing here
       # means the run may not be cited -- its numbers are not a result either
       # way -- and the artifact above is still preserved.
+      # Skipped on a probe, and not because the check would be inconvenient:
+      # a probe's `decisionGrade` is false by construction, so the rules would
+      # discard it every time and the red job would say "this run may not be
+      # cited" about something that was never going to be. What a probe is
+      # judged on is whether the answers parsed, which is on the summary above.
       - name: Admissibility
+        if: inputs.limit == ''
         run: |
           npm run check:memory-eval-run -- \
             --artifact=artifacts/mem-eval-${{ inputs.run_label }}.json
 
+      # Same reason, plus a mechanical one: the sheet samples every cell, and
+      # a probe of the first N cases does not reach most of them.
       - name: Blind review sheet
+        if: inputs.limit == ''
         run: |
           npm run make:memory-eval-blind-review -- \
             --artifact=artifacts/mem-eval-${{ inputs.run_label }}.json \
@@ -143,7 +187,7 @@ jobs:
             --out=artifacts/blind-review-${{ inputs.run_label }}.md
 
       - name: Preserve the blind review sheet
-        if: always()
+        if: always() && inputs.limit == ''
         uses: actions/upload-artifact@v4
         with:
           name: mem-eval-${{ inputs.run_label }}-blind-review
