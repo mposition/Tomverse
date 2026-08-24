@@ -145,6 +145,15 @@ const NOTE_KEY: Record<ImportFieldNote, string> = {
     confirm_models: "assistantPackageImport.noteConfirmModels",
 };
 
+/**
+ * How many of a loss's items the report names before summarising the rest.
+ *
+ * Twenty is enough to recognise what a package dropped -- the common cases are
+ * one or two files -- without turning the acknowledgement screen into a
+ * directory listing.
+ */
+const LOSS_ITEMS_SHOWN = 20;
+
 const LOSS_KEY: Record<ConversionLossKind, string> = {
     scripts: "assistantPackageImport.lossScripts",
     icon: "assistantPackageImport.lossIcon",
@@ -1388,7 +1397,34 @@ function LossesStep({
                                 </p>
                                 {loss.items && loss.items.length > 0 && (
                                     <p className="text-xs text-zinc-500">
-                                        {loss.items.join(", ")}
+                                        {/*
+                                          Named, but bounded. A package may
+                                          hold up to `maxEntries` entries and
+                                          skip nearly all of them, and a line
+                                          listing two thousand paths is a wall
+                                          rather than a disclosure. The
+                                          remainder is stated rather than
+                                          dropped: a list that quietly stops
+                                          reads as the whole list.
+                                        */}
+                                        {loss.items
+                                            .slice(0, LOSS_ITEMS_SHOWN)
+                                            .join(", ")}
+                                        {loss.items.length > LOSS_ITEMS_SHOWN && (
+                                            <>
+                                                {" "}
+                                                {interpolate(
+                                                    t(
+                                                        "assistantPackageImport.lossItemsMore"
+                                                    ),
+                                                    {
+                                                        count:
+                                                            loss.items.length -
+                                                            LOSS_ITEMS_SHOWN,
+                                                    }
+                                                )}
+                                            </>
+                                        )}
                                     </p>
                                 )}
                             </li>

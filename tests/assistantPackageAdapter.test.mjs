@@ -23,7 +23,7 @@ const EMPTY_INVENTORY = {
     skillDocument: "SKILL.md",
     knowledgeCandidates: [],
     scriptPaths: [],
-    skippedCount: 0,
+    skippedPaths: [],
 };
 
 const parsed = (source) => {
@@ -175,6 +175,35 @@ test("scripts are named in the loss report and never treated as knowledge", () =
     assert.equal(scripts.count, 2);
     assert.deepEqual(scripts.items, ["scripts/lint.py", "scripts/fetch.sh"]);
     assert.deepEqual(conversion.knowledgeCandidates, []);
+});
+
+test("skipped entries are named too, not just counted", () => {
+    // The gap a staging run found: this loss carried a count alone, so step 5
+    // said "1 file of a kind this import does not use" beside a `scripts` line
+    // that named its two paths. Step 5 is the screen with the acknowledgement
+    // checkbox, so a count with no name is the owner agreeing to lose
+    // something they were not told the name of.
+    const conversion = convertSkillPackage({
+        frontmatter: { name: "a", description: null, license: null, allowedTools: null, unknownKeys: [] },
+        body: "Body.",
+        inventory: {
+            ...EMPTY_INVENTORY,
+            skippedPaths: ["assets/icon.png", "assets/demo.mp4"],
+        },
+    });
+    const skipped = conversion.losses.find((loss) => loss.kind === "skipped_entries");
+    assert.ok(skipped);
+    assert.equal(skipped.count, 2);
+    assert.deepEqual(skipped.items, ["assets/icon.png", "assets/demo.mp4"]);
+});
+
+test("no skipped entries means no line at all, not a line saying zero", () => {
+    const conversion = convertSkillPackage({
+        frontmatter: { name: "a", description: null, license: null, allowedTools: null, unknownKeys: [] },
+        body: "Body.",
+        inventory: EMPTY_INVENTORY,
+    });
+    assert.ok(!lossKinds(conversion).includes("skipped_entries"));
 });
 
 test("a stated licence and a missing one are different things to say", () => {

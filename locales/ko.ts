@@ -1535,6 +1535,7 @@ export const ko = {
         lossAllowedTools: "패키지가 도구 사용을 요청합니다. 도구 사용 권한은 요금제와 이 어시스턴트의 설정이 정합니다.",
         lossRelativeLinks: "지시문이 패키지 안의 파일을 링크로 가리킵니다. 그 링크는 열리지 않으니, 필요하면 해당 파일을 문서로 추가하세요.",
         lossSkippedEntries: "이 가져오기가 쓰지 않는 종류의 파일 {count}개.",
+        lossItemsMore: "그 밖 {count}개.",
         lossKnowledgeOverLimit: "패키지가 문서 {count}개를 제안하지만, 한 번에 가져올 수 있는 것은 최대 {limit}개입니다.",
         targetHeading: "이 어시스턴트를 어디에 만들지",
         targetNew: "새 어시스턴트 만들기",
