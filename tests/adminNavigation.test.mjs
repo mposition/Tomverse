@@ -244,3 +244,20 @@ test("every badge key a navigation entry declares is one the resolver knows", ()
     );
   }
 });
+
+test("the discovery backlog keeps a way in", () => {
+  // The finding this whole surface answers is that discovery wrote its results
+  // to a table nothing read. A tab removed, a badge unwired or a renamed id
+  // would put it back there, so the path is pinned rather than assumed.
+  const models = ADMIN_NAVIGATION.find((item) => item.id === "models");
+  assert.ok(models, "the models entry exists");
+  assert.equal(models.badge, "modelLifecycle");
+  assert.deepEqual(
+    models.tabs?.map((tab) => tab.id),
+    ["registry", "discovery"]
+  );
+  // The registry stays the default: an operator opening /admin/models is far
+  // more often there for the catalogue than for the backlog.
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), undefined).id, "registry");
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), "discovery").id, "discovery");
+});

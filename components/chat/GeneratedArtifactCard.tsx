@@ -24,6 +24,7 @@ import {
   artifactDownloadPath,
   artifactFormat,
   formatArtifactSize,
+  visibleGeneratedArtifacts,
   type ArtifactFailureCode,
   type ArtifactLabelGroup,
   type ChatStreamArtifact,
@@ -206,15 +207,33 @@ export function GeneratedArtifactCard({
       data-artifact-format={artifact.format}
       data-artifact-model={attributedModelId ?? ""}
       /*
-        `flex-col` first and `sm:flex-row` second, so the 320px case is the
+        `flex-col` first and the row layout second, so the narrow case is the
         one that is written down rather than the one that is hoped for: the
         name and the button occupy separate full-width rows and cannot
         overlap. `min-w-0` on the text column is what actually lets `truncate`
         work -- a flex child's default `min-width: auto` refuses to shrink
         below its content, and a long file name would push the button off the
         card instead of ellipsising.
+
+        The row layout is keyed to `@md/artifacts` -- the width of the list
+        this card sits in -- and not to `sm:`, the width of the window. A
+        1440px desktop renders three model panels side by side, and inside one
+        of those the card's own content box is around 300px: the viewport
+        variant matched there anyway, laid the card out in one row, and left
+        the failure sentence a few characters wide wrapping down the card. A
+        card cannot query its own size, so the container is the `<ul>` in
+        `GeneratedArtifactList`; with no such ancestor these variants never
+        match and the card stays in its stacked layout, which is the safe way
+        round. See components/analytics/AnalyticsProvider.tsx for the same
+        move on the consent notice.
+
+        28rem is where a row actually fits: 40px of icon, two 12px gaps and a
+        control that runs to ~150px in the longest locale still leave the text
+        column over 200px. `flex-wrap` is the last resort under that -- a
+        locale whose label outgrows the budget wraps the control onto its own
+        line instead of crushing the sentence beside it.
       */
-      className={`flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center ${
+      className={`flex flex-col gap-3 rounded-xl border p-3 @md/artifacts:flex-row @md/artifacts:flex-wrap @md/artifacts:items-center ${
         isReady
           ? "border-accent-generated-artifact-200 bg-accent-generated-artifact-50/60 dark:border-accent-generated-artifact-800 dark:bg-accent-generated-artifact-950/40"
           : isBlocked
@@ -241,7 +260,13 @@ export function GeneratedArtifactCard({
         )}
       </span>
 
-      <div className="min-w-0 flex-1">
+      {/*
+        `min-w-0` keeps `truncate` working; the container-scoped minimum keeps
+        the column readable once the card is in its row layout, so a long
+        control can never squeeze the failure sentence into a vertical ribbon
+        of single characters.
+      */}
+      <div className="min-w-0 flex-1 @md/artifacts:min-w-[10rem]">
         <p
           data-testid="generated-artifact-filename"
           className="truncate text-sm font-bold text-zinc-800 dark:text-zinc-100"
@@ -288,7 +313,7 @@ export function GeneratedArtifactCard({
               same rectangle. The focus ring is `focus-visible` so a pointer
               user never sees it and a keyboard user always does.
             */
-            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent-generated-artifact-600 px-4 text-sm font-bold text-white transition hover:bg-accent-generated-artifact-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto dark:focus-visible:ring-offset-zinc-900"
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent-generated-artifact-600 px-4 text-sm font-bold text-white transition hover:bg-accent-generated-artifact-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 focus-visible:ring-offset-2 disabled:opacity-60 @md/artifacts:w-auto dark:focus-visible:ring-offset-zinc-900"
           >
             {isDownloading ? (
               <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
@@ -302,7 +327,7 @@ export function GeneratedArtifactCard({
           <Link
             href={`/auth/signin?callbackUrl=${encodeURIComponent("/chat")}`}
             data-testid="generated-artifact-signin"
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 sm:w-auto dark:focus-visible:ring-offset-zinc-900"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 @md/artifacts:w-auto dark:focus-visible:ring-offset-zinc-900"
           >
             {t("chat.artifactSignInCta")}
           </Link>
@@ -313,7 +338,7 @@ export function GeneratedArtifactCard({
             data-testid="generated-artifact-retry"
             onClick={onRetry}
             aria-label={accessibleName}
-            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-bold text-amber-800 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 sm:w-auto dark:border-amber-700 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/40 dark:focus-visible:ring-offset-zinc-900"
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-bold text-amber-800 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 @md/artifacts:w-auto dark:border-amber-700 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/40 dark:focus-visible:ring-offset-zinc-900"
           >
             <RotateCcw className="h-4 w-4" />
             {t("chat.artifactRetry")}
@@ -341,7 +366,15 @@ export function GeneratedArtifactList({
   isGuestMode,
 }: GeneratedArtifactListProps) {
   const { t } = useLanguage();
-  if (!artifacts.length) return null;
+  /*
+    A turn that failed once and then fixed itself shows the file, not both the
+    file and the apology for it. The rows stay in the database either way --
+    this is a presentation rule, and the whole of it is in
+    `visibleGeneratedArtifacts`, so the streamed trailer and the reloaded
+    conversation reach the same answer from the same input.
+  */
+  const visible = visibleGeneratedArtifacts(artifacts, { fallbackModelId });
+  if (!visible.length) return null;
   return (
     <section
       data-testid="generated-artifact-section"
@@ -351,8 +384,16 @@ export function GeneratedArtifactList({
       <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
         {t("chat.artifactSectionLabel")}
       </p>
-      <ul className="space-y-2">
-        {artifacts.map((artifact) => (
+      {/*
+        The query container for every card below. It is the list rather than
+        the card because an element cannot query its own size, and the list is
+        exactly as wide as the cards are -- which is the width that decides
+        whether a card's icon, text and control fit on one row. The viewport
+        does not decide that: a model panel inside a 1440px window is about
+        300px wide.
+      */}
+      <ul className="space-y-2 @container/artifacts">
+        {visible.map((artifact) => (
           <GeneratedArtifactCard
             key={`${artifact.id}-${artifact.ordinal}`}
             artifact={artifact}

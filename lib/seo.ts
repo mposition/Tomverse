@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { Language } from "@/components/LanguageProvider";
 
 export const SITE_ORIGIN = "https://tomverse.app";
-export const SITE_NAME = "Tomverse Insight";
+export const SITE_NAME = "Tomverse Review";
 
 export const SEO_LOCALES: readonly Language[] = [
   "en",
@@ -116,7 +116,7 @@ export const createPageMetadata = ({
         url: `${SITE_ORIGIN}/opengraph-image`,
         width: 1200,
         height: 630,
-        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
+        alt: "Tomverse Review by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
@@ -127,7 +127,7 @@ export const createPageMetadata = ({
     images: [
       {
         url: `${SITE_ORIGIN}/twitter-image`,
-        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
+        alt: "Tomverse Review by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
@@ -193,37 +193,37 @@ export const homeOgCopy: Record<
   { title: string; description: string }
 > = {
   en: {
-    title: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
+    title: "Tomverse Review by Tomverse | Multi-AI Comparison & Review",
     description:
       "Compare GPT, Claude, and Gemini side by side, use AI Review to identify differences and omissions, then check the points that need verification.",
   },
   ko: {
-    title: "Tomverse Insight (by Tomverse) | 멀티 AI 비교 및 검토",
+    title: "Tomverse Review (by Tomverse) | 멀티 AI 비교 및 검토",
     description:
       "GPT, Claude, Gemini의 답변을 나란히 비교하고 AI Review로 차이점과 누락을 확인한 뒤, 검증이 필요한 부분은 웹 검색으로 확인하세요.",
   },
   zh: {
-    title: "Tomverse Insight（by Tomverse）| 多 AI 比较与审查",
+    title: "Tomverse Review（by Tomverse）| 多 AI 比较与审查",
     description:
       "并排比较 GPT、Claude 和 Gemini 的回答，用 AI Review 找出差异与遗漏，再核实需要查证的要点。",
   },
   fr: {
-    title: "Tomverse Insight (par Tomverse) | Comparaison et revue multi-IA",
+    title: "Tomverse Review (par Tomverse) | Comparaison et revue multi-IA",
     description:
       "Comparez GPT, Claude et Gemini côte à côte, repérez différences et omissions avec AI Review, puis vérifiez les points qui le demandent.",
   },
   de: {
-    title: "Tomverse Insight (von Tomverse) | Multi-KI-Vergleich und -Prüfung",
+    title: "Tomverse Review (von Tomverse) | Multi-KI-Vergleich und -Prüfung",
     description:
       "Vergleichen Sie GPT, Claude und Gemini nebeneinander, erkennen Sie mit AI Review Unterschiede und Lücken und prüfen Sie danach, was geprüft werden muss.",
   },
   es: {
-    title: "Tomverse Insight (de Tomverse) | Comparación y revisión multi-IA",
+    title: "Tomverse Review (de Tomverse) | Comparación y revisión multi-IA",
     description:
       "Compara GPT, Claude y Gemini en paralelo, identifica diferencias y omisiones con AI Review y después comprueba los puntos que lo requieran.",
   },
   pt: {
-    title: "Tomverse Insight (da Tomverse) | Comparação e revisão multi-IA",
+    title: "Tomverse Review (da Tomverse) | Comparação e revisão multi-IA",
     description:
       "Compare GPT, Claude e Gemini lado a lado, identifique diferenças e omissões com o AI Review e depois confira os pontos que precisam de verificação.",
   },

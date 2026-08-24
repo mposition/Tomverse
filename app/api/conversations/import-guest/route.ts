@@ -20,6 +20,8 @@ import {
   getUserBillingPlan,
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
+import { createConversation } from "@/lib/conversationCreation";
+import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
 
 const modelIdSchema = z.string().min(1).max(120);
 
@@ -117,16 +119,18 @@ export async function POST(req: Request) {
 
       await assertConversationCapacity(tx, userId);
 
-      const conversation = await tx.conversation.create({
-        data: {
-          userId,
-          title: body.title,
-          selectedModels: JSON.stringify(normalizedModels),
-          disabledPanels: JSON.stringify(normalizedDisabled),
-          importedGuestKey: body.guestConversationId,
-          createdAt: new Date(body.createdAt),
-          updatedAt: new Date(lastMessageAt),
-        },
+      const conversation = await createConversation(tx, {
+        userId,
+        title: body.title,
+        // What the guest conversation already was. A guest transcript is a
+        // multi-model comparison, so importing it produces a Review
+        // conversation; the import changes ownership, not the product.
+        productKey: REVIEW_PRODUCT_KEY,
+        selectedModels: JSON.stringify(normalizedModels),
+        disabledPanels: JSON.stringify(normalizedDisabled),
+        importedGuestKey: body.guestConversationId,
+        createdAt: new Date(body.createdAt),
+        updatedAt: new Date(lastMessageAt),
       });
 
       await assertMessageCapacity(

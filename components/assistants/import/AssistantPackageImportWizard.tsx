@@ -25,6 +25,8 @@ import {
     type AssistantPackageSkipReason,
 } from "@/lib/assistantPackageLimits";
 import { knowledgeMimeForExtension } from "@/lib/assistantKnowledgeLimits";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { ENABLED_MODELS } from "@/lib/models";
 import {
     ASSISTANT_PACKAGE_IMPORT_STEPS,
     IMPORT_APPROVAL_DIGEST_VERSION,
@@ -88,7 +90,7 @@ import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPacka
  *     state rather than a rendering detail so a redesign cannot lose it.
  *
  * Steps 7 and 8 run against the import endpoints, and the whole route stays
- * behind a flag that is off until the rollout in §15 says otherwise.
+ * behind a flag that is off until the rollout is approved.
  *
  * `mergeTargets` arrives as a prop rather than being fetched here, and that is
  * the same contract from the other side: a list request made from step 6 would
@@ -1249,14 +1251,36 @@ function FieldEditor({
         "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:disabled:bg-zinc-900/60";
 
     if (fieldKey === "modelIds") {
+        // The editor's control, mode and all. A package names no Tomverse
+        // model, so "this assistant names none of its own" is the answer the
+        // import most often has -- and it is an answer the profile validator
+        // accepts, which is why it must be sayable here rather than refused.
+        //
+        // The mode is read from the list rather than stored: an empty list is
+        // `account-default` and a non-empty one is `explicit`, and switching to
+        // explicit seeds a model in the same move, so the derived value is
+        // never the one the owner did not pick. The last tick cannot be
+        // removed inside `explicit`, so the two states stay distinguishable
+        // without a second field to keep in step with this one.
+        const seed =
+            ENABLED_MODELS.find(
+                (model) => model.id === APP_DEFAULTS.defaultModelId
+            ) ?? ENABLED_MODELS[0];
+        const setModelIds = (next: string[]) =>
+            dispatch({ type: "field_edited", edits: { modelIds: next } });
         return (
             <ModelSelector
                 label={t("assistantPackageImport.fieldModelIds")}
                 hint={t("assistantPackageImport.fieldModelIdsHint")}
-                selected={draft.modelIds}
-                onChange={(next) =>
-                    dispatch({ type: "field_edited", edits: { modelIds: next } })
+                mode={draft.modelIds.length > 0 ? "explicit" : "account-default"}
+                onModeChange={(next) =>
+                    setModelIds(
+                        next === "explicit" && seed ? [seed.id] : []
+                    )
                 }
+                selected={draft.modelIds}
+                onChange={setModelIds}
+                t={t}
                 testIdPrefix="assistant-package"
             />
         );

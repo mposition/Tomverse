@@ -3,9 +3,15 @@ import { after, test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma";
 import {
+  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
+  STATIC_RUNTIME_MODELS,
+} from "../../lib/modelRegistryShared";
+import {
   ensureModelRegistrySeeded,
   getEnabledRuntimeModel,
   getRuntimeModel,
+  reconcileStaticCatalogMetadata,
   reconcileStaticWithdrawals,
 } from "../../lib/modelRegistry";
 import { assertModelRuntimeAvailable } from "../../lib/modelAvailability";
@@ -193,7 +199,7 @@ test("an already-withdrawn row with a stale replacement is still corrected", asy
 // who deletes a catalogue entry finds it here rather than in production.
 //
 // Both replay paths iterate the static catalogue -- reconcileStaticWithdrawals
-// over STATIC_WITHDRAWN_MODELS, applyScopedStaticCatalogReconciliation over
+// over STATIC_WITHDRAWN_MODELS, reconcileStaticCatalogMetadata over
 // filtered seed rows -- so an id removed outright leaves nothing to iterate,
 // while getRuntimeModels keeps answering from the row. Deleting an entry
 // therefore does NOT withdraw the model from an environment that already
@@ -312,6 +318,285 @@ test("persists and resolves a newly registered model without a source catalogue 
     inputUsdPerMillionTokens: 2.5,
     outputUsdPerMillionTokens: 8.5,
     cachedInputPriceMultiplier: 0.5,
+  });
+});
+
+// Trace 2e4327a9: claude-sonnet-5 returned no answer at all and reported
+// AI_EMPTY_RESPONSE.MAX_TOKENS. 16,314 input tokens went out, 4,096 output
+// tokens were allowed, 4,095 of them went to reasoning, and the turn ended
+// before a word of visible text or a single tool call.
+//
+// 4,096 was FALLBACK_PRICING.advanced, written into the row when it was seeded
+// on 2026-07-17 -- claude-sonnet-5 had no pricing profile then. The profile
+// arrived on 2026-08-04 saying 128,000 and never reached the row:
+// `createMany({ skipDuplicates: true })` does not revisit an existing row, and
+// the model was not in STATIC_CATALOG_RECONCILIATION_MODEL_IDS. Unlike the
+// three price columns there is no NULL-means-inherit rule here to save it --
+// `registryRowToModel()` simply obeys the stored number.
+//
+// This plants the production shape and checks the bootstrap corrects it,
+// including the fields it must NOT touch on the way past.
+test("bootstrapping lifts a stale Sonnet 5 output cap without touching price, credits or availability", async () => {
+  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "claude-sonnet-5" },
+  });
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "claude-sonnet-5" },
+    data: {
+      // The fossil.
+      maxOutputTokens: 4_096,
+      reservationOutputTokens: 2_048,
+      // Fields an operator owns, planted so a reconciliation that reached too
+      // far is caught here rather than in production. The price columns are a
+      // stored number, which by contract means "an administrator overrode this
+      // model" and beats the profile including its tiers.
+      inputUsdPerMillionTokens: 9.5,
+      outputUsdPerMillionTokens: 42.5,
+      cachedInputPriceMultiplier: 0.25,
+      updatedById: null,
+      updatedByEmail: "ops@tomverse.app",
+      sortOrder: 4_242,
+      catalogDeleted: false,
+    },
+  });
+
+  // The bootstrap memoises, so the reconciliation is invoked directly -- which
+  // is also how an operator repairs one environment without a deploy.
+  await reconcileStaticCatalogMetadata();
+
+  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "claude-sonnet-5" },
+  });
+
+  // The one number this is for.
+  assert.equal(row.maxOutputTokens, 128_000);
+  // And the one that must not move with it: what a turn reserves against the
+  // user's credits and the provider budget is an entitlement decision, not
+  // something an incident fix carries along
+  // (docs/policy/credit-and-cost-limits.md).
+  assert.equal(row.reservationOutputTokens, 2_048);
+
+  // The administrator's price override survives, tiers and all.
+  assert.equal(Number(row.inputUsdPerMillionTokens), 9.5);
+  assert.equal(Number(row.outputUsdPerMillionTokens), 42.5);
+  assert.equal(Number(row.cachedInputPriceMultiplier), 0.25);
+  // As does everything else the operator owns.
+  assert.equal(row.updatedByEmail, "ops@tomverse.app");
+  assert.equal(row.sortOrder, 4_242);
+  assert.equal(row.catalogDeleted, false);
+  // Sonnet 5 is enabled, so the lifecycle branch is not taken and the model
+  // stays exactly as available as it was.
+  assert.equal(row.enabled, before.enabled);
+  assert.equal(row.publiclyListed, before.publiclyListed);
+  assert.equal(row.status, before.status);
+  assert.equal(row.creditWeight, 4);
+
+  // What the request actually asks for, read back through the same path the
+  // chat route uses. The stored override is what makes this worth asserting:
+  // resolveModelPricing() prefers row values, so a run that only checked the
+  // profile would pass while production still capped at 4,096.
+  const model = await getEnabledRuntimeModel("claude-sonnet-5");
+  assert.ok(model);
+  assert.equal(model.maxOutputTokens, 128_000);
+  assert.equal(getModelBillingProfile(model).maxOutputTokens, 128_000);
+  assert.equal(getModelBillingProfile(model).reservationOutputTokens, 2_048);
+  assert.equal(getModelUsageProfile(model).credits, 4);
+
+  // Idempotent: a second pass writes nothing and changes nothing.
+  await reconcileStaticCatalogMetadata();
+  const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "claude-sonnet-5" },
+  });
+  assert.equal(again.maxOutputTokens, 128_000);
+  assert.equal(again.reservationOutputTokens, 2_048);
+  assert.equal(Number(again.inputUsdPerMillionTokens), 9.5);
+
+  // Put the row back the way the suite found it: the price columns are NULL
+  // in a real deployment, and leaving an override behind would quietly change
+  // what every later test in this database is priced at.
+  await prisma.modelRegistryEntry.update({
+    where: { id: "claude-sonnet-5" },
+    data: {
+      inputUsdPerMillionTokens: before.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: before.outputUsdPerMillionTokens,
+      cachedInputPriceMultiplier: before.cachedInputPriceMultiplier,
+      updatedById: before.updatedById,
+      updatedByEmail: before.updatedByEmail,
+      sortOrder: before.sortOrder,
+    },
+  });
+});
+
+// The 2026-08-23 sweep found twelve more rows in the same shape, and one of
+// them is the model docs/policy/perplexity-sonar-credit-price-hold.md was
+// written about: source says creditWeight 16, production bills 20, and that
+// hold forbids moving either until finance/product decide. Full-scope
+// reconciliation writes creditWeight, so these twelve are reconciled for the
+// output cap alone. This plants both halves of that conflict and checks the
+// cap moves while the held credit weight does not.
+test("a cap-only reconciliation lifts the output cap and leaves the held credit weight alone", async () => {
+  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "perplexity/sonar" },
+  });
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "perplexity/sonar" },
+    data: {
+      // The pre-profile seed: FALLBACK_PRICING.research would have written
+      // 4,096 / 2,048 before the 2026-08-04 profile existed.
+      maxOutputTokens: 4_096,
+      reservationOutputTokens: 2_048,
+      // What production actually bills, and what the hold protects. The
+      // catalogue says 16; if this comes back 16, a price change nobody
+      // approved has shipped.
+      creditWeight: 20,
+      bestFor: "an operator's own wording",
+      sortOrder: 4_243,
+    },
+  });
+
+  await reconcileStaticCatalogMetadata();
+
+  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "perplexity/sonar" },
+  });
+
+  assert.equal(row.maxOutputTokens, 128_000);
+  assert.equal(
+    row.creditWeight,
+    20,
+    "the Perplexity Sonar credit hold forbids this row moving to the catalogue's 16"
+  );
+  // The reservation is an entitlement figure and is outside this scope, so it
+  // keeps whatever the row held rather than being refreshed alongside the cap.
+  assert.equal(row.reservationOutputTokens, 2_048);
+  // And nothing else in the metadata block is carried either.
+  assert.equal(row.bestFor, "an operator's own wording");
+  assert.equal(row.sortOrder, 4_243);
+  assert.equal(row.enabled, before.enabled);
+  assert.equal(row.publiclyListed, before.publiclyListed);
+
+  // What the request actually asks for, through the same path chat uses.
+  const model = await getEnabledRuntimeModel("perplexity/sonar");
+  assert.ok(model);
+  assert.equal(getModelBillingProfile(model).maxOutputTokens, 128_000);
+  assert.equal(getModelUsageProfile(model).credits, 20);
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "perplexity/sonar" },
+    data: {
+      creditWeight: before.creditWeight,
+      bestFor: before.bestFor,
+      sortOrder: before.sortOrder,
+      reservationOutputTokens: before.reservationOutputTokens,
+    },
+  });
+});
+
+// Every model in the narrow scope, end to end: a pre-profile row goes in, the
+// approved cap comes out, and the row's credit weight is untouched.
+test("every cap-only model has its stranded cap lifted by the bootstrap", async () => {
+  const ids = [...OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS];
+  const originals = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: ids } },
+  });
+  assert.equal(originals.length, ids.length, "all cap-only models must be seeded");
+
+  // A distinctive credit weight per row, so a reconciliation that reached the
+  // column would be visible rather than coincidentally correct.
+  const sentinelCreditWeight = 97;
+  await prisma.modelRegistryEntry.updateMany({
+    where: { id: { in: ids } },
+    data: { maxOutputTokens: 1_024, creditWeight: sentinelCreditWeight },
+  });
+
+  await reconcileStaticCatalogMetadata();
+
+  const rows = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: ids } },
+  });
+  for (const row of rows) {
+    const expected = STATIC_RUNTIME_MODELS.find((model) => model.id === row.id);
+    assert.ok(expected, row.id);
+    assert.equal(row.maxOutputTokens, expected.maxOutputTokens, row.id);
+    assert.ok(row.maxOutputTokens! > 1_024, row.id);
+    assert.equal(row.creditWeight, sentinelCreditWeight, row.id);
+  }
+
+  for (const original of originals) {
+    await prisma.modelRegistryEntry.update({
+      where: { id: original.id },
+      data: {
+        maxOutputTokens: original.maxOutputTokens,
+        creditWeight: original.creditWeight,
+      },
+    });
+  }
+});
+
+// The reservation-only scope, end to end. This is the one narrow entry that
+// moves a money figure, so what it must NOT touch is worth pinning as firmly
+// as what it does: docs/policy/credit-and-cost-limits.md section 4 approved
+// 6,144 for reasoning models, and nothing else about the row was approved
+// with it.
+test("the reservation-only scope raises the held figure and leaves the cap and credits alone", async () => {
+  assert.deepEqual(
+    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
+    ["gpt-5-5-thinking"]
+  );
+  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "gpt-5-5-thinking" },
+  });
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "gpt-5-5-thinking" },
+    data: {
+      // The premium class fallback a pre-2026-08-01 seed left behind.
+      reservationOutputTokens: 4_096,
+      // Deliberately wrong, and deliberately left wrong: this scope carries
+      // the reservation only, so an operator's cap survives it.
+      maxOutputTokens: 7_000,
+      creditWeight: 31,
+      inputUsdPerMillionTokens: 11.5,
+      updatedByEmail: "ops@tomverse.app",
+    },
+  });
+
+  await reconcileStaticCatalogMetadata();
+
+  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "gpt-5-5-thinking" },
+  });
+  assert.equal(row.reservationOutputTokens, 6_144);
+  assert.equal(
+    row.maxOutputTokens,
+    7_000,
+    "the cap is outside this scope, so even a wrong one is left for a human"
+  );
+  assert.equal(row.creditWeight, 31);
+  assert.equal(Number(row.inputUsdPerMillionTokens), 11.5);
+  assert.equal(row.updatedByEmail, "ops@tomverse.app");
+  assert.equal(row.enabled, before.enabled);
+  assert.equal(row.status, before.status);
+
+  // Idempotent.
+  await reconcileStaticCatalogMetadata();
+  const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "gpt-5-5-thinking" },
+  });
+  assert.equal(again.reservationOutputTokens, 6_144);
+  assert.equal(again.creditWeight, 31);
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "gpt-5-5-thinking" },
+    data: {
+      maxOutputTokens: before.maxOutputTokens,
+      reservationOutputTokens: before.reservationOutputTokens,
+      creditWeight: before.creditWeight,
+      inputUsdPerMillionTokens: before.inputUsdPerMillionTokens,
+      updatedByEmail: before.updatedByEmail,
+    },
   });
 });
 

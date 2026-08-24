@@ -109,7 +109,7 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
   // label ("Web search - Use web search"): the only selected model here is
   // gpt-5-4-mini, pinned above, which has no verified provider-native search, so the honest
   // state is "unavailable" plus a way out -- never a silent fall back to
-  // training knowledge.
+  // answering without a search.
   const chip = page.getByTestId("web-search-mode-chip");
   await expect(chip).toBeVisible();
   await expect(chip).toHaveAttribute("data-tone", "blocked");

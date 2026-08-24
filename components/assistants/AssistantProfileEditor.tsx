@@ -13,17 +13,25 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { KnowledgeFilesPanel } from "@/components/assistants/KnowledgeFilesPanel";
-import { ModelSelector } from "@/components/assistants/ModelSelector";
+import {
+    ModelSelector,
+    type ModelMode,
+} from "@/components/assistants/ModelSelector";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     ASSISTANT_PROFILE_LIST_PATH,
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
 import { ASSISTANT_PROFILE_CHAT_PATH } from "@/lib/assistantProfileReturn";
+import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+// Still needed after the control moved out: the editor seeds the explicit mode
+// with the account default, which is a question about this screen's state
+// rather than about how the list renders.
+import { ENABLED_MODELS } from "@/lib/models";
 
 /**
  * Creating and editing one profile (Release C, slice C3b).
@@ -75,6 +83,27 @@ const interpolate = (
         template
     );
 
+/**
+ * What a failed response says, as a code this screen can translate.
+ *
+ * A 401 is the one case with no code to read: the route answers
+ * `{ error: "Unauthorized" }` before any handler runs, so the client names
+ * the case itself rather than falling back to "try again", which is the
+ * wrong advice for a session that expired mid-edit.
+ */
+const failureNotice = async (
+    response: Response
+): Promise<Extract<Notice, { kind: "failed" }>> => {
+    if (response.status === 401) {
+        await discardResponseBody(response);
+        return { kind: "failed", code: "UNAUTHENTICATED" };
+    }
+    const body = (await response.json().catch(() => null)) as {
+        code?: string;
+    } | null;
+    return { kind: "failed", code: body?.code };
+};
+
 const sectionClass =
     "rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60";
 const primaryButtonClass =
@@ -118,16 +147,19 @@ type Notice =
     | { kind: "published"; revision: number }
     | { kind: "unchanged" }
     | { kind: "stale" }
-    | { kind: "failed"; detail?: string };
+    /**
+     * The server's refusal *code*, never its message.
+     *
+     * This field held `detail` -- the `error` string the API returns -- and
+     * the screen printed it. Those strings are written for operators and
+     * exist only in English, so a Korean user saw `Invalid request payload.`
+     * with no field named and no next step. The code resolves to a sentence
+     * this product owns, in the reader's language
+     * (`lib/assistantProfileErrorCopy.ts`); an unmapped one falls back to the
+     * generic message rather than showing the code.
+     */
+    | { kind: "failed"; code?: string };
 
-/**
- * The models a profile runs, chosen from the catalogue.
- *
- * A checkbox list rather than a `<select multiple>`: the maximum is three, the
- * list is short, and a multi-select is the control users most often fail to
- * operate without a mouse. Each row names the model the way the rest of the
- * product names it, so nobody has to recognise an internal id.
- */
 export function AssistantProfileEditor({
     profileId,
     onCreated,
@@ -165,6 +197,13 @@ export function AssistantProfileEditor({
      * exist when they did not.
      */
     const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+    /**
+     * Naming no model is the default, and it is what a created profile now
+     * stores. The old create screen resolved the account's default and wrote
+     * it into revision 1, which pinned it: changing the account default later
+     * left every existing assistant starting conversations on the old one.
+     */
+    const [modelMode, setModelMode] = useState<ModelMode>("account-default");
     const [webSearch, setWebSearch] = useState(false);
     const [deepResearch, setDeepResearch] = useState(false);
     // §14's narrow-only default. A new profile asks for nothing it was not
@@ -177,6 +216,29 @@ export function AssistantProfileEditor({
     const [invalidField, setInvalidField] = useState<
         "name" | "instructions" | null
     >(null);
+
+    /**
+     * Switching modes, with the selection kept coherent with the mode.
+     *
+     * Entering `explicit` seeds the account's default so the mode always has
+     * at least one model in it, and leaving it keeps the ticks so a user who
+     * flips back and forth does not lose what they chose — the stored value is
+     * decided by the mode at save time, not by what is still ticked.
+     */
+    const changeModelMode = (next: ModelMode) => {
+        setModelMode(next);
+        if (next === "explicit" && selectedModelIds.length === 0) {
+            const seed =
+                ENABLED_MODELS.find(
+                    (model) => model.id === APP_DEFAULTS.defaultModelId
+                ) ?? ENABLED_MODELS[0];
+            if (seed) setSelectedModelIds([seed.id]);
+        }
+    };
+
+    /** What the mode says to store, rather than what is still ticked. */
+    const modelIdsForSave = () =>
+        modelMode === "explicit" ? selectedModelIds : [];
 
     // "Create and use in this chat" only when there is a chat to go back to.
     // Promising it from the settings page would name a destination the button
@@ -221,8 +283,7 @@ export function AssistantProfileEditor({
                 return;
             }
             if (!response.ok) {
-                await discardResponseBody(response);
-                setNotice({ kind: "failed" });
+                setNotice(await failureNotice(response));
                 return;
             }
             const data = (await response.json()) as { profile: LoadedProfile };
@@ -234,8 +295,10 @@ export function AssistantProfileEditor({
             const version = loaded.currentVersion;
             setLoadedRevision(version?.revision ?? null);
             setInstructions(version?.instructions ?? "");
-            setSelectedModelIds(
-                version?.models ?? [APP_DEFAULTS.defaultModelId]
+            const storedModels = version?.models ?? [];
+            setSelectedModelIds(storedModels);
+            setModelMode(
+                storedModels.length > 0 ? "explicit" : "account-default"
             );
             setWebSearch(version?.toolPolicy.webSearch ?? false);
             setDeepResearch(version?.toolPolicy.deepResearch ?? false);
@@ -301,20 +364,18 @@ export function AssistantProfileEditor({
                     icon: icon.trim() === "" ? null : icon,
                     description: description.trim() === "" ? null : description,
                     instructions,
-                    // Omitted rather than guessed when the user never opened
-                    // advanced: the server resolves the account's own default,
-                    // and a client-supplied one would be the client deciding
-                    // what this account may run.
-                    ...(selectedModelIds.length > 0
-                        ? { modelIds: selectedModelIds }
+                    // Omitted, not guessed, when the profile names no model:
+                    // the account's own new-conversation selection is
+                    // resolved when a conversation is actually created, and a
+                    // client-supplied default would pin today's answer to a
+                    // question asked later.
+                    ...(modelIdsForSave().length > 0
+                        ? { modelIds: modelIdsForSave() }
                         : {}),
                 }),
             });
             if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { error?: string }
-                    | null;
-                setNotice({ kind: "failed", detail: data?.error });
+                setNotice(await failureNotice(response));
                 return;
             }
             const data = (await response.json()) as { profile: { id: string } };
@@ -354,10 +415,7 @@ export function AssistantProfileEditor({
                 }
             );
             if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { error?: string }
-                    | null;
-                setNotice({ kind: "failed", detail: data?.error });
+                setNotice(await failureNotice(response));
                 return;
             }
             await discardResponseBody(response);
@@ -389,7 +447,7 @@ export function AssistantProfileEditor({
                     body: JSON.stringify({
                         expectedRevision: loadedRevision,
                         instructions,
-                        modelIds: selectedModelIds,
+                        modelIds: modelIdsForSave(),
                         toolPolicy: { webSearch, deepResearch },
                         memoryPolicy: { useAccountMemory },
                         starters: starters
@@ -400,16 +458,19 @@ export function AssistantProfileEditor({
                     }),
                 }
             );
-            if (response.status === 409) {
-                await discardResponseBody(response);
-                setNotice({ kind: "stale" });
-                return;
-            }
             if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { error?: string }
-                    | null;
-                setNotice({ kind: "failed", detail: data?.error });
+                const failure = await failureNotice(response);
+                // The stale conflict has its own notice, because its next
+                // step is a reload rather than a retry. Decided by the code
+                // and not by the 409 alone: the account ceiling answers 409
+                // too, and telling somebody at their profile limit that
+                // another tab edited this one would send them to reload a
+                // screen that is already current.
+                setNotice(
+                    failure.code === "ASSISTANT_PROFILE_VERSION_STALE"
+                        ? { kind: "stale" }
+                        : failure
+                );
                 return;
             }
             const data = (await response.json()) as
@@ -435,9 +496,12 @@ export function AssistantProfileEditor({
             const response = await fetch(`/api/assistant-profiles/${profileId}`, {
                 method: "DELETE",
             });
+            if (!response.ok) {
+                setNotice(await failureNotice(response));
+                return;
+            }
             await discardResponseBody(response);
-            if (response.ok) router.replace(ASSISTANT_PROFILE_LIST_PATH);
-            else setNotice({ kind: "failed" });
+            router.replace(ASSISTANT_PROFILE_LIST_PATH);
         } catch {
             setNotice({ kind: "failed" });
         } finally {
@@ -541,7 +605,10 @@ export function AssistantProfileEditor({
                                 t("assistantProfiles.noticeUnchanged")}
                             {notice.kind === "stale" && t("assistantProfiles.noticeStale")}
                             {notice.kind === "failed" &&
-                                (notice.detail || t("assistantProfiles.noticeFailed"))}
+                                t(
+                                    assistantProfileErrorCopyKey(notice.code) ??
+                                        "assistantProfiles.noticeFailed"
+                                )}
                         </p>
                     )}
 
@@ -720,8 +787,11 @@ export function AssistantProfileEditor({
                                     <ModelSelector
                                         label={t("assistantProfiles.modelsLabel")}
                                         hint={t("assistantProfiles.modelsHint")}
+                                        mode={modelMode}
+                                        onModeChange={changeModelMode}
                                         selected={selectedModelIds}
                                         onChange={setSelectedModelIds}
+                                        t={t}
                                     />
                                 </div>
                             </details>
@@ -779,8 +849,11 @@ export function AssistantProfileEditor({
                                     <ModelSelector
                                         label={t("assistantProfiles.modelsLabel")}
                                         hint={t("assistantProfiles.modelsHint")}
+                                        mode={modelMode}
+                                        onModeChange={changeModelMode}
                                         selected={selectedModelIds}
                                         onChange={setSelectedModelIds}
+                                        t={t}
                                     />
                                     <label className={labelClass}>
                                         {t("assistantProfiles.startersLabel")}

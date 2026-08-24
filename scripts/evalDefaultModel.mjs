@@ -120,7 +120,7 @@ const REFUSAL_MARKERS = [
 ];
 
 const LONG_DOCUMENT = [
-  "Tomverse Insight quarterly operations note.",
+  "Tomverse Review quarterly operations note.",
   "Chat volume grew 18% quarter over quarter, driven mainly by document analysis.",
   "The median conversation used 2.4 models. Guest sessions converted at 6.1%.",
   "Credit consumption per completed answer fell after the 2026-08-01 catalogue work.",

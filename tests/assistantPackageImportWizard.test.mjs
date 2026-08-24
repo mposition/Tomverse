@@ -264,10 +264,12 @@ test("choosing edit without typing anything keeps what was proposed", () => {
 
 test("the profile's own validation decides the fields step", () => {
     // Not restated here: a wizard that accepts a draft the editor rejects is
-    // a wizard that sends the owner forward to fail at publish.
+    // a wizard that sends the owner forward to fail at publish. The reverse
+    // holds too, which is what this first case is: naming no model is a
+    // profile saying it names none of its own, and the validator has no floor,
+    // so this step must let it through rather than inventing one.
     const noModel = at("fields", { edits: {} });
-    assert.deepEqual(blockKinds(noModel), ["invalid_draft"]);
-    assert.equal(advanceProblems(noModel)[0].problem.field, "modelIds");
+    assert.deepEqual(blockKinds(noModel), []);
 
     const tooLong = at("fields", {
         edits: {

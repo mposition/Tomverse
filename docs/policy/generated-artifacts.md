@@ -344,14 +344,94 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   덮어쓰지 않는다.
 - **멀티 모델 비교**: artifact는 `modelId`를 들고 있고 카드가 그 모델 이름을
   표시한다. 세 패널이 각자의 messageId에 각자의 파일을 붙인다.
-- 320px에서 파일명 행과 버튼 행은 서로 다른 full-width 행이다(`flex-col`이
-  기본, `sm:flex-row`가 확장). 텍스트 열은 `min-w-0`이라야 `truncate`가 동작
-  한다.
+- **같은 turn에서 자동 복구된 실패는 카드로 보여 주지 않는다.** 모델이 명세를
+  거절당하고 고쳐서 다시 호출해 성공하면, 완성된 다운로드 옆에 "만들지
+  못했습니다" 카드와 "파일 다시 만들기" CTA가 같이 서게 된다 — 이미 있는 파일을
+  다시 만들라는 제안이다. **DB 행은 지우지 않는다**(실패는 모델이 무엇을
+  들었는지에 대한 감사 기록이다). 판정은 표시 단계 한 곳
+  (`visibleGeneratedArtifacts()`, `lib/generatedArtifactCore.ts`)에서만 하고,
+  규칙은 좁게 고정한다.
+  - `failed`만 숨긴다. `blocked`는 나중 성공이 답하지 못하는 로그인 요구이고
+    `ready`는 사용자가 가질 수 있는 파일이다.
+  - 동일성은 **파일명 + 형식 + 실효 모델**이다. 실효 모델은
+    `artifact.modelId ?? 패널의 fallbackModelId`이며, 파일명은 trim 후
+    소문자로 맞춘다. 다른 이름·다른 형식·다른 모델의 성공은 이 실패를
+    지우지 못한다.
+  - 그 성공의 `ordinal`이 **더 클 때만** 숨긴다. 배열 순서가 아니라 `ordinal`로
+    비교하므로 streaming trailer와 대화 재조회가 같은 카드를 보여 준다.
+    `ready` 뒤에 온 `failed`는 그 파일에 대해 turn이 아는 가장 최신 사실이므로
+    남는다.
+  - `ready`끼리는 합치지 않는다. 같은 이름이라도 위의 "후속 수정은 새
+    버전이다"에 따라 각자 카드를 갖는다.
+- 파일명 행과 버튼 행은 **카드가 좁을 때** 서로 다른 full-width 행이다
+  (`flex-col`이 기본, `@md/artifacts:flex-row`가 확장). 판정 기준은 viewport가
+  아니라 **카드가 속한 목록의 너비**다 — 1440px 창 안의 모델 패널은 폭이 300px
+  남짓인데 `sm:`은 거기서도 걸려 실패 설명이 몇 글자 폭으로 눌렸다. query
+  container는 `GeneratedArtifactList`의 `<ul>`(`@container/artifacts`)이고,
+  container가 없으면 어떤 variant도 걸리지 않아 stacked layout으로 남는다.
+  텍스트 열은 `min-w-0`이라야 `truncate`가 동작하고, row layout에서는 최소
+  너비를 함께 갖는다.
 - 버튼은 최소 44px 터치 영역과 `focus-visible` 링을 갖는다.
 - 스크린 리더는 하나의 accessible name으로 형식·파일명·크기·상태를 받는다.
 - 시각 role은 `accent-generated-artifact-*`(emerald)뿐이다. AI Review의
   cyan→blue→purple gradient는 예약이며 쓰지 않는다.
 - 문구는 `locales/*.ts` 7개 언어 전부에 넣는다.
+
+### 시작만 하고 끝나지 못한 tool 호출 — `turn_incomplete`
+
+승인일: 2026-08-23. §1의 규칙("만들지 못했으면 만들었다고 말하지 않는다")의
+반대쪽 절반이며, 예외가 아니다.
+
+**증상.** Claude Haiku 4.5가 PPT를 웹페이지로 만들어 달라는 요청에 짧은 사전
+설명과 "이제 웹페이지를 만들겠습니다:"까지 쓰고 `create_text_file` 호출을
+시작했다가 출력 토큰 상한에 걸렸다. tool은 실행되지 않았으므로 collector에는
+아무것도 기록되지 않았고, turn은 일반적인 길이 초과 안내만 남긴 채 끝났다.
+**앱이 파일을 만들겠다고 말한 뒤 아무 말도 하지 않은 것**이고, 이는 §1이
+금지하는 침묵이다.
+
+**판정 신호는 두 개이고 서로 다른 곳에서 온다.**
+
+- `tool-input-start`(`streamText`의 `onChunk`) — provider가 tool 호출을
+  **시작**했다고 이름을 대는 유일한 시점. toolCallId와 toolName으로 기록한다.
+- tool 실행 시작(`onToolExecutionStart`와 각 tool의 `execute` 양쪽) — 그 호출이
+  collector에 도달했다는 사실. 도달한 호출은 성공·실패·로그인 거절 중 하나로
+  **이미 자기 결과를 기록**했으므로 여기서 다시 세지 않는다.
+
+추적은 `lib/generatedArtifactTurnTracker.ts`가 하고, 기록은
+`GeneratedArtifactCollector.recordIncompleteToolCalls()`가 한다.
+
+절대 조건:
+
+- **완료 판정이 `incomplete`(= `length`)일 때만** 기록한다
+  (`resolveChatCompletionOutcome`). 정상 종료나 취소는 대상이 아니다.
+- **artifact tool 호출이 시작되지 않은 길이 초과는 지금과 같다** — 일반
+  incomplete 안내만 보이고 카드는 만들지 않는다.
+- **native tool은 절대 세지 않는다.** `web_search`·`google_search`도 같은
+  `tool-input-start`를 내지만, 판정 대상은 **이 요청이 실제로 등록한 application
+  tool 이름 집합**이며 `providerExecuted`도 함께 거른다. 잘린 검색은 사용자가
+  약속받은 파일이 아니다.
+- **부분 tool input을 읽지 않는다.** delta frame은 구독하지 않고, 로그에도 DB에도
+  남기지 않는다. 검증된 format·filename이 없으므로 카드는 **tool 종류의 기존
+  안전한 fallback descriptor**(`FALLBACK_FORMAT`, 파일명 `generated`)로 표시한다.
+- **상한을 올리지 않는다.** 메시지당 top-level 3개는 그대로이고, 네 번째 시작
+  호출은 호출로 세되 카드는 만들지 않는다. `ARTIFACT_LIMITS`도
+  `maxOutputTokens`도 이 결함의 해결책이 아니다.
+- **ordinal·modelId·persistence 계약은 그대로다.** 실패 row는 assistant 메시지와
+  **같은 트랜잭션**에서 쓰이고(§8), 재조회 후에도 카드가 남는다. 카드 문구는
+  기존 `turn_incomplete` locale 항목(`chat.artifactFailedIncomplete`)이고 재시도
+  동작도 기존 `failed` 카드와 같다.
+- **`wasInvoked`가 참이 된다.** 잘린 turn의 provider response messages에는 끝까지
+  쓰이지 못한 `tool_use`가 들어 있고, 그것을 reasoning replay로 저장하면 다음
+  turn이 provider에게 거절당한다. 그래서 그 turn은
+  `MessageProviderContext`를 남기지 않는다.
+
+**지시문도 함께 고친다**(§2의 system block). 파일을 만들기 전에 "분석 중",
+"이제 만들겠습니다" 같은 진행 약속을 본문에 쓰지 않고, tool을 먼저 부른 뒤
+`created` 결과를 받고 나서야 한두 문장으로 성공을 알린다. HTML·소스 파일은
+반복 블록·군더더기 주석·중복 데이터를 피하고, 한 번의 호출에 담기 어렵다고
+판단되면 성공을 예고하거나 불완전한 호출을 시작하지 말고 범위를 줄여 달라고
+요청한다. **다만 지시문은 신뢰성의 근거가 아니다** — 위의 lifecycle 판정이
+근거이고, 지시문은 그 판정이 발동할 빈도를 줄일 뿐이다.
 
 ## 10. 자동 fallback과 web search
 

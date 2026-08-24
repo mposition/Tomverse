@@ -182,10 +182,15 @@ mock.module(mod("lib/traceErrorEvidence.ts"), {
 mock.module(mod("lib/feedbackAutoFixShadow.ts"), {
   namedExports: { purgeClosedAutoFixCases: async () => 19 },
 });
-mock.module(mod("lib/billingEmails.ts"), {
+// The two pass sweeps enqueue rather than send now (EM-07), so the collaborator
+// to stand in for is the lane, not the mailer.
+mock.module(mod("lib/standardEmailLane.ts"), {
   namedExports: {
-    sendFoundingTesterPassReminderEmail: async () => ({ sent: true }),
-    sendFoundingTesterPassEndedEmail: async () => ({ sent: true }),
+    enqueueStandardEmail: async () => ({
+      eventId: "event",
+      deliveryId: "delivery",
+      idempotencyKey: "key",
+    }),
   },
 });
 mock.module(mod("lib/accountDeletion.ts"), {

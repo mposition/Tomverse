@@ -1,21 +1,29 @@
-// Moves stored *selection* state off gpt-5-4-mini and onto gpt-5-6-luna.
+// Moves stored *selection* state off one retired model and onto its
+// replacement. Both are named on the command line: this is the tool for every
+// retirement, not for one of them (ML-10).
 //
-// Run with the RETIREMENT deploy, not with the default switch. While
-// gpt-5-4-mini is still enabled and publicly listed it is a working model that
-// some users may have picked deliberately, and rewriting their setting on no
-// evidence would be overriding a live choice. Once 5.4 mini is disabled and
+// Run with the RETIREMENT deploy, not with the default switch. While the old
+// model is still enabled and publicly listed it is a working model that some
+// users may have picked deliberately, and rewriting their setting on no
+// evidence would be overriding a live choice. Once it is disabled and
 // delisted, the same rows become stale pointers that every read path has to
 // resolve through the replacement chain on every request -- that is the point
 // at which flattening them is a fix rather than an override.
+//
+// That timing is checked rather than trusted: --apply reads the registry and
+// refuses if --from is still enabled or still listed. It used to be enforced by
+// a pair of constants naming one migration, which made the rule true by
+// accident for that one and unavailable for the next.
 //
 // Safe to run repeatedly and safe to run early: it is idempotent, and it makes
 // no change at all once no row names the old id. Defaults to a dry run.
 //
 // Usage:
-//   node --import tsx scripts/run-default-model-reconciliation.mjs
+//   node --import tsx scripts/run-default-model-reconciliation.mjs \
+//     --from=<retired model id> --to=<replacement model id>
 //   node --import tsx scripts/run-default-model-reconciliation.mjs \
 //     --apply --approved-retirement --ticket="<url>" --actor="<name>" \
-//     --from=gpt-5-4-mini --to=gpt-5-6-luna
+//     --from=<retired model id> --to=<replacement model id>
 //
 // A dry run needs nothing: reporting what would change is the safe half and
 // stays one command away. A write needs the whole line above, because
@@ -25,9 +33,15 @@
 // or an npm build/start/deploy/migrate lifecycle step at all.
 //
 // Requires DATABASE_URL. Reads and writes only:
-//   * AppSetting["guestDefaultModelId"]  (only when it names the old id)
-//   * UserSettings.defaultModel          (only rows exactly equal to the old id)
-//   * Conversation.selectedModels        (only rows whose JSON array contains it)
+//   * AppSetting["guestDefaultModelId"]     (only when it names the old id)
+//   * UserSettings.defaultModel             (only rows exactly equal to the old id)
+//   * UserSettings.newConversationModelIds  (only arrays containing it)
+//   * Conversation.selectedModels           (only rows whose JSON array contains it)
+//
+// Every write is paired with a ModelMigrationRecord in the same transaction.
+// Without that the run reports counts to stdout and keeps nothing, so the
+// notice telling people their settings moved has no audience it can be honest
+// about -- only "everybody" or "nobody".
 //
 // It never touches Message.modelId, ChatCreditReservation, UsageBucket, the
 // credit ledger, ModelRegistryEntry.catalogDeleted, or any other model's
@@ -40,16 +54,17 @@
 import { prisma } from "../lib/prisma.ts";
 import {
   emptyCounts,
+  leadOutOfSync,
   rewriteDefaultModel,
+  rewriteNewConversationModelIds,
   rewriteSelectedModels,
 } from "../lib/defaultModelReconciliationCore.ts";
 import {
   findReconciliationApprovalProblems,
+  findReconciliationTargetProblems,
   readReconciliationEnvironment,
 } from "../lib/reconciliationApprovalCore.ts";
 
-const FROM_MODEL_ID = "gpt-5-4-mini";
-const TO_MODEL_ID = "gpt-5-6-luna";
 const GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId";
 const CONVERSATION_PAGE_SIZE = 500;
 
@@ -71,26 +86,64 @@ const approval = {
   environment: readReconciliationEnvironment(process.env),
 };
 
-const approvalProblems = findReconciliationApprovalProblems(approval, {
-  fromModelId: FROM_MODEL_ID,
-  toModelId: TO_MODEL_ID,
-});
-if (approvalProblems.length > 0) {
+const refuse = (problems) => {
   console.error(
-    `\nRefusing to write. ${approvalProblems.length} requirement(s) not met:\n` +
-      approvalProblems
+    `\nRefusing to write. ${problems.length} requirement(s) not met:\n` +
+      problems
         .map((problem) => `  - [${problem.code}] ${problem.message}`)
         .join("\n") +
       "\n\nRun without --apply to see what would change. See section 7 of\n" +
       "docs/policy/default-model-luna-migration.md before writing anything."
   );
   process.exit(1);
+};
+
+const approvalProblems = findReconciliationApprovalProblems(approval);
+if (approvalProblems.length > 0) refuse(approvalProblems);
+
+// A dry run needs the pair too -- without them there is nothing to report on --
+// but it needs no approval, so this is the first point both are known good.
+if (!approval.fromModelId || !approval.toModelId) {
+  console.error(
+    "--from=<model id> and --to=<model id> are required, including for a dry run."
+  );
+  process.exit(1);
 }
+const FROM_MODEL_ID = approval.fromModelId;
+const TO_MODEL_ID = approval.toModelId;
 
 if (!process.env.DATABASE_URL?.trim()) {
   console.error("DATABASE_URL is required.");
   process.exit(1);
 }
+
+// The precondition, read from the registry rather than assumed from a
+// constant. Runs before anything is scanned so a refusal costs one query
+// rather than a full table walk.
+const registryState = async (modelId) => {
+  const row = await prisma.modelRegistryEntry.findUnique({
+    where: { id: modelId },
+    select: { enabled: true, publiclyListed: true, catalogDeleted: true },
+  });
+  return {
+    modelId,
+    found: Boolean(row),
+    enabled: row?.enabled ?? false,
+    publiclyListed: row?.publiclyListed ?? false,
+    catalogDeleted: row?.catalogDeleted ?? false,
+  };
+};
+
+const targets = findReconciliationTargetProblems({
+  apply,
+  from: await registryState(FROM_MODEL_ID),
+  to: await registryState(TO_MODEL_ID),
+});
+if (targets.problems.length > 0) {
+  await prisma.$disconnect();
+  refuse(targets.problems);
+}
+for (const warning of targets.warnings) console.warn(`  ! ${warning}`);
 
 const malformedConversations = [];
 const warnings = [];
@@ -124,15 +177,93 @@ try {
     }
   }
 
-  // 2. Per-user default model. updateMany on an exact equality filter is
-  //    already idempotent: the second run matches zero rows.
-  const userDefaultMatches = await prisma.userSettings.count({
-    where: { defaultModel: FROM_MODEL_ID },
+  // 2. Per-user settings: the representative model and the new-conversation
+  //    combination, which are two independent decisions
+  //    (docs/policy/default-model-luna-migration.md §1.2) and have to move in
+  //    one transaction per row. An updateMany would be shorter and could not
+  //    write the migration record beside the change it describes.
+  const affected = await prisma.userSettings.findMany({
+    where: {
+      OR: [
+        { defaultModel: FROM_MODEL_ID },
+        { newConversationModelIds: { array_contains: FROM_MODEL_ID } },
+      ],
+    },
+    select: { userId: true, defaultModel: true, newConversationModelIds: true },
   });
-  if (apply && userDefaultMatches > 0) {
-    await prisma.userSettings.updateMany({
-      where: { defaultModel: FROM_MODEL_ID },
-      data: { defaultModel: TO_MODEL_ID },
+
+  let userDefaultMatches = 0;
+  let combinationRewritten = 0;
+  let combinationMalformed = 0;
+  let leadMismatches = 0;
+
+  for (const row of affected) {
+    const defaultDecision = rewriteDefaultModel(row.defaultModel, {
+      from: FROM_MODEL_ID,
+      to: TO_MODEL_ID,
+    });
+    const combination = rewriteNewConversationModelIds(
+      row.newConversationModelIds,
+      { from: FROM_MODEL_ID, to: TO_MODEL_ID }
+    );
+
+    if (defaultDecision.status === "rewritten") userDefaultMatches += 1;
+    if (combination.status === "rewritten") combinationRewritten += 1;
+    if (combination.status === "malformed") {
+      combinationMalformed += 1;
+      warnings.push(
+        `${row.userId}: newConversationModelIds is ${combination.reason} and was left untouched`
+      );
+    }
+    if (combination.warning) {
+      warnings.push(`${row.userId}: ${combination.warning}`);
+    }
+
+    const nextDefault =
+      defaultDecision.status === "rewritten" ? defaultDecision.value : row.defaultModel;
+    const nextModels =
+      combination.status === "rewritten" ? combination.models : null;
+
+    // Reported, never corrected: which model leads the combination is the
+    // user's choice, and reordering it to match defaultModel would be making
+    // that choice for them.
+    if (leadOutOfSync(nextModels ?? null, nextDefault)) {
+      leadMismatches += 1;
+      warnings.push(
+        `${row.userId}: combination lead ${nextModels[0]} and defaultModel ${nextDefault} disagree`
+      );
+    }
+
+    if (!apply) continue;
+    if (defaultDecision.status !== "rewritten" && nextModels === null) continue;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.userSettings.update({
+        where: { userId: row.userId },
+        data: {
+          ...(defaultDecision.status === "rewritten"
+            ? { defaultModel: defaultDecision.value }
+            : {}),
+          ...(nextModels ? { newConversationModelIds: nextModels } : {}),
+        },
+      });
+      const records = [];
+      if (defaultDecision.status === "rewritten") {
+        records.push("user_settings_default_model");
+      }
+      if (nextModels) records.push("new_conversation_model_ids");
+      for (const field of records) {
+        await tx.modelMigrationRecord.create({
+          data: {
+            userId: row.userId,
+            field,
+            fromModelId: FROM_MODEL_ID,
+            toModelId: TO_MODEL_ID,
+            ticket: approval.ticket,
+            actorEmail: approval.actor,
+          },
+        });
+      }
     });
   }
 
@@ -145,7 +276,7 @@ try {
   for (;;) {
     const page = await prisma.conversation.findMany({
       where: { selectedModels: { contains: FROM_MODEL_ID } },
-      select: { id: true, selectedModels: true },
+      select: { id: true, userId: true, selectedModels: true },
       orderBy: { id: "asc" },
       take: CONVERSATION_PAGE_SIZE,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -178,9 +309,26 @@ try {
         warnings.push(`${conversation.id}: ${decision.warning}`);
       }
       if (apply) {
-        await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { selectedModels: decision.value },
+        await prisma.$transaction(async (tx) => {
+          await tx.conversation.update({
+            where: { id: conversation.id },
+            data: { selectedModels: decision.value },
+          });
+          // The conversation carries the owner, so the notice can be addressed
+          // to a person rather than to a row.
+          if (conversation.userId) {
+            await tx.modelMigrationRecord.create({
+              data: {
+                userId: conversation.userId,
+                conversationId: conversation.id,
+                field: "conversation_selected_models",
+                fromModelId: FROM_MODEL_ID,
+                toModelId: TO_MODEL_ID,
+                ticket: approval.ticket,
+                actorEmail: approval.actor,
+              },
+            });
+          }
         });
       }
     }
@@ -192,6 +340,8 @@ try {
       `  AppSetting.${GUEST_DEFAULT_MODEL_KEY}: ${guestDefaultUpdated} updated` +
         (guestSetting ? "" : " (no row set; falls back to the code default)"),
       `  UserSettings.defaultModel:      ${userDefaultMatches} matched`,
+      `  UserSettings.newConversation:   ${combinationRewritten} rewritten, ` +
+        `${combinationMalformed} malformed, ${leadMismatches} lead mismatch`,
       `  Conversation.selectedModels:    ${counts.scanned} scanned, ` +
         `${counts.rewritten} rewritten, ${counts.unchanged} unchanged, ` +
         `${counts.malformed} malformed`,

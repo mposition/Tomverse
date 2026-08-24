@@ -85,6 +85,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
 
   // --- the user's data mixed with Tomverse's internals ----------------------
   {
+    domain: "modelMigrationRecord",
+    publicName: "model_changes",
+    prismaModel: "ModelMigrationRecord",
+    state: "included_filtered",
+    withheldReason:
+      "Which of their stored model settings an approved retirement moved, from what to what, and when. Held back: the operator's email and the internal ticket that authorised the run, and the lifecycle work item the run belonged to. The person is entitled to know we changed their model and what it held before, not to the staff identity behind an internal decision or to the queue row that tracked it.",
+  },
+  {
     domain: "consentRecord",
     publicName: "email_consent_history",
     prismaModel: "ConsentRecord",

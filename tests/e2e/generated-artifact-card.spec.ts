@@ -326,6 +326,168 @@ test("a failed file fails inside its own card, not the whole answer @ui-risk", a
   await expect(page.getByTestId("chat-error-auxiliary-info")).toHaveCount(0);
 });
 
+/* -------------------------------------------------------------------------- */
+/* A file the answer began and never finished                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The reported turn, as the browser receives it.
+ *
+ * Claude Haiku 4.5 wrote a short preamble, began a `create_text_file` call for
+ * an HTML page, and hit its output ceiling while it was still writing the
+ * input. The server now records that as a `turn_incomplete` artifact
+ * (lib/generatedArtifactTurnTracker.ts) rather than letting the answer end on
+ * a promise with nothing after it.
+ */
+const TRUNCATED_ANSWER = "이 자료를 바탕으로 웹페이지를 만들겠습니다:";
+const INCOMPLETE_ARTIFACT: ChatStreamArtifact = {
+  id: "art_incomplete",
+  ordinal: 0,
+  // The fallback descriptor for the text kind: the model never finished naming
+  // a format or a filename, and neither is read back off a partial input.
+  format: "txt",
+  filename: "generated.txt",
+  mediaType: "text/plain",
+  byteSize: 0,
+  status: "failed",
+  failureCode: "turn_incomplete",
+  modelId: "claude-haiku-4-5",
+};
+
+const truncatedBody = (artifacts: ChatStreamArtifact[]) =>
+  TRUNCATED_ANSWER +
+  buildChatStreamTrailerChunk({
+    searchMetadata: null,
+    completion: { status: "incomplete", incompleteReason: "length" },
+    ...(artifacts.length ? { artifacts } : {}),
+  });
+
+test("an answer cut off mid file says so on its own card @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, truncatedBody([INCOMPLETE_ARTIFACT]));
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "이 PPT를 웹페이지로 만들어줘");
+
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  await expect(inCard(page, "generated-artifact-failure")).toHaveText(
+    "파일이 완성되기 전에 답변이 끝났습니다."
+  );
+  // The turn is still an incomplete turn, and still says so. The card explains
+  // the missing file; the notice explains the truncated answer. Scoped to the
+  // first panel for the reason every locator here is: a guest conversation
+  // renders three, and the mocked answer is served to all of them.
+  await expect(
+    page.getByTestId("response-incomplete-notice").first()
+  ).toBeVisible();
+  // And the preamble that promised the file is still shown, because it is what
+  // the model actually said.
+  await expect(page.getByTestId("chat-message").last()).toContainText(
+    TRUNCATED_ANSWER
+  );
+});
+
+test("the same truncation with no file begun draws no card at all", async ({
+  page,
+}, testInfo) => {
+  // The ordinary long answer that ran out of room. Nothing was promised, so
+  // nothing is owed: the generic notice on its own is the whole of it.
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, truncatedBody([]));
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "아주 긴 설명을 써줘");
+
+  await expect(
+    page.getByTestId("response-incomplete-notice").first()
+  ).toBeVisible();
+  await expect(page.getByTestId("generated-artifact-section")).toHaveCount(0);
+  await expect(page.getByTestId("generated-artifact-pending")).toHaveCount(0);
+});
+
+test("a signed-in account can retry the file the answer never finished @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page, { selectedModels: ["claude-haiku-4-5"] });
+  // A brand-new account, so the conversation the send creates starts empty and
+  // the panel resolves deterministically.
+  await page.route("**/api/conversations", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+
+  let chatRequests = 0;
+  await page.route("**/api/chat", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    chatRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/plain; charset=utf-8",
+      headers: { "X-Request-ID": "qa-trace-incomplete" },
+      body: truncatedBody([INCOMPLETE_ARTIFACT]),
+    });
+  });
+
+  await page.goto("/chat?lang=ko");
+  await sendChatMessage(page, testInfo, "이 PPT를 웹페이지로 만들어줘");
+
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  const retry = inCard(page, "generated-artifact-retry");
+  await expect(retry).toBeVisible();
+  await expect(retry).toHaveText("파일 다시 만들기");
+  // The existing retry behaviour, unchanged: it re-sends the prompt, and it
+  // does so only when the user asks.
+  expect(chatRequests).toBe(1);
+  await retry.click();
+  await expect.poll(() => chatRequests).toBe(2);
+});
+
+test("the turn_incomplete card comes back after a reload @ui-risk", async ({
+  page,
+}) => {
+  // The row went down in the assistant message's own transaction, so nothing
+  // has to stream for the card to be here: this one comes from the
+  // conversation endpoint.
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["claude-haiku-4-5"],
+    messages: [
+      { id: "m-user", role: "user", content: "이 PPT를 웹페이지로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: TRUNCATED_ANSWER,
+        modelId: "claude-haiku-4-5",
+        status: "incomplete",
+        artifacts: [INCOMPLETE_ARTIFACT],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  await expect(inCard(page, "generated-artifact-failure")).toHaveText(
+    "파일이 완성되기 전에 답변이 끝났습니다."
+  );
+
+  await page.reload();
+  await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
+  await expect(inCard(page, "generated-artifact-failure")).toHaveText(
+    "파일이 완성되기 전에 답변이 끝났습니다."
+  );
+});
+
 test("a guest is shown a sign-in card, never a table pretending to be a file @ui-risk", async ({
   page,
 }, testInfo) => {
@@ -446,6 +608,284 @@ test("at 320px the name and the download button never overlap @ui-risk", async (
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+/**
+ * The width that actually decides the card's layout.
+ *
+ * A model panel inside a 1440px window is around 300px wide, so a card in it
+ * has to stack -- and the 320px test above cannot ask that question, because
+ * it shrinks the *window*. Constraining the artifact area alone, with the
+ * window left wide, is the regression: with the layout keyed to `sm:` the row
+ * variant applied here anyway and squeezed the text column to ~80px.
+ */
+const NARROW_PANEL_CSS = `
+  [data-testid="generated-artifact-section"] {
+    width: 320px !important;
+    max-width: 320px !important;
+  }
+`;
+
+test("a narrow panel in a wide window stacks the card @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await prepareGuestPage(page, "ko");
+  await mockChat(
+    page,
+    answerWith([
+      {
+        ...ARTIFACT,
+        filename: "2026년_분기별_매출_상세_집계_최종본_확정.xlsx",
+      },
+    ])
+  );
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
+  await expect(card(page)).toBeVisible();
+  await page.addStyleTag({ content: NARROW_PANEL_CSS });
+
+  const box = (await card(page).boundingBox())!;
+  const name = (await inCard(page, "generated-artifact-filename").boundingBox())!;
+  const button = (await inCard(page, "generated-artifact-download").boundingBox())!;
+
+  // The panel really is narrow while the window is not.
+  expect(box.width).toBeLessThanOrEqual(322);
+  expect(page.viewportSize()!.width).toBe(1440);
+
+  // Separate rows, and the name keeps a column it can be read in.
+  expect(button.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
+  expect(name.width).toBeGreaterThanOrEqual(200);
+  // The stacked layout, not a row that merely wrapped: the control takes the
+  // card's whole content width (320px less the 12px padding on each side).
+  expect(button.width).toBeGreaterThanOrEqual(box.width - 26);
+
+  // Nothing escapes the card on either side.
+  for (const element of [name, button]) {
+    expect(element.x).toBeGreaterThanOrEqual(box.x - 1);
+    expect(element.x + element.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  }
+  expect(button.height).toBeGreaterThanOrEqual(44);
+});
+
+test("a failure in a narrow panel keeps a readable sentence and its own row @ui-risk", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: [
+      { id: "m-user", role: "user", content: "엑셀로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: "파일을 만들지 못했습니다.",
+        modelId: "gpt-5-6-luna",
+        artifacts: [
+          {
+            ...ARTIFACT,
+            id: "art_failed",
+            byteSize: 0,
+            status: "failed",
+            failureCode: "generation_failed",
+            modelId: "gpt-5-6-luna",
+          },
+        ],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+  await expect(card(page)).toBeVisible();
+  await page.addStyleTag({ content: NARROW_PANEL_CSS });
+
+  const box = (await card(page).boundingBox())!;
+  const failure = (await inCard(page, "generated-artifact-failure").boundingBox())!;
+  const retry = (await inCard(page, "generated-artifact-retry").boundingBox())!;
+
+  // The description is a sentence, not a vertical ribbon of single characters.
+  expect(failure.width).toBeGreaterThanOrEqual(200);
+  expect(retry.y).toBeGreaterThanOrEqual(failure.y + failure.height - 1);
+  expect(retry.width).toBeGreaterThanOrEqual(box.width - 26);
+  expect(retry.x).toBeGreaterThanOrEqual(box.x - 1);
+  expect(retry.x + retry.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  expect(retry.height).toBeGreaterThanOrEqual(44);
+});
+
+/* -------------------------------------------------------------------------- */
+/* A failure the same turn fixed                                                */
+/* -------------------------------------------------------------------------- */
+
+/** One artifact for the recovery cases, named by the fields identity reads. */
+const recoveryArtifact = (
+  ordinal: number,
+  status: "ready" | "failed",
+  overrides: {
+    filename?: string;
+    /** The fixture's stored-conversation shape carries these two formats. */
+    format?: "xlsx" | "csv";
+    modelId?: string;
+  } = {}
+) => ({
+  ...ARTIFACT,
+  id: `art_${status}_${ordinal}`,
+  ordinal,
+  filename: "분기별_매출.xlsx",
+  byteSize: status === "ready" ? 3053 : 0,
+  status,
+  ...(status === "failed" ? { failureCode: "spec_rejected" as const } : {}),
+  modelId: "gpt-5-6-luna",
+  ...overrides,
+});
+
+const firstSection = (page: Page) =>
+  page.getByTestId("generated-artifact-section").first();
+
+test("a failure the model fixed in the same turn leaves one card @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(
+    page,
+    answerWith([
+      { ...recoveryArtifact(0, "failed"), modelId: "gemini-2-5-flash" },
+      { ...recoveryArtifact(1, "ready"), modelId: "gemini-2-5-flash" },
+    ])
+  );
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "분기별 매출을 엑셀로 만들어줘");
+
+  const cards = firstSection(page).getByTestId("generated-artifact-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "ready");
+  // No apology, and no offer to redo work that already succeeded.
+  await expect(firstSection(page).getByTestId("generated-artifact-failure")).toHaveCount(0);
+  await expect(firstSection(page).getByTestId("generated-artifact-retry")).toHaveCount(0);
+  await expect(
+    firstSection(page).getByTestId("generated-artifact-download")
+  ).toBeVisible();
+});
+
+test("the same turn shows the same one card after a reload @ui-risk", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: [
+      { id: "m-user", role: "user", content: "분기별 매출을 엑셀로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: "요청하신 Excel 파일을 만들었습니다.",
+        modelId: "gpt-5-6-luna",
+        artifacts: [recoveryArtifact(0, "failed"), recoveryArtifact(1, "ready")],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  const cards = firstSection(page).getByTestId("generated-artifact-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "ready");
+
+  // The streamed answer and the stored one are the same set of rows, so they
+  // have to reach the same cards.
+  await page.reload();
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "ready");
+});
+
+test("a failure nothing fixed keeps its card and its retry @ui-risk", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: [
+      { id: "m-user", role: "user", content: "엑셀로 만들어줘" },
+      {
+        id: "m-assistant",
+        role: "assistant",
+        content: "파일을 만들지 못했습니다.",
+        modelId: "gpt-5-6-luna",
+        artifacts: [recoveryArtifact(0, "failed")],
+      },
+    ],
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  const cards = firstSection(page).getByTestId("generated-artifact-card");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("data-artifact-status", "failed");
+  await expect(
+    firstSection(page).getByTestId("generated-artifact-retry")
+  ).toBeVisible();
+});
+
+/**
+ * The four turns the hiding rule must *not* fire on.
+ *
+ * One conversation, one panel, four answers -- each renders its own section,
+ * so a single load asks all four questions.
+ */
+const KEPT_FAILURES = [
+  {
+    name: "another file's success",
+    artifacts: [
+      recoveryArtifact(0, "failed"),
+      recoveryArtifact(1, "ready", { filename: "월별_매출.xlsx" }),
+    ],
+  },
+  {
+    name: "another format's success",
+    artifacts: [
+      recoveryArtifact(0, "failed"),
+      recoveryArtifact(1, "ready", { format: "csv", filename: "분기별_매출.csv" }),
+    ],
+  },
+  {
+    name: "another model's success",
+    artifacts: [
+      recoveryArtifact(0, "failed"),
+      recoveryArtifact(1, "ready", { modelId: "gemini-2-5-flash" }),
+    ],
+  },
+  {
+    name: "a failure that came after the success",
+    artifacts: [recoveryArtifact(0, "ready"), recoveryArtifact(1, "failed")],
+  },
+];
+
+test("only the same file, format and model resolves a failure @ui-risk", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-6-luna"],
+    messages: KEPT_FAILURES.flatMap((turn, index) => [
+      { id: `m-user-${index}`, role: "user" as const, content: `${index}번 요청` },
+      {
+        id: `m-assistant-${index}`,
+        role: "assistant" as const,
+        content: `${index}번 답변`,
+        modelId: "gpt-5-6-luna",
+        artifacts: turn.artifacts,
+      },
+    ]),
+  });
+  await page.goto("/chat?lang=ko");
+  await openRecentConversation(page);
+
+  const sections = page.getByTestId("generated-artifact-section");
+  await expect(sections).toHaveCount(KEPT_FAILURES.length);
+  for (const [index, turn] of KEPT_FAILURES.entries()) {
+    const cards = sections.nth(index).getByTestId("generated-artifact-card");
+    await expect(cards, turn.name).toHaveCount(2);
+    await expect(
+      sections.nth(index).getByTestId("generated-artifact-failure"),
+      turn.name
+    ).toBeVisible();
+  }
 });
 
 test("the download button meets the touch target and shows a focus ring @ui-risk", async ({

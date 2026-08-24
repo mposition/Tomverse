@@ -35,6 +35,26 @@ export type ChatAttachment = {
    * is self-authorising; a signed-in composer never sets this.
    */
   objectKey?: string;
+  /**
+   * What the server made of an archive: how many entries it will read and how
+   * many it left out.
+   *
+   * Runtime only, and display only. The count used to exist solely in a
+   * four-second toast, so a person who looked away never learned that two of
+   * the files they attached were not going to be read -- and later saw an
+   * answer that did not mention them, with nothing on screen to explain why.
+   * The chip carries it for as long as the file is attached.
+   *
+   * It is not sent anywhere: `lib/chatMessageSerialization.ts` is an
+   * allowlist, so this field is dropped from every request and every stored
+   * message without needing a rule of its own. The server recomputes the plan
+   * on the turn that sends the archive; this is a copy of what it already
+   * said, not an input to it.
+   */
+  archive?: {
+    includedFiles: number;
+    excludedFiles: number;
+  };
   kind: "file" | "text";
 };
 
@@ -73,6 +93,26 @@ export type Message = {
    * it could only ever be a stale claim.
    */
   memoryUsedCount?: number;
+  /**
+   * The model Auto routed this turn to, and the Router's own reason
+   * identifier.
+   *
+   * Both are read from this response's headers, and the server sets them only
+   * when the Router actually chose the model (`autoSelection.routed`). A turn
+   * that fell back to the user's own model carries neither, so a badge cannot
+   * claim a routing decision that did not happen -- the same rule
+   * `lib/autoModelSelection.ts` makes unrepresentable on the server.
+   *
+   * `routedReason` is a fixed identifier, never prose and never anything
+   * derived from what the user wrote, so the client localises it and nothing
+   * about the turn crosses the wire.
+   *
+   * Runtime-only, like `memoryUsedCount`: the serializers in
+   * lib/chatMessageSerialization.ts are allowlists, so this stays out of
+   * transcripts and storage, where it could only ever be a stale claim.
+   */
+  routedModelId?: string;
+  routedReason?: string | null;
   /**
    * docs/policy/external-conversation-import-and-memory.md §14.3: how many
    * assistant-profile knowledge excerpts this answer's prompt

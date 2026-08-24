@@ -5,10 +5,15 @@ import {
   isApprovedProviderApiKeyEnvName,
   isSafeProviderApiBaseUrl,
   normalizeApiBaseUrl,
+  NARROW_SCOPE_RECONCILIATION_MODEL_IDS,
+  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
   PROVIDER_API_CONFIGURATION,
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
   STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
   staticModelRegistryReconciliationRows,
 } from "../lib/modelRegistryShared.ts";
+import { AVAILABLE_MODELS, getModelUsageProfile } from "../lib/models.ts";
+import { resolveModelPricing } from "../lib/modelPricing.ts";
 
 test("provider registry defaults use public HTTPS endpoints and named environment keys", () => {
   for (const [provider, configuration] of Object.entries(
@@ -83,6 +88,198 @@ test("catalog reconciliation is exact-ID scoped and preserves operator-owned fie
   assert.ok(grok45);
   assert.equal("enabled" in grok45.data, false);
   assert.equal("status" in grok45.data, false);
+});
+
+// Trace 2e4327a9: claude-sonnet-5 answered nothing and reported
+// AI_EMPTY_RESPONSE.MAX_TOKENS because production still served it under the
+// 4,096-token `advanced` class fallback its row was seeded with on
+// 2026-07-17, five weeks before the 128,000 profile landed. Reconciliation is
+// what carries the profile across to a row that already exists.
+test("claude-sonnet-5 reconciles its output cap without moving credits or price", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  const sonnet = rows.find((row) => row.id === "claude-sonnet-5");
+  assert.ok(sonnet, "claude-sonnet-5 must be reconciled, or the 4,096 row stands");
+
+  // The one number this entry exists to move.
+  assert.equal(sonnet.data.maxOutputTokens, 128_000);
+  // And the one it must not: the reservation is what a turn holds against the
+  // user's credits and the provider budget, so it stays where the profile and
+  // the row already agree. Raising it here would be an entitlement change
+  // smuggled in as an incident fix (docs/policy/credit-and-cost-limits.md).
+  assert.equal(sonnet.data.reservationOutputTokens, 2_048);
+
+  // Sonnet 5 is enabled, so the lifecycle branch is not taken: an operator's
+  // incident switch is not turned back on by an application restart.
+  for (const field of [
+    "enabled",
+    "publiclyListed",
+    "status",
+    "operationalReason",
+    "userVisibleNote",
+    "replacementModelId",
+  ]) {
+    assert.equal(field in sonnet.data, false, field);
+  }
+
+  // Price stays NULL-means-inherit, and the credit weight stays the Advanced
+  // class default the row was already billing at.
+  for (const field of [
+    "inputUsdPerMillionTokens",
+    "outputUsdPerMillionTokens",
+    "cachedInputPriceMultiplier",
+    "updatedById",
+    "updatedByEmail",
+  ]) {
+    assert.equal(field in sonnet.data, false, field);
+  }
+  assert.equal(sonnet.data.creditWeight, 4);
+});
+
+// The 2026-08-23 sweep that followed trace 2e4327a9: twelve more models whose
+// rows were seeded before their pricing profile existed, so each holds a
+// FALLBACK_PRICING class cap far below the profile. They are reconciled for
+// that one column and nothing else -- see the block comment on
+// OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS for why widening them would move
+// figures that are under a hold.
+test("a cap-only entry carries the output cap and nothing else", () => {
+  const rows = staticModelRegistryReconciliationRows();
+
+  for (const modelId of OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS) {
+    const row = rows.find((entry) => entry.id === modelId);
+    assert.ok(row, modelId);
+
+    // Exactly one field. Asserted as the whole key set rather than field by
+    // field, so a future field added to the shared payload cannot leak into
+    // this scope unnoticed.
+    assert.deepEqual(Object.keys(row.data), ["maxOutputTokens"], modelId);
+
+    // And it is the profile's number, not the class fallback the row holds.
+    const model = AVAILABLE_MODELS.find((entry) => entry.id === modelId);
+    assert.ok(model, modelId);
+    assert.equal(
+      row.data.maxOutputTokens,
+      resolveModelPricing({ ...model, maxOutputTokens: undefined })
+        .maxOutputTokens,
+      modelId
+    );
+  }
+});
+
+// docs/policy/perplexity-sonar-credit-price-hold.md: source says 16,
+// production bills 20, and that document names this reconciliation list as
+// the mechanism that would move the row. Until finance/product decide, an
+// entry that wrote creditWeight would be a price change nobody approved.
+test("cap-only entries never write a credit weight or a price", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  const held = rows.find((entry) => entry.id === "perplexity/sonar");
+  assert.ok(held);
+  assert.equal("creditWeight" in held.data, false);
+  assert.equal(getModelUsageProfile({ usageClass: "research" }).credits, 20);
+
+  for (const modelId of OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS) {
+    const row = rows.find((entry) => entry.id === modelId);
+    for (const field of [
+      "creditWeight",
+      "reservationOutputTokens",
+      "inputUsdPerMillionTokens",
+      "outputUsdPerMillionTokens",
+      "cachedInputPriceMultiplier",
+      "usageClass",
+      "minimumPlan",
+      "enabled",
+      "publiclyListed",
+      "status",
+    ]) {
+      assert.equal(field in row.data, false, `${modelId}.${field}`);
+    }
+  }
+});
+
+// gpt-5-5-thinking has nothing for the cap-only scope to carry -- its cap
+// already agrees -- so it gets the mirror-image scope instead. The figure it
+// does carry is approved: docs/policy/credit-and-cost-limits.md section 4 sets
+// the output reservation at "premium 4,096, reasoning 6,144", and this model
+// is premium-reasoning, so a row holding 4,096 is holding the premium class
+// fallback rather than a decision.
+test("gpt-5-5-thinking carries its approved reservation and nothing else", () => {
+  assert.deepEqual(
+    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
+    ["gpt-5-5-thinking"]
+  );
+  assert.equal(
+    OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.includes("gpt-5-5-thinking"),
+    false,
+    "its cap agrees, so the cap-only scope would carry nothing"
+  );
+
+  const model = AVAILABLE_MODELS.find((entry) => entry.id === "gpt-5-5-thinking");
+  const pricing = resolveModelPricing({
+    ...model,
+    maxOutputTokens: undefined,
+    reservationOutputTokens: undefined,
+  });
+  // The premium class fallback and the profile agree on the cap (8,192) and
+  // disagree on the reservation (4,096 vs 6,144). If the cap ever diverges
+  // too, this model needs the other scope as well rather than silently
+  // keeping a stranded ceiling.
+  assert.equal(pricing.maxOutputTokens, 8_192);
+  assert.equal(pricing.reservationOutputTokens, 6_144);
+
+  const row = staticModelRegistryReconciliationRows().find(
+    (entry) => entry.id === "gpt-5-5-thinking"
+  );
+  assert.ok(row);
+  assert.deepEqual(Object.keys(row.data), ["reservationOutputTokens"]);
+  assert.equal(row.data.reservationOutputTokens, 6_144);
+});
+
+// The narrow scopes exist to keep money columns out of a sweep. Neither may
+// write a credit weight, a price, or a lifecycle field
+// (docs/policy/perplexity-sonar-credit-price-hold.md).
+test("neither narrow scope writes a credit weight, a price or a lifecycle field", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  for (const modelId of NARROW_SCOPE_RECONCILIATION_MODEL_IDS) {
+    const row = rows.find((entry) => entry.id === modelId);
+    assert.ok(row, modelId);
+    assert.equal(Object.keys(row.data).length, 1, modelId);
+    for (const field of [
+      "creditWeight",
+      "inputUsdPerMillionTokens",
+      "outputUsdPerMillionTokens",
+      "cachedInputPriceMultiplier",
+      "enabled",
+      "publiclyListed",
+      "status",
+      "usageClass",
+      "minimumPlan",
+    ]) {
+      assert.equal(field in row.data, false, `${modelId}.${field}`);
+    }
+  }
+});
+
+test("the two reconciliation scopes are disjoint and both reach the shared list", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  assert.deepEqual(
+    rows.map((row) => row.id).sort(),
+    [...STATIC_CATALOG_RECONCILIATION_MODEL_IDS].sort()
+  );
+
+  const capOnly = new Set(OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS);
+  assert.equal(capOnly.size, OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.length);
+  assert.equal(
+    new Set(STATIC_CATALOG_RECONCILIATION_MODEL_IDS).size,
+    STATIC_CATALOG_RECONCILIATION_MODEL_IDS.length,
+    "a model must not appear in both scopes"
+  );
+
+  // A full-scope entry still carries its whole block, so narrowing one scope
+  // did not quietly narrow the other.
+  const full = rows.find((row) => row.id === "gpt-5-6-luna");
+  assert.ok(full);
+  assert.equal(full.data.creditWeight, 1);
+  assert.equal(full.data.maxOutputTokens, 128_000);
+  assert.equal(full.data.reservationOutputTokens, 4_096);
 });
 
 test("model registry URL validation blocks SSRF-oriented endpoints", () => {

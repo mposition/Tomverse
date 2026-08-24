@@ -109,6 +109,7 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+  modelMigrationRecords ModelMigrationRecord[]
 }
 
 model UserSettings {
@@ -239,6 +240,24 @@ model Conversation {
   // by lib/imageAssetLifecycle.ts). See docs/policy/image-generation.md.
   kind String @default("chat")
 
+  /// "chat" | "review" | "studio" -- which Tomverse product this conversation
+  /// belongs to (product boundary decision record v1.2, decision 2). Allowlist
+  /// and cross-constraints live in the migration; the application copy is
+  /// lib/conversationProduct.ts.
+  ///
+  /// Orthogonal to `kind`, and deliberately not derived from it: `kind` is the
+  /// execution and permission modality that lib/conversationKindGuard.ts
+  /// enforces, `productKey` is the product task the user is performing. The
+  /// delivery plan §5 forbids reusing one as the other.
+  ///
+  /// Nullable and **without a default** during the expand phase. A `review`
+  /// default would answer "unknown" with "Review" for every writer that
+  /// omitted the column, which is the substitution the nullability exists to
+  /// prevent (20260814170000_attempt_cost_accrual). NULL means "not decided
+  /// yet", and that is the backfill's work list. NOT NULL is a later,
+  /// separate migration with its own evidence.
+  productKey String?
+
   /// Per-conversation memory mode (import/memory policy §8.1 invariant 1):
   /// "inherit" | "on" | "off" — allowlist CHECK lives in the migration.
   /// Server-stored and server-decided; "inherit" resolves to the account
@@ -297,6 +316,7 @@ model Conversation {
   shareRevokedAt DateTime?
 
   messages              Message[]
+  routingRuns           RoutingRun[]
   messageArtifacts      MessageArtifact[]
   messageAttachments    MessageAttachment[]
   comparisonReviews     ComparisonReview[]
@@ -1906,6 +1926,157 @@ model ProviderModelCatalogRun {
   @@index([status, startedAt])
 }
 
+/// What we decided to do about a model a provider listed, and how far that has
+/// got. Separate from ProviderModelCatalogEntry on purpose.
+///
+/// The catalogue entry is an observation and the monitor overwrites its
+/// `status` on every scan, so a decision recorded there is erased by the next
+/// run. This is the other half: written by discovery, changed only by a person,
+/// and never re-derived from today's scan.
+///
+/// The unique key is (provider, apiModel, action) rather than the model alone:
+/// adding a model and later retiring it are two decisions at two times, but two
+/// open "add"s for one model is a duplicate.
+model ModelLifecycleWorkItem {
+  id       String @id @default(cuid())
+  provider String
+  apiModel String
+
+  /// The mapped ModelRegistryEntry, once one exists.
+  modelId String?
+  /// The observation this came from. Not a foreign key: the catalogue row is
+  /// upserted every scan and may be swept, while the decision outlives it.
+  catalogEntryId String?
+
+  /// add | upgrade | replace | retire | monitor | no_action
+  action String
+  /// The eleven states in lib/modelLifecycleWorkItemCore.ts.
+  status String @default("discovered")
+  /// critical | high | normal
+  severity String @default("normal")
+
+  predecessorModelId String?
+  replacementModelId String?
+
+  /// The automatic suggestion, which a person may overwrite. Never a decision.
+  recommendation String?
+  /// high | medium | low, for the suggestion above.
+  confidence String?
+
+  /// Observation evidence: lifecycle strings, consecutive-miss counts, run ids.
+  evidence Json?
+  /// Facts still needed before this can be decided.
+  unknowns Json?
+  /// Named things being waited on, in the sense report-issue-backlog uses:
+  /// something the repository cannot answer by itself.
+  blockers Json?
+  /// Verifications owed before rollout, e.g. ["pricing","access","staging"].
+  /// One list rather than three states because they run in parallel.
+  pendingValidations Json?
+
+  reviewerId     String?
+  reviewerEmail  String?
+  /// approve | reject | defer
+  decision       String?
+  decisionReason String?
+  decidedAt      DateTime?
+
+  ownerEmail    String?
+  dueAt         DateTime?
+  deferredUntil DateTime?
+
+  linkedIssueUrl     String?
+  linkedPrUrl        String?
+  linkedDeploymentId String?
+
+  implementationEvidence Json?
+  validationEvidence     Json?
+
+  /// Whether users have to be told before this closes. A retirement that moves
+  /// somebody's stored model owes a notice; an addition does not.
+  communicationRequired Boolean @default(false)
+
+  firstSeenAt DateTime  @default(now())
+  completedAt DateTime?
+  closedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ModelLifecycleWorkItemEvent[]
+
+  @@unique([provider, apiModel, action])
+  @@index([status, severity, firstSeenAt])
+  @@index([ownerEmail, dueAt])
+  @@index([modelId])
+}
+
+/// Append-only history of one work item. Never updated, never deleted.
+///
+/// The item says what is true now; this says how it got there and who moved it.
+/// A queue whose decisions can be edited without a trace cannot answer "why is
+/// this model not in the catalogue", which is the question the audit could not
+/// answer for seven models.
+model ModelLifecycleWorkItemEvent {
+  id         String                 @id @default(cuid())
+  workItemId String
+  workItem   ModelLifecycleWorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  occurredAt DateTime @default(now())
+  /// Null only for the automatic creation event; every other row names a person.
+  actorEmail String?
+  fromStatus String?
+  toStatus   String
+  note       String?
+  evidence   Json?
+
+  @@index([workItemId, occurredAt])
+}
+
+/// What an approved retirement reconciliation actually changed, per user and
+/// per field. Append-only.
+///
+/// Without this a completion notice has no audience. The script reported
+/// aggregate counts to stdout and nothing else, so "we changed your default
+/// model" could only be sent to everybody or to nobody -- and both are wrong in
+/// a way that cannot be taken back once the mail has gone.
+///
+/// It is also the only thing that can answer a support question afterwards:
+/// what did this account hold before, and when did we change it.
+model ModelMigrationRecord {
+  id     String @id @default(cuid())
+  userId String
+  /// Cascades: the record exists to address a notice to this person and to
+  /// answer what their setting held before. Both questions die with the
+  /// account, so keeping the row afterwards would be keeping a user id for no
+  /// purpose. The aggregate ("this retirement moved N accounts") belongs to the
+  /// campaign, not to a row per person.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the change was to one conversation rather than to the account.
+  conversationId String?
+
+  /// The lifecycle item this ran for, when there is one.
+  workItemId String?
+
+  /// user_settings_default_model | new_conversation_model_ids
+  ///   | conversation_selected_models | app_setting_guest_default
+  field String
+
+  fromModelId String
+  toModelId   String
+
+  /// The approval the run carried: the ticket and the person who ran it.
+  ticket     String
+  actorEmail String
+
+  changedAt DateTime @default(now())
+
+  @@index([userId, changedAt])
+  @@index([fromModelId, toModelId, changedAt])
+  @@index([workItemId])
+}
+
 model AdminNotificationLog {
   id                  String    @id @default(cuid())
   channel             String
@@ -3331,6 +3502,37 @@ model RoutingRun {
   reservationId     String?
   settlementOutcome String?
 
+  /// --- product attribution (decision record v1.2 §5) ----------------------
+
+  /// Which product this run executed for, snapshotted at execution time.
+  ///
+  /// A snapshot rather than a join, because the join can be broken: a user
+  /// deleting one conversation would otherwise take that turn's product out of
+  /// the evaluation segment with it. ROUTE-01's sample and ROUTE-07's
+  /// denominator would then shrink with user behaviour rather than with
+  /// anything about routing.
+  ///
+  /// Nullable because rows written before this column existed genuinely had no
+  /// product recorded, and a guessed value would claim an attribution nobody
+  /// made. Runs after the cutover must carry one -- how that is enforced is
+  /// decided in docs/policy/adr/2026-08-22-routing-run-product-attribution.md.
+  productKey String?
+
+  /// Which conversation this run belongs to.
+  ///
+  /// `beginInstrumentedDispatch` already received this and dropped it, so a
+  /// failed run -- which never gets an `assistantMessageId` -- had no way at
+  /// all of naming its conversation, and operational lookup was traceId only.
+  ///
+  /// SetNull, not Cascade: today these rows survive a conversation deletion
+  /// because there is no FK at all, and adding a cascade would delete
+  /// evaluation data every time a user tidies up. The same pattern as
+  /// ChatCreditReservation.userId. Deleting the *account* still takes the runs
+  /// with it -- userId -> User stays Cascade, which the data-domain policy
+  /// decided and this does not change.
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
   routingAttempts RoutingAttempt[] @relation("RunAttempts")
   updatedAt       DateTime         @default(now()) @updatedAt
 
@@ -3338,6 +3540,11 @@ model RoutingRun {
   @@index([mode, createdAt])
   @@index([userId, createdAt])
   @@index([finalModelId, createdAt])
+  @@index([productKey, createdAt])
+  /// Not optional. PostgreSQL does not index a referencing column for you, and
+  /// ON DELETE SET NULL has to find the referencing rows -- without this,
+  /// deleting one conversation scans every RoutingRun.
+  @@index([conversationId])
 }
 
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in

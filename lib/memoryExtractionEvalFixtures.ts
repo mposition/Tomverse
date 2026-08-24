@@ -21,8 +21,36 @@
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
+import { BATCH_001_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch001DurableKo";
+import { BATCH_002_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch002DurableEn";
+import { BATCH_003_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch003AssistantKo";
+import { BATCH_004_ASSISTANT_EN } from "@/lib/memoryExtractionEvalAdopted/batch004AssistantEn";
+import { BATCH_005_SECRET_KO } from "@/lib/memoryExtractionEvalAdopted/batch005SecretKo";
+import { BATCH_006_SECRET_EN } from "@/lib/memoryExtractionEvalAdopted/batch006SecretEn";
+import { BATCH_007_INJECTION_KO } from "@/lib/memoryExtractionEvalAdopted/batch007InjectionKo";
+import { BATCH_008_INJECTION_EN } from "@/lib/memoryExtractionEvalAdopted/batch008InjectionEn";
+import { BATCH_009_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch009DurableKo";
+import { BATCH_010_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch010DurableEn";
+import { BATCH_011_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch011DurableKo";
+import { BATCH_012_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch012DurableEn";
+import { BATCH_013_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch013DurableKo";
+import { BATCH_014_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch014DurableEn";
+import { BATCH_015_DURABLE_KO } from "@/lib/memoryExtractionEvalAdopted/batch015DurableKo";
+import { BATCH_016_DURABLE_EN } from "@/lib/memoryExtractionEvalAdopted/batch016DurableEn";
+import { BATCH_017_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch017AssistantKo";
+import { BATCH_018_ASSISTANT_EN } from "@/lib/memoryExtractionEvalAdopted/batch018AssistantEn";
+import { BATCH_019_ASSISTANT_KO } from "@/lib/memoryExtractionEvalAdopted/batch019AssistantKo";
+import { BATCH_020_ASSISTANT_EN } from "@/lib/memoryExtractionEvalAdopted/batch020AssistantEn";
+import { BATCH_021_SECRET_KO } from "@/lib/memoryExtractionEvalAdopted/batch021SecretKo";
+import { BATCH_022_SECRET_EN } from "@/lib/memoryExtractionEvalAdopted/batch022SecretEn";
+import { BATCH_023_INJECTION_KO } from "@/lib/memoryExtractionEvalAdopted/batch023InjectionKo";
+import { BATCH_024_INJECTION_EN } from "@/lib/memoryExtractionEvalAdopted/batch024InjectionEn";
+import { BATCH_025_SECRET_KO } from "@/lib/memoryExtractionEvalAdopted/batch025SecretKo";
+import { BATCH_026_SECRET_EN } from "@/lib/memoryExtractionEvalAdopted/batch026SecretEn";
+import { BATCH_027_INJECTION_KO } from "@/lib/memoryExtractionEvalAdopted/batch027InjectionKo";
+import { BATCH_028_INJECTION_EN } from "@/lib/memoryExtractionEvalAdopted/batch028InjectionEn";
 
-export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-1";
+export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-10";
 
 /**
  * Whether this dataset is frozen for a decision-grade run (§12.2).
@@ -519,9 +547,46 @@ const injectionDirectives: MemoryEvalCase[] = [
     },
 ];
 
+/**
+ * The seed cases plus every batch a person has adopted.
+ *
+ * An adopted batch is imported from `lib/memoryExtractionEvalAdopted/`, never
+ * from `lib/memoryExtractionEvalCandidates/` -- the candidate directory is
+ * the one this file may not name, and adoption is what moves a batch across
+ * that line. `lib/memoryExtractionEvalAdopted/index.ts` keeps the registry
+ * that ties each of them back to the record it was adopted on.
+ */
 export const MEMORY_EVAL_CASES: readonly MemoryEvalCase[] = [
     ...durableFacts,
     ...assistantOnly,
     ...sensitiveSecrets,
     ...injectionDirectives,
+    ...BATCH_001_DURABLE_KO,
+    ...BATCH_002_DURABLE_EN,
+    ...BATCH_003_ASSISTANT_KO,
+    ...BATCH_004_ASSISTANT_EN,
+    ...BATCH_005_SECRET_KO,
+    ...BATCH_006_SECRET_EN,
+    ...BATCH_007_INJECTION_KO,
+    ...BATCH_008_INJECTION_EN,
+    ...BATCH_009_DURABLE_KO,
+    ...BATCH_010_DURABLE_EN,
+    ...BATCH_011_DURABLE_KO,
+    ...BATCH_012_DURABLE_EN,
+    ...BATCH_013_DURABLE_KO,
+    ...BATCH_014_DURABLE_EN,
+    ...BATCH_015_DURABLE_KO,
+    ...BATCH_016_DURABLE_EN,
+    ...BATCH_017_ASSISTANT_KO,
+    ...BATCH_018_ASSISTANT_EN,
+    ...BATCH_019_ASSISTANT_KO,
+    ...BATCH_020_ASSISTANT_EN,
+    ...BATCH_021_SECRET_KO,
+    ...BATCH_022_SECRET_EN,
+    ...BATCH_023_INJECTION_KO,
+    ...BATCH_024_INJECTION_EN,
+    ...BATCH_025_SECRET_KO,
+    ...BATCH_026_SECRET_EN,
+    ...BATCH_027_INJECTION_KO,
+    ...BATCH_028_INJECTION_EN,
 ];

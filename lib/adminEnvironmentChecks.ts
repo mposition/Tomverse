@@ -129,10 +129,12 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
       configured: isConfigured(process.env.EMAIL_UNSUBSCRIBE_KEYS),
       description:
         "Keys for unsubscribe links, as version:secret pairs. Marketing mail " +
-        "refuses to send without one. Old versions must stay listed for as " +
-        "long as mail carrying them is in the wild -- dropping a version does " +
-        "not invalidate those links, it breaks them, and a broken unsubscribe " +
-        "link's alternative is the spam button.",
+        "refuses to send without one, and /api/ready refuses the deployment " +
+        "once MARKETING_EMAIL_FROM is set -- so set this one first. Old " +
+        "versions must stay listed for as long as mail carrying them is in " +
+        "the wild: dropping a version does not invalidate those links, it " +
+        "breaks them, and a broken unsubscribe link's alternative is the spam " +
+        "button.",
     },
     {
       name: "EMAIL_SNAPSHOT_KEYS",
@@ -142,6 +144,56 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "stores, as version:secret pairs. Without it that lane refuses to " +
         "enqueue rather than storing them in the clear. Old versions must stay " +
         "listed for as long as the rows they sealed are retained.",
+    },
+    {
+      name: "EMAIL_BUSINESS_LEGAL_NAME",
+      configured: isConfigured(process.env.EMAIL_BUSINESS_LEGAL_NAME),
+      description:
+        "The sender's registered name, printed in the jurisdiction footer of " +
+        "every message. Unset means transactional mail goes out without a " +
+        "footer -- loudly, as email_jurisdiction_footer_degraded -- and " +
+        "marketing mail is refused outright, because an advertisement that " +
+        "does not say who sent it is the thing every anti-spam statute names " +
+        "first. Nothing is defaulted: a placeholder would satisfy the renderer " +
+        "and put a false statement of identity in the footer.",
+    },
+    {
+      name: "EMAIL_BUSINESS_POSTAL_ADDRESS",
+      configured: isConfigured(process.env.EMAIL_BUSINESS_POSTAL_ADDRESS),
+      description:
+        "The sender's physical address. Required by every profile's footer, " +
+        "and the one field CAN-SPAM names explicitly.",
+    },
+    {
+      name: "EMAIL_BUSINESS_CONTACT_EMAIL",
+      configured: isConfigured(process.env.EMAIL_BUSINESS_CONTACT_EMAIL),
+      description:
+        "The address a recipient can reply to about the mail itself, printed " +
+        "in the footer. Not the sending address.",
+    },
+    {
+      name: "EMAIL_BUSINESS_REGISTRATION_NUMBER",
+      configured: isConfigured(process.env.EMAIL_BUSINESS_REGISTRATION_NUMBER),
+      description:
+        "사업자등록번호. Only the KR profile's footer prints it, so it is not " +
+        "needed until mail is sent to a Korean recipient -- at which point its " +
+        "absence refuses marketing and degrades the rest.",
+    },
+    {
+      name: "EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER",
+      configured: isConfigured(
+        process.env.EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER
+      ),
+      description: "통신판매업 신고번호. KR profile only, as above.",
+    },
+    {
+      name: "EMAIL_BUSINESS_ABN",
+      configured: isConfigured(process.env.EMAIL_BUSINESS_ABN),
+      description:
+        "Australian Business Number. AU profile only; the Spam Act asks for " +
+        "accurate sender identification rather than the ABN by name, and the " +
+        "profile prints it because it is the identifier an Australian " +
+        "recipient can check.",
     },
     {
       name: "TRANSACTIONAL_EMAIL_FROM",

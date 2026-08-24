@@ -2,7 +2,7 @@ schemaVersion: 1
 
 metadata:
   status: draft
-  lastUpdated: "2026-08-05"
+  lastUpdated: "2026-08-24"
   owner: backend-ai
   validatorCommand: npm run check:context-window-register
   purpose: >-
@@ -179,7 +179,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Partial observation only. Anthropic published an input limit of 1,000,000
+      and an output limit of 128,000 on 2026-08-23
+      (npm run report:model-context-window-evidence, staging) and no combined
+      window. An input limit is not this field: it excludes the answer, and
+      adding the two is a guess about how the provider counts. What
+      contextWindowIncludesOutput should be is exactly the open question, so
+      neither number is recorded here.
 
   - modelId: "claude-haiku-4-5"
     apiModel: "claude-haiku-4-5-20251001"
@@ -195,7 +202,35 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Partial observation only. Anthropic published an input limit of 200,000
+      and an output limit of 64,000 on 2026-08-23
+      (npm run report:model-context-window-evidence, staging) and no combined
+      window. See claude-sonnet-5: the input limit is not this field.
+
+  - modelId: "gemini-3-7-flash"
+    apiModel: "gemini-3.7-flash"
+    provider: google
+    status: unverified
+    contextWindowTokens: null
+    contextWindowIncludesOutput: null
+    maxInputTokens: null
+    maxOutputTokens: null
+    aliasOrLatest: null
+    sourceUrl: null
+    sourceTitle: null
+    verifiedAt: null
+    verifiedBy: null
+    catalogueDeclaredTokens: 1048576
+    notes: >-
+      Left unverified deliberately, though a source exists. The model page at
+      ai.google.dev states an input token limit of 1,048,576 and an output token
+      limit of 65,536 as two separate figures, and does not say whether the
+      window covers input alone or input plus output. contextWindowIncludesOutput
+      has to be stated explicitly and deciding it from the shape of the table
+      would be inferring it, which is what the rules above refuse. Whoever
+      verifies this needs that one answer; the numbers themselves are on
+      https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash.
 
   - modelId: "gemini-3-6-flash"
     apiModel: "gemini-3.6-flash"
@@ -227,7 +262,11 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Partial observation only. Google published an input limit of 1,048,576
+      and an output limit of 65,536 on 2026-08-23
+      (npm run report:model-context-window-evidence, staging) and no combined
+      window. See claude-sonnet-5: the input limit is not this field.
 
   - modelId: "gemini-2-5-flash"
     apiModel: "gemini-3.5-flash-lite"
@@ -307,7 +346,11 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Provider catalog observation, not a verification: Mistral's model list
+      reported max_context_length 262,144 for mistral-small-latest on
+      2026-08-23 (npm run report:model-context-window-evidence, staging).
+      apiModel is a floating alias; see mistral-large-3.
 
   - modelId: "mistral-large-3"
     apiModel: "mistral-large-latest"
@@ -323,7 +366,13 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Provider catalog observation, not a verification: Mistral's model list
+      reported max_context_length 262,144 for mistral-large-latest on
+      2026-08-23 (npm run report:model-context-window-evidence, staging).
+      apiModel is a floating alias, so a figure read from it describes whatever
+      the alias pointed at that day -- aliasOrLatest will be true when this is
+      verified, and the verification expires sooner for it.
 
   - modelId: "mistral-medium-3-1"
     apiModel: "mistral-medium-3-5"
@@ -355,7 +404,13 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Provider catalog observation, not a verification: Moonshot's model list
+      reported context_length 262,144 on 2026-08-23
+      (npm run report:model-context-window-evidence, staging). That field is a
+      whole window rather than an input allowance, so it is the right shape for
+      contextWindowTokens -- but it carries no sourceUrl, so this row stays
+      unverified until someone confirms it against Moonshot's documentation.
 
   - modelId: "kimi-k3"
     apiModel: "kimi-k3"

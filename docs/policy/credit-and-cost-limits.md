@@ -302,6 +302,121 @@ cached multiplier는 double이라 등가 비교 대신 허용오차로 맞추고
 override**가 남아 있으면 실패합니다. 그런 override는 오늘 아무 숫자도 바꾸지
 않으면서 밑의 tier를 꺼 둡니다.
 
+### 토큰 한도 컬럼에는 그 NULL 구분이 없습니다 (2026-08-23)
+
+`ModelRegistryEntry.maxOutputTokens`와 `reservationOutputTokens`는 바로 위
+세 가격 컬럼과 **다르게** 동작합니다. 이름이 비슷하고 같은 seed가 같은 시점에
+쓰기 때문에 같은 계약일 것처럼 보이지만, 아닙니다.
+
+| | 가격 세 컬럼 | 토큰 두 컬럼 |
+|---|---|---|
+| seed가 쓰는 값 | 항상 `NULL` | `getModelBillingProfile()`이 해석한 숫자 |
+| 저장된 숫자의 뜻 | 관리자 override | 관리자 override **또는** 그때의 profile 화석 |
+| 둘을 구분하는 근거 | `NULL` 여부 | 없음 |
+
+`registryRowToModel()`은 저장된 숫자를 그대로 신뢰하고, `resolveModelPricing()`
+의 `model.maxOutputTokens ?? <profile>`이 그것을 먼저 읽으며,
+`createChatBudget()`을 지나 `app/api/chat/route.ts`가
+`streamText({ maxOutputTokens })`로 넘깁니다. **그래서 이 컬럼의 화석은 낡은
+표시 문구가 아니라 모든 답변에 걸리는 살아 있는 상한입니다.**
+
+2026-08-23에 그 상태가 발견됐습니다. Trace `2e4327a9`의 `claude-sonnet-5`
+요청이 `AI_EMPTY_RESPONSE.MAX_TOKENS`로 끝났습니다 — 입력 16,314 토큰, 허용
+출력 4,096 토큰, 그중 4,095가 reasoning, 보이는 텍스트 0, tool 호출 0.
+4,096은 `FALLBACK_PRICING.advanced`의 값이고, 행이 seed된 2026-07-17에는
+`claude-sonnet-5`에 profile이 없었습니다. 128,000을 가진 profile은
+2026-08-04에 도착해 **행이 없던 환경에만** 도달했습니다
+(`createMany({ skipDuplicates: true })`는 기존 행을 다시 보지 않고,
+`STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에도 없었습니다).
+
+규칙:
+
+- **profile의 출력 한도를 바꾸면 기존 행에는 반영되지 않습니다.** 반영하려면
+  모델을 `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에 등록합니다. 코드만 고치고
+  끝내면 소스는 새 숫자를 말하고 운영은 옛 숫자로 답합니다.
+- **`maxOutputTokens`와 `reservationOutputTokens`를 함께 움직이지 않습니다.**
+  앞의 것은 능력(capability) — 답변이 얼마나 길 수 있는가 — 이고, 뒤의 것은
+  entitlement — 한 turn이 사용자 크레딧과 provider 예산에서 얼마를 잡아 두는가
+  — 입니다. 상한을 고치는 변경이 예약을 따라 올리면 그것은 사고 대응이 아니라
+  과금 변경입니다. `reservationOutputBasis`를 `conservative_default`에서
+  옮기는 조건은 `docs/policy/default-model-luna-migration.md` 3.1에 있습니다.
+- **화석과 결정을 구분할 근거는 actor 컬럼뿐입니다.** `updatedById`/
+  `updatedByEmail`은 `PUT /api/admin/models`만 씁니다 — seed도 reconciliation도
+  쓰지 않으므로, 둘 다 비어 있는 행의 차이는 관리자 결정일 가능성이 낮습니다.
+  증거이지 증명은 아닙니다.
+
+#### reconciliation에는 두 개의 scope가 있습니다
+
+`STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에 등록한다는 것은 원래 **검토된
+메타데이터 블록 전체**(이름·apiModel·등급·`creditWeight`·capability·토큰 한도)를
+행에 쓴다는 뜻입니다. 상한 하나를 고치려고 그 전체를 쓰면 안 되는 이유가
+있습니다.
+
+**`creditWeight`가 hold 중입니다.** `perplexity/sonar`는 소스 16, production
+청구 20이고, `docs/policy/perplexity-sonar-credit-price-hold.md`는 승인 전
+어느 쪽도 바꾸지 말라고 하면서 **바로 이 목록을 그 행을 움직일 수 있는
+경로로 지목**합니다. 전체 scope로 등록하면 다음 부팅에 20이 16이 되고, 그것은
+사고 대응에 섞여 들어간 승인 없는 가격 인하입니다. docs/policy/perplexity-sonar-credit-price-hold.md §5는 다른 모델도
+같은 상태일 수 있고 production 대상 `report:model-credit-weights`만 그 범위를
+정할 수 있다고 적어 두었으므로, 이 반대는 Perplexity 두 모델만이 아니라 아래
+열두 개 전부에 적용됩니다.
+
+그래서 2026-08-23에 좁은 scope를 두었습니다 —
+`OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS`. payload는 `maxOutputTokens`
+**한 필드**입니다.
+
+| | 전체 scope | 상한 전용 | 예약 전용 |
+|---|---|---|---|
+| 쓰는 것 | 검토된 메타데이터 블록 | `maxOutputTokens` | `reservationOutputTokens` |
+| `creditWeight` | 씁니다 | **쓰지 않습니다** | **쓰지 않습니다** |
+| 가격 컬럼·lifecycle | 씁니다 | **쓰지 않습니다** | **쓰지 않습니다** |
+| 근거 | 카탈로그가 그 모두의 authority임을 사람이 확인함 | 상한은 능력 | 숫자가 §4에 확정돼 있음 |
+
+대상 열두 개는 전부 Sonnet 5와 같은 모양입니다 — profile이 생기기 전에 seed돼
+class fallback 상한(profile의 1/4 ~ 1/64)을 들고 있습니다:
+`claude-haiku-4-5`, `glm-5.2`, `kimi-k2.7-code`, `mistral-large-3`,
+`mistral-small-4`, `perplexity/sonar`, `perplexity/sonar-deep-research`,
+`perplexity/sonar-pro`, `perplexity/sonar-reasoning-pro`, `qwen3.6-flash`,
+`qwen3.7-max`, `qwen3.7-plus`.
+
+**`gpt-5-5-thinking`은 세 번째 scope입니다** —
+`RESERVATION_ONLY_RECONCILIATION_MODEL_IDS`, payload는
+`reservationOutputTokens` 한 필드. 상한은 이미 일치하므로(양쪽 8,192) 상한 전용
+scope가 옮길 것이 없고, 어긋나는 것은 예약뿐입니다(premium fallback 4,096 →
+6,144).
+
+예약을 옮기는 것은 보통 이 저장소가 일괄로 하지 않는 일입니다. 여기서 허용되는
+근거는 하나입니다 — **그 숫자가 이미 이 문서 §4에 확정돼 있습니다**: "출력
+예약은 모델별 p90입니다. premium 4,096, reasoning 모델 6,144." 이 모델은
+`premium-reasoning`이므로 승인된 값이 6,144이고, 4,096을 든 행은 결정이 아니라
+premium class fallback 화석입니다. **이미 내려진 결정을 행에 옮기는 것이지 새
+결정을 내리는 것이 아닙니다.**
+
+p90 basis 일반에 대한 허가로 읽지 않습니다.
+docs/policy/default-model-luna-migration.md 3.1은 모델을 `p90_output_tokens`로
+**옮기는** 경우를 규율하며 9개 조건과 새 `pricingVersion`을 요구합니다. 이
+모델의 profile은 §4 숫자가 정해질 때 이미 그 basis를 갖고 있었고 이 변경은
+그것을 건드리지 않습니다. `conservative_default`인 모델은 여기 들어오지
+않습니다.
+
+**바뀌는 것과 바뀌지 않는 것.** 사용자에게 청구되는 크레딧은
+`creditWeight`에서 나오므로 **변하지 않습니다.** 바뀌는 것은 turn이 앞단에서
+잡아 두는 내부 USD로, 같은 단가에서 예약분이 1.5배가 되고 정산에서 환급됩니다.
+그래서 경계에서 `CREDIT_COST_ALLOWANCE_INSUFFICIENT`나 operational guardrail에
+더 일찍 걸릴 수 있습니다 — 과소 예약을 줄이는 방향이며, 정책이 경고하는 반대
+방향(과소 예약)이 아닙니다.
+
+`reservationOutputTokens`를 좁은 scope에서도 빼는 이유는, 열두 개 모두 오늘은
+class fallback과 값이 같아 write가 no-op이지만 **profile이 움직이거나 관리자가
+손으로 넣는 순간 조용히 진짜 write가 되기 때문**입니다.
+
+확인: `npm run report:model-token-limits`(읽기 전용). 모델별로 catalogue와
+저장 행의 두 컬럼을 나란히 놓고, 행이 reconciliation 대상인지와 actor 유무를
+함께 보고합니다. **gate가 아니라 보고입니다** — 행이 카탈로그와 다른 것은
+`PUT /api/admin/models`가 만들라고 있는 상태이고, 예약 토큰 차이는 위 규칙
+때문에 일괄 수정 대상이 아닙니다. `DATABASE_URL`이 없으면 비교할 대상이 없다고
+밝히고 카탈로그 숫자만 출력합니다.
+
 ### 처리 경로: `service_tier`와 `/v1/models`
 
 `MODEL_PRICING`의 모든 항목은 `processingTier: "standard"`입니다. 이것은 선호가

@@ -25,9 +25,10 @@ const meta = (overrides = {}) => ({
     ...overrides,
 });
 
-test("a message with no search metadata gets no badge", () => {
-    // Historical rows only: normalizeWebSearchExecution always returns an
-    // object, so every message the current code writes carries one.
+test("a finished message with no search metadata gets no badge", () => {
+    // Historical rows: normalizeWebSearchExecution always returns an object,
+    // so every message the current code *persists* carries one. A turn still
+    // running is the other way to have none, and is covered below.
     for (const usageClass of ["standard", "research", "deep-research", undefined]) {
         assert.deepEqual(
             decideWebSearchBadge({ searchMetadata: null, usageClass }),
@@ -37,6 +38,49 @@ test("a message with no search metadata gets no badge", () => {
         assert.deepEqual(
             decideWebSearchBadge({ searchMetadata: undefined, usageClass }),
             { shown: false }
+        );
+    }
+});
+
+// The regression this pair exists to stop: `searchMetadata` arrives in the
+// stream trailer, so it is absent for the whole of a running turn. Reading
+// that absence as "old row" hid the Deep Research badge for the entire visible
+// run -- the job is asynchronous, so "running" is where the panel sits until
+// the research finishes. It was caught by one golden of the four that show the
+// state; the other three moved fewer pixels than the diff threshold allows.
+test("a Deep Research turn keeps its badge while it is still running", () => {
+    assert.deepEqual(
+        decideWebSearchBadge({
+            searchMetadata: null,
+            usageClass: "deep-research",
+            generating: true,
+        }),
+        { shown: true, status: "deep-research" }
+    );
+    assert.deepEqual(
+        decideWebSearchBadge({
+            searchMetadata: undefined,
+            usageClass: "deep-research",
+            generating: true,
+        }),
+        { shown: true, status: "deep-research" }
+    );
+});
+
+test("running is not a way back in for the guess the provider fallback made", () => {
+    // Only the mode is reachable without a record, and only a Deep Research
+    // model has one to report. Everything else stays silent until the trailer
+    // says what actually happened -- in particular nothing here may claim a
+    // search was executed, which is the assertion this module removed.
+    for (const usageClass of ["standard", "research", undefined]) {
+        assert.deepEqual(
+            decideWebSearchBadge({
+                searchMetadata: null,
+                usageClass,
+                generating: true,
+            }),
+            { shown: false },
+            `usageClass ${usageClass} must stay silent while running`
         );
     }
 });
@@ -85,7 +129,7 @@ test("a failure outranks execution, so a partial search is never reported as don
     );
 });
 
-test("a Deep Research model reports its mode, but only with a record to attach it to", () => {
+test("a Deep Research model reports its mode, but not on a row with no record", () => {
     assert.deepEqual(
         decideWebSearchBadge({
             searchMetadata: meta({ requested: false, executed: false }),
@@ -93,8 +137,18 @@ test("a Deep Research model reports its mode, but only with a record to attach i
         }),
         { shown: true, status: "deep-research" }
     );
+    // Finished, and nothing was recorded: a row from before the field, where
+    // the label would describe the model rather than this answer.
     assert.deepEqual(
         decideWebSearchBadge({ searchMetadata: null, usageClass: "deep-research" }),
+        { shown: false }
+    );
+    assert.deepEqual(
+        decideWebSearchBadge({
+            searchMetadata: null,
+            usageClass: "deep-research",
+            generating: false,
+        }),
         { shown: false }
     );
 });

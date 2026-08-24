@@ -13,7 +13,24 @@
 // the catalogue's own numbers and says so. That run cannot find anything.
 
 import { AVAILABLE_MODELS, getModelUsageProfile } from "../lib/models.ts";
-import { STATIC_CATALOG_RECONCILIATION_MODEL_IDS } from "../lib/modelRegistryShared.ts";
+import {
+  NARROW_SCOPE_RECONCILIATION_MODEL_IDS,
+  STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
+} from "../lib/modelRegistryShared.ts";
+
+// Only the models whose reconciliation actually writes `creditWeight`.
+//
+// Being in STATIC_CATALOG_RECONCILIATION_MODEL_IDS no longer implies that:
+// the narrow scopes carry one token column each and nothing else, precisely so
+// they cannot move a credit weight
+// (docs/policy/perplexity-sonar-credit-price-hold.md). Handing the whole list
+// to this report would file `perplexity/sonar` under "corrected on the next
+// boot" -- which is false, and is the opposite of what that hold needs this
+// report to say when it uses it to scope itself
+// (docs/policy/perplexity-sonar-credit-price-hold.md §5).
+const narrowScope = new Set(NARROW_SCOPE_RECONCILIATION_MODEL_IDS);
+const CREDIT_WEIGHT_RECONCILED_MODEL_IDS =
+  STATIC_CATALOG_RECONCILIATION_MODEL_IDS.filter((id) => !narrowScope.has(id));
 import {
   compareCreditWeights,
   creditWeightFindings,
@@ -69,7 +86,7 @@ if (databaseUrl) {
 const entries = compareCreditWeights({
   catalogueModels,
   storedRows,
-  reconciledModelIds: STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
+  reconciledModelIds: CREDIT_WEIGHT_RECONCILED_MODEL_IDS,
 });
 const findings = creditWeightFindings(entries);
 

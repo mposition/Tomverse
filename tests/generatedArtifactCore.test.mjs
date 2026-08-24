@@ -17,6 +17,7 @@ import {
   requireArtifactFormat,
   sanitizeArtifactFilename,
   SUPPORTED_ARTIFACT_FORMATS,
+  visibleGeneratedArtifacts,
 } from "../lib/generatedArtifactCore.ts";
 
 // docs/policy/generated-artifacts.md sections 3, 4, 5 and 6.
@@ -354,4 +355,147 @@ test("sizes read as sizes", () => {
   assert.equal(formatArtifactSize(512), "512 B");
   assert.equal(formatArtifactSize(3053), "3.0 KB");
   assert.equal(formatArtifactSize(1024 * 1024 * 2), "2.0 MB");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Which cards a turn shows -- docs/policy/generated-artifacts.md section 9      */
+/* -------------------------------------------------------------------------- */
+
+const shown = (artifacts, options) =>
+  visibleGeneratedArtifacts(artifacts, options).map(
+    (artifact) => `${artifact.ordinal}:${artifact.status}`
+  );
+
+/** One artifact, named by the fields the identity rule actually reads. */
+const artifactAt = (ordinal, status, overrides = {}) => ({
+  id: `art_${ordinal}`,
+  ordinal,
+  format: "xlsx",
+  filename: "report.xlsx",
+  mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  byteSize: status === "ready" ? 3053 : 0,
+  status,
+  ...(status === "ready" ? {} : { failureCode: "spec_rejected" }),
+  modelId: "gpt-5-6-luna",
+  ...overrides,
+});
+
+test("a failure the same turn fixed does not keep its card", () => {
+  assert.deepEqual(
+    shown([artifactAt(0, "failed"), artifactAt(1, "ready")]),
+    ["1:ready"]
+  );
+});
+
+test("every earlier failure for one file goes, not just the last one", () => {
+  assert.deepEqual(
+    shown([artifactAt(0, "failed"), artifactAt(1, "failed"), artifactAt(2, "ready")]),
+    ["2:ready"]
+  );
+});
+
+test("the order the artifacts arrive in does not change what is shown", () => {
+  // The streamed trailer and a reloaded conversation are the same set; only
+  // `ordinal` decides which of two artifacts came second.
+  const streamed = [artifactAt(0, "failed"), artifactAt(1, "ready")];
+  assert.deepEqual(shown([...streamed].reverse()), ["1:ready"]);
+});
+
+test("a failure nothing resolved keeps its card and its retry", () => {
+  assert.deepEqual(shown([artifactAt(0, "failed")]), ["0:failed"]);
+  assert.deepEqual(
+    shown([artifactAt(0, "failed"), artifactAt(1, "failed")]),
+    ["0:failed", "1:failed"]
+  );
+});
+
+test("a failure after the success is the newest news and stays", () => {
+  assert.deepEqual(
+    shown([artifactAt(0, "ready"), artifactAt(1, "failed")]),
+    ["0:ready", "1:failed"]
+  );
+});
+
+test("only a matching file resolves a failure", () => {
+  // A different name.
+  assert.deepEqual(
+    shown([artifactAt(0, "failed"), artifactAt(1, "ready", { filename: "summary.xlsx" })]),
+    ["0:failed", "1:ready"]
+  );
+  // A different format under the same name.
+  assert.deepEqual(
+    shown([
+      artifactAt(0, "failed"),
+      artifactAt(1, "ready", { format: "csv", filename: "report.csv" }),
+    ]),
+    ["0:failed", "1:ready"]
+  );
+  // Another model's success.
+  assert.deepEqual(
+    shown([artifactAt(0, "failed"), artifactAt(1, "ready", { modelId: "claude-sonnet-4-5" })]),
+    ["0:failed", "1:ready"]
+  );
+});
+
+test("a name that differs only in case is the same file", () => {
+  assert.deepEqual(
+    shown([artifactAt(0, "failed"), artifactAt(1, "ready", { filename: "Report.XLSX" })]),
+    ["1:ready"]
+  );
+});
+
+test("the panel's model stands in for an artifact that names none", () => {
+  const unattributed = (ordinal, status) => {
+    const artifact = artifactAt(ordinal, status);
+    delete artifact.modelId;
+    return artifact;
+  };
+  // Both fall back to the panel, so they are one file.
+  assert.deepEqual(
+    shown([unattributed(0, "failed"), unattributed(1, "ready")], {
+      fallbackModelId: "gpt-5-6-luna",
+    }),
+    ["1:ready"]
+  );
+  // The failure names no model and the success names another one: with the
+  // panel's model standing in for the failure, these are two different files.
+  assert.deepEqual(
+    shown([unattributed(0, "failed"), artifactAt(1, "ready", { modelId: "claude-sonnet-4-5" })], {
+      fallbackModelId: "gpt-5-6-luna",
+    }),
+    ["0:failed", "1:ready"]
+  );
+  // With no panel model either, an unattributed pair is still one file.
+  assert.deepEqual(shown([unattributed(0, "failed"), unattributed(1, "ready")]), [
+    "1:ready",
+  ]);
+});
+
+test("a sign-in card is never hidden by a later success", () => {
+  // `blocked` asks the visitor to sign in; another artifact succeeding does
+  // not answer that, and the guest still cannot download this one.
+  assert.deepEqual(
+    shown([
+      artifactAt(0, "blocked", { failureCode: "sign_in_required" }),
+      artifactAt(1, "ready"),
+    ]),
+    ["0:blocked", "1:ready"]
+  );
+});
+
+test("two successes with one name are two versions, not one card", () => {
+  assert.deepEqual(
+    shown([artifactAt(0, "ready"), artifactAt(1, "ready")]),
+    ["0:ready", "1:ready"]
+  );
+});
+
+test("the input is not mutated and an all-ready turn is returned intact", () => {
+  const artifacts = [artifactAt(0, "ready"), artifactAt(1, "failed", { filename: "other.xlsx" })];
+  const frozen = JSON.stringify(artifacts);
+  const result = visibleGeneratedArtifacts(artifacts);
+  assert.notEqual(result, artifacts);
+  assert.equal(result.length, 2);
+  assert.equal(JSON.stringify(artifacts), frozen);
+  assert.deepEqual(visibleGeneratedArtifacts([]), []);
 });

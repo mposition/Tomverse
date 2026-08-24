@@ -23,6 +23,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { Message, type ChatAttachment } from "@/components/chat/types";
+import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -288,7 +289,7 @@ export function ChatMessageList({
   const isProgrammaticScrollRef = useRef(false);
   const programmaticScrollRafRef = useRef<number | null>(null);
   const [scrollMode, setScrollModeState] = useState<ChatScrollMode>("following");
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -527,9 +528,22 @@ export function ChatMessageList({
                 className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
               >
                 {!isUser && modelInfo && (
-                  <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
+                  // Every control on this row states something the reader
+                  // cannot recover from anywhere else -- the run mode, that
+                  // the turn is live, how to stop it -- so none of them may
+                  // wrap or shrink their own label. Only the model name
+                  // gives way, and it keeps the full string in `title`
+                  // beside a logo that already names the provider.
+                  <div
+                    data-testid="assistant-message-header"
+                    className="mb-1.5 ml-1 flex max-w-full select-none items-center gap-2"
+                  >
                     <ModelLogo model={modelInfo} size="sm" />
-                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                    <span
+                      data-testid="assistant-message-model-name"
+                      title={modelInfo.name}
+                      className="min-w-0 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
+                    >
                       {modelInfo.name}
                     </span>
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
@@ -540,6 +554,12 @@ export function ChatMessageList({
                       const decision = decideWebSearchBadge({
                         searchMetadata: msg.searchMetadata,
                         usageClass: modelInfo.usageClass,
+                        // The trailer that carries `searchMetadata` arrives at
+                        // the end of the stream, so a running turn has none.
+                        // Without this the Deep Research badge is absent for
+                        // the whole run -- which, the job being asynchronous,
+                        // is the state the panel is in the entire time.
+                        generating: isActivelyGenerating,
                       });
                       if (!decision.shown) return null;
                       const status = decision.status;
@@ -574,14 +594,14 @@ export function ChatMessageList({
                           data-search-status={status}
                           title={detail}
                           aria-label={detail ? `${label} — ${detail}` : undefined}
-                          className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          className="shrink-0 whitespace-nowrap rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                         >
                           {label}
                         </span>
                       );
                     })()}
                     {isActivelyGenerating && msg.content && (
-                      <span className="text-[11px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                      <span className="shrink-0 whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
                         {t("chat.generatingStatus")}
                       </span>
                     )}
@@ -592,7 +612,7 @@ export function ChatMessageList({
                         onClick={onStopGenerating}
                         title={t("chat.stopThisResponse")}
                         aria-label={t("chat.stopThisResponse")}
-                        className="ml-auto flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+                        className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
                       >
                         <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
                         {t("chat.stop")}
@@ -842,6 +862,38 @@ export function ChatMessageList({
                           </p>
                         );
                       })()}
+                    {/*
+                      Which model answered, on a turn Auto routed
+                      (docs/ui-contracts/auto-model-selection.md).
+
+                      Only on a routed turn: `routedModelId` is set from a
+                      response header the server writes when the Router chose
+                      the model and omits when it did not, so a fallback turn
+                      has nothing here rather than a badge claiming a decision
+                      nobody made.
+
+                      The display name, not the id -- the id is for logs. A
+                      model that has since left the catalogue falls back to its
+                      id rather than rendering an empty badge, because "this
+                      answer came from something we no longer list" is still
+                      the truth about the answer.
+
+                      It is a statement about this answer, so it sits with the
+                      answer. It touches neither the mobile composer contract
+                      nor the comparison rail's.
+                    */}
+                    {!isUser && msg.routedModelId && (
+                      <p className="mt-3">
+                        <AutoRoutedByBadge
+                          routed
+                          modelName={
+                            getModel(msg.routedModelId)?.name ?? msg.routedModelId
+                          }
+                          reason={msg.routedReason ?? null}
+                          language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
+                        />
+                      </p>
+                    )}
                     {/*
                       The files this answer produced
                       (docs/policy/generated-artifacts.md section 9).

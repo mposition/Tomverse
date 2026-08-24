@@ -195,10 +195,11 @@ export function judgeManifestVersion(raw: unknown): ManifestVersionVerdict {
 /**
  * A profile reduced to what the format is supposed to carry.
  *
- * Storage identity is not in here on purpose. A re-import issues new file ids
- * -- §14 of the release-C policy is explicit that re-uploading the same bytes
- * is a different file -- so a comparison keyed on ids answers "is this the
- * same row", when the question is "did the format lose anything".
+ * Storage identity is not in here on purpose. A re-import issues new file
+ * ids -- docs/policy/external-conversation-import-and-memory.md §14 is
+ * explicit that re-uploading the same bytes is a different file -- so a
+ * comparison keyed on ids answers "is this the same row", when the question
+ * is "did the format lose anything".
  */
 export type PortableProfile = {
     name: string;
