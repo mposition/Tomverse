@@ -106,7 +106,21 @@ export type AiModel = {
     status: ModelStatus;
     /** Private operational explanation shown only to administrators. */
     operationalReason?: string;
-    /** Safe status explanation that may be shown to end users. */
+    /**
+     * An operator's own sentence about this model, shown to end users as
+     * written.
+     *
+     * Only for something the registry cannot derive. A plain retirement is
+     * derived from `replacementModelId` and rendered in the reader's language
+     * (lib/modelRetirementNotice.ts, EM-15); writing it here instead ships one
+     * English sentence to every locale, which is what this field used to do for
+     * nine of the ten models that had one.
+     *
+     * What survives here is the case no field holds -- Codestral leaving one
+     * *product* while the model itself still exists. That is worth an
+     * operator's words, and it cannot be translated, so it is not pretended
+     * otherwise.
+     */
     userVisibleNote?: string;
     /**
      * Whether, and how strongly, this model reasons -- a catalogue fact, not
@@ -199,7 +213,7 @@ export const AVAILABLE_MODELS = [
 
     { id: "gemini-3-7-flash", name: "Gemini 3.7 Flash", apiModel: "gemini-3.7-flash", provider: "google", icon: "✨", bestFor: "Complex coding, agentic workflows and multi-step execution", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-6-flash", name: "Gemini 3.6 Flash", apiModel: "gemini-3.6-flash", provider: "google", icon: "✨", bestFor: "Fast agentic, coding, and multimodal analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
-    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", bestFor: "Legacy fast multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse consolidated the overlapping Flash catalogue on Gemini 3.6 Flash on 2026-08-03.", userVisibleNote: "This model was retired and replaced by Gemini 3.6 Flash.", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", bestFor: "Legacy fast multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse consolidated the overlapping Flash catalogue on Gemini 3.6 Flash on 2026-08-03.", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", bestFor: "Detailed multimodal analysis and complex documents", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-flash", name: "Gemini 3.5 Flash-Lite", apiModel: "gemini-3.5-flash-lite", provider: "google", icon: "✨", bestFor: "Low-latency document parsing and high-volume everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
@@ -241,14 +255,14 @@ export const AVAILABLE_MODELS = [
     // points at llama-3-3. A replacement is only ever offered, never applied
     // on the user's behalf, so it cannot hand out a tier the user has not
     // paid for.
-    { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Legacy fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse retired Llama 3.1 on 2026-08-01 ahead of Groq's scheduled 2026-08-16 shutdown.", userVisibleNote: "This model was retired and replaced by DeepSeek-V4 Flash." },
+    { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Legacy fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse retired Llama 3.1 on 2026-08-01 ahead of Groq's scheduled 2026-08-16 shutdown." },
     // Was already retired ahead of the rest: Groq shut it down on 2026-07-17,
     // the catalog monitor first recorded it missing on 2026-07-21 and
     // escalated it to likely_deprecated after seven consecutive absences, and
     // live calls returned HTTP 404. Its replacement is Gemini 3.6 Flash, the
     // closest active model that keeps native image input.
-    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Groq shut down Llama 4 Scout on 2026-07-17.", userVisibleNote: "This model was retired and replaced by Gemini 3.6 Flash.", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
-    { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Legacy open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "mistral-medium-3-1", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse retired Llama 3.3 on 2026-08-01 ahead of Groq's scheduled 2026-08-16 shutdown.", userVisibleNote: "This model was retired and replaced by Mistral Medium 3.5." },
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Groq shut down Llama 4 Scout on 2026-07-17.", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
+    { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Legacy open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "mistral-medium-3-1", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse retired Llama 3.3 on 2026-08-01 ahead of Groq's scheduled 2026-08-16 shutdown." },
 
     // xAI is consolidated on Grok 4.5 -- it is the only publicly listed Grok.
     // This is a Tomverse catalogue decision, not a claim that xAI switched
@@ -265,11 +279,11 @@ export const AVAILABLE_MODELS = [
     // Every retired Grok points at grok-4-5, which is Pro-only. Callers must
     // offer it, not force it, and must fall back to an accessible active
     // model for users without Pro.
-    { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Legacy current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Absent from 12 consecutive successful xAI catalog scans as of 2026-08-01.", userVisibleNote: "This model was retired and replaced by Grok 4.5." },
+    { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Legacy current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Absent from 12 consecutive successful xAI catalog scans as of 2026-08-01." },
     { id: "grok-4-5", name: "Grok 4.5", apiModel: "grok-4.5", provider: "xai", icon: "𝕏", bestFor: "Deep reasoning on complex technical and analytical tasks", minimumPlan: "Pro", usageClass: "premium-reasoning", creditWeight: 8, enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 500_000, inputCapabilities: { image: true, nativePdf: false } },
-    { id: "grok-4-3", name: "Grok 4.3", apiModel: "grok-4.3", provider: "xai", icon: "𝕏", bestFor: "Legacy fast general analysis with strong instruction following", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse consolidated xAI on Grok 4.5 on 2026-08-01.", userVisibleNote: "This model was retired and replaced by Grok 4.5.", reasoning: "none", contextWindowTokens: 1_000_000, inputCapabilities: { image: true, nativePdf: false } },
-    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", bestFor: "Legacy general analysis with a direct conversational style", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "xAI retired Grok 3 on 2026-05-15; absent from 12 consecutive successful catalog scans as of 2026-08-01.", userVisibleNote: "This model was retired and replaced by Grok 4.5." },
-    { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", bestFor: "Legacy fast, concise everyday answers", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Absent from 12 consecutive successful xAI catalog scans as of 2026-08-01.", userVisibleNote: "This model was retired and replaced by Grok 4.5." },
+    { id: "grok-4-3", name: "Grok 4.3", apiModel: "grok-4.3", provider: "xai", icon: "𝕏", bestFor: "Legacy fast general analysis with strong instruction following", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse consolidated xAI on Grok 4.5 on 2026-08-01.", reasoning: "none", contextWindowTokens: 1_000_000, inputCapabilities: { image: true, nativePdf: false } },
+    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", bestFor: "Legacy general analysis with a direct conversational style", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "xAI retired Grok 3 on 2026-05-15; absent from 12 consecutive successful catalog scans as of 2026-08-01." },
+    { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", bestFor: "Legacy fast, concise everyday answers", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Absent from 12 consecutive successful xAI catalog scans as of 2026-08-01." },
     { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", bestFor: "Fast coding help and cost-efficient technical reasoning", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_000_000 },
     { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", bestFor: "Long-context technical analysis, agents, and coding", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000 },
     // Retired: DeepSeek stopped serving `deepseek-reasoner`. Confirmed by this
@@ -277,7 +291,7 @@ export const AVAILABLE_MODELS = [
     // 2026-08-01 report recorded it absent from 12 consecutive *successful*
     // DeepSeek catalog scans. Replacement is deepseek-v4-flash, the same
     // provider's remaining general model.
-    { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", bestFor: "Legacy math, code, and explicit reasoning", minimumPlan: "Free", usageClass: "reasoning", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "DeepSeek retired deepseek-reasoner on 2026-07-24.", userVisibleNote: "This model was retired and replaced by DeepSeek-V4 Flash.", reasoning: "high" },
+    { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", bestFor: "Legacy math, code, and explicit reasoning", minimumPlan: "Free", usageClass: "reasoning", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "DeepSeek retired deepseek-reasoner on 2026-07-24.", reasoning: "high" },
     { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", bestFor: "Efficient multilingual writing and everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
     { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", bestFor: "High-quality multilingual analysis and long-form work", minimumPlan: "Pro", usageClass: "premium", creditWeight: 4, enabled: true, status: "enabled" },
     { id: "mistral-medium-3-1", name: "Mistral Medium 3.5", apiModel: "mistral-medium-3-5", provider: "mistral", icon: "M", bestFor: "Multimodal agentic work, coding, and multilingual analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 262_144, inputCapabilities: { image: true, nativePdf: false } },
