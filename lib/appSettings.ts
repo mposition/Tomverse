@@ -39,7 +39,10 @@ import {
 } from "@/lib/models";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
-import { invalidatePublicSnapshot } from "@/lib/publicSnapshotCache";
+import {
+  invalidatePublicSnapshot,
+  readPublicSnapshot,
+} from "@/lib/publicSnapshotCache";
 
 export type PublicAppSettings = {
   guestDefaultModelId: string;
@@ -198,6 +201,34 @@ export async function isImageGenerationEnabled(): Promise<boolean> {
   return imageGenerationEnabledFromValue(row?.value);
 }
 
+/**
+ * The same answer, from the shared snapshot.
+ *
+ * Every chat turn needs this flag now: it decides what the image-capability
+ * system block tells the model (lib/imageCapabilityPrompt.ts). Reading the row
+ * per turn would add a database round trip to the hottest path in the app for
+ * a value that changes when an operator flips a toggle.
+ *
+ * Its own snapshot key rather than a field on `PublicAppSettings`, for two
+ * reasons: that object is what the unauthenticated `/api/app-settings`
+ * serves, and this is beta rollout state; and the flag is **default-off**
+ * while every flag in that object is default-on. The interpretation stays
+ * `imageGenerationEnabledFromValue` here -- reusing `enabledFromValue` would
+ * turn a missing row into an enabled feature, which is the precise direction
+ * this flag exists to refuse.
+ *
+ * `setImageGenerationEnabled` invalidates the key, so an admin toggle is not
+ * announced for another TTL after it is turned off.
+ */
+export async function isImageGenerationEnabledCached(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const { value } = await readPublicSnapshot(
+    "image-generation-flag",
+    isImageGenerationEnabled
+  );
+  return value;
+}
+
 // The admin write path. "true"/"false" are the only stored values; a missing
 // row and "false" are equally off (imageGenerationEnabledFromValue), so
 // disabling never needs a delete.
@@ -207,6 +238,11 @@ export async function setImageGenerationEnabled(enabled: boolean) {
     update: { value: enabled ? "true" : "false" },
     create: { key: IMAGE_GENERATION_FLAG_KEY, value: enabled ? "true" : "false" },
   });
+  // Same reason `updateGuestDefaultModel` invalidates its snapshot: chat turns
+  // read this flag through `isImageGenerationEnabledCached`, so without this an
+  // operator who turns image generation off keeps having it announced to models
+  // -- and users pointed at it -- for the rest of the TTL.
+  invalidatePublicSnapshot("image-generation-flag");
 }
 
 export class ImageGenerationDisabledError extends Error {

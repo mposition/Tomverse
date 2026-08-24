@@ -104,6 +104,15 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import { draftSuggestionKey, suggestsWebSearchInComposer } from "@/lib/webSearchSuggestion";
+import {
+  allowsImageHandoffReshow,
+  classifyImageIntent,
+  imageIntentDraftKey,
+  offersImageHandoffChip,
+  type ImageIntentClass,
+} from "@/lib/imageIntentSignals";
+import { normalizeComposerImageIntentInput } from "@/lib/imageIntentInput";
+import { ImageIntentHandoffChip } from "@/components/chat/ImageIntentHandoffChip";
 import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
@@ -814,6 +823,24 @@ export function ChatInput({
     string | null
   >(null);
   const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
+  /*
+    The image-request handoff chip's own state (entry point 5 of
+    docs/ui-contracts/image-generation-workspace.md).
+
+    `isComposingDraft` exists because this chip changes the composer's height.
+    The web-search suggestion above can afford to appear mid-composition; a row
+    that grows while a Korean syllable is being assembled moves the input under
+    the cursor, which the mobile composer contract treats as an input accident.
+    So classification is suspended between compositionstart and compositionend
+    and resumes one debounce later.
+  */
+  const [isComposingDraft, setIsComposingDraft] = useState(false);
+  const [settledDraft, setSettledDraft] = useState("");
+  const [dismissedImageIntent, setDismissedImageIntent] = useState<{
+    key: string;
+    intentClass: ImageIntentClass;
+  } | null>(null);
+  const [imageIntentReshownOnce, setImageIntentReshownOnce] = useState(false);
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
@@ -1218,6 +1245,106 @@ export function ChatInput({
     trackedWebSearchSuggestionKeyRef.current = webSearchSuggestionKey;
     trackProductEvent("web_search_suggestion_shown", selectedModels.length, {});
   }, [showWebSearchSuggestion, webSearchSuggestionKey, selectedModels.length]);
+
+  /*
+    The image-request handoff chip.
+
+    Offered only for unmistakable raster generation: a text-dense infographic,
+    an edit of an attached image and a question about one are all classified
+    here too, and all three deliberately get no chip. Sending them to a
+    text-to-image workspace would be a wrong answer rather than a shortcut --
+    see docs/policy/image-generation.md §13.
+
+    The classifier is shared with the server's image-capability system block
+    (lib/imageIntentSignals.ts). Two dictionaries would let the chip appear on
+    turns the block says nothing about.
+  */
+  useEffect(() => {
+    if (isComposingDraft) return;
+    // Same debounce shape as the rest of this composer's derived state: the
+    // verdict follows the settled draft, not every keystroke.
+    const timer = setTimeout(() => setSettledDraft(value), 150);
+    return () => clearTimeout(timer);
+  }, [value, isComposingDraft]);
+
+  const imageIntentClass = useMemo(
+    () =>
+      classifyImageIntent(
+        normalizeComposerImageIntentInput({
+          text: settledDraft,
+          attachments,
+        })
+      ),
+    [settledDraft, attachments]
+  );
+  const imageIntentKey = imageIntentDraftKey(settledDraft);
+  const imageIntentOffered =
+    Boolean(onStartImageDraft || imageGenerationLock) &&
+    !isComposingDraft &&
+    settledDraft.trim().length > 0 &&
+    offersImageHandoffChip(imageIntentClass);
+  /*
+    A dismissal belongs to the draft it was made on: once the draft is sent or
+    cleared the question is new, so the suppression and its single re-show
+    budget stop applying. Derived rather than reset in an effect -- an effect
+    that calls setState on every empty draft is a cascading render, and the
+    stale value is unreachable while the draft is empty anyway.
+  */
+  const imageIntentDraftIsEmpty = value.trim().length === 0;
+  const activeImageIntentDismissal = imageIntentDraftIsEmpty
+    ? null
+    : dismissedImageIntent;
+  const imageIntentDismissed = Boolean(
+    activeImageIntentDismissal &&
+      !(
+        !imageIntentReshownOnce &&
+        allowsImageHandoffReshow({
+          dismissedKey: activeImageIntentDismissal.key,
+          currentKey: imageIntentKey,
+          dismissedIntent: activeImageIntentDismissal.intentClass,
+          currentIntent: imageIntentClass,
+        })
+      )
+  );
+  const showImageIntentSuggestion = imageIntentOffered && !imageIntentDismissed;
+  const trackedImageIntentKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showImageIntentSuggestion) {
+      // An emptied composer is a new question, so the same draft typed again
+      // is a new offer rather than a repeat. A ref, not state: this is
+      // bookkeeping for an external call, not something the render reads.
+      if (imageIntentDraftIsEmpty) trackedImageIntentKeyRef.current = null;
+      return;
+    }
+    if (trackedImageIntentKeyRef.current === imageIntentKey) return;
+    trackedImageIntentKeyRef.current = imageIntentKey;
+    trackProductEvent("image_intent_suggestion_shown", selectedModels.length, {
+      image_intent_class: imageIntentClass,
+      image_intent_lock: imageGenerationLock ?? "none",
+    });
+  }, [
+    showImageIntentSuggestion,
+    imageIntentDraftIsEmpty,
+    imageIntentKey,
+    imageIntentClass,
+    imageGenerationLock,
+    selectedModels.length,
+  ]);
+  const dismissImageIntentSuggestion = (accepted: boolean) => {
+    if (activeImageIntentDismissal) setImageIntentReshownOnce(true);
+    else if (imageIntentReshownOnce) setImageIntentReshownOnce(false);
+    setDismissedImageIntent({ key: imageIntentKey, intentClass: imageIntentClass });
+    trackProductEvent(
+      accepted
+        ? "image_intent_suggestion_accepted"
+        : "image_intent_suggestion_dismissed",
+      selectedModels.length,
+      {
+        image_intent_class: imageIntentClass,
+        image_intent_lock: imageGenerationLock ?? "none",
+      }
+    );
+  };
   // Model-picker-only counterpart to the message-content-driven
   // contextualSuggestion above: nudges toward one complementary model based
   // on what kind of thinking the *currently selected* models are missing,
@@ -2729,6 +2856,23 @@ export function ChatInput({
                 </div>
               </div>
             )}
+          {showImageIntentSuggestion && (
+            <ImageIntentHandoffChip
+              lock={imageGenerationLock}
+              onAccept={() => {
+                dismissImageIntentSuggestion(true);
+                if (imageGenerationLock) {
+                  onLockedImageGenerationClick?.(imageGenerationLock);
+                  return;
+                }
+                // The same handoff the tools menu performs: the composer's
+                // text becomes the image prompt, no server row is created,
+                // and cancelling restores this draft.
+                onStartImageDraft?.(value);
+              }}
+              onDismiss={() => dismissImageIntentSuggestion(false)}
+            />
+          )}
           {showWebSearchSuggestion && (
             <div
               data-testid="web-search-auto-suggestion"
@@ -3093,6 +3237,14 @@ export function ChatInput({
             onChange(e.target.value);
           }}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => setIsComposingDraft(true)}
+          onCompositionEnd={(e) => {
+            setIsComposingDraft(false);
+            // The committed syllable is in the element, not yet in `value` on
+            // every engine, so the settled draft is taken from the event's own
+            // target rather than waiting a render.
+            setSettledDraft(e.currentTarget.value);
+          }}
           onPaste={handlePaste}
           aria-label={placeholderText}
           placeholder={placeholderText}

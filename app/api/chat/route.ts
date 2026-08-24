@@ -81,11 +81,7 @@ import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
-import {
-    planGeneratedArtifactTool,
-    ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
-    ARTIFACT_TOOL_DEFINITION_TOKENS,
-} from "@/lib/generatedArtifactToolPolicy";
+import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
 import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
@@ -209,7 +205,11 @@ import {
     featureNotIncludedResponse,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
-import { getOperationalFeatureFlags } from "@/lib/appSettings";
+import {
+    getOperationalFeatureFlags,
+    isImageGenerationEnabledCached,
+} from "@/lib/appSettings";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
     messageAttachmentReferenceSchema,
@@ -1909,26 +1909,46 @@ async function handleChatPost(
           is checked elsewhere.
         */
         const isDeepResearchTurn = modelConfig.usageClass === "deep-research";
-        const artifactToolPlan = isDeepResearchTurn
-            ? null
-            : planGeneratedArtifactTool({
-                  modelId: modelConfig.id,
-                  provider: modelConfig.provider,
-                  isAuthenticated: Boolean(session?.user?.id),
-                  canPersist: Boolean(
-                      session?.user?.id && conversationId && assistantMessageId
-                  ),
-                  nativeSearchEnabled,
-                  // Only OpenAI's tool can be forced, and
-                  // `buildWebSearchToolConfig` forces it whenever it is
-                  // enabled. Read from the capability rather than from the
-                  // provider name so the two cannot drift.
-                  nativeSearchForced:
-                      nativeSearchEnabled &&
-                      webSearchCapability.canForceExecution,
-                  conversationKind: "chat",
-                  turnAttachments: turnAttachmentDescriptors,
-              });
+        /*
+          The image-capability block rides in the same object, for the reason
+          the paragraph above gives about pricing: both blocks are input, both
+          are decided before the reservation, and `/api/chat/preflight` has to
+          quote the same two. One builder is what keeps the quote, the
+          reservation and the request from disagreeing -- see
+          lib/chatTurnSystemBlocks.ts.
+        */
+        // Cached rather than a per-turn row read (isImageGenerationEnabledCached),
+        // and skipped entirely on a deep-research turn, which carries no
+        // capability blocks for it to decide.
+        const imageGenerationFlagEnabled = isDeepResearchTurn
+            ? false
+            : await isImageGenerationEnabledCached();
+        const turnSystemBlocks = buildChatTurnSystemBlocks({
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            isDeepResearchTurn,
+            isAuthenticated: Boolean(session?.user?.id),
+            canPersist: Boolean(
+                session?.user?.id && conversationId && assistantMessageId
+            ),
+            nativeSearchEnabled,
+            // Only OpenAI's tool can be forced, and
+            // `buildWebSearchToolConfig` forces it whenever it is enabled.
+            // Read from the capability rather than from the provider name so
+            // the two cannot drift.
+            nativeSearchForced:
+                nativeSearchEnabled && webSearchCapability.canForceExecution,
+            turnAttachments: turnAttachmentDescriptors,
+            promptText:
+                typeof latestMessage?.content === "string"
+                    ? latestMessage.content
+                    : "",
+            imageGenerationFlagEnabled,
+            planAllowsImageGeneration: Boolean(
+                accountPlan && planAllowsImageGeneration(accountPlan.tier)
+            ),
+        });
+        const artifactToolPlan = turnSystemBlocks.artifactPlan;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
@@ -1936,27 +1956,18 @@ async function handleChatPost(
         const formattedMessages: ModelMessage[] = contextSystemPrompt
             ? [{ role: "system", content: contextSystemPrompt }]
             : [];
-        if (artifactToolPlan) {
-            formattedMessages.push({
-                role: "system",
-                content: artifactToolPlan.systemPrompt,
-            });
-            // Priced like any other input. The tool *definition* is a separate
-            // cost the provider adds when the schema is sent, and it is a
-            // build-time constant rather than a per-request tokenisation --
-            // see ARTIFACT_TOOL_DEFINITION_TOKENS.
-            const artifactPromptTokens =
-                estimateTextTokens(artifactToolPlan.systemPrompt) +
-                (artifactToolPlan.registerTool
-                    ? ARTIFACT_TOOL_DEFINITION_TOKENS
-                    : 0) +
-                // The batch tool's schema is only sent on a turn that carries
-                // a Word template, so it is priced only there.
-                (artifactToolPlan.registerDocumentBatch
-                    ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
-                    : 0);
-            estimatedInputTokens += artifactPromptTokens;
-            inputEstimate.addTokens(artifactPromptTokens);
+        for (const block of turnSystemBlocks.systemMessages) {
+            formattedMessages.push(block);
+        }
+        // Priced like any other input, and counted by the same builder that
+        // produced the blocks so preflight cannot arrive at a different
+        // number. The tool *definitions* are a separate cost the provider adds
+        // when the schema is sent, and they are build-time constants rather
+        // than a per-request tokenisation -- see
+        // ARTIFACT_TOOL_DEFINITION_TOKENS.
+        if (turnSystemBlocks.promptTokens > 0) {
+            estimatedInputTokens += turnSystemBlocks.promptTokens;
+            inputEstimate.addTokens(turnSystemBlocks.promptTokens);
         }
         for (const msg of messages) {
             if (msg.role === "assistant") {
