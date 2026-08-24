@@ -460,6 +460,34 @@ wizard의 inventory · 형식 감지 · secret 탐지 · 위험 경고 · 필드
 3. C3(정책 문서가 flag 순서에 대해 남겨 둔 결정)이 해소됨.
 4. `docs/ops/assistant-package-import-staging-checklist.md`의 **차단 구획이
    전부 실행되고 서명됨.** 차단 아닌 구획은 `미기록`으로 남겨도 됩니다.
+5. **감사 가능한 Admin 제어 경로가 구현되고, 그 경로로 켠 성공 감사 로그가
+   확인됨.** 아래 §12.2.1.
+
+### 12.2.1 production 활성화는 감사 가능한 제어로만 합니다
+
+오늘 이 flag에는 애플리케이션 writer가 없습니다. 그것은 빠뜨린 것이 아니라
+`tests/appSettingWriters.test.mjs`에 읽기 전용으로 등록된 의도이고, 그래서
+staging 검증 회차는 SQL로 켭니다. **staging에서는 그것으로 충분하지만
+production에서는 아닙니다** — SQL로 켠 활성화는 누가 언제 무엇을 왜 바꿨는지를
+남기지 않고, 그 기록이 없으면 rollback도 근거 없이 일어납니다.
+
+그러므로 production 활성화 전에 다음이 함께 들어옵니다. 기존 일괄 설정 PATCH에
+field 하나를 더하는 것은 이 요구를 만족하지 않습니다 — 일괄 PATCH는 무엇이
+바뀌었는지를 말하지 않습니다.
+
+- `setAssistantPackageImportEnabled()` 서버 함수 하나. 켜기와 rollback이 **같은
+  경로**를 씁니다. rollback만 SQL로 하면 끈 기록이 없습니다.
+- `ops:write` 권한과 **최근 관리자 재인증**.
+- `AdminAuditLog` 한 행: **변경 전·후 값, 실행자, 시각, rollout 근거.**
+- writer를 추가하는 같은 변경에서 `READ_ONLY_KEYS` 예외를 제거하고 테스트를
+  갱신합니다. 예외를 남긴 채 writer를 만들면 두 문서가 서로 다른 말을 합니다.
+
+활성화 순서는 **제어 배포 → 그 제어로 켜기 → 성공 감사 로그 확인**입니다. 로그를
+확인하기 전까지는 켜진 것으로 보고하지 않습니다.
+
+staging 체크리스트의 §G-1이 이 조건을 가리킵니다. 그 항목이 staging 회차에서
+`n/a`인 것은 이 조건이 면제됐다는 뜻이 **아니라**, 판정 시점이 production
+활성화로 옮겨졌다는 뜻입니다.
 
 ### 12.3 rollback은 진입점을 지우는 것이지 데이터를 지우는 것이 아닙니다
 

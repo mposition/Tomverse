@@ -56,15 +56,18 @@ const READ_ONLY_KEYS = {
   },
   ASSISTANT_PACKAGE_IMPORT_FLAG_KEY: {
     reason:
-      "docs/policy/assistant-package-import.md §12.2 lists four things that " +
+      "docs/policy/assistant-package-import.md §12.2 lists five things that " +
       "have to be true before package import may be turned on, in order, and " +
-      "two of them are not: the validating migration for " +
-      "`extractedCharacters` is not deployed, so the figure the quota check " +
-      "reads has not been surveyed, and the staging checklist has no signed " +
-      "run. A toggle would be that procedure's last step without its first " +
-      "ones. The flag exists ahead of the control on purpose -- enabling it " +
-      "later is then a settings change against a reviewed path -- and the " +
-      "control lands with the rollout, not before it.",
+      "the staging checklist still has no signed run. A toggle would be that " +
+      "procedure's last step without its first ones. The flag exists ahead of " +
+      "the control on purpose -- staging turns it on with SQL, which is " +
+      "enough there and is not enough in production -- and the control lands " +
+      "with the rollout, not before it. When it lands it is the dedicated, " +
+      "audited path of §12.2.1 (`setAssistantPackageImportEnabled()`, " +
+      "`ops:write` plus recent re-authentication, an `AdminAuditLog` row " +
+      "carrying before/after values, actor, time and rationale, the same path " +
+      "for rollback), not one more field on the bulk settings PATCH, and that " +
+      "change removes this entry.",
   },
 };
 
