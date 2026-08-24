@@ -170,10 +170,11 @@ PACKAGES.push({
         },
     ],
     expect: [
-        "**4건**이 발견되어야 합니다 — `aws-access-key-id`, `github-token`, `anthropic-key`, `google-api-key`.",
+        "**4건**이 발견되어야 합니다 — `aws-access-key-id`, `github-token`, `anthropic-key`, `google-api-key`. **규칙 id는 화면에 없습니다**(아래 참조). 화면에서 세는 것은 개수와 위치입니다.",
+        "화면에 뜨는 네 줄의 위치는 `instructions`, `instructions`, `knowledge:config.md`, `knowledge:config.md` — 앞의 두 건이 지시문, 뒤의 두 건이 문서입니다. 같은 위치가 두 번 나오는 것이 정상입니다.",
         "지식 후보는 **1개**(`references/config.md`)입니다. 자격증명이 들어 있어도 문서는 문서로 제안되며, 막는 것은 waive 하지 않은 finding입니다.",
         "심어 둔 값은 전부 **지어낸 것**이며 어떤 계정에도 속한 적이 없습니다.",
-        "화면에는 규칙 이름·위치·digest만 보이고 **일치한 원문은 보이지 않아야** 합니다.",
+        "화면에는 **위치 하나**만 보이고 **일치한 원문은 보이지 않아야** 합니다. 규칙 id·offset·매치의 SHA-256은 finding 안에 있지만 화면에 그리지 않습니다 — `docs/policy/assistant-package-import.md` §A5의 `approvedDigest` 결속용 데이터입니다.",
         "4건을 전부 waive 해야 다음 단계로 갑니다. 3건만 waive 하면 막혀야 합니다.",
         "**서버 로그와 오류 응답에 위 문자열이 없어야 합니다** — 로그를 직접 열어 확인합니다.",
     ],

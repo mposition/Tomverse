@@ -20,8 +20,13 @@
 상태입니다. 실행 결과는 `assistant-package-import-staging-verification-records/`
 에 **날짜와 전체 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-24c` — 항목이 바뀌면 이 값을 올리고, 실행
+- **template revision**: `2026-08-24d` — 항목이 바뀌면 이 값을 올리고, 실행
   기록은 자기가 어느 revision으로 실행됐는지 적습니다.
+
+  `2026-08-24c` → `2026-08-24d`: §C-1·C-2가 화면에 "규칙 이름·위치·digest"가
+  보인다고 적었지만, wizard는 발견마다 **위치 하나**만 그립니다. 규칙 id와
+  digest는 `docs/policy/assistant-package-import.md` §A5의 override 결속용
+  데이터이지 표시 대상이 아닙니다.
 
   `2026-08-24b` → `2026-08-24c`: §B-6이 "이 기능의 요청이 하나도 없다"고
   적었지만, Slice 7이 단계마다 `POST /api/analytics/events`를 보냅니다. 그것이
@@ -223,10 +228,15 @@ flag가 꺼진 상태에서 먼저 봅니다. 켜고 나면 다시 만들기 어
 
 시료: `P2-planted-credentials.zip`
 
-- [ ] 심어 둔 자격증명 **전부**가 발견된다 (정답지가 개수와 규칙 id를 적어
-      두었습니다)
-- [ ] 화면 어디에도 **일치한 원문이 보이지 않는다.** 규칙 이름·위치·digest만
-      보인다
+- [ ] 심어 둔 자격증명 **전부**가 발견된다. 화면에서 셀 수 있는 것은 **개수와
+      위치**입니다 — 3단계 "내용"의 경고 구획에 발견마다 한 줄, 그리고 "아직
+      판단하지 않은 값이 N개 있습니다." 정답지가 개수·규칙 id·위치를 적어
+      두었지만 **규칙 id는 화면에 없으므로** 개수와 위치로 대조합니다
+- [ ] 화면 어디에도 **일치한 원문이 보이지 않는다.** 각 줄이 내는 것은 **위치
+      하나**입니다(`instructions`, `knowledge:config.md`). 규칙 id·offset·
+      매치의 SHA-256은 finding 안에 있지만 화면에는 그리지 않습니다 — 그것들은
+      `docs/policy/assistant-package-import.md` §A5의 `approvedDigest` 결속용이지 표시용이 아닙니다. 화면에
+      규칙 이름이나 digest가 없다는 이유로 `fail`로 적지 않습니다
 - [ ] 하나도 waive 하지 않으면 **다음 단계로 갈 수 없다**
 - [ ] 하나만 waive 하면 나머지 때문에 여전히 막힌다
 - [ ] 전부 waive 한 뒤 7단계로 넘어간다
