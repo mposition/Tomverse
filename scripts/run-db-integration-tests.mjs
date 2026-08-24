@@ -207,6 +207,10 @@ run(
     "tests/integration/campaign-audience.db.test.ts",
     "tests/integration/campaign-scheduling.db.test.ts",
     "tests/integration/campaign-attestations.db.test.ts",
+    // Two callers ensuring the same template at the same moment. Both races it
+    // covers are lost or won by the database's own unique indexes, so a single
+    // process proves nothing about either.
+    "tests/integration/email-template-registry-race.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.

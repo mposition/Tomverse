@@ -40,7 +40,8 @@ export type AdminNavBadgeKey =
   | "providers"
   | "automation"
   | "alerts"
-  | "modelLifecycle";
+  | "modelLifecycle"
+  | "emailCampaigns";
 
 export type AdminNavTab = {
   id: string;
@@ -363,6 +364,40 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "email-campaigns",
+    label: "Email campaigns",
+    href: "/admin/email-campaigns",
+    description:
+      "Campaign drafts, what each one is waiting on, and the waves that are due",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "emailCampaigns",
+    aliases: [
+      "campaign",
+      "fan-out",
+      "fanout",
+      "wave",
+      "reminder",
+      "retirement notice",
+      "bulk email",
+      "announcement",
+      "attestation",
+      "approve campaign",
+    ],
+    tabs: [
+      {
+        id: "campaigns",
+        label: "Campaigns",
+        description: "Every campaign, its status, and what still blocks its send",
+      },
+      {
+        id: "schedule",
+        label: "Schedule",
+        description: "Waves by the time they are due, overdue ones first",
+      },
+    ],
+  },
+  {
     id: "email-delivery",
     label: "Email delivery",
     href: "/admin/email-delivery",
@@ -546,6 +581,15 @@ const ADMIN_DETAIL_ROUTES = [
     parentLabel: "Users",
     parentHref: "/admin/users",
     group: "Customers" as const,
+  },
+  {
+    pattern: /^\/admin\/email-campaigns\/[^/]+$/,
+    label: "Campaign detail",
+    description:
+      "The copy this campaign sends, who has attested to what, and whether it may go out",
+    parentLabel: "Email campaigns",
+    parentHref: "/admin/email-campaigns",
+    group: "Operations" as const,
   },
   {
     pattern: /^\/admin\/providers\/[^/]+$/,
