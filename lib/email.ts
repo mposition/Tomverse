@@ -5,7 +5,10 @@ import type {
   ProviderSendResult,
   RenderedMessage,
 } from "@/lib/emailProviderPortCore";
-import type { SendingStream } from "@/lib/emailSendingIdentityCore";
+import type {
+  SenderRole,
+  SendingStream,
+} from "@/lib/emailSendingIdentityCore";
 
 /**
  * What the lanes call to send one message.
@@ -26,6 +29,16 @@ type SendEmailInput = {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Who the recipient sees this as being from. Required, never defaulted.
+   *
+   * Every caller here already knows the answer -- a login code is `security`,
+   * a refund decision is `billing` -- and a default would let the next one not
+   * know. A wrong role is not a failed send: it arrives, from a sender the
+   * recipient may have filtered somewhere else
+   * (docs/policy/email-notifications.md §14.1a).
+   */
+  senderRole: SenderRole;
   /** See `SendOptions.idempotencyKey` in lib/emailProviderPortCore.ts. */
   idempotencyKey?: string;
 };
@@ -66,6 +79,7 @@ export async function deliverEmailOnce(
   };
   return emailProvider().send(message, {
     stream: input.stream ?? "transactional",
+    senderRole: input.senderRole,
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
   });
@@ -86,6 +100,8 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
       JSON.stringify({
         event: "transactional_email_skipped",
         reason: "recipient missing",
+        stream: "transactional",
+        senderRole: input.senderRole,
         subject: input.subject,
       })
     );
@@ -100,6 +116,8 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
         JSON.stringify({
           event: "transactional_email_skipped",
           reason: "no provider API key for the transactional stream",
+          stream: "transactional",
+          senderRole: input.senderRole,
           to: input.to,
           subject: input.subject,
         })
@@ -128,6 +146,12 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
       event: "transactional_email_sent",
       provider: "resend",
       id: result.providerMessageId,
+      // Both axes, on every line. "Which address did this send from" is the
+      // question nobody could answer during the 2026-08-21 cutover, and with
+      // six senders on one domain the address alone no longer answers "and was
+      // that the right one" (docs/ops/email-sending-domains.md §1.2).
+      stream: "transactional",
+      senderRole: result.senderRole,
       to: input.to,
       subject: input.subject,
       from: result.from,

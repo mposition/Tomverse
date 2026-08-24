@@ -488,6 +488,7 @@ export const ko = {
         artifactTypeCode: "{ext} 소스 파일",
         artifactTypeArchive: "ZIP 압축 파일",
         artifactDownload: "다운로드",
+        artifactPreviewAlt: "{filename} 미리보기",
         artifactReadyLabel: "{filename} 다운로드, {type}, {size}",
         artifactFailedLabel: "{type} {filename}을(를) 만들지 못했습니다",
         artifactBlockedLabel: "{type}을(를) 만들려면 로그인하세요",

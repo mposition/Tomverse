@@ -482,6 +482,7 @@ export const zh = {
         artifactTypeCode: "{ext} 源文件",
         artifactTypeArchive: "ZIP 压缩包",
         artifactDownload: "下载",
+        artifactPreviewAlt: "{filename} 预览",
         artifactReadyLabel: "下载 {filename}，{type}，{size}",
         artifactFailedLabel: "无法创建 {type} {filename}",
         artifactBlockedLabel: "登录后可创建 {type}",

@@ -15,6 +15,11 @@ import { buildModelLaunchEmail } from "@/lib/modelLaunchEmail";
 import type { ModelLaunchPayload } from "@/lib/modelLaunchEmail";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
+import {
+  senderRoleAllowedOnStream,
+  streamForClassification,
+  type SenderRole,
+} from "@/lib/emailSendingIdentityCore";
 
 /**
  * Every message this system can send, and what kind of message each one is.
@@ -44,6 +49,22 @@ export type RenderedEmail = { subject: string; html: string; text: string };
 export type EmailTemplateDefinition<Payload> = {
   key: string;
   classification: EmailClassification;
+  /**
+   * Who the recipient sees this message as being from.
+   *
+   * A property of the message, exactly like `classification` above and for the
+   * same reason: a caller that could pass its own would eventually send a
+   * refund decision as the security sender. It also makes the queue correct for
+   * free -- the drain re-reads the definition by template key on every attempt,
+   * so a retry three hours later resolves the same role as the first send
+   * rather than one recomputed from whatever the retry knows
+   * (docs/policy/email-notifications.md §14.1a).
+   *
+   * The two axes are checked against each other in `templateDefinitionProblems`
+   * below: only `marketing` may sit on a marketing classification, and only the
+   * transactional roles on the rest.
+   */
+  senderRole: SenderRole;
   /**
    * Which EmailPreference gates this. Absent for transactional and legal, and
    * the database insists on that: giving a login code a purpose would imply it
@@ -133,6 +154,7 @@ export const ADMIN_PLAN_CHANGED_TEMPLATE = "admin_plan_changed";
 const definitions: AnyDefinition[] = [
   {
     key: AUTH_LOGIN_CODE_TEMPLATE,
+    senderRole: "security",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -142,6 +164,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: ACCOUNT_WELCOME_TEMPLATE,
+    senderRole: "general",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -151,6 +174,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    senderRole: "security",
     // Legal rather than transactional: it is the notice that an account and
     // everything in it is about to be destroyed, and it has to reach someone
     // who has switched off everything switchable.
@@ -163,6 +187,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: ACCOUNT_RESTORED_TEMPLATE,
+    senderRole: "security",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -172,6 +197,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: MODEL_LAUNCH_TEMPLATE,
+    senderRole: "marketing",
     // A product announcement to people nothing has happened to. That is
     // marketing, whatever else it is about, and the alternative -- calling it
     // `service` so it reaches an audience that never opted in -- is the failure
@@ -195,6 +221,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE,
+    senderRole: "operations",
     // Transactional, and the recipient is an operator rather than a customer:
     // there is no preference that gates it and no unsubscribe link, because the
     // person who receives it is on the address precisely to be interrupted.
@@ -222,6 +249,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: BILLING_WELCOME_TEMPLATE,
+    senderRole: "billing",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -238,6 +266,7 @@ const definitions: AnyDefinition[] = [
   // carries an unsubscribe link (docs/policy/email-notifications.md §3.2).
   {
     key: FOUNDING_TESTER_PASS_STARTED_TEMPLATE,
+    senderRole: "billing",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -247,6 +276,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: FOUNDING_TESTER_PASS_REMINDER_TEMPLATE,
+    senderRole: "billing",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -256,6 +286,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: FOUNDING_TESTER_PASS_ENDED_TEMPLATE,
+    senderRole: "billing",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -265,6 +296,7 @@ const definitions: AnyDefinition[] = [
   },
   {
     key: ADMIN_PLAN_CHANGED_TEMPLATE,
+    senderRole: "billing",
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
@@ -297,7 +329,23 @@ export const emailTemplateDefinition = (key: string): AnyDefinition => {
  */
 export const templateDefinitionProblems = (definition: AnyDefinition) => {
   const problems: string[] = [];
-  const { key, classification, purpose, requiresUnsubscribe } = definition;
+  const { key, classification, purpose, requiresUnsubscribe, senderRole } =
+    definition;
+
+  if (!senderRole) {
+    problems.push(
+      `${key}: names no sender role. Every message says who it is from, and ` +
+        "the value it would take by omission is whoever the general identity is."
+    );
+  } else if (
+    !senderRoleAllowedOnStream(streamForClassification(classification), senderRole)
+  ) {
+    problems.push(
+      `${key}: is ${classification} mail sent as the "${senderRole}" sender, which ` +
+        "belongs to the other stream. Refused rather than sent from the other " +
+        "stream's domain (docs/policy/email-notifications.md §14.1a)."
+    );
+  }
 
   if (classification === "marketing" && !requiresUnsubscribe) {
     problems.push(`${key}: marketing mail must carry an unsubscribe link.`);

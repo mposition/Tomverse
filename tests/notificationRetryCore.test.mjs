@@ -418,7 +418,10 @@ test("every transactional email sender has a reviewed failure policy", () => {
   )
     .split("\n")
     .filter(Boolean)
-    .filter((path) => path !== "lib/email.ts");
+    .filter((path) => path !== "lib/email.ts")
+    // Names the entry point in prose, to describe the check that finds callers
+    // of it that name no sender role. It sends nothing.
+    .filter((path) => path !== "lib/emailSendingIdentityCore.ts");
 
   const unclassified = senders.filter((path) => !(path in CLASSIFIED));
   assert.deepEqual(

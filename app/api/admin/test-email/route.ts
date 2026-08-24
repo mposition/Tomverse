@@ -41,6 +41,12 @@ export async function POST(req: Request) {
 
     const result = await sendTransactionalEmail({
       to: session.user.email,
+      // `general` on purpose, and it is the point of this button: it is the
+      // identity `TRANSACTIONAL_EMAIL_FROM` configures directly, and every
+      // other role derives its domain from it. A test sent as `operations`
+      // would prove the derived address works and say nothing about the one it
+      // was derived from (docs/policy/email-notifications.md §14.1a).
+      senderRole: "general",
       subject: "Tomverse test email",
       text: [
         "This is a Tomverse transactional email test.",

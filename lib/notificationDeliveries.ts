@@ -14,6 +14,7 @@ import {
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import type { FeedbackLifecycleStage } from "@/lib/feedbackLifecycleCore";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import type { SenderRole } from "@/lib/emailSendingIdentityCore";
 import {
   NOTIFICATION_DELIVERY_STATUS,
   classifyNotificationError,
@@ -61,6 +62,33 @@ export const NOTIFICATION_KIND = {
 
 export type NotificationKind =
   (typeof NOTIFICATION_KIND)[keyof typeof NOTIFICATION_KIND];
+
+/**
+ * Who each notification is from.
+ *
+ * Keyed by `kind`, which is stored on the queue row, so the inline first
+ * attempt and every retry after it resolve the same sender -- the role is never
+ * recomputed from anything that could have changed in between
+ * (docs/policy/email-notifications.md §14.1a).
+ *
+ * The split is what the recipient is: `support_feedback` goes to the team about
+ * somebody else's report, so it is an operations alert; the three lifecycle
+ * notices go to the person who filed it, so they are support; and a refund
+ * decision is money, so it is billing and belongs beside the receipts in the
+ * recipient's mailbox.
+ *
+ * Typed as a total record, so a kind added to `NOTIFICATION_KIND` without a
+ * sender fails the build rather than picking one up by omission.
+ */
+export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
+  [NOTIFICATION_KIND.supportFeedback]: "operations",
+  [NOTIFICATION_KIND.refundRequestReceived]: "billing",
+  [NOTIFICATION_KIND.refundRequestApproved]: "billing",
+  [NOTIFICATION_KIND.refundRequestRejected]: "billing",
+  [NOTIFICATION_KIND.feedbackUserReceived]: "support",
+  [NOTIFICATION_KIND.feedbackUserReviewing]: "support",
+  [NOTIFICATION_KIND.feedbackUserCompleted]: "support",
+};
 
 /** Which submitter-facing kind announces each lifecycle stage. */
 export const FEEDBACK_USER_NOTIFICATION_KIND: Record<
@@ -312,8 +340,17 @@ export async function attemptNotificationDelivery({
   if (!message) return { kind: "unsendable", reason: "source_missing" };
 
   try {
+    const senderRole = NOTIFICATION_SENDER_ROLE[kind as NotificationKind];
+    if (!senderRole) {
+      // A kind with no sender is a kind this module does not know how to send.
+      // Refused rather than sent as the general identity: an unknown message
+      // going out under whichever sender is the default is precisely what the
+      // role axis exists to stop.
+      return { kind: "unsendable", reason: "sender_role_unknown" };
+    }
     const result = await sendTransactionalEmail({
       ...message,
+      senderRole,
       idempotencyKey: `notification-delivery:${deliveryId}`,
     });
     if (result.skipped) return { kind: "not_configured" };

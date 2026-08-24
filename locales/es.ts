@@ -446,6 +446,7 @@ export const es = {
         artifactTypeCode: "Archivo fuente {ext}",
         artifactTypeArchive: "Archivo ZIP",
         artifactDownload: "Descargar",
+        artifactPreviewAlt: "Vista previa de {filename}",
         artifactReadyLabel: "Descargar {filename}, {type}, {size}",
         artifactFailedLabel: "No se pudo crear {type} {filename}",
         artifactBlockedLabel: "Inicia sesión para crear un {type}",

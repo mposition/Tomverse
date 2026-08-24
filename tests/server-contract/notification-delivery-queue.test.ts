@@ -55,6 +55,7 @@ type SendAttempt = {
   to: string;
   subject: string;
   text: string;
+  senderRole?: string;
   idempotencyKey?: string;
 };
 
@@ -242,6 +243,7 @@ async function loadModules() {
             to: input.to,
             subject: input.subject,
             text: input.text,
+            senderRole: input.senderRole,
             idempotencyKey: input.idempotencyKey,
           });
           if (outcome === "ok") return { sent: true, skipped: false, id: "1" };
@@ -378,6 +380,11 @@ test("a later drain delivers what the first attempt could not", async () => {
   // delivery as far as the provider is concerned.
   assert.equal(world.sends[1].idempotencyKey, world.sends[0].idempotencyKey);
   assert.match(String(world.sends[0].idempotencyKey), /^notification-delivery:/);
+  // And from the same sender. The role is keyed on the delivery's `kind`, which
+  // is a stored column, so a retry cannot resolve a different one from whatever
+  // state it happens to find (docs/policy/email-notifications.md §14.1a).
+  assert.equal(world.sends[0].senderRole, "operations");
+  assert.equal(world.sends[1].senderRole, world.sends[0].senderRole);
 });
 
 test("a delivery not yet due is left alone", async () => {
