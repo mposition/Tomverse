@@ -122,6 +122,65 @@ const outsideConversationSurface = (page: Page, testInfo: TestInfo) =>
       : "chat-sidebar"
   );
 
+/**
+ * A control that is actually painted where its box says it is.
+ *
+ * Playwright's `toBeVisible()` passes for an element an ancestor's
+ * `overflow-hidden` has clipped out of sight -- the element still has a
+ * non-empty box and no `visibility: hidden` -- which is exactly how the
+ * composer's remove button went missing on image attachments while every
+ * assertion around it stayed green. The centre point is what tells the two
+ * apart, the same measure the mobile drawer contract uses
+ * (docs/ui-contracts/mobile-sidebar-drawer.md).
+ */
+async function expectHitTestable(control: Locator, label: string) {
+  const box = await control.boundingBox();
+  expect(box, `${label}: expected a box`).not.toBeNull();
+  const hit = await control.evaluate(
+    (element, [x, y]) => {
+      const target = document.elementFromPoint(x as number, y as number);
+      return {
+        hitsSelf:
+          Boolean(target) && (target === element || element.contains(target)),
+        description: target
+          ? `${target.tagName.toLowerCase()}${
+              target.getAttribute("data-testid")
+                ? `[data-testid=${target.getAttribute("data-testid")}]`
+                : ""
+            }`
+          : "null",
+      };
+    },
+    [box!.x + box!.width / 2, box!.y + box!.height / 2]
+  );
+  expect(
+    hit.hitsSelf,
+    `${label}: centre point hit ${hit.description} instead of the control`
+  ).toBe(true);
+}
+
+/**
+ * The remove button belongs to its own card. When it fell back into normal
+ * flow it left the card entirely -- below a thumbnail that fills its
+ * container -- so containment names the failure directly rather than through
+ * whatever happened to be painted underneath.
+ */
+async function expectInsideCard(control: Locator, card: Locator, label: string) {
+  const [controlBox, cardBox] = await Promise.all([
+    control.boundingBox(),
+    card.boundingBox(),
+  ]);
+  expect(controlBox, `${label}: expected a control box`).not.toBeNull();
+  expect(cardBox, `${label}: expected a card box`).not.toBeNull();
+  expect(
+    controlBox!.y >= cardBox!.y - 1 &&
+      controlBox!.y + controlBox!.height <= cardBox!.y + cardBox!.height + 1 &&
+      controlBox!.x >= cardBox!.x - 1 &&
+      controlBox!.x + controlBox!.width <= cardBox!.x + cardBox!.width + 1,
+    `${label}: control at ${JSON.stringify(controlBox)} is outside its card at ${JSON.stringify(cardBox)}`
+  ).toBe(true);
+}
+
 async function sendMessage(page: Page, prompt: string, answer: string) {
   await page.getByTestId("chat-textarea").fill(prompt);
   await page.getByRole("button", { name: /전송|Send|发送/ }).click();
@@ -509,5 +568,94 @@ test.describe("attachment UX", () => {
       })
       .click();
     await expect(warning).toBeHidden();
+  });
+
+  // The bug these cover: the remove button carried `relative` and `absolute`
+  // at once. Tailwind emits `.relative` after `.absolute`, so `relative` won,
+  // the button left its card, and on an image -- whose card is a fixed-size
+  // `overflow-hidden` box filled edge to edge by the thumbnail -- it was
+  // clipped away entirely. Paste is simply the usual way an image arrives, so
+  // it read as "a pasted image cannot be deleted"; every upload path was hit.
+  test("a pasted image keeps a remove control inside its own card", async ({
+    page,
+  }) => {
+    await pasteFile(page, "clipboard-remove.png", "image/png", createQaPngBuffer());
+    await expect(page.getByAltText("clipboard-remove.png")).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+
+    const card = page.getByTestId("attachment-complete");
+    const remove = card.getByTestId("attachment-remove");
+    await expect(remove).toHaveAttribute(
+      "aria-label",
+      "첨부파일 제거: clipboard-remove.png"
+    );
+    await expectInsideCard(remove, card, "pasted image remove button");
+    await expectHitTestable(remove, "pasted image remove button");
+  });
+
+  test("removing a pasted image clears the card and releases the upload", async ({
+    page,
+  }) => {
+    await pasteFile(page, "clipboard-remove.png", "image/png", createQaPngBuffer());
+    await expect(page.getByAltText("clipboard-remove.png")).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+    const uploadId = uploadState.uploadIds[0];
+
+    // Reached the way a user reaches it. Playwright's own `.click()` scrolls
+    // to and dispatches on a clipped element all the same, so the click below
+    // stayed green all through the defect -- the point check is what makes
+    // this test fail when the control is not really there.
+    const remove = page.getByTestId("attachment-remove");
+    await expectHitTestable(remove, "pasted image remove button");
+    await remove.click();
+
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
+    await expect(page.getByAltText("clipboard-remove.png")).toHaveCount(0);
+    // Dropping the card is also giving the object back: the composer names the
+    // opaque upload id and never a storage key
+    // (docs/policy/user-attachment-persistence.md).
+    await expect.poll(() => uploadState.deleteCount).toBe(1);
+    expect(uploadState.deletedUploadIds).toEqual([uploadId]);
+  });
+
+  test("a pasted file card keeps its remove control too", async ({ page }) => {
+    // The file branch survived the same defect by accident -- its card is a
+    // flex row, so the button stayed in the row instead of being clipped. It
+    // is asserted here so the two branches cannot drift apart again.
+    await pasteFile(page, "clipboard-remove.pdf", "application/pdf", createQaPdfBuffer());
+    await expect(page.getByText("clipboard-remove.pdf", { exact: true })).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+
+    const card = page.getByTestId("attachment-complete");
+    const remove = card.getByTestId("attachment-remove");
+    await expectInsideCard(remove, card, "pasted file remove button");
+    await expectHitTestable(remove, "pasted file remove button");
+
+    await remove.click();
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
+    await expect.poll(() => uploadState.deleteCount).toBe(1);
+  });
+
+  test("an image attached from the picker is removable on the same terms", async ({
+    page,
+  }) => {
+    // Paste is not a path of its own: the card is the same card wherever the
+    // file came from, so a fix that only reached the paste handler would be
+    // the wrong fix.
+    await attachFromComputer(page, {
+      name: "picker-remove.png",
+      mimeType: "image/png",
+      buffer: createQaPngBuffer(),
+    });
+    await expect(page.getByAltText("picker-remove.png")).toBeVisible();
+    await expect.poll(() => uploadState.finalizeCount).toBe(1);
+
+    const card = page.getByTestId("attachment-complete");
+    const remove = card.getByTestId("attachment-remove");
+    await expectInsideCard(remove, card, "picker image remove button");
+    await expectHitTestable(remove, "picker image remove button");
+
+    await remove.click();
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
   });
 });
