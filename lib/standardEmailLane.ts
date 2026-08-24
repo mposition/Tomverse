@@ -21,6 +21,7 @@ import {
   suppressionCheck,
 } from "@/lib/emailSuppression";
 import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
+import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
@@ -524,6 +525,31 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         data: {
           status: "skipped",
           skipReason: consent.skipReason,
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
+
+  // The stream's own kill switch, checked before anything else marketing-only
+  // because it is a fact about the stream rather than about this recipient
+  // (§14.5, EM-09). Marketing alone reaches it: provider suppression is already
+  // account-wide (§5.3.1), so a switch that could stop transactional mail would
+  // be a second route to login codes not arriving.
+  if (definition.classification === "marketing") {
+    const health = await evaluateMarketingSendHealth(now);
+    if (health.halted) {
+      // Skipped rather than held. A promotion that waits for a person to clear
+      // a halt is a promotion that arrives stale, and the reputation event that
+      // tripped the switch is itself the reason not to send this one.
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "marketing_halted",
           attempts: delivery.attempts,
           nextAttemptAt: null,
           claimedAt: null,

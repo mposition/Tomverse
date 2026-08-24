@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, mock, test } from "node:test";
 
-import { MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  ACCOUNT_WELCOME_TEMPLATE,
+  MODEL_LAUNCH_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { MARKETING_HALT_SETTING_KEY } from "@/lib/marketingSendHealthCore";
 import {
   activatePolicyVersion,
   ensureJurisdictionPolicyDraft,
@@ -34,7 +38,7 @@ const reset = () =>
       "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
       "ConsentRecord", "EmailPreference", "SuppressionEntry",
       "JurisdictionCountryMap", "JurisdictionProfile", "EmailPolicyVersion",
-      "UserSettings", "User"
+      "AppSetting", "UserSettings", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -399,4 +403,193 @@ test("without an unsubscribe key marketing is refused by name, not as a render f
   );
   // And specifically not the old symptom.
   assert.equal(incidents.includes("EMAIL_RENDER_FAILED"), false);
+});
+
+
+// EM-09: the stream stops itself.
+//
+// Contract: docs/policy/email-notifications.md §14.5.
+//
+// The thresholds and the arithmetic have unit tests. What needs a database is
+// that the switch is reached from a real send, that a halted stream refuses,
+// and -- the part that matters most -- that it refuses marketing only.
+
+/** Marketing deliveries in the window, as the counter will see them. */
+const priorMarketingSends = async (input: {
+  sent: number;
+  complained: number;
+}) => {
+  const template = await prisma.emailTemplate.findFirstOrThrow({
+    where: { key: MODEL_LAUNCH_TEMPLATE },
+    select: { id: true },
+  });
+  const version = await prisma.templateVersion.findFirstOrThrow({
+    where: { templateId: template.id },
+    select: { id: true },
+  });
+  const policy = await prisma.emailPolicyVersion.findFirstOrThrow({
+    select: { id: true },
+  });
+  const now = new Date();
+  for (let index = 0; index < input.sent; index += 1) {
+    const event = await prisma.emailEvent.create({
+      data: {
+        kind: `email.${MODEL_LAUNCH_TEMPLATE}`,
+        templateId: template.id,
+        payload: { language: "en" },
+        audienceKind: "single_user",
+        status: "expanded",
+      },
+      select: { id: true },
+    });
+    await prisma.emailDelivery.create({
+      data: {
+        eventId: event.id,
+        recipientKey: `addr:prior-${index}@example.test`,
+        lane: "standard",
+        emailAddress: `prior-${index}@example.test`,
+        language: "en",
+        jurisdictionCountry: "AU",
+        jurisdictionProfileKey: "AU",
+        policyVersionId: policy.id,
+        templateVersionId: version.id,
+        idempotencyKey: `prior-${index}-${randomUUID()}`,
+        status: index < input.complained ? "complained" : "delivered",
+        attempts: 1,
+        sentAt: now,
+      },
+    });
+  }
+};
+
+test("a complaint rate over the threshold halts the stream", async () => {
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  // Seed the template and its version by queuing one message first.
+  const seed = await subscriber();
+  await queue(seed);
+  await priorMarketingSends({ sent: 200, complained: 5 });
+
+  const calls = stubProvider();
+  const incidents: string[] = [];
+  const stop = observeOperationalIncidents((incident) => incidents.push(incident.code));
+  const user = await subscriber();
+  const rows = await queue(user);
+
+  try {
+    await drainStandardEmailDeliveries({ limit: 5 });
+  } finally {
+    stop();
+  }
+
+  assert.equal(calls.length, 0, "a halted stream sends nothing");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows!.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.equal(delivery.status, "skipped");
+  assert.equal(delivery.skipReason, "marketing_halted");
+  assert.ok(incidents.includes("EMAIL_MARKETING_HALTED"));
+
+  // Sticky: the reason is stored, so clearing it is a person's decision.
+  const stored = await prisma.appSetting.findUniqueOrThrow({
+    where: { key: MARKETING_HALT_SETTING_KEY },
+    select: { value: true },
+  });
+  assert.match(stored.value, /complaint/);
+});
+
+test("a halt does not lift when the numbers improve", async () => {
+  // The window rolls. A halt that lifted with it would resume into exactly the
+  // reputation it was protecting.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  await prisma.appSetting.create({
+    data: {
+      key: MARKETING_HALT_SETTING_KEY,
+      value: JSON.stringify({
+        haltedAt: new Date().toISOString(),
+        metric: "complaint",
+        rate: 0.02,
+        observed: 20,
+        sent: 1000,
+        reason: "Complaint rate 2.00% is above the halt threshold.",
+      }),
+    },
+  });
+
+  const calls = stubProvider();
+  const user = await subscriber();
+  const rows = await queue(user);
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 0);
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows!.deliveryId },
+    select: { skipReason: true },
+  });
+  assert.equal(delivery.skipReason, "marketing_halted");
+});
+
+test("a halted marketing stream does not stop a transactional message", async () => {
+  // The boundary that matters most. Provider suppression is already
+  // account-wide (§5.3.1), so a kill switch that could stop transactional mail
+  // would be a second route to login codes not arriving.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  await activatePolicy();
+  await prisma.appSetting.create({
+    data: {
+      key: MARKETING_HALT_SETTING_KEY,
+      value: JSON.stringify({
+        haltedAt: new Date().toISOString(),
+        metric: "complaint",
+        rate: 0.02,
+        observed: 20,
+        sent: 1000,
+        reason: "halted",
+      }),
+    },
+  });
+
+  const calls = stubProvider();
+  const user = await subscriber();
+  const rows = await enqueueStandardEmail({
+    templateKey: ACCOUNT_WELCOME_TEMPLATE,
+    emailAddress: user.email,
+    userId: user.id,
+    language: "en",
+    payload: { name: "Subscriber" },
+  });
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 1, "the welcome still goes out");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows!.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.equal(delivery.status, "sent");
+  assert.equal(delivery.skipReason, null);
+});
+
+test("a clean window sends and stores no halt", async () => {
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  const seed = await subscriber();
+  await queue(seed);
+  await priorMarketingSends({ sent: 200, complained: 0 });
+
+  const calls = stubProvider();
+  const user = await subscriber();
+  await queue(user);
+  await drainStandardEmailDeliveries({ limit: 5 });
+
+  assert.ok(calls.length > 0, "nothing was wrong, so it sends");
+  assert.equal(
+    await prisma.appSetting.count({ where: { key: MARKETING_HALT_SETTING_KEY } }),
+    0
+  );
 });
