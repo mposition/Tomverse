@@ -745,6 +745,11 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     // transactional domain has no symptom until login codes stop arriving
     // (docs/policy/email-notifications.md §5.3, §14.1).
     stream: streamForClassification(definition.classification),
+    // From the definition too, and for the same reason: the drain looks the
+    // template up by key on every attempt, so a retry hours later resolves the
+    // sender the first attempt used rather than one recomputed from what the
+    // retry happens to know (docs/policy/email-notifications.md §14.1a).
+    senderRole: definition.senderRole,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 
@@ -761,6 +766,8 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         component: "standard-email-lane",
         deliveryId: delivery.id,
         classification: definition.classification,
+        stream: streamForClassification(definition.classification),
+        senderRole: definition.senderRole,
       },
     });
   }

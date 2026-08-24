@@ -558,7 +558,10 @@ const sendEmailAlert = async (
   // divergence costs the most.
   const result = await emailProvider().send(
     { to, subject: `[Tomverse Admin] ${title}`, text: `${title}\n\n${detail}` },
-    { stream: "transactional" }
+    // Operator alert, so the operations sender -- the same one the operational
+    // incident path uses. The two are told apart by their subject prefix, not
+    // by their address (docs/policy/email-notifications.md §14.1a).
+    { stream: "transactional", senderRole: "operations" }
   );
 
   if (result.ok) {

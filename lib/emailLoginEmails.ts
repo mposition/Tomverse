@@ -140,6 +140,13 @@ export async function sendEmailLoginCodeEmail(input: {
 }) {
   return sendTransactionalEmail({
     to: input.to,
+    // Must match the `auth_login_code` definition in
+    // lib/emailTemplateDefinitions.ts, which is what the credential lane
+    // actually sends through; `tests/senderRoles.test.mjs` pins the pair.
+    //
+    // Named rather than imported because that module imports this one for the
+    // renderer, and a cycle for one string is a worse trade than a test.
+    senderRole: "security",
     ...buildEmailLoginCodeEmail(input),
   });
 }
@@ -220,6 +227,9 @@ export async function sendLoginMethodChangedEmail(input: {
   const subject = input.action === "linked" ? copy.linkedSubject : copy.unlinkedSubject;
   return sendTransactionalEmail({
     to: input.to,
+    // A login method was added or removed and every other device was signed
+    // out. If it was not the account holder, this is the message they act on.
+    senderRole: "security",
     subject,
     text: `${body}\n\n${copy.contact}`,
     html: `
