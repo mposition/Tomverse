@@ -22,6 +22,12 @@ import {
   imageGenerationEnabledFromValue,
 } from "@/lib/imageGenerationAccess";
 import {
+  EMAIL_CAMPAIGNS_FLAG_KEY,
+  EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
+  EMAIL_MARKETING_FLAG_KEY,
+  emailFeatureEnabledFromValue,
+} from "@/lib/emailFeatureFlags";
+import {
   MEMORY_EXTRACTION_FLAG_KEY,
   MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
   MEMORY_INJECTION_FLAG_KEY,
@@ -328,6 +334,46 @@ export async function isMemoryInjectionEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return memoryInjectionEnabledFromValue(row?.value);
+}
+
+/**
+ * The email ADR's three flags (docs/policy/email-notifications.md §15.2),
+ * read the same way as the two above.
+ *
+ * `e2eDatabaseDisabled()` returns false for the same reason it does there: a
+ * harness with no database must not be able to send marketing, and off is the
+ * answer that fails safely.
+ */
+export async function isEmailMarketingEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_MARKETING_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
+export async function isEmailCampaignsEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_CAMPAIGNS_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
+/**
+ * Read by nothing today: the two-year consent re-confirmation batch does not
+ * exist. Exported anyway so the ADR's name resolves to a real accessor rather
+ * than to a search with no results, which is the EM-05 finding.
+ */
+export async function isEmailConsentReconfirmEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_CONSENT_RECONFIRM_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
 }
 
 export class MemoryFeatureDisabledError extends Error {

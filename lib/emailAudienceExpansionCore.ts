@@ -40,7 +40,22 @@ export type ExpansionRefusal =
  * see: an event id that names no row. Kept a closed list rather than `string`
  * so a caller switching on it is told when a new reason appears.
  */
-export type ExpansionRefusalReason = ExpansionRefusal | "not_found";
+export type ExpansionRefusalReason =
+  | ExpansionRefusal
+  | "not_found"
+  /**
+   * The marketing feature is switched off (EM-05).
+   *
+   * Not part of the pure rule above because it is a fact about the
+   * installation rather than about the event, and it is read from
+   * `AppSetting` rather than from anything the caller passes in.
+   *
+   * It has to be here at all because a fan-out does not go through
+   * `enqueueStandardEmail`: it writes its delivery rows directly. A flag that
+   * only guarded the single-message path would leave the campaign path as an
+   * unguarded second route to exactly the sends it was meant to stop.
+   */
+  | "marketing_disabled";
 
 /**
  * Whether a pass may run at all.

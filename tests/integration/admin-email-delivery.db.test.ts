@@ -16,6 +16,7 @@ import {
 } from "@/lib/adminEmailDeliveries";
 import { parseDeliveryFilters } from "@/lib/adminEmailDeliveryFilters";
 import { recordSuppression, removeSuppression } from "@/lib/emailSuppression";
+import { enqueuedRow } from "../support/enqueuedEmail";
 
 // Reading the outbox back, against a real database.
 //
@@ -53,7 +54,7 @@ const someone = () =>
 
 const queue = async (templateKey: string, status?: string) => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey,
     emailAddress: user.email,
     userId: user.id,
@@ -61,7 +62,7 @@ const queue = async (templateKey: string, status?: string) => {
       templateKey === ACCOUNT_DELETION_SCHEDULED_TEMPLATE
         ? { scheduledFor: new Date().toISOString() }
         : { name: "Someone" },
-  });
+  }));
   assert.ok(rows);
   if (status) {
     await prisma.emailDelivery.update({
