@@ -56,12 +56,15 @@ const READ_ONLY_KEYS = {
   },
   ASSISTANT_PACKAGE_IMPORT_FLAG_KEY: {
     reason:
-      "docs/policy/assistant-package-import.md §11 lists what has to be true " +
-      "before package import may be turned on, and none of it is yet: the " +
-      "upload and publish steps have no endpoints, so a toggle would enable a " +
-      "wizard that stops at step 6. The flag exists ahead of that on purpose " +
-      "-- so enabling it later is a settings change against a reviewed path -- " +
-      "and its control lands with the slice that makes the rest of it work.",
+      "docs/policy/assistant-package-import.md §12.2 lists four things that " +
+      "have to be true before package import may be turned on, in order, and " +
+      "two of them are not: the validating migration for " +
+      "`extractedCharacters` is not deployed, so the figure the quota check " +
+      "reads has not been surveyed, and the staging checklist has no signed " +
+      "run. A toggle would be that procedure's last step without its first " +
+      "ones. The flag exists ahead of the control on purpose -- enabling it " +
+      "later is then a settings change against a reviewed path -- and the " +
+      "control lands with the rollout, not before it.",
   },
 };
 

@@ -17,9 +17,23 @@ import {
   expansionRefusal,
   nextBatchPlan,
   readExpansionSpec,
+  type AudienceCohortSpec,
   type ExpansionRefusalReason,
   type ExpansionResult,
 } from "@/lib/emailAudienceExpansionCore";
+import {
+  audienceCandidatePage,
+  audienceCandidatesByIds,
+  audienceMembersFor,
+  type AudienceCandidate,
+} from "@/lib/modelRetirementAudience";
+import {
+  recipientVerdict,
+  waveRecomputesCohorts,
+  type CampaignExcludedReason,
+} from "@/lib/emailCampaignRecipientCore";
+import { audienceExclusion } from "@/lib/modelRetirementAudienceCore";
+import type { SendClassification } from "@/lib/emailSuppressionCore";
 
 /**
  * One event, many deliveries, resumably (EM-01).
@@ -49,6 +63,154 @@ import {
  */
 
 const recipientKeyFor = (userId: string) => `user:${userId}`;
+
+/**
+ * What the campaign ledger records about one person, decided before any row is
+ * written.
+ *
+ * Present only for a cohort audience. A wave that named its recipients
+ * explicitly has no cohort attribution to record, and writing a guessed
+ * `eligibilityReason` would put a made-up reason in an audit record -- the
+ * ledger's whole purpose is to be the place that does not do that.
+ */
+type LedgerVerdict = {
+  cohort: string | null;
+  excludedReason: CampaignExcludedReason | null;
+  malformed: boolean;
+};
+
+type ExpansionCandidate = {
+  id: string;
+  email: string | null;
+  language: string | null;
+  ledger: LedgerVerdict | null;
+  /**
+   * False for a row the audience prefilter returned and the cohort rules then
+   * rejected. Kept in the page so the cursor still advances past them; written
+   * nowhere, because the honest record of somebody who is not in the campaign
+   * is no record.
+   */
+  inAudience: boolean;
+};
+
+/**
+ * The wave this event belongs to, if any.
+ *
+ * Found through the event rather than passed in, so `expandEmailEvent` keeps
+ * one caller-facing shape: belonging to a campaign is a property of the event,
+ * not an argument the caller has to remember to supply.
+ */
+const waveForEvent = (eventId: string) =>
+  prisma.emailCampaignWave.findFirst({
+    where: { eventId },
+    select: { id: true, campaignId: true, kind: true },
+  });
+
+/**
+ * Who a cohort wave looks at next.
+ *
+ * A first notice asks the audience query. A reminder asks the people the
+ * campaign already wrote to, because the answer it needs is about them -- and
+ * one of the possible answers is "this person is no longer affected", which the
+ * audience query expresses by not returning them at all.
+ */
+const cohortCandidates = async (input: {
+  cohort: AudienceCohortSpec;
+  campaignId: string;
+  recomputes: boolean;
+  after: string | null;
+  take: number;
+  /**
+   * The template's own classification and purpose, not this function's guess.
+   * Suppression answers differently for each -- a complaint stops marketing and
+   * does not stop transactional -- so asking under the wrong one produces an
+   * exclusion list that is right about a send nobody is making.
+   */
+  classification: SendClassification;
+  purpose: string | null;
+}): Promise<AudienceCandidateWithVerdict[]> => {
+  const candidates = input.recomputes
+    ? await audienceCandidatesByIds({
+        targetModelId: input.cohort.targetModelId,
+        userIds: (
+          await prisma.emailCampaignRecipient.findMany({
+            where: {
+              campaignId: input.campaignId,
+              excludedReason: null,
+              ...(input.after ? { userId: { gt: input.after } } : {}),
+            },
+            orderBy: { userId: "asc" },
+            take: input.take,
+            distinct: ["userId"],
+            select: { userId: true },
+          })
+        ).map((row) => row.userId),
+      })
+    : await audienceCandidatePage({
+        targetModelId: input.cohort.targetModelId,
+        after: input.after,
+        take: input.take,
+      });
+
+  const members = await audienceMembersFor({
+    candidates,
+    replacementModelId: input.cohort.replacementModelId,
+    classification: input.classification,
+    purpose: input.purpose,
+  });
+
+  return candidates.map((candidate: AudienceCandidate, index: number) => ({
+    candidate,
+    verdict: recipientVerdict({
+      cohorts: candidate.cohorts,
+      exclusion: audienceExclusion(members[index]),
+      malformed: candidate.malformed,
+      recomputesCohorts: input.recomputes,
+    }),
+  }));
+};
+
+type AudienceCandidateWithVerdict = {
+  candidate: AudienceCandidate;
+  verdict: ReturnType<typeof recipientVerdict>;
+};
+
+/**
+ * Writes one ledger entry, once.
+ *
+ * `skipDuplicates` on `(waveId, userId)` is what makes a resumed pass harmless
+ * here, the same way the delivery index does for the outbox: re-covering ground
+ * is the ordinary case, and the first pass's verdict is the one that stands --
+ * re-deciding on the second pass would let a person's recorded reason change
+ * because the run crashed, which is not a fact about the person.
+ */
+const recordLedgerEntry = async (input: {
+  wave: { id: string; campaignId: string };
+  userId: string;
+  email: string | null;
+  language: string | null;
+  jurisdictionCountry: string | null;
+  ledger: LedgerVerdict;
+  deliveryId: string | null;
+}) => {
+  await prisma.emailCampaignRecipient.createMany({
+    data: [
+      {
+        campaignId: input.wave.campaignId,
+        waveId: input.wave.id,
+        userId: input.userId,
+        emailAddress: input.email,
+        language: input.language,
+        jurisdictionCountry: input.jurisdictionCountry,
+        eligibilityReason: input.ledger.cohort,
+        excludedReason: input.ledger.excludedReason,
+        deliveryId: input.deliveryId,
+        malformed: input.ledger.malformed,
+      },
+    ],
+    skipDuplicates: true,
+  });
+};
 
 /**
  * The same refusal the enqueue path makes, for the same reason: this lane
@@ -139,13 +301,14 @@ export async function expandEmailEvent(input: {
   });
   if (!event) return { refused: "not_found" };
 
+  const spec = readExpansionSpec(event.audienceSpec);
   const refusal = expansionRefusal({
     audienceKind: event.audienceKind,
     status: event.status,
+    spec,
   });
   if (refusal) return { refused: refusal };
 
-  const spec = readExpansionSpec(event.audienceSpec);
   const cap = input.recipientCap ?? spec.recipientCap;
   const deadline = Date.now() + (input.timeBudgetMs ?? 60_000);
 
@@ -175,6 +338,11 @@ export async function expandEmailEvent(input: {
     where: { eventId: event.id },
   });
 
+  const wave = await waveForEvent(event.id);
+  // Only a campaign wave re-asks the audience question, and only the later
+  // waves do. The first notice's audience is the query that produced it.
+  const recomputesCohorts = wave ? waveRecomputesCohorts(wave.kind) : false;
+
   try {
     for (;;) {
       const plan = nextBatchPlan({
@@ -187,25 +355,97 @@ export async function expandEmailEvent(input: {
         break;
       }
 
-      const candidates = await nextCandidates({
-        ...(spec.userIds ? { userIds: spec.userIds } : {}),
-        after: result.cursor,
-        take: plan.take,
-      });
+      const candidates: ExpansionCandidate[] = spec.cohort
+        ? (
+            await cohortCandidates({
+              cohort: spec.cohort,
+              campaignId: wave?.campaignId ?? "",
+              recomputes: recomputesCohorts,
+              after: result.cursor,
+              take: plan.take,
+              classification: definition.classification,
+              purpose: definition.purpose ?? null,
+            })
+          ).map(({ candidate, verdict }) => ({
+            id: candidate.userId,
+            email: candidate.email,
+            language: candidate.language,
+            // A person the prefilter returned and the cohort rules rejected
+            // gets no ledger row and no delivery. They are still in the list so
+            // the cursor advances past them -- dropping them here would let a
+            // page of nothing but near-misses look like the end of the
+            // audience, and everybody after it would never be read.
+            ledger:
+              verdict.outcome === "not_in_audience"
+                ? null
+                : {
+                    cohort: verdict.cohort ?? null,
+                    excludedReason:
+                      verdict.outcome === "exclude"
+                        ? verdict.excludedReason
+                        : null,
+                    malformed: verdict.malformed,
+                  },
+            inAudience: verdict.outcome !== "not_in_audience",
+          }))
+        : (
+            await nextCandidates({
+              ...(spec.userIds ? { userIds: spec.userIds } : {}),
+              after: result.cursor,
+              take: plan.take,
+            })
+          ).map((candidate) => ({
+            id: candidate.id,
+            email: candidate.email,
+            language: candidate.settings?.language ?? null,
+            ledger: null,
+            inAudience: true,
+          }));
       if (candidates.length === 0) {
         result.status = "expanded";
         break;
       }
 
       for (const candidate of candidates) {
-        if (!candidate.email) {
-          // No address, so there is no row to write and nothing for the lane's
-          // gates to record a reason on. Counted, never invented.
+        if (!candidate.inAudience) continue;
+
+        // Excluded by the audience rules -- suppressed, on a plan the
+        // replacement does not reach, or no longer affected at all. The ledger
+        // is the only place this is written down, because there will be no
+        // delivery row for the lane to record a reason on.
+        if (wave && candidate.ledger?.excludedReason) {
+          await recordLedgerEntry({
+            wave,
+            userId: candidate.id,
+            email: candidate.email,
+            language: null,
+            jurisdictionCountry: null,
+            ledger: candidate.ledger,
+            deliveryId: null,
+          });
           result.skipped += 1;
           continue;
         }
-        const language = isLanguage(candidate.settings?.language)
-          ? candidate.settings.language
+
+        if (!candidate.email) {
+          // No address, so there is no row to write and nothing for the lane's
+          // gates to record a reason on. Counted, never invented.
+          if (wave && candidate.ledger) {
+            await recordLedgerEntry({
+              wave,
+              userId: candidate.id,
+              email: null,
+              language: null,
+              jurisdictionCountry: null,
+              ledger: { ...candidate.ledger, excludedReason: "no_email" },
+              deliveryId: null,
+            });
+          }
+          result.skipped += 1;
+          continue;
+        }
+        const language = isLanguage(candidate.language)
+          ? candidate.language
           : "en";
         const template = await ensureTemplateVersion({
           templateKey: event.template.key,
@@ -216,7 +456,8 @@ export async function expandEmailEvent(input: {
         // what a row already written renders under.
         const resolved = await jurisdictionForUser({ userId: candidate.id });
 
-        const written = await prisma.emailDelivery.createMany({
+        const written = await prisma.emailDelivery.createManyAndReturn({
+          select: { id: true },
           data: [
             {
               eventId: event.id,
@@ -248,11 +489,38 @@ export async function expandEmailEvent(input: {
           skipDuplicates: true,
         });
 
-        if (written.count === 1) {
+        if (written.length === 1) {
           result.expanded += 1;
           expandedSoFar += 1;
         } else {
           result.alreadyPresent += 1;
+        }
+
+        if (wave && candidate.ledger) {
+          await recordLedgerEntry({
+            wave,
+            userId: candidate.id,
+            email: candidate.email,
+            language,
+            jurisdictionCountry: resolved?.countryCode ?? "ZZ",
+            ledger: candidate.ledger,
+            // Looked up only when this pass did not write the row, which is
+            // the resumed case. The ordinary path already has the id.
+            deliveryId:
+              written[0]?.id ??
+              (
+                await prisma.emailDelivery.findUnique({
+                  where: {
+                    eventId_recipientKey: {
+                      eventId: event.id,
+                      recipientKey: recipientKeyFor(candidate.id),
+                    },
+                  },
+                  select: { id: true },
+                })
+              )?.id ??
+              null,
+          });
         }
       }
 

@@ -71,6 +71,8 @@ const scan = (): ProviderModelCatalogResult[] => [
     newCandidates: [],
     missing: [],
     lifecycleWarnings: [],
+    heuristicallyExcluded: [],
+    truncated: false,
   },
   {
     provider: "groq",
@@ -81,6 +83,8 @@ const scan = (): ProviderModelCatalogResult[] => [
     newCandidates: [],
     missing: [],
     lifecycleWarnings: [],
+    heuristicallyExcluded: [],
+    truncated: false,
     errorCode: "HTTP_401",
   },
 ];
