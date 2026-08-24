@@ -43,6 +43,7 @@
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
     "check:accent-tokens": "node scripts/check-accent-tokens.mjs",
     "verify:fixture-route-gate": "node scripts/verify-fixture-route-gate.mjs",
+    "check:memory-eval-run": "node scripts/check-memory-eval-run-admissibility.mjs",
     "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",

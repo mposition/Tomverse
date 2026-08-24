@@ -466,6 +466,7 @@ export type EvalRunModeDecision =
               | "no_eval_budget"
               | "no_api_key"
               | "dataset_not_frozen"
+              | "unknown_commit"
               | "run_cap_above_approved_ceiling";
       };
 
@@ -489,6 +490,18 @@ export function decideEvalRunMode(input: {
     registerEntry: { evalBudget: { maxUsd: number } | null } | null | undefined;
     hasApiKey: boolean;
     datasetFrozen: boolean;
+    /**
+     * Whether the run can name the commit it is running.
+     *
+     * docs/policy/external-conversation-import-and-memory.md §12.2 requires a
+     * decision-grade run to be tied to one, and a deployed container has no
+     * git metadata -- `commitSha` comes out "unknown" and `workingTreeDirty`
+     * comes out `false`, which reads exactly like a clean checkout. So the
+     * artifact would look admissible while being impossible to tie to a
+     * commit, and the refusal has to happen here, before 1,150 paid calls buy
+     * a verdict nobody can cite.
+     */
+    commitKnown: boolean;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -499,6 +512,9 @@ export function decideEvalRunMode(input: {
     if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
     if (!input.datasetFrozen) {
         return { mode: "refused", reason: "dataset_not_frozen" };
+    }
+    if (!input.commitKnown) {
+        return { mode: "refused", reason: "unknown_commit" };
     }
     // A per-run cap may only narrow the approved programme ceiling. Letting a
     // command-line flag widen it would make the approval meaningless.
