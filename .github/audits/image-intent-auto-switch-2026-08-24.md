@@ -9,6 +9,17 @@
 
 ## 개정 이력
 
+**v4 (2026-08-24, 3차 검토 반영 — 설계 공백 2건 + 문안 4건).**
+
+| # | v3의 문제 | v4 |
+|---|---|---|
+| 1 | 후보 문안이 **가용 상태를 반영하지 않음** — flag off·Guest·Free에게 없는 문을 가리킴 | §5.1에 `imageHandoff`·`artifact` **2축 조립** 도입, 부록 A를 문단 단위로 재작성, 토큰 표를 **상태별 177~293**으로 갱신. `route.ts`가 image flag를 읽지 않는다는 **구현 공백**도 명시 |
+| 2 | **C 분류(첨부 편집)의 안내 시점 미정** | §5.4 신설 — C-①·②·③ 비교와 권장(C-②), ①·③은 별도 작업 |
+| 3 | 후보 문안에 **ASCII 예외 문장이 없음** (본문에만 있었음) | 부록 A-1 `CORE`에 문장 추가 후 재측정 |
+| 4 | 후보 B가 `diagram`·`infographic`까지 workspace로 안내 — L3 보류와 충돌 | 부록 A-2 `available` 문단이 **"텍스트 밀집 도표에는 안내하지 말 것"**을 명시 |
+| 5 | 요약이 다시 "구현 비용이 낮다"로 읽힘 | §10에서 **"인계 실행은 낮음 / L1 전체는 중간"**으로 통일 |
+| 6 | `lib/models.ts:269` 줄 번호가 리비전에 따라 어긋남 | §1의 참조를 **심볼 기준**으로 바꾸고, 이 문서는 줄 번호를 근거로 쓰지 않는다고 명시 |
+
 **v3 (2026-08-24, 2차 검토 반영 — 보완 6건).**
 
 | # | v2의 문제 | v3 |
@@ -49,6 +60,7 @@
 | L3 | 텍스트 밀집 도표·인포그래픽의 SVG/이미지 선택 UX | 보류 | **L1과 분리해 별도 설계** |
 | D-3a | 확인 없이 image **draft만** 자동으로 열기 | **하지 않음** | 비용은 없으나 오탐 시 화면이 통째로 바뀝니다 |
 | D-3b | 확인 없이 **generation 제출** | **하지 않음** | 크레딧 소비 — 가격·모델 동의 필요 |
+| C | 첨부 편집 요청의 안내 시점 | **L0에서만**(C-②) | ①·③은 별도 작업 — §5.4 |
 
 ---
 
@@ -59,9 +71,13 @@
 
 그 turn의 사실`[코드]`:
 
+이 표의 파일 참조는 **심볼 기준**입니다. 줄 번호는 개정마다 움직이므로
+(2차 검토에서 `lib/models.ts:269`와 `:283`이 어긋난 것이 그 예입니다) 이 문서는
+줄 번호를 근거로 쓰지 않습니다.
+
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 모델 | `grok-4-5`, `premium-reasoning`, `creditWeight: 8`, Pro 전용 | `lib/models.ts:269` |
+| 모델 | `grok-4-5`, `premium-reasoning`, `creditWeight: 8`, Pro 전용 | `lib/models.ts`의 `grok-4-5` 항목 |
 | artifact tool | **비활성** — xAI는 `ARTIFACT_TOOL_CAPABILITIES`에 의도적으로 부재 → `unverified` | `lib/generatedArtifactToolPolicy.ts` |
 | 그 turn이 받은 지시 | `offPrompt("model_unverified")` — "다운로드 파일을 만들 수 없다. 파일 경로·링크·base64·저장하는 코드를 쓰지 마라" | 같은 파일 |
 | **이미지에 대한 지시** | **없음** | 같은 파일 |
@@ -239,10 +255,41 @@ v1은 이 문서를 빠뜨렸습니다.
   가능한 대안만** 제시할 것
 - 질문 자체에 대한 답은 계속 해도 된다
 
-**가능성에 따라 문구가 갈라져야 합니다.** artifact tool이 꺼진 turn에서 SVG를
-권하면, 이 저장소가 이미 고친 결함 — "할 수 없는 것을 할 수 있다고 말하기" — 을
-다시 만듭니다. 판정은 `planGeneratedArtifactTool()`이 이미 계산해 두었으므로 그
-결과를 읽습니다`[코드]`. 첨부 화면의 turn이 정확히 이 경우입니다(§1).
+#### 단일 문안이 아니라 **상태별 조립**입니다
+
+v3까지의 후보 문안은 "이미지 생성은 도구 메뉴에 있습니다"를 무조건 안내했습니다.
+그러면 flag가 꺼진 배포·Guest·Free에게 **없는 문을 가리키게** 됩니다. 계약이
+말하는 "실제로 가능한 대안만"을 지키려면 블록은 두 축의 계획 결과로 조립돼야
+합니다.
+
+```
+imageHandoff: hidden | sign_in | upgrade | available
+artifact:     unavailable | sign_in | available
+```
+
+| 축 | 입력 | 오늘의 출처 |
+|---|---|---|
+| `imageHandoff` | flag + 플랜 entitlement | `isImageGenerationEnabled()`(`lib/appSettings.ts`) + `planAllowsImageGeneration(tier)`(`lib/imageGenerationAccess.ts`)`[코드]` |
+| `artifact` | 이미 계산돼 있음 | `planGeneratedArtifactTool()`의 `mode`·`offReason``[코드]` |
+
+**여기에 구현 공백이 하나 있습니다.** `app/api/chat/route.ts`는 오늘 이미지
+flag를 읽지 않습니다`[코드]` — 이 값은 chat page의 RSC가 클라이언트로만
+내려보냅니다. 플랜 tier는 route가 이미 가지고 있으므로(`accountPlan?.tier`),
+새로 필요한 것은 **flag 읽기 한 번**입니다. 다만
+`getOperationalFeatureFlags()`는 이 flag를 포함하지 않고
+(`aiChatEnabled`·`attachmentsEnabled`·`publicSharingEnabled` 셋뿐)`[코드]`,
+`isImageGenerationEnabled()`는 캐시되지 않는 DB 조회입니다. **turn마다 DB를 한 번
+더 치지 않도록** 기존 설정 조회나 public snapshot에 합쳐야 합니다. 이것은 L0의
+숨은 비용이며, C-5에 넣었습니다.
+
+**artifact tool이 꺼진 turn에서 SVG를 권하면** 이 저장소가 이미 고친 결함 —
+"할 수 없는 것을 할 수 있다고 말하기" — 을 다시 만듭니다. 첨부 화면의 turn이
+정확히 이 경우입니다(§1).
+
+**두 블록이 같은 turn에 실린다는 점도 계약입니다.** artifact 블록은 이미 자기
+사정을 말하므로, 이미지 블록은 artifact가 **available일 때만** SVG를 언급하고
+그 외에는 침묵합니다. 로그인·모델 미검증 사유를 두 블록이 각자 설명하면 같은
+turn에 같은 말이 두 번 실립니다.
 
 #### 효과 — best-effort이지 강제가 아닙니다
 
@@ -255,18 +302,25 @@ v1의 "그 화면은 사라집니다"는 과장이었습니다. system block은 
 
 `estimateTextTokens`는 비CJK 4바이트/토큰입니다(`lib/chatTokenEstimate.ts:112`)`[코드]`.
 
-| 블록 | 바이트 | 추정 토큰 |
+§9 부록 A의 상태별 조합을 잰 값입니다(비교용: 기존 artifact `offPrompt`는
+422바이트 / 106토큰).
+
+| 상태 조합 | 바이트 | 추정 토큰 |
 |---|---:|---:|
-| 기존 artifact `offPrompt` (비교용) | 422 | 106 |
-| 제안 블록(고지만) | 597 | 150 |
-| 제안 블록(인계 안내 포함) | 765 | 192 |
+| `hidden` + artifact off — **최소** | 706 | **177** |
+| `sign_in` + artifact off | 817 | 205 |
+| `upgrade` + artifact off | 832 | 208 |
+| `available` + artifact off | 962 | 241 |
+| `hidden` + artifact on | 916 | 229 |
+| `available` + artifact on — **최대** | 1,172 | **293** |
 
-turn당 **약 150~190 토큰**입니다. 대표 모델의 입력가로 환산하면:
+turn당 **177~293 토큰**입니다. v3의 "150~192"는 상태 분기를 넣기 전 값이라
+하한이 낮았습니다. 대표 모델의 입력가로 환산하면:
 
-| 모델 | 입력가 | turn당 | 월 100k turn |
+| 모델 | 입력가 | turn당(최소~최대) | 월 100k turn |
 |---|---:|---:|---:|
-| `gpt-5-6-luna` | $0.20/1M | 약 38µUSD | 약 $3.8 |
-| `grok-4-5` | $2.00/1M | 약 380µUSD | 약 $38 |
+| `gpt-5-6-luna` | $0.20/1M | 35~59µUSD | 약 $3.5~5.9 |
+| `grok-4-5` | $2.00/1M | 354~586µUSD | 약 $35~59 |
 
 `[코드]` `lib/modelPricing.ts` · 월 turn 수는 `[확인 불가]`이므로 100k는 예시입니다.
 
@@ -364,7 +418,32 @@ v1의 규칙은 다음이 위험했습니다.
 7. 사전과 판정은 **한 순수 모듈**에 둡니다. 목록이 갈라지는 것이 이 저장소의
    반복된 사고 원인입니다`[정책]`.
 
-### 5.4 L2 — 답변 이후 액션 (보류)
+### 5.4 C 분류(첨부 편집)의 안내 시점 — 결정 필요
+
+v3은 "지원하지 않는다고 말해야 한다"고만 적고 **언제 어디서**를 정하지
+않았습니다. 그대로 두면 사용자는 **제출하고 채팅 크레딧을 쓴 뒤 L0 답변에서야**
+제한을 알게 됩니다. 세 안 중 하나를 골라야 합니다.
+
+| 안 | 동작 | 비용 | 사용자 경험 |
+|---|---|---|---|
+| **C-①** 제출 전 비동작 안내 칩 | 첨부 + 생성 동사 감지 시 "첨부 이미지 편집은 아직 지원하지 않습니다" 칩 | **L1과 별개의 UI·locale·테스트** | 크레딧 쓰기 전에 앎 |
+| **C-②** 제출 허용, L0에서만 고지 | 추가 UI 없음 | 0 | 크레딧 1 turn 쓰고 나서 앎 |
+| **C-③** ①에 더해 "첨부를 빼고 text-to-image로" 선택지 제공 | 첨부 제거 + draft 전환을 한 동작으로 | ① + 첨부 제거 흐름·복원 규칙 | 가장 친절하나 **첨부를 지우는 파괴적 동작**이라 확인이 필요 |
+
+**권장은 C-②로 시작**입니다. 근거는 범위입니다 — C는 L1의 대상이 아니고, ①·③은
+L1과 무관한 UI·문구·테스트를 새로 요구하므로 "명백한 raster 의도만"이라는 1차
+범위 축소와 모순됩니다. L0이 이미 그 turn에서 이유를 말하므로 사용자는 **적어도
+침묵당하지는 않습니다.**
+
+다만 C-②를 고르면 **L0의 조립 축에 하나가 더 붙습니다** — 첨부가 있는 turn에서는
+"편집은 지원하지 않는다"를 말해야 하므로, `imageHandoff`가 `available`이어도
+그 문단은 편집이 아니라 새 생성만 가리켜야 합니다. §9 부록 A의 `available` 문안이
+이미 그렇게 쓰여 있습니다.
+
+C-①·③을 고른다면 **별도 작업으로 뺍니다**. L1에 얹으면 L1의 범위가 다시
+넓어집니다.
+
+### 5.5 L2 — 답변 이후 액션 (보류)
 
 새 결정 하나를 요구합니다: **무엇을 프롬프트 seed로 쓸 것인가.** 사용자의 마지막
 메시지인지 답변 요약인지, 후자면 요약 생성 비용이 듭니다. §3.1에 따라 이 액션은
@@ -425,7 +504,8 @@ v1은 SVG를 기술적으로 우월한 기본 경로처럼 서술했습니다. �
 | C-2 | 정책에 "확인 없는 자동 draft 전환·자동 생성 제출 금지" 명시 (D-3a·D-3b 각각) | 권장 |
 | C-3 | L0 블록이 SVG를 권해도 되는 조건 — `docs/policy/generated-artifacts.md` **§2(가용성)·§4(형식)·§6(보안)·§9(UI 계약)**과의 정합. v2 초안이 §13을 인용했으나 그 절은 첨부 템플릿 일괄 생성이라 무관합니다 | 확인 |
 | C-4 | 기능 이름 확정 (`Auto` 금지, §3.2) | 결정 |
-| C-5 | L0 블록 문안 확정 후 토큰 재측정, 16k 경계 배수 영향 수용 여부 | 결정 |
+| C-5 | L0 블록 **상태별** 문안 확정 후 토큰 재측정(§9), 16k 경계 배수 영향 수용 여부, 그리고 **image flag를 turn마다 DB에서 읽지 않도록** 기존 설정 조회·snapshot에 합치는 방법 | 결정 |
+| C-6 | **C 분류 안내 시점** — C-①(제출 전 칩) / C-②(L0에서만, 권장) / C-③(첨부 제거 + 전환) 중 택일. ①·③은 별도 작업으로 분리 | 결정 |
 
 미결 질문:
 
@@ -433,16 +513,22 @@ v1은 SVG를 기술적으로 우월한 기본 경로처럼 서술했습니다. �
 2. L1 칩을 **Guest·Free에게도 띄웁니까?** 계약의 잠금 노출 원칙은 그렇다고 답하지만,
    부르지 않은 자리에 뜨는 업그레이드 유도라는 반론이 있습니다.
 3. L3(B 분류 UX)를 이번 범위에 넣습니까, 별도 작업으로 뺍니까?
+4. **C 분류에 제출 전 안내를 붙입니까?**(§5.4) 붙이지 않으면 사용자는 채팅 1 turn을
+   쓰고 나서 제한을 알게 됩니다 — 받아들일 수 있는 비용인지의 판단입니다.
 
 ---
 
 ## 9. 부록 A — L0 블록 측정 원문과 재현 절차
 
-§5.1의 150·192토큰은 아래 **후보 문안**을 잰 값입니다. 문안이 바뀌면 수치도
+§5.1의 177~293토큰은 아래 **후보 문안**을 잰 값입니다. 문안이 바뀌면 수치도
 바뀌므로 C-5(재측정)와 함께 읽습니다. 이 문안은 **측정을 재현하기 위한 초안**이며
 확정된 제품 문구가 아닙니다.
 
-### A-1. 후보 A — 고지만 (597 bytes / 150 tokens)
+블록은 고정 문안 하나가 아니라 **공통 문단 + 상태별 문단**으로 조립합니다(§5.1).
+문단 사이는 빈 줄(`\n\n`) 하나로 잇습니다 — v3의 765바이트가 이 빈 줄을 포함해야
+재현되는 값이었습니다.
+
+### A-1. 공통 문단 `CORE` (706 bytes / 177 tokens) — 항상 실림
 
 ```text
 # Images
@@ -454,38 +540,90 @@ the user's language and say what would let them get one.
 Never substitute a drawing made of text characters -- no ASCII art, no
 box-drawing or arrow diagrams standing in for a picture, no emoji layout
 pretending to be a chart. A text approximation of a requested image is a
-silent substitution, not an answer.
+silent substitution, not an answer. The one exception is an explicit
+request for text art itself ("draw it in ASCII art"), which you may honour.
 
 You may still answer the question itself in words, and you may still use
 ordinary formatting -- a table is a table, not a drawing.
 ```
 
-### A-2. 후보 B — 인계 안내 포함 (765 bytes / 192 tokens)
+문자 그림 금지의 **예외가 문안 안에 들어갔습니다.** v3은 본문에서만 예외를
+말하고 후보 문안에는 넣지 않아, 재는 값과 실제로 보낼 값이 달랐습니다.
 
-후보 A에 아래 문단을 덧붙인 것입니다.
+### A-2. `imageHandoff` 문단
+
+**`hidden`** — 문단 없음. flag가 꺼진 배포에서는 그 기능이 아무에게도 존재하지
+않으므로 언급 자체가 없습니다.
+
+**`sign_in`** (109 bytes / 28 tokens)
 
 ```text
-Image generation is a separate workspace in this app, reachable from the
-composer's tools menu. Point the user there rather than describing an API
-or another product.
+Image generation exists in this app but requires signing in. Say that
+much and no more about how to reach it.
 ```
 
-### A-3. 재현 명령
+**`upgrade`** (124 bytes / 31 tokens)
+
+```text
+Image generation exists in this app but is included only in the paid
+plans. Say that much and no more about how to reach it.
+```
+
+**`available`** (254 bytes / 64 tokens)
+
+```text
+For a photo or an illustration, image generation is a separate workspace
+in this app, reachable from the composer's tools menu. Point the user
+there for those. Do not point there for a text-heavy chart or
+infographic -- that is not what it produces well.
+```
+
+마지막 두 줄이 **B 분류를 L3까지 보류한다는 결정을 문안으로 옮긴 것**입니다.
+이것이 없으면 블록이 인포그래픽 요청까지 이미지 workspace로 보내, §5.2의 범위
+축소와 충돌합니다.
+
+### A-3. `artifact` 문단
+
+**`available`일 때만** (208 bytes / 52 tokens)
+
+```text
+For a chart or diagram whose text must be exact, you can instead create a
+downloadable SVG file with the file tool. It arrives as a download rather
+than a picture inside the message; say so when you offer it.
+```
+
+`unavailable`·`sign_in`에서는 **문단 없음** — artifact 블록이 같은 turn에서 이미
+자기 사정을 말합니다(§5.1).
+
+### A-4. 조합별 측정값
+
+| `imageHandoff` | `artifact` | 바이트 | 토큰 |
+|---|---|---:|---:|
+| `hidden` | off | 706 | **177** |
+| `sign_in` | off | 817 | 205 |
+| `upgrade` | off | 832 | 208 |
+| `available` | off | 962 | 241 |
+| `hidden` | on | 916 | 229 |
+| `available` | on | 1,172 | **293** |
+
+### A-5. 재현 명령
 
 `estimateTextTokens`는 비CJK 구간을 4바이트/토큰으로 셉니다
-(`lib/chatTokenEstimate.ts:112`, `ACTIVE_ESTIMATOR_VERSION =
-"generic_multilingual_v1"`). 위 문안은 전부 ASCII이므로 다음과 같습니다.
+(`lib/chatTokenEstimate.ts`, `ACTIVE_ESTIMATOR_VERSION =
+"generic_multilingual_v1"`). 위 문안은 전부 ASCII이므로 다음이 성립합니다.
 
 ```bash
-# 문안을 block.txt에 저장한 뒤
-wc -c block.txt                      # bytes
+# 조합한 문안을 block.txt에 저장한 뒤
+wc -c block.txt
 node -e 'console.log(Math.ceil(require("fs").statSync("block.txt").size/4))'
 ```
 
 저장소 함수로 직접 재는 편이 정확합니다.
 
 ```bash
-npx tsx -e 'import{estimateTextTokens}from"./lib/chatTokenEstimate";import{readFileSync}from"fs";console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
+npx tsx -e 'import{estimateTextTokens}from"./lib/chatTokenEstimate";\
+import{readFileSync}from"fs";\
+console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
 ```
 
 **한국어 문안을 쓰면 수치가 달라집니다** — 한글은 별도 계수로 계산되므로 위
@@ -493,18 +631,23 @@ npx tsx -e 'import{estimateTextTokens}from"./lib/chatTokenEstimate";import{readF
 §5.1 표와 C-5를 함께 갱신합니다.
 
 **주의**: 이 블록은 turn마다 실려 나가므로, 문안을 늘리는 것은 문서 편집이 아니라
-**단가 인상**입니다.
+**단가 인상**입니다. 그리고 조립 축이 늘어날 때마다 표의 행이 곱으로 늘어납니다 —
+축을 추가하기 전에 그 축이 사용자에게 다른 행동을 하게 만드는지 확인합니다.
 
 ---
 
 ## 10. 요약
 
-- 자동 **탐지**는 타당하고, 인계 경로가 이미 있어 구현 비용이 낮습니다.
+- 자동 **탐지**는 타당합니다. **인계 실행 비용은 낮지만**(기존
+  `handleStartImageDraft` 재사용) **L1 전체의 구현 비용은 "중간"**입니다 — 분류
+  모듈·dismiss 수명주기·analytics schema·잠금 분기·locale·테스트가 새로
+  필요합니다(§3.3).
 - 자동 **draft 전환(D-3a)**은 비용이 아니라 **오탐 시 화면 강탈·IME 위험**을 근거로
   권하지 않습니다. 자동 **생성 제출(D-3b)**은 가격 고지 계약과 충돌합니다.
 - 이 제안이 겨냥한 화면은 전환 기능이 아니라 **고지 부재**의 결과이며, 같은 결함을
   파일에 대해서는 이미 해결해 두었습니다. **L0이 1순위**이되 효과는 best-effort이고
-  turn당 150~190토큰의 실비가 듭니다.
+  turn당 **177~293토큰**의 실비가 들며, 문안은 단일 고정이 아니라
+  `imageHandoff`·`artifact` 상태로 조립해야 합니다(§5.1).
 - L1은 **명백한 raster 생성 의도로 범위를 좁혀** 시작하고, 첨부 화면 같은 텍스트
   밀집 인포그래픽은 **L3에서 SVG/이미지 선택 UX로 따로** 설계합니다.
 - 착수 전 **`image-generation.md` §13과 UI 계약 둘 다** 개정해야 합니다.
