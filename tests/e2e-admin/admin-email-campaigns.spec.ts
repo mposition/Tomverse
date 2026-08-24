@@ -298,6 +298,47 @@ test.describe("Admin Console — email campaigns", () => {
     );
   });
 
+  test("an unmeasured audience says nobody has counted it, not zero", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    const estimate = page.getByTestId("admin-campaign-estimate");
+    await expect(estimate).toBeVisible();
+    await expect(
+      page.getByTestId("admin-campaign-estimate-absent")
+    ).toContainText("Nobody has measured this audience");
+    // "not measured", never "0": a count nobody has taken and a count that came
+    // back nought are different facts.
+    await expect(estimate).not.toContainText("would receive the notice");
+  });
+
+  test("measuring the audience stores a number that says when it was taken", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    await page.getByTestId("admin-campaign-estimate-run").click();
+
+    // Zero people are affected in this fixture, and that is a measurement:
+    // the headline appears, dated and attributed.
+    await expect(
+      page.getByTestId("admin-campaign-estimate-headline")
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("admin-campaign-estimate")).toContainText(
+      "Measured"
+    );
+    await expect(
+      page.getByTestId("admin-campaign-estimate-absent")
+    ).toHaveCount(0);
+  });
+
   test("an unknown campaign id shows the not-found page, not an empty detail panel", async ({
     page,
     signInAs,
