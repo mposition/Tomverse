@@ -1,6 +1,6 @@
 # memory extraction decision-grade eval 실행 절차
 
-`(gpt-5-6-luna, mem-extract-v1)` 쌍을 실제로 재고, 그 결과로 register를
+`(gpt-5-6-luna, mem-extract-v2)` 쌍을 실제로 재고, 그 결과로 register를
 승인하기까지의 절차입니다. 근거는
 `docs/policy/external-conversation-import-and-memory.md` §12.2~§12.5이고,
 표본을 만들고 동결한 절차는 `docs/ops/memory-extraction-eval-dataset.md`입니다.

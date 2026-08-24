@@ -1527,6 +1527,7 @@ export const zh = {
         lossAllowedTools: "这个包请求使用工具。工具权限由你的套餐和这个助手自己的设置决定。",
         lossRelativeLinks: "指令里链接到了包内的文件。那些链接不会打开；如果需要，请把这些文件作为文档添加。",
         lossSkippedEntries: "{count} 个本次导入不使用的类型的文件。",
+        lossItemsMore: "另有 {count} 个。",
         lossKnowledgeOverLimit: "这个包提供了 {count} 个文档；一次导入最多只能带 {limit} 个。",
         targetHeading: "这个助手放到哪里",
         targetNew: "新建一个助手",

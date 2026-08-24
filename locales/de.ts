@@ -1536,6 +1536,7 @@ export const de = {
         lossAllowedTools: "Das Paket verlangt Werkzeuge. Über deren Nutzung entscheiden Ihr Tarif und die Einstellungen dieses Assistenten.",
         lossRelativeLinks: "Die Anweisungen verlinken auf Dateien im Paket. Diese Verweise führen ins Leere; fügen Sie die Dateien bei Bedarf als Dokumente hinzu.",
         lossSkippedEntries: "{count} Datei(en) einer Art, die dieser Import nicht verwendet.",
+        lossItemsMore: "und {count} weitere.",
         lossKnowledgeOverLimit: "Das Paket bietet {count} Dokumente an; pro Import sind höchstens {limit} möglich.",
         targetHeading: "Wohin dieser Assistent kommt",
         targetNew: "Neuen Assistenten anlegen",

@@ -75,25 +75,32 @@ export type MemoryExtractionEvalEntry = {
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
         {
-            // §12.5 first eval target. **Still a candidate.** The budget below
-            // is filled, which is what opens `--live`; it is not approval of
-            // the pair. That is the §12.4 procedure — decision-grade run,
-            // artifact preservation, blind review, independent re-run, §12.3
-            // judgement, approver signature, register merge, staging
-            // verification — and none of it has happened.
+            // **Never approved, superseded by v2.** The pair was the §12.5
+            // first eval target and its only live run reached five
+            // consecutive unscoreable answers: the prompt asked for JSON
+            // "matching the requested schema" and the adapter requested no
+            // schema, so the model guessed the field names and the type of
+            // `confidence`. That is a wiring defect, not a measurement, and
+            // the run is recorded as `abortedOnConsecutiveFailures` rather
+            // than as a verdict. US$0.0012 was spent reaching it.
+            //
+            // Kept rather than deleted because the budget below was really
+            // approved and really spent against, and a register that dropped
+            // the entry would lose both facts.
             extractionModelId: "gpt-5-6-luna",
-            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
-            status: "candidate",
+            // Written out, never `MEMORY_EXTRACTION_PROMPT_VERSION`. While
+            // these entries read the live constant, bumping it moved every
+            // approval onto the new version without anybody approving
+            // anything -- which is precisely what a version is for.
+            promptVersion: "mem-extract-v1",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-03",
+            notes:
+                "Never approved. Superseded by mem-extract-v2 (structured " +
+                "outputs) on 2026-08-24. US$0.0012 spent; no verdict exists.",
             evalBudget: {
                 approvedBy: "@mposition",
-                // US$17.36 is the worst case for three runs: §12.4 asks for two
-                // and the third absorbs one failed run without a second
-                // approval. The worst case prices every call at the harness's
-                // 4,096-token output ceiling, so a run that behaves cannot
-                // approach this — the typical figure for two runs is US$3.09.
-                // Derivation and what it does not measure: issue #837.
                 maxUsd: 20,
                 ticket: "https://github.com/mposition/Tomverse/issues/837",
                 approvedAt: "2026-08-23",
@@ -101,12 +108,59 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // §12.5 backup candidate, evaluated only if the primary fails.
             extractionModelId: "gpt-5-4-mini",
-            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
-            status: "candidate",
+            promptVersion: "mem-extract-v1",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-03",
+            notes:
+                "Never approved. Superseded by mem-extract-v2 on 2026-08-24; " +
+                "never had a budget and was never run.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
+            // §12.5 first eval target under v2. **Still a candidate.** The
+            // budget below is what opens `--live`; it is not approval of the
+            // pair. That is the §12.4 procedure — decision-grade run,
+            // artifact preservation, blind review, independent re-run, §12.3
+            // judgement, approver signature, register merge, staging
+            // verification — and none of it has happened for v2.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v2",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-24",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Approved for v2 on its own, not carried across from v1:
+                // #837 was amended rather than reused, because a budget that
+                // migrates with a version bump is a budget nobody approved
+                // for the thing it ends up paying for.
+                //
+                // US$11.57 is the worst case for two runs at the 4,096-token
+                // output ceiling the product sends; the typical figure is
+                // US$3.09. The headroom to US$20 absorbs the compatibility
+                // probe and one failed run without a second approval.
+                //
+                // US$0.0012 was already spent under v1 finding the wiring
+                // defect v2 fixes. It counts against this programme, and
+                // nothing enforces that: the harness bounds a *run* through
+                // --max-cost-usd and has no cumulative ledger, so the figure
+                // is recorded here to be subtracted by a person.
+                maxUsd: 20,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-24",
+            },
+            evaluation: null,
+        },
+        {
+            // §12.5 backup candidate, evaluated only if the primary fails.
+            extractionModelId: "gpt-5-4-mini",
+            promptVersion: "mem-extract-v2",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-24",
             evalBudget: null,
             evaluation: null,
         },
