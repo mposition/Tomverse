@@ -536,7 +536,18 @@ export function CreditPackPurchaseButton({
         </button>
       )}
       {open && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/65 p-3 backdrop-blur-sm sm:items-center" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
+        /*
+         * z-[150] rather than the z-[120] this overlay used to sit at. This
+         * modal is opened from *inside* other overlays -- account User
+         * Settings renders at z-[130] and its own nested dialogs (delete
+         * account, sign-out confirm) at z-[140] -- so anything at or below
+         * those layers is painted underneath the panel that opened it: present
+         * in the DOM, `open`, and both invisible and unclickable. The portal
+         * target stays `document.body`, because moving it inside the settings
+         * panel would clip it against that panel's `overflow-hidden`, and the
+         * settings modal deliberately stays open underneath.
+         */
+        <div className="fixed inset-0 z-[150] flex items-end justify-center bg-black/65 p-3 backdrop-blur-sm sm:items-center" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
           <section
             id="credit-pack-modal"
             ref={dialogRef}
