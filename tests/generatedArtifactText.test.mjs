@@ -331,3 +331,87 @@ test("admitTextContent is what every path shares", () => {
     "x = 1\n"
   );
 });
+
+/* ------------------------------------------------------------------------ */
+/* XML strictness: the errors that make a browser refuse to draw an SVG      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * A generated `.svg` carrying `text-anchor` twice on one element was accepted,
+ * written, and offered as a finished picture -- and opened as "Attribute
+ * text-anchor redefined". The scanner passed it because it never looked at
+ * attributes. Each case below is fatal to an XML parser, so each one is a file
+ * this product would have claimed to make and could not open.
+ */
+const FATAL_IN_XML = [
+  [
+    "the same attribute twice",
+    '<svg xmlns="http://www.w3.org/2000/svg"><text x="10" text-anchor="middle" y="20" text-anchor="start">hi</text></svg>',
+  ],
+  [
+    "an unescaped ampersand in text",
+    '<svg xmlns="http://www.w3.org/2000/svg"><text>salt & sodium</text></svg>',
+  ],
+  [
+    "an unescaped ampersand in an attribute",
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="a.html?x=1&y=2">x</a></svg>',
+  ],
+  [
+    "tags whose case does not match",
+    '<svg xmlns="http://www.w3.org/2000/svg"><Text>hi</text></svg>',
+  ],
+  [
+    "an unquoted attribute value",
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect width=100 height="50"/></svg>',
+  ],
+  [
+    "an unclosed element that HTML would forgive",
+    '<svg xmlns="http://www.w3.org/2000/svg"><img src="a.png"></svg>',
+  ],
+];
+
+for (const [label, svg] of FATAL_IN_XML) {
+  test(`an SVG with ${label} is refused rather than delivered`, () => {
+    assert.throws(() => text("svg", svg), TextContentError);
+  });
+}
+
+test("an XML file is held to the same rules as an SVG", () => {
+  assert.throws(() => text("xml", '<a b="1" b="2"/>'), TextContentError);
+  assert.throws(() => text("xml", "<a>Tom & Jerry</a>"), TextContentError);
+  assert.equal(text("xml", '<a b="1">Tom &amp; Jerry</a>'), '<a b="1">Tom &amp; Jerry</a>\n');
+});
+
+test("HTML keeps every one of those, because a browser does too", () => {
+  // Turning strictness on for `.html` would reject ordinary working pages.
+  const page =
+    '<html><head><meta charset="utf-8"></head><body><BR><img src="a.png">' +
+    '<div class=box>Tom & Jerry</div></body></html>';
+  assert.equal(text("html", page), `${page}\n`);
+});
+
+test("the references XML does accept still pass", () => {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg"><text>A &amp; B &lt; C &#65; &#x42;</text></svg>';
+  assert.equal(text("svg", svg), `${svg}\n`);
+});
+
+test("a named HTML entity is refused in an SVG, as XML refuses it", () => {
+  // `&nbsp;` needs a DTD an SVG a browser opens does not have.
+  assert.throws(
+    () => text("svg", '<svg xmlns="http://www.w3.org/2000/svg"><text>a&nbsp;b</text></svg>'),
+    TextContentError
+  );
+});
+
+test("a realistic infographic SVG is still accepted", () => {
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">',
+    '<rect width="400" height="60" fill="#e94b35"/>',
+    '<text x="200" y="38" text-anchor="middle" font-size="24" fill="#ffffff">고혈압에 좋은 음식</text>',
+    '<g transform="translate(20,80)"><circle cx="20" cy="20" r="18" fill="#e94b35"/>',
+    '<text x="50" y="26" font-size="14">바나나 &amp; 시금치</text></g>',
+    "</svg>",
+  ].join("");
+  assert.equal(text("svg", svg), `${svg}\n`);
+});
