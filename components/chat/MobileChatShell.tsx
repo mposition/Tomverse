@@ -44,6 +44,12 @@ import {
   resolveChatContentState,
   type ChatContentState,
 } from "@/lib/chatContentState";
+import {
+  chatModelStatusKey,
+  isConversationResponding,
+  scopeModelStatusesToConversation,
+  type ModelRuntimeStatus,
+} from "@/lib/chatRuntimeStatus";
 import { useGuestChatContentSeed } from "@/components/chat/useGuestChatContentSeed";
 import { buildChatModelSummary } from "@/lib/chatModelSummary";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
@@ -84,8 +90,6 @@ type PromptPayload = {
   contextBundle?: string | null;
   contextLayout?: "single" | "comparison";
 };
-
-type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "cancelled" | "paused";
 
 /**
  * PROV-BANNER-001. The provider outage banner's share of the screen.
@@ -350,7 +354,13 @@ export function MobileChatShell({
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
     [conversations, currentChatId]
   );
-  const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
+  // Keyed by (conversation, model), never by model alone -- see
+  // DesktopChatShell's matching block and lib/chatRuntimeStatus.ts. Both
+  // shells read the same derivation so one can never call a conversation busy
+  // that the other would call free.
+  const [reportedModelStatuses, setReportedModelStatuses] = useState<
+    Record<string, ModelRuntimeStatus>
+  >({});
   const [modelContentStates, setModelContentStates] = useState<
     Record<string, ChatContentState>
   >({});
@@ -374,16 +384,36 @@ export function MobileChatShell({
 
   // Bumped to abort every currently-responding panel at once ("stop all").
   const [stopSignal, setStopSignal] = useState(0);
-  const isAnyModelResponding = Object.values(modelStatuses).some(
-    (status) => status === "responding"
+  // What every consumer below reads: this conversation's currently selected
+  // models and nothing else.
+  const modelStatuses = useMemo(
+    () =>
+      scopeModelStatusesToConversation({
+        statuses: reportedModelStatuses,
+        conversationId: currentChatId,
+        selectedModelIds: selectedModels,
+      }),
+    [currentChatId, reportedModelStatuses, selectedModels]
   );
+  // Only a run this conversation's own, un-paused panels are performing may
+  // hold this composer, and only those panels are what the stop button then
+  // stops. A background answer in a conversation the user left keeps running
+  // and has no say here.
+  const isAnyModelResponding = isConversationResponding({
+    statuses: modelStatuses,
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+  });
 
   const handleModelStatusChange = useCallback(
-    (modelId: string, nextStatus: ModelRuntimeStatus) => {
-      setModelStatuses((current) =>
-        current[modelId] === nextStatus
-          ? current
-          : { ...current, [modelId]: nextStatus }
+    (
+      modelId: string,
+      nextStatus: ModelRuntimeStatus,
+      conversationId: string | null
+    ) => {
+      const key = chatModelStatusKey(conversationId, modelId);
+      setReportedModelStatuses((current) =>
+        current[key] === nextStatus ? current : { ...current, [key]: nextStatus }
       );
     },
     []

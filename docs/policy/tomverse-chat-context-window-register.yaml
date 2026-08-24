@@ -591,6 +591,38 @@ models:
       path validating max_tokens does not know the window, and no provider
       named one. No sourceUrl, so the row stays unverified.
 
+
+      Pending review, 2026-08-24. Perplexity's model documentation is
+      reported to state a context length of "128K" for sonar, at
+      https://docs.perplexity.ai/docs/sonar/models/sonar, with
+      usage.prompt_tokens defined in the API response specification at
+      https://docs.perplexity.ai/api-reference/sonar-post. Recorded as a
+      lead, NOT as a source: the pages were supplied by the register's
+      owner and could not be opened from the environment this note was
+      written in, where the egress policy blocks docs.perplexity.ai. Nobody
+      has yet read them here.
+
+
+      Two things would still be missing even once someone has. "128K" does
+      not say whether the figure is 128,000 or 131,072, and the difference
+      is 3,072 tokens of room the guard would either have or not have. And
+      contextWindowIncludesOutput is not addressed, which this register
+      requires stated explicitly rather than assumed. So this stays
+      unverified with null values until a reader confirms the exact integer
+      and what it covers.
+
+
+      Trial observation, same date, and it is not evidence of a window: npm
+      run report:model-window-probe-trial -- --model=perplexity/sonar --send
+      sent roughly 150,000 tokens of filler and the provider answered HTTP
+      200. Read against a published 128K, silent truncation or some
+      pre-processing step is the likelier explanation than a window that
+      large, and the run did not read usage.prompt_tokens, so it cannot tell
+      which. The script was corrected to report that count rather than to
+      call a 200 an acceptance. No further paid attempts were made: the
+      accept path can only ever produce a lower bound, and this register
+      cannot record one.
+
   - modelId: "perplexity/sonar-pro"
     apiModel: "sonar-pro"
     provider: perplexity
