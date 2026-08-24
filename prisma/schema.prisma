@@ -96,6 +96,7 @@ model User {
   emailPreferences                   EmailPreference[]
   consentRecords                     ConsentRecord[]
   emailDeliveries                    EmailDelivery[]
+  modelMigrationRecords              ModelMigrationRecord[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -107,7 +108,6 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
-  modelMigrationRecords ModelMigrationRecord[]
 }
 
 model UserSettings {
@@ -1941,15 +1941,15 @@ model ModelLifecycleWorkItem {
   apiModel String
 
   /// The mapped ModelRegistryEntry, once one exists.
-  modelId String?
+  modelId        String?
   /// The observation this came from. Not a foreign key: the catalogue row is
   /// upserted every scan and may be swept, while the decision outlives it.
   catalogEntryId String?
 
   /// add | upgrade | replace | retire | monitor | no_action
-  action String
+  action   String
   /// The eleven states in lib/modelLifecycleWorkItemCore.ts.
-  status String @default("discovered")
+  status   String @default("discovered")
   /// critical | high | normal
   severity String @default("normal")
 
@@ -1959,15 +1959,15 @@ model ModelLifecycleWorkItem {
   /// The automatic suggestion, which a person may overwrite. Never a decision.
   recommendation String?
   /// high | medium | low, for the suggestion above.
-  confidence String?
+  confidence     String?
 
   /// Observation evidence: lifecycle strings, consecutive-miss counts, run ids.
-  evidence Json?
+  evidence           Json?
   /// Facts still needed before this can be decided.
-  unknowns Json?
+  unknowns           Json?
   /// Named things being waited on, in the sense report-issue-backlog uses:
   /// something the repository cannot answer by itself.
-  blockers Json?
+  blockers           Json?
   /// Verifications owed before rollout, e.g. ["pricing","access","staging"].
   /// One list rather than three states because they run in parallel.
   pendingValidations Json?
@@ -3747,6 +3747,89 @@ model JurisdictionCountryMap {
 /// recipient set, the footer, whether an unsubscribe link appears, and whether
 /// a human has to approve the send. It is chosen once and cannot be edited to
 /// something incompatible with the versions already published under it.
+/// A user-facing announcement, from draft to sent.
+///
+/// Contract: .github/audits/model-lifecycle-email-2026-08-22.md §12.2, EM-06.
+///
+/// The layer above EmailEvent. An event is one fan-out; a campaign is the
+/// decision to make one, who approved it, and what they approved. Kept apart
+/// from EmailEvent because approval is a property of the campaign and not of
+/// the outbox: adding draft and pending_approval to EmailEvent.status would put
+/// approval vocabulary in the table that also holds login codes.
+model EmailCampaign {
+  id String @id @default(cuid())
+
+  /// model_launch | model_upgrade | model_retirement | model_migration
+  ///  | model_incident | other
+  category String
+
+  /// classification and purpose are derived from this, never stored again.
+  templateKey String
+
+  /// draft | pending_approval | approved | running | completed | cancelled
+  ///  | halted
+  status String @default("draft")
+
+  /// The languages this campaign sends in.
+  locales Json
+
+  /// Handed to each wave's EmailEvent unchanged.
+  audienceSpec Json
+
+  /// language -> TemplateVersion.id, pinned when the campaign was approved.
+  ///
+  /// EM-06. Copy changes mint a new TemplateVersion automatically, so without a
+  /// pin an approval would silently come to cover text nobody approved.
+  templateVersionIds Json?
+
+  approvalId String?
+  approvedAt DateTime?
+
+  createdByEmail String
+
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  waves EmailCampaignWave[]
+
+  @@index([status, createdAt])
+  @@index([templateKey])
+}
+
+/// One send within a campaign.
+///
+/// A campaign may notify, remind and then confirm; each is its own fan-out with
+/// its own event, cap and dry-run flag, and each has to be resumable on its
+/// own.
+model EmailCampaignWave {
+  id         String        @id @default(cuid())
+  campaignId String
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  /// launch | notice | reminder | final_reminder | completion
+  kind     String
+  sequence Int
+
+  /// The EmailEvent this wave expanded into, once it has one.
+  eventId String?
+
+  /// pending | expanding | expanded | sending | done | cancelled | halted
+  status String @default("pending")
+
+  recipientCap  Int?
+  dryRun        Boolean @default(false)
+  expandedCount Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campaignId, kind, sequence])
+  @@index([status, createdAt])
+}
+
 model EmailTemplate {
   id  String @id @default(cuid())
   key String @unique

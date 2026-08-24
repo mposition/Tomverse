@@ -551,7 +551,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   `enqueueStandardEmail`이 행을 만들지 않고 이유를 반환한다.
 - **파일**: `docs/policy/email-notifications.md:2206-2223`
 
-### EM-06 — template 게시에 사람의 내용 승인이 없다 (P1, Medium)
+### EM-06 — template 게시에 사람의 내용 승인이 없다 (P1, Medium) — **해결 (2026-08-24)** — §37
 
 - **Evidence**: `[코드]` `lib/emailTemplateRegistry.ts:118-133`
 - **현재 동작**: 코드의 카피가 바뀌면 다음 발송이 새 `TemplateVersion`을
@@ -2115,7 +2115,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~ML-12 provider 무관 후보 dedup~~ **완료 (2026-08-23)** — §28
 - ~~ML-13 리포트에서 모델 소유자와 관측 경로 분리~~ **완료 (2026-08-23)** — §31
 - ~~ML-10 reconciliation script 범용화 + precondition 검사~~ **완료 (2026-08-23)** — §33
-- EM-06 campaign이 templateVersion pin
+- ~~EM-06 campaign이 templateVersion pin~~ **완료 (2026-08-24)** — §37
 - EM-11 standard drain job key + backlog incident
 - EM-10 조건부 readiness
 - EM-15 `userVisibleNote` 다국어
@@ -2701,3 +2701,59 @@ suppression·관할권)가 이미 행을 `skipped`로 만들고 **이유를 그 
 
 **2차 범위**: `EmailCampaign`/`Wave`/`Recipient`, 승인(§12.3), 예약, reminder
 wave의 cohort 재계산, admin 화면. EM-06은 그 위에 얹힙니다.
+
+---
+
+## 37. EM-01 2차 + EM-06 구현 기록 — campaign workflow (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `prisma/schema.prisma` · `migrations/20260824000000_email_campaign` | `EmailCampaign` · `EmailCampaignWave` |
+| `lib/emailCampaignCore.ts` | 발송 가능 여부 판정 + **EM-06 content 대조**. 순수 |
+| `lib/emailCampaignService.ts` | draft · approve · run wave · cancel |
+| `scripts/check-enum-constraints.mjs` | 새 CHECK 5건 등록 |
+| `tests/emailCampaignCore.test.mjs` | 12건 |
+| `tests/integration/email-campaign.db.test.ts` | 12건, 새 파일 |
+
+**승인은 campaign의 성질이지 outbox의 성질이 아닙니다.** §12.1이 B안을 고른
+결정적 이유가 이것이고, 그래서 `draft`/`pending_approval`을 `EmailEvent.status`에
+넣지 않았습니다 — 그 CHECK는 **로그인 코드가 들어 있는 테이블**의 어휘이고 두
+lane이 모두 의존합니다.
+
+**EM-06은 여기서 자연히 나옵니다.** 승인이 언어별로 `TemplateVersion.id`와
+**그 시점의 `contentHash`**를 함께 pin하고, 발송 직전에 template이 **지금**
+렌더하는 해시와 대조합니다. 다르면 거부입니다 — 재승인이 아니라 거부인 이유는,
+승인의 의미가 **사람이 그 문장을 봤다**는 것이기 때문입니다.
+
+**세 가지 거부를 구분합니다.** `content_changed`(승인된 문장이 바뀜),
+`locale_not_pinned`(승인 후 언어 추가 — 고치는 방법이 다릅니다: 새 언어를 덮는
+승인이 필요하지 옛 승인을 다시 읽는 게 아닙니다), 그리고 상태별
+`not_approved`/`cancelled`/`halted`/`already_completed`. 하나의 "보낼 수 없음"으로
+뭉치면 운영자가 무엇을 해야 하는지 알 수 없습니다.
+
+**언어가 사라진 것도 바뀐 것으로 셉니다.** 승인된 문장이 다른 것이 아니라
+**없어진** 것이고, 그쪽이 더 중요한 방향입니다.
+
+**읽을 수 없는 pin은 pin이 아닙니다.** `locale_not_pinned`으로 드러납니다 —
+이 코드가 절대 만들면 안 되는 결과가 **pin 없는 언어를 조용히 발송**하는 것입니다.
+
+**DB CHECK가 반쪽 승인을 막습니다.** `EmailCampaign_approval_completeness_check`:
+approved 이상이면 approvalId·approvedAt·templateVersionIds가 **전부** 있어야
+합니다. 승인 id는 있고 pin이 없는 행은 오늘의 코드가 말하는 것을 그대로
+보내며, 그것이 EM-06이 서술한 실패 전부입니다.
+
+**wave의 unique index가 재실행을 무해하게 만듭니다.** `(campaignId, kind,
+sequence)`이므로 두 번째 `reminder 1`은 불가능하고, 그래서 서비스는 요청을
+거절하는 대신 **이어서 합니다** — 재시도한 운영자 조작이 바로 그 모양입니다.
+
+**취소는 앞으로를 정하고 뒤를 고치지 않습니다.** 이미 쓰인 delivery 행은 lane이
+자기 gate로 처리하도록 둡니다. 되돌려 쓰면 이미 일어난 일이 기록에서 사라집니다.
+
+**아직 컬럼을 만들지 않은 것**: `scheduledAt`·`workItemId`·`targetModelId`·
+`effectiveAt`·`triggerMode`·`audienceVersion`·`estimatedRecipients`, 그리고
+`EmailCampaignRecipient`. 마지막 것은 cohort 귀속(§11)이 목적인데 audience
+계산기 연결이 3차이고, 지금 만들면 절반이 죽은 채로 남습니다 — EM-01이 지적한
+그 결함입니다.
+
+**3차 범위**: 예약, audience 계산기 연결과 `EmailCampaignRecipient`, reminder
+wave의 cohort 재계산, admin 화면, `runWithAdminApproval` 연결.
