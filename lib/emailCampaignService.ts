@@ -20,6 +20,8 @@ import {
 } from "@/lib/emailCampaignAttestationCore";
 import { automaticTransitionClaim } from "@/lib/automaticTransitionClaim";
 import { AUDIENCE_DEFINITION_VERSION } from "@/lib/modelRetirementAudienceCore";
+import { isEmailCampaignsEnabled } from "@/lib/appSettings";
+import { CAMPAIGNS_DISABLED_MESSAGE } from "@/lib/emailFeatureFlags";
 import { readExpansionSpec } from "@/lib/emailAudienceExpansionCore";
 import {
   summariseRetirementAudience,
@@ -51,6 +53,34 @@ import {
  * and what it is allowed to say -- which is the part an approval is about.
  */
 
+/**
+ * Thrown by every campaign action while the feature is switched off.
+ *
+ * Contract: docs/policy/email-notifications.md §15.2 (EM-05).
+ *
+ * The flag gates *acts*, not reads. An operator can still open the console and
+ * see what exists, which is the only place `EmailCampaignWave` is readable at
+ * all -- hiding it would mean the feature being off also hid whatever it had
+ * already done. Drafting, approving, scheduling, estimating and sending are
+ * refused.
+ *
+ * Thrown rather than returned because these functions already have refusal
+ * unions for their own reasons -- "this campaign is cancelled", "the copy
+ * moved" -- and folding a feature-level switch into a per-campaign verdict
+ * would make callers handle "the feature is off" once per campaign state.
+ */
+export class CampaignsDisabledError extends Error {
+  readonly code = "CAMPAIGNS_DISABLED";
+  constructor() {
+    super(CAMPAIGNS_DISABLED_MESSAGE);
+    this.name = "CampaignsDisabledError";
+  }
+}
+
+const assertCampaignsEnabled = async () => {
+  if (!(await isEmailCampaignsEnabled())) throw new CampaignsDisabledError();
+};
+
 export type CampaignDraft = {
   category: CampaignCategory;
   templateKey: string;
@@ -60,6 +90,7 @@ export type CampaignDraft = {
 };
 
 export const createCampaignDraft = async (input: CampaignDraft) => {
+  await assertCampaignsEnabled();
   // Reject an unknown template here rather than at send: a draft naming a
   // template that does not exist cannot be approved into anything.
   emailTemplateDefinition(input.templateKey);
@@ -96,6 +127,7 @@ export const approveCampaign = async (input: {
   approvalId: string;
   now?: Date;
 }) => {
+  await assertCampaignsEnabled();
   const campaign = await prisma.emailCampaign.findUniqueOrThrow({
     where: { id: input.campaignId },
     select: { id: true, status: true, templateKey: true, locales: true },
@@ -214,6 +246,7 @@ export const runCampaignWave = async (input: {
   batchSize?: number;
   timeBudgetMs?: number;
 }): Promise<CampaignWaveRun> => {
+  await assertCampaignsEnabled();
   const refusal = await campaignSendRefusal(input.campaignId);
   if (refusal) {
     if (refusal.refusal === "content_changed") {
@@ -395,6 +428,7 @@ export const scheduleCampaignWave = async (input: {
   recipientCap?: number;
   dryRun?: boolean;
 }) => {
+  await assertCampaignsEnabled();
   const sequence = input.sequence ?? 1;
   return prisma.emailCampaignWave.upsert({
     where: {
@@ -472,6 +506,10 @@ export const runDueCampaignWaves = async (input?: {
   now?: Date;
   limit?: number;
 }): Promise<DueWaveOutcome[]> => {
+  // The scheduler asks rather than asserts. It runs on the fifteen-minute cron
+  // beside unrelated work, and an exception here would take that whole pass
+  // down over a switch being off -- which is a normal state, not a fault.
+  if (!(await isEmailCampaignsEnabled())) return [];
   const now = input?.now ?? new Date();
   const due = await prisma.emailCampaignWave.findMany({
     where: {
@@ -774,6 +812,7 @@ export const estimateCampaignAudience = async (input: {
       summary: AudienceSummary;
     }
 > => {
+  await assertCampaignsEnabled();
   const campaign = await prisma.emailCampaign.findUnique({
     where: { id: input.campaignId },
     select: {

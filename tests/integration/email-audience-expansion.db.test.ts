@@ -6,6 +6,8 @@ import { MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
 import { prisma } from "@/lib/prisma";
+import { EMAIL_MARKETING_FLAG_KEY } from "@/lib/emailFeatureFlags";
+import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // One event, many deliveries, resumably (EM-01).
 //
@@ -34,6 +36,10 @@ beforeEach(async () => {
   process.env.EMAIL_AUDIT_HASH_KEY = "test-audit-key";
   process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
+  // These suites drive `model_launch`, which is classified marketing, so the
+  // fan-out needs that flag on too (EM-05). Off is the default everywhere
+  // else, which is what makes turning it on here a statement.
+  await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
 });
 
 after(async () => {

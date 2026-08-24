@@ -9,6 +9,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { purgeExpiredRenderSnapshots } from "@/lib/emailSnapshotRetention";
+import { enqueuedRow } from "../support/enqueuedEmail";
 
 // Clearing the personalisation snapshot once its window has passed (EM-08).
 //
@@ -53,7 +54,7 @@ const someone = () =>
 /** A delivery of the given template, aged by backdating its send. */
 const aged = async (templateKey: string, daysOld: number) => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey,
     emailAddress: user.email,
     userId: user.id,
@@ -62,7 +63,7 @@ const aged = async (templateKey: string, daysOld: number) => {
       templateKey === ACCOUNT_DELETION_SCHEDULED_TEMPLATE
         ? { scheduledFor: "2026-09-15T09:00:00.000Z" }
         : { name: user.name },
-  });
+  }));
   assert.ok(rows);
   const sentAt = new Date(Date.now() - daysOld * DAY_MS);
   await prisma.emailDelivery.update({
@@ -148,12 +149,12 @@ test("a second sweep does not re-stamp an already purged row", async () => {
 
 test("a delivery that never sent is aged from when it was written", async () => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: user.name },
-  });
+  }));
   assert.ok(rows);
   // Still pending, never sent, and holding the same personal data. Leaving it
   // forever because the send failed would be the wrong way round.

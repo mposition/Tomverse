@@ -14,6 +14,11 @@ import {
   audienceCandidatesByIds,
   summariseRetirementAudience,
 } from "@/lib/modelRetirementAudience";
+import {
+  EMAIL_CAMPAIGNS_FLAG_KEY,
+  EMAIL_MARKETING_FLAG_KEY,
+} from "@/lib/emailFeatureFlags";
+import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // Who a retirement reaches, and the record of who it did not (EM-01 slice 3).
 //
@@ -41,6 +46,13 @@ beforeEach(async () => {
   process.env.EMAIL_AUDIT_HASH_KEY = "test-audit-key";
   process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
+  // Campaigns are off by default (EM-05). This suite is about the campaign
+  // machinery, so it turns the switch on the way an operator would.
+  await setEmailFeatureFlag(EMAIL_CAMPAIGNS_FLAG_KEY, true);
+  // These suites drive `model_launch`, which is classified marketing, so the
+  // fan-out needs that flag on too (EM-05). Off is the default everywhere
+  // else, which is what makes turning it on here a statement.
+  await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
 });
 
 after(async () => {

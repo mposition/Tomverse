@@ -180,6 +180,10 @@ run(
     // the one that must NOT fire when a single model's answers are cleared.
     "tests/integration/message-attachments.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    // The three ADR flags against the rows that hold them: the acceptance
+    // criterion is about a delivery row *not* being created, which only the
+    // table can confirm, and the fan-out gate needs a real event to expand.
+    "tests/integration/email-feature-flags.db.test.ts",
     "tests/integration/credential-email-lane.db.test.ts",
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",

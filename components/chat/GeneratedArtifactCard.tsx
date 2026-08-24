@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -127,6 +127,7 @@ export function GeneratedArtifactCard({
   const { t } = useLanguage();
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const attributedModelId = artifact.modelId ?? fallbackModelId ?? null;
   const modelName = attributedModelId
@@ -174,6 +175,64 @@ export function GeneratedArtifactCard({
 
   const isReady = artifact.status === "ready";
   const isBlocked = artifact.status === "blocked";
+
+  /*
+    The picture, for the one format that is one.
+
+    Policy: docs/policy/generated-artifacts.md section 9, "SVG는 카드 안에서
+    미리 보여 준다".
+
+    An SVG asked for as a chart or an infographic is a picture, and a card that
+    only offers to download it makes the user leave the conversation to find
+    out whether it is the picture they wanted. Every other generated format is
+    a document an application opens; this one the browser can already draw.
+
+    **Rendered through `<img>`, never inlined into the DOM.** An `<img>` puts
+    the SVG in the browser's secure static mode: no script runs, no external
+    resource is fetched, nothing is interactive -- so this cannot become an
+    execution surface in this application's origin even if a hostile SVG got
+    past `findSvgScript` in lib/generatedArtifactText.ts. Inlining the markup,
+    or an `<object>`/`<iframe>`, would each give up that guarantee.
+
+    The blob's type is set here from what the card knows rather than taken from
+    the response, so a route that one day answered with a different media type
+    could not turn this element into something else.
+
+    Failure is silent: no preview, and the download button below is unchanged.
+    A second error row for a picture that did not load would be noise on a card
+    that already has a working control.
+  */
+  useEffect(() => {
+    if (!isReady || artifact.format !== "svg") return;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(artifactDownloadPath(artifact.id), {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          await discardResponseBody(response);
+          return;
+        }
+        const bytes = await response.arrayBuffer();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(
+          new Blob([bytes], { type: "image/svg+xml" })
+        );
+        setPreviewUrl(objectUrl);
+      } catch {
+        // Silent by design; see above.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setPreviewUrl(null);
+    };
+  }, [artifact.format, artifact.id, isReady]);
 
   /*
     One accessible name carrying everything the card says visually: the
@@ -345,6 +404,35 @@ export function GeneratedArtifactCard({
           </button>
         )}
       </div>
+
+      {/*
+        The preview takes a full-width line of its own in both layouts:
+        `basis-full` forces a wrap in the row layout, and in the stacked layout
+        it is already the last row. It never shares a line with the file name
+        or the button, so the card's existing shape is unchanged for every
+        other format.
+
+        `alt` names the file rather than describing the drawing -- nobody can
+        describe a generated picture, and silence would hide from a screen
+        reader that a preview is on the card at all.
+      */}
+      {previewUrl && (
+        <div className="w-full @md/artifacts:basis-full">
+          {/* eslint-disable-next-line @next/next/no-img-element -- the source is
+              a client-side blob URL, which next/image cannot optimise; and a
+              plain <img> is the element that puts the SVG in the browser's
+              secure static mode, which is the security property this preview
+              rests on. */}
+          <img
+            data-testid="generated-artifact-preview"
+            src={previewUrl}
+            alt={interpolateCopy(t("chat.artifactPreviewAlt"), {
+              filename: artifact.filename,
+            })}
+            className="max-h-96 w-full rounded-lg border border-accent-generated-artifact-200 bg-white object-contain p-2 dark:border-accent-generated-artifact-800 dark:bg-zinc-950"
+          />
+        </div>
+      )}
     </li>
   );
 }
