@@ -387,7 +387,7 @@ disagreement는 위 판정에서 그대로 계산되며, 채택된 케이스의 
 
 | 항목 | 값 |
 |---|---|
-| 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | *(운영자 기입)* |
+| 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | `ai-draft:claude-code/claude/2026-08-23` |
 | 검수자 (사람 · 최초의 권위 있는 판정) | @mposition *(전사 — 확인 필요)* |
 | 재작성 회차 | 1 (최초 초안) |
 | draft disagreement 비율 (`docs/ops/memory-extraction-eval-dataset.md` §6.4) | **0%** — 전건 25건 전부 채택, 반려 0건 (전사된 판정에서 계산) |
