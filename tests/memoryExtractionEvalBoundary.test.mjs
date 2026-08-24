@@ -132,13 +132,11 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
 
 /* ------------------------------------------------------- shipped register -- */
 
-test("nothing in the shipped register can run live", () => {
-    // The state after 2026-08-24. `mem-extract-v1` is revoked -- never
-    // approved, superseded by v2 -- and keeps the US$20 that was really
-    // approved and really spent against, so the register is the only thing
-    // standing between that budget and another run of a closed pair. The v2
-    // entries are candidates with no budget yet, because v1's approval was
-    // for v1.
+test("only the funded v2 candidate can run live against the shipped dataset", () => {
+    // The state after the v2 budget was approved on 2026-08-24. Three pairs
+    // are still refused and each names a different reason, which is the part
+    // worth pinning: `mem-extract-v1` is stopped by its status *before* its
+    // budget is read, and the v2 backup by having no budget at all.
     //
     // `datasetFrozen` is read from the fixtures rather than forced. Forcing it
     // asserts a world of the test's own making, and the value that ships is
@@ -148,8 +146,9 @@ test("nothing in the shipped register can run live", () => {
         true,
         "this test describes the frozen dataset that shipped"
     );
-    const seen = new Set();
+    const live = [];
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
+        const label = `${entry.extractionModelId}::${entry.promptVersion}`;
         const decision = decideEvalRunMode({
             live: true,
             registerEntry: entry,
@@ -157,16 +156,20 @@ test("nothing in the shipped register can run live", () => {
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
             commitKnown: true,
         });
-        assert.equal(
-            decision.mode,
-            "refused",
-            `${entry.extractionModelId}::${entry.promptVersion} must not be live-runnable as shipped`
-        );
-        seen.add(decision.reason);
+        if (entry.status !== "candidate") {
+            assert.equal(decision.mode, "refused", label);
+            assert.equal(decision.reason, "pair_not_runnable", label);
+        } else if (!entry.evalBudget) {
+            assert.equal(decision.mode, "refused", label);
+            assert.equal(decision.reason, "no_eval_budget", label);
+        } else {
+            assert.equal(decision.mode, "live", label);
+            assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
+            live.push(label);
+        }
     }
-    // And refused for the right reasons, in the right places: the revoked
-    // pair is stopped by its status *before* its budget is consulted.
-    assert.deepEqual([...seen].sort(), ["no_eval_budget", "pair_not_runnable"]);
+    // Exactly one, and the one the §12.5 amendment names.
+    assert.deepEqual(live, ["gpt-5-6-luna::mem-extract-v2"]);
 });
 
 test("a revoked pair is refused even though it still has a budget", () => {

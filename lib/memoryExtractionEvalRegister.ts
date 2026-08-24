@@ -120,17 +120,38 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // §12.5 first eval target under v2. **A candidate.** The budget
-            // is null on purpose: v1's approval was for v1, and carrying it
-            // across would approve spending on a pair nobody approved. A new
-            // budget names this pair and counts the US$0.0012 already spent
-            // against the programme.
+            // §12.5 first eval target under v2. **Still a candidate.** The
+            // budget below is what opens `--live`; it is not approval of the
+            // pair. That is the §12.4 procedure — decision-grade run,
+            // artifact preservation, blind review, independent re-run, §12.3
+            // judgement, approver signature, register merge, staging
+            // verification — and none of it has happened for v2.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v2",
             status: "candidate",
             owner: "@mposition",
             registeredAt: "2026-08-24",
-            evalBudget: null,
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Approved for v2 on its own, not carried across from v1:
+                // #837 was amended rather than reused, because a budget that
+                // migrates with a version bump is a budget nobody approved
+                // for the thing it ends up paying for.
+                //
+                // US$11.57 is the worst case for two runs at the 4,096-token
+                // output ceiling the product sends; the typical figure is
+                // US$3.09. The headroom to US$20 absorbs the compatibility
+                // probe and one failed run without a second approval.
+                //
+                // US$0.0012 was already spent under v1 finding the wiring
+                // defect v2 fixes. It counts against this programme, and
+                // nothing enforces that: the harness bounds a *run* through
+                // --max-cost-usd and has no cumulative ledger, so the figure
+                // is recorded here to be subtracted by a person.
+                maxUsd: 20,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-24",
+            },
             evaluation: null,
         },
         {
