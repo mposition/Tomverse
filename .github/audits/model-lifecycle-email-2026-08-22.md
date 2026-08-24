@@ -691,7 +691,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **권고**: 10절의 판정 참조 — **Slack은 직접 유지, 이메일은 standard lane으로**.
 - **파일**: `lib/providerModelCatalogReport.ts:196-232`
 
-### EM-15 — 오늘의 유일한 폐기 안내가 영어 한 줄이다 (P1, Medium)
+### EM-15 — 오늘의 유일한 폐기 안내가 영어 한 줄이다 (P1, Medium) — **해결 (2026-08-24)** — §39
 
 - **Evidence**: `[코드]` `lib/models.ts:201,243,249,250,267,269,270,271,279,283`
 - **현재 동작**: 폐기 안내는 `ModelRegistryEntry.userVisibleNote` 문자열
@@ -2119,7 +2119,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~EM-11 standard drain job key + backlog incident~~ **완료 (2026-08-23)** — §35
 - ~~EM-10 조건부 readiness~~ **완료 (2026-08-23)** — §32
 - ~~EM-09 marketing bounce/complaint kill switch~~ **완료 (2026-08-23)** — §34
-- EM-15 `userVisibleNote` 다국어
+- ~~EM-15 `userVisibleNote` 다국어~~ **완료 (2026-08-24)** — §39
 
 ### P2
 
@@ -2898,3 +2898,56 @@ sequence)`이므로 두 번째 `reminder 1`은 불가능하고, 그래서 서비
 
 **3차 범위**: 예약, audience 계산기 연결과 `EmailCampaignRecipient`, reminder
 wave의 cohort 재계산, admin 화면, `runWithAdminApproval` 연결.
+
+---
+
+## 39. EM-15 구현 기록 — 폐기 안내의 다국어 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelRetirementNotice.ts` | 안내 판정. 순수, 새 파일 |
+| `lib/modelAvailability.ts` | 저장된 영어 문장 대신 copy key + 파라미터 반환 |
+| `lib/models.ts` | 유도 가능한 note 9개 제거 + field 용도 문서화 |
+| `app/api/chat/route.ts` | `MODEL_TEMPORARILY_UNAVAILABLE`이 안내를 데이터로 전달 |
+| `components/chat/ChatApp.tsx` | 그 안내를 사용자 언어로 렌더 |
+| `locales/*.ts` | `chat.modelTemporarilyUnavailable` 7개 언어 |
+| `tests/modelRetirementNotice.test.mjs` | 9건 |
+
+**규약은 이미 있었고 한 경로만 쓰고 있었습니다.** `MODEL_RETIRED`(410) 분기는
+이미 `replacementModelName`을 **데이터로** 보내고 client가
+`chat.modelRetiredWithReplacement`를 렌더합니다. EM-15의 실제 gap은
+`MODEL_TEMPORARILY_UNAVAILABLE`(503)이 `userVisibleNote`를 **영어 문장 그대로**
+message에 실어 보내는 것이었습니다. 그래서 새 문구 체계를 만들지 않고 그 규약에
+맞췄고, **새 key는 하나**입니다.
+
+**10개 중 9개는 `replacementModelId`가 이미 말하는 것을 다시 쓴 것이었습니다.**
+"This model was retired and replaced by Grok 4.5." — replacement의 이름이
+그대로 들어 있습니다. 저장하지 않고 registry에서 유도해 client가 렌더합니다.
+저장을 지운 것이 핵심입니다: 남겨 두면 유도된 다국어 문장보다 저장된 영어가
+이깁니다.
+
+**열 번째는 남깁니다.** codestral의 note는 "Tomverse **Review**에서 더 이상
+제공되지 않는다"이고, 모델 자체는 존재합니다. 어떤 field도 담지 않는 사실이므로
+운영자의 문장이 맞습니다. 대신 그것이 **번역될 수 없다는 사실을 타입이
+말합니다** — `source: "operator"`와 `source: "localised"`는 서로 다른 것이고,
+후자인 척하는 것이 영어 한 문장이 번역 작업을 통과해 살아남은 방식입니다.
+
+**replacement가 없는 사용 불가는 "폐기"라고 하지 않습니다.** 장애·공급자
+사고·관리자 스위치로도 사용 불가가 되며, 돌아올 모델을 두고 사라졌다고 말하는
+쪽이 두 실수 중 비싼 쪽입니다. 그래서 `chat.modelTemporarilyUnavailable`이
+별도 문구입니다 — 기존 "더 이상 제공되지 않습니다. 다른 모델을 선택하세요"를
+재사용하지 않았습니다.
+
+**운영자 note는 동작하는 모델에서도 남습니다.** throttling을 설명하는 note가
+바로 그 경우입니다. 유도된 문장은 반대로 사용 불가일 때만 만듭니다 — 답하고
+있는 모델에 "폐기되어 X로 대체됨"을 유도하면 사실이 아닌 말을 하게 됩니다.
+
+**공개 catalogue는 문장을 잃고 `replacementModelId`를 유지합니다.**
+`/api/models`의 `userVisibleNote`를 읽는 client component는 없었고,
+`tests/publicModelCatalog.test.mjs`가 고정하던 것은 결함 자체였습니다 —
+그 단언을 의도로 바꿨습니다.
+
+**회귀 방지**: `tests/modelRetirementNotice.test.mjs`가 (1) 7개 locale 전부에
+key가 있는지, (2) `{model}` placeholder가 번역에서 사라지지 않았는지,
+(3) 정적 카탈로그에 "This model was retired..." 문장이 다시 들어오지 않았는지를
+검사합니다. 세 번째가 이 결함의 재발 경로입니다.

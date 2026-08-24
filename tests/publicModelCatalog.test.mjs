@@ -89,7 +89,7 @@ test("every field the UI reads off a catalogue model survives", () => {
   assert.ok(withContext, "context window must survive -- the picker displays it");
 });
 
-test("a retired model is still resolvable, with the note that explains it", () => {
+test("a retired model is still resolvable, and names where to go instead", () => {
   // The reason the endpoint returns every row rather than only the selectable
   // ones: a stored conversation naming a retired model has to render a name,
   // an icon and where the user should go instead.
@@ -107,9 +107,18 @@ test("a retired model is still resolvable, with the note that explains it", () =
     );
   }
 
+  // And they do it with `replacementModelId`, not with a stored English
+  // sentence. Nine rows used to carry "This model was retired and replaced by
+  // X." -- one language, every reader, while the retirement email for the same
+  // event was written in seven (EM-15). The sentence is derived and rendered
+  // where the locale is known; see lib/modelRetirementNotice.ts.
   const scout = publicBody().find((model) => model.id === "llama-4-scout");
   assert.ok(scout);
-  assert.equal(scout.userVisibleNote, "This model was retired and replaced by Gemini 3.6 Flash.");
+  assert.equal(scout.replacementModelId, "gemini-3-6-flash");
+  assert.ok(
+    !scout.userVisibleNote,
+    "a plain retirement is derived, not stored in one language"
+  );
 });
 
 test("the administrators-only explanation is not the one users receive", () => {
