@@ -165,6 +165,30 @@ test("the generate prompt names every tool and every format group", () => {
   }
 });
 
+test("the generate prompt forbids announcing a file before the tool has made one", () => {
+  // The failure this closes: a model wrote "이제 웹페이지를 만들겠습니다:",
+  // began a `create_text_file` call, and was cut off by the output ceiling
+  // before it ran. The server now records that as a `turn_incomplete` card
+  // (lib/generatedArtifactTurnTracker.ts) -- this is the half that stops the
+  // promise being made in the first place.
+  const prompt = plan().systemPrompt;
+  assert.match(prompt, /Call the tool first/);
+  assert.match(prompt, /`created`/);
+  assert.match(prompt, /progress promise/);
+});
+
+test("the generate prompt asks for a lean file and a narrower scope over a doomed call", () => {
+  const prompt = plan().systemPrompt;
+  // Padding is what puts a call over the ceiling, and a call over the ceiling
+  // produces no file at all.
+  assert.match(prompt, /no repeated blocks/);
+  assert.match(prompt, /restating what the next line does/);
+  // And when it plainly will not fit, asking is the answer -- not starting a
+  // call that cannot finish.
+  assert.match(prompt, /ask the user to narrow it/);
+  assert.match(prompt, /Do not begin a call you cannot finish/);
+});
+
 test("the generate prompt says which extensions are refused outright", () => {
   const prompt = plan().systemPrompt;
   // A refusal the model can state is what keeps it from inventing a link

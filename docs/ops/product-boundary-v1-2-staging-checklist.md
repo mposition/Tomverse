@@ -16,7 +16,7 @@
 `product-boundary-v1-2-staging-verification-records/`에 **날짜와 전체 deploy
 SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-23d`
+- **template revision**: `2026-08-23e`
 - 실행 방법과 파일 이름 규칙:
   `product-boundary-v1-2-staging-verification-records/README.md`
 - 기록 template:
@@ -227,20 +227,47 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 
   ### 제약 상태
 
+  **찾는 이름을 먼저 늘어놓고 왼쪽 조인합니다.** 이름 패턴으로 거르지 마십시오 —
+  이유는 아래에 있습니다.
+
   ```sql
-  SELECT conname, convalidated
-    FROM pg_constraint
-   WHERE conrelid IN ('"Conversation"'::regclass, '"RoutingRun"'::regclass)
-     AND (conname LIKE '%product%' OR conname = 'RoutingRun_conversationId_fkey')
-   ORDER BY conname;
+  SELECT e.name, c.convalidated
+    FROM (VALUES
+      ('Conversation_product_key_check'),
+      ('Conversation_product_modality_check'),
+      ('Conversation_auto_only_chat_check'),
+      ('RoutingRun_product_key_check'),
+      ('RoutingRun_conversationId_fkey')
+    ) AS e(name)
+    LEFT JOIN pg_constraint c ON c.conname = e.name
+   ORDER BY 1;
   ```
 
-  `%product%` 네 개는 전부 `NOT VALID`로 걸었으므로 `convalidated = false`여야
-  합니다. `true`가 하나라도 있으면 누군가 손으로 validate한 것이고, schema 비교가
-  drift로 잡습니다.
+  다섯 행이 나와야 합니다. **`convalidated`가 `null`인 행은 그 제약이 없다는
+  뜻**이고, 마이그레이션이 일부만 적용된 것이므로 A-2는 거기서 실패입니다.
 
-  `RoutingRun_conversationId_fkey`만 `true`입니다 — 이것만 즉시 검증으로 걸린
-  제약이고, A-1이 `Conversation` 락을 따지는 이유가 바로 이 줄입니다.
+  | 제약 | 기대 | 왜 |
+  |---|---|---|
+  | `Conversation_product_key_check` | `false` | `NOT VALID`로 걸었음 |
+  | `Conversation_product_modality_check` | `false` | 〃 |
+  | `Conversation_auto_only_chat_check` | `false` | 〃 |
+  | `RoutingRun_product_key_check` | `false` | 〃 |
+  | `RoutingRun_conversationId_fkey` | **`true`** | 유일하게 즉시 검증으로 걸린 제약 |
+
+  `false`여야 할 자리에 `true`가 있으면 누군가 손으로 validate한 것이고, schema
+  비교가 drift로 잡습니다. `true`여야 할 자리가 `false`면 FK가 검증되지 않은
+  것이고, A-1이 `Conversation` 락을 따진 전제가 성립하지 않습니다.
+
+  #### 이름 패턴으로 거르면 하나가 조용히 빠집니다
+
+  이 항목은 한동안 `conname LIKE '%product%'`로 걸러고 있었고, 그 필터는
+  **`Conversation_auto_only_chat_check`를 절대 반환하지 못합니다** — 이름에
+  `product`가 없기 때문입니다. 마이그레이션이 만드는 CHECK 셋 중 하나가 검사
+  범위 밖에 있었고, 실제 회차에서 네 행이 나온 것을 정상으로 읽을 뻔했습니다.
+
+  그래서 위 쿼리는 이름을 명시하고 `LEFT JOIN`합니다. 빠진 제약이 **행이
+  사라지는 대신 `null`로 보이게** 하려는 것이고, 이것이 A-2 전체를 관통하는
+  규칙입니다 — **없는 것은 없다고 보여야 하지, 짧은 출력으로 보이면 안 됩니다.**
 
   ### 다음 항목으로 넘어가기 전에 — develop을 멈추십시오
 
