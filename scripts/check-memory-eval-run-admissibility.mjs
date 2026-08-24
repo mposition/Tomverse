@@ -49,6 +49,18 @@ const manifest = JSON.parse(readFileSync(artifactPath, "utf8")).manifest ?? {};
  */
 const RULES = [
     {
+        // First, because `workingTreeDirty` cannot be trusted without it: a
+        // run with no git metadata reports the tree clean and the commit
+        // "unknown", which reads like a spotless checkout. The harness now
+        // refuses such a run outright; this stays for artifacts made before
+        // it did.
+        key: "commitSha",
+        fails: (m) => !m.commitSha || m.commitSha === "unknown",
+        discards: true,
+        met: "the run cannot name the commit it ran",
+        action: "discard — an artifact with no commit is not evidence",
+    },
+    {
         key: "workingTreeDirty",
         fails: (m) => m.workingTreeDirty === true,
         discards: true,

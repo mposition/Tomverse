@@ -53,6 +53,8 @@ test("each discarding signal discards on its own", () => {
         ["truncatedByCostCeiling", true],
         ["abortedOnConsecutiveFailures", true],
         ["decisionGrade", false],
+        ["commitSha", "unknown"],
+        ["commitSha", ""],
     ]) {
         const result = check({ ...ADMISSIBLE, [field]: value });
         assert.equal(result.status, 1, `${field} should discard the run`);
@@ -69,6 +71,17 @@ test("an unpriced call is a cost note, not a discard", () => {
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /NOTE {2}spendCeilingReliable/);
     assert.match(result.stdout, /invoice/);
+});
+
+test("a run that cannot name its commit is discarded", () => {
+    // The failure that motivated the rule: run from a deployed container,
+    // `git rev-parse` returns nothing, so the harness writes commit "unknown"
+    // and -- because the same call fails -- `workingTreeDirty: false`. The
+    // artifact reads as a spotless checkout. The harness refuses this case up
+    // front now; the rule stays for artifacts written before it did.
+    const result = check({ ...ADMISSIBLE, commitSha: "unknown", workingTreeDirty: false });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /cannot name the commit/);
 });
 
 test("a manifest missing a field is discarded, not assumed clean", () => {

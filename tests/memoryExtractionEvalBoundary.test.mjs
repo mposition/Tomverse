@@ -42,6 +42,7 @@ test("a run without --live is smoke, whatever else is present", () => {
             registerEntry: budgeted,
             hasApiKey: true,
             datasetFrozen: true,
+            commitKnown: true,
         }),
         { mode: "smoke" }
     );
@@ -72,6 +73,19 @@ test("every missing precondition refuses a live run", () => {
             { registerEntry: budgeted, hasApiKey: true, datasetFrozen: false },
             "dataset_not_frozen",
         ],
+        // A deployed container has no git metadata, so `commitSha` is
+        // "unknown" and `workingTreeDirty` is `false` -- an artifact that
+        // reads as a clean checkout while being impossible to tie to a
+        // commit. Refused before the calls, not after.
+        [
+            {
+                registerEntry: budgeted,
+                hasApiKey: true,
+                datasetFrozen: true,
+                commitKnown: false,
+            },
+            "unknown_commit",
+        ],
     ];
     for (const [input, reason] of cases) {
         const decision = decideEvalRunMode({ live: true, ...input });
@@ -86,6 +100,7 @@ test("only every precondition together allows a live run", () => {
         registerEntry: budgeted,
         hasApiKey: true,
         datasetFrozen: true,
+        commitKnown: true,
     });
     assert.equal(decision.mode, "live");
     assert.equal(decision.ceilingUsd, 50);
@@ -97,6 +112,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         registerEntry: budgeted,
         hasApiKey: true,
         datasetFrozen: true,
+        commitKnown: true,
         requestedRunCapUsd: 5,
     });
     assert.equal(narrowed.mode, "live");
@@ -107,6 +123,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         registerEntry: budgeted,
         hasApiKey: true,
         datasetFrozen: true,
+        commitKnown: true,
         requestedRunCapUsd: 500,
     });
     assert.equal(widened.mode, "refused");
@@ -137,6 +154,7 @@ test("only the funded pair can run live against the shipped dataset", () => {
             registerEntry: entry,
             hasApiKey: true,
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+            commitKnown: true,
         });
         if (entry.evalBudget) {
             assert.equal(
@@ -166,6 +184,7 @@ test("a live run still needs an API key the environment may not have", () => {
             registerEntry: entry,
             hasApiKey: false,
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+            commitKnown: true,
         });
         assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
         assert.equal(
@@ -191,6 +210,7 @@ test("the budget is the only gate an approval opens", () => {
             registerEntry: entry,
             hasApiKey: true,
             datasetFrozen: true,
+            commitKnown: true,
         });
         assert.equal(decision.mode, "live", `${entry.extractionModelId}`);
         assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
@@ -201,6 +221,7 @@ test("the budget is the only gate an approval opens", () => {
             registerEntry: entry,
             hasApiKey: true,
             datasetFrozen: true,
+            commitKnown: true,
         });
         assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
     }

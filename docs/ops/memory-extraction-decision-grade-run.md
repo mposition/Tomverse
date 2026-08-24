@@ -76,10 +76,41 @@ console에서 도는 것도 아닙니다 — 그곳에는 git checkout이 없고
 회차는 DB drift(`creditWeight`·`maxOutputTokens` 화석)에 영향을 받지 않고, 어느
 기계에서 돌리든 같은 것을 잽니다. 출력 상한도 harness가 4,096으로 직접 넘깁니다.
 
+**git checkout이 아닌 곳에서는 harness가 거절합니다.** 배포된 컨테이너에는 git
+metadata가 없어 `commitSha`가 `unknown`이 되고, 같은 실패로 `workingTreeDirty`
+까지 `false`가 됩니다 — 인용할 수 없는 회차가 깨끗한 회차처럼 보입니다. 그래서
+거절은 1,150번의 유료 호출 **앞**에 있습니다.
+
 **`npm run`으로 실행합니다.** bare `node --import tsx scripts/…`로 돌리면
 live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 `import "server-only"`로 시작하고, 그것을 통과시키는 `--conditions=react-server`
 가 npm script 쪽에 있기 때문입니다. 돈은 안 나가지만 회차는 날아갑니다.
+
+### 2.5.1 어디서 돌리는가 — GitHub Actions
+
+`Memory eval — decision-grade run` workflow를 수동 dispatch합니다
+(`.github/workflows/memory-eval-decision-grade.yml`). 사람 기계에서 돌리는 것도
+가능하지만 이쪽을 기본으로 두는 이유는 셋입니다.
+
+- checkout이 **구조적으로** clean이라 §12.2의 "동일 commit"이 사고로 깨지지
+  않습니다.
+- 키가 셸 기록이 아니라 repository secret(`OPENAI_API_KEY`)에 있습니다.
+- artifact를 플랫폼이 보존하고, **그 run URL이 곧 §12.1의 `artifactRef`**입니다.
+  로컬 실행은 이 불변 참조를 따로 만들어야 합니다.
+
+입력은 넷입니다 — `model`, `run_label`(`run1`·`run2`…), `max_cost_usd`, 그리고
+`confirm`에 **`SPEND`를 그대로 입력**해야 합니다. 유료 provider를 부르는
+dispatch이므로 오타나 실수로 눌리지 않게 한 겹 둡니다.
+
+순서도 의도된 것입니다. 무료로 거절할 수 있는 것(동결 조건·register 구조·smoke)
+이 **키가 provider 앞에 놓이기 전에** 전부 돌고, artifact 업로드는 admissibility
+검사 **앞**에 `if: always()`로 있습니다 — 1,150번을 이미 지불한 회차가 뒤 단계
+실패로 기록을 잃어서는 안 됩니다.
+
+한 번에 하나만 돕니다(`concurrency`), 그리고 진행 중인 회차를 **취소하지
+않습니다** — 취소는 이미 지불한 호출을 버리는 일입니다.
+
+운영자가 할 일은 secret `OPENAI_API_KEY` 등록과 dispatch 두 가지입니다.
 
 ## 3. 사전 등록 — 제외·재실행 규칙 [확정 · 2026-08-24 @mposition]
 
@@ -97,13 +128,20 @@ live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 
 | artifact 신호 | 뜻 | 처리 |
 |---|---|---|
+| `commitSha` 가 `unknown`(또는 없음) | 회차가 자기 commit을 대지 못함 | 폐기 |
 | `workingTreeDirty: true` | commit이 실행을 설명하지 못함 | 폐기·재실행 |
 | `truncatedByCostCeiling: true` | 상한에서 잘림, 전체 표본이 아님 | 폐기·재실행 |
 | `abortedOnConsecutiveFailures: true` | 5회 연속 실패 — 고장이지 불운이 아님 | 폐기, 원인 조사 |
 | `decisionGrade` 가 `true` 가 아님 | live·floor·frozen 중 하나가 빠짐 | 인용 불가 |
 | `spendCeilingReliable` 가 `true` 가 아님 | 가격 미해석 호출 있음 — 지출은 하한값 | **판정은 유효**, 비용만 청구서로 정산 |
 
-앞의 넷은 `true`일 때, 뒤의 둘은 **`true`가 아닐 때** 걸립니다. 필드가 아예 없는
+`commitSha` 줄이 맨 위인 이유는 그것 없이는 `workingTreeDirty`를 믿을 수 없기
+때문입니다. git이 없는 곳에서 돌리면 `git rev-parse`가 실패해 commit이
+`unknown`이 되고, **같은 실패 때문에 `workingTreeDirty`도 `false`가 됩니다** —
+artifact가 티 없는 checkout처럼 읽힙니다. 이제 harness가 그런 회차를 아예
+거절하므로(§2.5) 이 줄은 그 전에 만들어진 artifact를 위해 남습니다.
+
+가운데 넷은 `true`일 때, 뒤의 둘은 **`true`가 아닐 때** 걸립니다. 필드가 아예 없는
 artifact(옛 harness가 만든 것)도 뒤의 둘에서는 걸린다는 뜻이고, 그것이 의도입니다
 — 없는 값을 "괜찮음"으로 읽는 것이 인용 불가한 회차가 인용되는 경로입니다.
 
