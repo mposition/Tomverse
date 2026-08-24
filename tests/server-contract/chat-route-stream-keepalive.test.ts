@@ -74,17 +74,19 @@ const FIRST_TOKEN_DEADLINE_MS = 1_500;
 /* The liveness budgets, shrunk                                               */
 /* -------------------------------------------------------------------------- */
 
-const realLiveness = require(
-  resolve(ROOT, "lib/chatStreamLiveness.ts")
-) as Record<string, unknown>;
+/*
+  Through the environment, not through `mock.module`.
 
-mock.module(mod("lib/chatStreamLiveness.ts"), {
-  namedExports: {
-    ...realLiveness,
-    CHAT_STREAM_KEEPALIVE_INTERVAL_MS: KEEPALIVE_INTERVAL_MS,
-    CHAT_SERVER_FIRST_TOKEN_DEADLINE_MS: FIRST_TOKEN_DEADLINE_MS,
-  },
-});
+  The first version of this file replaced the two constants with a module
+  mock. It worked locally and did not apply on CI at all: the route kept its
+  nine-minute deadline and all four cases died on the guard below, twice, with
+  `540000 !== 260`. A seam whose behaviour differs between two machines
+  running the same Node major is not a seam, so the route now reads these
+  through `lib/chatStreamKeepalivePlan.ts` and this sets them the way an
+  operator would.
+*/
+process.env.CHAT_STREAM_KEEPALIVE_INTERVAL_MS = String(KEEPALIVE_INTERVAL_MS);
+process.env.CHAT_FIRST_TOKEN_DEADLINE_MS = String(FIRST_TOKEN_DEADLINE_MS);
 
 mock.module("next-auth/next", {
   namedExports: {
@@ -305,13 +307,19 @@ let routePromise: Promise<RouteModule> | null = null;
 
 const loadRoute = async (): Promise<RouteModule> => {
   routePromise ??= (async () => {
-    const liveness = (await import(mod("lib/chatStreamLiveness.ts"))) as Record<
-      string,
-      unknown
-    >;
-    assert.equal(
-      liveness.CHAT_SERVER_FIRST_TOKEN_DEADLINE_MS,
-      FIRST_TOKEN_DEADLINE_MS,
+    // The same call the route makes. Kept as a guard because a budget that
+    // silently stayed at nine minutes is how this file failed on CI while
+    // passing locally, and the failure has to name that rather than surface
+    // as four unrelated-looking assertions.
+    const { resolveChatStreamKeepalivePlan } = (await import(
+      mod("lib/chatStreamKeepalivePlan.ts")
+    )) as typeof import("../../lib/chatStreamKeepalivePlan");
+    assert.deepEqual(
+      resolveChatStreamKeepalivePlan(),
+      {
+        intervalMs: KEEPALIVE_INTERVAL_MS,
+        firstTokenDeadlineMs: FIRST_TOKEN_DEADLINE_MS,
+      },
       "the shrunk budgets did not reach the route, so this suite would wait " +
         "nine minutes per case"
     );

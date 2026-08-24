@@ -187,10 +187,7 @@ import {
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
 import { buildStreamKeepaliveChunk } from "@/lib/chatStreamKeepalive";
-import {
-    CHAT_SERVER_FIRST_TOKEN_DEADLINE_MS,
-    CHAT_STREAM_KEEPALIVE_INTERVAL_MS,
-} from "@/lib/chatStreamLiveness";
+import { resolveChatStreamKeepalivePlan } from "@/lib/chatStreamKeepalivePlan";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import {
     conversationLockedResponse,
@@ -3810,9 +3807,11 @@ async function handleChatPost(
           this deployment sits behind an edge proxy whose read timeout is far
           shorter than a legitimate high-reasoning first token, so a stream
           that writes nothing for minutes is closed by the edge rather than by
-          anyone who can explain it. A NUL-led control chunk every
-          CHAT_STREAM_KEEPALIVE_INTERVAL_MS keeps the connection legible, and
-          the client strips it before anything is rendered.
+          anyone who can explain it. A NUL-led control chunk every twenty
+          seconds keeps the connection legible, and the client strips it before
+          anything is rendered. Both that interval and the deadline below are
+          read per request from lib/chatStreamKeepalivePlan.ts, so an operator
+          can lower either without a deploy.
 
           The keepalive covers whichever attempt is current -- the primary and
           §7's automatic fallback alike -- because it is tied to "no visible
@@ -3894,6 +3893,7 @@ async function handleChatPost(
             controller: ReadableStreamDefaultController<string>
         ) => {
             if (keepaliveWriter || visibleTokenEmitted) return;
+            const plan = resolveChatStreamKeepalivePlan();
             keepaliveWriter = setInterval(() => {
                 if (visibleTokenEmitted || streamState !== "open") {
                     stopFirstTokenWatch();
@@ -3906,7 +3906,7 @@ async function handleChatPost(
                         elapsedMs: Date.now() - firstTokenWatchStartedAt,
                     })
                 );
-            }, CHAT_STREAM_KEEPALIVE_INTERVAL_MS);
+            }, plan.intervalMs);
             // Same reason as the lease heartbeat: a pending timer must never
             // be why a worker stays up after its request is done.
             keepaliveWriter.unref?.();
@@ -3916,7 +3916,7 @@ async function handleChatPost(
                     return;
                 }
                 void endOnFirstTokenDeadline(controller);
-            }, CHAT_SERVER_FIRST_TOKEN_DEADLINE_MS);
+            }, plan.firstTokenDeadlineMs);
             firstTokenDeadline.unref?.();
         };
         /**
