@@ -30,6 +30,45 @@ export const scriptMentions = (text) => {
 };
 
 /**
+ * Whether a workflow enforces anything, from its triggers.
+ *
+ * A workflow that only runs when somebody clicks it gates nothing: no push,
+ * no pull request and no release is stopped by it, so a `npm run check:...`
+ * inside one is a step of a manual procedure rather than a gate the checklist
+ * has to mirror. Counting those as CI enforcement demands a checklist line
+ * for a check a release manager cannot run, which is the opposite of what
+ * this file is for.
+ *
+ * Read from the triggers rather than the filename, because the question is
+ * what starts the workflow and nothing else answers it.
+ */
+export const enforcedByCi = (source) => {
+    const lines = source.split("\n");
+    const start = lines.findIndex((line) => /^on:/.test(line));
+    if (start < 0) return true; // Cannot tell; assume it gates something.
+
+    // `on: push` and `on: [push, pull_request]` put the answer on one line.
+    const inline = lines[start].slice(3).trim().replace(/^\[|\]$/g, "");
+    if (inline) {
+        return inline
+            .split(",")
+            .map((name) => name.trim())
+            .some((name) => name && name !== "workflow_dispatch");
+    }
+
+    // Otherwise the events are the keys one level in, up to the next
+    // top-level key. Nested keys (a `types:` or a `branches:` under an event)
+    // are deeper and must not be read as events themselves.
+    const events = [];
+    for (const line of lines.slice(start + 1)) {
+        if (/^\S/.test(line)) break;
+        const match = /^ {2}(\S+):/.exec(line);
+        if (match) events.push(match[1]);
+    }
+    return events.some((name) => name !== "workflow_dispatch");
+};
+
+/**
  * Checks that cannot run in CI and must therefore be carried by the checklist.
  * Each says why, because "CI does not run it" is not on its own a reason for a
  * human to have to.
