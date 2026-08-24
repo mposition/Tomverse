@@ -487,6 +487,13 @@ export type QaConversationMessage = {
    */
   status?: string;
   /**
+   * The deep-research job this answer is waiting on, as the real endpoint
+   * returns it. Paired with `status: "pending"` it is what lets ChatApp
+   * re-attach to a job that outlived the page -- so a spec can seed the state
+   * a reload lands in, rather than only the state a live send produces.
+   */
+  pendingJobId?: string | null;
+  /**
    * The turn's WebSearchExecution, exactly as the real endpoint returns the
    * `searchMetadata` JSON column. Seeded so a spec can assert the source list
    * a *stored* conversation renders, not only the streamed one.
