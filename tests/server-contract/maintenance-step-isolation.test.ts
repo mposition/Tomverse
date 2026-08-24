@@ -236,6 +236,21 @@ mock.module(mod("lib/assistantKnowledgeProcessor.ts"), {
     }),
   },
 });
+// The package import's two sweeps, mocked as collaborators for the same reason
+// the knowledge steps above are. `refused` is deliberately non-zero: an expired
+// import the collector would not take is the case that must survive the run
+// rather than stop it, and a stub reporting only successes could not tell the
+// two apart.
+mock.module(mod("lib/assistantProfileImportSweep.ts"), {
+  namedExports: {
+    sweepExpiredProfileImports: async () => ({
+      considered: 34,
+      cancelled: 33,
+      refused: 34 - 33,
+    }),
+    reclaimStaleUploadClaims: async () => ({ reclaimed: 35 }),
+  },
+});
 
 type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
@@ -336,6 +351,11 @@ test("a step that throws does not skip the steps behind it", async () => {
   // extraction slice already paid for.
   assert.equal(result.assistantKnowledgeReclaimed, 29);
   assert.equal(result.assistantKnowledgeProcessed, 30);
+  // The package import's expiry clocks and the finalize that never came back.
+  // Both run unattended, and both are behind the failing step above.
+  assert.equal(result.assistantImportsExpired, 33);
+  assert.equal(result.assistantImportsExpiryRefused, 1);
+  assert.equal(result.assistantImportUploadClaimsReclaimed, 35);
 });
 
 test("a clean run reports no failed steps and every count", async () => {
