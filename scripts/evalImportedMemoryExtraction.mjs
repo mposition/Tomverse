@@ -51,6 +51,7 @@ import {
     findDuplicateCases,
     judgeEval,
     scoreCase,
+    summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
 
 const argValue = (name, fallback) => {
@@ -371,6 +372,22 @@ for (const [cell, count] of Object.entries(verdict.adequacy.counts)) {
     const minimum =
         MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[cell.split(":")[0]];
     line(cell, `${count}${count < minimum ? `  (needs ${minimum})` : ""}`);
+}
+
+// Why cases failed, not just how many. Without this the run says the pair is
+// broken and leaves the reason in the artifact, so the first thing anybody
+// does after a failed run is download a file to read one repeated sentence.
+const failureReasons = summarizeFailures(records);
+if (failureReasons.length > 0) {
+    const scored = records.filter((record) => record.failure).length;
+    console.log(`\nWhy ${scored} case(s) had no scoreable answer`);
+    for (const { reason, count } of failureReasons.slice(0, 5)) {
+        const text = reason.length > 300 ? `${reason.slice(0, 300)}…` : reason;
+        console.log(`  ${String(count).padStart(4)}x  ${text}`);
+    }
+    if (failureReasons.length > 5) {
+        console.log(`  … and ${failureReasons.length - 5} other reason(s).`);
+    }
 }
 
 if (verdict.failures.length > 0) {

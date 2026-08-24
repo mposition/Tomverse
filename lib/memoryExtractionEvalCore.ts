@@ -529,6 +529,32 @@ export function decideEvalRunMode(input: {
 }
 
 /**
+ * The distinct reasons cases failed, most common first.
+ *
+ * A run that stops on consecutive failures says the pair is "broken, not
+ * unlucky" and then does not say how — which leaves the one question worth
+ * asking answered only inside the artifact. The reasons are almost always a
+ * handful of repeats (one provider error, one parser complaint), so counting
+ * them turns a wall of records into the line somebody can act on.
+ *
+ * Grouped by the message verbatim. Normalising it would merge errors that
+ * differ in the part that matters, and these strings have already been
+ * stripped of anything key-shaped by the caller.
+ */
+export function summarizeFailures(
+    records: readonly { failure: string | null }[]
+): { reason: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const record of records) {
+        if (!record.failure) continue;
+        counts.set(record.failure, (counts.get(record.failure) ?? 0) + 1);
+    }
+    return [...counts]
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : 1));
+}
+
+/**
  * §12.2 forbids inflating the sample with copies or trivial variants, so the
  * harness refuses to count a dataset that contains them. Identity is the
  * normalized concatenation of the case's message contents: two cases that put
