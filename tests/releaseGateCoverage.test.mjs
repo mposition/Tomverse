@@ -5,6 +5,7 @@ import {
   auditReleaseGateCoverage,
   MANUALLY_GATED_CHECKS,
   NOT_A_GATE,
+  enforcedByCi,
   scriptMentions,
 } from "../scripts/check-release-gate-coverage-core.mjs";
 
@@ -95,6 +96,40 @@ test("every not-a-gate entry says why it is not one", () => {
       `${script} needs a reason it is not a release gate`
     );
   }
+});
+
+test("a dispatch-only workflow enforces nothing", () => {
+  // It stops no push, no pull request and no release, so a check inside one
+  // is a step of a manual procedure. Demanding a checklist line for it asks a
+  // release manager to run something the release does not depend on -- and,
+  // when the workflow sits on the default branch ahead of the scripts it
+  // calls, something they cannot run at all.
+  assert.equal(
+    enforcedByCi(["on:", "  workflow_dispatch:", "    inputs:", "      confirm:", "jobs:"].join("\n")),
+    false
+  );
+  // One automatic trigger beside it is enough to make it a gate again.
+  assert.equal(
+    enforcedByCi(["on:", "  workflow_dispatch:", "  pull_request:", "jobs:"].join("\n")),
+    true
+  );
+  assert.equal(enforcedByCi(["on:", "  pull_request:", "jobs:"].join("\n")), true);
+  // The one-line forms say the same thing and must read the same way.
+  assert.equal(enforcedByCi("on: workflow_dispatch\njobs:"), false);
+  assert.equal(enforcedByCi("on: [workflow_dispatch]\njobs:"), false);
+  assert.equal(enforcedByCi("on: [workflow_dispatch, schedule]\njobs:"), true);
+  assert.equal(enforcedByCi("on: push\njobs:"), true);
+  // A nested key under an event is not an event: `types:` below
+  // `pull_request:` must not be mistaken for a trigger of its own, and a
+  // workflow whose only event is a dispatch with inputs must stay excluded.
+  assert.equal(
+    enforcedByCi(["on:", "  workflow_dispatch:", "    inputs:", "      ref:", "        required: true", "jobs:"].join("\n")),
+    false
+  );
+  // Unreadable triggers fail towards demanding the checklist line, not away
+  // from it: silence about what starts a workflow is not evidence it starts
+  // by hand.
+  assert.equal(enforcedByCi("jobs:\n  build:"), true);
 });
 
 test("mentions are read out of prose and YAML alike", () => {
