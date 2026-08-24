@@ -76,6 +76,7 @@ import {
   SquarePen,
   X,
 } from "lucide-react";
+import { lockBodyScroll } from "@/components/useBodyScrollLock";
 
 type PromptPayload = {
   id: string;
@@ -475,7 +476,12 @@ export function MobileChatShell({
   useEffect(() => {
     if (!isDrawerOpen) return;
 
-    document.body.style.overflow = "hidden";
+    // Counted rather than set directly: this drawer used to write
+    // `body.style.overflow` on open and `""` on close, so closing it behind
+    // the settings modal it had opened unlocked the page under that modal --
+    // and the modal, restoring the `hidden` it had captured from the drawer,
+    // then left the page unable to scroll with nothing open at all.
+    const releaseScrollLock = lockBodyScroll();
     // Registered so the dialogs opened from inside the drawer -- the account
     // footer's settings modal, and the delete-account dialog on top of that --
     // can be seen to have opened after it. The frame is then skipped when one
@@ -505,7 +511,7 @@ export function MobileChatShell({
     return () => {
       unregister?.();
       cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = "";
+      releaseScrollLock();
       document.removeEventListener("keydown", handleEscape);
     };
   }, [closeDrawer, isDrawerOpen]);

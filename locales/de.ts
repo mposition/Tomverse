@@ -110,6 +110,17 @@ export const de = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "Der Chat-Arbeitsbereich konnte nicht geladen werden",
+            body: "Ihre Unterhaltungen sind sicher. Ein erneuter Versuch behebt das meist.",
+            reference: "Wenn es weiterhin auftritt, nennen Sie dem Support diese Referenz:",
+            noReference: "Wenn es weiterhin auftritt, wenden Sie sich an den Support.",
+            retry: "Erneut versuchen",
+            support: "Support kontaktieren",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Bildgenerierung",
         imageGenerationBackToChat: "Zurück zum Chat",

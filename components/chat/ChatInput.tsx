@@ -124,6 +124,7 @@ import { type ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -160,14 +161,7 @@ function MobileModelMenuPortal({ children }: { children: ReactNode }) {
     getServerMobileModelMenuSnapshot
   );
 
-  useEffect(() => {
-    if (!isMobile) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [isMobile]);
+  useBodyScrollLock(isMobile);
 
   return isMobile ? createPortal(children, document.body) : children;
 }
