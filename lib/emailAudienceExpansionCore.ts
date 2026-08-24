@@ -32,7 +32,8 @@ export const EXPANSION_BATCH_SIZE = 200;
 export type ExpansionRefusal =
   | "not_a_segment"
   | "already_expanded"
-  | "previously_failed";
+  | "previously_failed"
+  | "no_audience";
 
 /**
  * Why a pass produced nothing, including the one reason the pure rule cannot
@@ -52,11 +53,22 @@ export type ExpansionRefusalReason = ExpansionRefusal | "not_found";
 export const expansionRefusal = (input: {
   audienceKind: string;
   status: string;
+  /** The spec as read, so an unusable one is refused rather than widened. */
+  spec?: ExpansionSpec;
 }): ExpansionRefusal | null => {
   if (input.audienceKind === "single_user") {
     // A single-user event is written whole by the enqueue path, delivery row
     // and all. Expanding one would mean a second row for the same person.
     return "not_a_segment";
+  }
+  if (input.audienceKind === "user_segment" && input.spec && !hasAudience(input.spec)) {
+    // A segment that names nobody is not "everybody". `readExpansionSpec`
+    // defaults a spec it cannot read to an empty one, and an empty one used to
+    // fall through to the unfiltered query -- so one mistyped field turned a
+    // retirement notice for a few hundred people into a send to the whole
+    // product. `all_users` still means everyone, because saying so is a
+    // separate, deliberate act.
+    return "no_audience";
   }
   if (input.status === "expanded") return "already_expanded";
   if (input.status === "failed") {
@@ -68,9 +80,26 @@ export const expansionRefusal = (input: {
   return null;
 };
 
+/**
+ * An audience the expander resolves itself, rather than one handed to it.
+ *
+ * A model retirement reaches thousands of people across three overlapping
+ * cohorts (§13.1). Computing that list somewhere else and carrying it in
+ * `userIds` would put thousands of ids in a JSON column, and would freeze the
+ * answer at the moment it was computed -- which is exactly wrong for a reminder
+ * wave, whose whole job is to re-ask who is still affected.
+ */
+export type AudienceCohortSpec = {
+  kind: "model_retirement";
+  targetModelId: string;
+  replacementModelId: string;
+};
+
 export type ExpansionSpec = {
   /** Explicit recipients, for a cohort computed somewhere else. */
   userIds?: readonly string[];
+  /** A cohort the expander resolves as it goes. */
+  cohort?: AudienceCohortSpec;
   /**
    * The most this event may ever produce.
    *
@@ -96,12 +125,33 @@ export type ExpansionSpec = {
  * who it is for must reach nobody, and a throw here would mark the event
  * `failed` for what may be a typo in one field.
  */
+const readCohortSpec = (raw: unknown): AudienceCohortSpec | undefined => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  if (value.kind !== "model_retirement") return undefined;
+  const target = value.targetModelId;
+  const replacement = value.replacementModelId;
+  // Both, or neither. A retirement cohort with no replacement cannot answer
+  // the plan-compatibility question (§13.3 condition 4), and a spec that is
+  // half-read is the kind that reaches the wrong people confidently.
+  if (typeof target !== "string" || target.trim().length === 0) return undefined;
+  if (typeof replacement !== "string" || replacement.trim().length === 0) {
+    return undefined;
+  }
+  return {
+    kind: "model_retirement",
+    targetModelId: target.trim(),
+    replacementModelId: replacement.trim(),
+  };
+};
+
 export const readExpansionSpec = (raw: unknown): ExpansionSpec => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const value = raw as Record<string, unknown>;
   const userIds = Array.isArray(value.userIds)
     ? value.userIds.filter((entry): entry is string => typeof entry === "string")
     : undefined;
+  const cohort = readCohortSpec(value.cohort);
   const cap =
     typeof value.recipientCap === "number" &&
     Number.isInteger(value.recipientCap) &&
@@ -110,10 +160,22 @@ export const readExpansionSpec = (raw: unknown): ExpansionSpec => {
       : undefined;
   return {
     ...(userIds ? { userIds } : {}),
+    ...(cohort ? { cohort } : {}),
     ...(cap === undefined ? {} : { recipientCap: cap }),
     ...(value.dryRun === true ? { dryRun: true } : {}),
   };
 };
+
+/**
+ * Whether a spec names anybody at all.
+ *
+ * Separate from parsing so the refusal above and the expander read the same
+ * answer: "the spec was unreadable" and "the spec named nobody" have to reach
+ * the same place, because a caller cannot tell them apart and both mean the
+ * send must not go out.
+ */
+export const hasAudience = (spec: ExpansionSpec): boolean =>
+  Boolean((spec.userIds && spec.userIds.length > 0) || spec.cohort);
 
 export type BatchPlan = {
   /** How many to read. Zero means the cap is already reached. */
