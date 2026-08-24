@@ -36,6 +36,8 @@ import {
   type AutoCohortConfig,
   type AutoCohortDecision,
 } from "@/lib/autoCohort";
+import { autoProductBoundary } from "@/lib/autoProductBoundary";
+import type { ProductKeyReadMode } from "@/lib/productKeyReadMode";
 import type { ModelTier } from "@/lib/models";
 import type { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
 
@@ -46,7 +48,14 @@ export const isAutoRouterUiEnabled = (
   environment: Record<string, string | undefined> = process.env
 ) => environment[AUTO_ROUTER_UI_FLAG] === "true";
 
-export type AutoUiRefusal = "ui_flag_off" | "not_eligible";
+/**
+ * `product_not_chat` sits alongside the two rollout refusals rather than
+ * inside the cohort's, because it is answered before the cohort is consulted
+ * (decision record v1.2 §3). A Review conversation is not outside the cohort;
+ * it was never a subject of the question, and counting it as a cohort refusal
+ * would dilute the rollout percentage with Review traffic.
+ */
+export type AutoUiRefusal = "ui_flag_off" | "product_not_chat" | "not_eligible";
 
 /** The server's own view: a boolean, plus why, for the log. */
 export type AutoUiAvailability = {
@@ -60,6 +69,23 @@ export type AutoUiAvailabilityInput = {
   subjectKey: string;
   isGuest: boolean;
   plan: ModelTier | "Guest" | null;
+  /**
+   * The conversation's stored productKey, or null when there is no
+   * conversation yet.
+   *
+   * Read from the row under an ownership check -- never from a request body,
+   * a Referer, or the surface the client was on. Null is not a product
+   * refusal: a screen with no conversation has no product to refuse, and
+   * falling back to a surface is what §6 forbids.
+   */
+  productKey?: string | null;
+  /**
+   * Whether a conversation row exists at all. False for the surface-entry
+   * question ("may this account start a Chat"), where there is nothing to
+   * read a product from and nothing to resolve.
+   */
+  hasConversation?: boolean;
+  readMode?: ProductKeyReadMode;
   flagEnabled?: boolean;
   cohortConfig?: AutoCohortConfig;
   readiness?: ReturnType<typeof autoRolloutReadiness>;
@@ -74,6 +100,18 @@ export const autoUiAvailability = (
   // request does not need to do.
   if (!flagEnabled) {
     return { offered: false, reason: "ui_flag_off", cohort: null };
+  }
+
+  // The product, before the cohort. `cohort: null` is the point as much as
+  // the reason is: the cohort was not consulted, so there is no bucket to
+  // report, and the rollout figures stay a statement about Chat.
+  const product = autoProductBoundary({
+    productKey: input.productKey ?? null,
+    hasConversation: input.hasConversation ?? false,
+    readMode: input.readMode,
+  });
+  if (product.reason === "product_not_chat") {
+    return { offered: false, reason: "product_not_chat", cohort: null };
   }
 
   const cohort = decideAutoCohort({

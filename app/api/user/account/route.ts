@@ -58,6 +58,7 @@ export async function DELETE(req: Request) {
           templateKey: ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
           emailAddress: deletion.email,
           userId: session.user.id,
+          language: deletion.language,
           payload: { scheduledFor: deletion.scheduledFor.toISOString() },
           referenceType: "User",
           referenceId: session.user.id,

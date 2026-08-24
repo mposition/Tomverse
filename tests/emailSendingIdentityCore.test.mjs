@@ -41,7 +41,7 @@ test("both header shapes parse, and the domain is normalised", () => {
     address: "hello@tomverse.app",
     domain: "tomverse.app",
   });
-  assert.equal(parseFromAddress('"Tomverse Insight" <a@b.co>').displayName, "Tomverse Insight");
+  assert.equal(parseFromAddress('"Tomverse Review" <a@b.co>').displayName, "Tomverse Review");
 });
 
 test("an unusable value is unparseable rather than half-read", () => {
@@ -129,7 +129,7 @@ test("sending from the registrable domain warns in production only", () => {
   // rather than an error: gating on it would refuse readiness on today's
   // production in order to announce a planned migration.
   const input = {
-    transactionalFrom: "Tomverse Insight <hello@tomverse.app>",
+    transactionalFrom: "Tomverse Review <hello@tomverse.app>",
     marketingFrom: null,
   };
   assert.deepEqual(problemCodes({ ...input, nodeEnv: "production" }), [

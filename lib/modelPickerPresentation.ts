@@ -32,6 +32,7 @@ const koreanDescriptions: Record<string, string> = {
   "claude-opus-4-8": "까다롭고 중요한 작업의 섬세한 추론",
   "claude-sonnet-5": "글쓰기, 구조화된 분석과 상세 문서 작업",
   "claude-haiku-4-5": "빠른 요약, 초안 작성과 가벼운 분석",
+  "gemini-3-7-flash": "복잡한 코딩과 연속된 단계를 거치는 작업",
   "gemini-3-6-flash": "빠른 에이전트 작업, 코딩과 멀티모달 분석",
   "gemini-3-5-flash": "빠른 응답과 이미지·파일 분석",
   "gemini-3-1-pro": "상세한 멀티모달 분석과 복잡한 문서",

@@ -23,7 +23,7 @@ async function installClipboardMock(page: Page) {
 
 async function openSidebarOnMobile(page: Page) {
   if (await page.getByTestId("mobile-chat-shell").isVisible()) {
-    if (await page.getByRole("dialog", { name: "Tomverse Insight" }).isVisible()) {
+    if (await page.getByRole("dialog", { name: "Tomverse Review" }).isVisible()) {
       return;
     }
 

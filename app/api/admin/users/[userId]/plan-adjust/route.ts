@@ -11,7 +11,8 @@ import {
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { resolveManualPlanPeriodEnd } from "@/lib/adminPlanAdjustCore";
-import { sendAdminPlanChangedEmail } from "@/lib/billingEmails";
+import { ADMIN_PLAN_CHANGED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -121,14 +122,25 @@ export async function PATCH(req: Request, context: RouteContext) {
         })
     );
 
-    await sendAdminPlanChangedEmail({
-      to: user.email,
-      plan: user.plan,
-      billingInterval: user.subscriptionBillingInterval,
-      periodEnd: user.subscriptionCurrentPeriodEnd,
-      reason: body.reason,
+    // Queued: the plan moved whether or not the notice reaches anybody, and
+    // somebody whose plan changed under them without a message has no way to
+    // tell it from a fault (docs/policy/email-notifications.md §2.4).
+    await enqueueStandardEmail({
+      templateKey: ADMIN_PLAN_CHANGED_TEMPLATE,
+      emailAddress: user.email,
+      userId: user.id,
+      payload: {
+        plan: user.plan,
+        billingInterval: user.subscriptionBillingInterval,
+        periodEnd: user.subscriptionCurrentPeriodEnd
+          ? user.subscriptionCurrentPeriodEnd.toISOString()
+          : null,
+        reason: body.reason ?? null,
+      },
+      referenceType: "User",
+      referenceId: user.id,
     }).catch((emailError) => {
-      console.error("Admin plan changed email failed:", emailError);
+      console.error("Admin plan changed email enqueue failed:", emailError);
     });
 
     await writeAdminAuditLog({

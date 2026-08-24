@@ -54,6 +54,7 @@ import type {
 } from "@/lib/routerDecision";
 import {
   MANIFEST_HASH_ALGORITHM,
+  ManifestHashKeyringError,
   activeManifestHashKey,
 } from "@/lib/manifestHashKeyring";
 import {
@@ -92,8 +93,22 @@ const hashKey = () => {
   try {
     return activeManifestHashKey();
   } catch (error) {
+    // The keyring's own message travels in the text, not only as a `cause`.
+    // The four ways this fails need four different edits -- a value that is
+    // not `keyId:secret`, an active id naming a key the ring does not hold, a
+    // secret below the length floor, an id configured twice -- and an operator
+    // reading "no manifest hash key is configured" cannot tell which one they
+    // are looking at. That sentence also reads as "nothing was set", which
+    // sends someone to add a variable that is already there.
+    //
+    // Safe to log: every `ManifestHashKeyringError` message names ids, lengths
+    // and variable names, and none of them interpolates a secret. Anything
+    // that is not one of those errors is reported without its text, because
+    // this function cannot vouch for what an unknown throw carries.
     throw new DispatchBoundaryError(
-      "No manifest hash key is configured, so no manifest can be digested.",
+      error instanceof ManifestHashKeyringError
+        ? `No manifest hash key is configured, so no manifest can be digested: ${error.message}`
+        : "No manifest hash key is configured, so no manifest can be digested.",
       error
     );
   }
@@ -206,7 +221,26 @@ export type BeginDispatchInput = {
   reservedInputTokens: number;
   requestOutputCapTokens: number;
   reservationId?: string | null;
+  /**
+   * The conversation this turn belongs to, when there is one.
+   *
+   * Stored, not merely accepted. It was dropped before, so a run that failed
+   * -- and therefore never got an `assistantMessageId` -- had no way at all of
+   * naming what it belonged to, and ROUTE-07 counts those terminations.
+   */
   conversationId?: string | null;
+  /**
+   * The product this run executed for, snapshotted here.
+   *
+   * Read from the stored `Conversation.productKey` by the caller, never
+   * derived from a surface: the join is allowed to break (SET NULL on
+   * conversation deletion) and the snapshot is what survives it.
+   *
+   * Null for a turn with no conversation -- a guest turn has no row to read a
+   * product from, and writing one anyway would be a claim about a conversation
+   * that does not exist.
+   */
+  productKey?: string | null;
 };
 
 /**
@@ -267,6 +301,8 @@ export const beginInstrumentedDispatch = async (
         decisionMicros: record ? Math.round(record.decisionLatencyMs * 1_000) : 0,
         initialModelId: input.modelId,
         reservationId: input.reservationId ?? null,
+        conversationId: input.conversationId ?? null,
+        productKey: input.productKey ?? null,
       },
       select: { id: true },
     });

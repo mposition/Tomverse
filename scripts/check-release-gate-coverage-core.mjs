@@ -40,6 +40,12 @@ export const MANUALLY_GATED_CHECKS = {
             "Reads ModelRegistryEntry to prove stored NULL still means 'inherit the code profile' " +
             "(AGENTS.md names this check for that contract). It needs the deployed database, not a fixture.",
     },
+    "check:router-context-window-db": {
+        reason:
+            "Reads ModelRegistryEntry to prove no row cleared a context window the catalogue declares. " +
+            "getRuntimeModels builds each model from its row alone, so that row is what a request reads " +
+            "and the catalogue-side check cannot see it. It needs the deployed database, not a fixture.",
+    },
     "check:openai-model-access": {
         reason:
             "Calls GET /v1/models with a production key to confirm per-account model visibility. " +

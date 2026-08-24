@@ -14,6 +14,10 @@ import {
   externalImportEnabledFromValue,
 } from "@/lib/externalImportAccess";
 import {
+  ASSISTANT_PACKAGE_IMPORT_FLAG_KEY,
+  assistantPackageImportEnabledFromValue,
+} from "@/lib/assistantPackageImportAccess";
+import {
   IMAGE_GENERATION_FLAG_KEY,
   imageGenerationEnabledFromValue,
 } from "@/lib/imageGenerationAccess";
@@ -438,4 +442,22 @@ export async function assertOperationalFeatureEnabled(
 ) {
   const flags = await getOperationalFeatureFlags();
   if (!flags[feature]) throw new OperationalFeatureDisabledError(feature);
+}
+
+/**
+ * The assistant-package import rollout flag
+ * (docs/policy/assistant-package-import.md §11).
+ *
+ * Same default-off opt-in shape as the flags above. The wizard route is the
+ * only reader today, and it answers 404 rather than rendering a disabled
+ * screen: a route that exists and refuses still tells anyone who asks that the
+ * feature is coming, and there is nothing here for an operator to act on.
+ */
+export async function isAssistantPackageImportEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY },
+    select: { value: true },
+  });
+  return assistantPackageImportEnabledFromValue(row?.value);
 }

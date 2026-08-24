@@ -51,7 +51,7 @@ export function formatConversationHeader(
     personalizationNotice?: string
 ) {
     return [
-        "Tomverse Insight Export",
+        "Tomverse Review Export",
         `Conversation: ${conversation.title}`,
         `Created: ${formatDate(conversation.createdAt)}`,
         ...(personalizationNotice ? [personalizationNotice] : []),

@@ -8,6 +8,8 @@ import {
   PROVIDER_API_KEY_ENV_NAMES,
   resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
+import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
+import { candidateIdentity } from "@/lib/modelLifecycleWorkItemCore";
 import {
   catalogNextCursor,
   missingConfirmationRuns,
@@ -187,6 +189,27 @@ const runProviderCheck = async (
     },
   });
   const registryByApiModel = new Map(registry.map((model) => [model.apiModel, model]));
+
+  // Whether *this* provider serves a model we have is a provider-scoped
+  // question, and `registry` above answers it: that is what missing-detection
+  // and the reconciler act on.
+  //
+  // Whether a model is new to us is not. Judging it inside one provider's slice
+  // is what made the same model a fresh candidate every time another provider
+  // started serving it -- `kimi-k3` was reported as new three times, the last
+  // of them three weeks after it shipped, because Perplexity and Qwen list it
+  // and Moonshot is where we registered it (ML-12).
+  //
+  // The observation rows below stay per provider. They are facts. Collapsing
+  // belongs to the layer that decides, not the layer that records.
+  const catalogueIdentities = new Set(
+    (
+      await prisma.modelRegistryEntry.findMany({
+        where: { catalogDeleted: false },
+        select: { apiModel: true },
+      })
+    ).map((model) => candidateIdentity(model.apiModel))
+  );
   const observedById = new Map(observations.map((item) => [item.id, item]));
   const existingEntries = await prisma.providerModelCatalogEntry.findMany({
     where: { provider },
@@ -208,7 +231,10 @@ const runProviderCheck = async (
           ? "available"
           : "candidate";
       if (model) mapped.push(model.id);
-      else if (!observation.lifecycle) {
+      else if (
+        !observation.lifecycle &&
+        !catalogueIdentities.has(candidateIdentity(observation.id))
+      ) {
         candidates.push(observation.id);
         if (!existingByApiModel.has(observation.id)) newCandidates.push(observation.id);
       }
@@ -316,7 +342,7 @@ export async function checkProviderModelCatalogs(now = new Date()) {
   const confirmationRuns = missingConfirmationRuns(
     process.env.PROVIDER_MODEL_MISSING_CONFIRMATION_RUNS
   );
-  return Promise.all(
+  const results = await Promise.all(
     AI_PROVIDERS.map((provider) =>
       runProviderCheck(provider, now, confirmationRuns).catch(async (error) => {
         const safe = safeError(error);
@@ -350,4 +376,34 @@ export async function checkProviderModelCatalogs(now = new Date()) {
       })
     )
   );
+
+  // The queue is fed from `candidates` -- every unmapped model this scan saw --
+  // and never from `newCandidates`, which is empty on every run after the
+  // first and is the reason a discovered model was named once and lost.
+  // Deciding what is actually new is the queue's job, across all providers at
+  // once so one model is one decision.
+  //
+  // Wrapped because a queue write must not fail the scan: the observations and
+  // the reconciliation above are already committed, and losing them to a
+  // bookkeeping error would be a worse trade than a missed work item, which the
+  // next run creates anyway.
+  try {
+    await recordDiscoveredWorkItems({
+      observed: results.flatMap((result) =>
+        result.status === "checked"
+          ? result.candidates.map((apiModel) => ({
+              provider: result.provider,
+              apiModel,
+            }))
+          : []
+      ),
+      now,
+    });
+  } catch (error) {
+    console.error("Model lifecycle work item write failed:", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+  }
+
+  return results;
 }

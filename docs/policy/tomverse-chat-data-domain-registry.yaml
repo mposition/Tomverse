@@ -406,6 +406,26 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: assistantProfileImport
+    prismaModel: AssistantProfileImport
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: assistantKnowledgeUploadReservation
+    prismaModel: AssistantKnowledgeUploadReservation
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+
   - domain: memoryEvidence
     prismaModel: MemoryEvidence
     userLinkageRole: subject
@@ -993,6 +1013,26 @@ domains:
       and billing rows cannot be written disabled -- a CHECK constraint holds
       that -- so what cascades away here is never the reason a login alert was
       not sent.
+
+  - domain: modelMigrationRecord
+    prismaModel: ModelMigrationRecord
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      What an approved retirement reconciliation changed on this account, per
+      field. It exists for two questions -- who the completion notice is
+      addressed to, and what this setting held before we moved it -- and both
+      die with the account, so it cascades rather than being retained. The
+      aggregate a retirement needs afterwards ("this moved N accounts") belongs
+      to the campaign record, not to a row per person. Exported filtered: the
+      person is entitled to know we changed their model and what it was, and not
+      to the operator email, the internal ticket that authorised the run, or the
+      lifecycle work item it belonged to.
 
   - domain: consentRecord
     prismaModel: ConsentRecord

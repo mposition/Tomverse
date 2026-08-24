@@ -44,6 +44,8 @@ export const BOUNDED_TABLES = {
     AdminSlackTemplate: "primary key is the template key",
     AdminAlertPolicy: "one row per alert policy, edited rather than appended",
     UserMemorySettings: "primary key is the user; grows with signups only",
+    EmailTemplate:
+        "one row per template key, and the keys are written in lib/emailTemplateDefinitions.ts",
     ProviderDailyUsage:
         "one row per (provider, model, source, day); the day makes it grow, but at a rate set by the catalogue rather than by traffic",
 };
@@ -61,6 +63,12 @@ export const RETAINED_TABLES = {
         "the record that a destructive cleanup was run, and by whom; written on demand, not on a cadence",
     AdminOperationReport:
         "operator-authored reports, written on demand rather than on a cadence",
+    ModelMigrationRecord:
+        "the record of what an approved retirement changed on somebody's account; it is the audience of the notice that tells them, and the only answer to what their setting held before",
+    ModelLifecycleWorkItem:
+        "the decision record for a discovered model; deleting one returns that model to the state this table was built to end, where nothing says whether it was reviewed",
+    ModelLifecycleWorkItemEvent:
+        "append-only history of who moved a work item and when; an entry removed from the middle makes the decision unanswerable",
     AdminNote: "support notes about a customer, deleted with the customer",
     BillingTransaction:
         "billing record; a subscription charge has to stay answerable long after it clears",
@@ -80,6 +88,12 @@ export const RETAINED_TABLES = {
     AdminProviderIncident:
         "incident history; the record of what was wrong and when it was resolved",
     Feedback: "support record, deleted with the customer",
+    EmailEvent:
+        "the record that a message was owed and to whom it was expanded; a delivery row points at it, so removing one leaves a send with no reason it happened",
+    ConsentRecord:
+        "the evidence that somebody agreed, on which policy version and how it was captured; it is the answer to a regulator asking why a message was sent, and it has to outlive the consent it records",
+    EmailPolicyVersion:
+        "the labelling rules a delivery was rendered under, pinned by id on every EmailDelivery; deleting a version makes every message sent beneath it unexplainable",
 };
 
 /**

@@ -480,3 +480,92 @@ test("a failed chunk retries below its cap and is terminal at it", () => {
         { status: "failed" }
     );
 });
+
+// --- eval budget contents (docs/policy/external-conversation-import-and-memory.md §12.5) ---
+
+test("a half-filled eval budget fails wherever it appears", () => {
+    // Filling the budget is what opens `--live`. A candidate carrying an
+    // incomplete one is the dangerous state, not a harmless one: spending is
+    // unlocked and the record naming who authorised it has a hole. So the
+    // check does not wait for `status: "approved"` -- by then the money is
+    // already spendable.
+    const candidateWith = (budget) => [
+        {
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v1",
+            status: "candidate",
+            owner: "@qa",
+            registeredAt: "2026-08-03",
+            evalBudget: budget,
+            evaluation: null,
+        },
+    ];
+    const complete = {
+        approvedBy: "@qa",
+        maxUsd: 20,
+        ticket: "https://example.invalid/1",
+        approvedAt: "2026-08-03",
+    };
+
+    assert.deepEqual(findEvalRegisterProblems(candidateWith(complete), NOW), []);
+    // No budget at all stays the ordinary waiting state of
+    // docs/policy/external-conversation-import-and-memory.md §12.5.
+    assert.deepEqual(findEvalRegisterProblems(candidateWith(null), NOW), []);
+
+    for (const field of ["approvedBy", "ticket", "approvedAt"]) {
+        const problems = findEvalRegisterProblems(
+            candidateWith({ ...complete, [field]: "  " }),
+            NOW
+        );
+        assert.ok(
+            problems.some((line) => line.includes(`empty ${field}`)),
+            `an empty ${field} passed`
+        );
+    }
+});
+
+test("the spend ceiling must be a positive number", () => {
+    // The harness reads `maxUsd` as the ceiling. Zero stops every live run at
+    // the first case, and a negative number is a ceiling nobody chose -- both
+    // are records that look filled in and are not.
+    for (const maxUsd of [0, -1, Number.NaN]) {
+        const problems = findEvalRegisterProblems(
+            [
+                {
+                    extractionModelId: "gpt-5-6-luna",
+                    promptVersion: "mem-extract-v1",
+                    status: "candidate",
+                    owner: "@qa",
+                    registeredAt: "2026-08-03",
+                    evalBudget: {
+                        approvedBy: "@qa",
+                        maxUsd,
+                        ticket: "https://example.invalid/1",
+                        approvedAt: "2026-08-03",
+                    },
+                    evaluation: null,
+                },
+            ],
+            NOW
+        );
+        assert.ok(
+            problems.some((line) => line.includes("maxUsd must be a positive number")),
+            `maxUsd=${maxUsd} passed`
+        );
+    }
+});
+
+test("the shipped budget names a ticket and a positive ceiling", () => {
+    // The register's own entry, not a fixture: an approval recorded with a
+    // blank ticket is an approval nobody can trace.
+    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.filter((entry) => entry.evalBudget);
+    for (const entry of funded) {
+        assert.ok(entry.evalBudget.ticket.trim().length > 0);
+        assert.ok(entry.evalBudget.approvedBy.trim().length > 0);
+        assert.ok(entry.evalBudget.maxUsd > 0);
+    }
+    // A funded pair is still not an approved pair.
+    for (const entry of funded) {
+        assert.notEqual(entry.status, "approved");
+    }
+});

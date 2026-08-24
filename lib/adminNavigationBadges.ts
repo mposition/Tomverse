@@ -18,6 +18,15 @@ export type AdminNavigationCounts = {
    * -- while an abandoned promotion is a promotion nobody missed.
    */
   abandonedLegalEmail: number | null;
+  /**
+   * Models discovery found that nobody has decided about yet.
+   *
+   * Earns a badge because it is the count whose absence was the finding: for a
+   * month the daily report said "new candidates 0" while seven first-party
+   * models sat unreviewed, because the report described the day rather than the
+   * backlog.
+   */
+  openModelLifecycle: number | null;
   openFeedback: number | null;
   openPrivacyRequests: number | null;
   pendingRefunds: number | null;
@@ -30,6 +39,7 @@ export type AdminNavigationCounts = {
 
 export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   abandonedLegalEmail: null,
+  openModelLifecycle: null,
   openFeedback: null,
   openPrivacyRequests: null,
   pendingRefunds: null,
@@ -77,6 +87,8 @@ export const adminNavigationBadge = (
       return counts.failedAlerts;
     case "abandonedLegalEmail":
       return counts.abandonedLegalEmail;
+    case "modelLifecycle":
+      return counts.openModelLifecycle;
     default:
       return null;
   }

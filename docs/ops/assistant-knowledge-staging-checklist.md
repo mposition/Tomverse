@@ -68,7 +68,7 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 붙인 별도 파일**로 `assistant-knowledge-staging-verification-records/` 아래에
 남습니다.
 
-- **template revision**: `2026-08-22d`
+- **template revision**: `2026-08-23b`
 - 실행 방법과 파일 이름 규칙:
   `assistant-knowledge-staging-verification-records/README.md`
 
@@ -135,20 +135,43 @@ epoch이 없어 키를 한 번 바꾸면 그 이전 전부가 영구히 무효�
 - [ ] C-3a. 그 파일을 삭제하면 목록에서 사라지고 잔여 용량이 돌아온다.
       **이 시점에 R2 object는 아직 남아 있어야 한다** — DB-first가 지켜졌다는
       뜻이고, 없으면 그것이 결함이다
-- [ ] C-3b. **다음 03:00 UTC sweep 이후** R2 object가 사라진다
+- [ ] C-3b. **다음 정각 sweep(:00 · :15 · :30 · :45) 이후** R2 object가
+      사라진다
 
-**sweep은 15분이 아니라 하루 한 번입니다.** 이 회차에서 실제로 틀린 적이 있어
-적어 둡니다 — `railway.maintenance.json`의 `cronSchedule`이 `0 3 * * *`이고,
-그 job이 `cleanupExpiredData()`를 통해 knowledge tombstone을 비웁니다. `*/15`인
-것은 `railway.credit-reconciliation.json`이며 object 정리와 무관합니다.
+**삭제 시각과 두 관측 시각을 UTC로 적습니다.** 이 셋이 C-3의 전부이고, 셋 중
+하나라도 없으면 나머지 둘이 무엇을 말하는지 알 수 없습니다.
 
-그래서 **C-3b는 같은 날 안에 관측되지 않습니다.** 몇 분 기다렸다가 결함으로
-적지 마십시오. 온디맨드 실행(`retention.cleanup.execute`)은 2인 승인을 요구하고
-자기 승인이 금지돼 있어 관리자가 하나인 조직에서는 쓸 수 없습니다
-(`lib/adminApprovalCore.ts`).
+`*/15`는 "삭제하고 15분"이 아니라 **다음 정각**입니다
+(`railway.credit-reconciliation.json`). :58에 지웠으면 2분이고 :01에 지웠으면
+14분이므로, 시계가 아니라 **다음 정각 run이 뜬 뒤에** 봅니다. 그 run이 실제로
+떴는지는 Railway의 `Credit Reconciliation` 서비스 로그에서 확인할 수 있습니다 —
+`Starting Container` 줄이 그 시각에 있으면 뜬 것입니다.
 
-회차를 하루 안에 닫아야 한다면 C-3b를 `미기록`으로 두고 판정에 그 이유를
-적습니다. 그것이 이 항목을 통과로 적는 것보다 정확합니다.
+**로그의 `examined: 0`을 sweep이 아무것도 안 했다는 뜻으로 읽지 마십시오.**
+`scripts/run-credit-reconciliation.mjs`가 찍는 것은 credit reservation 하나의
+숫자이고, knowledge를 포함한 ride-along sweep의 결과는 응답 본문에 있지만
+로그에도 admin 표면에도 나오지 않습니다(`227be331` 회차 발견 사항 1). **판별은
+R2 콘솔에서 합니다.**
+
+일간 `railway.maintenance.json`(`0 3 * * *`)도 같은 큐를 계속 비웁니다.
+멱등한 그물이며, 15분 경로가 어떤 이유로 멈춰도 하루 안에는 정리된다는 뜻입니다.
+
+두 번째 정각 run 이후에도 남아 있으면 그때가 결함입니다. 그때는 Admin
+Console의 retention 패널에서 dry-run을 돌려 `assistantKnowledge` 항목을
+봅니다 — `retryable`이 0이 아닌데 object가 남아 있다면 sweep이 큐를 비우지
+못하는 것이고, 0이라면 tombstone이 아예 만들어지지 않은 것이라 결함의 위치가
+다릅니다.
+
+**온디맨드 실행은 이제 관리자가 한 명이어도 됩니다.** 적격 관리자가 정확히
+한 명이면 `retention.cleanup.execute`가 방금 본 dry-run에 결속된 채로
+실행됩니다(`lib/adminSoleApproverCore.ts`, 2026-08-23 결정). preview 없이
+누르면 dry-run을 먼저 돌리라고 거절하고, preview가 15분보다 오래됐거나 그
+사이 새 run이 생겼으면 다시 돌리라고 거절합니다. 관리자가 둘 이상이 되면
+자동으로 기존 2인 승인으로 돌아갑니다.
+
+이전에는 이 경로가 1인 조직에서 닫혀 있었고(`canReviewAdminApproval()`이
+요구하는 `requestedById !== reviewerId`), `f3974ef`·`4380bc1` 두 회차가 그것을
+발견 사항으로 남겼습니다.
 
 ## D. 더 확인하고 싶다면 (전부 차단 아님)
 
