@@ -774,3 +774,220 @@ for (const shell of SHELLS) {
     });
   });
 }
+
+// ===========================================================================
+// STREAM-STATE-003: a comparison keeps each panel's own state across a switch.
+//
+// The two blocks above both use a single model, which leaves the *model* half
+// of the runtime key untested from the browser: with one panel per
+// conversation, a key that dropped `modelId` entirely would still pass every
+// assertion in them. A comparison is where that half is load-bearing -- three
+// panels stream at once into one conversation, and each owns its own answer.
+//
+// It is also where the states diverge. Leaving a comparison mid-run and coming
+// back is not one question but three: the panel still streaming, the panel that
+// finished while nobody was watching, and -- in the second test -- the
+// deep-research panel, which is not streaming at all but polling a job. They
+// have to come back as what they each are, not as whatever the last one to
+// report happened to be.
+//
+// The composer is the third assertion. `isAnyModelResponding` reads the
+// conversation on screen and the models it has not paused
+// (lib/chatRuntimeStatus.ts), so a comparison with one panel done and one still
+// running must still read as busy -- releasing on the first panel to finish
+// would let a second send land on top of a run that is still going.
+// ===========================================================================
+
+const ALPHA_ONE = "ALPHA-ONE";
+const ALPHA_TWO = "ALPHA-TWO";
+const BETA_ONE = "BETA-ONE";
+const BETA_TWO = "BETA-TWO";
+
+/**
+ * Brings `modelId`'s panel on screen and returns it.
+ *
+ * The two shells disclose a comparison differently and this is the whole of
+ * the difference: desktop lays every panel out side by side, mobile shows one
+ * at a time behind a tab strip. Scoping to the panel matters on desktop
+ * precisely because the sibling *is* on screen -- a page-level `getByText`
+ * would happily find the other model's answer and call it this one's.
+ */
+async function modelPanel(page: Page, shell: Shell, modelId: string) {
+  if (!isMobile(shell)) {
+    return page.locator(
+      `[data-testid="desktop-model-panel"][data-model-id="${modelId}"]`
+    );
+  }
+  await page
+    .locator(`[data-testid="mobile-model-tab"][data-model-id="${modelId}"]`)
+    .click();
+  // Model ids carry `/` and `-`, so this is an attribute match rather than a
+  // `#id` selector.
+  return page.locator(`[id="mobile-model-tabpanel-${modelId}"]`);
+}
+
+async function openComparisonWorkspace(
+  page: Page,
+  shell: Shell,
+  models: string[],
+  stub: ChatModelStubSpec
+): Promise<DeepResearchStatusController> {
+  await mockAuthenticatedApi(page, {
+    selectedModels: models,
+    messages: [
+      { id: "seed-user-cmp", role: "user", content: "Comparison seed." },
+    ],
+    extraConversations: [
+      {
+        id: OTHER_CONVERSATION,
+        title: "Second QA conversation",
+        selectedModels: [DEFAULT_MODEL],
+        messages: [
+          { id: "seed-user-cmp-2", role: "user", content: "Second conversation seed." },
+          {
+            id: "seed-assistant-cmp-2",
+            role: "assistant",
+            content: OTHER_ANSWER,
+            modelId: DEFAULT_MODEL,
+          },
+        ],
+      },
+    ],
+  });
+  // Pro because the deep-research model in the second test is a Pro model, and
+  // because both tests should differ only in the models they compare.
+  await mockUserUsage(page, { plan: "Pro" });
+  // Installed before the navigation for the same reason the deep-research
+  // opener does it: a poll must never be able to reach the real endpoint.
+  // Nothing here seeds a pending job, so the first poll cannot land until the
+  // send -- but the order should not be the thing keeping that true.
+  const research = await installDeepResearchStatusController(page);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.setViewportSize(shell.viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(
+    page.getByTestId(
+      shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
+    )
+  ).toBeVisible();
+  await installChatModelStub(page, stub);
+  return research;
+}
+
+for (const shell of SHELLS) {
+  test.describe(`STREAM-STATE-003 (${shell.name}): a comparison is per panel`, () => {
+    test("each panel keeps its own answer, and the composer waits for the last one", async ({
+      page,
+    }) => {
+      await openComparisonWorkspace(page, shell, [DEFAULT_MODEL, OTHER_MODEL], {
+        [DEFAULT_MODEL]: { kind: "controlled", channel: "cmp-alpha" },
+        [OTHER_MODEL]: { kind: "controlled", channel: "cmp-beta" },
+      });
+
+      await submitComposer(page, "Compare these two.", shell.viewport.width);
+      await waitForControlledStream(page, "cmp-alpha");
+      await waitForControlledStream(page, "cmp-beta");
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_ONE);
+      await pushControlledChunk(page, "cmp-beta", BETA_ONE);
+
+      // Each answer is in its own panel and in no other.
+      const alpha = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(alpha.getByText(ALPHA_ONE, { exact: false })).toBeVisible();
+      await expect(alpha.getByText(BETA_ONE, { exact: false })).toHaveCount(0);
+      const beta = await modelPanel(page, shell, OTHER_MODEL);
+      await expect(beta.getByText(BETA_ONE, { exact: false })).toBeVisible();
+      await expect(beta.getByText(ALPHA_ONE, { exact: false })).toHaveCount(0);
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+
+      // While we are away the two panels diverge: one finishes, one keeps
+      // going. Both writes have to land on their own key.
+      await pushControlledChunk(page, "cmp-beta", BETA_TWO);
+      await finishControlledStream(page, "cmp-beta");
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_TWO);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      const alphaBack = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(
+        alphaBack.getByText(`${ALPHA_ONE}${ALPHA_TWO}`, { exact: false })
+      ).toBeVisible();
+      const betaBack = await modelPanel(page, shell, OTHER_MODEL);
+      await expect(
+        betaBack.getByText(`${BETA_ONE}${BETA_TWO}`, { exact: false })
+      ).toBeVisible();
+      // One panel finished, the other did not, so the conversation is still
+      // busy. Releasing here would let a second send land on a live run.
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await finishControlledStream(page, "cmp-alpha");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await expect(page.getByTestId("chat-send-button")).toBeVisible();
+    });
+
+    test("a deep-research panel and a streaming panel both survive the switch", async ({
+      page,
+    }) => {
+      const research = await openComparisonWorkspace(
+        page,
+        shell,
+        [DEFAULT_MODEL, DEEP_RESEARCH_MODEL],
+        {
+          [DEFAULT_MODEL]: { kind: "controlled", channel: "cmp-alpha" },
+          [DEEP_RESEARCH_MODEL]: { kind: "async-job" },
+        }
+      );
+
+      await submitComposer(page, "Compare a stream and a job.", shell.viewport.width);
+      await waitForControlledStream(page, "cmp-alpha");
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_ONE);
+      await research.waitForPoll();
+
+      // Two panels in two different transports, in one conversation.
+      const streaming = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(streaming.getByText(ALPHA_ONE, { exact: false })).toBeVisible();
+      const researching = await modelPanel(page, shell, DEEP_RESEARCH_MODEL);
+      await expect(
+        researching.getByText("심층 리서치 요청 중", { exact: false })
+      ).toBeVisible();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_TWO);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      const streamingBack = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(
+        streamingBack.getByText(`${ALPHA_ONE}${ALPHA_TWO}`, { exact: false })
+      ).toBeVisible();
+      const researchingBack = await modelPanel(page, shell, DEEP_RESEARCH_MODEL);
+      await expect(
+        researchingBack.getByText("심층 리서치 요청 중", { exact: false })
+      ).toBeVisible();
+      // The comparison remounted twice and the job is still one job.
+      expect(research.pollCount()).toBe(1);
+
+      // The job finishes; the stream is still going, so the composer waits.
+      await research.answerPoll({
+        status: "completed",
+        content: DEEP_RESEARCH_ANSWER,
+      });
+      const finishedResearch = await modelPanel(page, shell, DEEP_RESEARCH_MODEL);
+      await expect(
+        finishedResearch.getByText(DEEP_RESEARCH_ANSWER, { exact: false })
+      ).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await finishControlledStream(page, "cmp-alpha");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    });
+  });
+}

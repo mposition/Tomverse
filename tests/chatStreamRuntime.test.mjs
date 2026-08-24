@@ -134,13 +134,16 @@ test("the stop button of a panel that remounted stops the run that is going", ()
     aborted = true;
   });
 
-  // The panel that started this is long gone; only the key is known.
-  abortChatRuntime(A);
+  // The panel that started this is long gone; only the key is known. The
+  // cause is required because every abort in this app has a reason -- a
+  // liveness deadline and this button are the same `AbortError` otherwise
+  // (lib/chatStreamLiveness.ts).
+  abortChatRuntime(A, "user_stop");
   assert.equal(aborted, true);
 
   // Idempotent, and harmless on a key with nothing running.
-  abortChatRuntime(A);
-  abortChatRuntime(B);
+  abortChatRuntime(A, "user_stop");
+  abortChatRuntime(B, "user_stop");
 });
 
 test("a settled run does not close a retry that already took the key", () => {

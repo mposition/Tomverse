@@ -1,4 +1,5 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import type { ChatAbortCause } from "@/lib/chatStreamLiveness";
 
 /**
  * Where a comparison panel's transcript and its in-flight request actually
@@ -119,6 +120,17 @@ type ChatRuntimeRecord = {
   listeners: Set<() => void>;
   /** Stops the run this key owns. Null when nothing is in flight. */
   controller: AbortController | null;
+  /**
+   * Why this key's run was aborted, or null while it is live.
+   *
+   * The controller lives here rather than in a panel ref, so the reason has
+   * to live here too: `AbortError` is the same exception whether the user
+   * pressed stop or a liveness deadline expired, and the panel that catches
+   * it has no other way to tell them apart
+   * (lib/chatStreamLiveness.ts). Reset by `beginChatRuntimeRun`, so a retry
+   * never inherits the previous run's reason.
+   */
+  abortCause: ChatAbortCause | null;
   /** Newest load ticket; only the newest may settle the view. */
   loadRequestId: number;
   /** True while a history load for this key is running (across remounts). */
@@ -165,6 +177,7 @@ const ensureRecord = (key: string): ChatRuntimeRecord => {
     snapshot: EMPTY_CHAT_RUNTIME_SNAPSHOT,
     listeners: new Set(),
     controller: null,
+    abortCause: null,
     loadRequestId: 0,
     isLoading: false,
     revision: 0,
@@ -349,6 +362,9 @@ export function beginChatRuntimeRun(key: string): AbortController {
   const record = ensureRecord(key);
   const controller = new AbortController();
   record.controller = controller;
+  // A fresh run, so a fresh reason. Carrying the previous one over would let
+  // a retry that the user simply let finish report itself as stopped.
+  record.abortCause = null;
   patchSnapshot(key, { isStreaming: true });
   return controller;
 }
@@ -370,12 +386,58 @@ export function endChatRuntimeRun(
 }
 
 /**
- * Stops this key's run, if any. Safe to call when nothing is running, when the
- * run already finished, and repeatedly -- `AbortController.abort()` on a
- * settled controller is a no-op.
+ * Stops this key's run, if any, and records why.
+ *
+ * Safe to call when nothing is running, when the run already finished, and
+ * repeatedly -- `AbortController.abort()` on a settled controller is a no-op.
+ *
+ * The cause is required rather than optional. Every abort in this app has a
+ * reason, and the failure this parameter exists to prevent is a new call site
+ * quietly reverting to the state where a liveness deadline and the stop
+ * button were indistinguishable. The first cause wins: the stop button and a
+ * watchdog can race, and what ended the run is whichever got there first.
  */
-export function abortChatRuntime(key: string): void {
-  records.get(key)?.controller?.abort();
+export function abortChatRuntime(key: string, cause: ChatAbortCause): void {
+  const record = records.get(key);
+  if (!record?.controller) return;
+  record.abortCause ??= cause;
+  record.controller.abort();
+}
+
+/**
+ * Stops a run only while it is still the one this key owns.
+ *
+ * For an aborter that belongs to one particular run -- a liveness watchdog --
+ * rather than to the panel. A superseded run's watchdog firing must not kill
+ * the retry that replaced it, which is the same rule `endChatRuntimeRun`
+ * applies to finishing.
+ */
+export function abortChatRuntimeRun(
+  key: string,
+  controller: AbortController,
+  cause: ChatAbortCause
+): void {
+  const record = records.get(key);
+  if (!record || record.controller !== controller) return;
+  record.abortCause ??= cause;
+  controller.abort();
+}
+
+/**
+ * Why this run was aborted, or null.
+ *
+ * Scoped to the controller for the reason above: a run that has already been
+ * replaced is not the one asking, and answering with the current run's cause
+ * would attribute one request's ending to another. Null classifies as a stop
+ * (lib/chatStreamLiveness.ts), which is the conservative direction.
+ */
+export function getChatRuntimeAbortCause(
+  key: string,
+  controller: AbortController
+): ChatAbortCause | null {
+  const record = records.get(key);
+  if (!record || record.controller !== controller) return null;
+  return record.abortCause;
 }
 
 export function hasResumedChatRuntimeJob(key: string, jobId: string): boolean {
@@ -406,6 +468,7 @@ export function markChatRuntimeJobResumed(key: string, jobId: string): void {
 export function releaseChatRuntimeForOtherIdentities(identityKey: string): void {
   for (const [key, record] of [...records]) {
     if (chatRuntimeKeyIdentity(key) === identityKey) continue;
+    record.abortCause ??= "identity_released";
     record.controller?.abort();
     record.controller = null;
     records.delete(key);
@@ -414,6 +477,9 @@ export function releaseChatRuntimeForOtherIdentities(identityKey: string): void 
 
 /** Test-only: drops every key, aborting anything still running. */
 export function resetChatStreamRuntime(): void {
-  for (const record of records.values()) record.controller?.abort();
+  for (const record of records.values()) {
+    record.abortCause ??= "identity_released";
+    record.controller?.abort();
+  }
   records.clear();
 }

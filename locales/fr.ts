@@ -230,6 +230,8 @@ export const fr = {
         modelRetired: "Ce modèle n'est plus disponible. Sélectionnez un autre modèle actuel.",
         modelRetiredWithReplacement: "Ce modèle n'est plus disponible. Sélectionnez {model} ou un autre modèle actuel.",
         responseCancelled: "La génération de la réponse a été arrêtée.",
+        firstResponseTimeout: "La réponse était encore en préparation après un délai plus long que prévu, la connexion a donc été fermée. Réessayez dans un instant.",
+        streamIdleTimeout: "La réponse a cessé d'arriver pendant plus longtemps que prévu, la connexion a donc été fermée. Cette réponse est incomplète.",
         responseGenerating: "Génération d'une réponse.",
         responseComplete: "Réponse terminée.",
         responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
