@@ -538,7 +538,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/standardEmailLane.ts:508-511`, `lib/emailFooterRenderer.ts:282`,
   `lib/emailJurisdictionSeed.ts:88,183`
 
-### EM-05 — ADR이 이름 댄 flag가 코드에 없다 (P1, Medium)
+### EM-05 — ADR이 이름 댄 flag가 코드에 없다 (P1, Medium) — **해결 (2026-08-24)** — §46
 
 - **Evidence**: `[코드]` — `emailMarketingEnabled` / `emailCampaignsEnabled` /
   `emailConsentReconfirmEnabled` 전수 검색 결과 0건.
@@ -706,14 +706,28 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 ### EM-16 — marketing 활성화 선행 조건이 미완 (P0 for Phase 6, 운영)
 
 - **Evidence**: `[문서]` `docs/ops/email-sending-domains.md:38,160-170,434-450`
-- **현재 상태**:
-  - DMARC `p=none` 관측 시작 2026-08-21, 최소 2주 → **2026-09-04 이전 완료 불가**
+- **차단 대상**: **marketing 기능 개발 전체가 아니라 Phase 6의 production 발송
+  활성화**입니다. 템플릿·fan-out·campaign wave·kill switch는 이미 구현돼 있고,
+  저장소 안의 작업은 계속 진행할 수 있습니다.
+- **외부 의사결정 또는 운영 증거가 필요한 항목**:
+  - DMARC `p=none` 상태의 **유효한 집계 리포트 2주분** 확보와 SPF·DKIM alignment
+    확인. **가장 빠른 검토 가능일이 2026-09-04**이며 완료일이 아닙니다 — 시계는
+    DNS를 바꾼 시점이 아니라 **첫 실발송 시점부터** 돌고
+    (`docs/ops/email-sending-domains.md` §8.1), 리포트가 2주간 모이지 않으면
+    더 늦어집니다.
   - `dmarc@tomverse.app` 실제 수신 여부 **미확인**
-  - `news.tomverse.app` 미구성, warm-up(4~6주) 미시작
-  - Resend 계정/region suppression 분리 결정 미완(ADR §5.3.1, A18)
-  - 법률 검토 Q1/Q2/Q8 미회신
-- **영향**: **신규·업그레이드 홍보 메일은 오늘 발송할 수 없고, 빨라도
-  2026-10월 이전에는 어렵습니다** (`[추정]`: DMARC 2주 + warm-up 4~6주).
+  - **A18 suppression 경계 결정** — 별도 Resend team/region, 별도 provider,
+    또는 동일 계정 유지 + 비이메일 계정 복구 수단 의무화 중 하나 확정
+    (ADR §5.3.1)
+  - 결정된 발송 구조에 따른 `news.tomverse.app` 구성과 SPF/DKIM/DMARC 검증
+  - **동의한 수신자 cohort로 4~6주 warm-up**, complaint·bounce 기준 충족
+  - 법률 **Q1·Q2 회신**과 **Q8의 실제 사업자 정보** 확정
+- **저장소 안에 남아 있던 조건**: EM-05 feature flag(**§46에서 해결**)와
+  Admin API·UI·승인 연결. 즉 **EM-16만 풀려도 즉시 발송 가능한 상태가 아니며**,
+  반대로 EM-16이 저장소 작업을 멈추게 하지도 않습니다.
+- **영향**: 위 항목은 ops·product·legal의 권한이거나 외부 시스템 작업이라
+  구현만으로 끝낼 수 없습니다. **외부 선행조건과 저장소 내부 조건이 모두
+  충족되기 전까지 production marketing 발송은 비활성으로 유지됩니다.**
 - **권고**: Phase 6 진입 조건으로 고정. 이 감사가 이 상태를 바꾸지 않습니다.
 
 ---
@@ -3414,3 +3428,77 @@ campaign 화면에서 운영자가 주소를 볼 수 있는지는 `/admin/email-
 
 초안 작성 UI(§43.2), **D5**·**D10**(§21) 그대로입니다. `audienceEstimate`가
 있는 지금도 개인 단위 열람은 D10 뒤입니다.
+
+## 46. EM-05 구현 기록 — ADR이 이름 댄 flag (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailFeatureFlags.ts` | 세 key와 판정. 순수, 새 파일 |
+| `lib/appSettings.ts` | `isEmailMarketingEnabled` 외 2개 |
+| `lib/standardEmailLane.ts` | enqueue 거부 + 발송 시점 2차 층 |
+| `lib/emailAudienceExpansion.ts` · `...Core.ts` | fan-out 경로 차단 |
+| `lib/emailCampaignService.ts` | `CampaignsDisabledError`와 다섯 진입점 |
+| `migrations/20260824140000_email_marketing_disabled_skip_reason` | skipReason |
+| `tests/emailFeatureFlags.test.mjs` | 7건, 새 파일 |
+| `tests/integration/email-feature-flags.db.test.ts` | 11건, 새 파일 |
+| `tests/appSettingWriters.test.mjs` | 의도된 부재 3건 등록 |
+
+**찾아낸 결함은 "marketing이 나갈 수 있다"가 아닙니다** — 오늘 marketing은
+flag보다 강한 이유로 불가능합니다(marketing 분류 template 0개,
+`MARKETING_EMAIL_FROM` 미설정). 결함은 **ADR §15.2를 읽은 사람이 없는 스위치를
+찾게 된다**는 것이었고, `emailMarketingEnabled` 전수 검색 결과가 0건이었습니다.
+
+**flag는 구조적 차단을 대체하지 않고 앞에 섭니다.** enqueue 순서는
+**flag → template → identity**이며, 통합 테스트가 거부 시 template 행이 생기지
+않음을 고정합니다.
+
+**정확히 `"true"`만 켭니다.** `"TRUE"`·`"1"`·`"yes"`·앞뒤 공백 전부 꺼짐입니다.
+안전하게 실패하는 방향이 "발송되지 않음"이므로 관용을 두지 않았습니다.
+
+**bare `null`을 이름 있는 거부로 바꿨습니다.** `enqueueStandardEmail`은 아무것도
+안 썼다는 사실만 말하고 이유를 말하지 않았습니다 — 호출자가 **주소 없는 계정과
+꺼진 기능을 구분할 수 없었습니다.** 이제 `no_address` · `marketing_disabled`를
+문장과 함께 돌려주며, 타입 변경이 반환값을 읽던 지점을 전부 드러냈습니다.
+
+### 46.1 flag를 거짓말로 만들 뻔한 두 번째 경로
+
+**campaign fan-out은 `enqueueStandardEmail`을 지나지 않습니다** — 직접
+`EmailDelivery` 행을 만듭니다. 그 함수만 막았다면 campaign 경로가 **막으려던
+바로 그 발송에 대한 무방비 우회로**로 남았을 것입니다. `expandEmailEvent`가
+event를 `expanding`으로 옮기기 전, 행이 하나도 쓰이기 전에 거부합니다.
+
+**발송 시점에도 다시 묻습니다.** flag가 켜진 동안 쌓인 행이 꺼진 뒤에 나가면,
+운영자가 스위치를 내려 막으려던 것이 그대로 나갑니다. `marketing_disabled`는
+`marketing_halted`와 **별개 skipReason**입니다 — 앞은 결정이고 뒤는 사고이며,
+합치면 "누가 marketing을 껐다"와 "불만율이 폭증했다"가 같은 행이 됩니다.
+
+### 46.2 세 flag의 범위 — 무엇을 막고 무엇을 남겼는가
+
+| flag | 막는 것 | 남기는 것 |
+|---|---|---|
+| `emailMarketingEnabled` | marketing 분류의 enqueue·fan-out·발송 | transactional·service·legal 전부 |
+| `emailCampaignsEnabled` | 초안·승인·예약·추정·발송·scheduler | **읽기 전부** |
+| `emailConsentReconfirmEnabled` | (없음 — 배치가 아직 없습니다) | — |
+
+**campaign은 읽기를 남깁니다.** 기능이 꺼졌다고 이미 한 일까지 감추면 운영자가
+그것을 고장과 구분할 수 없고, 이 console은 `EmailCampaignWave`를 읽을 수 있는
+유일한 곳입니다. scheduler는 던지지 않고 빈 배열을 돌려줍니다 — 15분 cron에서
+스위치가 꺼져 있다는 정상 상태로 전체 pass를 죽일 수 없습니다.
+
+**두 flag를 합치지 않았습니다.** campaign은 분류가 아니라 fan-out 수단입니다 —
+모델 은퇴 안내는 `service`이고 같은 wave로 나가며 marketing이 아닙니다. 하나로
+묶으면 marketing과 함께 은퇴 안내가 꺼지거나, 은퇴 안내와 함께 marketing이
+켜집니다.
+
+**세 번째는 선언만 했습니다.** 재확인 배치가 없으므로 소비자가 없고, 없는 기능에
+동작하는 스위치를 붙이는 것은 **스위치가 아무 일도 안 한다고 운영자를 가르치는
+일**입니다. key와 그 이유를 남겨 ADR의 이름이 검색되게 한 것이 이 항목의 요구
+사항입니다.
+
+### 46.3 쓰기 경로를 만들지 않았습니다
+
+memory flag의 선례를 따라 **admin API에 writer를 두지 않고**
+`tests/appSettingWriters.test.mjs`에 **의도된 부재**로 등록했습니다. 활성화
+조건은 §15.2가 정한 법률 검토와 승인 프로세스 확정이고, 체크박스는 그 절차의
+마지막 단계만 남기고 앞을 지웁니다. E2E도 admin 화면이 아니라 행을 직접 씁니다 —
+테스트 편의를 위해 writer를 만들면 이 결정 자체가 사라집니다.

@@ -69,6 +69,31 @@ const READ_ONLY_KEYS = {
       "for rollback), not one more field on the bulk settings PATCH, and that " +
       "change removes this entry.",
   },
+  EMAIL_MARKETING_FLAG_KEY: {
+    reason:
+      "docs/policy/email-notifications.md §15.2 keeps this off until the legal " +
+      "review lands: Q1, Q2 and Q8 are unanswered, the A18 suppression " +
+      "boundary is undecided, and `news.tomverse.app` has neither been " +
+      "configured nor warmed up. A checkbox would put all of that behind one " +
+      "click. The flag exists ahead of the control on purpose -- turning it " +
+      "on later is then a settings change against a path that has already " +
+      "been reviewed and tested.",
+  },
+  EMAIL_CAMPAIGNS_FLAG_KEY: {
+    reason:
+      "Same §15.2 table, different condition: the approval process has to be " +
+      "settled first. Much of it now exists, but whether it is settled is an " +
+      "organisational judgement recorded by an operator writing the row, not " +
+      "something this code may decide by offering a toggle.",
+  },
+  EMAIL_CONSENT_RECONFIRM_FLAG_KEY: {
+    reason:
+      "The two-year re-confirmation batch does not exist yet, so there is " +
+      "nothing for a control to switch. The key is declared so the name in " +
+      "§15.2 resolves to something a reader can find; a writer for a feature " +
+      "with no consumer would be a switch that does nothing, which teaches an " +
+      "operator that switches do nothing.",
+  },
 };
 
 const source = readFileSync(SOURCE, "utf8");
