@@ -102,7 +102,10 @@ const versionSchema = z
         starters: z
             .array(trimmed.max(ASSISTANT_PROFILE_LIMITS.maxStarterCharacters))
             .max(ASSISTANT_PROFILE_LIMITS.maxStarters),
-        /** A request. Entitlement is decided at runtime, not here (§5.3). */
+        /**
+         * A request. Entitlement is decided at runtime, not here
+         * (docs/policy/assistant-package-import.md §5.3).
+         */
         modelIds: z
             .array(trimmed.min(1).max(120))
             .max(ASSISTANT_PROFILE_LIMITS.maxModels),
