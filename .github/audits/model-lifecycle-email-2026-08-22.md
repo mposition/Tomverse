@@ -2154,7 +2154,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | D2 | 자동 전환 완료 안내를 `transactional`로 둘지 | product + legal | F template | **transactional**. 요청 없이 가한 변경의 기록이므로 끌 수 없어야 합니다 |
 | D3 | 전체 대상 일반 폐기 공지를 만들지 | product | C template | **만들지 않음**. marketing A/B에 흡수 |
 | D4 | marketing Resend 계정/region 분리 | ops + legal | Phase 6 | ADR §5.3.1 미결 |
-| D5 | 1인 조직 이중 승인 예외를 campaign에 적용 | 조직 | Phase 4 승인 | `soleApproverAllowed` 선례 적용 |
+| D5 | 1인 조직 이중 승인 예외를 campaign에 적용 | 조직 | ~~Phase 4 승인~~ | **승인 (2026-08-24, 조직)** — §47에 구현. `soleApproverAllowed` 선례 적용 |
 | D6 | reminder를 몇 번 보낼지 (1회 / 2회) | product | E wave 수 | **최초 + 3일 전 2회**. 그 이상은 스팸 신고를 부릅니다 |
 | D7 | 사전 안내 리드타임 | product | D 일정 | **14일**. 폐기 결정 → 안내 → reminder → 실행 |
 | D8 | assistant profile이 모델 선택을 갖는지 | eng | audience 정의 | 조사 필요(23절) |
@@ -3502,3 +3502,77 @@ memory flag의 선례를 따라 **admin API에 writer를 두지 않고**
 조건은 §15.2가 정한 법률 검토와 승인 프로세스 확정이고, 체크박스는 그 절차의
 마지막 단계만 남기고 앞을 지웁니다. E2E도 admin 화면이 아니라 행을 직접 씁니다 —
 테스트 편의를 위해 writer를 만들면 이 결정 자체가 사라집니다.
+
+## 47. D5 결정 기록과 구현 — campaign 승인의 1인 관리자 예외 (2026-08-24 · 완료)
+
+**결정**: 조직이 2026-08-24에 **승인**했습니다. `email_campaign.approve`가
+`SOLE_APPROVER_ACTIONS`에 들어갑니다.
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminSoleApproverCore.ts` | action 추가 · `checkCampaignCopyBinding` |
+| `lib/adminSoleApproverExecution.ts` | 확인 증거를 action별 union으로 일반화 |
+| `app/api/admin/email-campaigns/[campaignId]/approve/route.ts` | 1인 경로 배선 |
+| `app/api/admin/maintenance/cleanup/route.ts` | 새 union으로 이관 |
+| `tests/adminSoleApprover.test.mjs` | 18건(신규 3건) |
+
+### 47.1 근거가 기존 예외와 다릅니다
+
+**이것을 코드에 적었습니다.** `retention.cleanup.execute`가 예외를 받은 근거는
+*"자동 스케줄이 15분마다 같은 삭제를 무인으로 수행하므로 이 예외는 시스템이
+이미 하지 않는 삭제를 열지 않는다"*였습니다. **campaign 승인에는 그런 스케줄이
+없습니다** — 무엇도 문구를 무인으로 승인하지 않고, 승인이 곧 사람이 문구를 읽는
+행위이며 그것이 EM-06이 pin하는 대상입니다.
+
+D5를 지탱하는 것은 **다른 근거**입니다: 1인 조직에서 2인 규칙은 엄격한 것이
+아니라 **충족 불가능**하고, 그러면 어떤 campaign도 승인될 수 없어 fan-out 전체가
+아무것도 보낼 수 없습니다. AGENTS.md가 release gate의
+`approvalPolicy.soleApproverAllowed`에 기록한 논리와 같습니다.
+
+**두 근거는 서로 다른 것을 정당화하므로 구분해 적었습니다.** retention 쪽 근거는
+스케줄이 이미 수행하는 모든 action으로 번지고, campaign 쪽 근거는 **달리 불가능한
+action에만** 미치며 두 번째 관리자가 생기는 순간 끝납니다. 어느 쪽도
+`user.delete`나 환불에 닿지 않습니다 — 스케줄이 대응물을 수행하지 않고, 관리자
+한 명이 다른 한 명에게 부탁하면 그만인 일입니다.
+
+### 47.2 두 번째 독자가 없으므로 무엇으로 대신했는가
+
+retention의 dry-run 결속이 증명하는 것은 *"당신이 본 preview가 이것이고 그 사이
+아무것도 그것을 대체하지 않았다"*입니다. campaign의 등가물은
+*"당신이 읽은 문구가 이것이고 그 사이 바뀌지 않았다"* — 5차가 이미 만든
+`campaignDigest()`입니다. 승인자가 읽은 문구의 digest를 되돌려 주고 **서버가
+현재 문구와 대조**합니다. 이것이 없으면 1인 승인자는 "그 campaign"을 승인하고,
+그 campaign은 발송 시점에 template이 말하는 무엇이든이 됩니다.
+
+**세 가지가 retention 결속과 다르고, 각각 확인 대상이 다르기 때문입니다.**
+
+- **만료가 없습니다.** retention preview는 살아 있는 행의 수라 스스로 낡지만,
+  문구는 누가 고치지 않으면 바뀌지 않으므로 불일치가 신호의 전부입니다. 시계를
+  두면 **옳은 승인을 이유 없이 거부**하게 됩니다.
+- **소유자 검사가 없습니다.** digest는 문구의 성질이지 누군가에게 속한 저장된
+  preview가 아니라서 "다른 사람이 실행한 것"이라는 말이 성립하지 않습니다.
+- **현재 digest가 null이면 통과가 아니라 거부**입니다. 대조할 문구를 렌더할 수
+  없었다는 뜻이고, 아무도 읽을 수 없는 말을 승인하는 것이 이 경로가 막으려는
+  실패입니다.
+
+**현재 digest는 route가 읽습니다, 요청에서 받지 않습니다** — retention 분기가
+제출된 id 대신 최신 run을 읽는 것과 같은 이유입니다. 요청자가 제공한 값과
+대조하는 확인은 아무것도 확인하지 않습니다.
+
+### 47.3 그대로 둔 것
+
+**조건 1·5·6은 action별이 아니므로 손대지 않았습니다** — 자격 있는 관리자가
+정확히 하나, 요청·실행·결과가 감사에 남고, 두 번째 관리자가 생기면 자동으로
+2인 경로가 돌아옵니다. 6번은 **매 요청마다 설정에서 다시 계산**하므로 끄는 것을
+기억할 flag가 없습니다.
+
+**승인 전 거부 셋도 그대로입니다** — locale 불일치, 일정 부정합, 전환 약속
+미충족은 여전히 승인을 claim하기 전에 거부합니다. 1인 경로라고 해서 그 앞의
+게이트가 느슨해지지 않습니다.
+
+**`approvalId`는 `sole-approver:{campaignId}`입니다.** 이 경로에는
+`AdminActionApproval` 행이 없으므로, 12조건 게이트의 `communication_approved`가
+읽을 것은 감사된 실행을 가리키는 이 값입니다.
+
+**감사 기록에는 digest만 남고 문구는 남지 않습니다.** 어떤 말이 승인됐는지
+말하면서 그 말의 두 번째 사본이 되지는 않습니다.
