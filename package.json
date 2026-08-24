@@ -12,7 +12,7 @@
     "dev": "next dev --webpack",
     "predev": "node scripts/generate-build-info.mjs",
     "prebuild": "node scripts/check-native-swc.mjs && node scripts/generate-build-info.mjs",
-    "build": "next build",
+    "build": "node scripts/run-next-build.mjs",
     "start": "next start",
     "start:e2e": "next start -H 127.0.0.1 -p 3100",
     "test:e2e": "npm run build && npm run test:e2e:run",
