@@ -1647,7 +1647,7 @@ export const zh = {
         noticeNotFound: "该助手已不存在。请从列表中重新打开。",
         noticeRateLimited: "请求过于频繁。请稍候再试。",
         noticeImportInProgress: "该助手正有一个导入在审阅中。请先完成或取消它，然后再在这里保存。",
-        noticeSignedOut: "你已退出登录，因此未保存任何内容。重新登录后，编辑的内容仍在此页面上。",
+        noticeSignedOut: "你尚未登录，因此未保存任何内容。登录后，编辑的内容仍在此页面上。",
         fileStatus: {
             pending: "等待中",
             processing: "处理中",

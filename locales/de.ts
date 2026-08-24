@@ -1656,7 +1656,7 @@ export const de = {
         noticeNotFound: "Diesen Assistenten gibt es nicht mehr. Öffne ihn erneut aus der Liste.",
         noticeRateLimited: "Zu viele Anfragen hintereinander. Warte einen Moment und versuche es erneut.",
         noticeImportInProgress: "Für diesen Assistenten wird gerade ein Import geprüft. Schließen Sie ihn ab oder brechen Sie ihn ab, bevor Sie hier speichern.",
-        noticeSignedOut: "Du wurdest abgemeldet, es wurde nichts gespeichert. Melde dich erneut an – deine Änderungen stehen weiterhin auf dieser Seite.",
+        noticeSignedOut: "Du bist nicht angemeldet, deshalb wurde nichts gespeichert. Melde dich an – deine Änderungen stehen weiterhin auf dieser Seite.",
         fileStatus: {
             pending: "wartet",
             processing: "in Arbeit",
