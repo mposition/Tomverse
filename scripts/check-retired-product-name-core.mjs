@@ -77,6 +77,18 @@ export const HISTORICAL_ALLOWLIST = [
             "Sections 3.5.1 and 3.5.4 are staging verification records -- headers a recipient actually judged, not settings we can restate. check:staging-verification-records reads them. The pending production display-name change is tracked in docs/ops/tomverse-review-rename.md instead.",
     },
     {
+        // A completed run record, not a live document. The observation it
+        // carries is the display name a recipient actually saw, and rewriting
+        // it to the new name would falsify what was observed -- the same
+        // argument as email-sending-domains.md 3.5 above. The blank template
+        // beside these records is deliberately NOT allowlisted: it is live
+        // copy, and exempting it would weaken this check for every future run.
+        prefix:
+            "docs/ops/product-boundary-v1-2-staging-verification-records/2026-",
+        reason:
+            "Completed staging verification run records. They quote the sending display name as observed; the pending production change is tracked in docs/ops/tomverse-review-rename.md 5.4. The blank _record-template.md is not covered.",
+    },
+    {
         prefix: "docs/ops/product-boundary-v1-2-staging-checklist.md",
         reason:
             "The staging checklist for the rename. It has to quote the retired name three times to be usable: the Search Console query to look up, what the pending \"formerly\" copy would read, and the string a verifier confirms is absent from the welcome email.",
