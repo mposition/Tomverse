@@ -196,16 +196,28 @@ export async function buildChatProfileContext(input: {
 
     const modelIds = storedModelIds(version.models);
     const primaryModelId = modelIds[0];
-    const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
-    const model = runtimeModels.find((entry) => entry.id === primaryModelId);
+    // Only when there is one to resolve. A version that names no model has no
+    // model claim to check (§14.0a), and reading the catalogue to decide
+    // nothing would be a query per turn for an answer that is already known.
+    const model =
+        primaryModelId === undefined
+            ? undefined
+            : (
+                  await getRuntimeModels({ includeCatalogDeleted: true })
+              ).find((entry) => entry.id === primaryModelId);
     const decision = decideProfileRuntime({
         isAuthenticated: true,
         profilesFlagEnabled: profilesEnabled,
         hasActiveVersion: true,
-        modelEnabled: Boolean(model?.enabled) && !model?.catalogDeleted,
-        modelPermittedByPlan: model
-            ? canUseModelWithPlan(input.plan ?? "Free", model)
-            : false,
+        namedModel:
+            primaryModelId === undefined
+                ? null
+                : {
+                      enabled: Boolean(model?.enabled) && !model?.catalogDeleted,
+                      permittedByPlan: model
+                          ? canUseModelWithPlan(input.plan ?? "Free", model)
+                          : false,
+                  },
         promptFormatVersion: version.promptFormatVersion,
     });
     if (!decision.allowed) return refused(decision.reason);

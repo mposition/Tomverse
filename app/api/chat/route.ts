@@ -91,6 +91,7 @@ import {
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
 } from "@/lib/generatedArtifactTool";
+import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
@@ -2997,13 +2998,42 @@ async function handleChatPost(
                       turnAttachments: turnAttachmentBytes,
                   })
                 : null;
+        /*
+          Which artifact tool calls the model began (lib/generatedArtifactTurnTracker.ts).
+
+          A provider that runs out of output tokens halfway through writing a
+          tool call leaves nothing behind except the fact that it started one
+          -- and without that fact the turn ends on "I will now create the
+          file:" with no file and no card, which is the exact silence
+          docs/policy/generated-artifacts.md section 1 forbids.
+
+          Declared before the tools and assigned after them, because the two
+          refer to each other: the tracker is built from the names the config
+          actually registered, and each tool reports its own execution back
+          into the tracker.
+        */
+        let artifactToolCallTracker: ArtifactToolCallTracker | null = null;
         const artifactToolConfig = artifactCollector
             ? buildGeneratedArtifactToolConfig(artifactCollector, {
                   registerDocumentBatch: Boolean(
                       artifactToolPlan?.registerDocumentBatch
                   ),
+                  // Read at call time, which is after the assignment below:
+                  // a tool cannot execute before the request that carries it
+                  // has been assembled.
+                  noteExecutionStarted: (toolCallId) =>
+                      artifactToolCallTracker?.noteExecutionStarted(toolCallId),
               })
             : null;
+        if (artifactToolConfig) {
+            // The names this request actually registered, and nothing else.
+            // `web_search` and `google_search` are not among them, which is
+            // what keeps a truncated native search from being reported as a
+            // file the user never got.
+            artifactToolCallTracker = new ArtifactToolCallTracker(
+                Object.keys(artifactToolConfig.tools)
+            );
+        }
         /*
           Tools from both features, merged rather than chosen between.
 
@@ -3026,7 +3056,39 @@ async function handleChatPost(
                           ...(artifactToolConfig?.tools ?? {}),
                       },
                       ...(artifactToolConfig
-                          ? { stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS) }
+                          ? {
+                                stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS),
+                                /*
+                                  The two halves of "was this file begun, and
+                                  did it ever run".
+
+                                  `onChunk` sees `tool-input-start`, which is
+                                  the earliest and only point a provider names
+                                  a tool call it is about to write. The delta
+                                  frames that follow carry the model's partial
+                                  specification and are deliberately not read:
+                                  a truncated specification is neither logged
+                                  nor stored (docs/policy/generated-artifacts.md
+                                  section 5).
+
+                                  `onToolExecutionStart` closes the pair. Each
+                                  tool's own `execute` reports the same fact,
+                                  so an executed call is marked twice and can
+                                  never be mistaken for an abandoned one --
+                                  which is what keeps a second card off a file
+                                  that already failed on its own terms.
+                                */
+                                onChunk: ({ chunk }: { chunk: unknown }) => {
+                                    artifactToolCallTracker?.noteChunk(chunk);
+                                },
+                                onToolExecutionStart: (event: {
+                                    toolCall?: { toolCallId?: string };
+                                }) => {
+                                    artifactToolCallTracker?.noteExecutionStarted(
+                                        event.toolCall?.toolCallId
+                                    );
+                                },
+                            }
                           : {}),
                   }
                 : null;
@@ -4018,6 +4080,9 @@ async function handleChatPost(
               they belong to.
             */
             await artifactCollector?.discard();
+            // The same reasoning one step earlier: a tool call the displaced
+            // model began belongs to an answer that will not be written.
+            artifactToolCallTracker?.reset();
 
             displacedModelId = dispatched.modelId;
             rerouteCount += 1;
@@ -4202,6 +4267,26 @@ async function handleChatPost(
                                     timestamp: new Date().toISOString(),
                                 })
                             );
+                            /*
+                              A file the answer began and the output ceiling
+                              cut off.
+
+                              Only on an incomplete turn, and only for calls
+                              that never reached their tool: a call that ran
+                              has already recorded its own outcome, and a
+                              length-truncated answer that started no tool call
+                              keeps exactly the generic incomplete notice it
+                              has today. Recorded here, before the trailer is
+                              built and before the message transaction, so the
+                              card the user sees while it streams and the row
+                              they reload into are the same card
+                              (docs/policy/generated-artifacts.md section 9).
+                            */
+                            if (artifactCollector && artifactToolCallTracker) {
+                                artifactCollector.recordIncompleteToolCalls(
+                                    artifactToolCallTracker.abandonedCalls()
+                                );
+                            }
                         }
                         const searchSettlementFields = {
                             searchSurchargeCredits: getWebSearchSurchargeCredits(

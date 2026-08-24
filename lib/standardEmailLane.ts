@@ -21,6 +21,7 @@ import {
   suppressionCheck,
 } from "@/lib/emailSuppression";
 import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
+import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
@@ -223,6 +224,27 @@ export async function enqueueStandardEmail(
     : prisma.$transaction((tx) => createStandardDeliveryRows(tx, rows));
 }
 
+/**
+ * Queue depth that stops being ordinary (EM-11).
+ *
+ * One pass claims fifty, and the drain rides the fifteen-minute reconciliation
+ * cron. Two hundred pending is therefore about an hour of catching up, which is
+ * the point at which "busy" and "not keeping up" stop being the same thing.
+ */
+export const STANDARD_EMAIL_QUEUE_DEPTH_ALERT = 200;
+
+/**
+ * How long the oldest waiting message may have waited.
+ *
+ * Depth alone would miss the worse case. Two hundred messages queued a minute
+ * ago is a busy morning; five that have been waiting six hours are five people
+ * who never got their receipt, and the queue is shallow the whole time. This is
+ * the signal that catches the second one, and it is deliberately far below the
+ * point at which a message abandons -- by then it is not a warning, it is a
+ * report of something already lost.
+ */
+export const STANDARD_EMAIL_OLDEST_PENDING_ALERT_MS = 60 * 60 * 1_000;
+
 export type StandardDrainResult = {
   claimed: number;
   sent: number;
@@ -238,6 +260,13 @@ export type StandardDrainResult = {
    * messages were abandoned" does not say whether a person has to be woken.
    */
   abandonedByClassification: Record<EmailClassification, number>;
+  /**
+   * Age of the oldest message still waiting, or null when nothing is.
+   *
+   * Reported beside the count because the two answer different questions and a
+   * backlog can be either shape.
+   */
+  oldestPendingMs: number | null;
 };
 
 type ClaimedDelivery = {
@@ -505,6 +534,31 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     }
   }
 
+  // The stream's own kill switch, checked before anything else marketing-only
+  // because it is a fact about the stream rather than about this recipient
+  // (§14.5, EM-09). Marketing alone reaches it: provider suppression is already
+  // account-wide (§5.3.1), so a switch that could stop transactional mail would
+  // be a second route to login codes not arriving.
+  if (definition.classification === "marketing") {
+    const health = await evaluateMarketingSendHealth(now);
+    if (health.halted) {
+      // Skipped rather than held. A promotion that waits for a person to clear
+      // a halt is a promotion that arrives stale, and the reputation event that
+      // tripped the switch is itself the reason not to send this one.
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "marketing_halted",
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
+
   // Marketing needs a confirmed jurisdiction, and nothing else consults this.
   // An inferred country is refused as firmly as an absent one: sending
   // advertising under a guessed set of labelling rules is what §6.3 declines
@@ -548,8 +602,43 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       process.env.NEXT_PUBLIC_APP_URL ||
       "https://tomverse.app",
   };
-  const unsubscribeLink = unsubscribeUrl(unsubscribeTarget);
-  const headers = unsubscribeHeaders({ ...unsubscribeTarget, url: unsubscribeLink });
+  const link = unsubscribeUrl(unsubscribeTarget);
+  if (link.ok === false) {
+    // Named, permanent, and reported as itself rather than swallowed by the
+    // outer catch. Before EM-10 this threw, the catch turned it into
+    // EMAIL_RENDER_FAILED, and an operator went looking at templates for a
+    // missing environment variable.
+    //
+    // Permanent for the same reason the identity refusal is: no amount of
+    // waiting sets an environment variable, and retrying would spend the
+    // message's whole budget discovering that.
+    await reportOperationalIncident({
+      code: "EMAIL_UNSUBSCRIBE_KEY_MISSING",
+      title: "A marketing message was refused because it can carry no unsubscribe link",
+      severity: "error",
+      error: link.message,
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+        setInstead: "EMAIL_UNSUBSCRIBE_KEYS",
+      },
+    });
+    const recorded = await recordOutcome(
+      delivery,
+      { kind: "permanent", errorKind: link.refusal },
+      {
+        now,
+        attempts,
+        classification: definition.classification,
+        rendered: templateRendered,
+        status: null,
+      }
+    );
+    return { outcome: recorded, classification: definition.classification };
+  }
+  const unsubscribeLink = link.url;
+  const headers = unsubscribeHeaders(unsubscribeLink);
 
   // The subject prefix and the jurisdiction footer, from the profile this row
   // was pinned to at enqueue (EM-04). Read from the pinned policy version and
@@ -719,6 +808,7 @@ export async function drainStandardEmailDeliveries(options?: {
     abandoned: 0,
     suppressed: 0,
     pending: 0,
+    oldestPendingMs: null,
     abandonedByClassification: {
       transactional: 0,
       service: 0,
@@ -782,6 +872,49 @@ export async function drainStandardEmailDeliveries(options?: {
   result.pending = await prisma.emailDelivery.count({
     where: { lane: "standard", status: "pending" },
   });
+  const oldestPending = await prisma.emailDelivery.findFirst({
+    where: { lane: "standard", status: "pending" },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
+  // Resolved here rather than reusing the per-message `now` inside the loop:
+  // that one is scoped to a claim and does not exist when the loop never ran,
+  // which is exactly the case a stale queue shows up in.
+  const measuredAt = options?.now ?? new Date();
+  result.oldestPendingMs = oldestPending
+    ? Math.max(0, measuredAt.getTime() - oldestPending.createdAt.getTime())
+    : null;
+
+  // A backlog, said out loud while the mail is merely late (EM-11). Either
+  // shape counts: too many waiting, or one waiting too long.
+  //
+  // Deliberately separate from the abandonment incidents below. Those fire once
+  // a message is already lost, which the audit calls the signal that arrives
+  // too late; this one is the signal that arrives while it can still be acted
+  // on.
+  const deepQueue = result.pending >= STANDARD_EMAIL_QUEUE_DEPTH_ALERT;
+  const staleQueue =
+    (result.oldestPendingMs ?? 0) >= STANDARD_EMAIL_OLDEST_PENDING_ALERT_MS;
+  if (deepQueue || staleQueue) {
+    await reportOperationalIncident({
+      code: "EMAIL_STANDARD_DRAIN_BACKLOG",
+      title: "User email queue is not keeping up",
+      error: staleQueue
+        ? `The oldest pending message has waited ${Math.round((result.oldestPendingMs ?? 0) / 60_000)} minute(s); ${result.pending} still pending`
+        : `${result.pending} message(s) still pending after a drain pass`,
+      severity: "warning",
+      cooldownMs: 30 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        pending: result.pending,
+        claimed: result.claimed,
+        oldestPendingMs: result.oldestPendingMs,
+        // Which of the two tripped, so the first line of the incident does not
+        // have to be reverse-engineered from the numbers.
+        trigger: staleQueue ? "oldest_pending" : "queue_depth",
+      },
+    });
+  }
 
   // Abandonment is the outcome nobody else notices: the account was created,
   // the subscription started, the deletion was scheduled -- the product looks

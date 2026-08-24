@@ -90,10 +90,17 @@ export function decideProfileRuntime(input: {
     profilesFlagEnabled: boolean;
     /** False when the profile has never published a version. */
     hasActiveVersion: boolean;
-    /** The version's model, resolved against the registry by the caller. */
-    modelEnabled: boolean;
-    /** Whether the caller's plan permits that model. */
-    modelPermittedByPlan: boolean;
+    /**
+     * The model this version names, resolved against the registry by the
+     * caller — or `null` when the version names none (§14.0a).
+     *
+     * Null is not "no model available"; it is "this profile made no model
+     * choice", and there is nothing here to refuse. The turn still runs on a
+     * model, and that model's own enablement and plan entitlement are checked
+     * where every other turn's are — a profile cannot widen them, which is
+     * the only thing §14 asks of this check.
+     */
+    namedModel: { enabled: boolean; permittedByPlan: boolean } | null;
     /** The stored `promptFormatVersion` of the version being run. */
     promptFormatVersion: string;
 }): ProfileRuntimeDecision {
@@ -104,7 +111,14 @@ export function decideProfileRuntime(input: {
     // "this model is gone" and "your plan no longer includes it" are one
     // problem with one fix, which is to pick a different model. Nothing here
     // picks one for them.
-    if (!input.modelEnabled || !input.modelPermittedByPlan) {
+    //
+    // A version that names no model skips this entirely. Refusing one would
+    // drop the whole profile — instructions, knowledge and tools — over a
+    // choice it never made, on a turn already running a model of its own.
+    if (
+        input.namedModel &&
+        (!input.namedModel.enabled || !input.namedModel.permittedByPlan)
+    ) {
         return refuse("model_unavailable");
     }
     if (input.promptFormatVersion !== ASSISTANT_PROMPT_FORMAT_VERSION) {

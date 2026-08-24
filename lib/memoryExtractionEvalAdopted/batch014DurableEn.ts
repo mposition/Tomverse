@@ -1,15 +1,29 @@
 /**
- * Batch 014 — `durable_facts:en`, fourth batch. **Candidate pool, not dataset.**
+ * Batch 014 — `durable_facts:en`. **Adopted. This is dataset.**
+ *
+ * Reviewed and adopted on 2026-08-23, recorded in
+ * `docs/ops/memory-extraction-eval-batches/batch-014-durable-facts-en.md`:
+ * all 10 sampled cases 채택 under docs/ops/memory-extraction-eval-dataset.md §6.3's 20% sample review,
+ * draft disagreement 0%, diversity judged sufficient, the drafting setup
+ * recorded as unchanged, and the explicit batch adoption line filled.
+ *
+ * The other 36 cases enter the dataset on that adoption line rather than on a
+ * verdict of their own. docs/ops/memory-extraction-eval-dataset.md §6.3 is explicit that this is what the line is for:
+ * seeing the sample and saying nothing is not adoption.
+ *
+ * The `cand-` ids are kept: they are what the review record names, and a case
+ * that cannot be traced back to the verdict that admitted it is a case whose
+ * review cannot be checked (docs/ops/memory-extraction-eval-dataset.md §7.1 asks for the judgement basis on record).
+ *
+ * `tests/memoryEvalAdoptedBatches.test.mjs` re-reads that record on every run:
+ * if the adoption line ever stops saying 채택, these cases stop being allowed
+ * in the dataset.
  *
  * 46 cases, inside the 25-50 range of docs/ops/memory-extraction-eval-dataset.md §6.1. The
  * number is 46 rather than 50 because the cell is 71 short of its floor: 46
  * now and 25 in the last batch lands on 200 exactly, and neither batch falls
  * under the range's floor. Drafting past 200 would buy nothing and would cost
  * a reviewer verdicts on cases the floor does not ask for.
- *
- * These are AI drafts. Policy docs/policy/external-conversation-import-and-memory.md §12.6 keeps them a candidate pool
- * until a person adopts them, and this file is deliberately not imported by
- * `lib/memoryExtractionEvalFixtures.ts`.
  *
  * **Written against the 129 cases the cell already holds.** No `mustInclude`
  * topic repeats — a second case on the same topic grows the count without

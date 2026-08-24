@@ -613,7 +613,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/retentionPolicyCore.ts:53-285`,
   `prisma/schema.prisma:3735-3737`
 
-### EM-09 — marketing bounce/complaint kill switch가 없다 (P1, Medium)
+### EM-09 — marketing bounce/complaint kill switch가 없다 (P1, Medium) — **해결 (2026-08-23)** — §34
 
 - **Evidence**: `[코드]` — `killSwitch`는 auto-router에만 존재
   (`lib/autoCohort.ts:114`). 이메일에는 없습니다.
@@ -626,7 +626,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   초과 시 wave를 `halted`로. Phase 6 blocking 조건.
 - **파일**: `lib/emailWebhookProcessing.ts`
 
-### EM-10 — `EMAIL_UNSUBSCRIBE_KEYS`가 readiness에 없다 (P1, Medium)
+### EM-10 — `EMAIL_UNSUBSCRIBE_KEYS`가 readiness에 없다 (P1, Medium) — **해결 (2026-08-23)** — §32
 
 - **Evidence**: `[코드]` `app/api/ready/route.ts:104-108`
 - **현재 동작**: `/api/ready`의 hard dependency는 sending identity와 snapshot
@@ -646,7 +646,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `app/api/ready/route.ts:91-108`,
   `lib/emailUnsubscribeHeaders.ts:31-40`, `lib/standardEmailLane.ts:621-660`
 
-### EM-11 — standard drain에 자기 job 기록이 없다 (P2, Low)
+### EM-11 — standard drain에 자기 job 기록이 없다 (P2, Low) — **해결 (2026-08-23)** — §35
 
 - **Evidence**: `[코드]` `lib/notificationDeliveryJob.ts:78-100`
 - **현재 동작**: `drainStandardEmailDeliveries()`는 `try/catch`로 감싸여
@@ -2116,8 +2116,9 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~ML-13 리포트에서 모델 소유자와 관측 경로 분리~~ **완료 (2026-08-23)** — §31
 - ~~ML-10 reconciliation script 범용화 + precondition 검사~~ **완료 (2026-08-23)** — §33
 - ~~EM-06 campaign이 templateVersion pin~~ **완료 (2026-08-24)** — §37
-- EM-11 standard drain job key + backlog incident
-- EM-10 조건부 readiness
+- ~~EM-11 standard drain job key + backlog incident~~ **완료 (2026-08-23)** — §35
+- ~~EM-10 조건부 readiness~~ **완료 (2026-08-23)** — §32
+- ~~EM-09 marketing bounce/complaint kill switch~~ **완료 (2026-08-23)** — §34
 - EM-15 `userVisibleNote` 다국어
 
 ### P2
@@ -2596,6 +2597,59 @@ registry에 있는 모델**에 대한 것이고 거기서 provider는 우리가 
 
 ---
 
+## 32. EM-10 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailUnsubscribeReadiness.ts` | 조건부 readiness 판정. 순수, 새 파일 |
+| `app/api/ready/route.ts` | `emailUnsubscribeKeyring` hard dependency 추가 |
+| `lib/emailUnsubscribeHeaders.ts` | throw → 이름 붙은 refusal |
+| `lib/standardEmailLane.ts` | refusal을 `EMAIL_UNSUBSCRIBE_KEY_MISSING`으로 보고 |
+| `lib/adminEnvironmentChecks.ts` | 설명에 `/api/ready` 결합 명시 |
+| `tests/emailUnsubscribeReadiness.test.mjs` | 7건 |
+| `tests/integration/marketing-lane.db.test.ts` | 1건 추가 (총 10) |
+| `tests/integration/email-preferences-consent.db.test.ts` | 호출 형태 갱신 |
+
+**조건은 `MARKETING_EMAIL_FROM`입니다.** 감사 §15.2가 이름 댄
+`feature.emailMarketingEnabled`는 **코드에 없으므로** 그것을 조건으로 쓸 수
+없습니다. 대신 marketing이 실제로 나갈 수 있으려면 반드시 참이어야 하는 구조적
+사실 하나 — 자기 발송 identity — 를 씁니다. 그 주소를 설정하고 키를 설정하지 않은
+상태가 정확히 EM-10이 말한 "ready라고 답하면서 모든 marketing이 거부되는" 상태입니다.
+
+**"marketing template이 있는가"를 조건으로 쓰지 않았습니다.** template은 코드가
+등록하므로 모든 환경에 존재합니다 — `model_launch`가 생긴 날(EM-03) 그 조건은
+모든 환경에서 참이 됐고, 그것을 기준으로 삼았다면 오늘 배포가 not-ready가 됩니다.
+
+**키가 있는데 깨진 것은 marketing 여부와 무관하게 error입니다.** 설정한 사람은
+동작하기를 의도한 것이고, "아직 필요 없음"으로 보고하면 오타가 marketing을 켜는
+날까지 숨습니다 — 찾기에 가장 나쁜 날입니다.
+
+**pin 안 된 rotation은 warning입니다.** 발송은 되고 기존 token도 전부 검증됩니다.
+잘못된 것은 **어느 키가 새 token에 서명하는지를 목록 순서가 정한다**는 것이고,
+이는 snapshot keyring이 이미 경고하는 것과 같은 drift입니다.
+
+**부수 문제를 함께 고쳤습니다 — 이쪽이 운영자 시간을 더 아낍니다.**
+`unsubscribeUrl()`이 throw했고 drain 바깥 `try/catch`가 그것을 받아
+`EMAIL_RENDER_FAILED`로 보고했습니다. **"수신 거부 키가 없다"가 "렌더에
+실패했다"로 보고되면** 운영자는 환경변수 하나를 찾는 대신 template을 읽습니다.
+이제 `{ok:false, refusal:"unsubscribe_keys_missing"}`를 돌려주고 drain이
+`EMAIL_UNSUBSCRIBE_KEY_MISSING` incident와 함께 permanent로 기록합니다 —
+identity refusal과 같은 취급이며, 이유도 같습니다: 기다린다고 환경변수가
+설정되지 않습니다.
+
+**`{ok:true, url:null}`과 `{ok:false}`는 다른 답입니다.** 앞은 unsubscribe가
+없는 것이 옳은 transactional 메시지이고, 뒤는 보내면 안 되는 marketing
+메시지입니다. 호출자가 둘을 섞으면 광고가 링크 없이 나갑니다.
+
+**오늘 production 동작은 바뀌지 않습니다.** `MARKETING_EMAIL_FROM`이 미설정이므로
+`/api/ready`는 계속 ready이고, 키 부재는 warning으로만 보고됩니다. 기능보다 먼저
+설치한 guard입니다.
+
+**범위 밖**: EM-16(발송 계정·region 분리, 도메인, warm-up). marketing을 실제로
+켜는 것은 이 항목이 아니며, 이 변경은 **켤 때 조용히 실패하지 않게** 합니다.
+
+---
+
 ## 33. ML-10 구현 기록 (2026-08-23 · 완료)
 
 | 파일 | 역할 |
@@ -2648,6 +2702,93 @@ dry run에도 필요합니다(없으면 보고할 대상이 없습니다).
 
 ---
 
+## 34. EM-09 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/marketingSendHealthCore.ts` | 임계·최소 사건 수·판정. 순수, 새 파일 |
+| `lib/marketingSendHealth.ts` | window 집계, sticky halt 기록, incident |
+| `lib/standardEmailLane.ts` | marketing 분기에서 halt 확인 → `marketing_halted` |
+| `lib/emailWebhookProcessing.ts` | marketing 이벤트마다 재평가 |
+| `prisma/migrations/20260823230000_email_marketing_halt_skip_reason` | skipReason 값 추가 |
+| `tests/marketingSendHealth.test.mjs` | 15건 |
+| `tests/integration/marketing-lane.db.test.ts` | 4건 추가 (총 13) |
+
+**감사의 권고는 "campaign wave 단위"였지만 campaign이 없습니다**(EM-01 미구현).
+그런데 §14.5의 표는 **wave가 아니라 stream 단위**입니다 — bounce > 5%,
+complaint > 0.3%면 "marketing 발송 자동 중단". 그래서 stream 층에 구현했습니다.
+campaign이 생기면 wave 단위가 그 위에 얹히고, 이것은 바닥으로 남습니다.
+
+**rate만으로는 멈출 수 없습니다.** 100건 중 complaint 1건은 1%로 임계의 세
+배지만, 버튼을 누른 사람 하나입니다. 작은 분모 위의 비율은 비율이 아닙니다.
+그래서 halt에는 비율 **그리고** 패턴이라 부를 만한 사건 수가 필요합니다 —
+complaint 3건, bounce 10건.
+
+**분모 하한은 의도적으로 없습니다.** 0.3%가 산술적으로 도달 가능하려면 약
+1,000명이 필요한데, 그것을 요구하면 **작은 campaign에서는 스위치가 영원히
+작동하지 않습니다** — 그리고 이 시스템이 처음 보낼 것이 전부 작은 campaign입니다.
+200건에 complaint 3건이면 이미 문제를 찾은 것입니다.
+
+**warning에는 최소 사건 수가 없습니다.** warning은 로그 한 줄이고, 피해보다
+먼저 도착하는 유일한 신호입니다. 그것을 막으면 조기 경보를 늦추는 것뿐입니다.
+
+**halt는 sticky이고 사람이 해제합니다.** window는 굴러갑니다. 나쁜 발송이
+window 밖으로 나가면서 halt가 저절로 풀린다면, **보호하려던 바로 그 평판으로
+재개**합니다. incident에 무엇을 지워야 하는지(`AppSetting["email.marketingHalt"]`)
+적어 두었습니다 — 사람의 결정이지만 방법을 모르게 두지는 않습니다.
+
+**읽을 수 없는 halt 값은 halt로 셉니다.** "중단됐는지 알 수 없다"의 대안은
+발송이고, 발송이 되돌릴 수 없는 쪽입니다.
+
+**transactional은 절대 건드리지 않습니다.** 이것이 가장 중요한 경계입니다 —
+provider suppression이 이미 계정 전체 범위이므로(§5.3.1), transactional을 멈출
+수 있는 kill switch는 **로그인 코드가 안 오는 상태로 가는 두 번째 경로**가 됩니다.
+DB test가 halt된 상태에서 welcome 메일이 정상 발송됨을 고정합니다.
+
+**분모에 bounce·complaint를 포함합니다.** bounce된 메시지도 발송된 것이고,
+분모에서 빼면 측정 대상 자체만큼 모든 비율이 부풀려집니다.
+
+**평가 지점은 둘입니다** — 발송 직전(모든 marketing 전송)과 marketing webhook
+이벤트(임계를 넘긴 그 사건에서 즉시 트립, 다음 drain을 기다리지 않음). 멱등이고
+어느 쪽도 halt를 해제하지 않습니다.
+
+**범위 밖**: campaign wave 단위 집계(EM-01 대기), 그리고 halt 해제 UI. 오늘은
+`AppSetting` 행 삭제이고, admin 화면은 campaign 화면과 함께 오는 것이 맞습니다.
+## 35. EM-11 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/scheduledJobsCore.ts` | `standard_email_drain` job key 등록 |
+| `lib/notificationDeliveryJob.ts` | drain을 `startScheduledJob`/`complete`/`fail`로 감쌈 |
+| `lib/standardEmailLane.ts` | `oldestPendingMs` + backlog incident |
+| `tests/integration/standard-email-lane.db.test.ts` | 6건 추가 (총 21) |
+
+**운영자 큐가 성공했다는 것이 사용자 메일이 나갔다는 뜻은 아니었습니다.**
+standard drain은 `try/catch`로 감싸여 `console.error` 한 줄만 남겼고,
+`ScheduledJobRun` 기록이 없어 **`/admin/jobs`에는 두 큐가 하나의 초록 행**으로
+보였습니다. 이제 자기 job key를 갖습니다 — 같은 cron(같은 tick에 돌므로)이지만
+자기 run입니다. 실패도 그 run에 기록한 뒤 삼킵니다(두 큐는 독립적으로 실패하고
+그렇게 보고돼야 합니다).
+
+**backlog 신호를 두 모양으로 잡습니다.** 깊이만으로는 더 나쁜 쪽을 놓칩니다 —
+1분 전에 쌓인 200건은 바쁜 아침이고, **6시간째 기다리는 5건은 영수증을 못 받은
+사람 다섯**인데 그동안 큐는 계속 얕습니다. 그래서 `pending >= 200` **또는**
+가장 오래 기다린 메시지가 1시간을 넘으면 incident를 올립니다. incident의
+`trigger`가 어느 쪽인지 말하므로 숫자를 역산할 필요가 없습니다.
+
+**abandonment incident와 의도적으로 분리했습니다.** 그것은 메시지가 이미
+사라진 뒤에 울리고, 감사가 지적한 것이 바로 "그건 이미 늦은 신호"입니다.
+이쪽은 아직 손쓸 수 있을 때 울립니다.
+
+**임계 200의 근거**: 한 pass가 50건을 집고 15분 cron을 탑니다. 200건이면
+약 한 시간치 밀림이고, "바쁨"과 "못 따라감"이 갈라지는 지점입니다.
+
+**빈 큐는 `null`이지 `0`이 아닙니다.** 대시보드에 "0분"으로 뜨면 완벽하게 도는
+큐처럼 보입니다.
+
+**측정 시각을 loop 밖에서 잡습니다.** loop 안의 `now`는 claim 하나에 묶여
+있고 **loop가 한 번도 안 돌면 존재하지 않습니다** — 그것이 정체된 큐가 드러나는
+바로 그 경우입니다.
 ## 36. EM-01 구현 기록 — 1차: event 단위 fan-out (2026-08-24 · 완료)
 
 | 파일 | 역할 |

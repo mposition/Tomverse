@@ -515,7 +515,13 @@ export type QaConversationMessage = {
   artifacts?: Array<{
     id: string;
     ordinal: number;
-    format: "xlsx" | "csv";
+    /**
+     * Any supported format, not just the two this fixture was first written
+     * with. The format table has fifty-odd entries and the endpoint returns
+     * whichever one the answer produced -- narrowing it here would only mean
+     * a spec seeding an `html` or a `txt` card cannot say so.
+     */
+    format: string;
     filename: string;
     mediaType: string;
     byteSize: number;
