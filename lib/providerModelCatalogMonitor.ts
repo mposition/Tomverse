@@ -10,10 +10,11 @@ import {
 } from "@/lib/modelRegistryShared";
 import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
 import { candidateIdentity } from "@/lib/modelLifecycleWorkItemCore";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   catalogNextCursor,
   missingConfirmationRuns,
-  parseProviderCatalogResponse,
+  parseProviderCatalogModels,
   providerCatalogUrl,
   type ProviderCatalogObservation,
 } from "@/lib/providerModelCatalogCore";
@@ -35,6 +36,16 @@ export type ProviderModelCatalogResult = {
     apiModel: string;
     lifecycle: string;
   }>;
+  /**
+   * Ids dropped only because their name did not match the OpenAI chat prefix.
+   *
+   * Reported so the guess is visible. If OpenAI ships a chat model shaped
+   * unlike its predecessors, this is where it appears -- otherwise it is not
+   * discovered, not reported, and nothing says so (.github/audits/model-lifecycle-email-2026-08-22.md §6 candidate 10).
+   */
+  heuristicallyExcluded: string[];
+  /** The page budget ran out with more pages to read. */
+  truncated: boolean;
   errorCode?: string;
   errorDetail?: string;
 };
@@ -109,15 +120,24 @@ const fetchProviderCatalog = async (provider: AiProvider) => {
   }
 
   const observations = new Map<string, ProviderCatalogObservation>();
+  const heuristicallyExcluded = new Set<string>();
   let cursor: string | null = null;
+  // Set when the page budget runs out with a cursor still pointing somewhere.
+  // The loop used to end there in silence, and a scan that stopped early looks
+  // exactly like a scan that finished -- so every model past the cut would be
+  // reported "missing" with no hint that nobody had looked.
+  let truncated = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const payload = await fetchJson(provider, apiKey, cursor);
-    for (const observation of parseProviderCatalogResponse(provider, payload)) {
+    const parsed = parseProviderCatalogModels(provider, payload);
+    for (const observation of parsed.observations) {
       observations.set(observation.id, observation);
     }
+    for (const id of parsed.heuristicallyExcluded) heuristicallyExcluded.add(id);
     const next = catalogNextCursor(provider, payload);
     if (!next || next === cursor) break;
     cursor = next;
+    if (page === MAX_PAGES - 1) truncated = true;
   }
   if (observations.size === 0) {
     throw new CatalogRequestError(
@@ -125,7 +145,11 @@ const fetchProviderCatalog = async (provider: AiProvider) => {
       "Model catalog API returned no chat-capable models."
     );
   }
-  return Array.from(observations.values());
+  return {
+    observations: Array.from(observations.values()),
+    heuristicallyExcluded: Array.from(heuristicallyExcluded).sort(),
+    truncated,
+  };
 };
 
 const safeError = (error: unknown) => ({
@@ -150,9 +174,9 @@ const runProviderCheck = async (
     data: { provider, status: "running", startedAt: now },
     select: { id: true },
   });
-  let observations: ProviderCatalogObservation[];
+  let scan: Awaited<ReturnType<typeof fetchProviderCatalog>>;
   try {
-    observations = await fetchProviderCatalog(provider);
+    scan = await fetchProviderCatalog(provider);
   } catch (error) {
     const safe = safeError(error);
     const status = safe.code === "PROVIDER_MODEL_CATALOG_KEY_MISSING" ? "skipped" : "failed";
@@ -174,10 +198,14 @@ const runProviderCheck = async (
       newCandidates: [],
       missing: [],
       lifecycleWarnings: [],
+      heuristicallyExcluded: [],
+      truncated: false,
       errorCode: safe.code,
       errorDetail: safe.detail,
     };
   }
+
+  const observations = scan.observations;
 
   const registry = await prisma.modelRegistryEntry.findMany({
     where: { provider, catalogDeleted: false },
@@ -326,6 +354,26 @@ const runProviderCheck = async (
       completedAt: new Date(),
     },
   });
+  if (scan.truncated) {
+    // Loud, because it should not happen: five pages of a thousand is far more
+    // than any provider lists today. What makes it worth an incident rather
+    // than a note is what it does to the *next* section of the report -- every
+    // model past the cut is absent from a run that reported success, and
+    // absence is how a retirement is detected.
+    await reportOperationalIncident({
+      code: "PROVIDER_MODEL_CATALOG_TRUNCATED",
+      title: "A provider catalogue scan stopped at its page limit",
+      error: `${provider} still had pages left after ${MAX_PAGES}; models beyond that point were not seen and must not be read as missing.`,
+      severity: "warning",
+      context: {
+        component: "provider-model-catalog",
+        provider,
+        maxPages: MAX_PAGES,
+        discovered: observations.length,
+      },
+    });
+  }
+
   return {
     provider,
     status: "checked",
@@ -335,6 +383,8 @@ const runProviderCheck = async (
     newCandidates: newCandidates.sort(),
     missing,
     lifecycleWarnings,
+    heuristicallyExcluded: scan.heuristicallyExcluded,
+    truncated: scan.truncated,
   };
 };
 
@@ -370,6 +420,8 @@ export async function checkProviderModelCatalogs(now = new Date()) {
           newCandidates: [],
           missing: [],
           lifecycleWarnings: [],
+          heuristicallyExcluded: [],
+          truncated: false,
           errorCode: safe.code,
           errorDetail: safe.detail,
         };

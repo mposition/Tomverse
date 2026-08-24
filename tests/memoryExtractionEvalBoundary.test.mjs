@@ -42,6 +42,7 @@ test("a run without --live is smoke, whatever else is present", () => {
             registerEntry: budgeted,
             hasApiKey: true,
             datasetFrozen: true,
+            commitKnown: true,
         }),
         { mode: "smoke" }
     );
@@ -72,6 +73,19 @@ test("every missing precondition refuses a live run", () => {
             { registerEntry: budgeted, hasApiKey: true, datasetFrozen: false },
             "dataset_not_frozen",
         ],
+        // A deployed container has no git metadata, so `commitSha` is
+        // "unknown" and `workingTreeDirty` is `false` -- an artifact that
+        // reads as a clean checkout while being impossible to tie to a
+        // commit. Refused before the calls, not after.
+        [
+            {
+                registerEntry: budgeted,
+                hasApiKey: true,
+                datasetFrozen: true,
+                commitKnown: false,
+            },
+            "unknown_commit",
+        ],
     ];
     for (const [input, reason] of cases) {
         const decision = decideEvalRunMode({ live: true, ...input });
@@ -86,6 +100,7 @@ test("only every precondition together allows a live run", () => {
         registerEntry: budgeted,
         hasApiKey: true,
         datasetFrozen: true,
+        commitKnown: true,
     });
     assert.equal(decision.mode, "live");
     assert.equal(decision.ceilingUsd, 50);
@@ -97,6 +112,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         registerEntry: budgeted,
         hasApiKey: true,
         datasetFrozen: true,
+        commitKnown: true,
         requestedRunCapUsd: 5,
     });
     assert.equal(narrowed.mode, "live");
@@ -107,6 +123,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         registerEntry: budgeted,
         hasApiKey: true,
         datasetFrozen: true,
+        commitKnown: true,
         requestedRunCapUsd: 500,
     });
     assert.equal(widened.mode, "refused");
@@ -115,27 +132,65 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
 
 /* ------------------------------------------------------- shipped register -- */
 
-test("no pair in the shipped register can run live today", () => {
-    // This used to hold because neither entry had a budget. One does now
-    // (docs/policy/external-conversation-import-and-memory.md §12.5, issue
-    // #837), so the reason has moved rather than disappeared: the funded pair
-    // is stopped by the dataset, which is not frozen.
+test("only the funded pair can run live against the shipped dataset", () => {
+    // Both entries used to be refused, first for want of a budget and then
+    // because the dataset was still moving. The dataset was frozen on
+    // 2026-08-24 (docs/ops/memory-extraction-eval-dataset.md §7.2), so what
+    // stops a pair now is the budget alone -- which is the state
+    // docs/policy/external-conversation-import-and-memory.md §12.5 describes,
+    // and the point of freezing.
     //
-    // `datasetFrozen` is read from the fixtures rather than forced to `true`.
-    // Forcing it asserts a world that does not exist, and on the day the
-    // dataset is frozen this test would keep passing while describing the
-    // opposite of what shipped.
+    // `datasetFrozen` is read from the fixtures rather than forced. Forcing it
+    // asserts a world of the test's own making, and the value that ships is
+    // the only one that decides what an operator can actually run.
+    assert.equal(
+        MEMORY_EVAL_DATASET_FROZEN,
+        true,
+        "this test describes the frozen dataset that shipped"
+    );
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
         const decision = decideEvalRunMode({
             live: true,
             registerEntry: entry,
             hasApiKey: true,
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+            commitKnown: true,
         });
+        if (entry.evalBudget) {
+            assert.equal(
+                decision.mode,
+                "live",
+                `${entry.extractionModelId} has an approved budget and a frozen dataset`
+            );
+            assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
+        } else {
+            assert.equal(
+                decision.mode,
+                "refused",
+                `${entry.extractionModelId} must not be live-runnable as shipped`
+            );
+            assert.equal(decision.reason, "no_eval_budget");
+        }
+    }
+});
+
+test("a live run still needs an API key the environment may not have", () => {
+    // Freezing removed one refusal and must not have removed another. Without
+    // a key the funded pair is refused for the key, not waved through on the
+    // strength of its budget.
+    for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
+        const decision = decideEvalRunMode({
+            live: true,
+            registerEntry: entry,
+            hasApiKey: false,
+            datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+            commitKnown: true,
+        });
+        assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
         assert.equal(
-            decision.mode,
-            "refused",
-            `${entry.extractionModelId} must not be live-runnable as shipped`
+            decision.reason,
+            entry.evalBudget ? "no_api_key" : "no_eval_budget",
+            `${entry.extractionModelId} should name the first gate it fails`
         );
     }
 });
@@ -155,6 +210,7 @@ test("the budget is the only gate an approval opens", () => {
             registerEntry: entry,
             hasApiKey: true,
             datasetFrozen: true,
+            commitKnown: true,
         });
         assert.equal(decision.mode, "live", `${entry.extractionModelId}`);
         assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
@@ -165,6 +221,7 @@ test("the budget is the only gate an approval opens", () => {
             registerEntry: entry,
             hasApiKey: true,
             datasetFrozen: true,
+            commitKnown: true,
         });
         assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
     }
@@ -239,17 +296,19 @@ test("--live with a key but no approved budget never reaches the network", () =>
     );
 });
 
-test("a funded pair still refuses, and still reaches no network", () => {
-    // Recording a budget opens `--live`; it does not open the run. Everything
-    // after the budget check still has to hold, and today the dataset is not
-    // frozen. This is the guarantee that matters once a budget exists: funding
+test("a funded pair with no key refuses, and still reaches no network", () => {
+    // Recording a budget opens `--live`; it does not open the run. Two gates
+    // used to stand after the budget check and the dataset freeze took one of
+    // them away, so this test now exercises the one that is left. The
+    // guarantee it protects is unchanged and is the reason it exists: funding
     // alone must never be the thing that lets a call out.
     const result = runHarness(["--live", "--model=gpt-5-6-luna"], {
-        OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
+        OPENAI_API_KEY: "",
     });
     assert.equal(result.status, 1, "the run must refuse");
     assert.doesNotMatch(result.output, /no approved eval budget/i);
-    assert.match(result.output, /is not frozen/i);
+    assert.doesNotMatch(result.output, /is not frozen/i);
+    assert.match(result.output, /OPENAI_API_KEY/);
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,
@@ -269,14 +328,17 @@ test("a smoke run completes without touching the network", () => {
 });
 
 test("a smoke run that passes every rule still says it proves nothing", () => {
-    // The dangerous shape now that the floor is met: a stub agreeing with
-    // itself prints "Every §12.3 rule passed", and without the caveat beside
-    // it that reads like a result. Two independent facts have to stay on the
-    // page -- no provider was called, and the dataset is not frozen.
+    // The dangerous shape now that the floor is met and the dataset is frozen:
+    // a stub agreeing with itself prints "Every §12.3 rule passed", and without
+    // the caveat beside it that reads like a decision-grade result. The freeze
+    // removed the second disclaimer this test used to lean on ("not frozen"),
+    // which makes the first one load-bearing -- so it is asserted on its own,
+    // beside the dataset line that now reads `decision, frozen`.
     const result = runHarness([]);
     assert.match(result.output, /SMOKE RUN — NOT an eval result/);
     assert.match(result.output, /No provider was called/);
-    assert.match(result.output, /not frozen/);
+    assert.match(result.output, /\(decision, frozen\)/);
+    assert.doesNotMatch(result.output, /not frozen/);
 });
 
 /* ---------------------------------------------------------------- static -- */

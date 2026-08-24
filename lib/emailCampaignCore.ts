@@ -69,7 +69,8 @@ export type CampaignRunRefusal =
   | "halted"
   | "already_completed"
   | "content_changed"
-  | "locale_not_pinned";
+  | "locale_not_pinned"
+  | "transition_unproven";
 
 /** One language's pinned version and what that version's copy hashed to. */
 export type PinnedVersion = {
@@ -97,6 +98,16 @@ export const campaignRunRefusal = (input: {
   locales: readonly string[];
   pinned: readonly PinnedVersion[];
   currentHashes: Readonly<Record<string, string>>;
+  /**
+   * Whether this campaign's copy promises an automatic transition, and which of
+   * section 13.3's twelve conditions are not met.
+   *
+   * Checked at send rather than only at approval because the facts move: a
+   * replacement can be disabled, an owner can leave, and a copy edit takes the
+   * `differences_stated` attestation with it. A gate asked once is a gate that
+   * was true once.
+   */
+  transitionClaim?: { claimed: boolean; unmet: readonly string[] };
 }): CampaignRunRefusalDetail | null => {
   if (input.status === "cancelled") {
     return { refusal: "cancelled", message: "This campaign was cancelled." };
@@ -117,6 +128,20 @@ export const campaignRunRefusal = (input: {
     return {
       refusal: "not_approved",
       message: `A campaign sends only once approved; this one is ${input.status}.`,
+    };
+  }
+
+  if (
+    input.transitionClaim?.claimed &&
+    input.transitionClaim.unmet.length > 0
+  ) {
+    // Refused, not downgraded. Quietly sending the weaker sentence would be the
+    // safe words with nobody having decided to use them, and the operator would
+    // never learn that the promise they wrote was not made.
+    return {
+      refusal: "transition_unproven",
+      languages: [...input.transitionClaim.unmet],
+      message: `This campaign promises an automatic transition and ${input.transitionClaim.unmet.length} of the twelve conditions for that promise are unmet: ${input.transitionClaim.unmet.join(", ")}. Meet them, or turn the promise off and say the model is going away instead.`,
     };
   }
 

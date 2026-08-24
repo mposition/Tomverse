@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1차 해결 (2026-08-24)** — §36. campaign workflow는 2차
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~5차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42. admin 화면은 6차
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -691,7 +691,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **권고**: 10절의 판정 참조 — **Slack은 직접 유지, 이메일은 standard lane으로**.
 - **파일**: `lib/providerModelCatalogReport.ts:196-232`
 
-### EM-15 — 오늘의 유일한 폐기 안내가 영어 한 줄이다 (P1, Medium)
+### EM-15 — 오늘의 유일한 폐기 안내가 영어 한 줄이다 (P1, Medium) — **해결 (2026-08-24)** — §39
 
 - **Evidence**: `[코드]` `lib/models.ts:201,243,249,250,267,269,270,271,279,283`
 - **현재 동작**: 폐기 안내는 `ModelRegistryEntry.userVisibleNote` 문자열
@@ -2119,16 +2119,16 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~EM-11 standard drain job key + backlog incident~~ **완료 (2026-08-23)** — §35
 - ~~EM-10 조건부 readiness~~ **완료 (2026-08-23)** — §32
 - ~~EM-09 marketing bounce/complaint kill switch~~ **완료 (2026-08-23)** — §34
-- EM-15 `userVisibleNote` 다국어
+- ~~EM-15 `userVisibleNote` 다국어~~ **완료 (2026-08-24)** — §39
 
 ### P2
 
-- ML-05 minimax 표시명 + 전수 test
-- ML-06 이미지 모델 discovery (별도 설계)
-- ML-07 perplexity 한계 명시
-- OpenAI `isLikelyChatModelId` prefix 위험 완화(6절 #10)
-- `MAX_PAGES` 초과 시 경고 로그
-- `/admin/email-delivery` 주소 마스킹 정책
+- ~~ML-05 minimax 표시명 + 전수 test~~ **완료 (2026-08-24)** — §40
+- ML-06 이미지 모델 discovery (별도 설계) — 리포트 범위 한계 명시는 §10.10에서 완료
+- ~~ML-07 perplexity 한계 명시~~ **완료** — §10.10
+- ~~OpenAI `isLikelyChatModelId` prefix 위험 완화(6절 #10)~~ **완료 (2026-08-24)** — §40
+- ~~`MAX_PAGES` 초과 시 경고 로그~~ **완료 (2026-08-24)** — §40
+- `/admin/email-delivery` 주소 마스킹 정책 — **결정 대기**(§21에 D10으로 추가)
 
 ---
 
@@ -2145,6 +2145,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | D7 | 사전 안내 리드타임 | product | D 일정 | **14일**. 폐기 결정 → 안내 → reminder → 실행 |
 | D8 | assistant profile이 모델 선택을 갖는지 | eng | audience 정의 | 조사 필요(23절) |
 | D9 | 최근 사용 기반 cohort를 포함할지 | product | audience 크기 | **미포함**. 저장된 선택만. 최근 사용은 영향이 아니라 관심입니다 |
+| D10 | `/admin/email-delivery`의 사용자 주소를 마스킹할지 | product + ops | 없음(오늘 동작함) | **기본 마스킹 + 명시적 공개 행위를 감사 로그에 기록**. 지원 능력을 잃지 않으면서 노출을 *상태*가 아니라 *사건*으로 만듭니다. 다만 공개 행위의 감사 설계는 구현 전 승인이 필요합니다 |
 
 ---
 
@@ -2898,3 +2899,304 @@ sequence)`이므로 두 번째 `reminder 1`은 불가능하고, 그래서 서비
 
 **3차 범위**: 예약, audience 계산기 연결과 `EmailCampaignRecipient`, reminder
 wave의 cohort 재계산, admin 화면, `runWithAdminApproval` 연결.
+
+---
+
+## 38. EM-01 3차 구현 기록 — audience 해석과 recipient 원장 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelRetirementAudience.ts` | cohort 세 개를 DB에서 해석. 새 파일 |
+| `lib/emailCampaignRecipientCore.ts` | 원장 판정(우선순위·제외 사유·재계산). 순수, 새 파일 |
+| `prisma/schema.prisma` · `migrations/20260824030000_email_campaign_recipient` | `EmailCampaignRecipient` |
+| `lib/emailAudienceExpansionCore.ts` | cohort selector, `no_audience` 거부 |
+| `lib/emailAudienceExpansion.ts` | cohort 해석 연결 + 원장 기록 |
+| `lib/accountDataExport.ts` · `lib/accountDataExportDomains.ts` · `docs/policy/tomverse-chat-data-domain-registry.yaml` | 새 domain 등록과 export |
+| `tests/emailCampaignRecipientCore.test.mjs` | 11건 |
+| `tests/emailAudienceExpansionCore.test.mjs` | 7건 추가 (총 20) |
+| `tests/integration/campaign-audience.db.test.ts` | 17건, 새 파일 |
+
+**§12.2의 표와 계산기가 서로 다른 말을 하고 있었습니다.** §12.2의
+`excludedReason` 목록에는 `malformed`가 있고 `account_inactive`가 없는데,
+P0-5가 만든 `summariseAudience()`는 malformed 계정을 **notice audience 안**과
+`autoMigratable` 밖에 셉니다 — 알려는 주고 자동 이전은 하지 않는다는 뜻입니다.
+`malformed`를 "아무것도 못 받은 이유"로 두면 그 계산기와 정면으로 어긋나므로,
+**독립 컬럼으로 두고 제외 사유 목록에서 뺐습니다.** §12.2는 "스키마 (개념)"
+이고 계산기는 나중에 내려진 검증된 결정이므로 후자를 따랐습니다. CHECK 주석과
+`CAMPAIGN_EXCLUDED_REASONS`의 주석에 근거를 적었습니다.
+
+**`selectedModels`는 substring으로만 조회할 수 있고, 그것은 답이 아니라
+prefilter입니다.** `String` 컬럼에 든 JSON 배열이라 DB가 줄 수 있는 조건이
+`contains`뿐인데, `gpt-5-4-mini`로 찾으면 `gpt-5-4-mini-preview`를 고른 행도
+같이 옵니다. 배열을 파싱해 원소 단위로 비교합니다. 이것을 안 하면 **폐기되지
+않는 모델을 쓰는 사람에게 폐기 안내가 갑니다.**
+
+**그래서 판정 결과가 셋입니다.** `include` · `exclude` · `not_in_audience`.
+prefilter에 걸렸다가 cohort 규칙에서 탈락한 사람을 `already_changed`로 적으면
+**사실이 아닌 기록**이 남습니다 — 그들은 아무것도 바꾸지 않았고, 나중에
+`already_changed`를 세는 사람은 첫 안내가 닿은 적도 없는 사람에게 효과가
+있었다고 결론짓게 됩니다. 이 경우는 아무것도 적지 않는 것이 정직한 기록입니다.
+
+**탈락자도 page에 실려 나옵니다.** cursor가 그들을 지나가야 하기 때문입니다.
+여기서 걸러 내면 near-miss만 든 page 하나가 audience의 끝처럼 보이고, **그
+뒤의 사람 전원이 영원히 안 읽힙니다.** 소속 판정은 `cohorts.length > 0`이고,
+`summariseRetirementAudience()`가 세기 전에 거릅니다.
+
+**reminder는 새 audience 질의가 아니라 원장을 읽습니다.** 질의를 다시 돌리면
+첫 안내를 듣고 설정을 바꾼 사람은 **결과에 안 나올 뿐**이고, "안 나옴"과
+"더 이상 해당 없음"이 같은 침묵이 됩니다. campaign이 이미 쓴 사람들을 다시
+읽어 cohort를 재계산하고, 비어 있으면 `already_changed`입니다.
+
+**segment가 아무도 지목하지 않으면 거부합니다(`no_audience`).**
+`readExpansionSpec`은 읽을 수 없는 spec을 빈 spec으로 되돌리고, 빈 spec은
+필터 없는 질의로 떨어졌습니다 — **필드 하나 오타가 수백 명 대상 폐기 안내를
+전 제품 발송으로 바꿉니다.** 1차의 주석은 "누구인지 모르는 확장은 아무에게도
+닿으면 안 된다"고 적어 놓고 반대로 동작하고 있었습니다. `all_users`는 그대로
+전원을 뜻합니다 — 그렇게 말하는 것은 별개의 의도적 행위입니다.
+
+**classification은 template이 정합니다.** suppression 판정이 classification마다
+다르므로(complaint는 marketing을 막고 transactional을 막지 않습니다) 확장기가
+`"service"`로 고정하면 아무도 하지 않는 발송에 대해 옳은 제외 목록이 나옵니다.
+
+**userIds로 지목한 wave는 원장을 쓰지 않습니다.** 기록할 cohort 귀속이 없고,
+`eligibilityReason`을 지어내면 **그러지 않으려고 만든 표에 지어낸 이유가**
+들어갑니다.
+
+**계정 삭제 시 cascade입니다** — `EmailDelivery`의 `SetNull`과 다릅니다.
+delivery는 법적 통지가 실제로 전달됐다는 증거라 계정보다 오래 남을 근거가
+있지만, 이 행은 **보내지 않았다는 기록**이고 그것을 보관할 의무는 없습니다.
+게다가 주소를 들고 있으므로 링크만 끊어 남기는 쪽이 더 나쁩니다. campaign의
+도달 수는 아무도 지목하지 않는 `EmailCampaignWave.expandedCount`에 남습니다.
+
+**4차 범위**: 예약(`scheduledAt`·`triggerMode`·`effectiveAt`·`workItemId`·
+`targetModelId`), `runWithAdminApproval` 연결, admin API와 화면.
+예약을 3차에서 빼는 이유는 예약이 **운영자의 결정**이고 그것을 설정하는 화면과
+같은 변경으로 와야 하기 때문입니다.
+## 39. EM-15 구현 기록 — 폐기 안내의 다국어 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelRetirementNotice.ts` | 안내 판정. 순수, 새 파일 |
+| `lib/modelAvailability.ts` | 저장된 영어 문장 대신 copy key + 파라미터 반환 |
+| `lib/models.ts` | 유도 가능한 note 9개 제거 + field 용도 문서화 |
+| `app/api/chat/route.ts` | `MODEL_TEMPORARILY_UNAVAILABLE`이 안내를 데이터로 전달 |
+| `components/chat/ChatApp.tsx` | 그 안내를 사용자 언어로 렌더 |
+| `locales/*.ts` | `chat.modelTemporarilyUnavailable` 7개 언어 |
+| `tests/modelRetirementNotice.test.mjs` | 9건 |
+
+**규약은 이미 있었고 한 경로만 쓰고 있었습니다.** `MODEL_RETIRED`(410) 분기는
+이미 `replacementModelName`을 **데이터로** 보내고 client가
+`chat.modelRetiredWithReplacement`를 렌더합니다. EM-15의 실제 gap은
+`MODEL_TEMPORARILY_UNAVAILABLE`(503)이 `userVisibleNote`를 **영어 문장 그대로**
+message에 실어 보내는 것이었습니다. 그래서 새 문구 체계를 만들지 않고 그 규약에
+맞췄고, **새 key는 하나**입니다.
+
+**10개 중 9개는 `replacementModelId`가 이미 말하는 것을 다시 쓴 것이었습니다.**
+"This model was retired and replaced by Grok 4.5." — replacement의 이름이
+그대로 들어 있습니다. 저장하지 않고 registry에서 유도해 client가 렌더합니다.
+저장을 지운 것이 핵심입니다: 남겨 두면 유도된 다국어 문장보다 저장된 영어가
+이깁니다.
+
+**열 번째는 남깁니다.** codestral의 note는 "Tomverse **Review**에서 더 이상
+제공되지 않는다"이고, 모델 자체는 존재합니다. 어떤 field도 담지 않는 사실이므로
+운영자의 문장이 맞습니다. 대신 그것이 **번역될 수 없다는 사실을 타입이
+말합니다** — `source: "operator"`와 `source: "localised"`는 서로 다른 것이고,
+후자인 척하는 것이 영어 한 문장이 번역 작업을 통과해 살아남은 방식입니다.
+
+**replacement가 없는 사용 불가는 "폐기"라고 하지 않습니다.** 장애·공급자
+사고·관리자 스위치로도 사용 불가가 되며, 돌아올 모델을 두고 사라졌다고 말하는
+쪽이 두 실수 중 비싼 쪽입니다. 그래서 `chat.modelTemporarilyUnavailable`이
+별도 문구입니다 — 기존 "더 이상 제공되지 않습니다. 다른 모델을 선택하세요"를
+재사용하지 않았습니다.
+
+**운영자 note는 동작하는 모델에서도 남습니다.** throttling을 설명하는 note가
+바로 그 경우입니다. 유도된 문장은 반대로 사용 불가일 때만 만듭니다 — 답하고
+있는 모델에 "폐기되어 X로 대체됨"을 유도하면 사실이 아닌 말을 하게 됩니다.
+
+**공개 catalogue는 문장을 잃고 `replacementModelId`를 유지합니다.**
+`/api/models`의 `userVisibleNote`를 읽는 client component는 없었고,
+`tests/publicModelCatalog.test.mjs`가 고정하던 것은 결함 자체였습니다 —
+그 단언을 의도로 바꿨습니다.
+
+**회귀 방지**: `tests/modelRetirementNotice.test.mjs`가 (1) 7개 locale 전부에
+key가 있는지, (2) `{model}` placeholder가 번역에서 사라지지 않았는지,
+(3) 정적 카탈로그에 "This model was retired..." 문장이 다시 들어오지 않았는지를
+검사합니다. 세 번째가 이 결함의 재발 경로입니다.
+## 40. P2 catalogue coverage 구현 기록 (2026-08-24 · 완료)
+
+ML-05, 6절 후보 10(OpenAI prefix), `MAX_PAGES` 경고 — 셋 다 **스캔이 본 것보다
+적게 보고 그 사실을 말하지 않는다**는 같은 모양이라 한 변경으로 묶었습니다.
+
+| 파일 | 역할 |
+|---|---|
+| `lib/providerModelCatalogReport.ts` | provider 표시명을 `Record<AiProvider, string>`으로 |
+| `lib/providerModelCatalogCore.ts` | `chatModelExclusion()`, `parseProviderCatalogModels()` |
+| `lib/providerModelCatalogMonitor.ts` | truncation 감지 + incident, 두 사실을 결과에 실음 |
+| `tests/providerCatalogCoverage.test.mjs` | 10건, 새 파일 |
+
+**ML-05는 map 하나만 타입이 없었습니다.** 네 개의 provider 표시명 map 중
+`providerMonitoring` · admin panel · marketing은 `Record<AiProvider, string>`이고
+전부 12개를 갖습니다. 리포트의 것만 타입 없는 literal에 `|| provider` fallback
+이었고, 그것만 `minimax`를 잃었습니다. **값을 채우는 것이 아니라 타입을 주는
+것이 고침입니다** — 빠짐이 이제 컴파일 오류입니다.
+
+**표시명을 하나로 합치지 않았습니다.** 값이 표면마다 의도적으로 다릅니다 —
+운영 리포트는 스캔 대상 제품군(`Google Gemini`·`Moonshot Kimi`·`Zhipu GLM`)을,
+marketing은 회사(`Google`·`Moonshot AI`)를 부릅니다. 하나로 만들면 어느 쪽이든
+한쪽 화면에서 틀립니다. 공유하는 것은 값이 아니라 **전수성**입니다.
+
+**추측인 제외와 사실인 제외를 나눴습니다.** embedding 모델은 이름에
+`embedding`이 있고, 그것은 이름이 줄 수 있는 만큼 확실합니다. "OpenAI chat
+모델은 `gpt-`·`chatgpt-`·`o<n>`으로 시작한다"는 **내기**이고, 그것이 깨지는 날
+새 모델은 발견되지 않고 보고되지 않고 아무도 그 사실을 모릅니다. 그래서
+`openai_prefix_heuristic`으로 떨어진 id를 parser 밖으로 들고 나와 리포트의
+provider 행이 이름을 댑니다.
+
+**incident가 아니라 리포트입니다.** OpenAI는 항상 `davinci-002` 같은 것을 몇 개
+내보내므로 알림으로 만들면 매일 노이즈입니다. 리포트가 막아야 하는 것은 조용한
+경우 — 선배들과 다른 모양의 진짜 신형 chat 모델이 흔적 없이 사라지는 것입니다.
+
+**truncation은 반대로 incident입니다.** 5페이지 × 1000은 오늘 어느 provider보다
+훨씬 많아서, 도달했다면 비정상입니다. 그리고 이것이 **다음 섹션을 오염시킵니다** —
+잘린 뒤의 모델은 성공했다고 보고된 실행에서 부재하고, **부재가 곧 폐기 판정
+신호**입니다. incident 문장이 "must not be read as missing"이라고 적는 이유이고,
+테스트가 그 문장을 고정합니다.
+
+**ML-06·ML-07은 이미 되어 있었습니다.** daily email v2(§10.10)가 footer에
+"chat models only; image generation models are a static catalogue and are not
+scanned"를, perplexity 행에 "retirement cannot be proven here"를 이미 넣었습니다.
+착수 전에 코드로 확인했고, 없는 일을 한 것으로 적지 않았습니다.
+
+**남은 하나는 정책 결정입니다.** `/admin/email-delivery`의 주소 마스킹은 감사
+자신이 "마스킹 정책 결정"이라고 적었고, 저장소가 답할 수 없는 사실(관리자
+접근 범위, 지원 업무 실태)에 달려 있습니다. §21에 D10으로 올렸습니다.
+
+---
+
+## 41. EM-01 4차 구현 기록 — 예약과 자동 전환 진실성 게이트 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/automaticTransitionClaim.ts` | §13.3의 12개 조건. 순수, 새 파일 |
+| `lib/emailCampaignScheduleCore.ts` | due 판정 + 일정 정합성. 순수, 새 파일 |
+| `prisma/schema.prisma` · `migrations/20260824060000_email_campaign_scheduling` | 예약·모델·전환 컬럼 |
+| `lib/emailCampaignService.ts` | `scheduleCampaignWave` · `campaignScheduleProblems` · `runDueCampaignWaves` |
+| `lib/scheduledJobsCore.ts` · `lib/notificationDeliveryJob.ts` | `campaign_wave_scheduler` job key + cron 연결 |
+| `tests/automaticTransitionClaim.test.mjs` | 14건 |
+| `tests/emailCampaignScheduleCore.test.mjs` | 17건 |
+| `tests/integration/campaign-scheduling.db.test.ts` | 15건, 새 파일 |
+
+**예약과 §13.3을 같이 넣은 이유.** `effectiveAt` 컬럼은 campaign이 날짜를
+말할 수 있게 하는 것이고, **날짜를 말할 수 있다는 것은 그 날짜에 무언가를
+약속할 수 있다는 뜻**입니다. 12개 조건은 아무도 다시 읽지 않는 감사 문서의
+산문이었습니다. 컬럼만 추가하면 사실이 아닌 약속을 쓸 수 있는 컬럼이 생깁니다.
+
+**게이트의 세 조건은 코드가 알아낼 수 없습니다.** 본문이 capability·크레딧
+차이를 실제로 적었는지, rollback을 예행했는지, staging 검증이 됐는지 —
+`validationEvidence` blob이 비어 있지 않다는 것과 **누군가 그것을 확인했다**는
+것은 다른 사실입니다. 셋은 이름이 붙은 명시적 attestation으로 들어오고,
+**없으면 미충족**입니다. `undefined`·`0`·`"yes"`가 통과하지 않는 것을 테스트가
+고정합니다 — 침묵은 동의가 아닙니다.
+
+**`dryRunRecipientCount`에서 `0`과 `null`은 다릅니다.** 0은 누군가 세어 보고
+아무도 없었다는 것이고, `null`은 아무도 안 봤다는 것입니다. 후자만 미충족입니다.
+
+**게이트 두 개를 합치지 않습니다.** `scheduleRefusal`은 "이 자동화를 요청했고
+시간이 됐는가"(운영자 의도), `campaignSendRefusal`은 "이 문장을 보내도 되는가"
+(승인, EM-06). 앞을 통과하고 뒤에서 막히는 경우가 중요합니다 — 일정은 잡혀
+있는데 그 아래에서 문구가 바뀐 것이고, 그때 아무것도 나가면 안 됩니다.
+DB test가 이 경우를 고정합니다.
+
+**`manual`인 campaign은 대신 시작하지 않습니다.** manual로 둔 사람은 발송을
+지켜보려는 것이고, 시간이 설정돼 있다는 이유로 대신 시작하면 그 결정을 말없이
+빼앗는 것입니다. 그래서 scheduler는 `approved_schedule`만 봅니다.
+
+**due인데 거절된 wave는 조용한 skip이 아닙니다.** 일정은 보내라고 했고 무언가가
+아니라고 했으며, 그 간격은 아무도 스스로 알아내지 못합니다.
+`CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE` incident를 올립니다. 반대로 아무것도 due가
+아닌 tick은 로그를 남기지 않습니다 — 15분마다 "없음"을 적는 것이 진짜 신호를
+묻는 방법입니다.
+
+**자기 테스트가 제 버그를 잡았습니다.** `campaignScheduleProblems`가 DB에서
+`scheduledAt` 순으로 읽어 넘기는데 `scheduleProblems`는 **목록 순서**로 앞뒤를
+비교했습니다. 이미 오름차순인 목록을 연속 비교하면 순서 위반이 **영원히 발견되지
+않습니다**. 순수 함수가 스스로 `WAVE_ORDER`로 정렬하도록 고쳤습니다 — 물어야 할
+것은 배열이 정렬됐는지가 아니라 notice가 reminder보다 앞인지입니다. 회귀
+테스트가 시간 순으로 넘긴 경우를 고정합니다.
+
+**`effectiveAt`과 `timezoneLabel`은 함께 있거나 함께 없습니다**(DB CHECK).
+label 없는 UTC 순간은 받는 사람에게 설정한 사람과 다른 날로 읽히고, 이 한 쌍이
+존재하는 이유인 그 문장은 **날짜를 지목**합니다.
+
+**scheduler는 drain보다 앞에서 돕니다.** 여기서 확장된 wave가 delivery 행이
+되고 같은 pass가 그것을 내보내므로, 메일이 due였던 tick에 나갑니다 — 다음
+tick이 아니라.
+
+**D5는 건드리지 않았습니다.** 1인 조직 이중 승인 예외를 campaign에 적용할지는
+§21의 조직 결정이고, `SOLE_APPROVER_ACTIONS`에 campaign을 넣는 것은 그 결정을
+코드로 내리는 일입니다. 5차의 승인 연결은 일반 2인 경로(`runWithAdminApproval`)
+를 씁니다.
+
+**5차 범위**: admin API와 화면, `runWithAdminApproval` 연결, attestation을
+사람이 입력하는 경로.
+
+---
+
+## 42. EM-01 5차 구현 기록 — attestation 저장과 admin API (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailCampaignAttestationCore.ts` | attestation 판정. 순수, 새 파일 |
+| `prisma/schema.prisma` · `migrations/20260824080000_email_campaign_attestation` | `EmailCampaignAttestation` |
+| `lib/emailCampaignCore.ts` | `transition_unproven` 거부 |
+| `lib/emailCampaignService.ts` | 기록·철회·상태·12조건 종합 |
+| `app/api/admin/email-campaigns/**` | 목록·생성·상세·수정·승인·attestation·wave |
+| `tests/emailCampaignAttestationCore.test.mjs` | 12건 |
+| `tests/integration/campaign-attestations.db.test.ts` | 15건, 새 파일 |
+
+**4차가 이름만 붙이고 저장하지 않은 것을 저장합니다.** 살 곳이 없는
+attestation은 **호출자가 `true`를 넘길 수 있는 매개변수**입니다. 값어치를
+만드는 것은 누가 언제 말했는가이므로 boolean이 아니라 컬럼입니다.
+
+**셋 중 하나만 상합니다.** `differences_stated`는 **본문**에 대한 주장입니다 —
+누군가 문구를 읽고 capability·크레딧 차이가 적혀 있음을 확인한 것. 문구를 바꾸면
+그 읽기는 발송될 것을 더 이상 설명하지 않으며, 이것이 EM-06이 존재하는 실패와
+정확히 같은 모양입니다. 그래서 만들어진 시점의 content digest를 들고 다니고
+digest가 움직이면 세지 않습니다.
+
+`staging_verified`와 `reconciliation_ready`는 **migration**에 대한 것 — 예행과
+rollback입니다. 문구 수정이 둘 중 어느 것도 되돌리지 않으며, 그것으로 만료시키면
+**운영자가 다시 확인하지 않고 다시 서명하도록 훈련**됩니다. 묻지 않는 것보다
+나쁩니다.
+
+**digest는 요청이 아니라 campaign에서 가져옵니다.** 작성자가 제출한 digest에
+묶인 attestation은 **그가 문구라고 믿은 것**에 묶인 것이고, 검사 대상이 바로 그
+믿음입니다.
+
+**상했다는 것과 없다는 것을 구분합니다.** 상한 것도 서명자를 그대로 들고
+있으므로 화면이 "이것은 상했습니다"라고 말할 수 있습니다 — "아무도 이것을
+말하지 않았습니다"와 다른 문장이고, 일을 한 사람에 대해 뒤쪽은 틀렸습니다.
+
+**게이트가 발송을 실제로 막습니다**(`transition_unproven`). 이것이 없으면 12개
+조건은 권고입니다. 그리고 **약한 문장으로 조용히 낮추지 않습니다** — 그것은
+안전한 문구를 아무도 쓰기로 결정하지 않은 채 보내는 것이고, 운영자는 자기가 쓴
+약속이 나가지 않았다는 사실을 영원히 모릅니다.
+
+**승인만 2인 경로입니다.** draft는 아무것도 보내지 않고, 예약도 보내지
+않습니다(승인되지 않은 campaign의 예약은 due 시점에 거부됩니다). 이미 승인된
+campaign의 wave 실행은 **여기서 승인된 결정의 수행**이고, 그것에 두 번째 승인을
+요구하면 검토 대상이 문구가 아니라 발송 행위가 됩니다. 사람이 문구를 읽는 곳이
+승인이고, EM-06이 그 문구를 거기에 pin합니다.
+
+**승인 payload에 언어 목록을 넣습니다.** 그래야 요청과 승인 사이에 locale이
+움직이면 payload hash가 달라져 **옛 승인을 물려받지 못합니다.** 그리고 언어
+불일치는 승인을 claim하기 **전에** 거부합니다 — 잘못된 언어 목록에 대해 소비된
+승인은 이미 써 버린 것이고, 운영자의 다음 시도는 처음부터 시작합니다.
+
+**CHECK를 `owner: "list"`로 등록했습니다.** `ATTESTATION_KINDS`와 DB CHECK가
+서로 비교되므로 어긋날 수 없습니다 — 여기 있고 저기 없는 kind는 게이트가 결코
+묻지 않는 attestation입니다.
+
+**6차 범위**: admin 화면. `lib/adminNavigation.ts` 항목·icon·route segment를
+한 번에 추가해야 하고(admin IA 계약), E2E가 따로 필요합니다. API에 nav 항목만
+먼저 넣으면 그 계약을 깹니다.

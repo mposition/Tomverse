@@ -150,6 +150,10 @@ import {
   selectionAfterIdentityTransition,
   type IdentityNamespace,
 } from "@/lib/chatIdentityNamespace";
+import {
+  chatRuntimeIdentityKey,
+  releaseChatRuntimeForOtherIdentities,
+} from "@/lib/chatStreamRuntime";
 import { GuestImportModal } from "@/components/chat/GuestImportModal";
 import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
@@ -1155,6 +1159,20 @@ export function ChatPageClient({
     modelSettingsSyncQueueRef.current =
       createConversationModelSettingsSyncQueue();
     staleConversationIdsRef.current.clear();
+    // Panel transcripts and their in-flight runs are held per (identity,
+    // conversation, model) so they survive a conversation switch
+    // (lib/chatStreamRuntime.ts). Surviving an *identity* change is a
+    // different thing entirely: nothing in this tab may still be writing the
+    // previous identity's answer into memory, so those keys are dropped and
+    // their runs aborted. Guest transcripts in localStorage are untouched --
+    // the import modal still needs them.
+    releaseChatRuntimeForOtherIdentities(
+      chatRuntimeIdentityKey(
+        identityNamespace.kind === "guest"
+          ? { kind: "guest" }
+          : { kind: "account", userId: identityNamespace.userId }
+      )
+    );
 
     const carriedId = currentChatIdRef.current;
     if (transition.guestToAccount && typeof window !== "undefined") {

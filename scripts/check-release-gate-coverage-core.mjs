@@ -54,10 +54,28 @@ export const MANUALLY_GATED_CHECKS = {
 };
 
 /**
- * The variants that are not separate gates: a non-strict warning mode whose
- * strict form is already required, and helper scripts a required check calls.
+ * Scripts that appear in a workflow but are not release gates, and why.
+ *
+ * An entry is a decision that the checklist should *not* name the script --
+ * not a note that adding it is outstanding. Written as reasons for the same
+ * reason `MANUALLY_GATED_CHECKS` is: an exemption list without them becomes
+ * the place a check goes to stop being anybody's problem.
  */
-export const NOT_A_GATE = new Set(["check:encoding"]);
+export const NOT_A_GATE = {
+    "check:encoding": {
+        reason:
+            "The non-strict mode of a check whose strict form the checklist already " +
+            "requires. Demanding both would add a line that means nothing.",
+    },
+    "check:memory-eval-run": {
+        reason:
+            "Applies the pre-registered admissibility rules to one eval artifact, " +
+            "inside the manually dispatched decision-grade run that produced it " +
+            "(docs/ops/memory-extraction-decision-grade-run.md §3). A release " +
+            "manager has no artifact to run it against, so a checklist line would " +
+            "be an instruction nobody can follow.",
+    },
+};
 
 /**
  * @param {{
@@ -76,7 +94,7 @@ export function auditReleaseGateCoverage({
     const known = new Set(packageScripts);
 
     for (const script of ciMentions) {
-        if (NOT_A_GATE.has(script)) continue;
+        if (script in NOT_A_GATE) continue;
         if (!checklistMentions.has(script)) {
             errors.push(
                 `${script} is enforced by CI but not named in the release checklist. ` +

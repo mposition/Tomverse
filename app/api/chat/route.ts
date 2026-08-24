@@ -1316,7 +1316,27 @@ async function handleChatPost(
                 adminModelAccess.reason || "This model is temporarily unavailable.",
                 "MODEL_TEMPORARILY_UNAVAILABLE",
                 503,
-                traceId
+                traceId,
+                // The same shape the MODEL_RETIRED branch above already uses: a
+                // copy key and its parameter, so the sentence is written where
+                // the reader's language is known (EM-15). `message` above stays
+                // English for logs and for a client that has not learned the
+                // key. An operator's own note has no key -- it is their words,
+                // in whatever language they wrote them, and it travels as text.
+                adminModelAccess.notice
+                    ? adminModelAccess.notice.source === "localised"
+                        ? {
+                              noticeCopyKey: adminModelAccess.notice.copyKey,
+                              ...(adminModelAccess.notice.replacementModelName
+                                  ? {
+                                        replacementModelName:
+                                            adminModelAccess.notice
+                                                .replacementModelName,
+                                    }
+                                  : {}),
+                          }
+                        : { noticeText: adminModelAccess.notice.text }
+                    : undefined
             );
         }
         dispatchProviderForLog = modelConfig.provider;

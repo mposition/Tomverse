@@ -63,14 +63,22 @@ const MANIFEST = [
 
   // --- composer lock and release -------------------------------------------
   // Extraction that moves send state into chat-core breaks the composer's
-  // lock/release before it breaks layout. Only the abandoned-stream release
+  // lock/release before it breaks layout. Only the conversation-switch release
   // path is covered here: the failure-path release lives in this file's
   // "mobile chat keyboard policy" block, which skips outside mobile-*
   // projects, so it cannot be part of a desktop baseline (see
   // docs/qa/review-parity-baseline.md).
+  //
+  // Renamed from "the composer is released once the abandoned stream
+  // finishes". The contract is the same one and is strictly stronger now: the
+  // composer of the conversation arrived at is free *immediately*, not once
+  // the run left behind happens to end. It used to hold only at the end
+  // because both shells kept the run's status keyed by model id alone, so the
+  // lock followed the user out of the conversation that was busy
+  // (lib/chatRuntimeStatus.ts). Nothing was dropped from the baseline.
   {
     file: "conversation-switch-during-stream.spec.ts",
-    title: "the composer is released once the abandoned stream finishes",
+    title: "the composer of the conversation arrived at is free at once",
     categories: ["composerLock"],
     mandatory: true,
   },

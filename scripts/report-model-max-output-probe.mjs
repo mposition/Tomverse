@@ -1,43 +1,56 @@
-// Ask each provider what its own context window is, by asking for too much.
+// Ask each provider for the largest answer it will let a request ask for.
 //
-//   npm run report:model-context-window-probe                 # dry run
-//   npm run report:model-context-window-probe -- --send       # actually asks
-//   npm run report:model-context-window-probe -- --send --model=glm-5.2
+//   npm run report:model-max-output-probe                 # dry run
+//   npm run report:model-max-output-probe -- --send       # actually asks
+//   npm run report:model-max-output-probe -- --send --model=glm-5.2
 //
-// Ten enabled models declare no context window, and no provider list endpoint
-// answers for them (`npm run report:model-context-window-evidence` shows
-// which). docs/policy/tomverse-chat-context-window-register.yaml forbids the
-// shortcuts -- a window is "never estimated, inferred from a sibling model, or
-// copied from a provider's marketing page" -- so the remaining source is the
-// provider itself.
+// Ask for an impossible number of completion tokens and a provider refuses,
+// naming the ceiling it refused against:
 //
-// Ask for an impossible number of completion tokens and it refuses, naming the
-// limit it refused against. One request per model, rejected before any
-// inference runs, so it costs nothing to speak of and produces no tokens.
+//     "Range of max_tokens should be [1, 131072]"
+//
+// That ceiling is `maxOutputTokens` in
+// docs/policy/tomverse-chat-context-window-register.yaml -- "the provider's
+// absolute settable ceiling for max_completion_tokens, not the value Tomverse
+// sends", as its one verified row puts it.
+//
+// ## It does not measure the context window
+//
+// It was built believing it would. Run against staging on 2026-08-24, all nine
+// providers that answered named a `max_tokens` ceiling and none named a
+// window, because the code path validating `max_tokens` checks the output cap.
+// The name and the prose were corrected to the thing it actually measures.
+// Sizing the window needs an oversized *input* instead, which is a different
+// cost profile and is not built here.
 //
 // ## This sends real requests with real credentials
 //
 // Which is why it does nothing without `--send`. The default prints exactly
 // what it would send, to whom, so the decision is made on the request rather
 // than on a description of it. Keys are read from the environment and never
-// printed; only the variable name is.
+// printed; only the variable name.
+//
+// A provider that refuses spends nothing: the request dies on validation
+// before inference. A provider that *accepts* an impossible cap answers the
+// prompt, so it bills for a one-word question and whatever reply it produced.
+// Three of the twelve did exactly that on 2026-08-24 -- both Mistral models
+// and Moonshot -- which is cheap but not free, and the earlier claim that this
+// "produces no tokens" was wrong.
 //
 // ## It reports; it does not decide
 //
-// The output is evidence for a person to weigh, exactly like the evidence
-// report. It writes nothing to lib/models.ts and nothing to the register --
-// the register requires `sourceUrl`, `sourceTitle`, `verifiedAt` and
-// `verifiedBy` before a row may carry a number, and whether an API rejection
-// satisfies that is the register owner's call. `contextWindowIncludesOutput`
-// is the same kind of question: a refusal about *completion* tokens does not
-// always say whether the figure names the whole window or the answer's share.
+// The output is evidence for a person to weigh. It writes nothing to
+// lib/models.ts and nothing to the register -- the register requires
+// `sourceUrl`, `sourceTitle`, `verifiedAt` and `verifiedBy` before a row may
+// carry a number, and whether an API refusal satisfies that is the register
+// owner's call.
 
 import {
   IMPOSSIBLE_COMPLETION_TOKENS,
   errorMessageFrom,
   parseLimitCandidates,
   probeRequestFor,
-} from "./report-model-context-window-probe-core.mjs";
+} from "./report-model-max-output-probe-core.mjs";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
 
@@ -105,7 +118,7 @@ const label = (entry) => entry.models.map((model) => model.id).join(" + ");
 
 if (!send) {
   console.log(
-    `Context window probe — DRY RUN. ${targets.length} model(s) over ${plan.length} upstream model(s).\n`
+    `Max output ceiling probe — DRY RUN. ${targets.length} model(s) over ${plan.length} upstream model(s).\n`
   );
   for (const entry of plan) {
     if (entry.error) {
@@ -124,7 +137,8 @@ if (!send) {
   }
   console.log(
     "\nNothing was sent. Re-run with --send to ask the providers.\n" +
-      "Each request is refused before any inference runs, so it produces no tokens."
+      "A provider that refuses spends nothing. One that accepts an impossible cap\n" +
+      "answers the prompt instead, and bills for the reply -- cheap, not free."
   );
   process.exit(0);
 }
@@ -179,14 +193,18 @@ for (const entry of plan) {
     status,
     transportError,
     message,
-    candidates: parseLimitCandidates(message),
+    // Only a refusal carries a ceiling. A 200 body is a completion, and every
+    // number in one is noise -- ids, usage counts, a created-at stamp that
+    // reads as a nine-figure token limit. Parsing it would fill the output
+    // with candidates no provider stated.
+    candidates: status === 200 ? [] : parseLimitCandidates(message),
   });
 }
 
 if (json) {
   console.log(JSON.stringify({ probedAt: new Date().toISOString(), results }, null, 2));
 } else {
-  console.log(`Context window probe — asked ${results.length} upstream model(s)\n`);
+  console.log(`Max output ceiling probe — asked ${results.length} upstream model(s)\n`);
   for (const result of results) {
     console.log(`${result.models.join(" + ")}`);
     if (result.skipped) {
@@ -204,11 +222,12 @@ if (json) {
       // this somewhere else, or not at all.
       console.log(
         "  ACCEPTED. The provider did not refuse an impossible cap, so it does not\n" +
-          "  check this field up front and this probe cannot learn its window here."
+          "  check this field up front and this probe cannot learn its ceiling here.\n" +
+          "  It answered the prompt instead, so this one cost a reply."
       );
     }
     if (result.candidates.length === 0) {
-      console.log("  no token-sized number in the answer:");
+      console.log("  no token-sized number in the refusal:");
       console.log(`    ${(result.message ?? "(no message)").slice(0, 300)}`);
     } else {
       for (const candidate of result.candidates) {
@@ -218,12 +237,14 @@ if (json) {
     console.log("");
   }
   console.log(
-    "Every number above is a candidate, not a finding: a refusal often names both\n" +
-      "what was asked for and what is allowed. Read the phrase beside each one.\n\n" +
+    "Every number above is a candidate, not a finding: a refusal names what was\n" +
+      "asked for as well as what is allowed, and a range names its floor too.\n" +
+      "Read the phrase beside each one.\n\n" +
+      "These are output ceilings -- `maxOutputTokens` in the register -- and say\n" +
+      "nothing about a model's context window. The two are different fields and the\n" +
+      "code path that validates max_tokens only knows about the first.\n\n" +
       "Nothing was written. docs/policy/tomverse-chat-context-window-register.yaml\n" +
       "wants sourceUrl, sourceTitle, verifiedAt and verifiedBy before a row may carry\n" +
-      "a number, and contextWindowIncludesOutput stated explicitly -- a refusal about\n" +
-      "completion tokens does not always settle that. Both are decisions for the\n" +
-      "register's owner."
+      "any number, which is a decision for the register's owner."
   );
 }

@@ -57,48 +57,49 @@ model User {
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
 
-  accounts                           Account[]
-  sessions                           Session[]
-  projects                           ConversationProject[]
-  refundRequests                     RefundRequest[]
-  promotionRedemptions               BillingPromotionRedemption[]
-  billingTransactions                BillingTransaction[]
-  creditPurchases                    CreditPurchase[]
-  creditLots                         CreditLot[]
-  creditLedgerEntries                CreditLedgerEntry[]
-  creditDebtEntries                  CreditDebtEntry[]
-  chatCreditReservations             ChatCreditReservation[]
-  imageGenerations                   ImageGeneration[]
-  messageArtifacts                   MessageArtifact[]
-  messageAttachments                 MessageAttachment[]
-  messageAttachmentUploads           MessageAttachmentUpload[]
-  imageGenerationGroups              ImageGenerationGroup[]
-  imageCreditReservations            ImageCreditReservation[]
-  memoryExtractionCreditReservations MemoryExtractionCreditReservation[]
-  adminAuditLogs                     AdminAuditLog[]
-  adminNotes                         AdminNote[]
-  modelOverrides                     ModelOverride[]
-  conversations                      Conversation[]
-  comparisonReviews                  ComparisonReview[]
-  productAnalyticsEvents             ProductAnalyticsEvent[]
-  privacyRequests                    PrivacyRequest[]
-  planChangeRequests                 PlanChangeRequest[]
-  externalImports                    ExternalImport[]
-  memoryItems                        MemoryItem[]
-  memoryExtractionRuns               MemoryExtractionRun[]
-  routingRuns                        RoutingRun[]
-  memorySettings                     UserMemorySettings?
-  accountDataExportRequests          AccountDataExportRequest[]
-  assistantProfiles                  AssistantProfile[]
-  assistantProfileVersions           AssistantProfileVersion[]
-  assistantKnowledgeFiles            AssistantKnowledgeFile[]
-  assistantKnowledgeChunks           AssistantKnowledgeChunk[]
-  assistantProfileImports            AssistantProfileImport[]
+  accounts                             Account[]
+  sessions                             Session[]
+  projects                             ConversationProject[]
+  refundRequests                       RefundRequest[]
+  promotionRedemptions                 BillingPromotionRedemption[]
+  billingTransactions                  BillingTransaction[]
+  creditPurchases                      CreditPurchase[]
+  creditLots                           CreditLot[]
+  creditLedgerEntries                  CreditLedgerEntry[]
+  creditDebtEntries                    CreditDebtEntry[]
+  chatCreditReservations               ChatCreditReservation[]
+  imageGenerations                     ImageGeneration[]
+  messageArtifacts                     MessageArtifact[]
+  messageAttachments                   MessageAttachment[]
+  messageAttachmentUploads             MessageAttachmentUpload[]
+  imageGenerationGroups                ImageGenerationGroup[]
+  imageCreditReservations              ImageCreditReservation[]
+  memoryExtractionCreditReservations   MemoryExtractionCreditReservation[]
+  adminAuditLogs                       AdminAuditLog[]
+  adminNotes                           AdminNote[]
+  modelOverrides                       ModelOverride[]
+  conversations                        Conversation[]
+  comparisonReviews                    ComparisonReview[]
+  productAnalyticsEvents               ProductAnalyticsEvent[]
+  privacyRequests                      PrivacyRequest[]
+  planChangeRequests                   PlanChangeRequest[]
+  externalImports                      ExternalImport[]
+  memoryItems                          MemoryItem[]
+  memoryExtractionRuns                 MemoryExtractionRun[]
+  routingRuns                          RoutingRun[]
+  memorySettings                       UserMemorySettings?
+  accountDataExportRequests            AccountDataExportRequest[]
+  assistantProfiles                    AssistantProfile[]
+  assistantProfileVersions             AssistantProfileVersion[]
+  assistantKnowledgeFiles              AssistantKnowledgeFile[]
+  assistantKnowledgeChunks             AssistantKnowledgeChunk[]
+  assistantProfileImports              AssistantProfileImport[]
   assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
-  emailPreferences                   EmailPreference[]
-  consentRecords                     ConsentRecord[]
-  emailDeliveries                    EmailDelivery[]
-  modelMigrationRecords              ModelMigrationRecord[]
+  emailPreferences                     EmailPreference[]
+  consentRecords                       ConsentRecord[]
+  emailDeliveries                      EmailDelivery[]
+  campaignRecipients                   EmailCampaignRecipient[]
+  modelMigrationRecords                ModelMigrationRecord[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -3082,7 +3083,7 @@ model AssistantKnowledgeFile {
   /// the policy rather than a gap.
   extractedBytes Int?
 
-  chunkCount          Int  @default(0)
+  chunkCount Int @default(0)
 
   /// Which chunking and tokenising algorithm produced this file's chunks.
   retrievalVersion Int @default(1)
@@ -3227,7 +3228,9 @@ model AssistantProfileImport {
   /// effect of a server write.
   userApprovedAt DateTime?
 
-  /* ---------- provenance: what is observed, and what is claimed ---------- */
+  /**
+   * ---------- provenance: what is observed, and what is claimed ----------
+   */
 
   /// The server's own clock and the server's own reading of what it did.
   serverReceivedAt DateTime @default(now())
@@ -3988,6 +3991,45 @@ model EmailCampaign {
   approvalId String?
   approvedAt DateTime?
 
+  /// manual | auto_draft | approved_schedule -- how this campaign's waves are
+  /// started. `manual` means an operator runs each one; `approved_schedule`
+  /// means the scheduler does, once the campaign is approved.
+  triggerMode String @default("manual")
+
+  /// When the first wave is due. The operative times live on the waves; this is
+  /// the campaign's own answer to "when does this start", for a list to sort by.
+  scheduledAt DateTime?
+
+  /// What this campaign is about, when it is about a model.
+  ///
+  /// Nullable because a campaign need not be: `category = other` has no model.
+  /// Not derived from audienceSpec -- that says who to write to, which is a
+  /// different question from what the notice is about.
+  workItemId         String?
+  targetModelId      String?
+  replacementModelId String?
+
+  /// When the automatic transition happens, and the timezone the notice names
+  /// it in. Both or neither: a UTC instant with no label reads as a different
+  /// day to the reader than to the person who set it.
+  effectiveAt   DateTime?
+  timezoneLabel String?
+
+  /// Which version of the audience definition produced the estimate below.
+  /// Bumped when the cohort rules change, so an old estimate is recognisably
+  /// old rather than merely stale.
+  audienceVersion     Int  @default(1)
+  estimatedRecipients Int?
+
+  /// Whether the copy promises Tomverse will change the model automatically.
+  ///
+  /// A retirement notice can say "please pick another model" without promising
+  /// anything, and that sentence is always safe. The promise is not: it is
+  /// gated on the twelve conditions of section 13.3
+  /// (lib/automaticTransitionClaim.ts), and this flag is what says the campaign
+  /// is making it.
+  claimsAutomaticTransition Boolean @default(false)
+
   createdByEmail String
 
   cancelledAt  DateTime?
@@ -3996,7 +4038,9 @@ model EmailCampaign {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  waves EmailCampaignWave[]
+  waves        EmailCampaignWave[]
+  recipients   EmailCampaignRecipient[]
+  attestations EmailCampaignAttestation[]
 
   @@index([status, createdAt])
   @@index([templateKey])
@@ -4022,6 +4066,13 @@ model EmailCampaignWave {
   /// pending | expanding | expanded | sending | done | cancelled | halted
   status String @default("pending")
 
+  /// When this wave is due. NULL means an operator starts it by hand.
+  ///
+  /// The wave row exists before it runs, which is what makes scheduling
+  /// possible at all: a wave that has not been created cannot be found by a
+  /// scheduler looking for due work.
+  scheduledAt DateTime?
+
   recipientCap  Int?
   dryRun        Boolean @default(false)
   expandedCount Int     @default(0)
@@ -4029,8 +4080,102 @@ model EmailCampaignWave {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  recipients EmailCampaignRecipient[]
+
   @@unique([campaignId, kind, sequence])
   @@index([status, createdAt])
+  @@index([status, scheduledAt])
+}
+
+/// The three conditions of section 13.3 that no field holds, recorded as
+/// somebody having said them.
+///
+/// An attestation with nowhere to live is a parameter a caller could pass
+/// `true` for. What makes it worth anything is who said it and when, so those
+/// are columns rather than a boolean.
+///
+/// `differences_stated` carries the body digest it was made against and stops
+/// counting when the copy moves -- it is a claim about the words, and the words
+/// moved. The other two are about the migration, which a copy edit does not
+/// undo. See lib/emailCampaignAttestationCore.ts.
+model EmailCampaignAttestation {
+  id         String        @id @default(cuid())
+  campaignId String
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  /// differences_stated | staging_verified | reconciliation_ready
+  kind String
+
+  attestedByEmail String
+  attestedAt      DateTime @default(now())
+
+  /// What the person wants the next reader to know. Never required: an empty
+  /// note is honest, an invented one is not.
+  note String?
+
+  /// The body digest at the moment this was made. NULL for kinds that are not
+  /// about the body.
+  contentDigest String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([campaignId, kind])
+}
+
+/// The campaign's record of who was in the audience, including the people it
+/// wrote nothing for.
+///
+/// `EmailDelivery` records what was sent. This answers the opposite question --
+/// who was considered and got nothing, and why -- which no other table can,
+/// because the reasons somebody is skipped are exactly the reasons no delivery
+/// row exists for them
+/// (.github/audits/model-lifecycle-email-2026-08-22.md §12.2).
+///
+/// `malformed` is a column rather than an `excludedReason`: an unreadable
+/// stored value means the account cannot be migrated automatically, not that it
+/// should be left uninformed. See lib/emailCampaignRecipientCore.ts.
+model EmailCampaignRecipient {
+  id         String        @id @default(cuid())
+  campaignId String
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  waveId String
+  wave   EmailCampaignWave @relation(fields: [waveId], references: [id], onDelete: Cascade)
+
+  /// Cascaded, unlike EmailDelivery's SetNull. A delivery row is evidence that
+  /// a required notice was delivered and outlives the account for that reason;
+  /// this row is the record that one was *not*, which nothing obliges anybody
+  /// to keep -- and it holds the address, so keeping it unlinked would be the
+  /// worse of the two outcomes rather than the safer one.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Recorded as it was at expansion, so the ledger still reads correctly after
+  /// the account changes address or language.
+  emailAddress        String?
+  language            String?
+  jurisdictionCountry String?
+
+  /// default_model | new_conversation_lead | conversation_selection
+  /// The strongest link when several apply; NULL only when the person is no
+  /// longer in any cohort, which is what `already_changed` means.
+  eligibilityReason String?
+
+  /// no_email | account_inactive | suppressed | no_consent | plan_incompatible
+  ///  | already_changed. NULL means a delivery row was written.
+  excludedReason String?
+
+  /// Set when this person did receive a row, so the ledger and the outbox can
+  /// be reconciled without matching on address.
+  deliveryId String? @unique
+
+  /// A stored value the parser could not read. Reported, never rewritten.
+  malformed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([waveId, userId])
+  @@index([campaignId, excludedReason])
 }
 
 model EmailTemplate {

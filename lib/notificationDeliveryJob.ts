@@ -7,6 +7,7 @@ import {
 } from "@/lib/notificationDeliveries";
 import { sweepExpiredCredentialDeliveries } from "@/lib/credentialEmailLane";
 import { drainStandardEmailDeliveries } from "@/lib/standardEmailLane";
+import { runDueCampaignWaves } from "@/lib/emailCampaignService";
 import { purgeExpiredWebhookEvents } from "@/lib/emailWebhookProcessing";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -84,6 +85,70 @@ export async function runNotificationDeliveryDrain(options?: {
     // moved, not only whether the operator queue did. Before EM-11 a failure
     // here left one console line and a green row for the run that contained
     // it.
+    // Waves that came due since the last tick, started before the drain rather
+    // than after it: a wave that expands here becomes delivery rows the same
+    // pass then carries out, so the mail leaves on the tick it was due for
+    // instead of the one after.
+    //
+    // Its own job key and its own try, for the reason the drain has one: this
+    // fails when an approval no longer covers the copy, the drain fails when a
+    // provider will not take the message, and one green row for both would say
+    // neither.
+    const schedulerRun = await startScheduledJob("campaign_wave_scheduler");
+    try {
+      const started = await runDueCampaignWaves();
+      await completeScheduledJob({
+        runId: schedulerRun?.id,
+        processedCount: started.filter((wave) => wave.started).length,
+        result: { waves: started },
+      });
+      // Only when something happened. A line every fifteen minutes saying no
+      // campaign was due is how a real one stops being read.
+      if (started.length > 0) {
+        console.info(
+          JSON.stringify({
+            event: "campaign_wave_scheduler",
+            due: started.length,
+            started: started.filter((wave) => wave.started).length,
+            refused: started
+              .filter((wave) => wave.refusal)
+              .map((wave) => wave.refusal),
+            at: new Date().toISOString(),
+          })
+        );
+      }
+      // A wave that came due and was refused is not a quiet skip. The schedule
+      // said send and something said no, and the gap between those two is
+      // exactly what nobody finds out about on their own.
+      const refused = started.filter((wave) => wave.refusal);
+      if (refused.length > 0) {
+        await reportOperationalIncident({
+          code: "CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE",
+          title: "A scheduled campaign wave came due and did not send",
+          error: refused
+            .map((wave) => `${wave.campaignId}/${wave.kind}: ${wave.refusal}`)
+            .join("; "),
+          severity: "warning",
+          cooldownMs: 30 * 60 * 1_000,
+          context: {
+            component: "campaign-wave-scheduler",
+            refused: refused.length,
+            due: started.length,
+          },
+        });
+      }
+    } catch (schedulerError) {
+      await failScheduledJob({ runId: schedulerRun?.id, error: schedulerError });
+      console.error(
+        JSON.stringify({
+          event: "campaign_wave_scheduler_failed",
+          reason:
+            schedulerError instanceof Error ? schedulerError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
     const userMailRun = await startScheduledJob("standard_email_drain");
     try {
       const userMail = await drainStandardEmailDeliveries();

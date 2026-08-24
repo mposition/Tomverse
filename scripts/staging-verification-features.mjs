@@ -52,6 +52,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/product-boundary-v1-2-staging-verification-records",
     },
     {
+        key: "assistant-package-import",
+        label: "external assistant package import (Agent Skill / native)",
+        checklist: "docs/ops/assistant-package-import-staging-checklist.md",
+        records: "docs/ops/assistant-package-import-staging-verification-records",
+    },
+    {
         key: "chat-attachment",
         label: "chat attachment formats (archives, legacy Office, GIF)",
         checklist: "docs/ops/chat-attachment-staging-checklist.md",

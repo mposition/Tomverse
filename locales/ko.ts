@@ -278,6 +278,7 @@ export const ko = {
         attachmentTypeError: "지원하지 않는 파일 형식입니다.",
         attachmentTypeMismatch: "파일 확장자와 실제 형식이 일치하지 않습니다.",
         attachmentEncodingUnreadable: "파일의 문자 인코딩을 읽을 수 없습니다.",
+        modelTemporarilyUnavailable: "이 모델은 현재 사용할 수 없습니다.",
         attachmentAnimatedImage: "애니메이션 GIF는 지원하지 않습니다. 정지 이미지로 변환해 주세요.",
         attachmentImageInvalid: "이미지가 손상되었거나 지원하지 않는 형식입니다.",
         attachmentPdfInvalid: "PDF가 손상되었거나 읽을 수 없습니다.",
