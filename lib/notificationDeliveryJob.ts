@@ -79,8 +79,19 @@ export async function runNotificationDeliveryDrain(options?: {
     // moves anything is a pass that moves nothing for a while. It is wrapped so
     // its failure cannot fail the operator drain -- the two queues fail
     // independently and should be reported that way.
+    //
+    // Recorded under its own job key so /admin/jobs shows whether user mail
+    // moved, not only whether the operator queue did. Before EM-11 a failure
+    // here left one console line and a green row for the run that contained
+    // it.
+    const userMailRun = await startScheduledJob("standard_email_drain");
     try {
       const userMail = await drainStandardEmailDeliveries();
+      await completeScheduledJob({
+        runId: userMailRun?.id,
+        processedCount: userMail.claimed,
+        result: userMail,
+      });
       if (userMail.claimed > 0) {
         console.info(
           JSON.stringify({
@@ -91,6 +102,10 @@ export async function runNotificationDeliveryDrain(options?: {
         );
       }
     } catch (drainError) {
+      // Recorded against its own run and swallowed, in that order. The two
+      // queues fail independently and are reported that way; what changed is
+      // that this failure now has somewhere to be seen.
+      await failScheduledJob({ runId: userMailRun?.id, error: drainError });
       console.error(
         JSON.stringify({
           event: "standard_email_drain_failed",

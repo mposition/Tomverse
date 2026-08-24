@@ -199,6 +199,18 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
   },
   {
+    key: "standard_email_drain",
+    name: "User email delivery drain",
+    // Its own key rather than folding into the operator queue's run, because
+    // the two queues fail independently: the operator drain succeeding said
+    // nothing about whether anybody's receipt went out, and the console showed
+    // one green row for both (EM-11). Same cron, since it runs on the same
+    // tick and inherits that cadence rather than having one of its own.
+    cron: "creditReconciliation",
+    schedule: scheduleSentence("creditReconciliation", "via credit reconciliation cron"),
+    maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
+  },
+  {
     key: "infrastructure_threshold_monitor",
     name: "Infrastructure threshold monitor",
     cron: "creditReconciliation",
