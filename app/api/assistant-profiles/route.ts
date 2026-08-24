@@ -40,7 +40,6 @@ import {
     clampSelectedModelsAgainstRuntime,
     getRuntimeModels,
 } from "@/lib/modelRegistry";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { authOptions } from "@/lib/auth";
 
 const createSchema = z
@@ -72,9 +71,12 @@ const createSchema = z
             .min(1)
             .max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters)
             .optional(),
+        // No floor, for the reason `modelIds` has none when publishing: an
+        // empty list is a profile that names no model, and refusing it here
+        // would make the same state a payload error on one route and the
+        // ordinary case on the other.
         modelIds: z
             .array(z.string().trim().min(1))
-            .min(1)
             .max(ASSISTANT_PROFILE_LIMITS.maxModels)
             .optional(),
     })
@@ -165,29 +167,19 @@ export async function GET(req: Request) {
  * the owner would find a profile running something they did not choose. So the
  * clamp is used as the check and a shortfall is a refusal.
  *
- * With no models named, the account's own new-conversation default stands in —
- * resolved server-side, because a client-supplied default is a client deciding
- * what this account may run.
+ * Naming none stays none (§14.0a). Filling in the account's default here was
+ * the older behaviour and it pinned a model nobody chose: the profile went on
+ * starting conversations on whatever the account's default was on the day it
+ * was created, and changing that default later left every existing assistant
+ * behind. An empty list means the profile names no model, and
+ * `POST /api/conversations` resolves the account's own new-conversation
+ * selection at the moment a conversation is actually started.
  */
 const resolveCreateModelIds = async (
     requested: string[] | undefined
 ): Promise<string[]> => {
+    if (requested === undefined || requested.length === 0) return [];
     const models = await getRuntimeModels();
-    if (requested === undefined) {
-        const fallback = clampSelectedModelsAgainstRuntime(
-            [APP_DEFAULTS.defaultModelId],
-            models,
-            1
-        );
-        if (fallback.length === 0) {
-            throw new AssistantProfileError(
-                503,
-                ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
-                "No model is available to create a profile with."
-            );
-        }
-        return fallback;
-    }
     const resolved = clampSelectedModelsAgainstRuntime(
         requested,
         models,

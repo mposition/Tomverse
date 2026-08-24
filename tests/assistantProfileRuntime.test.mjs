@@ -27,8 +27,7 @@ const runnable = (overrides = {}) => ({
     isAuthenticated: true,
     profilesFlagEnabled: true,
     hasActiveVersion: true,
-    modelEnabled: true,
-    modelPermittedByPlan: true,
+    namedModel: { enabled: true, permittedByPlan: true },
     promptFormatVersion: ASSISTANT_PROMPT_FORMAT_VERSION,
     ...overrides,
 });
@@ -59,9 +58,23 @@ test("availability is decided before the version's content", () => {
     // Telling somebody who cannot use profiles at all that their model was
     // retired is a message about the wrong thing.
     const decision = decideProfileRuntime(
-        runnable({ profilesFlagEnabled: false, modelEnabled: false })
+        runnable({
+            profilesFlagEnabled: false,
+            namedModel: { enabled: false, permittedByPlan: true },
+        })
     );
     assert.equal(decision.reason, "flag_off");
+});
+
+test("a version that names no model is not refused for a model", () => {
+    // Policy §14.0a. `null` is "this profile made no model choice", not "no
+    // model is available". Refusing here would drop the whole profile --
+    // instructions, knowledge and tools -- on a turn already running a model
+    // of its own, whose enablement and plan entitlement are checked where
+    // every other turn's are.
+    assert.deepEqual(decideProfileRuntime(runnable({ namedModel: null })), {
+        allowed: true,
+    });
 });
 
 test("a profile with no published version cannot start a conversation", () => {
@@ -75,8 +88,8 @@ test("a retired model and a plan that no longer includes it are one refusal", ()
     // different model. Nothing here picks one for them -- that substitution is
     // exactly what the code name exists to forbid.
     for (const overrides of [
-        { modelEnabled: false },
-        { modelPermittedByPlan: false },
+        { namedModel: { enabled: false, permittedByPlan: true } },
+        { namedModel: { enabled: true, permittedByPlan: false } },
     ]) {
         const decision = decideProfileRuntime(runnable(overrides));
         assert.equal(decision.reason, "model_unavailable");
