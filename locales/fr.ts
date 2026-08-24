@@ -283,6 +283,7 @@ export const fr = {
         attachmentTypeError: "Ce type de fichier n'est pas pris en charge.",
         attachmentTypeMismatch: "L'extension du fichier ne correspond pas à son format réel.",
         attachmentEncodingUnreadable: "L'encodage de caractères du fichier n'a pas pu être lu.",
+        modelTemporarilyUnavailable: "Ce modèle est temporairement indisponible.",
         attachmentAnimatedImage: "Les GIF animés ne sont pas pris en charge. Convertissez-le en image fixe.",
         attachmentImageInvalid: "L'image est endommagée ou dans un format non pris en charge.",
         attachmentPdfInvalid: "Le PDF est endommagé ou illisible.",

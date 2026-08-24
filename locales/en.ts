@@ -274,6 +274,7 @@ export const en = {
         attachmentTypeError: "This file type is not supported.",
         attachmentTypeMismatch: "The file's extension does not match its actual format.",
         attachmentEncodingUnreadable: "The file's character encoding could not be read.",
+        modelTemporarilyUnavailable: "This model is temporarily unavailable.",
         attachmentAnimatedImage: "Animated GIFs are not supported. Convert it to a still image.",
         attachmentImageInvalid: "The image is damaged or in an unsupported format.",
         attachmentPdfInvalid: "The PDF is damaged or could not be read.",

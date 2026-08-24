@@ -1252,10 +1252,31 @@ function ChatAppComponent({
               replacementModelName
             )
           : t("chat.modelRetired");
+        // MODEL_TEMPORARILY_UNAVAILABLE carries the same kind of payload
+        // (EM-15). Two fields rather than one, because they are not the same
+        // thing: a copy key is a fact this app knows how to say in seven
+        // languages, while an operator's note is their words in whatever
+        // language they wrote them, and rendering the second as if it were the
+        // first is how one English sentence reached every locale.
+        const details =
+          requestError.details && typeof requestError.details === "object"
+            ? (requestError.details as Record<string, unknown>)
+            : null;
+        const noticeCopyKey =
+          typeof details?.noticeCopyKey === "string" ? details.noticeCopyKey : null;
+        const noticeText =
+          typeof details?.noticeText === "string" ? details.noticeText : null;
+        const unavailableMessage = noticeCopyKey
+          ? replacementModelName
+            ? t(noticeCopyKey).replace("{model}", replacementModelName)
+            : t(noticeCopyKey)
+          : noticeText;
         setAssistantMessage(
           assistantMessageId,
           `${errorCode === "MODEL_RETIRED"
             ? retiredMessage
+            : errorCode === "MODEL_TEMPORARILY_UNAVAILABLE" && unavailableMessage
+            ? unavailableMessage
             : localizedRequestError || typeof requestError.publicMessage === "string"
               ? localizedRequestError || requestError.publicMessage
               : t("chat.responseError")}${

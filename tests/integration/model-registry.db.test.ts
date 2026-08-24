@@ -616,9 +616,16 @@ test("stores limited availability and operational notes in the registry", async 
   assert.equal(model.status, "limited");
   assert.equal(model.operationalReason, "Integration-test provider throttling");
   assert.equal(model.userVisibleNote, "This model is temporarily limited.");
+  // An operator's own note survives on a model that still answers -- a note
+  // explaining throttling is exactly that case -- and travels as their words
+  // rather than as a copy key, because nothing can translate it (EM-15).
   assert.deepEqual(await assertModelRuntimeAvailable(modelId), {
     allowed: true,
     reason: "This model is temporarily limited.",
+    notice: {
+      source: "operator",
+      text: "This model is temporarily limited.",
+    },
   });
 });
 
