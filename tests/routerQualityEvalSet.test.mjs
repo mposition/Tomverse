@@ -30,7 +30,7 @@ const item = (overrides = {}) => ({
   adoptedBy: null,
   adoptedAt: null,
   // A drafted item records its drafter, because that drafter is the confound
-  // §8 makes a person weigh before adopting.
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8 makes a person weigh before adopting.
   draftProvenance: {
     batchId: "test-batch",
     provider: "openai",

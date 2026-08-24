@@ -15,7 +15,8 @@
  *
  * ## The Korean rule is enforced here, not left to the prompt
  *
- * §2: *"Korean is a first-class cell in every stratum, not a translation of the
+ * docs/ops/tomverse-chat-router-evaluation-set.md §2:
+ * *"Korean is a first-class cell in every stratum, not a translation of the
  * English one. Translated prompts measure translation quality, not Korean
  * usage."* A drafting model handed an English list and asked for Korean will
  * translate, because that is the easier task and nothing in the request
@@ -34,8 +35,9 @@ export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v1";
 /**
  * What each stratum is for, in the drafter's terms.
  *
- * Taken from §2's "why it is separate" column rather than reworded, so the
- * drafter is aiming at the thing the stratum exists to measure.
+ * Taken from the "why it is separate" column of
+ * docs/ops/tomverse-chat-router-evaluation-set.md §2 rather than reworded, so
+ * the drafter is aiming at the thing the stratum exists to measure.
  */
 export const STRATUM_BRIEF: Readonly<Record<EvalStratum, string>> = {
   general_question_answering:
@@ -74,7 +76,10 @@ export type DraftRequest = {
   avoid: readonly string[];
 };
 
-/** A drafter from a family that is also a routing candidate. §8's confound. */
+/**
+ * A drafter from a family that is also a routing candidate -- the confound
+ * named by docs/ops/tomverse-chat-router-evaluation-set.md §8.
+ */
 export const isRoutableFamily = (provider: string, routableProviders: readonly string[]): boolean =>
   routableProviders.includes(provider);
 

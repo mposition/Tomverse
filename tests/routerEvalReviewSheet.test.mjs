@@ -76,7 +76,7 @@ test("the sheet leaves every verdict empty", () => {
     assert.ok(!/adoptedBy["\s:]+["a-z]/i.test(sheet));
 });
 
-// §8/§11. The agent drafts; a person adopts. An adopted item arriving from a
+// docs/ops/tomverse-chat-router-evaluation-set.md §8/§11. The agent drafts; a person adopts. An adopted item arriving from a
 // drafting run is the one outcome the whole procedure is built to prevent, so
 // the sheet says so loudly rather than rendering it as a normal row.
 test("an already-adopted item in a drafted batch is called a rule violation", () => {
@@ -191,7 +191,7 @@ test("an unreconstructable drafter passes validation and is counted separately",
 
 // --- cell fill --------------------------------------------------------------
 
-// §2: a short cell makes the set unjudgeable and is never averaged away, so
+// docs/ops/tomverse-chat-router-evaluation-set.md §2: a short cell makes the set unjudgeable and is never averaged away, so
 // every cell gets a row -- including the full ones. If only short cells were
 // returned, an empty result would mean both "all full" and "nothing counted".
 test("every cell is reported, and candidates never count towards the target", () => {

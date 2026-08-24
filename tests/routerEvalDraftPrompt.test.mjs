@@ -10,7 +10,7 @@ import {
 
 const base = { stratum: "coding", cell: "ko", count: 14, avoid: [] };
 
-// §2: "Korean is a first-class cell in every stratum, not a translation of the
+// docs/ops/tomverse-chat-router-evaluation-set.md §2: "Korean is a first-class cell in every stratum, not a translation of the
 // English one. Translated prompts measure translation quality, not Korean
 // usage." A drafting model handed the English cell and asked for Korean will
 // translate it, because that is the easier task. So the instruction has to say
@@ -62,7 +62,7 @@ test("the count must be a whole positive number", () => {
     }
 });
 
-// §8 bans personal data, credentials and customer-identifying content from the
+// docs/ops/tomverse-chat-router-evaluation-set.md §8 bans personal data, credentials and customer-identifying content from the
 // set, including invented ones that look real.
 test("the sourcing bans are in the instruction, not left to judgement", () => {
     const instruction = draftInstruction(base);

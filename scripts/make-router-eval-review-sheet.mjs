@@ -82,5 +82,6 @@ for (const batchId of batchIds) {
 
 console.log(
   `\n${written} sheet(s) written. Nothing was adopted: every item stays status: candidate\n` +
-    "until a person records an adopter and a date, which §8 and §11 reserve for them."
+    "until a person records an adopter and a date, which the evaluation-set procedure\n" +
+    "reserves for them: docs/ops/tomverse-chat-router-evaluation-set.md."
 );

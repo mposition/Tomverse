@@ -6,9 +6,9 @@
 // ## Provider-neutral, and deliberately not Claude
 //
 // The drafter is chosen by model id from the catalogue, so no provider is
-// wired in. That matters for one reason: §8 of
-// docs/ops/tomverse-chat-router-evaluation-set.md warns that a set drafted by
-// a routable model measures how well that model handles its own phrasing, and
+// wired in. That matters for one reason, from
+// docs/ops/tomverse-chat-router-evaluation-set.md §8: a set drafted by a
+// routable model measures how well that model handles its own phrasing, and
 // claude-sonnet-5 and claude-haiku-4-5 are routable. An agent of the same
 // family drafting the whole set would tilt it toward that family's style.
 //
@@ -18,7 +18,8 @@
 // ## It drafts; it does not adopt
 //
 // Every item is written status: candidate with adoptedBy and adoptedAt null.
-// §8 and §11 reserve adoption for a person. Nothing here writes a verdict.
+// docs/ops/tomverse-chat-router-evaluation-set.md §8, §11 reserve adoption
+// for a person. Nothing here writes a verdict.
 //
 // ## This sends real requests and costs money
 //
@@ -40,7 +41,10 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
 
 const SET_PATH = "docs/ops/router-evaluation-set/development-v0.json";
-/** Families that are themselves routing candidates. §8's confound. */
+/**
+ * Families that are themselves routing candidates -- the confound named by
+ * docs/ops/tomverse-chat-router-evaluation-set.md §8.
+ */
 const ROUTABLE_PROVIDERS = [...new Set(AVAILABLE_MODELS.filter((m) => m.enabled).map((m) => m.provider))];
 
 const args = process.argv.slice(2);
@@ -88,7 +92,7 @@ if (configuration.protocol !== "openai-compatible" && model.provider !== "openai
 if (ROUTABLE_PROVIDERS.includes(model.provider) && !allowRoutable) {
   die(
     `${modelId} is served by ${model.provider}, which is a routing candidate.\n\n` +
-      "§8: a set drafted by a routable model measures how well that model handles its\n" +
+      "A set drafted by a routable model measures how well that model handles its\n" +
       "own phrasing. Every provider in the catalogue is routable, so this will fire for\n" +
       "any of them -- what it is protecting against is drafting the whole set with one\n" +
       "family, and Claude in particular, since the agent doing this work is Claude.\n\n" +
@@ -180,7 +184,7 @@ const language =
     : { prompt: cell, expectedResponse: cell };
 
 // Whatever the provider actually called itself. Never the id we asked for:
-// §8's confound is about the model that answered, and an echo of the request
+// The confound is about the model that ANSWERED, and an echo of the request
 // would look like a record while recording nothing.
 const modelVersion = typeof payload?.model === "string" && payload.model.trim() ? payload.model.trim() : null;
 
@@ -231,6 +235,7 @@ if (drafted.length < count) {
   );
 }
 console.log(
-  `\n  Every item is status: candidate. Adoption is §8/§11's human act.\n` +
+  `\n  Every item is status: candidate. Adoption is a human act, reserved by the\n` +
+    `  procedure in docs/ops/tomverse-chat-router-evaluation-set.md.\n` +
     `  Next: npm run make:router-eval-review-sheet -- --batch=${resolvedBatch}`
 );

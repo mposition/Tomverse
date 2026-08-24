@@ -9,10 +9,9 @@
  *
  * What the sheet is allowed to decide: nothing. It carries the machine checks
  * that were already run, ranks where to look for template reuse, and leaves a
- * verdict column empty. §8 and §11 of
- * `docs/ops/tomverse-chat-router-evaluation-set.md` reserve adoption for a
- * person, so this file never writes a verdict, and the generator never sets
- * `status: adopted`.
+ * verdict column empty. Adoption is reserved for a person by
+ * docs/ops/tomverse-chat-router-evaluation-set.md §8, §11, so this file never
+ * writes a verdict and the generator never sets `status: adopted`.
  *
  * Pure: it takes a set and a batch id and returns Markdown. The script reads
  * and writes the files.
@@ -153,7 +152,7 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
     "채택은 이 시트로 확정되지 않습니다. `status: adopted`와 `adoptedBy`·`adoptedAt`은 사람이"
   );
   lines.push(
-    "기입하는 값이고(§8·§11), 에이전트 산출물은 어떤 경우에도 `status: candidate`입니다."
+    "기입하는 값이고, 에이전트 산출물은 어떤 경우에도 `status: candidate`입니다."
   );
   lines.push("");
   lines.push("---");
@@ -179,18 +178,18 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
   }
   if (!drafterIsRoutableFamily) {
     lines.push(
-      "> **이 batch의 초안 생성자를 재구성할 수 없습니다.** provider가 `unrecorded`입니다. §8은"
+      "> **이 batch의 초안 생성자를 재구성할 수 없습니다.** provider가 `unrecorded`입니다."
     );
     lines.push(
-      "> 초안 생성 모델을 검수자가 저울질해야 할 교란 요인으로 규정하는데, 이 항목들은 그"
+      "> 절차 문서는 초안 생성 모델을 검수자가 저울질해야 할 교란 요인으로 규정하는데,"
     );
     lines.push(
-      "> 저울질을 할 수 없습니다. 그 사유만으로 반려하셔도 됩니다."
+      "> 이 항목들은 그 저울질을 할 수 없습니다. 그 사유만으로 반려하셔도 됩니다."
     );
     lines.push("");
   }
   lines.push(
-    "§8: *\"A set drafted by a routable model measures how well that model handles its own"
+    "*\"A set drafted by a routable model measures how well that model handles its own"
   );
   lines.push(
     "phrasing.\"* 초안 모델과 같은 계열이 라우팅 후보에 있다면, 그 계열에 유리한 문체·문제"
