@@ -401,6 +401,81 @@ export async function mockDeepResearchStatus(page: Page, response: DeepResearchS
   });
 }
 
+/** One answer to one poll of the deep-research status endpoint. */
+export type DeepResearchStatusOutcome =
+  | { status: "in_progress" }
+  | { status: "completed"; content: string }
+  | { status: "failed"; error: string };
+
+/**
+ * A deep-research job whose *polls* the test answers one at a time.
+ *
+ * `mockDeepResearchStatus` above fixes one answer for the whole test, which is
+ * enough to paint a state but cannot express a job that changes while nobody is
+ * watching -- and that is the only interesting thing a conversation switch does
+ * to it. The alternative to this is waiting out the client's real 5s poll
+ * interval on every transition, which turns each assertion into a bet on
+ * wall-clock timing.
+ *
+ * So each poll is parked until the test answers it. The client is then always
+ * inside `fetch`, never inside the interval sleep, and "the job is still
+ * running" is a state the test holds. `pollCount` is part of the contract, not
+ * a diagnostic: re-attaching to a running job must not start a *second* poll
+ * for it, and the count is the only way to see that from outside.
+ */
+export type DeepResearchStatusController = {
+  /** Resolves once the client has polled at least `count` times. */
+  waitForPoll(count?: number): Promise<void>;
+  /** Answers the oldest poll still parked. */
+  answerPoll(outcome: DeepResearchStatusOutcome): Promise<void>;
+  /** How many polls the client has made since installation. */
+  pollCount(): number;
+};
+
+export async function installDeepResearchStatusController(
+  page: Page
+): Promise<DeepResearchStatusController> {
+  const parked: Array<(outcome: DeepResearchStatusOutcome) => Promise<void>> = [];
+  let seen = 0;
+
+  await page.route("**/api/chat/deep-research/status", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    seen += 1;
+    // Deliberately not awaited: the route stays open until answerPoll settles
+    // it, which is what parks the client inside its own fetch.
+    parked.push((outcome) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(outcome),
+      })
+    );
+  });
+
+  return {
+    pollCount: () => seen,
+    waitForPoll: async (count = 1) => {
+      await expect
+        .poll(() => seen, {
+          message: `waiting for deep-research poll #${count}`,
+        })
+        .toBeGreaterThanOrEqual(count);
+    },
+    answerPoll: async (outcome) => {
+      const settle = parked.shift();
+      if (!settle) {
+        throw new Error(
+          "No deep-research poll is parked; call waitForPoll() before answering."
+        );
+      }
+      await settle(outcome);
+    },
+  };
+}
+
 export type GuestUsagePatch = {
   /** Spendable guest credits, as the server would report them. */
   creditsAvailable?: number;

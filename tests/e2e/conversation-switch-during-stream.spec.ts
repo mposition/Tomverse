@@ -5,6 +5,8 @@ import {
   MOBILE_VIEWPORT,
   finishControlledStream,
   installChatModelStub,
+  installDeepResearchStatusController,
+  mockUserUsage,
   pushControlledChunk,
   restoreActiveConversation,
   setDeterministicTheme,
@@ -12,6 +14,7 @@ import {
   suppressTransientUi,
   waitForControlledStream,
   type ChatModelStubSpec,
+  type DeepResearchStatusController,
 } from "./support/chat-state-fixtures";
 
 // ---------------------------------------------------------------------------
@@ -519,6 +522,254 @@ for (const shell of SHELLS) {
       ).toBeVisible();
 
       await finishControlledStream(page, "stream-a");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    });
+  });
+}
+
+// ===========================================================================
+// STREAM-STATE-002: the same guarantee for a deep-research job.
+//
+// Deep research is the one answer that does not stream. `perplexity/
+// sonar-deep-research` cannot, so app/api/chat/route.ts submits it as a job
+// and answers immediately with `X-Chat-Response-Mode: async-job`; the panel
+// then polls /api/chat/deep-research/status until the job reaches a terminal
+// state. That poll is a plain async loop, not a subscription, and it outlives
+// the panel that started it -- which is exactly why it needs the same
+// per-conversation runtime key an ordinary stream needs.
+//
+// It is also the case where losing the state costs the most. A deep-research
+// turn is 16 credits and runs for minutes, so "leave the conversation and the
+// answer is gone" is not a repaint away from being fixed: the job has been
+// paid for, it is still running server-side, and nothing in the UI would ever
+// show it again.
+//
+// Two contracts, and the second is not visible from inside the page at all:
+//
+//   1. the job writes to its own conversation's key, so leaving and returning
+//      shows the phase it is in, or the answer if it finished while away;
+//   2. re-attaching to a running job must not start a *second* poll for it.
+//      `pollCount` is how that is asserted -- a duplicate poll would double
+//      the request rate against a job the user is already paying for, and
+//      nothing on screen would look wrong.
+//
+// The polls are answered by the test rather than by a timer (see
+// `installDeepResearchStatusController`), so none of this waits out the
+// client's real 5s interval.
+// ===========================================================================
+
+const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
+const DEEP_RESEARCH_CONVERSATION = "qa-conversation-deep-research";
+const DEEP_RESEARCH_ANSWER = "The finished deep research report.";
+const RESUMED_JOB_ID = "qa-deep-research-job-resumed";
+
+/**
+ * A workspace whose primary conversation compares the deep-research model.
+ *
+ * The plan is raised to Pro because that model's `minimumPlan` is Pro and the
+ * shared auth fixture reports Free. This is a fixture fact, not a claim about
+ * entitlement: what is under test is the job's runtime state across a switch,
+ * and a composer refusing the send for a plan reason would test the refusal
+ * instead.
+ */
+async function openDeepResearchWorkspace(
+  page: Page,
+  shell: Shell,
+  options: { pendingJob?: boolean } = {}
+): Promise<DeepResearchStatusController> {
+  await mockAuthenticatedApi(page, {
+    selectedModels: [DEEP_RESEARCH_MODEL],
+    messages: [
+      { id: "seed-user-dr", role: "user", content: "Research this for me." },
+      ...(options.pendingJob
+        ? [
+            {
+              // The state a reload lands in: the job outlived the page, and
+              // the transcript says which job to re-attach to.
+              id: "seed-assistant-dr",
+              role: "assistant" as const,
+              content: "",
+              modelId: DEEP_RESEARCH_MODEL,
+              status: "pending",
+              pendingJobId: RESUMED_JOB_ID,
+            },
+          ]
+        : [
+            {
+              id: "seed-assistant-dr",
+              role: "assistant" as const,
+              content: "An earlier report in this conversation.",
+              modelId: DEEP_RESEARCH_MODEL,
+            },
+          ]),
+    ],
+    extraConversations: [
+      {
+        id: DEEP_RESEARCH_CONVERSATION,
+        title: "Ordinary QA conversation",
+        selectedModels: [DEFAULT_MODEL],
+        messages: [
+          { id: "seed-user-dr-2", role: "user", content: "Second conversation seed." },
+          {
+            id: "seed-assistant-dr-2",
+            role: "assistant",
+            content: OTHER_ANSWER,
+            modelId: DEFAULT_MODEL,
+          },
+        ],
+      },
+    ],
+  });
+  await mockUserUsage(page, { plan: "Pro" });
+  // Before the navigation, not after it. A conversation seeded with a pending
+  // job re-attaches to it *during load*, so a controller installed after
+  // `goto` would miss that first poll -- it would reach the real endpoint
+  // instead, and the test would sit waiting for a poll it never saw.
+  const research = await installDeepResearchStatusController(page);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.setViewportSize(shell.viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(
+    page.getByTestId(
+      shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
+    )
+  ).toBeVisible();
+  await installChatModelStub(page, {
+    [DEEP_RESEARCH_MODEL]: { kind: "async-job" },
+  });
+  return research;
+}
+
+/** The phase text the panel paints before its first poll returns. */
+const researchingStatus = (page: Page) =>
+  page
+    .getByTestId("chat-message-list")
+    .getByText("심층 리서치 요청 중", { exact: false });
+
+for (const shell of SHELLS) {
+  test.describe(`STREAM-STATE-002 (${shell.name}): deep research is per conversation`, () => {
+    test("a job that finished while away is shown on return, once", async ({
+      page,
+    }) => {
+      const research = await openDeepResearchWorkspace(page, shell);
+
+      await submitComposer(page, "Research this deeply.", shell.viewport.width);
+      // The job is submitted and the panel is waiting on its first poll.
+      await research.waitForPoll();
+      await expect(researchingStatus(page)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await switchToConversation(page, shell, DEEP_RESEARCH_CONVERSATION);
+      // The job belongs to the conversation it was started in. This one has
+      // never run anything, so it is free -- and shows none of the job's state.
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await expect(researchingStatus(page)).toHaveCount(0);
+
+      // The job finishes while no panel is mounted on its conversation. Under
+      // the old per-component state this write had nowhere to land.
+      await research.answerPoll({
+        status: "completed",
+        content: DEEP_RESEARCH_ANSWER,
+      });
+      await expect(page.getByText(DEEP_RESEARCH_ANSWER)).toHaveCount(0);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      const report = page.getByText(DEEP_RESEARCH_ANSWER, { exact: false });
+      await expect(report).toBeVisible();
+      // Once: not joined by a second copy re-read from the server, and not
+      // replaced by the phase text the job was last showing.
+      await expect(report).toHaveCount(1);
+      await expect(researchingStatus(page)).toHaveCount(0);
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+    });
+
+    test("returning to a running job shows it running, stops it, and never double-polls", async ({
+      page,
+    }) => {
+      const research = await openDeepResearchWorkspace(page, shell);
+
+      await submitComposer(page, "Research this deeply.", shell.viewport.width);
+      await research.waitForPoll();
+      await expect(researchingStatus(page)).toBeVisible();
+
+      await switchToConversation(page, shell, DEEP_RESEARCH_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await switchToConversation(page, shell, "qa-conversation");
+
+      // Still running, and it says so -- with a stop that reaches the job.
+      await expect(researchingStatus(page)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+      const stopButton = page.getByTestId("stop-this-response");
+      await expect(stopButton).toBeVisible();
+
+      // Contract 2. The panel remounted twice; the job is one job, so the
+      // poll it is parked on is still the only one that was ever made.
+      expect(research.pollCount()).toBe(1);
+
+      await stopButton.click();
+
+      // A deep-research stop is not instant, and the test says so rather than
+      // hiding it. The poll checks its abort signal at the top of each tick --
+      // the signal is deliberately not passed into `fetch`, because each poll
+      // is a short independent request and there is no long-held connection to
+      // tear down -- so a stop lands within one poll interval. Answering the
+      // parked poll here is what lets the loop reach that check: without it the
+      // client sits inside a fetch that the test is holding open, which is a
+      // property of this fixture and not of the product.
+      await research.answerPoll({ status: "in_progress" });
+
+      // A stop is a client-side detachment -- the job keeps running server
+      // side -- so what has to be true is that this conversation says it
+      // stopped and gives the composer back. The timeout covers the client's
+      // real 5s poll interval.
+      const settled = { timeout: 15_000 };
+      await expect(
+        page
+          .getByTestId("chat-message-list")
+          .getByText("응답 생성이 중지되었습니다", { exact: false })
+      ).toBeVisible(settled);
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled(settled);
+      await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+      // The abort is seen before the next request goes out, so the stopped job
+      // is not polled again.
+      expect(research.pollCount()).toBe(1);
+    });
+
+    test("a job restored from the transcript is re-attached exactly once", async ({
+      page,
+    }) => {
+      // No send here: the conversation is *loaded* holding a pending job, which
+      // is the state a reload mid-research lands in. The re-attach is what puts
+      // the UI back on it.
+      const research = await openDeepResearchWorkspace(page, shell, {
+        pendingJob: true,
+      });
+
+      await research.waitForPoll();
+      await expect(researchingStatus(page)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await switchToConversation(page, shell, DEEP_RESEARCH_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await switchToConversation(page, shell, "qa-conversation");
+
+      await expect(researchingStatus(page)).toBeVisible();
+      // The re-attach is recorded on the runtime key, not in a per-component
+      // ref, so returning to the conversation does not start a second poll for
+      // the job the first one is still watching.
+      expect(research.pollCount()).toBe(1);
+
+      await research.answerPoll({
+        status: "completed",
+        content: DEEP_RESEARCH_ANSWER,
+      });
+      await expect(page.getByText(DEEP_RESEARCH_ANSWER, { exact: false })).toBeVisible();
       await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     });
   });

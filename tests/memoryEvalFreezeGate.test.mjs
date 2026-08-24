@@ -37,10 +37,16 @@ test("the PR gate runs the freeze check", () => {
     const packageJson = JSON.parse(
         readFileSync(new URL("../package.json", import.meta.url), "utf8")
     );
-    assert.match(
-        packageJson.scripts["check:memory-eval-freeze"] ?? "",
-        new RegExp(SCRIPT.replace(/[/.]/g, "\\$&")),
-        "the npm script the workflow calls should reach this script"
+    // A substring test, said as one. This was a regex built from `SCRIPT` with
+    // `/` and `.` escaped, which is every metacharacter that path happens to
+    // contain today and none of the ones a future path might -- a `+` or a `(`
+    // in a renamed script would quietly change what the assertion matches, and
+    // a backslash would make it a regex nobody wrote. The question here is only
+    // whether the npm script names this file, and `includes` asks exactly that.
+    const script = packageJson.scripts["check:memory-eval-freeze"] ?? "";
+    assert.ok(
+        script.includes(SCRIPT),
+        `the npm script the workflow calls should reach ${SCRIPT}, got: ${script}`
     );
 });
 

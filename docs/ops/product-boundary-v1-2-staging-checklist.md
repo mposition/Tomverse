@@ -16,7 +16,7 @@
 `product-boundary-v1-2-staging-verification-records/`에 **날짜와 전체 deploy
 SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-23e`
+- **template revision**: `2026-08-24a`
 - 실행 방법과 파일 이름 규칙:
   `product-boundary-v1-2-staging-verification-records/README.md`
 - 기록 template:
@@ -34,7 +34,7 @@ SHA로 이름 붙인 별도 파일**로 남습니다.
 | `RoutingRun` 인덱스 2개 + 즉시 검증 FK | **배포 중 쓰기를 막습니다.** 막힌 동안 실패한 턴은 되돌릴 수 없음 | **차단 A-1** |
 | 새 `productKey` 값이 틀리게 저장됨 | 아직 아무 reader도 읽지 않음(`PRODUCT_KEY_READ_MODE` 미배선). `UPDATE`로 정정 가능 | 차단 아님 |
 | 대화 생성 경로가 깨짐 | 고쳐서 배포하면 끝. 다만 **폭발 반경이 전체**이고 확인이 무료 | **차단 B** |
-| 이름이 바뀐 이메일 | **발송된 메일은 회수되지 않습니다.** `buildAccountWelcomeEmail`과 billing 계열은 render 테스트가 없습니다 | **차단 C** |
+| 이름이 바뀐 이메일 | **발송된 메일은 회수되지 않습니다.** `buildAccountWelcomeEmail`과 billing 계열은 render 테스트가 없습니다 | **차단 C** (폐기명만. 브랜드 층위는 관측 — `docs/ops/tomverse-review-rename.md` §7) |
 | Stripe line item 이름 | 발행된 invoice는 수정 불가하나 크레딧노트·재발행이 성립. `AGENTS.md`가 잘못된 과금을 되돌릴 수 있음으로 분류 | 차단 아님 |
 | SEO·OG·`SITE_NAME` | 색인은 재크롤로 회복. 기준값도 16개월은 남으나, **property가 검증돼 있지 않으면 소급 수집이 없음** | **배포 전 선행 P-1** |
 | 생성 파일 `dc:creator` | 다운로드된 파일은 회수 불가하나, 아무 표면도 읽지 않는 메타데이터 | 차단 아님 |
@@ -331,9 +331,38 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
 
 ## C. 회수되지 않는 표면
 
+이 구획은 **서로 다른 두 가지**를 봅니다. 섞으면 둘 다 놓칩니다.
+
+| | 질문 | 성격 |
+|---|---|---|
+| **(a) 폐기명** | `Tomverse Insight`가 남아 있는가 | **차단** |
+| **(b) 브랜드 층위** | 새 이름이 맞는 층위에 있는가 | **관측·기록** |
+
+(b)를 차단으로 올리지 않는 이유는 `AGENTS.md`의 기준 그대로입니다 — 층위가 어긋난
+이름을 받은 사람이 잃는 것이 없습니다. 그래도 **메일은 회수되지 않으므로** 무엇이
+나갔는지는 남겨야 합니다.
+
+### (b)를 판정하는 법 — 문자열 검색으로는 안 됩니다
+
+규칙은 `docs/ops/tomverse-review-rename.md` §7입니다. `Tomverse`는 상위 브랜드이자
+공용 플랫폼이고, Chat·Review·Studio·Code는 그 아래 제품입니다. **이메일은 어느
+화면에서 발생했는가가 아니라 무엇에 대해 책임지는가로 분류합니다.**
+
+판정에 필요한 사실이 하나 있습니다. **현재 등록된 사용자 이메일 템플릿은 전부
+플랫폼 공용입니다** — 로그인 코드, 계정 환영·삭제 예정·복구, billing welcome, founding
+tester pass 3종, plan 변경, 모델 출시 (`lib/emailTemplateDefinitions.ts`). **제품 전용
+이메일은 아직 하나도 없습니다.**
+
+그래서 오늘 이 구획의 (b)는 한 줄로 판정됩니다:
+
+> **제품명(`Tomverse Review` 등)을 쓰는 사용자 이메일은 전부 범위 불일치입니다.**
+> 그것을 정당화할 제품 전용 이메일이 존재하지 않기 때문입니다.
+
+이미 알려진 불일치 목록은 `docs/ops/tomverse-review-rename.md` §7.6에 있습니다. **거기 없는 것이 나오면 그것이 발견입니다.**
+
 - [ ] **C-1** staging에서 계정을 하나 만들고 **welcome 메일을 실제로 받는다.**
 
-  확인: 제목·본문·발신 표시 이름에 `Tomverse Insight`가 **없을 것**.
+  **(a) 폐기명 — 차단.** 제목·본문·발신 표시 이름에 `Tomverse Insight`가 **없을 것**.
 
   이 항목이 필수인 이유는 문구가 중요해서가 아니라 **`buildAccountWelcomeEmail`에
   render 테스트가 없기 때문입니다.** `buildAccountDeletionScheduledEmail`과
@@ -341,12 +370,51 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
   렌더까지 확인하므로 여기서 다시 볼 필요가 없습니다. 메일은 회수되지 않으므로,
   테스트가 덮지 않는 경로만 사람이 한 번 봅니다.
 
+  **(b) 층위 — 네 슬롯을 따로 적습니다.** 계정 환영은 **플랫폼 공용**이므로 네 곳
+  모두 `Tomverse`가 맞습니다.
+
+  | 슬롯 | 적을 것 |
+  |---|---|
+  | 발신 표시 이름 | 관측한 이름 (환경변수 소관 — §5.4) |
+  | 제목 | 관측한 이름 |
+  | 본문 헤더/브랜드 셸 | 관측한 이름 |
+  | 본문 CTA | 관측한 이름 |
+
+  본문 CTA만은 예외입니다 — 가입 진입점이 특정 제품이면 **CTA에서만** 그 제품을
+  안내할 수 있습니다(`docs/ops/tomverse-review-rename.md` §7.4). `"Tomverse Review 계정이 생성되었습니다"`처럼 **계정을
+  제품의 것으로 말하면** 공유 계정 구조와 충돌하므로, 그 표현이 보이면 적으십시오.
+
+  네 슬롯이 서로 다른 층위를 말하면 그것도 관측입니다
+  (`docs/ops/tomverse-review-rename.md` §7.5 4번).
+
 - [ ] **C-2** Stripe **test mode**에서 결제를 한 번 완료한다. *(test mode가
       없으면 `미기록`)*
 
-  확인 두 가지 — Checkout 화면의 line item 이름, 그리고 도착한 billing welcome
-  메일. billing builder 계열도 render 테스트가 없고, `lib/billingEmails.ts`에는
-  이름이 바뀐 문자열이 가장 많습니다.
+  **(a) 폐기명 — 차단.** Checkout 화면과 billing welcome 메일 어디에도
+  `Tomverse Insight`가 없을 것.
+
+  billing builder 계열은 render 테스트가 없고, `lib/billingEmails.ts`에 이름이 바뀐
+  문자열이 가장 많습니다.
+
+  **(b) 층위.** 결제는 계정에 대한 것이므로 **플랫폼 공용**입니다 — Review 화면에서
+  시작해도 그렇습니다. C-1과 같은 네 슬롯을 적고, 여기에 하나를 더합니다.
+
+  | 슬롯 | 적을 것 |
+  |---|---|
+  | Checkout line item 이름 | 관측한 이름 **과 그것이 어디서 왔는지** |
+
+  **line item은 코드에서 안 나올 수 있습니다.** `plan.stripeProductId`가 설정돼
+  있으면 코드의 `Tomverse Review {plan}`은 쓰이지 않고 **Stripe 대시보드의 Product
+  이름**이 표시됩니다(`app/api/billing/checkout/route.ts:318-322`). 그러므로:
+
+  | 화면에 보이는 것 | 무엇을 검증한 것인가 |
+  |---|---|
+  | `Tomverse {plan}` 계열 | Stripe 카탈로그. 코드 경로는 **미검증** |
+  | `Tomverse Review {plan}` | 코드 fallback 경로 |
+  | `Tomverse Insight …` | **(a) 실패** — 그리고 Stripe 대시보드 소관 |
+
+  결제 화면과 결제 메일이 **서로 다른 이름**을 말하면, 그 자체가
+  `docs/ops/tomverse-review-rename.md` §7.5 4번이 묻는 모순입니다. 둘 다 적으십시오.
 
 ---
 
