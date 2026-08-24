@@ -54,6 +54,33 @@ validator 테스트 두 개가 여기 있는 이유는 §12.3의 마지막 조�
 유효합니다(§12.2 조건부 요건 4개). 둘 중 하나가 깨지면 이 회차는 성립하지
 않습니다.
 
+## 2.5 실행 환경
+
+**이 회차는 배포 환경이 아닙니다.** production도 staging도 아니고, Railway
+console에서 도는 것도 아닙니다 — 그곳에는 git checkout이 없고, 애초에 필요한
+것도 아닙니다.
+
+필요한 것은 넷뿐입니다.
+
+| 필요 | 왜 |
+|---|---|
+| 저장소 checkout (clean tree) | harness가 `commitSha`와 `workingTreeDirty`를 artifact에 적습니다 |
+| `npm ci` | `tsx`와 AI SDK |
+| `OPENAI_API_KEY` | 유일한 자격증명. gate와 실제 호출이 **같은 변수**를 봅니다 |
+| OpenAI로 나가는 네트워크 | |
+
+**데이터베이스는 필요 없습니다.** live 경로
+(`memoryExtractionPipeline` → `models` → `modelPricing` → `activeAiModel`)의
+어느 파일도 Prisma를 import하지 않습니다. 모델 설정은 `lib/models.ts`의 **정적
+카탈로그**에서 오고 운영 `ModelRegistryEntry` 행에서 오지 않습니다 — 그래서 이
+회차는 DB drift(`creditWeight`·`maxOutputTokens` 화석)에 영향을 받지 않고, 어느
+기계에서 돌리든 같은 것을 잽니다. 출력 상한도 harness가 4,096으로 직접 넘깁니다.
+
+**`npm run`으로 실행합니다.** bare `node --import tsx scripts/…`로 돌리면
+live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
+`import "server-only"`로 시작하고, 그것을 통과시키는 `--conditions=react-server`
+가 npm script 쪽에 있기 때문입니다. 돈은 안 나가지만 회차는 날아갑니다.
+
 ## 3. 사전 등록 — 제외·재실행 규칙 [확정 · 2026-08-24 @mposition]
 
 §12.2는 **제외·재실행 규칙을 사전에 고정**하라고 요구합니다. 결과를 보고 정하면
