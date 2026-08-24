@@ -116,30 +116,7 @@ export type AiModel = {
      * never a user-controlled arbitrary request parameter.
      */
     reasoning?: "none" | "low" | "medium" | "high";
-    /**
-     * The published window input and output share, in tokens.
-     *
-     * `fitChatOutputToContextWindow` subtracts the request's reserved input
-     * from this and gives the answer whatever is left, so it is a total and
-     * not an input allowance.
-     *
-     * Providers publish it two ways. Some report one `context_length` /
-     * `max_context_length`, which is this figure directly. Others -- Anthropic
-     * and Google among them -- publish an input token limit and a separate
-     * output limit; this field takes the *input* limit for those. That is the
-     * conservative reading: if the provider in fact allows the answer on top
-     * of its input limit, a request is refused slightly earlier than it had to
-     * be, which is the safe direction. Adding the two together would be a
-     * guess about how the provider counts, and a window that is too large is
-     * worse than none -- it passes the guard by inventing headroom.
-     *
-     * Absent means unguarded, not unlimited: the fit is skipped entirely and
-     * the request reaches the provider unchecked (ESTIMATE-03).
-     * `scripts/check-router-context-window.mjs` holds the models still in that
-     * state as a shrinking baseline, and
-     * `npm run report:model-context-window-evidence` prints what each provider
-     * published so a window is declared from a figure rather than recalled.
-     */
+    /** Published context window for catalogue metadata and request validation. */
     contextWindowTokens?: number;
     /** Explicit per-model native input support. Omitted means text-only. */
     inputCapabilities?: ModelInputCapabilities;
@@ -217,13 +194,13 @@ export const AVAILABLE_MODELS = [
     // Stable Tomverse ID upgraded in place. Stored conversations and historic
     // ledgers keep `claude-opus-4-8`; new requests use Anthropic's Opus 5 API.
     { id: "claude-opus-4-8", name: "Claude Opus 5", apiModel: "claude-opus-5", provider: "anthropic", icon: "🧠", bestFor: "Frontier reasoning across demanding, high-stakes tasks", minimumPlan: "Pro", usageClass: "premium", creditWeight: 16, enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
-    { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", bestFor: "Writing, structured analysis, and detailed documents", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", bestFor: "Quick summaries, drafting, and lightweight analysis", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 200_000, inputCapabilities: FULL_BINARY_INPUT },
+    { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", bestFor: "Writing, structured analysis, and detailed documents", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", bestFor: "Quick summaries, drafting, and lightweight analysis", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "gemini-3-7-flash", name: "Gemini 3.7 Flash", apiModel: "gemini-3.7-flash", provider: "google", icon: "✨", bestFor: "Complex coding, agentic workflows and multi-step execution", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-6-flash", name: "Gemini 3.6 Flash", apiModel: "gemini-3.6-flash", provider: "google", icon: "✨", bestFor: "Fast agentic, coding, and multimodal analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", bestFor: "Legacy fast multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse consolidated the overlapping Flash catalogue on Gemini 3.6 Flash on 2026-08-03.", userVisibleNote: "This model was retired and replaced by Gemini 3.6 Flash.", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
-    { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", bestFor: "Detailed multimodal analysis and complex documents", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", bestFor: "Detailed multimodal analysis and complex documents", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-flash", name: "Gemini 3.5 Flash-Lite", apiModel: "gemini-3.5-flash-lite", provider: "google", icon: "✨", bestFor: "Low-latency document parsing and high-volume everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
 
@@ -301,11 +278,11 @@ export const AVAILABLE_MODELS = [
     // DeepSeek catalog scans. Replacement is deepseek-v4-flash, the same
     // provider's remaining general model.
     { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", bestFor: "Legacy math, code, and explicit reasoning", minimumPlan: "Free", usageClass: "reasoning", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "DeepSeek retired deepseek-reasoner on 2026-07-24.", userVisibleNote: "This model was retired and replaced by DeepSeek-V4 Flash.", reasoning: "high" },
-    { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", bestFor: "Efficient multilingual writing and everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 262_144 },
-    { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", bestFor: "High-quality multilingual analysis and long-form work", minimumPlan: "Pro", usageClass: "premium", creditWeight: 4, enabled: true, status: "enabled", contextWindowTokens: 262_144 },
+    { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", bestFor: "Efficient multilingual writing and everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
+    { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", bestFor: "High-quality multilingual analysis and long-form work", minimumPlan: "Pro", usageClass: "premium", creditWeight: 4, enabled: true, status: "enabled" },
     { id: "mistral-medium-3-1", name: "Mistral Medium 3.5", apiModel: "mistral-medium-3-5", provider: "mistral", icon: "M", bestFor: "Multimodal agentic work, coding, and multilingual analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 262_144, inputCapabilities: { image: true, nativePdf: false } },
     { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", bestFor: "Legacy code generation and repository questions", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "mistral-medium-3-1", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Removed from Tomverse Review on 2026-08-03 ahead of the separate Tomverse Code catalogue.", userVisibleNote: "This model is no longer available in Tomverse Review. Use Mistral Medium 3.5 instead." },
-    { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2.7-code", provider: "moonshot", icon: "KM", bestFor: "Coding tasks and long technical context", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 262_144 },
+    { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2.7-code", provider: "moonshot", icon: "KM", bestFor: "Coding tasks and long technical context", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     // Kimi K3 is separate from the coding-specialised K2.7 entry. K3 always
     // thinks; ordinary chat explicitly requests high effort rather than the
     // much more expensive provider default (`max`).
