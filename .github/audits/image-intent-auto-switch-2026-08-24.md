@@ -9,6 +9,14 @@
 
 ## 개정 이력
 
+**v8 (2026-08-24, 7차 검토 반영 — 분류기 계약 정합 3건).**
+
+| # | v7의 문제 | v8 |
+|---|---|---|
+| 1 | L0의 이진 `intent`와 parity 테스트의 A·B·C·D·예외가 **같은 반환형처럼 읽힘** | `ImageIntentClass` 6값을 분류기 반환형으로 정의하고, **L0은 C 여부·L1은 A 여부로 좁히는** 코드를 명시(B-8) |
+| 2 | 호출 예제가 `turnAttachmentDescriptors`를 **분류기에 직접 전달** — 새 DTO 계약을 우회 | `normalizeServerImageIntentInput()`을 거치는 예제로 교체, parity fixture도 **정규화 결과까지** 비교 |
+| 3 | 첨부 정책 인용이 **부정확** — `uploadId`·파일명·크기는 정책이 금지하지 않고 실제로 클라이언트에 반환됨(§4) | DTO에서 빼는 이유를 **"분류에 불필요"**로 정정하고, 정책이 실제 금지하는 것(`objectKey`·`data`·`bytes`·`path`, §2)을 **별개 이유**로 분리 |
+
 **v7 (2026-08-24, 6차 검토 반영 — 문서 수정 4건).**
 
 | # | v6의 문제 | v7 |
@@ -320,11 +328,42 @@ v5는 이 값을 `turnAttachmentDescriptors`에서 얻는다고 적었는데, de
 붙습니다. 그래서 입력은 프롬프트와 첨부를 함께 읽은 분류기여야 합니다.
 
 ```ts
-classifyImageIntent({
+const input = normalizeServerImageIntentInput({
   text: latestUserMessage,
   attachments: turnAttachmentDescriptors,
-})
+});
+
+const intentClass = classifyImageIntent(input);
 ```
+
+`turnAttachmentDescriptors`를 분류기에 **직접 넘기지 않습니다** — adapter를 거친
+정규화 DTO만 받는 것이 아래 계약이고, 예제가 그것을 우회하면 계약이 아니라
+권고가 됩니다.
+
+#### 반환형은 하나, 소비자는 둘
+
+분류기는 **A·B·C·D와 예외를 모두 구분하는 하나의 값**을 돌려주고, L0은 그중
+자기에게 필요한 것만 봅니다. L0의 `intent`가 이진값인 것은 **블록 분기의 입력**
+이지 분류기의 반환형이 아닙니다.
+
+```ts
+type ImageIntentClass =
+  | "raster_generation"    // A -- L1 칩 대상
+  | "text_heavy_visual"    // B -- L3까지 보류
+  | "edit_or_reference"    // C
+  | "analysis"             // D -- 채팅이 답함
+  | "explicit_text_art"    // 예외 -- 문자 그림 금지 대상 아님
+  | "none";
+
+// L0은 C만 구분하면 된다
+const l0Intent =
+  intentClass === "edit_or_reference" ? "edit_or_reference" : "none";
+
+// L1은 A만 칩으로 띄운다
+const showChip = intentClass === "raster_generation";
+```
+
+두 소비자가 각자 분류하지 않고 **같은 값을 다르게 좁히는** 것이 요점입니다.
 
 **이 순수 분류기를 L1(클라이언트)과 L0(서버)이 공유합니다.** §5.3이 말한 "사전과
 판정은 한 순수 모듈"이 바로 이것이고, 두 벌을 두면 칩이 뜨는 조건과 블록이 붙는
@@ -338,9 +377,17 @@ composer의 첨부 상태를 갖고 있어 **모양이 다릅니다**. 그래서
 둡니다.
 
 - 분류기는 **정규화된 DTO 하나만** 받습니다. 제안:
-  `{ text: string; attachments: { kind: "image" | "other" }[] }` — 파일명·바이트·
-  R2 key·업로드 id는 들어가지 않습니다(`docs/policy/user-attachment-persistence.md`가
-  금지하는 값들이기도 합니다)`[정책]`.
+  `{ text: string; attachments: { kind: "image" | "other" }[] }`.
+  파일명·크기·`uploadId`를 넣지 않는 이유는 **분류에 필요 없기 때문**입니다 —
+  정책이 금지해서가 아닙니다. `uploadId`·`name`·`mediaType`·`size`·`kind`는
+  정상적으로 클라이언트에 반환되는 값입니다
+  (`docs/policy/user-attachment-persistence.md` §4)`[정책]`. 넣지 않는 실질적
+  이유는 파일명을 읽는 분류기가 `logo.png` 같은 이름으로 판정을 시작하게 되고,
+  그 판정은 사용자가 쓴 문장과 무관하기 때문입니다.
+- 정책이 실제로 금지하는 것은 **저장 위치와 원시 바이트**입니다 —
+  `objectKey`·`data`·`bytes`·`path`는 참조 schema가 `.strict()`로 거절합니다
+  (같은 문서 §2)`[정책]`. DTO에도 당연히 넣지 않지만, 이는 위 항목과 **다른
+  이유**입니다.
 - 양쪽에 **adapter를 하나씩** 둡니다: 서버 `descriptors → DTO`, 클라이언트
   `composer 첨부 → DTO`. 분류기 자체는 어느 쪽 타입도 import 하지 않습니다 —
   `packages/**`의 framework 순수성 규칙과 같은 이유입니다`[정책]`.
@@ -349,17 +396,21 @@ composer의 첨부 상태를 갖고 있어 **모양이 다릅니다**. 그래서
 
 #### parity 테스트 (필수)
 
-같은 fixture를 두 adapter에 통과시켜 **같은 결과가 나오는지** 고정합니다. 최소
-집합:
+fixture는 **서버 원본 표현과 클라이언트 원본 표현을 각각** 만들고, 두 adapter의
+**정규화 결과**와 **최종 분류 결과**를 함께 비교합니다 — 정규화가 어긋나면
+분류가 우연히 일치하는 경우가 생기고, 그 우연은 입력이 조금만 달라져도
+깨집니다. 최소 집합:
 
 | fixture | 기대 |
 |---|---|
-| 이미지 첨부 + "배경을 바꿔 줘" | **C** (`edit_or_reference`) |
-| 이미지 첨부 + "이 사진을 설명해 줘" | **D** (`none` — 채팅이 답함) |
-| 첨부 없음 + "고양이 그림 그려 줘" | **A** (raster 생성 — L1 칩 대상) |
-| 첨부 없음 + "인포그래픽으로 그려 줘" | **B** (L1 칩 없음, L3 대상) |
-| 첨부 없음 + "ASCII 아트로 그려 줘" | **예외** (문자 그림 금지 대상 아님) |
-| 위 전부 | **클라이언트 adapter와 서버 adapter의 결과가 동일** |
+| fixture | `ImageIntentClass` | L0 `intent` | L1 칩 |
+|---|---|---|---|
+| 이미지 첨부 + "배경을 바꿔 줘" | `edit_or_reference` | `edit_or_reference` | 없음 |
+| 이미지 첨부 + "이 사진을 설명해 줘" | `analysis` | `none` | 없음 |
+| 첨부 없음 + "고양이 그림 그려 줘" | `raster_generation` | `none` | **있음** |
+| 첨부 없음 + "인포그래픽으로 그려 줘" | `text_heavy_visual` | `none` | 없음 |
+| 첨부 없음 + "ASCII 아트로 그려 줘" | `explicit_text_art` | `none` | 없음 |
+| 위 전부 | **두 adapter의 정규화 결과와 분류 결과가 동일** | | |
 
 마지막 줄이 이 테스트의 존재 이유입니다. 앞의 다섯은 분류기의 정확도이고, 마지막
 하나가 **두 경로가 갈라지지 않았음**을 증명합니다.
@@ -828,9 +879,10 @@ console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
 | B-3 | **전송 route와 `/api/chat/preflight`가 같은 builder·같은 토큰 값을 쓰도록 할 것.** 오늘 preflight는 artifact 블록을 아예 세지 않습니다(`app/api/chat/preflight/route.ts`에 artifact 관련 코드 없음). **즉 이 어긋남은 이미 존재하고**, 이미지 블록을 route에만 추가하면 그 격차가 커집니다. 표시·예약·실제 전송의 입력 배수가 달라질 수 있습니다. | `app/api/chat/route.ts`, `app/api/chat/preflight/route.ts``[코드]` |
 | B-4 | **품질 주장을 문안에 넣지 말 것.** A-2의 `available` 문단은 "범위 밖"으로 씁니다. | §9 A-2 |
 | B-5 | **정정이 아니라 배제로 조립할 것.** 편집 분기에서는 handoff·SVG 문단을 **넣지 않습니다.** 세 문단을 다 싣고 마지막이 이기기를 기대하는 구조는 모델에게 상충 지시를 주는 것입니다. | §5.1, §9 A-4 |
-| B-6 | **분류기를 L0·L1이 공유할 것.** `classifyImageIntent({ text, attachments })` 하나를 서버 블록과 클라이언트 칩이 함께 씁니다. 두 벌이면 칩이 뜨는 조건과 블록이 붙는 조건이 갈라집니다. 특히 **첨부 유무만으로 C와 D를 가르면 안 됩니다** — descriptor는 둘을 구분하지 못합니다. | §5.1 |
-| B-7 | **분류기는 정규화 DTO만 받고, 양쪽에 adapter를 둘 것.** 서버 descriptor와 클라이언트 composer 첨부는 모양이 다릅니다. parity 테스트(§5.1)가 두 경로의 결과 일치를 고정합니다. | §5.1 |
-| B-8 | **`CORE`가 부정하는 범위를 SVG와 어긋나게 두지 말 것.** "이미지를 만들 수 없다"와 "SVG 파일을 만들 수 있다"가 한 요청에 같이 들어가면 모순입니다. raster workflow·인라인 raster로 한정합니다. | §9 A-1·A-3 |
+| B-6 | **분류기를 L0·L1이 공유할 것.** `classifyImageIntent(input)` 하나를 서버 블록과 클라이언트 칩이 함께 씁니다. 두 벌이면 칩이 뜨는 조건과 블록이 붙는 조건이 갈라집니다. 특히 **첨부 유무만으로 C와 D를 가르면 안 됩니다** — descriptor는 둘을 구분하지 못합니다. | §5.1 |
+| B-7 | **분류기는 정규화 DTO만 받고, 양쪽에 adapter를 둘 것.** 서버 descriptor와 클라이언트 composer 첨부는 모양이 다릅니다. 호출부가 원본을 직접 넘기면 계약이 권고로 내려앉습니다. parity 테스트(§5.1)가 **정규화 결과와 분류 결과 양쪽**의 일치를 고정합니다. | §5.1 |
+| B-8 | **반환형은 하나, 좁히기는 소비자별로.** `ImageIntentClass` 6값을 L0은 C 여부로, L1은 A 여부로 좁힙니다. 두 소비자가 각자 분류하면 B-6이 무너집니다. | §5.1 |
+| B-9 | **`CORE`가 부정하는 범위를 SVG와 어긋나게 두지 말 것.** "이미지를 만들 수 없다"와 "SVG 파일을 만들 수 있다"가 한 요청에 같이 들어가면 모순입니다. raster workflow·인라인 raster로 한정합니다. | §9 A-1·A-3 |
 
 ---
 
@@ -851,10 +903,10 @@ console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
 - L1은 **명백한 raster 생성 의도로 범위를 좁혀** 시작하고, 첨부 화면 같은 텍스트
   밀집 인포그래픽은 **L3에서 SVG/이미지 선택 UX로 따로** 설계합니다.
 - 착수 전 **`image-generation.md` §13과 UI 계약 둘 다** 개정해야 하고, 구현에서는
-  **부록 B의 8건**(snapshot default-off 보존, 관리자 토글의 snapshot 무효화,
+  **부록 B의 9건**(snapshot default-off 보존, 관리자 토글의 snapshot 무효화,
   preflight와 전송 route의 동일 builder, 품질 주장 금지, 정정이 아닌 배제,
-  L0·L1 분류기 공유, 정규화 DTO와 parity 테스트, `CORE` 범위와 SVG의 정합)을
-  확인합니다.
+  L0·L1 분류기 공유, 정규화 DTO와 parity 테스트, 반환형 하나·소비자별 좁히기,
+  `CORE` 범위와 SVG의 정합)을 확인합니다.
 - **관측된 사례는 B 분류입니다.** 따라서 L0만 배포하면 재발 **가능성을 낮출 뿐**이고,
   L3(텍스트 밀집 도표의 SVG/이미지 선택 UX)가 마련되기 전까지 첨부 화면의 요청은
   **결정적으로 해결되지 않습니다.** L0을 1순위로 두는 것은 그것이 완결이어서가
