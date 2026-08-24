@@ -33,6 +33,7 @@ import {
   FIXTURE_USAGE,
   FIXTURE_WEBHOOK,
 } from "./fixture-data";
+import { EMAIL_CAMPAIGNS_FLAG_KEY } from "@/lib/emailFeatureFlags";
 
 /**
  * The fixture boundary for the Admin Console E2E suite.
@@ -699,6 +700,11 @@ export const seedAdminFixtures = async () => {
         key: "guestDefaultModelId",
         value: FIXTURE_APP_SETTINGS.guestDefaultModelId,
       },
+      // The campaign console lives behind this (EM-05, ADR section 15.2) and it
+      // is off everywhere it has not been switched on. The harness switches it
+      // on so the console's own specs exercise the feature; one spec turns it
+      // back off to check what an operator sees when it is not.
+      { key: EMAIL_CAMPAIGNS_FLAG_KEY, value: "true" },
     ],
   });
 
@@ -793,4 +799,24 @@ export const seedAdminFixtures = async () => {
 export const resetAndSeedAdminFixtures = async () => {
   await resetAdminDatabase();
   return seedAdminFixtures();
+};
+
+/**
+ * Writes an `AppSetting` row directly, for a spec that needs a flag in a state
+ * the harness does not seed.
+ *
+ * Test infrastructure, not a product path. The email feature flags are
+ * deliberately not writable through any admin API
+ * (docs/policy/email-notifications.md §15.2, registered in
+ * `tests/appSettingWriters.test.mjs`), so a spec about one of them being off
+ * cannot get there by driving the console — and hiding that by adding a writer
+ * for the test's convenience would remove the very decision the ADR made.
+ */
+export const setAppSettingDirectly = async (key: string, value: string) => {
+  const prisma = adminFixtureDatabase();
+  await prisma.appSetting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  });
 };
