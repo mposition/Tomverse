@@ -101,6 +101,7 @@
     "report:email-domains": "node --conditions=react-server --import tsx scripts/report-email-sending-domains.mjs",
     "report:assistant-knowledge-invariants": "node --conditions=react-server --import tsx scripts/report-assistant-knowledge-invariants.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
+    "make:memory-eval-blind-review": "node --import tsx scripts/make-memory-eval-blind-review.mjs",
     "make:memory-eval-review-sheet": "node --import tsx scripts/make-memory-eval-review-sheet.mjs",
     "record:memory-eval-drafter": "node --import tsx scripts/record-memory-eval-drafter.mjs",
     "record:memory-eval-review": "node --import tsx scripts/record-memory-eval-review.mjs",
