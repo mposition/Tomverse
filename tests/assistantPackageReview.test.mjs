@@ -405,7 +405,10 @@ test("instruction URLs reach the review as hosts", async () => {
         "description: Points somewhere.",
         "---",
         "",
-        "Read https://docs.example.com/guide?key=abc123def456 first.",
+        // A query string, but not a credential-shaped one: the assertion is
+        // about the host, and `?key=<12 characters>` is a line any secret
+        // scanner has to report -- ours and the repository's both did.
+        "Read https://docs.example.com/guide?section=intro first.",
     ].join("\n");
     const result = await reviewOf([{ name: "SKILL.md", data: skill }]);
     assert.equal(result.outcome, "review");

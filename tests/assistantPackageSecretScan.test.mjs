@@ -231,7 +231,13 @@ test("URLs are disclosed as hosts, deduplicated and sorted", () => {
 });
 
 test("a path or query string never reaches the disclosure", () => {
-    const result = collectUrlHosts("https://example.com/download?token=abc123def456");
+    // Joined rather than written out, for the same reason the samples above
+    // are: this value is a placeholder that never authorised anything, but a
+    // line reading `token=<12 characters>` is a finding to a scanner reading
+    // one line at a time, and that is the correct behaviour for a scanner.
+    const result = collectUrlHosts(
+        forge("https://example.com/download?to", "ken=", "abc123def456")
+    );
     assert.deepEqual(result.hosts, ["example.com"]);
 });
 

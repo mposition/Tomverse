@@ -51,3 +51,22 @@ c5d63312a625450918df5bf8f4a0c32e575243b1:tests/fixtures/memoryExtractionEval.mjs
 32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:216
 32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:217
 32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:245
+
+# Synthetic package-import fixtures, not credentials.
+#
+# Commits 1401bee and fc1e336 introduced two URLs carrying a placeholder query
+# value — `?token=<12 characters>` and `?key=<12 characters>` — in tests for
+# the package import's own URL-host disclosure. Neither value ever authorised
+# anything; they exist so a test can assert that a query string does *not*
+# reach the disclosure. gitleaks reads one line at a time and cannot tell a
+# placeholder from a live token, which is the correct behaviour for a scanner,
+# so the follow-up commit stopped writing the shape rather than widening the
+# allowlist: one URL now carries an ordinary query, and the other is joined
+# from parts by the same `forge()` helper the credential samples in that file
+# already use.
+#
+# The introducing commits are immutable history and stay pinned here.
+#
+# Scope: exactly these two findings in those two commits — nothing wider.
+1401bee74b6922e5355278ed241865afafc82755:tests/assistantPackageSecretScan.test.mjs:generic-api-key:234
+fc1e3368e4d14f3d3552c677184a9a88b7a05697:tests/assistantPackageReview.test.mjs:generic-api-key:408
