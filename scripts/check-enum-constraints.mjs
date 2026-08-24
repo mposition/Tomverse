@@ -451,6 +451,31 @@ const REGISTRY = {
     reason:
       "The nine delivery states. failed and abandoned are deliberately different: failed is one attempt that did not land, abandoned is the queue giving up, and only the credential lane is forbidden the second (EmailDelivery_credential_not_abandoned_check). Written as literals by the two lanes and by the webhook processor.",
   },
+  EmailCampaign_status_check: {
+    owner: "database",
+    reason:
+      "A campaign's lifecycle: draft through completed, plus cancelled and halted. Kept off EmailEvent.status deliberately -- approval is a property of the campaign, and adding draft/pending_approval to the outbox's vocabulary would put it in the table that also holds login codes. Written as literals by lib/emailCampaignService.ts and judged by lib/emailCampaignCore.ts.",
+  },
+  EmailCampaign_category_check: {
+    owner: "database",
+    reason:
+      "What the campaign is about, from section 12.2 of the model lifecycle audit. Five model lifecycle events plus `other`, so a campaign that is not about a model still has somewhere to be rather than borrowing a category that misdescribes it.",
+  },
+  EmailCampaign_approval_completeness_check: {
+    owner: "database",
+    reason:
+      "An approved campaign has both halves of its approval or neither: an approval id, an approval time, and the copy that was pinned. A row with an approval and no pin would send whatever the code says today, which is the whole failure EM-06 describes.",
+  },
+  EmailCampaignWave_status_check: {
+    owner: "database",
+    reason:
+      "One send within a campaign, which is a narrower life than the campaign's: pending through done, plus cancelled and halted. Separate from EmailCampaign.status because a campaign that is running has waves in several of these at once.",
+  },
+  EmailCampaignWave_kind_check: {
+    owner: "database",
+    reason:
+      "Which send this is -- launch, notice, reminder, final reminder, completion. Part of the unique key with sequence, so it is what makes a second `reminder 1` impossible rather than merely unlikely.",
+  },
   EmailDelivery_skip_reason_check: {
     owner: "database",
     reason:
