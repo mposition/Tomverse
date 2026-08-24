@@ -2123,12 +2123,12 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 ### P2
 
-- ML-05 minimax 표시명 + 전수 test
-- ML-06 이미지 모델 discovery (별도 설계)
-- ML-07 perplexity 한계 명시
-- OpenAI `isLikelyChatModelId` prefix 위험 완화(6절 #10)
-- `MAX_PAGES` 초과 시 경고 로그
-- `/admin/email-delivery` 주소 마스킹 정책
+- ~~ML-05 minimax 표시명 + 전수 test~~ **완료 (2026-08-24)** — §40
+- ML-06 이미지 모델 discovery (별도 설계) — 리포트 범위 한계 명시는 §10.10에서 완료
+- ~~ML-07 perplexity 한계 명시~~ **완료** — §10.10
+- ~~OpenAI `isLikelyChatModelId` prefix 위험 완화(6절 #10)~~ **완료 (2026-08-24)** — §40
+- ~~`MAX_PAGES` 초과 시 경고 로그~~ **완료 (2026-08-24)** — §40
+- `/admin/email-delivery` 주소 마스킹 정책 — **결정 대기**(§21에 D10으로 추가)
 
 ---
 
@@ -2145,6 +2145,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | D7 | 사전 안내 리드타임 | product | D 일정 | **14일**. 폐기 결정 → 안내 → reminder → 실행 |
 | D8 | assistant profile이 모델 선택을 갖는지 | eng | audience 정의 | 조사 필요(23절) |
 | D9 | 최근 사용 기반 cohort를 포함할지 | product | audience 크기 | **미포함**. 저장된 선택만. 최근 사용은 영향이 아니라 관심입니다 |
+| D10 | `/admin/email-delivery`의 사용자 주소를 마스킹할지 | product + ops | 없음(오늘 동작함) | **기본 마스킹 + 명시적 공개 행위를 감사 로그에 기록**. 지원 능력을 잃지 않으면서 노출을 *상태*가 아니라 *사건*으로 만듭니다. 다만 공개 행위의 감사 설계는 구현 전 승인이 필요합니다 |
 
 ---
 
@@ -2898,3 +2899,54 @@ sequence)`이므로 두 번째 `reminder 1`은 불가능하고, 그래서 서비
 
 **3차 범위**: 예약, audience 계산기 연결과 `EmailCampaignRecipient`, reminder
 wave의 cohort 재계산, admin 화면, `runWithAdminApproval` 연결.
+
+---
+
+## 40. P2 catalogue coverage 구현 기록 (2026-08-24 · 완료)
+
+ML-05, 6절 후보 10(OpenAI prefix), `MAX_PAGES` 경고 — 셋 다 **스캔이 본 것보다
+적게 보고 그 사실을 말하지 않는다**는 같은 모양이라 한 변경으로 묶었습니다.
+
+| 파일 | 역할 |
+|---|---|
+| `lib/providerModelCatalogReport.ts` | provider 표시명을 `Record<AiProvider, string>`으로 |
+| `lib/providerModelCatalogCore.ts` | `chatModelExclusion()`, `parseProviderCatalogModels()` |
+| `lib/providerModelCatalogMonitor.ts` | truncation 감지 + incident, 두 사실을 결과에 실음 |
+| `tests/providerCatalogCoverage.test.mjs` | 10건, 새 파일 |
+
+**ML-05는 map 하나만 타입이 없었습니다.** 네 개의 provider 표시명 map 중
+`providerMonitoring` · admin panel · marketing은 `Record<AiProvider, string>`이고
+전부 12개를 갖습니다. 리포트의 것만 타입 없는 literal에 `|| provider` fallback
+이었고, 그것만 `minimax`를 잃었습니다. **값을 채우는 것이 아니라 타입을 주는
+것이 고침입니다** — 빠짐이 이제 컴파일 오류입니다.
+
+**표시명을 하나로 합치지 않았습니다.** 값이 표면마다 의도적으로 다릅니다 —
+운영 리포트는 스캔 대상 제품군(`Google Gemini`·`Moonshot Kimi`·`Zhipu GLM`)을,
+marketing은 회사(`Google`·`Moonshot AI`)를 부릅니다. 하나로 만들면 어느 쪽이든
+한쪽 화면에서 틀립니다. 공유하는 것은 값이 아니라 **전수성**입니다.
+
+**추측인 제외와 사실인 제외를 나눴습니다.** embedding 모델은 이름에
+`embedding`이 있고, 그것은 이름이 줄 수 있는 만큼 확실합니다. "OpenAI chat
+모델은 `gpt-`·`chatgpt-`·`o<n>`으로 시작한다"는 **내기**이고, 그것이 깨지는 날
+새 모델은 발견되지 않고 보고되지 않고 아무도 그 사실을 모릅니다. 그래서
+`openai_prefix_heuristic`으로 떨어진 id를 parser 밖으로 들고 나와 리포트의
+provider 행이 이름을 댑니다.
+
+**incident가 아니라 리포트입니다.** OpenAI는 항상 `davinci-002` 같은 것을 몇 개
+내보내므로 알림으로 만들면 매일 노이즈입니다. 리포트가 막아야 하는 것은 조용한
+경우 — 선배들과 다른 모양의 진짜 신형 chat 모델이 흔적 없이 사라지는 것입니다.
+
+**truncation은 반대로 incident입니다.** 5페이지 × 1000은 오늘 어느 provider보다
+훨씬 많아서, 도달했다면 비정상입니다. 그리고 이것이 **다음 섹션을 오염시킵니다** —
+잘린 뒤의 모델은 성공했다고 보고된 실행에서 부재하고, **부재가 곧 폐기 판정
+신호**입니다. incident 문장이 "must not be read as missing"이라고 적는 이유이고,
+테스트가 그 문장을 고정합니다.
+
+**ML-06·ML-07은 이미 되어 있었습니다.** daily email v2(§10.10)가 footer에
+"chat models only; image generation models are a static catalogue and are not
+scanned"를, perplexity 행에 "retirement cannot be proven here"를 이미 넣었습니다.
+착수 전에 코드로 확인했고, 없는 일을 한 것으로 적지 않았습니다.
+
+**남은 하나는 정책 결정입니다.** `/admin/email-delivery`의 주소 마스킹은 감사
+자신이 "마스킹 정책 결정"이라고 적었고, 저장소가 답할 수 없는 사실(관리자
+접근 범위, 지원 업무 실태)에 달려 있습니다. §21에 D10으로 올렸습니다.
