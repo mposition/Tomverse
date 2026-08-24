@@ -6,12 +6,17 @@ import {
     errorMessageFrom,
     parseLimitCandidates,
     probeRequestFor,
-} from "../scripts/report-model-context-window-probe-core.mjs";
+} from "../scripts/report-model-max-output-probe-core.mjs";
 
 // The probe sends real requests with real credentials, so what it builds and
 // what it reads back are the two things that must not drift. Neither can be
 // exercised in CI -- there are no provider keys there -- which makes these
 // tests the only thing that holds them.
+//
+// The messages below are the ones staging actually received on 2026-08-24,
+// kept verbatim. The first version of the parser turned four of them into
+// figures no provider had said, by reading a range's floor and ceiling as one
+// separated number, and no invented example had caught it.
 
 test("OpenAI gets the field it renamed, and the compatible providers keep the old one", () => {
     const openai = probeRequestFor({
@@ -73,14 +78,59 @@ test("a provider speaking its own dialect is refused rather than sent a guess", 
     );
 });
 
+// Every one of these is a real answer from a real provider. `[1, 131072]` read
+// as 1,131,072 before the grouping rule required three-digit groups.
+test("a range is two numbers, not one with a separator in it", () => {
+    const cases = [
+        [
+            "Error.Algo.InvalidParameter: Range of max_tokens should be [1, 131072]",
+            131_072,
+        ],
+        [
+            "Error.Algo.InvalidParameter: Range of max_tokens should be [1, 65536]",
+            65_536,
+        ],
+        ["The max_tokens parameter is illegal.: 限制数值范围[1,131072]", 131_072],
+    ];
+    for (const [message, expected] of cases) {
+        assert.deepEqual(
+            parseLimitCandidates(message).map((candidate) => candidate.tokens),
+            [expected],
+            message
+        );
+    }
+});
+
+test("real refusals that state one ceiling yield exactly it", () => {
+    for (const message of [
+        "max_tokens must be at most 128000",
+        "body -> max_tokens: Input should be less than or equal to 128000",
+    ]) {
+        assert.deepEqual(
+            parseLimitCandidates(message).map((candidate) => candidate.tokens),
+            [128_000],
+            message
+        );
+    }
+});
+
+test("thousands separators still read as one number", () => {
+    assert.deepEqual(
+        parseLimitCandidates("the window is 1,048,576 tokens and the cap is 131,072").map(
+            (candidate) => candidate.tokens
+        ),
+        [1_048_576, 131_072]
+    );
+});
+
 test("both numbers in a refusal are reported, largest first", () => {
     const candidates = parseLimitCandidates(
-        "max_tokens is too large: 1000000000. This model supports at most 128000 completion tokens, " +
-            "and a context length of 200000."
+        "max_completion_tokens is too large: 1000000000. This model supports at most 128000 " +
+            "completion tokens, whereas you provided 1000000000."
     );
     assert.deepEqual(
         candidates.map((candidate) => candidate.tokens),
-        [200_000, 128_000]
+        [128_000]
     );
     // The probe's own input is not evidence about the provider.
     assert.ok(!candidates.some((c) => c.tokens === IMPOSSIBLE_COMPLETION_TOKENS));
@@ -92,14 +142,6 @@ test("each candidate carries the words around it, because the number alone does 
     );
     assert.equal(candidate.tokens, 128_000);
     assert.match(candidate.phrase, /maximum context length is 128000 tokens/);
-});
-
-test("thousands separators are read as one number, not several", () => {
-    const candidates = parseLimitCandidates("最大上下文长度为 262,144 tokens");
-    assert.deepEqual(
-        candidates.map((candidate) => candidate.tokens),
-        [262_144]
-    );
 });
 
 // Rejections are full of small numbers -- status codes, field indices, retry
