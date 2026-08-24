@@ -9,7 +9,18 @@
 
 ## 개정 이력
 
-**v2 (2026-08-24, 검토 반영 — 조건부 승인 의견 7건).** v1의 다음 오류를
+**v3 (2026-08-24, 2차 검토 반영 — 보완 6건).**
+
+| # | v2의 문제 | v3 |
+|---|---|---|
+| 1 | C-3이 artifact 정책 **§13**을 인용 — 그 절은 첨부 템플릿 일괄 생성이라 무관 | §8 C-3을 **§2·§4·§6·§9**로 정정 |
+| 2 | L0 토큰 수치를 **재현할 수 없음** (측정 원문 부재) | **부록 A** 신설 — 후보 문안 전문·재현 명령·한국어 문안 주의 |
+| 3 | `Draft`가 두 뜻으로 쓰임 (workspace draft ↔ 품질 preset) | §3.4 표를 "Draft **품질 preset**"으로, 용어 주의 문단 추가 |
+| 4 | "돌아오면 그 대화는 존재하지 않습니다" — 사실과 다름 | §2 정정: 원래 대화는 남아 있고 **아직 저장 안 된 image draft로 문맥이 바뀐다**. IME 위험은 `[추론]`으로 표기 |
+| 5 | "L1 구현 비용이 낮다" — 인계 함수만 본 표현 | §3.3에서 **인계 실행은 낮음 / L1 전체는 중간**으로 분리, 새로 필요한 6가지 명시 |
+| 6 | 탐지 예외 2건 누락, `30%`가 정책값처럼 읽힘 | §5.1에 **명시적 ASCII 요청 예외**, §5.3에 **`compositionend` 이후 평가**, `30%`를 실험 가설로 표기 |
+
+**v2 (2026-08-24, 1차 검토 반영 — 조건부 승인 의견 7건).** v1의 다음 오류를
 정정했습니다. 각 항목은 본문에 반영돼 있습니다.
 
 | # | v1의 문제 | v2 |
@@ -93,11 +104,13 @@
 1. **오탐 1건의 비용이 화면 전체입니다.** 칩은 무시하면 그만이지만, 자동 전환은
    사용자가 타이핑하던 화면을 통째로 갈아치웁니다. 복원 경로가 있어도 "내가 하지
    않은 이동"은 신뢰를 깎습니다.
-2. **§3.1에 따라 전환은 대화를 떠나는 것**이라, 사용자가 "채팅에 답이 왔겠거니"
-   하고 돌아오면 그 대화는 존재하지 않습니다.
-3. IME 조합 중 화면 전환은 입력 손실 위험이 있습니다 —
-   `docs/ui-contracts/mobile-chat-composer.md`가 한국어 IME 회귀 검증을 요구하는
-   맥락과 같습니다`[정책]`.
+2. **문맥이 저장되지 않은 곳으로 바뀝니다.** 원래 채팅 대화가 사라지는 것은
+   아닙니다 — 서버에 그대로 있고 취소하면 draft와 첨부까지 복원됩니다`[코드]`.
+   문제는 화면이 **아직 저장된 적 없는 image draft**로 옮겨 간다는 점이고,
+   사용자에게는 자기 대화가 사라진 것처럼 보인다는 점입니다.
+3. IME 조합 중 화면 전환은 입력 손실 위험이 있습니다`[추론]` — 확인된 결함이
+   아니라, `docs/ui-contracts/mobile-chat-composer.md`가 한국어 IME 회귀 검증을
+   절대 조건으로 요구하는 맥락에서 나온 위험 추론입니다.
 
 ### D-3b에 반대하는 근거는 계약입니다
 
@@ -135,19 +148,37 @@ handoff)"**.
 넘기고, 원래 draft를 `chatDraftBeforeImage`에 보관했다가 취소 시 **첨부까지**
 복원하며, 서버 행을 만들지 않습니다.
 
-→ L1 구현은 **기존 함수를 부르는 진입점 추가**입니다. 새 파이프라인이 아닙니다.
+→ **인계 실행 비용은 낮습니다** — 새 생성 파이프라인이 필요 없고 진입점만
+추가하면 됩니다. 다만 **L1 전체의 구현 비용은 "중간"**입니다. 아래가 전부 새로
+필요합니다.
+
+| 새로 필요한 것 | 비고 |
+|---|---|
+| A/B/C/D 분류 모듈 | 순수 모듈 1개 + 사전 |
+| dismiss 상태 수명주기 | draft 범위, 재노출 조건 |
+| analytics event·property schema | consent 경로 준수 |
+| Guest·Free 잠금 분기 | §3.6 |
+| locale 문구 (ko/en) | 칩·잠금·안내 |
+| desktop·mobile·IME·접근성 테스트 | 계약이 요구하는 회귀 범위 |
+
+v1·v2 초안의 "구현 비용이 낮다"는 인계 함수 재사용만 본 표현이었고, 위 목록이
+빠져 있었습니다.
 
 ### 3.4 가격 차이가 두 자릿수입니다
 
 | 경로 | 크레딧 |
 |---|---:|
 | 채팅 1 turn (`grok-4-5`) | 8 |
-| 이미지 Draft | 15 |
-| 이미지 Standard | 60~70 |
-| 이미지 Final | 200~250 |
+| 이미지 생성 — **Draft 품질 preset** | 15 |
+| 이미지 생성 — Standard 품질 preset | 60~70 |
+| 이미지 생성 — Final 품질 preset | 200~250 |
 | `grok-imagine` 1K | 75 |
 
 `[정책]` `docs/policy/image-generation.md` §3, §12.1
+
+**용어 주의**: 표의 `Draft`는 **품질 preset**이고, §2의 "image draft 전환"은
+**아직 제출되지 않은 작성 상태**입니다. 서로 다른 것이며, 전자만 크레딧을
+씁니다. 이 문서에서 preset을 가리킬 때는 항상 "Draft 품질 preset"으로 씁니다.
 
 ### 3.5 모델 선택이 프롬프트보다 먼저입니다
 
@@ -200,6 +231,10 @@ v1은 이 문서를 빠뜨렸습니다.
 - 이 대화에서는 **이미지를 생성할 수 없다**
 - **ASCII·박스·화살표·이모지 배치로 그림을 대신하지 말 것** — 오늘의 실패 모드를
   이름으로 지목합니다. 단 **표는 표이지 그림이 아니므로** 일반 서식은 계속 허용
+- **명시적 요청은 예외입니다.** 사용자가 "ASCII 아트로 그려 줘", "텍스트로
+  다이어그램 만들어 줘"처럼 문자 그림 **자체를** 요청하면 금지 대상이 아닙니다.
+  이 블록이 막는 것은 *요청받지 않은 대체*이지 문자 그림이라는 형식이 아닙니다.
+  예외를 적지 않으면 사용자가 명시적으로 부탁한 것을 거절하게 됩니다
 - 사용자가 그림을 요청하면 그 사실을 사용자 언어로 말하고, **그 turn에서 실제로
   가능한 대안만** 제시할 것
 - 질문 자체에 대한 답은 계속 해도 된다
@@ -310,17 +345,23 @@ v1의 규칙은 다음이 위험했습니다.
    편집은 범위 밖입니다`[정책]`. 이때 칩을 안 띄우고 조용히 채팅으로 보내면
    §1과 같은 결함을 다른 자리에서 반복합니다. **"첨부 이미지 편집은 아직
    지원하지 않습니다"를 명시**해야 하며, 이 안내는 L0 블록의 분기로도 필요합니다.
-3. **dismiss 범위를 정의해야 합니다.** "같은 draft"의 정의가 v1에 없었습니다.
+3. **IME 조합 중에는 평가하지 않습니다.** 자동 전환을 하지 않더라도 칩이
+   나타나면 composer 높이가 바뀌고, 한글 조합 중의 레이아웃 이동은 그 자체로
+   입력 사고입니다. 판정은 `compositionend` 이후(그리고 짧은 debounce 뒤)에만
+   수행합니다.
+4. **dismiss 범위를 정의해야 합니다.** "같은 draft"의 정의가 v1에 없었습니다.
    제안: 닫은 시점의 정규화된 텍스트를 기준으로, **길이 30% 이상 변하거나 새 A
    신호가 추가되면** 다시 제안할 수 있고, 그 외에는 억제합니다. 한 draft에서
    재노출은 최대 1회, 전송 후에는 상태를 버립니다.
-4. **텔레메트리는 기존 consent 경로를 따릅니다.** 프롬프트 원문을 저장하지 않는
+   **`30%`는 정책값이 아니라 실험 가설입니다**`[추론]` — 근거가 없는 초기값이고,
+   §7의 닫기율·재노출률 관측으로 조정할 대상입니다. 문서에 못박지 않습니다.
+5. **텔레메트리는 기존 consent 경로를 따릅니다.** 프롬프트 원문을 저장하지 않는
    것만으로는 부족하고, `analyticsConsent()`가 `declined`면 전송하지 않는 기존
    경로를 그대로 씁니다(`lib/productAnalyticsClient.ts`)`[코드]`. 남기는 필드는
    `matched`, `intentClass`, `accepted`, `dismissed`, locale 정도입니다.
-5. **재현율 우선, 정밀도 양보** — A 분류에 한해서입니다. B·C·D로 판정되면 칩을
+6. **재현율 우선, 정밀도 양보** — A 분류에 한해서입니다. B·C·D로 판정되면 칩을
    띄우지 않습니다.
-6. 사전과 판정은 **한 순수 모듈**에 둡니다. 목록이 갈라지는 것이 이 저장소의
+7. 사전과 판정은 **한 순수 모듈**에 둡니다. 목록이 갈라지는 것이 이 저장소의
    반복된 사고 원인입니다`[정책]`.
 
 ### 5.4 L2 — 답변 이후 액션 (보류)
@@ -382,7 +423,7 @@ v1은 SVG를 기술적으로 우월한 기본 경로처럼 서술했습니다. �
 |---|---|---|
 | C-1 | **두 문서를 함께 개정**: `docs/policy/image-generation.md` §13(진입점 네 곳) + `docs/ui-contracts/image-generation-workspace.md` Entry points. **"제안은 진입점이지 실행이 아니다"**를 규칙으로 명시 | **차단** — 정책이 UI 계약에 우선하므로 한쪽만 고치면 무효 |
 | C-2 | 정책에 "확인 없는 자동 draft 전환·자동 생성 제출 금지" 명시 (D-3a·D-3b 각각) | 권장 |
-| C-3 | L0 블록이 SVG를 권해도 되는 조건 — artifact 정책 §13과의 정합 | 확인 |
+| C-3 | L0 블록이 SVG를 권해도 되는 조건 — `docs/policy/generated-artifacts.md` **§2(가용성)·§4(형식)·§6(보안)·§9(UI 계약)**과의 정합. v2 초안이 §13을 인용했으나 그 절은 첨부 템플릿 일괄 생성이라 무관합니다 | 확인 |
 | C-4 | 기능 이름 확정 (`Auto` 금지, §3.2) | 결정 |
 | C-5 | L0 블록 문안 확정 후 토큰 재측정, 16k 경계 배수 영향 수용 여부 | 결정 |
 
@@ -395,7 +436,68 @@ v1은 SVG를 기술적으로 우월한 기본 경로처럼 서술했습니다. �
 
 ---
 
-## 9. 요약
+## 9. 부록 A — L0 블록 측정 원문과 재현 절차
+
+§5.1의 150·192토큰은 아래 **후보 문안**을 잰 값입니다. 문안이 바뀌면 수치도
+바뀌므로 C-5(재측정)와 함께 읽습니다. 이 문안은 **측정을 재현하기 위한 초안**이며
+확정된 제품 문구가 아닙니다.
+
+### A-1. 후보 A — 고지만 (597 bytes / 150 tokens)
+
+```text
+# Images
+
+You cannot generate images in this conversation. If the user asks for a
+picture, an illustration, a diagram or an infographic, say so plainly in
+the user's language and say what would let them get one.
+
+Never substitute a drawing made of text characters -- no ASCII art, no
+box-drawing or arrow diagrams standing in for a picture, no emoji layout
+pretending to be a chart. A text approximation of a requested image is a
+silent substitution, not an answer.
+
+You may still answer the question itself in words, and you may still use
+ordinary formatting -- a table is a table, not a drawing.
+```
+
+### A-2. 후보 B — 인계 안내 포함 (765 bytes / 192 tokens)
+
+후보 A에 아래 문단을 덧붙인 것입니다.
+
+```text
+Image generation is a separate workspace in this app, reachable from the
+composer's tools menu. Point the user there rather than describing an API
+or another product.
+```
+
+### A-3. 재현 명령
+
+`estimateTextTokens`는 비CJK 구간을 4바이트/토큰으로 셉니다
+(`lib/chatTokenEstimate.ts:112`, `ACTIVE_ESTIMATOR_VERSION =
+"generic_multilingual_v1"`). 위 문안은 전부 ASCII이므로 다음과 같습니다.
+
+```bash
+# 문안을 block.txt에 저장한 뒤
+wc -c block.txt                      # bytes
+node -e 'console.log(Math.ceil(require("fs").statSync("block.txt").size/4))'
+```
+
+저장소 함수로 직접 재는 편이 정확합니다.
+
+```bash
+npx tsx -e 'import{estimateTextTokens}from"./lib/chatTokenEstimate";import{readFileSync}from"fs";console.log(estimateTextTokens(readFileSync("block.txt","utf8")))'
+```
+
+**한국어 문안을 쓰면 수치가 달라집니다** — 한글은 별도 계수로 계산되므로 위
+4바이트 근사가 성립하지 않습니다. 최종 문안이 정해지면 실제 함수로 다시 재고,
+§5.1 표와 C-5를 함께 갱신합니다.
+
+**주의**: 이 블록은 turn마다 실려 나가므로, 문안을 늘리는 것은 문서 편집이 아니라
+**단가 인상**입니다.
+
+---
+
+## 10. 요약
 
 - 자동 **탐지**는 타당하고, 인계 경로가 이미 있어 구현 비용이 낮습니다.
 - 자동 **draft 전환(D-3a)**은 비용이 아니라 **오탐 시 화면 강탈·IME 위험**을 근거로
@@ -405,4 +507,8 @@ v1은 SVG를 기술적으로 우월한 기본 경로처럼 서술했습니다. �
   turn당 150~190토큰의 실비가 듭니다.
 - L1은 **명백한 raster 생성 의도로 범위를 좁혀** 시작하고, 첨부 화면 같은 텍스트
   밀집 인포그래픽은 **L3에서 SVG/이미지 선택 UX로 따로** 설계합니다.
-- 착수 전 **정책 §13과 UI 계약 둘 다** 개정해야 합니다.
+- 착수 전 **`image-generation.md` §13과 UI 계약 둘 다** 개정해야 합니다.
+- **관측된 사례는 B 분류입니다.** 따라서 L0만 배포하면 재발 **가능성을 낮출 뿐**이고,
+  L3(텍스트 밀집 도표의 SVG/이미지 선택 UX)가 마련되기 전까지 첨부 화면의 요청은
+  **결정적으로 해결되지 않습니다.** L0을 1순위로 두는 것은 그것이 완결이어서가
+  아니라, 그때까지의 turn에서 사용자가 최소한 이유와 대안을 듣게 하기 위해서입니다.
