@@ -1,6 +1,14 @@
 ﻿"use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -42,6 +50,31 @@ import {
 } from "@/lib/errorReportContract";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ChatContentState } from "@/lib/chatContentState";
+import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
+import {
+  abortChatRuntime,
+  advanceChatRuntimeRevision,
+  beginChatRuntimeRun,
+  chatRuntimeIdentityKey,
+  chatRuntimeKey,
+  claimChatRuntimeLoad,
+  endChatRuntimeRun,
+  getChatRuntimeLastPrompt,
+  getChatRuntimeRevision,
+  getChatRuntimeServerSnapshot,
+  getChatRuntimeSnapshot,
+  hasResumedChatRuntimeJob,
+  isChatRuntimeLoadInFlight,
+  isChatRuntimeStreaming,
+  isCurrentChatRuntimeLoad,
+  markChatRuntimeJobResumed,
+  ownsChatRuntimeTranscript,
+  releaseChatRuntimeLoad,
+  setChatRuntimeLastPrompt,
+  settleChatRuntimeLoad,
+  subscribeChatRuntime,
+  writeChatRuntimeMessages,
+} from "@/lib/chatStreamRuntime";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -124,9 +157,18 @@ type ChatAppProps = {
    * lib/chatContentState.ts.
    */
   onContentStateChange?: (modelId: string, state: ChatContentState) => void;
+  /**
+   * Reports this panel's runtime status *and the conversation it belongs to*.
+   *
+   * The conversation is not decoration: the shells key what they receive by
+   * (conversation, model), because a status keyed by model alone let a run
+   * started in one conversation disable the composer of another
+   * (lib/chatRuntimeStatus.ts).
+   */
   onStatusChange?: (
     modelId: string,
-    status: "idle" | "loading" | "responding" | "error" | "cancelled" | "paused"
+    status: ModelRuntimeStatus,
+    conversationId: string | null
   ) => void;
   onResponseComplete?: (
     promptId: string | null,
@@ -174,8 +216,6 @@ function ChatAppComponent({
   currentPlan,
   stopSignal,
 }: ChatAppProps) {
-  const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
-  const [loadedMessageViewKey, setLoadedMessageViewKey] = useState<string | null>(null);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
     const { t } = useLanguage();
@@ -188,43 +228,68 @@ function ChatAppComponent({
   // shows it, once, in the shell's own verification surface).
   const { runGuestChatRequest } = useGuestVerification();
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: WELCOME_MESSAGE_ID,
-      role: "assistant",
-          content: t("chat.welcome"),
-	  status: "normal",
-    },
-  ]);
-  
+  /**
+   * This panel's runtime identity: (identity namespace, conversation, model).
+   *
+   * Everything that has to survive the user walking away -- the transcript, an
+   * answer still streaming into it, the controller that stops it -- is held
+   * against this key in lib/chatStreamRuntime.ts rather than in this
+   * component, because both shells unmount every panel when the conversation
+   * changes. Remounting on the same key adopts the run that is already going
+   * instead of starting over with nothing.
+   */
+  const runtimeKey = chatRuntimeKey({
+    identityKey: chatRuntimeIdentityKey(
+      isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
+    ),
+    conversationId: initialConversationId,
+    modelId,
+  });
+  const subscribeRuntime = useCallback(
+    (listener: () => void) => subscribeChatRuntime(runtimeKey, listener),
+    [runtimeKey]
+  );
+  const readRuntime = useCallback(
+    () => getChatRuntimeSnapshot(runtimeKey),
+    [runtimeKey]
+  );
+  const runtime = useSyncExternalStore(
+    subscribeRuntime,
+    readRuntime,
+    getChatRuntimeServerSnapshot
+  );
+  const messages = runtime.messages;
+  const isSending = runtime.isStreaming;
+  /**
+   * The key the *current* view writes to.
+   *
+   * A run captures its own key when it starts and keeps writing to it, so an
+   * answer keeps arriving in the conversation it was sent in even after this
+   * panel has been rebuilt for a different one. This ref is only for the
+   * handlers that act on whatever is on screen right now.
+   */
+  const runtimeKeyRef = useRef(runtimeKey);
+  useLayoutEffect(() => {
+    runtimeKeyRef.current = runtimeKey;
+  });
     const isMobileShell = useIsMobileShell();
-    const [isSending, setIsSending] = useState(false);
     const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
     const modelInput = modelInputs[modelId] || "";
     const setModelInput = (value: string) => {
       setModelInputs((current) => ({ ...current, [modelId]: value }));
     };
   
-  const isSendingRef = useRef(false);
   /** True while an IME composition is in progress in the model-only composer. */
   const isModelInputComposingRef = useRef(false);
-  const streamingChatIdRef = useRef<string | null>(null);
-  // Guards for the message-view loader below. `requestedViewKeyRef` dedupes
-  // repeat loads of the same view; `loadRequestIdRef` identifies the newest
-  // load so a superseded one settles nothing and the current one always does.
-  const requestedViewKeyRef = useRef<string | null>(null);
-  const loadRequestIdRef = useRef(0);
-  // Bumped whenever this panel adds messages of its own. Lets an in-flight
-  // history load tell "still describes the current conversation" from
-  // "superseded by a send that happened while I was loading".
-  const localMessageRevisionRef = useRef(0);
-  const abortControllerRef = useRef<AbortController | null>(null);
-    const loadedChatIdRef = useRef<string | null>(null);
-  const lastPromptRef = useRef<{
-    text: string;
-    targetChatId: string;
-    attachments: ChatAttachment[];
-  } | null>(null);
+  /**
+   * Dedupes repeat loads *within this component instance*.
+   *
+   * The cross-instance half of the same job lives on the runtime record
+   * (`isChatRuntimeLoadInFlight`), because a panel that remounts while its
+   * history request is still on the wire must not start a second one -- the
+   * first will settle the record either way.
+   */
+  const settledViewKeyRef = useRef<string | null>(null);
   /**
    * The send barrier and this panel's current model, read through refs by the
    * auto-send effect below.
@@ -243,20 +308,24 @@ function ChatAppComponent({
     panelModelIdRef.current = modelId;
   });
 
-  const expectedMessageViewKey = `${
-    isGuestMode ? "guest" : sessionUserId || "account"
-  }:${initialConversationId || "new"}:${modelId}`;
-  const isCurrentMessageViewLoaded =
-    isMessagesLoaded && loadedMessageViewKey === expectedMessageViewKey;
+  // `runtime.isLoaded` is already per (identity, conversation, model): the
+  // snapshot a panel reads can only describe the key it asked for, so there is
+  // no separate "which view is this?" comparison to get wrong.
+  const isCurrentMessageViewLoaded = runtime.isLoaded;
 
-  useEffect(() => {
+  // Reported in a layout effect, like the content state below and for the same
+  // reason: a panel that mounts on a conversation whose answer finished while
+  // it was unmounted has to correct the shell's last report *before* the
+  // browser paints, or the composer it comes back to is briefly disabled by a
+  // run that is no longer happening.
+  useLayoutEffect(() => {
     if (isPanelDisabled) {
-      onStatusChange?.(modelId, "paused");
+      onStatusChange?.(modelId, "paused", initialConversationId);
       return;
     }
 
     if (isSending) {
-      onStatusChange?.(modelId, "responding");
+      onStatusChange?.(modelId, "responding", initialConversationId);
       return;
     }
 
@@ -275,22 +344,39 @@ function ChatAppComponent({
         : lastAssistantMessage?.status === "cancelled"
           ? "cancelled"
           : "idle";
-    onStatusChange?.(modelId, status);
-  }, [isPanelDisabled, isSending, messages, modelId, onStatusChange]);
+    onStatusChange?.(modelId, status, initialConversationId);
+  }, [
+    initialConversationId,
+    isPanelDisabled,
+    isSending,
+    messages,
+    modelId,
+    onStatusChange,
+  ]);
 
   // Bumped by the parent to request an abort of this panel's in-flight
-  // request, if any. AbortController.abort() on an already-settled (or
-  // already-null) controller is a safe no-op, so this stays correct even if
+  // request, if any. `abortChatRuntime` on a key with nothing running (or an
+  // already-settled controller) is a safe no-op, so this stays correct even if
   // clicked repeatedly or after this panel already finished on its own.
+  //
+  // The last value seen is remembered, and a mount that merely *inherits* the
+  // shell's current counter aborts nothing: the shell's counter is one number
+  // for the whole page, so returning to a conversation that is still streaming
+  // would otherwise stop it on arrival with a "stop all" nobody pressed here.
+  const lastStopSignalRef = useRef(stopSignal);
   useEffect(() => {
     if (stopSignal === undefined) return;
-    abortControllerRef.current?.abort();
+    if (lastStopSignalRef.current === stopSignal) return;
+    lastStopSignalRef.current = stopSignal;
+    abortChatRuntime(runtimeKeyRef.current);
   }, [stopSignal]);
 
   // Lets the message list offer a per-panel stop button, distinct from the
-  // shell's "stop all" button which drives every panel via stopSignal.
+  // shell's "stop all" button which drives every panel via stopSignal. Both
+  // stop the run belonging to the conversation on screen, never one left
+  // running in a conversation the user walked away from.
   const stopThisPanel = useCallback(() => {
-    abortControllerRef.current?.abort();
+    abortChatRuntime(runtimeKeyRef.current);
   }, []);
 
   const isConversationEmpty =
@@ -314,25 +400,37 @@ function ChatAppComponent({
     );
   }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onContentStateChange]);
 
-  const setAssistantMessage = useCallback((
-    id: string,
-    content: string,
-    status?: Message["status"],
-    errorMeta?: {
-      errorCode?: string;
-      errorHadAttachments?: boolean;
-      errorReport?: MessageErrorReportContext;
-    },
-    extraFields?: Partial<Message>
-  ) => {
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.id === id
-          ? { ...message, content, status, ...errorMeta, ...extraFields }
-          : message
-      )
-    );
-  }, []);
+  /**
+   * A writer bound to one runtime key.
+   *
+   * A run has to keep writing into the conversation it was sent in, whatever
+   * the user is looking at by the time the next chunk arrives, so every path
+   * that streams (the send, the deep-research poll) takes the key it started
+   * with and writes through this rather than through the panel's current view.
+   */
+  const assistantMessageWriter = useCallback(
+    (key: string) =>
+      (
+        id: string,
+        content: string,
+        status?: Message["status"],
+        errorMeta?: {
+          errorCode?: string;
+          errorHadAttachments?: boolean;
+          errorReport?: MessageErrorReportContext;
+        },
+        extraFields?: Partial<Message>
+      ) => {
+        writeChatRuntimeMessages(key, (prev) =>
+          prev.map((message) =>
+            message.id === id
+              ? { ...message, content, status, ...errorMeta, ...extraFields }
+              : message
+          )
+        );
+      },
+    []
+  );
 
   const deepResearchPhaseText = useCallback(
     (elapsedMs: number) => {
@@ -354,6 +452,10 @@ function ChatAppComponent({
   // within one poll interval instead of needing its own abort plumbing.
   const pollDeepResearchJob = useCallback(
     async (
+      // The conversation this job belongs to. The poll outlives the panel that
+      // started it -- that is the point -- so every write names the key rather
+      // than whatever this component is showing when the tick lands.
+      key: string,
       jobAssistantMessageId: string,
       submittedAtMs: number,
       signal: AbortSignal,
@@ -361,6 +463,7 @@ function ChatAppComponent({
     ) => {
       const POLL_INTERVAL_MS = 5_000;
       const TAKING_LONGER_THRESHOLD_MS = 5 * 60 * 1000;
+      const setAssistantMessage = assistantMessageWriter(key);
 
       while (true) {
         if (signal.aborted) {
@@ -430,7 +533,7 @@ function ChatAppComponent({
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
     },
-    [deepResearchPhaseText, modelId, onResponseComplete, setAssistantMessage, t]
+    [assistantMessageWriter, deepResearchPhaseText, modelId, onResponseComplete, t]
   );
 
   // Resumes polling for a deep-research job that was still pending when this
@@ -438,104 +541,115 @@ function ChatAppComponent({
   // running server-side regardless of whether any tab is open, so this just
   // reattaches the UI to it using the persisted pendingJobId instead of
   // losing track of an in-flight request on every reload.
-  const resumedDeepResearchJobsRef = useRef<Set<string>>(new Set());
+  //
+  // Which jobs have already been re-attached to is recorded on the runtime key
+  // rather than in a ref, so switching away from a deep-research conversation
+  // and back does not start a second poll for the job the first one is still
+  // watching.
   useEffect(() => {
-    if (!isCurrentMessageViewLoaded || isSendingRef.current) return;
+    if (!isCurrentMessageViewLoaded || isChatRuntimeStreaming(runtimeKey)) return;
     const pendingMessage = messages.find(
       (message) =>
         message.role === "assistant" &&
         message.status === "pending" &&
         Boolean(message.pendingJobId)
     );
-    if (!pendingMessage || resumedDeepResearchJobsRef.current.has(pendingMessage.id)) {
+    if (!pendingMessage || hasResumedChatRuntimeJob(runtimeKey, pendingMessage.id)) {
       return;
     }
-    resumedDeepResearchJobsRef.current.add(pendingMessage.id);
+    markChatRuntimeJobResumed(runtimeKey, pendingMessage.id);
 
-    setIsSending(true);
-    isSendingRef.current = true;
-    streamingChatIdRef.current = initialConversationId;
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginChatRuntimeRun(runtimeKey);
     const submittedAtMs = pendingMessage.createdAt
       ? new Date(pendingMessage.createdAt).getTime()
       : Date.now();
 
-    pollDeepResearchJob(pendingMessage.id, submittedAtMs, controller.signal).finally(() => {
-      setIsSending(false);
-      isSendingRef.current = false;
-      streamingChatIdRef.current = null;
-      abortControllerRef.current = null;
+    pollDeepResearchJob(
+      runtimeKey,
+      pendingMessage.id,
+      submittedAtMs,
+      controller.signal
+    ).finally(() => {
+      endChatRuntimeRun(runtimeKey, controller);
     });
-  }, [initialConversationId, isCurrentMessageViewLoaded, messages, pollDeepResearchJob]);
+  }, [isCurrentMessageViewLoaded, messages, pollDeepResearchJob, runtimeKey]);
 
-  // Loads the message view for the current (account, conversation, model)
-  // triple. Two rules keep it deterministic:
+  // Loads the message view for the current (identity, conversation, model)
+  // triple. Four rules keep it deterministic:
   //
-  //  * Only the newest load may settle `isMessagesLoaded` /
-  //    `loadedMessageViewKey`, tracked by `loadRequestIdRef` rather than by
-  //    invalidating the in-flight load from the effect cleanup. The old
-  //    cleanup-based version combined with a dedup guard that returned
-  //    *before* settling, so an effect re-run while a fetch was in flight
-  //    left the view permanently unloaded: the previous run could no longer
-  //    settle it and the new run returned early without settling it either.
-  //    The panel then rendered its loading placeholder forever, which is why
-  //    a send could clear the composer and create the sidebar conversation
-  //    while the main panel showed no user message at all.
+  //  * Only the newest load may settle the view, tracked by a load ticket on
+  //    the runtime record rather than by invalidating the in-flight load from
+  //    the effect cleanup. The old cleanup-based version combined with a dedup
+  //    guard that returned *before* settling, so an effect re-run while a
+  //    fetch was in flight left the view permanently unloaded: the previous
+  //    run could no longer settle it and the new run returned early without
+  //    settling it either. The panel then rendered its loading placeholder
+  //    forever, which is why a send could clear the composer and create the
+  //    sidebar conversation while the main panel showed no user message at
+  //    all.
   //  * The current load always settles, including when it bails out because
-  //    this panel started streaming in the meantime.
+  //    this key started streaming in the meantime.
+  //  * A key whose transcript this session already owns -- streaming, or
+  //    advanced by a send -- is never re-read. Coming back to a conversation
+  //    mid-answer must show the answer that is arriving, and coming back just
+  //    after one finished must not replace it with a server copy written
+  //    before it landed. This is what makes the completed answer appear
+  //    exactly once.
+  //  * The ticket lives on the runtime record, so a panel that remounts while
+  //    its own history request is still on the wire waits for that request
+  //    instead of starting a second one.
   useEffect(() => {
     if (!isGuestMode && !sessionUserId) return;
+    if (ownsChatRuntimeTranscript(runtimeKey)) return;
+    if (settledViewKeyRef.current === runtimeKey) return;
+    if (isChatRuntimeLoadInFlight(runtimeKey)) return;
+
+    const loadKey = runtimeKey;
 
     if (isGuestMode) {
       // Resolves synchronously from localStorage, so no interim "loading"
-      // state is needed: `isCurrentMessageViewLoaded` already reads as false
-      // for this view until `loadedMessageViewKey` catches up below.
-      // Bookkeeping stays synchronous so a second effect run in the same tick
-      // cannot start a competing load; only the state writes are deferred.
-      const requestId = (loadRequestIdRef.current += 1);
-      requestedViewKeyRef.current = expectedMessageViewKey;
+      // state is needed: the runtime snapshot already reads as not loaded for
+      // this key until the microtask below settles it. Bookkeeping stays
+      // synchronous so a second effect run in the same tick cannot start a
+      // competing load; only the state writes are deferred.
+      const requestId = claimChatRuntimeLoad(loadKey);
 
       queueMicrotask(() => {
-        if (loadRequestIdRef.current !== requestId) return;
+        if (!isCurrentChatRuntimeLoad(loadKey, requestId)) return;
 
         if (initialConversationId) {
-          loadedChatIdRef.current = initialConversationId;
-
           const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
           const savedMessages = localStorage.getItem(storageKey);
           if (savedMessages) {
             try {
-              setMessages(JSON.parse(savedMessages));
+              writeChatRuntimeMessages(loadKey, JSON.parse(savedMessages));
             } catch (e) {
               console.error("Failed to load guest messages:", e);
-              setMessages([]);
+              writeChatRuntimeMessages(loadKey, []);
             }
           } else {
-            setMessages([
+            writeChatRuntimeMessages(loadKey, [
               { id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.guestWelcome"), status: "normal" },
             ]);
           }
         } else {
-          setMessages([]);
+          writeChatRuntimeMessages(loadKey, []);
         }
 
-        setIsMessagesLoaded(true);
-        setLoadedMessageViewKey(expectedMessageViewKey);
+        settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
       });
       return;
     }
 
     if (initialConversationId && initialConversationId !== "guest-chat") {
-      // Already loaded, or a load for this exact view is still running.
-      // Safe to skip only because that load is guaranteed to settle.
-      if (requestedViewKeyRef.current === expectedMessageViewKey) return;
-
-      requestedViewKeyRef.current = expectedMessageViewKey;
-      const requestId = (loadRequestIdRef.current += 1);
-      const isCurrentLoad = () => loadRequestIdRef.current === requestId;
-      const revisionAtStart = localMessageRevisionRef.current;
-      setIsMessagesLoaded(false);
+      // Only the account branch is deduped per instance: the two synchronous
+      // branches cost nothing to re-run, and re-running them is how a language
+      // change reaches the welcome copy they render.
+      settledViewKeyRef.current = loadKey;
+      const requestId = claimChatRuntimeLoad(loadKey);
+      const isCurrentLoad = () => isCurrentChatRuntimeLoad(loadKey, requestId);
+      const revisionAtStart = getChatRuntimeRevision(loadKey);
+      let loadFailed = false;
 
       const fetchPastMessages = async () => {
         try {
@@ -567,19 +681,17 @@ function ChatAppComponent({
               nextCursor = pageData.messagePage?.nextCursor;
             }
             if (!isCurrentLoad()) return;
-            // This panel sent something while the history request was in
+            // This key sent something while the history request was in
             // flight, so the response describes the conversation as it was
             // before that send. Applying it would replace the optimistic user
             // message and the reply with pre-send history -- which is exactly
             // how a completed send could end up showing an empty panel when
             // the two responses landed in the wrong order. Checking a
-            // revision counter rather than `isSendingRef` also covers the
-            // window just *after* streaming finishes, where the old guard had
-            // already been released.
-            if (localMessageRevisionRef.current !== revisionAtStart) return;
-            if (isSendingRef.current && streamingChatIdRef.current === initialConversationId) {
-              return;
-            }
+            // revision counter rather than a "still sending" flag also covers
+            // the window just *after* streaming finishes, where the old guard
+            // had already been released.
+            if (getChatRuntimeRevision(loadKey) !== revisionAtStart) return;
+            if (isChatRuntimeStreaming(loadKey)) return;
 
           if (data.messages && data.messages.length > 0) {
             const filteredMessages: Message[] = [];
@@ -596,9 +708,9 @@ function ChatAppComponent({
 					      }
 				    }
 
-              setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
+              writeChatRuntimeMessages(loadKey, filteredMessages.length > 0 ? filteredMessages : [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
-              setMessages([{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
+              writeChatRuntimeMessages(loadKey, [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           }
         } else {
           await discardResponseBody(response);
@@ -606,12 +718,20 @@ function ChatAppComponent({
         }
       } catch (error) {
         console.error("Failed to load conversation messages:", error);
-        // Let a later re-run retry instead of pinning the view to a failed load.
-        if (isCurrentLoad()) requestedViewKeyRef.current = null;
+        loadFailed = true;
       } finally {
+        // The current load always settles, including when it bailed out above
+        // because a send advanced this key while the request was in flight:
+        // the transcript on screen is then the send's, and it is loaded.
         if (isCurrentLoad()) {
-          setIsMessagesLoaded(true);
-          setLoadedMessageViewKey(expectedMessageViewKey);
+          if (loadFailed) {
+            // Let a later re-run retry instead of pinning the view to a failed
+            // load, which would leave the loading placeholder up for good.
+            settledViewKeyRef.current = null;
+            releaseChatRuntimeLoad(loadKey, requestId);
+          } else {
+            settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
+          }
         }
       }
     };
@@ -621,12 +741,11 @@ function ChatAppComponent({
     }
 
     // No conversation selected yet: nothing to fetch, just the welcome view.
-    const requestId = (loadRequestIdRef.current += 1);
-    requestedViewKeyRef.current = expectedMessageViewKey;
+    const requestId = claimChatRuntimeLoad(loadKey);
 
     queueMicrotask(() => {
-      if (loadRequestIdRef.current !== requestId) return;
-      setMessages([
+      if (!isCurrentChatRuntimeLoad(loadKey, requestId)) return;
+      writeChatRuntimeMessages(loadKey, [
         {
           id: WELCOME_MESSAGE_ID,
           role: "assistant",
@@ -634,8 +753,7 @@ function ChatAppComponent({
           status: "normal",
         },
       ]);
-      setIsMessagesLoaded(true);
-      setLoadedMessageViewKey(expectedMessageViewKey);
+      settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
     });
   }, [
     initialConversationId,
@@ -643,30 +761,52 @@ function ChatAppComponent({
     modelId,
     sessionUserId,
     t,
-    expectedMessageViewKey,
+    runtimeKey,
   ]);
   
+  /**
+   * Writes a guest's transcript back to localStorage.
+   *
+   * Kept as a plain function rather than only an effect because a guest answer
+   * can now finish while no panel is mounted on it: the run writes its last
+   * chunk into the runtime key of a conversation the user has left, and an
+   * effect on `messages` of an unmounted component never fires. The send path
+   * calls this as it settles, with the key it ran under.
+   */
+  const persistGuestTranscript = useCallback(
+    (key: string, conversationId: string | null) => {
+      if (!isGuestMode || !conversationId) return;
+      const transcript = getChatRuntimeSnapshot(key).messages;
+      if (transcript.length === 0) return;
+      const storageKey = guestMessagesStorageKey(conversationId, modelId);
+      try {
+        // The same `data` strip the request already does. A guest image
+        // attachment carries a multi-megabyte data URL for its preview, and
+        // writing that into localStorage would blow the origin's quota --
+        // taking the whole guest transcript with it. The bytes live in
+        // ephemeral object storage, keyed by objectKey; the preview is worth
+        // less than the history.
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify(transcript.map(toGuestPersistableMessage))
+        );
+      } catch (error) {
+        console.error("Failed to persist guest messages:", error);
+      }
+    },
+    [isGuestMode, modelId]
+  );
+
   useEffect(() => {
-      if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
-          if (loadedChatIdRef.current === initialConversationId) {
-              const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
-              try {
-                  // The same `data` strip the request already does. A guest
-                  // image attachment carries a multi-megabyte data URL for its
-                  // preview, and writing that into localStorage would blow the
-                  // origin's quota -- taking the whole guest transcript with
-                  // it. The bytes live in ephemeral object storage, keyed by
-                  // objectKey; the preview is worth less than the history.
-                  localStorage.setItem(
-                      storageKey,
-                      JSON.stringify(messages.map(toGuestPersistableMessage))
-                  );
-              } catch (error) {
-                  console.error("Failed to persist guest messages:", error);
-              }
-          }
-    }
-  }, [messages, isGuestMode, initialConversationId, modelId, isMessagesLoaded]);
+    if (!isCurrentMessageViewLoaded) return;
+    persistGuestTranscript(runtimeKey, initialConversationId);
+  }, [
+    initialConversationId,
+    isCurrentMessageViewLoaded,
+    messages,
+    persistGuestTranscript,
+    runtimeKey,
+  ]);
 
   const handleSendPrompt = useCallback(async (
     text: string,
@@ -679,17 +819,29 @@ function ChatAppComponent({
     contextBundle?: string | null,
     contextLayout: "single" | "comparison" = "single"
   ) => {
-  	if ((!text && attachments.length === 0) || isSendingRef.current) return;
+    // The key this run owns for its whole life. `targetChatId` is the
+    // conversation the send was made in, and every write below names this key
+    // rather than the panel's current view: the user may open another
+    // conversation a chunk later, and the answer still belongs here.
+    const runKey = chatRuntimeKey({
+      identityKey: chatRuntimeIdentityKey(
+        isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
+      ),
+      conversationId: targetChatId,
+      modelId,
+    });
+    if ((!text && attachments.length === 0) || isChatRuntimeStreaming(runKey)) {
+      return;
+    }
 
-    lastPromptRef.current = { text, targetChatId, attachments };
-    // Marks this panel's history as locally advanced. A history load that was
-    // already in flight when this send started describes the conversation as
-    // it was *before* the send, so it must not be applied afterwards.
-    localMessageRevisionRef.current += 1;
-    setIsSending(true);
-	isSendingRef.current = true;
-    streamingChatIdRef.current = targetChatId;
-	
+    const setAssistantMessage = assistantMessageWriter(runKey);
+    setChatRuntimeLastPrompt(runKey, { text, targetChatId, attachments });
+    // Marks this conversation's history as locally advanced. A history load
+    // that was already in flight when this send started describes the
+    // conversation as it was *before* the send, so it must not be applied
+    // afterwards.
+    advanceChatRuntimeRevision(runKey);
+
     const userMessage: Message = {
       id: userMsgId,
       role: "user",
@@ -709,16 +861,15 @@ function ChatAppComponent({
 		createdAt: new Date().toISOString(),
 	};
 	
-    setMessages((prev) => [
+    writeChatRuntimeMessages(runKey, (prev) => [
       ...prev,
       userMessage,
       assistantMessage,
     ]);
 
-    setIsSending(true);
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    // Opening the run here, on the key, is what lets a panel that mounts later
+    // for this same conversation show it as still generating and stop it.
+    const controller = beginChatRuntimeRun(runKey);
 
     let idleTimeoutId: number | null = null;
     const resetIdleTimeout = () => {
@@ -946,6 +1097,7 @@ function ChatAppComponent({
           idleTimeoutId = null;
         }
         await pollDeepResearchJob(
+          runKey,
           assistantMessageId,
           Date.now(),
           controller.signal,
@@ -1303,27 +1455,31 @@ function ChatAppComponent({
         window.clearTimeout(idleTimeoutId);
       }
 
-      setIsSending(false);
-      isSendingRef.current = false;
-      streamingChatIdRef.current = null;
-      abortControllerRef.current = null;
+      endChatRuntimeRun(runKey, controller);
+      // A guest answer can finish while no panel is mounted on this
+      // conversation, and an effect on `messages` of an unmounted component
+      // never fires. Written here so the transcript localStorage holds is the
+      // finished one, not the last frame the user happened to be looking at.
+      persistGuestTranscript(runKey, targetChatId);
     }
   }, [
+    assistantMessageWriter,
     isGuestMode,
     onContextBundleStale,
     messages,
     modelId,
     onResponseComplete,
+    persistGuestTranscript,
     pollDeepResearchJob,
     runGuestChatRequest,
-    setAssistantMessage,
+    sessionUserId,
     t,
     webSearchMode,
   ]);
 
   const handleRetryLast = useCallback(() => {
-    const lastPrompt = lastPromptRef.current;
-    if (!lastPrompt || isSendingRef.current) return;
+    const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
+    if (!lastPrompt || isChatRuntimeStreaming(runtimeKeyRef.current)) return;
 
     // Unlike a fresh send, a retry doesn't go through handleGlobalSubmit or
     // handleModelOnlySubmit -- both of which flush any pending model-list
@@ -1345,8 +1501,8 @@ function ChatAppComponent({
   }, [handleSendPrompt, onBeforeSend]);
 
   const handleRetryWithoutAttachments = useCallback(() => {
-    const lastPrompt = lastPromptRef.current;
-    if (!lastPrompt || isSendingRef.current) return;
+    const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
+    if (!lastPrompt || isChatRuntimeStreaming(runtimeKeyRef.current)) return;
 
     void (async () => {
       const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
@@ -1430,7 +1586,7 @@ function ChatAppComponent({
 
     const handleModelOnlySubmit = async () => {
         const trimmed = modelInput.trim();
-        if (!trimmed || isSendingRef.current || isPanelDisabled || !initialConversationId) return;
+        if (!trimmed || isChatRuntimeStreaming(runtimeKey) || isPanelDisabled || !initialConversationId) return;
 
         const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
         if (!settingsReady) return;
