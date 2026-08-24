@@ -481,6 +481,13 @@ const REGISTRY = {
     reason:
       "How a campaign's waves are started: manual, auto_draft, or approved_schedule. Only the third is the scheduler's to act on -- a campaign left on manual is one somebody intends to watch as it goes out, and starting it for them because a time happened to be set would take that decision away silently. Judged by lib/emailCampaignScheduleCore.ts.",
   },
+  EmailCampaignAttestation_kind_check: {
+    owner: "list",
+    module: "lib/emailCampaignAttestationCore.ts",
+    list: "ATTESTATION_KINDS",
+    reason:
+      "The three conditions of section 13.3 that no field holds, recorded as somebody having said them: the body names the capability and credit differences, staging was verified, the reconciliation and its rollback are ready. Compared against lib/emailCampaignAttestationCore.ts's ATTESTATION_KINDS, which is what lib/automaticTransitionClaim.ts reads -- a kind here with no entry there would be an attestation the gate never asks about.",
+  },
   EmailCampaignRecipient_eligibility_reason_check: {
     owner: "database",
     reason:

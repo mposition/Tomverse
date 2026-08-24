@@ -95,7 +95,8 @@ export const scheduleRefusal = (
  * A reminder before its notice is not a scheduling mistake to be sorted out at
  * send time -- it is a sequence that cannot be repaired afterwards, because the
  * reminder recomputes its audience from the people the notice already reached
- * (§12.3), and there are none.
+ * (.github/audits/model-lifecycle-email-2026-08-22.md §12.3), and there are
+ * none.
  */
 export const WAVE_ORDER: readonly WaveKind[] = WAVE_KINDS;
 
