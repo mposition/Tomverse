@@ -127,6 +127,17 @@ export const zh = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "无法加载聊天工作区",
+            body: "您的对话是安全的。重试通常即可解决。",
+            reference: "如果仍然发生，联系客服时请提供此参考编号：",
+            noReference: "如果仍然发生，请联系客服。",
+            retry: "重试",
+            support: "联系客服",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "图像生成",
         imageGenerationBackToChat: "返回聊天",

@@ -110,6 +110,17 @@ export const pt = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "Não foi possível carregar o espaço de conversa",
+            body: "Suas conversas estão seguras. Tentar novamente costuma resolver.",
+            reference: "Se continuar acontecendo, informe esta referência ao contactar o suporte:",
+            noReference: "Se continuar acontecendo, contacte o suporte.",
+            retry: "Tentar novamente",
+            support: "Contactar o suporte",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Geração de imagens",
         imageGenerationBackToChat: "Voltar ao chat",
