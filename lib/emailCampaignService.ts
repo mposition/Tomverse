@@ -19,6 +19,12 @@ import {
   type StoredAttestation,
 } from "@/lib/emailCampaignAttestationCore";
 import { automaticTransitionClaim } from "@/lib/automaticTransitionClaim";
+import { AUDIENCE_DEFINITION_VERSION } from "@/lib/modelRetirementAudienceCore";
+import { readExpansionSpec } from "@/lib/emailAudienceExpansionCore";
+import {
+  summariseRetirementAudience,
+  type AudienceSummary,
+} from "@/lib/modelRetirementAudience";
 import {
   scheduleProblems,
   scheduleRefusal,
@@ -706,5 +712,128 @@ export const campaignTransitionClaim = async (campaignId: string) => {
       attestations: attestationsForClaim(states),
     }),
     attestations: states,
+  };
+};
+
+/**
+ * How many candidates one estimate will walk before it stops and says so.
+ *
+ * The scan visits every account that names the retiring model, which is the
+ * number being asked about -- so it is most expensive on exactly the audience
+ * an operator most wants sized. Bounded here because a person is waiting for
+ * the answer; past the bound the summary reports `truncated` and every figure
+ * in it is a floor, which the screen states rather than rounding away.
+ */
+export const AUDIENCE_ESTIMATE_MAX_CANDIDATES = 20_000;
+
+export type EstimateRefusal =
+  | "not_found"
+  | "no_cohort"
+  | "cancelled"
+  | "already_approved";
+
+export const ESTIMATE_REFUSAL_MESSAGE: Record<EstimateRefusal, string> = {
+  not_found: "This campaign no longer exists.",
+  no_cohort:
+    "This campaign names its recipients explicitly rather than by cohort, so there is nothing to count: the audience is exactly the list it carries.",
+  cancelled: "This campaign was cancelled.",
+  already_approved:
+    "This campaign is already approved. Its audience is measured again by each wave as it runs, and re-estimating now would overwrite the number the approver read.",
+};
+
+/**
+ * Measures the audience and stores the result on the campaign.
+ *
+ * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §11, §12.3.
+ *
+ * `estimatedRecipients` and `audienceVersion` have been on the row since the
+ * fourth slice with nothing writing them from the audience: the number came
+ * from an operator typing it, and the version answered "1" for estimates no
+ * version of the rules had produced. `summariseRetirementAudience` has existed
+ * since the third and was called only by its own test.
+ *
+ * The stored headline is `noticeAudience` -- who the notice actually goes to,
+ * after exclusions -- and not `distinctUsers`. A campaign sized on everyone in
+ * the cohort would be sized on people it is about to decide not to write to.
+ *
+ * Refused once approved. Re-measuring then would replace the number the
+ * approver read with a different one under the same approval, and each wave
+ * recomputes its own audience as it runs anyway.
+ */
+export const estimateCampaignAudience = async (input: {
+  campaignId: string;
+  byEmail: string;
+  now?: Date;
+  maxCandidates?: number;
+}): Promise<
+  | { refused: EstimateRefusal; message: string }
+  | {
+      estimatedRecipients: number;
+      audienceVersion: number;
+      estimatedAt: Date;
+      summary: AudienceSummary;
+    }
+> => {
+  const campaign = await prisma.emailCampaign.findUnique({
+    where: { id: input.campaignId },
+    select: {
+      status: true,
+      templateKey: true,
+      audienceSpec: true,
+      replacementModelId: true,
+    },
+  });
+  if (!campaign) {
+    return { refused: "not_found", message: ESTIMATE_REFUSAL_MESSAGE.not_found };
+  }
+  if (campaign.status === "cancelled") {
+    return { refused: "cancelled", message: ESTIMATE_REFUSAL_MESSAGE.cancelled };
+  }
+  if (campaign.status !== "draft" && campaign.status !== "pending_approval") {
+    return {
+      refused: "already_approved",
+      message: ESTIMATE_REFUSAL_MESSAGE.already_approved,
+    };
+  }
+
+  const spec = readExpansionSpec(campaign.audienceSpec);
+  if (!spec.cohort) {
+    return { refused: "no_cohort", message: ESTIMATE_REFUSAL_MESSAGE.no_cohort };
+  }
+
+  // The template's own classification and purpose, not a guess: suppression
+  // answers differently for each, so asking under the wrong one produces an
+  // exclusion count that is right about a send nobody is making.
+  const definition = emailTemplateDefinition(campaign.templateKey);
+  const summary = await summariseRetirementAudience({
+    targetModelId: spec.cohort.targetModelId,
+    // The spec's replacement, not the campaign column's: the count is about the
+    // audience this campaign will actually expand, and the expander reads the
+    // spec.
+    replacementModelId: spec.cohort.replacementModelId,
+    purpose: definition.purpose,
+    classification: definition.classification,
+    maxCandidates: input.maxCandidates ?? AUDIENCE_ESTIMATE_MAX_CANDIDATES,
+  });
+
+  const estimatedAt = input.now ?? new Date();
+  await prisma.emailCampaign.update({
+    where: { id: input.campaignId },
+    data: {
+      // One statement, so the headline and the summary it came from cannot
+      // drift apart, and so the completeness CHECK is satisfied by every write.
+      estimatedRecipients: summary.noticeAudience,
+      audienceVersion: AUDIENCE_DEFINITION_VERSION,
+      estimatedAt,
+      estimatedByEmail: input.byEmail,
+      audienceEstimate: summary as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  return {
+    estimatedRecipients: summary.noticeAudience,
+    audienceVersion: AUDIENCE_DEFINITION_VERSION,
+    estimatedAt,
+    summary,
   };
 };
