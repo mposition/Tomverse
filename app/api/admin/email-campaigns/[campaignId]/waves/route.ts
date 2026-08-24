@@ -150,6 +150,9 @@ export async function POST(req: Request, context: Context) {
 
     return NextResponse.json({ waveId: run.waveId, expansion: run.expansion });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to act on the wave.", error);
+    return NextResponse.json({ error: "Failed to act on the wave." }, { status: 500 });
   }
 }

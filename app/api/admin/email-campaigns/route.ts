@@ -81,7 +81,10 @@ export async function GET(req: Request) {
     });
     return NextResponse.json({ campaigns });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to load campaigns.", error);
+    return NextResponse.json({ error: "Failed to load campaigns." }, { status: 500 });
   }
 }
 
@@ -148,6 +151,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ campaign: draft }, { status: 201 });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to draft the campaign.", error);
+    return NextResponse.json({ error: "Failed to draft the campaign." }, { status: 500 });
   }
 }

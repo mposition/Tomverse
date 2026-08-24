@@ -125,7 +125,10 @@ export async function GET(req: Request, context: Context) {
       transitionClaim: transition,
     });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to load the campaign.", error);
+    return NextResponse.json({ error: "Failed to load the campaign." }, { status: 500 });
   }
 }
 
@@ -275,6 +278,9 @@ export async function PATCH(req: Request, context: Context) {
 
     return NextResponse.json({ campaign });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to update the campaign.", error);
+    return NextResponse.json({ error: "Failed to update the campaign." }, { status: 500 });
   }
 }

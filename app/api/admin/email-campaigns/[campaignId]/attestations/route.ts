@@ -69,7 +69,10 @@ export async function GET(req: Request, context: Context) {
       attestations: await campaignAttestationStates(campaignId),
     });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to load the attestations.", error);
+    return NextResponse.json({ error: "Failed to load the attestations." }, { status: 500 });
   }
 }
 
@@ -135,7 +138,10 @@ export async function POST(req: Request, context: Context) {
       attestations: await campaignAttestationStates(campaignId),
     });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to record the attestation.", error);
+    return NextResponse.json({ error: "Failed to record the attestation." }, { status: 500 });
   }
 }
 
@@ -175,6 +181,9 @@ export async function DELETE(req: Request, context: Context) {
       attestations: await campaignAttestationStates(campaignId),
     });
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to withdraw the attestation.", error);
+    return NextResponse.json({ error: "Failed to withdraw the attestation." }, { status: 500 });
   }
 }

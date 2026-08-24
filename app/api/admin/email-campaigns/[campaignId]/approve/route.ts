@@ -199,6 +199,9 @@ export async function POST(req: Request, context: Context) {
       throw error;
     }
   } catch (error) {
-    return apiSecurityResponse(error);
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    console.error("Failed to approve the campaign.", error);
+    return NextResponse.json({ error: "Failed to approve the campaign." }, { status: 500 });
   }
 }
