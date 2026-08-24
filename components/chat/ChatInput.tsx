@@ -2995,8 +2995,18 @@ export function ChatInput({
                   )}
                   <button
                     type="button"
+                    data-testid="attachment-remove"
                     onClick={() => handleRemoveAttachment(attachment)}
-                    className={`relative before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3" : "before:-inset-1"} ${
+                    // No `relative` here. Both branches below position the
+                    // button with `absolute`, and an absolutely positioned
+                    // element is already the containing block its own
+                    // `before:` touch target needs. Spelling both out let
+                    // Tailwind's stylesheet order decide -- `.relative` is
+                    // emitted after `.absolute`, so it won, the button fell
+                    // back into flow, and the image branch's `overflow-hidden`
+                    // clipped it away: an attached image had no remove control
+                    // at all.
+                    className={`before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3" : "before:-inset-1"} ${
                       attachment.data
                         ? "absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
                         : "absolute right-[8px] top-[8px] flex h-[20px] w-[20px] items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
