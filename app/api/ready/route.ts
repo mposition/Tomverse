@@ -9,6 +9,7 @@ import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
+import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
   getActiveProviders,
@@ -102,10 +103,20 @@ const readinessResponse = async (head = false) => {
   // saying they never got a receipt.
   const snapshotKeyring = snapshotKeyringReadiness();
   const emailSnapshotKeyring = snapshotKeyring.ready;
+  // The one-click unsubscribe keyring, and the only email dependency here that
+  // is conditional. It becomes an error once MARKETING_EMAIL_FROM is set --
+  // the state where a deployment answers ready while every marketing send is
+  // refused for having no unsubscribe link (EM-10). Until then a missing key
+  // is a warning, because gating on it would refuse today's deployment to
+  // announce a capability nobody has turned on. A keyring that is present and
+  // broken is an error either way.
+  const unsubscribeKeyring = unsubscribeKeyringReadiness();
+  const emailUnsubscribeKeyring = unsubscribeKeyring.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
-    imageProviderBudget && emailSendingIdentity && emailSnapshotKeyring;
+    imageProviderBudget && emailSendingIdentity && emailSnapshotKeyring &&
+    emailUnsubscribeKeyring;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -228,6 +239,33 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-unsubscribe-keyring",
+        healthy: emailUnsubscribeKeyring,
+        code: "EMAIL_UNSUBSCRIBE_KEYRING_NOT_READY",
+        title: "Marketing mail cannot carry a one-click unsubscribe link",
+        error:
+          unsubscribeKeyring.errors.length > 0
+            ? unsubscribeKeyring.errors.map((problem) => problem.message).join(" | ")
+            : unsubscribeKeyring.required
+              ? "The unsubscribe keyring is configured."
+              : "Marketing sending is not configured, so no unsubscribe keyring is required yet.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // Whether this deployment is one the keys are mandatory for, so a
+          // warning here can be read without also knowing what
+          // MARKETING_EMAIL_FROM is set to. No counts and no labels: unlike the
+          // snapshot keyring this can be absent by design, and a version count
+          // of zero would read as a fault.
+          required: unsubscribeKeyring.required,
+          warnings:
+            unsubscribeKeyring.warnings.map((problem) => problem.code).join(",") ||
+            "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -264,6 +302,7 @@ const readinessResponse = async (head = false) => {
         imageProviderBudget,
         emailSendingIdentity,
         emailSnapshotKeyring,
+        emailUnsubscribeKeyring,
       },
       traceId,
     },
