@@ -208,6 +208,8 @@ export const en = {
         modelRetired: "This model is no longer available. Please select another current model.",
         modelRetiredWithReplacement: "This model is no longer available. Please select {model} or another current model.",
         responseCancelled: "Response generation was stopped.",
+        firstResponseTimeout: "The response was still being prepared after longer than expected, so the connection was closed. Please try again shortly.",
+        streamIdleTimeout: "The response stopped arriving for longer than expected, so the connection was closed. This answer is not complete.",
         connectingStatus: "Connecting…",
         searchingWebStatus: "Searching the web…",
         readingFileStatus: "Reading the file…",

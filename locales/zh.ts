@@ -235,6 +235,8 @@ export const zh = {
         modelRetired: "此模型已不再提供。请选择其他当前可用的模型。",
         modelRetiredWithReplacement: "此模型已不再提供。请选择 {model} 或其他当前可用的模型。",
         responseCancelled: "回复生成已停止。",
+        firstResponseTimeout: "回复准备时间超出预期，连接已关闭。请稍后重试。",
+        streamIdleTimeout: "回复传输中断的时间超出预期，连接已关闭。此回复尚未完成。",
         deepResearchRequestingStatus: "正在请求深度研究…",
         deepResearchSearchingStatus: "正在搜索资料…",
         deepResearchWritingStatus: "正在撰写报告…",
