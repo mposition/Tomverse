@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~7차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42 · §43 · §44
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~8차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42 · §43 · §44 · §45
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -3340,3 +3340,77 @@ campaign 화면에서 운영자가 주소를 볼 수 있는지는 `/admin/email-
 
 **초안 작성 UI는 여전히 없습니다**(§43.2). **D5·D10도 그대로 결정 대기**입니다.
 개인 단위 원장 열람은 D10이 정해진 뒤에 다시 봅니다.
+
+## 45. EM-01 8차 구현 기록 — 추정치를 재기 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelRetirementAudienceCore.ts` | `AUDIENCE_DEFINITION_VERSION`, `AudienceSummary.truncated` |
+| `lib/modelRetirementAudience.ts` | `summariseRetirementAudience`에 `maxCandidates` |
+| `prisma/schema.prisma` · `migrations/20260824120000_email_campaign_audience_estimate` | `estimatedAt` · `estimatedByEmail` · `audienceEstimate` + 완결성 CHECK |
+| `lib/emailCampaignService.ts` | `estimateCampaignAudience()` |
+| `app/api/admin/email-campaigns/[campaignId]/estimate/route.ts` | 계수 실행 |
+| `components/admin/AdminCampaignDetailPanel.tsx` | 추정 구획 |
+| `tests/audienceEstimateTruncation.test.mjs` | 5건, 새 파일 |
+| `tests/integration/campaign-audience-estimate.db.test.ts` | 12건, 새 파일 |
+| `tests/e2e-admin/admin-email-campaigns.spec.ts` | 2건 추가(총 14건) |
+
+**`estimatedRecipients`의 유일한 출처가 사람이 타이핑한 숫자였습니다.**
+4차부터 컬럼은 있었지만 audience에서 그것을 쓰는 코드가 없었고,
+`audienceVersion`은 **아무도 쓰지 않아 영원히 1**이었습니다 — "어떤 규칙이 이
+추정을 만들었는가"를 말하겠다는 컬럼이 어떤 규칙도 만들지 않은 추정에 대해
+"버전 1"이라고 답하고 있었습니다. 그리고 3차가 만든
+`summariseRetirementAudience()`는 **자기 테스트 말고 아무도 부르지
+않았습니다** — 이 기능에서 같은 패턴의 세 번째입니다(§43.1의 overdue wave,
+§44의 원장).
+
+**저장하는 머릿수는 `noticeAudience`이지 `distinctUsers`가 아닙니다.** cohort
+전체로 크기를 잡으면, 곧 쓰지 않기로 결정할 사람들까지 포함해 발송 규모를
+가늠하게 됩니다.
+
+**추정은 숫자·시각·요약이 함께이거나 전부 없습니다**(CHECK). 시각 없는 숫자는
+매일 움직이는 audience에 대한 나이 모를 수이고, 그것이 바로 이 slice가
+"측정"으로 오인되지 않게 하려는 **타이핑된 추측**입니다. `NOT VALID`으로
+배포하며, 그런 기존 행은 삭제가 아니라 **다시 재도록** 남겨 둡니다.
+
+**요약 전체를 행에 저장합니다.** 제외 내역은 audience query가 틀렸다고 말해
+주는 부분인데, 계산한 요청의 응답에만 두면 **campaign을 검토하는 두 번째
+관리자가 그것을 영영 보지 못합니다.**
+
+**한계를 둔 계수는 한계를 두었다고 말합니다.** scan은 은퇴 모델을 지목한 모든
+계정을 도는데, 그것이 바로 묻고 있는 수이므로 **가장 알고 싶은 audience에서
+가장 비쌉니다.** 사람이 기다리므로 상한을 두고, 넘으면 `truncated`이며 모든
+수치가 총계가 아니라 **하한**입니다. 화면이 "at least N"이라고 씁니다 —
+보정·외삽·반올림을 하지 않으므로 그 문장이 참입니다.
+
+**13번째 조건을 만들지 않았습니다.** §13.3의 12조건은 그대로이고 이것은
+아무것도 gate하지 않습니다. 크기를 **누구도 약속하기 전에 알 수 있게** 할
+뿐입니다.
+
+**승인 후에는 거부합니다.** 다시 재면 승인자가 읽은 숫자가 같은 승인 아래에서
+다른 숫자로 바뀌고, 어차피 각 wave가 실행 시점에 자기 audience를 다시
+계산합니다.
+
+**cohort 없는 campaign은 0으로 재지 않고 거부합니다.** 세 사람을 명시적으로
+지목한 campaign에 "수신자 0명"이라고 답하는 것은 틀린 질문에 대한 측정입니다.
+
+### 45.1 테스트에서 고친 제 실수 셋
+
+세 번 다 코드가 아니라 테스트가 틀렸고, 그대로 두면 통과하는 거짓 검사가
+됐을 것들입니다.
+
+1. **`AudienceMember` fixture의 필드명이 틀렸습니다.** 모두 `no_email`로
+   제외돼 0을 세고 있었고, "truncation이 수치를 바꾸지 않는다" 검사는 양쪽 다
+   0이라 **통과하고 있었습니다.** fixture를 고치고, 비교 전에
+   `noticeAudience === 2`를 먼저 단언하도록 바꿨습니다.
+2. **cap을 기본 page size(200)보다 작은 audience로 시험했습니다.** 짧은 page
+   에서 loop가 먼저 끝나므로 cap에 닿지 않습니다 — 코드가 맞습니다. 그 분기는
+   `pageSize`가 노출된 summariser 층에서 시험하고, 서비스에는 **테스트 전용
+   손잡이를 달지 않았습니다.**
+3. **`status: "approved"`를 손으로 세팅했습니다.** `approval_completeness_check`
+   가 정당하게 거부했고, `approveCampaign()`으로 실제 경로를 지나게 고쳤습니다.
+
+### 45.2 남은 것
+
+초안 작성 UI(§43.2), **D5**·**D10**(§21) 그대로입니다. `audienceEstimate`가
+있는 지금도 개인 단위 열람은 D10 뒤입니다.

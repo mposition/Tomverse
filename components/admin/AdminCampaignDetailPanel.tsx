@@ -74,6 +74,9 @@ type CampaignView = {
   replacementModelId: string | null;
   audienceVersion: number;
   estimatedRecipients: number | null;
+  estimatedAt: string | null;
+  estimatedByEmail: string | null;
+  audienceEstimate: AudienceSummaryView | null;
   claimsAutomaticTransition: boolean;
   approvalId: string | null;
   approvedAt: string | null;
@@ -82,6 +85,18 @@ type CampaignView = {
   cancelReason: string | null;
   createdAt: string;
   waves: WaveView[];
+};
+
+type AudienceSummaryView = {
+  cohortRows: Record<string, number>;
+  cohortUsers: Record<string, number>;
+  distinctUsers: number;
+  excluded: Record<string, number>;
+  noticeAudience: number;
+  autoMigratable: number;
+  malformed: number;
+  /** The scan stopped before the audience did: every figure is a floor. */
+  truncated: boolean;
 };
 
 type AudienceView = {
@@ -131,6 +146,13 @@ const EXCLUDED_LABEL: Record<string, string> = {
   no_consent: "No consent for this purpose",
   plan_incompatible: "Replacement not available on their plan",
   already_changed: "No longer in any cohort",
+};
+
+const ESTIMATE_EXCLUDED_LABEL: Record<string, string> = {
+  no_email: "No address on the account",
+  account_inactive: "Account inactive",
+  suppressed: "Address suppressed",
+  plan_incompatible: "Replacement not available on their plan",
 };
 
 const COHORT_LABEL: Record<string, string> = {
@@ -315,8 +337,8 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
             [
               "Estimated recipients",
               campaign.estimatedRecipients === null
-                ? "not estimated"
-                : `${campaign.estimatedRecipients} (audience v${campaign.audienceVersion})`,
+                ? "not measured"
+                : `${campaign.estimatedRecipients} — measured ${when(campaign.estimatedAt)} by ${campaign.estimatedByEmail ?? "unknown"} (rules v${campaign.audienceVersion})`,
             ],
             ["Work item", campaign.workItemId ?? "—"],
             ["Drafted by", campaign.createdByEmail],
@@ -618,6 +640,114 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
             ))}
           </ul>
         )}
+      </section>
+
+      <section
+        className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
+        data-testid="admin-campaign-estimate"
+      >
+        <h3 className="text-lg font-black text-white">How large is this?</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          Counted from the audience rules, not typed in. The number is who the
+          notice would go to after exclusions — not everyone in the cohort,
+          which would size the send on people it is about to decide not to write
+          to.
+        </p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          This gates nothing. It exists so the size is knowable before anybody
+          commits to it; a campaign still sends on the same conditions it did
+          before.
+        </p>
+
+        {campaign.audienceEstimate === null ? (
+          <p
+            className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
+            data-testid="admin-campaign-estimate-absent"
+          >
+            Nobody has measured this audience.
+          </p>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <p className="text-sm text-zinc-200">
+              <span
+                className="text-2xl font-black text-white"
+                data-testid="admin-campaign-estimate-headline"
+              >
+                {campaign.audienceEstimate.truncated ? "at least " : ""}
+                {campaign.audienceEstimate.noticeAudience}
+              </span>{" "}
+              would receive the notice, out of{" "}
+              {campaign.audienceEstimate.distinctUsers} people in the cohort.
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Measured {when(campaign.estimatedAt)} by{" "}
+              {campaign.estimatedByEmail ?? "unknown"} under audience rules v
+              {campaign.audienceVersion}. The audience moves; a count is about
+              the moment it was taken.
+            </p>
+
+            {campaign.audienceEstimate.truncated ? (
+              <p
+                className="mt-3 rounded-xl border border-amber-800 bg-amber-950/40 p-3 text-sm leading-6 text-amber-100"
+                data-testid="admin-campaign-estimate-truncated"
+              >
+                The scan stopped before the audience did, so every figure here
+                is a floor rather than a total. The real audience is larger by
+                an unknown amount.
+              </p>
+            ) : null}
+
+            <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+              {Object.entries(campaign.audienceEstimate.excluded).map(
+                ([reason, count]) => (
+                  <div
+                    key={reason}
+                    className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
+                  >
+                    <dt className="min-w-0 text-sm text-zinc-400">
+                      {ESTIMATE_EXCLUDED_LABEL[reason] ?? reason}
+                    </dt>
+                    <dd
+                      className={`text-sm font-bold ${
+                        count > 0 ? "text-amber-200" : "text-zinc-600"
+                      }`}
+                    >
+                      {count}
+                    </dd>
+                  </div>
+                )
+              )}
+            </dl>
+
+            <p className="mt-3 text-sm text-zinc-300">
+              {campaign.audienceEstimate.autoMigratable} of them could be moved
+              automatically.{" "}
+              {campaign.audienceEstimate.malformed > 0
+                ? `${campaign.audienceEstimate.malformed} could not, because a stored value the parser cannot read is preserved rather than rewritten — promising those accounts an automatic change would be untrue.`
+                : ""}
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() =>
+            void run(
+              "estimate",
+              () => send("/estimate", "POST", {}),
+              "Measured."
+            )
+          }
+          disabled={busy !== null}
+          className="mt-4 inline-flex min-h-11 items-center rounded-xl border border-blue-500/40 bg-blue-500/15 px-5 text-sm font-bold text-white hover:border-blue-400 disabled:opacity-60"
+          data-testid="admin-campaign-estimate-run"
+        >
+          {busy === "estimate"
+            ? "Counting…"
+            : campaign.audienceEstimate
+              ? "Measure again"
+              : "Measure the audience"}
+        </button>
       </section>
 
       <section
