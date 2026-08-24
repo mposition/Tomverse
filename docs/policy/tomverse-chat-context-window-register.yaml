@@ -100,14 +100,28 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 128,000 completion tokens ("This model supports at most 128000
-      completion tokens"). This is an output ceiling for maxOutputTokens,
-      NOT a context window -- the code path validating max_tokens does not
-      know the window, and no provider named one. No sourceUrl, so the row
-      stays unverified.
+      Pending review. Read from
+      https://platform.openai.com/docs/models/gpt-5.5 on 2026-08-24:
+      "1,050,000 context window" and "128,000 max output tokens". Both are
+      exact integers, and 1,050,000 is neither a round million nor 1,048,576
+      -- a figure no convention would have produced, which is the argument
+      for reading the page rather than converting a letter.
+
+
+      The 128,000 matches what the max-output probe measured against staging
+      on the same date ("supports at most 128000 completion tokens"), so two
+      independent paths agree on the output ceiling.
+
+
+      Blocked on one field. The page does not say whether the 1,050,000
+      covers output as well as input, and this register requires
+      contextWindowIncludesOutput stated rather than assumed. Until someone
+      establishes it the row carries no values, including the two figures
+      above -- an unverified row may not hold them.
+
+
+      gpt-5-5 and gpt-5-5-thinking share apiModel gpt-5.5, so both rows rest
+      on this one reading.
 
   - modelId: "gpt-5-5-thinking"
     apiModel: "gpt-5.5"
@@ -124,14 +138,28 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 128,000 completion tokens ("This model supports at most 128000
-      completion tokens"). Same upstream model as gpt-5-5, asked once. This
-      is an output ceiling for maxOutputTokens, NOT a context window -- the
-      code path validating max_tokens does not know the window, and no
-      provider named one. No sourceUrl, so the row stays unverified.
+      Pending review. Read from
+      https://platform.openai.com/docs/models/gpt-5.5 on 2026-08-24:
+      "1,050,000 context window" and "128,000 max output tokens". Both are
+      exact integers, and 1,050,000 is neither a round million nor 1,048,576
+      -- a figure no convention would have produced, which is the argument
+      for reading the page rather than converting a letter.
+
+
+      The 128,000 matches what the max-output probe measured against staging
+      on the same date ("supports at most 128000 completion tokens"), so two
+      independent paths agree on the output ceiling.
+
+
+      Blocked on one field. The page does not say whether the 1,050,000
+      covers output as well as input, and this register requires
+      contextWindowIncludesOutput stated rather than assumed. Until someone
+      establishes it the row carries no values, including the two figures
+      above -- an unverified row may not hold them.
+
+
+      gpt-5-5 and gpt-5-5-thinking share apiModel gpt-5.5, so both rows rest
+      on this one reading.
 
   - modelId: "gpt-5-4-mini"
     apiModel: "gpt-5.4-mini"
@@ -196,13 +224,29 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Partial observation only. Anthropic published an input limit of 1,000,000
-      and an output limit of 128,000 on 2026-08-23
-      (npm run report:model-context-window-evidence, staging) and no combined
-      window. An input limit is not this field: it excludes the answer, and
-      adding the two is a guess about how the provider counts. What
-      contextWindowIncludesOutput should be is exactly the open question, so
-      neither number is recorded here.
+      Pending review. Two readings, both 2026-08-24.
+
+
+      https://platform.claude.com/docs/en/about-claude/models/overview gives
+      Claude Sonnet 5 a context window of "1M tokens" and max output of "128k tokens",
+      against Claude API ID claude-sonnet-5, which is this row's apiModel.
+
+
+      The provider's /v1/models resolves those into integers: the provider
+      catalog monitor observed max_input_tokens 1,000,000 and max_tokens
+      128,000 on the same date. So Anthropic's "1M tokens" is decimal, where
+      Mistral's "256k" on the mistral-small-4 row is 262,144. The letters are
+      not a shared convention and each provider has to be read separately.
+      
+
+      Blocked on contextWindowIncludesOutput. The API reference describes
+      max_input_tokens as "Maximum input context window size in tokens",
+      which is suggestive but is not a statement about whether the window
+      covers the answer -- and the documented context window and the reported
+      input limit are the same number, which is exactly the ambiguity.
+      Guessing is the failure this field exists to prevent: a window that is
+      too large passes the guard by inventing headroom, which is worse than
+      declaring none.
 
   - modelId: "claude-haiku-4-5"
     apiModel: "claude-haiku-4-5-20251001"
@@ -219,10 +263,32 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Partial observation only. Anthropic published an input limit of 200,000
-      and an output limit of 64,000 on 2026-08-23
-      (npm run report:model-context-window-evidence, staging) and no combined
-      window. See claude-sonnet-5: the input limit is not this field.
+      Pending review. Two readings, both 2026-08-24.
+
+
+      https://platform.claude.com/docs/en/about-claude/models/overview gives
+      Claude Haiku 4.5 a context window of "200k tokens" and max output of "64k tokens",
+      against Claude API ID claude-haiku-4-5-20251001, which is this row's apiModel.
+
+
+      The provider's /v1/models resolves those into integers: the provider
+      catalog monitor observed max_input_tokens 200,000 and max_tokens
+      64,000 on the same date. So Anthropic's "200k tokens" is decimal, where
+      Mistral's "256k" on the mistral-small-4 row is 262,144. The letters are
+      not a shared convention and each provider has to be read separately.
+      
+      The page lists claude-haiku-4-5 as an alias of the dated id this row
+      sends, so aliasOrLatest needs deciding when the row is verified.
+
+
+      Blocked on contextWindowIncludesOutput. The API reference describes
+      max_input_tokens as "Maximum input context window size in tokens",
+      which is suggestive but is not a statement about whether the window
+      covers the answer -- and the documented context window and the reported
+      input limit are the same number, which is exactly the ambiguity.
+      Guessing is the failure this field exists to prevent: a window that is
+      too large passes the guard by inventing headroom, which is worse than
+      declaring none.
 
   - modelId: "gemini-3-7-flash"
     apiModel: "gemini-3.7-flash"
@@ -279,10 +345,20 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Partial observation only. Google published an input limit of 1,048,576
-      and an output limit of 65,536 on 2026-08-23
-      (npm run report:model-context-window-evidence, staging) and no combined
-      window. See claude-sonnet-5: the input limit is not this field.
+      Pending review.
+      https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
+      ("Gemini 3.1 Pro preview") on 2026-08-24 states, for model code
+      gemini-3.1-pro-preview which is this row's apiModel: "Input token limit
+      1,048,576" and "Output token limit 65,536". The provider catalog
+      monitor reports the same two figures, so documentation and API agree.
+
+
+      Blocked differently from every other row here. The provider publishes
+      no combined context window at all, only the two limits, so
+      contextWindowTokens has no source to take. Adding them would be a guess
+      about how Google counts, and an input limit is not a window: it
+      excludes the answer. What is missing is a published figure, not a
+      conversion.
 
   - modelId: "gemini-2-5-flash"
     apiModel: "gemini-3.5-flash-lite"
@@ -351,51 +427,97 @@ models:
   - modelId: "mistral-small-4"
     apiModel: "mistral-small-latest"
     provider: mistral
-    status: unverified
-    contextWindowTokens: null
-    contextWindowIncludesOutput: null
+    status: verified
+    contextWindowTokens: 262144
+    contextWindowIncludesOutput: true
     maxInputTokens: null
     maxOutputTokens: null
-    aliasOrLatest: null
-    sourceUrl: null
-    sourceTitle: null
-    verifiedAt: null
-    verifiedBy: null
+    aliasOrLatest: true
+    sourceUrl: "https://docs.mistral.ai/resources/known-limitations"
+    sourceTitle: "Known limitations | Mistral Docs"
+    verifiedAt: "2026-08-24"
+    verifiedBy: backend-ai
     catalogueDeclaredTokens: null
     notes: >-
-      Provider catalog observation, not a verification: Mistral's model list
-      reported max_context_length 262,144 for mistral-small-latest on
-      2026-08-23 (npm run report:model-context-window-evidence, staging).
-      apiModel is a floating alias; see mistral-large-3.
+      Two independent sources agree, and that is what carries this row. The
+      documentation states "Mistral Small 4 | 256k tokens". The provider's own
+      /v1/models reports max_context_length 262,144 for mistral-small-latest,
+      observed by the provider catalog monitor on 2026-08-24. 262,144 is
+      256 x 1024, so the API resolves the documented "256k" into the exact
+      integer this register requires. Neither source alone would have.
 
-      The 2026-08-24 max-output probe learned nothing here: Mistral accepted
-      a cap of 1,000,000,000 rather than refusing it, so it does not
-      validate that field up front. It answered the prompt instead.
+
+      Do not carry that reading to another provider. Anthropic's API answers
+      200,000 for a documented "200k", which is decimal. The same letter means
+      different things and each provider has to be checked on its own.
+
+
+      contextWindowIncludesOutput is taken from the same page and is stated
+      rather than inferred: "Token counts include both input and output
+      tokens. Plan your max_tokens accordingly."
+
+
+      aliasOrLatest is true, and it matters more here than usual. apiModel is
+      the moving alias, currently resolving to mistral-small-2603
+      (Mistral Small 4 v26.03). https://docs.mistral.ai/inference/model-lifecycle
+      describes -latest as the "Latest General Availability version, across
+      generations", so a new GA generation changes what Tomverse calls and
+      this verification expires with it. lib/models.ts points at the alias
+      too, so the exposure is not confined to this file.
+
+
+      maxOutputTokens stays null: no settable ceiling is published, and the
+      max-output probe learned nothing here -- Mistral accepted a cap of
+      1,000,000,000 rather than refusing it, so it does not validate that
+      field up front.
+
   - modelId: "mistral-large-3"
     apiModel: "mistral-large-latest"
     provider: mistral
-    status: unverified
-    contextWindowTokens: null
-    contextWindowIncludesOutput: null
+    status: verified
+    contextWindowTokens: 262144
+    contextWindowIncludesOutput: true
     maxInputTokens: null
     maxOutputTokens: null
-    aliasOrLatest: null
-    sourceUrl: null
-    sourceTitle: null
-    verifiedAt: null
-    verifiedBy: null
+    aliasOrLatest: true
+    sourceUrl: "https://docs.mistral.ai/resources/known-limitations"
+    sourceTitle: "Known limitations | Mistral Docs"
+    verifiedAt: "2026-08-24"
+    verifiedBy: backend-ai
     catalogueDeclaredTokens: null
     notes: >-
-      Provider catalog observation, not a verification: Mistral's model list
-      reported max_context_length 262,144 for mistral-large-latest on
-      2026-08-23 (npm run report:model-context-window-evidence, staging).
-      apiModel is a floating alias, so a figure read from it describes whatever
-      the alias pointed at that day -- aliasOrLatest will be true when this is
-      verified, and the verification expires sooner for it.
+      Two independent sources agree, and that is what carries this row. The
+      documentation states "Mistral Large 3 | 256k tokens". The provider's own
+      /v1/models reports max_context_length 262,144 for mistral-large-latest,
+      observed by the provider catalog monitor on 2026-08-24. 262,144 is
+      256 x 1024, so the API resolves the documented "256k" into the exact
+      integer this register requires. Neither source alone would have.
 
-      The 2026-08-24 max-output probe learned nothing here: Mistral accepted
-      a cap of 1,000,000,000 rather than refusing it, so it does not
-      validate that field up front. It answered the prompt instead.
+
+      Do not carry that reading to another provider. Anthropic's API answers
+      200,000 for a documented "200k", which is decimal. The same letter means
+      different things and each provider has to be checked on its own.
+
+
+      contextWindowIncludesOutput is taken from the same page and is stated
+      rather than inferred: "Token counts include both input and output
+      tokens. Plan your max_tokens accordingly."
+
+
+      aliasOrLatest is true, and it matters more here than usual. apiModel is
+      the moving alias, currently resolving to mistral-large-2512
+      (Mistral Large 3 v25.12). https://docs.mistral.ai/inference/model-lifecycle
+      describes -latest as the "Latest General Availability version, across
+      generations", so a new GA generation changes what Tomverse calls and
+      this verification expires with it. lib/models.ts points at the alias
+      too, so the exposure is not confined to this file.
+
+
+      maxOutputTokens stays null: no settable ceiling is published, and the
+      max-output probe learned nothing here -- Mistral accepted a cap of
+      1,000,000,000 rather than refusing it, so it does not validate that
+      field up front.
+
   - modelId: "mistral-medium-3-1"
     apiModel: "mistral-medium-3-5"
     provider: mistral
@@ -415,28 +537,41 @@ models:
   - modelId: "kimi-k2.7-code"
     apiModel: "kimi-k2.7-code"
     provider: moonshot
-    status: unverified
-    contextWindowTokens: null
-    contextWindowIncludesOutput: null
+    status: verified
+    contextWindowTokens: 262144
+    contextWindowIncludesOutput: true
     maxInputTokens: null
     maxOutputTokens: null
-    aliasOrLatest: null
-    sourceUrl: null
-    sourceTitle: null
-    verifiedAt: null
-    verifiedBy: null
+    aliasOrLatest: false
+    sourceUrl: "https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart"
+    sourceTitle: "Kimi K2.7 Code"
+    verifiedAt: "2026-08-24"
+    verifiedBy: backend-ai
     catalogueDeclaredTokens: null
     notes: >-
-      Provider catalog observation, not a verification: Moonshot's model list
-      reported context_length 262,144 on 2026-08-23
-      (npm run report:model-context-window-evidence, staging). That field is a
-      whole window rather than an input allowance, so it is the right shape for
-      contextWindowTokens -- but it carries no sourceUrl, so this row stays
-      unverified until someone confirms it against Moonshot's documentation.
+      Documentation and API agree. The model page states that
+      "kimi-k2.7-code, kimi-k2.7-code-highspeed, kimi-k2.6, kimi-k2.5 models
+      all provide a 256K context window", and /v1/models reports 262,144 for
+      kimi-k2.7-code, observed by the provider catalog monitor on 2026-08-24.
+      256 x 1024 = 262,144, so the two are the same figure written two ways.
 
-      The 2026-08-24 max-output probe learned nothing here: Moonshot
-      accepted a cap of 1,000,000,000 rather than refusing it, so it does
-      not validate that field up front. It answered the prompt instead.
+
+      contextWindowIncludesOutput comes from the Chat API page,
+      https://platform.kimi.ai/docs/api/chat: "If input plus
+      max_completion_tokens exceeds the model context window, the API returns
+      invalid_request_error." Stated, not inferred.
+
+
+      maxOutputTokens stays null. That page documents a settable ceiling for
+      K3 but not for K2.7 Code, and the max-output probe learned nothing --
+      Moonshot accepted a cap of 1,000,000,000 rather than refusing it, the
+      same behaviour recorded on the kimi-k3 row.
+
+
+      aliasOrLatest is false: kimi-k2.7-code is a fixed id. The
+      kimi-k2.7-code-highspeed entry is a separate id for the same model, not
+      this one moving.
+
   - modelId: "kimi-k3"
     apiModel: "kimi-k3"
     provider: moonshot
@@ -491,13 +626,30 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 131,072 ("Range of max_tokens should be [1, 131072]"). This is
-      an output ceiling for maxOutputTokens, NOT a context window -- the
-      code path validating max_tokens does not know the window, and no
-      provider named one. No sourceUrl, so the row stays unverified.
+      Pending review. https://help.aliyun.com/zh/model-studio/qwen3-7-max
+      on 2026-08-24 publishes exact integers for this model: context length
+      1,000,000, maximum input length 991,808, maximum output length 131,072.
+      The page states the id is functionally equivalent to the snapshot
+      qwen3.7-max-2026-05-20, so aliasOrLatest needs deciding when the row is
+      verified -- no automatic-movement rule is documented either way.
+
+
+      The output figure matches what the max-output probe measured against
+      staging on the same date, so documentation and API agree there.
+
+
+      Blocked on contextWindowIncludesOutput, which the page does not state.
+      The arithmetic is suggestive: 1,000,000 - 991,808 = 8,192, and the
+      thinking-mode input limit of 983,616 leaves exactly 16,384. Both land
+      on powers of two, which reads as input and output sharing one
+      1,000,000 window with a reserved minimum for the answer -- and that is
+      what fitChatOutputToContextWindow already computes, since 1,000,000
+      minus an input of 991,808 leaves the 8,192 the provider documents.
+
+
+      It is still a derivation, and it is being held rather than adopted.
+      Mistral and Anthropic have just shown, in this same file, that a clean
+      reading of one provider's numbers does not transfer to the next.
 
   - modelId: "qwen3.7-plus"
     apiModel: "qwen3.7-plus"
@@ -514,13 +666,30 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 131,072 ("Range of max_tokens should be [1, 131072]"). This is
-      an output ceiling for maxOutputTokens, NOT a context window -- the
-      code path validating max_tokens does not know the window, and no
-      provider named one. No sourceUrl, so the row stays unverified.
+      Pending review. https://help.aliyun.com/zh/model-studio/qwen3-7-plus
+      on 2026-08-24 publishes exact integers for this model: context length
+      1,000,000, maximum input length 991,808, maximum output length 131,072.
+      The page states the id is functionally equivalent to the snapshot
+      qwen3.7-plus-2026-05-26, so aliasOrLatest needs deciding when the row is
+      verified -- no automatic-movement rule is documented either way.
+
+
+      The output figure matches what the max-output probe measured against
+      staging on the same date, so documentation and API agree there.
+
+
+      Blocked on contextWindowIncludesOutput, which the page does not state.
+      The arithmetic is suggestive: 1,000,000 - 991,808 = 8,192, and the
+      thinking-mode input limit of 983,616 leaves exactly 16,384. Both land
+      on powers of two, which reads as input and output sharing one
+      1,000,000 window with a reserved minimum for the answer -- and that is
+      what fitChatOutputToContextWindow already computes, since 1,000,000
+      minus an input of 991,808 leaves the 8,192 the provider documents.
+
+
+      It is still a derivation, and it is being held rather than adopted.
+      Mistral and Anthropic have just shown, in this same file, that a clean
+      reading of one provider's numbers does not transfer to the next.
 
   - modelId: "qwen3.6-flash"
     apiModel: "qwen3.6-flash"
@@ -537,13 +706,30 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 65,536 ("Range of max_tokens should be [1, 65536]"). This is an
-      output ceiling for maxOutputTokens, NOT a context window -- the code
-      path validating max_tokens does not know the window, and no provider
-      named one. No sourceUrl, so the row stays unverified.
+      Pending review. https://help.aliyun.com/zh/model-studio/qwen3-6-flash
+      on 2026-08-24 publishes exact integers for this model: context length
+      1,000,000, maximum input length 991,808, maximum output length 65,536.
+      The page states the id is functionally equivalent to the snapshot
+      qwen3.6-flash-2026-04-16, so aliasOrLatest needs deciding when the row is
+      verified -- no automatic-movement rule is documented either way.
+
+
+      The output figure matches what the max-output probe measured against
+      staging on the same date, so documentation and API agree there.
+
+
+      Blocked on contextWindowIncludesOutput, which the page does not state.
+      The arithmetic is suggestive: 1,000,000 - 991,808 = 8,192, and the
+      thinking-mode input limit of 983,616 leaves exactly 16,384. Both land
+      on powers of two, which reads as input and output sharing one
+      1,000,000 window with a reserved minimum for the answer -- and that is
+      what fitChatOutputToContextWindow already computes, since 1,000,000
+      minus an input of 991,808 leaves the 8,192 the provider documents.
+
+
+      It is still a derivation, and it is being held rather than adopted.
+      Mistral and Anthropic have just shown, in this same file, that a clean
+      reading of one provider's numbers does not transfer to the next.
 
   - modelId: "glm-5.2"
     apiModel: "glm-5.2"
@@ -560,13 +746,17 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 131,072 ("限制数值范围[1,131072]"). This is an output ceiling for
-      maxOutputTokens, NOT a context window -- the code path validating
-      max_tokens does not know the window, and no provider named one. No
-      sourceUrl, so the row stays unverified.
+      Pending review. https://docs.z.ai/guides/llm/glm-5.2 ("GLM-5.2") on
+      2026-08-24 gives Context Length "1M" and Maximum Output Tokens "128K".
+
+
+      Blocked on the integer. The max-output probe measured 131,072 against
+      staging, which is 128 x 1024 and so suggests this provider's K is 1024
+      and its "1M" is 1,048,576. That is an inference about a convention
+      rather than a figure the provider published, and the register does not
+      accept one -- Anthropic writes "200k" for 200,000 on the
+      claude-haiku-4-5 row, so the convention is not shared. Zhipu's
+      /v1/models publishes no window.
 
   - modelId: "perplexity/sonar"
     apiModel: "sonar"
@@ -586,42 +776,41 @@ models:
       Probe observation, not a verification: npm run
       report:model-max-output-probe -- --send against staging on 2026-08-24
       asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 128,000 ("max_tokens must be at most 128000"). This is an
-      output ceiling for maxOutputTokens, NOT a context window -- the code
-      path validating max_tokens does not know the window, and no provider
-      named one. No sourceUrl, so the row stays unverified.
+      naming 128,000 ("max_tokens must be at most 128000"). This is an output
+      ceiling for maxOutputTokens, NOT a context window -- the code path
+      validating max_tokens does not know the window.
 
 
-      Pending review, 2026-08-24. Perplexity's model documentation is
-      reported to state a context length of "128K" for sonar, at
-      https://docs.perplexity.ai/docs/sonar/models/sonar, with
-      usage.prompt_tokens defined in the API response specification at
-      https://docs.perplexity.ai/api-reference/sonar-post. Recorded as a
-      lead, NOT as a source: the pages were supplied by the register's
-      owner and could not be opened from the environment this note was
-      written in, where the egress policy blocks docs.perplexity.ai. Nobody
-      has yet read them here.
+      Documentation, read on 2026-08-24:
+      https://docs.perplexity.ai/docs/sonar/models/sonar states "128K context
+      length". An earlier version of this note said the page could not be
+      opened from the environment it was written in and blamed an egress
+      policy. That was wrong: the block was in one fetch tool, not the
+      network, and the page has since been read directly.
 
 
-      Two things would still be missing even once someone has. "128K" does
-      not say whether the figure is 128,000 or 131,072, and the difference
-      is 3,072 tokens of room the guard would either have or not have. And
-      contextWindowIncludesOutput is not addressed, which this register
-      requires stated explicitly rather than assumed. So this stays
-      unverified with null values until a reader confirms the exact integer
-      and what it covers.
+      Blocked on the integer: "128K" is not 128,000 or 131,072 until the
+      provider says which. Note that the documented context length and the
+      probe's output ceiling are both written 128K/128,000 while being
+      different fields, so neither confirms the other.
 
 
-      Trial observation, same date, and it is not evidence of a window: npm
-      run report:model-window-probe-trial -- --model=perplexity/sonar --send
-      sent roughly 150,000 tokens of filler and the provider answered HTTP
-      200. Read against a published 128K, silent truncation or some
-      pre-processing step is the likelier explanation than a window that
-      large, and the run did not read usage.prompt_tokens, so it cannot tell
-      which. The script was corrected to report that count rather than to
-      call a 200 an acceptance. No further paid attempts were made: the
-      accept path can only ever produce a lower bound, and this register
-      cannot record one.
+      Perplexity's /v1/models cannot supply the integer either.
+      lib/providerModelCatalogMonitor.ts already refuses to read retirement
+      from that endpoint because it describes Agent API models rather than
+      the Chat Completions Sonar entries Tomverse sends, and the same
+      mismatch means it carries no window for this row. Documentation is the
+      only path here.
+
+
+      Trial observation, same date, and it settles nothing: npm run
+      report:model-window-probe-trial -- --model=perplexity/sonar --send sent
+      roughly 150,000 tokens of filler and the provider answered HTTP 200. A
+      success status alone does not establish that the whole input was
+      accepted. That run did not retain usage.prompt_tokens, so whether the
+      input was truncated cannot be determined either. The script was
+      corrected afterwards to report that count rather than to call a 200 an
+      acceptance.
 
   - modelId: "perplexity/sonar-pro"
     apiModel: "sonar-pro"
@@ -638,13 +827,20 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 128,000 ("max_tokens must be at most 128000"). This is an
-      output ceiling for maxOutputTokens, NOT a context window -- the code
-      path validating max_tokens does not know the window, and no provider
-      named one. No sourceUrl, so the row stays unverified.
+      Pending review. https://docs.perplexity.ai/docs/sonar/models/sonar-pro
+      states "200K context length", read on 2026-08-24.
+
+
+      Blocked on the integer: "200K" is not 128,000 or 131,072 until the
+      provider says which, and this register does not convert a letter.
+
+
+      Perplexity's /v1/models cannot supply the integer either.
+      lib/providerModelCatalogMonitor.ts already refuses to read retirement
+      from that endpoint because it describes Agent API models rather than
+      the Chat Completions Sonar entries Tomverse sends, and the same
+      mismatch means it carries no window for this row. Documentation is the
+      only path here.
 
   - modelId: "perplexity/sonar-reasoning-pro"
     apiModel: "sonar-reasoning-pro"
@@ -661,13 +857,20 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 128,000 ("max_tokens must be at most 128000"). This is an
-      output ceiling for maxOutputTokens, NOT a context window -- the code
-      path validating max_tokens does not know the window, and no provider
-      named one. No sourceUrl, so the row stays unverified.
+      Pending review. https://docs.perplexity.ai/docs/sonar/models/sonar-reasoning-pro
+      states "128K context length", read on 2026-08-24.
+
+
+      Blocked on the integer: "128K" is not 128,000 or 131,072 until the
+      provider says which, and this register does not convert a letter.
+
+
+      Perplexity's /v1/models cannot supply the integer either.
+      lib/providerModelCatalogMonitor.ts already refuses to read retirement
+      from that endpoint because it describes Agent API models rather than
+      the Chat Completions Sonar entries Tomverse sends, and the same
+      mismatch means it carries no window for this row. Documentation is the
+      only path here.
 
   - modelId: "perplexity/sonar-deep-research"
     apiModel: "sonar-deep-research"
@@ -684,10 +887,18 @@ models:
     verifiedBy: null
     catalogueDeclaredTokens: null
     notes: >-
-      Probe observation, not a verification: npm run
-      report:model-max-output-probe -- --send against staging on 2026-08-24
-      asked for 1,000,000,000 completion tokens and the provider refused,
-      naming 128,000 ("Input should be less than or equal to 128000"). This
-      is an output ceiling for maxOutputTokens, NOT a context window -- the
-      code path validating max_tokens does not know the window, and no
-      provider named one. No sourceUrl, so the row stays unverified.
+      Pending review. https://docs.perplexity.ai/docs/sonar/models/sonar-deep-research
+      states "128K context length", read on 2026-08-24.
+
+
+      Blocked on the integer: "128K" is not 128,000 or 131,072 until the
+      provider says which, and this register does not convert a letter.
+
+
+      Perplexity's /v1/models cannot supply the integer either.
+      lib/providerModelCatalogMonitor.ts already refuses to read retirement
+      from that endpoint because it describes Agent API models rather than
+      the Chat Completions Sonar entries Tomverse sends, and the same
+      mismatch means it carries no window for this row. Documentation is the
+      only path here.
+
