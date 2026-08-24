@@ -15,7 +15,7 @@ export const ko = {
         dismiss: "알림 닫기",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "계정 및 플랜",
         accountTooltipGuest: "로그인 또는 회원가입",
         guestMenuTitle: "게스트 모드",
@@ -809,7 +809,7 @@ export const ko = {
         close: "닫기",
         paymentSuccessfulEyebrow: "결제 완료",
         paymentSuccessfulTitle: "결제가 성공적으로 완료되었습니다.",
-        paymentSuccessfulWelcome: "Tomverse Review의 새로운 가족이 되신 것을 진심으로 환영합니다. 이제 {plan} 워크스페이스에서 더 넓은 사용량과 고급 기능을 활용하실 수 있습니다.",
+        paymentSuccessfulWelcome: "Tomverse의 새로운 가족이 되신 것을 진심으로 환영합니다. 이제 {plan} 워크스페이스에서 더 넓은 사용량과 고급 기능을 활용하실 수 있습니다.",
         testerPassActivatedEyebrow: "Tester Pass 활성화",
         testerPassActivatedTitle: "60일 Founding Tester Pass가 시작되었습니다.",
         testerPassActivatedWelcome: "Founding Tester로서 {plan} 워크스페이스를 이용할 수 있습니다.",
