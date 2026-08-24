@@ -82,7 +82,7 @@ test("the date is escaped in the html", () => {
     scheduledFor: '<script>alert(1)</script>',
     language: "ko",
   });
-  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<script>/i);
   assert.ok(html.includes("&lt;script&gt;"));
 });
 

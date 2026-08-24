@@ -385,6 +385,8 @@ export const ko = {
         toolsAssistantNone: "어시스턴트 없음",
         toolsAssistantNoneDescription: "모델만으로 답변합니다",
         toolsAssistantRevision: "개정 {revision}",
+        toolsAssistantRevisionInUse: "개정 {revision} 사용 중 · 최신 {latest}",
+        toolsAssistantNewRevisionAvailable: "새 개정 있음",
         toolsAssistantSuperseded: "이 대화는 개정 {revision}으로 실행되고, 최신은 {latest}입니다",
         toolsAssistantMoveToLatest: "이 대화에 최신 개정 적용",
         toolsAssistantEmpty: "아직 게시된 어시스턴트가 없습니다. 설정에서 만들 수 있습니다.",

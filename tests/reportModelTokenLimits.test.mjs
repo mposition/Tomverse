@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   ACTOR_ABSENT,
@@ -345,4 +346,78 @@ test("a cap-only model's reservation difference is never reported as pending", (
   );
   // And neither counts as stranded: something does lift both caps.
   assert.deepEqual(findings.strandedRequestCaps, []);
+});
+
+/**
+ * A run that never opened the database must not describe one.
+ *
+ * `compareTokenLimits` above is pure and correct about the list it is handed:
+ * given no stored rows, every model is `missing_in_db`, because that is true
+ * of that list. But "no rows were supplied" and "the database has no rows" are
+ * different facts, and only the second says anything about production.
+ *
+ * The wrapper used to collapse them. A real run on Railway's production
+ * console -- where the shell had no DATABASE_URL -- ended with "41 model(s)
+ * with no registry row. Seeding inserts these on next boot." Two claims about
+ * a database it had never opened, three lines under a header that correctly
+ * said it could find nothing, against a registry that was fully populated.
+ *
+ * Spawned rather than unit-tested because the defect was in what reached the
+ * operator's screen, and that is the only thing that can pin it.
+ */
+const runReport = (extraEnv) => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--conditions=react-server",
+      "--import",
+      "tsx",
+      "scripts/report-model-token-limits.mjs",
+      ...(extraEnv.args ?? []),
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: { ...process.env, ...extraEnv.env },
+    }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+};
+
+test("a run with no DATABASE_URL claims nothing about registry rows", () => {
+  const stdout = runReport({ env: { DATABASE_URL: "" } });
+
+  assert.match(stdout, /No DATABASE_URL/);
+  // The catalogue is still useful and needs no database to read.
+  assert.match(stdout, /claude-sonnet-5\s+128,000\/2,048/);
+
+  // None of these may appear: each is a statement about a row this run did not
+  // read. The first is the exact sentence that shipped the false claim.
+  assert.doesNotMatch(stdout, /Seeding inserts these on next boot/);
+  assert.doesNotMatch(stdout, /with no registry row/);
+  assert.doesNotMatch(stdout, /missing_in_db/);
+  assert.doesNotMatch(stdout, /stranded/);
+  assert.doesNotMatch(stdout, /\(no row\)/);
+  assert.doesNotMatch(stdout, /agrees/);
+  assert.match(stdout, /Nothing was compared/);
+});
+
+test("an unreadable DATABASE_URL is reported as unread, not as an empty registry", () => {
+  const stdout = runReport({
+    env: { DATABASE_URL: "postgresql://nobody@127.0.0.1:1/nope" },
+  });
+  assert.match(stdout, /unreadable/);
+  assert.doesNotMatch(stdout, /Seeding inserts these on next boot/);
+  assert.doesNotMatch(stdout, /missing_in_db/);
+  assert.match(stdout, /Nothing was compared/);
+});
+
+test("the JSON form says whether a comparison happened, and omits findings when it did not", () => {
+  const parsed = JSON.parse(runReport({ env: { DATABASE_URL: "" }, args: ["--json"] }));
+  assert.equal(parsed.comparedAgainstDatabase, false);
+  assert.equal("findings" in parsed, false);
+  assert.equal("entries" in parsed, false);
+  assert.ok(Array.isArray(parsed.catalogue));
+  assert.ok(parsed.catalogue.length > 0);
 });
