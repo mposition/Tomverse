@@ -180,6 +180,33 @@ test("two staging imports cannot share one profile", async () => {
     );
 });
 
+test("somebody else's profile is not a merge target, and is not named as one", async () => {
+    // The cross-account case for the *target*, which the test below covers only
+    // for the import row. A staging run cannot check this without a second
+    // account, so it is pinned here instead: the refusal is 404, not 403, so
+    // the answer does not tell a stranger whether the id exists.
+    const [mine, theirs] = await Promise.all([createUser(), createUser()]);
+    const theirProfile = await createAssistantProfile({
+        userId: theirs.id,
+        identity: identity("Theirs"),
+        firstVersion: draft(),
+    });
+
+    await assert.rejects(
+        startImport(mine.id, { mode: "merge", targetProfileId: theirProfile.id }),
+        (error: unknown) =>
+            error instanceof AssistantProfileImportError && error.status === 404
+    );
+
+    // And nothing was staged against it on the way to refusing.
+    assert.equal(
+        await prisma.assistantProfileImport.count({
+            where: { profileId: theirProfile.id },
+        }),
+        0
+    );
+});
+
 test("an import belonging to somebody else is simply absent", async () => {
     const [mine, theirs] = await Promise.all([createUser(), createUser()]);
     const started = await startImport(theirs.id);
