@@ -1,0 +1,152 @@
+name: Memory eval — decision-grade run
+#
+# The §12.4 decision-grade run for a memory-extraction pair, on demand.
+#
+# ############################################################################
+# # THIS WORKFLOW SPENDS MONEY. It makes 1,150 provider calls per dispatch.  #
+# # Manual dispatch only, with a typed confirmation, and never on push.      #
+# ############################################################################
+#
+# Why here rather than someone's machine
+# (docs/ops/memory-extraction-decision-grade-run.md §2.5):
+#
+#   * the checkout is clean by construction, so §12.2's "same commit" cannot
+#     be broken by accident, and the artifact's commitSha names a real commit
+#     -- a run from a deployed container reports "unknown" and is refused;
+#   * the key is a repository secret rather than a shell history;
+#   * the artifact is preserved by the platform, which is what §12.1 means by
+#     an immutable artifactRef: the run URL is the reference.
+#
+# What it does not do: approve anything. It computes a verdict and preserves
+# the evidence. Moving the register entry to `approved` is the human procedure
+# in §12.4 and never happens from CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Pair under evaluation"
+        required: true
+        default: gpt-5-6-luna
+      run_label:
+        description: "Names the artifact — run1, run2 (the independent re-run), rerun1…"
+        required: true
+        default: run1
+      max_cost_usd:
+        description: "Per-run ceiling in USD. May only narrow the approved budget."
+        required: true
+        default: "6"
+      confirm:
+        description: "Type SPEND to confirm this dispatch will call a paid provider"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+# One at a time. Two concurrent runs would spend two budgets and produce two
+# artifacts of the same label, and `cancel-in-progress` would abandon a run
+# that had already paid for most of its calls.
+concurrency:
+  group: memory-eval-decision-grade
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Decision-grade run
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Confirm the spend
+        if: inputs.confirm != 'SPEND'
+        run: |
+          echo "::error::confirm must be exactly SPEND. Nothing was run."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The workflow file has to exist on the default branch for GitHub to
+      # offer it at all, so it lives on `main` while the scripts it calls
+      # live on `develop`. Dispatching with the default ref therefore selects
+      # a branch that cannot run it, and `npm run` would answer with "Missing
+      # script" -- a message that says nothing about which branch to pick.
+      - name: The selected ref can run this
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts ?? {};
+            const missing = [
+              "eval:memory-extraction",
+              "check:memory-eval-freeze",
+              "check:memory-eval-run",
+              "make:memory-eval-blind-review",
+            ].filter((name) => !(name in scripts));
+            if (missing.length === 0) process.exit(0);
+            console.log(
+              `::error::This branch does not carry ${missing.join(", ")}. ` +
+                "Re-dispatch with Branch: develop, or a branch that has them."
+            );
+            process.exit(1);
+          '
+
+      # Everything that can refuse for free refuses here, before the key is
+      # ever put in front of a provider.
+      - name: Preconditions
+        run: |
+          npm run check:memory-eval-freeze
+          npm run check:memory-extraction-eval
+          npm run eval:memory-extraction
+
+      - name: Live run (this is the step that spends)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          mkdir -p artifacts
+          npm run eval:memory-extraction -- \
+            --live \
+            --model='${{ inputs.model }}' \
+            --json=artifacts/mem-eval-${{ inputs.run_label }}.json \
+            --max-cost-usd='${{ inputs.max_cost_usd }}'
+
+      # Before the admissibility check, and before anything that can fail:
+      # a run that paid for 1,150 calls must not lose its records because a
+      # later step exited non-zero.
+      - name: Preserve the artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mem-eval-${{ inputs.run_label }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 90
+
+      # The rules pre-registered on 2026-08-24
+      # (docs/ops/memory-extraction-decision-grade-run.md §3). Failing here
+      # means the run may not be cited -- its numbers are not a result either
+      # way -- and the artifact above is still preserved.
+      - name: Admissibility
+        run: |
+          npm run check:memory-eval-run -- \
+            --artifact=artifacts/mem-eval-${{ inputs.run_label }}.json
+
+      - name: Blind review sheet
+        run: |
+          npm run make:memory-eval-blind-review -- \
+            --artifact=artifacts/mem-eval-${{ inputs.run_label }}.json \
+            --per-cell=5 \
+            --out=artifacts/blind-review-${{ inputs.run_label }}.md
+
+      - name: Preserve the blind review sheet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mem-eval-${{ inputs.run_label }}-blind-review
+          path: artifacts/blind-review-${{ inputs.run_label }}.md
+          if-no-files-found: warn
+          retention-days: 90

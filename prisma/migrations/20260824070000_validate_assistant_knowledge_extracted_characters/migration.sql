@@ -1,0 +1,52 @@
+-- Validate the `extractedCharacters` non-negative CHECK added NOT VALID by
+-- 20260823090000_assistant_package_import.
+--
+-- Contract: docs/policy/assistant-package-import.md §12.
+-- Procedure: .github/RELEASE_CHECKLIST.md §7.7a.
+--
+-- Step (3) of the sequence that migration wrote down. Steps (1) and (2) are
+-- done: the constraint deployed and has been enforcing every INSERT and UPDATE
+-- since, and `npm run report:assistant-knowledge-invariants` was run against
+-- production from the deployed release SHA on 2026-08-24 and reported
+--
+--     unvalidated: AssistantKnowledgeFile_extractedCharacters_non_negative_check
+--     validated:   AssistantKnowledgeFile_extractedBytes_non_negative_check
+--     violationCount:  0   (extractedCharacters 0, extractedBytes 0)
+--     readyToValidate: true
+--
+-- Zero violating rows is what makes this migration a formality rather than a
+-- gamble: VALIDATE re-reads every existing row and fails the migration if one
+-- of them breaks the CHECK, so running it before the survey would be deploying
+-- a statement whose outcome nobody had looked at.
+--
+-- ## Why only one constraint
+--
+-- `AssistantKnowledgeFile_extractedBytes_non_negative_check` guards a column
+-- the same migration added, so it had no historical rows to defer and went in
+-- validated. The survey reports both because "the column added with the fix is
+-- guarded" belongs to the same answer, but only this one was ever deferred and
+-- only this one has anything left to do.
+--
+-- ## Why this is a migration and not a psql session
+--
+-- Hand-validating production would leave `pg_get_constraintdef()` -- whose
+-- output carries the `NOT VALID` suffix -- disagreeing with what the migration
+-- history builds, and `scripts/compare-schema-to-migrations.mjs` compares
+-- exactly that string between a shadow database built from these files and the
+-- real one. The drift would be reported for as long as this file was missing.
+--
+-- ## Why this is a separate deploy
+--
+-- `prisma migrate deploy` applies every pending migration in one run. Shipping
+-- this alongside the one that added the constraint would have validated it in
+-- the same breath as adding it, and the survey between them -- the whole point
+-- of the split -- would never have happened. 20260823090000 is already live in
+-- production; this goes out after it, on its own.
+--
+-- ## Locking
+--
+-- VALIDATE CONSTRAINT takes SHARE UPDATE EXCLUSIVE, not ACCESS EXCLUSIVE: it
+-- scans the table while reads and writes continue.
+
+ALTER TABLE "AssistantKnowledgeFile"
+    VALIDATE CONSTRAINT "AssistantKnowledgeFile_extractedCharacters_non_negative_check";

@@ -80,9 +80,21 @@ test("a warning-only variant is not treated as a separate gate", () => {
   // `check:encoding` is the non-strict mode of a check whose strict form the
   // checklist already requires. Demanding both would add a line that means
   // nothing.
-  assert.ok(NOT_A_GATE.has("check:encoding"));
+  assert.ok("check:encoding" in NOT_A_GATE);
   const { errors } = audit({ ciMentions: new Set(["check:encoding"]) });
   assert.deepEqual(errors, []);
+});
+
+test("every not-a-gate entry says why it is not one", () => {
+  // The list is small and stays that way only if adding to it costs a
+  // sentence. An unexplained exemption is indistinguishable from a check
+  // somebody quietly stopped running.
+  for (const [script, entry] of Object.entries(NOT_A_GATE)) {
+    assert.ok(
+      entry?.reason && entry.reason.trim().length > 0,
+      `${script} needs a reason it is not a release gate`
+    );
+  }
 });
 
 test("mentions are read out of prose and YAML alike", () => {
