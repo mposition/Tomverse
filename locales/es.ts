@@ -283,6 +283,7 @@ export const es = {
         attachmentTypeError: "Este tipo de archivo no es compatible.",
         attachmentTypeMismatch: "La extensión del archivo no coincide con su formato real.",
         attachmentEncodingUnreadable: "No se pudo leer la codificación de caracteres del archivo.",
+        modelTemporarilyUnavailable: "Este modelo no está disponible temporalmente.",
         attachmentAnimatedImage: "Los GIF animados no son compatibles. Conviértelo en una imagen fija.",
         attachmentImageInvalid: "La imagen está dañada o tiene un formato no compatible.",
         attachmentPdfInvalid: "El PDF está dañado o no se pudo leer.",
