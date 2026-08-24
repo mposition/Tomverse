@@ -372,6 +372,8 @@ export const es = {
         toolsAssistantNone: "Sin asistente",
         toolsAssistantNoneDescription: "Responder solo con el modelo",
         toolsAssistantRevision: "Revisión {revision}",
+        toolsAssistantRevisionInUse: "Revisión {revision} en uso · la más reciente es {latest}",
+        toolsAssistantNewRevisionAvailable: "Nueva revisión",
         toolsAssistantSuperseded: "Esta conversación usa la revisión {revision}; la más reciente es {latest}",
         toolsAssistantMoveToLatest: "Usar la revisión más reciente aquí",
         toolsAssistantEmpty: "Aún no hay ningún asistente publicado. Crea uno en Ajustes.",

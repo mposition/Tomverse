@@ -3416,12 +3416,19 @@ export function ChatInput({
                             : t("chat.toolsAssistantNone")}
                         </span>
                       </span>
+                      {/* A dot, which is what this was, carried the state to
+                          nobody: the 2026-08-21 staging round recorded that
+                          the mark was seen and its meaning was not, and
+                          `aria-hidden` meant a screen reader was told nothing
+                          at all. Said in words instead, and the words are the
+                          accessible name too. */}
                       {assistantProfile?.status === "superseded" && (
                         <span
-                          data-testid="tools-assistant-superseded-dot"
-                          aria-hidden="true"
-                          className="ml-auto h-2 w-2 shrink-0 rounded-full bg-accent-assistant-profile-500"
-                        />
+                          data-testid="tools-assistant-superseded-badge"
+                          className="ml-auto shrink-0 rounded-full bg-accent-assistant-profile-500/10 px-2 py-0.5 text-xs font-medium text-accent-assistant-profile-500"
+                        >
+                          {t("chat.toolsAssistantNewRevisionAvailable")}
+                        </span>
                       )}
                     </button>
                   )}
@@ -3876,7 +3883,38 @@ export function ChatInput({
                       />
                     )}
                   </button>
-                  {assistantProfileOptions.map((option) => (
+                  {assistantProfileOptions.map((option) => {
+                    /*
+                     * The row for the profile this conversation already runs
+                     * under reports the revision *it* runs, not the one the
+                     * profile is on. `option.revision` is `currentRevision` --
+                     * the profile's newest -- so a conversation pinned to
+                     * revision 1 of a profile since published to 2 read
+                     * "Revision 2" with a tick beside it: a claim that the
+                     * conversation had moved, when §14 is that nothing moves
+                     * it but the user. The tick is right (this profile is the
+                     * chosen one); the number was not.
+                     *
+                     * The description gives way to that line rather than
+                     * sitting beside it. On the chosen row the question is
+                     * what is running; a description is there to help pick
+                     * among the rows that are not.
+                     */
+                    const boundHere =
+                      assistantProfile?.profileId === option.id
+                        ? assistantProfile
+                        : null;
+                    const revisionLine = boundHere
+                      ? boundHere.status === "superseded"
+                        ? t("chat.toolsAssistantRevisionInUse")
+                            .replace("{revision}", String(boundHere.revision))
+                            .replace("{latest}", String(boundHere.latestRevision))
+                        : t("chat.toolsAssistantRevision").replace(
+                            "{revision}",
+                            String(boundHere.revision)
+                          )
+                      : null;
+                    return (
                     <button
                       key={option.id}
                       type="button"
@@ -3901,12 +3939,16 @@ export function ChatInput({
                         <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
                           {option.name}
                         </span>
-                        <span className="truncate text-xs text-zinc-500">
-                          {option.description ||
-                            t("chat.toolsAssistantRevision").replace(
-                              "{revision}",
-                              String(option.revision)
-                            )}
+                        <span
+                          data-testid={`assistant-option-${option.id}-detail`}
+                          className="truncate text-xs text-zinc-500"
+                        >
+                          {revisionLine ??
+                            (option.description ||
+                              t("chat.toolsAssistantRevision").replace(
+                                "{revision}",
+                                String(option.revision)
+                              ))}
                         </span>
                       </span>
                       {assistantProfile?.profileId === option.id && (
@@ -3916,7 +3958,8 @@ export function ChatInput({
                         />
                       )}
                     </button>
-                  ))}
+                    );
+                  })}
                   {assistantProfileOptions.length === 0 && (
                     <p
                       data-testid="assistant-options-empty"

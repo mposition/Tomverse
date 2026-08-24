@@ -381,6 +381,8 @@ export const zh = {
         toolsAssistantNone: "不使用助手",
         toolsAssistantNoneDescription: "仅由模型作答",
         toolsAssistantRevision: "修订 {revision}",
+        toolsAssistantRevisionInUse: "正在使用修订 {revision} · 最新为 {latest}",
+        toolsAssistantNewRevisionAvailable: "有新修订",
         toolsAssistantSuperseded: "此对话运行修订 {revision}，最新为 {latest}",
         toolsAssistantMoveToLatest: "在此对话使用最新修订",
         toolsAssistantEmpty: "尚未发布任何助手。可在设置中创建。",
