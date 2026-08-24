@@ -46,6 +46,21 @@ export type StreamAttempt =
   // Fetch never settles -- represents "still connecting, no token yet".
   // Bounded by the test/page lifetime, not an unbounded token generator.
   | { kind: "hold" }
+  /**
+   * A 200 whose body the *test* drives, chunk by chunk.
+   *
+   * The alternative is a fixed number of chunks at a fixed interval, and then
+   * every assertion about "while it is still streaming" is really an assertion
+   * about wall-clock timing: too fast and the stream has already finished by
+   * the time the click lands, too slow and the test pays the wait on every
+   * run. Here the stream stays open until the test says otherwise, so
+   * "mid-stream" is a state the test holds rather than a race it hopes to win.
+   *
+   * `channel` names the control handle registered on the page; the helpers
+   * below (`waitForControlledStream`, `pushControlledChunk`,
+   * `finishControlledStream`) drive it.
+   */
+  | { kind: "controlled"; channel: string; traceId?: string }
   | {
       kind: "error";
       status: number;
@@ -100,11 +115,37 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
       };
     };
 
-    const respond = async (attempt: { kind: string; [key: string]: unknown }): Promise<Response> => {
+    // `fetch` rejects an aborted request, and aborts a body already streaming.
+    // The stub has to do the same or the product's stop paths cannot be tested
+    // at all: `AbortController.abort()` would leave `reader.read()` waiting
+    // forever, and the panel would stay "responding" after the user stopped it.
+    const abortError = () =>
+      new DOMException("The operation was aborted.", "AbortError");
+
+    const respond = async (
+      attempt: { kind: string; [key: string]: unknown },
+      signal?: AbortSignal | null
+    ): Promise<Response> => {
       const traceId = (attempt.traceId as string) || "qa-trace-id";
 
+      if (signal?.aborted) throw abortError();
+
+      /** Fails an in-flight body when the caller aborts, exactly as fetch does. */
+      const bindAbort = (streamController: ReadableStreamDefaultController<Uint8Array>) => {
+        if (!signal) return;
+        signal.addEventListener("abort", () => {
+          try {
+            streamController.error(abortError());
+          } catch {
+            // Already closed or already errored: nothing left to abort.
+          }
+        });
+      };
+
       if (attempt.kind === "hold") {
-        return new Promise<Response>(() => {});
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(abortError()));
+        });
       }
 
       if (attempt.kind === "async-job") {
@@ -142,6 +183,49 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
         );
       }
 
+      if (attempt.kind === "controlled") {
+        const channel = attempt.channel as string;
+        const encoder = new TextEncoder();
+        const controls = window as unknown as {
+          __chatStreamControls?: Record<
+            string,
+            { push: (text: string) => void; close: () => void }
+          >;
+        };
+        const registry = (controls.__chatStreamControls ??= {});
+        const stream = new ReadableStream<Uint8Array>({
+          // Runs synchronously during construction, so the handle exists
+          // before this Response is handed back to the client.
+          start(streamController) {
+            bindAbort(streamController);
+            registry[channel] = {
+              push: (text: string) => {
+                try {
+                  streamController.enqueue(encoder.encode(text));
+                } catch {
+                  // The reader stopped (a stop, a navigation): a chunk pushed
+                  // afterwards is simply not delivered, as on a real stream.
+                }
+              },
+              close: () => {
+                try {
+                  streamController.close();
+                } catch {
+                  // Already closed or errored.
+                }
+              },
+            };
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "X-Request-ID": traceId,
+          },
+        });
+      }
+
       if (attempt.kind === "empty") {
         const emptyStream = new ReadableStream<Uint8Array>({
           start(controller) {
@@ -163,11 +247,21 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
+          bindAbort(controller);
           for (const chunk of chunks) {
             await new Promise((resolve) => setTimeout(resolve, intervalMs));
-            controller.enqueue(encoder.encode(chunk));
+            if (signal?.aborted) return;
+            try {
+              controller.enqueue(encoder.encode(chunk));
+            } catch {
+              return;
+            }
           }
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Already errored by an abort.
+          }
         },
       });
       return new Response(stream, {
@@ -200,7 +294,12 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
         }
         const attempt = modelId ? attemptFor(modelId) : null;
         if (attempt) {
-          return respond(attempt);
+          const signal =
+            init?.signal ??
+            (typeof input === "object" && "signal" in input
+              ? (input as Request).signal
+              : null);
+          return respond(attempt, signal);
         }
       }
 
@@ -216,6 +315,63 @@ export async function installChatModelStub(page: Page, spec: ChatModelStubSpec) 
   // context yet -- the addInitScript registration above still covers the
   // upcoming navigation in that case.
   await page.evaluate(patchWindowFetchForChatStub, serialized).catch(() => {});
+}
+
+/**
+ * Resolves once the page has an open controlled stream on `channel` -- that
+ * is, once the request the test is about to steer has actually been made.
+ */
+export async function waitForControlledStream(page: Page, channel: string) {
+  await page.waitForFunction(
+    (name) =>
+      Boolean(
+        (
+          window as unknown as {
+            __chatStreamControls?: Record<string, unknown>;
+          }
+        ).__chatStreamControls?.[name]
+      ),
+    channel
+  );
+}
+
+/** Emits one chunk into an open controlled stream. */
+export async function pushControlledChunk(
+  page: Page,
+  channel: string,
+  text: string
+) {
+  await page.evaluate(
+    ([name, chunk]) => {
+      const control = (
+        window as unknown as {
+          __chatStreamControls?: Record<
+            string,
+            { push: (value: string) => void; close: () => void }
+          >;
+        }
+      ).__chatStreamControls?.[name];
+      if (!control) throw new Error(`No controlled stream named ${name}`);
+      control.push(chunk);
+    },
+    [channel, text]
+  );
+}
+
+/** Ends an open controlled stream, the way a finished answer ends. */
+export async function finishControlledStream(page: Page, channel: string) {
+  await page.evaluate((name) => {
+    const control = (
+      window as unknown as {
+        __chatStreamControls?: Record<
+          string,
+          { push: (value: string) => void; close: () => void }
+        >;
+      }
+    ).__chatStreamControls?.[name];
+    if (!control) throw new Error(`No controlled stream named ${name}`);
+    control.close();
+  }, channel);
 }
 
 export type DeepResearchStatusResponse =

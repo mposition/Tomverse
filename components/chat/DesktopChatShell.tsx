@@ -26,6 +26,12 @@ import {
   resolveChatContentState,
   type ChatContentState,
 } from "@/lib/chatContentState";
+import {
+  chatModelStatusKey,
+  isConversationResponding,
+  scopeModelStatusesToConversation,
+  type ModelRuntimeStatus,
+} from "@/lib/chatRuntimeStatus";
 import { useGuestChatContentSeed } from "@/components/chat/useGuestChatContentSeed";
 import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
@@ -286,30 +292,54 @@ export function DesktopChatShell({
     pendingSubmission,
   });
   const isConversationEmpty = conversationContentState === "empty";
-  const [modelStatuses, setModelStatuses] = useState<
-    Record<string, "idle" | "loading" | "responding" | "error" | "cancelled" | "paused">
+  // Keyed by (conversation, model), never by model alone: a run started in one
+  // conversation used to disable the composer of every other one, because a
+  // model id says nothing about where it was running. See
+  // lib/chatRuntimeStatus.ts -- the report keeps its own conversation, and the
+  // run itself keeps going (lib/chatStreamRuntime.ts).
+  const [reportedModelStatuses, setReportedModelStatuses] = useState<
+    Record<string, ModelRuntimeStatus>
   >({});
   const handleModelStatusChange = useCallback(
     (
       modelId: string,
-      nextStatus: "idle" | "loading" | "responding" | "error" | "cancelled" | "paused"
+      nextStatus: ModelRuntimeStatus,
+      conversationId: string | null
     ) => {
-      setModelStatuses((current) =>
-        current[modelId] === nextStatus
-          ? current
-          : { ...current, [modelId]: nextStatus }
+      const key = chatModelStatusKey(conversationId, modelId);
+      setReportedModelStatuses((current) =>
+        current[key] === nextStatus ? current : { ...current, [key]: nextStatus }
       );
     },
     []
+  );
+  // What every consumer below reads: this conversation's currently selected
+  // models and nothing else. A model dropped from the selection stops counting
+  // immediately rather than when it next reports, and a model still answering
+  // in another conversation is simply not in here.
+  const modelStatuses = useMemo(
+    () =>
+      scopeModelStatusesToConversation({
+        statuses: reportedModelStatuses,
+        conversationId: currentChatId,
+        selectedModelIds: selectedModels,
+      }),
+    [currentChatId, reportedModelStatuses, selectedModels]
   );
   // Bumped to abort every currently-responding panel at once ("stop all").
   // A counter, not a boolean, so a second click still re-triggers each
   // ChatApp panel's abort effect even though the value it flips from/to
   // would otherwise look unchanged.
   const [stopSignal, setStopSignal] = useState(0);
-  const isAnyModelResponding = Object.values(modelStatuses).some(
-    (status) => status === "responding"
-  );
+  // Only a run this conversation's own, un-paused panels are performing may
+  // hold this composer -- and only those panels are what the stop button then
+  // stops. A background answer in a conversation the user left keeps running,
+  // shows its own state when they return, and has no say here.
+  const isAnyModelResponding = isConversationResponding({
+    statuses: modelStatuses,
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+  });
   // A quick-comparison summary needs at least two models that have actually
   // finished responding (not still streaming, not paused/off) -- the
   // request only ever counted selectedModels.length > 1 and an otherwise
