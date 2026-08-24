@@ -53,9 +53,22 @@ const USER_ID = "keepalive-user-1";
 const CONVERSATION_ID = "keepalive-conversation-1";
 const ASSISTANT_MESSAGE_ID = "22222222-3333-4444-8555-666666666666";
 
-/** Milliseconds, so the whole suite runs in about a second. */
-const KEEPALIVE_INTERVAL_MS = 40;
-const FIRST_TOKEN_DEADLINE_MS = 260;
+/*
+  Milliseconds, so the suite runs in seconds rather than in nine-minute
+  budgets -- but chosen so that nothing here is a race against a loaded
+  machine.
+
+  The first version of this file used 40ms and 260ms and asserted an exact
+  keepalive count. It passed locally and failed all four cases on CI, because
+  both directions of that assertion are wall-clock bets: a starved event loop
+  fires fewer ticks than the arithmetic predicts, and a fast turn that should
+  see none can still be overtaken by one if the read is delayed past a single
+  interval. The interval is now small against a deadline long enough that even
+  a badly loaded runner gets many ticks, and the assertions below are about
+  what the contract actually says rather than about how many.
+*/
+const KEEPALIVE_INTERVAL_MS = 25;
+const FIRST_TOKEN_DEADLINE_MS = 1_500;
 
 /* -------------------------------------------------------------------------- */
 /* The liveness budgets, shrunk                                               */
@@ -333,6 +346,27 @@ const whileWaiting = async <T,>(read: () => Promise<T>): Promise<T> => {
   }
 };
 
+/**
+ * Waits for something the route does asynchronously, without betting on when.
+ *
+ * A fixed sleep is the same wall-clock bet the constants above were: long
+ * enough to be slow on every healthy run, and still too short on the one
+ * loaded runner that matters. This polls instead, and fails with the
+ * condition's own name rather than with a downstream assertion.
+ */
+const until = async (what: string, ready: () => boolean): Promise<void> => {
+  const deadline = Date.now() + FIRST_TOKEN_DEADLINE_MS * 8;
+  const anchor = setInterval(() => {}, 20);
+  try {
+    while (!ready()) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((settle) => setTimeout(settle, 20));
+    }
+  } finally {
+    clearInterval(anchor);
+  }
+};
+
 const ask = async (next: Script) => {
   script = next;
   sourceCancelReason = null;
@@ -379,11 +413,15 @@ const countKeepalives = (body: string) =>
 test("a provider that never produces a token is kept alive, then given up on", async () => {
   const { body } = await ask({ text: null });
 
-  // The connection was written to repeatedly while the provider was silent.
-  // Without this the edge closes it long before a high-reasoning first token.
+  // The connection was written to while the provider was silent. Without this
+  // the edge closes it long before a high-reasoning first token.
+  //
+  // "at least one" rather than a count derived from interval and deadline:
+  // what the contract says is that the connection does not go silent, and a
+  // number here would only be asserting that the runner was not busy.
   assert.ok(
-    countKeepalives(body) >= 3,
-    `expected several keepalives, got ${countKeepalives(body)}`
+    countKeepalives(body) >= 1,
+    `the stream went entirely silent while the provider was thinking: ${JSON.stringify(body)}`
   );
 
   // And the waiting ended: a keepalive that never stops is a dead provider
@@ -412,13 +450,20 @@ test("giving up cancels the provider stream, settles and releases the lease", as
   assert.deepEqual(world.messages, []);
 });
 
-test("a normal turn writes no keepalive and no stall notice", async () => {
+test("a turn that answers is never marked stalled, and reads clean", async () => {
   const { body } = await ask({ text: "The answer." });
 
-  assert.equal(countKeepalives(body), 0);
   const split = splitStreamKeepaliveSignal(body);
-  assert.equal(split.signal, null);
+  // Not `countKeepalives(body) === 0`. With the real 20s interval a turn this
+  // fast sees none, but asserting that here would be asserting that the
+  // runner was not busy -- and it is not what the contract says. What matters
+  // is that nothing about a keepalive reaches the user, and that a turn which
+  // answered is not reported as one that stalled.
+  assert.equal(split.signal?.state === "stalled", false);
+  // `startsWith`, not equality: this splitter removes keepalives only, and the
+  // turn's closing search-metadata trailer is still on the end of the stream.
   assert.ok(split.text.startsWith("The answer."));
+  assert.equal(split.text.includes("TOMVERSE_STREAM_KEEPALIVE"), false);
 
   // The turn completed, so it settled as a completed turn and let its slot go.
   assert.equal(ledger.settlements.length, 1);
@@ -454,7 +499,7 @@ test("a client that walks away stops the keepalive writer", async () => {
   await whileWaiting(() => reader.read());
   await reader.cancel("client is gone");
 
-  await new Promise((settle) => setTimeout(settle, FIRST_TOKEN_DEADLINE_MS * 2));
+  await until("the abandoned run to settle", () => ledger.settlements.length > 0);
 
   assert.ok(sourceCancelReason, "the provider stream was left open");
   assert.equal(ledger.settlements.length, 1);
