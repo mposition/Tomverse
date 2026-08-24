@@ -223,6 +223,8 @@ export const ko = {
         modelRetired: "이 모델은 더 이상 제공되지 않습니다. 다른 최신 모델을 선택해 주세요.",
         modelRetiredWithReplacement: "이 모델은 더 이상 제공되지 않습니다. {model} 또는 다른 최신 모델을 선택해 주세요.",
         responseCancelled: "응답 생성이 중지되었습니다.",
+        firstResponseTimeout: "응답 준비가 예상보다 오래 걸려 연결을 종료했습니다. 잠시 후 다시 시도해 주세요.",
+        streamIdleTimeout: "응답 전송이 예상보다 오래 멈춰 연결을 종료했습니다. 이 답변은 완료되지 않았습니다.",
         connectingStatus: "연결 중…",
         searchingWebStatus: "웹 검색 중…",
         readingFileStatus: "파일 검토 중…",
