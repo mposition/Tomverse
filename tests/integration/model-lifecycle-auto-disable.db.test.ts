@@ -82,6 +82,8 @@ const scan = (
     newCandidates: [],
     missing,
     lifecycleWarnings: [],
+    heuristicallyExcluded: [],
+    truncated: false,
   },
 ];
 
