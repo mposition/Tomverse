@@ -11,9 +11,10 @@
 // question rather than a defect, and why the reservation figure in particular
 // is never something this report proposes changing on its own.
 //
-// Without a DATABASE_URL there is nothing to compare against. That run says so
-// and reports the catalogue's own numbers; it cannot find anything, and it
-// does not pretend to have failed either.
+// Without a readable DATABASE_URL there is nothing to compare against. That
+// run says so and prints the catalogue's own numbers only -- no stored column,
+// no state, no findings, because every one of those would be a claim about
+// rows it never read. It does not pretend to have failed either.
 
 import {
   OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
@@ -83,6 +84,59 @@ if (databaseUrl) {
   }
 }
 
+// Did this run actually read ModelRegistryEntry?
+//
+// The distinction matters more than it looks. `compareTokenLimits` is pure and
+// correct about what it was handed: given no stored rows it reports every
+// model as `missing_in_db`, because that is true of the list it was given. But
+// "no rows were supplied" and "the database has no rows" are different facts,
+// and only the second one says anything about production.
+//
+// Printing the findings from an un-compared run collapsed the two. A run on
+// Railway's production console with no DATABASE_URL in the shell ended with
+// "41 model(s) with no registry row. Seeding inserts these on next boot." --
+// two claims about a database it had never opened, three lines below a header
+// that correctly said it could find nothing. The registry was fully populated.
+//
+// So the findings are computed only when there is something to compare. An
+// empty table read successfully is NOT this case: `missing_in_db` is then a
+// real observation and seeding really will insert those rows.
+const comparedAgainstDatabase = source === "model_registry";
+
+if (!comparedAgainstDatabase) {
+  // The catalogue's own numbers are still worth printing -- they are what a
+  // fresh seed would write, and reading them needs no database. What is
+  // withheld is every column and every finding that would be a claim about
+  // rows this run never saw.
+  if (json) {
+    console.log(
+      JSON.stringify(
+        { source, note, comparedAgainstDatabase, catalogue: catalogueModels },
+        null,
+        2
+      )
+    );
+  } else {
+    console.log(`Model output token limits (${source})\n  ${note}\n`);
+    console.log(
+      `  ${"model".padEnd(32)}${"catalogue max/reservation"}`
+    );
+    for (const model of catalogueModels) {
+      const limits = `${(model.maxOutputTokens ?? 0).toLocaleString("en-US")}/${(
+        model.reservationOutputTokens ?? 0
+      ).toLocaleString("en-US")}`;
+      console.log(
+        `  ${model.id.padEnd(32)}${limits.padEnd(18)}${model.enabled === false ? "[disabled]" : ""}`.trimEnd()
+      );
+    }
+    console.log(
+      `\n  ${catalogueModels.length} model(s) in the compiled catalogue. Nothing was compared, so this run\n` +
+        "  reports no stored value, no drift and no finding -- it cannot see a registry row."
+    );
+  }
+  process.exit(0);
+}
+
 const entries = compareTokenLimits({
   catalogueModels,
   storedRows,
@@ -93,7 +147,13 @@ const entries = compareTokenLimits({
 const findings = tokenLimitFindings(entries);
 
 if (json) {
-  console.log(JSON.stringify({ source, note, findings, entries }, null, 2));
+  console.log(
+    JSON.stringify(
+      { source, note, comparedAgainstDatabase, findings, entries },
+      null,
+      2
+    )
+  );
 } else {
   console.log(`Model output token limits (${source})\n  ${note}\n`);
   console.log(
