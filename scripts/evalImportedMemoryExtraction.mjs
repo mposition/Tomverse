@@ -51,6 +51,7 @@ import {
     findDuplicateCases,
     judgeEval,
     scoreCase,
+    summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
 
 const argValue = (name, fallback) => {
@@ -122,6 +123,7 @@ const runMode = decideEvalRunMode({
     registerEntry,
     hasApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()),
     datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+    commitKnown: commitSha !== "unknown",
     requestedRunCapUsd: maxCostUsd,
 });
 
@@ -135,6 +137,15 @@ const REFUSAL_MESSAGES = {
         "lib/memoryExtractionEvalRegister.ts (approvedBy, maxUsd, ticket, approvedAt),\n" +
         "merged as its own reviewed change. That record is the audit trail.",
     no_api_key: "OPENAI_API_KEY is required for --live.",
+    unknown_commit:
+        "This run cannot name the commit it is running (§12.2).\n\n" +
+        "`git rev-parse HEAD` produced nothing, which means this is not a git\n" +
+        "checkout -- a deployed container, an extracted tarball, a copied\n" +
+        "directory. A decision-grade verdict is cited against a commit, and an\n" +
+        "artifact that cannot name one is not evidence however good its numbers\n" +
+        "are. Worse, `workingTreeDirty` comes out `false` there, so the run\n" +
+        "would look clean.\n\n" +
+        "Run it from a checkout of the commit under evaluation.",
     dataset_not_frozen:
         `Dataset ${MEMORY_EVAL_DATASET_VERSION} (${MEMORY_EVAL_DATASET_PURPOSE}) is not frozen (§12.2).\n\n` +
         "A decision-grade number computed against a sample that is still being\n" +
@@ -361,6 +372,22 @@ for (const [cell, count] of Object.entries(verdict.adequacy.counts)) {
     const minimum =
         MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[cell.split(":")[0]];
     line(cell, `${count}${count < minimum ? `  (needs ${minimum})` : ""}`);
+}
+
+// Why cases failed, not just how many. Without this the run says the pair is
+// broken and leaves the reason in the artifact, so the first thing anybody
+// does after a failed run is download a file to read one repeated sentence.
+const failureReasons = summarizeFailures(records);
+if (failureReasons.length > 0) {
+    const scored = records.filter((record) => record.failure).length;
+    console.log(`\nWhy ${scored} case(s) had no scoreable answer`);
+    for (const { reason, count } of failureReasons.slice(0, 5)) {
+        const text = reason.length > 300 ? `${reason.slice(0, 300)}…` : reason;
+        console.log(`  ${String(count).padStart(4)}x  ${text}`);
+    }
+    if (failureReasons.length > 5) {
+        console.log(`  … and ${failureReasons.length - 5} other reason(s).`);
+    }
 }
 
 if (verdict.failures.length > 0) {

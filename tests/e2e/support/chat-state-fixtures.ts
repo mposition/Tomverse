@@ -46,6 +46,21 @@ export type StreamAttempt =
   // Fetch never settles -- represents "still connecting, no token yet".
   // Bounded by the test/page lifetime, not an unbounded token generator.
   | { kind: "hold" }
+  /**
+   * A 200 whose body the *test* drives, chunk by chunk.
+   *
+   * The alternative is a fixed number of chunks at a fixed interval, and then
+   * every assertion about "while it is still streaming" is really an assertion
+   * about wall-clock timing: too fast and the stream has already finished by
+   * the time the click lands, too slow and the test pays the wait on every
+   * run. Here the stream stays open until the test says otherwise, so
+   * "mid-stream" is a state the test holds rather than a race it hopes to win.
+   *
+   * `channel` names the control handle registered on the page; the helpers
+   * below (`waitForControlledStream`, `pushControlledChunk`,
+   * `finishControlledStream`) drive it.
+   */
+  | { kind: "controlled"; channel: string; traceId?: string }
   | {
       kind: "error";
       status: number;
@@ -100,11 +115,37 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
       };
     };
 
-    const respond = async (attempt: { kind: string; [key: string]: unknown }): Promise<Response> => {
+    // `fetch` rejects an aborted request, and aborts a body already streaming.
+    // The stub has to do the same or the product's stop paths cannot be tested
+    // at all: `AbortController.abort()` would leave `reader.read()` waiting
+    // forever, and the panel would stay "responding" after the user stopped it.
+    const abortError = () =>
+      new DOMException("The operation was aborted.", "AbortError");
+
+    const respond = async (
+      attempt: { kind: string; [key: string]: unknown },
+      signal?: AbortSignal | null
+    ): Promise<Response> => {
       const traceId = (attempt.traceId as string) || "qa-trace-id";
 
+      if (signal?.aborted) throw abortError();
+
+      /** Fails an in-flight body when the caller aborts, exactly as fetch does. */
+      const bindAbort = (streamController: ReadableStreamDefaultController<Uint8Array>) => {
+        if (!signal) return;
+        signal.addEventListener("abort", () => {
+          try {
+            streamController.error(abortError());
+          } catch {
+            // Already closed or already errored: nothing left to abort.
+          }
+        });
+      };
+
       if (attempt.kind === "hold") {
-        return new Promise<Response>(() => {});
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(abortError()));
+        });
       }
 
       if (attempt.kind === "async-job") {
@@ -142,6 +183,49 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
         );
       }
 
+      if (attempt.kind === "controlled") {
+        const channel = attempt.channel as string;
+        const encoder = new TextEncoder();
+        const controls = window as unknown as {
+          __chatStreamControls?: Record<
+            string,
+            { push: (text: string) => void; close: () => void }
+          >;
+        };
+        const registry = (controls.__chatStreamControls ??= {});
+        const stream = new ReadableStream<Uint8Array>({
+          // Runs synchronously during construction, so the handle exists
+          // before this Response is handed back to the client.
+          start(streamController) {
+            bindAbort(streamController);
+            registry[channel] = {
+              push: (text: string) => {
+                try {
+                  streamController.enqueue(encoder.encode(text));
+                } catch {
+                  // The reader stopped (a stop, a navigation): a chunk pushed
+                  // afterwards is simply not delivered, as on a real stream.
+                }
+              },
+              close: () => {
+                try {
+                  streamController.close();
+                } catch {
+                  // Already closed or errored.
+                }
+              },
+            };
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "X-Request-ID": traceId,
+          },
+        });
+      }
+
       if (attempt.kind === "empty") {
         const emptyStream = new ReadableStream<Uint8Array>({
           start(controller) {
@@ -163,11 +247,21 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
+          bindAbort(controller);
           for (const chunk of chunks) {
             await new Promise((resolve) => setTimeout(resolve, intervalMs));
-            controller.enqueue(encoder.encode(chunk));
+            if (signal?.aborted) return;
+            try {
+              controller.enqueue(encoder.encode(chunk));
+            } catch {
+              return;
+            }
           }
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Already errored by an abort.
+          }
         },
       });
       return new Response(stream, {
@@ -200,7 +294,12 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
         }
         const attempt = modelId ? attemptFor(modelId) : null;
         if (attempt) {
-          return respond(attempt);
+          const signal =
+            init?.signal ??
+            (typeof input === "object" && "signal" in input
+              ? (input as Request).signal
+              : null);
+          return respond(attempt, signal);
         }
       }
 
@@ -216,6 +315,63 @@ export async function installChatModelStub(page: Page, spec: ChatModelStubSpec) 
   // context yet -- the addInitScript registration above still covers the
   // upcoming navigation in that case.
   await page.evaluate(patchWindowFetchForChatStub, serialized).catch(() => {});
+}
+
+/**
+ * Resolves once the page has an open controlled stream on `channel` -- that
+ * is, once the request the test is about to steer has actually been made.
+ */
+export async function waitForControlledStream(page: Page, channel: string) {
+  await page.waitForFunction(
+    (name) =>
+      Boolean(
+        (
+          window as unknown as {
+            __chatStreamControls?: Record<string, unknown>;
+          }
+        ).__chatStreamControls?.[name]
+      ),
+    channel
+  );
+}
+
+/** Emits one chunk into an open controlled stream. */
+export async function pushControlledChunk(
+  page: Page,
+  channel: string,
+  text: string
+) {
+  await page.evaluate(
+    ([name, chunk]) => {
+      const control = (
+        window as unknown as {
+          __chatStreamControls?: Record<
+            string,
+            { push: (value: string) => void; close: () => void }
+          >;
+        }
+      ).__chatStreamControls?.[name];
+      if (!control) throw new Error(`No controlled stream named ${name}`);
+      control.push(chunk);
+    },
+    [channel, text]
+  );
+}
+
+/** Ends an open controlled stream, the way a finished answer ends. */
+export async function finishControlledStream(page: Page, channel: string) {
+  await page.evaluate((name) => {
+    const control = (
+      window as unknown as {
+        __chatStreamControls?: Record<
+          string,
+          { push: (value: string) => void; close: () => void }
+        >;
+      }
+    ).__chatStreamControls?.[name];
+    if (!control) throw new Error(`No controlled stream named ${name}`);
+    control.close();
+  }, channel);
 }
 
 export type DeepResearchStatusResponse =
@@ -243,6 +399,81 @@ export async function mockDeepResearchStatus(page: Page, response: DeepResearchS
       body: JSON.stringify(response),
     });
   });
+}
+
+/** One answer to one poll of the deep-research status endpoint. */
+export type DeepResearchStatusOutcome =
+  | { status: "in_progress" }
+  | { status: "completed"; content: string }
+  | { status: "failed"; error: string };
+
+/**
+ * A deep-research job whose *polls* the test answers one at a time.
+ *
+ * `mockDeepResearchStatus` above fixes one answer for the whole test, which is
+ * enough to paint a state but cannot express a job that changes while nobody is
+ * watching -- and that is the only interesting thing a conversation switch does
+ * to it. The alternative to this is waiting out the client's real 5s poll
+ * interval on every transition, which turns each assertion into a bet on
+ * wall-clock timing.
+ *
+ * So each poll is parked until the test answers it. The client is then always
+ * inside `fetch`, never inside the interval sleep, and "the job is still
+ * running" is a state the test holds. `pollCount` is part of the contract, not
+ * a diagnostic: re-attaching to a running job must not start a *second* poll
+ * for it, and the count is the only way to see that from outside.
+ */
+export type DeepResearchStatusController = {
+  /** Resolves once the client has polled at least `count` times. */
+  waitForPoll(count?: number): Promise<void>;
+  /** Answers the oldest poll still parked. */
+  answerPoll(outcome: DeepResearchStatusOutcome): Promise<void>;
+  /** How many polls the client has made since installation. */
+  pollCount(): number;
+};
+
+export async function installDeepResearchStatusController(
+  page: Page
+): Promise<DeepResearchStatusController> {
+  const parked: Array<(outcome: DeepResearchStatusOutcome) => Promise<void>> = [];
+  let seen = 0;
+
+  await page.route("**/api/chat/deep-research/status", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    seen += 1;
+    // Deliberately not awaited: the route stays open until answerPoll settles
+    // it, which is what parks the client inside its own fetch.
+    parked.push((outcome) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(outcome),
+      })
+    );
+  });
+
+  return {
+    pollCount: () => seen,
+    waitForPoll: async (count = 1) => {
+      await expect
+        .poll(() => seen, {
+          message: `waiting for deep-research poll #${count}`,
+        })
+        .toBeGreaterThanOrEqual(count);
+    },
+    answerPoll: async (outcome) => {
+      const settle = parked.shift();
+      if (!settle) {
+        throw new Error(
+          "No deep-research poll is parked; call waitForPoll() before answering."
+        );
+      }
+      await settle(outcome);
+    },
+  };
 }
 
 export type GuestUsagePatch = {

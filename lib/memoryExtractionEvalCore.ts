@@ -466,6 +466,7 @@ export type EvalRunModeDecision =
               | "no_eval_budget"
               | "no_api_key"
               | "dataset_not_frozen"
+              | "unknown_commit"
               | "run_cap_above_approved_ceiling";
       };
 
@@ -489,6 +490,18 @@ export function decideEvalRunMode(input: {
     registerEntry: { evalBudget: { maxUsd: number } | null } | null | undefined;
     hasApiKey: boolean;
     datasetFrozen: boolean;
+    /**
+     * Whether the run can name the commit it is running.
+     *
+     * docs/policy/external-conversation-import-and-memory.md §12.2 requires a
+     * decision-grade run to be tied to one, and a deployed container has no
+     * git metadata -- `commitSha` comes out "unknown" and `workingTreeDirty`
+     * comes out `false`, which reads exactly like a clean checkout. So the
+     * artifact would look admissible while being impossible to tie to a
+     * commit, and the refusal has to happen here, before 1,150 paid calls buy
+     * a verdict nobody can cite.
+     */
+    commitKnown: boolean;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -500,6 +513,9 @@ export function decideEvalRunMode(input: {
     if (!input.datasetFrozen) {
         return { mode: "refused", reason: "dataset_not_frozen" };
     }
+    if (!input.commitKnown) {
+        return { mode: "refused", reason: "unknown_commit" };
+    }
     // A per-run cap may only narrow the approved programme ceiling. Letting a
     // command-line flag widen it would make the approval meaningless.
     const requested = input.requestedRunCapUsd;
@@ -510,6 +526,32 @@ export function decideEvalRunMode(input: {
         mode: "live",
         ceilingUsd: requested != null ? requested : budget.maxUsd,
     };
+}
+
+/**
+ * The distinct reasons cases failed, most common first.
+ *
+ * A run that stops on consecutive failures says the pair is "broken, not
+ * unlucky" and then does not say how — which leaves the one question worth
+ * asking answered only inside the artifact. The reasons are almost always a
+ * handful of repeats (one provider error, one parser complaint), so counting
+ * them turns a wall of records into the line somebody can act on.
+ *
+ * Grouped by the message verbatim. Normalising it would merge errors that
+ * differ in the part that matters, and these strings have already been
+ * stripped of anything key-shaped by the caller.
+ */
+export function summarizeFailures(
+    records: readonly { failure: string | null }[]
+): { reason: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const record of records) {
+        if (!record.failure) continue;
+        counts.set(record.failure, (counts.get(record.failure) ?? 0) + 1);
+    }
+    return [...counts]
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : 1));
 }
 
 /**

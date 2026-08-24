@@ -30,6 +30,45 @@ export const scriptMentions = (text) => {
 };
 
 /**
+ * Whether a workflow enforces anything, from its triggers.
+ *
+ * A workflow that only runs when somebody clicks it gates nothing: no push,
+ * no pull request and no release is stopped by it, so a `npm run check:...`
+ * inside one is a step of a manual procedure rather than a gate the checklist
+ * has to mirror. Counting those as CI enforcement demands a checklist line
+ * for a check a release manager cannot run, which is the opposite of what
+ * this file is for.
+ *
+ * Read from the triggers rather than the filename, because the question is
+ * what starts the workflow and nothing else answers it.
+ */
+export const enforcedByCi = (source) => {
+    const lines = source.split("\n");
+    const start = lines.findIndex((line) => /^on:/.test(line));
+    if (start < 0) return true; // Cannot tell; assume it gates something.
+
+    // `on: push` and `on: [push, pull_request]` put the answer on one line.
+    const inline = lines[start].slice(3).trim().replace(/^\[|\]$/g, "");
+    if (inline) {
+        return inline
+            .split(",")
+            .map((name) => name.trim())
+            .some((name) => name && name !== "workflow_dispatch");
+    }
+
+    // Otherwise the events are the keys one level in, up to the next
+    // top-level key. Nested keys (a `types:` or a `branches:` under an event)
+    // are deeper and must not be read as events themselves.
+    const events = [];
+    for (const line of lines.slice(start + 1)) {
+        if (/^\S/.test(line)) break;
+        const match = /^ {2}(\S+):/.exec(line);
+        if (match) events.push(match[1]);
+    }
+    return events.some((name) => name !== "workflow_dispatch");
+};
+
+/**
  * Checks that cannot run in CI and must therefore be carried by the checklist.
  * Each says why, because "CI does not run it" is not on its own a reason for a
  * human to have to.
@@ -54,10 +93,20 @@ export const MANUALLY_GATED_CHECKS = {
 };
 
 /**
- * The variants that are not separate gates: a non-strict warning mode whose
- * strict form is already required, and helper scripts a required check calls.
+ * Scripts that appear in a workflow but are not release gates, and why.
+ *
+ * An entry is a decision that the checklist should *not* name the script --
+ * not a note that adding it is outstanding. Written as reasons for the same
+ * reason `MANUALLY_GATED_CHECKS` is: an exemption list without them becomes
+ * the place a check goes to stop being anybody's problem.
  */
-export const NOT_A_GATE = new Set(["check:encoding"]);
+export const NOT_A_GATE = {
+    "check:encoding": {
+        reason:
+            "The non-strict mode of a check whose strict form the checklist already " +
+            "requires. Demanding both would add a line that means nothing.",
+    },
+};
 
 /**
  * @param {{
@@ -76,7 +125,7 @@ export function auditReleaseGateCoverage({
     const known = new Set(packageScripts);
 
     for (const script of ciMentions) {
-        if (NOT_A_GATE.has(script)) continue;
+        if (script in NOT_A_GATE) continue;
         if (!checklistMentions.has(script)) {
             errors.push(
                 `${script} is enforced by CI but not named in the release checklist. ` +
