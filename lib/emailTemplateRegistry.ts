@@ -3,6 +3,9 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { prisma } from "@/lib/prisma";
+
+/** `prisma` or a transaction client: both answer the one read shared below. */
+type PrismaLike = Pick<typeof prisma, "templateVersion">;
 import {
   emailTemplateDefinition,
   type RenderedEmail,
@@ -32,12 +35,42 @@ export const templateContentHash = (parts: RenderedEmail) =>
 
 /**
  * Prisma reports a unique-constraint conflict as P2002 regardless of which
- * index caught it, which is all the caller below needs to know.
+ * index caught it, which is all the callers below need to know.
  */
 const isUniqueViolation = (error: unknown) =>
   typeof error === "object" &&
   error !== null &&
   (error as { code?: unknown }).code === "P2002";
+
+/**
+ * An upsert that survives a second caller doing the same upsert at the moment.
+ *
+ * `prisma.upsert` on a row that does not exist yet is a read followed by an
+ * insert, so two callers can both read "absent" and both insert; the unique
+ * index lets one through and the other gets P2002. That is not an error here --
+ * the row the winner wrote is the row this caller wanted -- so it is read back.
+ *
+ * The same reasoning already guarded `templateVersion.create` below, one
+ * statement further down. It did not guard the two upserts, and the gap is not
+ * theoretical: a campaign detail view asks the send gate and the content digest
+ * in parallel, both ensure the same template, and the P2002 took the whole page
+ * down. On the credential lane the same race is two people signing in for the
+ * first time after a copy change, where losing it means one of them never
+ * receives their code.
+ */
+const upsertSurvivingRace = async <T>(input: {
+  upsert: () => Promise<T>;
+  readBack: () => Promise<T | null>;
+}): Promise<T> => {
+  try {
+    return await input.upsert();
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const raced = await input.readBack();
+    if (!raced) throw error;
+    return raced;
+  }
+};
 
 /**
  * The policy version deliveries resolve against.
@@ -56,18 +89,26 @@ export async function ensureBootstrapPolicyVersion(): Promise<string> {
   });
   if (active) return active.id;
 
-  const created = await prisma.emailPolicyVersion.upsert({
-    where: { version: BOOTSTRAP_POLICY_VERSION },
-    update: {},
-    create: {
-      version: BOOTSTRAP_POLICY_VERSION,
-      status: "active",
-      activatedAt: new Date(),
-      changeSummary:
-        "Bootstrap: transactional-only. Jurisdiction profiles land with M7 " +
-        "as a separately approved version.",
-    },
-    select: { id: true },
+  const created = await upsertSurvivingRace({
+    upsert: () =>
+      prisma.emailPolicyVersion.upsert({
+        where: { version: BOOTSTRAP_POLICY_VERSION },
+        update: {},
+        create: {
+          version: BOOTSTRAP_POLICY_VERSION,
+          status: "active",
+          activatedAt: new Date(),
+          changeSummary:
+            "Bootstrap: transactional-only. Jurisdiction profiles land with M7 " +
+            "as a separately approved version.",
+        },
+        select: { id: true },
+      }),
+    readBack: () =>
+      prisma.emailPolicyVersion.findUnique({
+        where: { version: BOOTSTRAP_POLICY_VERSION },
+        select: { id: true },
+      }),
   });
   return created.id;
 }
@@ -91,62 +132,28 @@ export async function ensureTemplateVersion(input: {
   );
   const contentHash = templateContentHash(rendered);
 
-  const template = await prisma.emailTemplate.upsert({
-    where: { key: definition.key },
-    update: {},
-    create: {
-      key: definition.key,
-      classification: definition.classification,
-      purpose: definition.purpose,
-      requiresUnsubscribe: definition.requiresUnsubscribe,
-    },
-    select: { id: true },
+  const template = await upsertSurvivingRace({
+    upsert: () =>
+      prisma.emailTemplate.upsert({
+        where: { key: definition.key },
+        update: {},
+        create: {
+          key: definition.key,
+          classification: definition.classification,
+          purpose: definition.purpose,
+          requiresUnsubscribe: definition.requiresUnsubscribe,
+        },
+        select: { id: true },
+      }),
+    readBack: () =>
+      prisma.emailTemplate.findUnique({
+        where: { key: definition.key },
+        select: { id: true },
+      }),
   });
 
-  const existing = await prisma.templateVersion.findFirst({
-    where: {
-      templateId: template.id,
-      language: input.language,
-      contentHash,
-      status: "published",
-    },
-    select: { id: true },
-  });
-  if (existing) {
-    return { templateId: template.id, templateVersionId: existing.id };
-  }
-
-  const latest = await prisma.templateVersion.findFirst({
-    where: { templateId: template.id, language: input.language },
-    orderBy: { version: "desc" },
-    select: { version: true },
-  });
-
-  try {
-    const created = await prisma.templateVersion.create({
-      data: {
-        templateId: template.id,
-        language: input.language,
-        version: (latest?.version ?? 0) + 1,
-        subject: rendered.subject,
-        bodyHtml: rendered.html,
-        bodyText: rendered.text,
-        contentHash,
-        status: "published",
-        publishedAt: new Date(),
-      },
-      select: { id: true },
-    });
-    return { templateId: template.id, templateVersionId: created.id };
-  } catch (error) {
-    // Two sends arriving together after a copy change both read the same
-    // `latest` and both try to write version N+1; the unique index lets one
-    // through. Losing that race is not an error -- the row the winner wrote is
-    // the row this caller wanted -- so it is read back rather than propagated.
-    // Left unhandled it would surface as a failed sign-in or a dropped receipt,
-    // which is a spectacular consequence for two people acting at once.
-    if (!isUniqueViolation(error)) throw error;
-    const raced = await prisma.templateVersion.findFirst({
+  const publishedMatch = (client: PrismaLike) =>
+    client.templateVersion.findFirst({
       where: {
         templateId: template.id,
         language: input.language,
@@ -155,7 +162,68 @@ export async function ensureTemplateVersion(input: {
       },
       select: { id: true },
     });
-    if (!raced) throw error;
-    return { templateId: template.id, templateVersionId: raced.id };
+
+  // The steady state: the copy has not moved and the row already exists. It
+  // takes no lock, which is what keeps the lock below off the send path -- only
+  // the first send after a copy change pays for it.
+  const existing = await publishedMatch(prisma);
+  if (existing) {
+    return { templateId: template.id, templateVersionId: existing.id };
   }
+
+  // Serialized per template and language, because the unique index cannot do
+  // it. The index is on `(templateId, language, version)`, so two callers that
+  // read `latest` at different moments write versions N and N+1 and *both*
+  // succeed -- two published rows for one piece of copy, with the same content
+  // hash. The send gate compares hashes and is unharmed, but "which version did
+  // we send" then has two answers for copy that never changed, which is the
+  // one thing this registry exists to be able to answer.
+  //
+  // `pg_advisory_xact_lock` rather than a row lock: there is no row to lock
+  // yet, and it releases when the transaction ends however it ends.
+  const versionId = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-template-version:${template.id}:${input.language}`}))`;
+
+    // Asked again inside the lock: the caller that held it before this one may
+    // have written exactly this row.
+    const settled = await publishedMatch(tx);
+    if (settled) return settled.id;
+
+    const latest = await tx.templateVersion.findFirst({
+      where: { templateId: template.id, language: input.language },
+      orderBy: { version: "desc" },
+      select: { version: true },
+    });
+
+    try {
+      const created = await tx.templateVersion.create({
+        data: {
+          templateId: template.id,
+          language: input.language,
+          version: (latest?.version ?? 0) + 1,
+          subject: rendered.subject,
+          bodyHtml: rendered.html,
+          bodyText: rendered.text,
+          contentHash,
+          status: "published",
+          publishedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      return created.id;
+    } catch (error) {
+      // Kept even with the lock above. A caller on another process that has not
+      // taken the lock -- a migration, a console, an older deployment mid-roll
+      // -- can still write version N+1 first, and losing that race is not an
+      // error: the row the winner wrote is the row this caller wanted. Left
+      // unhandled it would surface as a failed sign-in or a dropped receipt,
+      // which is a spectacular consequence for two people acting at once.
+      if (!isUniqueViolation(error)) throw error;
+      const raced = await publishedMatch(tx);
+      if (!raced) throw error;
+      return raced.id;
+    }
+  });
+
+  return { templateId: template.id, templateVersionId: versionId };
 }

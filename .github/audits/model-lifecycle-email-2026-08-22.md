@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~5차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42. admin 화면은 6차
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~6차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42 · §43
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -3200,3 +3200,89 @@ campaign의 wave 실행은 **여기서 승인된 결정의 수행**이고, 그�
 **6차 범위**: admin 화면. `lib/adminNavigation.ts` 항목·icon·route segment를
 한 번에 추가해야 하고(admin IA 계약), E2E가 따로 필요합니다. API에 nav 항목만
 먼저 넣으면 그 계약을 깹니다.
+
+## 43. EM-01 6차 구현 기록 — campaign admin 화면 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminNavigation.ts` | `email-campaigns` 항목(Operations) · `Campaign detail` detail route · badge key |
+| `components/admin/adminNavigationIcons.ts` | icon |
+| `lib/adminNavigationBadges.ts` · `lib/adminNavigationCounts.ts` | `overdueCampaignWaves` |
+| `lib/adminEmailCampaigns.ts` | 화면용 read layer. 새 파일 |
+| `app/(site)/(application)/admin/email-campaigns/**` | 목록·일정 route, 상세 route |
+| `components/admin/AdminEmailCampaignsPanel.tsx` | 목록. server component |
+| `components/admin/AdminCampaignSchedulePanel.tsx` | wave 일정. server component |
+| `components/admin/AdminCampaignDetailPanel.tsx` | 상세·승인·attestation·취소. client |
+| `lib/emailTemplateRegistry.ts` | **두 건의 동시성 결함 수정** (아래) |
+| `tests/e2e-admin/admin-email-campaigns.spec.ts` | 10건, 새 파일 |
+| `tests/integration/email-template-registry-race.db.test.ts` | 5건, 새 파일 |
+
+**admin IA 계약대로 세 곳을 한 번에 넣었습니다** — route table · icon ·
+실제 route segment. `docs/ui-contracts/admin-console-ia.md` 규칙 3이고,
+`tests/adminNavigation.test.mjs`가 셋 중 하나라도 빠지면 실패합니다. section은
+`?tab=`에 있고 tab은 `<Link>`이며 열린 section의 데이터만 읽습니다(규칙 2).
+
+**badge는 "승인된 발송이 due였는데 나가지 않은 wave" 하나뿐입니다.** 규칙 4가
+badge를 장식이 아니라 일에만 허용하고, 이 수는 운영자가 실제로 할 일이 있을
+때만 0이 아닙니다. `approved_schedule`로 한정합니다 — `manual` wave의 과거
+시각은 누군가 보내려던 때를 적은 메모이지 실패한 job이 아니고, 그것까지 세면
+어떤 행동으로도 사라지지 않는 숫자가 sidebar에 붙습니다.
+
+**일정 section이 존재하는 이유는 목록이 보여 줄 수 없는 행 하나입니다.**
+scheduler가 due wave에 도달해 거부하면 wave 행은 시도도 이유도 기록하지
+않습니다 — 거부는 `CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE` operational incident로
+나가고, 그것은 Sentry와 운영 알림 채널로 갈 뿐 이 console이 읽는 어떤 표에도
+남지 않습니다. 그래서 console 안의 유일한 흔적이 "due인데 여전히 pending"이고,
+**화면은 이유가 wave에 있는 척하지 않습니다.**
+
+**초안 작성은 API에 남겼고 화면이 그렇게 적습니다.** audience spec은 expansion
+층이 소유하는 문서이고, 자유 입력 상자는 이미 검증하는 요청보다 나쁜 편집기
+입니다. 없는 버튼을 찾게 만들지 않으려면 없다고 말해야 합니다.
+
+**상세 화면은 gate를 스스로 판단하지 않습니다.** 버튼은 계속 살아 있고 거부는
+전부 서버의 것을 그대로 옮깁니다 — 문장 없이 비활성화된 버튼은 고장 난 버튼과
+구분되지 않습니다. 모든 동작 뒤에 서버에서 다시 읽습니다: gate는 이 화면이
+들고 있지 않은 행에서 계산되므로, 국소 갱신은 다시 묻지 않은 판정을 보여
+주게 됩니다.
+
+**상한 뒤 `notFound()`는 soft 404입니다.** shell이 이미 streaming된 뒤라 상태
+코드를 바꿀 수 없고(`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/not-found.md`),
+`noindex`가 그것을 정직하게 만듭니다. E2E는 200/404가 아니라 **not-found UI가
+뜨고 상세 panel이 뜨지 않는다**와 `noindex`를 검사합니다.
+
+### 43.1 화면이 드러낸 발송 경로의 동시성 결함 둘
+
+**이 slice가 만든 결함이 아니라 이 slice가 처음 부딪힌 결함입니다.** 상세
+route가 send gate와 content digest를 병렬로 묻는데 둘 다 같은 template을
+ensure하므로, `lib/emailTemplateRegistry.ts`의 경합이 매번 재현됐습니다.
+
+1. **`emailTemplate.upsert` / `emailPolicyVersion.upsert`가 P2002로 터집니다.**
+   존재하지 않는 행에 대한 `upsert`는 읽고 나서 insert이므로 동시 호출 둘이
+   모두 "없음"을 읽고 모두 insert합니다. 바로 아래 `templateVersion.create`는
+   이미 같은 경합을 처리하고 있었고 위 두 줄은 처리하지 않았습니다.
+   `upsertSurvivingRace()`로 잡아 읽어 옵니다. **credential lane에서는 이것이
+   copy 변경 직후 동시에 로그인한 두 사람 중 하나가 코드를 영영 못 받는
+   결함입니다.**
+
+2. **같은 문구가 published version 두 개를 갖습니다.** unique index는
+   `(templateId, language, version)`이라, `latest`를 서로 다른 시점에 읽은 두
+   caller가 N과 N+1을 쓰고 **둘 다 성공**합니다. send gate는 hash를 비교하므로
+   발송 판정은 무해하지만, 바뀐 적 없는 문구에 대해 "어느 version을
+   보냈는가"의 답이 둘이 됩니다 — 이 registry가 답하려고 존재하는 바로 그
+   질문입니다. `pg_advisory_xact_lock`으로 (template, language)마다
+   직렬화하며, **행이 이미 있는 정상 경로는 잠금을 잡지 않으므로** 비용은 copy
+   변경 후 첫 발송에만 듭니다. P2002 처리는 그대로 둡니다 — 잠금을 잡지 않는
+   다른 process(migration, console, 배포 중인 구버전)가 여전히 먼저 쓸 수
+   있습니다.
+
+`tests/integration/email-template-registry-race.db.test.ts`가 둘을 고정합니다.
+2번은 비결정적이라 한 번의 통과가 증거가 아니며, 3회 연속 실행으로 확인했습니다.
+
+### 43.2 남은 것
+
+**D5와 D10은 그대로입니다.** `email_campaign.approve`는 여전히
+`SOLE_APPROVER_ACTIONS`에 없고(§21 D5), `/admin/email-delivery` 주소 마스킹
+(§21 D10)도 결정 대기입니다. 둘 다 조직의 결정이지 코드의 결정이 아닙니다.
+
+**초안 작성 UI는 만들지 않았습니다.** 위에 적은 이유이며, audience spec의
+모양이 하나(`model_retirement` cohort)를 넘어 늘어나면 다시 볼 일입니다.
