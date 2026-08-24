@@ -581,6 +581,8 @@ const sendEmailAlert = async (
       JSON.stringify({
         event: "provider_email_alert_not_configured",
         title,
+        stream: "transactional",
+        senderRole: "operations",
         email: to,
       })
     );

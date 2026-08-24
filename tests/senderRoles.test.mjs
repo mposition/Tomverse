@@ -386,6 +386,29 @@ test("every notification kind names a sender, and the right one", () => {
   }
 });
 
+test("both lanes log the sender they used, with no credential and no recipient", () => {
+  // The lanes record an outcome on a row; the wire call logs nothing. Before
+  // this a message that left as the wrong sender left no trace of having done
+  // so, which is the question this whole axis exists to make answerable.
+  for (const [file, event] of [
+    ["lib/standardEmailLane.ts", "standard_email_sent"],
+    ["lib/credentialEmailLane.ts", "credential_email_sent"],
+  ]) {
+    const source = readFileSync(file, "utf8");
+    const block = source.slice(
+      source.indexOf(`event: "${event}"`),
+      source.indexOf(`event: "${event}"`) + 700
+    );
+    assert.ok(block.length > 0, `${file} logs no ${event}`);
+    assert.match(block, /stream:/, `${event} names no stream`);
+    assert.match(block, /senderRole:/, `${event} names no sender role`);
+    // Neither the address it went to nor anything rendered. On the credential
+    // lane the rendered body *is* the secret.
+    assert.doesNotMatch(block, /\bto:/, `${event} logs a recipient`);
+    assert.doesNotMatch(block, /\b(html|text|code|subject):/, `${event} logs content`);
+  }
+});
+
 test("the operator alert paths and the audit report all send as operations", () => {
   // Three senders that each held their own From variable before 2026-08-21, so
   // three that a role change is most likely to leave behind. Read from the
