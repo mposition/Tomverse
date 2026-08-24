@@ -96,32 +96,33 @@ test("a swallowed pricing failure is counted and reported", () => {
     assert.match(harness, /pricingFailures: runMode\.mode === "live"/);
 });
 
-test("neither side hard-codes the output ceiling", () => {
-    // These used to be two literal 4,096s kept equal by comparing them. The
-    // number was wrong on both sides -- it is the model's
-    // `reservationOutputTokens`, entitlement rather than capability -- and
-    // agreeing about a wrong number is what a drift test cannot catch. Both
-    // now read `maxOutputTokens` off the resolved profile, so there is one
-    // source and the question of drift does not arise.
+test("both sides price the ceiling the product actually sends", () => {
+    // These were two literal 4,096s kept equal by comparing them, then two
+    // different wrong numbers when the harness went looking for a better one.
+    // Both now import `memoryExtractionWorker`'s constant -- the ceiling the
+    // product sends -- so there is one source and the question of drift does
+    // not arise.
     for (const [name, source] of [
         ["the harness", harness],
         ["the estimator", estimator],
     ]) {
+        assert.match(
+            source,
+            /MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS/,
+            `${name} should read the ceiling from the product's constant`
+        );
         assert.ok(
             !/maxOutputTokens:\s*[\d_]+/.test(source),
             `${name} should not send a literal output ceiling`
         );
-        // A use, not a mention: both files explain the old bug in prose, and
-        // a check that could not tell the explanation from the mistake would
-        // have to be deleted the first time somebody documented it.
         assert.ok(
             !/\.reservationOutputTokens/.test(source),
             `${name} must not cap output at the reservation`
         );
-        assert.match(
-            source,
-            /(pricing|capability)\.maxOutputTokens/,
-            `${name} should read the ceiling from the pricing profile`
+        assert.ok(
+            !/\.maxOutputTokens\b/.test(source),
+            `${name} must not cap output at the model's full capability -- ` +
+                "that is what the model can do, not what this prompt asks for"
         );
     }
 });

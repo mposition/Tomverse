@@ -221,53 +221,66 @@ let abortedOnFailures = false;
 /** Consecutive scoreable-answer failures after which the run stops. */
 const MAX_CONSECUTIVE_FAILURES = 5;
 
-const liveAdapter = async ({ prompt }) => {
+/**
+ * The live adapter is the product's adapter.
+ *
+ * It used to build its own `generateText` call, and three runs died on the
+ * difference: a system message the SDK refuses, then an output ceiling this
+ * file had picked for itself. Both were invented here, and the second was
+ * worse than the first -- an eval that sends a request the product never
+ * sends is not measuring the product, however green its numbers come out.
+ *
+ * So the call comes from `createExtractionProviderAdapter`, the same function
+ * `memoryExtractionWorker` uses, and this file supplies only what an eval
+ * needs to differ in: nothing to abort, no durable cost row, and a usage hook
+ * so the spend ceiling has real numbers rather than an estimate.
+ */
+const liveAdapter = async (input) => {
     const [
-        { generateText },
-        { getActiveAiModel },
+        { createExtractionProviderAdapter },
+        { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS },
         { getModel },
         { resolveModelPricing },
-        { buildLiveExtractionRequest },
     ] = await Promise.all([
-        import("ai"),
-        import("../lib/activeAiModel.ts"),
+        import("../lib/memoryExtractionProvider.ts"),
+        import("../lib/memoryExtractionWorker.ts"),
         import("../lib/models.ts"),
         import("../lib/modelPricing.ts"),
-        import("../lib/memoryEvalLiveRequest.ts"),
     ]);
     const model = getModel(modelId);
-    // The output ceiling is the model's capability, read from the same
-    // profile the product prices against -- not the reservation beside it.
-    const capability = resolveModelPricing(model, { estimatedPromptTokens: 0 });
-    const result = await generateText({
-        model: getActiveAiModel(model),
-        ...buildLiveExtractionRequest({
-            prompt,
-            maxOutputTokens: capability.maxOutputTokens,
-        }),
+    const adapter = createExtractionProviderAdapter({
+        model,
+        maxOutputTokens: MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS,
+        // An eval has no deadline of its own: the run is bounded by the spend
+        // ceiling and the consecutive-failure guard, both of which stop it
+        // between cases rather than mid-request.
+        signal: new AbortController().signal,
+        onCallIssued: () => {},
+        onResult: (result) => {
+            try {
+                // `resolveModelPricing` takes the model and an options object,
+                // not an id and a bare number. Called with `(modelId, tokens)`
+                // it threw on every single call, and the catch below swallowed
+                // it, so `accruedCostUsd` stayed at zero for a whole live run
+                // and the §12.5 spend ceiling never bound.
+                const pricing = resolveModelPricing(model, {
+                    estimatedPromptTokens: result.usage.inputTokens ?? 0,
+                });
+                accruedCostUsd +=
+                    ((result.usage.inputTokens ?? 0) *
+                        pricing.inputUsdPerMillionTokens +
+                        (result.usage.outputTokens ?? 0) *
+                            pricing.outputUsdPerMillionTokens) /
+                    1_000_000;
+            } catch {
+                // Pricing is for the spend ceiling only, so a resolution
+                // failure does not abort a run that is otherwise fine. It is
+                // counted, though: silence here is what hid the bug above.
+                pricingFailures += 1;
+            }
+        },
     });
-    const usage = result.usage ?? {};
-    try {
-        // `resolveModelPricing` takes the model and an options object, not an
-        // id and a bare number. Called with `(modelId, tokens)` it threw on
-        // every single call -- `model.id` on a string is undefined -- and the
-        // catch below swallowed it, so `accruedCostUsd` stayed at zero for a
-        // whole live run and the §12.5 spend ceiling never bound. The budget
-        // *refusal* worked; the ceiling did not.
-        const pricing = resolveModelPricing(model, {
-            estimatedPromptTokens: usage.inputTokens ?? 0,
-        });
-        accruedCostUsd +=
-            ((usage.inputTokens ?? 0) * pricing.inputUsdPerMillionTokens +
-                (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens) /
-            1_000_000;
-    } catch {
-        // Pricing is for the spend ceiling only, so a resolution failure does
-        // not abort a run that is otherwise fine. It is counted, though: see
-        // `pricingFailures`. Silence here is what hid the bug above.
-        pricingFailures += 1;
-    }
-    return { text: result.text ?? "" };
+    return adapter(input);
 };
 
 /* -------------------------------------------------------------------- run -- */
