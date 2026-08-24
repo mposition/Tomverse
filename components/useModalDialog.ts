@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type RefObject } from "react";
+import { lockBodyScroll } from "./useBodyScrollLock";
 
 /**
  * UX-010. The focus contract every `aria-modal="true"` surface owes its users.
@@ -25,7 +26,14 @@ import { useEffect, type RefObject } from "react";
  * - **Tab and Shift+Tab cycle** within the panel, including when focus has
  *   escaped to the document.
  * - **Escape closes**, via `onClose`.
- * - **Background scroll is locked** and restored exactly to its previous value.
+ * - **Background scroll is locked** through the shared reference-counted lock
+ *   in `useBodyScrollLock`, never by writing `body.style.overflow` here. These
+ *   dialogs stack -- Settings opens above the mobile drawer, Delete Account
+ *   above Settings -- and a per-dialog save/restore gets both directions of
+ *   that wrong: the outer surface releasing first unlocks the page underneath
+ *   a dialog that is still open, and the inner one then restores the `hidden`
+ *   it captured from the outer one, leaving the page unable to scroll with
+ *   nothing open.
  * - **Focus returns** to whatever was focused before opening, if it is still in
  *   the document.
  * - **Nested modals own their own keys.** Ownership is decided by the event
@@ -158,8 +166,7 @@ export function useModalDialog({
     const returnTarget =
       returnFocusRef?.current ??
       (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const releaseScrollLock = lockBodyScroll();
 
     // Registered before the frame is scheduled, so a dialog that opens after
     // this one can be seen to have opened after it. The frame below is then
@@ -187,7 +194,7 @@ export function useModalDialog({
     return () => {
       unregister?.();
       cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       requestAnimationFrame(() => {
         // The trigger can be gone by now (a row that was just deleted, a menu
         // that closed with the dialog); focusing a detached node would silently

@@ -2,6 +2,8 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import type { WaveKind } from "@/lib/emailCampaignCore";
+import { CAMPAIGN_EXCLUDED_REASONS } from "@/lib/emailCampaignRecipientCore";
+import { AUDIENCE_COHORTS } from "@/lib/modelRetirementAudienceCore";
 import { WAVE_ORDER } from "@/lib/emailCampaignScheduleCore";
 
 /**
@@ -285,6 +287,132 @@ export const readAdminCampaign = async (campaignId: string) => {
     locales: readLocales(campaign.locales),
     waves,
   };
+};
+
+export type WaveAudienceBreakdown = {
+  waveId: string;
+  kind: string;
+  sequence: number;
+  dryRun: boolean;
+  /** Ledger rows for this wave, however they ended. */
+  total: number;
+  /**
+   * Rows with no exclusion reason: a delivery row was written for them.
+   *
+   * Not "was sent to". On a dry-run wave every one of these deliveries was
+   * written `skipped` with `skipReason = dry_run`, so a screen that called this
+   * column "sent" would report a rehearsal as a send -- which is the one thing
+   * a rehearsal must never be mistaken for.
+   */
+  written: number;
+  /** Stored values the parser could not read. Reported, never rewritten. */
+  malformed: number;
+  excluded: Record<string, number>;
+  cohorts: Record<string, number>;
+};
+
+/**
+ * Who each wave reached, and who it did not reach and why.
+ *
+ * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §12.3, §13.1.
+ *
+ * `EmailCampaignRecipient` has been written since the third slice and read by
+ * nothing an operator can open: the expander writes it, the expander reads it
+ * back to resume, one count feeds the transition gate, and the account export
+ * returns a person their own row. So the exclusion reasons that slice recorded
+ * -- the whole point of recording them -- had nowhere to be looked at, and a
+ * dry run, whose only job is to answer "who would this have reached", produced
+ * an answer nobody could read.
+ *
+ * Counts, not people. Every row holds an address, and whether an operator may
+ * see addresses on a campaign screen is the same open question as D10 for
+ * `/admin/email-delivery` (section 21). Answering it by building the list would
+ * be deciding it.
+ */
+export const waveAudienceBreakdown = async (
+  campaignId: string
+): Promise<WaveAudienceBreakdown[]> => {
+  const waves = await prisma.emailCampaignWave.findMany({
+    where: { campaignId },
+    select: { id: true, kind: true, sequence: true, dryRun: true },
+  });
+  if (waves.length === 0) return [];
+
+  // Three grouped reads rather than one pass over the rows: the ledger is one
+  // row per person per wave, and a campaign that reached its audience has as
+  // many as the audience is large.
+  const [byExclusion, byCohort, malformed] = await Promise.all([
+    prisma.emailCampaignRecipient.groupBy({
+      by: ["waveId", "excludedReason"],
+      where: { campaignId },
+      _count: { _all: true },
+    }),
+    prisma.emailCampaignRecipient.groupBy({
+      by: ["waveId", "eligibilityReason"],
+      where: { campaignId },
+      _count: { _all: true },
+    }),
+    prisma.emailCampaignRecipient.groupBy({
+      by: ["waveId"],
+      where: { campaignId, malformed: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const malformedByWave = new Map(
+    malformed.map((row) => [row.waveId, row._count._all])
+  );
+
+  return waves
+    .sort(
+      (left, right) =>
+        waveOrderIndex(left.kind) - waveOrderIndex(right.kind) ||
+        left.sequence - right.sequence
+    )
+    .map((wave) => {
+      const exclusionRows = byExclusion.filter((row) => row.waveId === wave.id);
+      const excluded: Record<string, number> = {};
+      // Every reason is present, including the zeroes. A breakdown that omits
+      // the reasons that did not fire reads as though they were not asked, and
+      // "nobody was suppressed" is the answer an operator most wants to see
+      // stated rather than inferred from an absence.
+      for (const reason of CAMPAIGN_EXCLUDED_REASONS) excluded[reason] = 0;
+      let written = 0;
+      let total = 0;
+      for (const row of exclusionRows) {
+        total += row._count._all;
+        if (row.excludedReason === null) written += row._count._all;
+        else if (row.excludedReason in excluded) {
+          excluded[row.excludedReason] += row._count._all;
+        } else {
+          // A reason the application no longer names. Kept rather than dropped:
+          // a row written by an older deployment is still a person who was not
+          // written to, and silently discarding it would make the columns stop
+          // adding up to the total.
+          excluded[row.excludedReason] = row._count._all;
+        }
+      }
+
+      const cohorts: Record<string, number> = {};
+      for (const cohort of AUDIENCE_COHORTS) cohorts[cohort] = 0;
+      for (const row of byCohort.filter((entry) => entry.waveId === wave.id)) {
+        if (row.eligibilityReason === null) continue;
+        cohorts[row.eligibilityReason] =
+          (cohorts[row.eligibilityReason] ?? 0) + row._count._all;
+      }
+
+      return {
+        waveId: wave.id,
+        kind: wave.kind,
+        sequence: wave.sequence,
+        dryRun: wave.dryRun,
+        total,
+        written,
+        malformed: malformedByWave.get(wave.id) ?? 0,
+        excluded,
+        cohorts,
+      };
+    });
 };
 
 export type { WaveKind };

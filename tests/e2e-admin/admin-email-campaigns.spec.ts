@@ -254,6 +254,91 @@ test.describe("Admin Console — email campaigns", () => {
     );
   });
 
+  test("a campaign with no expansion says nobody has been considered", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    const audience = page.getByTestId("admin-campaign-audience");
+    await expect(audience).toBeVisible();
+    await expect(audience).toContainText("No wave has expanded yet");
+  });
+
+  test("the ledger is read back as counts, and a dry run is never reported as a send", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const api = adminApi(page);
+    const campaignId = await draftCampaign(api);
+
+    // A dry run is the case worth driving through the browser: it writes the
+    // same rows a real wave writes, and only the wave's own flag separates
+    // "would have reached" from "reached".
+    const scheduled = await api.post(`${CAMPAIGN_API}/${campaignId}/waves`, {
+      kind: "launch",
+      action: "schedule",
+      scheduledAt: null,
+      dryRun: true,
+    });
+    expect(scheduled.status()).toBe(200);
+
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+    const wave = page.getByTestId("admin-campaign-audience-wave");
+    await expect(wave).toHaveCount(1);
+    await expect(wave).toContainText("This wave has not expanded.");
+
+    // No address is on the page at any point: the ledger holds them and whether
+    // an operator may see them is still an open decision.
+    await expect(page.getByTestId("admin-campaign-audience")).not.toContainText(
+      "@"
+    );
+  });
+
+  test("an unmeasured audience says nobody has counted it, not zero", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    const estimate = page.getByTestId("admin-campaign-estimate");
+    await expect(estimate).toBeVisible();
+    await expect(
+      page.getByTestId("admin-campaign-estimate-absent")
+    ).toContainText("Nobody has measured this audience");
+    // "not measured", never "0": a count nobody has taken and a count that came
+    // back nought are different facts.
+    await expect(estimate).not.toContainText("would receive the notice");
+  });
+
+  test("measuring the audience stores a number that says when it was taken", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    await page.getByTestId("admin-campaign-estimate-run").click();
+
+    // Zero people are affected in this fixture, and that is a measurement:
+    // the headline appears, dated and attributed.
+    await expect(
+      page.getByTestId("admin-campaign-estimate-headline")
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("admin-campaign-estimate")).toContainText(
+      "Measured"
+    );
+    await expect(
+      page.getByTestId("admin-campaign-estimate-absent")
+    ).toHaveCount(0);
+  });
+
   test("an unknown campaign id shows the not-found page, not an empty detail panel", async ({
     page,
     signInAs,

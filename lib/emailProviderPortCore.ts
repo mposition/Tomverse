@@ -1,5 +1,8 @@
 import { readSvixHeaders, verifySvixSignature } from "@/lib/svixSignature";
-import type { SendingStream } from "@/lib/emailSendingIdentityCore";
+import type {
+  SenderRole,
+  SendingStream,
+} from "@/lib/emailSendingIdentityCore";
 
 /**
  * The seam between this system and whoever puts the bytes on the wire.
@@ -69,6 +72,20 @@ export type SendOptions = {
    */
   stream: SendingStream;
   /**
+   * Who the recipient sees this message as being from.
+   *
+   * Required for the same reason `stream` is, and it is a *different* reason.
+   * A missing stream would send a promotion down the login-code domain; a
+   * missing role would send a refund decision as whoever the general identity
+   * is. Neither has a safe default, so neither has one -- and because this is
+   * required rather than optional, a send path added later cannot compile
+   * without deciding (docs/policy/email-notifications.md §14.1a).
+   *
+   * The pair is checked, not just each half: a role that does not belong to
+   * this stream is refused before the wire.
+   */
+  senderRole: SenderRole;
+  /**
    * Makes a send exactly-once at the provider for 24 hours.
    *
    * Resend records the key against the request it accepted, so a retry that
@@ -98,6 +115,8 @@ export type ProviderSendResult =
        * sender it *thinks* was used is the shape of that failure.
        */
       from: string;
+      /** The role that From was resolved for, for the structured log. */
+      senderRole: SenderRole;
     }
   | {
       ok: false;
@@ -240,6 +259,15 @@ export const postToResend = async (
   config: {
     apiKey: string;
     from: string;
+    senderRole: SenderRole;
+    /**
+     * Where a reply goes, when it is not the From address.
+     *
+     * Omitted entirely when absent rather than sent empty: `reply_to: null`
+     * and no `reply_to` are the same to Resend today, and only one of them
+     * stays true if that changes.
+     */
+    replyTo?: string;
     idempotencyKey?: string;
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
@@ -260,6 +288,7 @@ export const postToResend = async (
       },
       body: JSON.stringify({
         from: config.from,
+        ...(config.replyTo ? { reply_to: config.replyTo } : {}),
         to: message.to,
         subject: message.subject,
         html: message.html,
@@ -295,6 +324,7 @@ export const postToResend = async (
     ok: true,
     providerMessageId: typeof body?.id === "string" ? body.id : null,
     from: config.from,
+    senderRole: config.senderRole,
   };
 };
 

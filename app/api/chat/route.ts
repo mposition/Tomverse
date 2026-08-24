@@ -67,6 +67,10 @@ import {
     recordDispatched,
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
+import type {
+    RoutingAttemptOutcome,
+    RoutingFailureLayer,
+} from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
@@ -81,11 +85,7 @@ import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
-import {
-    planGeneratedArtifactTool,
-    ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
-    ARTIFACT_TOOL_DEFINITION_TOKENS,
-} from "@/lib/generatedArtifactToolPolicy";
+import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
 import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
@@ -182,6 +182,8 @@ import {
 } from "@/lib/routingFaultInjection";
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
+import { buildStreamKeepaliveChunk } from "@/lib/chatStreamKeepalive";
+import { resolveChatStreamKeepalivePlan } from "@/lib/chatStreamKeepalivePlan";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import {
     conversationLockedResponse,
@@ -209,7 +211,11 @@ import {
     featureNotIncludedResponse,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
-import { getOperationalFeatureFlags } from "@/lib/appSettings";
+import {
+    getOperationalFeatureFlags,
+    isImageGenerationEnabledCached,
+} from "@/lib/appSettings";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
     messageAttachmentReferenceSchema,
@@ -1133,19 +1139,6 @@ async function handleChatPost(
             plan: accountPlan?.tier ?? null,
             drillOverride: drillOverride.allowed,
         });
-        if (autoCohort.eligible && autoCohort.drillOverride) {
-            // Loud, and every time. A routed turn that only routed because a
-            // drill said so must be legible as one in the record it produces,
-            // not inferred later from the absence of an attestation.
-            console.warn(JSON.stringify({
-                event: "chat_auto_readiness_overridden",
-                traceId,
-                conversationId,
-                reason: autoCohort.drillOverride,
-                environment: resolveDeploymentEnvironment(),
-                timestamp: new Date().toISOString(),
-            }));
-        }
         // No longer gated on cohort eligibility. Decision record v1.2 §3 puts
         // the product before the cohort, and the product lives on this row --
         // so skipping the read for an account the cohort would refuse would
@@ -1258,6 +1251,11 @@ async function handleChatPost(
                   }))
                 : [],
             ...routerCandidateInputs,
+            // The readiness hole, carried to the decision that uses it. The
+            // cohort read above is not the one that routes: this function
+            // consults the cohort again, and without this the drill's turn was
+            // refused on the very gate the override exists to pass.
+            drillOverride: drillOverride.allowed,
             reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
@@ -1277,6 +1275,28 @@ async function handleChatPost(
                 selectedModelId: effectiveModelId,
                 selectionReason: autoSelection.record.selectionReason,
                 routerVersion: autoSelection.versions.decision,
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        // Loud, and every time -- but only about a turn that was actually
+        // routed. A routed turn that only routed because a drill said so must
+        // be legible as one in the record it produces, not inferred later from
+        // the absence of an attestation.
+        //
+        // Recorded here rather than beside the cohort read, which is where it
+        // used to be. Passing the override does not make routing happen: the
+        // selection can still refuse for `product_not_chat`,
+        // `conversation_is_manual` or `no_candidate`, and logging on the
+        // cohort alone claimed an overridden routing decision for every turn
+        // that went on to be refused for a reason unrelated to readiness.
+        if (autoSelection.routed && autoSelection.cohort.drillOverride) {
+            console.warn(JSON.stringify({
+                event: "chat_auto_readiness_overridden",
+                traceId,
+                conversationId,
+                reason: autoSelection.cohort.drillOverride,
+                selectedModelId: effectiveModelId,
+                environment: resolveDeploymentEnvironment(),
                 timestamp: new Date().toISOString(),
             }));
         }
@@ -1929,26 +1949,46 @@ async function handleChatPost(
           is checked elsewhere.
         */
         const isDeepResearchTurn = modelConfig.usageClass === "deep-research";
-        const artifactToolPlan = isDeepResearchTurn
-            ? null
-            : planGeneratedArtifactTool({
-                  modelId: modelConfig.id,
-                  provider: modelConfig.provider,
-                  isAuthenticated: Boolean(session?.user?.id),
-                  canPersist: Boolean(
-                      session?.user?.id && conversationId && assistantMessageId
-                  ),
-                  nativeSearchEnabled,
-                  // Only OpenAI's tool can be forced, and
-                  // `buildWebSearchToolConfig` forces it whenever it is
-                  // enabled. Read from the capability rather than from the
-                  // provider name so the two cannot drift.
-                  nativeSearchForced:
-                      nativeSearchEnabled &&
-                      webSearchCapability.canForceExecution,
-                  conversationKind: "chat",
-                  turnAttachments: turnAttachmentDescriptors,
-              });
+        /*
+          The image-capability block rides in the same object, for the reason
+          the paragraph above gives about pricing: both blocks are input, both
+          are decided before the reservation, and `/api/chat/preflight` has to
+          quote the same two. One builder is what keeps the quote, the
+          reservation and the request from disagreeing -- see
+          lib/chatTurnSystemBlocks.ts.
+        */
+        // Cached rather than a per-turn row read (isImageGenerationEnabledCached),
+        // and skipped entirely on a deep-research turn, which carries no
+        // capability blocks for it to decide.
+        const imageGenerationFlagEnabled = isDeepResearchTurn
+            ? false
+            : await isImageGenerationEnabledCached();
+        const turnSystemBlocks = buildChatTurnSystemBlocks({
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            isDeepResearchTurn,
+            isAuthenticated: Boolean(session?.user?.id),
+            canPersist: Boolean(
+                session?.user?.id && conversationId && assistantMessageId
+            ),
+            nativeSearchEnabled,
+            // Only OpenAI's tool can be forced, and
+            // `buildWebSearchToolConfig` forces it whenever it is enabled.
+            // Read from the capability rather than from the provider name so
+            // the two cannot drift.
+            nativeSearchForced:
+                nativeSearchEnabled && webSearchCapability.canForceExecution,
+            turnAttachments: turnAttachmentDescriptors,
+            promptText:
+                typeof latestMessage?.content === "string"
+                    ? latestMessage.content
+                    : "",
+            imageGenerationFlagEnabled,
+            planAllowsImageGeneration: Boolean(
+                accountPlan && planAllowsImageGeneration(accountPlan.tier)
+            ),
+        });
+        const artifactToolPlan = turnSystemBlocks.artifactPlan;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
@@ -1956,27 +1996,18 @@ async function handleChatPost(
         const formattedMessages: ModelMessage[] = contextSystemPrompt
             ? [{ role: "system", content: contextSystemPrompt }]
             : [];
-        if (artifactToolPlan) {
-            formattedMessages.push({
-                role: "system",
-                content: artifactToolPlan.systemPrompt,
-            });
-            // Priced like any other input. The tool *definition* is a separate
-            // cost the provider adds when the schema is sent, and it is a
-            // build-time constant rather than a per-request tokenisation --
-            // see ARTIFACT_TOOL_DEFINITION_TOKENS.
-            const artifactPromptTokens =
-                estimateTextTokens(artifactToolPlan.systemPrompt) +
-                (artifactToolPlan.registerTool
-                    ? ARTIFACT_TOOL_DEFINITION_TOKENS
-                    : 0) +
-                // The batch tool's schema is only sent on a turn that carries
-                // a Word template, so it is priced only there.
-                (artifactToolPlan.registerDocumentBatch
-                    ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
-                    : 0);
-            estimatedInputTokens += artifactPromptTokens;
-            inputEstimate.addTokens(artifactPromptTokens);
+        for (const block of turnSystemBlocks.systemMessages) {
+            formattedMessages.push(block);
+        }
+        // Priced like any other input, and counted by the same builder that
+        // produced the blocks so preflight cannot arrive at a different
+        // number. The tool *definitions* are a separate cost the provider adds
+        // when the schema is sent, and they are build-time constants rather
+        // than a per-request tokenisation -- see
+        // ARTIFACT_TOOL_DEFINITION_TOKENS.
+        if (turnSystemBlocks.promptTokens > 0) {
+            estimatedInputTokens += turnSystemBlocks.promptTokens;
+            inputEstimate.addTokens(turnSystemBlocks.promptTokens);
         }
         for (const msg of messages) {
             if (msg.role === "assistant") {
@@ -2705,6 +2736,10 @@ async function handleChatPost(
                 traceId,
                 userId: access.userId ?? null,
                 subjectKey: access.subjectKey,
+                // The same two the dispatch row carries. A shadow decision is
+                // about this turn, so it belongs to this turn's conversation.
+                conversationId: conversationId ?? null,
+                productKey: conversationProductKey,
                 // A signed-in account with no resolved plan reads as Guest
                 // rather than as a paid one: the filters use this to decide
                 // what the account may reach, and guessing upwards would let a
@@ -3381,6 +3416,22 @@ async function handleChatPost(
         let sourceCancelled = false;
         let usageSettlement: Promise<void> | null = null;
         let streamState: "open" | "closed" | "cancelled" = "open";
+        /**
+         * Whether a token the user can see has reached the response stream.
+         *
+         * The out-of-band chunks do not count -- a routing-retry marker and a
+         * keepalive are both stripped before anything is rendered, so a turn
+         * that has sent only those has still shown the user nothing.
+         */
+        let visibleTokenEmitted = false;
+        /**
+         * Cancels the keepalive writer and the first-token deadline below.
+         *
+         * Declared here, assigned once the stream helpers exist, for the same
+         * reason `stopLeaseHeartbeat` is: `release()` is defined before them
+         * and has to be able to stop them.
+         */
+        let stopFirstTokenWatch: () => void = () => {};
         // Perplexity's response body is captured once and answers two
         // questions -- what this turn cost, and which sources the answer's
         // "[n]" markers point at. Consuming the capture releases it, so both
@@ -3445,6 +3496,21 @@ async function handleChatPost(
                 searchCostMicroUsd?: number;
                 searchQueryCount?: number;
                 searchQueriesObserved?: boolean;
+            },
+            /**
+             * What the attempt record should say, when the generic mapping
+             * below would say something untrue.
+             *
+             * There is exactly one caller: the first-token deadline. A turn
+             * the provider never wrote a token for is not
+             * `failed_post_token`, and filing it under the same errorClass as
+             * a stream that broke mid-answer would mix a liveness decision
+             * this app made into the provider's own failure counts.
+             */
+            instrumentation?: {
+                outcome?: RoutingAttemptOutcome;
+                failureLayer?: RoutingFailureLayer;
+                errorClass?: string | null;
             }
         ) => {
             if (usageSettlement) return usageSettlement;
@@ -3520,20 +3586,27 @@ async function handleChatPost(
                     // missed.
                     await completeInstrumentedDispatch(dispatchRecord, {
                         outcome:
-                            outcome === "completed"
+                            instrumentation?.outcome ??
+                            (outcome === "completed"
                                 ? "succeeded"
                                 : outcome === "cancelled"
                                   ? "cancelled"
-                                  : "failed_post_token",
+                                  : "failed_post_token"),
                         failureLayer:
-                            outcome === "completed" || outcome === "cancelled"
+                            instrumentation?.failureLayer ??
+                            (outcome === "completed" || outcome === "cancelled"
                                 ? "none"
-                                : "stream",
+                                : "stream"),
                         actualInputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
                         actualOutputTokens:
                             usage?.outputTokens ?? estimatedGeneratedOutputTokens(),
-                        errorClass: outcome === "empty" ? "empty_response" : null,
+                        errorClass:
+                            instrumentation?.errorClass !== undefined
+                                ? instrumentation.errorClass
+                                : outcome === "empty"
+                                  ? "empty_response"
+                                  : null,
                         settlementOutcome: outcome,
                     });
                     // Auto's memory of this conversation, written only for a
@@ -3636,6 +3709,11 @@ async function handleChatPost(
             if (released) return;
             released = true;
             stopHeartbeat();
+            // Belt and braces: every terminal path already stops these, and
+            // every terminal path also funnels through here. A keepalive
+            // interval that outlived its request would write into a closed
+            // controller forever.
+            stopFirstTokenWatch();
             await releaseChatAccess(activeLeaseId, {
                 traceId,
                 reason: streamState === "cancelled" ? "stream_cancelled" : "stream_finished",
@@ -3749,6 +3827,126 @@ async function handleChatPost(
                 }
                 return false;
             }
+        };
+        /*
+          Keeping the connection alive while the provider thinks, and giving
+          up on it when it never stops.
+
+          lib/chatStreamKeepalive.ts carries the whole rationale. In short:
+          this deployment sits behind an edge proxy whose read timeout is far
+          shorter than a legitimate high-reasoning first token, so a stream
+          that writes nothing for minutes is closed by the edge rather than by
+          anyone who can explain it. A NUL-led control chunk every twenty
+          seconds keeps the connection legible, and the client strips it before
+          anything is rendered. Both that interval and the deadline below are
+          read per request from lib/chatStreamKeepalivePlan.ts, so an operator
+          can lower either without a deploy.
+
+          The keepalive covers whichever attempt is current -- the primary and
+          §7's automatic fallback alike -- because it is tied to "no visible
+          token yet", which is precisely the window a fallback is allowed to
+          happen in. The deadline is absolute from the first pull and is not
+          restarted by a swap: a turn that has shown the user nothing for nine
+          minutes is over regardless of how many models were tried inside it.
+        */
+        const firstTokenWatchStartedAt = Date.now();
+        let keepaliveWriter: ReturnType<typeof setInterval> | null = null;
+        let firstTokenDeadline: ReturnType<typeof setTimeout> | null = null;
+        stopFirstTokenWatch = () => {
+            if (keepaliveWriter) {
+                clearInterval(keepaliveWriter);
+                keepaliveWriter = null;
+            }
+            if (firstTokenDeadline) {
+                clearTimeout(firstTokenDeadline);
+                firstTokenDeadline = null;
+            }
+        };
+        /**
+         * Ends a turn whose provider never produced a visible token.
+         *
+         * Order matters. The stall notice and the close go out first, so the
+         * browser is told what happened rather than left to infer it from a
+         * stream that ended empty -- which is a different thing (the provider
+         * finished and said nothing) with its own copy and its own counters.
+         * Closing also flips `streamState` away from "open", which is what
+         * makes the in-flight `reader.read()` below return through the
+         * already-settled guard instead of running the completion branch.
+         */
+        const endOnFirstTokenDeadline = async (
+            controller: ReadableStreamDefaultController<string>
+        ) => {
+            stopFirstTokenWatch();
+            const elapsedMs = Date.now() - firstTokenWatchStartedAt;
+            // Diagnostics only, and deliberately only these fields: no
+            // prompt, no attachment name, no document text.
+            console.warn(
+                JSON.stringify({
+                    event: "chat_stream_first_token_timeout",
+                    traceId,
+                    modelId: dispatched.modelId,
+                    provider: dispatched.provider,
+                    abortCause: "first_response_timeout",
+                    phase: "first_response",
+                    elapsedMs,
+                    timestamp: new Date().toISOString(),
+                })
+            );
+            enqueueSafely(
+                controller,
+                buildStreamKeepaliveChunk({
+                    state: "stalled",
+                    elapsedMs,
+                    code: "CHAT_FIRST_RESPONSE_TIMEOUT",
+                })
+            );
+            closeSafely(controller);
+            await cancelSourceSafely(
+                "first token deadline exceeded"
+            );
+            await settleSafely(
+                "failed",
+                { searchQueriesObserved: false },
+                {
+                    outcome: "failed_pre_token",
+                    failureLayer: "provider",
+                    errorClass: "first_token_deadline_exceeded",
+                }
+            );
+            // Releases the concurrency lease and, because no message
+            // transaction ever committed, discards whatever the artifact
+            // collector had put in storage.
+            await releaseSafely();
+        };
+        const startFirstTokenWatch = (
+            controller: ReadableStreamDefaultController<string>
+        ) => {
+            if (keepaliveWriter || visibleTokenEmitted) return;
+            const plan = resolveChatStreamKeepalivePlan();
+            keepaliveWriter = setInterval(() => {
+                if (visibleTokenEmitted || streamState !== "open") {
+                    stopFirstTokenWatch();
+                    return;
+                }
+                enqueueSafely(
+                    controller,
+                    buildStreamKeepaliveChunk({
+                        state: "awaiting_first_token",
+                        elapsedMs: Date.now() - firstTokenWatchStartedAt,
+                    })
+                );
+            }, plan.intervalMs);
+            // Same reason as the lease heartbeat: a pending timer must never
+            // be why a worker stays up after its request is done.
+            keepaliveWriter.unref?.();
+            firstTokenDeadline = setTimeout(() => {
+                if (visibleTokenEmitted || streamState !== "open") {
+                    stopFirstTokenWatch();
+                    return;
+                }
+                void endOnFirstTokenDeadline(controller);
+            }, plan.firstTokenDeadlineMs);
+            firstTokenDeadline.unref?.();
         };
         /**
          * §7's automatic fallback, or the named reason there was none.
@@ -4149,6 +4347,12 @@ async function handleChatPost(
             async pull(controller) {
                 if (streamState !== "open") return;
                 streamController = controller;
+                // Armed on the first pull rather than at construction: pull
+                // is only ever called once the Response has been published,
+                // so a request that throws between building this stream and
+                // returning it cannot leave a timer behind. Idempotent, so
+                // every later pull is a no-op.
+                startFirstTokenWatch(controller);
 
                 try {
                     const { done, value } = await dispatched.reader.read();
@@ -4157,6 +4361,9 @@ async function handleChatPost(
                         return;
                     }
                     if (done) {
+                        // The provider finished. Whatever it produced, it is
+                        // no longer being waited for.
+                        stopFirstTokenWatch();
                         const completionResults = await Promise.allSettled([
                             dispatched.stream.response,
                             dispatched.stream.usage,
@@ -4636,6 +4843,12 @@ async function handleChatPost(
                         return;
                     }
                     generatedText += value;
+                    // The user is about to see something, so the keepalive
+                    // window is over -- for this attempt and for the turn:
+                    // §7 forbids a fallback once a visible token has gone
+                    // out, so nothing can put this turn back into the wait.
+                    visibleTokenEmitted = true;
+                    stopFirstTokenWatch();
                     if (!enqueueSafely(controller, value)) {
                         await cancelSourceSafely("response stream is no longer open");
                         await settleSafely("cancelled", earlyCancelSearchFields);
@@ -4723,6 +4936,7 @@ async function handleChatPost(
             },
             async cancel(reason) {
                 streamState = "cancelled";
+                stopFirstTokenWatch();
                 await cancelSourceSafely(reason);
                 await settleSafely("cancelled", earlyCancelSearchFields);
                 await releaseSafely();

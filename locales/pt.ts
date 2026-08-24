@@ -13,7 +13,7 @@ export const pt = {
         dismiss: "Fechar a notificação",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Conta e plano",
         accountTooltipGuest: "Entrar ou criar conta",
         guestMenuTitle: "Modo convidado",
@@ -110,11 +110,25 @@ export const pt = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "Não foi possível carregar o espaço de conversa",
+            body: "Suas conversas estão seguras. Tentar novamente costuma resolver.",
+            reference: "Se continuar acontecendo, informe esta referência ao contactar o suporte:",
+            noReference: "Se continuar acontecendo, contacte o suporte.",
+            retry: "Tentar novamente",
+            support: "Contactar o suporte",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Geração de imagens",
         imageGenerationBackToChat: "Voltar ao chat",
         toolsImageGeneration: "Geração de imagens",
         toolsImageGenerationDescription: "Compare imagens de vários modelos",
+        imageIntentSuggestionTitle: "Prefere gerar isso como imagem?",
+        imageIntentSuggestionAccept: "Abrir geração de imagens",
+        imageIntentSuggestionDismiss: "Agora não",
         imageGenerationModelLabel: "Modelos",
         imageGenerationModelCount: "{count} modelo(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -230,6 +244,8 @@ export const pt = {
         modelRetired: "Este modelo não está mais disponível. Selecione outro modelo atual.",
         modelRetiredWithReplacement: "Este modelo não está mais disponível. Selecione {model} ou outro modelo atual.",
         responseCancelled: "A geração da resposta foi interrompida.",
+        firstResponseTimeout: "A resposta ainda estava sendo preparada depois de mais tempo do que o esperado, então a conexão foi encerrada. Tente novamente em instantes.",
+        streamIdleTimeout: "A resposta parou de chegar por mais tempo do que o esperado, então a conexão foi encerrada. Esta resposta está incompleta.",
         responseGenerating: "Gerando uma resposta.",
         responseComplete: "Resposta concluída.",
         responseIncomplete: "A resposta parou no limite de comprimento de saída.",
@@ -430,6 +446,7 @@ export const pt = {
         artifactTypeCode: "Arquivo de código {ext}",
         artifactTypeArchive: "Arquivo ZIP",
         artifactDownload: "Baixar",
+        artifactPreviewAlt: "Pré-visualização de {filename}",
         artifactReadyLabel: "Baixar {filename}, {type}, {size}",
         artifactFailedLabel: "Não foi possível criar {type} {filename}",
         artifactBlockedLabel: "Entre para criar um {type}",
@@ -790,7 +807,7 @@ export const pt = {
         close: "Fechar",
         paymentSuccessfulEyebrow: "Pagamento concluído",
         paymentSuccessfulTitle: "Seu pagamento foi concluído com sucesso.",
-        paymentSuccessfulWelcome: "Bem-vindo à família Tomverse Review. Agora você pode usar limites maiores e recursos avançados no workspace {plan}.",
+        paymentSuccessfulWelcome: "Bem-vindo à família Tomverse. Agora você pode usar limites maiores e recursos avançados no workspace {plan}.",
         testerPassActivatedEyebrow: "Passe de teste ativado",
         testerPassActivatedTitle: "O seu passe Founding Tester de 60 dias está ativo.",
         testerPassActivatedWelcome: "Já pode usar o workspace {plan} como Founding Tester.",

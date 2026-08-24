@@ -13,7 +13,7 @@ export const de = {
         dismiss: "Benachrichtigung schließen",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Konto & Plan",
         accountTooltipGuest: "Anmelden oder registrieren",
         guestMenuTitle: "Gastmodus",
@@ -110,11 +110,25 @@ export const de = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "Der Chat-Arbeitsbereich konnte nicht geladen werden",
+            body: "Ihre Unterhaltungen sind sicher. Ein erneuter Versuch behebt das meist.",
+            reference: "Wenn es weiterhin auftritt, nennen Sie dem Support diese Referenz:",
+            noReference: "Wenn es weiterhin auftritt, wenden Sie sich an den Support.",
+            retry: "Erneut versuchen",
+            support: "Support kontaktieren",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Bildgenerierung",
         imageGenerationBackToChat: "Zurück zum Chat",
         toolsImageGeneration: "Bildgenerierung",
         toolsImageGenerationDescription: "Bilder mehrerer Modelle vergleichen",
+        imageIntentSuggestionTitle: "Stattdessen als Bild erzeugen?",
+        imageIntentSuggestionAccept: "Bildgenerierung öffnen",
+        imageIntentSuggestionDismiss: "Jetzt nicht",
         imageGenerationModelLabel: "Modelle",
         imageGenerationModelCount: "{count} Modell(e)",
         // Catalogue image tab (policy v2 section 13)
@@ -230,6 +244,8 @@ export const de = {
         modelRetired: "Dieses Modell ist nicht mehr verfügbar. Wählen Sie ein anderes aktuelles Modell.",
         modelRetiredWithReplacement: "Dieses Modell ist nicht mehr verfügbar. Wählen Sie {model} oder ein anderes aktuelles Modell.",
         responseCancelled: "Die Antwortgenerierung wurde gestoppt.",
+        firstResponseTimeout: "Die Antwort wurde nach ungewöhnlich langer Zeit noch immer vorbereitet, daher wurde die Verbindung geschlossen. Bitte versuchen Sie es in Kürze erneut.",
+        streamIdleTimeout: "Die Übertragung der Antwort stockte länger als erwartet, daher wurde die Verbindung geschlossen. Diese Antwort ist unvollständig.",
         responseGenerating: "Antwort wird generiert.",
         responseComplete: "Antwort abgeschlossen.",
         responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
@@ -430,6 +446,7 @@ export const de = {
         artifactTypeCode: "{ext}-Quelldatei",
         artifactTypeArchive: "ZIP-Archiv",
         artifactDownload: "Herunterladen",
+        artifactPreviewAlt: "Vorschau von {filename}",
         artifactReadyLabel: "{filename} herunterladen, {type}, {size}",
         artifactFailedLabel: "{type} {filename} konnte nicht erstellt werden",
         artifactBlockedLabel: "Melden Sie sich an, um eine {type} zu erstellen",

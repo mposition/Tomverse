@@ -13,7 +13,7 @@ export const es = {
         dismiss: "Cerrar la notificación",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Cuenta y plan",
         accountTooltipGuest: "Iniciar sesión o registrarte",
         guestMenuTitle: "Modo invitado",
@@ -110,11 +110,25 @@ export const es = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "No se pudo cargar el espacio de chat",
+            body: "Tus conversaciones están a salvo. Reintentar suele resolverlo.",
+            reference: "Si sigue ocurriendo, indica esta referencia al contactar con soporte:",
+            noReference: "Si sigue ocurriendo, contacta con soporte.",
+            retry: "Reintentar",
+            support: "Contactar con soporte",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Generación de imágenes",
         imageGenerationBackToChat: "Volver al chat",
         toolsImageGeneration: "Generación de imágenes",
         toolsImageGenerationDescription: "Compara imágenes de varios modelos",
+        imageIntentSuggestionTitle: "¿Prefieres generarlo como imagen?",
+        imageIntentSuggestionAccept: "Abrir generación de imágenes",
+        imageIntentSuggestionDismiss: "Ahora no",
         imageGenerationModelLabel: "Modelos",
         imageGenerationModelCount: "{count} modelo(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -230,6 +244,8 @@ export const es = {
         modelRetired: "Este modelo ya no está disponible. Selecciona otro modelo actual.",
         modelRetiredWithReplacement: "Este modelo ya no está disponible. Selecciona {model} u otro modelo actual.",
         responseCancelled: "Se detuvo la generación de la respuesta.",
+        firstResponseTimeout: "La respuesta seguía preparándose tras más tiempo del esperado, así que se cerró la conexión. Vuelve a intentarlo en breve.",
+        streamIdleTimeout: "La respuesta dejó de llegar durante más tiempo del esperado, así que se cerró la conexión. Esta respuesta está incompleta.",
         responseGenerating: "Generando una respuesta.",
         responseComplete: "Respuesta completada.",
         responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
@@ -430,6 +446,7 @@ export const es = {
         artifactTypeCode: "Archivo fuente {ext}",
         artifactTypeArchive: "Archivo ZIP",
         artifactDownload: "Descargar",
+        artifactPreviewAlt: "Vista previa de {filename}",
         artifactReadyLabel: "Descargar {filename}, {type}, {size}",
         artifactFailedLabel: "No se pudo crear {type} {filename}",
         artifactBlockedLabel: "Inicia sesión para crear un {type}",
@@ -790,7 +807,7 @@ export const es = {
         close: "Cerrar",
         paymentSuccessfulEyebrow: "Pago correcto",
         paymentSuccessfulTitle: "Tu pago se completó correctamente.",
-        paymentSuccessfulWelcome: "Bienvenido a la familia de Tomverse Review. Ahora puedes usar mayores límites y funciones avanzadas en tu espacio {plan}.",
+        paymentSuccessfulWelcome: "Bienvenido a la familia de Tomverse. Ahora puedes usar mayores límites y funciones avanzadas en tu espacio {plan}.",
         testerPassActivatedEyebrow: "Pase de prueba activado",
         testerPassActivatedTitle: "Tu pase Founding Tester de 60 días está activo.",
         testerPassActivatedWelcome: "Ya puedes usar el espacio {plan} como Founding Tester.",

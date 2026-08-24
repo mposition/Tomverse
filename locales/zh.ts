@@ -30,7 +30,7 @@ export const zh = {
         dismiss: "关闭通知",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "账户与套餐",
         accountTooltipGuest: "登录或注册",
         guestMenuTitle: "访客模式",
@@ -127,11 +127,25 @@ export const zh = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "无法加载聊天工作区",
+            body: "您的对话是安全的。重试通常即可解决。",
+            reference: "如果仍然发生，联系客服时请提供此参考编号：",
+            noReference: "如果仍然发生，请联系客服。",
+            retry: "重试",
+            support: "联系客服",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "图像生成",
         imageGenerationBackToChat: "返回聊天",
         toolsImageGeneration: "图像生成",
         toolsImageGenerationDescription: "比较多个模型生成的图像",
+        imageIntentSuggestionTitle: "要改用图像生成来制作吗？",
+        imageIntentSuggestionAccept: "打开图像生成",
+        imageIntentSuggestionDismiss: "暂不",
         imageGenerationModelLabel: "模型",
         imageGenerationModelCount: "{count} 个模型",
         // Catalogue image tab (policy v2 section 13)
@@ -235,6 +249,8 @@ export const zh = {
         modelRetired: "此模型已不再提供。请选择其他当前可用的模型。",
         modelRetiredWithReplacement: "此模型已不再提供。请选择 {model} 或其他当前可用的模型。",
         responseCancelled: "回复生成已停止。",
+        firstResponseTimeout: "回复准备时间超出预期，连接已关闭。请稍后重试。",
+        streamIdleTimeout: "回复传输中断的时间超出预期，连接已关闭。此回复尚未完成。",
         deepResearchRequestingStatus: "正在请求深度研究…",
         deepResearchSearchingStatus: "正在搜索资料…",
         deepResearchWritingStatus: "正在撰写报告…",
@@ -466,6 +482,7 @@ export const zh = {
         artifactTypeCode: "{ext} 源文件",
         artifactTypeArchive: "ZIP 压缩包",
         artifactDownload: "下载",
+        artifactPreviewAlt: "{filename} 预览",
         artifactReadyLabel: "下载 {filename}，{type}，{size}",
         artifactFailedLabel: "无法创建 {type} {filename}",
         artifactBlockedLabel: "登录后可创建 {type}",
@@ -807,7 +824,7 @@ export const zh = {
         close: "关闭",
         paymentSuccessfulEyebrow: "付款成功",
         paymentSuccessfulTitle: "付款已成功完成。",
-        paymentSuccessfulWelcome: "欢迎加入 Tomverse Review。你现在可以在 {plan} 工作区使用更高额度和高级功能。",
+        paymentSuccessfulWelcome: "欢迎加入 Tomverse。你现在可以在 {plan} 工作区使用更高额度和高级功能。",
         testerPassActivatedEyebrow: "测试通行证已激活",
         testerPassActivatedTitle: "您的 60 天创始测试通行证已生效。",
         testerPassActivatedWelcome: "您现在可以作为创始测试用户使用 {plan} 工作区。",

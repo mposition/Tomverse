@@ -74,6 +74,9 @@ type CampaignView = {
   replacementModelId: string | null;
   audienceVersion: number;
   estimatedRecipients: number | null;
+  estimatedAt: string | null;
+  estimatedByEmail: string | null;
+  audienceEstimate: AudienceSummaryView | null;
   claimsAutomaticTransition: boolean;
   approvalId: string | null;
   approvedAt: string | null;
@@ -82,6 +85,30 @@ type CampaignView = {
   cancelReason: string | null;
   createdAt: string;
   waves: WaveView[];
+};
+
+type AudienceSummaryView = {
+  cohortRows: Record<string, number>;
+  cohortUsers: Record<string, number>;
+  distinctUsers: number;
+  excluded: Record<string, number>;
+  noticeAudience: number;
+  autoMigratable: number;
+  malformed: number;
+  /** The scan stopped before the audience did: every figure is a floor. */
+  truncated: boolean;
+};
+
+type AudienceView = {
+  waveId: string;
+  kind: string;
+  sequence: number;
+  dryRun: boolean;
+  total: number;
+  written: number;
+  malformed: number;
+  excluded: Record<string, number>;
+  cohorts: Record<string, number>;
 };
 
 type DetailResponse = {
@@ -93,6 +120,7 @@ type DetailResponse = {
   }>;
   attestations: AttestationView[];
   transitionClaim: TransitionClaimView;
+  audience: AudienceView[];
 };
 
 const ATTESTATION_LABEL: Record<string, string> = {
@@ -109,6 +137,28 @@ const ATTESTATION_ABOUT: Record<string, string> = {
     "About the migration. A copy edit does not undo a rehearsal, so this does not expire with one.",
   reconciliation_ready:
     "About the script. A copy edit does not undo it either.",
+};
+
+const EXCLUDED_LABEL: Record<string, string> = {
+  no_email: "No address on the account",
+  account_inactive: "Account inactive",
+  suppressed: "Address suppressed",
+  no_consent: "No consent for this purpose",
+  plan_incompatible: "Replacement not available on their plan",
+  already_changed: "No longer in any cohort",
+};
+
+const ESTIMATE_EXCLUDED_LABEL: Record<string, string> = {
+  no_email: "No address on the account",
+  account_inactive: "Account inactive",
+  suppressed: "Address suppressed",
+  plan_incompatible: "Replacement not available on their plan",
+};
+
+const COHORT_LABEL: Record<string, string> = {
+  default_model: "Their default model",
+  new_conversation_lead: "Lead of their new-conversation set",
+  conversation_selection: "Selected in a conversation",
 };
 
 const when = (value: string | null) => {
@@ -228,8 +278,14 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
     );
   }
 
-  const { campaign, sendRefusal, scheduleProblems, attestations, transitionClaim } =
-    data;
+  const {
+    campaign,
+    sendRefusal,
+    scheduleProblems,
+    attestations,
+    transitionClaim,
+    audience,
+  } = data;
   const editable =
     campaign.status === "draft" || campaign.status === "pending_approval";
 
@@ -281,8 +337,8 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
             [
               "Estimated recipients",
               campaign.estimatedRecipients === null
-                ? "not estimated"
-                : `${campaign.estimatedRecipients} (audience v${campaign.audienceVersion})`,
+                ? "not measured"
+                : `${campaign.estimatedRecipients} — measured ${when(campaign.estimatedAt)} by ${campaign.estimatedByEmail ?? "unknown"} (rules v${campaign.audienceVersion})`,
             ],
             ["Work item", campaign.workItemId ?? "—"],
             ["Drafted by", campaign.createdByEmail],
@@ -580,6 +636,232 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
                     Start now
                   </button>
                 </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section
+        className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
+        data-testid="admin-campaign-estimate"
+      >
+        <h3 className="text-lg font-black text-white">How large is this?</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          Counted from the audience rules, not typed in. The number is who the
+          notice would go to after exclusions — not everyone in the cohort,
+          which would size the send on people it is about to decide not to write
+          to.
+        </p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          This gates nothing. It exists so the size is knowable before anybody
+          commits to it; a campaign still sends on the same conditions it did
+          before.
+        </p>
+
+        {campaign.audienceEstimate === null ? (
+          <p
+            className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
+            data-testid="admin-campaign-estimate-absent"
+          >
+            Nobody has measured this audience.
+          </p>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <p className="text-sm text-zinc-200">
+              <span
+                className="text-2xl font-black text-white"
+                data-testid="admin-campaign-estimate-headline"
+              >
+                {campaign.audienceEstimate.truncated ? "at least " : ""}
+                {campaign.audienceEstimate.noticeAudience}
+              </span>{" "}
+              would receive the notice, out of{" "}
+              {campaign.audienceEstimate.distinctUsers} people in the cohort.
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Measured {when(campaign.estimatedAt)} by{" "}
+              {campaign.estimatedByEmail ?? "unknown"} under audience rules v
+              {campaign.audienceVersion}. The audience moves; a count is about
+              the moment it was taken.
+            </p>
+
+            {campaign.audienceEstimate.truncated ? (
+              <p
+                className="mt-3 rounded-xl border border-amber-800 bg-amber-950/40 p-3 text-sm leading-6 text-amber-100"
+                data-testid="admin-campaign-estimate-truncated"
+              >
+                The scan stopped before the audience did, so every figure here
+                is a floor rather than a total. The real audience is larger by
+                an unknown amount.
+              </p>
+            ) : null}
+
+            <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+              {Object.entries(campaign.audienceEstimate.excluded).map(
+                ([reason, count]) => (
+                  <div
+                    key={reason}
+                    className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
+                  >
+                    <dt className="min-w-0 text-sm text-zinc-400">
+                      {ESTIMATE_EXCLUDED_LABEL[reason] ?? reason}
+                    </dt>
+                    <dd
+                      className={`text-sm font-bold ${
+                        count > 0 ? "text-amber-200" : "text-zinc-600"
+                      }`}
+                    >
+                      {count}
+                    </dd>
+                  </div>
+                )
+              )}
+            </dl>
+
+            <p className="mt-3 text-sm text-zinc-300">
+              {campaign.audienceEstimate.autoMigratable} of them could be moved
+              automatically.{" "}
+              {campaign.audienceEstimate.malformed > 0
+                ? `${campaign.audienceEstimate.malformed} could not, because a stored value the parser cannot read is preserved rather than rewritten — promising those accounts an automatic change would be untrue.`
+                : ""}
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() =>
+            void run(
+              "estimate",
+              () => send("/estimate", "POST", {}),
+              "Measured."
+            )
+          }
+          disabled={busy !== null}
+          className="mt-4 inline-flex min-h-11 items-center rounded-xl border border-blue-500/40 bg-blue-500/15 px-5 text-sm font-bold text-white hover:border-blue-400 disabled:opacity-60"
+          data-testid="admin-campaign-estimate-run"
+        >
+          {busy === "estimate"
+            ? "Counting…"
+            : campaign.audienceEstimate
+              ? "Measure again"
+              : "Measure the audience"}
+        </button>
+      </section>
+
+      <section
+        className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
+        data-testid="admin-campaign-audience"
+      >
+        <h3 className="text-lg font-black text-white">Who each wave reached</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          The expansion ledger, read back. Every person the expander considered
+          is one row: either a delivery was written for them, or a reason was
+          recorded for why it was not.
+        </p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          Counts, not people. Each row holds the address it was written to, and
+          whether an operator may see addresses on a campaign screen is the same
+          open question as the one on Email delivery. Building the list would be
+          answering it.
+        </p>
+
+        {audience.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
+            No wave has expanded yet, so nobody has been considered.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {audience.map((wave) => (
+              <li
+                key={wave.waveId}
+                className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4"
+                data-testid="admin-campaign-audience-wave"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-bold text-white">
+                    {wave.kind}
+                    {wave.sequence > 1 ? ` #${wave.sequence}` : ""}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {wave.total} considered
+                  </p>
+                </div>
+
+                {wave.total === 0 ? (
+                  <p className="mt-2 text-sm text-zinc-400">
+                    This wave has not expanded.
+                  </p>
+                ) : (
+                  <>
+                    {/* Said as "a delivery row was written", never as "sent".
+                        On a dry run every one of those deliveries was written
+                        `skipped`, and a column headed "sent" would report a
+                        rehearsal as a send. */}
+                    <p className="mt-2 text-sm text-zinc-200">
+                      <span className="font-bold">{wave.written}</span>{" "}
+                      {wave.dryRun ? (
+                        <span data-testid="admin-campaign-audience-dry-run">
+                          would have been written to — this was a dry run, so
+                          every one of those deliveries was skipped and nothing
+                          was sent.
+                        </span>
+                      ) : (
+                        "had a delivery row written."
+                      )}
+                    </p>
+
+                    <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                      {Object.entries(wave.excluded).map(([reason, count]) => (
+                        <div
+                          key={reason}
+                          className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
+                        >
+                          <dt className="min-w-0 text-sm text-zinc-400">
+                            {EXCLUDED_LABEL[reason] ?? reason}
+                          </dt>
+                          <dd
+                            className={`text-sm font-bold ${
+                              count > 0 ? "text-amber-200" : "text-zinc-600"
+                            }`}
+                          >
+                            {count}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+
+                    <p className="mt-3 text-xs uppercase tracking-wider text-zinc-500">
+                      Why they were in the audience
+                    </p>
+                    <dl className="mt-1 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                      {Object.entries(wave.cohorts).map(([cohort, count]) => (
+                        <div
+                          key={cohort}
+                          className="flex items-baseline justify-between gap-3 py-1"
+                        >
+                          <dt className="min-w-0 text-sm text-zinc-400">
+                            {COHORT_LABEL[cohort] ?? cohort}
+                          </dt>
+                          <dd className="text-sm text-zinc-300">{count}</dd>
+                        </div>
+                      ))}
+                    </dl>
+
+                    {wave.malformed > 0 ? (
+                      <p
+                        className="mt-3 rounded-xl border border-amber-800 bg-amber-950/40 p-3 text-sm leading-6 text-amber-100"
+                        data-testid="admin-campaign-audience-malformed"
+                      >
+                        {wave.malformed} of these people had a stored value the
+                        parser could not read. It was reported and left exactly
+                        as it was — nothing rewrote it — so the count is here
+                        rather than in a log nobody opens.
+                      </p>
+                    ) : null}
+                  </>
+                )}
               </li>
             ))}
           </ul>

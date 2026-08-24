@@ -38,12 +38,6 @@ const estimator = readFileSync(
     "utf8"
 );
 
-/** The number after `maxOutputTokens:` in a source file. */
-const outputCeiling = (source, pattern) => {
-    const match = pattern.exec(source);
-    return match ? Number(match[1].replace(/_/g, "")) : null;
-};
-
 test("the eval's pricing basis resolves for every registered pair", () => {
     // If this cannot resolve, the ceiling has no number behind it and a live
     // run spends without a bound.
@@ -102,24 +96,33 @@ test("a swallowed pricing failure is counted and reported", () => {
     assert.match(harness, /pricingFailures: runMode\.mode === "live"/);
 });
 
-test("the cost estimate prices the ceiling the harness actually sends", () => {
-    // The estimate's worst case is "every call hits the output ceiling". If
-    // the harness raises `maxOutputTokens` and the estimator keeps the old
-    // number, the approved budget is set from a ceiling that no longer bounds
-    // anything -- and the gap shows up on an invoice rather than here.
-    const harnessCeiling = outputCeiling(
-        harness,
-        /maxOutputTokens:\s*([\d_]+)/
-    );
-    const estimatorCeiling = outputCeiling(
-        estimator,
-        /MAX_OUTPUT_TOKENS\s*=\s*([\d_]+)/
-    );
-    assert.ok(harnessCeiling, "could not read maxOutputTokens from the harness");
-    assert.ok(estimatorCeiling, "could not read MAX_OUTPUT_TOKENS from the estimator");
-    assert.equal(
-        estimatorCeiling,
-        harnessCeiling,
-        "the estimator prices a different output ceiling than the harness sends"
-    );
+test("both sides price the ceiling the product actually sends", () => {
+    // These were two literal 4,096s kept equal by comparing them, then two
+    // different wrong numbers when the harness went looking for a better one.
+    // Both now import `memoryExtractionWorker`'s constant -- the ceiling the
+    // product sends -- so there is one source and the question of drift does
+    // not arise.
+    for (const [name, source] of [
+        ["the harness", harness],
+        ["the estimator", estimator],
+    ]) {
+        assert.match(
+            source,
+            /MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS/,
+            `${name} should read the ceiling from the product's constant`
+        );
+        assert.ok(
+            !/maxOutputTokens:\s*[\d_]+/.test(source),
+            `${name} should not send a literal output ceiling`
+        );
+        assert.ok(
+            !/\.reservationOutputTokens/.test(source),
+            `${name} must not cap output at the reservation`
+        );
+        assert.ok(
+            !/\.maxOutputTokens\b/.test(source),
+            `${name} must not cap output at the model's full capability -- ` +
+                "that is what the model can do, not what this prompt asks for"
+        );
+    }
 });

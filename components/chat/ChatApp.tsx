@@ -30,12 +30,7 @@ import {
 import type { WebSearchMode } from "@/lib/appDefaults";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { decideBundleStaleRecovery } from "@/lib/chatContextBundleRecovery";
-import {
-  parseChatStreamTrailer,
-  splitSearchMetadataTrailer,
-} from "@/lib/webSearchStreamTrailer";
-import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
-import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
+import { parseChatStreamTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
 import {
@@ -51,8 +46,16 @@ import {
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
+import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import {
+  classifyChatAbort,
+  createChatLivenessWatchdog,
+  type ChatLivenessExpiry,
+  type ChatTimeoutErrorCode,
+} from "@/lib/chatStreamLiveness";
 import {
   abortChatRuntime,
+  abortChatRuntimeRun,
   advanceChatRuntimeRevision,
   beginChatRuntimeRun,
   chatRuntimeIdentityKey,
@@ -62,6 +65,7 @@ import {
   getChatRuntimeLastPrompt,
   getChatRuntimeRevision,
   getChatRuntimeServerSnapshot,
+  getChatRuntimeAbortCause,
   getChatRuntimeSnapshot,
   hasResumedChatRuntimeJob,
   isChatRuntimeLoadInFlight,
@@ -77,7 +81,6 @@ import {
 } from "@/lib/chatStreamRuntime";
 
 const processedPromptKeys = new Set<string>();
-const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 // The greeting bubble an empty conversation renders. It is UI, not
 // transcript: it is never persisted, and it must never be sent to
@@ -368,7 +371,7 @@ function ChatAppComponent({
     if (stopSignal === undefined) return;
     if (lastStopSignalRef.current === stopSignal) return;
     lastStopSignalRef.current = stopSignal;
-    abortChatRuntime(runtimeKeyRef.current);
+    abortChatRuntime(runtimeKeyRef.current, "user_stop_all");
   }, [stopSignal]);
 
   // Lets the message list offer a per-panel stop button, distinct from the
@@ -376,7 +379,7 @@ function ChatAppComponent({
   // stop the run belonging to the conversation on screen, never one left
   // running in a conversation the user walked away from.
   const stopThisPanel = useCallback(() => {
-    abortChatRuntime(runtimeKeyRef.current);
+    abortChatRuntime(runtimeKeyRef.current, "user_stop");
   }, []);
 
   const isConversationEmpty =
@@ -871,17 +874,38 @@ function ChatAppComponent({
     // for this same conversation show it as still generating and stop it.
     const controller = beginChatRuntimeRun(runKey);
 
-    let idleTimeoutId: number | null = null;
-    const resetIdleTimeout = () => {
-      if (idleTimeoutId !== null) {
-        window.clearTimeout(idleTimeoutId);
-      }
-      idleTimeoutId = window.setTimeout(() => {
-        controller.abort();
-      }, CHAT_STREAM_IDLE_TIMEOUT_MS);
-    };
-    resetIdleTimeout();
     let requestTraceId: string | null = null;
+    /*
+      The staged liveness policy (lib/chatStreamLiveness.ts) that replaced the
+      single 90s timer this used to hold.
+
+      The old timer covered three different waits at once -- the server
+      extracting an attachment, the provider thinking, and a stalled stream --
+      and it aborted through the same controller the stop button uses, so a
+      model that was still working was reported as something the user had
+      done. It now aborts with a *reason*, recorded on the run itself, and the
+      catch block below reads that reason rather than guessing.
+    */
+    const onLivenessExpiry = (expiry: ChatLivenessExpiry) => {
+      // Diagnostics only, and only these fields: no prompt, no attachment
+      // name, no document text. Warn rather than error because a timeout is
+      // not, on its own, evidence that anything failed.
+      console.warn(
+        JSON.stringify({
+          event: "chat_client_stream_timeout",
+          traceId: requestTraceId,
+          modelId,
+          abortCause: expiry.cause,
+          phase: expiry.phase,
+          elapsedMs: expiry.elapsedMs,
+          idleMs: expiry.idleMs,
+        })
+      );
+      // Scoped to this controller: a retry that started while this run was
+      // settling owns the key now, and this watchdog must not end it.
+      abortChatRuntimeRun(runKey, controller, expiry.cause);
+    };
+    const liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
     // The signed error report token from the response headers, when the
     // server issued one. Lives only in this closure and in the error
     // message's runtime `errorReport` context -- never persisted.
@@ -910,6 +934,58 @@ function ChatAppComponent({
             occurredAt: new Date().toISOString(),
           }
         : undefined;
+
+    /**
+     * Ends this turn as an automatic timeout rather than as a stop.
+     *
+     * Three rules, all of them things the single 90s abort got wrong:
+     *
+     *  * it is an `error`, never `cancelled` -- nobody stopped anything, and
+     *    a stopped panel is a state comparison and AI Review read;
+     *  * whatever had already streamed is kept and the notice is appended to
+     *    it, so a stream that died two paragraphs in leaves two paragraphs
+     *    rather than one sentence about being stopped;
+     *  * `error` rather than `incomplete`, because `incomplete` means the
+     *    provider finished at its output-token ceiling. That is a completed
+     *    answer with a withheld claim; this is a connection this app closed.
+     *
+     * The trace and the response's error-report token are preserved whenever
+     * the headers had already arrived, so a report filed from here carries
+     * the same context every other server error does.
+     */
+    const endAsTimeout = (
+      errorCode: ChatTimeoutErrorCode,
+      classificationSource: MessageErrorReportContext["errorClassificationSource"],
+      partialText: string
+    ) => {
+      if (requestTraceId && typeof window !== "undefined") {
+        window.localStorage.setItem(
+          "tomverse_last_error_trace_id",
+          requestTraceId
+        );
+      }
+      const notice =
+        errorCode === "CHAT_FIRST_RESPONSE_TIMEOUT"
+          ? t("chat.firstResponseTimeout")
+          : t("chat.streamIdleTimeout");
+      const kept = partialText.trim();
+      setAssistantMessage(
+        assistantMessageId,
+        `${kept ? `${kept}\n\n` : ""}${notice}${
+          requestTraceId ? `\n${t("chat.traceId")}: ${requestTraceId}` : ""
+        }`,
+        "error",
+        {
+          errorCode,
+          errorHadAttachments: attachments.length > 0,
+          errorReport: buildErrorReport(
+            requestTraceId,
+            errorCode,
+            classificationSource
+          ),
+        }
+      );
+    };
 
     // The bundle actually presented, which a stale-recovery retry replaces.
     // `contextBundle` is what this send was prepared with; after one refusal
@@ -958,7 +1034,11 @@ function ChatAppComponent({
           }),
           signal: controller.signal,
         });
-        resetIdleTimeout();
+        // Headers move the phase and deliberately do not extend the deadline:
+        // the first-response budget is absolute from the moment the request
+        // was issued, so server-side attachment extraction and the provider's
+        // own thinking time share it instead of chaining two full budgets.
+        liveness.noteHeaders();
         requestTraceId = res.headers.get("X-Request-ID");
         // §13.4: the server's own count, taken from the response rather than
         // derived here. Absent means memory played no part -- which is not
@@ -1092,10 +1172,7 @@ function ChatAppComponent({
         // Deep research doesn't stream -- the idle-timeout watchdog is
         // meaningless here (there's no single connection for it to guard),
         // and pollDeepResearchJob checks the abort signal itself instead.
-        if (idleTimeoutId !== null) {
-          window.clearTimeout(idleTimeoutId);
-          idleTimeoutId = null;
-        }
+        liveness.stop();
         await pollDeepResearchJob(
           runKey,
           assistantMessageId,
@@ -1110,72 +1187,46 @@ function ChatAppComponent({
         throw new Error(t("chat.responseBodyMissing"));
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+      /*
+        The read loop lives in lib/chatStreamConsumer.ts.
 
-      // The stream ends with one extra out-of-band chunk carrying this
-      // turn's WebSearchExecution JSON (see lib/webSearchStreamTrailer.ts) --
-      // rawStreamText keeps the untouched accumulation so the marker can be
-      // found even if it arrives split across reads, while assistantText
-      // (used for display and the empty-response check below) always has it
-      // stripped back out.
-      let rawStreamText = "";
+        It is out of this component so the liveness contract it implements can
+        actually be executed: the required regressions are about *when* a turn
+        is given up on, the unit lane cannot mount a client component, and a
+        test that re-implemented this loop would only prove it agrees with
+        itself. What it hands back is what this panel renders.
+      */
+      const streamed = await consumeChatStream({
+        reader: response.body.getReader(),
+        liveness,
+        onProgress: (progress) => {
+          assistantText = progress.displayText;
+          setAssistantMessage(
+            assistantMessageId,
+            progress.displayText,
+            "normal",
+            undefined,
+            progress.isGeneratingArtifact
+              ? {
+                  isGeneratingArtifact: true,
+                  ...(progress.generatingArtifactFormat
+                    ? {
+                        generatingArtifactFormat:
+                          progress.generatingArtifactFormat,
+                      }
+                    : {}),
+                }
+              : undefined
+          );
+        },
+      });
+      assistantText = streamed.displayText;
       // Set when the server announced a model change mid-response. Kept so the
       // finished message can say which model actually answered -- the routed
       // header named the model that was asked first, and it is no longer true.
-      let retryingWithModelId: string | null = null;
-      // Set by the out-of-band "generating" marker and cleared when the
-      // trailer says what actually happened. Held on the message rather than
-      // in component state because three panels stream at once and the status
-      // belongs to one of them.
-      let isGeneratingArtifact = false;
-      let generatingArtifactFormat: string | null = null;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        resetIdleTimeout();
-        rawStreamText += decoder.decode(value, { stream: true });
-        // §7's `retrying_with_another_model` arrives as a leading out-of-band
-        // chunk, because a fallback is decided after the headers are gone.
-        // Stripped here on every pass rather than once at the end: the answer
-        // is rendered as it streams, and a marker left in for even one frame
-        // is a marker the user reads.
-        const routing = splitRoutingRetrySignal(rawStreamText);
-        if (routing.signal) retryingWithModelId = routing.signal.modelId;
-        // The "creating the Excel file" marker, stripped on every pass for
-        // the same reason the routing one is: the answer is rendered as it
-        // streams, and a marker left in for even one frame is a marker the
-        // user reads.
-        const artifactProgress = splitArtifactProgressSignal(routing.text);
-        if (artifactProgress.signal) {
-          isGeneratingArtifact = true;
-          generatingArtifactFormat = artifactProgress.signal.format;
-        }
-        assistantText = splitSearchMetadataTrailer(
-          artifactProgress.text
-        ).displayText;
-		setAssistantMessage(
-          assistantMessageId,
-          assistantText,
-          "normal",
-          undefined,
-          isGeneratingArtifact
-            ? {
-                isGeneratingArtifact: true,
-                ...(generatingArtifactFormat
-                  ? { generatingArtifactFormat }
-                  : {}),
-              }
-            : undefined
-        );
-      }
-
-      const finalRouting = splitRoutingRetrySignal(rawStreamText);
-      if (finalRouting.signal) retryingWithModelId = finalRouting.signal.modelId;
-      const { searchMetadataJson } = splitSearchMetadataTrailer(
-        splitArtifactProgressSignal(finalRouting.text).text
-      );
+      const retryingWithModelId = streamed.retryingWithModelId;
+      const serverStallCode = streamed.serverStallCode;
+      const searchMetadataJson = streamed.searchMetadataJson;
       const trailer = parseChatStreamTrailer(searchMetadataJson);
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
@@ -1195,7 +1246,19 @@ function ChatAppComponent({
       */
       const artifacts = trailer?.artifacts ?? [];
 
-	  if (!assistantText.trim()) {
+      // The server stopped waiting for the provider and said so. Checked
+      // before the empty-response branch below, and that order is the whole
+      // point: a stall reaches this code as a stream that closed with no
+      // text, which is exactly what an empty response looks like -- and the
+      // two are different events with different copy, different codes and
+      // different counters.
+      if (serverStallCode) {
+        endAsTimeout(
+          serverStallCode,
+          ERROR_CLASSIFICATION_SOURCE.server,
+          assistantText
+        );
+      } else if (!assistantText.trim()) {
         if (requestTraceId && typeof window !== "undefined") {
           window.localStorage.setItem(
             "tomverse_last_error_trace_id",
@@ -1272,15 +1335,34 @@ function ChatAppComponent({
             })
           : {};
       if (requestError.name === "AbortError") {
-        // Keep whatever was already generated -- a stop mid-answer
-        // shouldn't throw away useful partial content, only mark it as
-        // stopped. Only fall back to the placeholder text if nothing had
-        // streamed in yet (e.g. aborted before the first token).
-        setAssistantMessage(
-          assistantMessageId,
-          assistantText.trim() ? assistantText : t("chat.responseCancelled"),
-          "cancelled"
+        // Every abort raises the same `AbortError`, so the reason has to come
+        // from the run rather than from the exception. A stop stays exactly
+        // what it was; a liveness deadline is a different event and gets its
+        // own code and its own sentence.
+        const outcome = classifyChatAbort(
+          getChatRuntimeAbortCause(runKey, controller)
         );
+        if (outcome.kind === "timeout") {
+          endAsTimeout(
+            outcome.errorCode,
+            // The client watched the clock, so the client classified it.
+            // docs/policy/trace-feedback-automation.md: a client
+            // classification is never promoted to a server fact, and the
+            // report simply verifies as unverified.
+            ERROR_CLASSIFICATION_SOURCE.client,
+            assistantText
+          );
+        } else {
+          // Keep whatever was already generated -- a stop mid-answer
+          // shouldn't throw away useful partial content, only mark it as
+          // stopped. Only fall back to the placeholder text if nothing had
+          // streamed in yet (e.g. aborted before the first token).
+          setAssistantMessage(
+            assistantMessageId,
+            assistantText.trim() ? assistantText : t("chat.responseCancelled"),
+            "cancelled"
+          );
+        }
       } else if (isGuestVerificationError(error)) {
         // The challenge itself ended without a token (failed / cancelled /
         // timeout / expired / unavailable) -- either in this panel or in the
@@ -1451,9 +1533,7 @@ function ChatAppComponent({
         );
       }	
     } finally {
-	  if (idleTimeoutId !== null) {
-        window.clearTimeout(idleTimeoutId);
-      }
+	  liveness.stop();
 
       endChatRuntimeRun(runKey, controller);
       // A guest answer can finish while no panel is mounted on this

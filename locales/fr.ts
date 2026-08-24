@@ -13,7 +13,7 @@ export const fr = {
         dismiss: "Fermer la notification",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Compte et forfait",
         accountTooltipGuest: "Se connecter ou s'inscrire",
         guestMenuTitle: "Mode invité",
@@ -110,11 +110,25 @@ export const fr = {
     },
     chat: {
         ...en.chat,
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "Impossible de charger l’espace de discussion",
+            body: "Vos conversations sont intactes. Réessayer suffit généralement.",
+            reference: "Si cela persiste, indiquez cette référence en contactant le support :",
+            noReference: "Si cela persiste, contactez le support.",
+            retry: "Réessayer",
+            support: "Contacter le support",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Génération d'images",
         imageGenerationBackToChat: "Retour au chat",
         toolsImageGeneration: "Génération d'images",
         toolsImageGenerationDescription: "Comparer les images de plusieurs modèles",
+        imageIntentSuggestionTitle: "Générer plutôt une image ?",
+        imageIntentSuggestionAccept: "Ouvrir la génération d'images",
+        imageIntentSuggestionDismiss: "Pas maintenant",
         imageGenerationModelLabel: "Modèles",
         imageGenerationModelCount: "{count} modèle(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -230,6 +244,8 @@ export const fr = {
         modelRetired: "Ce modèle n'est plus disponible. Sélectionnez un autre modèle actuel.",
         modelRetiredWithReplacement: "Ce modèle n'est plus disponible. Sélectionnez {model} ou un autre modèle actuel.",
         responseCancelled: "La génération de la réponse a été arrêtée.",
+        firstResponseTimeout: "La réponse était encore en préparation après un délai plus long que prévu, la connexion a donc été fermée. Réessayez dans un instant.",
+        streamIdleTimeout: "La réponse a cessé d'arriver pendant plus longtemps que prévu, la connexion a donc été fermée. Cette réponse est incomplète.",
         responseGenerating: "Génération d'une réponse.",
         responseComplete: "Réponse terminée.",
         responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
@@ -430,6 +446,7 @@ export const fr = {
         artifactTypeCode: "Fichier source {ext}",
         artifactTypeArchive: "Archive ZIP",
         artifactDownload: "Télécharger",
+        artifactPreviewAlt: "Aperçu de {filename}",
         artifactReadyLabel: "Télécharger {filename}, {type}, {size}",
         artifactFailedLabel: "Impossible de créer {type} {filename}",
         artifactBlockedLabel: "Connectez-vous pour créer un {type}",
@@ -790,7 +807,7 @@ export const fr = {
         close: "Fermer",
         paymentSuccessfulEyebrow: "Paiement réussi",
         paymentSuccessfulTitle: "Votre paiement a bien été effectué.",
-        paymentSuccessfulWelcome: "Bienvenue dans la famille Tomverse Review. Vous pouvez maintenant utiliser des quotas plus larges et des fonctions avancées dans votre espace {plan}.",
+        paymentSuccessfulWelcome: "Bienvenue dans la famille Tomverse. Vous pouvez maintenant utiliser des quotas plus larges et des fonctions avancées dans votre espace {plan}.",
         testerPassActivatedEyebrow: "Pass testeur activé",
         testerPassActivatedTitle: "Votre pass testeur fondateur de 60 jours est actif.",
         testerPassActivatedWelcome: "Vous pouvez maintenant utiliser l’espace {plan} en tant que testeur fondateur.",

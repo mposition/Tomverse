@@ -8,14 +8,22 @@
  * stylesheet or the theme class. Styles are therefore inline, and both colour
  * schemes are handled with `color-scheme` plus neutral values that stay legible
  * either way. No `metadata` export is possible in a Client Component, so the
- * document title is set with React's <title>.
+ * document title is set with React's <title>. It is English for the same
+ * reason: `LanguageProvider` lives in the layouts this file replaces, so there
+ * is no locale to read here.
+ *
+ * The prop is `retry`. Next passed `unstable_retry` in v16.2.0 and renamed it
+ * in v16.3.0; the runtime passes `error`, `reset` and `retry` and nothing
+ * else, so the old name destructured `undefined` and the retry button threw a
+ * `TypeError` of its own -- in the boundary that has nothing beneath it to
+ * catch that. Pinned by `tests/errorBoundaryProps.test.mjs`.
  */
 export default function GlobalError({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string };
-  unstable_retry: () => void;
+  retry: () => void;
 }) {
   return (
     <html lang="en">
@@ -41,15 +49,27 @@ export default function GlobalError({
         </h1>
         <p style={{ maxWidth: "28rem", lineHeight: 1.6, margin: 0 }}>
           We hit an unexpected error while loading Tomverse. Your account and
-          conversations are unaffected. Quote reference{" "}
-          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
-            {error.digest || "not available"}
-          </span>{" "}
-          if you contact support.
+          conversations are unaffected.{" "}
+          {/* A digest only exists for a server-side throw. The old copy told
+              the reader to quote the reference "not available", which reads as
+              an instruction to repeat those two words to support. */}
+          {error.digest ? (
+            <>
+              Quote reference{" "}
+              <span
+                style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
+              >
+                {error.digest}
+              </span>{" "}
+              if you contact support.
+            </>
+          ) : (
+            "Contact support if it keeps happening."
+          )}
         </p>
         <button
           type="button"
-          onClick={() => unstable_retry()}
+          onClick={() => retry()}
           style={{
             marginTop: "0.5rem",
             padding: "0.55rem 1.1rem",

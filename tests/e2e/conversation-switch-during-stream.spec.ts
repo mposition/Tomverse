@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi } from "./support/app-fixtures";
+import {
+  createQaXlsxBuffer,
+  mockAttachmentUpload,
+  mockAuthenticatedApi,
+} from "./support/app-fixtures";
 import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
@@ -770,6 +774,397 @@ for (const shell of SHELLS) {
         content: DEEP_RESEARCH_ANSWER,
       });
       await expect(page.getByText(DEEP_RESEARCH_ANSWER, { exact: false })).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    });
+  });
+}
+
+// ===========================================================================
+// STREAM-STATE-003: a comparison keeps each panel's own state across a switch.
+//
+// The two blocks above both use a single model, which leaves the *model* half
+// of the runtime key untested from the browser: with one panel per
+// conversation, a key that dropped `modelId` entirely would still pass every
+// assertion in them. A comparison is where that half is load-bearing -- three
+// panels stream at once into one conversation, and each owns its own answer.
+//
+// It is also where the states diverge. Leaving a comparison mid-run and coming
+// back is not one question but three: the panel still streaming, the panel that
+// finished while nobody was watching, and -- in the second test -- the
+// deep-research panel, which is not streaming at all but polling a job. They
+// have to come back as what they each are, not as whatever the last one to
+// report happened to be.
+//
+// The composer is the third assertion. `isAnyModelResponding` reads the
+// conversation on screen and the models it has not paused
+// (lib/chatRuntimeStatus.ts), so a comparison with one panel done and one still
+// running must still read as busy -- releasing on the first panel to finish
+// would let a second send land on top of a run that is still going.
+// ===========================================================================
+
+const ALPHA_ONE = "ALPHA-ONE";
+const ALPHA_TWO = "ALPHA-TWO";
+const BETA_ONE = "BETA-ONE";
+const BETA_TWO = "BETA-TWO";
+
+/**
+ * Brings `modelId`'s panel on screen and returns it.
+ *
+ * The two shells disclose a comparison differently and this is the whole of
+ * the difference: desktop lays every panel out side by side, mobile shows one
+ * at a time behind a tab strip. Scoping to the panel matters on desktop
+ * precisely because the sibling *is* on screen -- a page-level `getByText`
+ * would happily find the other model's answer and call it this one's.
+ */
+async function modelPanel(page: Page, shell: Shell, modelId: string) {
+  if (!isMobile(shell)) {
+    return page.locator(
+      `[data-testid="desktop-model-panel"][data-model-id="${modelId}"]`
+    );
+  }
+  await page
+    .locator(`[data-testid="mobile-model-tab"][data-model-id="${modelId}"]`)
+    .click();
+  // Model ids carry `/` and `-`, so this is an attribute match rather than a
+  // `#id` selector.
+  return page.locator(`[id="mobile-model-tabpanel-${modelId}"]`);
+}
+
+async function openComparisonWorkspace(
+  page: Page,
+  shell: Shell,
+  models: string[],
+  stub: ChatModelStubSpec
+): Promise<DeepResearchStatusController> {
+  await mockAuthenticatedApi(page, {
+    selectedModels: models,
+    messages: [
+      { id: "seed-user-cmp", role: "user", content: "Comparison seed." },
+    ],
+    extraConversations: [
+      {
+        id: OTHER_CONVERSATION,
+        title: "Second QA conversation",
+        selectedModels: [DEFAULT_MODEL],
+        messages: [
+          { id: "seed-user-cmp-2", role: "user", content: "Second conversation seed." },
+          {
+            id: "seed-assistant-cmp-2",
+            role: "assistant",
+            content: OTHER_ANSWER,
+            modelId: DEFAULT_MODEL,
+          },
+        ],
+      },
+    ],
+  });
+  // Pro because the deep-research model in the second test is a Pro model, and
+  // because both tests should differ only in the models they compare.
+  await mockUserUsage(page, { plan: "Pro" });
+  // Installed before the navigation for the same reason the deep-research
+  // opener does it: a poll must never be able to reach the real endpoint.
+  // Nothing here seeds a pending job, so the first poll cannot land until the
+  // send -- but the order should not be the thing keeping that true.
+  const research = await installDeepResearchStatusController(page);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.setViewportSize(shell.viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(
+    page.getByTestId(
+      shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
+    )
+  ).toBeVisible();
+  await installChatModelStub(page, stub);
+  return research;
+}
+
+for (const shell of SHELLS) {
+  test.describe(`STREAM-STATE-003 (${shell.name}): a comparison is per panel`, () => {
+    test("each panel keeps its own answer, and the composer waits for the last one", async ({
+      page,
+    }) => {
+      await openComparisonWorkspace(page, shell, [DEFAULT_MODEL, OTHER_MODEL], {
+        [DEFAULT_MODEL]: { kind: "controlled", channel: "cmp-alpha" },
+        [OTHER_MODEL]: { kind: "controlled", channel: "cmp-beta" },
+      });
+
+      await submitComposer(page, "Compare these two.", shell.viewport.width);
+      await waitForControlledStream(page, "cmp-alpha");
+      await waitForControlledStream(page, "cmp-beta");
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_ONE);
+      await pushControlledChunk(page, "cmp-beta", BETA_ONE);
+
+      // Each answer is in its own panel and in no other.
+      const alpha = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(alpha.getByText(ALPHA_ONE, { exact: false })).toBeVisible();
+      await expect(alpha.getByText(BETA_ONE, { exact: false })).toHaveCount(0);
+      const beta = await modelPanel(page, shell, OTHER_MODEL);
+      await expect(beta.getByText(BETA_ONE, { exact: false })).toBeVisible();
+      await expect(beta.getByText(ALPHA_ONE, { exact: false })).toHaveCount(0);
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+
+      // While we are away the two panels diverge: one finishes, one keeps
+      // going. Both writes have to land on their own key.
+      await pushControlledChunk(page, "cmp-beta", BETA_TWO);
+      await finishControlledStream(page, "cmp-beta");
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_TWO);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      const alphaBack = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(
+        alphaBack.getByText(`${ALPHA_ONE}${ALPHA_TWO}`, { exact: false })
+      ).toBeVisible();
+      const betaBack = await modelPanel(page, shell, OTHER_MODEL);
+      await expect(
+        betaBack.getByText(`${BETA_ONE}${BETA_TWO}`, { exact: false })
+      ).toBeVisible();
+      // One panel finished, the other did not, so the conversation is still
+      // busy. Releasing here would let a second send land on a live run.
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await finishControlledStream(page, "cmp-alpha");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await expect(page.getByTestId("chat-send-button")).toBeVisible();
+    });
+
+    test("a deep-research panel and a streaming panel both survive the switch", async ({
+      page,
+    }) => {
+      const research = await openComparisonWorkspace(
+        page,
+        shell,
+        [DEFAULT_MODEL, DEEP_RESEARCH_MODEL],
+        {
+          [DEFAULT_MODEL]: { kind: "controlled", channel: "cmp-alpha" },
+          [DEEP_RESEARCH_MODEL]: { kind: "async-job" },
+        }
+      );
+
+      await submitComposer(page, "Compare a stream and a job.", shell.viewport.width);
+      await waitForControlledStream(page, "cmp-alpha");
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_ONE);
+      await research.waitForPoll();
+
+      // Two panels in two different transports, in one conversation.
+      const streaming = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(streaming.getByText(ALPHA_ONE, { exact: false })).toBeVisible();
+      const researching = await modelPanel(page, shell, DEEP_RESEARCH_MODEL);
+      await expect(
+        researching.getByText("심층 리서치 요청 중", { exact: false })
+      ).toBeVisible();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+
+      await pushControlledChunk(page, "cmp-alpha", ALPHA_TWO);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      const streamingBack = await modelPanel(page, shell, DEFAULT_MODEL);
+      await expect(
+        streamingBack.getByText(`${ALPHA_ONE}${ALPHA_TWO}`, { exact: false })
+      ).toBeVisible();
+      const researchingBack = await modelPanel(page, shell, DEEP_RESEARCH_MODEL);
+      await expect(
+        researchingBack.getByText("심층 리서치 요청 중", { exact: false })
+      ).toBeVisible();
+      // The comparison remounted twice and the job is still one job.
+      expect(research.pollCount()).toBe(1);
+
+      // The job finishes; the stream is still going, so the composer waits.
+      await research.answerPoll({
+        status: "completed",
+        content: DEEP_RESEARCH_ANSWER,
+      });
+      const finishedResearch = await modelPanel(page, shell, DEEP_RESEARCH_MODEL);
+      await expect(
+        finishedResearch.getByText(DEEP_RESEARCH_ANSWER, { exact: false })
+      ).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await finishControlledStream(page, "cmp-alpha");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    });
+  });
+}
+
+// ===========================================================================
+// STREAM-STATE-004: the attachment on a turn survives the switch too.
+//
+// An attachment is part of the *user* turn, not the answer, and the user turn
+// is the one thing on screen the panel wrote itself rather than received. When
+// the panel's state lived in the component, leaving mid-answer discarded the
+// question and its files along with the reply -- and the file is the half the
+// user cannot retype.
+//
+// It is also the half with no server fallback during the run. The answer is
+// persisted when the stream finishes, but the *card* the user is looking at is
+// rendered from the optimistic turn this panel made at send time; nothing puts
+// it back if that turn is dropped. So this is not "the same test with a file
+// attached": it is the case where losing the runtime key loses something the
+// user supplied.
+//
+// Two states, because they end differently: a run that is still going when the
+// user comes back, and a run that failed while they were away. The second is
+// where `errorHadAttachments` lives -- the flag behind the "retry without the
+// files" offer -- and it has to come back with the turn or the offer silently
+// becomes an ordinary retry that will fail the same way.
+// ===========================================================================
+
+const ATTACHED_FILE = "명단.xlsx";
+const ATTACHED_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+async function openAttachmentWorkspace(
+  page: Page,
+  shell: Shell,
+  stub: ChatModelStubSpec
+) {
+  await mockAuthenticatedApi(page, {
+    selectedModels: [DEFAULT_MODEL],
+    messages: [
+      { id: "seed-user-att", role: "user", content: "Attachment seed." },
+    ],
+    extraConversations: [
+      {
+        id: OTHER_CONVERSATION,
+        title: "Second QA conversation",
+        selectedModels: [DEFAULT_MODEL],
+        messages: [
+          { id: "seed-user-att-2", role: "user", content: "Second conversation seed." },
+          {
+            id: "seed-assistant-att-2",
+            role: "assistant",
+            content: OTHER_ANSWER,
+            modelId: DEFAULT_MODEL,
+          },
+        ],
+      },
+    ],
+  });
+  await mockAttachmentUpload(page);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.setViewportSize(shell.viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(
+    page.getByTestId(
+      shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
+    )
+  ).toBeVisible();
+  await installChatModelStub(page, stub);
+}
+
+/** Attaches one file through the composer's own tools menu. */
+async function attachSpreadsheet(page: Page) {
+  await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+  await page.getByTestId("tools-attach-row").click();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("attach-local-file-row").click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: ATTACHED_FILE,
+    mimeType: ATTACHED_TYPE,
+    buffer: createQaXlsxBuffer(),
+  });
+  // The tray reports the upload finished before the send may carry its id.
+  await expect(page.getByTestId("attachment-complete")).toBeVisible();
+}
+
+/** The user turn carrying the attached file, wherever it is on screen. */
+const attachedTurn = (page: Page) =>
+  page.locator('[data-message-role="user"]').filter({ hasText: ATTACHED_FILE });
+
+for (const shell of SHELLS) {
+  test.describe(`STREAM-STATE-004 (${shell.name}): an attached turn is per conversation`, () => {
+    test("the attachment card comes back with the partial answer, once", async ({
+      page,
+    }) => {
+      await openAttachmentWorkspace(page, shell, {
+        [DEFAULT_MODEL]: { kind: "controlled", channel: "att-stream" },
+      });
+
+      await attachSpreadsheet(page);
+      await submitComposer(page, "What is in this file?", shell.viewport.width);
+      await waitForControlledStream(page, "att-stream");
+      await pushControlledChunk(page, "att-stream", PARTIAL_ONE);
+      await expect(attachedTurn(page)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      // The file belongs to the question that was asked in the other
+      // conversation, and questions do not follow the user either.
+      await expect(attachedTurn(page)).toHaveCount(0);
+
+      await pushControlledChunk(page, "att-stream", PARTIAL_TWO);
+      await switchToConversation(page, shell, "qa-conversation");
+
+      // The question, its file and everything received so far -- and exactly
+      // one copy of the turn, not the optimistic one plus a re-read one.
+      await expect(attachedTurn(page)).toHaveCount(1);
+      await expect(
+        page.getByText(`${PARTIAL_ONE}${PARTIAL_TWO}`, { exact: false })
+      ).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await finishControlledStream(page, "att-stream");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await expect(attachedTurn(page)).toHaveCount(1);
+    });
+
+    test("an attachment failure survives the switch with its retry-without-files offer", async ({
+      page,
+    }) => {
+      // A request-level refusal, not a broken stream. That is how an
+      // unreadable attachment actually arrives -- the server refuses the send
+      // and names the reason -- and it is the only shape that produces the
+      // attachment-specific offer: `classifyError` asks for
+      // `errorHadAttachments` *and* a file-parsing message, so a stream that
+      // dies mid-answer is a generic failure no matter what was attached.
+      await openAttachmentWorkspace(page, shell, {
+        [DEFAULT_MODEL]: {
+          kind: "error",
+          status: 400,
+          code: "ATTACHMENT_UNSUPPORTED",
+          message: "Unsupported attachment format.",
+        },
+      });
+
+      await attachSpreadsheet(page);
+      await submitComposer(page, "What is in this file?", shell.viewport.width);
+
+      // The failure settles this conversation's run: the turn keeps its file,
+      // the reason is on screen, and the composer comes back.
+      await expect(attachedTurn(page)).toHaveCount(1);
+      const retryWithoutFiles = page.getByRole("button", {
+        name: "첨부파일 없이 다시 시도",
+      });
+      await expect(retryWithoutFiles).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      // Neither the failed turn nor its file belongs to this conversation.
+      await expect(attachedTurn(page)).toHaveCount(0);
+      await expect(retryWithoutFiles).toHaveCount(0);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      // All three come back together. `errorHadAttachments` is the one that
+      // has no second source: lose it and the offer silently becomes an
+      // ordinary retry, which would resend the same file and fail the same way.
+      await expect(attachedTurn(page)).toHaveCount(1);
+      await expect(retryWithoutFiles).toBeVisible();
       await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     });
   });

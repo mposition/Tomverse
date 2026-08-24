@@ -106,6 +106,7 @@ test("a send posts to the one endpoint and reports the From it used", async () =
     {
       apiKey: "key",
       from: "Tomverse <hello@mail.example.com>",
+      senderRole: "general",
       idempotencyKey: "delivery-1",
       fetchImpl: async (url, init) => {
         seen = { url, init };
@@ -120,11 +121,38 @@ test("a send posts to the one endpoint and reports the From it used", async () =
   const body = JSON.parse(seen.init.body);
   assert.equal(body.from, "Tomverse <hello@mail.example.com>");
   assert.equal(body.headers, undefined, "no headers key when none were given");
+  assert.equal(body.reply_to, undefined, "no reply_to key when none was given");
   assert.deepEqual(result, {
     ok: true,
     providerMessageId: "msg_1",
     from: "Tomverse <hello@mail.example.com>",
+    // Reported alongside the From, because with six senders on one domain the
+    // address alone no longer answers "and was that the right one".
+    senderRole: "general",
   });
+});
+
+test("a reply-to is sent only when one was resolved", async () => {
+  // From and mailbox are different things: `security@` is an authenticated
+  // sending identity and nothing says a person reads it, so a reply is directed
+  // at the published contact address instead. Absent means the key is absent
+  // rather than null -- the two are the same to Resend today, and only one of
+  // them stays true if that changes.
+  let seen = null;
+  await postToResend(
+    { to: "a@example.com", subject: "s", text: "t" },
+    {
+      apiKey: "key",
+      from: "Tomverse Security <security@mail.example.com>",
+      senderRole: "security",
+      replyTo: "support@example.com",
+      fetchImpl: async (url, init) => {
+        seen = { url, init };
+        return okResponse();
+      },
+    }
+  );
+  assert.equal(JSON.parse(seen.init.body).reply_to, "support@example.com");
 });
 
 test("the idempotency key is cut to the provider's limit", async () => {
@@ -134,6 +162,7 @@ test("the idempotency key is cut to the provider's limit", async () => {
     {
       apiKey: "key",
       from: "A <a@example.com>",
+      senderRole: "general",
       idempotencyKey: "x".repeat(400),
       fetchImpl: async (_url, init) => {
         seen = init;
@@ -153,6 +182,7 @@ test("a text-only message sends no html field", async () => {
     {
       apiKey: "key",
       from: "A <a@example.com>",
+      senderRole: "general",
       fetchImpl: async (_url, init) => {
         body = JSON.parse(init.body);
         return okResponse();
@@ -169,6 +199,7 @@ test("a rejected send reports its status and never its body", async () => {
     {
       apiKey: "key",
       from: "A <a@example.com>",
+      senderRole: "general",
       fetchImpl: async () =>
         new Response(JSON.stringify({ message: "member@example.com bounced" }), {
           status: 422,
@@ -193,6 +224,7 @@ test("a transport failure is a null status, not a zero one", async () => {
     {
       apiKey: "key",
       from: "A <a@example.com>",
+      senderRole: "general",
       fetchImpl: async () => {
         throw boom;
       },

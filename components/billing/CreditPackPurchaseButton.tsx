@@ -38,6 +38,7 @@ import {
   type BillingErrorCode,
 } from "@/lib/purchaseIntent";
 import { billingErrorMessage, purchaseCtaCopy } from "./purchaseCopy";
+import { lockBodyScroll } from "@/components/useBodyScrollLock";
 
 type Pack = {
   id: string;
@@ -301,14 +302,13 @@ export function CreditPackPurchaseButton({
       returnFocusRef.current =
         (document.activeElement as HTMLElement | null) || triggerRef.current;
     }
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const releaseScrollLock = lockBodyScroll();
     const focusFrame = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
     return () => {
       cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       const returnTarget = returnFocusRef.current;
       returnFocusRef.current = null;
       requestAnimationFrame(() => {

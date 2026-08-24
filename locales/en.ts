@@ -11,7 +11,7 @@ export const en = {
         dismiss: "Dismiss notification",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Account & plan",
         accountTooltipGuest: "Log in or sign up",
         guestMenuTitle: "Guest mode",
@@ -107,11 +107,25 @@ export const en = {
         projectDeleteFailed: "Project could not be deleted.",
     },
     chat: {
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "The chat workspace could not be loaded",
+            body: "Your conversations are safe. Retrying usually resolves this.",
+            reference: "If it keeps happening, quote this reference when you contact support:",
+            noReference: "If it keeps happening, contact support.",
+            retry: "Try again",
+            support: "Contact support",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Image generation",
         imageGenerationBackToChat: "Back to chat",
         toolsImageGeneration: "Image generation",
         toolsImageGenerationDescription: "Compare images from several models",
+        imageIntentSuggestionTitle: "Generate this as an image instead?",
+        imageIntentSuggestionAccept: "Open image generation",
+        imageIntentSuggestionDismiss: "Not now",
         imageGenerationModelLabel: "Models",
         imageGenerationModelCount: "{count} model(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -208,6 +222,8 @@ export const en = {
         modelRetired: "This model is no longer available. Please select another current model.",
         modelRetiredWithReplacement: "This model is no longer available. Please select {model} or another current model.",
         responseCancelled: "Response generation was stopped.",
+        firstResponseTimeout: "The response was still being prepared after longer than expected, so the connection was closed. Please try again shortly.",
+        streamIdleTimeout: "The response stopped arriving for longer than expected, so the connection was closed. This answer is not complete.",
         connectingStatus: "Connecting…",
         searchingWebStatus: "Searching the web…",
         readingFileStatus: "Reading the file…",
@@ -468,6 +484,7 @@ export const en = {
         artifactTypeCode: "{ext} source file",
         artifactTypeArchive: "ZIP archive",
         artifactDownload: "Download",
+        artifactPreviewAlt: "Preview of {filename}",
         artifactReadyLabel: "Download {filename}, {type}, {size}",
         artifactFailedLabel: "{type} {filename} could not be created",
         artifactBlockedLabel: "Sign in to create a {type}",
@@ -791,7 +808,7 @@ export const en = {
         close: "Close",
         paymentSuccessfulEyebrow: "Payment successful",
         paymentSuccessfulTitle: "Your payment was completed successfully.",
-        paymentSuccessfulWelcome: "Welcome to the Tomverse Review family. You can now use broader allowances and advanced features in your {plan} workspace.",
+        paymentSuccessfulWelcome: "Welcome to the Tomverse family. You can now use broader allowances and advanced features in your {plan} workspace.",
         testerPassActivatedEyebrow: "Tester Pass activated",
         testerPassActivatedTitle: "Your 60-day Founding Tester Pass is active.",
         testerPassActivatedWelcome: "You can now use the {plan} workspace as a Founding Tester.",

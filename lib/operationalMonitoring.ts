@@ -120,9 +120,11 @@ const postJson = async (url: string | undefined, body: unknown) => {
  * literal, which is why it stayed on the old domain when the transactional
  * sender moved -- see docs/ops/email-sending-domains.md §1.2.
  *
- * The display name is gone with it. One transactional identity sends
- * everything, and "Operations" versus "Admin" stays where it already was and
- * where a mail client actually shows it: the subject prefix.
+ * The display name is not written here either, but it is back: the `operations`
+ * role resolves to the operations identity on the same authenticated domain, so
+ * the sender says what it is without this file naming an address. The subject
+ * prefix stays as it was -- it is what a mail client shows in the list, and it
+ * distinguishes this path from the provider alert one.
  *
  * Still a direct send rather than the outbox. An alert about the system being
  * unwell must not depend on the part of the system that drains a queue.
@@ -145,7 +147,11 @@ const deliverOperatorEmail = async (subject: string, detail: string) => {
     to,
     send: await emailProvider().send(
       { to, subject: `[Tomverse Operations] ${subject}`, text: detail },
-      { stream: "transactional" }
+      // The operations sender: an alert about the system being unwell is from
+      // the operators' own identity, and it is the one role whose mail carries
+      // no Reply-To -- a reply about an incident belongs in the incident, not
+      // in the support queue (docs/policy/email-notifications.md §14.1a).
+      { stream: "transactional", senderRole: "operations" }
     ),
   };
 };

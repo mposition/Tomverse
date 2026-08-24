@@ -15,7 +15,7 @@ export const ko = {
         dismiss: "알림 닫기",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "계정 및 플랜",
         accountTooltipGuest: "로그인 또는 회원가입",
         guestMenuTitle: "게스트 모드",
@@ -111,11 +111,25 @@ export const ko = {
         projectDeleteFailed: "프로젝트를 삭제하지 못했습니다.",
     },
     chat: {
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "채팅 작업 공간을 불러오지 못했습니다",
+            body: "대화는 안전합니다. 다시 시도하면 대부분 해결됩니다.",
+            reference: "계속 발생하면 고객 지원에 문의할 때 이 참조 번호를 알려 주세요:",
+            noReference: "계속 발생하면 고객 지원에 문의해 주세요.",
+            retry: "다시 시도",
+            support: "고객 지원 문의",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "이미지 생성",
         imageGenerationBackToChat: "채팅으로 돌아가기",
         toolsImageGeneration: "이미지 생성",
         toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
+        imageIntentSuggestionTitle: "이미지 생성으로 만들어 볼까요?",
+        imageIntentSuggestionAccept: "이미지 생성 열기",
+        imageIntentSuggestionDismiss: "나중에",
         imageGenerationModelLabel: "모델",
         imageGenerationModelCount: "모델 {count}개",
         // Catalogue image tab (policy v2 section 13)
@@ -212,6 +226,8 @@ export const ko = {
         modelRetired: "이 모델은 더 이상 제공되지 않습니다. 다른 최신 모델을 선택해 주세요.",
         modelRetiredWithReplacement: "이 모델은 더 이상 제공되지 않습니다. {model} 또는 다른 최신 모델을 선택해 주세요.",
         responseCancelled: "응답 생성이 중지되었습니다.",
+        firstResponseTimeout: "응답 준비가 예상보다 오래 걸려 연결을 종료했습니다. 잠시 후 다시 시도해 주세요.",
+        streamIdleTimeout: "응답 전송이 예상보다 오래 멈춰 연결을 종료했습니다. 이 답변은 완료되지 않았습니다.",
         connectingStatus: "연결 중…",
         searchingWebStatus: "웹 검색 중…",
         readingFileStatus: "파일 검토 중…",
@@ -472,6 +488,7 @@ export const ko = {
         artifactTypeCode: "{ext} 소스 파일",
         artifactTypeArchive: "ZIP 압축 파일",
         artifactDownload: "다운로드",
+        artifactPreviewAlt: "{filename} 미리보기",
         artifactReadyLabel: "{filename} 다운로드, {type}, {size}",
         artifactFailedLabel: "{type} {filename}을(를) 만들지 못했습니다",
         artifactBlockedLabel: "{type}을(를) 만들려면 로그인하세요",
@@ -793,7 +810,7 @@ export const ko = {
         close: "닫기",
         paymentSuccessfulEyebrow: "결제 완료",
         paymentSuccessfulTitle: "결제가 성공적으로 완료되었습니다.",
-        paymentSuccessfulWelcome: "Tomverse Review의 새로운 가족이 되신 것을 진심으로 환영합니다. 이제 {plan} 워크스페이스에서 더 넓은 사용량과 고급 기능을 활용하실 수 있습니다.",
+        paymentSuccessfulWelcome: "Tomverse의 새로운 가족이 되신 것을 진심으로 환영합니다. 이제 {plan} 워크스페이스에서 더 넓은 사용량과 고급 기능을 활용하실 수 있습니다.",
         testerPassActivatedEyebrow: "Tester Pass 활성화",
         testerPassActivatedTitle: "60일 Founding Tester Pass가 시작되었습니다.",
         testerPassActivatedWelcome: "Founding Tester로서 {plan} 워크스페이스를 이용할 수 있습니다.",
