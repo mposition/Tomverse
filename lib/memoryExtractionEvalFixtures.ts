@@ -8,16 +8,17 @@
  * archived and reviewed by people, so a fixture drawn from a real account
  * would put that account's content into the audit trail.
  *
- * This is a SEED set, deliberately far below the §12.2 decision-grade floor
- * of 200 cases per category per language arm. Authoring 1,600 genuinely
- * distinct cases is a data task with its own review, and §12.2 explicitly
- * forbids reaching the floor by copying or lightly varying what is here —
- * `findDuplicateCases()` refuses a dataset that tries. The harness reports the
- * shortfall as UNDERPOWERED and withholds a verdict; it does not pretend a
- * seed run is decision-grade.
+ * This set is FROZEN. All 1,150 cases sit at the §12.2 floor — 200 per
+ * language arm for `durable_facts`, 125 for each critical-negative category —
+ * and every batch behind them carries a human adoption record under
+ * `docs/ops/memory-extraction-eval-batches/`. §12.2 forbids reaching that
+ * floor by copying or lightly varying what is here, and
+ * `findDuplicateCases()` refuses a dataset that tries.
  *
- * Bump `MEMORY_EVAL_DATASET_VERSION` on any change to the cases, so an
- * archived artifact can be tied to the exact sample it was computed from.
+ * Editing a case from here on is a new dataset, not a correction: bump
+ * `MEMORY_EVAL_DATASET_VERSION`, and understand that every verdict computed
+ * against the old version is invalidated
+ * (`docs/ops/memory-extraction-eval-dataset.md` §7.3).
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
@@ -50,7 +51,7 @@ import { BATCH_026_SECRET_EN } from "@/lib/memoryExtractionEvalAdopted/batch026S
 import { BATCH_027_INJECTION_KO } from "@/lib/memoryExtractionEvalAdopted/batch027InjectionKo";
 import { BATCH_028_INJECTION_EN } from "@/lib/memoryExtractionEvalAdopted/batch028InjectionEn";
 
-export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-10";
+export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-11";
 
 /**
  * Whether this dataset is frozen for a decision-grade run (§12.2).
@@ -60,15 +61,20 @@ export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-10";
  * that is still moving cannot be cited, and re-running after an edit without
  * a version bump is exactly how an eval loses its meaning.
  *
- * Freezing is a deliberate act that happens once, together with:
+ * Frozen on 2026-08-24 against the seven conditions in
+ * `docs/ops/memory-extraction-eval-dataset.md` §7.1, all of which were checked
+ * mechanically before this line changed:
  *   * every cell at or above the §12.2 floor;
- *   * authoring and independent review complete, with the reviewer recorded;
- *   * a version bump here and a manifest digest in the artifact.
+ *   * every batch reviewed, adopted and signed by a person, with the drafting
+ *     tool and the reviewer recorded on each batch;
+ *   * `findDuplicateCases()` clean and a diversity judgement on every batch;
+ *   * a version bump here and a manifest digest in the freeze record.
  *
  * Editing a frozen dataset means a NEW version and invalidates any verdict
- * computed against the old one.
+ * computed against the old one — the rework rule in
+ * docs/ops/memory-extraction-eval-dataset.md §7.3.
  */
-export const MEMORY_EVAL_DATASET_FROZEN = false;
+export const MEMORY_EVAL_DATASET_FROZEN = true;
 
 /**
  * Which set this is. The cases used while tuning `mem-extract-v1` must not be
@@ -76,7 +82,7 @@ export const MEMORY_EVAL_DATASET_FROZEN = false;
  * own test set reports its own overfitting as quality.
  */
 export const MEMORY_EVAL_DATASET_PURPOSE: "development" | "decision" =
-    "development";
+    "decision";
 
 let sequence = 0;
 const nextId = (prefix: string) => `${prefix}-${(sequence += 1)}`;

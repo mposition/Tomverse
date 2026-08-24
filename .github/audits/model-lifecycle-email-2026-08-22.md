@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1차 해결 (2026-08-24)** — §36. campaign workflow는 2차
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~3차 해결 (2026-08-24)** — §36 · §37 · §38. 예약과 admin 화면은 4차
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -2902,6 +2902,76 @@ wave의 cohort 재계산, admin 화면, `runWithAdminApproval` 연결.
 
 ---
 
+## 38. EM-01 3차 구현 기록 — audience 해석과 recipient 원장 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelRetirementAudience.ts` | cohort 세 개를 DB에서 해석. 새 파일 |
+| `lib/emailCampaignRecipientCore.ts` | 원장 판정(우선순위·제외 사유·재계산). 순수, 새 파일 |
+| `prisma/schema.prisma` · `migrations/20260824030000_email_campaign_recipient` | `EmailCampaignRecipient` |
+| `lib/emailAudienceExpansionCore.ts` | cohort selector, `no_audience` 거부 |
+| `lib/emailAudienceExpansion.ts` | cohort 해석 연결 + 원장 기록 |
+| `lib/accountDataExport.ts` · `lib/accountDataExportDomains.ts` · `docs/policy/tomverse-chat-data-domain-registry.yaml` | 새 domain 등록과 export |
+| `tests/emailCampaignRecipientCore.test.mjs` | 11건 |
+| `tests/emailAudienceExpansionCore.test.mjs` | 7건 추가 (총 20) |
+| `tests/integration/campaign-audience.db.test.ts` | 17건, 새 파일 |
+
+**§12.2의 표와 계산기가 서로 다른 말을 하고 있었습니다.** §12.2의
+`excludedReason` 목록에는 `malformed`가 있고 `account_inactive`가 없는데,
+P0-5가 만든 `summariseAudience()`는 malformed 계정을 **notice audience 안**과
+`autoMigratable` 밖에 셉니다 — 알려는 주고 자동 이전은 하지 않는다는 뜻입니다.
+`malformed`를 "아무것도 못 받은 이유"로 두면 그 계산기와 정면으로 어긋나므로,
+**독립 컬럼으로 두고 제외 사유 목록에서 뺐습니다.** §12.2는 "스키마 (개념)"
+이고 계산기는 나중에 내려진 검증된 결정이므로 후자를 따랐습니다. CHECK 주석과
+`CAMPAIGN_EXCLUDED_REASONS`의 주석에 근거를 적었습니다.
+
+**`selectedModels`는 substring으로만 조회할 수 있고, 그것은 답이 아니라
+prefilter입니다.** `String` 컬럼에 든 JSON 배열이라 DB가 줄 수 있는 조건이
+`contains`뿐인데, `gpt-5-4-mini`로 찾으면 `gpt-5-4-mini-preview`를 고른 행도
+같이 옵니다. 배열을 파싱해 원소 단위로 비교합니다. 이것을 안 하면 **폐기되지
+않는 모델을 쓰는 사람에게 폐기 안내가 갑니다.**
+
+**그래서 판정 결과가 셋입니다.** `include` · `exclude` · `not_in_audience`.
+prefilter에 걸렸다가 cohort 규칙에서 탈락한 사람을 `already_changed`로 적으면
+**사실이 아닌 기록**이 남습니다 — 그들은 아무것도 바꾸지 않았고, 나중에
+`already_changed`를 세는 사람은 첫 안내가 닿은 적도 없는 사람에게 효과가
+있었다고 결론짓게 됩니다. 이 경우는 아무것도 적지 않는 것이 정직한 기록입니다.
+
+**탈락자도 page에 실려 나옵니다.** cursor가 그들을 지나가야 하기 때문입니다.
+여기서 걸러 내면 near-miss만 든 page 하나가 audience의 끝처럼 보이고, **그
+뒤의 사람 전원이 영원히 안 읽힙니다.** 소속 판정은 `cohorts.length > 0`이고,
+`summariseRetirementAudience()`가 세기 전에 거릅니다.
+
+**reminder는 새 audience 질의가 아니라 원장을 읽습니다.** 질의를 다시 돌리면
+첫 안내를 듣고 설정을 바꾼 사람은 **결과에 안 나올 뿐**이고, "안 나옴"과
+"더 이상 해당 없음"이 같은 침묵이 됩니다. campaign이 이미 쓴 사람들을 다시
+읽어 cohort를 재계산하고, 비어 있으면 `already_changed`입니다.
+
+**segment가 아무도 지목하지 않으면 거부합니다(`no_audience`).**
+`readExpansionSpec`은 읽을 수 없는 spec을 빈 spec으로 되돌리고, 빈 spec은
+필터 없는 질의로 떨어졌습니다 — **필드 하나 오타가 수백 명 대상 폐기 안내를
+전 제품 발송으로 바꿉니다.** 1차의 주석은 "누구인지 모르는 확장은 아무에게도
+닿으면 안 된다"고 적어 놓고 반대로 동작하고 있었습니다. `all_users`는 그대로
+전원을 뜻합니다 — 그렇게 말하는 것은 별개의 의도적 행위입니다.
+
+**classification은 template이 정합니다.** suppression 판정이 classification마다
+다르므로(complaint는 marketing을 막고 transactional을 막지 않습니다) 확장기가
+`"service"`로 고정하면 아무도 하지 않는 발송에 대해 옳은 제외 목록이 나옵니다.
+
+**userIds로 지목한 wave는 원장을 쓰지 않습니다.** 기록할 cohort 귀속이 없고,
+`eligibilityReason`을 지어내면 **그러지 않으려고 만든 표에 지어낸 이유가**
+들어갑니다.
+
+**계정 삭제 시 cascade입니다** — `EmailDelivery`의 `SetNull`과 다릅니다.
+delivery는 법적 통지가 실제로 전달됐다는 증거라 계정보다 오래 남을 근거가
+있지만, 이 행은 **보내지 않았다는 기록**이고 그것을 보관할 의무는 없습니다.
+게다가 주소를 들고 있으므로 링크만 끊어 남기는 쪽이 더 나쁩니다. campaign의
+도달 수는 아무도 지목하지 않는 `EmailCampaignWave.expandedCount`에 남습니다.
+
+**4차 범위**: 예약(`scheduledAt`·`triggerMode`·`effectiveAt`·`workItemId`·
+`targetModelId`), `runWithAdminApproval` 연결, admin API와 화면.
+예약을 3차에서 빼는 이유는 예약이 **운영자의 결정**이고 그것을 설정하는 화면과
+같은 변경으로 와야 하기 때문입니다.
 ## 40. P2 catalogue coverage 구현 기록 (2026-08-24 · 완료)
 
 ML-05, 6절 후보 10(OpenAI prefix), `MAX_PAGES` 경고 — 셋 다 **스캔이 본 것보다

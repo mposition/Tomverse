@@ -10,7 +10,8 @@ import {
 } from "../lib/providerModelCatalogCore.ts";
 import { AI_PROVIDERS } from "../lib/modelRegistryShared.ts";
 
-// What a catalogue scan did *not* look at (ML-05, §6 candidate 10, MAX_PAGES).
+// What a catalogue scan did *not* look at: ML-05, the OpenAI prefix guess, and
+// the page budget.
 //
 // Contract: .github/audits/model-lifecycle-email-2026-08-22.md ML-05, §6.
 //
