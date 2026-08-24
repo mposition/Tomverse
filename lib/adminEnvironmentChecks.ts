@@ -129,10 +129,12 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
       configured: isConfigured(process.env.EMAIL_UNSUBSCRIBE_KEYS),
       description:
         "Keys for unsubscribe links, as version:secret pairs. Marketing mail " +
-        "refuses to send without one. Old versions must stay listed for as " +
-        "long as mail carrying them is in the wild -- dropping a version does " +
-        "not invalidate those links, it breaks them, and a broken unsubscribe " +
-        "link's alternative is the spam button.",
+        "refuses to send without one, and /api/ready refuses the deployment " +
+        "once MARKETING_EMAIL_FROM is set -- so set this one first. Old " +
+        "versions must stay listed for as long as mail carrying them is in " +
+        "the wild: dropping a version does not invalidate those links, it " +
+        "breaks them, and a broken unsubscribe link's alternative is the spam " +
+        "button.",
     },
     {
       name: "EMAIL_SNAPSHOT_KEYS",

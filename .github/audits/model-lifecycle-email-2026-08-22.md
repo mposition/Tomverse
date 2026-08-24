@@ -626,7 +626,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   초과 시 wave를 `halted`로. Phase 6 blocking 조건.
 - **파일**: `lib/emailWebhookProcessing.ts`
 
-### EM-10 — `EMAIL_UNSUBSCRIBE_KEYS`가 readiness에 없다 (P1, Medium)
+### EM-10 — `EMAIL_UNSUBSCRIBE_KEYS`가 readiness에 없다 (P1, Medium) — **해결 (2026-08-23)** — §32
 
 - **Evidence**: `[코드]` `app/api/ready/route.ts:104-108`
 - **현재 동작**: `/api/ready`의 hard dependency는 sending identity와 snapshot
@@ -2117,7 +2117,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~ML-10 reconciliation script 범용화 + precondition 검사~~ **완료 (2026-08-23)** — §33
 - EM-06 campaign이 templateVersion pin
 - EM-11 standard drain job key + backlog incident
-- EM-10 조건부 readiness
+- ~~EM-10 조건부 readiness~~ **완료 (2026-08-23)** — §32
 - ~~EM-09 marketing bounce/complaint kill switch~~ **완료 (2026-08-23)** — §34
 - EM-15 `userVisibleNote` 다국어
 
@@ -2594,6 +2594,59 @@ prefix는 **이름이 아무것도 말하지 않을 때만** 봅니다. 그리�
 **범위 밖**: `missing`·`lifecycleWarnings` 줄의 provider 라벨. 그 둘은 **우리
 registry에 있는 모델**에 대한 것이고 거기서 provider는 우리가 실제로 요청을 보내는
 경로이므로 의미가 맞습니다.
+
+---
+
+## 32. EM-10 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailUnsubscribeReadiness.ts` | 조건부 readiness 판정. 순수, 새 파일 |
+| `app/api/ready/route.ts` | `emailUnsubscribeKeyring` hard dependency 추가 |
+| `lib/emailUnsubscribeHeaders.ts` | throw → 이름 붙은 refusal |
+| `lib/standardEmailLane.ts` | refusal을 `EMAIL_UNSUBSCRIBE_KEY_MISSING`으로 보고 |
+| `lib/adminEnvironmentChecks.ts` | 설명에 `/api/ready` 결합 명시 |
+| `tests/emailUnsubscribeReadiness.test.mjs` | 7건 |
+| `tests/integration/marketing-lane.db.test.ts` | 1건 추가 (총 10) |
+| `tests/integration/email-preferences-consent.db.test.ts` | 호출 형태 갱신 |
+
+**조건은 `MARKETING_EMAIL_FROM`입니다.** 감사 §15.2가 이름 댄
+`feature.emailMarketingEnabled`는 **코드에 없으므로** 그것을 조건으로 쓸 수
+없습니다. 대신 marketing이 실제로 나갈 수 있으려면 반드시 참이어야 하는 구조적
+사실 하나 — 자기 발송 identity — 를 씁니다. 그 주소를 설정하고 키를 설정하지 않은
+상태가 정확히 EM-10이 말한 "ready라고 답하면서 모든 marketing이 거부되는" 상태입니다.
+
+**"marketing template이 있는가"를 조건으로 쓰지 않았습니다.** template은 코드가
+등록하므로 모든 환경에 존재합니다 — `model_launch`가 생긴 날(EM-03) 그 조건은
+모든 환경에서 참이 됐고, 그것을 기준으로 삼았다면 오늘 배포가 not-ready가 됩니다.
+
+**키가 있는데 깨진 것은 marketing 여부와 무관하게 error입니다.** 설정한 사람은
+동작하기를 의도한 것이고, "아직 필요 없음"으로 보고하면 오타가 marketing을 켜는
+날까지 숨습니다 — 찾기에 가장 나쁜 날입니다.
+
+**pin 안 된 rotation은 warning입니다.** 발송은 되고 기존 token도 전부 검증됩니다.
+잘못된 것은 **어느 키가 새 token에 서명하는지를 목록 순서가 정한다**는 것이고,
+이는 snapshot keyring이 이미 경고하는 것과 같은 drift입니다.
+
+**부수 문제를 함께 고쳤습니다 — 이쪽이 운영자 시간을 더 아낍니다.**
+`unsubscribeUrl()`이 throw했고 drain 바깥 `try/catch`가 그것을 받아
+`EMAIL_RENDER_FAILED`로 보고했습니다. **"수신 거부 키가 없다"가 "렌더에
+실패했다"로 보고되면** 운영자는 환경변수 하나를 찾는 대신 template을 읽습니다.
+이제 `{ok:false, refusal:"unsubscribe_keys_missing"}`를 돌려주고 drain이
+`EMAIL_UNSUBSCRIBE_KEY_MISSING` incident와 함께 permanent로 기록합니다 —
+identity refusal과 같은 취급이며, 이유도 같습니다: 기다린다고 환경변수가
+설정되지 않습니다.
+
+**`{ok:true, url:null}`과 `{ok:false}`는 다른 답입니다.** 앞은 unsubscribe가
+없는 것이 옳은 transactional 메시지이고, 뒤는 보내면 안 되는 marketing
+메시지입니다. 호출자가 둘을 섞으면 광고가 링크 없이 나갑니다.
+
+**오늘 production 동작은 바뀌지 않습니다.** `MARKETING_EMAIL_FROM`이 미설정이므로
+`/api/ready`는 계속 ready이고, 키 부재는 warning으로만 보고됩니다. 기능보다 먼저
+설치한 guard입니다.
+
+**범위 밖**: EM-16(발송 계정·region 분리, 도메인, warm-up). marketing을 실제로
+켜는 것은 이 항목이 아니며, 이 변경은 **켤 때 조용히 실패하지 않게** 합니다.
 
 ---
 

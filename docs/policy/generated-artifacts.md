@@ -377,6 +377,62 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   cyan→blue→purple gradient는 예약이며 쓰지 않는다.
 - 문구는 `locales/*.ts` 7개 언어 전부에 넣는다.
 
+### 시작만 하고 끝나지 못한 tool 호출 — `turn_incomplete`
+
+승인일: 2026-08-23. §1의 규칙("만들지 못했으면 만들었다고 말하지 않는다")의
+반대쪽 절반이며, 예외가 아니다.
+
+**증상.** Claude Haiku 4.5가 PPT를 웹페이지로 만들어 달라는 요청에 짧은 사전
+설명과 "이제 웹페이지를 만들겠습니다:"까지 쓰고 `create_text_file` 호출을
+시작했다가 출력 토큰 상한에 걸렸다. tool은 실행되지 않았으므로 collector에는
+아무것도 기록되지 않았고, turn은 일반적인 길이 초과 안내만 남긴 채 끝났다.
+**앱이 파일을 만들겠다고 말한 뒤 아무 말도 하지 않은 것**이고, 이는 §1이
+금지하는 침묵이다.
+
+**판정 신호는 두 개이고 서로 다른 곳에서 온다.**
+
+- `tool-input-start`(`streamText`의 `onChunk`) — provider가 tool 호출을
+  **시작**했다고 이름을 대는 유일한 시점. toolCallId와 toolName으로 기록한다.
+- tool 실행 시작(`onToolExecutionStart`와 각 tool의 `execute` 양쪽) — 그 호출이
+  collector에 도달했다는 사실. 도달한 호출은 성공·실패·로그인 거절 중 하나로
+  **이미 자기 결과를 기록**했으므로 여기서 다시 세지 않는다.
+
+추적은 `lib/generatedArtifactTurnTracker.ts`가 하고, 기록은
+`GeneratedArtifactCollector.recordIncompleteToolCalls()`가 한다.
+
+절대 조건:
+
+- **완료 판정이 `incomplete`(= `length`)일 때만** 기록한다
+  (`resolveChatCompletionOutcome`). 정상 종료나 취소는 대상이 아니다.
+- **artifact tool 호출이 시작되지 않은 길이 초과는 지금과 같다** — 일반
+  incomplete 안내만 보이고 카드는 만들지 않는다.
+- **native tool은 절대 세지 않는다.** `web_search`·`google_search`도 같은
+  `tool-input-start`를 내지만, 판정 대상은 **이 요청이 실제로 등록한 application
+  tool 이름 집합**이며 `providerExecuted`도 함께 거른다. 잘린 검색은 사용자가
+  약속받은 파일이 아니다.
+- **부분 tool input을 읽지 않는다.** delta frame은 구독하지 않고, 로그에도 DB에도
+  남기지 않는다. 검증된 format·filename이 없으므로 카드는 **tool 종류의 기존
+  안전한 fallback descriptor**(`FALLBACK_FORMAT`, 파일명 `generated`)로 표시한다.
+- **상한을 올리지 않는다.** 메시지당 top-level 3개는 그대로이고, 네 번째 시작
+  호출은 호출로 세되 카드는 만들지 않는다. `ARTIFACT_LIMITS`도
+  `maxOutputTokens`도 이 결함의 해결책이 아니다.
+- **ordinal·modelId·persistence 계약은 그대로다.** 실패 row는 assistant 메시지와
+  **같은 트랜잭션**에서 쓰이고(§8), 재조회 후에도 카드가 남는다. 카드 문구는
+  기존 `turn_incomplete` locale 항목(`chat.artifactFailedIncomplete`)이고 재시도
+  동작도 기존 `failed` 카드와 같다.
+- **`wasInvoked`가 참이 된다.** 잘린 turn의 provider response messages에는 끝까지
+  쓰이지 못한 `tool_use`가 들어 있고, 그것을 reasoning replay로 저장하면 다음
+  turn이 provider에게 거절당한다. 그래서 그 turn은
+  `MessageProviderContext`를 남기지 않는다.
+
+**지시문도 함께 고친다**(§2의 system block). 파일을 만들기 전에 "분석 중",
+"이제 만들겠습니다" 같은 진행 약속을 본문에 쓰지 않고, tool을 먼저 부른 뒤
+`created` 결과를 받고 나서야 한두 문장으로 성공을 알린다. HTML·소스 파일은
+반복 블록·군더더기 주석·중복 데이터를 피하고, 한 번의 호출에 담기 어렵다고
+판단되면 성공을 예고하거나 불완전한 호출을 시작하지 말고 범위를 줄여 달라고
+요청한다. **다만 지시문은 신뢰성의 근거가 아니다** — 위의 lifecycle 판정이
+근거이고, 지시문은 그 판정이 발동할 빈도를 줄일 뿐이다.
+
 ## 10. 자동 fallback과 web search
 
 - **fallback**: artifact tool을 제공한 turn은 `autoFallbackScope`의

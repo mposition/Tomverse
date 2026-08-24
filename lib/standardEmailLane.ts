@@ -574,8 +574,43 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       process.env.NEXT_PUBLIC_APP_URL ||
       "https://tomverse.app",
   };
-  const unsubscribeLink = unsubscribeUrl(unsubscribeTarget);
-  const headers = unsubscribeHeaders({ ...unsubscribeTarget, url: unsubscribeLink });
+  const link = unsubscribeUrl(unsubscribeTarget);
+  if (link.ok === false) {
+    // Named, permanent, and reported as itself rather than swallowed by the
+    // outer catch. Before EM-10 this threw, the catch turned it into
+    // EMAIL_RENDER_FAILED, and an operator went looking at templates for a
+    // missing environment variable.
+    //
+    // Permanent for the same reason the identity refusal is: no amount of
+    // waiting sets an environment variable, and retrying would spend the
+    // message's whole budget discovering that.
+    await reportOperationalIncident({
+      code: "EMAIL_UNSUBSCRIBE_KEY_MISSING",
+      title: "A marketing message was refused because it can carry no unsubscribe link",
+      severity: "error",
+      error: link.message,
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+        setInstead: "EMAIL_UNSUBSCRIBE_KEYS",
+      },
+    });
+    const recorded = await recordOutcome(
+      delivery,
+      { kind: "permanent", errorKind: link.refusal },
+      {
+        now,
+        attempts,
+        classification: definition.classification,
+        rendered: templateRendered,
+        status: null,
+      }
+    );
+    return { outcome: recorded, classification: definition.classification };
+  }
+  const unsubscribeLink = link.url;
+  const headers = unsubscribeHeaders(unsubscribeLink);
 
   // The subject prefix and the jurisdiction footer, from the profile this row
   // was pinned to at enqueue (EM-04). Read from the pinned policy version and

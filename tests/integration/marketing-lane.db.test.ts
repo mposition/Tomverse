@@ -364,6 +364,48 @@ test("a transactional message keeps its own stream and carries no unsubscribe", 
   assert.doesNotMatch(calls[0].body.subject, /광고/);
 });
 
+// EM-10: a missing unsubscribe key is reported as itself.
+
+test("without an unsubscribe key marketing is refused by name, not as a render failure", async () => {
+  // Everything else configured, so the only thing wrong is the key. Before
+  // EM-10 this threw, the drain's outer catch turned it into
+  // EMAIL_RENDER_FAILED, and an operator went looking at templates for a
+  // missing environment variable.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+
+  await activatePolicy();
+  const calls = stubProvider();
+  const incidents: string[] = [];
+  const stop = observeOperationalIncidents((incident) => incidents.push(incident.code));
+  const user = await subscriber();
+  const rows = await queue(user);
+
+  try {
+    await drainStandardEmailDeliveries({ limit: 1 });
+  } finally {
+    stop();
+  }
+
+  assert.equal(calls.length, 0, "a message with no unsubscribe link must not send");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows!.deliveryId },
+    select: { status: true, lastErrorKind: true },
+  });
+  // Permanent for the same reason the identity refusal is: no amount of
+  // waiting sets an environment variable.
+  assert.equal(delivery.status, "failed");
+  assert.equal(delivery.lastErrorKind, "unsubscribe_keys_missing");
+  assert.deepEqual(
+    incidents.filter((code) => code === "EMAIL_UNSUBSCRIBE_KEY_MISSING"),
+    ["EMAIL_UNSUBSCRIBE_KEY_MISSING"]
+  );
+  // And specifically not the old symptom.
+  assert.equal(incidents.includes("EMAIL_RENDER_FAILED"), false);
+});
+
+
 // EM-09: the stream stops itself.
 //
 // Contract: docs/policy/email-notifications.md §14.5.
