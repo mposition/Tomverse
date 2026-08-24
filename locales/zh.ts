@@ -30,7 +30,7 @@ export const zh = {
         dismiss: "关闭通知",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "账户与套餐",
         accountTooltipGuest: "登录或注册",
         guestMenuTitle: "访客模式",
@@ -824,7 +824,7 @@ export const zh = {
         close: "关闭",
         paymentSuccessfulEyebrow: "付款成功",
         paymentSuccessfulTitle: "付款已成功完成。",
-        paymentSuccessfulWelcome: "欢迎加入 Tomverse Review。你现在可以在 {plan} 工作区使用更高额度和高级功能。",
+        paymentSuccessfulWelcome: "欢迎加入 Tomverse。你现在可以在 {plan} 工作区使用更高额度和高级功能。",
         testerPassActivatedEyebrow: "测试通行证已激活",
         testerPassActivatedTitle: "您的 60 天创始测试通行证已生效。",
         testerPassActivatedWelcome: "您现在可以作为创始测试用户使用 {plan} 工作区。",

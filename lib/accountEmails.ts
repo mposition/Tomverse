@@ -213,14 +213,14 @@ const escapeHtml = (value: string) =>
 
 const copy: Record<EmailLanguage, WelcomeCopy> = {
   en: {
-    brandLabel: "Tomverse Review",
-    subject: "Welcome to Tomverse Review",
+    brandLabel: "Tomverse",
+    subject: "Welcome to Tomverse",
     title: "Your AI workspace is ready",
     subtitle:
       "Compare leading AI models, work with files, and keep useful answers organized in one clean workspace.",
     greeting: (name) => `Hi ${name},`,
     paragraphs: [
-      "Welcome to Tomverse Review. Your workspace is ready, and you can start comparing answers from multiple AI models in one conversation flow.",
+      "Welcome to Tomverse. Your workspace is ready, and in Tomverse Review you can start comparing answers from multiple AI models in one conversation flow.",
       "Ask once, review different model perspectives, attach useful files, and keep important conversations organized for later.",
       "Start with one question, choose the models you want to compare, and let Tomverse help you move from exploration to a practical answer faster.",
     ],
@@ -232,18 +232,18 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "Open your workspace",
     footer:
-      "You are receiving this email because a Tomverse Review account was created with this address. If this was not you, please contact Tomverse support.",
-    preview: "Your Tomverse Review workspace is ready.",
+      "You are receiving this email because a Tomverse account was created with this address. If this was not you, please contact Tomverse support.",
+    preview: "Your Tomverse workspace is ready.",
   },
   ko: {
-    brandLabel: "Tomverse Review",
-    subject: "Tomverse Review에 오신 것을 환영합니다",
+    brandLabel: "Tomverse",
+    subject: "Tomverse에 오신 것을 환영합니다",
     title: "AI 워크스페이스가 준비되었습니다",
     subtitle:
       "여러 AI 모델의 답변을 비교하고, 파일을 함께 분석하며, 유용한 대화를 한곳에 정리하세요.",
     greeting: (name) => `${name}님, 안녕하세요.`,
     paragraphs: [
-      "Tomverse Review에 가입해 주셔서 감사합니다. 이제 하나의 대화 흐름 안에서 여러 AI 모델의 답변을 비교해볼 수 있습니다.",
+      "Tomverse에 가입해 주셔서 감사합니다. 이제 Tomverse Review에서 하나의 대화 흐름 안에 여러 AI 모델의 답변을 비교해볼 수 있습니다.",
       "한 번 질문하고, 모델별 관점을 검토하고, 필요한 파일을 첨부하며, 중요한 대화는 나중에 다시 찾기 쉽게 정리할 수 있습니다.",
       "첫 질문을 입력하고 비교할 모델을 선택해 보세요. Tomverse가 더 빠르게 실용적인 답변에 도달할 수 있도록 도와드립니다.",
     ],
@@ -255,18 +255,18 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "워크스페이스 열기",
     footer:
-      "이 이메일은 해당 주소로 Tomverse Review 계정이 생성되어 발송되었습니다. 본인이 가입한 것이 아니라면 Tomverse 지원팀에 문의해 주세요.",
-    preview: "Tomverse Review 워크스페이스가 준비되었습니다.",
+      "이 이메일은 해당 주소로 Tomverse 계정이 생성되어 발송되었습니다. 본인이 가입한 것이 아니라면 Tomverse 지원팀에 문의해 주세요.",
+    preview: "Tomverse 워크스페이스가 준비되었습니다.",
   },
   zh: {
-    brandLabel: "Tomverse Review",
-    subject: "欢迎使用 Tomverse Review",
+    brandLabel: "Tomverse",
+    subject: "欢迎使用 Tomverse",
     title: "你的 AI 工作区已准备就绪",
     subtitle:
       "在一个清晰的工作区中比较主流 AI 模型、处理文件，并整理有价值的回答。",
     greeting: (name) => `${name}，你好。`,
     paragraphs: [
-      "欢迎加入 Tomverse Review。现在你可以在同一个对话流程中比较多个 AI 模型的回答。",
+      "欢迎加入 Tomverse。现在你可以在 Tomverse Review 中于同一个对话流程里比较多个 AI 模型的回答。",
       "你可以一次提问，查看不同模型的观点，上传有用的文件，并把重要对话整理起来以便之后使用。",
       "从一个问题开始，选择想要比较的模型，让 Tomverse 帮你更快找到实用答案。",
     ],
@@ -278,18 +278,18 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "打开工作区",
     footer:
-      "你收到这封邮件，是因为有人使用此邮箱创建了 Tomverse Review 账户。如果这不是你本人操作，请联系 Tomverse 支持团队。",
-    preview: "你的 Tomverse Review 工作区已准备就绪。",
+      "你收到这封邮件，是因为有人使用此邮箱创建了 Tomverse 账户。如果这不是你本人操作，请联系 Tomverse 支持团队。",
+    preview: "你的 Tomverse 工作区已准备就绪。",
   },
   fr: {
-    brandLabel: "Tomverse Review",
-    subject: "Bienvenue sur Tomverse Review",
+    brandLabel: "Tomverse",
+    subject: "Bienvenue sur Tomverse",
     title: "Votre espace IA est prêt",
     subtitle:
       "Comparez les principaux modèles d'IA, travaillez avec des fichiers et organisez les réponses utiles dans un seul espace.",
     greeting: (name) => `Bonjour ${name},`,
     paragraphs: [
-      "Bienvenue sur Tomverse Review. Votre espace est prêt et vous pouvez comparer les réponses de plusieurs modèles d'IA dans un même fil de conversation.",
+      "Bienvenue sur Tomverse. Votre espace est prêt et, dans Tomverse Review, vous pouvez comparer les réponses de plusieurs modèles d'IA dans un même fil de conversation.",
       "Posez une question une seule fois, analysez plusieurs perspectives, ajoutez des fichiers utiles et gardez vos conversations importantes bien organisées.",
       "Commencez avec une question, choisissez les modèles à comparer et laissez Tomverse vous aider à obtenir plus rapidement une réponse exploitable.",
     ],
@@ -301,18 +301,18 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "Ouvrir votre espace",
     footer:
-      "Vous recevez cet email parce qu'un compte Tomverse Review a été créé avec cette adresse. Si ce n'était pas vous, contactez le support Tomverse.",
-    preview: "Votre espace Tomverse Review est prêt.",
+      "Vous recevez cet email parce qu'un compte Tomverse a été créé avec cette adresse. Si ce n'était pas vous, contactez le support Tomverse.",
+    preview: "Votre espace Tomverse est prêt.",
   },
   de: {
-    brandLabel: "Tomverse Review",
-    subject: "Willkommen bei Tomverse Review",
+    brandLabel: "Tomverse",
+    subject: "Willkommen bei Tomverse",
     title: "Dein KI-Workspace ist bereit",
     subtitle:
       "Vergleiche führende KI-Modelle, arbeite mit Dateien und organisiere nützliche Antworten an einem Ort.",
     greeting: (name) => `Hallo ${name},`,
     paragraphs: [
-      "Willkommen bei Tomverse Review. Dein Workspace ist bereit und du kannst Antworten mehrerer KI-Modelle in einem sauberen Gesprächsfluss vergleichen.",
+      "Willkommen bei Tomverse. Dein Workspace ist bereit und in Tomverse Review kannst du Antworten mehrerer KI-Modelle in einem sauberen Gesprächsfluss vergleichen.",
       "Stelle eine Frage, prüfe unterschiedliche Modellperspektiven, füge hilfreiche Dateien hinzu und halte wichtige Gespräche übersichtlich fest.",
       "Starte mit einer Frage, wähle die Modelle aus, die du vergleichen möchtest, und lass Tomverse schneller eine brauchbare Antwort finden.",
     ],
@@ -324,18 +324,18 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "Workspace öffnen",
     footer:
-      "Du erhältst diese E-Mail, weil mit dieser Adresse ein Tomverse Review Konto erstellt wurde. Falls du das nicht warst, kontaktiere bitte den Tomverse Support.",
-    preview: "Dein Tomverse Review Workspace ist bereit.",
+      "Du erhältst diese E-Mail, weil mit dieser Adresse ein Tomverse Konto erstellt wurde. Falls du das nicht warst, kontaktiere bitte den Tomverse Support.",
+    preview: "Dein Tomverse Workspace ist bereit.",
   },
   es: {
-    brandLabel: "Tomverse Review",
-    subject: "Te damos la bienvenida a Tomverse Review",
+    brandLabel: "Tomverse",
+    subject: "Te damos la bienvenida a Tomverse",
     title: "Tu espacio de IA está listo",
     subtitle:
       "Compara los principales modelos de IA, trabaja con archivos y organiza respuestas útiles en un solo espacio.",
     greeting: (name) => `Hola ${name},`,
     paragraphs: [
-      "Bienvenido a Tomverse Review. Tu espacio está listo y ya puedes comparar respuestas de varios modelos de IA en un único flujo de conversación.",
+      "Bienvenido a Tomverse. Tu espacio está listo y en Tomverse Review ya puedes comparar respuestas de varios modelos de IA en un único flujo de conversación.",
       "Pregunta una vez, revisa distintas perspectivas, adjunta archivos útiles y mantén tus conversaciones importantes organizadas para más adelante.",
       "Empieza con una pregunta, elige los modelos que quieres comparar y deja que Tomverse te ayude a llegar antes a una respuesta práctica.",
     ],
@@ -347,18 +347,18 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "Abrir tu espacio",
     footer:
-      "Recibes este correo porque se creó una cuenta de Tomverse Review con esta dirección. Si no fuiste tú, contacta con el soporte de Tomverse.",
-    preview: "Tu espacio de Tomverse Review está listo.",
+      "Recibes este correo porque se creó una cuenta de Tomverse con esta dirección. Si no fuiste tú, contacta con el soporte de Tomverse.",
+    preview: "Tu espacio de Tomverse está listo.",
   },
   pt: {
-    brandLabel: "Tomverse Review",
-    subject: "Boas-vindas ao Tomverse Review",
+    brandLabel: "Tomverse",
+    subject: "Boas-vindas ao Tomverse",
     title: "Seu workspace de IA está pronto",
     subtitle:
       "Compare os principais modelos de IA, trabalhe com arquivos e organize respostas úteis em um só lugar.",
     greeting: (name) => `Olá, ${name}.`,
     paragraphs: [
-      "Boas-vindas ao Tomverse Review. Seu workspace está pronto e você já pode comparar respostas de vários modelos de IA em um único fluxo de conversa.",
+      "Boas-vindas ao Tomverse. Seu workspace está pronto e no Tomverse Review você já pode comparar respostas de vários modelos de IA em um único fluxo de conversa.",
       "Faça uma pergunta, revise diferentes perspectivas, anexe arquivos úteis e mantenha conversas importantes organizadas para depois.",
       "Comece com uma pergunta, escolha os modelos que deseja comparar e deixe o Tomverse ajudar você a chegar mais rápido a uma resposta prática.",
     ],
@@ -370,8 +370,8 @@ const copy: Record<EmailLanguage, WelcomeCopy> = {
     ],
     button: "Abrir workspace",
     footer:
-      "Você está recebendo este email porque uma conta Tomverse Review foi criada com este endereço. Se não foi você, entre em contato com o suporte Tomverse.",
-    preview: "Seu workspace Tomverse Review está pronto.",
+      "Você está recebendo este email porque uma conta Tomverse foi criada com este endereço. Se não foi você, entre em contato com o suporte Tomverse.",
+    preview: "Seu workspace Tomverse está pronto.",
   },
 };
 
@@ -405,7 +405,7 @@ const shell = (copyItem: WelcomeCopy, body: string) => {
     </div>
     <div style="max-width:700px;margin:0 auto;padding:34px 18px;">
       <div style="margin:0 auto 18px;text-align:center;">
-        <img src="${logoUrl()}" width="64" height="64" alt="Tomverse Review" style="display:inline-block;border-radius:18px;border:1px solid #dbe3ef;background:#ffffff;box-shadow:0 12px 34px rgba(15,23,42,0.14);" />
+        <img src="${logoUrl()}" width="64" height="64" alt="Tomverse" style="display:inline-block;border-radius:18px;border:1px solid #dbe3ef;background:#ffffff;box-shadow:0 12px 34px rgba(15,23,42,0.14);" />
       </div>
       <div style="background:#ffffff;border:1px solid #d9e2ee;border-radius:26px;overflow:hidden;box-shadow:0 24px 70px rgba(15,23,42,0.14);">
         <div style="padding:34px 36px 32px;background:#08111f;color:#ffffff;">
@@ -440,7 +440,7 @@ const shell = (copyItem: WelcomeCopy, body: string) => {
         ${escapeHtml(copyItem.footer)}
       </p>
       <p style="margin:10px 8px 0;color:#94a3b8;font-size:11px;text-align:center;">
-        Tomverse Review · <a href="${appUrl()}" style="color:#64748b;text-decoration:underline;">${appUrl()}</a>
+        Tomverse · <a href="${appUrl()}" style="color:#64748b;text-decoration:underline;">${appUrl()}</a>
       </p>
     </div>
   </div>

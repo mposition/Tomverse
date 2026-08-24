@@ -13,7 +13,7 @@ export const de = {
         dismiss: "Benachrichtigung schließen",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Konto & Plan",
         accountTooltipGuest: "Anmelden oder registrieren",
         guestMenuTitle: "Gastmodus",
