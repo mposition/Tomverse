@@ -9,6 +9,11 @@
 
 ## 개정 이력
 
+**v9 (2026-08-24, 8차 검토 반영 — 문서 편집 2건).** parity 테스트 표에 남아
+있던 2열 헤더를 삭제했고, 입력 출처 표에서 `intentClass`(분류기 반환값)와
+`intent`(L0용 파생 이진값)를 분리했습니다. 비용 개정표의 마지막 행은
+`v6~v8`로 적어 v6 이후 수치가 그대로 유효함을 밝혔습니다.
+
 **v8 (2026-08-24, 7차 검토 반영 — 분류기 계약 정합 3건).**
 
 | # | v7의 문제 | v8 |
@@ -303,13 +308,15 @@ v3까지의 후보 문안은 "이미지 생성은 도구 메뉴에 있습니다"
 
 ```
 intent:       none | edit_or_reference        <- 배타 분기 (가산 축이 아님)
+                                                 intentClass에서 파생
 imageHandoff: hidden | sign_in | upgrade | available
 artifact:     unavailable | sign_in | available
 ```
 
 | 입력 | 오늘의 출처 |
 |---|---|
-| `intent` | **분류기 결과** — 아래 참조 |
+| `intentClass` | `classifyImageIntent(input)`의 반환값 — 아래 참조 |
+| `intent` | `intentClass`를 L0용 이진 분기로 축소한 값 |
 | `imageHandoff` | `isImageGenerationEnabled()`(`lib/appSettings.ts`) + `planAllowsImageGeneration(tier)`(`lib/imageGenerationAccess.ts`)`[코드]` |
 | `artifact` | `planGeneratedArtifactTool()`의 `mode`·`offReason``[코드]` |
 
@@ -401,8 +408,6 @@ fixture는 **서버 원본 표현과 클라이언트 원본 표현을 각각** �
 분류가 우연히 일치하는 경우가 생기고, 그 우연은 입력이 조금만 달라져도
 깨집니다. 최소 집합:
 
-| fixture | 기대 |
-|---|---|
 | fixture | `ImageIntentClass` | L0 `intent` | L1 칩 |
 |---|---|---|---|
 | 이미지 첨부 + "배경을 바꿔 줘" | `edit_or_reference` | `edit_or_reference` | 없음 |
@@ -490,7 +495,7 @@ turn당 **231~351 토큰**입니다. 하한이 v5(204)보다 오른 것은 `CORE
 | v3 | 단일 문안 | 150~192 |
 | v4 | 2축 가산 | 177~293 |
 | v5 | 3축 가산 | 204~382 |
-| **v6** | **2축 + 배타 분기** | **231~351** |
+| **v6~v8** | **2축 + 배타 분기** | **231~351** |
 
 대표 모델의 입력가로 환산하면:
 
