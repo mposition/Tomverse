@@ -80,3 +80,11 @@ docs/*
 # Pre-change snapshots from scripts/stamp-promotion-metadata.mjs. Its default
 # path is the working tree, and the file records live Stripe object metadata.
 promotion-metadata-snapshot-*.json
+
+# Staging verification fixtures, generated on demand.
+#
+# `npm run make:assistant-package-staging-fixtures` writes packages and their
+# answer key here. They are not committed: the command reproduces the same
+# bytes, the manifest carries their digests, and a fixture in the tree is one
+# that drifts from the code it was built to exercise.
+.tmp/
