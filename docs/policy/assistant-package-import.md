@@ -433,3 +433,63 @@ wizard의 inventory · 형식 감지 · secret 탐지 · 위험 경고 · 필드
 | 형식 allowlist | knowledge는 `ASSISTANT_KNOWLEDGE_TYPES` 그대로 | `lib/assistantKnowledgeLimits.ts` |
 
 ## 11. 이 계약을 어기는 변경은 릴리스 차단 사유입니다
+
+## 12. Rollout과 rollback
+
+### 12.1 flag
+
+`AppSetting`의 `feature.assistantPackageImportEnabled` 하나입니다. 값이
+정확히 `"true"`일 때만 켜지고, **행이 없는 경우를 포함해 그 밖의 모든 값은
+꺼짐**입니다(fail-closed). 판정은 `lib/assistantPackageImportAccess.ts` 한
+곳이며, 두 번째 판정을 만들지 않습니다.
+
+**이 flag는 두 번째 flag와 함께 봅니다.** `assertImportEnabled()`가
+`feature.assistantKnowledgeEnabled`도 읽습니다 — knowledge를 끄면 wizard가
+7단계에서 업로드 경로가 없는 것을 발견하게 되고, 그것은 사용자가 파일을 고른
+뒤에 알게 되는 실패입니다.
+
+### 12.2 켜기 전에 무엇이 참이어야 하는가
+
+순서가 있고, 앞의 것이 뒤의 것의 전제입니다.
+
+1. Slice 7까지 배포됨.
+2. **Slice 5B 배포 완료.** `AssistantKnowledgeFile_extractedCharacters_non_negative_check`
+   가 `NOT VALID`인 동안은 `extractedCharacters`의 기존 행이 조사되지 않은
+   상태이고, 그 값이 quota 판정에 쓰입니다. 검증되지 않은 집계로 여는 것은
+   **사용자에게 잘못된 한도를 적용한 채 여는 것**입니다.
+3. C3(정책 문서가 flag 순서에 대해 남겨 둔 결정)이 해소됨.
+4. `docs/ops/assistant-package-import-staging-checklist.md`의 **차단 구획이
+   전부 실행되고 서명됨.** 차단 아닌 구획은 `미기록`으로 남겨도 됩니다.
+
+### 12.3 rollback은 진입점을 지우는 것이지 데이터를 지우는 것이 아닙니다
+
+flag를 끄면 **wizard route와 import·export API만** 사라집니다. 이미 만들어진
+것은 그대로 남고 그대로 동작합니다.
+
+| 대상 | flag off일 때 |
+|---|---|
+| 가져오기가 만든 `AssistantProfile`·`AssistantProfileVersion` | **그대로 남고 정상 동작.** `feature.assistantProfilesEnabled`가 지배하며 이 flag는 관여하지 않습니다 |
+| 승격된 `AssistantKnowledgeFile`(`importId = NULL`) | 그대로 남습니다. 평범한 knowledge 파일입니다 |
+| `AssistantProfileImport` 행 | **그대로 남습니다.** provenance가 flag와 함께 사라지면 이미 만들어진 profile이 "출처를 모르는 profile"이 됩니다 |
+| staging 중이던 import | 새 요청이 거절되므로 진행할 수 없고, 두 시계의 만료 sweep이 가져갑니다. 사람이 손으로 지우지 않습니다 |
+| `/settings/assistants/import` | 404 |
+
+**세 가지 답이 가능했고 두 개는 나빴습니다.** profile이 사라진다 — 되돌릴 수
+없는 손실이라 안 됩니다. profile은 남지만 쓸 수 없다 — 사용자가 자기 목록에서
+죽은 행을 보게 됩니다. 남은 것이 위 표이며, 그것이 가능한 이유는 가져오기가
+만드는 것이 **평범한 profile과 version**이기 때문입니다.
+
+### 12.4 rollback이 하지 않는 것
+
+- **행을 지우지 않습니다.** 이 flag를 끄는 것으로 데이터가 사라지는 경로는
+  없어야 하고, 그것을 추가하는 변경은 §11에 걸립니다.
+- **migration을 되돌리지 않습니다.** migration은 forward only입니다. 테이블은
+  남고, 남아 있어도 아무도 쓰지 않습니다.
+- **provenance를 감추지 않습니다.** 이미 게시된 profile의 출처 표시는 flag와
+  무관하게 계속 보입니다.
+
+### 12.5 다시 켜는 것
+
+같은 flag를 다시 `"true"`로 두면 됩니다. 남아 있던 profile·파일·provenance가
+그대로이므로 이전 상태가 복구되고, 만료된 staging import는 돌아오지 않습니다 —
+그것은 rollback이 지운 것이 아니라 시계가 가져간 것입니다.

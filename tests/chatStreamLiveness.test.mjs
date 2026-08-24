@@ -7,10 +7,16 @@ import {
   CHAT_SERVER_FIRST_TOKEN_DEADLINE_MS,
   CHAT_STREAM_KEEPALIVE_INTERVAL_MS,
   classifyChatAbort,
-  createChatAbortHandle,
   createChatLivenessWatchdog,
   isChatTimeoutErrorCode,
 } from "../lib/chatStreamLiveness.ts";
+import {
+  abortChatRuntime,
+  abortChatRuntimeRun,
+  beginChatRuntimeRun,
+  getChatRuntimeAbortCause,
+  resetChatStreamRuntime,
+} from "../lib/chatStreamRuntime.ts";
 
 /*
   The staged liveness policy that replaced one 90s timer.
@@ -262,7 +268,7 @@ test("a watchdog that already expired leaves no timer behind", () => {
 test("a stop is a stop and a timeout is a timeout", () => {
   assert.deepEqual(classifyChatAbort("user_stop"), { kind: "cancelled" });
   assert.deepEqual(classifyChatAbort("user_stop_all"), { kind: "cancelled" });
-  assert.deepEqual(classifyChatAbort("component_unmounted"), {
+  assert.deepEqual(classifyChatAbort("identity_released"), {
     kind: "cancelled",
   });
   assert.deepEqual(classifyChatAbort("first_response_timeout"), {
@@ -283,48 +289,94 @@ test("an abort with no recorded cause classifies as a stop", () => {
   assert.deepEqual(classifyChatAbort(undefined), { kind: "cancelled" });
 });
 
-test("the handle records the first cause and keeps it", () => {
-  const handle = createChatAbortHandle();
-  assert.equal(handle.cause, null);
-  assert.equal(handle.aborted, false);
+/*
+  The cause lives beside the controller, in lib/chatStreamRuntime.ts, because
+  a panel that remounts adopts the run that is already going and has to adopt
+  its reason with it.
+*/
 
-  handle.abort("user_stop");
-  assert.equal(handle.aborted, true);
-  assert.equal(handle.cause, "user_stop");
+const RUN_A = "guest|conversation-1|gpt-5-6-luna";
+const RUN_B = "guest|conversation-1|claude-haiku-4-5";
 
-  // The stop button and the watchdog can race. Whichever ended the request is
+test("a run records the first cause and keeps it", () => {
+  resetChatStreamRuntime();
+  const controller = beginChatRuntimeRun(RUN_A);
+  assert.equal(getChatRuntimeAbortCause(RUN_A, controller), null);
+
+  abortChatRuntime(RUN_A, "user_stop");
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(getChatRuntimeAbortCause(RUN_A, controller), "user_stop");
+
+  // The stop button and the watchdog can race. Whichever ended the run is
   // what happened; a later abort must not rewrite it into a timeout.
-  handle.abort("stream_idle_timeout");
-  assert.equal(handle.cause, "user_stop");
-  assert.deepEqual(classifyChatAbort(handle.cause), { kind: "cancelled" });
+  abortChatRuntime(RUN_A, "stream_idle_timeout");
+  assert.equal(getChatRuntimeAbortCause(RUN_A, controller), "user_stop");
+  assert.deepEqual(
+    classifyChatAbort(getChatRuntimeAbortCause(RUN_A, controller)),
+    { kind: "cancelled" }
+  );
 });
 
 test("a watchdog expiry and a stop cannot be mistaken for one another", () => {
-  const stopped = createChatAbortHandle();
-  const timedOut = createChatAbortHandle();
-  stopped.abort("user_stop_all");
-  timedOut.abort("first_response_timeout");
+  resetChatStreamRuntime();
+  const stopped = beginChatRuntimeRun(RUN_A);
+  const timedOut = beginChatRuntimeRun(RUN_B);
+  abortChatRuntime(RUN_A, "user_stop_all");
+  abortChatRuntime(RUN_B, "first_response_timeout");
 
-  // The bug this replaces: one shared `AbortController` and no cause, so both
-  // of these arrived at the catch block as the same `AbortError`.
-  assert.deepEqual(classifyChatAbort(stopped.cause), { kind: "cancelled" });
-  assert.deepEqual(classifyChatAbort(timedOut.cause), {
-    kind: "timeout",
-    errorCode: "CHAT_FIRST_RESPONSE_TIMEOUT",
+  // The bug this replaces: one `AbortController` and no cause, so both of
+  // these arrived at the catch block as the same `AbortError`.
+  assert.deepEqual(classifyChatAbort(getChatRuntimeAbortCause(RUN_A, stopped)), {
+    kind: "cancelled",
   });
+  assert.deepEqual(
+    classifyChatAbort(getChatRuntimeAbortCause(RUN_B, timedOut)),
+    { kind: "timeout", errorCode: "CHAT_FIRST_RESPONSE_TIMEOUT" }
+  );
 });
 
-test("two panels' handles never share a cause", () => {
-  const panelA = createChatAbortHandle();
-  const panelB = createChatAbortHandle();
+test("two panels' runs never share a cause", () => {
+  resetChatStreamRuntime();
+  const panelA = beginChatRuntimeRun(RUN_A);
+  const panelB = beginChatRuntimeRun(RUN_B);
 
-  panelA.abort("stream_idle_timeout");
-  assert.equal(panelB.cause, null);
-  assert.equal(panelB.aborted, false);
+  abortChatRuntime(RUN_A, "stream_idle_timeout");
+  assert.equal(getChatRuntimeAbortCause(RUN_B, panelB), null);
+  assert.equal(panelB.signal.aborted, false);
 
-  panelB.abort("user_stop");
-  assert.equal(panelA.cause, "stream_idle_timeout");
-  assert.equal(panelB.cause, "user_stop");
+  abortChatRuntime(RUN_B, "user_stop");
+  assert.equal(getChatRuntimeAbortCause(RUN_A, panelA), "stream_idle_timeout");
+  assert.equal(getChatRuntimeAbortCause(RUN_B, panelB), "user_stop");
+});
+
+test("a superseded run's watchdog cannot end the retry that replaced it", () => {
+  // The reason the watchdog aborts through the controller-scoped call. A
+  // retry that starts while the previous run is still settling owns the key,
+  // and the old run's timer must not kill it -- the same rule
+  // `endChatRuntimeRun` applies to finishing.
+  resetChatStreamRuntime();
+  const first = beginChatRuntimeRun(RUN_A);
+  const second = beginChatRuntimeRun(RUN_A);
+
+  abortChatRuntimeRun(RUN_A, first, "first_response_timeout");
+
+  assert.equal(second.signal.aborted, false);
+  assert.equal(getChatRuntimeAbortCause(RUN_A, second), null);
+  // And the superseded run is not answered with the live run's reason.
+  assert.equal(getChatRuntimeAbortCause(RUN_A, first), null);
+});
+
+test("a run started after an abort does not inherit the previous reason", () => {
+  resetChatStreamRuntime();
+  const first = beginChatRuntimeRun(RUN_A);
+  abortChatRuntime(RUN_A, "stream_idle_timeout");
+  assert.equal(getChatRuntimeAbortCause(RUN_A, first), "stream_idle_timeout");
+
+  const retry = beginChatRuntimeRun(RUN_A);
+  assert.equal(getChatRuntimeAbortCause(RUN_A, retry), null);
+  assert.deepEqual(classifyChatAbort(getChatRuntimeAbortCause(RUN_A, retry)), {
+    kind: "cancelled",
+  });
 });
 
 test("the timeout codes are recognised and nothing else is", () => {

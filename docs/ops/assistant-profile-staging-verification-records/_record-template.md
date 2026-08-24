@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/assistant-profile-staging-checklist.md
-templateRevision: 2026-08-21a
+templateRevision: 2026-08-24a
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 profile 표면 diff 결과 | |
-| template revision | 2026-08-21a |
+| template revision | 2026-08-24a |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -43,7 +43,7 @@ digest:
 
 ## 항목별 결과
 
-체크리스트의 A–I 구획을 그대로 옮기고, 각 항목에 다음 중 하나를 적습니다.
+체크리스트의 A–J 구획을 그대로 옮기고, 각 항목에 다음 중 하나를 적습니다.
 
 - `pass` — 확인함. 증거 참조를 함께 적습니다.
 - `fail` — 확인했고 실패했습니다. 후속 티켓을 적습니다.

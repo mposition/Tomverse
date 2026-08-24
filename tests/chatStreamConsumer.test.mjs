@@ -8,9 +8,14 @@ import {
 } from "../lib/chatStreamKeepalive.ts";
 import {
   classifyChatAbort,
-  createChatAbortHandle,
   createChatLivenessWatchdog,
 } from "../lib/chatStreamLiveness.ts";
+import {
+  abortChatRuntimeRun,
+  beginChatRuntimeRun,
+  getChatRuntimeAbortCause,
+  resetChatStreamRuntime,
+} from "../lib/chatStreamRuntime.ts";
 import { buildRoutingRetryChunk } from "../lib/routingRetrySignal.ts";
 import {
   buildChatStreamTrailerChunk,
@@ -31,6 +36,8 @@ import {
 */
 
 /* ------------------------------------------------------------ harness ---- */
+
+resetChatStreamRuntime();
 
 const fakeTimers = () => {
   let now = 0;
@@ -130,10 +137,25 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
  * One panel: an abort handle, a watchdog wired to abort it, the read loop,
  * and the rendered text as `setAssistantMessage` would have received it.
  */
+let nextRunIndex = 0;
+
 const panel = () => {
   const clock = fakeTimers();
   const stream = scriptedStream();
-  const handle = createChatAbortHandle();
+  // A real runtime key and a real run, so the cause travels the way it does
+  // in the app: beside the controller, in lib/chatStreamRuntime.ts.
+  nextRunIndex += 1;
+  const runtimeKey = `guest|conversation-${nextRunIndex}|gpt-5-6-luna`;
+  const controller = beginChatRuntimeRun(runtimeKey);
+  const handle = {
+    get cause() {
+      return getChatRuntimeAbortCause(runtimeKey, controller);
+    },
+    get aborted() {
+      return controller.signal.aborted;
+    },
+    abort: (cause) => abortChatRuntimeRun(runtimeKey, controller, cause),
+  };
   const rendered = [];
   const expiries = [];
 

@@ -476,6 +476,28 @@ const REGISTRY = {
     reason:
       "Which send this is -- launch, notice, reminder, final reminder, completion. Part of the unique key with sequence, so it is what makes a second `reminder 1` impossible rather than merely unlikely.",
   },
+  EmailCampaign_trigger_mode_check: {
+    owner: "database",
+    reason:
+      "How a campaign's waves are started: manual, auto_draft, or approved_schedule. Only the third is the scheduler's to act on -- a campaign left on manual is one somebody intends to watch as it goes out, and starting it for them because a time happened to be set would take that decision away silently. Judged by lib/emailCampaignScheduleCore.ts.",
+  },
+  EmailCampaignAttestation_kind_check: {
+    owner: "list",
+    module: "lib/emailCampaignAttestationCore.ts",
+    list: "ATTESTATION_KINDS",
+    reason:
+      "The three conditions of section 13.3 that no field holds, recorded as somebody having said them: the body names the capability and credit differences, staging was verified, the reconciliation and its rollback are ready. Compared against lib/emailCampaignAttestationCore.ts's ATTESTATION_KINDS, which is what lib/automaticTransitionClaim.ts reads -- a kind here with no entry there would be an attestation the gate never asks about.",
+  },
+  EmailCampaignRecipient_eligibility_reason_check: {
+    owner: "database",
+    reason:
+      "Which cohort a person was filed under: the three of section 13.1 that this repository can actually compute. `recent_usage` is in the audit's list and deliberately absent -- nothing computes it, and allowing the value would let a row claim a cohort no code produces. Written by lib/emailAudienceExpansion.ts from lib/emailCampaignRecipientCore.ts's precedence.",
+  },
+  EmailCampaignRecipient_excluded_reason_check: {
+    owner: "database",
+    reason:
+      "Why somebody in the audience received nothing. A superset of AudienceExclusion because it also carries reasons decided later: `already_changed` is only knowable at the reminder, after the first notice has had time to work. `malformed` is deliberately not in this list -- an unreadable stored value means the account cannot be migrated automatically, not that it should be left uninformed, and an exclusion here would contradict summariseAudience().",
+  },
   EmailDelivery_skip_reason_check: {
     owner: "database",
     reason:

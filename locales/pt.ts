@@ -285,6 +285,7 @@ export const pt = {
         attachmentTypeError: "Este tipo de arquivo não é suportado.",
         attachmentTypeMismatch: "A extensão do arquivo não corresponde ao seu formato real.",
         attachmentEncodingUnreadable: "Não foi possível ler a codificação de caracteres do arquivo.",
+        modelTemporarilyUnavailable: "Este modelo está temporariamente indisponível.",
         attachmentAnimatedImage: "GIFs animados não são compatíveis. Converta para uma imagem estática.",
         attachmentImageInvalid: "A imagem está danificada ou em um formato não compatível.",
         attachmentPdfInvalid: "O PDF está danificado ou não pôde ser lido.",

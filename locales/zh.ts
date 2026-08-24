@@ -294,6 +294,7 @@ export const zh = {
         attachmentTypeError: "不支持此文件类型。",
         attachmentTypeMismatch: "文件扩展名与实际格式不一致。",
         attachmentEncodingUnreadable: "无法读取文件的字符编码。",
+        modelTemporarilyUnavailable: "该模型暂时无法使用。",
         attachmentAnimatedImage: "不支持动态 GIF，请先转换为静态图片。",
         attachmentImageInvalid: "图片已损坏或格式不受支持。",
         attachmentPdfInvalid: "PDF 已损坏或无法读取。",

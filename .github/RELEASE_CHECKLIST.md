@@ -92,6 +92,12 @@ Date / timezone:    ____________________
 - [ ] `npm run check:auto-rollout-readiness`
 - [ ] `npm run check:usage-bucket-range`
 - [ ] `npm run check:memory-extraction-eval`
+- [ ] `npm run check:memory-eval-freeze` — the eval dataset's freeze is
+      three constant edits, and a frozen dataset is what a decision-grade
+      verdict is cited against. Fails only when
+      `MEMORY_EVAL_DATASET_FROZEN` claims a freeze the conditions of
+      docs/ops/memory-extraction-eval-dataset.md §7.1 do not support;
+      while the dataset is still being authored it reports progress
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`

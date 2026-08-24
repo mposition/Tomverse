@@ -65,9 +65,12 @@
 /**
  * Why an in-flight chat request was aborted.
  *
- * Recorded per request rather than in a module-level boolean: three panels
- * stream at once in a comparison, and a shared flag would let one panel's
- * timeout describe another panel's stop.
+ * Recorded per run rather than in a module-level boolean: three panels stream
+ * at once in a comparison, and a shared flag would let one panel's timeout
+ * describe another panel's stop. It is stored beside the `AbortController`
+ * itself, in `lib/chatStreamRuntime.ts`, because that is where the controller
+ * lives -- a panel that remounts adopts the run that is already going, and it
+ * has to adopt the reason with it.
  */
 export type ChatAbortCause =
   /** The per-panel "stop this response" button. */
@@ -78,8 +81,12 @@ export type ChatAbortCause =
   | "first_response_timeout"
   /** A visible token arrived, then nothing for `idleMs`. */
   | "stream_idle_timeout"
-  /** The panel or shell went away while the request was in flight. */
-  | "component_unmounted";
+  /**
+   * The tab moved into another identity namespace -- signing in, signing out,
+   * switching accounts -- and runs started under the previous one were
+   * dropped (docs/policy/chat-concurrency-and-identity.md §5).
+   */
+  | "identity_released";
 
 export type ChatLivenessPhase = "pre_headers" | "first_response" | "mid_stream";
 
@@ -189,45 +196,6 @@ export const isChatTimeoutErrorCode = (
   code: string
 ): code is ChatTimeoutErrorCode =>
   code === "CHAT_FIRST_RESPONSE_TIMEOUT" || code === "CHAT_STREAM_IDLE_TIMEOUT";
-
-/* -------------------------------------------------------------------------- */
-/* The per-request abort handle                                                */
-/* -------------------------------------------------------------------------- */
-
-export type ChatAbortHandle = {
-  readonly signal: AbortSignal;
-  /** The cause of the first abort, or null while the request is live. */
-  readonly cause: ChatAbortCause | null;
-  readonly aborted: boolean;
-  /**
-   * Aborts once. A second call keeps the first cause: the stop button and the
-   * watchdog can race, and the event that actually ended the request is the
-   * one that got there first.
-   */
-  abort: (cause: ChatAbortCause) => void;
-};
-
-export const createChatAbortHandle = (
-  controller: AbortController = new AbortController()
-): ChatAbortHandle => {
-  let cause: ChatAbortCause | null = null;
-  return {
-    get signal() {
-      return controller.signal;
-    },
-    get cause() {
-      return cause;
-    },
-    get aborted() {
-      return controller.signal.aborted;
-    },
-    abort: (nextCause: ChatAbortCause) => {
-      if (controller.signal.aborted) return;
-      cause = nextCause;
-      controller.abort();
-    },
-  };
-};
 
 /* -------------------------------------------------------------------------- */
 /* The watchdog                                                                */

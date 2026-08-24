@@ -70,20 +70,41 @@ const lifecycleFromRecord = (item: Record<string, unknown>) => {
     : null;
 };
 
-export const isLikelyChatModelId = (provider: AiProvider, modelId: string) => {
+/**
+ * Why an id was not treated as a chat model.
+ *
+ * Two reasons, kept apart because only one of them is a guess.
+ * `non_chat_kind` reads the id's own words -- an embedding model says
+ * `embedding` -- and is as reliable as a name can be. `openai_prefix_heuristic`
+ * is a bet that OpenAI's chat models always start `gpt-`, `chatgpt-` or `o<n>`,
+ * and the day that stops being true the new model is not discovered, not
+ * reported, and nothing says so (.github/audits/model-lifecycle-email-2026-08-22.md §6 candidate 10).
+ *
+ * So the second reason is carried out of the parser instead of vanishing
+ * inside a boolean, and the daily report names what it dropped.
+ */
+export type ChatModelExclusion = "non_chat_kind" | "openai_prefix_heuristic";
+
+export const chatModelExclusion = (
+  provider: AiProvider,
+  modelId: string
+): ChatModelExclusion | null => {
   const id = modelId.toLowerCase();
   if (
     /(embedding|embed-|moderation|whisper|transcri|speech|tts|dall-e|image-gen|imagen|veo|rerank|guard|safeguard)/.test(
       id
     )
   ) {
-    return false;
+    return "non_chat_kind";
   }
-  if (provider === "openai") {
-    return /^(gpt-|chatgpt-|o\d)/.test(id);
+  if (provider === "openai" && !/^(gpt-|chatgpt-|o\d)/.test(id)) {
+    return "openai_prefix_heuristic";
   }
-  return true;
+  return null;
 };
+
+export const isLikelyChatModelId = (provider: AiProvider, modelId: string) =>
+  chatModelExclusion(provider, modelId) === null;
 
 const observationFromItem = (
   provider: AiProvider,
@@ -146,23 +167,58 @@ const observationFromItem = (
   };
 };
 
-export function parseProviderCatalogResponse(
+/**
+ * The models a payload describes, and the ids a guess dropped.
+ *
+ * Two lists because they answer different questions. The first is what the scan
+ * found. The second is what the scan decided not to look at on the strength of
+ * `openai_prefix_heuristic` -- ids that survived every "this is not a chat
+ * model" test and were excluded only by the shape of their name.
+ *
+ * Reported rather than raised: OpenAI always lists a few of these
+ * (`davinci-002` and friends), so an alert would be daily noise. What the
+ * report has to make impossible is the silent case -- a genuinely new chat
+ * model shaped unlike its predecessors, dropped with no trace.
+ */
+export type ProviderCatalogParse = {
+  observations: ProviderCatalogObservation[];
+  heuristicallyExcluded: string[];
+};
+
+export function parseProviderCatalogModels(
   provider: AiProvider,
   payload: unknown
-) {
+): ProviderCatalogParse {
   const direct = Array.isArray(payload) ? payload : null;
   const root = record(payload);
-  if (!root && !direct) return [];
+  if (!root && !direct) return { observations: [], heuristicallyExcluded: [] };
   const source =
     direct ||
     (Array.isArray(root?.data) && root.data) ||
     (Array.isArray(root?.models) && root.models) ||
     [];
+  const heuristicallyExcluded = new Set<string>();
+  const noteExclusion = (candidate: string | null | undefined) => {
+    if (
+      candidate &&
+      chatModelExclusion(provider, candidate) === "openai_prefix_heuristic"
+    ) {
+      heuristicallyExcluded.add(candidate);
+    }
+  };
+
   const observations = source.flatMap((value) => {
     const item = record(value);
     if (!item) return [];
     const observation = observationFromItem(provider, item);
-    if (!observation) return [];
+    if (!observation) {
+      noteExclusion(
+        provider === "google"
+          ? text(item.baseModelId) || text(item.name)?.replace(/^models\//, "")
+          : text(item.id) || text(item.name)
+      );
+      return [];
+    }
     const aliases = Array.isArray(item.aliases)
       ? item.aliases.flatMap((value) => {
           const alias = text(value);
@@ -173,6 +229,7 @@ export function parseProviderCatalogResponse(
             !/^[a-zA-Z0-9._:/-]+$/.test(alias) ||
             !isLikelyChatModelId(provider, alias)
           ) {
+            noteExclusion(alias);
             return [];
           }
           return [
@@ -186,10 +243,24 @@ export function parseProviderCatalogResponse(
       : [];
     return [observation, ...aliases];
   });
-  return Array.from(
-    new Map(observations.map((observation) => [observation.id, observation])).values()
-  );
+  return {
+    observations: Array.from(
+      new Map(
+        observations.map((observation) => [observation.id, observation])
+      ).values()
+    ),
+    heuristicallyExcluded: Array.from(heuristicallyExcluded).sort(),
+  };
 }
+
+/**
+ * The observations alone, for callers that do not report coverage.
+ * Kept so the parser's existing shape is still available unchanged.
+ */
+export const parseProviderCatalogResponse = (
+  provider: AiProvider,
+  payload: unknown
+) => parseProviderCatalogModels(provider, payload).observations;
 
 export const catalogNextCursor = (provider: AiProvider, payload: unknown) => {
   const root = record(payload);

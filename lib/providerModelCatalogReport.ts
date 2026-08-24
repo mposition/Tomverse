@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { AiProvider } from "@/lib/models";
 import { appUrl } from "@/lib/accountEmails";
 import { OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
@@ -16,20 +17,43 @@ import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReco
 import { prisma } from "@/lib/prisma";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 
+/**
+ * Display names for the operator report.
+ *
+ * Deliberately not shared with the admin panel's or the marketing page's map:
+ * this one names the product line an operator is scanning (`Google Gemini`,
+ * `Moonshot Kimi`, `Zhipu GLM`) where those name the company. Three surfaces,
+ * three sets of words, one type.
+ *
+ * `Record<AiProvider, string>` rather than a bare literal with a `|| provider`
+ * fallback, which is how `minimax` came to print as `minimax` in every report
+ * for as long as the provider has existed (.github/audits/model-lifecycle-email-2026-08-22.md ML-05). The other three maps were
+ * already typed this way and none of them lost a provider. A missing entry is
+ * now a compile error rather than a raw key in front of a person.
+ */
+const PROVIDER_REPORT_NAMES: Readonly<Record<AiProvider, string>> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google Gemini",
+  groq: "Groq",
+  xai: "xAI",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  moonshot: "Moonshot Kimi",
+  minimax: "MiniMax",
+  qwen: "Qwen",
+  zhipu: "Zhipu GLM",
+  perplexity: "Perplexity",
+};
+
+/**
+ * A provider string arrives from a stored row as well as from the live scan, so
+ * it is typed loosely and checked here. An id no longer in `AI_PROVIDERS` --
+ * a provider removed after its rows were written -- prints as itself rather
+ * than throwing inside a report.
+ */
 const providerName = (provider: string) =>
-  ({
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-    google: "Google Gemini",
-    groq: "Groq",
-    xai: "xAI",
-    deepseek: "DeepSeek",
-    mistral: "Mistral",
-    moonshot: "Moonshot Kimi",
-    qwen: "Qwen",
-    zhipu: "Zhipu GLM",
-    perplexity: "Perplexity",
-  })[provider] || provider;
+  PROVIDER_REPORT_NAMES[provider as AiProvider] ?? provider;
 
 const code = (value: string) => `\`${value.replace(/`/g, "")}\``;
 
@@ -270,12 +294,30 @@ const reportPayload = (input: {
       errorCode: result.errorCode ?? null,
       modelCount: result.status === "checked" ? result.discovered : null,
       lastSuccessLabel: lastSuccess ? input.dayLabel(lastSuccess) : null,
-      // Named in the report rather than left to be inferred: Perplexity's API
-      // does not list models, so its row is not evidence of anything (ML-07).
+      // What this row does not prove, said in the row rather than left to be
+      // inferred. All three are the same kind of fact: the scan looked at less
+      // than the provider has, and only the row can say so.
       note:
-        result.provider === "perplexity"
-          ? "retirement cannot be proven here"
-          : null,
+        [
+          // Perplexity's API describes Agent API models, so absence from it is
+          // not evidence of a retirement (.github/audits/model-lifecycle-email-2026-08-22.md ML-07).
+          result.provider === "perplexity"
+            ? "retirement cannot be proven here"
+            : null,
+          // The page budget ran out. Everything past the cut is unseen, and
+          // unseen is how a retirement looks.
+          result.truncated ? "page limit reached; the list is incomplete" : null,
+          // Dropped by the OpenAI chat-prefix guess rather than by anything the
+          // id says about itself. Named so a chat model shaped unlike its
+          // predecessors is visible instead of silently absent (.github/audits/model-lifecycle-email-2026-08-22.md §6 candidate 10).
+          result.heuristicallyExcluded.length
+            ? `not scanned, name did not match the chat prefix: ${result.heuristicallyExcluded
+                .slice(0, 6)
+                .join(", ")}${result.heuristicallyExcluded.length > 6 ? ` (+${result.heuristicallyExcluded.length - 6} more)` : ""}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
     };
   }),
   workItems: input.workItems.map((item) => ({

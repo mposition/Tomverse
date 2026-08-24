@@ -211,6 +211,17 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
   },
   {
+    key: "campaign_wave_scheduler",
+    name: "Campaign wave scheduler",
+    // Same cron as the drain it feeds: a wave it starts becomes delivery rows,
+    // and those are drained on this tick anyway. Its own key because the two
+    // fail for different reasons -- this one for an approval that no longer
+    // covers the copy, that one for a provider that will not take the message.
+    cron: "creditReconciliation",
+    schedule: scheduleSentence("creditReconciliation", "via credit reconciliation cron"),
+    maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
+  },
+  {
     key: "infrastructure_threshold_monitor",
     name: "Infrastructure threshold monitor",
     cron: "creditReconciliation",

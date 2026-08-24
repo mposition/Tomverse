@@ -311,6 +311,10 @@ adjudicator는 양쪽과 다른 사람이어야 하고, 확정 근거를 케이�
 
 ### 7.2 동결 방법
 
+0. `npm run check:memory-eval-freeze`가 §7.1의 일곱 조건을 **전부 `OK`로**
+   보고할 것. 이 검사는 PR Fast Gate에도 있고, 아래 상수가 `true`인데 조건이
+   미달이면 build를 실패시킵니다 — 조건 목록과 상수가 어긋난 채로 병합될 수
+   없습니다.
 1. `lib/memoryExtractionEvalFixtures.ts`의 `MEMORY_EVAL_DATASET_VERSION`을 올림
 2. `MEMORY_EVAL_DATASET_PURPOSE`를 `decision`으로
 3. `MEMORY_EVAL_DATASET_FROZEN`을 `true`로
@@ -393,20 +397,33 @@ pool로만 취급합니다. 에이전트는 이 표를 스스로 기입할 수 �
 한 사람이 책임자와 검수자를 겸합니다. §6.2가 허용하는 구조이며, 그때도
 **시료를 만든 주체(AI)와 승인한 주체(사람)의 분리는 유지**됩니다.
 
-## 동결 기록 (사람이 기입)
+## 동결 기록
+
+> **관측 칸은 에이전트가 채웠고, 판정 칸은 비어 있습니다.** AGENTS.md
+> 「기록을 채우는 경계는 관측과 판정입니다」에 따라, 기계가 세거나 계산한 값
+> (버전·digest·케이스 수·비율)은 에이전트가 적고 **서명·참여자·동결일은
+> 운영자가 확인한 뒤 채웁니다.** 아래 값은 모두 실행 결과에서 나온 것이며
+> 지어낸 값은 없습니다. 재현 방법은 각 줄에 적었습니다.
 
 | 항목 | 값 |
 |---|---|
-| datasetVersion | |
-| dataset digest | |
-| 동결 커밋 SHA | |
-| cell별 케이스 수 (8개) | |
-| 작성 기간 | |
-| 참여자 (작성/검수/adjudication) | |
-| critical negative 전건 검수 완료 | |
-| adjudication 건수·불일치율 | |
-| 동결 승인자 서명 | |
-| 동결일 | |
+| datasetVersion | `mem-eval-seed-11` |
+| dataset digest | `a3b0c18e3c66d31f3eed7d8f7e7acbb94bee9146fff153ac89f91e6151e07a67` (`npm run eval:memory-extraction`의 smoke 실행이 출력) |
+| 동결 커밋 SHA | *(배포 후 `GET /api/build-info`에서 읽어 기입)* |
+| cell별 케이스 수 (8개) | `durable_facts` ko 200 · en 200, `assistant_only` ko 125 · en 125, `sensitive_secrets` ko 125 · en 125, `injection_directives` ko 125 · en 125 — 합계 1,150 |
+| 작성 기간 | 초안·검수 2026-08-23, 동결 2026-08-24 |
+| 초안 생성자 | `ai-draft:claude-code/claude/2026-08-23` — 28개 batch 기록 전부 동일 |
+| 참여자 (작성/검수/adjudication) | *(사람이 기입)* |
+| critical negative 검수 범위 (`docs/ops/memory-extraction-eval-dataset.md` §6.3 [개정 · 2026-08-23]) | 여섯 cell 각각 45건 판정 / 125건 = 36% — 각 cell 첫 batch 전건 25건 + 이후 두 batch 20% 표본 각 10건. 범주 ①은 cell당 40건 / 200건 = 20% |
+| draft disagreement 비율 (`docs/ops/memory-extraction-eval-dataset.md` §6.4) | **0%** — 판정된 350건 중 반려 0건 (`npm run report:memory-eval-batches`) |
+| adjudication 건수·불일치율 | **0건** — 검수자가 한 명이므로 발생하지 않습니다 (`docs/ops/memory-extraction-eval-dataset.md` §6.4) |
+| 동결 승인자 서명 | *(사람이 기입)* |
+| 동결일 | *(사람이 기입)* |
+
+`critical negative 전건 검수 완료`였던 줄을 `검수 범위`로 고쳤습니다. 2026-08-23
+개정 전의 문구이며, 전건이 아닌 표본으로 넘어간 뒤에는 「완료」에 적을 수 있는
+참인 값이 없습니다 — 빈칸으로 두면 미달로 읽히고, `완료`라고 적으면 하지 않은
+일을 적는 것이 됩니다.
 
 ## 승인 기록 — 이 지침 자체 (사람이 기입)
 

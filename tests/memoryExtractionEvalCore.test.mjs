@@ -306,13 +306,14 @@ test("the shipped fixtures are synthetic, distinct and cover every cell", () => 
         "every cell should now be at or above its floor"
     );
     // And that half is not the whole. `adequacy.decisionGrade` speaks only to
-    // sample size; the harness additionally requires a live run and a frozen
-    // dataset before it will call a run decision-grade. The dataset is not
-    // frozen, so nothing here may be cited as one.
+    // sample size; the harness additionally requires a live run against a
+    // frozen dataset. The dataset was frozen on 2026-08-24
+    // (docs/ops/memory-extraction-eval-dataset.md §7.2), so the remaining
+    // condition is the run itself -- no verdict exists yet.
     assert.equal(
         MEMORY_EVAL_DATASET_FROZEN,
-        false,
-        "an unfrozen dataset cannot back a decision-grade claim"
+        true,
+        "a decision-grade claim needs the frozen dataset it was computed on"
     );
 });
 

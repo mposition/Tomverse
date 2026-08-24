@@ -285,6 +285,7 @@ export const de = {
         attachmentTypeError: "Dieser Dateityp wird nicht unterstützt.",
         attachmentTypeMismatch: "Die Dateiendung stimmt nicht mit dem tatsächlichen Format überein.",
         attachmentEncodingUnreadable: "Die Zeichenkodierung der Datei konnte nicht gelesen werden.",
+        modelTemporarilyUnavailable: "Dieses Modell ist vorübergehend nicht verfügbar.",
         attachmentAnimatedImage: "Animierte GIFs werden nicht unterstützt. Wandeln Sie die Datei in ein Standbild um.",
         attachmentImageInvalid: "Das Bild ist beschädigt oder liegt in einem nicht unterstützten Format vor.",
         attachmentPdfInvalid: "Das PDF ist beschädigt oder nicht lesbar.",
