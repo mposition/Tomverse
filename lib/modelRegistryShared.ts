@@ -443,13 +443,55 @@ export const OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS = [
 ] as const;
 
 /**
+ * The other narrow scope: carry the reservation figure onto an existing row,
+ * and nothing else.
+ *
+ * One model, and it needed its own scope rather than a place in either list
+ * above. `gpt-5-5-thinking`'s output cap already agrees (8,192 on both sides),
+ * so the cap-only scope has nothing to carry for it; what its row can be
+ * stranded on is the *reservation*, where the premium class fallback says
+ * 4,096 and the profile says 6,144.
+ *
+ * Moving a reservation figure is normally an entitlement decision this
+ * codebase refuses to make in a sweep -- it is what a turn holds against a
+ * user's credits and against the provider budget. It is admissible here for
+ * one reason: **the number is already approved and written down.**
+ * docs/policy/credit-and-cost-limits.md section 4 fixes the output reservation
+ * per model at "premium 4,096, reasoning 6,144 (maxOutputTokens 8,192)", and
+ * `gpt-5-5-thinking` is premium-reasoning. So 6,144 is the decided figure and
+ * a row holding 4,096 is holding the premium class fallback -- the same
+ * pre-profile seed fossil the cap-only scope exists for, on the other column.
+ * This carries a decision that was already made; it does not make one.
+ *
+ * Not to be read as licence for the p90 basis generally.
+ * docs/policy/default-model-luna-migration.md section 3.1 governs *moving* a
+ * model onto `p90_output_tokens` and requires nine conditions plus a new
+ * pricingVersion. This model's profile already carries that basis, set when
+ * the section 4 figures were, and nothing here changes it. A model still on
+ * `conservative_default` does not get an entry here.
+ */
+export const RESERVATION_ONLY_RECONCILIATION_MODEL_IDS = [
+  "gpt-5-5-thinking", // premium fallback 4,096 -> approved 6,144; cap agrees
+] as const;
+
+/**
+ * Both narrow scopes together. What unites them is the negative: neither
+ * writes `creditWeight`, a price column, or any lifecycle field, so neither
+ * can be treated as "the catalogue is authority on this row" by a reader.
+ */
+export const NARROW_SCOPE_RECONCILIATION_MODEL_IDS = [
+  ...OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  ...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
+] as const;
+
+/**
  * Every model an application restart will correct, whatever the scope. Read
  * by the drift reports to tell "will be fixed on the next boot" apart from
  * "nothing will ever fix this".
  */
 export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   ...FULL_METADATA_RECONCILIATION_MODEL_IDS,
-  ...OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  ...NARROW_SCOPE_RECONCILIATION_MODEL_IDS,
 ] as const;
 
 const reconciliationModelIds = new Set<string>(
@@ -458,6 +500,10 @@ const reconciliationModelIds = new Set<string>(
 
 const outputCapOnlyModelIds = new Set<string>(
   OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS
+);
+
+const reservationOnlyModelIds = new Set<string>(
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS
 );
 
 export const staticModelRegistryReconciliationRows = () =>
@@ -469,6 +515,16 @@ export const staticModelRegistryReconciliationRows = () =>
       // already handled by reconcileStaticWithdrawals().
       if (outputCapOnlyModelIds.has(row.id)) {
         return { id: row.id, data: { maxOutputTokens: row.maxOutputTokens } };
+      }
+      // Likewise one field -- see RESERVATION_ONLY_RECONCILIATION_MODEL_IDS.
+      // The cap is deliberately absent even though writing it would be a
+      // no-op today: this entry exists to carry one approved number, and a
+      // second field here would be a second decision nobody made.
+      if (reservationOnlyModelIds.has(row.id)) {
+        return {
+          id: row.id,
+          data: { reservationOutputTokens: row.reservationOutputTokens },
+        };
       }
       const lifecycle = row.enabled
         ? {}

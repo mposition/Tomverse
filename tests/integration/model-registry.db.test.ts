@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma";
 import {
   OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
   STATIC_RUNTIME_MODELS,
 } from "../../lib/modelRegistryShared";
 import {
@@ -532,6 +533,71 @@ test("every cap-only model has its stranded cap lifted by the bootstrap", async 
       },
     });
   }
+});
+
+// The reservation-only scope, end to end. This is the one narrow entry that
+// moves a money figure, so what it must NOT touch is worth pinning as firmly
+// as what it does: docs/policy/credit-and-cost-limits.md section 4 approved
+// 6,144 for reasoning models, and nothing else about the row was approved
+// with it.
+test("the reservation-only scope raises the held figure and leaves the cap and credits alone", async () => {
+  assert.deepEqual(
+    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
+    ["gpt-5-5-thinking"]
+  );
+  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "gpt-5-5-thinking" },
+  });
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "gpt-5-5-thinking" },
+    data: {
+      // The premium class fallback a pre-2026-08-01 seed left behind.
+      reservationOutputTokens: 4_096,
+      // Deliberately wrong, and deliberately left wrong: this scope carries
+      // the reservation only, so an operator's cap survives it.
+      maxOutputTokens: 7_000,
+      creditWeight: 31,
+      inputUsdPerMillionTokens: 11.5,
+      updatedByEmail: "ops@tomverse.app",
+    },
+  });
+
+  await reconcileStaticCatalogMetadata();
+
+  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "gpt-5-5-thinking" },
+  });
+  assert.equal(row.reservationOutputTokens, 6_144);
+  assert.equal(
+    row.maxOutputTokens,
+    7_000,
+    "the cap is outside this scope, so even a wrong one is left for a human"
+  );
+  assert.equal(row.creditWeight, 31);
+  assert.equal(Number(row.inputUsdPerMillionTokens), 11.5);
+  assert.equal(row.updatedByEmail, "ops@tomverse.app");
+  assert.equal(row.enabled, before.enabled);
+  assert.equal(row.status, before.status);
+
+  // Idempotent.
+  await reconcileStaticCatalogMetadata();
+  const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
+    where: { id: "gpt-5-5-thinking" },
+  });
+  assert.equal(again.reservationOutputTokens, 6_144);
+  assert.equal(again.creditWeight, 31);
+
+  await prisma.modelRegistryEntry.update({
+    where: { id: "gpt-5-5-thinking" },
+    data: {
+      maxOutputTokens: before.maxOutputTokens,
+      reservationOutputTokens: before.reservationOutputTokens,
+      creditWeight: before.creditWeight,
+      inputUsdPerMillionTokens: before.inputUsdPerMillionTokens,
+      updatedByEmail: before.updatedByEmail,
+    },
+  });
 });
 
 test("stores limited availability and operational notes in the registry", async () => {

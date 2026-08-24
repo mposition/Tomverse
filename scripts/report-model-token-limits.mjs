@@ -17,6 +17,7 @@
 
 import {
   OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
   STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
   STATIC_RUNTIME_MODELS,
 } from "../lib/modelRegistryShared.ts";
@@ -87,6 +88,7 @@ const entries = compareTokenLimits({
   storedRows,
   reconciledModelIds: STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
   outputCapOnlyModelIds: OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  reservationOnlyModelIds: RESERVATION_ONLY_RECONCILIATION_MODEL_IDS,
 });
 const findings = tokenLimitFindings(entries);
 
@@ -106,7 +108,7 @@ if (json) {
   if (findings.strandedRequestCaps.length > 0) {
     console.log(
       `\n  ${findings.strandedRequestCaps.length} stranded request cap(s). The row caps output where the\n` +
-        "  profile does not, no operator is named on it, and no reconciliation covers the model --\n" +
+        "  profile does not, no operator is named on it, and no reconciliation covers that column --\n" +
         "  so nothing will resolve this on its own. This is the shape claude-sonnet-5 was in when\n" +
         "  trace 2e4327a9 returned an empty answer: reasoning filled the cap before any text.\n" +
         "  Fixing one means adding it to STATIC_CATALOG_RECONCILIATION_MODEL_IDS, not editing here."
@@ -162,7 +164,7 @@ if (json) {
   if (findings.unreconciledReservations.length > 0) {
     console.log(
       `\n  ${findings.unreconciledReservations.length} reservation figure(s) that no reconciliation covers.\n` +
-        "  A cap-only entry lifts the output cap and deliberately leaves the reservation alone, so\n" +
+        "  A narrow reconciliation entry writes one column and deliberately leaves the other, so\n" +
         "  these do not clear on a restart. That is the intended state until someone decides them."
     );
   }
