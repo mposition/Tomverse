@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi } from "./support/app-fixtures";
+import {
+  createQaXlsxBuffer,
+  mockAttachmentUpload,
+  mockAuthenticatedApi,
+} from "./support/app-fixtures";
 import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
@@ -987,6 +991,180 @@ for (const shell of SHELLS) {
       await expect(page.getByTestId("chat-textarea")).toBeDisabled();
 
       await finishControlledStream(page, "cmp-alpha");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    });
+  });
+}
+
+// ===========================================================================
+// STREAM-STATE-004: the attachment on a turn survives the switch too.
+//
+// An attachment is part of the *user* turn, not the answer, and the user turn
+// is the one thing on screen the panel wrote itself rather than received. When
+// the panel's state lived in the component, leaving mid-answer discarded the
+// question and its files along with the reply -- and the file is the half the
+// user cannot retype.
+//
+// It is also the half with no server fallback during the run. The answer is
+// persisted when the stream finishes, but the *card* the user is looking at is
+// rendered from the optimistic turn this panel made at send time; nothing puts
+// it back if that turn is dropped. So this is not "the same test with a file
+// attached": it is the case where losing the runtime key loses something the
+// user supplied.
+//
+// Two states, because they end differently: a run that is still going when the
+// user comes back, and a run that failed while they were away. The second is
+// where `errorHadAttachments` lives -- the flag behind the "retry without the
+// files" offer -- and it has to come back with the turn or the offer silently
+// becomes an ordinary retry that will fail the same way.
+// ===========================================================================
+
+const ATTACHED_FILE = "명단.xlsx";
+const ATTACHED_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+async function openAttachmentWorkspace(
+  page: Page,
+  shell: Shell,
+  stub: ChatModelStubSpec
+) {
+  await mockAuthenticatedApi(page, {
+    selectedModels: [DEFAULT_MODEL],
+    messages: [
+      { id: "seed-user-att", role: "user", content: "Attachment seed." },
+    ],
+    extraConversations: [
+      {
+        id: OTHER_CONVERSATION,
+        title: "Second QA conversation",
+        selectedModels: [DEFAULT_MODEL],
+        messages: [
+          { id: "seed-user-att-2", role: "user", content: "Second conversation seed." },
+          {
+            id: "seed-assistant-att-2",
+            role: "assistant",
+            content: OTHER_ANSWER,
+            modelId: DEFAULT_MODEL,
+          },
+        ],
+      },
+    ],
+  });
+  await mockAttachmentUpload(page);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.setViewportSize(shell.viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(
+    page.getByTestId(
+      shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
+    )
+  ).toBeVisible();
+  await installChatModelStub(page, stub);
+}
+
+/** Attaches one file through the composer's own tools menu. */
+async function attachSpreadsheet(page: Page) {
+  await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+  await page.getByTestId("tools-attach-row").click();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("attach-local-file-row").click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: ATTACHED_FILE,
+    mimeType: ATTACHED_TYPE,
+    buffer: createQaXlsxBuffer(),
+  });
+  // The tray reports the upload finished before the send may carry its id.
+  await expect(page.getByTestId("attachment-complete")).toBeVisible();
+}
+
+/** The user turn carrying the attached file, wherever it is on screen. */
+const attachedTurn = (page: Page) =>
+  page.locator('[data-message-role="user"]').filter({ hasText: ATTACHED_FILE });
+
+for (const shell of SHELLS) {
+  test.describe(`STREAM-STATE-004 (${shell.name}): an attached turn is per conversation`, () => {
+    test("the attachment card comes back with the partial answer, once", async ({
+      page,
+    }) => {
+      await openAttachmentWorkspace(page, shell, {
+        [DEFAULT_MODEL]: { kind: "controlled", channel: "att-stream" },
+      });
+
+      await attachSpreadsheet(page);
+      await submitComposer(page, "What is in this file?", shell.viewport.width);
+      await waitForControlledStream(page, "att-stream");
+      await pushControlledChunk(page, "att-stream", PARTIAL_ONE);
+      await expect(attachedTurn(page)).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      // The file belongs to the question that was asked in the other
+      // conversation, and questions do not follow the user either.
+      await expect(attachedTurn(page)).toHaveCount(0);
+
+      await pushControlledChunk(page, "att-stream", PARTIAL_TWO);
+      await switchToConversation(page, shell, "qa-conversation");
+
+      // The question, its file and everything received so far -- and exactly
+      // one copy of the turn, not the optimistic one plus a re-read one.
+      await expect(attachedTurn(page)).toHaveCount(1);
+      await expect(
+        page.getByText(`${PARTIAL_ONE}${PARTIAL_TWO}`, { exact: false })
+      ).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+
+      await finishControlledStream(page, "att-stream");
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+      await expect(attachedTurn(page)).toHaveCount(1);
+    });
+
+    test("an attachment failure survives the switch with its retry-without-files offer", async ({
+      page,
+    }) => {
+      // A request-level refusal, not a broken stream. That is how an
+      // unreadable attachment actually arrives -- the server refuses the send
+      // and names the reason -- and it is the only shape that produces the
+      // attachment-specific offer: `classifyError` asks for
+      // `errorHadAttachments` *and* a file-parsing message, so a stream that
+      // dies mid-answer is a generic failure no matter what was attached.
+      await openAttachmentWorkspace(page, shell, {
+        [DEFAULT_MODEL]: {
+          kind: "error",
+          status: 400,
+          code: "ATTACHMENT_UNSUPPORTED",
+          message: "Unsupported attachment format.",
+        },
+      });
+
+      await attachSpreadsheet(page);
+      await submitComposer(page, "What is in this file?", shell.viewport.width);
+
+      // The failure settles this conversation's run: the turn keeps its file,
+      // the reason is on screen, and the composer comes back.
+      await expect(attachedTurn(page)).toHaveCount(1);
+      const retryWithoutFiles = page.getByRole("button", {
+        name: "첨부파일 없이 다시 시도",
+      });
+      await expect(retryWithoutFiles).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+
+      await switchToConversation(page, shell, OTHER_CONVERSATION);
+      await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
+      // Neither the failed turn nor its file belongs to this conversation.
+      await expect(attachedTurn(page)).toHaveCount(0);
+      await expect(retryWithoutFiles).toHaveCount(0);
+
+      await switchToConversation(page, shell, "qa-conversation");
+
+      // All three come back together. `errorHadAttachments` is the one that
+      // has no second source: lose it and the offer silently becomes an
+      // ordinary retry, which would resend the same file and fail the same way.
+      await expect(attachedTurn(page)).toHaveCount(1);
+      await expect(retryWithoutFiles).toBeVisible();
       await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     });
   });
