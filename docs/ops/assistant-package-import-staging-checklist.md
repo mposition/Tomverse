@@ -20,8 +20,13 @@
 상태입니다. 실행 결과는 `assistant-package-import-staging-verification-records/`
 에 **날짜와 전체 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-24a` — 항목이 바뀌면 이 값을 올리고, 실행
+- **template revision**: `2026-08-24b` — 항목이 바뀌면 이 값을 올리고, 실행
   기록은 자기가 어느 revision으로 실행됐는지 적습니다.
+
+  `2026-08-24a` → `2026-08-24b`: §B-1이 script를 "개수로만" 나타난다고 적어
+  두었지만, `docs/policy/assistant-package-import.md` §7 표의 `scripts/**` 행은
+  **개수와 경로**를 표시하라고
+  정합니다. 낡은 기대대로 읽으면 정책이 요구한 동작을 `fail`로 적게 됩니다.
 
   `2026-08-24` → `2026-08-24a`: §A-2·A-3이 기대하는 오류 코드가 틀려 있었고
   (`ASSISTANT_PROFILES_DISABLED`, 실제는 `ASSISTANT_PACKAGE_IMPORT_DISABLED`),
@@ -184,9 +189,12 @@ flag가 꺼진 상태에서 먼저 봅니다. 켜고 나면 다시 만들기 어
 
 시료: `P1-skill-with-script.zip`
 
-- [ ] package 안의 `.sh`가 **실행되지 않는다.** 손실 보고서에 개수로만
-      나타난다
-- [ ] 손실 보고서가 script의 **내용을 보여주지 않는다**
+- [ ] package 안의 `.sh`가 **실행되지 않는다.** 손실 보고서에 **개수와
+      경로로만** 나타난다 — 경로 표시는 `docs/policy/assistant-package-import.md` §7
+      표의 `scripts/**` 행이 요구하는 동작입니다("읽지도 inflate하지도 않고 개수·경로만 표시").
+      경로가 보인다는 이유로 `fail`로 적지 않습니다
+- [ ] 손실 보고서가 script의 **내용을 보여주지 않는다** — 이것이 위 항목과
+      다른 점이고, 이 구획이 보는 것입니다
 - [ ] 지시문 안의 URL이 **방문되지 않는다.** staging 네트워크 로그에 그
       호스트로 나가는 요청이 없다
 - [ ] 그 URL이 **host로만** 공개된다 — 경로·query·자격증명이 화면에 없다
