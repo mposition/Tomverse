@@ -99,7 +99,15 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 128,000 completion tokens ("This model supports at most 128000
+      completion tokens"). This is an output ceiling for maxOutputTokens,
+      NOT a context window -- the code path validating max_tokens does not
+      know the window, and no provider named one. No sourceUrl, so the row
+      stays unverified.
 
   - modelId: "gpt-5-5-thinking"
     apiModel: "gpt-5.5"
@@ -115,7 +123,15 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 128,000 completion tokens ("This model supports at most 128000
+      completion tokens"). Same upstream model as gpt-5-5, asked once. This
+      is an output ceiling for maxOutputTokens, NOT a context window -- the
+      code path validating max_tokens does not know the window, and no
+      provider named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "gpt-5-4-mini"
     apiModel: "gpt-5.4-mini"
@@ -352,6 +368,9 @@ models:
       2026-08-23 (npm run report:model-context-window-evidence, staging).
       apiModel is a floating alias; see mistral-large-3.
 
+      The 2026-08-24 max-output probe learned nothing here: Mistral accepted
+      a cap of 1,000,000,000 rather than refusing it, so it does not
+      validate that field up front. It answered the prompt instead.
   - modelId: "mistral-large-3"
     apiModel: "mistral-large-latest"
     provider: mistral
@@ -374,6 +393,9 @@ models:
       the alias pointed at that day -- aliasOrLatest will be true when this is
       verified, and the verification expires sooner for it.
 
+      The 2026-08-24 max-output probe learned nothing here: Mistral accepted
+      a cap of 1,000,000,000 rather than refusing it, so it does not
+      validate that field up front. It answered the prompt instead.
   - modelId: "mistral-medium-3-1"
     apiModel: "mistral-medium-3-5"
     provider: mistral
@@ -412,6 +434,9 @@ models:
       contextWindowTokens -- but it carries no sourceUrl, so this row stays
       unverified until someone confirms it against Moonshot's documentation.
 
+      The 2026-08-24 max-output probe learned nothing here: Moonshot
+      accepted a cap of 1,000,000,000 rather than refusing it, so it does
+      not validate that field up front. It answered the prompt instead.
   - modelId: "kimi-k3"
     apiModel: "kimi-k3"
     provider: moonshot
@@ -465,7 +490,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 131,072 ("Range of max_tokens should be [1, 131072]"). This is
+      an output ceiling for maxOutputTokens, NOT a context window -- the
+      code path validating max_tokens does not know the window, and no
+      provider named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "qwen3.7-plus"
     apiModel: "qwen3.7-plus"
@@ -481,7 +513,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 131,072 ("Range of max_tokens should be [1, 131072]"). This is
+      an output ceiling for maxOutputTokens, NOT a context window -- the
+      code path validating max_tokens does not know the window, and no
+      provider named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "qwen3.6-flash"
     apiModel: "qwen3.6-flash"
@@ -497,7 +536,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 65,536 ("Range of max_tokens should be [1, 65536]"). This is an
+      output ceiling for maxOutputTokens, NOT a context window -- the code
+      path validating max_tokens does not know the window, and no provider
+      named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "glm-5.2"
     apiModel: "glm-5.2"
@@ -513,7 +559,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 131,072 ("限制数值范围[1,131072]"). This is an output ceiling for
+      maxOutputTokens, NOT a context window -- the code path validating
+      max_tokens does not know the window, and no provider named one. No
+      sourceUrl, so the row stays unverified.
 
   - modelId: "perplexity/sonar"
     apiModel: "sonar"
@@ -529,7 +582,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 128,000 ("max_tokens must be at most 128000"). This is an
+      output ceiling for maxOutputTokens, NOT a context window -- the code
+      path validating max_tokens does not know the window, and no provider
+      named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "perplexity/sonar-pro"
     apiModel: "sonar-pro"
@@ -545,7 +605,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 128,000 ("max_tokens must be at most 128000"). This is an
+      output ceiling for maxOutputTokens, NOT a context window -- the code
+      path validating max_tokens does not know the window, and no provider
+      named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "perplexity/sonar-reasoning-pro"
     apiModel: "sonar-reasoning-pro"
@@ -561,7 +628,14 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 128,000 ("max_tokens must be at most 128000"). This is an
+      output ceiling for maxOutputTokens, NOT a context window -- the code
+      path validating max_tokens does not know the window, and no provider
+      named one. No sourceUrl, so the row stays unverified.
 
   - modelId: "perplexity/sonar-deep-research"
     apiModel: "sonar-deep-research"
@@ -577,4 +651,11 @@ models:
     verifiedAt: null
     verifiedBy: null
     catalogueDeclaredTokens: null
-    notes: ""
+    notes: >-
+      Probe observation, not a verification: npm run
+      report:model-max-output-probe -- --send against staging on 2026-08-24
+      asked for 1,000,000,000 completion tokens and the provider refused,
+      naming 128,000 ("Input should be less than or equal to 128000"). This
+      is an output ceiling for maxOutputTokens, NOT a context window -- the
+      code path validating max_tokens does not know the window, and no
+      provider named one. No sourceUrl, so the row stays unverified.
