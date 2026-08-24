@@ -17,6 +17,7 @@ import {
   expansionRefusal,
   nextBatchPlan,
   readExpansionSpec,
+  type ExpansionRefusalReason,
   type ExpansionResult,
 } from "@/lib/emailAudienceExpansionCore";
 
@@ -97,6 +98,18 @@ const nextCandidates = async (input: {
   });
 
 /**
+ * What one expansion pass returns.
+ *
+ * Written out rather than inferred: TypeScript normalises a union of two object
+ * literals by giving each member the other's keys as `?: undefined`, so
+ * `"refused" in result` then narrows to `Detail | undefined` and every caller
+ * has to re-check something the function already decided.
+ */
+export type ExpansionOutcome =
+  | ExpansionResult
+  | { refused: ExpansionRefusalReason };
+
+/**
  * Expands one event into delivery rows.
  *
  * Returns what this pass did rather than what the event now totals: a resumed
@@ -110,7 +123,7 @@ export async function expandEmailEvent(input: {
   batchSize?: number;
   /** Wall-clock budget, so a pass inside a cron cannot run past its tick. */
   timeBudgetMs?: number;
-}): Promise<ExpansionResult | { refused: string }> {
+}): Promise<ExpansionOutcome> {
   const event = await prisma.emailEvent.findUnique({
     where: { id: input.eventId },
     select: {

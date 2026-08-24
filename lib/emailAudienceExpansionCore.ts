@@ -35,6 +35,13 @@ export type ExpansionRefusal =
   | "previously_failed";
 
 /**
+ * Why a pass produced nothing, including the one reason the pure rule cannot
+ * see: an event id that names no row. Kept a closed list rather than `string`
+ * so a caller switching on it is told when a new reason appears.
+ */
+export type ExpansionRefusalReason = ExpansionRefusal | "not_found";
+
+/**
  * Whether a pass may run at all.
  *
  * `expanding` is allowed through: it is what a pass that died halfway leaves

@@ -4,7 +4,10 @@ import type { Prisma } from "@prisma/client";
 
 import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
-import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
+import {
+  expandEmailEvent,
+  type ExpansionOutcome,
+} from "@/lib/emailAudienceExpansion";
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -159,6 +162,17 @@ export const campaignSendRefusal = async (
  * The refusal is checked here rather than only at draft time because the thing
  * it guards against -- copy changing after approval -- happens between the two.
  */
+/**
+ * What starting or resuming a wave returns.
+ *
+ * Named for the same reason `ExpansionOutcome` is: an inferred union of object
+ * literals carries the other member's keys as `?: undefined`, and a caller
+ * asking `"refused" in run` then gets a refusal that might not be there.
+ */
+export type CampaignWaveRun =
+  | { refused: CampaignRunRefusalDetail }
+  | { waveId: string; expansion: ExpansionOutcome };
+
 export const runCampaignWave = async (input: {
   campaignId: string;
   kind: WaveKind;
@@ -167,7 +181,7 @@ export const runCampaignWave = async (input: {
   dryRun?: boolean;
   batchSize?: number;
   timeBudgetMs?: number;
-}) => {
+}): Promise<CampaignWaveRun> => {
   const refusal = await campaignSendRefusal(input.campaignId);
   if (refusal) {
     if (refusal.refusal === "content_changed") {
