@@ -1667,7 +1667,7 @@ export const en = {
         noticeNotFound: "This assistant no longer exists. Open it again from the list.",
         noticeRateLimited: "Too many requests in a row. Wait a moment and try again.",
         noticeImportInProgress: "An import is being reviewed for this assistant. Finish or cancel it before saving here.",
-        noticeSignedOut: "You have been signed out, so nothing was saved. Sign in again and your edits are still on this screen.",
+        noticeSignedOut: "You are not signed in, so nothing was saved. Sign in and your edits are still on this screen.",
         fileStatus: {
             pending: "waiting",
             processing: "processing",

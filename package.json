@@ -90,6 +90,7 @@
     "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
     "check:staging-verification-records": "node scripts/check-staging-verification-records.mjs",
     "new:staging-verification-record": "node scripts/new-staging-verification-record.mjs",
+    "make:assistant-package-staging-fixtures": "node --import tsx scripts/make-assistant-package-staging-fixtures.mjs",
     "check:locale-translation": "node --import tsx scripts/check-locale-translation.mjs",
     "check:api-cache-control": "node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs",
     "check:enum-constraints": "node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs",
