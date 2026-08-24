@@ -11,7 +11,7 @@ export const en = {
         dismiss: "Dismiss notification",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Account & plan",
         accountTooltipGuest: "Log in or sign up",
         guestMenuTitle: "Guest mode",
@@ -813,7 +813,7 @@ export const en = {
         close: "Close",
         paymentSuccessfulEyebrow: "Payment successful",
         paymentSuccessfulTitle: "Your payment was completed successfully.",
-        paymentSuccessfulWelcome: "Welcome to the Tomverse Review family. You can now use broader allowances and advanced features in your {plan} workspace.",
+        paymentSuccessfulWelcome: "Welcome to the Tomverse family. You can now use broader allowances and advanced features in your {plan} workspace.",
         testerPassActivatedEyebrow: "Tester Pass activated",
         testerPassActivatedTitle: "Your 60-day Founding Tester Pass is active.",
         testerPassActivatedWelcome: "You can now use the {plan} workspace as a Founding Tester.",
