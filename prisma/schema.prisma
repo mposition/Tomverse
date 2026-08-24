@@ -93,6 +93,8 @@ model User {
   assistantProfileVersions           AssistantProfileVersion[]
   assistantKnowledgeFiles            AssistantKnowledgeFile[]
   assistantKnowledgeChunks           AssistantKnowledgeChunk[]
+  assistantProfileImports            AssistantProfileImport[]
+  assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
   emailPreferences                   EmailPreference[]
   consentRecords                     ConsentRecord[]
   emailDeliveries                    EmailDelivery[]
@@ -2930,6 +2932,7 @@ model AssistantProfile {
 
   versions       AssistantProfileVersion[] @relation("AssistantProfileVersions")
   knowledgeFiles AssistantKnowledgeFile[]  @relation("AssistantProfileKnowledge")
+  imports        AssistantProfileImport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3004,6 +3007,11 @@ model AssistantProfileVersion {
 
   conversations Conversation[]
 
+  /// The imports that published this snapshot. At most one today; a list
+  /// because Prisma requires the back side of an optional relation to be one,
+  /// and because `SetNull` means the import outlives the version it names.
+  imports AssistantProfileImport[]
+
   @@unique([profileId, revision])
   @@index([profileId, createdAt])
   @@index([userId, createdAt])
@@ -3062,6 +3070,18 @@ model AssistantKnowledgeFile {
   /// What the extractor produced, before chunking. Recorded so a file that
   /// yielded nothing is distinguishable from one nobody has processed.
   extractedCharacters Int?
+
+  /// Policy: docs/policy/assistant-package-import.md §10.
+  /// The same text measured in UTF-8 bytes, which is the unit the account
+  /// ceiling is written in. The extractor already computed this to decide
+  /// whether to accept the file; until now it threw the number away and the
+  /// running total was summed from `extractedCharacters` instead, so a
+  /// Korean document counted about a third of what it costs. NULL on every
+  /// row written before this column existed -- those keep being counted the
+  /// old way rather than being re-extracted, which is a decision recorded in
+  /// the policy rather than a gap.
+  extractedBytes Int?
+
   chunkCount          Int  @default(0)
 
   /// Which chunking and tokenising algorithm produced this file's chunks.
@@ -3071,12 +3091,32 @@ model AssistantKnowledgeFile {
   updatedAt   DateTime  @updatedAt
   processedAt DateTime?
 
+  /// Policy: docs/policy/assistant-package-import.md §5.
+  /// The import holding this file as staging. NULL is an ordinary file.
+  ///
+  /// Publishing an import sets this to NULL, and that is what "promotion"
+  /// means: until it happens the ordinary knowledge list, the ordinary
+  /// manifest resolver and therefore the ordinary publish path cannot see the
+  /// file at all. Without it, a file uploaded for an import under review is a
+  /// file another tab can publish.
+  ///
+  /// `Cascade` rather than `Restrict`: `User` cascades into both
+  /// `AssistantProfileImport` and this table with no ordering between them, so
+  /// a restricting edge would abort account deletion. R2 tombstones are the
+  /// application's job on the cancel and expiry paths; this cascade is the
+  /// backstop for the rows.
+  importId String?
+  import   AssistantProfileImport? @relation(fields: [importId], references: [id], onDelete: Cascade)
+
   chunks AssistantKnowledgeChunk[]
 
   @@index([profileId, createdAt])
   @@index([userId, createdAt])
   /// The processing worker's claim query reads exactly this pair.
   @@index([processingStatus, createdAt])
+  /// Cancellation and expiry find this import's files by this column rather
+  /// than by a list somebody remembered to keep.
+  @@index([importId])
 }
 
 /// Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -3116,6 +3156,169 @@ model AssistantKnowledgeChunk {
   @@unique([fileId, ordinal])
   @@index([userId])
   @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "AssistantKnowledgeChunk_searchTerms_gin_idx")
+}
+
+/// Policy: docs/policy/assistant-package-import.md §5, §6.
+/// One attempt to turn an external assistant package into a profile.
+///
+/// The row exists from the moment files start being stored -- step 7 of the
+/// wizard -- and outlives the import itself, because a published profile has
+/// to be able to say where it came from. Everything before step 7 happens in
+/// the browser and leaves nothing here.
+///
+/// Two modes with two different staging holders (§5.2). `create` owns a draft
+/// `AssistantProfile` whose `currentVersionId` is NULL, which the existing
+/// runtime already refuses to start a conversation with; `merge` has no row of
+/// its own and stages into the target profile, which is possible only because
+/// a version's manifest is resolved against the files that profile holds --
+/// so a staged file that no manifest names can sit there without reaching any
+/// answer. `mode` is therefore not a display field: it is the branch the
+/// cancellation and expiry sweeps take, and getting it wrong deletes a profile
+/// somebody else built. Hence the CHECK, and hence the fail-closed
+/// preconditions the sweep re-tests before it deletes anything.
+model AssistantProfileImport {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "create" | "merge" -- allowlist CHECK in the migration.
+  mode String
+
+  /// The profile this import writes to: the draft it created, or the target it
+  /// merges into. One column because neither mode ever moves a file between
+  /// profiles -- the manifest resolver scopes by profile id, so cross-profile
+  /// staging is not expressible.
+  profileId String
+  profile   AssistantProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  /// merge only. The target's revision when the import started, passed to
+  /// `planProfileVersionPublish()` as `expectedRevision` so a profile edited
+  /// in another tab meanwhile is a stale publish rather than a silent
+  /// overwrite. NULL for create.
+  expectedTargetRevision Int?
+
+  /// merge only. A digest of the target's name, icon and description at the
+  /// same moment. Identity is not part of a version snapshot, so it does not
+  /// consume a revision and the number above cannot see it change.
+  expectedTargetIdentityDigest String?
+
+  /// "staging" | "published" -- allowlist CHECK in the migration.
+  status String @default("staging")
+
+  /// What the owner assembled in the wizard: instructions, starters, models,
+  /// policies and which documents to bring. Stored because the container is
+  /// not kept, so resuming an interrupted import has nothing else to read.
+  ///
+  /// Stored is not approved. While `userApprovedAt` is NULL these
+  /// instructions are not the owner's words and reach no prompt.
+  stagingManifest Json?
+
+  /// The digest of `stagingManifest` as it stands, and the digest of what the
+  /// owner actually confirmed. They are two columns because the point is to be
+  /// able to prove afterwards that what was stored is what was shown; the
+  /// waived credential findings bind to the approved one.
+  candidateDigest String?
+  approvedDigest  String?
+  digestVersion   Int?
+
+  /// When a person pressed confirm. Distinct from `serverReceivedAt` on
+  /// purpose: fold them together and "a human approved this" becomes a side
+  /// effect of a server write.
+  userApprovedAt DateTime?
+
+  /* ---------- provenance: what is observed, and what is claimed ---------- */
+
+  /// The server's own clock and the server's own reading of what it did.
+  serverReceivedAt DateTime @default(now())
+  validatorVersion String
+  ingestPath       String
+
+  /// Everything below is the client's or the owner's claim. Nothing decides
+  /// anything from these, and nothing fetches the URL.
+  declaredSourceKind         String?
+  declaredSourceName         String?
+  declaredSourceUrl          String?
+  declaredPreviousProvenance Json?
+
+  /// The revision this import published. NULL while staging.
+  ///
+  /// `SetNull` rather than `Cascade`: if the version disappears by any route,
+  /// the fact that an import happened still has to be true. Cascading would
+  /// delete the provenance along with the thing it explains.
+  versionId String?
+  version   AssistantProfileVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  stagedFiles        AssistantKnowledgeFile[]
+  uploadReservations AssistantKnowledgeUploadReservation[]
+
+  /// The expiry clocks are columns rather than arithmetic over `updatedAt`.
+  /// `@updatedAt` moves on every write, including the background extractor's
+  /// and a failed publish's, so an idle timer read from it would be extended
+  /// by exactly the events that mean nobody is here.
+  createdAt          DateTime @default(now())
+  /// Moved by the owner doing something, and by nothing else.
+  lastUserActivityAt DateTime @default(now())
+  idleExpiresAt      DateTime
+  absoluteExpiresAt  DateTime
+  /// Diagnostics. Never read to decide an expiry.
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([profileId, createdAt])
+  /// The two expiry sweeps read exactly these pairs.
+  @@index([status, idleExpiresAt])
+  @@index([status, absoluteExpiresAt])
+}
+
+/// Policy: docs/policy/assistant-package-import.md §5.
+/// Proof that the server issued an upload key, and what it issued it for.
+///
+/// `knowledgeKey()` is a random UUID, so a key alone says nothing about who
+/// asked for it. Without this row, finalize would have to decide from the
+/// client's own claim whether a stored object is safe to delete -- and the
+/// ordinary finalize path would happily turn an import's key into an ordinary
+/// file, which is the isolation `AssistantKnowledgeFile.importId` exists to
+/// provide, bypassed in one request.
+///
+/// The row's life is short by design: prepare creates it, a successful
+/// finalize deletes it in the same transaction, publish deletes whatever was
+/// never used, and cancellation or account deletion cascades it away. It is
+/// never the lifetime of the stored object -- an object nobody claimed is the
+/// abandoned-upload sweep's, because a key we did not issue must not be
+/// deleted on the strength of a request that names it.
+model AssistantKnowledgeUploadReservation {
+  r2Key String @id
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Required. The only issuer today is the import path, and a nullable column
+  /// would allow a row no cascade reaches. Widening this to ordinary uploads
+  /// is a migration, not an omission.
+  importId String
+  import   AssistantProfileImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  /// Diagnostics. Ownership is decided by `userId` and the import row.
+  profileId String
+
+  /// "pending" | "finalizing" -- allowlist CHECK in the migration.
+  state String @default("pending")
+
+  /// The current claimant's token, NULL while pending. Every state change
+  /// compares against it, so a request that comes back after its claim was
+  /// reclaimed changes nothing.
+  claimToken String?
+
+  /// When the claim was taken. The stale-claim sweep reads only this.
+  finalizingStartedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([importId])
+  @@index([userId, createdAt])
+  /// The stale-claim sweep reads exactly this pair.
+  @@index([state, finalizingStartedAt])
 }
 
 /// A stored object whose row is gone and whose bytes still have to go (§14.2).

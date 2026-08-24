@@ -832,11 +832,41 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         processingStatus: true,
         failureCode: true,
         extractedCharacters: true,
+        // Beside the character count rather than instead of it: the two are
+        // the same text measured two ways, and exporting one without the
+        // other would be an asymmetry nobody could explain.
+        extractedBytes: true,
         chunkCount: true,
         createdAt: true,
         processedAt: true,
       },
       orderBy: [{ profileId: "asc" }, { createdAt: "asc" }],
+      take: EXPORT_ROW_CAP,
+    }),
+
+  assistantProfileImport: (userId) =>
+    prisma.assistantProfileImport.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        profileId: true,
+        mode: true,
+        status: true,
+        // What the person assembled, including for an import they abandoned.
+        // That draft is still their words, which is the whole reason this
+        // table is exported rather than treated as machinery.
+        stagingManifest: true,
+        // Claims, exported as claims. Nothing here was checked and nothing
+        // fetched the address.
+        declaredSourceKind: true,
+        declaredSourceName: true,
+        declaredSourceUrl: true,
+        declaredPreviousProvenance: true,
+        serverReceivedAt: true,
+        userApprovedAt: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
 

@@ -148,9 +148,22 @@ const ENGLISH_STRING_CEILING = {
   // the other four groups are translated ("Donnees", "Balisage", "Code
   // source", "Fichiers compresses"), and German takes all six
   // ("Auszeichnung", "Quellcode") so it did not move.
+  //
+  // +4 fr and +2 de on 2026-08-23 from the package import wizard's step and
+  // field labels. French writes "Format", "Destination", "Description" and
+  // "Instructions" exactly as English does and German writes "Format" and
+  // "Name"; every one of those is the ordinary word in that language, and
+  // choosing a different one to make this number smaller would make the label
+  // worse. The wizard's other hundred-odd strings are translated in all six,
+  // and Korean, Chinese, Spanish and Portuguese share none of them.
+  //
+  // +1 fr from the same wizard's confirmation screen, which labels the list of
+  // files it is about to publish. French writes "Documents" exactly as English
+  // does; the row beside it ("Modeles") and the heading above it are
+  // translated, so this is the word rather than a skipped line.
   zh: 10,
-  fr: 34,
-  de: 27,
+  fr: 39,
+  de: 29,
   es: 18,
   pt: 16,
 };

@@ -568,6 +568,61 @@ Then, by outcome:
   financial fact. The correction needs the same approval any credit adjustment
   needs. Validation waits until the count reaches zero.
 
+### 7.7a Assistant knowledge invariants (post-deploy, owned, time-boxed)
+
+`20260823090000_assistant_package_import` added
+`AssistantKnowledgeFile_extractedCharacters_non_negative_check` as `NOT VALID`,
+for the same reason 7.7's constraints were: from that deploy onward Postgres
+enforces it on every INSERT and UPDATE, and what is deferred is only the check
+against rows that already existed.
+
+The column changed job in that migration. It had been close to a display value;
+it is now a quota input, because a file with no `extractedBytes` — every file
+written before the migration — is counted by its character count instead. A
+negative number there stops being cosmetic and starts granting allowance.
+
+`npm run report:assistant-knowledge-invariants` is that survey. **It is not a
+gate.** It exits 0 whatever it finds, so nothing will fail because this was
+skipped.
+
+```
+Owner:              ____________________
+Due (within 7 days of the deploy): ____________________
+```
+
+Run **from the deployed release SHA**, against production on a read-only role.
+
+- [ ] Production deploy SHA and the timestamp of the run recorded
+- [ ] `AssistantKnowledgeFile_extractedCharacters_non_negative_check` exists and
+      is reported `NOT VALID`
+- [ ] `violationCount` and `readyToValidate` recorded
+
+```
+Deploy SHA:         ____________________
+Ran at (UTC):       ____________________
+violationCount:     ____________________
+readyToValidate:    ____________________
+```
+
+Unlike 7.7, this report prints **no identifiers at all** — it answers with
+counts, because the recommended action for a violating row is not to edit it.
+The four figures above are the whole record, and the report's own output does
+not go into a pull request or an issue either.
+
+Then, by outcome:
+
+- **Zero violations** — add a forward migration that runs
+  `ALTER TABLE "AssistantKnowledgeFile" VALIDATE CONSTRAINT ...`. That is a
+  separate submission and a separate deploy from the one above: `prisma migrate
+  deploy` applies every pending migration in one run, so shipping both together
+  would validate without the survey ever happening. Hand-validating production
+  instead leaves `pg_get_constraintdef()` disagreeing with the migration
+  history, which §7.6 then reports as drift.
+- **Any violations** — **do not edit the rows.** A negative extraction count is
+  a processing result, so the question is what wrote it. Find that first;
+  validation waits until the count reaches zero, and the fix belongs in the
+  extractor rather than in the data.
+
 ### 7.8 Tables nothing removes rows from
 
 `npm run report:unswept-tables` lists every table the application writes and

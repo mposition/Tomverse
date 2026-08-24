@@ -1,0 +1,73 @@
+{
+  "kind": "agent-skill",
+  "name": "webapp-testing",
+  "description": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.",
+  "instructionsLength": 3574,
+  "instructionsHead": "# Web Application Testing\n\nTo test local web applications, w",
+  "modelIds": [],
+  "toolPolicy": {
+    "webSearch": false,
+    "deepResearch": false
+  },
+  "memoryPolicy": {
+    "useAccountMemory": false
+  },
+  "knowledgeCandidates": [
+    {
+      "path": "LICENSE.txt",
+      "name": "LICENSE.txt",
+      "bytes": 11345,
+      "digest": "sha256:bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "scannedAsText": true
+    }
+  ],
+  "losses": [
+    {
+      "kind": "scripts",
+      "count": 4,
+      "items": [
+        "examples/console_logging.py",
+        "examples/element_discovery.py",
+        "examples/static_html_automation.py",
+        "scripts/with_server.py"
+      ]
+    },
+    {
+      "kind": "license_stated",
+      "items": [
+        "Complete terms in LICENSE.txt"
+      ]
+    },
+    {
+      "kind": "icon"
+    },
+    {
+      "kind": "model"
+    }
+  ],
+  "skips": [
+    {
+      "path": "examples/console_logging.py",
+      "reason": "executable_script"
+    },
+    {
+      "path": "examples/element_discovery.py",
+      "reason": "executable_script"
+    },
+    {
+      "path": "examples/static_html_automation.py",
+      "reason": "executable_script"
+    },
+    {
+      "path": "scripts/with_server.py",
+      "reason": "executable_script"
+    }
+  ],
+  "instructionUrls": {
+    "count": 1,
+    "hosts": [
+      "localhost"
+    ]
+  },
+  "secretFindings": []
+}
