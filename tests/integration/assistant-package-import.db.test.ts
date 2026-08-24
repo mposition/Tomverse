@@ -22,6 +22,7 @@ import {
     AssistantProfileError,
     createAssistantProfile,
     publishAssistantProfileVersion,
+    readAssistantProfile,
 } from "@/lib/assistantProfileService";
 import { prisma } from "@/lib/prisma";
 
@@ -202,6 +203,13 @@ test("a staged file is invisible to the ordinary editor", async () => {
 
     const listed = await listKnowledgeFiles(user.id, started.profileId);
     assert.deepEqual(listed, []);
+
+    // Both readers, because the editor screen uses the second one. This test
+    // asserted only the first, and the profile read had no filter at all: a
+    // staged file was drawn in the editor's knowledge list on staging while
+    // its import was still under review.
+    const profile = await readAssistantProfile(user.id, started.profileId);
+    assert.deepEqual(profile.knowledgeFiles, []);
 
     // And the import's own view does see it, so the emptiness above is
     // isolation rather than the file failing to exist.
