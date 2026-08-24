@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/assistant-package-import-staging-checklist.md
-templateRevision: 2026-08-24
+templateRevision: 2026-08-24e
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 가져오기 표면 diff 결과 | |
-| template revision | 2026-08-24 |
+| template revision | 2026-08-24e |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -113,9 +113,13 @@ digest:
 | 발견 사항 | |
 | 후속 티켓 | |
 
-**A · B · C · D · E · G 중 하나라도 `fail`이면 결과는 실패입니다.** 체크리스트의
-"무엇이 flag를 막고, 무엇이 막지 않는가"가 그 이유를 적어 두었습니다. F·H·I는
+**A · B · C · D · E · G-3 중 하나라도 `fail`이면 결과는 실패입니다.** 체크리스트의
+"무엇이 flag를 막고, 무엇이 막지 않는가"가 그 이유를 적어 두었습니다. F·G-2·H·I는
 `미기록`으로 두고 서명해도 되며, 그때는 건너뛴 이유를 위 칸에 적습니다.
+
+**§G-1은 이 회차의 차단이 아니라 production 활성화의 차단입니다.** 여기서
+`n/a`인 것은 면제가 아니라 판정 시점이 옮겨진 것이며, 그 조건은
+`docs/policy/assistant-package-import.md` §12.2.1에 있습니다.
 
 ## 정리 의무
 
