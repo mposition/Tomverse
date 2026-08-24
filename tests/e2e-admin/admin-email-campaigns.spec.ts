@@ -4,6 +4,7 @@ import {
   expect,
   test,
 } from "./support/console";
+import { setAppSettingDirectly } from "./support/database";
 
 /**
  * The campaign console.
@@ -21,6 +22,9 @@ import {
  */
 
 const CAMPAIGN_API = "/api/admin/email-campaigns";
+
+/** The `AppSetting` key the campaign feature lives behind. */
+const CAMPAIGNS_FLAG = "feature.emailCampaignsEnabled";
 
 /** A template key that exists, so `createCampaignDraft` does not reject it. */
 const TEMPLATE_KEY = "model_launch";
@@ -365,6 +369,32 @@ test.describe("Admin Console — email campaigns", () => {
     await expect(
       page.locator('meta[name="robots"][content*="noindex"]').first()
     ).toBeAttached();
+  });
+
+  test("with the feature switched off the console still reads, and refuses to act", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const api = adminApi(page);
+    const campaignId = await draftCampaign(api);
+
+    // Written straight to the row, because no admin API writes this key and
+    // that absence is the decision (EM-05, ADR section 15.2): activation is a
+    // judgement recorded by an operator, not a checkbox. A writer added for
+    // this test's convenience would remove the decision it is testing.
+    await setAppSettingDirectly(CAMPAIGNS_FLAG, "false");
+
+    // Reading still works. An operator who cannot see what the feature already
+    // did cannot tell it apart from broken, and this console is the only place
+    // campaign waves are readable at all.
+    await page.goto("/admin/email-campaigns");
+    await expect(consoleHeading(page)).toHaveText("Email campaigns");
+    await expect(page.getByTestId("admin-campaign-row")).toHaveCount(1);
+
+    // Acting does not.
+    const refused = await api.post(`${CAMPAIGN_API}/${campaignId}/estimate`);
+    expect(refused.status()).toBeGreaterThanOrEqual(400);
   });
 
   test("a support administrator can read the workspace but not write to it", async ({

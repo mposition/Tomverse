@@ -10,6 +10,8 @@ import {
 import { AUDIENCE_DEFINITION_VERSION } from "@/lib/modelRetirementAudienceCore";
 import { summariseRetirementAudience } from "@/lib/modelRetirementAudience";
 import { prisma } from "@/lib/prisma";
+import { EMAIL_CAMPAIGNS_FLAG_KEY } from "@/lib/emailFeatureFlags";
+import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // Measuring the audience instead of typing a number (EM-01 slice 8).
 //
@@ -38,6 +40,9 @@ beforeEach(async () => {
   process.env.EMAIL_AUDIT_HASH_KEY = "test-audit-key";
   process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
+  // Campaigns are off by default (EM-05). This suite is about the campaign
+  // machinery, so it turns the switch on the way an operator would.
+  await setEmailFeatureFlag(EMAIL_CAMPAIGNS_FLAG_KEY, true);
 });
 
 after(async () => {

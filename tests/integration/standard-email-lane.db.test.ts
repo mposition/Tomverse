@@ -10,6 +10,7 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import {
   drainStandardEmailDeliveries,
+  enqueueRefused,
   enqueueStandardEmail,
 } from "@/lib/standardEmailLane";
 import { STANDARD_RETRY_CURVES } from "@/lib/standardEmailRetryCore";
@@ -19,6 +20,7 @@ import {
 } from "@/lib/standardEmailLane";
 import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { decryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto";
+import { enqueuedRow } from "../support/enqueuedEmail";
 
 // The standard lane against a real database.
 //
@@ -83,13 +85,13 @@ test("enqueuing writes an outbox row and sends nothing yet", async () => {
   const user = await someone();
   const fetches = stubFetch([accepted()]);
 
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     language: "ko",
     payload: { name: user.name },
-  });
+  }));
 
   assert.ok(rows);
   assert.equal(fetches.count(), 0, "enqueue must not send");
@@ -105,12 +107,12 @@ test("enqueuing writes an outbox row and sends nothing yet", async () => {
 
 test("the personalisation snapshot is stored encrypted", async () => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: BILLING_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { plan: "Pro", billingInterval: "monthly", periodEnd: null },
-  });
+  }));
 
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
     where: { id: rows!.deliveryId },
@@ -130,12 +132,12 @@ test("the personalisation snapshot is stored encrypted", async () => {
 
 test("a drain sends the message and records what it sent", async () => {
   const user = await someone();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   const fetches = stubFetch([accepted()]);
   const result = await drainStandardEmailDeliveries();
@@ -155,12 +157,12 @@ test("a drain sends the message and records what it sent", async () => {
 
 test("the drain renders from the snapshot, not from live rows", async () => {
   const user = await someone();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: BILLING_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { plan: "Pro", billingInterval: "monthly", periodEnd: null },
-  });
+  }));
 
   // The account upgrades between the enqueue and the drain. The receipt that
   // goes out is still the one that was owed -- re-reading the account would
@@ -177,12 +179,12 @@ test("the drain renders from the snapshot, not from live rows", async () => {
 
 test("a message that failed to send is tried again later, not lost", async () => {
   const user = await someone();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   stubFetch([refused(503)]);
   const first = await drainStandardEmailDeliveries();
@@ -216,12 +218,12 @@ test("a message that failed to send is tried again later, not lost", async () =>
 
 test("a row not yet due is left alone", async () => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
   await prisma.emailDelivery.update({
     where: { id: rows!.deliveryId },
     data: { nextAttemptAt: new Date(Date.now() + 60_000) },
@@ -236,12 +238,12 @@ test("a row not yet due is left alone", async () => {
 
 test("a permanent refusal stops immediately instead of burning the curve", async () => {
   const user = await someone();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   const fetches = stubFetch([refused(400), accepted()]);
   const result = await drainStandardEmailDeliveries();
@@ -256,12 +258,12 @@ test("a permanent refusal stops immediately instead of burning the curve", async
 
 test("a message is abandoned once its curve runs out, and says so", async () => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   // Already at the end of the transactional curve.
   await prisma.emailDelivery.update({
@@ -280,12 +282,12 @@ test("a message is abandoned once its curve runs out, and says so", async () => 
 
 test("the legal curve outlasts the transactional one on the same failure", async () => {
   const user = await someone();
-  const legal = await enqueueStandardEmail({
+  const legal = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { scheduledFor: new Date().toISOString() },
-  });
+  }));
 
   // At the point a transactional message would already be abandoned, a
   // deletion notice is still trying: it is the notice that an account and
@@ -305,12 +307,12 @@ test("the legal curve outlasts the transactional one on the same failure", async
 
 test("an unconfigured provider waits rather than failing the message", async () => {
   const user = await someone();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   delete process.env.RESEND_API_KEY;
   const fetches = stubFetch([accepted()]);
@@ -328,12 +330,12 @@ test("an unconfigured provider waits rather than failing the message", async () 
 
 test("a claimed row is not taken twice", async () => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   // Another worker holds it, recently.
   await prisma.emailDelivery.update({
@@ -350,12 +352,12 @@ test("a claimed row is not taken twice", async () => {
 
 test("a claim left behind by a killed worker is reclaimed", async () => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   await prisma.emailDelivery.update({
     where: { id: rows!.deliveryId },
@@ -373,14 +375,18 @@ test("a claim left behind by a killed worker is reclaimed", async () => {
 test("an account with no address enqueues nothing and does not throw", async () => {
   const user = await prisma.user.create({ data: { name: "No address" } });
 
-  const rows = await enqueueStandardEmail({
+  const result = await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: user.name },
   });
 
-  assert.equal(rows, null);
+  // Named, not a bare `null` (EM-05). The old return said nothing was written
+  // and nothing about why, so a caller could not tell an account with no
+  // address from a feature that had been switched off.
+  assert.ok(enqueueRefused(result));
+  assert.equal(result.refused, "no_address");
   assert.equal(await prisma.emailDelivery.count(), 0);
 });
 
@@ -390,13 +396,13 @@ test("the enqueue joins the caller's transaction", async () => {
   let failed = false;
   try {
     await prisma.$transaction(async (tx) => {
-      await enqueueStandardEmail({
+      enqueuedRow(await enqueueStandardEmail({
         tx,
         templateKey: ACCOUNT_WELCOME_TEMPLATE,
         emailAddress: user.email,
         userId: user.id,
         payload: { name: "Someone" },
-      });
+      }));
       throw new Error("the thing being announced failed to commit");
     });
   } catch {
@@ -433,18 +439,18 @@ test("a legal abandonment is its own critical incident, not a line in a total", 
   // reading that cannot tell whether anyone has to be woken -- and §9.4 gives
   // legal an answer the others do not have.
   const user = await someone();
-  const legal = await enqueueStandardEmail({
+  const legal = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { scheduledFor: new Date().toISOString() },
-  });
-  const transactional = await enqueueStandardEmail({
+  }));
+  const transactional = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     payload: { name: "Someone" },
-  });
+  }));
 
   await prisma.emailDelivery.updateMany({
     where: { id: legal!.deliveryId },
@@ -502,13 +508,13 @@ const queueDepth = async (count: number, agedMs = 0) => {
   const user = await someone();
   const ids: string[] = [];
   for (let index = 0; index < count; index += 1) {
-    const rows = await enqueueStandardEmail({
+    const rows = enqueuedRow(await enqueueStandardEmail({
       templateKey: ACCOUNT_WELCOME_TEMPLATE,
       emailAddress: `queued-${index}-${randomUUID()}@example.com`,
       userId: user.id,
       language: "en",
       payload: { name: "Someone" },
-    });
+    }));
     ids.push(rows!.deliveryId);
   }
   if (agedMs > 0) {
