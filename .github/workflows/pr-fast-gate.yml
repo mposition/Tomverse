@@ -237,6 +237,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:memory-extraction-eval
 
+      # docs/ops/memory-extraction-eval-dataset.md §7.1: freezing the eval
+      # dataset is a three-line edit, and a frozen dataset is what a verdict is
+      # cited against. This fails the build if that constant is true while a
+      # freeze condition is not -- an unfrozen dataset is only reported on.
+      - name: Memory eval freeze conditions
+        timeout-minutes: 5
+        run: npm run check:memory-eval-freeze
+
       # Tomverse Chat release thresholds live only in the canonical registry
       # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
       # gate IDs and may not redefine numbers. A registry with duplicate IDs,
