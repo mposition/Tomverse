@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
 /**
@@ -425,6 +425,228 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
         return !dialogClosed;
       });
       expect(dialogEscapeIsBubblePhase).toBe(true);
+    }
+  );
+});
+/**
+ * What sits at a control's own centre point, as a sentence a failure can be
+ * read from.
+ *
+ * `toBeVisible()` cannot answer this. A modal that is painted *underneath* a
+ * full-screen overlay is still rendered, still has a non-empty box, and still
+ * passes every visibility check Playwright makes -- while being both invisible
+ * to the eye and unreachable by a pointer. `elementFromPoint` asks the browser
+ * the question the user is actually asking: if I click here, what do I hit?
+ */
+const hitTargetAtCentre = (locator: Locator) =>
+  locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      Math.round(rect.left + rect.width / 2),
+      Math.round(rect.top + rect.height / 2)
+    );
+    if (!hit) return "<nothing>";
+    if (hit === node || node.contains(hit)) return "self";
+    const labelled = hit.closest("[data-testid]");
+    const testId = labelled?.getAttribute("data-testid");
+    return `covered by ${testId ? `[data-testid="${testId}"]` : hit.tagName.toLowerCase()} :: ${String(
+      hit.className
+    ).slice(0, 120)}`;
+  });
+
+/**
+ * Opens the account User Settings dialog from /chat on either shell.
+ *
+ * Reports whether the mobile drawer was used to get there, because that drawer
+ * is itself a modal surface holding its own body scroll lock -- so on that
+ * shell the page is still locked after User Settings closes, and it is the
+ * drawer, not this modal stack, that is holding it.
+ */
+async function openUserSettings(page: Page) {
+  const viaMobileDrawer = (page.viewportSize()?.width ?? 0) < 768;
+  const accountTrigger = page.getByTestId("account-menu-trigger");
+  if (viaMobileDrawer) {
+    await page.getByRole("button", { name: "Open chat menu" }).click();
+  }
+  await expect(accountTrigger).toBeVisible();
+  await accountTrigger.click();
+  await page
+    .getByTestId("account-menu")
+    .getByTestId("account-settings")
+    .click();
+  const settings = page.getByRole("dialog", { name: "User Settings" });
+  await expect(settings).toBeVisible();
+  return { settings, viaMobileDrawer };
+}
+
+/** Closes whatever surface is still holding the lock and asserts it released. */
+async function expectScrollLockReleased(page: Page, viaMobileDrawer: boolean) {
+  if (viaMobileDrawer) {
+    expect(await bodyScrollLocked(page)).toBe(true);
+    await page.keyboard.press("Escape");
+  }
+  await expect.poll(() => bodyScrollLocked(page)).toBe(false);
+}
+
+test.describe("credit pack purchase opened from account settings", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAuthenticatedApi(page);
+    // Registered after the shared fixtures so this more specific handler wins:
+    // the modal will not render a single pack card without it, and a modal with
+    // nothing in it cannot be hit-tested against what covers it.
+    await page.route("**/api/billing/credit-packs**", (route) => {
+      if (route.request().method() !== "GET") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ url: "https://checkout.example.test/session" }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          plan: "Free",
+          market: { country: "US", currency: "USD" },
+          creditDebt: { credits: 0 },
+          analyticsContext: {
+            currentPlan: "free",
+            planCreditsRemaining: 300,
+            addonCreditsRemaining: 0,
+          },
+          packs: [
+            {
+              id: "starter_500",
+              name: "Starter Credit Pack",
+              credits: 500,
+              priceMinor: 499,
+              priceCents: 499,
+              currency: "USD",
+              validityDays: 365,
+            },
+          ],
+        }),
+      });
+    });
+  });
+
+  test(
+    "the purchase modal is the topmost hit target above User Settings",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      // The defect: this modal's overlay sat at z-[120] while the User Settings
+      // overlay it opens from sits at z-[130] (and that dialog's own nested
+      // dialogs at z-[140]). The purchase modal mounted, reported `open`, and
+      // passed `toBeVisible()` -- painted underneath the settings overlay, so
+      // nothing was on screen and no click reached it. Only a hit test at the
+      // control's own centre can tell the two apart.
+      await page.goto("/chat?lang=en");
+      const { settings, viaMobileDrawer } = await openUserSettings(page);
+
+      await settings.getByTestId("settings-tab-plan").click();
+      const trigger = settings.getByTestId("credit-pack-purchase-trigger");
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+
+      const purchase = page.getByTestId("credit-pack-modal");
+      await expect(purchase).toBeVisible();
+      // Requirement 2 and 4: settings stays open underneath, and the purchase
+      // modal is portalled to `document.body` rather than nested inside the
+      // settings panel (which would clip it against `overflow-hidden`).
+      await expect(settings).toBeVisible();
+      expect(
+        await purchase.evaluate((node) => node.closest('[role="dialog"][aria-labelledby="user-settings-title"]') === null)
+      ).toBe(true);
+
+      // The assertion the old z-index fails: at its own centre, the purchase
+      // modal is what the browser would hand a click to.
+      expect(await hitTargetAtCentre(purchase)).toBe("self");
+      await expect
+        .poll(() => hitTargetAtCentre(page.getByTestId("credit-pack-modal-close")))
+        .toBe("self");
+
+      // ...and the settings overlay underneath is genuinely covered, so the
+      // check above cannot pass because both happen to be reachable.
+      const closeIsAbovePanel = await page.evaluate(() => {
+        const close = document.querySelector<HTMLElement>(
+          '[data-testid="credit-pack-modal-close"]'
+        );
+        const settingsPanel = document.querySelector<HTMLElement>(
+          '[role="dialog"][aria-labelledby="user-settings-title"]'
+        );
+        if (!close || !settingsPanel) return false;
+        const rect = close.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          Math.round(rect.left + rect.width / 2),
+          Math.round(rect.top + rect.height / 2)
+        );
+        return hit !== null && !settingsPanel.contains(hit);
+      });
+      expect(closeIsAbovePanel).toBe(true);
+
+      // Focus is inside the purchase modal, on its close button.
+      await expect.poll(() => activeTestId(page)).toBe("credit-pack-modal-close");
+      expect(await bodyScrollLocked(page)).toBe(true);
+
+      // A real click, not `force`: Playwright's own actionability check would
+      // time out against an obscured control, so this is a second, independent
+      // reading of the same fact.
+      await page.getByTestId("credit-pack-modal-close").click();
+      await expect(purchase).toBeHidden();
+
+      // Requirement 2, 7 and 8: settings survived, focus came back to the
+      // trigger, and the scroll lock the settings dialog owns is still held.
+      await expect(settings).toBeVisible();
+      await expect(trigger).toBeFocused();
+      expect(await bodyScrollLocked(page)).toBe(true);
+
+      await page.keyboard.press("Escape");
+      await expect(settings).toBeHidden();
+      await expectScrollLockReleased(page, viaMobileDrawer);
+    }
+  );
+
+  test(
+    "Escape closes only the purchase modal and leaves User Settings open",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await page.goto("/chat?lang=en");
+      const { settings, viaMobileDrawer } = await openUserSettings(page);
+
+      await settings.getByTestId("settings-tab-plan").click();
+      const trigger = settings.getByTestId("credit-pack-purchase-trigger");
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+
+      const purchase = page.getByTestId("credit-pack-modal");
+      await expect(purchase).toBeVisible();
+      await expect.poll(() => hitTargetAtCentre(purchase)).toBe("self");
+      await expect
+        .poll(() => purchase.evaluate((node) => node.contains(document.activeElement)))
+        .toBe(true);
+
+      // Tab stays inside the topmost dialog rather than walking the settings
+      // panel underneath it.
+      for (let step = 0; step < 10; step += 1) {
+        await page.keyboard.press("Tab");
+        expect(
+          await purchase.evaluate((node) => node.contains(document.activeElement)),
+          `focus escaped the purchase modal after ${step + 1} tabs`
+        ).toBe(true);
+      }
+
+      await page.keyboard.press("Escape");
+      await expect(purchase).toBeHidden();
+      await expect(settings).toBeVisible();
+      await expect(trigger).toBeFocused();
+      // Requirement 10: the lock belongs to whichever modal is still open.
+      expect(await bodyScrollLocked(page)).toBe(true);
+
+      // The settings dialog is still the one holding the keys, and closing it
+      // is what finally releases the page.
+      await page.keyboard.press("Escape");
+      await expect(settings).toBeHidden();
+      await expectScrollLockReleased(page, viaMobileDrawer);
     }
   );
 });
