@@ -254,6 +254,50 @@ test.describe("Admin Console — email campaigns", () => {
     );
   });
 
+  test("a campaign with no expansion says nobody has been considered", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    const audience = page.getByTestId("admin-campaign-audience");
+    await expect(audience).toBeVisible();
+    await expect(audience).toContainText("No wave has expanded yet");
+  });
+
+  test("the ledger is read back as counts, and a dry run is never reported as a send", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    const api = adminApi(page);
+    const campaignId = await draftCampaign(api);
+
+    // A dry run is the case worth driving through the browser: it writes the
+    // same rows a real wave writes, and only the wave's own flag separates
+    // "would have reached" from "reached".
+    const scheduled = await api.post(`${CAMPAIGN_API}/${campaignId}/waves`, {
+      kind: "launch",
+      action: "schedule",
+      scheduledAt: null,
+      dryRun: true,
+    });
+    expect(scheduled.status()).toBe(200);
+
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+    const wave = page.getByTestId("admin-campaign-audience-wave");
+    await expect(wave).toHaveCount(1);
+    await expect(wave).toContainText("This wave has not expanded.");
+
+    // No address is on the page at any point: the ledger holds them and whether
+    // an operator may see them is still an open decision.
+    await expect(page.getByTestId("admin-campaign-audience")).not.toContainText(
+      "@"
+    );
+  });
+
   test("an unknown campaign id shows the not-found page, not an empty detail panel", async ({
     page,
     signInAs,

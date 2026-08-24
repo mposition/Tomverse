@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~6차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42 · §43
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~7차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42 · §43 · §44
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -3286,3 +3286,57 @@ ensure하므로, `lib/emailTemplateRegistry.ts`의 경합이 매번 재현됐습
 
 **초안 작성 UI는 만들지 않았습니다.** 위에 적은 이유이며, audience spec의
 모양이 하나(`model_retirement` cohort)를 넘어 늘어나면 다시 볼 일입니다.
+
+## 44. EM-01 7차 구현 기록 — 확장 원장 읽기 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminEmailCampaigns.ts` | `waveAudienceBreakdown()` |
+| `app/api/admin/email-campaigns/[campaignId]/route.ts` | 상세 응답에 `audience` |
+| `components/admin/AdminCampaignDetailPanel.tsx` | wave별 원장 구획 |
+| `tests/integration/campaign-audience-readback.db.test.ts` | 11건, 새 파일 |
+| `tests/e2e-admin/admin-email-campaigns.spec.ts` | 2건 추가(총 12건) |
+
+**3차가 쓴 것을 아무도 읽지 못했습니다.** `EmailCampaignRecipient`를 읽는 곳은
+expander(재개용), transition gate의 count 하나, 계정 데이터 내보내기 셋뿐이고
+**운영자가 열 수 있는 화면은 없었습니다.** 3차가 제외 사유를 기록한 이유 자체가
+그것을 검토하기 위해서였는데 볼 곳이 없었고, **dry run은 "누구에게 갔을
+것인가"에 답하는 것이 유일한 일인데 그 답을 아무도 읽을 수 없었습니다.**
+
+이는 6차가 고친 것과 같은 모양입니다 — 쓰이고 읽히지 않는 데이터.
+12조건의 `dry_run_counted`가 "아무도 보지 않은 숫자에게 약속하게 된다"고
+말하면서 볼 방법을 주지 않았던 것도 같은 구멍입니다.
+
+**`excludedReason IS NULL`을 "발송됨"이라고 쓰지 않습니다.** dry run은
+`EmailDelivery`를 `status: "skipped"` · `skipReason: "dry_run"`으로 쓰므로,
+원장에서 그 열은 **"delivery 행이 쓰였음"**입니다. "sent"라고 이름 붙인 열은
+예행을 발송으로 보고하는 것이고, 예행이 절대 오해받아서는 안 되는 단 하나가
+그것입니다. 화면은 wave의 `dryRun`을 보고 문장을 바꿉니다.
+
+**0인 사유도 전부 보여 줍니다.** 발동하지 않은 사유를 생략한 내역은 그 사유를
+묻지 않은 것처럼 읽히고, "아무도 suppress되지 않았다"는 부재에서 추론할 것이
+아니라 적혀 있어야 하는 답입니다.
+
+**cohort는 제외와 따로 셉니다.** 제외된 사람도 audience에 있던 사람입니다 —
+cohort는 expander가 왜 그를 봤는지, 제외는 왜 그에게 쓰지 않았는지입니다.
+쓰인 사람만 세면 audience가 실제로 일치한 것보다 작아 보입니다.
+
+**`malformed`를 결과 대신이 아니라 결과와 함께 보고합니다.** 읽기에 대한
+사실이지 제외 사유가 아니며, malformed인 사람도 발송 대상일 수 있습니다.
+3차가 "보고하되 다시 쓰지 않는다"고 정한 값이 이제 로그가 아니라 화면에
+있습니다.
+
+**주소는 한 개도 싣지 않습니다 — 숫자만입니다.** 모든 행이 주소를 들고 있고,
+campaign 화면에서 운영자가 주소를 볼 수 있는지는 `/admin/email-delivery`의
+**D10(§21)과 같은 미결 질문**입니다. 개인 목록을 만드는 것이 곧 그 결정을
+내리는 일이므로 만들지 않았습니다. E2E가 이 구획에 `@`가 없음을 검사합니다.
+
+**도달 불가능한 상태를 단언하지 않았습니다.** breakdown에는 목록에 없는 사유를
+만나도 합계가 맞도록 하는 분기가 있지만, 그 분기는 DB CHECK 때문에 오늘 DB를
+통해서는 도달할 수 없습니다. 테스트는 분기가 아니라 **CHECK가 그 행을
+거부한다**는 실제 보증을 고정합니다.
+
+### 44.1 남은 것
+
+**초안 작성 UI는 여전히 없습니다**(§43.2). **D5·D10도 그대로 결정 대기**입니다.
+개인 단위 원장 열람은 D10이 정해진 뒤에 다시 봅니다.
