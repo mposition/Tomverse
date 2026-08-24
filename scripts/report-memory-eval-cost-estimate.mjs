@@ -40,6 +40,7 @@ import {
 import { toExtractionPromptInput } from "../lib/memoryExtractionPrompt.ts";
 import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
+import { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS } from "../lib/memoryExtractionWorker.ts";
 import { getModel } from "../lib/models.ts";
 
 const argValue = (name, fallback) => {
@@ -120,15 +121,17 @@ const costFor = (cases, outputTokens) => {
 };
 
 /**
- * The harness's per-call output ceiling, read from the same profile it reads.
+ * The per-call output ceiling, read from the constant both the product and
+ * the harness send.
  *
- * It used to be a literal 4,096 here and in the harness, kept in step by a
- * test. That number was the model's `reservationOutputTokens` -- entitlement,
- * not capability -- and using it as a cap is how a reasoning model returns
- * empty answers. Both sides now read `maxOutputTokens`, so there is one
- * source and nothing to keep in step.
+ * It was briefly the model's `maxOutputTokens` -- its full capability -- on
+ * the reasoning that a reservation must not be used as a cap. That was the
+ * wrong reading of the right rule: 4,096 here is not
+ * `reservationOutputTokens`, it is `memoryExtractionWorker`'s deliberate
+ * ceiling on one chunk's answer, and pricing anything else would price a
+ * request nobody makes.
  */
-const MAX_OUTPUT_TOKENS = pricing.maxOutputTokens;
+const MAX_OUTPUT_TOKENS = MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS;
 
 const worstPerRun = costFor(floorTotal, MAX_OUTPUT_TOKENS);
 const assumedPerRun = costFor(floorTotal, ASSUMED_OUTPUT_TOKENS);
@@ -161,19 +164,12 @@ line("at that assumption, all runs", usd(assumedPerRun * runs));
 line("per +1,000 output tokens/answer, all runs", usd(perThousandOutputPerRun * runs));
 line("if every answer hit the cap, all runs", usd(worstPerRun * runs));
 
-// The worst case stopped being the number to budget from when the cap became
-// the model's real capability. Quoting it would name a figure nobody is going
-// to approve for a run whose realistic cost is two orders of magnitude
-// smaller -- and would hide which control actually binds.
 console.log(
-    `\nThe output cap does not bound a run: at ${MAX_OUTPUT_TOKENS.toLocaleString("en-US")} tokens per call the\n` +
-        "last line above is the ceiling's absence, not a budget. What bounds a run is\n" +
-        "--max-cost-usd, narrowed from the approved programme budget: the harness stops\n" +
-        "the moment accrued spend reaches it.\n\n" +
-        "A run stopped that way is truncated, and a truncated run is not\n" +
-        "decision-grade. So set the cap above the assumed figure with room for the\n" +
-        "output side being wrong, and below anything that would empty the budget.\n" +
-        "The first live run that reports usage turns the assumption into a number."
+    `\nSet the ceiling from the worst case, not the assumption: ${usd(worstPerRun * runs)}.\n` +
+        "A run that behaves cannot exceed it, and a run that does not is exactly what a\n" +
+        "ceiling is for. A run stopped by that ceiling is truncated, and a truncated run\n" +
+        "is not decision-grade -- so the worst case is the number to approve, not the\n" +
+        "number to fear."
 );
 
 console.log(

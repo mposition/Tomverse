@@ -279,3 +279,81 @@ test("a negative stored streak is read as zero, not as a negative streak", () =>
   );
   assert.equal(stickyStateAfterRoutedTurn("m", -1).routerChallengerTurns, 0);
 });
+
+/* ------------------------------------------------- the staging drill hole */
+
+/*
+  `lib/autoDrillOverride.ts` exists to break one circularity: a fallback drill
+  needs a routed turn, routing needs readiness, and the readiness register is
+  static code with no environment dimension. Its four locks are tested where
+  they are decided (`tests/autoDrillOverride.test.mjs`); what these pin is that
+  the decision reaches the function that actually routes.
+
+  It did not. `app/api/chat/route.ts` consulted the cohort once with the
+  override -- logging that a turn had been overridden -- and this function
+  consulted it again without, refusing on the very gate the override exists to
+  pass. The drill could not route anything, and the record said it had.
+*/
+
+const pending = {
+  ready: false,
+  outstanding: ["shadow_report"],
+  problems: [],
+};
+
+test("an outstanding gate still refuses when no drill override is given", () => {
+  const selection = selectAutoModel(input({ readiness: pending }));
+  assert.equal(selection.routed, false);
+  assert.equal(selection.reason, "cohort_refused");
+});
+
+test("a permitted drill override routes the turn and marks the decision", () => {
+  const selection = selectAutoModel(
+    input({ readiness: pending, drillOverride: true })
+  );
+  assert.equal(selection.routed, true);
+  // The marker is what keeps a drill-routed turn from being read later as one
+  // that qualified.
+  assert.equal(selection.cohort.drillOverride, "staging_drill_override");
+});
+
+test("an ordinary ready turn carries no override marker", () => {
+  const selection = selectAutoModel(input({ drillOverride: true }));
+  assert.equal(selection.routed, true);
+  assert.equal(selection.cohort.drillOverride, undefined);
+});
+
+/*
+  The override buys readiness and nothing else, which is also why the route
+  logs it only after the selection has actually routed: passing it does not
+  make routing happen, so a log placed on the cohort alone claimed an
+  overridden routing decision for turns that were refused for reasons having
+  nothing to do with readiness.
+*/
+test("the override does not carry a turn past any other refusal", () => {
+  for (const [reason, overrides] of [
+    ["product_not_chat", { productKey: "review" }],
+    ["conversation_is_manual", { conversation: autoConversation({ selectionMode: "manual" }) }],
+    ["no_conversation", { conversation: null }],
+    ["attachments_unmeasurable", { attachmentsUnmeasurable: true }],
+  ]) {
+    const selection = selectAutoModel(
+      input({ readiness: pending, drillOverride: true, ...overrides })
+    );
+    assert.equal(selection.routed, false, `${reason} routed anyway`);
+    assert.equal(selection.reason, reason);
+  }
+});
+
+test("the kill switch still outranks a permitted override", () => {
+  const selection = selectAutoModel(
+    input({
+      readiness: pending,
+      drillOverride: true,
+      cohortConfig: { ...cohortConfig, killSwitch: true },
+    })
+  );
+  assert.equal(selection.routed, false);
+  assert.equal(selection.reason, "cohort_refused");
+  assert.equal(selection.cohort.reason, "kill_switch");
+});

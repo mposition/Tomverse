@@ -13,7 +13,7 @@ export const de = {
         dismiss: "Benachrichtigung schließen",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Konto & Plan",
         accountTooltipGuest: "Anmelden oder registrieren",
         guestMenuTitle: "Gastmodus",
@@ -446,6 +446,7 @@ export const de = {
         artifactTypeCode: "{ext}-Quelldatei",
         artifactTypeArchive: "ZIP-Archiv",
         artifactDownload: "Herunterladen",
+        artifactPreviewAlt: "Vorschau von {filename}",
         artifactReadyLabel: "{filename} herunterladen, {type}, {size}",
         artifactFailedLabel: "{type} {filename} konnte nicht erstellt werden",
         artifactBlockedLabel: "Melden Sie sich an, um eine {type} zu erstellen",
