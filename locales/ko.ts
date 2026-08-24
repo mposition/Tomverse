@@ -127,6 +127,9 @@ export const ko = {
         imageGenerationBackToChat: "채팅으로 돌아가기",
         toolsImageGeneration: "이미지 생성",
         toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
+        imageIntentSuggestionTitle: "이미지 생성으로 만들어 볼까요?",
+        imageIntentSuggestionAccept: "이미지 생성 열기",
+        imageIntentSuggestionDismiss: "나중에",
         imageGenerationModelLabel: "모델",
         imageGenerationModelCount: "모델 {count}개",
         // Catalogue image tab (policy v2 section 13)

@@ -143,6 +143,9 @@ export const zh = {
         imageGenerationBackToChat: "返回聊天",
         toolsImageGeneration: "图像生成",
         toolsImageGenerationDescription: "比较多个模型生成的图像",
+        imageIntentSuggestionTitle: "要改用图像生成来制作吗？",
+        imageIntentSuggestionAccept: "打开图像生成",
+        imageIntentSuggestionDismiss: "暂不",
         imageGenerationModelLabel: "模型",
         imageGenerationModelCount: "{count} 个模型",
         // Catalogue image tab (policy v2 section 13)

@@ -126,6 +126,9 @@ export const pt = {
         imageGenerationBackToChat: "Voltar ao chat",
         toolsImageGeneration: "Geração de imagens",
         toolsImageGenerationDescription: "Compare imagens de vários modelos",
+        imageIntentSuggestionTitle: "Prefere gerar isso como imagem?",
+        imageIntentSuggestionAccept: "Abrir geração de imagens",
+        imageIntentSuggestionDismiss: "Agora não",
         imageGenerationModelLabel: "Modelos",
         imageGenerationModelCount: "{count} modelo(s)",
         // Catalogue image tab (policy v2 section 13)

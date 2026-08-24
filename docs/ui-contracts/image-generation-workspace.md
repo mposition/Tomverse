@@ -42,7 +42,7 @@ entry point rather than at the submit button.
 
 ## Entry points
 
-There are exactly four, and no standalone "New image" button:
+There are exactly five, and no standalone "New image" button:
 
 1. Desktop sidebar **split button** — the primary click stays "new chat"; the
    caret opens the menu that holds image generation.
@@ -51,15 +51,46 @@ There are exactly four, and no standalone "New image" button:
 3. Chat composer **tools menu** → image generation, which switches to the image
    draft client-side.
 4. Model catalogue → **image tab** (see below).
+5. Chat composer **image-request handoff chip** — offered while the draft is
+   being typed, when the draft is an unmistakable raster-generation request.
 
 Requirements:
 
 - The launcher renders once per shell. A second image button anywhere is a
-  contract violation, not a convenience.
+  contract violation, not a convenience. The chip is not a second launcher: it
+  is state-driven, appears at most once per draft, and offers the same handoff
+  the tools menu already performs.
 - The menu is a real menu: `role="menu"`/`role="menuitem"`, focus moves into it
   on open, Escape closes it and returns focus to the trigger.
 - Switching to the image draft creates **no server row**. The conversation only
   exists once a generation is actually reserved (policy §6).
+
+### The handoff chip is an entry point, not an execution
+
+Non-negotiable, and the reason this entry point was allowed to exist at all
+(policy §13):
+
+- **The user must press it.** Switching to the image draft without a press —
+  because the text "looked like" an image request — is forbidden. The chip
+  changes nothing until it is clicked.
+- **Submitting a generation without confirmation is forbidden.** Price and
+  model selection stay where they are: quoted in the workspace composer before
+  submission.
+- **A visible chip never blocks an ordinary chat submit.** Ignoring it and
+  pressing send sends the chat turn.
+- **Guest and Free see the requirement inside the chip**, before the click, and
+  the click routes to sign-in or `/pricing` — the same locked-exposure rule the
+  table below states for every other entry point.
+- **With the flag off the chip does not render**, like every other entry point.
+- The chip is offered only for unmistakable raster generation. A text-dense
+  chart or infographic, a request to edit or reference an attached image, and a
+  request to describe an attached image are all **out of scope** and get no
+  chip — routing them to a text-to-image workspace would be a wrong answer, not
+  a helpful one.
+- It obeys the mobile composer contract: its own full-width row above the
+  textarea, never sharing, overlapping or floating above it, and it is
+  suppressed during IME composition so a chip cannot resize the composer
+  mid-word.
 
 ## Locked exposure, everywhere
 

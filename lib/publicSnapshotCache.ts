@@ -29,13 +29,23 @@ import { createHash } from "node:crypto";
  */
 
 /** The complete set of cacheable snapshots. Not extensible at runtime. */
-export type PublicSnapshotKey = "app-settings" | "model-catalog";
+export type PublicSnapshotKey =
+  | "app-settings"
+  | "model-catalog"
+  | "image-generation-flag";
 
 const TTL_MS: Record<PublicSnapshotKey, number> = {
   // Short enough that an operational flag flip (chat disabled during an
   // incident) reaches users promptly even if the invalidation below is missed.
   "app-settings": 10_000,
   "model-catalog": 10_000,
+  // Read once per chat turn to decide what the image-capability system block
+  // says. Its own key rather than a field on `app-settings`, because that
+  // snapshot is what `/api/app-settings` serves to anyone who asks and this
+  // flag is a beta rollout state; sharing the entry would publish it. Same
+  // TTL, and the admin toggle invalidates it, so an operator who turns image
+  // generation off does not keep being announced.
+  "image-generation-flag": 10_000,
 };
 
 type Snapshot<T> = {
