@@ -484,6 +484,7 @@ export const en = {
         artifactTypeCode: "{ext} source file",
         artifactTypeArchive: "ZIP archive",
         artifactDownload: "Download",
+        artifactPreviewAlt: "Preview of {filename}",
         artifactReadyLabel: "Download {filename}, {type}, {size}",
         artifactFailedLabel: "{type} {filename} could not be created",
         artifactBlockedLabel: "Sign in to create a {type}",
