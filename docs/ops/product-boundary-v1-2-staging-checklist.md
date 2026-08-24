@@ -358,7 +358,8 @@ tester pass 3종, plan 변경, 모델 출시 (`lib/emailTemplateDefinitions.ts`)
 > **제품명(`Tomverse Review` 등)을 쓰는 사용자 이메일은 전부 범위 불일치입니다.**
 > 그것을 정당화할 제품 전용 이메일이 존재하지 않기 때문입니다.
 
-이미 알려진 불일치 목록은 `docs/ops/tomverse-review-rename.md` §7.6에 있습니다. **거기 없는 것이 나오면 그것이 발견입니다.**
+`docs/ops/tomverse-review-rename.md` §7.6의 불일치 목록은 **이미 정리됐습니다.** 그러므로 플랫폼 공용 이메일에서
+  제품명이 나오면 그것은 알려진 항목이 아니라 **회귀**입니다.
 
 - [ ] **C-1** staging에서 계정을 하나 만들고 **welcome 메일을 실제로 받는다.**
 
