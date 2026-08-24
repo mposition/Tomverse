@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High)
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1차 해결 (2026-08-24)** — §36. campaign workflow는 2차
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -2645,3 +2645,59 @@ dry run에도 필요합니다(없으면 보고할 대상이 없습니다).
 **범위 밖**: reconciliation을 자동으로 실행하는 것. CI·lifecycle 거부는 그대로이고,
 `tests/reconciliationApprovalCore.test.ts`가 저장소 안 어떤 경로도 이 명령을
 스스로 부르지 않는지 계속 확인합니다.
+
+---
+
+## 36. EM-01 구현 기록 — 1차: event 단위 fan-out (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailAudienceExpansionCore.ts` | 착수 가능 여부·batch 계획·spec 파싱. 순수, 새 파일 |
+| `lib/emailAudienceExpansion.ts` | `expandEmailEvent()` |
+| `tests/emailAudienceExpansionCore.test.mjs` | 13건 |
+| `tests/integration/email-audience-expansion.db.test.ts` | 12건, 새 파일 |
+
+**범위를 event 층으로 잘랐습니다.** EM-01의 기대 동작("하나의 이벤트에서 다수
+`EmailDelivery`를 재개 가능하게 생성"), AC, 파일 목록(`EmailEvent`,
+`standardEmailLane`)이 **전부 event 단위**입니다. §12.2의 `EmailCampaign` ·
+`Wave` · `Recipient`는 그 위의 **campaign workflow** 층이고, EM-06이 기다리는
+것이 그쪽입니다. 2차에서 만듭니다.
+
+**새 죽은 컬럼을 만들지 않았습니다.** EM-01의 evidence 자체가
+"`audienceSpec`·`expansionCursor`·`status`의 세 값을 **아무 코드도 쓰지
+않는다**"입니다. 승인 flow가 없는 상태에서 `approvalId`·`scheduledAt`을 미리
+만들면 같은 결함을 한 번 더 저지르는 것입니다. 이번 변경은 **이미 있는 죽은
+필드를 살립니다** — 새 테이블도 새 컬럼도 없습니다.
+
+**AC는 unique index가 강제합니다.** `@@unique([eventId, recipientKey])`가
+중복을 막고, 그래서 재개한 pass는 **앞 pass가 무엇을 했는지 알 필요 없이**
+겹쳐 읽어도 됩니다. `createMany({ skipDuplicates: true })`의 결과로
+`expanded`와 `alreadyPresent`를 구분해 보고합니다 — "아무것도 안 썼다"와
+"아무도 없었다"는 다른 사실이고 하나만 문제입니다.
+
+**모든 수신자에게 행을 씁니다, 보내지 않을 사람 것도.** lane의 gate(동의·
+suppression·관할권)가 이미 행을 `skipped`로 만들고 **이유를 그 행에 적습니다**.
+여기서 걸러내면 발송은 싸지지만 "누구에게 도달했고 나머지는 왜 아닌가"가
+그 질문에 답해야 할 테이블에서 사라집니다. 예외는 주소 없는 계정뿐입니다 —
+쓸 행이 없습니다. 세지만 지어내지 않습니다.
+
+**dry run은 같은 행을 쓰고 표시만 합니다.** 행을 안 만드는 dry run은 dry run에게
+묻는 질문에 답하지 못합니다. `dry_run`은 처음부터 skipReason CHECK에 있었고
+아무도 쓴 적이 없습니다.
+
+**time budget 검사를 batch **뒤**로 옮겼습니다.** 앞에서 검사하면 한 batch보다
+작은 예산 — 느린 DB, 큰 batch size, 이미 늦은 tick — 이 **fan-out을 영원히 0행씩
+전진**시키면서 매번 성공을 보고합니다. test가 그것을 드러냈고, 고친 것은 test가
+아니라 동작입니다.
+
+**cap은 page size가 아닙니다.** "audience query가 틀렸으면 어떻게 되는가"에
+대한 답이고, 틀렸을 때의 대가는 **이미 도착했다**는 것입니다. 재개한 pass는
+테이블에서 센 값으로 cap을 이어 쓰므로 세 번 재개해도 cap이 세 배가 되지
+않습니다.
+
+**`failed`는 사람을 기다립니다.** 얼마나 진행됐는지 모르는 채 멈췄고, 실패
+원인은 대개 저절로 낫는 종류가 아닙니다. incident에 cursor를 싣습니다 —
+고치려는 사람이 필요한 값이 그것입니다.
+
+**2차 범위**: `EmailCampaign`/`Wave`/`Recipient`, 승인(§12.3), 예약, reminder
+wave의 cohort 재계산, admin 화면. EM-06은 그 위에 얹힙니다.

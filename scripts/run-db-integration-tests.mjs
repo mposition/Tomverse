@@ -196,6 +196,10 @@ run(
     // can answer: the row pins a policy version and activating a later one must
     // not change what an already-queued message says.
     "tests/integration/email-jurisdiction-composition.db.test.ts",
+    // One event fanning out to many deliveries, resumably. The acceptance
+    // criterion is that expanding twice changes nothing, and the unique index
+    // that guarantees it only exists in the database.
+    "tests/integration/email-audience-expansion.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.
