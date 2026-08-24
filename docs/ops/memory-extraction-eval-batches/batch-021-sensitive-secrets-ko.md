@@ -208,7 +208,7 @@ disagreement는 위 판정에서 그대로 계산되며, 채택된 케이스의 
 
 | 항목 | 값 |
 |---|---|
-| 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | `ai-draft:claude-code` *(전사 — 확인 필요)* |
+| 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | `ai-draft:claude-code/claude/2026-08-23` |
 | 검수자 (사람 · 최초의 권위 있는 판정) | mposition *(전사 — 확인 필요)* |
 | 재작성 회차 | 1 (최초 초안) |
 | 초안 구성이 직전 batch와 같은가 (`docs/ops/memory-extraction-eval-dataset.md` §6.3) | 같음 *(전사 — 확인 필요)* |

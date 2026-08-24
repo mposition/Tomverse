@@ -472,6 +472,26 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  emailCampaignRecipient: (userId) =>
+    prisma.emailCampaignRecipient.findMany({
+      where: { userId },
+      // Which announcement audiences they were in, and -- when nothing was
+      // sent -- why. The campaign, wave and delivery ids are withheld: they are
+      // internal handles onto the send rather than facts about the person.
+      // `malformed` is withheld too, because it describes a stored value this
+      // system could not read rather than anything they did.
+      select: {
+        id: true,
+        emailAddress: true,
+        language: true,
+        jurisdictionCountry: true,
+        eligibilityReason: true,
+        excludedReason: true,
+        createdAt: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
   emailDelivery: (userId) =>
     prisma.emailDelivery.findMany({
       where: { userId },

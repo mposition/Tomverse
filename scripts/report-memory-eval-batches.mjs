@@ -2,12 +2,14 @@
  * Where every candidate batch stands
  * (docs/ops/memory-extraction-eval-dataset.md §6.3, §6.4, §7.1).
  *
- * The dataset needs 1,600 cases across eight cells, which is roughly sixty
- * batches, and each one is waiting on a different thing: some on drafting,
- * some on a reviewer, some on nothing but the move into the fixtures. Asking
- * that question by opening sixty markdown files is how a batch that was
- * adopted weeks ago sits unpromoted, and how one nobody judged slides past
- * §7.1's "명시적 채택 기록" check.
+ * The dataset needs 1,150 cases across eight cells -- the floors of
+ * docs/policy/external-conversation-import-and-memory.md §12.2 as amended on
+ * 2026-08-23 -- which came to twenty-eight batches, and each one
+ * waited on a different thing: some on drafting, some on a reviewer, some on
+ * nothing but the move into the fixtures. Asking that question by opening
+ * twenty-eight markdown files is how a batch that was adopted weeks ago sits
+ * unpromoted, and how one nobody judged slides past the "명시적 채택 기록"
+ * condition in docs/ops/memory-extraction-eval-dataset.md §7.1.
  *
  * Report only. It does not adopt, promote, or edit anything -- adoption is a
  * person's act recorded in the batch record, and a report that edited its own
