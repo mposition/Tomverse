@@ -9,6 +9,7 @@
  *   ... --model=gpt-5-6-luna                             pair under evaluation
  *   ... --json=artifacts/mem-eval.json                   preserve the artifact
  *   ... --max-cost-usd=5                                 hard stop on spend
+ *   ... --limit=10                                       compatibility probe, not a run
  *
  * What this does NOT do, on purpose:
  *
@@ -63,6 +64,22 @@ const hasFlag = (name) => process.argv.includes(`--${name}`);
 const modelId = argValue("model", "gpt-5-6-luna");
 const jsonPath = argValue("json", "");
 const live = hasFlag("live");
+/**
+ * A compatibility probe: run the first N cases and stop.
+ *
+ * Point of it is to learn whether the wiring works before paying to learn it
+ * 1,150 times -- v1 spent three dispatches discovering, one failure at a
+ * time, that the request was wrong. A probe is never a run: the artifact
+ * records `probeLimit` and `decisionGrade` is false whatever the numbers say,
+ * because a verdict from a slice of the sample is not a verdict.
+ */
+const rawProbeLimit = argValue("limit", "");
+const probeLimit = rawProbeLimit === "" ? null : Number(rawProbeLimit);
+if (probeLimit !== null && !(Number.isInteger(probeLimit) && probeLimit > 0)) {
+    console.error(`--limit must be a positive integer (got "${rawProbeLimit}").`);
+    process.exit(1);
+}
+
 const rawMaxCost = argValue("max-cost-usd", "");
 const maxCostUsd = rawMaxCost === "" ? null : Number(rawMaxCost);
 if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
@@ -137,6 +154,13 @@ const REFUSAL_MESSAGES = {
         "lib/memoryExtractionEvalRegister.ts (approvedBy, maxUsd, ticket, approvedAt),\n" +
         "merged as its own reviewed change. That record is the audit trail.",
     no_api_key: "OPENAI_API_KEY is required for --live.",
+    pair_not_runnable:
+        `${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION} is \`${registerEntry?.status}\` in the ` +
+        "register (§12.1).\n\n" +
+        "A revoked entry keeps its approved budget -- the approval was real and\n" +
+        "was really spent against -- so the budget is not permission to run it\n" +
+        "again. Register the pair you mean to evaluate, or reopen this one\n" +
+        "deliberately as its own reviewed change.",
     unknown_commit:
         "This run cannot name the commit it is running (§12.2).\n\n" +
         "`git rev-parse HEAD` produced nothing, which means this is not a git\n" +
@@ -289,6 +313,7 @@ const outcomes = [];
 const records = [];
 
 for (const testCase of MEMORY_EVAL_CASES) {
+    if (probeLimit !== null && outcomes.length >= probeLimit) break;
     // The ceiling is the approved budget narrowed by any --max-cost-usd, so a
     // runaway retry or an output-token anomaly stops here rather than being
     // discovered on the invoice.
@@ -438,6 +463,14 @@ if (!verdict.adequacy.decisionGrade) {
             "existing ones, and the duplicate check refuses a dataset that tries."
     );
 }
+if (probeLimit !== null) {
+    console.log(
+        `\nPROBE — ran the first ${outcomes.length} case(s) of ${MEMORY_EVAL_CASES.length} and stopped at --limit.\n` +
+            "This is a compatibility check, not a run: it says whether the request, the\n" +
+            "schema, the parser and the validator agree end to end on real answers. Its\n" +
+            "numbers are a slice of the sample and are not a verdict at any quality."
+    );
+}
 if (workingTreeDirty) {
     console.log(
         "\nWorking tree is dirty, so the commit above does not fully describe what ran."
@@ -486,6 +519,8 @@ const artifact = {
         caseCount: outcomes.length,
         plannedCaseCount: MEMORY_EVAL_CASES.length,
         truncatedByCostCeiling: costStopped,
+        // Non-null means this was a probe, and the fields below say so too.
+        probeLimit,
         maxCostUsd,
         accruedCostUsd: runMode.mode === "live" ? accruedCostUsd : 0,
         // How many calls the accrued figure is missing. Zero means the ceiling
@@ -499,7 +534,8 @@ const artifact = {
         decisionGrade:
             verdict.adequacy.decisionGrade &&
             runMode.mode === "live" &&
-            MEMORY_EVAL_DATASET_FROZEN,
+            MEMORY_EVAL_DATASET_FROZEN &&
+            probeLimit === null,
         datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
         datasetPurpose: MEMORY_EVAL_DATASET_PURPOSE,
         abortedOnConsecutiveFailures: abortedOnFailures,

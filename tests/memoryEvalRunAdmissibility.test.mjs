@@ -94,6 +94,16 @@ test("a manifest missing a field is discarded, not assumed clean", () => {
     assert.match(result.stdout, /decisionGrade/);
 });
 
+test("a probe is never admissible", () => {
+    // A probe runs the first N cases to check the wiring. Its numbers are a
+    // slice of the sample, so `decisionGrade` is false whatever they say, and
+    // the pre-registered rules discard it on that alone -- there is no route
+    // by which a compatibility check becomes a result.
+    const result = check({ ...ADMISSIBLE, decisionGrade: false, probeLimit: 10 });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /decisionGrade/);
+});
+
 test("a smoke run is never admissible", () => {
     // Smoke answers come from a deterministic stub, so `decisionGrade` is
     // false and this must never read as a result.
