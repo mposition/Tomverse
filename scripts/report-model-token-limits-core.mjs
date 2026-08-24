@@ -75,6 +75,19 @@ export const SCOPE_FULL = "full";
  * Reporting one as "pending" would promise a fix nothing is going to make.
  */
 export const SCOPE_OUTPUT_CAP_ONLY = "output_cap_only";
+/**
+ * The mirror image: reconciliation carries the reservation figure alone, so a
+ * cap difference on this model is the one nothing will correct
+ * (RESERVATION_ONLY_RECONCILIATION_MODEL_IDS).
+ */
+export const SCOPE_RESERVATION_ONLY = "reservation_only";
+
+/** Which of the two columns a scope actually writes. */
+const FIELDS_BY_SCOPE = {
+  [SCOPE_FULL]: { cap: true, reservation: true },
+  [SCOPE_OUTPUT_CAP_ONLY]: { cap: true, reservation: false },
+  [SCOPE_RESERVATION_ONLY]: { cap: false, reservation: true },
+};
 
 const stateFor = (maxAgrees, reservationAgrees) => {
   if (maxAgrees && reservationAgrees) return AGREES;
@@ -109,16 +122,20 @@ export const compareTokenLimits = ({
   storedRows,
   reconciledModelIds = [],
   outputCapOnlyModelIds = [],
+  reservationOnlyModelIds = [],
 }) => {
   const stored = new Map(storedRows.map((row) => [row.id, row]));
   const reconciled = new Set(reconciledModelIds);
   const capOnly = new Set(outputCapOnlyModelIds);
+  const reservationOnly = new Set(reservationOnlyModelIds);
   const scopeFor = (id) =>
     !reconciled.has(id)
       ? null
       : capOnly.has(id)
         ? SCOPE_OUTPUT_CAP_ONLY
-        : SCOPE_FULL;
+        : reservationOnly.has(id)
+          ? SCOPE_RESERVATION_ONLY
+          : SCOPE_FULL;
   const seen = new Set();
   const entries = [];
 
@@ -219,6 +236,21 @@ const DIVERGED_STATES = new Set([
  * figure is a credit and cost decision, so it is reported for review and never
  * grouped with the request cap as one number to go and fix.
  */
+const coverageOf = (entry) =>
+  FIELDS_BY_SCOPE[entry.reconciledScope] ?? { cap: false, reservation: false };
+
+const isFullyCovered = (entry) => {
+  const covered = coverageOf(entry);
+  const capDiverged =
+    entry.state === MAX_OUTPUT_DIVERGED || entry.state === BOTH_DIVERGED;
+  const reservationDiverged =
+    entry.state === RESERVATION_DIVERGED || entry.state === BOTH_DIVERGED;
+  return (
+    (!capDiverged || covered.cap) &&
+    (!reservationDiverged || covered.reservation)
+  );
+};
+
 export const tokenLimitFindings = (entries) => {
   const diverged = entries.filter((entry) => DIVERGED_STATES.has(entry.state));
   const requestCapDifferences = diverged.filter(
@@ -229,7 +261,8 @@ export const tokenLimitFindings = (entries) => {
     diverged,
     requestCapDifferences,
     strandedRequestCaps: requestCapDifferences.filter(
-      (entry) => !entry.reconciled && entry.actorMetadata === ACTOR_ABSENT
+      (entry) =>
+        !coverageOf(entry).cap && entry.actorMetadata === ACTOR_ABSENT
     ),
     operatorOwnedRequestCaps: requestCapDifferences.filter(
       (entry) => entry.actorMetadata === ACTOR_PRESENT
@@ -238,18 +271,14 @@ export const tokenLimitFindings = (entries) => {
       (entry) =>
         entry.state === RESERVATION_DIVERGED || entry.state === BOTH_DIVERGED
     ),
-    // Only what a restart will genuinely correct. A cap-only entry fixes the
-    // cap, so a reservation difference on the same row stays a finding rather
-    // than being filed under "corrected on the next boot".
-    pendingReconciliation: diverged.filter(
-      (entry) =>
-        (entry.reconciledScope === SCOPE_FULL) ||
-        (entry.reconciledScope === SCOPE_OUTPUT_CAP_ONLY &&
-          entry.state === MAX_OUTPUT_DIVERGED)
-    ),
+    // Only what a restart will genuinely correct: every difference this row
+    // has must be one its scope actually writes. A narrow entry that fixes one
+    // column leaves the other as a finding rather than filing it under
+    // "corrected on the next boot", which would promise a fix nobody makes.
+    pendingReconciliation: diverged.filter(isFullyCovered),
     unreconciledReservations: diverged.filter(
       (entry) =>
-        entry.reconciledScope !== SCOPE_FULL &&
+        !coverageOf(entry).reservation &&
         (entry.state === RESERVATION_DIVERGED || entry.state === BOTH_DIVERGED)
     ),
     missingInDb: entries.filter((entry) => entry.state === MISSING_IN_DB),

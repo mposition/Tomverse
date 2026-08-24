@@ -14,23 +14,23 @@
 
 import { AVAILABLE_MODELS, getModelUsageProfile } from "../lib/models.ts";
 import {
-  OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS,
+  NARROW_SCOPE_RECONCILIATION_MODEL_IDS,
   STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
 } from "../lib/modelRegistryShared.ts";
 
 // Only the models whose reconciliation actually writes `creditWeight`.
 //
 // Being in STATIC_CATALOG_RECONCILIATION_MODEL_IDS no longer implies that:
-// the cap-only scope carries `maxOutputTokens` and nothing else, precisely so
-// it cannot move a credit weight
+// the narrow scopes carry one token column each and nothing else, precisely so
+// they cannot move a credit weight
 // (docs/policy/perplexity-sonar-credit-price-hold.md). Handing the whole list
 // to this report would file `perplexity/sonar` under "corrected on the next
 // boot" -- which is false, and is the opposite of what that hold needs this
 // report to say when it uses it to scope itself
 // (docs/policy/perplexity-sonar-credit-price-hold.md §5).
-const capOnly = new Set(OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS);
+const narrowScope = new Set(NARROW_SCOPE_RECONCILIATION_MODEL_IDS);
 const CREDIT_WEIGHT_RECONCILED_MODEL_IDS =
-  STATIC_CATALOG_RECONCILIATION_MODEL_IDS.filter((id) => !capOnly.has(id));
+  STATIC_CATALOG_RECONCILIATION_MODEL_IDS.filter((id) => !narrowScope.has(id));
 import {
   compareCreditWeights,
   creditWeightFindings,
