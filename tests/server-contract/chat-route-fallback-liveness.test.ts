@@ -203,20 +203,22 @@ const DEFAULTS: Record<string, () => unknown> = {
   `lib/autoProductBoundary.ts` refuses Review and Studio before the cohort is
   ever consulted.
 */
-const conversationRow = {
+let conversationSelectionMode: "auto" | "manual" = "auto";
+
+const conversationRow = () => ({
   id: CONVERSATION_ID,
   userId: USER_ID,
   password: null,
   selectedModels: JSON.stringify([REQUESTED_MODEL_ID]),
   kind: "chat",
   productKey: "chat",
-  selectionMode: "auto",
-};
+  selectionMode: conversationSelectionMode,
+});
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
   conversation: {
-    findUnique: () => conversationRow,
-    findFirst: () => conversationRow,
+    findUnique: () => conversationRow(),
+    findFirst: () => conversationRow(),
   },
   message: {
     findFirst: () => ({ id: "user-message-1" }),
@@ -289,7 +291,39 @@ const realChatSecurity = require(resolve(ROOT, "lib/chatSecurity.ts")) as Record
   `attemptFallback` refuses outright without both -- a second hold has to go
   into the same day and month the first one did, and a turn that reserved
   nothing has no evidence of which those were.
+
+  Held for every provider in the catalogue rather than for one. The Router
+  picks the primary, and which model that is depends on the catalogue, on
+  health signals and on the profile of the prompt -- none of which this file
+  is asserting about. Naming a single provider here would make the test fail
+  with `no_provider_hold` the day the Router's answer changed, which is a
+  fact about the catalogue rather than about the fallback.
 */
+const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as {
+  AVAILABLE_MODELS: ReadonlyArray<{ provider: string; enabled?: boolean }>;
+};
+
+const HELD_PROVIDERS = [
+  ...new Set(
+    AVAILABLE_MODELS.filter((model) => model.enabled !== false).map(
+      (model) => model.provider
+    )
+  ),
+];
+
+const providerHoldEntries = HELD_PROVIDERS.flatMap((provider) => [
+  {
+    key: `provider:${provider}`,
+    period: "provider-cost-day",
+    amountMicroUsd: 1_000,
+  },
+  {
+    key: `provider:${provider}`,
+    period: "provider-cost-month",
+    amountMicroUsd: 1_000,
+  },
+]);
+
 const reservation = {
   reservationId: "reservation-fallback-1",
   userId: USER_ID,
@@ -297,18 +331,7 @@ const reservation = {
   source: "chat" as const,
   modelId: REQUESTED_MODEL_ID,
   provider: "anthropic" as const,
-  entries: [
-    {
-      key: "provider:anthropic",
-      period: "provider-cost-day",
-      amountMicroUsd: 1_000,
-    },
-    {
-      key: "provider:anthropic",
-      period: "provider-cost-month",
-      amountMicroUsd: 1_000,
-    },
-  ],
+  entries: providerHoldEntries,
 };
 
 const ledger = {
@@ -341,13 +364,13 @@ mock.module(mod("lib/chatSecurity.ts"), {
       });
     },
     linkChatReservationProviderRequest: async () => undefined,
-    reserveAttemptProviderBudget: async () => {
+    reserveAttemptProviderBudget: async (input: { provider?: string }) => {
       ledger.attemptBudgetReservations += 1;
       return {
         reserved: true as const,
         entries: [
           {
-            key: "provider:anthropic",
+            key: `provider:${input?.provider ?? "anthropic"}`,
             period: "provider-cost-day",
             amountMicroUsd: 1_000,
           },
@@ -387,6 +410,23 @@ mock.module(mod("lib/activeAiModel.ts"), {
 });
 
 globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch;
+
+/*
+  The route's structured warnings, captured so a claim it makes about itself
+  can be asserted. `chat_auto_readiness_overridden` is the one that matters
+  here: it is a record that a turn routed only because a drill said so, and a
+  record like that is worth nothing if it is also written for turns that did
+  not route.
+*/
+const warnings: string[] = [];
+const realWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  if (typeof args[0] === "string") warnings.push(args[0]);
+  realWarn(...(args as []));
+};
+
+const warningEvents = (event: string) =>
+  warnings.filter((line) => line.includes(`"event":"${event}"`));
 
 /* -------------------------------------------------------------------------- */
 /* Driving the route                                                           */
@@ -428,6 +468,7 @@ const ask = async (behaviour: "answers" | "silent") => {
   ledger.releases = [];
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;
+  warnings.length = 0;
 
   const { POST } = await loadRoute();
   const response = await POST(
@@ -450,7 +491,22 @@ const ask = async (behaviour: "answers" | "silent") => {
   if (response.status !== 200) {
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
-  return { response, body: await whileWaiting(() => response.text()) };
+  /*
+    The body read is allowed to fail, and one case needs it to.
+
+    A turn that is not routed has no §7 recovery, so the injected fault ends
+    it by erroring the response stream -- which is the correct behaviour and
+    which makes `response.text()` reject. Swallowing it here keeps that case
+    asserting about the record the route wrote rather than about how the
+    stream ended.
+  */
+  const read = await whileWaiting(() =>
+    response.text().then(
+      (body) => ({ body, streamError: null as unknown }),
+      (streamError: unknown) => ({ body: "", streamError })
+    )
+  );
+  return { response, ...read };
 };
 
 const { splitRoutingRetrySignal } = require(
@@ -574,4 +630,40 @@ test("a stall after the swap cancels the fallback's stream, settles and releases
 
   // No answer existed, so no assistant message may be written for one.
   assert.deepEqual(world.messages, []);
+});
+
+/* ------------------------------------- what the override record may claim */
+
+test("a routed drill turn is recorded as overridden, exactly once", async () => {
+  await ask("answers");
+
+  const overridden = warningEvents("chat_auto_readiness_overridden");
+  assert.equal(overridden.length, 1);
+  assert.ok(overridden[0].includes('"reason":"staging_drill_override"'));
+  // It names the model that was actually chosen, so the record says what the
+  // override bought rather than only that it happened.
+  assert.ok(overridden[0].includes('"selectedModelId"'));
+});
+
+test("a turn the override did not route records no override at all", async () => {
+  // The same credential, the same account, the same outstanding gate -- and a
+  // manual conversation, which the override does not and must not carry past.
+  //
+  // This is the regression for where the record is written. It used to be
+  // written beside the cohort read, which happens before the selection: every
+  // turn with a valid drill credential was recorded as an overridden routing
+  // decision, including the ones that then routed nothing.
+  conversationSelectionMode = "manual";
+  try {
+    const { body, streamError } = await ask("answers");
+
+    assert.deepEqual(warningEvents("chat_auto_readiness_overridden"), []);
+    // Not routed, so §7 never applies: one attempt, and the injected fault
+    // ends the turn rather than being recovered from.
+    assert.equal(attempts.length, 1);
+    assert.ok(streamError, "an unrouted turn has no recovery, so the stream errors");
+    assert.equal(splitRoutingRetrySignal(body).signal, null);
+  } finally {
+    conversationSelectionMode = "auto";
+  }
 });
