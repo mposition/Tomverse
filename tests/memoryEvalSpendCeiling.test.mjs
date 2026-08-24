@@ -38,12 +38,6 @@ const estimator = readFileSync(
     "utf8"
 );
 
-/** The number after `maxOutputTokens:` in a source file. */
-const outputCeiling = (source, pattern) => {
-    const match = pattern.exec(source);
-    return match ? Number(match[1].replace(/_/g, "")) : null;
-};
-
 test("the eval's pricing basis resolves for every registered pair", () => {
     // If this cannot resolve, the ceiling has no number behind it and a live
     // run spends without a bound.
@@ -102,24 +96,32 @@ test("a swallowed pricing failure is counted and reported", () => {
     assert.match(harness, /pricingFailures: runMode\.mode === "live"/);
 });
 
-test("the cost estimate prices the ceiling the harness actually sends", () => {
-    // The estimate's worst case is "every call hits the output ceiling". If
-    // the harness raises `maxOutputTokens` and the estimator keeps the old
-    // number, the approved budget is set from a ceiling that no longer bounds
-    // anything -- and the gap shows up on an invoice rather than here.
-    const harnessCeiling = outputCeiling(
-        harness,
-        /maxOutputTokens:\s*([\d_]+)/
-    );
-    const estimatorCeiling = outputCeiling(
-        estimator,
-        /MAX_OUTPUT_TOKENS\s*=\s*([\d_]+)/
-    );
-    assert.ok(harnessCeiling, "could not read maxOutputTokens from the harness");
-    assert.ok(estimatorCeiling, "could not read MAX_OUTPUT_TOKENS from the estimator");
-    assert.equal(
-        estimatorCeiling,
-        harnessCeiling,
-        "the estimator prices a different output ceiling than the harness sends"
-    );
+test("neither side hard-codes the output ceiling", () => {
+    // These used to be two literal 4,096s kept equal by comparing them. The
+    // number was wrong on both sides -- it is the model's
+    // `reservationOutputTokens`, entitlement rather than capability -- and
+    // agreeing about a wrong number is what a drift test cannot catch. Both
+    // now read `maxOutputTokens` off the resolved profile, so there is one
+    // source and the question of drift does not arise.
+    for (const [name, source] of [
+        ["the harness", harness],
+        ["the estimator", estimator],
+    ]) {
+        assert.ok(
+            !/maxOutputTokens:\s*[\d_]+/.test(source),
+            `${name} should not send a literal output ceiling`
+        );
+        // A use, not a mention: both files explain the old bug in prose, and
+        // a check that could not tell the explanation from the mistake would
+        // have to be deleted the first time somebody documented it.
+        assert.ok(
+            !/\.reservationOutputTokens/.test(source),
+            `${name} must not cap output at the reservation`
+        );
+        assert.match(
+            source,
+            /(pricing|capability)\.maxOutputTokens/,
+            `${name} should read the ceiling from the pricing profile`
+        );
+    }
 });

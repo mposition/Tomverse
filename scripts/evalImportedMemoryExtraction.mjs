@@ -222,21 +222,29 @@ let abortedOnFailures = false;
 const MAX_CONSECUTIVE_FAILURES = 5;
 
 const liveAdapter = async ({ prompt }) => {
-    const [{ generateText }, { getActiveAiModel }, { getModel }, { resolveModelPricing }] =
-        await Promise.all([
-            import("ai"),
-            import("../lib/activeAiModel.ts"),
-            import("../lib/models.ts"),
-            import("../lib/modelPricing.ts"),
-        ]);
+    const [
+        { generateText },
+        { getActiveAiModel },
+        { getModel },
+        { resolveModelPricing },
+        { buildLiveExtractionRequest },
+    ] = await Promise.all([
+        import("ai"),
+        import("../lib/activeAiModel.ts"),
+        import("../lib/models.ts"),
+        import("../lib/modelPricing.ts"),
+        import("../lib/memoryEvalLiveRequest.ts"),
+    ]);
     const model = getModel(modelId);
+    // The output ceiling is the model's capability, read from the same
+    // profile the product prices against -- not the reservation beside it.
+    const capability = resolveModelPricing(model, { estimatedPromptTokens: 0 });
     const result = await generateText({
         model: getActiveAiModel(model),
-        messages: [
-            { role: "system", content: prompt.system },
-            { role: "user", content: prompt.user },
-        ],
-        maxOutputTokens: 4_096,
+        ...buildLiveExtractionRequest({
+            prompt,
+            maxOutputTokens: capability.maxOutputTokens,
+        }),
     });
     const usage = result.usage ?? {};
     try {
