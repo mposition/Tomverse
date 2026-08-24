@@ -372,6 +372,8 @@ export const pt = {
         toolsAssistantNone: "Sem assistente",
         toolsAssistantNoneDescription: "Responder apenas com o modelo",
         toolsAssistantRevision: "Revisão {revision}",
+        toolsAssistantRevisionInUse: "Revisão {revision} em uso · a mais recente é {latest}",
+        toolsAssistantNewRevisionAvailable: "Nova revisão",
         toolsAssistantSuperseded: "Esta conversa usa a revisão {revision}; a mais recente é {latest}",
         toolsAssistantMoveToLatest: "Usar a revisão mais recente aqui",
         toolsAssistantEmpty: "Nenhum assistente publicado ainda. Crie um nas Configurações.",
