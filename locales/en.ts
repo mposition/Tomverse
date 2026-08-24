@@ -381,6 +381,8 @@ export const en = {
         toolsAssistantNone: "No assistant",
         toolsAssistantNoneDescription: "Answer with the model on its own",
         toolsAssistantRevision: "Revision {revision}",
+        toolsAssistantRevisionInUse: "Revision {revision} in use · newest {latest}",
+        toolsAssistantNewRevisionAvailable: "New revision",
         toolsAssistantSuperseded: "This conversation runs revision {revision}; the newest is {latest}",
         toolsAssistantMoveToLatest: "Use the newest revision here",
         toolsAssistantEmpty: "No published assistant yet. Create one in Settings.",

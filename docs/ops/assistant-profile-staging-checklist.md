@@ -177,7 +177,12 @@ flag가 꺼진 상태에서 먼저 봅니다. 켜고 나면 다시 만들기 어
 
 - [ ] 새 대화가 profile의 **최신 active revision**에 pin된다
 - [ ] revision을 새로 publish한 뒤에도 기존 대화의 pin이 **움직이지 않는다**
-- [ ] 그 대화가 `superseded`로 표시된다 (`tools-assistant-superseded-dot`)
+- [ ] 그 대화가 `superseded`로 표시된다 — 점이 아니라 **문구**로
+      (`tools-assistant-superseded-badge`, "새 개정 있음")
+- [ ] 어시스턴트 목록에서 그 profile 행이 **pin된 개정**을 말한다
+      (`assistant-option-{id}-detail` = "개정 1 사용 중 · 최신 3"). 최신 개정
+      번호만 적힌 행에 체크 표시가 붙으면 이동하지 않은 대화가 이동한 것으로
+      읽힙니다
 - [ ] 그 상태에서 turn을 보내면 **옛 revision의 instructions**로 답한다
 - [ ] 최신으로 이동(`assistant-move-to-latest`)은 **사용자가 눌러야만** 일어난다
 - [ ] 이동 후에도 이미 저장된 과거 답변은 소급해 바뀌지 않는다
