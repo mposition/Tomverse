@@ -20,8 +20,13 @@
 상태입니다. 실행 결과는 `assistant-package-import-staging-verification-records/`
 에 **날짜와 전체 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-24b` — 항목이 바뀌면 이 값을 올리고, 실행
+- **template revision**: `2026-08-24c` — 항목이 바뀌면 이 값을 올리고, 실행
   기록은 자기가 어느 revision으로 실행됐는지 적습니다.
+
+  `2026-08-24b` → `2026-08-24c`: §B-6이 "이 기능의 요청이 하나도 없다"고
+  적었지만, Slice 7이 단계마다 `POST /api/analytics/events`를 보냅니다. 그것이
+  §G-2가 읽는 값이므로 **없으면 오히려 문제**입니다. 항목이 실제로 보는 것은
+  import API 요청이 없다는 것 하나입니다.
 
   `2026-08-24a` → `2026-08-24b`: §B-1이 script를 "개수로만" 나타난다고 적어
   두었지만, `docs/policy/assistant-package-import.md` §7 표의 `scripts/**` 행은
@@ -202,9 +207,17 @@ flag가 꺼진 상태에서 먼저 봅니다. 켜고 나면 다시 만들기 어
 - [ ] `ignore previous instructions` 류가 들어간 package의 지시문이 그대로
       profile instructions가 되고, **신뢰된 지시로 승격되지 않는다** — §H-2가
       실제 turn으로 다시 확인한다
-- [ ] 6단계까지 진행하는 동안 브라우저 네트워크 탭에 **이 기능의 요청이 하나도
-      없다**(profile 목록은 페이지 로드 시 서버가 읽어 prop으로 내려오므로
-      요청으로 보이지 않는다). 이것이 "6단계 전 취소는 지울 것이 없다"의 근거다
+- [ ] 6단계까지 진행하는 동안 브라우저 네트워크 탭에 **`/api/assistant-profiles/**`
+      로 나가는 요청이 하나도 없다.** 이것이 "6단계 전 취소는 지울 것이 없다"의
+      근거다. profile 목록은 페이지 로드 시 서버가 읽어 prop으로 내려오므로
+      요청으로 보이지 않는다.
+
+      **`POST /api/analytics/events`(202)는 예외이고 있어야 정상입니다.**
+      wizard가 단계마다 `assistant_package_import_step_entered`를 보내고
+      (`components/assistants/import/AssistantPackageImportWizard.tsx`),
+      §G-2가 그 값을 읽습니다. 이 요청이 보인다는 이유로 `fail`로 적지
+      않습니다 — 오히려 하나도 없으면 §G-2가 빈 채로 끝납니다. 이 요청은
+      import 행을 만들지 않으므로 "지울 것이 없다"는 그대로 참입니다
 
 ## C. 자격증명 (차단)
 

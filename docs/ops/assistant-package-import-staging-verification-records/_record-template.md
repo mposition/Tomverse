@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/assistant-package-import-staging-checklist.md
-templateRevision: 2026-08-24b
+templateRevision: 2026-08-24c
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 가져오기 표면 diff 결과 | |
-| template revision | 2026-08-24b |
+| template revision | 2026-08-24c |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
