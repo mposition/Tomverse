@@ -178,9 +178,38 @@ PR Fast Gate에서 fail-closed로 검사하므로, 아래가 비면 병합되지
 ## 9. 그다음 — flag
 
 §15.1의 순서표가 기준입니다. `memoryExtractionEnabled`는 **5번**이고 그 앞의
-4번은 `assistantKnowledgeEnabled`입니다 — 이 회차를 시작하기 전에 4번의 상태를
-확인합니다. flag 전환은 Admin Console을 통해서만 하며 `AdminAuditLog`에
-남아야 합니다.
+1~4번은 모두 production에서 켜져 있습니다 — 4번 `assistantKnowledgeEnabled`는
+2026-08-23T09:51Z에 켜졌고 기록은
+`docs/ops/assistant-knowledge-staging-verification-records/2026-08-23__ea5bf48565a52e00010a6fe8aa9ac3a2153367ad.md`
+입니다. 순서상 앞을 막는 것은 없습니다.
+
+**그런데 이 두 flag를 켜는 감사되는 경로가 지금 없습니다.** 8단계에 닿기 전에
+정해야 하는 것이고, 이 회차를 막지는 않으므로 여기에 적어 둡니다.
+
+`PATCH /api/admin/app-settings`의 schema에는 두 flag가 **의도적으로 없고**
+`.strict()`가 그것을 강제합니다 — 이름을 실은 요청은 무시가 아니라 거절됩니다.
+근거는 `tests/appSettingWriters.test.mjs`의 `READ_ONLY_KEYS`에 결정으로
+등록돼 있습니다: 활성화는 §12.4의 사람 절차이고, 체크박스는 그 절차의 마지막
+단계를 앞의 다섯 단계 없이 수행하는 일이 됩니다. **이 부재는 미완이 아니라
+결정입니다** — schema에 추가하는 것으로 해결하지 않습니다.
+
+동시에 이 저장소의 운영 규칙은 flag 전환을 Admin Console로만 하고
+`AdminAuditLog`에 남기는 것입니다. 두 사실이 겹치는 자리가 8단계이고, 지금
+상태로는 **손으로 `AppSetting`을 고치는 것 외에 방법이 없습니다** — 권한 검사도
+감사 기록도 없는 경로입니다. 정지 쪽(revocation)에는 control이 있습니다.
+멈추는 것은 쉽게 만들어도 안전하기 때문입니다.
+
+선택지는 셋이며 **판정은 사람이 합니다.**
+
+1. 승인된 pair가 있을 때에만 켤 수 있는 전용 control — `injectableExtractionPairs()`
+   가 비어 있으면 거절합니다. 절차를 건너뛸 수 없는 형태의 버튼입니다.
+2. 코드로 검토되는 변경(migration 또는 배포 시점 설정). 감사 기록은 commit
+   history입니다.
+3. `run-default-model-reconciliation`과 같은 승인 인자 방식 script —
+   `--approved-*`·티켓·실행자를 모두 요구하고 감사 로그를 남깁니다.
+
+`memoryInjectionEnabled`는 승인 pair가 없거나 revoke되면 flag가 켜져 있어도
+fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가 아닙니다.
 
 승인 pair가 없거나 revoke되면 flag가 켜져 있어도 injection은 fail-closed입니다.
 
