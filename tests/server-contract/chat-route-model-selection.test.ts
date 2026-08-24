@@ -109,6 +109,16 @@ async function loadRouteWithSpies(): Promise<{
               selectedModels: JSON.stringify(STORED_SELECTED_MODELS),
             };
           },
+          // The routing-state read is no longer gated on cohort eligibility:
+          // decision record v1.2 §3 settles the product before the cohort, and
+          // the product lives on this row. A manual Review conversation, which
+          // is what every conversation is today.
+          findFirst: async () => ({
+            selectionMode: "manual",
+            routerModelId: null,
+            routerChallengerTurns: 0,
+            productKey: "review",
+          }),
         },
         // The second test deliberately fails after the selection gate; the
         // route's provider-failure bookkeeping then runs. Absorb it -- what

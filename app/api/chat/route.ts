@@ -91,6 +91,7 @@ import {
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
 } from "@/lib/generatedArtifactTool";
+import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
@@ -976,6 +977,7 @@ async function handleChatPost(
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
+        let conversationProductKey: string | null = null;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §10: the conversation's bound profile version. Read from the same
         // row as the memory mode so the context this request builds is the
@@ -1144,8 +1146,18 @@ async function handleChatPost(
                 timestamp: new Date().toISOString(),
             }));
         }
+        // No longer gated on cohort eligibility. Decision record v1.2 §3 puts
+        // the product before the cohort, and the product lives on this row --
+        // so skipping the read for an account the cohort would refuse would
+        // mean deciding the cohort first, which is the ordering that dilutes
+        // the rollout percentage with Review traffic.
+        //
+        // The cost is one primary-key read on a signed-in conversation turn.
+        // A guest turn still reads nothing. The ownership check below reads
+        // the same row again; merging the two is worth doing and is not this
+        // change.
         const conversationRouting =
-            autoCohort.eligible && conversationId && session?.user?.id
+            conversationId && session?.user?.id
                 ? await prisma.conversation.findFirst({
                       // The owner is in the `where`, not checked afterwards,
                       // so this cannot read another account's mode. The real
@@ -1156,6 +1168,7 @@ async function handleChatPost(
                           selectionMode: true,
                           routerModelId: true,
                           routerChallengerTurns: true,
+                          productKey: true,
                       },
                   })
                 : null;
@@ -1223,6 +1236,11 @@ async function handleChatPost(
         const autoSelection = selectAutoModel({
             requestedModelId,
             conversation: conversationRouting,
+            // The stored product, never the surface the request came from:
+            // §6 forbids a surfaceProductKey fallback at dispatch. Null when
+            // there is no conversation, which is `no_conversation` further
+            // down rather than a product refusal.
+            productKey: conversationRouting?.productKey ?? null,
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
             plan: accountPlan?.tier ?? null,
@@ -1500,10 +1518,16 @@ async function handleChatPost(
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
+                    productKey: true,
                     assistantProfileVersionId: true,
                 },
             });
             conversationMemoryMode = conversation?.memoryMode ?? null;
+            // The stored product, read here because this is where the
+            // conversation is already fetched under an ownership check. §6:
+            // once the row exists, its own productKey is the only source --
+            // never the surface the request came from.
+            conversationProductKey = conversation?.productKey ?? null;
             conversationProfileVersionId =
                 conversation?.assistantProfileVersionId ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
@@ -2108,7 +2132,7 @@ async function handleChatPost(
                     // Scanned or image-only PDFs have no local text layer.
                     // Validate them before leaving the process, then use OCR 4
                     // as a backend conversion model. It is never exposed in
-                    // the Insight model picker and never consumes user model
+                    // the Tomverse Review model picker and never consumes user model
                     // credits; its page cost is recorded as internal usage.
                     //
                     // An archived PDF only reaches OCR while the archive's own
@@ -2974,13 +2998,42 @@ async function handleChatPost(
                       turnAttachments: turnAttachmentBytes,
                   })
                 : null;
+        /*
+          Which artifact tool calls the model began (lib/generatedArtifactTurnTracker.ts).
+
+          A provider that runs out of output tokens halfway through writing a
+          tool call leaves nothing behind except the fact that it started one
+          -- and without that fact the turn ends on "I will now create the
+          file:" with no file and no card, which is the exact silence
+          docs/policy/generated-artifacts.md section 1 forbids.
+
+          Declared before the tools and assigned after them, because the two
+          refer to each other: the tracker is built from the names the config
+          actually registered, and each tool reports its own execution back
+          into the tracker.
+        */
+        let artifactToolCallTracker: ArtifactToolCallTracker | null = null;
         const artifactToolConfig = artifactCollector
             ? buildGeneratedArtifactToolConfig(artifactCollector, {
                   registerDocumentBatch: Boolean(
                       artifactToolPlan?.registerDocumentBatch
                   ),
+                  // Read at call time, which is after the assignment below:
+                  // a tool cannot execute before the request that carries it
+                  // has been assembled.
+                  noteExecutionStarted: (toolCallId) =>
+                      artifactToolCallTracker?.noteExecutionStarted(toolCallId),
               })
             : null;
+        if (artifactToolConfig) {
+            // The names this request actually registered, and nothing else.
+            // `web_search` and `google_search` are not among them, which is
+            // what keeps a truncated native search from being reported as a
+            // file the user never got.
+            artifactToolCallTracker = new ArtifactToolCallTracker(
+                Object.keys(artifactToolConfig.tools)
+            );
+        }
         /*
           Tools from both features, merged rather than chosen between.
 
@@ -3003,7 +3056,39 @@ async function handleChatPost(
                           ...(artifactToolConfig?.tools ?? {}),
                       },
                       ...(artifactToolConfig
-                          ? { stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS) }
+                          ? {
+                                stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS),
+                                /*
+                                  The two halves of "was this file begun, and
+                                  did it ever run".
+
+                                  `onChunk` sees `tool-input-start`, which is
+                                  the earliest and only point a provider names
+                                  a tool call it is about to write. The delta
+                                  frames that follow carry the model's partial
+                                  specification and are deliberately not read:
+                                  a truncated specification is neither logged
+                                  nor stored (docs/policy/generated-artifacts.md
+                                  section 5).
+
+                                  `onToolExecutionStart` closes the pair. Each
+                                  tool's own `execute` reports the same fact,
+                                  so an executed call is marked twice and can
+                                  never be mistaken for an abandoned one --
+                                  which is what keeps a second card off a file
+                                  that already failed on its own terms.
+                                */
+                                onChunk: ({ chunk }: { chunk: unknown }) => {
+                                    artifactToolCallTracker?.noteChunk(chunk);
+                                },
+                                onToolExecutionStart: (event: {
+                                    toolCall?: { toolCallId?: string };
+                                }) => {
+                                    artifactToolCallTracker?.noteExecutionStarted(
+                                        event.toolCall?.toolCallId
+                                    );
+                                },
+                            }
                           : {}),
                   }
                 : null;
@@ -3095,6 +3180,10 @@ async function handleChatPost(
             requestOutputCapTokens: budget.maxOutputTokens,
             reservationId: usageReservation?.reservationId ?? null,
             conversationId: conversationId ?? null,
+            // The snapshot, so a failed or not_dispatched run can still be
+            // attributed to a product. Null on a turn with no conversation --
+            // a guest has no row to read one from.
+            productKey: conversationProductKey,
         });
         // §5 step 4: the effective request is only known once the adapter has
         // assembled it, so the manifest is finalized here and not a line
@@ -3991,6 +4080,9 @@ async function handleChatPost(
               they belong to.
             */
             await artifactCollector?.discard();
+            // The same reasoning one step earlier: a tool call the displaced
+            // model began belongs to an answer that will not be written.
+            artifactToolCallTracker?.reset();
 
             displacedModelId = dispatched.modelId;
             rerouteCount += 1;
@@ -4175,6 +4267,26 @@ async function handleChatPost(
                                     timestamp: new Date().toISOString(),
                                 })
                             );
+                            /*
+                              A file the answer began and the output ceiling
+                              cut off.
+
+                              Only on an incomplete turn, and only for calls
+                              that never reached their tool: a call that ran
+                              has already recorded its own outcome, and a
+                              length-truncated answer that started no tool call
+                              keeps exactly the generic incomplete notice it
+                              has today. Recorded here, before the trailer is
+                              built and before the message transaction, so the
+                              card the user sees while it streams and the row
+                              they reload into are the same card
+                              (docs/policy/generated-artifacts.md section 9).
+                            */
+                            if (artifactCollector && artifactToolCallTracker) {
+                                artifactCollector.recordIncompleteToolCalls(
+                                    artifactToolCallTracker.abandonedCalls()
+                                );
+                            }
                         }
                         const searchSettlementFields = {
                             searchSurchargeCredits: getWebSearchSurchargeCredits(

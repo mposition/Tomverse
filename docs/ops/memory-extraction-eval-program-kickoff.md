@@ -61,7 +61,10 @@ AGENTS.md가 "셈과 대조는 에이전트가 합니다"라고 정한 대로, �
 | `injection_directives` | 4 | 4 | 196 · 196 |
 
 - 현재 `datasetVersion`은 `mem-eval-seed-1`, purpose `development`, `frozen: false`
-- 8개 cell, 보유 **32건**, 하한 총계 **1,600건**, 부족 **1,568건**
+- 8개 cell, 하한 총계 **1,150건** (① 400 + ②③④ 750,
+  `docs/policy/external-conversation-import-and-memory.md` §12.2 [개정 · 2026-08-23]).
+  보유 건수와 부족분은 `npm run report:memory-eval-batches`가 실시간으로 셉니다 —
+  이 문서에 숫자를 박아 두면 batch가 채택될 때마다 거짓이 됩니다.
 - `MEMORY_EVAL_DATASET_FROZEN`이 `false`인 동안 harness는 `--live`를 거부합니다
   (`docs/ops/memory-extraction-eval-dataset.md` §7.2). 동결은 문서상의 약속이 아니라 코드가 강제하는 상태입니다.
 
@@ -235,10 +238,10 @@ disagreement 대 adjudication), `docs/ops/memory-extraction-eval-dataset.md` §6
 - 입력 크기: seed fixture 32건의 실제 extraction prompt를 `estimatePromptTokens()`
   로 재어 평균 571 토큰 / 최대 629 토큰
 
-| 시나리오 | 1건당 | 1,600건 1회 | 독립 재실행 포함 2회 |
+| 시나리오 | 1건당 | 1,150건 1회 | 독립 재실행 포함 2회 |
 |---|---|---|---|
-| seed 평균 크기, 출력 700 토큰 | US$0.00095 | **US$1.53** | **US$3.05** |
-| seed의 3배 크기, 출력 900 토큰 | US$0.00142 | US$2.28 | US$4.55 |
+| seed 평균 크기, 출력 700 토큰 | US$0.00095 | **US$1.09** | **US$2.19** |
+| seed의 3배 크기, 출력 900 토큰 | US$0.00142 | US$1.63 | US$3.27 |
 
 decision set의 케이스는 seed보다 클 수 있으므로 3배 행을 함께 뒀습니다. 10배로
 잡아도 2회 실행이 US$25 수준입니다.

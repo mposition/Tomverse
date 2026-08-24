@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import {
     ASSISTANT_KNOWLEDGE_LIMITS,
     ASSISTANT_KNOWLEDGE_OFFICE_TYPES,
@@ -9,6 +11,7 @@ import {
 } from "@/lib/assistantKnowledgeLimits";
 import { chunkKnowledgeText } from "@/lib/assistantKnowledgeChunking";
 import { knowledgeUsage } from "@/lib/assistantKnowledgeService";
+import { lockAccountKnowledgeQuota } from "@/lib/assistantProfileImportLocks";
 import { extractPdfTextSafely } from "@/lib/mediaSecurity";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import { prisma } from "@/lib/prisma";
@@ -150,12 +153,36 @@ const processClaimedFile = async (file: {
 
     const extractedCharacters = [...text].length;
     const extractedBytes = Buffer.byteLength(text, "utf8");
-    const usage = await knowledgeUsage(file.userId, file.profileId);
-    const refusal = knowledgeExtractedTextRefusal({
-        extractedBytesInAccount: usage.extractedBytesInAccount,
-        incomingExtractedBytes: extractedBytes,
-        extractedCodePoints: extractedCharacters,
+
+    // The account ceiling is decided and consumed in one transaction, under
+    // the account lock.
+    //
+    // It used to be decided out here and consumed in the transaction below,
+    // which meant two extractions running for the same account read the same
+    // total and both passed. Nothing upstream helps: the finalize path's lock
+    // is not held here, because extraction happens after that request has
+    // returned. This is the only place the figure it guards actually moves.
+    const refusal = await prisma.$transaction(async (tx) => {
+        await lockAccountKnowledgeQuota(tx, file.userId);
+        const usage = await knowledgeUsage(file.userId, file.profileId);
+        const decision = knowledgeExtractedTextRefusal({
+            extractedBytesInAccount: usage.extractedBytesInAccount,
+            incomingExtractedBytes: extractedBytes,
+            extractedCodePoints: extractedCharacters,
+        });
+        // Returned rather than thrown, so a refusal is not a rollback. The
+        // caller marks the file failed afterwards; throwing here would undo
+        // the read and leave the reason nowhere.
+        if (decision) return decision;
+        await writeChunks(tx, {
+            file,
+            chunks,
+            extractedCharacters,
+            extractedBytes,
+        });
+        return null;
     });
+
     if (refusal) {
         await markFailed(
             file.id,
@@ -170,7 +197,21 @@ const processClaimedFile = async (file: {
         };
     }
 
-    await prisma.$transaction(async (tx) => {
+    return { fileId: file.id, outcome: "ready", chunkCount: chunks.length };
+};
+
+/** The two writes that make a processed file retrievable. */
+const writeChunks = async (
+    tx: Prisma.TransactionClient,
+    input: {
+        file: { id: string; userId: string };
+        chunks: ReturnType<typeof chunkKnowledgeText>;
+        extractedCharacters: number;
+        extractedBytes: number;
+    }
+) => {
+    const { file, chunks } = input;
+    {
         await tx.assistantKnowledgeChunk.deleteMany({ where: { fileId: file.id } });
         await tx.assistantKnowledgeChunk.createMany({
             data: chunks.map((chunk) => ({
@@ -188,15 +229,18 @@ const processClaimedFile = async (file: {
             data: {
                 processingStatus: "ready",
                 failureCode: null,
-                extractedCharacters,
+                extractedCharacters: input.extractedCharacters,
+                // Stored rather than recomputed. It was already measured to
+                // decide the refusal above, and the account total is summed
+                // from this column -- throwing it away is what made that total
+                // count characters as if they were bytes.
+                extractedBytes: input.extractedBytes,
                 chunkCount: chunks.length,
                 retrievalVersion: chunks[0].retrievalVersion,
                 processedAt: new Date(),
             },
         });
-    });
-
-    return { fileId: file.id, outcome: "ready", chunkCount: chunks.length };
+    }
 };
 
 /**

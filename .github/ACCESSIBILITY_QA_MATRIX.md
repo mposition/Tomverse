@@ -1,6 +1,6 @@
 # Accessibility QA matrix
 
-Where accessibility verification for Tomverse Insight is recorded (WO-007 /
+Where accessibility verification for Tomverse Review is recorded (WO-007 /
 UX-F011). Automation covers part of this; the rest needs a human on real
 hardware and is marked **N/V** — *not verified* — until someone runs it.
 

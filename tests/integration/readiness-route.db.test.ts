@@ -197,6 +197,7 @@ type ReadinessBody = {
         imageProviderBudget: boolean;
         emailSendingIdentity: boolean;
         emailSnapshotKeyring: boolean;
+        emailUnsubscribeKeyring: boolean;
     };
     traceId: string;
 };
@@ -224,6 +225,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         imageProviderBudget: true,
         emailSendingIdentity: true,
         emailSnapshotKeyring: true,
+        emailUnsubscribeKeyring: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -274,6 +276,17 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 snapshotKeyringReady = false;
             },
         },
+        {
+            // Driven through the real environment rather than mocked, because
+            // this one is conditional and the condition is the interesting
+            // part: the keys are only required once marketing has a sending
+            // identity of its own, and that is what setting this reproduces.
+            name: "emailUnsubscribeKeyring",
+            arrange: () => {
+                process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+                delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -285,6 +298,8 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         imageBudget = { ready: true, flagEnabled: false };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
+        delete process.env.MARKETING_EMAIL_FROM;
+        delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
         setNodeEnv(originalNodeEnv);
         arrange();
 
@@ -312,6 +327,34 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             "every dependency is reported, not only the failing one"
         );
     }
+});
+
+test("the unsubscribe keyring is required only once marketing can send", async () => {
+    // EM-10's whole point, at the route. Gating on the keys unconditionally
+    // would refuse today's deployment over a capability nobody has turned on;
+    // not gating at all is how the endpoint answered ready while every
+    // marketing message would be refused for having no unsubscribe link.
+    delete process.env.MARKETING_EMAIL_FROM;
+    delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+    const withoutMarketing = await get();
+    assert.equal(withoutMarketing.body.checks.emailUnsubscribeKeyring, true);
+    assert.equal(withoutMarketing.body.ok, true);
+
+    // Configure the marketing address and the same missing key is now fatal.
+    process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+    const withMarketing = await get();
+    assert.equal(withMarketing.body.checks.emailUnsubscribeKeyring, false);
+    assert.equal(withMarketing.response.status, 503);
+
+    // Supplying the keys clears it, so the refusal names something an operator
+    // can actually act on rather than a permanent state.
+    process.env.EMAIL_UNSUBSCRIBE_KEYS = "v1:0123456789abcdef0123456789abcdef";
+    const configured = await get();
+    assert.equal(configured.body.checks.emailUnsubscribeKeyring, true);
+    assert.equal(configured.body.ok, true);
+
+    delete process.env.MARKETING_EMAIL_FROM;
+    delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
 });
 
 test("the image budget check throwing is not ready", async () => {

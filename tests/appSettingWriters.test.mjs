@@ -54,6 +54,15 @@ const READ_ONLY_KEYS = {
       "approval already exist. A toggle would be the procedure's last step " +
       "without its first five.",
   },
+  ASSISTANT_PACKAGE_IMPORT_FLAG_KEY: {
+    reason:
+      "docs/policy/assistant-package-import.md §11 lists what has to be true " +
+      "before package import may be turned on, and none of it is yet: the " +
+      "upload and publish steps have no endpoints, so a toggle would enable a " +
+      "wizard that stops at step 6. The flag exists ahead of that on purpose " +
+      "-- so enabling it later is a settings change against a reviewed path -- " +
+      "and its control lands with the slice that makes the rest of it work.",
+  },
 };
 
 const source = readFileSync(SOURCE, "utf8");

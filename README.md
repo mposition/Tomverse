@@ -1304,8 +1304,15 @@ RESEND_API_KEY=<Resend API key>
 Settings -> Secrets and variables -> Actions -> **Variables**:
 
 ```text
-TRANSACTIONAL_EMAIL_FROM=Tomverse Insight <hello@mail.tomverse.app>
+TRANSACTIONAL_EMAIL_FROM=Tomverse Review <hello@mail.tomverse.app>
 ```
+
+The display name follows the Insight -> Review rename (product boundary
+decision record v1.2, decision 1). **Production still carries the old one**:
+this variable wins over the compiled default, so the code change alone does not
+move it, and changing a From display name invalidates the filters recipients
+have built. `docs/ops/tomverse-review-rename.md` §5.4 tracks that as an
+outstanding human step, together with the one-time notice it ships beside.
 
 The From address is a variable, not a secret: it is printed on every message
 the service sends, so hiding it buys nothing, and the workflow reads it as

@@ -203,6 +203,12 @@ test("existing-conversation fallbacks stay single-model, only new creations use 
   // conversation is the single representative model, never the account's
   // new-conversation combination -- applying the combination there would
   // silently widen an old single-model conversation into several panels.
+  //
+  // The two halves live in two files since the creation handler was
+  // parameterised by product (decision record v1.2 §6): the route still owns
+  // GET, and POST delegates to lib/conversationCreateHandler.ts, which the
+  // product-specific endpoints share. The invariant is unchanged -- only where
+  // each half is read from.
   const { readFileSync } = await import("node:fs");
   const route = readFileSync(
     new URL("../app/api/conversations/route.ts", import.meta.url),
@@ -212,7 +218,18 @@ test("existing-conversation fallbacks stay single-model, only new creations use 
     route.indexOf("export async function GET"),
     route.indexOf("export async function POST")
   );
-  const postSection = route.slice(route.indexOf("export async function POST"));
+  const postSection = readFileSync(
+    new URL("../lib/conversationCreateHandler.ts", import.meta.url),
+    "utf8"
+  );
+
+  // The route's own POST must be a delegation and nothing else, or the two
+  // halves could drift apart with this test still passing.
+  assert.match(
+    route.slice(route.indexOf("export async function POST")),
+    /createConversationForProduct\(req, REVIEW_PRODUCT_KEY\)/,
+    "the route's POST must delegate to the shared product handler"
+  );
   assert.match(
     getSection,
     /\[resolvedDefaultEngine = APP_DEFAULTS\.defaultModelId\]/,

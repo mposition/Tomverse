@@ -5,8 +5,16 @@ import {
   buildAccountRestoredEmail,
   buildAccountWelcomeEmail,
 } from "@/lib/accountEmails";
-import { buildBillingWelcomeEmail } from "@/lib/billingEmails";
+import {
+  buildAdminPlanChangedEmail,
+  buildBillingWelcomeEmail,
+  buildFoundingTesterPassEmail,
+} from "@/lib/billingEmails";
 import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
+import { buildModelLaunchEmail } from "@/lib/modelLaunchEmail";
+import type { ModelLaunchPayload } from "@/lib/modelLaunchEmail";
+import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
+import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 
 /**
  * Every message this system can send, and what kind of message each one is.
@@ -76,13 +84,51 @@ export type BillingWelcomePayload = {
   /** ISO string. A Date does not survive JSON, and the snapshot is JSON. */
   periodEnd: string | null;
 };
+/**
+ * The pass notices carry one variable between them.
+ *
+ * ISO string, not a Date: the snapshot is JSON and a Date does not survive
+ * it. Null renders as the locale's "not available", which is what the
+ * renderer already did for a missing date.
+ */
+export type FoundingTesterPassPayload = { periodEnd: string | null };
+export type AdminPlanChangedPayload = {
+  plan: string | null;
+  billingInterval: string | null;
+  periodEnd: string | null;
+  reason: string | null;
+};
 export type LoginCodePayload = { code: string; verifyUrl: string };
+/**
+ * The whole report, as the structure both renderers read.
+ *
+ * Stored on the delivery row and re-rendered from there on every attempt, which
+ * is why the caller resolves the dates and the URL rather than the template
+ * reading a clock: a retry three hours later must produce the same bytes or the
+ * provider stops recognising it as the same message.
+ */
+export type OpsModelLifecycleDailyPayload = LifecycleReportInput;
 
 export const ACCOUNT_WELCOME_TEMPLATE = "account_welcome";
 export const ACCOUNT_DELETION_SCHEDULED_TEMPLATE = "account_deletion_scheduled";
 export const ACCOUNT_RESTORED_TEMPLATE = "account_restored";
 export const BILLING_WELCOME_TEMPLATE = "billing_welcome";
 export const AUTH_LOGIN_CODE_TEMPLATE = "auth_login_code";
+export const OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE = "ops_model_lifecycle_daily";
+export const MODEL_LAUNCH_TEMPLATE = "model_launch";
+/**
+ * Three keys rather than one with a phase field.
+ *
+ * A TemplateVersion is a hash of one message's copy. Folding three notices
+ * behind a phase variable would give them one hash, and the audit
+ * reproduction could no longer say which of the three a delivery was.
+ */
+export const FOUNDING_TESTER_PASS_STARTED_TEMPLATE =
+  "founding_tester_pass_started";
+export const FOUNDING_TESTER_PASS_REMINDER_TEMPLATE =
+  "founding_tester_pass_reminder";
+export const FOUNDING_TESTER_PASS_ENDED_TEMPLATE = "founding_tester_pass_ended";
+export const ADMIN_PLAN_CHANGED_TEMPLATE = "admin_plan_changed";
 
 const definitions: AnyDefinition[] = [
   {
@@ -111,8 +157,8 @@ const definitions: AnyDefinition[] = [
     classification: "legal",
     purpose: null,
     requiresUnsubscribe: false,
-    render: (payload: AccountDeletionScheduledPayload) =>
-      buildAccountDeletionScheduledEmail(payload),
+    render: (payload: AccountDeletionScheduledPayload, language) =>
+      buildAccountDeletionScheduledEmail({ ...payload, language }),
     placeholderPayload: { scheduledFor: "{{scheduledFor}}" },
   },
   {
@@ -120,8 +166,59 @@ const definitions: AnyDefinition[] = [
     classification: "transactional",
     purpose: null,
     requiresUnsubscribe: false,
-    render: () => buildAccountRestoredEmail(),
+    render: (_payload: AccountRestoredPayload, language) =>
+      buildAccountRestoredEmail({ language }),
     placeholderPayload: {},
+  },
+  {
+    key: MODEL_LAUNCH_TEMPLATE,
+    // A product announcement to people nothing has happened to. That is
+    // marketing, whatever else it is about, and the alternative -- calling it
+    // `service` so it reaches an audience that never opted in -- is the failure
+    // docs/policy/email-notifications.md §3.2 names first.
+    //
+    // Registered before anything sends it, on purpose. The lane's three
+    // marketing branches had never executed because no marketing template
+    // existed, so the first real send would have been their first run (EM-03).
+    classification: "marketing",
+    purpose: "product_updates",
+    requiresUnsubscribe: true,
+    render: (payload: ModelLaunchPayload, language) =>
+      buildModelLaunchEmail(payload, language),
+    placeholderPayload: {
+      modelName: "{{modelName}}",
+      plans: "{{plans}}",
+      highlights: ["{{highlight}}"],
+      creditLine: "{{creditLine}}",
+      ctaUrl: "{{ctaUrl}}",
+    },
+  },
+  {
+    key: OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE,
+    // Transactional, and the recipient is an operator rather than a customer:
+    // there is no preference that gates it and no unsubscribe link, because the
+    // person who receives it is on the address precisely to be interrupted.
+    //
+    // It goes through the standard lane rather than direct so it inherits the
+    // history, the retries and the suppression check. That is safe here for the
+    // reason the incident alerts are not: this report says nothing about the
+    // email system -- it reports the provider catalogue -- so routing it through
+    // the queue does not make it depend on the thing it would have to report on.
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: OpsModelLifecycleDailyPayload) =>
+      buildModelLifecycleDailyEmail(payload),
+    placeholderPayload: {
+      localDate: "{{localDate}}",
+      generatedLabel: "{{generatedLabel}}",
+      workQueueUrl: "{{workQueueUrl}}",
+      providers: [],
+      workItems: [],
+      lifecycleWarnings: [],
+      missing: [],
+      registry: { ran: false, disabled: [], restored: [], held: [] },
+    },
   },
   {
     key: BILLING_WELCOME_TEMPLATE,
@@ -134,6 +231,52 @@ const definitions: AnyDefinition[] = [
       plan: "{{plan}}",
       billingInterval: "{{billingInterval}}",
       periodEnd: null,
+    },
+  },
+  // The plan a person is on is what they are owed for their money, so the four
+  // notices below are transactional: none of them is switchable off, and none
+  // carries an unsubscribe link (docs/policy/email-notifications.md §3.2).
+  {
+    key: FOUNDING_TESTER_PASS_STARTED_TEMPLATE,
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: FoundingTesterPassPayload, language) =>
+      buildFoundingTesterPassEmail("started", { ...payload, language }),
+    placeholderPayload: { periodEnd: null },
+  },
+  {
+    key: FOUNDING_TESTER_PASS_REMINDER_TEMPLATE,
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: FoundingTesterPassPayload, language) =>
+      buildFoundingTesterPassEmail("reminder", { ...payload, language }),
+    placeholderPayload: { periodEnd: null },
+  },
+  {
+    key: FOUNDING_TESTER_PASS_ENDED_TEMPLATE,
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: FoundingTesterPassPayload, language) =>
+      buildFoundingTesterPassEmail("ended", { ...payload, language }),
+    placeholderPayload: { periodEnd: null },
+  },
+  {
+    key: ADMIN_PLAN_CHANGED_TEMPLATE,
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    // The language argument is ignored because this copy exists in English
+    // only; see buildAdminPlanChangedEmail.
+    render: (payload: AdminPlanChangedPayload) =>
+      buildAdminPlanChangedEmail(payload),
+    placeholderPayload: {
+      plan: "{{plan}}",
+      billingInterval: "{{billingInterval}}",
+      periodEnd: null,
+      reason: null,
     },
   },
 ];

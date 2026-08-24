@@ -6,6 +6,7 @@ import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 import { findDuplicateCases } from "../lib/memoryExtractionEvalCore.ts";
 import { MEMORY_KINDS } from "../lib/memoryValidatorCore.ts";
+import { parseBatchRecord } from "../lib/memoryEvalBatchRecord.ts";
 
 /**
  * Policy docs/policy/external-conversation-import-and-memory.md §12.6: whatever an agent makes is a candidate pool until a person
@@ -38,8 +39,12 @@ test("the fixtures file does not import the candidate pool", () => {
     // The structural half. An id check alone would pass the day someone
     // spreads the batch in under new ids.
     const source = read("../lib/memoryExtractionEvalFixtures.ts");
-    assert.ok(
-        !source.includes("memoryExtractionEvalCandidates"),
+    // An import, not a mention. The fixtures file explains in prose which
+    // directory it may not pull from, and a substring check would fail on
+    // the explanation while passing on a dynamic import.
+    assert.doesNotMatch(
+        source,
+        /(?:from|import\()\s*["'][^"']*memoryExtractionEvalCandidates/,
         "fixtures must not import candidates -- adoption is a human act, " +
             "recorded in the batch record, not an import"
     );
@@ -136,5 +141,30 @@ test("no kind takes more than 40% of a candidate cell", () => {
                 `${batch.id}: ${kind} is ${count}/${batch.cases.length}, over the 40% ceiling`
             );
         }
+    }
+});
+
+test("a record's verdicts name cases that are still in the batch", () => {
+    // docs/ops/memory-extraction-eval-dataset.md §6.4 redrafts a rejected case rather than editing it in place, and a
+    // redraft can renumber ids. If the record then names ids the batch no
+    // longer contains, the batch reads as reviewed while the cases that would
+    // move into the dataset are ones nobody judged -- the exact outcome
+    // docs/ops/memory-extraction-eval-dataset.md §6.3's explicit adoption line was added to prevent.
+    for (const batch of CANDIDATE_BATCHES) {
+        const record = parseBatchRecord(
+            readFileSync(
+                fileURLToPath(new URL(`../${batch.record}`, import.meta.url)),
+                "utf8"
+            )
+        );
+        const known = new Set(batch.cases.map((entry) => entry.id));
+        const orphans = record.cases
+            .map((entry) => entry.caseId)
+            .filter((id) => !known.has(id));
+        assert.deepEqual(
+            orphans,
+            [],
+            `${batch.id}: its record judges ${orphans.join(", ")}, which the batch no longer contains`
+        );
     }
 });

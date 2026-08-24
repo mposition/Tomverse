@@ -21,6 +21,10 @@ import {
     type MemoryExtractionPairRef,
     type RevokedPairsState,
 } from "@/lib/memoryAccess";
+import {
+    MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL,
+    MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
+} from "@/lib/memoryExtractionEvalCore";
 
 /** The prompt contract version the B2 pipeline implements. */
 export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v1";
@@ -71,16 +75,29 @@ export type MemoryExtractionEvalEntry = {
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
         {
-            // §12.5 first eval target. Candidate only: no decision-grade eval
-            // has been run, and the eval budget line below is the human entry
-            // point — smoke mode only until it is filled and this entry is
-            // moved to approved through the §12.4 procedure.
+            // §12.5 first eval target. **Still a candidate.** The budget below
+            // is filled, which is what opens `--live`; it is not approval of
+            // the pair. That is the §12.4 procedure — decision-grade run,
+            // artifact preservation, blind review, independent re-run, §12.3
+            // judgement, approver signature, register merge, staging
+            // verification — and none of it has happened.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
             status: "candidate",
             owner: "@mposition",
             registeredAt: "2026-08-03",
-            evalBudget: null,
+            evalBudget: {
+                approvedBy: "@mposition",
+                // US$17.36 is the worst case for three runs: §12.4 asks for two
+                // and the third absorbs one failed run without a second
+                // approval. The worst case prices every call at the harness's
+                // 4,096-token output ceiling, so a run that behaves cannot
+                // approach this — the typical figure for two runs is US$3.09.
+                // Derivation and what it does not measure: issue #837.
+                maxUsd: 20,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-23",
+            },
             evaluation: null,
         },
         {
@@ -98,7 +115,10 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
 /** §12.3 acceptance thresholds — the register check re-verifies them. */
 export const MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN = 0.95;
 export const MEMORY_EVAL_RECALL_WILSON_LOWER_MIN = 0.85;
-export const MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM = 200;
+// The floor itself lives in `lib/memoryExtractionEvalCore.ts` and is imported
+// rather than restated. It used to be declared here too, and two copies of a
+// number that must agree is one edit away from the harness and the register
+// enforcing different §12.2 floors.
 export const MEMORY_EVAL_REQUIRED_LANGUAGES = ["ko", "en"] as const;
 
 /**
@@ -140,6 +160,34 @@ export function findEvalRegisterProblems(
         if (!entry.owner || !entry.registeredAt) {
             problems.push(`${label}: owner and registeredAt are required`);
         }
+        // A budget is checked wherever it appears, not only on approved
+        // entries. Filling it is what opens `--live` (§12.5), so a candidate
+        // carrying a half-filled one is the dangerous state: spending is
+        // unlocked and the record that says who authorised it is incomplete.
+        // A missing budget stays the ordinary waiting state.
+        if (entry.evalBudget) {
+            const { approvedBy, maxUsd, ticket, approvedAt } = entry.evalBudget;
+            for (const [field, value] of [
+                ["approvedBy", approvedBy],
+                ["ticket", ticket],
+                ["approvedAt", approvedAt],
+            ] as const) {
+                if (!value || String(value).trim() === "") {
+                    problems.push(
+                        `${label}: eval budget has an empty ${field} ` +
+                            "(docs/policy/external-conversation-import-and-memory.md §12.5)"
+                    );
+                }
+            }
+            if (!Number.isFinite(maxUsd) || maxUsd <= 0) {
+                // The harness reads this as the spend ceiling. Zero would stop
+                // every live run at the first case, and a negative number is a
+                // ceiling nobody chose.
+                problems.push(
+                    `${label}: eval budget maxUsd must be a positive number (got ${maxUsd})`
+                );
+            }
+        }
         if (entry.status !== "approved") continue;
 
         if (!entry.evalBudget) {
@@ -170,13 +218,17 @@ export function findEvalRegisterProblems(
             if (!evaluation.languages.includes(language)) {
                 problems.push(`${label}: missing required eval language ${language}`);
             }
-            for (const category of ["1", "2", "3", "4"]) {
+            for (const policyLabel of ["1", "2", "3", "4"] as const) {
                 const count =
-                    evaluation.sampleCounts[`${category}:${language}`] ?? 0;
-                if (count < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM) {
+                    evaluation.sampleCounts[`${policyLabel}:${language}`] ?? 0;
+                const minimum =
+                    MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[
+                        MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL[policyLabel]
+                    ];
+                if (count < minimum) {
                     problems.push(
-                        `${label}: sample count ${category}:${language}=${count} below ` +
-                            `${MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM} (§12.2)`
+                        `${label}: sample count ${policyLabel}:${language}=${count} below ` +
+                            `${minimum} (docs/policy/external-conversation-import-and-memory.md §12.2)`
                     );
                 }
             }

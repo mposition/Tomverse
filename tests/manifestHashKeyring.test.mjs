@@ -83,3 +83,41 @@ test("nothing in the keyring's own output invites storing the secret", () => {
   const key = activeManifestHashKey(env());
   assert.deepEqual(Object.keys(key).sort(), ["keyId", "secret"]);
 });
+
+// `lib/routingDispatchInstrumentation.ts` puts these messages into an
+// operational incident so the operator can tell the four failures apart
+// without a debugger. That is only safe while none of them interpolates the
+// secret -- a message naming the value would move the key from an environment
+// variable into the incident log, which is exactly the disclosure the keyring
+// exists to avoid. Ids, lengths and variable names are fine: the id is already
+// stored in plaintext on every manifest row.
+test("no keyring failure message carries the secret it failed on", () => {
+  const cases = [
+    {},
+    { MANIFEST_HASH_KEYS: KEY },
+    { MANIFEST_HASH_KEYS: `:${KEY}` },
+    { MANIFEST_HASH_KEYS: `bad id:${KEY}` },
+    { MANIFEST_HASH_KEYS: "short:tooshort", MANIFEST_HASH_ACTIVE_KEY_ID: "short" },
+    { MANIFEST_HASH_KEYS: `dup:${KEY},dup:${OTHER}` },
+    env({ MANIFEST_HASH_ACTIVE_KEY_ID: "nope" }),
+  ];
+  for (const environment of cases) {
+    assert.throws(
+      () => activeManifestHashKey(environment),
+      (error) => {
+        assert.ok(error instanceof ManifestHashKeyringError);
+        // Substrings too: a message that printed a prefix of the key would
+        // leak just as surely as one that printed all of it.
+        for (const secret of [KEY, OTHER, "tooshort"]) {
+          for (const fragment of [secret, secret.slice(0, 8)]) {
+            assert.ok(
+              !error.message.includes(fragment),
+              `"${error.message}" carries the secret`
+            );
+          }
+        }
+        return true;
+      }
+    );
+  }
+});

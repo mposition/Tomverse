@@ -17,7 +17,10 @@ import {
  *   2. choosing an assistant reaches the server as a profile id, never as a
  *      version id, and the row then reports the revision the *server* pinned;
  *   3. a conversation the owner has published past says which revision it is
- *      on and offers the move, instead of quietly moving itself.
+ *      on and offers the move, instead of quietly moving itself — in words
+ *      rather than a dot, and on every surface that names a revision, the
+ *      picker row included: the row used to report the profile's newest
+ *      revision beside a tick, which reads as a move nobody made.
  *
  * Runs on the desktop and mobile projects alike: nothing here is decided by
  * shell, and the tools menu is the same surface in both.
@@ -172,14 +175,87 @@ test("a superseded conversation states its revision and offers the move", async 
     await expect(page.getByTestId("tools-assistant-row")).toContainText(
         "Revision 1"
     );
+    // In words, not a dot. The 2026-08-21 staging round saw the dot and could
+    // not say what it meant, and `aria-hidden` said nothing to a screen reader
+    // at all -- so the state is asserted as text a reader can quote.
+    await expect(
+        page.getByTestId("tools-assistant-superseded-badge")
+    ).toHaveText("New revision");
     await expect(
         page.getByTestId("tools-assistant-superseded-dot")
-    ).toBeVisible();
+    ).toHaveCount(0);
 
     await page.getByTestId("tools-assistant-row").click();
     await expect(page.getByTestId("assistant-move-to-latest")).toContainText(
         "newest revision"
     );
+});
+
+test("the picker row says which revision is running, not the profile's newest", async ({
+    page,
+}) => {
+    // The regression this pins: `assistantProfileOptions` carries the
+    // profile's `currentRevision`, so the row for a conversation pinned to
+    // revision 1 of a profile now on 3 read "Revision 3" with a tick beside
+    // it. Read together that says the conversation was moved to 3, and §14 is
+    // that only the user moves it.
+    await mockAuthenticatedApi(page, {
+        assistantProfiles: PROFILES,
+        assistantProfile: boundProfile({
+            revision: 1,
+            latestRevision: 3,
+            status: "superseded",
+        }),
+    });
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page);
+
+    await openAssistantMenu(page);
+    const detail = page.getByTestId("assistant-option-p-scheduler-detail");
+    await expect(detail).toHaveText("Revision 1 in use · newest 3");
+    // Both numbers, and the pinned one first: "3" alone on this row is what
+    // made the tick read as a move.
+    await expect(detail).not.toHaveText(/^Revision 3$/);
+    // The tick itself was never wrong -- this profile *is* the chosen one --
+    // so it stays.
+    await expect(
+        page.getByTestId("assistant-option-p-scheduler")
+    ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a chosen profile on its newest revision says only that revision", async ({
+    page,
+}) => {
+    // The other half of the same rule: with nothing published past the
+    // conversation there is no second number to report, and the row must not
+    // manufacture one.
+    await mockAuthenticatedApi(page, {
+        assistantProfiles: PROFILES,
+        assistantProfile: boundProfile(),
+    });
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page);
+
+    await openAssistantMenu(page);
+    await expect(
+        page.getByTestId("assistant-option-p-scheduler-detail")
+    ).toHaveText("Revision 3");
+});
+
+test("a profile the conversation does not run keeps its description", async ({
+    page,
+}) => {
+    // The revision line replaces the description only on the chosen row,
+    // where the question is what is running. Everywhere else the description
+    // is what helps the visitor choose.
+    await mockAuthenticatedApi(page, { assistantProfiles: PROFILES });
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page);
+
+    await openAssistantMenu(page);
+    await expect(
+        page.getByTestId("assistant-option-p-scheduler-detail")
+    ).toHaveText("Answers scheduling questions.");
 });
 
 test("detaching is always available, including with nothing published", async ({

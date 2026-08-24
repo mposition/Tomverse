@@ -82,7 +82,7 @@ export async function GET(req: Request) {
                     if (lockedCount > 0) {
                         controller.enqueue(
                             encoder.encode(
-                                `Tomverse Insight Export\n\n${lockedCount} locked conversation(s) were excluded. Unlock them before exporting to include their contents.\n\n`
+                                `Tomverse Review Export\n\n${lockedCount} locked conversation(s) were excluded. Unlock them before exporting to include their contents.\n\n`
                             )
                         );
                         return;
@@ -90,7 +90,7 @@ export async function GET(req: Request) {
                     if (exportable.length === 0) {
                         controller.enqueue(
                             encoder.encode(
-                                "Tomverse Insight Export\n\nNo conversations found.\n"
+                                "Tomverse Review Export\n\nNo conversations found.\n"
                             )
                         );
                         controller.close();

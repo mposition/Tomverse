@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { recordSoftBounce, recordSuppression } from "@/lib/emailSuppression";
 import { providerEventEffect } from "@/lib/emailSuppressionCore";
 
@@ -254,6 +255,15 @@ const applyResendEvent = async (input: {
     sourceMessageId: providerMessageId,
     occurredAt: input.receivedAt,
   });
+
+  if (classification === "marketing") {
+    // Evaluated here as well as before each send, so the switch trips on the
+    // event that crossed the threshold rather than on whenever the next drain
+    // happens to run. Idempotent, and it never un-halts (EM-09).
+    await evaluateMarketingSendHealth(input.receivedAt).catch((error) => {
+      console.error("Marketing send health evaluation failed:", error);
+    });
+  }
 
   if (effect.reason === "complaint" && classification && classification !== "marketing") {
     // Someone reported a receipt or a security alert as spam. Either an account

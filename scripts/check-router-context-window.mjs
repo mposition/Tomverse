@@ -19,12 +19,14 @@
 // deadline -- the release gate is what these entries block, so they do not
 // also need an invented expiry date.
 //
-// Scope note: ModelRegistryEntry rows can supply a window at runtime
-// (lib/modelRegistry.ts merges DB values over the catalogue), so a listed
-// model here is not necessarily unguarded in production. This check covers the
-// catalogue's own guarantee, which is the floor when no row exists. The
-// database side needs its own check, the same way check:model-pricing and
-// check:model-pricing-db split that responsibility.
+// Scope note: ModelRegistryEntry rows decide what a request actually reads.
+// `getRuntimeModels` does not merge a row with the catalogue entry of the same
+// id -- it builds each model from its row alone -- so a listed model here is
+// not necessarily unguarded in production, and a model absent from this list
+// is not necessarily guarded there. This check covers the catalogue's own
+// guarantee, which is the floor when no row exists;
+// `npm run check:router-context-window-db` covers the rows, the same way
+// check:model-pricing and check:model-pricing-db split that responsibility.
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 

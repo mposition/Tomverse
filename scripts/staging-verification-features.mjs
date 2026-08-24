@@ -46,6 +46,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/assistant-knowledge-staging-verification-records",
     },
     {
+        key: "product-boundary-v1-2",
+        label: "product boundary v1.2 (Insight -> Review, productKey)",
+        checklist: "docs/ops/product-boundary-v1-2-staging-checklist.md",
+        records: "docs/ops/product-boundary-v1-2-staging-verification-records",
+    },
+    {
         key: "chat-attachment",
         label: "chat attachment formats (archives, legacy Office, GIF)",
         checklist: "docs/ops/chat-attachment-staging-checklist.md",

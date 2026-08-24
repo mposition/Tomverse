@@ -136,6 +136,27 @@ const CREDENTIAL_PATTERNS: readonly RegExp[] = [
     /\b(password|passwd|passphrase)\s*(is|[:=])\s*\S+/i,
     /(비밀번호|암호)\s*(는|은|[:=])\s*\S+/,
     /\b(api[ _-]?key|secret[ _-]?key|access[ _-]?token|client[ _-]?secret)\s*(is|[:=])\s*\S+/i,
+    // Secrets that carry no provider prefix and no `key:` label. These are
+    // credentials in the sense that matters here — possessing the value grants
+    // access — so they take the reject path rather than the PII one below.
+    // Each is anchored on the naming word AND a value shape, because the
+    // naming word alone is ordinary ("uses a password manager") and a value
+    // shape alone is ordinary too (a four-digit year).
+    // `lib/memoryValidatorProbeCorpus.ts` pins both directions.
+    /(도어락|현관|출입|금고)\s*(비밀\s*)?번호[^\n]{0,12}[\d#]/,
+    /\b(gate|door|entry|safe|lock)\s*(code|combination)\b[^\n]{0,16}\d/i,
+    /\bPIN\b\s*(번호)?[^\n]{0,10}\d{3,}/i,
+    /(백업|복구)\s*코드[^\n]{0,16}\d/,
+    /\bbackup\s*codes?\b[^\n]{0,16}\d/i,
+    /(복구|시드)\s*(문구|구문|단어)/,
+    /\b(recovery|seed)\s*phrase\b/i,
+    /보안\s*질문[^\n]{0,20}(답|정답)/,
+    /\bsecurity\s*(question|answer)s?\b/i,
+    /\bmother'?s\s+maiden\s+name\b/i,
+    // An entitlement claim about THIS system. No genuine user memory says it,
+    // unlike a workplace admin role, which is why only this pair is here.
+    /(유료|프리미엄)\s*(기능|서비스)[^\n]{0,12}(무료|공짜)/,
+    /\bpaid\s+features?\b[^\n]{0,16}\bfor\s+free\b/i,
 ];
 
 /**
@@ -149,7 +170,9 @@ const INJECTION_PATTERNS: readonly RegExp[] = [
     /\breveal\s+(the\s+|your\s+)?system\s+prompt\b/i,
     /\bjailbreak\b/i,
     /\bnew\s+instructions?\s*:/i,
-    /(이전|기존|위의?)\s*(지시|명령|프롬프트|규칙)(사항)?\s*(을|를|은|는)?\s*(무시|잊)/,
+    // `모두`/`전부` may sit between the object and the verb, and the override
+    // may be framed as 지금까지 rather than 이전 — both were slipping through.
+    /(이전|기존|위의?|지금까지의?)\s*(모든\s*)?(지시|명령|프롬프트|규칙)(사항)?\s*(을|를|은|는)?\s*(모두\s*|전부\s*|다\s*)?(무시|잊)/,
     /시스템\s*프롬프트.{0,10}(공개|알려|보여)/,
 ];
 
@@ -221,6 +244,18 @@ const ABSOLUTE_MARKER_PATTERN = /(항상|반드시|무조건|절대)/;
 const SENSITIVE_PII_PATTERNS: readonly RegExp[] = [
     /\b\d{6}-[1-4]\d{6}\b/, // Korean resident registration number shape
     /\b(?:\d[ -]?){15}\d\b/, // payment card length run
+    // Government and financial identifiers. They are PII rather than
+    // credentials — holding one does not grant access — so they follow the
+    // resident-registration precedent above and are parked for a person
+    // instead of refused. Either way they never reach bulk approval.
+    /(계좌|카드)\s*(번호)?[^\n]{0,16}\d{4}[\s-]\d{2,}/,
+    /\bcard\s*(number|no\.?)?\b[^\n]{0,16}\d{4}[\s-]\d{2,}/i,
+    /\baccount\s*(number|no\.?)?\b[^\n]{0,16}\d{6,}/i,
+    /\bsort\s*code\b[^\n]{0,12}\d{2}[\s-]\d{2}[\s-]\d{2}/i,
+    /여권\s*번호[^\n]{0,12}[A-Za-z]?\d{6,}/,
+    /\bpassport\s*(number|no\.?)\b[^\n]{0,12}[A-Za-z]?\d{6,}/i,
+    /\bnational\s+insurance\b/i,
+    /\b(ssn|social\s+security\s+number)\b/i,
 ];
 
 const matchesAny = (patterns: readonly RegExp[], value: string): boolean =>

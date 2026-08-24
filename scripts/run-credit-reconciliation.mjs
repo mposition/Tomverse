@@ -46,7 +46,20 @@ try {
     console.error("Credit reconciliation request failed:", response.status, result);
     process.exitCode = 1;
   } else {
-    console.log("Credit reservation reconciliation completed:", result?.result || {});
+    // `result.result` is the credit-reservation object alone. The response
+    // carries a dozen sibling sweeps that ride along on this cadence -- image
+    // assets, generated artifacts, message attachments, assistant knowledge,
+    // staged imports, memory extraction -- and logging only the first field
+    // discarded every one of them, so the cron's own log could not answer what
+    // a run had deleted.
+    //
+    // Everything except `success` is reported. Naming the fields here would
+    // mean editing this script every time a sweep is added, and the sweep that
+    // gets forgotten is exactly the one nobody is watching.
+    const sweeps = Object.fromEntries(
+      Object.entries(result ?? {}).filter(([key]) => key !== "success")
+    );
+    console.log("Credit reservation reconciliation completed:", sweeps);
   }
 } catch (error) {
   console.error("Credit reconciliation request failed:", error);

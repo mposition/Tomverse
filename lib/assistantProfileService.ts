@@ -6,6 +6,7 @@ import { enqueueKnowledgeCleanupForFiles } from "@/lib/assistantKnowledgeLifecyc
 // approved table as the knowledge quotas, so it lives with them. Imported
 // rather than copied: two constants for one approved number is how they drift.
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
+import { lockProfileImport } from "@/lib/assistantProfileImportLocks";
 import {
     ASSISTANT_PROMPT_FORMAT_VERSION,
     ASSISTANT_RETRIEVAL_VERSION,
@@ -51,7 +52,7 @@ export class AssistantProfileError extends Error {
  * `(): never` does not do that, and the alternative is a `throw` repeated at
  * every call site.
  */
-function notFound(): never {
+export function notFound(): never {
     // 404 rather than 403 throughout: a profile the caller does not own is,
     // as far as they are entitled to know, a profile that does not exist.
     throw new AssistantProfileError(
@@ -339,17 +340,31 @@ export const updateAssistantProfileIdentity = async (input: {
  * account's: a manifest names what this version can retrieve, and retrieval is
  * scoped to the profile.
  */
-const resolveManifestEntries = async (input: {
-    userId: string;
-    profileId: string;
-    fileIds: readonly string[];
-}) => {
+const resolveManifestEntries = async (
+    client: Prisma.TransactionClient,
+    input: {
+        userId: string;
+        profileId: string;
+        fileIds: readonly string[];
+        /**
+         * Which import's files may be named, or `null` for the ordinary path.
+         *
+         * The ordinary editor may name only files with no import holding them.
+         * An import publish may name only its own. Neither can name the
+         * other's, and the existing "names a file this profile does not have"
+         * is the right answer in both directions -- a staged file is not a
+         * file this profile has yet.
+         */
+        importId: string | null;
+    }
+) => {
     if (input.fileIds.length === 0) return [];
-    const files = await prisma.assistantKnowledgeFile.findMany({
+    const files = await client.assistantKnowledgeFile.findMany({
         where: {
             id: { in: [...input.fileIds] },
             userId: input.userId,
             profileId: input.profileId,
+            importId: input.importId,
         },
         select: { id: true, name: true, digest: true },
     });
@@ -383,22 +398,38 @@ export type PublishOutcome =
     | { outcome: "unchanged"; revision: number };
 
 /**
- * Publishes a new version, or reports that nothing changed.
+ * Publishes a new version, or reports that nothing changed, inside a caller's
+ * transaction.
  *
- * The write is one transaction over an insert and a pointer move, because a
- * version that exists and is not current is a revision the owner cannot see
- * and cannot use — and the `(profileId, revision)` unique index means two
- * concurrent publishes from the same revision race there, with the loser
- * getting a conflict rather than a second row.
+ * Everything is in here -- the read, the manifest resolution, the plan and the
+ * two writes -- rather than the caller planning outside and passing a plan in.
+ * A plan made before the transaction opened is a plan made against a revision
+ * that may already have moved, and the staleness check would then be
+ * comparing against something that was true a moment ago.
+ *
+ * The two writes have to be one transaction because a version that exists and
+ * is not current is a revision the owner can neither see nor use. The
+ * `(profileId, revision)` unique index means two concurrent publishes from the
+ * same revision still race there, with the loser getting a conflict rather
+ * than a second row.
  */
-export const publishAssistantProfileVersion = async (input: {
-    userId: string;
-    profileId: string;
-    draft: AssistantProfileVersionDraft;
-    /** The revision the editor started from; null when publishing the first. */
-    expectedRevision: number | null;
-}): Promise<PublishOutcome> => {
-    const profile = await prisma.assistantProfile.findFirst({
+export const publishAssistantProfileVersionInTx = async (
+    tx: Prisma.TransactionClient,
+    input: {
+        userId: string;
+        profileId: string;
+        draft: AssistantProfileVersionDraft;
+        /** The revision the editor started from; null for the first. */
+        expectedRevision: number | null;
+        /**
+         * Which import's staged files this publish may name, or `null` for the
+         * ordinary editor. An import publish passes its own id; nothing else
+         * may reach a staged file.
+         */
+        importId?: string | null;
+    }
+): Promise<PublishOutcome> => {
+    const profile = await tx.assistantProfile.findFirst({
         where: { id: input.profileId, userId: input.userId },
         select: {
             id: true,
@@ -411,10 +442,11 @@ export const publishAssistantProfileVersion = async (input: {
     // edit change anything" by comparing drafts, and a draft carrying blank
     // names and digests would differ from every stored version -- so every
     // Save would publish a revision that changed nothing.
-    const manifest = await resolveManifestEntries({
+    const manifest = await resolveManifestEntries(tx, {
         userId: input.userId,
         profileId: input.profileId,
         fileIds: input.draft.knowledgeManifest.map((entry) => entry.fileId),
+        importId: input.importId ?? null,
     });
 
     const current = profile.currentVersion;
@@ -461,8 +493,8 @@ export const publishAssistantProfileVersion = async (input: {
         return { outcome: "unchanged", revision: plan.revision };
     }
 
-    const version = await prisma.$transaction(async (tx) => {
-        const created = await tx.assistantProfileVersion.create({
+    const created = await (async () => {
+        const version = await tx.assistantProfileVersion.create({
             data: {
                 profileId: input.profileId,
                 userId: input.userId,
@@ -484,12 +516,68 @@ export const publishAssistantProfileVersion = async (input: {
         });
         await tx.assistantProfile.update({
             where: { id: input.profileId },
-            data: { currentVersionId: created.id },
+            data: { currentVersionId: version.id },
         });
-        return created;
+        return version;
+    })();
+
+    return { outcome: "published", version: created };
+};
+
+/**
+ * The ordinary editor's publish.
+ *
+ * Two things happen here that did not before, and both are the same rule from
+ * two sides: an import that is staging into this profile owns it until it is
+ * finished or gone.
+ *
+ * The lock serialises this against the import paths. Without it an ordinary
+ * publish and an import publish can both read a profile with no active import,
+ * both decide they may proceed, and produce two revisions from one.
+ *
+ * The staging check is what stops a `create` import's draft from being
+ * published out from under it. That draft is an ordinary profile in every
+ * respect -- it is in the list, it has an editor -- so nothing else would
+ * refuse a publish of it, and the import would then be cleaned up as an
+ * abandoned draft while pointing at a published profile.
+ */
+export const publishAssistantProfileVersion = async (input: {
+    userId: string;
+    profileId: string;
+    draft: AssistantProfileVersionDraft;
+    /** The revision the editor started from; null when publishing the first. */
+    expectedRevision: number | null;
+}): Promise<PublishOutcome> =>
+    prisma.$transaction(async (tx) => {
+        await lockProfileImport(tx, input.profileId);
+        await assertNoActiveStagingImport(tx, input.profileId);
+        return publishAssistantProfileVersionInTx(tx, input);
     });
 
-    return { outcome: "published", version };
+/**
+ * Refuses when an import is staging into this profile.
+ *
+ * Scoped by profile alone rather than by profile and account: the caller has
+ * already established ownership, and an import belonging to somebody else on a
+ * profile belonging to this caller is a state that cannot exist -- an import's
+ * profile is one this account owns. Reading it as a plain profile question
+ * keeps the query the same shape as the one the sweep asks.
+ */
+export const assertNoActiveStagingImport = async (
+    tx: Prisma.TransactionClient,
+    profileId: string
+): Promise<void> => {
+    const active = await tx.assistantProfileImport.findFirst({
+        where: { profileId, status: "staging" },
+        select: { id: true },
+    });
+    if (active) {
+        throw new AssistantProfileError(
+            409,
+            "ASSISTANT_PROFILE_IMPORT_IN_PROGRESS",
+            "An import is still being reviewed for this assistant. Finish or cancel it first."
+        );
+    }
 };
 
 /**

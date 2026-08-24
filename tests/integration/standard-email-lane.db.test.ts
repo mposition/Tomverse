@@ -13,6 +13,10 @@ import {
   enqueueStandardEmail,
 } from "@/lib/standardEmailLane";
 import { STANDARD_RETRY_CURVES } from "@/lib/standardEmailRetryCore";
+import {
+  STANDARD_EMAIL_OLDEST_PENDING_ALERT_MS,
+  STANDARD_EMAIL_QUEUE_DEPTH_ALERT,
+} from "@/lib/standardEmailLane";
 import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { decryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto";
 
@@ -30,7 +34,7 @@ const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
-      "EmailPolicyVersion", "User"
+      "EmailPolicyVersion", "ScheduledJobRun", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -484,4 +488,152 @@ test("a legal abandonment is its own critical incident, not a line in a total", 
   );
   assert.ok(transactionalIncident);
   assert.equal(transactionalIncident.severity, "error");
+});
+
+// EM-11: a backlog is visible while the mail is merely late.
+//
+// Contract: .github/audits/model-lifecycle-email-2026-08-22.md EM-11.
+//
+// Abandonment already raised an incident, and the audit's point is that it
+// arrives once a message is lost. These two fire while it can still be sent.
+
+/** `count` queued messages, optionally aged by backdating them. */
+const queueDepth = async (count: number, agedMs = 0) => {
+  const user = await someone();
+  const ids: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const rows = await enqueueStandardEmail({
+      templateKey: ACCOUNT_WELCOME_TEMPLATE,
+      emailAddress: `queued-${index}-${randomUUID()}@example.com`,
+      userId: user.id,
+      language: "en",
+      payload: { name: "Someone" },
+    });
+    ids.push(rows!.deliveryId);
+  }
+  if (agedMs > 0) {
+    const createdAt = new Date(Date.now() - agedMs);
+    await prisma.emailDelivery.updateMany({
+      where: { id: { in: ids } },
+      // nextAttemptAt too, or the aged rows would be claimed by the pass that
+      // is supposed to observe them still waiting.
+      data: { createdAt, nextAttemptAt: new Date(Date.now() + 60_000) },
+    });
+  }
+  return ids;
+};
+
+test("a deep queue is reported before anything abandons", async () => {
+  await queueDepth(STANDARD_EMAIL_QUEUE_DEPTH_ALERT + 1, 60_000);
+  const { seen, stop } = watchIncidents();
+  stubFetch([]);
+
+  try {
+    await drainStandardEmailDeliveries({ limit: 1 });
+  } finally {
+    stop();
+  }
+
+  const backlog = seen.find((i) => i.code === "EMAIL_STANDARD_DRAIN_BACKLOG");
+  assert.ok(backlog, `no backlog incident: ${JSON.stringify(seen)}`);
+  assert.equal(backlog.severity, "warning");
+  assert.equal(
+    (backlog.context as { trigger?: string }).trigger,
+    "queue_depth"
+  );
+  // Nothing abandoned: the whole point is that this is the earlier signal.
+  assert.equal(
+    seen.filter((i) => i.code.includes("ABANDON")).length,
+    0
+  );
+});
+
+test("a shallow queue that stopped moving is reported too", async () => {
+  // Five messages waiting six hours is five people who never got their
+  // receipt, and the depth is never remarkable.
+  await queueDepth(5, STANDARD_EMAIL_OLDEST_PENDING_ALERT_MS + 60_000);
+  const { seen, stop } = watchIncidents();
+  stubFetch([]);
+
+  try {
+    await drainStandardEmailDeliveries({ limit: 10 });
+  } finally {
+    stop();
+  }
+
+  const backlog = seen.find((i) => i.code === "EMAIL_STANDARD_DRAIN_BACKLOG");
+  assert.ok(backlog, `no backlog incident: ${JSON.stringify(seen)}`);
+  assert.equal(
+    (backlog.context as { trigger?: string }).trigger,
+    "oldest_pending"
+  );
+});
+
+test("an ordinary queue reports nothing", async () => {
+  await queueDepth(3);
+  const { seen, stop } = watchIncidents();
+  stubFetch([accepted(), accepted(), accepted()]);
+
+  try {
+    await drainStandardEmailDeliveries({ limit: 10 });
+  } finally {
+    stop();
+  }
+
+  assert.equal(
+    seen.filter((i) => i.code === "EMAIL_STANDARD_DRAIN_BACKLOG").length,
+    0,
+    `a healthy drain must be quiet: ${JSON.stringify(seen)}`
+  );
+});
+
+test("the drain reports the age of the oldest waiting message", async () => {
+  await queueDepth(2, 90 * 60 * 1_000);
+  stubFetch([]);
+
+  const result = await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(result.pending, 2);
+  assert.ok(
+    (result.oldestPendingMs ?? 0) >= 90 * 60 * 1_000,
+    `oldestPendingMs was ${result.oldestPendingMs}`
+  );
+});
+
+test("an empty queue has no oldest message rather than an age of zero", async () => {
+  // null and 0 are different answers, and a dashboard that showed "0 minutes"
+  // for an empty queue would look like a queue moving perfectly.
+  stubFetch([]);
+  const result = await drainStandardEmailDeliveries({ limit: 1 });
+  assert.equal(result.pending, 0);
+  assert.equal(result.oldestPendingMs, null);
+});
+
+test("the drain records its own job run, separate from the operator queue's", async () => {
+  // EM-11's other half. The operator drain succeeding said nothing about
+  // whether anybody's receipt went out, and /admin/jobs showed one green row
+  // for both. Driven through the wrapper both queues share, so this asserts
+  // what the console will actually read.
+  const { runNotificationDeliveryDrain } = await import(
+    "@/lib/notificationDeliveryJob"
+  );
+  await queueDepth(1);
+  stubFetch([accepted()]);
+
+  await runNotificationDeliveryDrain();
+
+  const runs = await prisma.scheduledJobRun.findMany({
+    select: { jobKey: true, status: true, processedCount: true },
+    orderBy: { jobKey: "asc" },
+  });
+  const keys = runs.map((row) => row.jobKey);
+  assert.ok(
+    keys.includes("standard_email_drain"),
+    `user mail has no run of its own: ${JSON.stringify(keys)}`
+  );
+  assert.ok(keys.includes("notification_delivery_retry"), "and the operator queue keeps its own");
+
+  const userMail = runs.find((row) => row.jobKey === "standard_email_drain")!;
+  assert.equal(userMail.status, "succeeded");
+  assert.equal(userMail.processedCount, 1, "what it moved, not that it ran");
 });

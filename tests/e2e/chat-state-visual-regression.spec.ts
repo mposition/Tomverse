@@ -32,7 +32,7 @@ import {
 } from "./support/comparison-review-fixtures";
 
 // -----------------------------------------------------------------------
-// UI-P1-03: state fixtures + golden screenshots for the Tomverse Insight
+// UI-P1-03: state fixtures + golden screenshots for the Tomverse Review
 // chat workspace. Every state below is entered directly through mocked
 // network responses and an in-page fetch stub (see
 // tests/e2e/support/chat-state-fixtures.ts) -- no real OpenAI/Anthropic/

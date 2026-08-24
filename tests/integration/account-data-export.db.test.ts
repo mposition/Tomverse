@@ -566,6 +566,20 @@ const seedUser = async () => {
     },
   });
 
+  await prisma.modelMigrationRecord.create({
+    data: {
+      userId,
+      field: "user_settings_default_model",
+      fromModelId: "gpt-5-4-mini",
+      toModelId: "gpt-5-6-luna",
+      // Who authorised the run and which queue row it came from. The change
+      // itself is theirs; the decision behind it is ours.
+      ticket: sentinel("modelMigrationRecord-ticket"),
+      actorEmail: sentinel("modelMigrationRecord-actorEmail"),
+      workItemId: sentinel("modelMigrationRecord-workItemId"),
+    },
+  });
+
   return userId;
 };
 
@@ -623,6 +637,10 @@ test("the export still contains the data the user is owed", async () => {
   assert.ok(serialised.includes("the note the user wrote themselves"));
   assert.ok(serialised.includes("the reason the user gave"));
   assert.ok(serialised.includes("the review the user read"));
+  // A retirement moved one of their settings: they receive the change, not the
+  // approval behind it.
+  assert.equal(result.data.model_changes?.length, 1);
+  assert.ok(serialised.includes("user_settings_default_model"));
   // The image binaries are not in the file, but their shape is -- so the user
   // can see an image existed rather than finding nothing where one was.
   assert.equal(result.data.image_generations?.length, 1);

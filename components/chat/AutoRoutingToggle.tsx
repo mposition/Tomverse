@@ -28,6 +28,20 @@ import {
  * Auto off has to return the conversation to a model the user recognises, and
  * hiding what that would be makes the switch feel like a door with no handle
  * on the other side.
+ *
+ * ## Why this is plain blue and not an accent role
+ *
+ * It used to carry the three-stop gradient AGENTS.md reserves for AI Review.
+ * Nothing caught it because this file had never been mounted and was therefore
+ * not in `check:accent-tokens`'s guarded list -- it is now, so the reservation
+ * is enforced here from this point on.
+ *
+ * The replacement is the neutral primary (`blue`), which is deliberately not a
+ * role hue and needs no token. Auto is a *mode*, not a feature with its own
+ * identity in the palette, and inventing an `accent-auto-*` role would be a
+ * design decision this change is not entitled to make. If Auto is later given
+ * one, AGENTS.md sets the order: define the namespace in `app/globals.css`,
+ * register it in `KNOWN_ROLES`, and only then use it.
  */
 export function AutoRoutingToggle({
   offered,
@@ -56,7 +70,7 @@ export function AutoRoutingToggle({
         aria-hidden="true"
         className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
           enabled
-            ? "border-transparent bg-gradient-to-br from-accent-ai-review-start-600 via-blue-600 to-accent-ai-review-end-600 text-white"
+            ? "border-transparent bg-blue-600 text-white"
             : "border-zinc-300 text-zinc-400 dark:border-zinc-600 dark:text-zinc-500"
         }`}
       >

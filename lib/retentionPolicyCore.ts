@@ -21,6 +21,8 @@
  * same number.
  */
 
+import { LONGEST_SNAPSHOT_RETENTION_DAYS } from "@/lib/emailSnapshotRetentionCore";
+
 export type RetentionAction =
     /** Rows are removed. */
     | "delete"
@@ -270,6 +272,25 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         action: "delete",
         windowDays: 30,
         maintenanceStep: "scheduled_job_runs",
+    },
+    {
+        key: "emailDeliverySnapshots",
+        label: "Email render snapshots",
+        // The row survives; only `renderDataSnapshot` is emptied, and
+        // `snapshotPurgedAt` records that it happened. The delivery, its
+        // `renderedHash` and the fact that a notice was sent all remain --
+        // which is what docs/policy/email-notifications.md §10.3 rule 4 asks
+        // for when a deletion request arrives.
+        //
+        // The window is the longest of the four classifications, for the same
+        // reason the usage bucket policy uses its longest period: counting
+        // against 90 days would report every legal delivery past a quarter as
+        // overdue when the sweep was never going to take it.
+        policy:
+            "Clear the personalisation snapshot 90 days after sending, or after seven years for legal notices. The delivery row, its hash and the proof of notice remain.",
+        action: "clear",
+        windowDays: LONGEST_SNAPSHOT_RETENTION_DAYS,
+        maintenanceStep: "email_render_snapshots",
     },
     {
         key: "providerModelCatalogRuns",

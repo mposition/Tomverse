@@ -182,10 +182,15 @@ mock.module(mod("lib/traceErrorEvidence.ts"), {
 mock.module(mod("lib/feedbackAutoFixShadow.ts"), {
   namedExports: { purgeClosedAutoFixCases: async () => 19 },
 });
-mock.module(mod("lib/billingEmails.ts"), {
+// The two pass sweeps enqueue rather than send now (EM-07), so the collaborator
+// to stand in for is the lane, not the mailer.
+mock.module(mod("lib/standardEmailLane.ts"), {
   namedExports: {
-    sendFoundingTesterPassReminderEmail: async () => ({ sent: true }),
-    sendFoundingTesterPassEndedEmail: async () => ({ sent: true }),
+    enqueueStandardEmail: async () => ({
+      eventId: "event",
+      deliveryId: "delivery",
+      idempotencyKey: "key",
+    }),
   },
 });
 mock.module(mod("lib/accountDeletion.ts"), {
@@ -234,6 +239,21 @@ mock.module(mod("lib/assistantKnowledgeProcessor.ts"), {
       ready: 30,
       failed: 0,
     }),
+  },
+});
+// The package import's two sweeps, mocked as collaborators for the same reason
+// the knowledge steps above are. `refused` is deliberately non-zero: an expired
+// import the collector would not take is the case that must survive the run
+// rather than stop it, and a stub reporting only successes could not tell the
+// two apart.
+mock.module(mod("lib/assistantProfileImportSweep.ts"), {
+  namedExports: {
+    sweepExpiredProfileImports: async () => ({
+      considered: 34,
+      cancelled: 33,
+      refused: 34 - 33,
+    }),
+    reclaimStaleUploadClaims: async () => ({ reclaimed: 35 }),
   },
 });
 
@@ -336,6 +356,11 @@ test("a step that throws does not skip the steps behind it", async () => {
   // extraction slice already paid for.
   assert.equal(result.assistantKnowledgeReclaimed, 29);
   assert.equal(result.assistantKnowledgeProcessed, 30);
+  // The package import's expiry clocks and the finalize that never came back.
+  // Both run unattended, and both are behind the failing step above.
+  assert.equal(result.assistantImportsExpired, 33);
+  assert.equal(result.assistantImportsExpiryRefused, 1);
+  assert.equal(result.assistantImportUploadClaimsReclaimed, 35);
 });
 
 test("a clean run reports no failed steps and every count", async () => {

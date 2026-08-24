@@ -5,7 +5,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "Safety and Trust",
   description:
-    "Explore Tomverse Insight safety principles, model transparency, security boundaries, privacy controls, and incident practices.",
+    "Explore Tomverse Review safety principles, model transparency, security boundaries, privacy controls, and incident practices.",
   path: "/safety",
 });
 

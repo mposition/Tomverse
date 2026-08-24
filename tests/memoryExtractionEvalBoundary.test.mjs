@@ -6,6 +6,7 @@ import test from "node:test";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import { findApprovedEvalPair } from "../lib/memoryExtractionEvalRegister.ts";
 import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
+import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.ts";
 
 /**
  * The execution boundary: no provider is reached without every gate.
@@ -115,20 +116,57 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
 /* ------------------------------------------------------- shipped register -- */
 
 test("no pair in the shipped register can run live today", () => {
-    // Both entries are candidates awaiting a human eval-budget approval, so
-    // the repository as merged cannot spend anything at a provider.
+    // This used to hold because neither entry had a budget. One does now
+    // (docs/policy/external-conversation-import-and-memory.md §12.5, issue
+    // #837), so the reason has moved rather than disappeared: the funded pair
+    // is stopped by the dataset, which is not frozen.
+    //
+    // `datasetFrozen` is read from the fixtures rather than forced to `true`.
+    // Forcing it asserts a world that does not exist, and on the day the
+    // dataset is frozen this test would keep passing while describing the
+    // opposite of what shipped.
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
         const decision = decideEvalRunMode({
             live: true,
             registerEntry: entry,
             hasApiKey: true,
-            datasetFrozen: true,
+            datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
         });
         assert.equal(
             decision.mode,
             "refused",
             `${entry.extractionModelId} must not be live-runnable as shipped`
         );
+    }
+});
+
+test("the budget is the only gate an approval opens", () => {
+    // What approving a budget bought, stated exactly. The funded pair stops
+    // being refused *for want of a budget* and goes on being refused for every
+    // other reason -- and the unfunded one is untouched. An approval that
+    // quietly relaxed a second rule would be an approval nobody gave.
+    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.filter((e) => e.evalBudget);
+    const unfunded = MEMORY_EXTRACTION_EVAL_REGISTER.filter((e) => !e.evalBudget);
+    assert.ok(funded.length > 0 && unfunded.length > 0, "expected one of each");
+
+    for (const entry of funded) {
+        const decision = decideEvalRunMode({
+            live: true,
+            registerEntry: entry,
+            hasApiKey: true,
+            datasetFrozen: true,
+        });
+        assert.equal(decision.mode, "live", `${entry.extractionModelId}`);
+        assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
+    }
+    for (const entry of unfunded) {
+        const decision = decideEvalRunMode({
+            live: true,
+            registerEntry: entry,
+            hasApiKey: true,
+            datasetFrozen: true,
+        });
+        assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
     }
 });
 
@@ -183,7 +221,12 @@ const runHarness = (args, env = {}) => {
 };
 
 test("--live with a key but no approved budget never reaches the network", () => {
-    const result = runHarness(["--live"], {
+    // Named explicitly rather than relying on the default pair. The default is
+    // funded now (docs/policy/external-conversation-import-and-memory.md §12.5,
+    // issue #837), and a test that reads "no budget" from whichever pair
+    // happens to be default stops testing the budget refusal the moment one is
+    // approved -- silently, while still passing on a different rule.
+    const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
         // Plausible enough that a missing-key check could not be what stops it.
         OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
     });
@@ -196,14 +239,44 @@ test("--live with a key but no approved budget never reaches the network", () =>
     );
 });
 
+test("a funded pair still refuses, and still reaches no network", () => {
+    // Recording a budget opens `--live`; it does not open the run. Everything
+    // after the budget check still has to hold, and today the dataset is not
+    // frozen. This is the guarantee that matters once a budget exists: funding
+    // alone must never be the thing that lets a call out.
+    const result = runHarness(["--live", "--model=gpt-5-6-luna"], {
+        OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
+    });
+    assert.equal(result.status, 1, "the run must refuse");
+    assert.doesNotMatch(result.output, /no approved eval budget/i);
+    assert.match(result.output, /is not frozen/i);
+    assert.doesNotMatch(
+        result.output,
+        /QA_EXTERNAL_NETWORK_BLOCKED/,
+        "a funded pair must still not dial out"
+    );
+});
+
 test("a smoke run completes without touching the network", () => {
     const result = runHarness([]);
-    // Exit 1 because an underpowered sample is not a pass — that is the
-    // verdict, not a failure to run.
-    assert.equal(result.status, 1);
+    // Exit 0 since the 2026-08-23 promotion: every cell is at its §12.2 floor,
+    // so the run is no longer UNDERPOWERED. It used to exit 1 on that rule,
+    // and the change is the dataset's, not the harness's.
+    assert.equal(result.status, 0);
     assert.match(result.output, /SMOKE RUN/);
-    assert.match(result.output, /UNDERPOWERED/);
+    assert.doesNotMatch(result.output, /UNDERPOWERED/);
     assert.doesNotMatch(result.output, /QA_EXTERNAL_NETWORK_BLOCKED/);
+});
+
+test("a smoke run that passes every rule still says it proves nothing", () => {
+    // The dangerous shape now that the floor is met: a stub agreeing with
+    // itself prints "Every §12.3 rule passed", and without the caveat beside
+    // it that reads like a result. Two independent facts have to stay on the
+    // page -- no provider was called, and the dataset is not frozen.
+    const result = runHarness([]);
+    assert.match(result.output, /SMOKE RUN — NOT an eval result/);
+    assert.match(result.output, /No provider was called/);
+    assert.match(result.output, /not frozen/);
 });
 
 /* ---------------------------------------------------------------- static -- */

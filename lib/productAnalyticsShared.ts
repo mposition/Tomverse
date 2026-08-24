@@ -136,6 +136,27 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "assistant_profile_create_started",
   "assistant_profile_create_completed",
   "assistant_profile_applied_to_chat",
+  // Importing an assistant package
+  // (docs/policy/assistant-package-import.md §9). The four events answer the
+  // only questions aggregate data can answer about this feature: where people
+  // stop, what the packages people bring actually contain, and how often an
+  // import finishes.
+  //
+  // Content-free by schema, and this one matters more than most: a package
+  // carries somebody else's instructions, filenames and possibly credentials,
+  // and every one of those is a string that would be easy to "just log". The
+  // three properties below are closed enums, `analyticsPropertiesSchema` is
+  // strict, and unknown keys are stripped before an event is sent -- so there
+  // is no key an instruction, a filename, a URL, a digest or a matched secret
+  // could travel in.
+  //
+  // No counts either. "Five documents, 5,100 characters of instructions" is
+  // not content, but in a small population it is close to an identifier
+  // (§9).
+  "assistant_package_import_step_entered",
+  "assistant_package_import_step_abandoned",
+  "assistant_package_import_warning",
+  "assistant_package_import_completed",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -327,6 +348,44 @@ export const analyticsPropertiesSchema = z
         "desktop_recommended",
       ])
       .optional(),
+    // Which step of the *package* import wizard. A separate property from
+    // `import_step` above rather than a widened one: they are two different
+    // funnels with two different step sets, and one enum holding both would
+    // make every query about either of them start by filtering out the other.
+    //
+    // Written out here rather than imported from the wizard's own list. That
+    // module reaches the package adapter and the YAML parser behind it, and
+    // this file is loaded by every page; `tests/assistantPackageAnalytics.test.mjs`
+    // is what keeps the two in step.
+    package_import_step: z
+      .enum([
+        "source",
+        "detect",
+        "inventory",
+        "fields",
+        "losses",
+        "target",
+        "upload",
+        "confirm",
+      ])
+      .optional(),
+    // What the wizard told the owner about the package. A closed list of the
+    // things worth counting across many imports -- not the loss report, which
+    // is per-package and names files.
+    package_import_warning: z
+      .enum([
+        "package_refused",
+        "secret_finding",
+        "scripts_skipped",
+        "documents_over_limit",
+        "license_absent",
+        "relative_links",
+        "document_unreadable",
+      ])
+      .optional(),
+    // What the package turned out to be, as the parser read it -- not as the
+    // package claimed. The claim is display-only and never reaches analytics.
+    package_import_source: z.enum(["agent-skill", "tomverse-native"]).optional(),
   })
   .strict()
   .superRefine((properties, context) => {
