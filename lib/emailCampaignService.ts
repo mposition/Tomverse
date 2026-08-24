@@ -11,6 +11,12 @@ import {
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
+  scheduleProblems,
+  scheduleRefusal,
+  type ScheduleRefusalDetail,
+  type WaveSchedule,
+} from "@/lib/emailCampaignScheduleCore";
+import {
   campaignRunRefusal,
   readLocales,
   readPinnedVersions,
@@ -344,4 +350,156 @@ export const cancelCampaign = async (input: {
     });
     return { campaign, wavesCancelled: waves.count };
   });
+};
+
+
+/**
+ * Creates or moves a wave's scheduled time, without starting it.
+ *
+ * A wave row exists before it runs, which is what makes scheduling possible at
+ * all: a scheduler can only find work somebody wrote down. The row is `pending`
+ * with no event, which the wave CHECK already allows -- that state was in the
+ * schema from the second slice and had no writer until now.
+ */
+export const scheduleCampaignWave = async (input: {
+  campaignId: string;
+  kind: WaveKind;
+  sequence?: number;
+  scheduledAt: Date | null;
+  recipientCap?: number;
+  dryRun?: boolean;
+}) => {
+  const sequence = input.sequence ?? 1;
+  return prisma.emailCampaignWave.upsert({
+    where: {
+      campaignId_kind_sequence: {
+        campaignId: input.campaignId,
+        kind: input.kind,
+        sequence,
+      },
+    },
+    create: {
+      campaignId: input.campaignId,
+      kind: input.kind,
+      sequence,
+      status: "pending",
+      scheduledAt: input.scheduledAt,
+      ...(input.recipientCap === undefined
+        ? {}
+        : { recipientCap: input.recipientCap }),
+      dryRun: Boolean(input.dryRun),
+    },
+    // Only the time. Re-scheduling a wave is not an opportunity to quietly
+    // change its cap or turn a dry run into a real one -- those are separate
+    // edits with separate consequences.
+    update: { scheduledAt: input.scheduledAt },
+    select: { id: true, kind: true, sequence: true, scheduledAt: true, status: true },
+  });
+};
+
+/**
+ * Everything wrong with a campaign's schedule as it currently stands.
+ *
+ * Read from the rows rather than from a proposal, so an operator can ask the
+ * question after editing one wave -- which is when an ordering mistake is
+ * actually made.
+ */
+export const campaignScheduleProblems = async (input: {
+  campaignId: string;
+  now?: Date;
+}) => {
+  const campaign = await prisma.emailCampaign.findUniqueOrThrow({
+    where: { id: input.campaignId },
+    select: { effectiveAt: true },
+  });
+  const waves = await prisma.emailCampaignWave.findMany({
+    where: { campaignId: input.campaignId, status: { not: "cancelled" } },
+    orderBy: [{ scheduledAt: "asc" }, { sequence: "asc" }],
+    select: { kind: true, scheduledAt: true },
+  });
+  return scheduleProblems({
+    waves: waves as WaveSchedule[],
+    now: input.now ?? new Date(),
+    effectiveAt: campaign.effectiveAt,
+  });
+};
+
+export type DueWaveOutcome = {
+  waveId: string;
+  campaignId: string;
+  kind: string;
+  started: boolean;
+  refusal: string | null;
+};
+
+/**
+ * Starts every wave that is due, and says why it skipped the ones it did not.
+ *
+ * Two gates, asked in this order and never collapsed into one. `scheduleRefusal`
+ * answers "was this automation asked for and is it time" -- a question about the
+ * operator's intent. `campaignSendRefusal` answers "may these words go out" --
+ * a question about approval, and the one EM-06 exists for. A wave passing the
+ * first and failing the second is the important case: the schedule was set and
+ * the copy changed underneath it, and nothing should send.
+ */
+export const runDueCampaignWaves = async (input?: {
+  now?: Date;
+  limit?: number;
+}): Promise<DueWaveOutcome[]> => {
+  const now = input?.now ?? new Date();
+  const due = await prisma.emailCampaignWave.findMany({
+    where: {
+      status: "pending",
+      scheduledAt: { not: null, lte: now },
+      campaign: { triggerMode: "approved_schedule" },
+    },
+    orderBy: { scheduledAt: "asc" },
+    take: input?.limit ?? 25,
+    select: {
+      id: true,
+      campaignId: true,
+      kind: true,
+      sequence: true,
+      status: true,
+      scheduledAt: true,
+      eventId: true,
+      campaign: { select: { triggerMode: true } },
+    },
+  });
+
+  const outcomes: DueWaveOutcome[] = [];
+  for (const wave of due) {
+    const base = {
+      waveId: wave.id,
+      campaignId: wave.campaignId,
+      kind: wave.kind,
+    };
+
+    const blocked: ScheduleRefusalDetail | null = scheduleRefusal(
+      {
+        kind: wave.kind,
+        status: wave.status,
+        scheduledAt: wave.scheduledAt,
+        eventId: wave.eventId,
+        triggerMode: wave.campaign.triggerMode,
+      },
+      now
+    );
+    if (blocked) {
+      outcomes.push({ ...base, started: false, refusal: blocked.refusal });
+      continue;
+    }
+
+    const run = await runCampaignWave({
+      campaignId: wave.campaignId,
+      kind: wave.kind as WaveKind,
+      sequence: wave.sequence,
+    });
+    outcomes.push({
+      ...base,
+      started: !("refused" in run),
+      refusal: "refused" in run ? run.refused.refusal : null,
+    });
+  }
+  return outcomes;
 };

@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~3차 해결 (2026-08-24)** — §36 · §37 · §38. 예약과 admin 화면은 4차
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~4차 해결 (2026-08-24)** — §36 · §37 · §38 · §41. admin 화면과 승인 연결은 5차
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -3070,3 +3070,72 @@ scanned"를, perplexity 행에 "retirement cannot be proven here"를 이미 넣�
 **남은 하나는 정책 결정입니다.** `/admin/email-delivery`의 주소 마스킹은 감사
 자신이 "마스킹 정책 결정"이라고 적었고, 저장소가 답할 수 없는 사실(관리자
 접근 범위, 지원 업무 실태)에 달려 있습니다. §21에 D10으로 올렸습니다.
+
+---
+
+## 41. EM-01 4차 구현 기록 — 예약과 자동 전환 진실성 게이트 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/automaticTransitionClaim.ts` | §13.3의 12개 조건. 순수, 새 파일 |
+| `lib/emailCampaignScheduleCore.ts` | due 판정 + 일정 정합성. 순수, 새 파일 |
+| `prisma/schema.prisma` · `migrations/20260824060000_email_campaign_scheduling` | 예약·모델·전환 컬럼 |
+| `lib/emailCampaignService.ts` | `scheduleCampaignWave` · `campaignScheduleProblems` · `runDueCampaignWaves` |
+| `lib/scheduledJobsCore.ts` · `lib/notificationDeliveryJob.ts` | `campaign_wave_scheduler` job key + cron 연결 |
+| `tests/automaticTransitionClaim.test.mjs` | 14건 |
+| `tests/emailCampaignScheduleCore.test.mjs` | 17건 |
+| `tests/integration/campaign-scheduling.db.test.ts` | 15건, 새 파일 |
+
+**예약과 §13.3을 같이 넣은 이유.** `effectiveAt` 컬럼은 campaign이 날짜를
+말할 수 있게 하는 것이고, **날짜를 말할 수 있다는 것은 그 날짜에 무언가를
+약속할 수 있다는 뜻**입니다. 12개 조건은 아무도 다시 읽지 않는 감사 문서의
+산문이었습니다. 컬럼만 추가하면 사실이 아닌 약속을 쓸 수 있는 컬럼이 생깁니다.
+
+**게이트의 세 조건은 코드가 알아낼 수 없습니다.** 본문이 capability·크레딧
+차이를 실제로 적었는지, rollback을 예행했는지, staging 검증이 됐는지 —
+`validationEvidence` blob이 비어 있지 않다는 것과 **누군가 그것을 확인했다**는
+것은 다른 사실입니다. 셋은 이름이 붙은 명시적 attestation으로 들어오고,
+**없으면 미충족**입니다. `undefined`·`0`·`"yes"`가 통과하지 않는 것을 테스트가
+고정합니다 — 침묵은 동의가 아닙니다.
+
+**`dryRunRecipientCount`에서 `0`과 `null`은 다릅니다.** 0은 누군가 세어 보고
+아무도 없었다는 것이고, `null`은 아무도 안 봤다는 것입니다. 후자만 미충족입니다.
+
+**게이트 두 개를 합치지 않습니다.** `scheduleRefusal`은 "이 자동화를 요청했고
+시간이 됐는가"(운영자 의도), `campaignSendRefusal`은 "이 문장을 보내도 되는가"
+(승인, EM-06). 앞을 통과하고 뒤에서 막히는 경우가 중요합니다 — 일정은 잡혀
+있는데 그 아래에서 문구가 바뀐 것이고, 그때 아무것도 나가면 안 됩니다.
+DB test가 이 경우를 고정합니다.
+
+**`manual`인 campaign은 대신 시작하지 않습니다.** manual로 둔 사람은 발송을
+지켜보려는 것이고, 시간이 설정돼 있다는 이유로 대신 시작하면 그 결정을 말없이
+빼앗는 것입니다. 그래서 scheduler는 `approved_schedule`만 봅니다.
+
+**due인데 거절된 wave는 조용한 skip이 아닙니다.** 일정은 보내라고 했고 무언가가
+아니라고 했으며, 그 간격은 아무도 스스로 알아내지 못합니다.
+`CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE` incident를 올립니다. 반대로 아무것도 due가
+아닌 tick은 로그를 남기지 않습니다 — 15분마다 "없음"을 적는 것이 진짜 신호를
+묻는 방법입니다.
+
+**자기 테스트가 제 버그를 잡았습니다.** `campaignScheduleProblems`가 DB에서
+`scheduledAt` 순으로 읽어 넘기는데 `scheduleProblems`는 **목록 순서**로 앞뒤를
+비교했습니다. 이미 오름차순인 목록을 연속 비교하면 순서 위반이 **영원히 발견되지
+않습니다**. 순수 함수가 스스로 `WAVE_ORDER`로 정렬하도록 고쳤습니다 — 물어야 할
+것은 배열이 정렬됐는지가 아니라 notice가 reminder보다 앞인지입니다. 회귀
+테스트가 시간 순으로 넘긴 경우를 고정합니다.
+
+**`effectiveAt`과 `timezoneLabel`은 함께 있거나 함께 없습니다**(DB CHECK).
+label 없는 UTC 순간은 받는 사람에게 설정한 사람과 다른 날로 읽히고, 이 한 쌍이
+존재하는 이유인 그 문장은 **날짜를 지목**합니다.
+
+**scheduler는 drain보다 앞에서 돕니다.** 여기서 확장된 wave가 delivery 행이
+되고 같은 pass가 그것을 내보내므로, 메일이 due였던 tick에 나갑니다 — 다음
+tick이 아니라.
+
+**D5는 건드리지 않았습니다.** 1인 조직 이중 승인 예외를 campaign에 적용할지는
+§21의 조직 결정이고, `SOLE_APPROVER_ACTIONS`에 campaign을 넣는 것은 그 결정을
+코드로 내리는 일입니다. 5차의 승인 연결은 일반 2인 경로(`runWithAdminApproval`)
+를 씁니다.
+
+**5차 범위**: admin API와 화면, `runWithAdminApproval` 연결, attestation을
+사람이 입력하는 경로.

@@ -476,6 +476,11 @@ const REGISTRY = {
     reason:
       "Which send this is -- launch, notice, reminder, final reminder, completion. Part of the unique key with sequence, so it is what makes a second `reminder 1` impossible rather than merely unlikely.",
   },
+  EmailCampaign_trigger_mode_check: {
+    owner: "database",
+    reason:
+      "How a campaign's waves are started: manual, auto_draft, or approved_schedule. Only the third is the scheduler's to act on -- a campaign left on manual is one somebody intends to watch as it goes out, and starting it for them because a time happened to be set would take that decision away silently. Judged by lib/emailCampaignScheduleCore.ts.",
+  },
   EmailCampaignRecipient_eligibility_reason_check: {
     owner: "database",
     reason:
