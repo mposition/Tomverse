@@ -6,7 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { deliverEmailOnce } from "@/lib/email";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { suppressionCheck } from "@/lib/emailSuppression";
-import { AUTH_LOGIN_CODE_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  AUTH_LOGIN_CODE_TEMPLATE,
+  emailTemplateDefinition,
+} from "@/lib/emailTemplateDefinitions";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
@@ -54,6 +57,16 @@ import {
 export const CREDENTIAL_TEMPLATE_KEY = AUTH_LOGIN_CODE_TEMPLATE;
 
 export const CREDENTIAL_LANE = "credential_sync";
+
+/**
+ * The sender a login code goes out as.
+ *
+ * Derived from the template definition, not restated: a login code is the one
+ * message where a recipient most needs to recognise the sender, and two places
+ * naming it is how they come to disagree.
+ */
+const CREDENTIAL_SENDER_ROLE =
+  emailTemplateDefinition(CREDENTIAL_TEMPLATE_KEY).senderRole;
 
 export type CredentialEnqueueInput = {
   /** The EmailLoginAttempt this message carries a credential for. */
@@ -237,6 +250,11 @@ export async function sendCredentialEmailNow(input: {
       text: input.text,
       idempotencyKey: input.idempotencyKey,
       timeoutMs: decision.timeoutMs,
+      // Read from the one template this lane carries rather than written here.
+      // Every attempt inside this request, and the record of it, then names the
+      // same sender as the standard lane would for the same template
+      // (docs/policy/email-notifications.md §14.1a).
+      senderRole: CREDENTIAL_SENDER_ROLE,
     });
 
     const outcome: ProviderSendOutcome = response.ok

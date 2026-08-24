@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { resolveSendingIdentity } from "../lib/emailSendingIdentityCore.ts";
+import { resolveSenderIdentity } from "../lib/emailSendingIdentityCore.ts";
 
 const CHECKS = [
   ["Secret history scan", "SECURITY_AUDIT_GITLEAKS_STATUS"],
@@ -237,7 +237,13 @@ const sendEmails = async () => {
   // Note that `TRANSACTIONAL_EMAIL_FROM` here comes from a GitHub Actions
   // variable, not from the deployment's environment: `/api/ready` cannot see
   // this process, which is why the workflow runs its own preflight.
-  const identity = resolveSendingIdentity("transactional", process.env);
+  //
+  // `operations`, not the general identity: this is an operator alert, and it
+  // resolves to the same `alerts@` mailbox the in-app incident path sends from.
+  // The domain still comes from `TRANSACTIONAL_EMAIL_FROM` -- the role derives
+  // it rather than naming one, so this script cannot end up on a domain the
+  // deployment has moved off (docs/policy/email-notifications.md §14.1a).
+  const identity = resolveSenderIdentity("transactional", "operations", process.env);
   if (!identity.ok) {
     throw new Error(`Security audit sender unusable: ${identity.code}`);
   }

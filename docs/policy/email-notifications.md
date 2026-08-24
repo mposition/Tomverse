@@ -2116,6 +2116,10 @@ mail을 멈추고 제거는 mail을 다시 시작시키므로 비대칭이 요�
 | marketing | `news.tomverse.app` | 신규 |
 | 운영자 내부 알림 | transactional 재사용 | 외부 발송 아님 |
 
+**도메인은 둘이고 발신자는 여섯입니다.** 이 표는 어느 도메인이 평판을 지느냐를
+정하고, 수신자가 보는 발신자는 §14.1a의 `SenderRole`이 정합니다. 두 축은
+직교하며 어느 것도 다른 하나를 대체하지 않습니다.
+
 각 도메인에:
 - **SPF**: 제공자 include만. **10 DNS lookup 한도**에 유의.
 - **DKIM**: 제공자 발급 키. 2048비트 권장.
@@ -2129,6 +2133,88 @@ mail을 멈추고 제거는 mail을 다시 시작시키므로 비대칭이 요�
 현황 확인은 `npm run report:email-domains`와 Admin Console의 Email policy →
 Sending domains입니다. **DMARC는 제공자가 발급하지도 보고하지도 않으므로** 그
 어느 쪽도 확인해 주지 않습니다 — zone에서 직접 봅니다.
+
+### 14.1a 발신자 역할 (SenderRole)
+
+**stream과 역할은 다른 축입니다.** stream은 전송·평판·규제 경로이고(§5.3),
+역할은 **수신자가 보는 발신자 정체성**입니다. 로그인 코드와 영수증은 같은
+도메인·같은 DKIM 키·같은 suppression 목록 위를 지나지만 **같은 사람처럼 보여서는
+안 됩니다** — `billing@`을 한 달에 한 번 보는 폴더로 거르는 사람에게도 로그인
+코드는 받은편지함에 도착해야 합니다.
+
+정의는 `lib/emailSendingIdentityCore.ts`의 `SENDER_ROLE_SPECS` 한 곳입니다.
+
+| 역할 | stream | From | Reply-To |
+|---|---|---|---|
+| `general` | transactional | `TRANSACTIONAL_EMAIL_FROM` 값 **그대로** | 있음 |
+| `security` | transactional | `Tomverse Security <security@{도메인}>` | 있음 |
+| `billing` | transactional | `Tomverse Billing <billing@{도메인}>` | 있음 |
+| `support` | transactional | `Tomverse Support <support@{도메인}>` | 있음 |
+| `operations` | transactional | `Tomverse Operations <alerts@{도메인}>` | 없음 |
+| `marketing` | marketing | `MARKETING_EMAIL_FROM` 값 **그대로** | 없음 |
+
+절대 조건:
+
+- **`{도메인}`은 새 환경변수가 아니라 `TRANSACTIONAL_EMAIL_FROM`에서 파싱한
+  인증 도메인입니다.** 역할마다 변수를 두면 cutover가 여섯 중 다섯만 옮길 수
+  있게 됩니다 — 2026-08-21에 넷 중 셋이 남았던 것과 같은 실패입니다
+  (docs/ops/email-sending-domains.md §1.2).
+- **`general`과 `marketing`은 설정값을 그대로 씁니다.** 이 둘은 이미 DNS와
+  사용자 필터에 존재하는 주소이고, 부품에서 재조립하면 운영자가 고른 display
+  name이 사라지거나 mailbox가 조용히 정규화됩니다.
+- **잘못된 stream/role 조합은 fallback하지 않고 거절합니다**
+  (`SENDER_ROLE_NOT_ON_STREAM`). 역할은 정확히 하나의 stream에 속하며,
+  transactional에 실린 `marketing` 역할은 §5.3이 막으려는 바로 그 상태입니다.
+- **모든 실제 발송 API가 `senderRole`을 필수로 받습니다.** 기본값이 없으므로
+  나중에 추가되는 발송 경로는 역할을 정하지 않으면 컴파일되지 않습니다.
+  `EmailTemplateDefinition.senderRole`이 템플릿마다 역할을 선언하고, queue·
+  retry는 저장된 template key(또는 notification `kind`)에서 역할을 다시 읽으므로
+  **재시도는 최초 발송과 같은 역할로 나갑니다.**
+- **From과 수신 mailbox는 다릅니다.** 역할 주소가 메일을 받는다는 근거는
+  저장소 어디에도 없으므로 Reply-To는 `EMAIL_BUSINESS_CONTACT_EMAIL`
+  (docs/ops/email-business-identity.md가 "수신자가 이 메일에 관해 연락할 수 있는
+  주소"로 정의)로만 향합니다. 값이 없으면 **헤더를 붙이지 않습니다** — 아무도
+  읽지 않는 Reply-To는 없는 것보다 나쁩니다. `no-reply@`는 도입하지 않습니다.
+- **역할을 우회하는 주소 하드코딩을 정적으로 막습니다.** `hardCodedSenders`는
+  From 헤더 모양을, `sendingSubdomainAddresses`는 **발송 서브도메인 위의 모든
+  주소**를 잡습니다 — 후자가 역할 우회의 실제 모양입니다(`const ALERTS =
+  "alerts@..."`는 `from` 줄에 없어도 동작합니다). 공개 연락처인
+  `support@tomverse.app`은 registrable domain에 있으므로 대상이 아닙니다.
+  `sendCallsMissingSenderRole`은 역할을 적지 않은 발송 호출을 잡습니다. 셋 다
+  `npm run check:sending-identity`가 PR Fast Gate에서 실행합니다.
+- **`/api/ready`가 여섯 역할을 모두 확인합니다** — 주소 생성, 인증 도메인 일치,
+  local-part 일치, 잘못된 조합의 거절. GitHub Actions는 `/api/ready`를 볼 수
+  없으므로 `npm run check:sending-identity -- --env`가 runner의 변수로 같은
+  resolver를 돌립니다.
+- **구조화 로그에 `stream`과 `senderRole`을 함께 남깁니다.** 도메인 하나에 발신자가
+  여섯이면 주소만으로는 "그게 맞는 발신자였나"에 답하지 못합니다.
+
+### 14.1b 템플릿·경로별 역할
+
+| 경로 | 역할 |
+|---|---|
+| `auth_login_code` | `security` |
+| 로그인 방법 추가·제거 안내 | `security` |
+| `account_deletion_scheduled` | `security` |
+| `account_restored` | `security` |
+| `account_welcome` | `general` |
+| Admin test email | `general` |
+| `billing_welcome` | `billing` |
+| 환불 접수·승인·거절 | `billing` |
+| `founding_tester_pass_started` · `_reminder` · `_ended` | `billing` |
+| `admin_plan_changed` | `billing` |
+| 피드백 접수·검토·처리 결과(제출자) | `support` |
+| 고객지원 접수 알림(운영자) | `operations` |
+| `ops_model_lifecycle_daily` | `operations` |
+| operational monitoring 알림 | `operations` |
+| provider monitoring 알림 | `operations` |
+| GitHub Actions 보안 감사 보고서 | `operations` |
+| `model_launch` 및 마케팅 캠페인 | `marketing` |
+
+Admin test email이 `general`인 것은 의도입니다: 그 버튼이 확인하는 대상이
+`TRANSACTIONAL_EMAIL_FROM`이 설정한 identity이고, 나머지 다섯은 그것에서
+도메인을 유도합니다. `operations`로 보낸 시험은 유도된 주소가 동작한다는 것만
+증명하고 유도의 출처에 대해서는 아무것도 말하지 않습니다.
 
 ### 14.2 대량 발신자 요건
 
