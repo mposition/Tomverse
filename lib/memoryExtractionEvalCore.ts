@@ -467,6 +467,7 @@ export type EvalRunModeDecision =
               | "no_api_key"
               | "dataset_not_frozen"
               | "unknown_commit"
+              | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
       };
 
@@ -487,7 +488,21 @@ export type EvalRunModeDecision =
  */
 export function decideEvalRunMode(input: {
     live: boolean;
-    registerEntry: { evalBudget: { maxUsd: number } | null } | null | undefined;
+    registerEntry:
+        | {
+              evalBudget: { maxUsd: number } | null;
+              /**
+               * Checked as well as the budget, because a revoked entry keeps
+               * its budget: the approval was real and the money was really
+               * spent against it. `mem-extract-v1` is exactly that -- revoked,
+               * never approved, US$20 still recorded -- and a runner reading
+               * only `evalBudget` would happily spend the rest of it on a pair
+               * the register has closed.
+               */
+              status?: "candidate" | "approved" | "revoked";
+          }
+        | null
+        | undefined;
     hasApiKey: boolean;
     datasetFrozen: boolean;
     /**
@@ -507,6 +522,13 @@ export function decideEvalRunMode(input: {
 }): EvalRunModeDecision {
     if (!input.live) return { mode: "smoke" };
     if (!input.registerEntry) return { mode: "refused", reason: "unknown_pair" };
+    if (
+        input.registerEntry.status !== undefined &&
+        input.registerEntry.status !== "candidate" &&
+        input.registerEntry.status !== "approved"
+    ) {
+        return { mode: "refused", reason: "pair_not_runnable" };
+    }
     const budget = input.registerEntry.evalBudget;
     if (!budget) return { mode: "refused", reason: "no_eval_budget" };
     if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
