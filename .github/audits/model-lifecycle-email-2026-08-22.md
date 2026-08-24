@@ -646,7 +646,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `app/api/ready/route.ts:91-108`,
   `lib/emailUnsubscribeHeaders.ts:31-40`, `lib/standardEmailLane.ts:621-660`
 
-### EM-11 — standard drain에 자기 job 기록이 없다 (P2, Low)
+### EM-11 — standard drain에 자기 job 기록이 없다 (P2, Low) — **해결 (2026-08-23)** — §35
 
 - **Evidence**: `[코드]` `lib/notificationDeliveryJob.ts:78-100`
 - **현재 동작**: `drainStandardEmailDeliveries()`는 `try/catch`로 감싸여
@@ -2116,7 +2116,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~ML-13 리포트에서 모델 소유자와 관측 경로 분리~~ **완료 (2026-08-23)** — §31
 - ~~ML-10 reconciliation script 범용화 + precondition 검사~~ **완료 (2026-08-23)** — §33
 - EM-06 campaign이 templateVersion pin
-- EM-11 standard drain job key + backlog incident
+- ~~EM-11 standard drain job key + backlog incident~~ **완료 (2026-08-23)** — §35
 - ~~EM-10 조건부 readiness~~ **완료 (2026-08-23)** — §32
 - ~~EM-09 marketing bounce/complaint kill switch~~ **완료 (2026-08-23)** — §34
 - EM-15 `userVisibleNote` 다국어
@@ -2754,3 +2754,38 @@ DB test가 halt된 상태에서 welcome 메일이 정상 발송됨을 고정합�
 
 **범위 밖**: campaign wave 단위 집계(EM-01 대기), 그리고 halt 해제 UI. 오늘은
 `AppSetting` 행 삭제이고, admin 화면은 campaign 화면과 함께 오는 것이 맞습니다.
+## 35. EM-11 구현 기록 (2026-08-23 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/scheduledJobsCore.ts` | `standard_email_drain` job key 등록 |
+| `lib/notificationDeliveryJob.ts` | drain을 `startScheduledJob`/`complete`/`fail`로 감쌈 |
+| `lib/standardEmailLane.ts` | `oldestPendingMs` + backlog incident |
+| `tests/integration/standard-email-lane.db.test.ts` | 6건 추가 (총 21) |
+
+**운영자 큐가 성공했다는 것이 사용자 메일이 나갔다는 뜻은 아니었습니다.**
+standard drain은 `try/catch`로 감싸여 `console.error` 한 줄만 남겼고,
+`ScheduledJobRun` 기록이 없어 **`/admin/jobs`에는 두 큐가 하나의 초록 행**으로
+보였습니다. 이제 자기 job key를 갖습니다 — 같은 cron(같은 tick에 돌므로)이지만
+자기 run입니다. 실패도 그 run에 기록한 뒤 삼킵니다(두 큐는 독립적으로 실패하고
+그렇게 보고돼야 합니다).
+
+**backlog 신호를 두 모양으로 잡습니다.** 깊이만으로는 더 나쁜 쪽을 놓칩니다 —
+1분 전에 쌓인 200건은 바쁜 아침이고, **6시간째 기다리는 5건은 영수증을 못 받은
+사람 다섯**인데 그동안 큐는 계속 얕습니다. 그래서 `pending >= 200` **또는**
+가장 오래 기다린 메시지가 1시간을 넘으면 incident를 올립니다. incident의
+`trigger`가 어느 쪽인지 말하므로 숫자를 역산할 필요가 없습니다.
+
+**abandonment incident와 의도적으로 분리했습니다.** 그것은 메시지가 이미
+사라진 뒤에 울리고, 감사가 지적한 것이 바로 "그건 이미 늦은 신호"입니다.
+이쪽은 아직 손쓸 수 있을 때 울립니다.
+
+**임계 200의 근거**: 한 pass가 50건을 집고 15분 cron을 탑니다. 200건이면
+약 한 시간치 밀림이고, "바쁨"과 "못 따라감"이 갈라지는 지점입니다.
+
+**빈 큐는 `null`이지 `0`이 아닙니다.** 대시보드에 "0분"으로 뜨면 완벽하게 도는
+큐처럼 보입니다.
+
+**측정 시각을 loop 밖에서 잡습니다.** loop 안의 `now`는 claim 하나에 묶여
+있고 **loop가 한 번도 안 돌면 존재하지 않습니다** — 그것이 정체된 큐가 드러나는
+바로 그 경우입니다.
