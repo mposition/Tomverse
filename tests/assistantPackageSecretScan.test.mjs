@@ -21,6 +21,22 @@ import {
     sortFindings,
 } from "../lib/assistantPackageSecretScan.ts";
 
+/**
+ * The `Sha256Hex` port, as the production callers supply it.
+ *
+ * SHA-256 is the right primitive here and a slow one would be the wrong one.
+ * This is not password storage: it fingerprints a *detection* so the finding
+ * can travel in a request body, be folded into a digest and reach a logging
+ * failure path without ever carrying the matched text -- which is what
+ * docs/policy/assistant-package-import.md section 9 forbids, and what
+ * `lib/assistantPackageSecretScan.ts` says the shape is for.
+ *
+ * CodeQL's password-hash query sees a credential-shaped sample flow into a
+ * fast hash and cannot see either of those facts. The samples below are
+ * invented, the values are never authenticated against anything, and a
+ * deliberately slow hash would only make the scanner slow.
+ */
+// codeql[js/insufficient-password-hash]
 const sha256Hex = async (input) =>
     createHash("sha256").update(input, "utf8").digest("hex");
 
