@@ -107,6 +107,17 @@ export const en = {
         projectDeleteFailed: "Project could not be deleted.",
     },
     chat: {
+        // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
+        // It renders below the (application) layout, so LanguageProvider is
+        // mounted; global-error.tsx replaces that layout and stays English.
+        workspaceError: {
+            title: "The chat workspace could not be loaded",
+            body: "Your conversations are safe. Retrying usually resolves this.",
+            reference: "If it keeps happening, quote this reference when you contact support:",
+            noReference: "If it keeps happening, contact support.",
+            retry: "Try again",
+            support: "Contact support",
+        },
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Image generation",
         imageGenerationBackToChat: "Back to chat",

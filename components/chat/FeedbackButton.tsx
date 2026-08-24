@@ -42,6 +42,7 @@ import {
   FEEDBACK_MESSAGE_MIN_LENGTH,
   FEEDBACK_TRACE_ID_MAX_LENGTH,
 } from "@/lib/feedbackPolicy";
+import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 
 /**
  * The chat feedback modal.
@@ -303,14 +304,7 @@ export function FeedbackButton({
     return () => cancelAnimationFrame(frame);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [open]);
+  useBodyScrollLock(open);
 
   const getFocusableElements = useCallback(() => {
     const dialog = dialogRef.current;

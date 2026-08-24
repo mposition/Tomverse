@@ -7,6 +7,7 @@ import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchas
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import type { UserPlan } from "@/components/chat/useUserUsage";
 import { writePendingGuestImportIntent } from "@/lib/guestImport";
+import { lockBodyScroll } from "@/components/useBodyScrollLock";
 
 const interpolateCopy = (
   template: string,
@@ -78,14 +79,13 @@ export function UsageLimitModal({
 
     const returnTarget =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const releaseScrollLock = lockBodyScroll();
     const focusFrame = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
     return () => {
       cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       requestAnimationFrame(() => {
         if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
       });

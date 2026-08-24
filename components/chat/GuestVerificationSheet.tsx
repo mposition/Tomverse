@@ -15,6 +15,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { guestVerificationFailureKey } from "@/components/chat/guestVerificationCopy";
 import type { TurnstileWidgetSize } from "@/components/chat/turnstileScript";
+import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 
 /**
  * The mobile home for the real Cloudflare widget: a modal bottom sheet that
@@ -173,14 +174,7 @@ export function GuestVerificationSheet() {
     return () => cancelAnimationFrame(frame);
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [isOpen]);
+  useBodyScrollLock(isOpen);
 
   const getFocusableElements = useCallback(() => {
     const sheet = sheetRef.current;
