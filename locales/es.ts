@@ -1652,7 +1652,7 @@ export const es = {
         noticeNotFound: "Este asistente ya no existe. Ábrelo de nuevo desde la lista.",
         noticeRateLimited: "Demasiadas solicitudes seguidas. Espera un momento e inténtalo de nuevo.",
         noticeImportInProgress: "Hay una importación en revisión para este asistente. Termínela o cancélela antes de guardar aquí.",
-        noticeSignedOut: "Se cerró tu sesión, así que no se guardó nada. Vuelve a iniciar sesión: tus cambios siguen en esta pantalla.",
+        noticeSignedOut: "No has iniciado sesión, así que no se guardó nada. Inicia sesión: tus cambios siguen en esta pantalla.",
         fileStatus: {
             pending: "en espera",
             processing: "procesando",

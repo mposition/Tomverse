@@ -1652,7 +1652,7 @@ export const fr = {
         noticeNotFound: "Cet assistant n'existe plus. Rouvrez-le depuis la liste.",
         noticeRateLimited: "Trop de requêtes d'affilée. Patientez un instant et réessayez.",
         noticeImportInProgress: "Un import est en cours d'examen pour cet assistant. Terminez-le ou annulez-le avant d'enregistrer ici.",
-        noticeSignedOut: "Vous avez été déconnecté, rien n'a été enregistré. Reconnectez-vous : vos modifications sont toujours sur cet écran.",
+        noticeSignedOut: "Vous n'êtes pas connecté, rien n'a donc été enregistré. Connectez-vous : vos modifications sont toujours sur cet écran.",
         fileStatus: {
             pending: "en attente",
             processing: "en cours",
