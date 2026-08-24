@@ -107,15 +107,27 @@ test.describe("multi-model failure and recovery", () => {
     await expect(retry).toHaveCount(1);
     await retry.click();
 
-    // The failed panel recovers on the second attempt. `handleRetryLast`
-    // appends a new turn rather than rewriting the failed one, so the failure
-    // stays in the transcript as history -- along with its own retry
-    // affordance, which is why exactly one is still expected.
-    await expect(panel(page, 0)).toContainText("QA fixture: upstream failure.");
+    /*
+      The failed panel recovers on the second attempt, in place.
+
+      `handleRetryLast` used to append a new turn and leave the failed one
+      above it, so a recovered panel showed the same question twice -- once
+      erroring, once answered -- and kept an error card for an attempt that no
+      longer stood. Worse, the appended turn re-named the failed turn's
+      attachments, and `/api/chat` refused the transcript for it: a retry of
+      any turn carrying a file could not succeed at all. A retry now rebuilds
+      its own turn (`lib/chatRetryTranscript.ts`), so what is left is the
+      question, asked once, and the answer.
+    */
     await expect(panel(page, 0)).toContainText(RECOVERED_A);
+    await expect(panel(page, 0)).not.toContainText("QA fixture: upstream failure.");
+    await expect(
+      panel(page, 0).getByText("Fail once, then recover on retry.")
+    ).toHaveCount(1);
+    // Nothing is in an error state any more, so nothing offers a retry.
     await expect(
       page.getByRole("button", { name: "Retry", exact: true })
-    ).toHaveCount(1);
+    ).toHaveCount(0);
 
     // Only the failed model was re-requested: the healthy panels never reach
     // their second scripted answer.

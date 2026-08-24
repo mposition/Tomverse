@@ -170,3 +170,75 @@ export const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 export const XLSX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/* ------------------------------------------------------------------------ */
+/* Transcript admission                                                       */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Refusals `admitTranscriptAttachmentObjects` can produce, as the codes the
+ * request layer answers with.
+ */
+export const TRANSCRIPT_ATTACHMENT_REFUSAL_CODES = [
+  "DUPLICATE_ATTACHMENT_OBJECT",
+  "TOO_MANY_ATTACHMENT_OBJECTS",
+] as const;
+
+export type TranscriptAttachmentRefusalCode =
+  (typeof TRANSCRIPT_ATTACHMENT_REFUSAL_CODES)[number];
+
+export type TranscriptAttachmentAdmission =
+  | { admitted: true; distinctObjectCount: number }
+  | { admitted: false; code: TranscriptAttachmentRefusalCode };
+
+/**
+ * Decides whether a transcript may name the attachment objects it names.
+ *
+ * Two questions, and the scope of each is the whole point:
+ *
+ * **May one object be named twice?** Within the turn being sent, no. Five
+ * reference slots all pointing at one file is a way to have the same bytes
+ * read five times against a per-message allowance that counted five different
+ * files, and nothing legitimate produces it -- the composer mints a fresh
+ * upload per pick.
+ *
+ * **Across the transcript, yes.** An earlier turn naming the same object as
+ * this one is an ordinary transcript fact: the route re-reads every message's
+ * attachments on every turn already, so a repeat costs exactly what the second
+ * message always cost. Refusing it made a *retry* impossible -- the failed turn
+ * stays on screen, the retry names the same file again, and the request was
+ * rejected before it reached a model, for as many times as the button was
+ * pressed.
+ *
+ * **How many distinct objects may a conversation carry?** The cap counts
+ * objects, not mentions, which is why it is measured on the deduplicated set.
+ *
+ * Identities are opaque strings minted by the caller (`a:`/`u:` for a resolved
+ * reference, the object key for a guest); `null` means "this entry names no
+ * object" and is skipped rather than treated as an identity of its own.
+ */
+export const admitTranscriptAttachmentObjects = (input: {
+  /** Identities named by the message being sent, in composer order. */
+  turn: readonly (string | null)[];
+  /** Identities named by every earlier message in the transcript. */
+  history: readonly (string | null)[];
+  /** How many distinct objects one conversation may carry. */
+  maxDistinctObjects: number;
+}): TranscriptAttachmentAdmission => {
+  const distinct = new Set<string>();
+  for (const identity of input.turn) {
+    if (!identity) continue;
+    if (distinct.has(identity)) {
+      return { admitted: false, code: "DUPLICATE_ATTACHMENT_OBJECT" };
+    }
+    distinct.add(identity);
+  }
+  for (const identity of input.history) {
+    if (!identity) continue;
+    distinct.add(identity);
+  }
+  if (distinct.size > input.maxDistinctObjects) {
+    return { admitted: false, code: "TOO_MANY_ATTACHMENT_OBJECTS" };
+  }
+  return { admitted: true, distinctObjectCount: distinct.size };
+};

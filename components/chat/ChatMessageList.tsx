@@ -41,6 +41,10 @@ import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
+import {
+  classifyChatError,
+  type ChatErrorCategory,
+} from "@/lib/chatErrorCategory";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -63,35 +67,15 @@ type ChatMessageListProps = {
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
-// Codes where the fix is changing what's being asked for (fewer/cheaper
-// models, a different model) rather than repeating the same request.
-const QUOTA_ERROR_CODES = new Set([
-  "CREDIT_BALANCE_INSUFFICIENT",
-  "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
-  "PLAN_ENTITLEMENT_EXHAUSTED",
-  "PLAN_DAILY_CREDIT_LIMIT_REACHED",
-  "CHAT_QUOTA_EXCEEDED",
-  "FREE_PRO_MODEL_QUOTA_EXCEEDED",
-  "OPERATIONAL_COST_GUARDRAIL_TRIGGERED",
-  "PROVIDER_BUDGET_EXHAUSTED",
-  // Retired codes, still classified so a response cached from an older
-  // deployment keeps offering the "change what you asked for" affordances.
-  "INTERNAL_DAILY_COST_SAFETY_LIMIT",
-  "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
-  "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
-  "PROVIDER_SPEND_LIMIT_REACHED",
-  "CHAT_CONCURRENCY_EXCEEDED",
-  "CHAT_IP_CONCURRENCY_EXCEEDED",
-]);
-
-type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
-
-const classifyError = (message: Message): ErrorCategory => {
-  if (message.errorCode === "MODEL_RETIRED") return "model_retired";
-  if (message.errorCode && QUOTA_ERROR_CODES.has(message.errorCode)) return "quota";
-  if (message.errorHadAttachments && isFileParsingError(message.content)) return "attachment";
-  return "generic";
-};
+// The category, and every code that decides it, live in
+// `lib/chatErrorCategory.ts` -- pure, so the state matrix the error card
+// renders can be asserted without mounting the list.
+const classifyError = (message: Message): ChatErrorCategory =>
+  classifyChatError({
+    errorCode: message.errorCode,
+    content: message.content,
+    errorHadAttachments: message.errorHadAttachments,
+  });
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
@@ -133,16 +117,6 @@ const hasImagePreview = (attachment: ChatAttachment) =>
   attachment.mediaType.startsWith("image/") &&
   typeof attachment.data === "string" &&
   (attachment.data.startsWith("data:image/") || attachment.data.startsWith("blob:"));
-
-const isFileParsingError = (content: string) => {
-  const normalized = content.toLowerCase();
-  return (
-    normalized.includes("pdf") ||
-    normalized.includes("office") ||
-    normalized.includes("unsupported") ||
-    normalized.includes("invalid")
-  );
-};
 
 type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
 

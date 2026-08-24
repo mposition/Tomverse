@@ -54,6 +54,26 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     ARCHIVE_NO_SUPPORTED_FILES: "chat.archiveNoSupportedFiles",
     ARCHIVE_PROCESSING_TIMEOUT: "chat.archiveTimeout",
 
+    // -- Counting and references --------------------------------------------
+    /*
+      Send-path refusals. They belong in this table for the reason the table
+      exists: a refusal code without a sentence here reaches the panel as the
+      server's own English, and `/api/chat` had no localized branch for any of
+      them at all. `DUPLICATE_ATTACHMENT_OBJECT` is how that was noticed --
+      "Duplicate attachment objects are not allowed." rendered verbatim inside
+      a Korean conversation.
+    */
+    DUPLICATE_ATTACHMENT_OBJECT: "chat.duplicateAttachmentObject",
+    TOO_MANY_ATTACHMENTS: "chat.attachmentCountError",
+    TOO_MANY_ATTACHMENT_OBJECTS: "chat.conversationAttachmentLimit",
+    TOO_MANY_CONVERSATION_ATTACHMENTS: "chat.conversationAttachmentLimit",
+    GUEST_TOO_MANY_ATTACHMENTS: "chat.guestAttachmentCountError",
+    GUEST_TOO_MANY_CONVERSATION_ATTACHMENTS:
+        "chat.guestConversationAttachmentLimit",
+    INLINE_ATTACHMENT_FORBIDDEN: "chat.attachmentUnreadable",
+    ATTACHMENT_REFERENCE_REQUIRED: "chat.attachmentUnreadable",
+    INVALID_ATTACHMENT_KIND: "chat.attachmentTypeMismatch",
+
     // -- Operational --------------------------------------------------------
     ATTACHMENTS_DISABLED_BY_ADMIN: "chat.guestAttachmentUnavailable",
     API_RATE_LIMITED: "chat.compareRateLimited",

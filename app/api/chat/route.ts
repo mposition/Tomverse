@@ -212,6 +212,7 @@ import {
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
+    admitTranscriptAttachmentObjects,
     messageAttachmentReferenceSchema,
     turnAttachmentHandle,
     type MessageAttachmentReference,
@@ -1400,43 +1401,64 @@ async function handleChatPost(
         /*
           One attachment is named once per turn, whichever handle names it.
 
-          The set used to be storage keys, which is what the request carried.
-          It carries opaque ids now, so the identity being deduplicated is the
-          reference -- and the guest path, whose keys are derived from the
-          caller's own signed identity, keeps deduplicating on the key because
-          that is the only name a guest object has.
+          The identity is the reference the request carried -- the set used to
+          hold storage keys, and holds opaque ids now -- while the guest path,
+          whose keys are derived from the caller's own signed identity, keeps
+          deduplicating on the key because that is the only name a guest object
+          has.
+
+          The scope is the turn, not the transcript, and the difference is not
+          cosmetic: this loop used to run over every message, so a transcript
+          that named one file twice was refused outright. That is exactly what
+          a retry produces -- the failed turn stays on screen and the retry
+          names the same file again -- which made the retry button fail with
+          this refusal every time it was pressed, before the request reached a
+          model. `admitTranscriptAttachmentObjects` holds the rule and
+          `tests/messageAttachmentTranscriptAdmission.test.mjs` holds both
+          halves of it.
         */
-        const attachmentIdentities = new Set<string>();
         for (const attachment of requestAttachments) {
-            const hasObjectKey = typeof attachment?.objectKey === "string";
-            const hasInlineData = typeof attachment?.data === "string";
-            if (hasInlineData) {
+            if (typeof attachment?.data === "string") {
                 throw new ChatAccessError(
                     400,
                     "INLINE_ATTACHMENT_FORBIDDEN",
                     "Attachments must be uploaded before sending."
                 );
             }
-            const identity =
-                attachmentReferenceKey(attachment) ??
-                (hasObjectKey ? `k:${attachment.objectKey as string}` : null);
-            if (identity) {
-                if (attachmentIdentities.has(identity)) {
-                    throw new ChatAccessError(
-                        400,
-                        "DUPLICATE_ATTACHMENT_OBJECT",
-                        "Duplicate attachment objects are not allowed."
-                    );
-                }
-                attachmentIdentities.add(identity);
-            }
         }
-        if (attachmentIdentities.size > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_ATTACHMENT_OBJECTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
+        const attachmentObjectIdentity = (attachment: IncomingAttachment) =>
+            attachmentReferenceKey(attachment) ??
+            (typeof attachment?.objectKey === "string"
+                ? `k:${attachment.objectKey}`
+                : null);
+        const latestMessageAttachments = Array.isArray(latestMessage?.attachments)
+            ? (latestMessage.attachments as IncomingAttachment[])
+            : [];
+        const admission = admitTranscriptAttachmentObjects({
+            turn: latestMessageAttachments.map(attachmentObjectIdentity),
+            history: messages
+                .filter((message) => message !== latestMessage)
+                .flatMap((message) =>
+                    Array.isArray(message.attachments)
+                        ? (message.attachments as IncomingAttachment[]).map(
+                              attachmentObjectIdentity
+                          )
+                        : []
+                ),
+            maxDistinctObjects: MAX_CONVERSATION_ATTACHMENTS,
+        });
+        if (!admission.admitted) {
+            throw admission.code === "DUPLICATE_ATTACHMENT_OBJECT"
+                ? new ChatAccessError(
+                      400,
+                      "DUPLICATE_ATTACHMENT_OBJECT",
+                      "The same file is attached more than once to this message."
+                  )
+                : new ChatAccessError(
+                      413,
+                      "TOO_MANY_ATTACHMENT_OBJECTS",
+                      "This conversation has reached its attachment limit. Start a new chat to attach more files."
+                  );
         }
         // Resolved before the model, because Auto needs the plan to decide
         // whether this account is routed at all. Reused here rather than

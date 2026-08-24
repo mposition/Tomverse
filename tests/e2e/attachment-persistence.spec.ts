@@ -46,6 +46,17 @@ const sendButton = (page: Page) =>
 
 const userTurn = (page: Page) => page.locator('[data-message-role="user"]');
 
+/** How many of a request's messages name one attachment handle. */
+const attachmentHandleCount = (body: string, handle: string) => {
+  const parsed = JSON.parse(body) as {
+    messages: Array<{ attachments?: Array<Record<string, unknown>> }>;
+  };
+  return parsed.messages.flatMap((message) => message.attachments ?? []).filter(
+    (attachment) =>
+      attachment.attachmentId === handle || attachment.uploadId === handle
+  ).length;
+};
+
 /** The turn a request is actually asking about: its last user message. */
 const newestUserTurn = (body: string) => {
   const parsed = JSON.parse(body) as {
@@ -244,6 +255,76 @@ test.describe("a conversation with a stored attachment", () => {
     }
   });
 
+  /*
+    A retry rebuilds its own failed turn and nothing else.
+
+    The trim that stops a retry duplicating its own attachment reference must
+    not reach past that turn: an earlier question that was actually answered
+    carried its file, and dropping it would rewrite what the model was shown.
+    Seeded from the conversation endpoint, so the earlier turn is a stored one
+    rather than something this session happens to remember.
+  */
+  test("a retry leaves an already-answered turn's file in the transcript", async ({
+    page,
+  }) => {
+    const chatRequests: string[] = [];
+    // Registered after the beforeEach's `mockChatStream`, so this handler
+    // wins the POST: the first attempt fails, the retry succeeds.
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      chatRequests.push(route.request().postData() || "");
+      if (chatRequests.length === 1) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          headers: { "X-Request-ID": "qa-trace-id" },
+          body: JSON.stringify({
+            error: "Something went wrong.",
+            code: "AI_PROVIDER_ERROR",
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        headers: { "X-Request-ID": "qa-trace-id" },
+        body: "3행은 다음과 같습니다.",
+      });
+    });
+
+    await page.goto("/chat?lang=ko");
+    await openRecentConversation(page);
+    await expect(userTurn(page).filter({ hasText: "명단.xlsx" })).toBeVisible();
+
+    await page.getByTestId("chat-textarea").fill("아까 그 파일에서 3행만");
+    await sendButton(page).click();
+    await expect.poll(() => chatRequests.length).toBe(1);
+
+    await page
+      .getByRole("button", { name: /^다시 시도$/ })
+      .first()
+      .click();
+    await expect.poll(() => chatRequests.length).toBe(2);
+    await expect(page.getByText("3행은 다음과 같습니다.")).toBeVisible();
+
+    // The stored turn still names its file, exactly once, and the question
+    // that failed is asked once rather than twice.
+    const retried = JSON.parse(chatRequests[1]) as {
+      messages: Array<{ role: string; content?: string }>;
+    };
+    expect(attachmentHandleCount(chatRequests[1], "ma-stored-1")).toBe(1);
+    expect(
+      retried.messages.filter(
+        (message) =>
+          message.role === "user" && message.content === "아까 그 파일에서 3행만"
+      )
+    ).toHaveLength(1);
+  });
+
   // Without this the model that answered the first question cannot see the
   // file when the second one is asked -- the quietest of the three faces of
   // the original defect.
@@ -389,17 +470,30 @@ test.describe("a stored attachment across panels and retries", () => {
     const handle = reference![2];
     expect(chatRequests[0]).not.toContain("objectKey");
 
-    // The plain retry sends the same reference again.
+    // The plain retry sends the same reference again -- once.
+    //
+    // It used to send it twice. A retry minted a new message id, so the failed
+    // attempt stayed in the transcript beside the new one and both named this
+    // handle; `/api/chat` deduplicates references within a turn and refused
+    // the request outright, which this mocked route could never show. A retry
+    // now rebuilds its own turn (`lib/chatRetryTranscript.ts`).
     await page.getByRole("button", { name: /^다시 시도$/ }).first().click();
     await expect.poll(() => chatRequests.length).toBe(2);
     expect(newestUserTurn(chatRequests[1]).attachments?.[0]).toMatchObject({
       attachmentId: handle,
     });
+    expect(attachmentHandleCount(chatRequests[1], handle)).toBe(1);
 
-    // Without files: **that attempt only**. The earlier turns keep their
-    // attachment, because they really did carry it -- excluding it from the
-    // history would be rewriting what was sent. And nothing was deleted to
-    // achieve any of this.
+    // Without files: **that attempt only**. Nothing is deleted, and nothing
+    // that was actually answered is rewritten.
+    //
+    // This assertion used to read `expect(withoutFiles).toContain(handle)`,
+    // on the reasoning that the history keeps what it carried. Every turn in
+    // *this* conversation is the same failed attempt, though -- it was never
+    // answered and is not history -- so what that pinned was the duplicate
+    // turn itself. The property it was reaching for is a real one and is
+    // pinned where it can actually be exercised: "a retry leaves an
+    // already-answered turn's file in the transcript", below.
     await page
       .getByRole("button", { name: /첨부파일 없이 다시 시도/ })
       .first()
@@ -407,7 +501,7 @@ test.describe("a stored attachment across panels and retries", () => {
     await expect.poll(() => chatRequests.length).toBe(3);
     const withoutFiles = chatRequests[2];
     expect(newestUserTurn(withoutFiles).attachments).toEqual([]);
-    expect(withoutFiles).toContain(handle);
+    expect(attachmentHandleCount(withoutFiles, handle)).toBe(0);
     expect(uploads.deleteCount).toBe(0);
   });
 });

@@ -480,6 +480,87 @@ test("a guest cannot send more than one file in a message", async () => {
   assertNothingSpent(spies, "a second guest attachment");
 });
 
+test("one file may not be named twice in the same message", async () => {
+  // Five reference slots pointing at one object is a way to have the same
+  // bytes read five times against a per-message allowance that counted five
+  // different files. Refused before anything is read.
+  const { POST, spies } = await loadRouteWithSpies();
+  const key = guestAttachmentKey("guest:whoever");
+  const attachment = () => ({
+    name: "notes.txt",
+    mediaType: "text/plain",
+    kind: "text",
+    objectKey: key,
+  });
+
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read it twice.",
+          attachments: [attachment(), attachment()],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  assert.equal(response.status, 400);
+  const body = (await response.json()) as { code?: string };
+  assert.equal(body.code, "DUPLICATE_ATTACHMENT_OBJECT");
+  assertNothingSpent(spies, "one object named twice in a turn");
+});
+
+test("an earlier turn naming the same file is not a duplicate", async () => {
+  /*
+    The refusal a retry could not get past.
+
+    This check used to run over the whole transcript, so a conversation in
+    which one object appeared in two messages was rejected outright -- and
+    that is exactly the shape a retry produces, because the failed turn stays
+    on screen with its cards while the retry names the same file again. Every
+    press of the retry button produced this 400, before the request reached a
+    model.
+
+    The assertion is narrow on purpose: this transcript may still be refused
+    for its own reasons further down the route, but not for naming a file its
+    own history already named.
+  */
+  const { POST } = await loadRouteWithSpies();
+  const key = guestAttachmentKey("guest:whoever");
+  const attachment = () => ({
+    name: "notes.txt",
+    mediaType: "text/plain",
+    kind: "text",
+    objectKey: key,
+  });
+
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read this.",
+          attachments: [attachment()],
+        },
+        { role: "assistant", content: "That request failed." },
+        {
+          role: "user",
+          content: "Read this.",
+          attachments: [attachment()],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  if (!response.ok) {
+    const body = (await response.json()) as { code?: string };
+    assert.notEqual(body.code, "DUPLICATE_ATTACHMENT_OBJECT");
+  }
+});
+
 test("a guest cannot send an attachment type guests are not allowed", async () => {
   const { POST, spies } = await loadRouteWithSpies();
 

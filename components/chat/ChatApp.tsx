@@ -34,6 +34,8 @@ import {
   toChatRequestMessage,
   toGuestPersistableMessage,
 } from "@/lib/chatMessageSerialization";
+import { transcriptBeforeSend } from "@/lib/chatRetryTranscript";
+import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
   ERROR_CLASSIFICATION_SOURCE,
   ERROR_REPORT_TOKEN_HEADER,
@@ -224,6 +226,12 @@ function ChatAppComponent({
     text: string;
     targetChatId: string;
     attachments: ChatAttachment[];
+    /*
+      The id of the turn this prompt built, so a retry can rebuild that turn
+      instead of appending a second copy of it. See
+      `lib/chatRetryTranscript.ts`.
+    */
+    userMsgId: string;
   } | null>(null);
   /**
    * The send barrier and this panel's current model, read through refs by the
@@ -681,7 +689,7 @@ function ChatAppComponent({
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
-    lastPromptRef.current = { text, targetChatId, attachments };
+    lastPromptRef.current = { text, targetChatId, attachments, userMsgId };
     // Marks this panel's history as locally advanced. A history load that was
     // already in flight when this send started describes the conversation as
     // it was *before* the send, so it must not be applied afterwards.
@@ -709,8 +717,17 @@ function ChatAppComponent({
 		createdAt: new Date().toISOString(),
 	};
 	
+    /*
+      A retry rebuilds its own turn rather than adding one.
+
+      `userMsgId` is the failed turn's id when this send is a retry, so
+      everything from it onward -- the turn itself and the error assistant
+      turn beneath it -- is dropped before the fresh pair is appended. A first
+      send's id appears nowhere and nothing is dropped
+      (`lib/chatRetryTranscript.ts`).
+    */
     setMessages((prev) => [
-      ...prev,
+      ...transcriptBeforeSend(prev, userMsgId),
       userMessage,
       assistantMessage,
     ]);
@@ -783,12 +800,14 @@ function ChatAppComponent({
           body: JSON.stringify({
             // UI-only turns never go to a provider, and this turn's own user
             // message is appended exactly once -- `messages` is the pre-send
-            // snapshot, and the id filter keeps a re-render or a resend from
-            // duplicating it.
+            // snapshot, and `transcriptBeforeSend` drops the turn this send
+            // rebuilds, so neither a re-render nor a retry can duplicate it.
+            // The same trim is what keeps a retry from handing the provider
+            // the previous attempt's error sentence as an assistant turn.
             messages: [
-              ...messages.filter(
-                (message) =>
-                  isTranscriptMessage(message) && message.id !== userMessage.id
+              ...transcriptBeforeSend(
+                messages.filter(isTranscriptMessage),
+                userMessage.id
               ),
               userMessage,
             ].map(toChatRequestMessage),
@@ -1177,6 +1196,7 @@ function ChatAppComponent({
           typeof (requestError.details as Record<string, unknown>).retryAfterSeconds === "number"
             ? (requestError.details as Record<string, number>).retryAfterSeconds
             : null;
+        const attachmentErrorCopyKey = chatAttachmentErrorCopyKey(errorCode);
         const localizedRequestError =
           // A verification code surfacing here means the recovery flow itself
           // was refused again (e.g. the grant cookie was not honoured). The
@@ -1229,6 +1249,22 @@ function ChatAppComponent({
                       ? t("chat.comparisonHigherCostQuotaExceeded")
                   : errorCode === "CHAT_QUOTA_EXCEEDED"
                     ? t("chat.comparisonDailyCreditsInsufficient")
+                    /*
+                      Every attachment refusal, from one shared table.
+
+                      The branches above name a code each; the attachment
+                      family is thirty-odd codes and none of them had a branch,
+                      so all of them arrived as the server's English sentence
+                      -- `DUPLICATE_ATTACHMENT_OBJECT` rendering "Duplicate
+                      attachment objects are not allowed." inside a Korean
+                      conversation is what made that visible. The upload path
+                      already resolved these through
+                      `lib/chatAttachmentErrorCopy.ts`; this is the send path
+                      using the same table, so a new refusal code needs one
+                      entry rather than two.
+                    */
+                    : attachmentErrorCopyKey
+                      ? t(attachmentErrorCopyKey)
                     : null;
         const costSafetyDetails = isChatCostSafetyCode(errorCode)
           ? formatChatCostSafetyDetails(requestError.details)
@@ -1313,11 +1349,14 @@ function ChatAppComponent({
       const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
       if (!settingsReady) return;
 
-      const retryUserMessageId = crypto.randomUUID();
+      // The failed turn's own id, not a fresh one: a retry replaces that turn
+      // rather than adding a second copy of it beneath the error. Minting a
+      // new id is what made every retry of a turn carrying a file fail with
+      // `DUPLICATE_ATTACHMENT_OBJECT` -- both copies named the same upload.
       void handleSendPrompt(
         lastPrompt.text,
         lastPrompt.targetChatId,
-        retryUserMessageId,
+        lastPrompt.userMsgId,
         lastPrompt.attachments
       );
     })();
@@ -1331,10 +1370,14 @@ function ChatAppComponent({
       const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
       if (!settingsReady) return;
 
+      // Same replacement as `handleRetryLast`. The saved turn keeps the files
+      // it was sent with -- removing a card is editing a draft, not editing
+      // history (docs/policy/user-attachment-persistence.md) -- so only this
+      // attempt goes without them.
       void handleSendPrompt(
         lastPrompt.text,
         lastPrompt.targetChatId,
-        crypto.randomUUID(),
+        lastPrompt.userMsgId,
         []
       );
     })();
