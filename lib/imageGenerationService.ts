@@ -79,6 +79,8 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import { writeR2Object } from "@/lib/r2";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
+import { createConversation } from "@/lib/conversationCreation";
+import { STUDIO_PRODUCT_KEY } from "@/lib/conversationProduct";
 
 // The image generation billing path. Same wallet, same bucket table, same
 // ledger as chat -- what differs is the shape of the price (fixed success
@@ -529,16 +531,21 @@ export const requestImageGeneration = async (
           );
         }
       } else {
-        const conversation = await tx.conversation.create({
-          data: {
+        const conversation = await createConversation(
+          tx,
+          {
             userId: input.userId,
             title: input.prompt.trim().slice(0, 30) || "New image",
-            kind: "image",
+            // Image conversations are Studio, decided here rather than
+            // derived from `kind` later: the product exists in the data
+            // before it has a surface, which is what spares a backfill when
+            // /studio opens (decision record v1.2, decision 2).
+            productKey: STUDIO_PRODUCT_KEY,
             selectedModels: "[]",
             disabledPanels: "[]",
           },
-          select: { id: true },
-        });
+          { id: true }
+        );
         conversationId = conversation.id;
       }
 

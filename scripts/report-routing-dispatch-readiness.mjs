@@ -105,6 +105,18 @@ try {
     console.log("  ^ recording is off, so the counts below describe whatever was written");
     console.log("    before it was turned off, not the last window of traffic.");
   }
+  // Last in the section, because it qualifies everything above it. Both lines
+  // are read from this process's environment. A deployed server holds the
+  // variables it was started with, so a value corrected after it booted is not
+  // in it yet, and a report run against the corrected configuration says
+  // `configured` while the server that served the rows below was still failing
+  // on the old one. Not a hypothetical: that is how a keyring fix and a green
+  // preflight coexisted with an incident per turn on 2026-08-23.
+  console.log("");
+  console.log("  ^ both lines are read from this process's environment, not from the");
+  console.log("    running server. A server keeps the variables it started with, so these");
+  console.log("    describe what a process starting now would see. Redeploy before reading");
+  console.log("    them as the state the rows below were written under.");
   console.log("");
 
   console.log("Runs recorded");
@@ -161,12 +173,30 @@ try {
     );
   }
   if (mode !== "off" && attempts > 0 && pending === attempts) {
+    // The shape, which the counts do establish: something wrote the run and
+    // the attempt and never wrote the manifest, and the stale sweep cannot
+    // resolve what it cannot see a dispatch for.
     console.log(
-      "  ^ every attempt in this window is still pending. That is the fingerprint\n" +
-        "    of the keyring failure above: the run and the attempt are written, the\n" +
-        "    manifest is not, and the stale sweep never reaches these because it\n" +
-        "    only closes attempts that recorded a dispatch."
+      "  ^ every attempt in this window is still pending: the run and the attempt\n" +
+        "    were written and the manifest was not, and the stale sweep never reaches\n" +
+        "    these because it only closes attempts that recorded a dispatch."
     );
+    // The cause, which they do not. This used to name the keyring outright,
+    // which was a guess wearing a diagnosis: the same message printed under a
+    // preflight that had just resolved the keyring, sending the reader to
+    // re-check a variable that was already correct. Say it only when this
+    // process reproduces the failure; otherwise name the one place that holds
+    // the answer.
+    if (keyring) {
+      console.log(
+        "    The keyring resolves here, so this report cannot name the cause -- the\n" +
+          "    server that served these turns reads its own copy of the environment.\n" +
+          "    Its ROUTING_DISPATCH_INSTRUMENTATION_FAILED incidents name the stage\n" +
+          "    that failed; read those before changing a variable."
+      );
+    } else {
+      console.log("    That is the fingerprint of the keyring failure above.");
+    }
   }
 
   // Estimate error, from the runs that have a provider-reported figure.

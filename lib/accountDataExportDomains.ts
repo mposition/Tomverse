@@ -85,6 +85,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
 
   // --- the user's data mixed with Tomverse's internals ----------------------
   {
+    domain: "modelMigrationRecord",
+    publicName: "model_changes",
+    prismaModel: "ModelMigrationRecord",
+    state: "included_filtered",
+    withheldReason:
+      "Which of their stored model settings an approved retirement moved, from what to what, and when. Held back: the operator's email and the internal ticket that authorised the run, and the lifecycle work item the run belonged to. The person is entitled to know we changed their model and what it held before, not to the staff identity behind an internal decision or to the queue row that tracked it.",
+  },
+  {
     domain: "consentRecord",
     publicName: "email_consent_history",
     prismaModel: "ConsentRecord",
@@ -220,6 +228,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included_filtered",
     withheldReason:
       "The text of each knowledge file, in order, as the pieces retrieval actually reads. The derived search terms are withheld: they are an index over the same text rather than anything the user wrote, and a list of tokens beside the passage they came from is noise in a file somebody has to read.",
+  },
+  {
+    domain: "assistantProfileImport",
+    publicName: "assistant_profile_imports",
+    prismaModel: "AssistantProfileImport",
+    state: "included_filtered",
+    withheldReason:
+      "Where an imported assistant came from and what the person assembled before publishing it, including an import they abandoned -- that draft is still their words. The declared source name and address are exported as what the package or the person claimed rather than as anything verified. Withheld: the validator version and ingest path, the expected target revision and identity digest, the candidate and approved digests, and the published version's id, all internal identifiers of the same kind the profile and version exports already withhold.",
+  },
+  {
+    domain: "assistantKnowledgeUploadReservation",
+    publicName: "assistant_knowledge_upload_reservations",
+    prismaModel: "AssistantKnowledgeUploadReservation",
+    state: "excluded",
+    exclusionReason:
+      "Bookkeeping for an upload in progress. It holds nothing the user wrote -- an object key, whose owner claims it, and whether a finalize is currently in flight -- and the key is a storage path the policy forbids putting in any response. A successful upload deletes the row, so a completed import leaves none of these behind.",
   },
 
   // --- nothing in the row is the user's data --------------------------------

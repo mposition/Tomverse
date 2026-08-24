@@ -31,6 +31,8 @@ import {
   type AutoCohortConfig,
   type AutoCohortDecision,
 } from "@/lib/autoCohort";
+import { autoProductBoundary } from "@/lib/autoProductBoundary";
+import type { ProductKeyReadMode } from "@/lib/productKeyReadMode";
 import {
   storedSelectionMode,
   stickyStateFor,
@@ -47,6 +49,17 @@ import type { RouterStickyState } from "@/lib/routerSelection";
 import type { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
 
 export type AutoSelectionRefusal =
+  /**
+   * The conversation belongs to a product Auto is not offered in.
+   *
+   * An AutoSelectionRefusal and never an AutoCohortRefusal, and reported
+   * before the cohort is consulted (decision record v1.2 §3). A Review
+   * conversation is not outside the cohort; it was never a subject of the
+   * cohort question, and counting it as one would dilute the rollout
+   * percentage with Review traffic until "what share of Chat users are routed"
+   * stopped being readable.
+   */
+  | "product_not_chat"
   | "conversation_is_manual"
   /** No conversation row, so no mode and nowhere for sticky state to live. */
   | "no_conversation"
@@ -119,6 +132,20 @@ export type AutoSelectionInput = {
    * attachments were measured -- see `measureTurnAttachments`.
    */
   attachmentsUnmeasurable: boolean;
+  /**
+   * The conversation's stored productKey, or null when there is no
+   * conversation.
+   *
+   * Read from the row, never from the surface the request came from: §6
+   * forbids a surfaceProductKey fallback at dispatch precisely because the
+   * surface is the client's claim and the row is the server's decision.
+   *
+   * Null is not a product refusal -- it is `no_conversation` further down,
+   * which counts a different thing.
+   */
+  productKey: string | null;
+  /** Defaults to the transition's own mode. See lib/productKeyReadMode.ts. */
+  readMode?: ProductKeyReadMode;
   subjectKey: string;
   isGuest: boolean;
   /** The candidate filter's own plan type: a tier, or Guest. */
@@ -159,7 +186,28 @@ export type AutoSelectionInput = {
 export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
   const fallbackModelId = input.requestedModelId;
 
-  // The cohort first, and it is the only check that costs nothing: the plan is
+  // The product first, before the cohort. Cheaper than the cohort as well as
+  // more fundamental: the caller has already read the row under its ownership
+  // check, so this costs nothing at all.
+  //
+  // `cohort` is deliberately absent from this refusal. The cohort was not
+  // consulted, so there is no bucket to log, and a bucket logged here would
+  // appear in rollout figures for a conversation that was never a subject of
+  // the rollout.
+  const product = autoProductBoundary({
+    productKey: input.productKey,
+    // The row's existence, not its product. A conversation whose productKey
+    // is still NULL resolves to Review through the read mode and is refused;
+    // a turn with no conversation has nothing to resolve and falls through to
+    // `no_conversation` below.
+    hasConversation: input.conversation !== null,
+    readMode: input.readMode,
+  });
+  if (product.reason === "product_not_chat") {
+    return { routed: false, reason: "product_not_chat", fallbackModelId };
+  }
+
+  // The cohort next, and it is the only remaining check that costs nothing: the plan is
   // already in hand and readiness is read from memory. Everything below it
   // needs the conversation row, so a caller can skip that read entirely for an
   // account the cohort would refuse -- which, while the rollout is off, is

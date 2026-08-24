@@ -117,7 +117,7 @@ export const knowledgeUsage = async (
     userId: string,
     profileId: string
 ): Promise<KnowledgeUsage> => {
-    const [filesInProfile, filesInAccount, objectBytes, extractedCharacters] =
+    const [filesInProfile, filesInAccount, objectBytes, extracted] =
         await Promise.all([
             prisma.assistantKnowledgeFile.count({ where: { userId, profileId } }),
             prisma.assistantKnowledgeFile.count({ where: { userId } }),
@@ -125,20 +125,30 @@ export const knowledgeUsage = async (
                 where: { userId },
                 _sum: { bytes: true },
             }),
-            prisma.assistantKnowledgeFile.aggregate({
-                where: { userId, processingStatus: "ready" },
-                _sum: { extractedCharacters: true },
-            }),
+            // Raw because the sum is a COALESCE and Prisma's aggregate cannot
+            // express one. The alternative -- two sums added up in JavaScript
+            // -- would double-count every row that has both.
+            prisma.$queryRaw<{ total: bigint | null }[]>`
+                SELECT SUM(COALESCE("extractedBytes", "extractedCharacters"))::bigint AS total
+                FROM "AssistantKnowledgeFile"
+                WHERE "userId" = ${userId} AND "processingStatus" = 'ready'
+            `,
         ]);
     return {
         filesInProfile,
         filesInAccount,
         objectBytesInAccount: objectBytes._sum.bytes ?? 0,
-        // Characters are counted, bytes are budgeted. UTF-8 is what is stored,
-        // so a Korean document costs roughly three times a Latin one of the
-        // same length -- treating a character as a byte would give CJK users
-        // triple the allowance the policy says they have.
-        extractedBytesInAccount: extractedCharacters._sum.extractedCharacters ?? 0,
+        // Bytes where they are known, characters where they are not.
+        //
+        // The ceiling is written in UTF-8 bytes, and until `extractedBytes`
+        // existed this total was summed from `extractedCharacters` -- so a
+        // Korean document, at roughly three bytes a character, counted about a
+        // third of what it costs. New rows carry the real figure. Old rows
+        // keep being counted the old way rather than being re-extracted, which
+        // is a decision recorded in docs/policy/assistant-package-import.md
+        // §10 rather than an oversight: re-reading every stored file in every
+        // account would make quotas appear to fill overnight.
+        extractedBytesInAccount: Number(extracted[0]?.total ?? 0),
     };
 };
 
@@ -236,9 +246,46 @@ export const finalizeKnowledgeUpload = async (input: {
         );
     }
 
+    // An import's key, sent to the ordinary path.
+    //
+    // Nothing above would notice: the key is ours by prefix, no row claims it
+    // yet, and the profile is the caller's own. So the file would be created
+    // with no import holding it -- ordinary, listable, publishable -- and the
+    // isolation the import relies on would be gone in one request. The
+    // reservation is the only thing that knows this key was issued for
+    // something else.
+    const reservation = await prisma.assistantKnowledgeUploadReservation.findUnique({
+        where: { r2Key: input.uploadKey },
+        select: { userId: true },
+    });
+    if (reservation) {
+        if (reservation.userId !== input.userId) {
+            // Somebody else's key. The same answer their own file would get,
+            // deliberately: a 409 here would confirm that the key exists and
+            // is in use.
+            throw new AssistantKnowledgeError(
+                403,
+                "ASSISTANT_KNOWLEDGE_KEY_FORBIDDEN",
+                "That is not a knowledge upload key."
+            );
+        }
+        // The caller's own key, but another flow is using it. Not a 403: this
+        // is their file, and being told it is not theirs is a worse answer
+        // than being told where it already is.
+        //
+        // The object is left alone. We did issue this key, but the request
+        // naming it is not the one it was issued to, and deleting on the
+        // strength of that is how a published file loses its bytes.
+        throw new AssistantKnowledgeError(
+            409,
+            "ASSISTANT_KNOWLEDGE_KEY_RESERVED_FOR_IMPORT",
+            "That upload belongs to an import you are still reviewing."
+        );
+    }
+
     const existing = await prisma.assistantKnowledgeFile.findUnique({
         where: { r2Key: input.uploadKey },
-        select: { id: true, userId: true },
+        select: { id: true, userId: true, importId: true },
     });
     if (existing) {
         // A retried finalize of the caller's own upload is the same request
@@ -248,6 +295,17 @@ export const finalizeKnowledgeUpload = async (input: {
                 403,
                 "ASSISTANT_KNOWLEDGE_KEY_FORBIDDEN",
                 "That is not a knowledge upload key."
+            );
+        }
+        if (existing.importId !== null) {
+            // The import already finalised this key, so its reservation is
+            // gone and the check above found nothing -- but the row it made is
+            // still staged. Returning it here would hand a file under review
+            // to the path that is not allowed to see one.
+            throw new AssistantKnowledgeError(
+                409,
+                "ASSISTANT_KNOWLEDGE_KEY_RESERVED_FOR_IMPORT",
+                "That upload belongs to an import you are still reviewing."
             );
         }
         return prisma.assistantKnowledgeFile.findUniqueOrThrow({
@@ -326,11 +384,19 @@ export const finalizeKnowledgeUpload = async (input: {
     });
 };
 
-/** The owner's view of one profile's files. No keys, no digests. */
+/**
+ * The owner's view of one profile's files. No keys, no digests.
+ *
+ * `importId: null` is the isolation, not a filter for tidiness. A file staged
+ * for an import under review must not appear in the ordinary editor, because
+ * anything the editor can list is something the editor can publish -- and that
+ * would put a file into a version before the owner had approved the import it
+ * came from.
+ */
 export const listKnowledgeFiles = async (userId: string, profileId: string) => {
     await ownedProfile(profileId, userId);
     return prisma.assistantKnowledgeFile.findMany({
-        where: { userId, profileId },
+        where: { userId, profileId, importId: null },
         orderBy: { createdAt: "asc" },
         select: {
             id: true,
@@ -366,6 +432,11 @@ export const deleteKnowledgeFile = async (input: {
             id: input.fileId,
             userId: input.userId,
             profileId: input.profileId,
+            // The same isolation the list applies. A staged file belongs to
+            // the import that is holding it: removing it from here would leave
+            // that import's manifest naming a file that no longer exists, and
+            // the import has its own way to drop a file.
+            importId: null,
         },
         select: { id: true },
     });

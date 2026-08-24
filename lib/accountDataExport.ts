@@ -72,6 +72,11 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         id: true,
         title: true,
         kind: true,
+        // The product the conversation belongs to, exported for the same
+        // reason `kind` is: it is server-decided identity the account can see
+        // in the product, so an export that omitted it would be narrower than
+        // the screen.
+        productKey: true,
         createdAt: true,
         updatedAt: true,
         messages: {
@@ -404,6 +409,26 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       // handledById and handledByEmail identify a Tomverse operator, not the
       // requester, so they stay internal.
       select: { id: true, requestType: true, status: true, createdAt: true, completedAt: true },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // What an approved retirement did to their stored model settings. The
+  // person is entitled to know we changed a setting of theirs and what it held
+  // before; the operator who ran it and the ticket that authorised it are an
+  // internal decision about the catalogue, not a fact about them. workItemId
+  // names a row in the lifecycle queue, which they cannot read either.
+  modelMigrationRecord: (userId) =>
+    prisma.modelMigrationRecord.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        field: true,
+        fromModelId: true,
+        toModelId: true,
+        changedAt: true,
+      },
+      orderBy: { changedAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
 
@@ -807,11 +832,41 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         processingStatus: true,
         failureCode: true,
         extractedCharacters: true,
+        // Beside the character count rather than instead of it: the two are
+        // the same text measured two ways, and exporting one without the
+        // other would be an asymmetry nobody could explain.
+        extractedBytes: true,
         chunkCount: true,
         createdAt: true,
         processedAt: true,
       },
       orderBy: [{ profileId: "asc" }, { createdAt: "asc" }],
+      take: EXPORT_ROW_CAP,
+    }),
+
+  assistantProfileImport: (userId) =>
+    prisma.assistantProfileImport.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        profileId: true,
+        mode: true,
+        status: true,
+        // What the person assembled, including for an import they abandoned.
+        // That draft is still their words, which is the whole reason this
+        // table is exported rather than treated as machinery.
+        stagingManifest: true,
+        // Claims, exported as claims. Nothing here was checked and nothing
+        // fetched the address.
+        declaredSourceKind: true,
+        declaredSourceName: true,
+        declaredSourceUrl: true,
+        declaredPreviousProvenance: true,
+        serverReceivedAt: true,
+        userApprovedAt: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
 

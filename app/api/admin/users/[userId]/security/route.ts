@@ -74,7 +74,9 @@ export async function POST(req: Request, context: RouteContext) {
     });
     const existing = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true },
+      // The account's own language: a restoration notice is about their
+      // account, not about the operator restoring it.
+      select: { id: true, email: true, settings: { select: { language: true } } },
     });
     if (!existing) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
@@ -209,6 +211,7 @@ export async function POST(req: Request, context: RouteContext) {
             templateKey: ACCOUNT_RESTORED_TEMPLATE,
             emailAddress: existing.email,
             userId,
+            language: existing.settings?.language,
             payload: {},
             referenceType: "User",
             referenceId: userId,

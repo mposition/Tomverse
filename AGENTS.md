@@ -367,6 +367,40 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   drift로 잡습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
+# Conversation.productKey
+
+`Conversation.productKey`, 그 CHECK 제약, 또는 productKey를 쓰는 생성 경로를
+건드리기 전에 읽습니다.
+
+- `docs/policy/conversation-product-key.md`
+
+절대 조건:
+
+- **`kind`를 제품 정체성으로 재사용하지 않습니다**(계획서 §5). `kind`는
+  `lib/conversationKindGuard.ts`가 소유하는 **서버 authorization·modality 경계**
+  이고, `productKey`는 사용자가 수행하는 제품 작업입니다. 두 축은 직교하며 어느
+  것도 다른 하나를 대체하지 않습니다.
+- **`selectionMode`로 제품을 유도하거나 백필하지 않습니다.** Chat에서 사용자가
+  모델을 직접 골라도 그 대화는 Chat입니다. 그리고 manual 복귀가 sticky state를
+  지우므로(`Conversation_manual_has_no_sticky_state_check`) "Auto였던 적이 있나"를
+  나중에 물을 수조차 없습니다.
+- **허용값은 `chat` · `review` · `studio` 셋뿐이고 `code`는 없습니다.** Code가
+  Conversation을 쓰기 시작할 때 `lib/conversationProduct.ts`의
+  `CONVERSATION_PRODUCT_KEYS`와 DB CHECK에 **함께** 추가합니다
+  (`npm run check:enum-constraints`가 어긋남을 잡습니다).
+- **DB default를 두지 않습니다.** `review` default는 컬럼을 빼먹은 writer를
+  Review를 의도한 writer처럼 보이게 만듭니다. 전환 기간의 NULL은 "아직 안 정해짐"
+  이고 그것이 백필의 대상 목록입니다.
+- **Auto는 Chat 전용이며 규칙은 허용 하나로 씁니다**, 금지 목록이 아니라.
+  v1.1은 `review + auto`만 금지했고 `studio + auto`가 통과했습니다.
+- **NOT VALID 제약은 writer 누락을 막지 못합니다.** 셋 다 `productKey IS NULL`을
+  통과시킵니다. 누락은 공통 생성 서비스 · 직접 `conversation.create` 정적 검사 ·
+  writer coverage 테스트가 막으며, 이 셋은 제약과 별개로 계속 필요합니다.
+- **`VALIDATE CONSTRAINT`와 `NOT NULL`은 각각 별도 migration이고 별도 증거를
+  갖습니다.** 정책 문서 §7의 조건이 충족되기 전에는 작성하지 않습니다.
+  `tests/integration/conversation-product-key.db.test.ts`가 조기 전환을 실패로
+  만듭니다.
+
 # Chat concurrency and identity namespace
 
 게스트 동시 실행 scope, lease 수명, guest→로그인 전환의 대화 ID를 건드리기 전에
@@ -781,6 +815,13 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   않습니다. Anthropic 검색은 공존합니다.
 - **요청한 형식으로 만듭니다.** xlsx를 csv로, docx를 md로 대체하지 않습니다.
   표에 없는 확장자는 지원하지 않는다고 말합니다.
+- **시작만 하고 실행되지 못한 tool 호출도 카드를 남깁니다**(docs/policy/generated-artifacts.md §9).
+  출력 길이 제한으로 끝난 turn(`incomplete`/`length`)에서 `tool-input-start`는
+  났지만 실행에 도달하지 못한 artifact tool 호출은 `turn_incomplete` 실패로
+  기록합니다. 추적은 `lib/generatedArtifactTurnTracker.ts`, 기록은
+  `recordIncompleteToolCalls()`입니다. **native tool은 세지 않고**, 부분 tool
+  input은 읽지도 남기지도 않으며, 상한과 ordinal·persistence 계약은 그대로입니다.
+  `maxOutputTokens`나 `ARTIFACT_LIMITS`를 올리는 것은 이 결함의 답이 아닙니다.
 - **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
   내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
   docs/policy/generated-artifacts.md §11.
@@ -1029,13 +1070,14 @@ Non-negotiable requirements:
 <!-- BEGIN:auto-model-selection-invariant -->
 ## Auto model selection invariant
 
-Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
+Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
 
 - `docs/ui-contracts/auto-model-selection.md`
 
 Non-negotiable requirements:
 
-- **`offered` is the only input.** It already folds the feature flag together with cohort eligibility, so no surface may derive availability from the flag alone. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
+- **`offered` is the only input.** It already folds the feature flag, the conversation's product and cohort eligibility together, so no surface may derive availability from the flag alone.
+- **The product is decided before the cohort, in `lib/autoProductBoundary.ts`, and all three consumers share it** — surface entry, `offered`, and turn routing. `product_not_chat` is an `AutoSelectionRefusal`/`AutoUiRefusal` and never an `AutoCohortRefusal`: a Review conversation was not a subject of the cohort question, and counting it as a refusal dilutes the rollout percentage with Review traffic. The refusal carries no cohort. A row whose `productKey` is still NULL resolves through `PRODUCT_KEY_READ_MODE` and is refused; a turn with no conversation is `no_conversation` instead. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
 - No user-facing string may name a bucket, a percentage, a cohort salt or a readiness gate. A client that could read its own bucket could work out the rollout percentage.
 - No locale may promise a better, best, optimal or smartest model. `ROUTE-01` measures non-inferiority, which is a far weaker claim than that copy would be making, and `tests/autoRoutingUi.test.mjs` fails the build on the words.
 - The badge renders only on a turn Auto actually routed. A turn that fell back to the user's own model gets none, or it claims a routing decision that did not happen.

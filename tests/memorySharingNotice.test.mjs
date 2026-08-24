@@ -124,7 +124,7 @@ test("the export header carries the notice only when it is given one", () => {
         conversationExportPersonalizationNotice()
     );
     assert.ok(withNotice.includes("personalisation settings"));
-    assert.ok(withNotice.includes("Tomverse Insight Export"), "header intact");
+    assert.ok(withNotice.includes("Tomverse Review Export"), "header intact");
 
     const without = formatConversationHeader(conversation);
     assert.ok(

@@ -128,6 +128,7 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
 
   // Google -- exact model pages confirm Search grounding for both July 2026
   // stable releases as well as the existing 3.5 Flash / 3.1 Pro entries.
+  "gemini-3-7-flash": NATIVE_GOOGLE,
   "gemini-3-6-flash": NATIVE_GOOGLE,
   "gemini-3-5-flash": NATIVE_GOOGLE,
   "gemini-3-1-pro": NATIVE_GOOGLE,

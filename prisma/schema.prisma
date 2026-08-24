@@ -93,9 +93,12 @@ model User {
   assistantProfileVersions           AssistantProfileVersion[]
   assistantKnowledgeFiles            AssistantKnowledgeFile[]
   assistantKnowledgeChunks           AssistantKnowledgeChunk[]
+  assistantProfileImports            AssistantProfileImport[]
+  assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
   emailPreferences                   EmailPreference[]
   consentRecords                     ConsentRecord[]
   emailDeliveries                    EmailDelivery[]
+  modelMigrationRecords              ModelMigrationRecord[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -237,6 +240,24 @@ model Conversation {
   // by lib/imageAssetLifecycle.ts). See docs/policy/image-generation.md.
   kind String @default("chat")
 
+  /// "chat" | "review" | "studio" -- which Tomverse product this conversation
+  /// belongs to (product boundary decision record v1.2, decision 2). Allowlist
+  /// and cross-constraints live in the migration; the application copy is
+  /// lib/conversationProduct.ts.
+  ///
+  /// Orthogonal to `kind`, and deliberately not derived from it: `kind` is the
+  /// execution and permission modality that lib/conversationKindGuard.ts
+  /// enforces, `productKey` is the product task the user is performing. The
+  /// delivery plan §5 forbids reusing one as the other.
+  ///
+  /// Nullable and **without a default** during the expand phase. A `review`
+  /// default would answer "unknown" with "Review" for every writer that
+  /// omitted the column, which is the substitution the nullability exists to
+  /// prevent (20260814170000_attempt_cost_accrual). NULL means "not decided
+  /// yet", and that is the backfill's work list. NOT NULL is a later,
+  /// separate migration with its own evidence.
+  productKey String?
+
   /// Per-conversation memory mode (import/memory policy §8.1 invariant 1):
   /// "inherit" | "on" | "off" — allowlist CHECK lives in the migration.
   /// Server-stored and server-decided; "inherit" resolves to the account
@@ -295,6 +316,7 @@ model Conversation {
   shareRevokedAt DateTime?
 
   messages              Message[]
+  routingRuns           RoutingRun[]
   messageArtifacts      MessageArtifact[]
   messageAttachments    MessageAttachment[]
   comparisonReviews     ComparisonReview[]
@@ -1904,6 +1926,157 @@ model ProviderModelCatalogRun {
   @@index([status, startedAt])
 }
 
+/// What we decided to do about a model a provider listed, and how far that has
+/// got. Separate from ProviderModelCatalogEntry on purpose.
+///
+/// The catalogue entry is an observation and the monitor overwrites its
+/// `status` on every scan, so a decision recorded there is erased by the next
+/// run. This is the other half: written by discovery, changed only by a person,
+/// and never re-derived from today's scan.
+///
+/// The unique key is (provider, apiModel, action) rather than the model alone:
+/// adding a model and later retiring it are two decisions at two times, but two
+/// open "add"s for one model is a duplicate.
+model ModelLifecycleWorkItem {
+  id       String @id @default(cuid())
+  provider String
+  apiModel String
+
+  /// The mapped ModelRegistryEntry, once one exists.
+  modelId        String?
+  /// The observation this came from. Not a foreign key: the catalogue row is
+  /// upserted every scan and may be swept, while the decision outlives it.
+  catalogEntryId String?
+
+  /// add | upgrade | replace | retire | monitor | no_action
+  action   String
+  /// The eleven states in lib/modelLifecycleWorkItemCore.ts.
+  status   String @default("discovered")
+  /// critical | high | normal
+  severity String @default("normal")
+
+  predecessorModelId String?
+  replacementModelId String?
+
+  /// The automatic suggestion, which a person may overwrite. Never a decision.
+  recommendation String?
+  /// high | medium | low, for the suggestion above.
+  confidence     String?
+
+  /// Observation evidence: lifecycle strings, consecutive-miss counts, run ids.
+  evidence           Json?
+  /// Facts still needed before this can be decided.
+  unknowns           Json?
+  /// Named things being waited on, in the sense report-issue-backlog uses:
+  /// something the repository cannot answer by itself.
+  blockers           Json?
+  /// Verifications owed before rollout, e.g. ["pricing","access","staging"].
+  /// One list rather than three states because they run in parallel.
+  pendingValidations Json?
+
+  reviewerId     String?
+  reviewerEmail  String?
+  /// approve | reject | defer
+  decision       String?
+  decisionReason String?
+  decidedAt      DateTime?
+
+  ownerEmail    String?
+  dueAt         DateTime?
+  deferredUntil DateTime?
+
+  linkedIssueUrl     String?
+  linkedPrUrl        String?
+  linkedDeploymentId String?
+
+  implementationEvidence Json?
+  validationEvidence     Json?
+
+  /// Whether users have to be told before this closes. A retirement that moves
+  /// somebody's stored model owes a notice; an addition does not.
+  communicationRequired Boolean @default(false)
+
+  firstSeenAt DateTime  @default(now())
+  completedAt DateTime?
+  closedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ModelLifecycleWorkItemEvent[]
+
+  @@unique([provider, apiModel, action])
+  @@index([status, severity, firstSeenAt])
+  @@index([ownerEmail, dueAt])
+  @@index([modelId])
+}
+
+/// Append-only history of one work item. Never updated, never deleted.
+///
+/// The item says what is true now; this says how it got there and who moved it.
+/// A queue whose decisions can be edited without a trace cannot answer "why is
+/// this model not in the catalogue", which is the question the audit could not
+/// answer for seven models.
+model ModelLifecycleWorkItemEvent {
+  id         String                 @id @default(cuid())
+  workItemId String
+  workItem   ModelLifecycleWorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  occurredAt DateTime @default(now())
+  /// Null only for the automatic creation event; every other row names a person.
+  actorEmail String?
+  fromStatus String?
+  toStatus   String
+  note       String?
+  evidence   Json?
+
+  @@index([workItemId, occurredAt])
+}
+
+/// What an approved retirement reconciliation actually changed, per user and
+/// per field. Append-only.
+///
+/// Without this a completion notice has no audience. The script reported
+/// aggregate counts to stdout and nothing else, so "we changed your default
+/// model" could only be sent to everybody or to nobody -- and both are wrong in
+/// a way that cannot be taken back once the mail has gone.
+///
+/// It is also the only thing that can answer a support question afterwards:
+/// what did this account hold before, and when did we change it.
+model ModelMigrationRecord {
+  id     String @id @default(cuid())
+  userId String
+  /// Cascades: the record exists to address a notice to this person and to
+  /// answer what their setting held before. Both questions die with the
+  /// account, so keeping the row afterwards would be keeping a user id for no
+  /// purpose. The aggregate ("this retirement moved N accounts") belongs to the
+  /// campaign, not to a row per person.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the change was to one conversation rather than to the account.
+  conversationId String?
+
+  /// The lifecycle item this ran for, when there is one.
+  workItemId String?
+
+  /// user_settings_default_model | new_conversation_model_ids
+  ///   | conversation_selected_models | app_setting_guest_default
+  field String
+
+  fromModelId String
+  toModelId   String
+
+  /// The approval the run carried: the ticket and the person who ran it.
+  ticket     String
+  actorEmail String
+
+  changedAt DateTime @default(now())
+
+  @@index([userId, changedAt])
+  @@index([fromModelId, toModelId, changedAt])
+  @@index([workItemId])
+}
+
 model AdminNotificationLog {
   id                  String    @id @default(cuid())
   channel             String
@@ -2759,6 +2932,7 @@ model AssistantProfile {
 
   versions       AssistantProfileVersion[] @relation("AssistantProfileVersions")
   knowledgeFiles AssistantKnowledgeFile[]  @relation("AssistantProfileKnowledge")
+  imports        AssistantProfileImport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2833,6 +3007,11 @@ model AssistantProfileVersion {
 
   conversations Conversation[]
 
+  /// The imports that published this snapshot. At most one today; a list
+  /// because Prisma requires the back side of an optional relation to be one,
+  /// and because `SetNull` means the import outlives the version it names.
+  imports AssistantProfileImport[]
+
   @@unique([profileId, revision])
   @@index([profileId, createdAt])
   @@index([userId, createdAt])
@@ -2891,6 +3070,18 @@ model AssistantKnowledgeFile {
   /// What the extractor produced, before chunking. Recorded so a file that
   /// yielded nothing is distinguishable from one nobody has processed.
   extractedCharacters Int?
+
+  /// Policy: docs/policy/assistant-package-import.md §10.
+  /// The same text measured in UTF-8 bytes, which is the unit the account
+  /// ceiling is written in. The extractor already computed this to decide
+  /// whether to accept the file; until now it threw the number away and the
+  /// running total was summed from `extractedCharacters` instead, so a
+  /// Korean document counted about a third of what it costs. NULL on every
+  /// row written before this column existed -- those keep being counted the
+  /// old way rather than being re-extracted, which is a decision recorded in
+  /// the policy rather than a gap.
+  extractedBytes Int?
+
   chunkCount          Int  @default(0)
 
   /// Which chunking and tokenising algorithm produced this file's chunks.
@@ -2900,12 +3091,32 @@ model AssistantKnowledgeFile {
   updatedAt   DateTime  @updatedAt
   processedAt DateTime?
 
+  /// Policy: docs/policy/assistant-package-import.md §5.
+  /// The import holding this file as staging. NULL is an ordinary file.
+  ///
+  /// Publishing an import sets this to NULL, and that is what "promotion"
+  /// means: until it happens the ordinary knowledge list, the ordinary
+  /// manifest resolver and therefore the ordinary publish path cannot see the
+  /// file at all. Without it, a file uploaded for an import under review is a
+  /// file another tab can publish.
+  ///
+  /// `Cascade` rather than `Restrict`: `User` cascades into both
+  /// `AssistantProfileImport` and this table with no ordering between them, so
+  /// a restricting edge would abort account deletion. R2 tombstones are the
+  /// application's job on the cancel and expiry paths; this cascade is the
+  /// backstop for the rows.
+  importId String?
+  import   AssistantProfileImport? @relation(fields: [importId], references: [id], onDelete: Cascade)
+
   chunks AssistantKnowledgeChunk[]
 
   @@index([profileId, createdAt])
   @@index([userId, createdAt])
   /// The processing worker's claim query reads exactly this pair.
   @@index([processingStatus, createdAt])
+  /// Cancellation and expiry find this import's files by this column rather
+  /// than by a list somebody remembered to keep.
+  @@index([importId])
 }
 
 /// Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -2945,6 +3156,169 @@ model AssistantKnowledgeChunk {
   @@unique([fileId, ordinal])
   @@index([userId])
   @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "AssistantKnowledgeChunk_searchTerms_gin_idx")
+}
+
+/// Policy: docs/policy/assistant-package-import.md §5, §6.
+/// One attempt to turn an external assistant package into a profile.
+///
+/// The row exists from the moment files start being stored -- step 7 of the
+/// wizard -- and outlives the import itself, because a published profile has
+/// to be able to say where it came from. Everything before step 7 happens in
+/// the browser and leaves nothing here.
+///
+/// Two modes with two different staging holders (§5.2). `create` owns a draft
+/// `AssistantProfile` whose `currentVersionId` is NULL, which the existing
+/// runtime already refuses to start a conversation with; `merge` has no row of
+/// its own and stages into the target profile, which is possible only because
+/// a version's manifest is resolved against the files that profile holds --
+/// so a staged file that no manifest names can sit there without reaching any
+/// answer. `mode` is therefore not a display field: it is the branch the
+/// cancellation and expiry sweeps take, and getting it wrong deletes a profile
+/// somebody else built. Hence the CHECK, and hence the fail-closed
+/// preconditions the sweep re-tests before it deletes anything.
+model AssistantProfileImport {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "create" | "merge" -- allowlist CHECK in the migration.
+  mode String
+
+  /// The profile this import writes to: the draft it created, or the target it
+  /// merges into. One column because neither mode ever moves a file between
+  /// profiles -- the manifest resolver scopes by profile id, so cross-profile
+  /// staging is not expressible.
+  profileId String
+  profile   AssistantProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  /// merge only. The target's revision when the import started, passed to
+  /// `planProfileVersionPublish()` as `expectedRevision` so a profile edited
+  /// in another tab meanwhile is a stale publish rather than a silent
+  /// overwrite. NULL for create.
+  expectedTargetRevision Int?
+
+  /// merge only. A digest of the target's name, icon and description at the
+  /// same moment. Identity is not part of a version snapshot, so it does not
+  /// consume a revision and the number above cannot see it change.
+  expectedTargetIdentityDigest String?
+
+  /// "staging" | "published" -- allowlist CHECK in the migration.
+  status String @default("staging")
+
+  /// What the owner assembled in the wizard: instructions, starters, models,
+  /// policies and which documents to bring. Stored because the container is
+  /// not kept, so resuming an interrupted import has nothing else to read.
+  ///
+  /// Stored is not approved. While `userApprovedAt` is NULL these
+  /// instructions are not the owner's words and reach no prompt.
+  stagingManifest Json?
+
+  /// The digest of `stagingManifest` as it stands, and the digest of what the
+  /// owner actually confirmed. They are two columns because the point is to be
+  /// able to prove afterwards that what was stored is what was shown; the
+  /// waived credential findings bind to the approved one.
+  candidateDigest String?
+  approvedDigest  String?
+  digestVersion   Int?
+
+  /// When a person pressed confirm. Distinct from `serverReceivedAt` on
+  /// purpose: fold them together and "a human approved this" becomes a side
+  /// effect of a server write.
+  userApprovedAt DateTime?
+
+  /* ---------- provenance: what is observed, and what is claimed ---------- */
+
+  /// The server's own clock and the server's own reading of what it did.
+  serverReceivedAt DateTime @default(now())
+  validatorVersion String
+  ingestPath       String
+
+  /// Everything below is the client's or the owner's claim. Nothing decides
+  /// anything from these, and nothing fetches the URL.
+  declaredSourceKind         String?
+  declaredSourceName         String?
+  declaredSourceUrl          String?
+  declaredPreviousProvenance Json?
+
+  /// The revision this import published. NULL while staging.
+  ///
+  /// `SetNull` rather than `Cascade`: if the version disappears by any route,
+  /// the fact that an import happened still has to be true. Cascading would
+  /// delete the provenance along with the thing it explains.
+  versionId String?
+  version   AssistantProfileVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  stagedFiles        AssistantKnowledgeFile[]
+  uploadReservations AssistantKnowledgeUploadReservation[]
+
+  /// The expiry clocks are columns rather than arithmetic over `updatedAt`.
+  /// `@updatedAt` moves on every write, including the background extractor's
+  /// and a failed publish's, so an idle timer read from it would be extended
+  /// by exactly the events that mean nobody is here.
+  createdAt          DateTime @default(now())
+  /// Moved by the owner doing something, and by nothing else.
+  lastUserActivityAt DateTime @default(now())
+  idleExpiresAt      DateTime
+  absoluteExpiresAt  DateTime
+  /// Diagnostics. Never read to decide an expiry.
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([profileId, createdAt])
+  /// The two expiry sweeps read exactly these pairs.
+  @@index([status, idleExpiresAt])
+  @@index([status, absoluteExpiresAt])
+}
+
+/// Policy: docs/policy/assistant-package-import.md §5.
+/// Proof that the server issued an upload key, and what it issued it for.
+///
+/// `knowledgeKey()` is a random UUID, so a key alone says nothing about who
+/// asked for it. Without this row, finalize would have to decide from the
+/// client's own claim whether a stored object is safe to delete -- and the
+/// ordinary finalize path would happily turn an import's key into an ordinary
+/// file, which is the isolation `AssistantKnowledgeFile.importId` exists to
+/// provide, bypassed in one request.
+///
+/// The row's life is short by design: prepare creates it, a successful
+/// finalize deletes it in the same transaction, publish deletes whatever was
+/// never used, and cancellation or account deletion cascades it away. It is
+/// never the lifetime of the stored object -- an object nobody claimed is the
+/// abandoned-upload sweep's, because a key we did not issue must not be
+/// deleted on the strength of a request that names it.
+model AssistantKnowledgeUploadReservation {
+  r2Key String @id
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Required. The only issuer today is the import path, and a nullable column
+  /// would allow a row no cascade reaches. Widening this to ordinary uploads
+  /// is a migration, not an omission.
+  importId String
+  import   AssistantProfileImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  /// Diagnostics. Ownership is decided by `userId` and the import row.
+  profileId String
+
+  /// "pending" | "finalizing" -- allowlist CHECK in the migration.
+  state String @default("pending")
+
+  /// The current claimant's token, NULL while pending. Every state change
+  /// compares against it, so a request that comes back after its claim was
+  /// reclaimed changes nothing.
+  claimToken String?
+
+  /// When the claim was taken. The stale-claim sweep reads only this.
+  finalizingStartedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([importId])
+  @@index([userId, createdAt])
+  /// The stale-claim sweep reads exactly this pair.
+  @@index([state, finalizingStartedAt])
 }
 
 /// A stored object whose row is gone and whose bytes still have to go (§14.2).
@@ -3128,6 +3502,37 @@ model RoutingRun {
   reservationId     String?
   settlementOutcome String?
 
+  /// --- product attribution (decision record v1.2 §5) ----------------------
+
+  /// Which product this run executed for, snapshotted at execution time.
+  ///
+  /// A snapshot rather than a join, because the join can be broken: a user
+  /// deleting one conversation would otherwise take that turn's product out of
+  /// the evaluation segment with it. ROUTE-01's sample and ROUTE-07's
+  /// denominator would then shrink with user behaviour rather than with
+  /// anything about routing.
+  ///
+  /// Nullable because rows written before this column existed genuinely had no
+  /// product recorded, and a guessed value would claim an attribution nobody
+  /// made. Runs after the cutover must carry one -- how that is enforced is
+  /// decided in docs/policy/adr/2026-08-22-routing-run-product-attribution.md.
+  productKey String?
+
+  /// Which conversation this run belongs to.
+  ///
+  /// `beginInstrumentedDispatch` already received this and dropped it, so a
+  /// failed run -- which never gets an `assistantMessageId` -- had no way at
+  /// all of naming its conversation, and operational lookup was traceId only.
+  ///
+  /// SetNull, not Cascade: today these rows survive a conversation deletion
+  /// because there is no FK at all, and adding a cascade would delete
+  /// evaluation data every time a user tidies up. The same pattern as
+  /// ChatCreditReservation.userId. Deleting the *account* still takes the runs
+  /// with it -- userId -> User stays Cascade, which the data-domain policy
+  /// decided and this does not change.
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
   routingAttempts RoutingAttempt[] @relation("RunAttempts")
   updatedAt       DateTime         @default(now()) @updatedAt
 
@@ -3135,6 +3540,11 @@ model RoutingRun {
   @@index([mode, createdAt])
   @@index([userId, createdAt])
   @@index([finalModelId, createdAt])
+  @@index([productKey, createdAt])
+  /// Not optional. PostgreSQL does not index a referencing column for you, and
+  /// ON DELETE SET NULL has to find the referencing rows -- without this,
+  /// deleting one conversation scans every RoutingRun.
+  @@index([conversationId])
 }
 
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in
@@ -3540,6 +3950,89 @@ model JurisdictionCountryMap {
 /// recipient set, the footer, whether an unsubscribe link appears, and whether
 /// a human has to approve the send. It is chosen once and cannot be edited to
 /// something incompatible with the versions already published under it.
+/// A user-facing announcement, from draft to sent.
+///
+/// Contract: .github/audits/model-lifecycle-email-2026-08-22.md §12.2, EM-06.
+///
+/// The layer above EmailEvent. An event is one fan-out; a campaign is the
+/// decision to make one, who approved it, and what they approved. Kept apart
+/// from EmailEvent because approval is a property of the campaign and not of
+/// the outbox: adding draft and pending_approval to EmailEvent.status would put
+/// approval vocabulary in the table that also holds login codes.
+model EmailCampaign {
+  id String @id @default(cuid())
+
+  /// model_launch | model_upgrade | model_retirement | model_migration
+  ///  | model_incident | other
+  category String
+
+  /// classification and purpose are derived from this, never stored again.
+  templateKey String
+
+  /// draft | pending_approval | approved | running | completed | cancelled
+  ///  | halted
+  status String @default("draft")
+
+  /// The languages this campaign sends in.
+  locales Json
+
+  /// Handed to each wave's EmailEvent unchanged.
+  audienceSpec Json
+
+  /// language -> TemplateVersion.id, pinned when the campaign was approved.
+  ///
+  /// EM-06. Copy changes mint a new TemplateVersion automatically, so without a
+  /// pin an approval would silently come to cover text nobody approved.
+  templateVersionIds Json?
+
+  approvalId String?
+  approvedAt DateTime?
+
+  createdByEmail String
+
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  waves EmailCampaignWave[]
+
+  @@index([status, createdAt])
+  @@index([templateKey])
+}
+
+/// One send within a campaign.
+///
+/// A campaign may notify, remind and then confirm; each is its own fan-out with
+/// its own event, cap and dry-run flag, and each has to be resumable on its
+/// own.
+model EmailCampaignWave {
+  id         String        @id @default(cuid())
+  campaignId String
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  /// launch | notice | reminder | final_reminder | completion
+  kind     String
+  sequence Int
+
+  /// The EmailEvent this wave expanded into, once it has one.
+  eventId String?
+
+  /// pending | expanding | expanded | sending | done | cancelled | halted
+  status String @default("pending")
+
+  recipientCap  Int?
+  dryRun        Boolean @default(false)
+  expandedCount Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campaignId, kind, sequence])
+  @@index([status, createdAt])
+}
+
 model EmailTemplate {
   id  String @id @default(cuid())
   key String @unique

@@ -8,7 +8,9 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { snapshotPurgeCutoffs } from "@/lib/emailSnapshotRetentionCore";
 import { retentionCutoff, retentionPolicy } from "@/lib/retentionPolicyCore";
 
 /**
@@ -88,6 +90,8 @@ export async function GET(req: Request) {
       oldestProviderCheck,
       oldestProviderError,
       oldestProductAnalytics,
+      staleSnapshots,
+      oldestSnapshot,
     ] = await Promise.all([
       prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
       prisma.chatRequestLease.count({ where: { expiresAt: { lt: leaseCutoff } } }),
@@ -263,6 +267,36 @@ export async function GET(req: Request) {
           select: { occurredAt: true },
         })
         .then((row) => row?.occurredAt.toISOString() || null),
+      // Per classification, because the window is per classification: counting
+      // every snapshot older than 90 days would report legal notices as
+      // overdue for six and a half years before the sweep would touch them.
+      //
+      // The same cutoffs the sweep uses, from the same function, bound as
+      // timestamps. Computing them in SQL instead is what broke this route:
+      // `make_interval(days => $1)` binds its argument as text and the planner
+      // has nothing to infer from inside a CASE, so the query threw and the
+      // whole retention screen rendered empty.
+      Promise.all(
+        snapshotPurgeCutoffs(now).map(({ classification, cutoff }) =>
+          prisma.emailDelivery.count({
+            where: {
+              renderDataSnapshot: { not: Prisma.DbNull },
+              templateVersion: { template: { classification } },
+              OR: [
+                { sentAt: { lt: cutoff } },
+                { sentAt: null, createdAt: { lt: cutoff } },
+              ],
+            },
+          })
+        )
+      ).then((counts) => counts.reduce((total, count) => total + count, 0)),
+      prisma.emailDelivery
+        .findFirst({
+          where: { renderDataSnapshot: { not: Prisma.DbNull } },
+          orderBy: { createdAt: "asc" },
+          select: { createdAt: true },
+        })
+        .then((row) => row?.createdAt.toISOString() || null),
     ]);
 
     const measured: Record<
@@ -317,6 +351,10 @@ export async function GET(req: Request) {
       providerModelCatalogRuns: {
         staleCount: oldCatalogRuns,
         oldestAt: oldestCatalogRun,
+      },
+      emailDeliverySnapshots: {
+        staleCount: staleSnapshots,
+        oldestAt: oldestSnapshot,
       },
     };
 

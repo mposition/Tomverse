@@ -20,11 +20,14 @@ import {
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
-import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
+import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
+import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
+import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
+import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
-import { isEmailPurpose } from "@/lib/emailPreferenceCore";
+import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
@@ -221,6 +224,27 @@ export async function enqueueStandardEmail(
     : prisma.$transaction((tx) => createStandardDeliveryRows(tx, rows));
 }
 
+/**
+ * Queue depth that stops being ordinary (EM-11).
+ *
+ * One pass claims fifty, and the drain rides the fifteen-minute reconciliation
+ * cron. Two hundred pending is therefore about an hour of catching up, which is
+ * the point at which "busy" and "not keeping up" stop being the same thing.
+ */
+export const STANDARD_EMAIL_QUEUE_DEPTH_ALERT = 200;
+
+/**
+ * How long the oldest waiting message may have waited.
+ *
+ * Depth alone would miss the worse case. Two hundred messages queued a minute
+ * ago is a busy morning; five that have been waiting six hours are five people
+ * who never got their receipt, and the queue is shallow the whole time. This is
+ * the signal that catches the second one, and it is deliberately far below the
+ * point at which a message abandons -- by then it is not a warning, it is a
+ * report of something already lost.
+ */
+export const STANDARD_EMAIL_OLDEST_PENDING_ALERT_MS = 60 * 60 * 1_000;
+
 export type StandardDrainResult = {
   claimed: number;
   sent: number;
@@ -236,6 +260,13 @@ export type StandardDrainResult = {
    * messages were abandoned" does not say whether a person has to be woken.
    */
   abandonedByClassification: Record<EmailClassification, number>;
+  /**
+   * Age of the oldest message still waiting, or null when nothing is.
+   *
+   * Reported beside the count because the two answer different questions and a
+   * backlog can be either shape.
+   */
+  oldestPendingMs: number | null;
 };
 
 type ClaimedDelivery = {
@@ -246,6 +277,8 @@ type ClaimedDelivery = {
   attempts: number;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
+  policyVersionId: string;
+  jurisdictionProfileKey: string;
   templateVersion: {
     template: { key: string; classification: string; requiresUnsubscribe: boolean };
   };
@@ -294,6 +327,9 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       attempts: true,
       idempotencyKey: true,
       renderDataSnapshot: true,
+      // Pinned at enqueue, read here: this is the step the pin exists for.
+      policyVersionId: true,
+      jurisdictionProfileKey: true,
       templateVersion: {
         select: {
           template: {
@@ -456,19 +492,64 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // about the mailbox, a preference is about what this person asked for. Both
   // are checked at send time, because a message queued yesterday may be for a
   // purpose switched off this morning.
-  if (definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)) {
-    const preference = await prisma.emailPreference.findUnique({
-      where: {
-        userId_purpose: { userId: delivery.userId, purpose: definition.purpose },
-      },
-      select: { enabled: true },
+  //
+  // The decision is `consentGateVerdict`, not a comparison here, because the
+  // interesting case is the row that does not exist. `preference &&
+  // !preference.enabled` treated an absent row as a yes, and rows are created
+  // lazily on a settings read -- so every account that never opened the
+  // preference centre was one marketing template away from being sent
+  // advertising it had never agreed to.
+  {
+    const stored =
+      definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)
+        ? await prisma.emailPreference.findUnique({
+            where: {
+              userId_purpose: {
+                userId: delivery.userId,
+                purpose: definition.purpose,
+              },
+            },
+            select: { enabled: true },
+          })
+        : null;
+
+    const consent = consentGateVerdict({
+      classification: definition.classification,
+      purpose: definition.purpose,
+      hasAccount: Boolean(delivery.userId),
+      storedEnabled: stored ? stored.enabled : null,
     });
-    if (preference && !preference.enabled) {
+    if (!consent.allowed) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {
           status: "skipped",
-          skipReason: "no_consent",
+          skipReason: consent.skipReason,
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
+
+  // The stream's own kill switch, checked before anything else marketing-only
+  // because it is a fact about the stream rather than about this recipient
+  // (§14.5, EM-09). Marketing alone reaches it: provider suppression is already
+  // account-wide (§5.3.1), so a switch that could stop transactional mail would
+  // be a second route to login codes not arriving.
+  if (definition.classification === "marketing") {
+    const health = await evaluateMarketingSendHealth(now);
+    if (health.halted) {
+      // Skipped rather than held. A promotion that waits for a person to clear
+      // a halt is a promotion that arrives stale, and the reputation event that
+      // tripped the switch is itself the reason not to send this one.
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "marketing_halted",
           attempts: delivery.attempts,
           nextAttemptAt: null,
           claimedAt: null,
@@ -505,13 +586,13 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   }
 
   const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
-  const rendered = definition.render(payload, delivery.language);
+  const templateRendered = definition.render(payload, delivery.language);
   const attempts = delivery.attempts + 1;
 
   // Only marketing carries these, and the template's own flag decides -- which
   // the database holds as a CHECK against the classification, so a message
   // cannot acquire an unsubscribe header by being sent from the wrong place.
-  const headers = unsubscribeHeaders({
+  const unsubscribeTarget = {
     requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
     userId: delivery.userId,
     purpose: definition.purpose,
@@ -520,7 +601,138 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       process.env.PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
       "https://tomverse.app",
+  };
+  const link = unsubscribeUrl(unsubscribeTarget);
+  if (link.ok === false) {
+    // Named, permanent, and reported as itself rather than swallowed by the
+    // outer catch. Before EM-10 this threw, the catch turned it into
+    // EMAIL_RENDER_FAILED, and an operator went looking at templates for a
+    // missing environment variable.
+    //
+    // Permanent for the same reason the identity refusal is: no amount of
+    // waiting sets an environment variable, and retrying would spend the
+    // message's whole budget discovering that.
+    await reportOperationalIncident({
+      code: "EMAIL_UNSUBSCRIBE_KEY_MISSING",
+      title: "A marketing message was refused because it can carry no unsubscribe link",
+      severity: "error",
+      error: link.message,
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+        setInstead: "EMAIL_UNSUBSCRIBE_KEYS",
+      },
+    });
+    const recorded = await recordOutcome(
+      delivery,
+      { kind: "permanent", errorKind: link.refusal },
+      {
+        now,
+        attempts,
+        classification: definition.classification,
+        rendered: templateRendered,
+        status: null,
+      }
+    );
+    return { outcome: recorded, classification: definition.classification };
+  }
+  const unsubscribeLink = link.url;
+  const headers = unsubscribeHeaders(unsubscribeLink);
+
+  // The subject prefix and the jurisdiction footer, from the profile this row
+  // was pinned to at enqueue (EM-04). Read from the pinned policy version and
+  // not the active one: a message enqueued under one set of labelling rules
+  // must not be sent under another, or the delivery row records the first while
+  // the recipient receives the second.
+  const profile = await prisma.jurisdictionProfile.findUnique({
+    where: {
+      profileKey_policyVersionId: {
+        profileKey: delivery.jurisdictionProfileKey,
+        policyVersionId: delivery.policyVersionId,
+      },
+    },
+    select: {
+      profileKey: true,
+      subjectPrefix: true,
+      footerBlocks: true,
+      unsubscribeSlaBusinessDays: true,
+    },
   });
+
+  const composed = composeJurisdictionalMessage({
+    classification: definition.classification,
+    requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
+    profile: profile
+      ? {
+          profileKey: profile.profileKey,
+          subjectPrefix: profile.subjectPrefix,
+          footerBlocks: Array.isArray(profile.footerBlocks)
+            ? profile.footerBlocks.filter(
+                (block): block is string => typeof block === "string"
+              )
+            : [],
+          unsubscribeSlaBusinessDays: profile.unsubscribeSlaBusinessDays,
+        }
+      : null,
+    identity: readBusinessIdentity(process.env),
+    language: delivery.language,
+    unsubscribeUrl: unsubscribeLink,
+    rendered: templateRendered,
+  });
+
+  if (composed.ok === false) {
+    // Marketing only. An advertisement that cannot be labelled the way its
+    // recipient's jurisdiction requires is not sent, because the violation is
+    // not recoverable by fixing configuration afterwards -- the message has
+    // already arrived unlabelled.
+    await reportOperationalIncident({
+      code: "EMAIL_JURISDICTION_LABELLING_UNAVAILABLE",
+      title: "A marketing message was held because it could not be labelled",
+      severity: "error",
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        profileKey: delivery.jurisdictionProfileKey,
+        skipReason: composed.skipReason,
+        missing: composed.missing.join(","),
+        setInstead: composed.missing
+          .map((block) => BLOCK_ENV_VARIABLE[block])
+          .filter(Boolean)
+          .join(","),
+      },
+    });
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "skipped",
+        skipReason: composed.skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+      },
+    });
+    return { outcome: "suppressed" as const, classification: definition.classification };
+  }
+
+  if (composed.degraded.length > 0) {
+    // Not an incident: the message is correct and going out, and holding an
+    // account-deletion notice for an unset variable would be the worse failure.
+    // Loud anyway -- the footer is still owed, and a silent omission is one
+    // nobody ever fixes.
+    console.warn(
+      JSON.stringify({
+        event: "email_jurisdiction_footer_degraded",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+        profileKey: delivery.jurisdictionProfileKey,
+        reasons: composed.degraded,
+        sent: "without_footer",
+      })
+    );
+  }
+
+  const rendered = composed.rendered;
 
   const response = await deliverEmailOnce({
     to: delivery.emailAddress,
@@ -596,6 +808,7 @@ export async function drainStandardEmailDeliveries(options?: {
     abandoned: 0,
     suppressed: 0,
     pending: 0,
+    oldestPendingMs: null,
     abandonedByClassification: {
       transactional: 0,
       service: 0,
@@ -659,6 +872,49 @@ export async function drainStandardEmailDeliveries(options?: {
   result.pending = await prisma.emailDelivery.count({
     where: { lane: "standard", status: "pending" },
   });
+  const oldestPending = await prisma.emailDelivery.findFirst({
+    where: { lane: "standard", status: "pending" },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
+  // Resolved here rather than reusing the per-message `now` inside the loop:
+  // that one is scoped to a claim and does not exist when the loop never ran,
+  // which is exactly the case a stale queue shows up in.
+  const measuredAt = options?.now ?? new Date();
+  result.oldestPendingMs = oldestPending
+    ? Math.max(0, measuredAt.getTime() - oldestPending.createdAt.getTime())
+    : null;
+
+  // A backlog, said out loud while the mail is merely late (EM-11). Either
+  // shape counts: too many waiting, or one waiting too long.
+  //
+  // Deliberately separate from the abandonment incidents below. Those fire once
+  // a message is already lost, which the audit calls the signal that arrives
+  // too late; this one is the signal that arrives while it can still be acted
+  // on.
+  const deepQueue = result.pending >= STANDARD_EMAIL_QUEUE_DEPTH_ALERT;
+  const staleQueue =
+    (result.oldestPendingMs ?? 0) >= STANDARD_EMAIL_OLDEST_PENDING_ALERT_MS;
+  if (deepQueue || staleQueue) {
+    await reportOperationalIncident({
+      code: "EMAIL_STANDARD_DRAIN_BACKLOG",
+      title: "User email queue is not keeping up",
+      error: staleQueue
+        ? `The oldest pending message has waited ${Math.round((result.oldestPendingMs ?? 0) / 60_000)} minute(s); ${result.pending} still pending`
+        : `${result.pending} message(s) still pending after a drain pass`,
+      severity: "warning",
+      cooldownMs: 30 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        pending: result.pending,
+        claimed: result.claimed,
+        oldestPendingMs: result.oldestPendingMs,
+        // Which of the two tripped, so the first line of the incident does not
+        // have to be reverse-engineered from the numbers.
+        trigger: staleQueue ? "oldest_pending" : "queue_depth",
+      },
+    });
+  }
 
   // Abandonment is the outcome nobody else notices: the account was created,
   // the subscription started, the deletion was scheduled -- the product looks

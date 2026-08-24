@@ -70,6 +70,16 @@ written before it holding a commitment nothing could check. Old keys stay in
 the ring so a rotation does not strand what came before it; removing one is
 the deliberate decision that those records no longer need to be verifiable.
 
+**A variable change reaches the server on its next deploy, not on save.** A
+running process holds the environment it started with, so correcting a value
+leaves the instances already serving traffic on the old one until they are
+replaced. This matters most for the keyring: with recording on and the old
+broken value still in the process, every turn files an incident and strands an
+attempt while the configuration reads as correct everywhere an operator would
+look. `npm run report:routing-dispatch-readiness` reads the environment *it*
+runs in, so under `railway run` its preflight describes the configuration, not
+the server -- it says so in its own output. Redeploy, then re-read it.
+
 **The kill switch is checked before everything else**, including readiness and
 the percentage. An operator reaching for it during an incident must not have
 to reason about anything else, and a kill switch another setting can outrank

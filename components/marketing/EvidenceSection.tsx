@@ -9,7 +9,7 @@ import { ConditionLine, SectionHeading } from "./landingPrimitives";
 
 /**
  * Web search, Deep Research, source grounding and the per-item web check --
- * the four capabilities that make "Insight" mean something more than "several
+ * the four capabilities that make Tomverse Review mean something more than "several
  * answers at once", and the four the landing page did not mention at all.
  *
  * Every card carries its own condition line. These are the features whose

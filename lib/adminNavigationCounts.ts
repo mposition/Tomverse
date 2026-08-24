@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { abandonedLegalEmailCount } from "@/lib/adminEmailDeliveries";
+import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 
 export {
@@ -42,6 +43,7 @@ export async function getAdminNavigationCounts(): Promise<{
     jobs,
     failedAlerts,
     abandonedLegalEmail,
+    openModelLifecycle,
   ] = await Promise.allSettled([
     prisma.feedback.count({ where: { status: "open" } }),
     prisma.privacyRequest.count({ where: { status: "open" } }),
@@ -56,6 +58,7 @@ export async function getAdminNavigationCounts(): Promise<{
       where: { status: "failed", acknowledgedAt: null },
     }),
     abandonedLegalEmailCount(),
+    countOpenWorkItems(),
   ]);
 
   const jobsValue = settled(jobs);
@@ -71,6 +74,7 @@ export async function getAdminNavigationCounts(): Promise<{
       : null,
     failedAlerts: settled(failedAlerts),
     abandonedLegalEmail: settled(abandonedLegalEmail),
+    openModelLifecycle: settled(openModelLifecycle),
   };
 
   return {

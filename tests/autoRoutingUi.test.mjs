@@ -226,3 +226,47 @@ test("neither component renders anything without a routing decision behind it", 
   // A badge on a fallback would claim a routing decision that did not happen.
   assert.match(badge, /if \(!routed \|\| !modelName\) return null;/);
 });
+
+// --- and neither does the place they are mounted ---
+
+test("the picker's Auto wrapper is inside the condition, not around it", () => {
+  // The component returning null is not enough once it is mounted: a wrapper
+  // rendered anyway leaves an empty div carrying `mb-2` -- a margin and a row
+  // height for a control that does not exist. "Renders nothing" has to mean
+  // nothing.
+  const picker = readFileSync("components/chat/ModelPickerPanel.tsx", "utf8");
+
+  assert.match(picker, /\{autoSelectionOffered && onSelectionModeChange && \(/);
+  // Above the list, never in it: Auto has no context window, price or
+  // provider, and the footer's credit estimate would have nothing to show.
+  const togglePosition = picker.indexOf("<AutoRoutingToggle");
+  const selectedChipsPosition = picker.indexOf("model-picker-selected-list");
+  assert.ok(togglePosition > 0, "the toggle is mounted");
+  assert.ok(
+    togglePosition < selectedChipsPosition,
+    "the toggle sits above the selected models, not inside the catalogue"
+  );
+});
+
+test("the badge is mounted only behind the server's own routed marker", () => {
+  // `routedModelId` is set from a response header the server writes when the
+  // Router chose the model and omits when it did not, so the client has no
+  // way to render a badge for a turn nobody routed.
+  const list = readFileSync("components/chat/ChatMessageList.tsx", "utf8");
+
+  assert.match(list, /\{!isUser && msg\.routedModelId && \(/);
+  assert.match(list, /<AutoRoutedByBadge/);
+});
+
+test("the routed marker is never derived on the client", () => {
+  // The client reads the header and stores it. If it ever computed `routed`
+  // from the model that answered differing from the one requested, a manual
+  // model swap would grow a badge claiming Auto chose it.
+  const app = readFileSync("components/chat/ChatApp.tsx", "utf8");
+
+  assert.match(app, /res\.headers\.get\("X-Chat-Routed-Model"\)/);
+  assert.match(app, /res\.headers\.get\("X-Chat-Routed-Reason"\)/);
+  // A turn that fell back to another model produced the text, so the routed
+  // badge must not survive it.
+  assert.match(app, /routedModelId && !retryingWithModelId/);
+});

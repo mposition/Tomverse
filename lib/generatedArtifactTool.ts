@@ -115,6 +115,26 @@ export const ALL_ARTIFACT_TOOL_NAMES: readonly string[] = [
 ];
 
 /**
+ * The kind behind a tool name, for a call that never produced a specification.
+ *
+ * The reverse of `ARTIFACT_TOOL_NAMES`, plus the batch tool, which is not a
+ * sixth kind: it delivers an archive. Used only when a call has to be
+ * described without anything the model wrote -- a truncated tool call has no
+ * admitted format and no filename, and the honest label is the one its kind
+ * falls back to.
+ */
+const ARTIFACT_KIND_BY_TOOL_NAME: Readonly<Record<string, ArtifactKind>> = {
+  ...(Object.fromEntries(
+    Object.entries(ARTIFACT_TOOL_NAMES).map(([kind, name]) => [name, kind])
+  ) as Record<string, ArtifactKind>),
+  [CREATE_DOCUMENT_BATCH_TOOL_NAME]: "archive",
+};
+
+export const artifactKindForToolName = (
+  toolName: string
+): ArtifactKind | null => ARTIFACT_KIND_BY_TOOL_NAME[toolName] ?? null;
+
+/**
  * Steps one turn may take when the tools are registered.
  *
  * Four, not two: one for the tool call, one for the answer that follows it,
@@ -339,6 +359,8 @@ export class GeneratedArtifactCollector {
   private readonly failedArtifacts: FailedArtifact[] = [];
   private nextOrdinal = 0;
   private invocations = 0;
+  /** Artifact tool calls the model began and the turn never ran (`turn_incomplete`). */
+  private abandonedInvocations = 0;
   private modelId: string;
 
   constructor(private readonly options: GeneratedArtifactCollectorOptions) {
@@ -371,9 +393,15 @@ export class GeneratedArtifactCollector {
    * the provider's response messages. The route reads this to decide whether
    * those messages are safe to store for replay -- see
    * `serializeProviderResponseMessages`.
+   *
+   * A call that was cut off before it ran counts too, and for a sharper
+   * reason: the response messages then carry a tool call the provider never
+   * finished writing. Replaying a half-written `tool_use` on a later turn is
+   * a request the provider rejects, so the truncated turn must not leave one
+   * behind.
    */
   get wasInvoked(): boolean {
-    return this.invocations > 0;
+    return this.invocations > 0 || this.abandonedInvocations > 0;
   }
 
   /**
@@ -441,6 +469,77 @@ export class GeneratedArtifactCollector {
     const toDiscard = this.storedArtifacts.splice(0, this.storedArtifacts.length);
     this.seenSpecHashes.clear();
     await discardStoredArtifacts(toDiscard);
+  }
+
+  /**
+   * Records the files a truncated turn began and never made.
+   *
+   * Called once, at the end of a turn the provider ended with `length`, with
+   * the calls `ArtifactToolCallTracker` saw start and never saw execute
+   * (lib/generatedArtifactTurnTracker.ts). Without it the answer ends on "I
+   * will now create the web page:" and nothing follows -- policy section 1:
+   * if the app did not make the file, it says so.
+   *
+   * Three things it deliberately does not do:
+   *
+   *   * it does not read the partial input. A truncated specification is
+   *     half-written JSON; the card is labelled from the tool's kind, exactly
+   *     as any other call that never produced an admitted format is.
+   *   * it does not raise the per-answer ceiling. Three top-level files is
+   *     three, and a call that would be the fourth card is counted as a call
+   *     and left uncarded rather than allowed to exceed it.
+   *   * it does not touch a call the collector already answered. The tracker
+   *     has already removed everything that reached `execute`, so a file that
+   *     failed, succeeded or was refused for sign-in keeps its own single
+   *     card.
+   *
+   * Returns how many cards were added, for the caller's log.
+   */
+  recordIncompleteToolCalls(
+    calls: readonly { toolName: string }[]
+  ): number {
+    const recorded: SupportedArtifactFormat[] = [];
+    const abandoned: string[] = [];
+    for (const call of calls) {
+      const kind = artifactKindForToolName(call.toolName);
+      // A name this build does not register. Never a generated file, and the
+      // native search tools are the reason the check is here at all.
+      if (!kind) continue;
+      this.abandonedInvocations += 1;
+      abandoned.push(call.toolName);
+      if (
+        this.storedArtifacts.length + this.failedArtifacts.length >=
+        ARTIFACT_LIMITS.maxArtifactsPerMessage
+      ) {
+        continue;
+      }
+      const format = FALLBACK_FORMAT[kind];
+      this.recordFailure(
+        sanitizeArtifactFilename("generated", format),
+        format,
+        "turn_incomplete",
+        null
+      );
+      recorded.push(format);
+    }
+
+    if (abandoned.length > 0) {
+      // Tool names only: everything here is this application's own
+      // vocabulary, and none of it is the model's partial input.
+      console.warn(
+        JSON.stringify({
+          event: "generated_artifact_turn_incomplete",
+          traceId: this.options.traceId,
+          conversationId: this.options.conversationId,
+          modelId: this.modelId,
+          tools: abandoned,
+          carded: recorded.length,
+          timestamp: new Date().toISOString(),
+        })
+      );
+    }
+
+    return recorded.length;
   }
 
   private recordFailure(
@@ -906,40 +1005,73 @@ const DOCUMENT_BATCH_TOOL_DESCRIPTION =
 
 export const buildGeneratedArtifactToolConfig = (
   collector: GeneratedArtifactCollector,
-  { registerDocumentBatch = false }: { registerDocumentBatch?: boolean } = {}
+  {
+    registerDocumentBatch = false,
+    noteExecutionStarted,
+  }: {
+    registerDocumentBatch?: boolean;
+    /**
+     * Says that this call reached the tool, before any of its work.
+     *
+     * The turn tracker's second and surest signal that a begun tool call is
+     * not an abandoned one (lib/generatedArtifactTurnTracker.ts). Reported
+     * from inside `execute` rather than only from the SDK's own
+     * `onToolExecutionStart` because this line is this application's code:
+     * if it ran, the call ran, whatever the SDK reported.
+     */
+    noteExecutionStarted?: (toolCallId: string) => void;
+  } = {}
 ): { tools: ToolSet } => ({
   tools: {
     [ARTIFACT_TOOL_NAMES.spreadsheet]: tool({
       description: HANDLERS.spreadsheet.description,
       inputSchema: workbookSpecSchema,
-      execute: async (input) => collector.run("spreadsheet", input),
+      execute: async (input, { toolCallId }) => {
+        noteExecutionStarted?.(toolCallId);
+        return collector.run("spreadsheet", input);
+      },
     }),
     [ARTIFACT_TOOL_NAMES.document]: tool({
       description: HANDLERS.document.description,
       inputSchema: documentSpecSchema,
-      execute: async (input) => collector.run("document", input),
+      execute: async (input, { toolCallId }) => {
+        noteExecutionStarted?.(toolCallId);
+        return collector.run("document", input);
+      },
     }),
     [ARTIFACT_TOOL_NAMES.presentation]: tool({
       description: HANDLERS.presentation.description,
       inputSchema: presentationSpecSchema,
-      execute: async (input) => collector.run("presentation", input),
+      execute: async (input, { toolCallId }) => {
+        noteExecutionStarted?.(toolCallId);
+        return collector.run("presentation", input);
+      },
     }),
     [ARTIFACT_TOOL_NAMES.text]: tool({
       description: HANDLERS.text.description,
       inputSchema: textFileSpecSchema,
-      execute: async (input) => collector.run("text", input),
+      execute: async (input, { toolCallId }) => {
+        noteExecutionStarted?.(toolCallId);
+        return collector.run("text", input);
+      },
     }),
     [ARTIFACT_TOOL_NAMES.archive]: tool({
       description: HANDLERS.archive.description,
       inputSchema: archiveSpecSchema,
-      execute: async (input) => collector.run("archive", input),
+      execute: async (input, { toolCallId }) => {
+        noteExecutionStarted?.(toolCallId);
+        return collector.run("archive", input);
+      },
     }),
     ...(registerDocumentBatch
       ? {
           [CREATE_DOCUMENT_BATCH_TOOL_NAME]: tool({
             description: DOCUMENT_BATCH_TOOL_DESCRIPTION,
             inputSchema: documentBatchSpecSchema,
-            execute: async (input) => collector.runDocumentBatch(input),
+            execute: async (input, { toolCallId }) => {
+              noteExecutionStarted?.(toolCallId);
+              return collector.runDocumentBatch(input);
+            },
           }),
         }
       : {}),

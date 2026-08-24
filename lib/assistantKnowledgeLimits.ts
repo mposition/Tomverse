@@ -149,6 +149,27 @@ export const ASSISTANT_KNOWLEDGE_TYPES: Record<string, readonly string[]> = {
     "application/vnd.oasis.opendocument.presentation": ["odp"],
 };
 
+/**
+ * The media type for a file extension, or `null` for one this does not accept.
+ *
+ * Built by inverting the table above rather than written out again: a second
+ * list would be a second answer to the same question, and the one that drifts
+ * is always the one nobody is looking at. Each extension appears under exactly
+ * one media type, which is what makes the inversion well defined.
+ *
+ * Needed because a document that arrives inside a package has no browser to
+ * report its type -- the bytes come out of an archive, and the name is all
+ * there is to go on. The server still checks the bytes.
+ */
+const MIME_BY_EXTENSION: Record<string, string> = Object.fromEntries(
+    Object.entries(ASSISTANT_KNOWLEDGE_TYPES).flatMap(([mime, extensions]) =>
+        extensions.map((extension) => [extension, mime])
+    )
+);
+
+export const knowledgeMimeForExtension = (extension: string): string | null =>
+    MIME_BY_EXTENSION[extension.toLowerCase()] ?? null;
+
 export const ASSISTANT_KNOWLEDGE_TEXT_TYPES = new Set([
     "text/plain",
     "text/markdown",

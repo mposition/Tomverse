@@ -68,6 +68,14 @@ export const ASSISTANT_PROFILE_ERROR_COPY_KEYS: Readonly<
     ASSISTANT_KNOWLEDGE_UNSUPPORTED_FILE: "assistantProfiles.knowledgeUnsupported",
     ASSISTANT_KNOWLEDGE_DISABLED: "assistantProfiles.knowledgeDisabled",
 
+    // A package import holds this profile while its files are being reviewed,
+    // and an ordinary publish during that window would race it. Named rather
+    // than left generic because the owner has a way out and can act on it --
+    // finish the import or cancel it -- whereas "try again" would never come
+    // true on its own.
+    ASSISTANT_PROFILE_IMPORT_IN_PROGRESS:
+        "assistantProfiles.noticeImportInProgress",
+
     // -- Operational --------------------------------------------------------
     API_RATE_LIMITED: "assistantProfiles.noticeRateLimited",
     // Not a server code: a 401 answers `{ error: "Unauthorized" }` with no

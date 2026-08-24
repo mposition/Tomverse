@@ -71,6 +71,20 @@ const REGISTRY = {
     reason:
       "ready and failed. ARTIFACT_STATUSES beside it carries a third value, `blocked`, which is a live-stream state for a guest who has not signed in: there is no account to write a row under, so a third database value would be a status nothing could ever query for. The split is what keeps the constraint and the transport union from being forced to agree about a state only one of them has.",
   },
+  RoutingRun_product_key_check: {
+    owner: "list",
+    module: "lib/conversationProduct.ts",
+    list: "CONVERSATION_PRODUCT_KEYS",
+    reason:
+      "The same three products as Conversation.productKey, snapshotted at execution time (decision record v1.2 \u00a75). Deliberately the same list rather than a second one: a run's product is copied from the conversation's, so two lists that could drift would let a run claim a product no conversation can hold. Also NULL-permitting, because rows written before the column existed had no product recorded and a guessed value would be an attribution nobody made.",
+  },
+  Conversation_product_key_check: {
+    owner: "list",
+    module: "lib/conversationProduct.ts",
+    list: "CONVERSATION_PRODUCT_KEYS",
+    reason:
+      "chat, review, studio -- which Tomverse product a conversation belongs to (product boundary decision record v1.2, decision 2). The brand axis has a fourth product, `code`, deliberately absent: Tomverse Code writes no Conversation rows, so admitting it would make a row with no execution surface a legal value. It joins both the list and the constraint on the day Code starts writing conversations, which is why the two are compared here rather than left to agree by memory.",
+  },
   MessageAttachment_kind_check: {
     owner: "list",
     module: "lib/messageAttachmentCore.ts",
@@ -134,6 +148,27 @@ const REGISTRY = {
     reason:
       "The knowledge processing lifecycle. The status decides two different things in two different places -- the worker claims 'pending', retrieval reads 'ready' -- so a value in one and not the other is a row invisible to both while looking fine in a list.",
   },
+  AssistantProfileImport_mode_check: {
+    owner: "list",
+    module: "lib/assistantProfileImportCore.ts",
+    list: "ASSISTANT_PROFILE_IMPORT_MODES",
+    reason:
+      "create or merge (docs/policy/assistant-package-import.md \u00a75). Not a label: it is the branch cancellation and expiry take, and the two branches differ by whether a profile is deleted. A third value would reach a sweep that has no case for it, which is the one place a wrong answer is unrecoverable.",
+  },
+  AssistantProfileImport_status_check: {
+    owner: "list",
+    module: "lib/assistantProfileImportCore.ts",
+    list: "ASSISTANT_PROFILE_IMPORT_STATUSES",
+    reason:
+      "staging or published. The expiry sweeps filter on it, so a status they do not recognise is an import nothing ever collects -- and a published import collected as staging is a published profile deleted.",
+  },
+  AssistantKnowledgeUploadReservation_state_check: {
+    owner: "list",
+    module: "lib/assistantProfileImportCore.ts",
+    list: "ASSISTANT_KNOWLEDGE_RESERVATION_STATES",
+    reason:
+      "pending or finalizing. Whether an upload key is currently claimed by a finalize in flight; the compare-and-set that takes a claim and the sweep that reclaims a stale one both read it.",
+  },
   AssistantKnowledgeCleanup_reason_allowed: {
     owner: "list",
     module: "lib/assistantKnowledgeLimits.ts",
@@ -196,6 +231,60 @@ const REGISTRY = {
     owner: "type_only",
     reason:
       "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
+  },
+  ModelMigrationRecord_field_check: {
+    owner: "database",
+    reason:
+      "user_settings_default_model, new_conversation_model_ids, conversation_selected_models, app_setting_guest_default. Written as literals by the approved retirement reconciliation, which is the only writer; the completion notice reads them back to say which setting moved, so a fifth value would be a change nobody is told about.",
+  },
+  ModelLifecycleWorkItem_status_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_STATUSES",
+    reason:
+      "The eleven states of the model lifecycle queue. The transition rules read the same array, so a state added to one and not the other is a transition the machine allows and the database refuses.",
+  },
+  ModelLifecycleWorkItem_action_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_ACTIONS",
+    reason:
+      "add, upgrade, replace, retire, monitor, no_action. Part of the item's unique key with provider and apiModel, so a value the application does not know about is a duplicate nobody can see.",
+  },
+  ModelLifecycleWorkItem_severity_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_SEVERITIES",
+    reason:
+      "critical, high, normal. Orders the daily report's action section; an unknown value would sort somewhere arbitrary.",
+  },
+  ModelLifecycleWorkItem_confidence_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_CONFIDENCES",
+    reason:
+      "high, medium, low, describing the automatic recommendation rather than the decision. Nullable: an item nobody has suggested anything about has no confidence to report.",
+  },
+  ModelLifecycleWorkItem_decision_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_DECISIONS",
+    reason:
+      "approve, reject, defer. Paired with ModelLifecycleWorkItem_decision_reason_check, which refuses a decision with no reason and no timestamp, and with the approved_needs_decision check.",
+  },
+  ModelLifecycleWorkItemEvent_toStatus_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_STATUSES",
+    reason:
+      "The same eleven states, on the append-only history. Recorded separately from the item's own column because the history outlives the state it describes.",
+  },
+  ModelLifecycleWorkItemEvent_fromStatus_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_STATUSES",
+    reason:
+      "The same eleven states. Nullable for exactly one row per item -- the creation event, which comes from nowhere.",
   },
   ContextManifest_state_check: {
     owner: "database",
@@ -361,6 +450,31 @@ const REGISTRY = {
     owner: "database",
     reason:
       "The nine delivery states. failed and abandoned are deliberately different: failed is one attempt that did not land, abandoned is the queue giving up, and only the credential lane is forbidden the second (EmailDelivery_credential_not_abandoned_check). Written as literals by the two lanes and by the webhook processor.",
+  },
+  EmailCampaign_status_check: {
+    owner: "database",
+    reason:
+      "A campaign's lifecycle: draft through completed, plus cancelled and halted. Kept off EmailEvent.status deliberately -- approval is a property of the campaign, and adding draft/pending_approval to the outbox's vocabulary would put it in the table that also holds login codes. Written as literals by lib/emailCampaignService.ts and judged by lib/emailCampaignCore.ts.",
+  },
+  EmailCampaign_category_check: {
+    owner: "database",
+    reason:
+      "What the campaign is about, from section 12.2 of the model lifecycle audit. Five model lifecycle events plus `other`, so a campaign that is not about a model still has somewhere to be rather than borrowing a category that misdescribes it.",
+  },
+  EmailCampaign_approval_completeness_check: {
+    owner: "database",
+    reason:
+      "An approved campaign has both halves of its approval or neither: an approval id, an approval time, and the copy that was pinned. A row with an approval and no pin would send whatever the code says today, which is the whole failure EM-06 describes.",
+  },
+  EmailCampaignWave_status_check: {
+    owner: "database",
+    reason:
+      "One send within a campaign, which is a narrower life than the campaign's: pending through done, plus cancelled and halted. Separate from EmailCampaign.status because a campaign that is running has waves in several of these at once.",
+  },
+  EmailCampaignWave_kind_check: {
+    owner: "database",
+    reason:
+      "Which send this is -- launch, notice, reminder, final reminder, completion. Part of the unique key with sequence, so it is what makes a second `reminder 1` impossible rather than merely unlikely.",
   },
   EmailDelivery_skip_reason_check: {
     owner: "database",
