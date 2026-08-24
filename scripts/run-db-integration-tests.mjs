@@ -207,6 +207,9 @@ run(
     "tests/integration/campaign-audience.db.test.ts",
     "tests/integration/campaign-scheduling.db.test.ts",
     "tests/integration/campaign-attestations.db.test.ts",
+    // The expansion ledger read back: who each wave reached and who it did not.
+    // The counts come from grouped reads over rows no single process holds.
+    "tests/integration/campaign-audience-readback.db.test.ts",
     // Two callers ensuring the same template at the same moment. Both races it
     // covers are lost or won by the database's own unique indexes, so a single
     // process proves nothing about either.

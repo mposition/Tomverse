@@ -20,6 +20,7 @@ import {
   cancelCampaign,
 } from "@/lib/emailCampaignService";
 import { TRIGGER_MODES } from "@/lib/emailCampaignScheduleCore";
+import { waveAudienceBreakdown } from "@/lib/adminEmailCampaigns";
 import { prisma } from "@/lib/prisma";
 
 type Context = { params: Promise<{ campaignId: string }> };
@@ -108,14 +109,18 @@ export async function GET(req: Request, context: Context) {
     // Everything that decides whether this may send, answered together. Asked
     // one at a time an operator learns of the second problem only after fixing
     // the first.
-    const [refusal, schedule, attestations, transition] = await Promise.all([
-      campaignSendRefusal(campaignId),
-      campaignScheduleProblems({ campaignId }),
-      campaignAttestationStates(campaignId),
-      campaign.claimsAutomaticTransition
-        ? campaignTransitionClaim(campaignId).then((result) => result.claim)
-        : Promise.resolve(null),
-    ]);
+    const [refusal, schedule, attestations, transition, audience] =
+      await Promise.all([
+        campaignSendRefusal(campaignId),
+        campaignScheduleProblems({ campaignId }),
+        campaignAttestationStates(campaignId),
+        campaign.claimsAutomaticTransition
+          ? campaignTransitionClaim(campaignId).then((result) => result.claim)
+          : Promise.resolve(null),
+        // Who each wave reached and who it did not. Counts only -- the ledger
+        // holds addresses, and whether an operator may see them is D10.
+        waveAudienceBreakdown(campaignId),
+      ]);
 
     return NextResponse.json({
       campaign,
@@ -123,6 +128,7 @@ export async function GET(req: Request, context: Context) {
       scheduleProblems: schedule,
       attestations,
       transitionClaim: transition,
+      audience,
     });
   } catch (error) {
     const response = apiSecurityResponse(error);
