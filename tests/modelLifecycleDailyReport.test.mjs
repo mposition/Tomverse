@@ -361,7 +361,7 @@ test("interpolated values are escaped", () => {
       ],
     })
   );
-  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<script>/i);
   assert.ok(html.includes("&lt;script&gt;"));
   assert.ok(html.includes("&amp;"));
 });

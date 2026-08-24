@@ -384,7 +384,11 @@ for (const [index, entry] of cases.entries()) {
     const first = entry.conversations[0].messages.find(
         (message) => message.role === "user"
     );
-    const excerpt = (first?.content ?? "").replace(/\|/g, "\\|");
+    // Backslash first, then the delimiter: escaping only `|` lets an excerpt
+    // ending in `\` escape its own escape, and the cell boundary moves.
+    const excerpt = (first?.content ?? "")
+        .replace(/\\/g, "\\\\")
+        .replace(/\|/g, "\\|");
     const mark = sample.includes(index) ? " **←표본**" : "";
     p(
         `| ${index + 1}${mark} | \`${entry.expected[0]?.kind ?? "-"}\` | ${(entry.expected[0]?.mustInclude ?? []).map((k) => `\`${k}\``).join(" + ") || "-"} | ${excerpt.length > 46 ? `${excerpt.slice(0, 44)}…` : excerpt} |`

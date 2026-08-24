@@ -113,7 +113,7 @@ test("interpolated values are escaped", () => {
     { ...PAYLOAD, modelName: '<script>alert(1)</script>', ctaUrl: 'https://x/"y' },
     "en"
   );
-  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<script>/i);
   assert.ok(html.includes("&lt;script&gt;"));
   assert.ok(html.includes("&quot;"));
 });
