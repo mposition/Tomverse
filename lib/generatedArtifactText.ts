@@ -244,17 +244,93 @@ export class TextContentError extends Error {
 }
 
 /**
+ * The five predefined XML entities. Everything else needs a DTD, which an SVG
+ * a browser opens does not have -- `&nbsp;` in an SVG is a parse error, not a
+ * space.
+ */
+const XML_PREDEFINED_ENTITIES = new Set(["amp", "lt", "gt", "quot", "apos"]);
+
+/**
+ * Whether an `&` at this position starts a reference XML will accept.
+ *
+ * Numeric (`&#10;`, `&#x41;`) or one of the five predefined names. A bare `&`
+ * -- the one a model writes in "salt & sodium" -- is a fatal error in XML and
+ * is why this exists.
+ */
+const referenceAtIsValid = (source: string, ampersand: number): boolean => {
+  const semicolon = source.indexOf(";", ampersand + 1);
+  if (semicolon === -1 || semicolon - ampersand > 12) return false;
+  const reference = source.slice(ampersand + 1, semicolon);
+  if (!reference) return false;
+  if (reference.startsWith("#")) {
+    return /^#(?:\d+|[xX][0-9a-fA-F]+)$/.test(reference);
+  }
+  return XML_PREDEFINED_ENTITIES.has(reference);
+};
+
+/**
+ * The attribute failures a tag can carry, or null.
+ *
+ * XML only. Walks `name="value"` pairs and reports the two that stop a parser
+ * dead: the same attribute twice, and a value with no quotes. Names are
+ * compared case-sensitively because XML is.
+ */
+const findAttributeProblem = (tagInner: string, tagName: string): string | null => {
+  // Past the element name; the rest is attributes.
+  const attributes = tagInner.slice(tagInner.indexOf(tagName) + tagName.length);
+  const seen = new Set<string>();
+  const pattern = /([^\s=/>"']+)\s*(=)?\s*("[^"]*"|'[^']*'|[^\s/>]+)?/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(attributes)) !== null) {
+    const [, name, equals, value] = match;
+    if (!name || name === "/" || name === "?") continue;
+    if (seen.has(name)) return `the attribute "${name}" twice on <${tagName}>`;
+    seen.add(name);
+    if (!equals) continue;
+    if (value === undefined) return `no value for "${name}" on <${tagName}>`;
+    const quoted =
+      (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+      (value.startsWith("'") && value.endsWith("'") && value.length >= 2);
+    if (!quoted) {
+      return `an unquoted value for "${name}" on <${tagName}>`;
+    }
+  }
+  return null;
+};
+
+/**
  * Whether markup is well formed enough to be worth delivering.
  *
  * A scanner rather than a parser, and deliberately so: the question is not
  * "what does this document mean" but "will the thing that opens it choke". It
- * checks the failures that make a file useless -- unbalanced elements, an
- * unterminated attribute, a stray `<` -- and does not attempt DTDs, namespaces
- * or entity resolution, none of which change that answer.
+ * checks the failures that make a file useless and does not attempt DTDs,
+ * namespaces or entity resolution, none of which change that answer.
+ *
+ * ## Why there are two strictnesses
+ *
+ * HTML forgives what XML refuses. A browser reading a `.html` page happily
+ * takes `<BODY>` closed by `</body>`, `width=100` without quotes, and a bare
+ * `&` in a sentence. The same three in an SVG are **fatal**: the browser
+ * refuses to render and prints its parse error instead.
+ *
+ * That is not hypothetical. A generated `.svg` carrying `text-anchor` twice on
+ * one element was accepted here, written, and offered to the user as a
+ * finished picture -- and it opened as "Attribute text-anchor redefined". The
+ * scanner passed it because it never looked at attributes at all. Delivering a
+ * file that cannot be opened is the same failure as claiming a file that was
+ * never made (docs/policy/generated-artifacts.md section 1).
+ *
+ * So `strict` is on for `.svg` and `.xml`, and off for `.html`/`.htm` -- where
+ * turning it on would reject ordinary, working pages.
  *
  * Returns the first problem, or null.
  */
-export const findMarkupProblem = (source: string): string | null => {
+export const findMarkupProblem = (
+  source: string,
+  options: { strict?: boolean } = {}
+): string | null => {
+  const strict = options.strict ?? false;
   const stack: string[] = [];
   // Elements that are legally unclosed in HTML. In XML they must self-close,
   // and a scanner that insisted would reject every real HTML page.
@@ -305,24 +381,56 @@ export const findMarkupProblem = (source: string): string | null => {
     if (cursor >= source.length) return "an unterminated tag";
     if (quote) return "an unterminated attribute value";
 
+    // Text between the previous tag and this one. In XML a bare `&` here is
+    // fatal, so it is checked on the way past rather than in a second scan.
+    if (strict) {
+      const between = source.slice(index, open);
+      const ampersand = between.indexOf("&");
+      if (ampersand !== -1 && !referenceAtIsValid(between, ampersand)) {
+        return "an unescaped & in the text";
+      }
+    }
+
     const inner = source.slice(open + 1, cursor);
     const closing = inner.startsWith("/");
     const selfClosing = inner.endsWith("/");
-    const name = (closing ? inner.slice(1) : inner)
+    const rawName = (closing ? inner.slice(1) : inner)
       .trim()
-      .split(/[\s/>]/, 1)[0]!
-      .toLowerCase();
+      .split(/[\s/>]/, 1)[0]!;
+    // XML is case-sensitive, HTML is not: `<Text>` closed by `</text>` is a
+    // working page in one and a parse error in the other.
+    const name = strict ? rawName : rawName.toLowerCase();
 
     if (!name) return "a tag with no name";
     if (closing) {
       const expected = stack.pop();
       if (expected === undefined) return `a closing </${name}> with nothing open`;
       if (expected !== name) return `</${name}> where </${expected}> was expected`;
-    } else if (!selfClosing && !voidElements.has(name)) {
-      stack.push(name);
+    } else {
+      if (strict) {
+        const attributeProblem = findAttributeProblem(inner, name);
+        if (attributeProblem) return attributeProblem;
+        const ampersand = inner.indexOf("&");
+        if (ampersand !== -1 && !referenceAtIsValid(inner, ampersand)) {
+          return `an unescaped & in an attribute on <${name}>`;
+        }
+      }
+      // Void elements are an HTML rule. In XML every element closes, so the
+      // exemption would let `<img>` leave the stack unbalanced unnoticed.
+      if (!selfClosing && (strict || !voidElements.has(name))) {
+        stack.push(name);
+      }
     }
 
     index = cursor + 1;
+  }
+
+  if (strict) {
+    const trailing = source.slice(index);
+    const ampersand = trailing.indexOf("&");
+    if (ampersand !== -1 && !referenceAtIsValid(trailing, ampersand)) {
+      return "an unescaped & in the text";
+    }
   }
 
   if (stack.length > 0) return `<${stack[stack.length - 1]}> is never closed`;
@@ -403,7 +511,9 @@ export const admitTextContent = (spec: TextFileSpec): string => {
           `An SVG may not contain ${script}.`
         );
       }
-      const problem = findMarkupProblem(normalized);
+      // Strict: an SVG is parsed as XML by whatever opens it, and the errors
+      // XML calls fatal are the ones that make the picture never appear.
+      const problem = findMarkupProblem(normalized, { strict: true });
       if (problem) {
         throw new TextContentError(
           "CONTENT_MALFORMED",
@@ -419,7 +529,11 @@ export const admitTextContent = (spec: TextFileSpec): string => {
       break;
     }
     case "xml": {
-      const problem = findMarkupProblem(normalized);
+      // `.xml` is strict for the same reason `.svg` is; `.html`/`.htm` share
+      // this branch and must not be, so they are separated by extension.
+      const problem = findMarkupProblem(normalized, {
+        strict: descriptor.id === "xml",
+      });
       if (problem) {
         throw new TextContentError(
           "CONTENT_MALFORMED",
