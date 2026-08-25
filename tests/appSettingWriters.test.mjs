@@ -54,21 +54,6 @@ const READ_ONLY_KEYS = {
       "approval already exist. A toggle would be the procedure's last step " +
       "without its first five.",
   },
-  ASSISTANT_PACKAGE_IMPORT_FLAG_KEY: {
-    reason:
-      "docs/policy/assistant-package-import.md §12.2 lists five things that " +
-      "have to be true before package import may be turned on, in order, and " +
-      "the staging checklist still has no signed run. A toggle would be that " +
-      "procedure's last step without its first ones. The flag exists ahead of " +
-      "the control on purpose -- staging turns it on with SQL, which is " +
-      "enough there and is not enough in production -- and the control lands " +
-      "with the rollout, not before it. When it lands it is the dedicated, " +
-      "audited path of §12.2.1 (`setAssistantPackageImportEnabled()`, " +
-      "`ops:write` plus recent re-authentication, an `AdminAuditLog` row " +
-      "carrying before/after values, actor, time and rationale, the same path " +
-      "for rollback), not one more field on the bulk settings PATCH, and that " +
-      "change removes this entry.",
-  },
   EMAIL_MARKETING_FLAG_KEY: {
     reason:
       "docs/policy/email-notifications.md §15.2 keeps this off until the legal " +
@@ -130,11 +115,23 @@ const keysUsedWith = (predicate) => {
   return keys;
 };
 
-const readKeys = keysUsedWith(
-  (body) => /prisma\.appSetting\.(findUnique|findMany|findFirst|count)/.test(body)
+/**
+ * `tx` as well as `prisma`, because a write can be inside a transaction.
+ *
+ * `setAssistantPackageImportEnabled()` is: the flag change and its audit row
+ * share one transaction on purpose, so a failed audit write takes the change
+ * with it. Matching only `prisma.` would have read that as no write path at
+ * all -- the sweep would have reported the very control the policy asked for
+ * as missing, which is the opposite of the mistake this file exists to catch.
+ */
+const CLIENT = String.raw`(?:prisma|tx|client)`;
+const readKeys = keysUsedWith((body) =>
+  new RegExp(`${CLIENT}\\.appSetting\\.(findUnique|findMany|findFirst|count)`).test(
+    body
+  )
 );
-const writtenKeys = keysUsedWith(
-  (body) => /prisma\.appSetting\.(upsert|update|create|delete)/.test(body)
+const writtenKeys = keysUsedWith((body) =>
+  new RegExp(`${CLIENT}\\.appSetting\\.(upsert|update|create|delete)`).test(body)
 );
 
 test("the sweep finds the keys it is meant to, so a silent zero is impossible", () => {

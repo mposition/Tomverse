@@ -493,6 +493,22 @@ field 하나를 더하는 것은 이 요구를 만족하지 않습니다 — 일
 활성화 순서는 **제어 배포 → 그 제어로 켜기 → 성공 감사 로그 확인**입니다. 로그를
 확인하기 전까지는 켜진 것으로 보고하지 않습니다.
 
+구현된 자리는 다음과 같습니다.
+
+| | |
+|---|---|
+| 서버 함수 | `setAssistantPackageImportEnabled()` (`lib/appSettings.ts`). 켜기와 rollback이 같은 호출이고 인자만 다릅니다 |
+| 권한 | `ops:write` + `hasRecentAdminAuthentication()` — `/api/admin/**`의 다른 고위험 동작과 같은 창을 같은 helper로 읽습니다 |
+| 기록 | `AdminAuditLog` 한 행. `metadata`에 `before`·`after`, `summary`에 실행자가 쓴 근거. **쓰기와 감사 행이 한 transaction**이므로 감사 기록에 실패하면 변경도 함께 되돌아갑니다 |
+| 경로 | `POST /api/admin/assistant-package-import` (전용). 일괄 설정 PATCH에 넣지 않습니다 |
+| 화면 | Admin → Platform의 별도 카드. 근거 입력이 필수이고 저장 버튼과 분리돼 있습니다 |
+
+**근거(rationale)는 필수입니다.** "누가·언제"만 있고 "왜"가 없으면 그 행을
+남겨 두는 이유에 답하지 못합니다.
+
+**값이 이미 같아도 감사 행은 남습니다**(`outcome: "unchanged"`). 누른 것 자체가
+사건이고, 이미 켜진 것을 다시 켜려 한 시도는 켠 것과 다른 사실입니다.
+
 staging 체크리스트의 §G-1이 이 조건을 가리킵니다. 그 항목이 staging 회차에서
 `n/a`인 것은 이 조건이 면제됐다는 뜻이 **아니라**, 판정 시점이 production
 활성화로 옮겨졌다는 뜻입니다.
