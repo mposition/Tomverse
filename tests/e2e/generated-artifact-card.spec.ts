@@ -964,3 +964,133 @@ test("the card can be reached and operated from the keyboard alone", async ({
   await page.keyboard.press("Enter");
   await download;
 });
+
+/* ------------------------------------------------------------------------ */
+/* The SVG preview                                                           */
+/* ------------------------------------------------------------------------ */
+
+const SVG_ARTIFACT = {
+  id: "art_infographic",
+  ordinal: 0,
+  format: "svg" as const,
+  filename: "hypertension_healthy_foods.svg",
+  mediaType: "image/svg+xml; charset=utf-8",
+  byteSize: 214,
+  status: "ready" as const,
+  modelId: "gemini-2-5-flash",
+};
+
+const SVG_BODY =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60">' +
+  '<rect width="120" height="60" fill="#e94b35"/>' +
+  '<text x="60" y="35" text-anchor="middle" fill="#ffffff">food</text>' +
+  "</svg>";
+
+const serveSvg = async (page: Page, requested: string[]) => {
+  await page.route("**/api/artifacts/**", async (route: Route) => {
+    requested.push(new URL(route.request().url()).pathname);
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="generated.svg"',
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+      body: SVG_BODY,
+    });
+  });
+};
+
+test("an SVG is shown in the card, not only offered as a download @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, answerWith([SVG_ARTIFACT], "인포그래픽을 만들었습니다."));
+  const requested: string[] = [];
+  await serveSvg(page, requested);
+
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "인포그래픽으로 그려줘");
+  await expect(card(page)).toBeVisible();
+
+  // Scoped to one card: a guest conversation renders three model panels, so a
+  // page-level lookup matches the same preview once per panel.
+  const preview = inCard(page, "generated-artifact-preview");
+  await expect(preview).toBeVisible();
+  // Fetched through the app's own route, like the download.
+  expect(requested).toContain("/api/artifacts/art_infographic");
+  // Actually decoded by the browser rather than merely present in the DOM.
+  await expect
+    .poll(() => preview.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
+  // The download stays: a preview is an addition, not a replacement.
+  await expect(inCard(page, "generated-artifact-download")).toBeVisible();
+});
+
+test("the preview is an img element, so the SVG cannot run in this origin", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, answerWith([SVG_ARTIFACT], "인포그래픽을 만들었습니다."));
+  await serveSvg(page, []);
+
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "인포그래픽으로 그려줘");
+  const preview = inCard(page, "generated-artifact-preview");
+  await expect(preview).toBeVisible();
+
+  // An img puts the SVG in the browser's secure static mode. An inlined
+  // <svg>, an <object> or an <iframe> would each give that up, so the tag name
+  // is the contract rather than an implementation detail.
+  expect(await preview.evaluate((node) => node.tagName)).toBe("IMG");
+  // A blob URL: the markup never enters this document.
+  expect(await preview.getAttribute("src")).toMatch(/^blob:/);
+  // The card's own SVG markup is not in the page.
+  expect(await page.content()).not.toContain("text-anchor=");
+});
+
+test("a preview that fails to load leaves the card working", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, answerWith([SVG_ARTIFACT], "인포그래픽을 만들었습니다."));
+  await page.route("**/api/artifacts/**", async (route: Route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "nope" }),
+    });
+  });
+
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "인포그래픽으로 그려줘");
+  await expect(card(page)).toBeVisible();
+
+  // Silent: no preview, no second error row, and the control still there.
+  await expect(page.getByTestId("generated-artifact-preview")).toHaveCount(0);
+  await expect(page.getByTestId("generated-artifact-download-error")).toHaveCount(0);
+  await expect(inCard(page, "generated-artifact-download")).toBeVisible();
+});
+
+test("a non-image format gets no preview", async ({ page }, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(page, answerWith([ARTIFACT]));
+  const requested: string[] = [];
+  await page.route("**/api/artifacts/**", async (route: Route) => {
+    requested.push(new URL(route.request().url()).pathname);
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": XLSX_MEDIA_TYPE },
+      body: Buffer.from("PKfake"),
+    });
+  });
+
+  await page.goto("/chat");
+  await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
+  await expect(card(page)).toBeVisible();
+
+  await expect(page.getByTestId("generated-artifact-preview")).toHaveCount(0);
+  // And nothing was fetched for it: a spreadsheet is not downloaded twice.
+  expect(requested).toEqual([]);
+});

@@ -143,6 +143,9 @@ export const zh = {
         imageGenerationBackToChat: "返回聊天",
         toolsImageGeneration: "图像生成",
         toolsImageGenerationDescription: "比较多个模型生成的图像",
+        imageIntentSuggestionTitle: "要改用图像生成来制作吗？",
+        imageIntentSuggestionAccept: "打开图像生成",
+        imageIntentSuggestionDismiss: "暂不",
         imageGenerationModelLabel: "模型",
         imageGenerationModelCount: "{count} 个模型",
         // Catalogue image tab (policy v2 section 13)
@@ -479,6 +482,7 @@ export const zh = {
         artifactTypeCode: "{ext} 源文件",
         artifactTypeArchive: "ZIP 压缩包",
         artifactDownload: "下载",
+        artifactPreviewAlt: "{filename} 预览",
         artifactReadyLabel: "下载 {filename}，{type}，{size}",
         artifactFailedLabel: "无法创建 {type} {filename}",
         artifactBlockedLabel: "登录后可创建 {type}",

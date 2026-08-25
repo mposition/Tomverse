@@ -126,6 +126,9 @@ export const pt = {
         imageGenerationBackToChat: "Voltar ao chat",
         toolsImageGeneration: "Geração de imagens",
         toolsImageGenerationDescription: "Compare imagens de vários modelos",
+        imageIntentSuggestionTitle: "Prefere gerar isso como imagem?",
+        imageIntentSuggestionAccept: "Abrir geração de imagens",
+        imageIntentSuggestionDismiss: "Agora não",
         imageGenerationModelLabel: "Modelos",
         imageGenerationModelCount: "{count} modelo(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -443,6 +446,7 @@ export const pt = {
         artifactTypeCode: "Arquivo de código {ext}",
         artifactTypeArchive: "Arquivo ZIP",
         artifactDownload: "Baixar",
+        artifactPreviewAlt: "Pré-visualização de {filename}",
         artifactReadyLabel: "Baixar {filename}, {type}, {size}",
         artifactFailedLabel: "Não foi possível criar {type} {filename}",
         artifactBlockedLabel: "Entre para criar um {type}",

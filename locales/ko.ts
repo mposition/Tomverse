@@ -127,6 +127,9 @@ export const ko = {
         imageGenerationBackToChat: "채팅으로 돌아가기",
         toolsImageGeneration: "이미지 생성",
         toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
+        imageIntentSuggestionTitle: "이미지 생성으로 만들어 볼까요?",
+        imageIntentSuggestionAccept: "이미지 생성 열기",
+        imageIntentSuggestionDismiss: "나중에",
         imageGenerationModelLabel: "모델",
         imageGenerationModelCount: "모델 {count}개",
         // Catalogue image tab (policy v2 section 13)
@@ -485,6 +488,7 @@ export const ko = {
         artifactTypeCode: "{ext} 소스 파일",
         artifactTypeArchive: "ZIP 압축 파일",
         artifactDownload: "다운로드",
+        artifactPreviewAlt: "{filename} 미리보기",
         artifactReadyLabel: "{filename} 다운로드, {type}, {size}",
         artifactFailedLabel: "{type} {filename}을(를) 만들지 못했습니다",
         artifactBlockedLabel: "{type}을(를) 만들려면 로그인하세요",

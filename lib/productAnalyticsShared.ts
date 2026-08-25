@@ -157,6 +157,18 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "assistant_package_import_step_abandoned",
   "assistant_package_import_warning",
   "assistant_package_import_completed",
+  // The composer's image-request handoff chip
+  // (docs/policy/image-generation.md §13). Three events answer the only
+  // questions aggregate data can answer about a suggestion: how often it is
+  // offered, how often it was right, and how often it was in the way.
+  //
+  // Content-free by schema. The two properties are closed enums -- the intent
+  // class the classifier returned and whether the viewer was locked -- and
+  // `analyticsPropertiesSchema` is strict, so there is no key the draft text,
+  // an attachment name or a file id could travel in.
+  "image_intent_suggestion_shown",
+  "image_intent_suggestion_accepted",
+  "image_intent_suggestion_dismissed",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -199,6 +211,22 @@ export const analyticsPropertiesSchema = z
     // free string: the two entry points are the whole question, and a free
     // field is where a title eventually gets put "just to see".
     assistant_profile_entry: z.enum(["settings", "chat"]).optional(),
+    // Which class the shared image-intent classifier returned. A closed enum
+    // rather than the draft it was derived from: the draft is the user's
+    // prompt, and no analytics event in this product carries one.
+    image_intent_class: z
+      .enum([
+        "raster_generation",
+        "text_heavy_visual",
+        "edit_or_reference",
+        "analysis",
+        "explicit_text_art",
+        "none",
+      ])
+      .optional(),
+    // Whether the chip was offered locked, and to which tier of viewer. Says
+    // what the requirement was, never who the viewer is.
+    image_intent_lock: z.enum(["none", "sign_in", "upgrade"]).optional(),
     method: z.string().trim().min(1).max(32).optional(),
     attachment_count: z.number().int().min(1).max(5).optional(),
     model_id: z.string().trim().min(1).max(80).optional(),

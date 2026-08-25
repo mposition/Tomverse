@@ -32,6 +32,9 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
+import { isImageGenerationEnabledCached } from "@/lib/appSettings";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
@@ -198,6 +201,12 @@ export async function POST(request: Request) {
         // §10: the conversation's bound profile version, read here so the
         // priced context is the one the chat route will build.
         let profileVersionId: string | null = null;
+        // Whether this turn could persist an assistant message, which is what
+        // the artifact tool needs to attach a file to. The chat route reads
+        // the assistant message id straight from its payload; preflight is one
+        // step earlier and has the pair the client always sends with it -- a
+        // signed-in caller and a real conversation row.
+        let canPersistTurn = false;
         // A guest's transcript lives in their browser, so there is no server
         // conversation to read history from -- and no ownership question to
         // answer. Signed-in callers keep the full check below unchanged.
@@ -263,6 +272,7 @@ export async function POST(request: Request) {
             history = conversation.messages.reverse();
             conversationMemoryMode = conversation.memoryMode;
             profileVersionId = conversation.assistantProfileVersionId;
+            canPersistTurn = true;
         }
 
         // §10: the priced context and the sent context must be the same one,
@@ -281,6 +291,16 @@ export async function POST(request: Request) {
             conversationMode: conversationMemoryMode,
         });
 
+        // The capability blocks the chat route will send, priced here so the
+        // quote and the request are the same request. Both blocks used to be
+        // absent from this estimate entirely, which made every comparison
+        // quote lower than what the chat route then built
+        // (`.github/audits/image-intent-auto-switch-2026-08-24.md` B-3).
+        const imageGenerationFlagEnabled = await isImageGenerationEnabledCached();
+        const planAllowsImages = Boolean(
+            access.plan && planAllowsImageGeneration(access.plan)
+        );
+
         const budgets = models.map((model) => {
             // Per model, because history is filtered per model: a comparison
             // turn charges each model for the branch it can actually see.
@@ -294,6 +314,39 @@ export async function POST(request: Request) {
                 // tokens too, and pricing one without the others reserves
                 // against a prompt that is not the one being sent.
                 .addText(turnContext.systemPrompt ?? "");
+            // Same builder the chat route uses, so the artifact and image
+            // capability blocks are counted identically on both sides. Per
+            // model, because the artifact tool's availability is per model.
+            // Derived exactly as the chat route derives them, in the same
+            // order: `nativeSearchForced` is a narrowing of
+            // `nativeSearchEnabled`, so computing it from the raw mode would
+            // report a forced search on a model whose search is not native --
+            // and the artifact tool is refused on precisely that combination.
+            const modelSearchCapability = getWebSearchCapability(model.id);
+            const modelNativeSearchEnabled =
+                payload.webSearchMode === "always" &&
+                modelSearchCapability.support === "native";
+            const turnSystemBlocks = buildChatTurnSystemBlocks({
+                modelId: model.id,
+                provider: model.provider,
+                isDeepResearchTurn: model.usageClass === "deep-research",
+                isAuthenticated: Boolean(session?.user?.id),
+                canPersist: canPersistTurn,
+                nativeSearchEnabled: modelNativeSearchEnabled,
+                nativeSearchForced:
+                    modelNativeSearchEnabled &&
+                    modelSearchCapability.canForceExecution,
+                turnAttachments: payload.attachments.map((attachment, index) => ({
+                    handle: `att_${index + 1}`,
+                    name: "",
+                    mediaType: attachment.mediaType,
+                    byteSize: attachment.size,
+                })),
+                promptText: payload.prompt,
+                imageGenerationFlagEnabled,
+                planAllowsImageGeneration: planAllowsImages,
+            });
+            estimate.addTokens(turnSystemBlocks.promptTokens);
             for (const message of history) {
                 const belongsToModel =
                     message.role === "user"
