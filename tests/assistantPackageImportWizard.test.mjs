@@ -625,7 +625,8 @@ test("a manifest missing any part of the draft cannot be resumed", () => {
     // version of the wizard created the import, and a partial read would
     // publish empty fields over somebody's assistant.
     for (const key of Object.keys(MANIFEST_DRAFT)) {
-        const { [key]: _dropped, ...rest } = MANIFEST_DRAFT;
+        const rest = { ...MANIFEST_DRAFT };
+        delete rest[key];
         assert.equal(
             resumableDraftFromManifest({ draft: rest }),
             null,
