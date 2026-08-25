@@ -1600,6 +1600,7 @@ export const zh = {
         countSummary: "配置 {count} 个，上限 {max} 个",
         atCapacity: "已达到配置数量上限。删除一个后才能新增。",
         create: "新建配置",
+        importPackage: "导入外部配置",
         createAction: "创建配置",
         empty: "你还没有配置。创建一个，给助手你自己的指令。",
         publishedStatus: "已发布 — 修订 {revision}，知识文件 {files} 个",
