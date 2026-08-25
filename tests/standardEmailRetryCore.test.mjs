@@ -81,8 +81,8 @@ test("every template definition agrees with the rule the database enforces", () 
   // a bad definition fails the build rather than the insert -- and so the two
   // cannot drift into disagreeing about what marketing means.
   const definitions = [
-    { key: "ok_marketing", classification: "marketing", purpose: "promotions", requiresUnsubscribe: true },
-    { key: "ok_transactional", classification: "transactional", purpose: null, requiresUnsubscribe: false },
+    { key: "ok_marketing", classification: "marketing", senderRole: "marketing", purpose: "promotions", requiresUnsubscribe: true },
+    { key: "ok_transactional", classification: "transactional", senderRole: "general", purpose: null, requiresUnsubscribe: false },
   ];
   for (const definition of definitions) {
     assert.deepEqual(templateDefinitionProblems(definition), []);
@@ -92,6 +92,7 @@ test("every template definition agrees with the rule the database enforces", () 
     templateDefinitionProblems({
       key: "bad",
       classification: "marketing",
+      senderRole: "marketing",
       purpose: "promotions",
       requiresUnsubscribe: false,
     })[0],
@@ -104,6 +105,7 @@ test("every template definition agrees with the rule the database enforces", () 
     templateDefinitionProblems({
       key: "bad",
       classification: "transactional",
+      senderRole: "general",
       purpose: null,
       requiresUnsubscribe: true,
     })[0],
@@ -114,6 +116,7 @@ test("every template definition agrees with the rule the database enforces", () 
     templateDefinitionProblems({
       key: "bad",
       classification: "legal",
+      senderRole: "security",
       purpose: "newsletter",
       requiresUnsubscribe: false,
     })[0],

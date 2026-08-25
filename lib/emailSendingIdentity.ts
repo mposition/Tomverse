@@ -2,10 +2,14 @@ import "server-only";
 
 import {
   parseFromAddress,
+  replyToForSenderRole,
+  resolveSenderIdentity,
   resolveSendingIdentity,
   sendingIdentityInputFrom,
   sendingIdentityReadiness,
   streamForClassification,
+  type ResolvedSenderIdentity,
+  type SenderRole,
   type SendingIdentityEnv,
   type SendingStream,
 } from "@/lib/emailSendingIdentityCore";
@@ -58,6 +62,44 @@ export const fromAddressForStream = (stream: SendingStream): string => {
 /** The From header for a template classification. */
 export const fromAddressForClassification = (classification: string) =>
   fromAddressForStream(streamForClassification(classification));
+
+/**
+ * The sender identity for one (stream, role) pair, reported rather than thrown.
+ *
+ * The shape the provider port uses. It returns because the port's contract is
+ * that it reports -- an operator alert whose identity threw would take the
+ * Slack and Discord legs of the same alert down with it
+ * (docs/policy/email-notifications.md §14.1a).
+ */
+export const senderIdentityFor = (
+  stream: SendingStream,
+  role: SenderRole,
+  environment: SendingIdentityEnv = process.env
+): ResolvedSenderIdentity => resolveSenderIdentity(stream, role, environment);
+
+/** The From header for one (stream, role) pair, throwing on a refusal. */
+export const fromAddressForRole = (
+  stream: SendingStream,
+  role: SenderRole
+): string => {
+  const resolved = resolveSenderIdentity(stream, role, process.env);
+  if (!resolved.ok) {
+    throw new SendingIdentityError(resolved.code, resolved.message);
+  }
+  return resolved.from;
+};
+
+/**
+ * Where a reply to this role should go, or null for no Reply-To header.
+ *
+ * Null on every deployment that has not set `EMAIL_BUSINESS_CONTACT_EMAIL`,
+ * which is the behaviour that existed before roles: no Reply-To at all. See
+ * `replyToForSenderRole` for why a mailbox is not invented to fill it.
+ */
+export const replyToForRole = (
+  role: SenderRole,
+  environment: SendingIdentityEnv = process.env
+) => replyToForSenderRole(role, environment);
 
 /** What a health check or an operator screen should say about the configuration. */
 export const getSendingIdentityReadiness = (

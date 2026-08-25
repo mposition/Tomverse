@@ -6,6 +6,8 @@
  * never a value -- so nothing here can leak a secret into a rendered page.
  */
 
+import { providerApiKeyFor } from "@/lib/emailProviderPortCore";
+
 export type AdminEnvCheck = {
   name: string;
   configured: boolean;
@@ -103,8 +105,13 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
     },
     {
       name: "RESEND_API_KEY",
-      configured: isConfigured(process.env.RESEND_API_KEY),
-      description: "Required for Tomverse transactional email.",
+      // Resolved rather than read: `TRANSACTIONAL_RESEND_API_KEY` also
+      // configures this, and a screen that said "not configured" while mail
+      // was sending would send somebody to fix a variable that is not the one
+      // in use.
+      configured: isConfigured(providerApiKeyFor("transactional", process.env) ?? undefined),
+      description:
+        "Required for Tomverse transactional email. TRANSACTIONAL_RESEND_API_KEY satisfies it too.",
     },
     {
       name: "SUPPORT_NOTIFICATION_EMAIL",
@@ -245,7 +252,7 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         isConfigured(process.env.SLACK_WEBHOOK_URL) ||
         isConfigured(process.env.OPS_ALERT_DISCORD_WEBHOOK_URL) ||
         isConfigured(process.env.DISCORD_WEBHOOK_URL) ||
-        (isConfigured(process.env.RESEND_API_KEY) &&
+        (isConfigured(providerApiKeyFor("transactional", process.env) ?? undefined) &&
           (isConfigured(process.env.OPS_ALERT_EMAIL) ||
             isConfigured(process.env.ADMIN_ALERT_EMAIL))),
       description:

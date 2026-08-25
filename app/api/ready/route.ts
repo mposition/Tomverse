@@ -9,6 +9,7 @@ import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
+import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
@@ -112,11 +113,21 @@ const readinessResponse = async (head = false) => {
   // broken is an error either way.
   const unsubscribeKeyring = unsubscribeKeyringReadiness();
   const emailUnsubscribeKeyring = unsubscribeKeyring.ready;
+  // Who the footer says sent the message. Conditional in the same shape as the
+  // unsubscribe keyring, and for the same reason: an unset value drops the
+  // whole footer rather than one line, but transactional mail is deliberately
+  // not held for it, so gating readiness here would refuse today's deployment
+  // over a gap that has been there since the footer shipped. It becomes an
+  // error once MARKETING_EMAIL_FROM is set, because from then on an incomplete
+  // identity means every marketing send is refused while this endpoint answers
+  // yes -- the exact state EM-10 describes for the keyring.
+  const businessIdentity = businessIdentityReadiness();
+  const emailBusinessIdentity = businessIdentity.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
     imageProviderBudget && emailSendingIdentity && emailSnapshotKeyring &&
-    emailUnsubscribeKeyring;
+    emailUnsubscribeKeyring && emailBusinessIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -239,6 +250,32 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-business-identity",
+        healthy: emailBusinessIdentity,
+        code: "EMAIL_BUSINESS_IDENTITY_NOT_READY",
+        title: "Email footers cannot say who sent the message",
+        error:
+          businessIdentity.errors.length > 0
+            ? businessIdentity.errors.map((problem) => problem.message).join(" | ")
+            : businessIdentity.warnings.length > 0
+              ? businessIdentity.warnings.map((problem) => problem.message).join(" | ")
+              : "The footer's business identity is configured.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // The variables to set, not just the blocks that are empty: an
+          // operator told which footer block is missing still has to work out
+          // which variable sets it.
+          setInstead:
+            [...businessIdentity.errors, ...businessIdentity.warnings]
+              .flatMap((problem) => problem.variables)
+              .join(",") || "none",
+          marketingConfigured: businessIdentity.required,
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "email-unsubscribe-keyring",
         healthy: emailUnsubscribeKeyring,
         code: "EMAIL_UNSUBSCRIBE_KEYRING_NOT_READY",
@@ -303,6 +340,7 @@ const readinessResponse = async (head = false) => {
         emailSendingIdentity,
         emailSnapshotKeyring,
         emailUnsubscribeKeyring,
+        emailBusinessIdentity,
       },
       traceId,
     },

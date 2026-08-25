@@ -1,5 +1,8 @@
 import { readSvixHeaders, verifySvixSignature } from "@/lib/svixSignature";
-import type { SendingStream } from "@/lib/emailSendingIdentityCore";
+import type {
+  SenderRole,
+  SendingStream,
+} from "@/lib/emailSendingIdentityCore";
 
 /**
  * The seam between this system and whoever puts the bytes on the wire.
@@ -69,6 +72,20 @@ export type SendOptions = {
    */
   stream: SendingStream;
   /**
+   * Who the recipient sees this message as being from.
+   *
+   * Required for the same reason `stream` is, and it is a *different* reason.
+   * A missing stream would send a promotion down the login-code domain; a
+   * missing role would send a refund decision as whoever the general identity
+   * is. Neither has a safe default, so neither has one -- and because this is
+   * required rather than optional, a send path added later cannot compile
+   * without deciding (docs/policy/email-notifications.md §14.1a).
+   *
+   * The pair is checked, not just each half: a role that does not belong to
+   * this stream is refused before the wire.
+   */
+  senderRole: SenderRole;
+  /**
    * Makes a send exactly-once at the provider for 24 hours.
    *
    * Resend records the key against the request it accepted, so a retry that
@@ -98,6 +115,8 @@ export type ProviderSendResult =
        * sender it *thinks* was used is the shape of that failure.
        */
       from: string;
+      /** The role that From was resolved for, for the structured log. */
+      senderRole: SenderRole;
     }
   | {
       ok: false;
@@ -192,6 +211,41 @@ export const EMAIL_PROVIDER_API_KEY_ENV_KEYS = {
 
 export type ProviderEnv = Readonly<Record<string, string | undefined>>;
 
+/**
+ * A provider key read straight off an environment, found in source text.
+ *
+ * Pure, so `npm run check:sending-identity` can fail on one. The rule is the
+ * same as the sender's and exists for the same reason: `providerApiKeyFor()`
+ * prefers `TRANSACTIONAL_RESEND_API_KEY` and falls back to `RESEND_API_KEY`, so
+ * a file reading the second name directly reports on -- or sends with -- a
+ * credential the deployment may not be using. Four files did, and the domain
+ * report's 401 was indistinguishable from a fact about the domains.
+ *
+ * Matches a property read (`process.env.RESEND_API_KEY`, `env["RESEND_API_KEY"]`)
+ * and not a bare mention, because the admin environment screen legitimately
+ * prints the variable's *name* as a label and its description says the
+ * stream-specific name satisfies it too. The dot has to be adjacent for the
+ * same reason: a sentence ending in one is prose, not an access.
+ */
+const DIRECT_PROVIDER_KEY_READ =
+  /(?:\.|\[\s*["'`])(?:TRANSACTIONAL_|MARKETING_)?RESEND_API_KEY\b/g;
+
+export type DirectProviderKeyRead = { line: number; text: string };
+
+export const directProviderKeyReads = (
+  source: string
+): DirectProviderKeyRead[] => {
+  const found: DirectProviderKeyRead[] = [];
+  source.split("\n").forEach((line, index) => {
+    // A comment explaining the rule is not a violation of it.
+    const code = line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
+    for (const match of code.matchAll(DIRECT_PROVIDER_KEY_READ)) {
+      found.push({ line: index + 1, text: match[0].trim() });
+    }
+  });
+  return found;
+};
+
 export const providerApiKeyFor = (
   stream: SendingStream,
   env: ProviderEnv
@@ -240,6 +294,15 @@ export const postToResend = async (
   config: {
     apiKey: string;
     from: string;
+    senderRole: SenderRole;
+    /**
+     * Where a reply goes, when it is not the From address.
+     *
+     * Omitted entirely when absent rather than sent empty: `reply_to: null`
+     * and no `reply_to` are the same to Resend today, and only one of them
+     * stays true if that changes.
+     */
+    replyTo?: string;
     idempotencyKey?: string;
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
@@ -260,6 +323,7 @@ export const postToResend = async (
       },
       body: JSON.stringify({
         from: config.from,
+        ...(config.replyTo ? { reply_to: config.replyTo } : {}),
         to: message.to,
         subject: message.subject,
         html: message.html,
@@ -295,6 +359,7 @@ export const postToResend = async (
     ok: true,
     providerMessageId: typeof body?.id === "string" ? body.id : null,
     from: config.from,
+    senderRole: config.senderRole,
   };
 };
 

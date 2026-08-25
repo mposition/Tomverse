@@ -1,6 +1,7 @@
 import "server-only";
 
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { providerApiKeyFor } from "@/lib/emailProviderPortCore";
 import { stripeKeyLiveMode } from "@/lib/stripeMode";
 
 const strongSecret = (value: string | undefined) =>
@@ -65,7 +66,10 @@ export const getSecurityEnvironmentStatus = () => {
     configured(process.env.SLACK_WEBHOOK_URL) ||
     configured(process.env.OPS_ALERT_DISCORD_WEBHOOK_URL) ||
     configured(process.env.DISCORD_WEBHOOK_URL) ||
-    (configured(process.env.RESEND_API_KEY) &&
+    // Through the resolver: a deployment that sets only the stream-specific
+    // name has a working email channel, and reading RESEND_API_KEY alone would
+    // report it as having none.
+    (configured(providerApiKeyFor("transactional", process.env) ?? undefined) &&
       (configured(process.env.OPS_ALERT_EMAIL) ||
         configured(process.env.ADMIN_ALERT_EMAIL)));
   const databaseUrls = [

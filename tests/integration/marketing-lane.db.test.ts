@@ -47,6 +47,7 @@ type SentBody = {
   html: string;
   text: string;
   from?: string;
+  reply_to?: string;
   /** Resend carries message headers in the request body, not as HTTP headers. */
   headers?: Record<string, string>;
 };
@@ -362,6 +363,71 @@ test("a transactional message keeps its own stream and carries no unsubscribe", 
   assert.match(String(calls[0].body.from), /mail\.tomverse\.app/);
   assert.equal(calls[0].body.headers, undefined);
   assert.doesNotMatch(calls[0].body.subject, /광고/);
+  // `account_welcome` is the one template that keeps the historical identity,
+  // and the lane reads the role from the template definition rather than from
+  // the caller (docs/policy/email-notifications.md §14.1a).
+  assert.equal(calls[0].body.from, process.env.TRANSACTIONAL_EMAIL_FROM);
+  // A reply goes to the published contact address, not to the sending
+  // identity. `IDENTITY_ENV` sets it, which is the state this asserts.
+  assert.equal(calls[0].body.reply_to, IDENTITY_ENV.EMAIL_BUSINESS_CONTACT_EMAIL);
+});
+
+test("a billing notice arrives from the billing sender", async () => {
+  // The role travels with the template through the queue: nothing about this
+  // call site names a sender, and the drain re-reads the definition by the
+  // stored template key on every attempt.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber();
+  await enqueueStandardEmail({
+    templateKey: "billing_welcome",
+    emailAddress: user.email,
+    userId: user.id,
+    language: "en",
+    payload: { plan: "pro", billingInterval: "month", periodEnd: null },
+  });
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].body.from,
+    "Tomverse Billing <billing@mail.tomverse.app>"
+  );
+  assert.equal(calls[0].body.reply_to, IDENTITY_ENV.EMAIL_BUSINESS_CONTACT_EMAIL);
+});
+
+test("the operator report arrives from the operations sender, with no reply-to", async () => {
+  // An alert already lands in a mailbox the team reads; a reply about an
+  // incident does not belong in the support queue.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber();
+  await enqueueStandardEmail({
+    templateKey: "ops_model_lifecycle_daily",
+    emailAddress: user.email,
+    userId: user.id,
+    language: "en",
+    payload: {
+      localDate: "2026-08-24",
+      generatedLabel: "generated",
+      workQueueUrl: "https://tomverse.app/admin/work-queue",
+      providers: [],
+      workItems: [],
+      lifecycleWarnings: [],
+      missing: [],
+      registry: { ran: false, disabled: [], restored: [], held: [] },
+    },
+  });
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].body.from,
+    "Tomverse Operations <alerts@mail.tomverse.app>"
+  );
+  assert.equal(calls[0].body.reply_to, undefined);
 });
 
 // EM-10: a missing unsubscribe key is reported as itself.

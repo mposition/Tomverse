@@ -35,13 +35,19 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import { directProviderKeyReads } from "../lib/emailProviderPortCore.ts";
 import {
+  SENDER_ROLES,
+  SENDER_ROLE_SPECS,
   SENDING_IDENTITY_ENV_KEYS,
   hardCodedSenders,
   parseFromAddress,
+  resolveSenderIdentity,
   resolveSendingIdentity,
+  sendCallsMissingSenderRole,
   sendingIdentityInputFrom,
   sendingIdentityProblems,
+  sendingSubdomainAddresses,
 } from "../lib/emailSendingIdentityCore.ts";
 
 const runtimeMode = process.argv.includes("--env");
@@ -62,6 +68,45 @@ const RETIRED_ENV_NAMES = ["ADMIN_ALERT_FROM", "SECURITY_AUDIT_EMAIL_FROM"];
  * decide what an unconfigured deployment sends as.
  */
 const FROM_LITERAL_ALLOWED = new Set(["lib/emailSendingIdentityCore.ts"]);
+
+/**
+ * Files allowed to name an address on a sending subdomain.
+ *
+ * The same one, and for the same reason. This is the rule that catches a role
+ * bypass: roles gave the tree five more addresses to hard-code and none of them
+ * has to sit on a `from` line to work -- a plain constant holding the alerts
+ * mailbox on the sending subdomain reads as ordinary code. What separates a
+ * sender from every other address here is the domain: `tomverse.app` carries
+ * the published support address and the fixtures, while its sending subdomains
+ * exist only to send.
+ */
+const SENDING_SUBDOMAIN_ALLOWED = new Set(["lib/emailSendingIdentityCore.ts"]);
+
+/**
+ * Files whose send calls do not name a role literally, on purpose.
+ *
+ * One: `lib/email.ts` defines both entry points, and `sendTransactionalEmail`
+ * forwards its own already-typed input to `deliverEmailOnce` with a spread. The
+ * role is present there and TypeScript is what proves it -- `SendEmailInput`
+ * requires it, so a caller that omitted it never compiled. Restating it would
+ * be a second place for the two to disagree.
+ */
+const SEND_ROLE_LITERAL_EXEMPT = new Set(["lib/email.ts"]);
+
+/**
+ * Files allowed to name a provider API key variable in a read position.
+ *
+ * One: `lib/emailProviderPortCore.ts` owns the precedence table and this rule.
+ *
+ * The rule is the sender rule applied to the credential. `providerApiKeyFor()`
+ * prefers `TRANSACTIONAL_RESEND_API_KEY` and falls back to `RESEND_API_KEY`, so
+ * a file reading the second name directly reports on -- or sends with -- a key
+ * the deployment may not be using. Four files did: the domain report, the
+ * report script, the security-environment check and the admin environment
+ * screen. The first of those turned a permission error on one credential into
+ * a screen that looked like a finding about the sending domains.
+ */
+const PROVIDER_KEY_READ_ALLOWED = new Set(["lib/emailProviderPortCore.ts"]);
 
 /** Files that legitimately mention the retired names: this check, and the record. */
 const RETIRED_NAME_ALLOWED = new Set([
@@ -87,7 +132,32 @@ if (!runtimeMode) {
     if (!FROM_LITERAL_ALLOWED.has(file)) {
       for (const found of hardCodedSenders(source)) {
         problems.push(
-          `${file}:${found.line}: hard-codes a sender (${found.literal}). Resolve it with resolveSendingIdentity() instead.`
+          `${file}:${found.line}: hard-codes a sender (${found.literal}). Resolve it with resolveSenderIdentity() instead.`
+        );
+      }
+    }
+    if (!SENDING_SUBDOMAIN_ALLOWED.has(file)) {
+      for (const found of sendingSubdomainAddresses(source)) {
+        problems.push(
+          `${file}:${found.line}: names an address on a sending subdomain (${found.literal}). ` +
+            "Sending subdomains exist only to send, so ask resolveSenderIdentity() for the role instead."
+        );
+      }
+    }
+    for (const found of SEND_ROLE_LITERAL_EXEMPT.has(file)
+      ? []
+      : sendCallsMissingSenderRole(source)) {
+      problems.push(
+        `${file}:${found.line}: calls ${found.call}() without naming a senderRole. ` +
+          "Every message says who it is from, and the value it would take by omission " +
+          "is whoever the general identity is."
+      );
+    }
+    if (!PROVIDER_KEY_READ_ALLOWED.has(file)) {
+      for (const found of directProviderKeyReads(source)) {
+        problems.push(
+          `${file}:${found.line}: reads a provider API key directly (${found.text}). ` +
+            "Resolve it with providerApiKeyFor(stream, env) so it uses the key the deployment sends with."
         );
       }
     }
@@ -123,7 +193,9 @@ if (!runtimeMode) {
   }
 
   console.log(
-    "Sending identity check passed: no hard-coded sender and no retired sender variable."
+    "Sending identity check passed: no hard-coded sender, no address on a " +
+      "sending subdomain, no send without a role, no direct provider key read, " +
+      "and no retired sender variable."
   );
   process.exit(0);
 }
@@ -144,6 +216,36 @@ console.log(
 
 if (!transactional.ok) {
   console.error(`\n  ${transactional.message}`);
+  process.exit(1);
+}
+
+// Every role, not only the stream. `/api/ready` checks these in the deployment;
+// this is the same check where GitHub Actions can see it, because the runner's
+// `TRANSACTIONAL_EMAIL_FROM` is a repository variable the deployment knows
+// nothing about and vice versa. A role that refuses here is a security report
+// that will not send.
+console.log("\n  Senders by role\n");
+const roleFailures = [];
+for (const role of SENDER_ROLES) {
+  const stream = SENDER_ROLE_SPECS[role].stream;
+  const resolved = resolveSenderIdentity(stream, role, process.env);
+  const label = `  ${role.padEnd(11)} ${stream.padEnd(14)}`;
+  if (resolved.ok) {
+    console.log(`${label}${resolved.from}`);
+    continue;
+  }
+  // Marketing has no identity on any deployment today and is production-
+  // disabled until the suppression-boundary decision (A18). Reported, not
+  // failed -- failing here would stop the daily security report to announce a
+  // capability nobody has turned on.
+  const fatal = stream !== "marketing";
+  console.log(`${label}${fatal ? "REFUSED" : "not configured"} (${resolved.code})`);
+  if (fatal) roleFailures.push(`${role}: ${resolved.message}`);
+}
+
+if (roleFailures.length > 0) {
+  console.error("\n  Transactional senders that do not resolve:\n");
+  for (const failure of roleFailures) console.error(`    - ${failure}`);
   process.exit(1);
 }
 

@@ -24,6 +24,7 @@ Sending domains**.
 | region | 둘 다 `ap-northeast-1` |
 | DMARC | **제공자 레코드 집합에 없음.** zone에서 따로 확인해야 합니다 |
 | transactional From | `hello@mail.tomverse.app` (2026-08-21 전환) |
+| 발신자 역할 | 6개, 같은 도메인 위. 3a절 |
 | marketing From | 미설정 |
 | DNS | Cloudflare |
 
@@ -350,6 +351,18 @@ Resend API 키에는 권한 등급이 있고, **sending 전용 키는 `POST /ema
 Admin → Overview → **Send test email**. 메일이 오면 sending 전용 키이고, 실패하면
 키가 무효입니다.
 
+화면과 보고서가 401일 때 이 문장을 함께 출력하므로, 매번 이 문서를 찾지 않아도
+됩니다. **2026-08-24 확인: production에서 sending 전용 키로 확정**됐습니다
+(테스트 발송 도착).
+
+**어느 키를 읽는지도 2026-08-24에 통일했습니다.** 도메인 조회는
+`process.env.RESEND_API_KEY`를 직접 읽고 있었고, 실제 발송은
+`providerApiKeyFor()`가 `TRANSACTIONAL_RESEND_API_KEY`를 먼저 봅니다. 두 이름이
+서로 다른 키를 담은 배포에서는 **보내는 키와 조회하는 키가 달라지고**, 그때의 401은
+도메인에 대한 사실처럼 보입니다. 네 곳(도메인 조회, 이 보고서 script,
+security environment 검사, Admin 환경 화면)이 모두 resolver를 지나도록 바꿨고,
+`npm run check:sending-identity`가 직접 읽기를 정적으로 막습니다.
+
 `/api/ready`의 `emailSendingIdentity`로는 구분되지 않습니다. **그 검사는 API 키를
 아예 보지 않습니다** — 주소 문자열의 파싱과 스트림 간 도메인 분리만 판정하므로,
 401 키를 가진 배포도 readiness를 통과합니다.
@@ -575,6 +588,73 @@ SPF(`v=spf1 include:_spf.purelymail.com ~all`)와 MX(`mailserver.purelymail.com`
 그래서 두 레코드를 나눠 둔 것이기도 합니다.
 
 ---
+
+## 3a. 발신자 역할과 필요한 mailbox
+
+계약: `docs/policy/email-notifications.md` §14.1a.
+
+한 도메인 위에 발신자가 여섯입니다. **DNS는 바뀌지 않습니다** — 역할 주소는
+`TRANSACTIONAL_EMAIL_FROM`이 인증한 도메인 위에 있고, 그 도메인의 DKIM·SPF·DMARC가
+이미 모든 local-part를 덮습니다. 새 서브도메인도, 새 환경변수도 없습니다.
+
+현재 값(`TRANSACTIONAL_EMAIL_FROM=Tomverse Review <hello@mail.tomverse.app>`)
+기준으로 해석되는 주소입니다.
+
+| 역할 | From |
+|---|---|
+| `general` | `Tomverse Review <hello@mail.tomverse.app>` (설정값 그대로) |
+| `security` | `Tomverse Security <security@mail.tomverse.app>` |
+| `billing` | `Tomverse Billing <billing@mail.tomverse.app>` |
+| `support` | `Tomverse Support <support@mail.tomverse.app>` |
+| `operations` | `Tomverse Operations <alerts@mail.tomverse.app>` |
+| `marketing` | `MARKETING_EMAIL_FROM` (미설정, 발송 거부) |
+
+확인 명령:
+
+```
+npm run check:sending-identity -- --env
+```
+
+### 3a.1 발송 전용 주소이고 수신 사서함이 아닙니다
+
+**이 다섯 주소로 오는 답장은 아무도 읽지 않습니다.** 저장소에도 운영 문서에도
+`security@`·`billing@`·`support@`·`alerts@` **on `mail.tomverse.app`** 이 메일을
+받는다는 근거가 없고, 없는 사서함을 있다고 가정하지 않습니다.
+
+그래서 Reply-To를 씁니다. 대상은 이미 문서화된 수신 주소 하나뿐입니다.
+
+| 변수 | 문서 | 역할 |
+|---|---|---|
+| `EMAIL_BUSINESS_CONTACT_EMAIL` | `docs/ops/email-business-identity.md` | footer의 연락처이자 Reply-To |
+
+- 설정돼 있으면 `general`·`security`·`billing`·`support` 메일에 `Reply-To`가
+  붙습니다.
+- **설정돼 있지 않으면 헤더를 붙이지 않습니다.** 역할 도입 이전과 동일한 동작이며,
+  아무도 읽지 않는 Reply-To는 없는 것보다 나쁩니다 — 답장이 접수된 뒤 사라집니다.
+- `operations`와 `marketing`에는 붙지 않습니다. 운영 알림은 이미 팀이 읽는
+  주소로 가고, 장애에 대한 답장이 고객지원 큐로 들어가면 아무에게도 도움이
+  되지 않습니다.
+- `no-reply@`는 도입하지 않습니다.
+
+**운영자가 확인할 것.** `support@tomverse.app`은 `/support`와 모든 언어의 법적
+고지가 공개하는 주소이고 `EMAIL_BUSINESS_CONTACT_EMAIL`의 문서화된 값이지만,
+**production 환경변수에 실제로 설정돼 있는지는 이 저장소가 알 수 없습니다.**
+설정돼 있지 않으면 footer의 `contact_email` 블록도 이미 빠져 있다는 뜻이므로
+(`email_jurisdiction_footer_degraded` 경고), 그쪽부터 확인합니다.
+
+### 3a.2 답장을 실제로 받고 싶다면
+
+역할 주소 자체를 수신 가능하게 만드는 것은 **이 저장소 밖의 작업**이고, 지금은
+필요하지 않습니다. 필요해지면 순서는 이렇습니다.
+
+1. `mail.tomverse.app`에 MX를 두거나(현재 없음), Resend의 inbound를 켜거나,
+   각 주소를 `support@tomverse.app`으로 forwarding 합니다.
+2. 실제 수신을 확인합니다 — 설정했다는 것과 도착한다는 것은 다른 사실입니다.
+3. 그 뒤에 `docs/policy/email-notifications.md` §14.1a의 Reply-To 대상을
+   바꿉니다.
+
+**1번을 하기 전에는 하지 않습니다.** MX 없는 도메인의 주소로 답장을 유도하면
+답장이 bounce하고, bounce는 발신 도메인 평판에 얹힙니다.
 
 ## 4. marketing 도메인 (`news.tomverse.app`)
 

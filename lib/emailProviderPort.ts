@@ -1,9 +1,6 @@
 import "server-only";
 
-import {
-  SendingIdentityError,
-  fromAddressForStream,
-} from "@/lib/emailSendingIdentity";
+import { replyToForRole, senderIdentityFor } from "@/lib/emailSendingIdentity";
 import {
   postToResend,
   providerApiKeyFor,
@@ -41,25 +38,21 @@ export class ResendProvider implements EmailProviderPort {
     }
 
     // Resolved before the request rather than inside the body, so a stream with
-    // no domain of its own is reported as itself instead of throwing out of a
-    // method whose whole contract is that it reports rather than throws.
-    let from: string;
-    try {
-      from = fromAddressForStream(options.stream);
-    } catch (error) {
-      return {
-        ok: false,
-        status: null,
-        identityRefusal:
-          error instanceof SendingIdentityError
-            ? error.code
-            : "IDENTITY_UNRESOLVED",
-      };
+    // no domain of its own -- or a role that does not belong to it -- is
+    // reported as itself instead of throwing out of a method whose whole
+    // contract is that it reports rather than throws.
+    const identity = senderIdentityFor(options.stream, options.senderRole);
+    if (!identity.ok) {
+      return { ok: false, status: null, identityRefusal: identity.code };
     }
+
+    const replyTo = replyToForRole(options.senderRole);
 
     return postToResend(message, {
       apiKey,
-      from,
+      from: identity.from,
+      senderRole: identity.role,
+      ...(replyTo ? { replyTo } : {}),
       ...(options.idempotencyKey
         ? { idempotencyKey: options.idempotencyKey }
         : {}),

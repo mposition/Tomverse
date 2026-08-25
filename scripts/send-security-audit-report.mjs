@@ -1,7 +1,8 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { resolveSendingIdentity } from "../lib/emailSendingIdentityCore.ts";
+import { providerApiKeyFor } from "../lib/emailProviderPortCore.ts";
+import { resolveSenderIdentity } from "../lib/emailSendingIdentityCore.ts";
 
 const CHECKS = [
   ["Secret history scan", "SECURITY_AUDIT_GITLEAKS_STATUS"],
@@ -223,11 +224,17 @@ const sendSlack = async () => {
 
 const sendEmails = async () => {
   const recipients = parseRecipients(process.env.SECURITY_AUDIT_EMAILS);
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+  // The resolver, so this script uses whichever key the deployment sends with
+  // rather than only the generic name.
+  const apiKey = providerApiKeyFor("transactional", process.env);
   if (recipients.length === 0) {
     throw new Error("Security audit email recipient is not configured.");
   }
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured for security reports.");
+  if (!apiKey) {
+    throw new Error(
+      "No provider API key is configured for security reports (RESEND_API_KEY or TRANSACTIONAL_RESEND_API_KEY)."
+    );
+  }
   // The same resolver every other sender uses, reached through the pure core
   // rather than lib/emailSendingIdentity.ts: that module is `server-only` and
   // this script runs in GitHub Actions, outside Next.js. A second copy of the
@@ -237,7 +244,13 @@ const sendEmails = async () => {
   // Note that `TRANSACTIONAL_EMAIL_FROM` here comes from a GitHub Actions
   // variable, not from the deployment's environment: `/api/ready` cannot see
   // this process, which is why the workflow runs its own preflight.
-  const identity = resolveSendingIdentity("transactional", process.env);
+  //
+  // `operations`, not the general identity: this is an operator alert, and it
+  // resolves to the same `alerts@` mailbox the in-app incident path sends from.
+  // The domain still comes from `TRANSACTIONAL_EMAIL_FROM` -- the role derives
+  // it rather than naming one, so this script cannot end up on a domain the
+  // deployment has moved off (docs/policy/email-notifications.md §14.1a).
+  const identity = resolveSenderIdentity("transactional", "operations", process.env);
   if (!identity.ok) {
     throw new Error(`Security audit sender unusable: ${identity.code}`);
   }
