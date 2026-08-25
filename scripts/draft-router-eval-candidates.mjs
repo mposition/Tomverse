@@ -30,6 +30,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
+import { formatShortCommitSha, validateCommitSha } from "../lib/buildInfo.ts";
+
 import {
   DRAFT_TEMPLATE_VERSION,
   draftInstruction,
@@ -210,11 +212,21 @@ if (prompts.length === 0) {
   die(`\nNo prompts found in the reply:\n${String(content).slice(0, 600)}`);
 }
 
-let generatorCommit = null;
-try {
-  generatorCommit = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-} catch {
-  // Not a git checkout, or git is unavailable. Left null rather than guessed.
+// The deployed image has no git binary -- the first Wave 1 run printed
+// "git: not found" and recorded a null commit for all 28 items. So the
+// deployment's own commit is asked for first, the way lib/buildInfo.ts
+// already resolves it everywhere else in the product, and the local checkout
+// is only the fallback for running this from a workstation.
+let generatorCommit =
+  formatShortCommitSha(validateCommitSha(process.env.RAILWAY_GIT_COMMIT_SHA)) ?? null;
+if (!generatorCommit) {
+  try {
+    generatorCommit = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    // No git binary and no deployment variable. Left null rather than
+    // guessed: a wrong commit is worse than an absent one, because it looks
+    // checkable.
+  }
 }
 
 const language =
@@ -272,6 +284,12 @@ console.log(
   `  requested ${model.apiModel}; the provider answered as ` +
     `${modelVersion ?? "(no model field in the response — recorded as null, not guessed)"}`
 );
+if (!generatorCommit) {
+  console.log(
+    "  generatorCommit is null: no RAILWAY_GIT_COMMIT_SHA and no git binary. The batch\n" +
+      "  cannot be tied to the code that drafted it, which a reviewer may weigh."
+  );
+}
 if (dropped > 0) console.log(`  ${dropped} malformed entr(ies) dropped rather than padded.`);
 if (drafted.length < count) {
   console.log(
