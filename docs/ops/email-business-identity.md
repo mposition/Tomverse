@@ -30,6 +30,44 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 `EMAIL_BUSINESS_CONTACT_EMAIL`은 **발신 주소가 아닙니다.** 수신자가 이 메일에
 관해 연락할 수 있는 주소이고, `TRANSACTIONAL_EMAIL_FROM`과 같을 이유가 없습니다.
 
+이 값은 **Reply-To의 대상이기도 합니다**(`docs/policy/email-notifications.md`
+§14.1a). 역할 주소(`security@`·`billing@` 등)는 발송 전용이고 수신한다는 근거가
+없으므로, 답장은 여기로만 향합니다. 설정돼 있지 않으면 헤더를 붙이지 않습니다.
+
+## 값이 하나만 없어도 footer 전체가 사라집니다
+
+**빠진 줄 하나가 아니라 footer 전부입니다.** `renderJurisdictionFooter()`는 이름
+붙은 block 중 **하나라도** 값이 없으면 `{ ok: false }`를 반환하고,
+`composeJurisdictionalMessage()`가 footer를 통째로 버립니다. 그래서
+`EMAIL_BUSINESS_CONTACT_EMAIL` 하나가 비어 있으면 사업자 정보가 **모든 메일에서**
+빠집니다.
+
+어느 profile이 어느 값을 요구하는지는 `JURISDICTION_PROFILE_SEED`가 정합니다.
+
+| 값 | 요구하는 profile |
+|---|---|
+| `legal_name` · `postal_address` · `contact_email` | **전부** (`ZZ` 포함) |
+| `business_registration` · `mail_order_registration` | `KR` |
+| `abn` | `AU` |
+
+## 확인 방법
+
+`/api/ready`의 `emailBusinessIdentity`가 이 여섯 값을 검사합니다
+(`businessIdentityReadiness()`).
+
+- `MARKETING_EMAIL_FROM`이 없으면 **경고**입니다. transactional 메일은 이것 때문에
+  붙잡지 않으므로(아래 표), 여기서 readiness를 막으면 footer가 없던 내내 통과하던
+  production을 계획 안내를 위해 내리는 일이 됩니다.
+- `MARKETING_EMAIL_FROM`이 설정되면 **오류**로 바뀝니다. 그 순간부터 marketing은
+  전부 거부되는데 `/api/ready`는 계속 통과한다고 답하게 되기 때문입니다 — EM-10이
+  unsubscribe 키에 대해 기술한 것과 같은 상태입니다.
+- 관할권 전용 값(`KR`·`AU`)은 marketing이 켜져도 **경고로 남습니다.** 이 배포에
+  그 관할권 수신자가 있는지는 환경변수가 가진 사실이 아닙니다.
+
+빠진 값은 **한 번에 전부** 보고합니다 — 하나 고치고 다시 알게 되는 방식이면 세 번
+배포해야 세 가지를 압니다. 발송 시점의 신호는 여전히
+`email_jurisdiction_footer_degraded` 구조화 경고입니다.
+
 ## 설정하지 않으면
 
 **기본값은 없습니다.** placeholder를 넣으면 renderer를 통과하고 모든 검사를

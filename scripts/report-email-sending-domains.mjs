@@ -26,6 +26,7 @@
 // but unverified is a problem depends on whether somebody is mid-migration,
 // and `/api/ready` is where the blocking version of this check lives.
 
+import { providerApiKeyFor } from "../lib/emailProviderPortCore.ts";
 import {
   domainReportFindings,
   parseProviderDomains,
@@ -48,12 +49,16 @@ const configured = {
 };
 
 const readProviderDomains = async () => {
-  const apiKey = process.env.RESEND_API_KEY;
+  // The same resolver the sender uses, for the same reason the identity above
+  // goes through one: `providerApiKeyFor()` prefers
+  // `TRANSACTIONAL_RESEND_API_KEY`, and reading `RESEND_API_KEY` here would
+  // report on a credential the deployment may not be sending with.
+  const apiKey = providerApiKeyFor("transactional", process.env);
   if (!apiKey) {
     return {
       domains: null,
       error:
-        "RESEND_API_KEY is not set, so the provider's domain status could not be read. The configured addresses below are all this run can report.",
+        "No provider API key is set for the transactional stream, so the provider's domain status could not be read. The configured addresses below are all this run can report.",
     };
   }
   let response;
@@ -70,7 +75,12 @@ const readProviderDomains = async () => {
   if (!response.ok) {
     return {
       domains: null,
-      error: `The provider answered ${response.status} when listing domains.`,
+      // See lib/emailSendingDomains.ts: 401 is what a sending-only key answers
+      // here while sending normally (docs/ops/email-sending-domains.md §3.5.2).
+      error:
+        response.status === 401
+          ? "The provider answered 401 when listing domains. A sending-only API key gets this and still sends mail normally, so this is expected unless a test send also fails."
+          : `The provider answered ${response.status} when listing domains.`,
     };
   }
   return { domains: parseProviderDomains(await response.json()), error: null };
