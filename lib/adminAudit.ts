@@ -4,7 +4,11 @@ import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
-import { computeAdminAuditEntryHash } from "@/lib/adminAuditIntegrityCore";
+import {
+  computeAdminAuditEntryHash,
+  parseAdminAuditKeyring,
+  secretForEpoch,
+} from "@/lib/adminAuditIntegrityCore";
 
 type AuditInput = {
   session: Session;
@@ -51,8 +55,12 @@ export async function writeAdminAuditLog({
   const normalizedSummary = safeSummary(summary);
   const ipAddress = request ? getTrustedClientIp(request) : null;
   const userAgent = request?.headers.get("user-agent")?.slice(0, 500) || null;
-  const integritySecret =
-    process.env.ADMIN_AUDIT_INTEGRITY_KEY || process.env.NEXTAUTH_SECRET;
+  // The epoch this entry will be signed under, and the secret for it. A
+  // deployment with no keyring signs under the legacy key and records no epoch,
+  // which is what NULL means for every row written before epochs existed.
+  const keyring = parseAdminAuditKeyring(process.env);
+  const keyEpoch = keyring.activeEpoch;
+  const integritySecret = secretForEpoch(keyring, keyEpoch);
 
   const write = async (client: Prisma.TransactionClient) => {
     await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
@@ -99,6 +107,9 @@ export async function writeAdminAuditLog({
         userAgent,
         previousHash,
         entryHash,
+        // Recorded beside the hash it explains, so verification never has to
+        // guess which key to try. NULL is the pre-epoch key, not "unknown".
+        keyEpoch: entryHash ? keyEpoch : null,
         createdAt,
       },
     });

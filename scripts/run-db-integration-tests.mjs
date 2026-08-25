@@ -232,6 +232,10 @@ run(
     // the marketing sending stream.
     "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
+    // The audit chain across a key rotation. The property is what happens to
+    // rows signed under a key that is no longer current, which exists only as a
+    // relationship between stored rows and the environment.
+    "tests/integration/admin-audit-key-epoch.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.

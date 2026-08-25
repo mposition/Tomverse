@@ -1806,6 +1806,21 @@ model AdminAuditLog {
   userAgent    String?
   previousHash String?
   entryHash    String?  @unique
+
+  /// Which signing key epoch produced `entryHash`.
+  ///
+  /// Contract: docs/ops/admin-audit-key-epochs.md.
+  ///
+  /// Nullable, and NULL is not "unknown" -- it means the row was signed under
+  /// the pre-epoch key, which is what every row written before the keyring
+  /// existed was. Verification resolves NULL to `ADMIN_AUDIT_INTEGRITY_KEY`
+  /// (or its `NEXTAUTH_SECRET` fallback) and a named epoch to that epoch's
+  /// entry in `ADMIN_AUDIT_INTEGRITY_KEYS`.
+  ///
+  /// Never back-filled. Writing a new epoch label onto an old row would claim
+  /// it was signed by a key that did not sign it, and re-hashing it under a
+  /// current key is rewriting the audit log to make its own checker happy.
+  keyEpoch String?
   createdAt    DateTime @default(now())
 
   actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
@@ -1814,6 +1829,7 @@ model AdminAuditLog {
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
   @@index([createdAt, entryHash])
+  @@index([keyEpoch])
 }
 
 model AdminActionApproval {

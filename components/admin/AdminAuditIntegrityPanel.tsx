@@ -8,6 +8,17 @@ type Integrity = {
   configured: boolean;
   valid: boolean;
   checkedEntries: number;
+  /** Checked against the key that signed them. */
+  verifiedEntries?: number;
+  /**
+   * Counted, and deliberately not checked: their epoch's key is not in this
+   * environment. Beside `valid` rather than folded into it, so a reader is
+   * never told the whole chain checked out when part of it could not be read.
+   */
+  unverifiableEntries?: number;
+  byEpoch?: Array<{ epoch: string | null; entries: number; verifiable: boolean }>;
+  /** `ADMIN_AUDIT_INTEGRITY_KEY_VERSION` names an epoch the keyring lacks. */
+  pinnedEpochMissing?: boolean;
   firstInvalidId: string | null;
   /** The oldest hash-chained entry, whatever the verdict. */
   firstCheckedId: string | null;
@@ -115,6 +126,49 @@ export function AdminAuditIntegrityPanel() {
               ) : null}
             </div>
           </div>
+
+          {/* Entries whose signing key this environment does not hold. Said
+              plainly and apart from the verdict: before epochs, a rotation
+              turned the whole check red, and a permanently red check is one
+              nobody reads. Rendered under either verdict, because a chain can
+              be entirely unbroken and still hold entries nobody can read. */}
+          {integrity.unverifiableEntries ? (
+            <p
+              data-testid="admin-audit-integrity-unverifiable"
+              className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100"
+            >
+              {integrity.unverifiableEntries.toLocaleString()} entr
+              {integrity.unverifiableEntries === 1 ? "y" : "ies"} could not be
+              checked, because the key for their epoch is not in this
+              environment. That is not a failure and not a pass — nothing about
+              them has been read.
+              {integrity.byEpoch?.some((item) => !item.verifiable) ? (
+                <>
+                  {" "}
+                  Missing:{" "}
+                  <span className="font-mono">
+                    {integrity.byEpoch
+                      .filter((item) => !item.verifiable)
+                      .map((item) => item.epoch ?? "pre-epoch")
+                      .join(", ")}
+                  </span>
+                  .
+                </>
+              ) : null}{" "}
+              See docs/ops/admin-audit-key-epochs.md.
+            </p>
+          ) : null}
+
+          {integrity.pinnedEpochMissing ? (
+            <p
+              data-testid="admin-audit-integrity-pinned-missing"
+              className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100"
+            >
+              ADMIN_AUDIT_INTEGRITY_KEY_VERSION names an epoch that
+              ADMIN_AUDIT_INTEGRITY_KEYS does not carry, so new entries are being
+              signed under the pre-epoch key instead. Fix this before rotating.
+            </p>
+          ) : null}
 
           {integrity.firstInvalidId && !entry ? (
             <button
