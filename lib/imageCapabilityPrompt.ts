@@ -111,7 +111,9 @@ export const IMAGE_CAPABILITY_CORE = [
  *
  * `available` names the workspace for photographs and illustrations and tells
  * the model *not* to send a text-dense chart there. That sentence is the
- * deferral of the text-heavy case (report §5.2) carried into the prompt: the
+ * deferral of the text-heavy case
+ * (.github/audits/image-intent-auto-switch-2026-08-24.md §5.2)
+ * carried into the prompt: the
  * wording is "outside that path's current scope", a product-scope statement,
  * never a claim about how well the models render text -- which nobody has
  * measured.
