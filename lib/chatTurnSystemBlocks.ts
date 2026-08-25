@@ -18,7 +18,9 @@
  *
  * ## What is deliberately not here
  *
- * The §9.1 context block (memory, profile, knowledge) stays where it is. Both
+ * The context block (memory, profile, knowledge) of
+ * docs/policy/external-conversation-import-and-memory.md §9.1
+ * stays where it is. Both
  * routes already build it from `buildChatTurnContext` and both already price
  * its text; folding it in would move a settled thing for no gain.
  *
