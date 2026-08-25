@@ -51,11 +51,14 @@ test("every case is exhaustive and every memory states its disposition", () => {
     }
 });
 
-test("every case names a frozen case that exists, one to one", () => {
+test("a reworked case names a frozen case that exists, one to one", () => {
+    // A rewritten case declares no source, because it copies nothing. That is
+    // the honest shape: claiming a source it does not reproduce would make
+    // the traceability say something false.
     const frozen = new Set(MEMORY_EVAL_CASES.map((testCase) => testCase.id));
     const claimed = new Set();
     for (const testCase of BATCH_101_DURABLE_KO) {
-        assert.ok(testCase.sourceCaseId, `${testCase.id} names no source`);
+        if (!testCase.sourceCaseId) continue;
         assert.ok(
             frozen.has(testCase.sourceCaseId),
             `${testCase.id} names ${testCase.sourceCaseId}, which is not in the frozen set`
@@ -77,6 +80,7 @@ test("the conversations are copied from their source unchanged", () => {
         MEMORY_EVAL_CASES.map((testCase) => [testCase.id, testCase])
     );
     for (const testCase of BATCH_101_DURABLE_KO) {
+        if (!testCase.sourceCaseId) continue;
         const source = frozen.get(testCase.sourceCaseId);
         const text = (entry) =>
             entry.conversations
@@ -102,6 +106,50 @@ test("the two health cases are the ones held for review", () => {
     assert.deepEqual(held, ["succ-durable-ko-1", "succ-durable-ko-12"]);
 });
 
+test("exactly one case is rewritten rather than reworked", () => {
+    // `cand-durable-ko-2` carried four independently valid memories, which no
+    // exhaustive gold can hold. Named rather than counted, so a second
+    // rewrite has to be argued for rather than slipped in.
+    const rewritten = BATCH_101_DURABLE_KO.filter(
+        (testCase) => !testCase.sourceCaseId
+    ).map((testCase) => testCase.id);
+    assert.deepEqual(rewritten, ["succ-durable-ko-2"]);
+
+    // And it really is new text: no frozen case has this conversation.
+    const rewrittenCase = BATCH_101_DURABLE_KO.find(
+        (testCase) => testCase.id === "succ-durable-ko-2"
+    );
+    const text = (entry) =>
+        entry.conversations
+            .flatMap((conversation) =>
+                conversation.messages.map((message) => message.content)
+            )
+            .join("\n");
+    const frozenText = new Set(MEMORY_EVAL_CASES.map(text));
+    assert.equal(frozenText.has(text(rewrittenCase)), false);
+});
+
+test("the third-party health gold requires the user-centred form", () => {
+    // "사용자의 어머니가 휠체어를 사용한다" is a third party's medical
+    // profile. It satisfies 휠체어 and not 계단, so requiring both is what
+    // makes the normalised constraint the only answer that scores.
+    const testCase = BATCH_101_DURABLE_KO.find(
+        (entry) => entry.id === "succ-durable-ko-12"
+    );
+    assert.deepEqual(testCase.expected[0].mustInclude, ["휠체어", "계단"]);
+    assert.equal(testCase.expected[0].expectedDisposition, "sensitive_review");
+
+    const profileOnly = "사용자의 어머니가 휠체어를 사용한다";
+    const normalised =
+        "사용자는 휠체어 이용 가족과 이동할 때 계단 없는 경로가 필요하다";
+    const matches = (statement) =>
+        testCase.expected[0].mustInclude.every((token) =>
+            statement.includes(token)
+        );
+    assert.equal(matches(profileOnly), false);
+    assert.equal(matches(normalised), true);
+});
+
 test("the re-labelled kinds are the ones the batch record names", () => {
     // The kind taxonomy moves a case off a generic kind only where a dedicated one
     // applies. Pinning the pairs keeps a later edit from re-labelling a case
@@ -111,6 +159,7 @@ test("the re-labelled kinds are the ones the batch record names", () => {
     );
     const changed = [];
     for (const testCase of BATCH_101_DURABLE_KO) {
+        if (!testCase.sourceCaseId) continue;
         const before = frozen
             .get(testCase.sourceCaseId)
             .expected.map((expected) => expected.kind)
@@ -119,7 +168,6 @@ test("the re-labelled kinds are the ones the batch record names", () => {
         if (before !== after) changed.push(`${testCase.id}: ${before} -> ${after}`);
     }
     assert.deepEqual(changed, [
-        "succ-durable-ko-2: occupation -> occupation,recurring_context",
         "succ-durable-ko-6: expertise -> expertise,explanation_depth",
         "succ-durable-ko-16: expertise -> expertise,explanation_depth",
         "succ-durable-ko-17: preference -> formatting",

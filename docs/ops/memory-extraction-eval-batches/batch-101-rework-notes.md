@@ -53,11 +53,10 @@
 없습니다. 즉 `communication_style`은 style 쪽의 **일반 kind**로 기능하며, 답변
 순서에는 전용 kind가 있습니다.
 
-**확인이 필요한 점.** 이 해석 — `communication_style`을 style의 generic으로
-보는 것 — 은 규칙 문언에서 유도한 것이지 명시된 것이 아닙니다. **다르게 보신다면
-`communication_style`을 유지하고, 대신 규칙 1의 전용 목록에
-`communication_style`을 추가해야 합니다.** 이 batch만의 문제가 아니라 400건 전체에
-같은 판단이 걸립니다.
+**[확정 · 2026-08-25]** `communication_style`은 **style 영역의 residual generic
+kind**입니다. 전용 목록에 추가하지 않고, 어느 전용 kind에도 정확히 들어가지 않는
+상호작용 방식에만 씁니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9.1,
+`docs/ops/memory-extraction-eval-dataset.md` §4.1.2). 따라서 `structure` 유지.
 
 ### 3·4. `succ-durable-ko-6`, `succ-durable-ko-16` — expected 1개 → 2개
 
@@ -74,26 +73,32 @@
 `explanation_depth`를 옳게 뽑았을 때 그것이 false positive가 되면 안 됩니다.
 probe의 `durable-en-1`이 정확히 그 방식으로 precision을 잃었습니다.
 
-### 5. `succ-durable-ko-2` — expected 1개 → 2개, 그리고 **빠뜨린 것 하나**
+### 5. `succ-durable-ko-2` — **반려 후 재작성** [확정 · 2026-08-25]
 
-> 제가 종합병원 간호사인데 3교대라 수면 패턴이 계속 깨져요. 야간 근무 끝나고 낮에 자려고 하면 두세 시간 만에 깨고, 다시 잠들기가 어렵습니다. 커피는 근무 시작할 때 한 잔만 마셔요.
+원본 대화에는 독립적으로 유효한 memory가 **최소 넷** 있었습니다.
 
-`occupation`(간호사)에 `recurring_context`(3교대)를 더했습니다 — 언제 연락이
-닿는지를 정하는 별개의 사실입니다.
+- 간호사라는 직업
+- 반복되는 3교대
+- 지속되는 수면 문제
+- 근무 시작 시 커피를 마시는 습관
 
-**gold에 넣지 않은 것이 둘 있고, 이것이 이 batch에서 가장 약한 지점입니다.**
+수면과 커피를 빼고 `exhaustive`라고 부르는 것은 방어할 수 없고, 넷을 다 넣으면
+`docs/ops/memory-extraction-eval-dataset.md` §4.1의 "한 케이스 1~3개" 원칙을
+어깁니다. **라벨로 해결할 수 없는 케이스**이므로 반려하고 atomic하게 다시
+썼습니다.
 
-- **수면 문제.** "수면 패턴이 계속 깨져요 / 다시 잠들기가 어렵습니다"는 지속적
-  이지만 진단이 아니고, 교대 근무의 결과를 서술한 것에 가깝습니다. 저장 대상이
-  라면 kind는 `constraint`일 것이고 .github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §3.1에 따라
-  **`sensitive_review`**여야 합니다.
-- **커피 습관.** "근무 시작할 때 한 잔만"은 부수적이라고 보고 뺐습니다.
+> 저 종합병원 간호사예요. 3교대라 근무 시간이 주마다 바뀝니다.
 
-**둘 다 `exhaustive` 선언 아래에서는 결정이 곧 채점입니다.** 넣지 않기로 하면
-모델이 뽑았을 때 precision이 깎이고, 넣기로 하면 안 뽑았을 때 recall이 깎입니다.
-**이 케이스는 대화가 풍부해서 exhaustive gold를 쓰기 어려운 유형**이므로, 검수에서
-반려하고 더 atomic한 케이스로 재작성하는 선택지도 있습니다
-(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §4.2가 범주 ①을 가능한 한 atomic하게 쓰라고 한 이유입니다).
+gold는 `occupation`(간호사)과 `recurring_context`(3교대) 둘입니다.
+
+**이 케이스는 `sourceCaseId`를 선언하지 않습니다.** 아무것도 복사하지 않았으므로
+원본을 댈 수 없고, 대지 않는 것이 정직한 형태입니다. `cand-durable-ko-2`는 후속
+dataset에서 재작업되지 않고 대체됩니다.
+
+**나머지 375건에 같은 규칙이 걸립니다**(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9.2).
+
+> 유효 후보가 3개를 넘거나 gold 포함 여부에 합리적인 이견이 생기는 대화는
+> 라벨로 해결하지 않고 atomic case로 재작성한다.
 
 ## `sensitive_review`로 보낸 2건
 
@@ -102,29 +107,42 @@ probe의 `durable-en-1`이 정확히 그 방식으로 precision을 잃었습니�
 .github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §3.1 그대로입니다.
 추출은 되고, 자동 승인은 안 됩니다.
 
-### `succ-durable-ko-12` — 어머니의 휠체어 사용
+### `succ-durable-ko-12` — 어머니의 휠체어 사용 [확정 · 2026-08-25]
 
 > 어머니가 휠체어를 쓰셔서 계단 있는 곳은 아예 못 갑니다.
 
-**제3자의 건강·장애 정보입니다.** .github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §3.2의
-의미 범위는 "진단·질환"을 계정
-소유자로 한정하지 않고, 민감 lane의 요점은 **누구의 건강이든 자동 승인되지 않는
-것**이라고 읽었습니다.
+category와 `sensitive_review`를 유지하되 **gold 문장을 정규화하도록 토큰을
+바꿨습니다**: `["휠체어"]` → `["휠체어", "계단"]`.
 
-**확인이 필요한 점.** 개정안은 제3자 건강 정보를 따로 다루지 않습니다. 다르게
-보신다면 .github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §3.2의
-의미 범위에 제3자 취급을 한 줄 넣어야 하고, 이 역시 400건 전체에
-걸립니다 — 가족의 건강을 언급하는 케이스가 이 하나만은 아닐 것입니다.
+제3자 건강 정보는 `bulk_safe`가 될 수 없고, **동시에 제3자의 의료 프로필 자체를
+저장해서도 안 됩니다**(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9.3).
+
+| | statement | 이 gold에 매칭되는가 |
+|---|---|---|
+| 부적절 | 사용자의 어머니가 휠체어를 사용한다. | 아니오 (계단 없음) |
+| 적절 | 사용자는 휠체어 이용 가족과 이동할 때 계단 없는 경로가 필요하다. | 예 |
+
+토큰 하나였을 때는 앞 문장도 정답이 됐습니다. 두 토큰이 **사용자 중심 제약을
+정답의 조건으로 만듭니다.** `tests/memoryEvalSuccessorBatch101.test.mjs`가 두
+문장을 각각 대조합니다.
+
+**v3 프롬프트에도 한 줄이 필요합니다** — 건강 정보에서 파생된 최소화된
+statement 역시 sensitive이며, 정규화했다는 이유로 민감도가 내려가지 않습니다.
 
 ## 검수자에게 남기는 요청
 
-시트의 5건 표본 판정과 batch 채택 결정이 정식 절차입니다. 그와 별개로 **위
-질문 셋에 답해 주시면 나머지 375건의 작성 기준이 정해집니다.**
+시트의 5건 표본 판정과 batch 채택 결정이 남아 있습니다.
 
-1. `communication_style`은 style의 generic인가, 전용 kind인가 (2번)
-2. `succ-durable-ko-2`처럼 풍부한 대화를 exhaustive로 쓸 것인가, 반려 후 atomic
-   하게 재작성할 것인가 (5번)
-3. 제3자의 건강 정보를 `sensitive_review`로 볼 것인가 (`succ-durable-ko-12`)
+**작성 기준 세 건은 2026-08-25에 확정됐고 이 batch에 이미 반영돼 있습니다**
+(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9).
 
-셋 다 이 batch에서는 제 판단으로 채워 두었고, 다르게 정해지면 이 25건과 이후
-375건에 같은 규칙으로 다시 적용합니다.
+| 항목 | 결정 | 이 batch |
+|---|---|---|
+| `communication_style` | style 영역의 residual generic kind | `succ-durable-ko-21`은 `structure` 유지 |
+| 풍부한 대화 | 조건부 허용, 현재 사례는 atomic 재작성 | `succ-durable-ko-2` 반려 후 재작성 |
+| 제3자 건강 정보 | 최소화한 사용자 중심 맥락만, 언제나 sensitive | `succ-durable-ko-12` 유지 + gold 정규화 |
+
+셋 다 batch 메모가 아니라 정책과 작성 지침에 들어갔습니다 —
+.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9,
+`docs/ops/memory-extraction-eval-dataset.md` §4.1.2·§4.1.3. 나머지 375건은 그
+문서들을 근거로 씁니다.

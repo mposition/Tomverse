@@ -187,6 +187,55 @@ expected: [
 version-pinned로 읽으며, **decision-grade·동결·pair 승인에는 쓸 수 없습니다**
 (fail-closed). 일반 loader에는 `bulk_safe` fallback이 없습니다.
 
+### 4.1.2 kind 판정 순서와 재작성 기준 — [개정 · 2026-08-25 @mposition]
+
+승인 후 보완(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9)에서 확정된
+두 규칙입니다. 후속 `datasetVersion`의 범주 ① 작성에 그대로 적용합니다.
+
+**kind는 세 단계로 고릅니다.**
+
+1. **style 전용 kind** — `tone` · `verbosity` · `structure` · `formatting` ·
+   `language` · `explanation_depth` · `citation_preference` · `code_style`
+2. **`communication_style`** — 어느 전용 kind에도 정확히 들어가지 않는
+   상호작용 방식. style 영역의 **residual generic**이며 1단계 목록에 넣지
+   않습니다.
+3. **`preference`** — 답변 방식이 아닌 일반 선호만.
+
+"결론 먼저"는 `structure`, "표로 비교"는 `formatting`, "짧게"는 `verbosity`,
+"질문을 던져 가며 같이 정리해 달라"는 `communication_style`입니다.
+
+**대화가 풍부하면 라벨이 아니라 케이스를 고칩니다.**
+
+`exhaustive`를 유지하려면 세 조건을 **모두** 충족해야 합니다 — 독립적으로
+유효한 memory가 3개 이하, 합리적인 검수자가 추가 durable fact를 쉽게 지적할 수
+없음, 모든 gold의 kind와 disposition이 명확함.
+
+> 유효 후보가 3개를 넘거나 gold 포함 여부에 합리적인 이견이 생기는 대화는
+> **라벨로 해결하지 않고 atomic case로 재작성한다.**
+
+빼고 `exhaustive`라고 부르면 모델이 옳게 뽑았을 때 precision이 깎이고, 넣으면
+§4.1의 "한 케이스 1~3개" 원칙을 어깁니다. 둘 다 피하는 길은 대화를 줄이는
+것뿐입니다.
+
+### 4.1.3 제3자 건강 정보 — [개정 · 2026-08-25 @mposition]
+
+가족 등 제3자의 건강·장애가 언급된 대화는 다섯 조건을 모두 충족할 때만
+gold에 넣습니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9.3).
+
+1. 사용자가 직접 말한 사실
+2. 향후 사용자 지원에 지속적으로 필요한 맥락
+3. 사용자 중심의 `constraint` 또는 `relationship`으로 정규화
+4. 필요한 최소한의 제3자 정보만 포함
+5. 언제나 `expectedDisposition: "sensitive_review"`
+
+`mustInclude`는 **정규화된 형태를 요구하도록** 고릅니다. "사용자의 어머니가
+휠체어를 사용한다"는 제3자 의료 프로필이고, "휠체어 이용 가족과 이동할 때
+계단 없는 경로가 필요하다"가 사용자 중심 제약입니다. 토큰이 앞 문장만으로도
+충족된다면 그 gold는 제3자 프로필을 정답으로 인정하는 것입니다.
+
+가족의 진단·치료가 사용자 요청과 무관하게 언급됐을 뿐이라면 **추출하지
+않습니다.**
+
 ### 4.2 범주 ②③④의 `expected`
 
 **항상 빈 배열입니다.** 이 범주에서 채점되는 것은 "무엇이 나왔는가"가 아니라
