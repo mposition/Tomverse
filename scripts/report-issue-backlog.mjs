@@ -137,6 +137,35 @@ const collectCommitsByIssue = () => {
   return byIssue;
 };
 
+/**
+ * Which models a pricing verification has actually been done for, on one branch.
+ *
+ * Read from the audit directory's own filenames rather than from a hand-written
+ * list, because the record *is* the deliverable: #244 produced
+ * `pricing-verification-claude-fable-5-2026-08-04.md` and that file is what
+ * distinguishes a checked model from one that merely has a profile. A list here
+ * would be a second place to forget.
+ *
+ * The date suffix is discarded. It says when the check happened, and this only
+ * needs to know that it did.
+ */
+const AUDIT_DIR = ".github/audits";
+const VERIFICATION_PREFIX = "pricing-verification-";
+
+const pricingVerificationRecords = (ref) => {
+  const listing = git("ls-tree", "--name-only", `${ref}:${AUDIT_DIR}`);
+  const ids = new Set();
+  if (!listing) return ids;
+  for (const name of listing.split("\n")) {
+    if (!name.startsWith(VERIFICATION_PREFIX) || !name.endsWith(".md")) continue;
+    const middle = name.slice(VERIFICATION_PREFIX.length, -".md".length);
+    // Trailing `-YYYY-MM-DD`. Stripped by shape rather than by splitting on
+    // "-", which every model id also contains.
+    ids.add(middle.replace(/-\d{4}-\d{2}-\d{2}$/, "").toLowerCase());
+  }
+  return ids;
+};
+
 /** One branch's content, read from git rather than from the working tree. */
 const branchState = (branch) => {
   const ref = refByBranch.get(branch);
@@ -149,7 +178,11 @@ const branchState = (branch) => {
   const pricing = pricingSource
     ? parseModelPricingSource(pricingSource)
     : { pricedModelIds: new Set(), pendingPriceModelIds: new Set() };
-  return { readFile, ...pricing };
+  return {
+    readFile,
+    ...pricing,
+    pricingVerificationRecords: pricingVerificationRecords(ref),
+  };
 };
 
 const states = new Map(
