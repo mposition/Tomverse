@@ -25,6 +25,7 @@ import {
 import {
   compareTokenLimits,
   formatTokenLimitRow,
+  STATE_COLUMN_WIDTH,
   tokenLimitFindings,
 } from "./report-model-token-limits-core.mjs";
 
@@ -62,6 +63,14 @@ if (databaseUrl) {
         updatedById: true,
         updatedByEmail: true,
         updatedAt: true,
+        // Read only so a deliberately withdrawn row can be told apart from an
+        // unexplained one; see HISTORICAL_WITHDRAWALS in the core module. The
+        // token comparison does not use any of these.
+        publiclyListed: true,
+        status: true,
+        replacementModelId: true,
+        operationalReason: true,
+        userVisibleNote: true,
       },
       orderBy: [{ provider: "asc" }, { sortOrder: "asc" }],
     });
@@ -158,7 +167,7 @@ if (json) {
   console.log(`Model output token limits (${source})\n  ${note}\n`);
   console.log(
     `  ${"model".padEnd(32)}${"catalogue".padEnd(18)}${"stored".padEnd(18)}` +
-      `${"state".padEnd(22)}last written by`
+      `${"state".padEnd(STATE_COLUMN_WIDTH)}last written by`
   );
   console.log(
     `  ${"".padEnd(32)}${"max/reservation".padEnd(18)}${"max/reservation".padEnd(18)}`
@@ -235,6 +244,21 @@ if (json) {
     );
   }
 
+  if (findings.expectedHistoricalWithdrawals.length > 0) {
+    console.log(
+      `\n  ${findings.expectedHistoricalWithdrawals.length} row(s) withdrawn on purpose and left resolvable.\n` +
+        "  Absent from the catalogue, but every lifecycle column still reads exactly as the migration\n" +
+        "  that withdrew it wrote them, so this is a closed decision rather than an open question.\n" +
+        "  Listed because the row is still there: deleting one is a separate decision, and any edit\n" +
+        "  to it moves the row back into the unknown section below."
+    );
+    for (const entry of findings.expectedHistoricalWithdrawals) {
+      console.log(
+        `    ${entry.modelId}: served ${entry.storedMaxOutputTokens}/${entry.storedReservationOutputTokens}`
+      );
+    }
+  }
+
   if (findings.unknownToCode.length > 0) {
     console.log(
       `\n  ${findings.unknownToCode.length} row(s) the catalogue does not know about.\n` +
@@ -247,10 +271,15 @@ if (json) {
     }
   }
 
+  // A withdrawn row counts here too. It answers under a stored cap with no
+  // profile behind it, so printing "every registry row answers under the
+  // limits the pricing profile states" three lines under it would contradict
+  // the section above.
   if (
     findings.diverged.length === 0 &&
     findings.missingInDb.length === 0 &&
-    findings.unknownToCode.length === 0
+    findings.unknownToCode.length === 0 &&
+    findings.expectedHistoricalWithdrawals.length === 0
   ) {
     console.log(
       "\n  Every registry row answers under the limits the pricing profile states."
