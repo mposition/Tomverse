@@ -535,49 +535,40 @@ test("every cap-only model has its stranded cap lifted by the bootstrap", async 
   }
 });
 
-// The reservation-only scope, end to end. This is the one narrow scope that
+// The reservation-only scope, end to end. This is the one narrow entry that
 // moves a money figure, so what it must NOT touch is worth pinning as firmly
 // as what it does: docs/policy/credit-and-cost-limits.md section 4 approved
-// "premium 4,096, reasoning 6,144", and nothing else about the row was
-// approved with it.
+// the held figures, and nothing else about those rows was approved with them.
 //
-// `staleReservation` is the figure the production row actually held, and the
-// two sources differ. gpt-5-5-thinking held today's premium class fallback.
-// gpt-5-5 and gemini-3-1-pro held 2,048 -- what BILLING_DEFAULTS.premium in
-// lib/models.ts read on 2026-07-17, before lib/modelPricing.ts existed.
-const RESERVATION_ONLY_EXPECTATIONS: Record<
-  string,
-  { staleReservation: number; approved: number }
-> = {
-  "gpt-5-5-thinking": { staleReservation: 4_096, approved: 6_144 },
-  "gpt-5-5": { staleReservation: 2_048, approved: 4_096 },
-  "gemini-3-1-pro": { staleReservation: 2_048, approved: 4_096 },
-};
-
+// Every model in the scope is exercised, not just the first. The scope grew on
+// 2026-08-25 and this test still named one model, which is the shape of test
+// that reports a widened money path as green.
 test("the reservation-only scope raises the held figure and leaves the cap and credits alone", async () => {
-  assert.deepEqual(
-    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS].sort(),
-    Object.keys(RESERVATION_ONLY_EXPECTATIONS).sort()
+  const ids = [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS];
+  // Frozen deliberately. Adding a model here moves what an account is
+  // guaranteed, so it is an edit that must be made twice -- once in the scope
+  // and once in the test that says which rows the scope covers.
+  assert.deepEqual(ids, ["gpt-5-5-thinking", "gpt-5-5", "gemini-3-1-pro"]);
+
+  const originals = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: ids } },
+  });
+  assert.equal(
+    originals.length,
+    ids.length,
+    "all reservation-only models must be seeded"
   );
 
-  const originals = new Map<
-    string,
-    Awaited<ReturnType<typeof prisma.modelRegistryEntry.findUniqueOrThrow>>
-  >();
-  for (const id of Object.keys(RESERVATION_ONLY_EXPECTATIONS)) {
-    originals.set(
-      id,
-      await prisma.modelRegistryEntry.findUniqueOrThrow({ where: { id } })
-    );
-  }
-
-  // Every row is put into its stranded shape before a single reconciliation
-  // runs, so the pass has to correct all three rather than one at a time.
-  for (const [id, expectation] of Object.entries(RESERVATION_ONLY_EXPECTATIONS)) {
+  for (const original of originals) {
     await prisma.modelRegistryEntry.update({
-      where: { id },
+      where: { id: original.id },
       data: {
-        reservationOutputTokens: expectation.staleReservation,
+        // Below every approved figure in the scope, so a reconciliation that
+        // did nothing cannot pass by coincidence. The real fossils differ per
+        // row -- 4,096 on the premium fallback, 2,048 from the 2026-07-17
+        // seed -- and a shared sentinel is what lets one assertion cover all
+        // of them.
+        reservationOutputTokens: 1_024,
         // Deliberately wrong, and deliberately left wrong: this scope carries
         // the reservation only, so an operator's cap survives it.
         maxOutputTokens: 7_000,
@@ -590,36 +581,52 @@ test("the reservation-only scope raises the held figure and leaves the cap and c
 
   await reconcileStaticCatalogMetadata();
 
-  for (const [id, expectation] of Object.entries(RESERVATION_ONLY_EXPECTATIONS)) {
+  for (const original of originals) {
+    const expected = STATIC_RUNTIME_MODELS.find(
+      (model) => model.id === original.id
+    );
+    assert.ok(expected, original.id);
     const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
-      where: { id },
+      where: { id: original.id },
     });
-    assert.equal(row.reservationOutputTokens, expectation.approved, id);
+    assert.equal(
+      row.reservationOutputTokens,
+      expected.reservationOutputTokens,
+      original.id
+    );
+    assert.ok(row.reservationOutputTokens! > 1_024, original.id);
     assert.equal(
       row.maxOutputTokens,
       7_000,
-      `${id}: the cap is outside this scope, so even a wrong one is left for a human`
+      "the cap is outside this scope, so even a wrong one is left for a human"
     );
-    assert.equal(row.creditWeight, 31, id);
-    assert.equal(Number(row.inputUsdPerMillionTokens), 11.5, id);
-    assert.equal(row.updatedByEmail, "ops@tomverse.app", id);
-    assert.equal(row.enabled, originals.get(id)!.enabled, id);
-    assert.equal(row.status, originals.get(id)!.status, id);
+    assert.equal(row.creditWeight, 31, original.id);
+    assert.equal(Number(row.inputUsdPerMillionTokens), 11.5, original.id);
+    assert.equal(row.updatedByEmail, "ops@tomverse.app", original.id);
+    assert.equal(row.enabled, original.enabled, original.id);
+    assert.equal(row.status, original.status, original.id);
   }
 
   // Idempotent.
   await reconcileStaticCatalogMetadata();
-  for (const [id, expectation] of Object.entries(RESERVATION_ONLY_EXPECTATIONS)) {
+  for (const original of originals) {
+    const expected = STATIC_RUNTIME_MODELS.find(
+      (model) => model.id === original.id
+    );
     const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
-      where: { id },
+      where: { id: original.id },
     });
-    assert.equal(again.reservationOutputTokens, expectation.approved, id);
-    assert.equal(again.creditWeight, 31, id);
+    assert.equal(
+      again.reservationOutputTokens,
+      expected!.reservationOutputTokens,
+      original.id
+    );
+    assert.equal(again.creditWeight, 31, original.id);
   }
 
-  for (const [id, original] of originals) {
+  for (const original of originals) {
     await prisma.modelRegistryEntry.update({
-      where: { id },
+      where: { id: original.id },
       data: {
         maxOutputTokens: original.maxOutputTokens,
         reservationOutputTokens: original.reservationOutputTokens,
