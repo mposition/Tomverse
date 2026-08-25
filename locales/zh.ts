@@ -400,6 +400,7 @@ export const zh = {
         toolsMemoryInheritOnDescription: "当前默认为使用，更改账户设置后此对话会跟随",
         toolsAssistant: "助手",
         toolsAssistantNone: "不使用助手",
+        toolsAssistantRemoved: "此对话使用的助手已被删除",
         toolsAssistantNoneDescription: "仅由模型作答",
         toolsAssistantRevision: "修订 {revision}",
         toolsAssistantRevisionInUse: "正在使用修订 {revision} · 最新为 {latest}",
