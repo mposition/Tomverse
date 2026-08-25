@@ -377,6 +377,14 @@ migration은 **코드로 명시적으로 작성**하며 관용적 파싱으로 �
 - **UI 문구가 주장임을 드러냅니다.** "Agent Skill에서 가져옴"이 아니라
   **"Agent Skill에서 가져왔다고 표시됨"**입니다.
 - 시각은 **서버 것만** 씁니다.
+- **`declaredSourceUrl`은 host만 화면에 나갑니다**
+  (`lib/assistantPackageProvenance.ts`). 경로·query는 토큰을 실을 수 있고 이
+  URL은 패키지가 쓴 것입니다. http(s)가 아닌 scheme은 아무것도 보여 주지
+  않습니다 — `javascript:`는 출처가 아니며, "어디에서 왔는가" 아래에 그리면
+  출처인 것처럼 제시됩니다. **링크로 만들지 않습니다**: §7이 저장된 source URL을
+  다시 읽는 것을 금지하고, 링크는 정확히 그것을 부릅니다.
+- 표시 대상은 **게시된 import뿐**입니다. staging 중인 것은 아직 revision을
+  만들지 않았고, 여기에 그리면 승인하지 않은 가져오기를 알리는 것이 됩니다.
 
 ## 7. 원격 source 자동 업데이트 금지
 
@@ -485,9 +493,47 @@ field 하나를 더하는 것은 이 요구를 만족하지 않습니다 — 일
 활성화 순서는 **제어 배포 → 그 제어로 켜기 → 성공 감사 로그 확인**입니다. 로그를
 확인하기 전까지는 켜진 것으로 보고하지 않습니다.
 
+구현된 자리는 다음과 같습니다.
+
+| | |
+|---|---|
+| 서버 함수 | `setAssistantPackageImportEnabled()` (`lib/appSettings.ts`). 켜기와 rollback이 같은 호출이고 인자만 다릅니다 |
+| 권한 | `ops:write` + `hasRecentAdminAuthentication()` — `/api/admin/**`의 다른 고위험 동작과 같은 창을 같은 helper로 읽습니다 |
+| 기록 | `AdminAuditLog` 한 행. `metadata`에 `before`·`after`, `summary`에 실행자가 쓴 근거. **쓰기와 감사 행이 한 transaction**이므로 감사 기록에 실패하면 변경도 함께 되돌아갑니다 |
+| 경로 | `POST /api/admin/assistant-package-import` (전용). 일괄 설정 PATCH에 넣지 않습니다 |
+| 화면 | Admin → Platform의 별도 카드. 근거 입력이 필수이고 저장 버튼과 분리돼 있습니다 |
+
+**근거(rationale)는 필수입니다.** "누가·언제"만 있고 "왜"가 없으면 그 행을
+남겨 두는 이유에 답하지 못합니다.
+
+**값이 이미 같아도 감사 행은 남습니다**(`outcome: "unchanged"`). 누른 것 자체가
+사건이고, 이미 켜진 것을 다시 켜려 한 시도는 켠 것과 다른 사실입니다.
+
 staging 체크리스트의 §G-1이 이 조건을 가리킵니다. 그 항목이 staging 회차에서
 `n/a`인 것은 이 조건이 면제됐다는 뜻이 **아니라**, 판정 시점이 production
 활성화로 옮겨졌다는 뜻입니다.
+
+### 5.10 중단된 가져오기는 되찾을 수 있어야 합니다
+
+wizard는 page load 사이에 아무 상태도 갖지 않습니다. 그래서 7·8단계에서 탭을
+닫으면 그 import에 닿을 방법이 없었고, **`merge`에서는 그것이 하루짜리
+잠금**이었습니다 — 대상 profile은 사용자의 실제 assistant이므로 지워서 빠져나올
+수 없고, 그동안 편집 화면의 저장은 `ASSISTANT_PROFILE_IMPORT_IN_PROGRESS`로
+거절됩니다. `create`는 draft profile을 지우면 됐지만 그것도 우연히 가능한
+것이었습니다.
+
+- **1단계가 계정의 staging import를 먼저 보여 줍니다.** 서버가 읽어 prop으로
+  내려오므로 "6단계 전에는 요청이 없다"는 계약은 그대로입니다.
+- **이어서 하기는 서버가 가진 것만 씁니다.** 초안은 `stagingManifest`에서,
+  문서는 행에서 옵니다. 컨테이너는 남아 있지 않으므로 무엇도 재구성하지
+  않습니다.
+- **manifest는 신뢰하지 않고 검사합니다**(`resumableDraftFromManifest()`).
+  그것을 쓴 wizard가 지금 배포된 버전이 아닐 수 있고, 부분적으로 읽으면 남의
+  assistant 위에 빈 필드를 게시하게 됩니다. 읽을 수 없으면 이어서 할 수 없다고
+  말하고, **취소는 계속 제공합니다.**
+- **재개는 이미 건넌 경계를 다시 묻지 않습니다.** 손실 확인과 업로드 경계 동의는
+  import가 만들어지기 전에 받은 것이고, 서버가 그것을 들고 있다는 사실이 그
+  증거입니다.
 
 ### 12.3 rollback은 진입점을 지우는 것이지 데이터를 지우는 것이 아닙니다
 

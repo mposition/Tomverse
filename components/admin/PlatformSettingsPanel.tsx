@@ -45,6 +45,16 @@ type MemoryReleaseStatus = {
 
 type Props = {
   settings: PublicAppSettings;
+  /**
+   * External assistant package import.
+   *
+   * Not part of the form below and deliberately so: policy §12.2.1 keeps this
+   * flag off the bulk save (`docs/policy/assistant-package-import.md`
+   * §12.2.1), because a request that carries the whole panel
+   * leaves an audit row saying settings were saved and cannot say this flag
+   * moved. It has its own control, its own request and its own row.
+   */
+  assistantPackageImportEnabled?: boolean;
   /** Opt-in beta flag; resolved separately from the default-on kill switches. */
   imageGenerationEnabled: boolean;
   /** Release A import rollout flag; same opt-in, fail-closed shape. */
@@ -78,6 +88,7 @@ type Props = {
 
 export function PlatformSettingsPanel({
   settings,
+  assistantPackageImportEnabled: initialAssistantPackageImportEnabled = false,
   imageGenerationEnabled: initialImageGenerationEnabled,
   externalConversationImportEnabled: initialExternalImportEnabled,
   assistantProfilesEnabled: initialAssistantProfilesEnabled,
@@ -110,6 +121,64 @@ export function PlatformSettingsPanel({
   const [externalImportEnabled, setExternalImportEnabled] = useState(
     initialExternalImportEnabled
   );
+  /**
+   * The package import rollout control, kept apart from the form.
+   *
+   * Its own state, its own request, its own audit row. The
+   * rationale is required by the server, so it is a field here rather than
+   * something the operator discovers as a 403. Policy:
+   * `docs/policy/assistant-package-import.md` §12.2.1.
+   */
+  const [packageImportEnabled, setPackageImportEnabled] = useState(
+    initialAssistantPackageImportEnabled
+  );
+  const [packageImportRationale, setPackageImportRationale] = useState("");
+  const [packageImportBusy, setPackageImportBusy] = useState(false);
+
+  const submitPackageImportFlag = async (enabled: boolean) => {
+    if (packageImportBusy) return;
+    setPackageImportBusy(true);
+    try {
+      const response = await fetch("/api/admin/assistant-package-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled, rationale: packageImportRationale }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        outcome?: string;
+        before?: string | null;
+        after?: string;
+      };
+      if (!response.ok) {
+        dispatchAppToast(
+          data.code === "ADMIN_REAUTHENTICATION_REQUIRED"
+            ? "Sign in again before changing this flag."
+            : data.code === "ASSISTANT_PACKAGE_IMPORT_RATIONALE_REQUIRED"
+              ? "Say why this is changing. It goes on the audit row."
+              : "Refused. This needs ops:write.",
+          "error"
+        );
+        return;
+      }
+      setPackageImportEnabled(enabled);
+      setPackageImportRationale("");
+      dispatchAppToast(
+        // Both values, because a no-op is worth knowing about: pressing
+        // enable on something already enabled is a different fact from
+        // enabling it.
+        data.outcome === "unchanged"
+          ? `Recorded. It was already ${data.after}.`
+          : `Package import is now ${data.after}. Recorded with before=${data.before ?? "(none)"}.`,
+        "success"
+      );
+    } catch {
+      dispatchAppToast("The change could not be delivered.", "error");
+    } finally {
+      setPackageImportBusy(false);
+    }
+  };
+
   const [assistantProfilesEnabled, setAssistantProfilesEnabled] = useState(
     initialAssistantProfilesEnabled
   );
@@ -606,6 +675,59 @@ export function PlatformSettingsPanel({
                 </select>
               </label>
             </div>
+          </div>
+        </div>
+
+        <div
+          className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
+          data-testid="admin-package-import-control"
+        >
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+            Its own control, not part of the save above
+          </p>
+          <h3 className="mt-2 text-xl font-black text-white">
+            External assistant package import
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            Enabling and rolling back take the same path, and each press writes
+            one audit row carrying the value on both sides of it, who pressed
+            it, when, and the reason below. Needs ops:write and a session that
+            has not aged out
+            (docs/policy/assistant-package-import.md §12.2.1).
+          </p>
+          <p className="mt-3 text-sm font-bold text-white">
+            Currently {packageImportEnabled ? "enabled" : "disabled"}
+          </p>
+          <label className="mt-4 block text-sm font-bold text-white">
+            Why this is changing
+            <textarea
+              value={packageImportRationale}
+              onChange={(event) => setPackageImportRationale(event.target.value)}
+              maxLength={500}
+              rows={2}
+              className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm font-normal text-white"
+              data-testid="admin-package-import-rationale"
+            />
+          </label>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button
+              type="button"
+              disabled={packageImportBusy}
+              onClick={() => void submitPackageImportFlag(true)}
+              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+              data-testid="admin-package-import-enable"
+            >
+              Enable
+            </button>
+            <button
+              type="button"
+              disabled={packageImportBusy}
+              onClick={() => void submitPackageImportFlag(false)}
+              className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+              data-testid="admin-package-import-disable"
+            >
+              Roll back
+            </button>
           </div>
         </div>
 

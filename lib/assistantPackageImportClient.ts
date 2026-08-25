@@ -132,6 +132,12 @@ export type ImportSnapshot = {
     status: string;
     profileId: string;
     ready: boolean;
+    /**
+     * What the owner assembled, as this app stored it. `unknown` because it is
+     * JSON written by whichever version of the wizard created the import;
+     * `resumableDraftFromManifest()` is what decides whether it can be read.
+     */
+    stagingManifest?: unknown;
     files: {
         id: string;
         name: string;

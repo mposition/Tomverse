@@ -20,8 +20,12 @@
 상태입니다. 실행 결과는 `assistant-package-import-staging-verification-records/`
 에 **날짜와 전체 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-24f` — 항목이 바뀌면 이 값을 올리고, 실행
+- **template revision**: `2026-08-24g` — 항목이 바뀌면 이 값을 올리고, 실행
   기록은 자기가 어느 revision으로 실행됐는지 적습니다.
+
+  `2026-08-24f` → `2026-08-24g`: §G-1이 "이 회차에는 제어가 없으니 `n/a`"를
+  전제하고 있었는데 그 제어가 만들어졌습니다. 낡은 문구를 두면 SQL로 켠 회차가
+  계속 `n/a`로 통과합니다.
 
   `2026-08-24e` → `2026-08-24f`: §F-3이 개수만 대조하고 있었습니다. 1회차의
   발견 (2) — `skipped_entries` 손실이 이름 없이 개수만 내던 것 — 을 고친 뒤,
@@ -326,10 +330,14 @@ SQL로 활성화했고(`tests/appSettingWriters.test.mjs`가 이 키를 읽기 �
 대신 **실행자·UTC 시각·실행 SQL·변경 전후 값·`updatedAt`·배포 SHA를 실행
 기록에 남깁니다.**
 
-**Production 활성화 전에는 감사 가능한 Admin 제어 경로 구현과 성공 감사 로그
-확인을 별도 차단 조건으로 합니다** — `docs/policy/assistant-package-import.md`
-§12.2. 그 제어가 들어오는 변경에서 writer 등록과 `READ_ONLY_KEYS` 예외 제거,
-테스트 갱신이 함께 일어납니다.
+**Production 활성화 전에는 감사 가능한 Admin 제어 경로로 켜고 성공 감사 로그를
+확인하는 것이 별도 차단 조건입니다** — `docs/policy/assistant-package-import.md`
+§12.2.1.
+
+**그 제어는 이제 존재합니다**(`setAssistantPackageImportEnabled()`,
+`POST /api/admin/assistant-package-import`, Admin → Platform의 전용 카드).
+따라서 **다음 회차부터 §G-1은 `n/a`가 아닙니다** — SQL로 켜면 그 자체가
+`fail`입니다. 켜는 경로가 하나뿐인 것이 이 항목이 지키는 것입니다.
 
 ### G-2 — 단계 지표 (차단 아님)
 
