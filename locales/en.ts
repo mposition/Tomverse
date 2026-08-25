@@ -1607,6 +1607,12 @@ export const en = {
         blockDocumentsPending: "A document is still being read.",
         blockDocumentsFailed: "A document could not be read.",
         runCancel: "Cancel this import",
+        resumeHeading: "An import is still waiting",
+        resumeBody: "That assistant cannot be saved normally until this import is finished or cancelled.",
+        resumeCreate: "New assistant \u2014 {count} file(s) uploaded",
+        resumeMerge: "Merging into {name} \u2014 {count} file(s) uploaded",
+        resumeContinue: "Continue",
+        resumeFailed: "This import cannot be continued here. You can cancel it and start again.",
         runCancelHint: "Cancelling removes everything this import stored, and leaves your other assistants alone.",
     },
     assistantProfiles: {

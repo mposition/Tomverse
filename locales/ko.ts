@@ -1595,6 +1595,12 @@ export const ko = {
         blockDocumentsPending: "아직 읽는 중인 문서가 있습니다.",
         blockDocumentsFailed: "읽지 못한 문서가 있습니다.",
         runCancel: "이 가져오기 취소",
+        resumeHeading: "아직 끝나지 않은 가져오기가 있습니다",
+        resumeBody: "이 가져오기를 끝내거나 취소하기 전까지 해당 어시스턴트는 편집 화면에서 저장할 수 없습니다.",
+        resumeCreate: "새 어시스턴트 \u2014 파일 {count}개 업로드됨",
+        resumeMerge: "{name}에 합치는 중 \u2014 파일 {count}개 업로드됨",
+        resumeContinue: "이어서 하기",
+        resumeFailed: "이 가져오기는 여기에서 이어서 할 수 없습니다. 취소하고 다시 시작하세요.",
         runCancelHint: "취소하면 이 가져오기가 저장한 것을 지웁니다. 다른 어시스턴트는 건드리지 않습니다.",
     },
     assistantProfiles: {

@@ -1593,6 +1593,12 @@ export const fr = {
         blockDocumentsPending: "Un document est encore en cours de lecture.",
         blockDocumentsFailed: "Un document n'a pas pu être lu.",
         runCancel: "Annuler cet import",
+        resumeHeading: "Un import est toujours en attente",
+        resumeBody: "Cet assistant ne peut pas être enregistré normalement tant que cet import n\u2019est pas terminé ou annulé.",
+        resumeCreate: "Nouvel assistant \u2014 {count} fichier(s) envoyé(s)",
+        resumeMerge: "Fusion avec {name} \u2014 {count} fichier(s) envoyé(s)",
+        resumeContinue: "Continuer",
+        resumeFailed: "Cet import ne peut pas être repris ici. Vous pouvez l\u2019annuler et recommencer.",
         runCancelHint: "Annuler supprime tout ce que cet import a conservé et ne touche pas à vos autres assistants.",
     },
     assistantProfiles: {

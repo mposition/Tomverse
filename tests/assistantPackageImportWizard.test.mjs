@@ -24,6 +24,7 @@ import {
     initialImportState,
     keepFileIds,
     resolveImportDraft,
+    resumableDraftFromManifest,
     stepWritesToServer,
     unwaivedFindings,
 } from "../lib/assistantPackageImportWizard.ts";
@@ -594,4 +595,99 @@ test("an unknown extension has no media type rather than a guessed one", () => {
     assert.equal(knowledgeMimeForExtension(""), null);
     // Case is not a different file type.
     assert.equal(knowledgeMimeForExtension("PDF"), "application/pdf");
+});
+
+/* --------------------------------------------------------------- resuming */
+
+const MANIFEST_DRAFT = {
+    name: "Release notes helper",
+    icon: null,
+    description: "Drafts release notes.",
+    instructions: "Answer in Korean.",
+    starters: ["오늘 일정"],
+    modelIds: ["gpt-5-6-luna"],
+    toolPolicy: { webSearch: true, deepResearch: false },
+    memoryPolicy: { useAccountMemory: false },
+};
+
+test("a stored manifest yields back the draft it stored", () => {
+    const draft = resumableDraftFromManifest({
+        kind: "agent-skill",
+        adapterVersion: 1,
+        draft: MANIFEST_DRAFT,
+        documents: [],
+    });
+    assert.deepEqual(draft, MANIFEST_DRAFT);
+});
+
+test("a manifest missing any part of the draft cannot be resumed", () => {
+    // Checked rather than trusted: the manifest was written by whichever
+    // version of the wizard created the import, and a partial read would
+    // publish empty fields over somebody's assistant.
+    for (const key of Object.keys(MANIFEST_DRAFT)) {
+        const { [key]: _dropped, ...rest } = MANIFEST_DRAFT;
+        assert.equal(
+            resumableDraftFromManifest({ draft: rest }),
+            null,
+            `dropping ${key} should refuse the resume`
+        );
+    }
+    assert.equal(resumableDraftFromManifest(null), null);
+    assert.equal(resumableDraftFromManifest({}), null);
+    assert.equal(resumableDraftFromManifest({ draft: "no" }), null);
+});
+
+test("an icon or description of null is a value, not a missing field", () => {
+    // `null` is what "this package named none" looks like, and treating it as
+    // absent would refuse to resume every import that had no icon.
+    const draft = resumableDraftFromManifest({
+        draft: { ...MANIFEST_DRAFT, icon: null, description: null },
+    });
+    assert.ok(draft);
+    assert.equal(draft.icon, null);
+    assert.equal(draft.description, null);
+});
+
+test("resuming lands on step 8 only when every document is ready", () => {
+    const ready = reduce(initialImportState(), {
+        type: "resumed",
+        importId: "imp-1",
+        target: { kind: "merge", profileId: "p-1" },
+        draft: MANIFEST_DRAFT,
+        uploads: [
+            { path: "f-1", name: "a.md", status: "ready", fileId: "f-1", failureCode: null },
+        ],
+    });
+    assert.equal(ready.step, "confirm");
+    assert.deepEqual(ready.run, { kind: "ready", importId: "imp-1" });
+
+    const waiting = reduce(initialImportState(), {
+        type: "resumed",
+        importId: "imp-1",
+        target: { kind: "new" },
+        draft: MANIFEST_DRAFT,
+        uploads: [
+            { path: "f-1", name: "a.md", status: "ready", fileId: "f-1", failureCode: null },
+            { path: "f-2", name: "b.md", status: "processing", fileId: "f-2", failureCode: null },
+        ],
+    });
+    assert.equal(waiting.step, "upload");
+    assert.deepEqual(waiting.run, { kind: "processing", importId: "imp-1" });
+});
+
+test("a resumed draft resolves without a review, because there is not one", () => {
+    // The container is gone by now. Every decision becomes `edit` so the draft
+    // comes from the manifest rather than from `state.review`, which is null.
+    const state = reduce(initialImportState(), {
+        type: "resumed",
+        importId: "imp-1",
+        target: { kind: "new" },
+        draft: MANIFEST_DRAFT,
+        uploads: [],
+    });
+    assert.equal(state.review, null);
+    assert.deepEqual(resolveImportDraft(state), MANIFEST_DRAFT);
+    // And step 8 is not blocked by a boundary that was crossed before the
+    // interruption: both acknowledgements are already true.
+    assert.deepEqual(advanceProblems({ ...state, step: "target" }), []);
 });

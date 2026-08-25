@@ -1587,6 +1587,12 @@ export const zh = {
         blockDocumentsPending: "还有文档正在读取。",
         blockDocumentsFailed: "有一个文档无法读取。",
         runCancel: "取消这次导入",
+        resumeHeading: "有一个导入尚未完成",
+        resumeBody: "在完成或取消此次导入之前，该助手无法在编辑页面正常保存。",
+        resumeCreate: "新建助手 \u2014 已上传 {count} 个文件",
+        resumeMerge: "合并到 {name} \u2014 已上传 {count} 个文件",
+        resumeContinue: "继续",
+        resumeFailed: "此次导入无法在这里继续。可以取消后重新开始。",
         runCancelHint: "取消会删除这次导入保存的所有内容，不会影响你的其他助手。",
     },
     assistantProfiles: {

@@ -1593,6 +1593,12 @@ export const pt = {
         blockDocumentsPending: "Há um documento ainda a ser lido.",
         blockDocumentsFailed: "Um documento não pôde ser lido.",
         runCancel: "Cancelar esta importação",
+        resumeHeading: "Uma importação continua pendente",
+        resumeBody: "Esse assistente não pode ser guardado normalmente até esta importação terminar ou ser cancelada.",
+        resumeCreate: "Novo assistente \u2014 {count} ficheiro(s) carregado(s)",
+        resumeMerge: "A juntar a {name} \u2014 {count} ficheiro(s) carregado(s)",
+        resumeContinue: "Continuar",
+        resumeFailed: "Esta importação não pode continuar aqui. Pode cancelá-la e começar de novo.",
         runCancelHint: "Cancelar apaga tudo o que esta importação guardou, e deixa os seus outros assistentes em paz.",
     },
     assistantProfiles: {

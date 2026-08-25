@@ -1596,6 +1596,12 @@ export const de = {
         blockDocumentsPending: "Ein Dokument wird noch gelesen.",
         blockDocumentsFailed: "Ein Dokument konnte nicht gelesen werden.",
         runCancel: "Diesen Import abbrechen",
+        resumeHeading: "Ein Import wartet noch",
+        resumeBody: "Dieser Assistent kann erst wieder normal gespeichert werden, wenn der Import abgeschlossen oder abgebrochen ist.",
+        resumeCreate: "Neuer Assistent \u2014 {count} Datei(en) hochgeladen",
+        resumeMerge: "Zusammenführen mit {name} \u2014 {count} Datei(en) hochgeladen",
+        resumeContinue: "Fortsetzen",
+        resumeFailed: "Dieser Import lässt sich hier nicht fortsetzen. Sie können ihn abbrechen und neu beginnen.",
         runCancelHint: "Ein Abbruch entfernt alles, was dieser Import gespeichert hat, und lässt Ihre anderen Assistenten unberührt.",
     },
     assistantProfiles: {
