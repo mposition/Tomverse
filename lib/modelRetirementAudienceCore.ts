@@ -14,6 +14,17 @@
  * checked by adding it up.
  */
 
+/**
+ * Which version of these rules produced a stored estimate.
+ *
+ * Bumped by hand when the cohorts, the exclusions or their precedence change,
+ * so an estimate taken under the old rules is recognisably old rather than
+ * merely stale. `EmailCampaign.audienceVersion` has claimed to carry this since
+ * the fourth slice and nothing ever wrote it, which left every stored estimate
+ * saying it came from version 1 whether or not it had.
+ */
+export const AUDIENCE_DEFINITION_VERSION = 1;
+
 export const AUDIENCE_COHORTS = [
     "default_model",
     "new_conversation_lead",
@@ -72,6 +83,14 @@ export type AudienceSummary = {
     /** Who the initial notice goes to. */
     noticeAudience: number;
     /**
+     * Whether the scan stopped before the audience did.
+     *
+     * A bounded read has to say it was bounded: every figure above is then a
+     * floor rather than a total, and an operator sizing a send from a truncated
+     * count would be sizing it from the first N people the cursor reached.
+     */
+    truncated: boolean;
+    /**
      * Who an approved reconciliation would actually change.
      *
      * Never larger than the notice audience, and smaller whenever something is
@@ -84,7 +103,9 @@ export type AudienceSummary = {
 
 export const summariseAudience = (
     members: readonly AudienceMember[],
-    cohortRows: Record<AudienceCohort, number>
+    cohortRows: Record<AudienceCohort, number>,
+    /** True when the caller stopped scanning before the audience ran out. */
+    truncated = false
 ): AudienceSummary => {
     const cohortUsers = {
         default_model: 0,
@@ -129,6 +150,7 @@ export const summariseAudience = (
         noticeAudience,
         autoMigratable,
         malformed,
+        truncated,
     };
 };
 

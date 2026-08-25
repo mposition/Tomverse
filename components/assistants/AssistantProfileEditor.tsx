@@ -140,6 +140,26 @@ type LoadedProfile = {
     } | null;
     versions: VersionSummary[];
     knowledgeFiles: KnowledgeFile[];
+    /** Published package imports, newest first. Absent on older payloads. */
+    imports?: ImportProvenance[];
+};
+
+/**
+ * What a package said about itself, and what the server observed.
+ *
+ * The `declared*` half is the package's claim -- the server never saw the
+ * container -- so it is display-only and the copy says so
+ * (`docs/policy/assistant-package-import.md` §6.5). The timestamp is the
+ * server's own, and the host is all that survives of a URL nothing ever
+ * fetches (same document, §7).
+ */
+type ImportProvenance = {
+    id: string;
+    declaredSourceKind: string | null;
+    declaredSourceName: string | null;
+    declaredSourceHost: string | null;
+    serverReceivedAt: string;
+    versionId: string | null;
 };
 
 type Notice =
@@ -984,6 +1004,84 @@ export function AssistantProfileEditor({
                                     </p>
                                 )}
                             </section>
+
+                            {profile && (profile.imports?.length ?? 0) > 0 && (
+                                <section
+                                    className={`mt-4 ${sectionClass}`}
+                                    data-testid="assistant-provenance"
+                                >
+                                    <h2 className="text-lg font-bold">
+                                        {t("assistantProfiles.provenanceHeading")}
+                                    </h2>
+                                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                                        {t("assistantProfiles.provenanceHint")}
+                                    </p>
+                                    <ul className="mt-3 flex flex-col gap-2 text-sm">
+                                        {(profile.imports ?? []).map((entry) => (
+                                            <li key={entry.id}>
+                                                <p>
+                                                    {interpolate(
+                                                        t(
+                                                            "assistantProfiles.provenanceEntry"
+                                                        ),
+                                                        {
+                                                            // Both are the
+                                                            // package's own
+                                                            // words. The copy
+                                                            // reads "states"
+                                                            // for that reason.
+                                                            kind:
+                                                                entry.declaredSourceKind ??
+                                                                t(
+                                                                    "assistantProfiles.provenanceUnstated"
+                                                                ),
+                                                            name:
+                                                                entry.declaredSourceName ??
+                                                                t(
+                                                                    "assistantProfiles.provenanceUnstated"
+                                                                ),
+                                                        }
+                                                    )}
+                                                </p>
+                                                <p className="text-xs text-zinc-500">
+                                                    {interpolate(
+                                                        t(
+                                                            "assistantProfiles.provenanceReceived"
+                                                        ),
+                                                        {
+                                                            date: new Date(
+                                                                entry.serverReceivedAt
+                                                            ).toLocaleString(),
+                                                        }
+                                                    )}
+                                                    {entry.declaredSourceHost && (
+                                                        <>
+                                                            {" · "}
+                                                            {/*
+                                                              The host, and not
+                                                              a link: a stored
+                                                              URL is never
+                                                              fetched, and one
+                                                              rendered as a
+                                                              link invites
+                                                              exactly that.
+                                                            */}
+                                                            {interpolate(
+                                                                t(
+                                                                    "assistantProfiles.provenanceHost"
+                                                                ),
+                                                                {
+                                                                    host: entry.declaredSourceHost,
+                                                                }
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </p>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </section>
+                            )}
 
                             <section className={`mt-4 ${sectionClass}`}>
                                 <h2 className="text-lg font-bold">

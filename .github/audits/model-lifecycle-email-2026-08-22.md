@@ -433,7 +433,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
 - **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
-### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~5차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42. admin 화면은 6차
+### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High) — **1~8차 해결 (2026-08-24)** — §36 · §37 · §38 · §41 · §42 · §43 · §44 · §45
 
 - **Evidence**: `[코드]`
 - **현재 동작**: `audienceKind`는 CHECK에서 3값을 허용하지만
@@ -538,7 +538,7 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **파일**: `lib/standardEmailLane.ts:508-511`, `lib/emailFooterRenderer.ts:282`,
   `lib/emailJurisdictionSeed.ts:88,183`
 
-### EM-05 — ADR이 이름 댄 flag가 코드에 없다 (P1, Medium)
+### EM-05 — ADR이 이름 댄 flag가 코드에 없다 (P1, Medium) — **해결 (2026-08-24)** — §46
 
 - **Evidence**: `[코드]` — `emailMarketingEnabled` / `emailCampaignsEnabled` /
   `emailConsentReconfirmEnabled` 전수 검색 결과 0건.
@@ -706,14 +706,28 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 ### EM-16 — marketing 활성화 선행 조건이 미완 (P0 for Phase 6, 운영)
 
 - **Evidence**: `[문서]` `docs/ops/email-sending-domains.md:38,160-170,434-450`
-- **현재 상태**:
-  - DMARC `p=none` 관측 시작 2026-08-21, 최소 2주 → **2026-09-04 이전 완료 불가**
+- **차단 대상**: **marketing 기능 개발 전체가 아니라 Phase 6의 production 발송
+  활성화**입니다. 템플릿·fan-out·campaign wave·kill switch는 이미 구현돼 있고,
+  저장소 안의 작업은 계속 진행할 수 있습니다.
+- **외부 의사결정 또는 운영 증거가 필요한 항목**:
+  - DMARC `p=none` 상태의 **유효한 집계 리포트 2주분** 확보와 SPF·DKIM alignment
+    확인. **가장 빠른 검토 가능일이 2026-09-04**이며 완료일이 아닙니다 — 시계는
+    DNS를 바꾼 시점이 아니라 **첫 실발송 시점부터** 돌고
+    (`docs/ops/email-sending-domains.md` §8.1), 리포트가 2주간 모이지 않으면
+    더 늦어집니다.
   - `dmarc@tomverse.app` 실제 수신 여부 **미확인**
-  - `news.tomverse.app` 미구성, warm-up(4~6주) 미시작
-  - Resend 계정/region suppression 분리 결정 미완(ADR §5.3.1, A18)
-  - 법률 검토 Q1/Q2/Q8 미회신
-- **영향**: **신규·업그레이드 홍보 메일은 오늘 발송할 수 없고, 빨라도
-  2026-10월 이전에는 어렵습니다** (`[추정]`: DMARC 2주 + warm-up 4~6주).
+  - **A18 suppression 경계 결정** — 별도 Resend team/region, 별도 provider,
+    또는 동일 계정 유지 + 비이메일 계정 복구 수단 의무화 중 하나 확정
+    (ADR §5.3.1)
+  - 결정된 발송 구조에 따른 `news.tomverse.app` 구성과 SPF/DKIM/DMARC 검증
+  - **동의한 수신자 cohort로 4~6주 warm-up**, complaint·bounce 기준 충족
+  - 법률 **Q1·Q2 회신**과 **Q8의 실제 사업자 정보** 확정
+- **저장소 안에 남아 있던 조건**: EM-05 feature flag(**§46에서 해결**)와
+  Admin API·UI·승인 연결. 즉 **EM-16만 풀려도 즉시 발송 가능한 상태가 아니며**,
+  반대로 EM-16이 저장소 작업을 멈추게 하지도 않습니다.
+- **영향**: 위 항목은 ops·product·legal의 권한이거나 외부 시스템 작업이라
+  구현만으로 끝낼 수 없습니다. **외부 선행조건과 저장소 내부 조건이 모두
+  충족되기 전까지 production marketing 발송은 비활성으로 유지됩니다.**
 - **권고**: Phase 6 진입 조건으로 고정. 이 감사가 이 상태를 바꾸지 않습니다.
 
 ---
@@ -2128,7 +2142,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - ~~ML-07 perplexity 한계 명시~~ **완료** — §10.10
 - ~~OpenAI `isLikelyChatModelId` prefix 위험 완화(6절 #10)~~ **완료 (2026-08-24)** — §40
 - ~~`MAX_PAGES` 초과 시 경고 로그~~ **완료 (2026-08-24)** — §40
-- `/admin/email-delivery` 주소 마스킹 정책 — **결정 대기**(§21에 D10으로 추가)
+- `/admin/email-delivery` 주소 마스킹 정책 — **해결 (2026-08-24)** — §21 D10 승인, §48에 구현
 
 ---
 
@@ -2140,12 +2154,12 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | D2 | 자동 전환 완료 안내를 `transactional`로 둘지 | product + legal | F template | **transactional**. 요청 없이 가한 변경의 기록이므로 끌 수 없어야 합니다 |
 | D3 | 전체 대상 일반 폐기 공지를 만들지 | product | C template | **만들지 않음**. marketing A/B에 흡수 |
 | D4 | marketing Resend 계정/region 분리 | ops + legal | Phase 6 | ADR §5.3.1 미결 |
-| D5 | 1인 조직 이중 승인 예외를 campaign에 적용 | 조직 | Phase 4 승인 | `soleApproverAllowed` 선례 적용 |
+| D5 | 1인 조직 이중 승인 예외를 campaign에 적용 | 조직 | ~~Phase 4 승인~~ | **승인 (2026-08-24, 조직)** — §47에 구현. `soleApproverAllowed` 선례 적용 |
 | D6 | reminder를 몇 번 보낼지 (1회 / 2회) | product | E wave 수 | **최초 + 3일 전 2회**. 그 이상은 스팸 신고를 부릅니다 |
 | D7 | 사전 안내 리드타임 | product | D 일정 | **14일**. 폐기 결정 → 안내 → reminder → 실행 |
 | D8 | assistant profile이 모델 선택을 갖는지 | eng | audience 정의 | 조사 필요(23절) |
 | D9 | 최근 사용 기반 cohort를 포함할지 | product | audience 크기 | **미포함**. 저장된 선택만. 최근 사용은 영향이 아니라 관심입니다 |
-| D10 | `/admin/email-delivery`의 사용자 주소를 마스킹할지 | product + ops | 없음(오늘 동작함) | **기본 마스킹 + 명시적 공개 행위를 감사 로그에 기록**. 지원 능력을 잃지 않으면서 노출을 *상태*가 아니라 *사건*으로 만듭니다. 다만 공개 행위의 감사 설계는 구현 전 승인이 필요합니다 |
+| D10 | `/admin/email-delivery`의 사용자 주소를 마스킹할지 | product + ops | ~~없음~~ | **승인 (2026-08-24)** — 기본 마스킹 + 감사되는 공개. 사유 불요 · 화면 단위 · owner·ops 한정. §48에 구현 |
 
 ---
 
@@ -3200,3 +3214,453 @@ campaign의 wave 실행은 **여기서 승인된 결정의 수행**이고, 그�
 **6차 범위**: admin 화면. `lib/adminNavigation.ts` 항목·icon·route segment를
 한 번에 추가해야 하고(admin IA 계약), E2E가 따로 필요합니다. API에 nav 항목만
 먼저 넣으면 그 계약을 깹니다.
+
+## 43. EM-01 6차 구현 기록 — campaign admin 화면 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminNavigation.ts` | `email-campaigns` 항목(Operations) · `Campaign detail` detail route · badge key |
+| `components/admin/adminNavigationIcons.ts` | icon |
+| `lib/adminNavigationBadges.ts` · `lib/adminNavigationCounts.ts` | `overdueCampaignWaves` |
+| `lib/adminEmailCampaigns.ts` | 화면용 read layer. 새 파일 |
+| `app/(site)/(application)/admin/email-campaigns/**` | 목록·일정 route, 상세 route |
+| `components/admin/AdminEmailCampaignsPanel.tsx` | 목록. server component |
+| `components/admin/AdminCampaignSchedulePanel.tsx` | wave 일정. server component |
+| `components/admin/AdminCampaignDetailPanel.tsx` | 상세·승인·attestation·취소. client |
+| `lib/emailTemplateRegistry.ts` | **두 건의 동시성 결함 수정** (아래) |
+| `tests/e2e-admin/admin-email-campaigns.spec.ts` | 10건, 새 파일 |
+| `tests/integration/email-template-registry-race.db.test.ts` | 5건, 새 파일 |
+
+**admin IA 계약대로 세 곳을 한 번에 넣었습니다** — route table · icon ·
+실제 route segment. `docs/ui-contracts/admin-console-ia.md` 규칙 3이고,
+`tests/adminNavigation.test.mjs`가 셋 중 하나라도 빠지면 실패합니다. section은
+`?tab=`에 있고 tab은 `<Link>`이며 열린 section의 데이터만 읽습니다(규칙 2).
+
+**badge는 "승인된 발송이 due였는데 나가지 않은 wave" 하나뿐입니다.** 규칙 4가
+badge를 장식이 아니라 일에만 허용하고, 이 수는 운영자가 실제로 할 일이 있을
+때만 0이 아닙니다. `approved_schedule`로 한정합니다 — `manual` wave의 과거
+시각은 누군가 보내려던 때를 적은 메모이지 실패한 job이 아니고, 그것까지 세면
+어떤 행동으로도 사라지지 않는 숫자가 sidebar에 붙습니다.
+
+**일정 section이 존재하는 이유는 목록이 보여 줄 수 없는 행 하나입니다.**
+scheduler가 due wave에 도달해 거부하면 wave 행은 시도도 이유도 기록하지
+않습니다 — 거부는 `CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE` operational incident로
+나가고, 그것은 Sentry와 운영 알림 채널로 갈 뿐 이 console이 읽는 어떤 표에도
+남지 않습니다. 그래서 console 안의 유일한 흔적이 "due인데 여전히 pending"이고,
+**화면은 이유가 wave에 있는 척하지 않습니다.**
+
+**초안 작성은 API에 남겼고 화면이 그렇게 적습니다.** audience spec은 expansion
+층이 소유하는 문서이고, 자유 입력 상자는 이미 검증하는 요청보다 나쁜 편집기
+입니다. 없는 버튼을 찾게 만들지 않으려면 없다고 말해야 합니다.
+
+**상세 화면은 gate를 스스로 판단하지 않습니다.** 버튼은 계속 살아 있고 거부는
+전부 서버의 것을 그대로 옮깁니다 — 문장 없이 비활성화된 버튼은 고장 난 버튼과
+구분되지 않습니다. 모든 동작 뒤에 서버에서 다시 읽습니다: gate는 이 화면이
+들고 있지 않은 행에서 계산되므로, 국소 갱신은 다시 묻지 않은 판정을 보여
+주게 됩니다.
+
+**상한 뒤 `notFound()`는 soft 404입니다.** shell이 이미 streaming된 뒤라 상태
+코드를 바꿀 수 없고(`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/not-found.md`),
+`noindex`가 그것을 정직하게 만듭니다. E2E는 200/404가 아니라 **not-found UI가
+뜨고 상세 panel이 뜨지 않는다**와 `noindex`를 검사합니다.
+
+### 43.1 화면이 드러낸 발송 경로의 동시성 결함 둘
+
+**이 slice가 만든 결함이 아니라 이 slice가 처음 부딪힌 결함입니다.** 상세
+route가 send gate와 content digest를 병렬로 묻는데 둘 다 같은 template을
+ensure하므로, `lib/emailTemplateRegistry.ts`의 경합이 매번 재현됐습니다.
+
+1. **`emailTemplate.upsert` / `emailPolicyVersion.upsert`가 P2002로 터집니다.**
+   존재하지 않는 행에 대한 `upsert`는 읽고 나서 insert이므로 동시 호출 둘이
+   모두 "없음"을 읽고 모두 insert합니다. 바로 아래 `templateVersion.create`는
+   이미 같은 경합을 처리하고 있었고 위 두 줄은 처리하지 않았습니다.
+   `upsertSurvivingRace()`로 잡아 읽어 옵니다. **credential lane에서는 이것이
+   copy 변경 직후 동시에 로그인한 두 사람 중 하나가 코드를 영영 못 받는
+   결함입니다.**
+
+2. **같은 문구가 published version 두 개를 갖습니다.** unique index는
+   `(templateId, language, version)`이라, `latest`를 서로 다른 시점에 읽은 두
+   caller가 N과 N+1을 쓰고 **둘 다 성공**합니다. send gate는 hash를 비교하므로
+   발송 판정은 무해하지만, 바뀐 적 없는 문구에 대해 "어느 version을
+   보냈는가"의 답이 둘이 됩니다 — 이 registry가 답하려고 존재하는 바로 그
+   질문입니다. `pg_advisory_xact_lock`으로 (template, language)마다
+   직렬화하며, **행이 이미 있는 정상 경로는 잠금을 잡지 않으므로** 비용은 copy
+   변경 후 첫 발송에만 듭니다. P2002 처리는 그대로 둡니다 — 잠금을 잡지 않는
+   다른 process(migration, console, 배포 중인 구버전)가 여전히 먼저 쓸 수
+   있습니다.
+
+`tests/integration/email-template-registry-race.db.test.ts`가 둘을 고정합니다.
+2번은 비결정적이라 한 번의 통과가 증거가 아니며, 3회 연속 실행으로 확인했습니다.
+
+### 43.2 남은 것
+
+**D5와 D10은 그대로입니다.** `email_campaign.approve`는 여전히
+`SOLE_APPROVER_ACTIONS`에 없고(§21 D5), `/admin/email-delivery` 주소 마스킹
+(§21 D10)도 결정 대기입니다. 둘 다 조직의 결정이지 코드의 결정이 아닙니다.
+
+**초안 작성 UI는 만들지 않았습니다.** 위에 적은 이유이며, audience spec의
+모양이 하나(`model_retirement` cohort)를 넘어 늘어나면 다시 볼 일입니다.
+
+## 44. EM-01 7차 구현 기록 — 확장 원장 읽기 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminEmailCampaigns.ts` | `waveAudienceBreakdown()` |
+| `app/api/admin/email-campaigns/[campaignId]/route.ts` | 상세 응답에 `audience` |
+| `components/admin/AdminCampaignDetailPanel.tsx` | wave별 원장 구획 |
+| `tests/integration/campaign-audience-readback.db.test.ts` | 11건, 새 파일 |
+| `tests/e2e-admin/admin-email-campaigns.spec.ts` | 2건 추가(총 12건) |
+
+**3차가 쓴 것을 아무도 읽지 못했습니다.** `EmailCampaignRecipient`를 읽는 곳은
+expander(재개용), transition gate의 count 하나, 계정 데이터 내보내기 셋뿐이고
+**운영자가 열 수 있는 화면은 없었습니다.** 3차가 제외 사유를 기록한 이유 자체가
+그것을 검토하기 위해서였는데 볼 곳이 없었고, **dry run은 "누구에게 갔을
+것인가"에 답하는 것이 유일한 일인데 그 답을 아무도 읽을 수 없었습니다.**
+
+이는 6차가 고친 것과 같은 모양입니다 — 쓰이고 읽히지 않는 데이터.
+12조건의 `dry_run_counted`가 "아무도 보지 않은 숫자에게 약속하게 된다"고
+말하면서 볼 방법을 주지 않았던 것도 같은 구멍입니다.
+
+**`excludedReason IS NULL`을 "발송됨"이라고 쓰지 않습니다.** dry run은
+`EmailDelivery`를 `status: "skipped"` · `skipReason: "dry_run"`으로 쓰므로,
+원장에서 그 열은 **"delivery 행이 쓰였음"**입니다. "sent"라고 이름 붙인 열은
+예행을 발송으로 보고하는 것이고, 예행이 절대 오해받아서는 안 되는 단 하나가
+그것입니다. 화면은 wave의 `dryRun`을 보고 문장을 바꿉니다.
+
+**0인 사유도 전부 보여 줍니다.** 발동하지 않은 사유를 생략한 내역은 그 사유를
+묻지 않은 것처럼 읽히고, "아무도 suppress되지 않았다"는 부재에서 추론할 것이
+아니라 적혀 있어야 하는 답입니다.
+
+**cohort는 제외와 따로 셉니다.** 제외된 사람도 audience에 있던 사람입니다 —
+cohort는 expander가 왜 그를 봤는지, 제외는 왜 그에게 쓰지 않았는지입니다.
+쓰인 사람만 세면 audience가 실제로 일치한 것보다 작아 보입니다.
+
+**`malformed`를 결과 대신이 아니라 결과와 함께 보고합니다.** 읽기에 대한
+사실이지 제외 사유가 아니며, malformed인 사람도 발송 대상일 수 있습니다.
+3차가 "보고하되 다시 쓰지 않는다"고 정한 값이 이제 로그가 아니라 화면에
+있습니다.
+
+**주소는 한 개도 싣지 않습니다 — 숫자만입니다.** 모든 행이 주소를 들고 있고,
+campaign 화면에서 운영자가 주소를 볼 수 있는지는 `/admin/email-delivery`의
+**D10(§21)과 같은 미결 질문**입니다. 개인 목록을 만드는 것이 곧 그 결정을
+내리는 일이므로 만들지 않았습니다. E2E가 이 구획에 `@`가 없음을 검사합니다.
+
+**도달 불가능한 상태를 단언하지 않았습니다.** breakdown에는 목록에 없는 사유를
+만나도 합계가 맞도록 하는 분기가 있지만, 그 분기는 DB CHECK 때문에 오늘 DB를
+통해서는 도달할 수 없습니다. 테스트는 분기가 아니라 **CHECK가 그 행을
+거부한다**는 실제 보증을 고정합니다.
+
+### 44.1 남은 것
+
+**초안 작성 UI는 여전히 없습니다**(§43.2). **D5·D10도 그대로 결정 대기**입니다.
+개인 단위 원장 열람은 D10이 정해진 뒤에 다시 봅니다.
+
+## 45. EM-01 8차 구현 기록 — 추정치를 재기 (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/modelRetirementAudienceCore.ts` | `AUDIENCE_DEFINITION_VERSION`, `AudienceSummary.truncated` |
+| `lib/modelRetirementAudience.ts` | `summariseRetirementAudience`에 `maxCandidates` |
+| `prisma/schema.prisma` · `migrations/20260824120000_email_campaign_audience_estimate` | `estimatedAt` · `estimatedByEmail` · `audienceEstimate` + 완결성 CHECK |
+| `lib/emailCampaignService.ts` | `estimateCampaignAudience()` |
+| `app/api/admin/email-campaigns/[campaignId]/estimate/route.ts` | 계수 실행 |
+| `components/admin/AdminCampaignDetailPanel.tsx` | 추정 구획 |
+| `tests/audienceEstimateTruncation.test.mjs` | 5건, 새 파일 |
+| `tests/integration/campaign-audience-estimate.db.test.ts` | 12건, 새 파일 |
+| `tests/e2e-admin/admin-email-campaigns.spec.ts` | 2건 추가(총 14건) |
+
+**`estimatedRecipients`의 유일한 출처가 사람이 타이핑한 숫자였습니다.**
+4차부터 컬럼은 있었지만 audience에서 그것을 쓰는 코드가 없었고,
+`audienceVersion`은 **아무도 쓰지 않아 영원히 1**이었습니다 — "어떤 규칙이 이
+추정을 만들었는가"를 말하겠다는 컬럼이 어떤 규칙도 만들지 않은 추정에 대해
+"버전 1"이라고 답하고 있었습니다. 그리고 3차가 만든
+`summariseRetirementAudience()`는 **자기 테스트 말고 아무도 부르지
+않았습니다** — 이 기능에서 같은 패턴의 세 번째입니다(§43.1의 overdue wave,
+§44의 원장).
+
+**저장하는 머릿수는 `noticeAudience`이지 `distinctUsers`가 아닙니다.** cohort
+전체로 크기를 잡으면, 곧 쓰지 않기로 결정할 사람들까지 포함해 발송 규모를
+가늠하게 됩니다.
+
+**추정은 숫자·시각·요약이 함께이거나 전부 없습니다**(CHECK). 시각 없는 숫자는
+매일 움직이는 audience에 대한 나이 모를 수이고, 그것이 바로 이 slice가
+"측정"으로 오인되지 않게 하려는 **타이핑된 추측**입니다. `NOT VALID`으로
+배포하며, 그런 기존 행은 삭제가 아니라 **다시 재도록** 남겨 둡니다.
+
+**요약 전체를 행에 저장합니다.** 제외 내역은 audience query가 틀렸다고 말해
+주는 부분인데, 계산한 요청의 응답에만 두면 **campaign을 검토하는 두 번째
+관리자가 그것을 영영 보지 못합니다.**
+
+**한계를 둔 계수는 한계를 두었다고 말합니다.** scan은 은퇴 모델을 지목한 모든
+계정을 도는데, 그것이 바로 묻고 있는 수이므로 **가장 알고 싶은 audience에서
+가장 비쌉니다.** 사람이 기다리므로 상한을 두고, 넘으면 `truncated`이며 모든
+수치가 총계가 아니라 **하한**입니다. 화면이 "at least N"이라고 씁니다 —
+보정·외삽·반올림을 하지 않으므로 그 문장이 참입니다.
+
+**13번째 조건을 만들지 않았습니다.** §13.3의 12조건은 그대로이고 이것은
+아무것도 gate하지 않습니다. 크기를 **누구도 약속하기 전에 알 수 있게** 할
+뿐입니다.
+
+**승인 후에는 거부합니다.** 다시 재면 승인자가 읽은 숫자가 같은 승인 아래에서
+다른 숫자로 바뀌고, 어차피 각 wave가 실행 시점에 자기 audience를 다시
+계산합니다.
+
+**cohort 없는 campaign은 0으로 재지 않고 거부합니다.** 세 사람을 명시적으로
+지목한 campaign에 "수신자 0명"이라고 답하는 것은 틀린 질문에 대한 측정입니다.
+
+### 45.1 테스트에서 고친 제 실수 셋
+
+세 번 다 코드가 아니라 테스트가 틀렸고, 그대로 두면 통과하는 거짓 검사가
+됐을 것들입니다.
+
+1. **`AudienceMember` fixture의 필드명이 틀렸습니다.** 모두 `no_email`로
+   제외돼 0을 세고 있었고, "truncation이 수치를 바꾸지 않는다" 검사는 양쪽 다
+   0이라 **통과하고 있었습니다.** fixture를 고치고, 비교 전에
+   `noticeAudience === 2`를 먼저 단언하도록 바꿨습니다.
+2. **cap을 기본 page size(200)보다 작은 audience로 시험했습니다.** 짧은 page
+   에서 loop가 먼저 끝나므로 cap에 닿지 않습니다 — 코드가 맞습니다. 그 분기는
+   `pageSize`가 노출된 summariser 층에서 시험하고, 서비스에는 **테스트 전용
+   손잡이를 달지 않았습니다.**
+3. **`status: "approved"`를 손으로 세팅했습니다.** `approval_completeness_check`
+   가 정당하게 거부했고, `approveCampaign()`으로 실제 경로를 지나게 고쳤습니다.
+
+### 45.2 남은 것
+
+초안 작성 UI(§43.2), **D5**·**D10**(§21) 그대로입니다. `audienceEstimate`가
+있는 지금도 개인 단위 열람은 D10 뒤입니다.
+
+## 46. EM-05 구현 기록 — ADR이 이름 댄 flag (2026-08-24 · 완료)
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailFeatureFlags.ts` | 세 key와 판정. 순수, 새 파일 |
+| `lib/appSettings.ts` | `isEmailMarketingEnabled` 외 2개 |
+| `lib/standardEmailLane.ts` | enqueue 거부 + 발송 시점 2차 층 |
+| `lib/emailAudienceExpansion.ts` · `...Core.ts` | fan-out 경로 차단 |
+| `lib/emailCampaignService.ts` | `CampaignsDisabledError`와 다섯 진입점 |
+| `migrations/20260824140000_email_marketing_disabled_skip_reason` | skipReason |
+| `tests/emailFeatureFlags.test.mjs` | 7건, 새 파일 |
+| `tests/integration/email-feature-flags.db.test.ts` | 11건, 새 파일 |
+| `tests/appSettingWriters.test.mjs` | 의도된 부재 3건 등록 |
+
+**찾아낸 결함은 "marketing이 나갈 수 있다"가 아닙니다** — 오늘 marketing은
+flag보다 강한 이유로 불가능합니다(marketing 분류 template 0개,
+`MARKETING_EMAIL_FROM` 미설정). 결함은 **ADR §15.2를 읽은 사람이 없는 스위치를
+찾게 된다**는 것이었고, `emailMarketingEnabled` 전수 검색 결과가 0건이었습니다.
+
+**flag는 구조적 차단을 대체하지 않고 앞에 섭니다.** enqueue 순서는
+**flag → template → identity**이며, 통합 테스트가 거부 시 template 행이 생기지
+않음을 고정합니다.
+
+**정확히 `"true"`만 켭니다.** `"TRUE"`·`"1"`·`"yes"`·앞뒤 공백 전부 꺼짐입니다.
+안전하게 실패하는 방향이 "발송되지 않음"이므로 관용을 두지 않았습니다.
+
+**bare `null`을 이름 있는 거부로 바꿨습니다.** `enqueueStandardEmail`은 아무것도
+안 썼다는 사실만 말하고 이유를 말하지 않았습니다 — 호출자가 **주소 없는 계정과
+꺼진 기능을 구분할 수 없었습니다.** 이제 `no_address` · `marketing_disabled`를
+문장과 함께 돌려주며, 타입 변경이 반환값을 읽던 지점을 전부 드러냈습니다.
+
+### 46.1 flag를 거짓말로 만들 뻔한 두 번째 경로
+
+**campaign fan-out은 `enqueueStandardEmail`을 지나지 않습니다** — 직접
+`EmailDelivery` 행을 만듭니다. 그 함수만 막았다면 campaign 경로가 **막으려던
+바로 그 발송에 대한 무방비 우회로**로 남았을 것입니다. `expandEmailEvent`가
+event를 `expanding`으로 옮기기 전, 행이 하나도 쓰이기 전에 거부합니다.
+
+**발송 시점에도 다시 묻습니다.** flag가 켜진 동안 쌓인 행이 꺼진 뒤에 나가면,
+운영자가 스위치를 내려 막으려던 것이 그대로 나갑니다. `marketing_disabled`는
+`marketing_halted`와 **별개 skipReason**입니다 — 앞은 결정이고 뒤는 사고이며,
+합치면 "누가 marketing을 껐다"와 "불만율이 폭증했다"가 같은 행이 됩니다.
+
+### 46.2 세 flag의 범위 — 무엇을 막고 무엇을 남겼는가
+
+| flag | 막는 것 | 남기는 것 |
+|---|---|---|
+| `emailMarketingEnabled` | marketing 분류의 enqueue·fan-out·발송 | transactional·service·legal 전부 |
+| `emailCampaignsEnabled` | 초안·승인·예약·추정·발송·scheduler | **읽기 전부** |
+| `emailConsentReconfirmEnabled` | (없음 — 배치가 아직 없습니다) | — |
+
+**campaign은 읽기를 남깁니다.** 기능이 꺼졌다고 이미 한 일까지 감추면 운영자가
+그것을 고장과 구분할 수 없고, 이 console은 `EmailCampaignWave`를 읽을 수 있는
+유일한 곳입니다. scheduler는 던지지 않고 빈 배열을 돌려줍니다 — 15분 cron에서
+스위치가 꺼져 있다는 정상 상태로 전체 pass를 죽일 수 없습니다.
+
+**두 flag를 합치지 않았습니다.** campaign은 분류가 아니라 fan-out 수단입니다 —
+모델 은퇴 안내는 `service`이고 같은 wave로 나가며 marketing이 아닙니다. 하나로
+묶으면 marketing과 함께 은퇴 안내가 꺼지거나, 은퇴 안내와 함께 marketing이
+켜집니다.
+
+**세 번째는 선언만 했습니다.** 재확인 배치가 없으므로 소비자가 없고, 없는 기능에
+동작하는 스위치를 붙이는 것은 **스위치가 아무 일도 안 한다고 운영자를 가르치는
+일**입니다. key와 그 이유를 남겨 ADR의 이름이 검색되게 한 것이 이 항목의 요구
+사항입니다.
+
+### 46.3 쓰기 경로를 만들지 않았습니다
+
+memory flag의 선례를 따라 **admin API에 writer를 두지 않고**
+`tests/appSettingWriters.test.mjs`에 **의도된 부재**로 등록했습니다. 활성화
+조건은 §15.2가 정한 법률 검토와 승인 프로세스 확정이고, 체크박스는 그 절차의
+마지막 단계만 남기고 앞을 지웁니다. E2E도 admin 화면이 아니라 행을 직접 씁니다 —
+테스트 편의를 위해 writer를 만들면 이 결정 자체가 사라집니다.
+
+## 47. D5 결정 기록과 구현 — campaign 승인의 1인 관리자 예외 (2026-08-24 · 완료)
+
+**결정**: 조직이 2026-08-24에 **승인**했습니다. `email_campaign.approve`가
+`SOLE_APPROVER_ACTIONS`에 들어갑니다.
+
+| 파일 | 역할 |
+|---|---|
+| `lib/adminSoleApproverCore.ts` | action 추가 · `checkCampaignCopyBinding` |
+| `lib/adminSoleApproverExecution.ts` | 확인 증거를 action별 union으로 일반화 |
+| `app/api/admin/email-campaigns/[campaignId]/approve/route.ts` | 1인 경로 배선 |
+| `app/api/admin/maintenance/cleanup/route.ts` | 새 union으로 이관 |
+| `tests/adminSoleApprover.test.mjs` | 18건(신규 3건) |
+
+### 47.1 근거가 기존 예외와 다릅니다
+
+**이것을 코드에 적었습니다.** `retention.cleanup.execute`가 예외를 받은 근거는
+*"자동 스케줄이 15분마다 같은 삭제를 무인으로 수행하므로 이 예외는 시스템이
+이미 하지 않는 삭제를 열지 않는다"*였습니다. **campaign 승인에는 그런 스케줄이
+없습니다** — 무엇도 문구를 무인으로 승인하지 않고, 승인이 곧 사람이 문구를 읽는
+행위이며 그것이 EM-06이 pin하는 대상입니다.
+
+D5를 지탱하는 것은 **다른 근거**입니다: 1인 조직에서 2인 규칙은 엄격한 것이
+아니라 **충족 불가능**하고, 그러면 어떤 campaign도 승인될 수 없어 fan-out 전체가
+아무것도 보낼 수 없습니다. AGENTS.md가 release gate의
+`approvalPolicy.soleApproverAllowed`에 기록한 논리와 같습니다.
+
+**두 근거는 서로 다른 것을 정당화하므로 구분해 적었습니다.** retention 쪽 근거는
+스케줄이 이미 수행하는 모든 action으로 번지고, campaign 쪽 근거는 **달리 불가능한
+action에만** 미치며 두 번째 관리자가 생기는 순간 끝납니다. 어느 쪽도
+`user.delete`나 환불에 닿지 않습니다 — 스케줄이 대응물을 수행하지 않고, 관리자
+한 명이 다른 한 명에게 부탁하면 그만인 일입니다.
+
+### 47.2 두 번째 독자가 없으므로 무엇으로 대신했는가
+
+retention의 dry-run 결속이 증명하는 것은 *"당신이 본 preview가 이것이고 그 사이
+아무것도 그것을 대체하지 않았다"*입니다. campaign의 등가물은
+*"당신이 읽은 문구가 이것이고 그 사이 바뀌지 않았다"* — 5차가 이미 만든
+`campaignDigest()`입니다. 승인자가 읽은 문구의 digest를 되돌려 주고 **서버가
+현재 문구와 대조**합니다. 이것이 없으면 1인 승인자는 "그 campaign"을 승인하고,
+그 campaign은 발송 시점에 template이 말하는 무엇이든이 됩니다.
+
+**세 가지가 retention 결속과 다르고, 각각 확인 대상이 다르기 때문입니다.**
+
+- **만료가 없습니다.** retention preview는 살아 있는 행의 수라 스스로 낡지만,
+  문구는 누가 고치지 않으면 바뀌지 않으므로 불일치가 신호의 전부입니다. 시계를
+  두면 **옳은 승인을 이유 없이 거부**하게 됩니다.
+- **소유자 검사가 없습니다.** digest는 문구의 성질이지 누군가에게 속한 저장된
+  preview가 아니라서 "다른 사람이 실행한 것"이라는 말이 성립하지 않습니다.
+- **현재 digest가 null이면 통과가 아니라 거부**입니다. 대조할 문구를 렌더할 수
+  없었다는 뜻이고, 아무도 읽을 수 없는 말을 승인하는 것이 이 경로가 막으려는
+  실패입니다.
+
+**현재 digest는 route가 읽습니다, 요청에서 받지 않습니다** — retention 분기가
+제출된 id 대신 최신 run을 읽는 것과 같은 이유입니다. 요청자가 제공한 값과
+대조하는 확인은 아무것도 확인하지 않습니다.
+
+### 47.3 그대로 둔 것
+
+**조건 1·5·6은 action별이 아니므로 손대지 않았습니다** — 자격 있는 관리자가
+정확히 하나, 요청·실행·결과가 감사에 남고, 두 번째 관리자가 생기면 자동으로
+2인 경로가 돌아옵니다. 6번은 **매 요청마다 설정에서 다시 계산**하므로 끄는 것을
+기억할 flag가 없습니다.
+
+**승인 전 거부 셋도 그대로입니다** — locale 불일치, 일정 부정합, 전환 약속
+미충족은 여전히 승인을 claim하기 전에 거부합니다. 1인 경로라고 해서 그 앞의
+게이트가 느슨해지지 않습니다.
+
+**`approvalId`는 `sole-approver:{campaignId}`입니다.** 이 경로에는
+`AdminActionApproval` 행이 없으므로, 12조건 게이트의 `communication_approved`가
+읽을 것은 감사된 실행을 가리키는 이 값입니다.
+
+**감사 기록에는 digest만 남고 문구는 남지 않습니다.** 어떤 말이 승인됐는지
+말하면서 그 말의 두 번째 사본이 되지는 않습니다.
+
+## 48. D10 결정 기록과 구현 — 주소 마스킹과 감사되는 공개 (2026-08-24 · 완료)
+
+**결정**: 2026-08-24 승인. **기본 마스킹 + 감사되는 공개**, 그리고 §21이 구현 전
+승인을 요구했던 세 가지가 함께 정해졌습니다.
+
+| 질문 | 결정 |
+|---|---|
+| 공개에 사유를 요구하는가 | **아니오** |
+| 공개 범위 | **화면 단위** |
+| 공개 가능 역할 | **owner · ops** |
+
+| 파일 | 역할 |
+|---|---|
+| `lib/emailAddressMaskingCore.ts` | 마스킹 규칙 · 역할 · 상한. 순수, 새 파일 |
+| `lib/adminEmailDeliveries.ts` | 읽기 경계에서 마스킹 · `revealEmailAddresses` |
+| `app/api/admin/email-deliveries/reveal/route.ts` | 감사되는 공개. 새 파일 |
+| `components/admin/AdminAddressReveal.tsx` | client island. 새 파일 |
+| 두 패널 · `email-delivery/page.tsx` | 셀 교체 · provider 배선 |
+| `tests/emailAddressMasking.test.mjs` | 9건, 새 파일 |
+| `tests/e2e-admin/admin-read-surfaces.spec.ts` | 2건 추가 |
+
+### 48.1 상태가 아니라 사건으로 만든 방법
+
+**공개를 URL에 두지 않았습니다.** `?reveal=1`은 북마크되고 새로고침을 견디므로
+노출이 **다시 상태가 됩니다** — D10이 대체한 바로 그것 — 그리고 페이지 로드마다
+감사 항목이 찍혀 **진짜 기록이 소음에 묻힙니다.**
+
+그래서 공개는 **메모리에만 사는 client 동작**입니다. 한 번의 감사된 호출로
+주소가 오고, 화면을 떠나거나 새로고침하면 사라집니다. 북마크할 것도, 계속 참인
+것도 없습니다. E2E가 새로고침 뒤 주소가 사라지는 것을 검사합니다.
+
+### 48.2 타입이 보증합니다
+
+**`emailAddress`를 optional로 만들지 않고 행 타입에서 없앴습니다.** 패널이
+무언가를 확인하지 않아서 주소를 렌더하는 일이 불가능합니다 — 손이 갈 필드가
+존재하지 않고 컴파일러가 그렇게 말합니다. 이 변경이 정확히 세 지점을 드러냈고,
+그중 하나는 검색된 주소를 되돌려 주던 통합 테스트였습니다.
+
+**원문 주소는 서버가 렌더한 HTML에 아예 들어가지 않습니다.** 버튼을 누르지 않은
+운영자는 그 주소를 브라우저에 가진 적이 없습니다.
+
+### 48.3 마스크가 도메인을 남기는 이유
+
+전부 가리면 화면이 쓸모없어집니다 — bounce 목록을 훑는 운영자에게 필요한 것은
+"이 다섯 실패가 전부 한 provider"라는 사실이고 `•••` 다섯 줄은 아무 말도 하지
+않습니다. **local part가 식별하는 절반이고 도메인이 운영에 쓰이는 절반**이므로
+도메인은 남기고 local part는 양끝만 남깁니다.
+
+양끝을 남기는 이유는 흔한 지원 질문이 *"이 행이 나에게 편지 쓴 사람인가"*이고,
+사용자가 준 주소를 `p•••n@example.test`와 대조하면 **아무도 아무것도 공개하지
+않고** 답이 나오기 때문입니다.
+
+**해석 못 하는 값은 전부 가립니다.** 주소 모양이 아닌 값은 이 코드가 이해하지
+못하는 값이고, 마스크가 적용되지 않았다는 이유로 전문을 보여 주는 것은 정확히
+거꾸로입니다. `null`은 `null`로 둡니다 — 주소가 없는 것과 가려진 것은 다른
+사실입니다.
+
+### 48.4 화면 단위와 상한
+
+한 번의 호출이 화면의 모든 행을 덮고 **감사 항목 하나**를 남깁니다. 행마다
+공개하면 클릭마다 항목이 생기고, "주소 한 건"이 백 줄인 기록은 "백 건"이라고
+적힌 한 줄보다 읽기 어렵습니다.
+
+**상한 100건이 그 "한 화면"을 정직하게 만듭니다.** 없으면 감사된 호출 하나가
+표 전체를 가져갈 수 있고, 기록은 전부를 가져간 사람에 대해 "한 화면을 봤다"고
+말하게 됩니다.
+
+**감사 항목은 주소를 읽기 전에 씁니다** — `runWithAdminApproval`이 먼저 쓰는
+것과 같은 이유로, 감사 저장소가 없으면 공개도 일어나지 않습니다. 기록에는
+개수와 id만 남고 **주소는 남지 않습니다**: 기록이 기록 대상의 두 번째 사본이
+되지 않습니다.
+
+### 48.5 역할과 화면 문구
+
+**공개 역할 목록은 nav 항목의 `writeRoles`와 별개**입니다. 오늘 값이 같아도
+앞은 "무엇을 바꿀 수 있는가", 뒤는 "주소를 볼 수 있는가"이고, 합치면 한쪽 변경이
+다른 쪽을 조용히 움직입니다.
+
+**support에게도 control은 렌더되고 무엇인지 말합니다.** 어떤 관리자에게만
+사라지는 버튼은 그런 기능이 없는 화면과 구분되지 않고, 다음 질문이 화면에서
+답해지는 대신 만든 사람에게 갑니다. 서버도 그 말을 믿지 않고 403으로 거절합니다.
+
+### 48.6 남은 것
+
+**campaign 확장 원장의 개인 단위 열람**(§44)이 이제 열렸습니다. 7차는 D10 대기로
+숫자만 보여 주고 있으며, 같은 마스킹·공개 기전을 그 화면에 적용하는 것은 별도
+작업입니다.

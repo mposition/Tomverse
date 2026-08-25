@@ -309,6 +309,24 @@ export const FIXTURE_APP_SETTINGS = {
  * `eventName` must be one of `PRODUCT_ANALYTICS_EVENT_NAMES`; the funnel table
  * is built from that list, so an unknown name renders nowhere.
  */
+/**
+ * One suppressed address, so the masking and reveal controls have a real row to
+ * act on (D10, .github/audits/model-lifecycle-email-2026-08-22.md §21).
+ *
+ * A suppression rather than a delivery because it is self-contained: an
+ * `EmailDelivery` needs an event, a policy version and a template version
+ * behind it, and the two screens share the same component and the same reveal
+ * API — so a row here exercises both paths through the browser without
+ * building that graph in the harness.
+ */
+export const FIXTURE_SUPPRESSION = {
+  emailAddress: "suppressed.person@example.test",
+  scope: "global",
+  purposeKey: "all",
+  reason: "hard_bounce",
+  source: "provider_webhook",
+} as const;
+
 export const FIXTURE_ANALYTICS = {
   eventName: "landing_view",
   utmCampaign: "admin-console-e2e",

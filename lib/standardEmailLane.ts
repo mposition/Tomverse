@@ -22,6 +22,12 @@ import {
 } from "@/lib/emailSuppression";
 import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import {
+  ENQUEUE_REFUSAL_MESSAGE,
+  marketingFlagApplies,
+  type EnqueueRefusal,
+} from "@/lib/emailFeatureFlags";
 import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
@@ -190,10 +196,48 @@ export async function createStandardDeliveryRows(
  * better than a fire-and-forget send but leaves a window where the source row
  * exists and its notification does not.
  */
+export type StandardEnqueueResult =
+  | { refused: EnqueueRefusal; message: string }
+  | { eventId: string; deliveryId: string; idempotencyKey: string };
+
+/**
+ * Whether an enqueue produced a row.
+ *
+ * A named guard rather than `"deliveryId" in result` at every call site: the
+ * shape is a contract, and a caller reading a field off the refusal branch is
+ * exactly what a bare `null` used to allow.
+ */
+export const enqueueRefused = (
+  result: StandardEnqueueResult
+): result is { refused: EnqueueRefusal; message: string } =>
+  "refused" in result;
+
 export async function enqueueStandardEmail(
   input: StandardEnqueueInput & { tx?: Prisma.TransactionClient }
-) {
-  if (!input.emailAddress) return null;
+): Promise<StandardEnqueueResult> {
+  if (!input.emailAddress) {
+    return {
+      refused: "no_address",
+      message: ENQUEUE_REFUSAL_MESSAGE.no_address,
+    };
+  }
+
+  // First, before the template is registered and before an identity is
+  // resolved (EM-05, ADR section 15.2). A row written now would sit in the
+  // outbox waiting for a decision nobody has made, and the drain would send it
+  // the moment somebody flipped the switch for an unrelated reason.
+  //
+  // This is added in front of the structural block, never in place of it: no
+  // template is classified `marketing` today and `MARKETING_EMAIL_FROM` is
+  // unset, and both of those refuse the send whatever this flag says.
+  if (marketingFlagApplies(emailTemplateDefinition(input.templateKey).classification)) {
+    if (!(await isEmailMarketingEnabled())) {
+      return {
+        refused: "marketing_disabled",
+        message: ENQUEUE_REFUSAL_MESSAGE.marketing_disabled,
+      };
+    }
+  }
 
   const language = resolveLanguage(input.language);
   const template = await ensureTemplateVersion({
@@ -525,6 +569,30 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         data: {
           status: "skipped",
           skipReason: consent.skipReason,
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
+
+  // The feature flag, re-asked at send (EM-05). A row queued while marketing was
+  // on must not go out after somebody turned it off -- a switch that only
+  // guarded the enqueue would leave whatever was already queued to send itself,
+  // which is the one thing an operator flipping it off is trying to stop.
+  //
+  // Skipped rather than held, for the same reason the kill switch below skips:
+  // a promotion that waits for a decision arrives stale, and the row records
+  // why it never went.
+  if (definition.classification === "marketing") {
+    if (!(await isEmailMarketingEnabled())) {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "marketing_disabled",
           attempts: delivery.attempts,
           nextAttemptAt: null,
           claimedAt: null,

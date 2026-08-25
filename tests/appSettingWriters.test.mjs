@@ -54,17 +54,30 @@ const READ_ONLY_KEYS = {
       "approval already exist. A toggle would be the procedure's last step " +
       "without its first five.",
   },
-  ASSISTANT_PACKAGE_IMPORT_FLAG_KEY: {
+  EMAIL_MARKETING_FLAG_KEY: {
     reason:
-      "docs/policy/assistant-package-import.md §12.2 lists four things that " +
-      "have to be true before package import may be turned on, in order, and " +
-      "two of them are not: the validating migration for " +
-      "`extractedCharacters` is not deployed, so the figure the quota check " +
-      "reads has not been surveyed, and the staging checklist has no signed " +
-      "run. A toggle would be that procedure's last step without its first " +
-      "ones. The flag exists ahead of the control on purpose -- enabling it " +
-      "later is then a settings change against a reviewed path -- and the " +
-      "control lands with the rollout, not before it.",
+      "docs/policy/email-notifications.md §15.2 keeps this off until the legal " +
+      "review lands: Q1, Q2 and Q8 are unanswered, the A18 suppression " +
+      "boundary is undecided, and `news.tomverse.app` has neither been " +
+      "configured nor warmed up. A checkbox would put all of that behind one " +
+      "click. The flag exists ahead of the control on purpose -- turning it " +
+      "on later is then a settings change against a path that has already " +
+      "been reviewed and tested.",
+  },
+  EMAIL_CAMPAIGNS_FLAG_KEY: {
+    reason:
+      "Same §15.2 table, different condition: the approval process has to be " +
+      "settled first. Much of it now exists, but whether it is settled is an " +
+      "organisational judgement recorded by an operator writing the row, not " +
+      "something this code may decide by offering a toggle.",
+  },
+  EMAIL_CONSENT_RECONFIRM_FLAG_KEY: {
+    reason:
+      "The two-year re-confirmation batch does not exist yet, so there is " +
+      "nothing for a control to switch. The key is declared so the name in " +
+      "§15.2 resolves to something a reader can find; a writer for a feature " +
+      "with no consumer would be a switch that does nothing, which teaches an " +
+      "operator that switches do nothing.",
   },
 };
 
@@ -102,11 +115,23 @@ const keysUsedWith = (predicate) => {
   return keys;
 };
 
-const readKeys = keysUsedWith(
-  (body) => /prisma\.appSetting\.(findUnique|findMany|findFirst|count)/.test(body)
+/**
+ * `tx` as well as `prisma`, because a write can be inside a transaction.
+ *
+ * `setAssistantPackageImportEnabled()` is: the flag change and its audit row
+ * share one transaction on purpose, so a failed audit write takes the change
+ * with it. Matching only `prisma.` would have read that as no write path at
+ * all -- the sweep would have reported the very control the policy asked for
+ * as missing, which is the opposite of the mistake this file exists to catch.
+ */
+const CLIENT = String.raw`(?:prisma|tx|client)`;
+const readKeys = keysUsedWith((body) =>
+  new RegExp(`${CLIENT}\\.appSetting\\.(findUnique|findMany|findFirst|count)`).test(
+    body
+  )
 );
-const writtenKeys = keysUsedWith(
-  (body) => /prisma\.appSetting\.(upsert|update|create|delete)/.test(body)
+const writtenKeys = keysUsedWith((body) =>
+  new RegExp(`${CLIENT}\\.appSetting\\.(upsert|update|create|delete)`).test(body)
 );
 
 test("the sweep finds the keys it is meant to, so a silent zero is impossible", () => {

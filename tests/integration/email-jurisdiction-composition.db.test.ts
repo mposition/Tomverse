@@ -12,6 +12,7 @@ import {
   drainStandardEmailDeliveries,
   enqueueStandardEmail,
 } from "@/lib/standardEmailLane";
+import { enqueuedRow } from "../support/enqueuedEmail";
 
 // The subject prefix and the jurisdiction footer, applied at send time (EM-04).
 //
@@ -101,13 +102,13 @@ const activateSeededPolicy = async () => {
 
 const queueWelcome = async (profileKey?: string) => {
   const user = await someone();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     language: "en",
     payload: { name: user.name },
-  });
+  }));
   assert.ok(rows);
   if (profileKey) {
     // The resolver decides this from the account's own signals, and this suite

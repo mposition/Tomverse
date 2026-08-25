@@ -4021,6 +4021,21 @@ model EmailCampaign {
   audienceVersion     Int  @default(1)
   estimatedRecipients Int?
 
+  /// When the estimate above was measured, and by whom.
+  ///
+  /// An estimate with no timestamp is a number of unknown age against an
+  /// audience that moves daily. Both are NULL until something measures it --
+  /// which, before the eighth slice, nothing did.
+  estimatedAt      DateTime?
+  estimatedByEmail String?
+
+  /// The full AudienceSummary the estimate came from.
+  ///
+  /// The exclusion breakdown is the part that says the audience query is
+  /// wrong, and keeping it only in the computing request's response would mean
+  /// the second administrator reviewing this campaign never sees it.
+  audienceEstimate Json?
+
   /// Whether the copy promises Tomverse will change the model automatically.
   ///
   /// A retirement notice can say "please pick another model" without promising

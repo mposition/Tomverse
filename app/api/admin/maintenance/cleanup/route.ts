@@ -235,8 +235,11 @@ export async function POST(req: Request) {
                 action: "retention.cleanup.execute",
                 targetType: "Retention",
                 targetId: "expired-data",
-                submittedRunId: body.dryRunId || "",
-                submittedDigest: body.dryRunDigest || "",
+                confirmation: {
+                  kind: "retention_dry_run",
+                  submittedRunId: body.dryRunId || "",
+                  submittedDigest: body.dryRunDigest || "",
+                },
               },
               cleanupExpiredData
             )

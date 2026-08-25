@@ -48,20 +48,90 @@ export const EVAL_CELLS: Readonly<Record<EvalStratum, readonly string[]>> = {
 /** §8: where an item came from. A drafted item is a candidate, never adopted. */
 export type EvalItemSource = "real" | "drafted" | "adapted";
 
+/**
+ * docs/ops/tomverse-chat-router-evaluation-set.md §8 lists language beside stratum and cell, and the two are not the same
+ * thing.
+ *
+ * For thirteen of the fifteen cells the cell name is the language and this
+ * field only restates it. The two that matter are
+ * `translation_cross_language`, whose cell is `ko-en`: that is a direction,
+ * not a language. Storing it as one string would mean a later question --
+ * "how does the Router do on Korean prompts?" -- could not separate a Korean
+ * prompt answered in Korean from a Korean prompt answered in English, and
+ * those measure different things.
+ */
+export type EvalItemLanguage = {
+  /** The language the person writes in. */
+  prompt: string;
+  /** The language a correct answer comes back in. */
+  expectedResponse: string;
+};
+
+/**
+ * How a drafted item was produced, in enough detail to make it again.
+ *
+ * A free-text "drafted by Claude" reconstructs nothing a year later. docs/ops/tomverse-chat-router-evaluation-set.md §8 makes
+ * a drafted item a candidate precisely because the drafter's phrasing is a
+ * confound, so the reviewer weighing that confound needs to know which model,
+ * which version, and under which prompt.
+ *
+ * `modelVersion` is whatever identifier the provider actually returned. If it
+ * returned none, the field is null -- a guessed snapshot id is worse than an
+ * absent one, because it looks checkable and is not.
+ */
+export const UNRECORDED_PROVENANCE = "unrecorded";
+
+export type EvalDraftProvenance = {
+  batchId: string;
+  provider: string;
+  modelId: string;
+  modelVersion: string | null;
+  promptTemplateVersion: string;
+  promptTemplateHash: string;
+  generatorCommit: string | null;
+  draftedAt: string;
+};
+
 export type EvalSetItem = {
   id: string;
   stratum: EvalStratum;
   cell: string;
+  language: EvalItemLanguage;
   source: EvalItemSource;
   /** §8/§10: adoption is a human act, so the record is a person and a date. */
   status: "candidate" | "adopted";
   adoptedBy: string | null;
   adoptedAt: string | null;
+  /** Present on every drafted item; absent on one taken from real traffic. */
+  draftProvenance?: EvalDraftProvenance;
+  /**
+   * The item this one replaces, when a reviewer rejected the original.
+   *
+   * A rejected prompt is not edited into an accepted one: it is redrafted
+   * under a new id, so the review that rejected it still refers to what was
+   * actually rejected.
+   */
+  replaces?: string;
   prompt: string;
   /** Media types only. The set never carries a file, only the shape of one. */
   attachments?: readonly { mediaType: string }[];
   webSearchRequested?: boolean;
   notes?: string;
+};
+
+/**
+ * The language pair each cell implies, for checking an item against its cell.
+ *
+ * Kept beside `EVAL_CELLS` rather than derived from the cell name, because
+ * `ko-en` does not parse into a pair by any rule that would survive a third
+ * cross-language cell being added.
+ */
+export const CELL_LANGUAGES: Readonly<
+  Record<string, { prompt: string; expectedResponse: string }>
+> = {
+  ko: { prompt: "ko", expectedResponse: "ko" },
+  en: { prompt: "en", expectedResponse: "en" },
+  "ko-en": { prompt: "ko", expectedResponse: "en" },
 };
 
 export type EvalSetBaseline = {
@@ -79,7 +149,25 @@ export type EvalSet = {
   frozenAt: string | null;
   frozenBy: string | null;
   baseline: EvalSetBaseline | null;
+  /**
+   * docs/ops/tomverse-chat-router-evaluation-set.md §11's "Strata and cell targets frozen" record. A human entry: filled when
+   * a person freezes the targets, and what `cellShortfalls` grades against.
+   */
   cellTargets: readonly { stratum: string; cell: string; target: number }[];
+  /**
+   * What an agent may propose instead.
+   *
+   * Deliberately a different field from `cellTargets`, not a default for it.
+   * A proposal and a freeze are different acts by different parties, and one
+   * field holding both would make the freeze record unfalsifiable -- there
+   * would be no way to tell a target a person chose from one a script wrote.
+   */
+  proposedPilotCellTarget?: number | null;
+  /**
+   * Set by a person when the pool is believed complete, which is when a short
+   * cell becomes an error rather than work in progress.
+   */
+  pilotReady?: boolean;
   items: readonly EvalSetItem[];
 };
 
@@ -136,6 +224,51 @@ export const evalSetProblems = (
       );
     }
     if (!isNonEmptyString(item?.prompt)) problems.push(`${label} has no prompt`);
+
+    // docs/ops/tomverse-chat-router-evaluation-set.md §8. The cell fixes the language pair, so an item disagreeing with its
+    // own cell is one of the two mislabelled -- and either way the cell it
+    // gets counted in is not the cell it belongs to.
+    const expectedLanguage = CELL_LANGUAGES[item?.cell as string];
+    const language = item?.language;
+    if (!language || typeof language !== "object") {
+      problems.push(`${label} records no language (prompt and expected response)`);
+    } else if (expectedLanguage) {
+      if (language.prompt !== expectedLanguage.prompt) {
+        problems.push(
+          `${label} is in cell "${String(item?.cell)}" but its prompt language is ` +
+            `"${String(language.prompt)}", not "${expectedLanguage.prompt}"`
+        );
+      }
+      if (language.expectedResponse !== expectedLanguage.expectedResponse) {
+        problems.push(
+          `${label} is in cell "${String(item?.cell)}" but expects a ` +
+            `"${String(language.expectedResponse)}" answer, not "${expectedLanguage.expectedResponse}"`
+        );
+      }
+    }
+
+    // A drafted item whose drafter is unrecorded cannot be weighed for the
+    // confound docs/ops/tomverse-chat-router-evaluation-set.md §8 names, which is the whole reason drafted items stay
+    // candidates.
+    if (item?.source === "drafted") {
+      const provenance = item.draftProvenance;
+      if (!provenance || typeof provenance !== "object") {
+        problems.push(`${label} is drafted but records no draft provenance`);
+      } else {
+        for (const field of [
+          "batchId",
+          "provider",
+          "modelId",
+          "promptTemplateVersion",
+          "promptTemplateHash",
+          "draftedAt",
+        ] as const) {
+          if (!isNonEmptyString(provenance[field])) {
+            problems.push(`${label} draft provenance has no ${field}`);
+          }
+        }
+      }
+    }
     if (item?.source !== "real" && item?.source !== "drafted" && item?.source !== "adapted") {
       problems.push(`${label} has no recorded source`);
     }
@@ -220,4 +353,72 @@ export const uniformCellTargets = (
 ): readonly { stratum: EvalStratum; cell: string; target: number }[] =>
   EVAL_STRATA.flatMap((stratum) =>
     EVAL_CELLS[stratum].map((cell) => ({ stratum, cell, target: perCell }))
+  );
+
+
+/** Every cell of every stratum, as the flat list the counters work over. */
+export const allCells = (): readonly { stratum: EvalStratum; cell: string }[] =>
+  EVAL_STRATA.flatMap((stratum) => EVAL_CELLS[stratum].map((cell) => ({ stratum, cell })));
+
+export type CellFill = {
+  stratum: EvalStratum;
+  cell: string;
+  target: number;
+  candidates: number;
+  adopted: number;
+  /** Adopted is what counts: a candidate is a proposal, not a member. */
+  short: number;
+};
+
+/**
+ * How full each cell is, counted per cell and never pooled.
+ *
+ * docs/ops/tomverse-chat-router-evaluation-set.md §2 manages cells independently and reports a short cell as `UNDERPOWERED`
+ * rather than averaging it away, so this returns one row per cell -- including
+ * the cells that are full. A summary that listed only the short ones would
+ * make "no output" mean both "everything is full" and "nothing was counted".
+ *
+ * The target is the frozen `cellTargets` entry where one exists, and the
+ * agent's `proposedPilotCellTarget` otherwise. Which of the two was used is a
+ * question for the caller to report; this function does not decide whether a
+ * shortfall is an error, because during collection every cell is short and
+ * that is not a failure.
+ */
+export const cellFill = (set: EvalSet): readonly CellFill[] => {
+  const frozen = new Map(
+    (set.cellTargets ?? []).map((target) => [`${target.stratum}/${target.cell}`, target.target])
+  );
+  const proposed =
+    typeof set.proposedPilotCellTarget === "number" && set.proposedPilotCellTarget > 0
+      ? set.proposedPilotCellTarget
+      : 0;
+  return allCells().map(({ stratum, cell }) => {
+    const items = set.items.filter((item) => item.stratum === stratum && item.cell === cell);
+    const adopted = items.filter((item) => item.status === "adopted").length;
+    const target = frozen.get(`${stratum}/${cell}`) ?? proposed;
+    return {
+      stratum,
+      cell,
+      target,
+      candidates: items.filter((item) => item.status === "candidate").length,
+      adopted,
+      short: Math.max(0, target - adopted),
+    };
+  });
+};
+
+/**
+ * Drafted items whose drafter cannot be reconstructed.
+ *
+ * `evalSetProblems` only asks that a drafted item record a provenance, and a
+ * field reading "unrecorded" satisfies that. It is a truthful record of a real
+ * gap -- some items predate the schema -- but it would otherwise pass a check
+ * whose whole point is reconstructability, silently. So the gap is counted and
+ * reported rather than left to look like a filled field.
+ */
+export const unrecordedProvenanceItems = (set: EvalSet): readonly EvalSetItem[] =>
+  set.items.filter(
+    (item) =>
+      item.source === "drafted" &&
+      (item.draftProvenance?.provider ?? UNRECORDED_PROVENANCE) === UNRECORDED_PROVENANCE
   );

@@ -20,10 +20,27 @@ const item = (overrides = {}) => ({
   id: "gen-ko-001",
   stratum: "general_question_answering",
   cell: "ko",
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8 records language beside
+  // stratum and cell, as a pair: the cross-language cell is a direction rather
+  // than one language, and collapsing it would lose the ability to ask about
+  // Korean prompts separately from Korean answers.
+  language: { prompt: "ko", expectedResponse: "ko" },
   source: "drafted",
   status: "candidate",
   adoptedBy: null,
   adoptedAt: null,
+  // A drafted item records its drafter, because that drafter is the confound
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8 makes a person weigh before adopting.
+  draftProvenance: {
+    batchId: "test-batch",
+    provider: "openai",
+    modelId: "gpt-5-5",
+    modelVersion: null,
+    promptTemplateVersion: "router-eval-draft-v1",
+    promptTemplateHash: "0000000000000000",
+    generatorCommit: null,
+    draftedAt: "2026-08-24T00:00:00.000Z",
+  },
   prompt: "전세와 월세의 차이를 설명해 주세요.",
   ...overrides,
 });

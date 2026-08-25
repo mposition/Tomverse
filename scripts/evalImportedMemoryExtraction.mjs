@@ -9,6 +9,7 @@
  *   ... --model=gpt-5-6-luna                             pair under evaluation
  *   ... --json=artifacts/mem-eval.json                   preserve the artifact
  *   ... --max-cost-usd=5                                 hard stop on spend
+ *   ... --limit=10                                       compatibility probe, not a run
  *
  * What this does NOT do, on purpose:
  *
@@ -51,6 +52,7 @@ import {
     findDuplicateCases,
     judgeEval,
     scoreCase,
+    summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
 
 const argValue = (name, fallback) => {
@@ -62,6 +64,22 @@ const hasFlag = (name) => process.argv.includes(`--${name}`);
 const modelId = argValue("model", "gpt-5-6-luna");
 const jsonPath = argValue("json", "");
 const live = hasFlag("live");
+/**
+ * A compatibility probe: run the first N cases and stop.
+ *
+ * Point of it is to learn whether the wiring works before paying to learn it
+ * 1,150 times -- v1 spent three dispatches discovering, one failure at a
+ * time, that the request was wrong. A probe is never a run: the artifact
+ * records `probeLimit` and `decisionGrade` is false whatever the numbers say,
+ * because a verdict from a slice of the sample is not a verdict.
+ */
+const rawProbeLimit = argValue("limit", "");
+const probeLimit = rawProbeLimit === "" ? null : Number(rawProbeLimit);
+if (probeLimit !== null && !(Number.isInteger(probeLimit) && probeLimit > 0)) {
+    console.error(`--limit must be a positive integer (got "${rawProbeLimit}").`);
+    process.exit(1);
+}
+
 const rawMaxCost = argValue("max-cost-usd", "");
 const maxCostUsd = rawMaxCost === "" ? null : Number(rawMaxCost);
 if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
@@ -136,6 +154,13 @@ const REFUSAL_MESSAGES = {
         "lib/memoryExtractionEvalRegister.ts (approvedBy, maxUsd, ticket, approvedAt),\n" +
         "merged as its own reviewed change. That record is the audit trail.",
     no_api_key: "OPENAI_API_KEY is required for --live.",
+    pair_not_runnable:
+        `${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION} is \`${registerEntry?.status}\` in the ` +
+        "register (§12.1).\n\n" +
+        "A revoked entry keeps its approved budget -- the approval was real and\n" +
+        "was really spent against -- so the budget is not permission to run it\n" +
+        "again. Register the pair you mean to evaluate, or reopen this one\n" +
+        "deliberately as its own reviewed change.",
     unknown_commit:
         "This run cannot name the commit it is running (§12.2).\n\n" +
         "`git rev-parse HEAD` produced nothing, which means this is not a git\n" +
@@ -220,45 +245,66 @@ let abortedOnFailures = false;
 /** Consecutive scoreable-answer failures after which the run stops. */
 const MAX_CONSECUTIVE_FAILURES = 5;
 
-const liveAdapter = async ({ prompt }) => {
-    const [{ generateText }, { getActiveAiModel }, { getModel }, { resolveModelPricing }] =
-        await Promise.all([
-            import("ai"),
-            import("../lib/activeAiModel.ts"),
-            import("../lib/models.ts"),
-            import("../lib/modelPricing.ts"),
-        ]);
+/**
+ * The live adapter is the product's adapter.
+ *
+ * It used to build its own `generateText` call, and three runs died on the
+ * difference: a system message the SDK refuses, then an output ceiling this
+ * file had picked for itself. Both were invented here, and the second was
+ * worse than the first -- an eval that sends a request the product never
+ * sends is not measuring the product, however green its numbers come out.
+ *
+ * So the call comes from `createExtractionProviderAdapter`, the same function
+ * `memoryExtractionWorker` uses, and this file supplies only what an eval
+ * needs to differ in: nothing to abort, no durable cost row, and a usage hook
+ * so the spend ceiling has real numbers rather than an estimate.
+ */
+const liveAdapter = async (input) => {
+    const [
+        { createExtractionProviderAdapter },
+        { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS },
+        { getModel },
+        { resolveModelPricing },
+    ] = await Promise.all([
+        import("../lib/memoryExtractionProvider.ts"),
+        import("../lib/memoryExtractionWorker.ts"),
+        import("../lib/models.ts"),
+        import("../lib/modelPricing.ts"),
+    ]);
     const model = getModel(modelId);
-    const result = await generateText({
-        model: getActiveAiModel(model),
-        messages: [
-            { role: "system", content: prompt.system },
-            { role: "user", content: prompt.user },
-        ],
-        maxOutputTokens: 4_096,
+    const adapter = createExtractionProviderAdapter({
+        model,
+        maxOutputTokens: MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS,
+        // An eval has no deadline of its own: the run is bounded by the spend
+        // ceiling and the consecutive-failure guard, both of which stop it
+        // between cases rather than mid-request.
+        signal: new AbortController().signal,
+        onCallIssued: () => {},
+        onResult: (result) => {
+            try {
+                // `resolveModelPricing` takes the model and an options object,
+                // not an id and a bare number. Called with `(modelId, tokens)`
+                // it threw on every single call, and the catch below swallowed
+                // it, so `accruedCostUsd` stayed at zero for a whole live run
+                // and the §12.5 spend ceiling never bound.
+                const pricing = resolveModelPricing(model, {
+                    estimatedPromptTokens: result.usage.inputTokens ?? 0,
+                });
+                accruedCostUsd +=
+                    ((result.usage.inputTokens ?? 0) *
+                        pricing.inputUsdPerMillionTokens +
+                        (result.usage.outputTokens ?? 0) *
+                            pricing.outputUsdPerMillionTokens) /
+                    1_000_000;
+            } catch {
+                // Pricing is for the spend ceiling only, so a resolution
+                // failure does not abort a run that is otherwise fine. It is
+                // counted, though: silence here is what hid the bug above.
+                pricingFailures += 1;
+            }
+        },
     });
-    const usage = result.usage ?? {};
-    try {
-        // `resolveModelPricing` takes the model and an options object, not an
-        // id and a bare number. Called with `(modelId, tokens)` it threw on
-        // every single call -- `model.id` on a string is undefined -- and the
-        // catch below swallowed it, so `accruedCostUsd` stayed at zero for a
-        // whole live run and the §12.5 spend ceiling never bound. The budget
-        // *refusal* worked; the ceiling did not.
-        const pricing = resolveModelPricing(model, {
-            estimatedPromptTokens: usage.inputTokens ?? 0,
-        });
-        accruedCostUsd +=
-            ((usage.inputTokens ?? 0) * pricing.inputUsdPerMillionTokens +
-                (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens) /
-            1_000_000;
-    } catch {
-        // Pricing is for the spend ceiling only, so a resolution failure does
-        // not abort a run that is otherwise fine. It is counted, though: see
-        // `pricingFailures`. Silence here is what hid the bug above.
-        pricingFailures += 1;
-    }
-    return { text: result.text ?? "" };
+    return adapter(input);
 };
 
 /* -------------------------------------------------------------------- run -- */
@@ -267,6 +313,7 @@ const outcomes = [];
 const records = [];
 
 for (const testCase of MEMORY_EVAL_CASES) {
+    if (probeLimit !== null && outcomes.length >= probeLimit) break;
     // The ceiling is the approved budget narrowed by any --max-cost-usd, so a
     // runaway retry or an output-token anomaly stops here rather than being
     // discovered on the invoice.
@@ -373,6 +420,22 @@ for (const [cell, count] of Object.entries(verdict.adequacy.counts)) {
     line(cell, `${count}${count < minimum ? `  (needs ${minimum})` : ""}`);
 }
 
+// Why cases failed, not just how many. Without this the run says the pair is
+// broken and leaves the reason in the artifact, so the first thing anybody
+// does after a failed run is download a file to read one repeated sentence.
+const failureReasons = summarizeFailures(records);
+if (failureReasons.length > 0) {
+    const scored = records.filter((record) => record.failure).length;
+    console.log(`\nWhy ${scored} case(s) had no scoreable answer`);
+    for (const { reason, count } of failureReasons.slice(0, 5)) {
+        const text = reason.length > 300 ? `${reason.slice(0, 300)}…` : reason;
+        console.log(`  ${String(count).padStart(4)}x  ${text}`);
+    }
+    if (failureReasons.length > 5) {
+        console.log(`  … and ${failureReasons.length - 5} other reason(s).`);
+    }
+}
+
 if (verdict.failures.length > 0) {
     console.log("\nNot a pass:");
     for (const failure of verdict.failures) console.log(`  - ${failure}`);
@@ -398,6 +461,72 @@ if (!verdict.adequacy.decisionGrade) {
             "above with the number each one needs. Authoring the remaining cases is a data\n" +
             "task: §12.2 forbids reaching the floor by copying or lightly varying the\n" +
             "existing ones, and the duplicate check refuses a dataset that tries."
+    );
+}
+if (probeLimit !== null) {
+    // What a probe is actually for. Without this it answers "did the answers
+    // parse", and the first one did -- while nine adoptions matched three
+    // gold labels and the summary could not say whether the other six were
+    // wrong, extra-but-correct, or right with a different `kind`. Those need
+    // different responses and the counts collapse them into one number.
+    //
+    // Bounded by --limit, so it cannot become a wall of text.
+    const byId = new Map(MEMORY_EVAL_CASES.map((entry) => [entry.id, entry]));
+    console.log("\nWhat the model returned, case by case");
+    for (const record of records) {
+        const testCase = byId.get(record.caseId);
+        const expected = testCase?.expected ?? [];
+        console.log(`\n  ${record.caseId}  (${record.category}:${record.language})`);
+        if (record.failure) {
+            console.log(`    failed: ${record.failure}`);
+            continue;
+        }
+        console.log(
+            expected.length === 0
+                ? "    expected: nothing (extracting anything is a false positive)"
+                : `    expected: ${expected
+                      .map((entry) => `${entry.kind} + [${entry.mustInclude.join(", ")}]`)
+                      .join("; ")}`
+        );
+        if (record.candidates.length === 0) {
+            console.log("    returned: (nothing)");
+            continue;
+        }
+        for (const candidate of record.candidates) {
+            // Why a candidate did not count, named rather than implied: a
+            // right statement filed under the wrong kind never matches, and
+            // that reads identically to a wrong statement in the totals.
+            const kindMatches = expected.some((entry) => entry.kind === candidate.kind);
+            const tokensMatch = expected.some((entry) =>
+                entry.mustInclude.every((token) =>
+                    candidate.statement.toLowerCase().includes(token.toLowerCase())
+                )
+            );
+            const verdict = !candidate.bulkSafe
+                ? "not adopted"
+                : kindMatches && tokensMatch
+                  ? "MATCH"
+                  : tokensMatch
+                    ? `tokens match, kind differs (expected ${expected.map((e) => e.kind).join("/")})`
+                    : kindMatches
+                      ? "kind matches, tokens do not"
+                      : "neither";
+            console.log(
+                `    [${verdict}] ${candidate.kind} · bulk-safe ${candidate.bulkSafe} — ${candidate.statement}`
+            );
+        }
+    }
+    console.log(
+        "\nA candidate that reads correctly but is filed under another kind counts as\n" +
+            "a false positive, because §12.3 is scored on the gold label. Whether that is\n" +
+            "the model, the label or the taxonomy is a question for a person -- the counts\n" +
+            "above cannot tell them apart, which is why the statements are printed."
+    );
+    console.log(
+        `\nPROBE — ran the first ${outcomes.length} case(s) of ${MEMORY_EVAL_CASES.length} and stopped at --limit.\n` +
+            "This is a compatibility check, not a run: it says whether the request, the\n" +
+            "schema, the parser and the validator agree end to end on real answers. Its\n" +
+            "numbers are a slice of the sample and are not a verdict at any quality."
     );
 }
 if (workingTreeDirty) {
@@ -448,6 +577,8 @@ const artifact = {
         caseCount: outcomes.length,
         plannedCaseCount: MEMORY_EVAL_CASES.length,
         truncatedByCostCeiling: costStopped,
+        // Non-null means this was a probe, and the fields below say so too.
+        probeLimit,
         maxCostUsd,
         accruedCostUsd: runMode.mode === "live" ? accruedCostUsd : 0,
         // How many calls the accrued figure is missing. Zero means the ceiling
@@ -461,7 +592,8 @@ const artifact = {
         decisionGrade:
             verdict.adequacy.decisionGrade &&
             runMode.mode === "live" &&
-            MEMORY_EVAL_DATASET_FROZEN,
+            MEMORY_EVAL_DATASET_FROZEN &&
+            probeLimit === null,
         datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
         datasetPurpose: MEMORY_EVAL_DATASET_PURPOSE,
         abortedOnConsecutiveFailures: abortedOnFailures,

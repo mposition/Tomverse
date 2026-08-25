@@ -328,7 +328,13 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   `gpt-5-5-thinking`은 상한이 이미 맞고 예약만 어긋나서
   `RESERVATION_ONLY_RECONCILIATION_MODEL_IDS`로 따로 들어갔으며, 그 6,144는
   docs/policy/credit-and-cost-limits.md §4가 이미 확정한 값입니다 — **이미
-  내려진 결정을 옮기는 것이지 새로 정하는 것이 아닙니다.** p90 basis를 새로
+  내려진 결정을 옮기는 것이지 새로 정하는 것이 아닙니다.** 2026-08-25에
+  `gpt-5-5`·`gemini-3-1-pro`가 같은 scope에 들어갔습니다(2,048 → 4,096).
+  **예약 전용 scope에 등록하는 근거는 차이가 아니라 provenance입니다** —
+  actor 컬럼 부재, `updatedAt` = `createdAt`, `AdminAuditLog` 0건, 배치
+  write임을 보이는 공유 timestamp를 운영 DB에서 확인하고, 저장된 숫자가 그
+  seed 시점 트리의 class 기본값과 일치함까지 대조합니다. 하나라도 불명확하면
+  등록하지 않고 보고만 합니다. p90 basis를 새로
   적용하는 것은 여전히 별개이고 9개 조건이 필요합니다.
 - **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
   아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
@@ -1052,7 +1058,7 @@ Non-negotiable requirements:
 <!-- BEGIN:admin-console-ia-invariant -->
 ## Admin Console information architecture invariant
 
-Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, or any route under `app/(site)/(application)/admin/**`, read:
+Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, **any panel under `components/admin/`**, or any route under `app/(site)/(application)/admin/**`, read:
 
 - `docs/ui-contracts/admin-console-ia.md`
 
@@ -1063,6 +1069,14 @@ Non-negotiable requirements:
 - Adding an entry means adding it in three places at once: the route table in `lib/adminNavigation.ts`, an icon in `adminNavigationIcons.ts`, and a real route segment. There is no catch-all `[section]` route — an unknown admin URL must answer 404, not 200.
 - A badge is for work, not decoration: only entries an operator acts on carry one, and an unknown count renders nothing rather than zero.
 - The layout loads counts; a page loads its own data. Nothing that only one workspace displays may move into `admin/layout.tsx`. A panel showing the newest N rows states N on screen and does not present its own counters as totals.
+- **A step-up refusal offers the way back.** A control refused because the
+  administrator's sign-in is no longer recent renders
+  `adminRecentAuthenticationHref(<this screen's path>)` — the step-up URL that
+  carries a callback and keeps the console session. **A toast alone is a
+  defect**: it names the remedy and gives no way to reach it, so the screen
+  reads as broken rather than gated. This has been got wrong three times;
+  `tests/adminReauthenticationCta.test.mjs` fails any panel that can be refused
+  and cannot render the link.
 - Authorization is out of this contract's scope and was not changed by it: `writeRoles` in the route table drives the sidebar's "Read" marker only, and access is still decided server-side by `lib/adminAuth.ts` and each `/api/admin/**` handler.
 - Any related change must keep `tests/adminNavigation.test.mjs` and the `tests/e2e-admin/**` suite (`npm run test:e2e:admin`, the "Admin Console E2E (PostgreSQL)" workflow) passing.
 - A change that violates the redirect rule is a release blocker; the rest is ordinary review.

@@ -538,66 +538,104 @@ test("every cap-only model has its stranded cap lifted by the bootstrap", async 
 // The reservation-only scope, end to end. This is the one narrow entry that
 // moves a money figure, so what it must NOT touch is worth pinning as firmly
 // as what it does: docs/policy/credit-and-cost-limits.md section 4 approved
-// 6,144 for reasoning models, and nothing else about the row was approved
-// with it.
+// the held figures, and nothing else about those rows was approved with them.
+//
+// Every model in the scope is exercised, not just the first. The scope grew on
+// 2026-08-25 and this test still named one model, which is the shape of test
+// that reports a widened money path as green.
 test("the reservation-only scope raises the held figure and leaves the cap and credits alone", async () => {
-  assert.deepEqual(
-    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
-    ["gpt-5-5-thinking"]
-  );
-  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
-    where: { id: "gpt-5-5-thinking" },
-  });
+  const ids = [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS];
+  // Frozen deliberately. Adding a model here moves what an account is
+  // guaranteed, so it is an edit that must be made twice -- once in the scope
+  // and once in the test that says which rows the scope covers.
+  assert.deepEqual(ids, ["gpt-5-5-thinking", "gpt-5-5", "gemini-3-1-pro"]);
 
-  await prisma.modelRegistryEntry.update({
-    where: { id: "gpt-5-5-thinking" },
-    data: {
-      // The premium class fallback a pre-2026-08-01 seed left behind.
-      reservationOutputTokens: 4_096,
-      // Deliberately wrong, and deliberately left wrong: this scope carries
-      // the reservation only, so an operator's cap survives it.
-      maxOutputTokens: 7_000,
-      creditWeight: 31,
-      inputUsdPerMillionTokens: 11.5,
-      updatedByEmail: "ops@tomverse.app",
-    },
+  const originals = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: ids } },
   });
+  assert.equal(
+    originals.length,
+    ids.length,
+    "all reservation-only models must be seeded"
+  );
+
+  for (const original of originals) {
+    await prisma.modelRegistryEntry.update({
+      where: { id: original.id },
+      data: {
+        // Below every approved figure in the scope, so a reconciliation that
+        // did nothing cannot pass by coincidence. The real fossils differ per
+        // row -- 4,096 on the premium fallback, 2,048 from the 2026-07-17
+        // seed -- and a shared sentinel is what lets one assertion cover all
+        // of them.
+        reservationOutputTokens: 1_024,
+        // Deliberately wrong, and deliberately left wrong: this scope carries
+        // the reservation only, so an operator's cap survives it.
+        maxOutputTokens: 7_000,
+        creditWeight: 31,
+        inputUsdPerMillionTokens: 11.5,
+        updatedByEmail: "ops@tomverse.app",
+      },
+    });
+  }
 
   await reconcileStaticCatalogMetadata();
 
-  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
-    where: { id: "gpt-5-5-thinking" },
-  });
-  assert.equal(row.reservationOutputTokens, 6_144);
-  assert.equal(
-    row.maxOutputTokens,
-    7_000,
-    "the cap is outside this scope, so even a wrong one is left for a human"
-  );
-  assert.equal(row.creditWeight, 31);
-  assert.equal(Number(row.inputUsdPerMillionTokens), 11.5);
-  assert.equal(row.updatedByEmail, "ops@tomverse.app");
-  assert.equal(row.enabled, before.enabled);
-  assert.equal(row.status, before.status);
+  for (const original of originals) {
+    const expected = STATIC_RUNTIME_MODELS.find(
+      (model) => model.id === original.id
+    );
+    assert.ok(expected, original.id);
+    const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+      where: { id: original.id },
+    });
+    assert.equal(
+      row.reservationOutputTokens,
+      expected.reservationOutputTokens,
+      original.id
+    );
+    assert.ok(row.reservationOutputTokens! > 1_024, original.id);
+    assert.equal(
+      row.maxOutputTokens,
+      7_000,
+      "the cap is outside this scope, so even a wrong one is left for a human"
+    );
+    assert.equal(row.creditWeight, 31, original.id);
+    assert.equal(Number(row.inputUsdPerMillionTokens), 11.5, original.id);
+    assert.equal(row.updatedByEmail, "ops@tomverse.app", original.id);
+    assert.equal(row.enabled, original.enabled, original.id);
+    assert.equal(row.status, original.status, original.id);
+  }
 
   // Idempotent.
   await reconcileStaticCatalogMetadata();
-  const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
-    where: { id: "gpt-5-5-thinking" },
-  });
-  assert.equal(again.reservationOutputTokens, 6_144);
-  assert.equal(again.creditWeight, 31);
+  for (const original of originals) {
+    const expected = STATIC_RUNTIME_MODELS.find(
+      (model) => model.id === original.id
+    );
+    const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
+      where: { id: original.id },
+    });
+    assert.equal(
+      again.reservationOutputTokens,
+      expected!.reservationOutputTokens,
+      original.id
+    );
+    assert.equal(again.creditWeight, 31, original.id);
+  }
 
-  await prisma.modelRegistryEntry.update({
-    where: { id: "gpt-5-5-thinking" },
-    data: {
-      maxOutputTokens: before.maxOutputTokens,
-      reservationOutputTokens: before.reservationOutputTokens,
-      creditWeight: before.creditWeight,
-      inputUsdPerMillionTokens: before.inputUsdPerMillionTokens,
-      updatedByEmail: before.updatedByEmail,
-    },
-  });
+  for (const original of originals) {
+    await prisma.modelRegistryEntry.update({
+      where: { id: original.id },
+      data: {
+        maxOutputTokens: original.maxOutputTokens,
+        reservationOutputTokens: original.reservationOutputTokens,
+        creditWeight: original.creditWeight,
+        inputUsdPerMillionTokens: original.inputUsdPerMillionTokens,
+        updatedByEmail: original.updatedByEmail,
+      },
+    });
+  }
 });
 
 test("stores limited availability and operational notes in the registry", async () => {

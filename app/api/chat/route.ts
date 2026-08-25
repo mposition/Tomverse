@@ -1139,19 +1139,6 @@ async function handleChatPost(
             plan: accountPlan?.tier ?? null,
             drillOverride: drillOverride.allowed,
         });
-        if (autoCohort.eligible && autoCohort.drillOverride) {
-            // Loud, and every time. A routed turn that only routed because a
-            // drill said so must be legible as one in the record it produces,
-            // not inferred later from the absence of an attestation.
-            console.warn(JSON.stringify({
-                event: "chat_auto_readiness_overridden",
-                traceId,
-                conversationId,
-                reason: autoCohort.drillOverride,
-                environment: resolveDeploymentEnvironment(),
-                timestamp: new Date().toISOString(),
-            }));
-        }
         // No longer gated on cohort eligibility. Decision record v1.2 §3 puts
         // the product before the cohort, and the product lives on this row --
         // so skipping the read for an account the cohort would refuse would
@@ -1264,6 +1251,11 @@ async function handleChatPost(
                   }))
                 : [],
             ...routerCandidateInputs,
+            // The readiness hole, carried to the decision that uses it. The
+            // cohort read above is not the one that routes: this function
+            // consults the cohort again, and without this the drill's turn was
+            // refused on the very gate the override exists to pass.
+            drillOverride: drillOverride.allowed,
             reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
@@ -1283,6 +1275,28 @@ async function handleChatPost(
                 selectedModelId: effectiveModelId,
                 selectionReason: autoSelection.record.selectionReason,
                 routerVersion: autoSelection.versions.decision,
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        // Loud, and every time -- but only about a turn that was actually
+        // routed. A routed turn that only routed because a drill said so must
+        // be legible as one in the record it produces, not inferred later from
+        // the absence of an attestation.
+        //
+        // Recorded here rather than beside the cohort read, which is where it
+        // used to be. Passing the override does not make routing happen: the
+        // selection can still refuse for `product_not_chat`,
+        // `conversation_is_manual` or `no_candidate`, and logging on the
+        // cohort alone claimed an overridden routing decision for every turn
+        // that went on to be refused for a reason unrelated to readiness.
+        if (autoSelection.routed && autoSelection.cohort.drillOverride) {
+            console.warn(JSON.stringify({
+                event: "chat_auto_readiness_overridden",
+                traceId,
+                conversationId,
+                reason: autoSelection.cohort.drillOverride,
+                selectedModelId: effectiveModelId,
+                environment: resolveDeploymentEnvironment(),
                 timestamp: new Date().toISOString(),
             }));
         }
@@ -2722,6 +2736,10 @@ async function handleChatPost(
                 traceId,
                 userId: access.userId ?? null,
                 subjectKey: access.subjectKey,
+                // The same two the dispatch row carries. A shadow decision is
+                // about this turn, so it belongs to this turn's conversation.
+                conversationId: conversationId ?? null,
+                productKey: conversationProductKey,
                 // A signed-in account with no resolved plan reads as Guest
                 // rather than as a paid one: the filters use this to decide
                 // what the account may reach, and guessing upwards would let a

@@ -51,6 +51,72 @@ export const BOTH_DIVERGED = "both_diverged";
 export const MISSING_IN_DB = "missing_in_db";
 /** A registry row the compiled catalogue does not know about. */
 export const UNKNOWN_TO_CODE = "unknown_to_code";
+/**
+ * A registry row the catalogue does not know about *and* which the tree can
+ * account for: a model withdrawn on purpose, whose row was left resolvable
+ * rather than deleted.
+ *
+ * Separated from `unknown_to_code` because the two ask for opposite things. An
+ * unknown row is an open question -- a model that keeps answering under a
+ * stored cap nobody is looking at. A withdrawn row is a closed one, and
+ * reporting it as a finding every run teaches the reader to skim the section
+ * that would otherwise carry a real unknown.
+ */
+export const EXPECTED_HISTORICAL_WITHDRAWAL = "expected_historical_withdrawal";
+
+/**
+ * The withdrawals this report is allowed to account for, written by hand.
+ *
+ * Hand-written for the same reason `GATE_EVIDENCE` in
+ * report-release-gate-evidence-core.mjs is: a rule inferred from the row --
+ * "disabled and absent from the catalogue, so presumably intentional" -- would
+ * classify any accidental withdrawal as an expected one, which is precisely
+ * the failure the `unknown_to_code` state exists to surface.
+ *
+ * Each field below is the literal value
+ * prisma/migrations/20260801200000_withdraw_orphaned_gpt_oss_row/migration.sql
+ * writes. All of them must match, by strict equality, on a row that is also
+ * absent from the compiled catalogue. A row that differs in any one field --
+ * re-enabled, re-listed, pointed at a different replacement, or carrying an
+ * operator's own reason in place of the migration's -- is NOT this withdrawal
+ * and stays `unknown_to_code`, because whatever it now is was not decided
+ * here. A field the caller did not select reads as `undefined` and fails the
+ * same way, so a narrowed query degrades to the louder answer rather than the
+ * quieter one.
+ *
+ * `catalogDeleted` is deliberately not among them: the migration explains that
+ * it withdrew the row rather than deleting it so the id keeps resolving for
+ * conversations, ledger rows and user settings that reference it, and marking
+ * it deleted is an operator's decision to make later.
+ */
+export const HISTORICAL_WITHDRAWALS = Object.freeze({
+  "groq-gpt-oss-120b": Object.freeze({
+    enabled: false,
+    publiclyListed: false,
+    status: "disabled",
+    replacementModelId: "mistral-medium-3-1",
+    operationalReason:
+      "Tomverse does not list GPT-OSS: it is an open-weight line, not OpenAI hosted GPT. Removed from the catalogue on 2026-08-01.",
+    userVisibleNote:
+      "This model is no longer offered. Please select Mistral Medium 3.5 or another current model.",
+  }),
+});
+
+/**
+ * Every field of a known withdrawal present and equal, or it is not one.
+ *
+ * `Object.hasOwn` rather than a truthiness check on the lookup: a model id is
+ * whatever string the registry holds, and `Object.prototype` answers to a few
+ * of them. A row called `constructor` would otherwise find a function, iterate
+ * none of its fields, and pass an `every` over an empty list.
+ */
+const matchesHistoricalWithdrawal = (row) => {
+  if (!Object.hasOwn(HISTORICAL_WITHDRAWALS, row.id)) return false;
+  const expected = HISTORICAL_WITHDRAWALS[row.id];
+  return Object.entries(expected).every(
+    ([field, value]) => row[field] === value
+  );
+};
 
 /**
  * Whether a row names a human who last wrote it.
@@ -106,7 +172,12 @@ const stateFor = (maxAgrees, reservationAgrees) => {
  *
  * `storedRows` are `{ id, provider, enabled, maxOutputTokens,
  * reservationOutputTokens, updatedByEmail, updatedById, updatedAt }` from
- * `ModelRegistryEntry`. A NULL token column reads as `null` and is reported as
+ * `ModelRegistryEntry`, optionally with the lifecycle columns
+ * `publiclyListed`, `status`, `replacementModelId`, `operationalReason` and
+ * `userVisibleNote`. Those five are read for one purpose only -- telling a
+ * deliberately withdrawn row apart from an unexplained one -- and a caller
+ * that omits them loses that distinction rather than any part of the token
+ * comparison. A NULL token column reads as `null` and is reported as
  * a difference from a catalogue number, because `registryRowToModel()` turns
  * it into `undefined` and the pricing profile then supplies the value -- which
  * is the one shape where the row and the served request already agree.
@@ -210,7 +281,9 @@ export const compareTokenLimits = ({
       updatedAt: row.updatedAt ? String(row.updatedAt) : null,
       reconciled: reconciled.has(row.id),
       reconciledScope: scopeFor(row.id),
-      state: UNKNOWN_TO_CODE,
+      state: matchesHistoricalWithdrawal(row)
+        ? EXPECTED_HISTORICAL_WITHDRAWAL
+        : UNKNOWN_TO_CODE,
     });
   }
 
@@ -283,8 +356,21 @@ export const tokenLimitFindings = (entries) => {
     ),
     missingInDb: entries.filter((entry) => entry.state === MISSING_IN_DB),
     unknownToCode: entries.filter((entry) => entry.state === UNKNOWN_TO_CODE),
+    // Reported separately rather than dropped: the row is still serving a
+    // stored cap, and a reader deciding whether to finally delete it needs to
+    // see that it is there.
+    expectedHistoricalWithdrawals: entries.filter(
+      (entry) => entry.state === EXPECTED_HISTORICAL_WITHDRAWAL
+    ),
   };
 };
+
+/**
+ * Width of the state column, shared with the header the runner prints.
+ * `expected_historical_withdrawal` is the longest name; without this the
+ * header and that one row disagree about where the next column starts.
+ */
+export const STATE_COLUMN_WIDTH = EXPECTED_HISTORICAL_WITHDRAWAL.length + 2;
 
 const tokens = (value) =>
   value === null ? "-" : value.toLocaleString("en-US");
@@ -306,7 +392,7 @@ export const formatTokenLimitRow = (entry) => {
   const actor = entry.state === MISSING_IN_DB ? "-" : entry.actorMetadata;
   return (
     `  ${entry.modelId.padEnd(32)}${catalogue.padEnd(18)}` +
-    `${storedValues.padEnd(18)}${entry.state.padEnd(22)}` +
+    `${storedValues.padEnd(18)}${entry.state.padEnd(STATE_COLUMN_WIDTH)}` +
     `${actor.padEnd(17)}` +
     (entry.reconciled ? "reconciled " : "") +
     (entry.inheritsProfile ? "inherits-profile " : "") +

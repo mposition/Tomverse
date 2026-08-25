@@ -3,6 +3,8 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { marketingFlagApplies } from "@/lib/emailFeatureFlags";
 import { encryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto";
 import {
   ensureBootstrapPolicyVersion,
@@ -308,6 +310,17 @@ export async function expandEmailEvent(input: {
     spec,
   });
   if (refusal) return { refused: refusal };
+
+  // Before the event is moved to `expanding` and before a single row is
+  // written. A fan-out that started and then found the feature off would leave
+  // an event mid-expansion and a partial audience already queued.
+  const definitionForFlag = emailTemplateDefinition(event.template.key);
+  if (
+    marketingFlagApplies(definitionForFlag.classification) &&
+    !(await isEmailMarketingEnabled())
+  ) {
+    return { refused: "marketing_disabled" };
+  }
 
   const cap = input.recipientCap ?? spec.recipientCap;
   const deadline = Date.now() + (input.timeBudgetMs ?? 60_000);

@@ -882,7 +882,14 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 
 ### 12.5 첫 승인 후보 pair와 eval 예산 (§23 항목 4)
 
-- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v1)`입니다.** 선정 근거:
+- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v2)`입니다**
+  [개정 · 2026-08-24 @mposition]. v1은 **승인된 적 없이 종료**했습니다 —
+  프롬프트가 "requested schema에 맞춰 JSON만 반환하라"고 하면서 어댑터가 schema를
+  요청하지 않았고, 모델이 필드 이름과 `confidence` 타입을 추측해 strict parser가
+  전건을 거절했습니다. 첫 live 실행이 5회 연속 실패로 중단되며 그 배선 결함을
+  찾아냈고(US$0.0012), v2는 그 schema를 Structured Outputs로 실제 요청에
+  연결합니다. v1 entry는 `revoked`로 보존합니다 — 승인과 지출이 실재했기
+  때문입니다. **v1의 예산 승인은 v2로 이전되지 않습니다.** 선정 근거:
   기본 모델로서 verified pricing profile이 이미 `lib/modelPricing.ts`에
   있고(§ "가격 profile" 검사 대상), Standard 계층이라 batch 비용이 낮으며,
   ko/en 양쪽에서 운영 실적이 가장 많습니다. 예비 후보는 `gpt-5-4-mini`
@@ -1086,6 +1093,16 @@ composer·comparison rail contract를 침범하지 않습니다.
   은 생성 시점 version 유지(소급 적용 금지, 이동은 명시적 사용자 동작).
   version snapshot: instructions, models, tools, memory policy, knowledge
   manifest, retrievalVersion, prompt format version.
+- **고정된 version은 superseded가 되어도 계속 실행합니다**
+  [개정 · 2026-08-25 @mposition]. 아래 runtime 검증의 "active version"은
+  **conversation이 가리키는 version 행이 존재하고 소유자의 것인가**를 뜻하며,
+  **그것이 profile의 현재 version인가**를 뜻하지 않습니다. 두 읽기가 구분되지
+  않아, 개정을 새로 낸 순간 그 profile을 쓰던 **기존 대화 전부가 아무 신호 없이
+  profile을 잃는** 동작이 배포돼 있었습니다(2026-08-25 staging 검증에서 발견,
+  `docs/ops/assistant-profile-staging-verification-records/` 참조). 고정이
+  소유자의 편집 한 번에 풀린다면 그것은 고정이 아니고, 이동은 이 문서가 이미
+  **명시적 사용자 동작**으로 정해 두었습니다. profile 행이 삭제된 경우만
+  실행할 version이 없는 경우입니다.
 - knowledge manifest는 감사용 metadata입니다. retrieval은 현재 존재·접근
   가능·처리 완료된 chunk만 사용하고, dangling manifest로 삭제 object를 복구·
   재조회하지 않으며, 같은 digest 재업로드를 과거 version에 자동 재연결하지
@@ -1890,7 +1907,7 @@ A2 날짜로 덮으면 앞선 승인이 언제 이루어졌는지 말할 수 없
    §8.5 참조.
 3. **[확정]** source 삭제 시 파생 memory 상태 — 기본은 함께 삭제(`deleted`),
    사용자가 유지를 선택하면 `suspended_by_source_delete`. §8.3·§13.1 참조.
-4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v1)`
+4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v2)` [개정 · 2026-08-24]
    (예비 `gpt-5-4-mini`), 둘 다 verified pricing 보유. **eval 실행 예산
    승인(승인자·상한·티켓)은 사람이 register entry와 함께 기입해야 하며
    아직 미기입** — §12.5 참조.
