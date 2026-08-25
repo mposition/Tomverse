@@ -291,6 +291,41 @@ export async function loadAuditRows(
   }));
 }
 
+/**
+ * One audit row by id, whether or not it is in the recent window.
+ *
+ * Contract: docs/ui-contracts/admin-console-ia.md.
+ *
+ * `loadAuditRows` returns the newest `ADMIN_READ_LIMITS.auditLog` rows, and the
+ * integrity checker walks oldest-first and stops at the first bad one — so the
+ * row an operator most needs to see is precisely the one that window does not
+ * contain. Without this, "entry X is invalid" was a dead end: the console named
+ * a row it could not then show.
+ *
+ * Returns `null` rather than throwing. A stale link and a deleted row are the
+ * same observation from here, and the page says so on screen instead of
+ * answering 404 for a workspace that does exist.
+ */
+export async function loadAuditRowById(
+  auditId: string
+): Promise<AdminAuditRow | null> {
+  const log = await prisma.adminAuditLog.findUnique({ where: { id: auditId } });
+  if (!log) return null;
+  return {
+    id: log.id,
+    actorUserId: log.actorUserId,
+    actorEmail: log.actorEmail,
+    action: log.action,
+    targetType: log.targetType,
+    targetId: log.targetId,
+    summary: log.summary,
+    metadata: log.metadata,
+    ipAddress: log.ipAddress,
+    userAgent: log.userAgent,
+    createdAt: log.createdAt.toISOString(),
+  };
+}
+
 export type ProviderOpsData = {
   models: Awaited<ReturnType<typeof getRuntimeModels>>;
   incidents: AdminProviderIncidentRow[];
