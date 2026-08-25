@@ -1,7 +1,7 @@
 name: Main Chromium Regression
 #
 # This workflow owns the desktop-chromium coverage that PR Fast Gate no
-# longer runs. PR Fast Gate runs only the ~20 `@smoke` contracts (see
+# longer runs. PR Fast Gate runs only the 25 `@smoke` contracts (see
 # scripts/verify-smoke-coverage.mjs); every other desktop-chromium test --
 # visual regression, typography, touch targets, keyboard policy, responsive
 # layout, analytics consent, i18n -- is still executed here, unfiltered, on
@@ -32,7 +32,7 @@ permissions:
 
 # Every push to `main` is a release, so every push needs its own verdict.
 #
-# This run takes ~27 minutes wall clock (~63 runner-minutes across the three
+# This run takes ~25 minutes wall clock (~125 runner-minutes across the five
 # shards). On 2026-08-02 seven releases landed 11-20 minutes apart, and with
 # `cancel-in-progress: true` each one killed the previous run before it could
 # finish: `14ecd96`, `cd3e1b0` and `2a7eb03` were all cancelled in a row. The
@@ -74,12 +74,43 @@ jobs:
     # One shard's share of the suite, plus its own build. The single-job
     # version needed 75 minutes and was still growing into it.
     #
-    # First sharded run, for whoever tunes this next: 18m05s, 12m50s, 10m15s,
-    # against 33m36s unsharded. Wall clock is the slowest shard, so this is a
-    # bit under half, not the third the test split alone would suggest --
-    # every shard pays for its own build, and `--shard` divides by file, which
-    # does not divide evenly by duration. Raising the shard count trades more
-    # duplicated build for a flatter tail; three is where it sits today.
+    # First sharded run, at three shards: 18m05s, 12m50s, 10m15s, against
+    # 33m36s unsharded. Wall clock is the slowest shard, so that was a bit
+    # under half, not the third the test split alone would suggest -- every
+    # shard pays for its own build, and `--shard` divides by file, which does
+    # not divide evenly by duration.
+    #
+    # 2026-08-25, tuning it as that note invited. Three shards had grown into
+    # the ceiling and gone through it: on `c8e0a23` shard 1 was killed at 40
+    # minutes with the run unfinished, which failed the rollup and skipped the
+    # release's production deployment. Nothing was wrong with the tests --
+    # shards 2 and 3 passed in 29m04s and 29m08s.
+    #
+    # Playwright's own test times, for whoever tunes this next:
+    #
+    #   5673158  31.1m  29.3m  22.1m     three shards, all finished
+    #   c8e0a23  killed 29.1m  29.1m     same three, a slower set of runners
+    #
+    # Two things that run reveals. The suite is ~83 minutes of execution and
+    # was ~41 at the note above, so it doubled. And the split is even by test
+    # count but not by work: shard 1 skipped 112 tests where 2 and 3 skipped
+    # 504 and 514, so shard 1 actually ran 1553 against 1161 and 1151. Most
+    # specs belong to one project, and `--shard` cannot see that.
+    #
+    # So the lever is the shard count, which is what the original note said it
+    # would be. Five puts a typical shard near 20 minutes of tests plus about
+    # four of npm, build and browser install, which leaves the 40-minute
+    # ceiling roughly 40% of headroom -- enough to absorb the ~25% runner-speed
+    # variance visible between those two runs. The ceiling itself stays where
+    # it is: it is what stops a hung Playwright server burning a full hour, and
+    # raising it to buy headroom would spend exactly the protection it exists
+    # for. The cost is two more duplicated builds, which on a public repository
+    # is queue time rather than money.
+    #
+    # `--list` puts the five at 1016 / 1044 / 940 / 1007 / 991 specs, against
+    # ~1665 each at three. That is the count, not the work -- the runtime skips
+    # above are invisible to `--list`, so the duration tail is still bounded by
+    # file granularity and still wants watching.
     timeout-minutes: 40
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
@@ -87,8 +118,8 @@ jobs:
       # into an unreadable run.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        shards: [3]
+        shard: [1, 2, 3, 4, 5]
+        shards: [5]
     # Keep the production client bundle on the same deterministic Turnstile
     # configuration used by the isolated Playwright server.
     env:
