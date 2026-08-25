@@ -279,6 +279,20 @@ const drafted = prompts.map((prompt) => ({
 set.items = [...set.items, ...drafted];
 writeFileSync(setPath, `${JSON.stringify(set, null, 2)}\n`, "utf8");
 
+// The drafted items, on stdout, every time.
+//
+// The first Wave 1 run was made from the Railway console, whose filesystem
+// does not survive the container. The file write reported success, the
+// container was replaced, and 28 drafted prompts -- the only copy of a
+// model's output, already paid for -- were gone before anyone read them.
+//
+// So the file is no longer the delivery mechanism. It is a convenience for a
+// local checkout; this block is what the run actually produces, and it can be
+// copied out of any console.
+console.log(`\n--- drafted items (JSON) ---`);
+console.log(JSON.stringify(drafted, null, 1));
+console.log(`--- end drafted items ---`);
+
 console.log(`\n  ${drafted.length} candidate(s) written to ${setPath}`);
 console.log(
   `  requested ${model.apiModel}; the provider answered as ` +
@@ -288,6 +302,17 @@ if (!generatorCommit) {
   console.log(
     "  generatorCommit is null: no RAILWAY_GIT_COMMIT_SHA and no git binary. The batch\n" +
       "  cannot be tied to the code that drafted it, which a reviewer may weigh."
+  );
+}
+
+// A deployed container is replaced without warning and takes its filesystem
+// with it. Saying "written to <path>" there and stopping is how a paid-for
+// batch is lost between one command and the next.
+if (process.env.RAILWAY_DEPLOYMENT_ID || process.env.RAILWAY_ENVIRONMENT) {
+  console.log(
+    `\n  THIS FILESYSTEM DOES NOT PERSIST. ${setPath} lives only in this\n` +
+      "  container, which will be replaced. Copy the JSON block below out now; it is\n" +
+      "  the only durable copy of what was just paid for."
   );
 }
 if (dropped > 0) console.log(`  ${dropped} malformed entr(ies) dropped rather than padded.`);
