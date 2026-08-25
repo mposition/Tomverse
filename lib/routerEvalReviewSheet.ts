@@ -163,9 +163,16 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
     lines.push("| 항목 | 값 |");
     lines.push("|---|---|");
     lines.push(`| provider | \`${escapeCell(provenance.provider)}\` |`);
-    lines.push(`| modelId | \`${escapeCell(provenance.modelId)}\` |`);
+    lines.push(`| modelId (Tomverse) | \`${escapeCell(provenance.modelId)}\` |`);
     lines.push(
-      `| modelVersion | ${provenance.modelVersion ? `\`${escapeCell(provenance.modelVersion)}\`` : "*제공자가 반환하지 않음 — 추측하지 않았습니다*"} |`
+      `| 요청한 api model | \`${escapeCell(provenance.requestedApiModel ?? "기록 없음")}\`` +
+        `${/latest$/.test(provenance.requestedApiModel ?? "") ? " — **이동형 별칭**" : ""} |`
+    );
+    lines.push(
+      `| 응답이 밝힌 version | ${provenance.modelVersion ? `\`${escapeCell(provenance.modelVersion)}\`` : "*제공자가 반환하지 않음 — 추측하지 않았습니다*"} |`
+    );
+    lines.push(
+      `| 생성 파라미터 | \`${escapeCell(JSON.stringify(provenance.generationParameters ?? {}))}\` |`
     );
     lines.push(
       `| promptTemplate | \`${escapeCell(provenance.promptTemplateVersion)}\` (\`${escapeCell(provenance.promptTemplateHash)}\`) |`
@@ -174,6 +181,19 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
       `| generatorCommit | ${provenance.generatorCommit ? `\`${escapeCell(provenance.generatorCommit)}\`` : "*기록 없음*"} |`
     );
     lines.push(`| draftedAt | ${escapeCell(provenance.draftedAt)} |`);
+    lines.push("");
+  }
+  if (/latest$/.test(provenance?.requestedApiModel ?? "")) {
+    lines.push(
+      "> **요청한 이름이 이동형 별칭입니다.** 제공자가 이 별칭 뒤의 모델을 바꿀 수 있으므로,"
+    );
+    lines.push(
+      "> 같은 wave의 ko·en batch가 서로 다른 version에서 나왔을 수 있습니다. 그렇다면 두 언어의"
+    );
+    lines.push(
+      "> 차이로 읽히는 것이 실은 두 모델의 차이일 수 있습니다. 위 「응답이 밝힌 version」을 wave의"
+    );
+    lines.push("> 다른 batch와 대조해 주세요.");
     lines.push("");
   }
   if (!drafterIsRoutableFamily) {

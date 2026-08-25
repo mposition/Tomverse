@@ -10,6 +10,7 @@ import {
     cellFill,
     evalSetProblems,
     unrecordedProvenanceItems,
+    draftVersionsAcross,
 } from "../lib/routerQualityEvalSet.ts";
 
 // The sheet is the only thing standing between a drafter's systematic flaw and
@@ -21,6 +22,8 @@ const provenance = (batchId, extra = {}) => ({
     batchId,
     provider: "openai",
     modelId: "gpt-5-5",
+    requestedApiModel: "gpt-5.5",
+    generationParameters: { max_completion_tokens: 8000 },
     modelVersion: "gpt-5.5-2026-05-01",
     promptTemplateVersion: "router-eval-draft-v1",
     promptTemplateHash: "abc123",
@@ -246,4 +249,76 @@ test("shape separates a reused template from an unrelated prompt", () => {
     assert.ok(templated.shape > 0.5, `template reuse scored ${templated.shape}`);
     assert.ok(unrelated.shape < 0.1, `unrelated prompts scored ${unrelated.shape}`);
     assert.ok(pairs.indexOf(templated) < pairs.indexOf(unrelated));
+});
+
+// --- a moving alias -------------------------------------------------------
+
+// mistral-large-3 sends `mistral-large-latest`, which the lifecycle policy
+// defines as moving across generations. So which model ANSWERED is a separate
+// fact from which name was ASKED FOR, and only the first one stays true.
+test("the requested alias and the answering version are recorded apart", () => {
+    const items = [
+        item("a", {
+            draftProvenance: provenance("batch-001", {
+                provider: "mistral",
+                modelId: "mistral-large-3",
+                requestedApiModel: "mistral-large-latest",
+                modelVersion: "mistral-large-2512",
+            }),
+        }),
+    ];
+    const sheet = renderReviewSheet({ set: makeSet(items), batchId: "batch-001", corpus: items });
+    assert.match(sheet, /mistral-large-latest/);
+    assert.match(sheet, /mistral-large-2512/);
+    assert.match(sheet, /이동형 별칭/);
+});
+
+// A wave pairs ko with en so the reviewer can compare the languages. If the
+// alias moved between the two calls, a difference read as "Korean came out
+// weaker" may be two models differing instead.
+test("versions across a wave's batches are reported so a mismatch is visible", () => {
+    const set = makeSet([
+        item("ko-1", {
+            draftProvenance: provenance("wave1-ko", { modelVersion: "mistral-large-2512" }),
+        }),
+        item("en-1", {
+            cell: "en",
+            language: { prompt: "en", expectedResponse: "en" },
+            draftProvenance: provenance("wave1-en", { modelVersion: "mistral-large-2601" }),
+        }),
+    ]);
+    const versions = draftVersionsAcross(set, ["wave1-ko", "wave1-en"]);
+    assert.equal(versions.length, 2, "a mismatch must not collapse into one entry");
+
+    const agreeing = makeSet([
+        item("ko-1", { draftProvenance: provenance("wave1-ko", { modelVersion: "v" }) }),
+        item("en-1", {
+            cell: "en",
+            language: { prompt: "en", expectedResponse: "en" },
+            draftProvenance: provenance("wave1-en", { modelVersion: "v" }),
+        }),
+    ]);
+    assert.equal(draftVersionsAcross(agreeing, ["wave1-ko", "wave1-en"]).length, 1);
+});
+
+test("a drafted item with no generation parameters cannot be reproduced", () => {
+    const problems = evalSetProblems(
+        makeSet([
+            item("a", {
+                draftProvenance: { ...provenance("batch-001"), generationParameters: undefined },
+            }),
+        ])
+    );
+    assert.ok(problems.some((problem) => /records no generation parameters/.test(problem)));
+});
+
+test("a drafted item must say which api model was requested", () => {
+    const problems = evalSetProblems(
+        makeSet([
+            item("a", {
+                draftProvenance: { ...provenance("batch-001"), requestedApiModel: "" },
+            }),
+        ])
+    );
+    assert.ok(problems.some((problem) => /has no requestedApiModel/.test(problem)));
 });

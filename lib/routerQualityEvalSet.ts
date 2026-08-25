@@ -84,8 +84,29 @@ export const UNRECORDED_PROVENANCE = "unrecorded";
 export type EvalDraftProvenance = {
   batchId: string;
   provider: string;
+  /** The Tomverse catalogue id, e.g. `mistral-large-3`. */
   modelId: string;
+  /**
+   * The string actually put in the request body, which for several catalogue
+   * entries is a moving alias -- `mistral-large-3` sends
+   * `mistral-large-latest`. Recorded separately from `modelId` because the
+   * two answer different questions: which model Tomverse calls, and which
+   * name the provider was asked for. When the alias moves, only this one
+   * stays true about what was sent.
+   */
+  requestedApiModel: string;
+  /**
+   * What the provider called itself in its own response, never an echo of
+   * `requestedApiModel`. Null when the provider returned nothing usable: a
+   * guessed snapshot id looks checkable and is not.
+   */
   modelVersion: string | null;
+  /**
+   * The request parameters, so a batch can be reproduced rather than
+   * approximated. A temperature or a cap that changed between batches is a
+   * reason two batches differ, and without this the record would not show it.
+   */
+  generationParameters: Readonly<Record<string, number | string | boolean>>;
   promptTemplateVersion: string;
   promptTemplateHash: string;
   generatorCommit: string | null;
@@ -259,6 +280,7 @@ export const evalSetProblems = (
           "batchId",
           "provider",
           "modelId",
+          "requestedApiModel",
           "promptTemplateVersion",
           "promptTemplateHash",
           "draftedAt",
@@ -266,6 +288,9 @@ export const evalSetProblems = (
           if (!isNonEmptyString(provenance[field])) {
             problems.push(`${label} draft provenance has no ${field}`);
           }
+        }
+        if (!provenance.generationParameters || typeof provenance.generationParameters !== "object") {
+          problems.push(`${label} draft provenance records no generation parameters`);
         }
       }
     }
@@ -422,3 +447,36 @@ export const unrecordedProvenanceItems = (set: EvalSet): readonly EvalSetItem[] 
       item.source === "drafted" &&
       (item.draftProvenance?.provider ?? UNRECORDED_PROVENANCE) === UNRECORDED_PROVENANCE
   );
+
+/**
+ * Batches whose drafter answered under a different version from its siblings.
+ *
+ * A wave pairs a `ko` batch with an `en` one so the reviewer can compare the
+ * two languages. That comparison only holds if the same model wrote both: if
+ * the provider moved an alias between the two calls -- which
+ * `mistral-large-latest` is built to do -- then a difference the reviewer
+ * reads as "Korean came out weaker" may be the two models differing instead.
+ *
+ * Returns one entry per distinct `modelVersion` seen across the given
+ * batches, so an empty-or-single result means they agree. This reports; it
+ * does not reject. Whether a mismatch disqualifies a wave is
+ * docs/ops/tomverse-chat-router-evaluation-set.md §8's adoption question, and belongs
+ * to the person doing the adopting.
+ */
+export const draftVersionsAcross = (
+  set: EvalSet,
+  batchIds: readonly string[]
+): readonly { modelVersion: string | null; batchIds: readonly string[] }[] => {
+  const byVersion = new Map<string, { modelVersion: string | null; batchIds: string[] }>();
+  for (const batchId of batchIds) {
+    for (const item of set.items) {
+      if (item.draftProvenance?.batchId !== batchId) continue;
+      const version = item.draftProvenance.modelVersion;
+      const key = version ?? "\u0000null";
+      const entry = byVersion.get(key) ?? { modelVersion: version, batchIds: [] };
+      if (!entry.batchIds.includes(batchId)) entry.batchIds.push(batchId);
+      byVersion.set(key, entry);
+    }
+  }
+  return [...byVersion.values()];
+};

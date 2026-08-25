@@ -132,11 +132,12 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
 
 /* ------------------------------------------------------- shipped register -- */
 
-test("only the funded v2 candidate can run live against the shipped dataset", () => {
-    // The state after the v2 budget was approved on 2026-08-24. Three pairs
-    // are still refused and each names a different reason, which is the part
-    // worth pinning: `mem-extract-v1` is stopped by its status *before* its
-    // budget is read, and the v2 backup by having no budget at all.
+test("nothing in the shipped register can run live", () => {
+    // The state after the v2 diagnosis on 2026-08-25. All four entries are
+    // revoked: v1 for its wiring defect, v2 because the four contract defects
+    // its probes surfaced make the bounds unreachable regardless of the
+    // model (docs/ops/memory-extraction-eval-diagnostics.md). v3 is not registered
+    // yet, so there is no pair a key could spend against.
     //
     // `datasetFrozen` is read from the fixtures rather than forced. Forcing it
     // asserts a world of the test's own making, and the value that ships is
@@ -146,7 +147,6 @@ test("only the funded v2 candidate can run live against the shipped dataset", ()
         true,
         "this test describes the frozen dataset that shipped"
     );
-    const live = [];
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
         const label = `${entry.extractionModelId}::${entry.promptVersion}`;
         const decision = decideEvalRunMode({
@@ -156,20 +156,15 @@ test("only the funded v2 candidate can run live against the shipped dataset", ()
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
             commitKnown: true,
         });
-        if (entry.status !== "candidate") {
-            assert.equal(decision.mode, "refused", label);
-            assert.equal(decision.reason, "pair_not_runnable", label);
-        } else if (!entry.evalBudget) {
-            assert.equal(decision.mode, "refused", label);
-            assert.equal(decision.reason, "no_eval_budget", label);
-        } else {
-            assert.equal(decision.mode, "live", label);
-            assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
-            live.push(label);
-        }
+        assert.equal(decision.mode, "refused", label);
+        // Status first, before the budget is consulted -- which is the point,
+        // because one of these still carries an approved US$20.
+        assert.equal(decision.reason, "pair_not_runnable", label);
     }
-    // Exactly one, and the one the §12.5 amendment names.
-    assert.deepEqual(live, ["gpt-5-6-luna::mem-extract-v2"]);
+    assert.ok(
+        MEMORY_EXTRACTION_EVAL_REGISTER.some((entry) => entry.evalBudget),
+        "a closed pair keeping its budget is what makes the status check load-bearing"
+    );
 });
 
 test("a revoked pair is refused even though it still has a budget", () => {
@@ -291,18 +286,18 @@ const runHarness = (args, env = {}) => {
     }
 };
 
-test("--live with a key but no approved budget never reaches the network", () => {
-    // Named explicitly rather than relying on the default pair. The default is
-    // funded now (docs/policy/external-conversation-import-and-memory.md §12.5,
-    // issue #837), and a test that reads "no budget" from whichever pair
-    // happens to be default stops testing the budget refusal the moment one is
-    // approved -- silently, while still passing on a different rule.
+test("--live with a key never reaches the network for a closed pair", () => {
+    // This asserted the budget refusal by name. Every shipped pair is revoked
+    // now, so the harness stops at the status check first and saying "no
+    // approved eval budget" would be asserting a message the run no longer
+    // reaches -- a test that passes by describing the wrong gate is worse
+    // than one that fails.
     const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
         // Plausible enough that a missing-key check could not be what stops it.
         OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
     });
     assert.equal(result.status, 1, "the run must refuse");
-    assert.match(result.output, /no approved eval budget/i);
+    assert.match(result.output, /in the\s+register/i);
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,
@@ -321,10 +316,14 @@ test("the shipped pair refuses without a key, and reaches no network", () => {
     });
     assert.equal(result.status, 1, "the run must refuse");
     assert.doesNotMatch(result.output, /is not frozen/i);
-    // Which gate stops it depends on what the register says today -- the v2
-    // candidate has no budget yet. Either refusal is correct; reaching the
-    // network is not, and that is what this test exists for.
-    assert.match(result.output, /OPENAI_API_KEY|no approved eval budget/i);
+    // Which gate stops it depends on what the register says today: with every
+    // pair revoked it is the status, and with a candidate registered it would
+    // be the key. Any refusal is correct; reaching the network is not, and
+    // that is what this test exists for.
+    assert.match(
+        result.output,
+        /OPENAI_API_KEY|no approved eval budget|in the\s+register/i
+    );
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,

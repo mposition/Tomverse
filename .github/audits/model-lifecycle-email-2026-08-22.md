@@ -2157,7 +2157,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | D5 | 1인 조직 이중 승인 예외를 campaign에 적용 | 조직 | ~~Phase 4 승인~~ | **승인 (2026-08-24, 조직)** — §47에 구현. `soleApproverAllowed` 선례 적용 |
 | D6 | reminder를 몇 번 보낼지 (1회 / 2회) | product | E wave 수 | **최초 + 3일 전 2회**. 그 이상은 스팸 신고를 부릅니다 |
 | D7 | 사전 안내 리드타임 | product | D 일정 | **14일**. 폐기 결정 → 안내 → reminder → 실행 |
-| D8 | assistant profile이 모델 선택을 갖는지 | eng | audience 정의 | 조사 필요(23절) |
+| D8 | assistant profile이 모델 선택을 갖는지 | ~~eng~~ **product** | audience 정의 | **조사 완료 (2026-08-25) — §50.** 갖습니다. 다만 snapshot이라 옮길 수 없고 오늘의 template은 cohort를 읽지 않으므로, 남은 것은 **통보 여부와 문구**이며 product 결정입니다 |
 | D9 | 최근 사용 기반 cohort를 포함할지 | product | audience 크기 | **미포함**. 저장된 선택만. 최근 사용은 영향이 아니라 관심입니다 |
 | D10 | `/admin/email-delivery`의 사용자 주소를 마스킹할지 | product + ops | ~~없음~~ | **승인 (2026-08-24)** — 기본 마스킹 + 감사되는 공개. 사유 불요 · 화면 단위 · owner·ops 한정. §48에 구현 |
 
@@ -2176,7 +2176,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 | U6 | `MARKETING_EMAIL_FROM` production 설정 여부 | `GET /api/ready`의 `email-sending-identity` 항목, 또는 `npm run report:email-domains` |
 | U7 | DMARC 리포트 실수신 여부 | `dmarc@tomverse.app` 사서함 확인. 저장소 밖 |
 | U8 | `gpt-5-4-mini` 잔여 사용자 수 | `node --import tsx scripts/run-default-model-reconciliation.mjs` (dry run, 쓰기 없음) |
-| U9 | assistant profile의 모델 선택 저장 위치 (D8) | `AssistantProfileVersion` 스키마 조사 — 이번 감사 범위 밖 |
+| U9 | assistant profile의 모델 선택 저장 위치 (D8) | **해결됨 (2026-08-25).** `AssistantProfileVersion.models`(`Json`, 모델 ID 배열)이고 소유는 `userId`, 새 대화가 pin 하는 것은 `currentVersionId`입니다. §50 |
 | U10 | EmailDelivery 현재 행 수·snapshot 크기 (EM-08 규모) | `SELECT status, count(*), count("renderDataSnapshot") FROM "EmailDelivery" GROUP BY status;` |
 | U11 | Resend 계정 suppression 목록에 오른 자사 사용자 수 | Resend 콘솔 또는 `mcp__Resend__list-suppressions`. 이번 권한 밖 |
 
@@ -3740,4 +3740,84 @@ id는 누군가 다른 endpoint에 물어볼 수 있는 id입니다.
 
 초안 작성 UI(§43.2)는 그대로입니다. audience spec의 모양이 하나를 넘어 늘어나면
 다시 볼 일입니다.
+
+## 50. D8 조사 — assistant profile은 모델 선택을 갖는가 (2026-08-25 · 조사 완료)
+
+§21 D8은 결정권자가 **eng**이고 막고 있는 것이 **audience 정의**입니다. 결정이
+아니라 조사라서 지금 할 수 있었고, 답은 예/아니오가 아니었습니다.
+
+### 50.1 답 — 갖습니다
+
+`[코드]` `AssistantProfileVersion.models`가 `Json` 컬럼이고 안에 있는 것은 모델
+ID의 `string[]`입니다(`lib/assistantProfileService.ts:227,556`,
+`lib/assistantProfileVersioning.ts:124,185,270`). `AssistantProfile.userId`가
+소유 계정이고, `AssistantProfile.currentVersionId`가 schema 주석대로 **"새 대화가
+pin 하는 version"** 입니다.
+
+즉 어떤 계정의 현재 profile version이 은퇴 대상 모델을 지목하고 있으면, 그
+계정은 은퇴의 영향을 받습니다.
+
+### 50.2 그런데 audience에는 없습니다
+
+`[코드]` `lib/modelRetirementAudienceCore.ts`의 `AUDIENCE_COHORTS`는 셋뿐입니다 —
+`default_model` · `new_conversation_lead` · `conversation_selection`. 이 셋은
+전부 `UserSettings`와 `Conversation`에서 나오고, `lib/modelRetirementAudience.ts`의
+어느 query도 `AssistantProfile`을 읽지 않습니다.
+
+**그래서 노출이 assistant profile뿐인 계정은 세어지지도 않고 통보받지도
+않습니다.** 추정치도 그만큼 낮게 보고됩니다.
+
+### 50.3 실패는 크지만 늦습니다
+
+`[코드]` `lib/assistantProfileRuntime.ts:30` — profile의 모델이 사라지면
+`ASSISTANT_PROFILE_MODEL_UNAVAILABLE`로 **거절**하고 다른 모델로 옮기지
+않습니다. 이것은 결함이 아니라 의도된 계약이며 chat의 fallback 규칙과 같습니다.
+
+문제는 시점입니다. 조용히 틀린 답을 내지는 않지만, 사전 안내를 받지 못한 사람이
+은퇴 배포 이후에 자기 assistant가 멈춘 것을 발견합니다.
+
+### 50.4 이 사람들은 migration 대상이 아닙니다
+
+`[코드]` `scripts/run-default-model-reconciliation.mjs`는
+`AssistantProfileVersion`을 읽지도 쓰지도 않습니다. **그리고 그래야 합니다** —
+schema 주석이 그 이유를 이미 적어 두었습니다: *"a model that is later retired
+must not silently change what a past conversation is recorded as having run
+under."* version은 pin된 snapshot이고, 그것을 고쳐 쓰는 것은 과거 대화의 기록을
+바꾸는 일입니다.
+
+그러므로 이 cohort는 **통보 전용**입니다. 나머지 셋은 통보하고 옮기지만, 이쪽은
+계정 소유자가 직접 profile을 편집해야 합니다. 현재 `AudienceCohort` 타입에는
+이 구분이 없습니다.
+
+### 50.5 그래서 D8은 product 결정으로 넘어갑니다
+
+`[코드]` `lib/emailAudienceExpansion.ts:207`이 `eligibilityReason`을 원장에
+적지만, **template 본문은 cohort에 따라 달라지지 않습니다** — 어느 template
+정의도 cohort를 읽지 않습니다.
+
+따라서 지금 상태에서 네 번째 cohort를 audience에 추가하면, 이 사람들은 **자기에게
+일어나지 않을 전환을 설명하는 문구**를 받게 됩니다. 그것은 audience 계산의 문제가
+아니라 문구의 문제이고, 문구는 product의 것입니다.
+
+**조사가 내놓는 결론은 이것입니다.**
+
+| | |
+|---|---|
+| eng가 답한 것 | assistant profile은 모델 선택을 **갖는다**. 현재 version 기준으로 식별 가능하다 |
+| eng가 함께 확인한 것 | 그들은 **옮길 수 없다**. snapshot 불변은 의도된 계약이다 |
+| product가 정할 것 | 이 cohort에 통보할지, 통보한다면 **다른 문구**인지 — 오늘의 template은 cohort를 읽지 않는다 |
+
+### 50.6 착수 전에 정해야 할 것
+
+1. **네 번째 cohort를 만들 것인가.** 만들면 `AUDIENCE_DEFINITION_VERSION`을 2로
+   올려야 하며, 그래야 이전 규칙으로 잡힌 추정치가 낡은 것으로 식별됩니다.
+2. **cohort별 문구를 지원할 것인가.** 통보 전용 cohort는 "바꿨습니다"가 아니라
+   "직접 바꾸셔야 합니다"이므로, template이 cohort를 읽든지 별도 template이
+   생겨야 합니다.
+3. **`AudienceCohort`가 통보 전용을 표현할 것인가.** 표현하지 않으면
+   reconciliation이 언젠가 이 cohort를 옮기려 들 수 있고, 그것이 §50.4가 막는
+   바로 그 일입니다.
+
+이 셋이 정해지기 전에는 구현하지 않습니다. 지금 조용히 추가하면 **잘못된 문구를
+보내게 되고, 발송은 회수되지 않습니다.**
 
