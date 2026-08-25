@@ -39,6 +39,30 @@ const RASTER_DRAFT = "draw a picture of a cat sitting on a windowsill";
 /** A text-dense visual: deliberately out of scope until the L3 work lands. */
 const INFOGRAPHIC_DRAFT = "draw an infographic about blood pressure and food";
 
+/**
+ * Counts what the opt-in actually changes: requests to spend credits.
+ *
+ * Asserted instead of a spinner because `data-generating` follows the polled
+ * timeline, and this suite has no image backend -- a submit that was made and
+ * then failed looks identical to one that never happened.
+ */
+const countGenerationRequests = async (page: Page) => {
+  const prompts: string[] = [];
+  await page.route("**/api/images/generations", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { prompt?: unknown };
+      if (typeof body?.prompt === "string") prompts.push(body.prompt);
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "not wired in this suite" }),
+      });
+    }
+    return route.fallback();
+  });
+  return { count: () => prompts.length, prompts: () => [...prompts] };
+};
+
 const type = async (page: Page, text: string) => {
   // A composer mid-send is not editable, and `fill` on a disabled textarea is
   // silently a no-op -- which reads as the feature ignoring the new draft
@@ -291,6 +315,116 @@ test.describe("signed in", () => {
     await page.getByTestId("chat-send-button").click();
     await expect(composer(page)).toHaveValue("");
     await expect(chip(page)).toHaveCount(0);
+  });
+
+  /* ---------------------------------------------------------------------- */
+  /* "Generate without asking next time"                                       */
+  /* ---------------------------------------------------------------------- */
+
+  test("the press lands with the prompt and the price, and generates nothing", async ({
+    page,
+  }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    const submitted = await countGenerationRequests(page);
+    await page.goto("/chat?lang=en");
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-accept").click();
+
+    // The default, and the whole reason the opt-in has to be opted into: a
+    // press is navigation, and navigation does not spend credits.
+    await expect(page.getByTestId("image-generation-prompt")).toHaveValue(
+      RASTER_DRAFT
+    );
+    await page.waitForTimeout(600);
+    expect(submitted.count()).toBe(0);
+  });
+
+  test("the opt-in can only be set where the price is", async ({ page }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await page.goto("/chat?lang=en");
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-accept").click();
+
+    const toggle = page.getByTestId("image-generation-auto-generate-toggle");
+    await expect(toggle).toBeVisible();
+
+    // The contract's "quoted before submission" survives the opt-in only if
+    // the choice is made in front of the number it is about: the credit badge
+    // is on the submit button, in the same row.
+    const toggleBox = await toggle.boundingBox();
+    const submitBox = await page
+      .getByTestId("image-generation-submit")
+      .boundingBox();
+    expect(toggleBox).not.toBeNull();
+    expect(submitBox).not.toBeNull();
+    const sharesTheRow =
+      Math.abs(
+        toggleBox!.y + toggleBox!.height / 2 - (submitBox!.y + submitBox!.height / 2)
+      ) <
+      Math.max(toggleBox!.height, submitBox!.height);
+    expect(sharesTheRow).toBe(true);
+  });
+
+  test("with the opt-in on, the press generates without a second click", async ({
+    page,
+  }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    const submitted = await countGenerationRequests(page);
+    await page.goto("/chat?lang=en");
+
+    // Turned on the way a person turns it on: in the workspace, beside the
+    // price, before going back to ask for a picture.
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-accept").click();
+    await page
+      .getByTestId("image-generation-auto-generate-toggle")
+      .getByRole("checkbox")
+      .check();
+    await page.getByTestId("image-generation-cancel-draft").click();
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-accept").click();
+
+    await expect(page.getByTestId("image-generation-prompt")).toHaveValue(
+      RASTER_DRAFT
+    );
+    // The request itself, not a spinner: what this feature changes is whether
+    // credits are spent, and the POST is where that happens.
+    await expect.poll(() => submitted.count()).toBe(1);
+    expect(submitted.prompts()).toEqual([RASTER_DRAFT]);
+  });
+
+  test("the opt-in stays revocable on the screen it acts on", async ({ page }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await page.goto("/chat?lang=en");
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-accept").click();
+    const checkbox = page
+      .getByTestId("image-generation-auto-generate-toggle")
+      .getByRole("checkbox");
+    await checkbox.check();
+    await page.getByTestId("image-generation-cancel-draft").click();
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-accept").click();
+    // It has just spent credits on a press. The place to take that permission
+    // back is the place it was given, and it is still there while the request
+    // runs.
+    await expect(checkbox).toBeVisible();
+    await expect(checkbox).toBeChecked();
+    await checkbox.uncheck();
+    await expect(checkbox).not.toBeChecked();
   });
 
   test("the chip is reachable and operable from the keyboard", async ({ page }) => {

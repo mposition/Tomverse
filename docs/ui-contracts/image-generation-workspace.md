@@ -79,9 +79,37 @@ Non-negotiable, and the reason this entry point was allowed to exist at all
 - **The user must press it.** Switching to the image draft without a press —
   because the text "looked like" an image request — is forbidden. The chip
   changes nothing until it is clicked.
-- **Submitting a generation without confirmation is forbidden.** Price and
-  model selection stay where they are: quoted in the workspace composer before
-  submission.
+- **Submitting a generation without confirmation is forbidden, unless the
+  account has said otherwise while looking at the price.** The default is
+  unchanged: the press lands in the workspace with the prompt filled and the
+  price on the button, and generating is one more click.
+
+  `UserSettings.imageHandoffAutoGenerate` is the exception, and every part of
+  how it is offered is load-bearing:
+
+  - **It can only be set beside the price.** The only control that writes it is
+    the checkbox in the workspace composer, in the same row as the submit
+    button and the credit badge. An account settings page would move the choice
+    away from the number it is a decision about, and "quoted before submission"
+    would stop being true of it.
+  - **It is an account setting, not a browser one.** It decides whether one
+    click spends credits, and a per-device preference would let a shared
+    computer spend somebody else's.
+  - **Only the chat handoff may act on it.** The launcher, the drawer rows, the
+    tools menu and the catalogue tab are someone opening the workspace to
+    compose. A workspace that generated because it was opened would spend
+    credits on navigation.
+  - **It never bypasses a refusal.** The arrival submits only when the button
+    itself would be enabled, so a held price, an over-long prompt, a viewer
+    without the plan and a request already in flight all refuse it exactly as
+    they refuse a press.
+  - **It is spent once per landing**, and consumed even when the submit was
+    refused, so a landing that could not generate cannot fire later against a
+    prompt the user has since changed.
+  - **It stays visible and revocable on the screen it acts on**, including
+    while a generation is running, so the account that has just watched a press
+    spend credits can turn it off where it turned it on. It renders only for a
+    viewer who can actually generate.
 - **A visible chip never blocks an ordinary chat submit.** Ignoring it and
   pressing send sends the chat turn.
 - **Guest and Free see the requirement inside the chip**, before the click, and
@@ -532,7 +560,9 @@ rather than the behaviour.
 - [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard
 - [ ] Selected models' exact prices are inline in both disclosure modes
 - [ ] A retry still replaces its card in place
-- [ ] Prices are quoted before submit, per model and in total
+- [ ] Prices are quoted before submit, per model and in total — and, for an
+      account with `imageHandoffAutoGenerate` on, were quoted beside the
+      control that granted it
 - [ ] `accent-image-*` tokens only; no reserved gradient
 - [ ] The state matrix passes on desktop **and** mobile
 

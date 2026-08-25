@@ -162,6 +162,7 @@ export const en = {
         imageGenerationSizeLandscape: "Landscape",
         imageGenerationSizePortrait: "Portrait",
         imageGenerationGenerate: "Generate",
+        imageGenerationAutoGenerateLabel: "Generate without asking next time",
         imageGenerationGeneratingModels: "Generating {count} model(s)",
         imageGenerationGenerating: "Generating image...",
         imageGenerationGeneratingHint: "This can take up to about two minutes. Leaving this page does not cancel it.",
