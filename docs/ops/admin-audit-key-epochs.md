@@ -99,11 +99,12 @@ epoch가 있다는 것을 아는 것과 그 구간을 검증할 수 있는 것�
 
 ## 지금 상태
 
-**과거 키를 등재하면 그 구간이 검증됩니다.** staging epoch 1·1b는 위에서 창이
-좁혀졌고, 그때의 `NEXTAUTH_SECRET`을 `ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS`에
-넣으면 `GET /api/admin/audit-integrity`가 `valid: true`로 돌아옵니다. 그때
-message는 "valid across N signing keys"가 되어 **교체가 있었다는 사실 자체는
-사라지지 않습니다.**
+**두 환경 모두 옛 키가 아직 등재되지 않았습니다.** staging은 위에서 창이 5일로
+좁혀졌고 그때의 `NEXTAUTH_SECRET`을 구할 수 있음이 2026-08-25에 확인됐으므로,
+등재하면 `GET /api/admin/audit-integrity`가 `valid: true`로 돌아올 것으로
+기대됩니다 — 그때 message는 "valid across N signing keys"가 되어 **교체가
+있었다는 사실 자체는 사라지지 않습니다.** production은 옛 키가 그 구간을 열어
+주는지가 곧 교체 횟수의 답이므로(아래 남은 작업 2), 등재 결과 자체가 관측입니다.
 
 **등재하지 않으면** 그 구간은 `invalidEntries`로 계속 보고됩니다 — 조용히
 통과하지 않습니다. 패널이 검증된 수와 전체 수를 나란히 적으므로 `valid: false`
