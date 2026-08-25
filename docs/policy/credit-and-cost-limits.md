@@ -401,7 +401,8 @@ docs/policy/default-model-luna-migration.md 3.1은 모델을 `p90_output_tokens`
 
 **바뀌는 것과 바뀌지 않는 것.** 사용자에게 청구되는 크레딧은
 `creditWeight`에서 나오므로 **변하지 않습니다.** 바뀌는 것은 turn이 앞단에서
-잡아 두는 내부 USD로, 같은 단가에서 예약분이 1.5배가 되고 정산에서 환급됩니다.
+잡아 두는 내부 USD로, 같은 단가에서 예약분이 `gpt-5-5-thinking`은 1.5배가
+되고(4,096 → 6,144) 정산에서 환급됩니다.
 그래서 경계에서 `CREDIT_COST_ALLOWANCE_INSUFFICIENT`나 operational guardrail에
 더 일찍 걸릴 수 있습니다 — 과소 예약을 줄이는 방향이며, 정책이 경고하는 반대
 방향(과소 예약)이 아닙니다.
@@ -410,12 +411,53 @@ docs/policy/default-model-luna-migration.md 3.1은 모델을 `p90_output_tokens`
 class fallback과 값이 같아 write가 no-op이지만 **profile이 움직이거나 관리자가
 손으로 넣는 순간 조용히 진짜 write가 되기 때문**입니다.
 
+### 2026-08-25 — `gpt-5-5`·`gemini-3-1-pro`가 예약 전용 scope에 들어갔습니다
+
+같은 모양이 둘 더 있었습니다. 운영 행이 예약 2,048을 들고 있고 profile은
+4,096이며, 상한은 양쪽 8,192로 이미 일치합니다 — 상한 전용 scope가 옮길 것이
+없고 어긋나는 것은 예약뿐인, `gpt-5-5-thinking`과 정확히 같은 형태입니다. 둘 다
+`usageClass: "premium"`이므로 §4가 확정한 값은 4,096이고, profile은 이미
+`p90_output_tokens`입니다.
+
+**등록의 근거는 차이가 아니라 provenance입니다.** `reservationOutputTokens`에는
+가격 컬럼의 `NULL`=상속 규칙이 없어서 저장된 숫자가 자기 출처를 말하지 못하고,
+관리자의 의도된 override와 seed 화석이 컬럼만 봐서는 구분되지 않습니다. 그래서
+운영 DB에서 네 가지를 읽었고 전부 seed를 가리켰습니다.
+
+- `updatedById`·`updatedByEmail` 둘 다 없음
+- `updatedAt` = `createdAt` — 행이 한 번도 재작성되지 않음
+- `targetType='Model'`로 그 id를 지목하는 `AdminAuditLog` 행 0건
+- 그 `updatedAt`을 다른 행들과 밀리초 단위까지 공유 — 배치 write이며, 손 편집이
+  남기는 고유 timestamp가 아님
+
+저장된 숫자 자체도 seed 시점의 트리와 대조했습니다. seed 시각
+`2026-07-17T11:08:29.814Z` 직전 commit `987c8ba5`에는 `lib/modelPricing.ts`가
+아직 없었고, 두 모델은 그때도 `usageClass: "premium"`이었으며,
+`lib/models.ts`의 `BILLING_DEFAULTS.premium`이
+`{ maxOutputTokens: 8_192, reservationOutputTokens: 2_048 }`였습니다. **상한
+8,192와 예약 2,048은 그 표의 같은 행에서 나온 한 쌍**이고, premium 예약이
+4,096으로 오른 것은 profile이 도입된 뒤입니다.
+
+`conservative_default`인 세 모델 — `mistral-large-3`,
+`perplexity/sonar-deep-research`, `qwen3.7-max` — 은 예약이 어긋나 있어도 여전히
+이 목록 밖입니다. 그쪽은 §4가 값을 정한 적이 없으므로 옮길 승인된 숫자가
+존재하지 않습니다.
+
 확인: `npm run report:model-token-limits`(읽기 전용). 모델별로 catalogue와
 저장 행의 두 컬럼을 나란히 놓고, 행이 reconciliation 대상인지와 actor 유무를
 함께 보고합니다. **gate가 아니라 보고입니다** — 행이 카탈로그와 다른 것은
 `PUT /api/admin/models`가 만들라고 있는 상태이고, 예약 토큰 차이는 위 규칙
 때문에 일괄 수정 대상이 아닙니다. `DATABASE_URL`이 없으면 비교할 대상이 없다고
 밝히고 카탈로그 숫자만 출력합니다.
+
+카탈로그가 모르는 행 중 **의도적으로 withdraw된 것**은
+`expected_historical_withdrawal`로 따로 셉니다. 판정은
+`scripts/report-model-token-limits-core.mjs`의 `HISTORICAL_WITHDRAWALS`이며
+**손으로 쓴 표**입니다 — "disabled이고 카탈로그에 없으니 의도된 것"이라는 추론은
+사고로 사라진 행까지 정상으로 분류하고, 그것이 `unknown_to_code`가 잡으라고
+있는 실패입니다. 표의 값은 해당 migration이 쓴 문자열 그대로이고, **한 컬럼이라도
+다르거나 조회에서 빠지면 `unknown_to_code`로 남습니다.** withdraw된 행도 계속
+저장된 상한으로 답하므로 목록에서 지우지 않고 별도 구획으로 보고합니다.
 
 ### 처리 경로: `service_tier`와 `/v1/models`
 

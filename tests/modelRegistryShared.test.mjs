@@ -195,42 +195,93 @@ test("cap-only entries never write a credit weight or a price", () => {
   }
 });
 
-// gpt-5-5-thinking has nothing for the cap-only scope to carry -- its cap
-// already agrees -- so it gets the mirror-image scope instead. The figure it
-// does carry is approved: docs/policy/credit-and-cost-limits.md section 4 sets
-// the output reservation at "premium 4,096, reasoning 6,144", and this model
-// is premium-reasoning, so a row holding 4,096 is holding the premium class
-// fallback rather than a decision.
-test("gpt-5-5-thinking carries its approved reservation and nothing else", () => {
+// The reservation-only scope is for a model whose cap already agrees, so the
+// cap-only scope would carry nothing for it. Every figure it carries is
+// already approved: docs/policy/credit-and-cost-limits.md section 4 sets the
+// output reservation at "premium 4,096, reasoning 6,144 (maxOutputTokens
+// 8,192)". A row holding the class fallback instead is holding a pre-profile
+// seed value, not a decision.
+const RESERVATION_ONLY_EXPECTATIONS = {
+  // premium-reasoning, so section 4 says 6,144.
+  "gpt-5-5-thinking": 6_144,
+  // premium, so section 4 says 4,096. Its row holds 2,048 -- what
+  // BILLING_DEFAULTS.premium read on 2026-07-17, before lib/modelPricing.ts
+  // existed. Production provenance says seed on every axis: no actor columns,
+  // updatedAt equal to createdAt, no AdminAuditLog row, and that timestamp
+  // shared with other rows to the millisecond.
+  "gpt-5-5": 4_096,
+  "gemini-3-1-pro": 4_096,
+};
+
+test("every reservation-only model carries its approved figure and nothing else", () => {
   assert.deepEqual(
-    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
-    ["gpt-5-5-thinking"]
-  );
-  assert.equal(
-    OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.includes("gpt-5-5-thinking"),
-    false,
-    "its cap agrees, so the cap-only scope would carry nothing"
+    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS].sort(),
+    Object.keys(RESERVATION_ONLY_EXPECTATIONS).sort()
   );
 
-  const model = AVAILABLE_MODELS.find((entry) => entry.id === "gpt-5-5-thinking");
-  const pricing = resolveModelPricing({
-    ...model,
-    maxOutputTokens: undefined,
-    reservationOutputTokens: undefined,
-  });
-  // The premium class fallback and the profile agree on the cap (8,192) and
-  // disagree on the reservation (4,096 vs 6,144). If the cap ever diverges
-  // too, this model needs the other scope as well rather than silently
-  // keeping a stranded ceiling.
-  assert.equal(pricing.maxOutputTokens, 8_192);
-  assert.equal(pricing.reservationOutputTokens, 6_144);
+  const rows = staticModelRegistryReconciliationRows();
+  for (const [modelId, approvedReservation] of Object.entries(
+    RESERVATION_ONLY_EXPECTATIONS
+  )) {
+    assert.equal(
+      OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS.includes(modelId),
+      false,
+      `${modelId}: its cap agrees, so the cap-only scope would carry nothing`
+    );
 
-  const row = staticModelRegistryReconciliationRows().find(
-    (entry) => entry.id === "gpt-5-5-thinking"
-  );
-  assert.ok(row);
-  assert.deepEqual(Object.keys(row.data), ["reservationOutputTokens"]);
-  assert.equal(row.data.reservationOutputTokens, 6_144);
+    const model = AVAILABLE_MODELS.find((entry) => entry.id === modelId);
+    assert.ok(model, modelId);
+    const pricing = resolveModelPricing({
+      ...model,
+      maxOutputTokens: undefined,
+      reservationOutputTokens: undefined,
+    });
+    // The premium class fallback and the profile agree on the cap (8,192) and
+    // disagree only on the reservation. If a cap ever diverges too, that model
+    // needs the other scope as well rather than silently keeping a stranded
+    // ceiling.
+    assert.equal(pricing.maxOutputTokens, 8_192, modelId);
+    assert.equal(pricing.reservationOutputTokens, approvedReservation, modelId);
+    // Section 3.1 of docs/policy/default-model-luna-migration.md governs
+    // *moving* a model onto the p90 basis and needs nine conditions. Every
+    // profile here already carried it when the section 4 figures were set, so
+    // a model still on `conservative_default` must not appear in this scope.
+    assert.equal(pricing.reservationOutputBasis, "p90_output_tokens", modelId);
+
+    const row = rows.find((entry) => entry.id === modelId);
+    assert.ok(row, modelId);
+    assert.deepEqual(Object.keys(row.data), ["reservationOutputTokens"], modelId);
+    assert.equal(row.data.reservationOutputTokens, approvedReservation, modelId);
+  }
+});
+
+// The three models that diverge on reservation and are deliberately absent.
+// Their profiles are still `conservative_default`, so section 4's figures were
+// never set for them and there is no approved number to carry.
+test("a conservative_default model never enters the reservation-only scope", () => {
+  for (const modelId of [
+    "mistral-large-3",
+    "perplexity/sonar-deep-research",
+    "qwen3.7-max",
+  ]) {
+    const model = AVAILABLE_MODELS.find((entry) => entry.id === modelId);
+    assert.ok(model, modelId);
+    const pricing = resolveModelPricing({
+      ...model,
+      maxOutputTokens: undefined,
+      reservationOutputTokens: undefined,
+    });
+    assert.equal(
+      pricing.reservationOutputBasis,
+      "conservative_default",
+      modelId
+    );
+    assert.equal(
+      RESERVATION_ONLY_RECONCILIATION_MODEL_IDS.includes(modelId),
+      false,
+      modelId
+    );
+  }
 });
 
 // The narrow scopes exist to keep money columns out of a sweep. Neither may
