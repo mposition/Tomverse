@@ -218,6 +218,11 @@ run(
     // across accounts, settings and conversations, and the completeness CHECK
     // is the database's own statement that an estimate arrives whole.
     "tests/integration/campaign-audience-estimate.db.test.ts",
+    // The people behind those counts, masked (D10). The masking has to happen
+    // on the way out of the query rather than at the edge, and the only way to
+    // show that is to write a row holding a real address and read it back
+    // through the function a route calls.
+    "tests/integration/campaign-ledger-people.db.test.ts",
     // Two callers ensuring the same template at the same moment. Both races it
     // covers are lost or won by the database's own unique indexes, so a single
     // process proves nothing about either.

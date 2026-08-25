@@ -18,7 +18,8 @@ type Context = { params: Promise<{ campaignId: string }> };
  * One page of one wave's expansion ledger, masked.
  *
  * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §44 (the
- * ledger), §21 D10 (what may be shown of it).
+ * ledger) and .github/audits/model-lifecycle-email-2026-08-22.md §21
+ * (D10 — what may be shown of it).
  *
  * ## Why a route of its own
  *

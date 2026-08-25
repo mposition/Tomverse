@@ -9,9 +9,10 @@ import { revealEmailAddresses } from "@/lib/adminEmailAddressReveal";
 import { ADDRESS_REVEAL_MAX_IDS, MASK_CHARACTER } from "@/lib/emailAddressMaskingCore";
 import { prisma } from "@/lib/prisma";
 
-// The people behind the expansion ledger's counts (§44), under D10's rule (§21).
+// The people behind the expansion ledger's counts, under D10's rule.
 //
-// Contract: .github/audits/model-lifecycle-email-2026-08-22.md §21, §44.
+// Contract: .github/audits/model-lifecycle-email-2026-08-22.md §21 (D10)
+// and .github/audits/model-lifecycle-email-2026-08-22.md §44 (the ledger).
 //
 // What needs a database: the masking has to happen on the way *out of the
 // query*, not at the edge, and the only way to show that is to write a row with

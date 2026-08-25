@@ -14,7 +14,8 @@ import {
  * The people in one wave's expansion ledger.
  *
  * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §44 (the
- * ledger), §21 D10 (what may be shown of it), decided 2026-08-24.
+ * ledger) and .github/audits/model-lifecycle-email-2026-08-22.md §21
+ * (D10 — what may be shown of it), decided 2026-08-24.
  *
  * ## Why this was counts until now
  *

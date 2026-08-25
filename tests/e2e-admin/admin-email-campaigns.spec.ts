@@ -129,9 +129,10 @@ test.describe("Admin Console — email campaigns", () => {
     page,
     signInAs,
   }) => {
-    // D10 (§21), decided 2026-08-24. Until it was decided this screen showed
-    // counts and said on itself that building the list would be answering an
-    // open question.
+    // D10, decided 2026-08-24:
+    // .github/audits/model-lifecycle-email-2026-08-22.md §21.
+    // Until it was decided this screen showed counts and said on itself that
+    // building the list would be answering an open question.
     await signInAs("owner");
     const campaignId = await draftCampaign(adminApi(page));
     await seedCampaignLedger({

@@ -423,7 +423,8 @@ export const waveAudienceBreakdown = async (
  * One person in one wave's expansion ledger, as a screen may see them.
  *
  * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §21 (D10),
- * decided 2026-08-24; the ledger itself is §44.
+ * decided 2026-08-24; the ledger itself is
+ * .github/audits/model-lifecycle-email-2026-08-22.md §44.
  *
  * ## Why this exists now and not in the seventh slice
  *
