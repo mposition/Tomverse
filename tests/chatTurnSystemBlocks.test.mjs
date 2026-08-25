@@ -94,18 +94,28 @@ test("an unverified model still gets an image block, and both say what they cann
 
 test("the flag being off keeps the workspace out of the block", () => {
   const blocks = build({ imageGenerationFlagEnabled: false });
-  assert.equal(blocks.imageCapabilityPrompt.includes("separate workspace"), false);
+  assert.equal(blocks.imageCapabilityPrompt.includes("Image generation exists"), false);
   assert.equal(
     blocks.imageCapabilityPrompt.includes("Image generation exists in this app"),
     false
   );
 });
 
-test("a guest is told to sign in, a Free account to upgrade", () => {
-  const guest = build({ isAuthenticated: false, canPersist: false, planAllowsImageGeneration: false });
-  assert.ok(guest.imageCapabilityPrompt.includes("requires signing in"));
-  const free = build({ planAllowsImageGeneration: false });
-  assert.ok(free.imageCapabilityPrompt.includes("included only in the paid"));
+test("no viewer is told how to reach image generation, whatever their plan", () => {
+  // The ladder is the control's business now. A guest and a Free account both
+  // get the prohibition and nothing about sign-in or plans, because the row
+  // they will actually see states its own requirement before the click.
+  for (const viewer of [
+    { isAuthenticated: false, canPersist: false, planAllowsImageGeneration: false },
+    { planAllowsImageGeneration: false },
+    {},
+  ]) {
+    const text = build(viewer).imageCapabilityPrompt;
+    assert.ok(text.includes("never present it as an option"), JSON.stringify(viewer));
+    assert.equal(text.includes("requires signing in"), false, JSON.stringify(viewer));
+    assert.equal(text.includes("included only in the paid"), false, JSON.stringify(viewer));
+    assert.equal(text.includes("tools menu"), false, JSON.stringify(viewer));
+  }
 });
 
 test("an attached-image edit request takes the edit branch", () => {
@@ -117,7 +127,7 @@ test("an attached-image edit request takes the edit branch", () => {
   });
   assert.equal(blocks.imageIntentClass, "edit_or_reference");
   assert.ok(blocks.imageCapabilityPrompt.includes("workspace cannot edit"));
-  assert.equal(blocks.imageCapabilityPrompt.includes("separate workspace"), false);
+  assert.equal(blocks.imageCapabilityPrompt.includes("Image generation exists"), false);
 });
 
 test("a question about an attached image does not take the edit branch", () => {

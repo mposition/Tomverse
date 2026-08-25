@@ -107,33 +107,50 @@ export const IMAGE_CAPABILITY_CORE = [
 ].join("\n");
 
 /**
- * The handoff paragraphs.
+ * The handoff paragraph: a prohibition, not a direction.
  *
- * `available` names the workspace for photographs and illustrations and tells
- * the model *not* to send a text-dense chart there. That sentence is the
- * deferral of the text-heavy case
- * (.github/audits/image-intent-auto-switch-2026-08-24.md §5.2)
- * carried into the prompt: the
- * wording is "outside that path's current scope", a product-scope statement,
- * never a claim about how well the models render text -- which nobody has
- * measured.
+ * ## What this used to say, and what it produced
+ *
+ * It used to tell the model where image generation is and to point the user
+ * there. On 2026-08-25 a request for an infographic came back as a numbered
+ * list of four formats -- SVG, Word/PDF, PowerPoint, and "the image
+ * generation tool" -- ending in "which would you like?". The user answered
+ * "4". The model then said, correctly, that it has no way to reach that tool
+ * and told them to go find a tab.
+ *
+ * That is the app naming a destination only the app can walk to. The same
+ * failure the artifact policy already forbids one modality over: **do not say
+ * the app did something it cannot do**, extended to **do not offer a path you
+ * cannot take**.
+ *
+ * So the model is now told to say nothing about reaching it. The offer is a
+ * control the app renders beside the answer -- it navigates, it carries the
+ * prompt, and it knows whether this viewer is locked out. A sentence can do
+ * none of those things.
+ *
+ * ## Why three states now share one text
+ *
+ * `sign_in`, `upgrade` and `available` differed only in what the model was to
+ * tell the user about *reachability*, and the model no longer tells them
+ * anything about reachability. The ladder still exists and the control still
+ * renders all three states (docs/ui-contracts/image-generation-workspace.md);
+ * it is simply not the prompt's business any more. `hidden` stays empty: with
+ * the flag off there is no control either, and CORE's "state the limitation
+ * without inventing another path" is the whole answer.
  */
+const HANDOFF_EXISTS = [
+  "Image generation exists in this app, and the app itself offers it beside",
+  "this answer when it applies. Do not describe it, do not explain how to",
+  "reach it, and never present it as an option for the user to pick from a",
+  "list -- you cannot navigate there, so a user who chooses it from your list",
+  "has been sent nowhere.",
+].join("\n");
+
 export const IMAGE_HANDOFF_FRAGMENTS: Readonly<Record<ImageHandoffState, string>> = {
   hidden: "",
-  sign_in: [
-    "Image generation exists in this app but requires signing in. Say that",
-    "much and no more about how to reach it.",
-  ].join("\n"),
-  upgrade: [
-    "Image generation exists in this app but is included only in the paid",
-    "plans. Say that much and no more about how to reach it.",
-  ].join("\n"),
-  available: [
-    "For a photo or an illustration, image generation is a separate workspace",
-    "in this app, reachable from the composer's tools menu. Point the user",
-    "there for those. A text-heavy chart or infographic is outside that",
-    "path's current scope -- do not point there for one.",
-  ].join("\n"),
+  sign_in: HANDOFF_EXISTS,
+  upgrade: HANDOFF_EXISTS,
+  available: HANDOFF_EXISTS,
 };
 
 /**
