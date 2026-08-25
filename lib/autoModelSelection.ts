@@ -180,6 +180,26 @@ export type AutoSelectionInput = {
   signals?: RouterTieBreakSignals;
   cohortConfig?: AutoCohortConfig;
   readiness?: ReturnType<typeof autoRolloutReadiness>;
+  /**
+   * Whether this request may route while a readiness gate is outstanding.
+   *
+   * Decided by `lib/autoDrillOverride.ts`, which needs the request's own
+   * headers and therefore cannot be decided here -- the same reason
+   * `decideAutoCohort` takes it rather than reading it.
+   *
+   * It has to travel this far because the caller's own cohort decision is not
+   * the one that routes. This function consults the cohort again, and while
+   * that second call did not receive the override the drill could not route
+   * anything at all: the caller saw an eligible cohort and logged an
+   * override, and then the selection refused with `cohort_refused` on the
+   * readiness gate the override exists to pass. `lib/autoDrillOverride.ts`
+   * describes a circularity it breaks; until this argument existed, it broke
+   * it one call short of the decision that matters.
+   *
+   * Absent and `false` are the same thing, which is what every request that is
+   * not a staging drill gets.
+   */
+  drillOverride?: boolean;
   now?: () => number;
 };
 
@@ -219,6 +239,7 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
     plan: input.plan,
     config: input.cohortConfig,
     readiness: input.readiness,
+    drillOverride: input.drillOverride,
   });
   if (!cohort.eligible) {
     return { routed: false, reason: "cohort_refused", fallbackModelId, cohort };
