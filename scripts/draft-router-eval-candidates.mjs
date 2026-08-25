@@ -30,6 +30,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
+import { formatShortCommitSha, validateCommitSha } from "../lib/buildInfo.ts";
+
 import {
   DRAFT_TEMPLATE_VERSION,
   draftInstruction,
@@ -39,6 +41,7 @@ import {
 import { EVAL_CELLS } from "../lib/routerQualityEvalSet.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
+import { getModelPricingProfile } from "../lib/modelPricing.ts";
 
 const SET_PATH = "docs/ops/router-evaluation-set/development-v0.json";
 /**
@@ -120,13 +123,52 @@ const instruction = draftInstruction({
 const hash = templateHash(instruction);
 const resolvedBatch = batchId ?? `${stratum}-${cell}-${String(inCell.length + 1).padStart(3, "0")}`;
 
+// One object, used to build the request and then recorded verbatim. Two
+// copies would drift, and a recorded parameter that was not the one sent is
+// worse than none.
+const capField = model.provider === "openai" ? "max_completion_tokens" : "max_tokens";
+const generationParameters = { [capField]: 8000 };
+
+// Cost, from lib/modelPricing.ts rather than from a figure typed into a
+// conversation: the repository's own table is what the rest of the product
+// bills against, so a drafting estimate that disagreed with it would be
+// wrong somewhere that matters.
+const pricing = getModelPricingProfile(modelId);
+const tier = pricing?.tiers?.[0];
+// The instruction is the whole input. Four characters per token is the rough
+// figure for mixed Latin and Hangul; it is an estimate and is labelled as one.
+const estimatedInputTokens = Math.ceil(instruction.length / 4);
+const maximumOutputTokens = generationParameters[capField];
+const estimatedCostUsd = tier
+  ? (estimatedInputTokens / 1_000_000) * tier.inputUsdPerMillionTokens +
+    (maximumOutputTokens / 1_000_000) * tier.outputUsdPerMillionTokens
+  : null;
+
 console.log(`Router eval candidate drafting — ${stratum}/${cell}\n`);
 console.log(`  drafter   ${modelId} (${model.provider} ${model.apiModel})`);
 console.log(`  batch     ${resolvedBatch}`);
 console.log(`  count     ${count}`);
 console.log(`  template  ${DRAFT_TEMPLATE_VERSION} (${hash})`);
+console.log(`  api model  ${model.apiModel}${/latest$/.test(model.apiModel) ? "   (a MOVING alias — the version that answers is recorded per item)" : ""}`);
+console.log(`  params    ${JSON.stringify(generationParameters)}`);
 console.log(`  already in this cell: ${inCell.length}`);
 console.log(`  key from ${configuration.apiKeyEnvName}: ${process.env[configuration.apiKeyEnvName] ? "present" : "MISSING"}`);
+
+if (tier) {
+  console.log(
+    `\n  cost ceiling  ~$${estimatedCostUsd.toFixed(4)}  ` +
+      `(~${estimatedInputTokens.toLocaleString("en-US")} input tokens estimated` +
+      ` @ $${tier.inputUsdPerMillionTokens}/M, plus the full ${maximumOutputTokens.toLocaleString("en-US")}` +
+      ` output cap @ $${tier.outputUsdPerMillionTokens}/M)`
+  );
+  console.log(
+    `                a CEILING, not a forecast: the reply will be far shorter than the cap.\n` +
+      `                rates from lib/modelPricing.ts (${pricing.priceSource}, ${pricing.effectiveDate}).`
+  );
+} else {
+  console.log(`\n  cost ceiling  unknown — lib/modelPricing.ts has no profile for ${modelId}.`);
+}
+
 console.log(`\n--- instruction ---\n${instruction}\n--- end ---`);
 
 if (!send) {
@@ -137,7 +179,6 @@ if (!send) {
 const apiKey = process.env[configuration.apiKeyEnvName];
 if (!apiKey) die(`\n${configuration.apiKeyEnvName} is not set.`);
 
-const capField = model.provider === "openai" ? "max_completion_tokens" : "max_tokens";
 let response;
 let text;
 try {
@@ -147,7 +188,7 @@ try {
     body: JSON.stringify({
       model: model.apiModel,
       messages: [{ role: "user", content: instruction }],
-      [capField]: 8000,
+      ...generationParameters,
     }),
     signal: AbortSignal.timeout(Number(process.env.DRAFT_TIMEOUT_MS || 180_000)),
   });
@@ -171,11 +212,21 @@ if (prompts.length === 0) {
   die(`\nNo prompts found in the reply:\n${String(content).slice(0, 600)}`);
 }
 
-let generatorCommit = null;
-try {
-  generatorCommit = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-} catch {
-  // Not a git checkout, or git is unavailable. Left null rather than guessed.
+// The deployed image has no git binary -- the first Wave 1 run printed
+// "git: not found" and recorded a null commit for all 28 items. So the
+// deployment's own commit is asked for first, the way lib/buildInfo.ts
+// already resolves it everywhere else in the product, and the local checkout
+// is only the fallback for running this from a workstation.
+let generatorCommit =
+  formatShortCommitSha(validateCommitSha(process.env.RAILWAY_GIT_COMMIT_SHA)) ?? null;
+if (!generatorCommit) {
+  try {
+    generatorCommit = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    // No git binary and no deployment variable. Left null rather than
+    // guessed: a wrong commit is worse than an absent one, because it looks
+    // checkable.
+  }
 }
 
 const language =
@@ -214,7 +265,9 @@ const drafted = prompts.map((prompt) => ({
     batchId: resolvedBatch,
     provider: model.provider,
     modelId,
+    requestedApiModel: model.apiModel,
     modelVersion,
+    generationParameters,
     promptTemplateVersion: DRAFT_TEMPLATE_VERSION,
     promptTemplateHash: hash,
     generatorCommit,
@@ -227,6 +280,16 @@ set.items = [...set.items, ...drafted];
 writeFileSync(setPath, `${JSON.stringify(set, null, 2)}\n`, "utf8");
 
 console.log(`\n  ${drafted.length} candidate(s) written to ${setPath}`);
+console.log(
+  `  requested ${model.apiModel}; the provider answered as ` +
+    `${modelVersion ?? "(no model field in the response — recorded as null, not guessed)"}`
+);
+if (!generatorCommit) {
+  console.log(
+    "  generatorCommit is null: no RAILWAY_GIT_COMMIT_SHA and no git binary. The batch\n" +
+      "  cannot be tied to the code that drafted it, which a reviewer may weigh."
+  );
+}
 if (dropped > 0) console.log(`  ${dropped} malformed entr(ies) dropped rather than padded.`);
 if (drafted.length < count) {
   console.log(
