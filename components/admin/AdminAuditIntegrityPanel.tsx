@@ -9,14 +9,57 @@ type Integrity = {
   valid: boolean;
   checkedEntries: number;
   firstInvalidId: string | null;
+  /** The oldest hash-chained entry, whatever the verdict. */
+  firstCheckedId: string | null;
+  /** Whether the first failure is that oldest entry. */
+  firstInvalidIsOldest: boolean;
   message: string;
 };
 
+/** The identifying half of an audit row. Not its metadata, which can be large. */
+type AuditEntry = {
+  id: string;
+  createdAt: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  actorEmail: string | null;
+  actorUserId: string | null;
+};
+
+/**
+ * Verifying the chain, and — when it fails — showing the row it failed on.
+ *
+ * The 2026-08-21 staging round recorded that this panel named `firstInvalidId`
+ * and gave no way to look it up; the 2026-08-25 round found the identical id
+ * still there, still unreachable. An id nobody can resolve is not a diagnosis,
+ * it is a rock in the operator's shoe: it says something is wrong and refuses
+ * to say what.
+ *
+ * So the failure now carries two things it did not.
+ *
+ * The row itself, fetched from the endpoint that already existed
+ * (`GET /api/admin/audit/{id}`) and had simply never been linked to anything.
+ *
+ * And whether that row is the *oldest* entry in the chain, which is the bit
+ * that separates the two stories a failure can tell. The verifier stops at the
+ * first bad row, so a reader cannot otherwise tell "everything before this
+ * verified and this one does not" — tampering — from "nothing has verified at
+ * all" — a signing key that changed. `docs/ops/admin-audit-key-epochs.md`
+ * records that the second is what happened here, and this is the panel that
+ * should have been able to say so.
+ */
 export function AdminAuditIntegrityPanel() {
   const [integrity, setIntegrity] = useState<Integrity | null>(null);
   const [loading, setLoading] = useState(false);
+  const [entry, setEntry] = useState<AuditEntry | null>(null);
+  const [entryLoading, setEntryLoading] = useState(false);
+
   const verify = async () => {
     setLoading(true);
+    // A previous failure's row must not survive into a new verification: it
+    // would sit under a fresh verdict describing a different entry.
+    setEntry(null);
     try {
       const response = await fetch("/api/admin/audit-integrity", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { integrity?: Integrity; error?: string } | null;
@@ -27,6 +70,19 @@ export function AdminAuditIntegrityPanel() {
       dispatchAppToast(error instanceof Error ? error.message : "Audit verification failed.", "error");
     } finally { setLoading(false); }
   };
+
+  const loadEntry = async (auditId: string) => {
+    setEntryLoading(true);
+    try {
+      const response = await fetch(`/api/admin/audit/${encodeURIComponent(auditId)}`, { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as { audit?: AuditEntry; error?: string } | null;
+      if (!response.ok || !data?.audit) throw new Error(data?.error || "Audit event not found.");
+      setEntry(data.audit);
+    } catch (error) {
+      dispatchAppToast(error instanceof Error ? error.message : "Audit event not found.", "error");
+    } finally { setEntryLoading(false); }
+  };
+
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -36,7 +92,59 @@ export function AdminAuditIntegrityPanel() {
         </div>
         <button type="button" onClick={() => void verify()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Verify chain</button>
       </div>
-      {integrity ? <div className={`mt-4 flex items-start gap-3 rounded-2xl border p-3 ${integrity.valid ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" : "border-red-500/30 bg-red-500/10 text-red-100"}`}>{integrity.valid ? <CheckCircle2 className="mt-0.5 h-5 w-5" /> : <AlertTriangle className="mt-0.5 h-5 w-5" />}<div><p className="font-black">{integrity.message}</p><p className="mt-1 text-xs opacity-80">Checked {integrity.checkedEntries.toLocaleString()} entries{integrity.firstInvalidId ? ` · first invalid ${integrity.firstInvalidId}` : ""}</p></div></div> : null}
+
+      {integrity ? (
+        <div
+          data-testid="admin-audit-integrity-result"
+          className={`mt-4 rounded-2xl border p-3 ${integrity.valid ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" : "border-red-500/30 bg-red-500/10 text-red-100"}`}
+        >
+          <div className="flex items-start gap-3">
+            {integrity.valid ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />}
+            <div className="min-w-0">
+              <p className="font-black">{integrity.message}</p>
+              <p className="mt-1 text-xs opacity-80">
+                Checked {integrity.checkedEntries.toLocaleString()} entries
+                {integrity.firstInvalidId ? <> · first invalid <span className="font-mono">{integrity.firstInvalidId}</span></> : null}
+              </p>
+              {integrity.firstInvalidId ? (
+                <p data-testid="admin-audit-integrity-reading" className="mt-2 text-xs opacity-90">
+                  {integrity.firstInvalidIsOldest
+                    ? "This is the oldest entry in the chain, so no entry has verified under the current key. That is what a changed signing key looks like rather than an altered entry — see docs/ops/admin-audit-key-epochs.md."
+                    : "Entries before this one verified under the current key and this one did not, so a changed signing key does not explain it on its own."}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          {integrity.firstInvalidId && !entry ? (
+            <button
+              type="button"
+              data-testid="admin-audit-integrity-show-entry"
+              onClick={() => void loadEntry(integrity.firstInvalidId as string)}
+              disabled={entryLoading}
+              className="mt-3 inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Show this entry
+            </button>
+          ) : null}
+
+          {entry ? (
+            <dl data-testid="admin-audit-integrity-entry" className="mt-3 grid gap-x-4 gap-y-1 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs sm:grid-cols-2">
+              {[
+                ["Written", new Date(entry.createdAt).toISOString()],
+                ["Action", entry.action],
+                ["Target", entry.targetId ? `${entry.targetType} ${entry.targetId}` : entry.targetType],
+                ["Actor", entry.actorEmail || entry.actorUserId || "Unknown admin"],
+              ].map(([label, value]) => (
+                <div key={label} className="flex gap-2">
+                  <dt className="shrink-0 opacity-70">{label}</dt>
+                  <dd className="min-w-0 break-words font-mono">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
