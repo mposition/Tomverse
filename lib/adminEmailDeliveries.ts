@@ -3,11 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import {
-  ADDRESS_REVEAL_MAX_IDS,
-  maskEmailAddress,
-  type AddressRevealKind,
-} from "@/lib/emailAddressMaskingCore";
+import { maskEmailAddress } from "@/lib/emailAddressMaskingCore";
 import {
   DELIVERY_STATUSES,
   type DeliveryFilters,
@@ -206,31 +202,4 @@ export async function listSuppressions(input: {
     ...rest,
     emailAddressMasked: maskEmailAddress(emailAddress),
   }));
-}
-
-/**
- * The addresses behind a set of rows, for the audited reveal.
- *
- * Separate from the list reads on purpose: those can never return an address,
- * and this can never be reached without the route having checked the role and
- * written the audit entry first. Two functions rather than a flag, because a
- * flag is a thing somebody passes wrongly.
- */
-export async function revealEmailAddresses(input: {
-  kind: AddressRevealKind;
-  ids: readonly string[];
-}): Promise<Record<string, string | null>> {
-  const ids = Array.from(new Set(input.ids)).slice(0, ADDRESS_REVEAL_MAX_IDS);
-  if (ids.length === 0) return {};
-  const rows =
-    input.kind === "delivery"
-      ? await prisma.emailDelivery.findMany({
-          where: { id: { in: [...ids] } },
-          select: { id: true, emailAddress: true },
-        })
-      : await prisma.suppressionEntry.findMany({
-          where: { id: { in: [...ids] } },
-          select: { id: true, emailAddress: true },
-        });
-  return Object.fromEntries(rows.map((row) => [row.id, row.emailAddress]));
 }

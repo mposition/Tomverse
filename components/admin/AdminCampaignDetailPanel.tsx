@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import { AdminWaveLedger } from "@/components/admin/AdminWaveLedger";
 
 /**
  * One campaign, and every decision an operator makes about it.
@@ -169,12 +170,29 @@ const when = (value: string | null) => {
     : date.toISOString().replace("T", " ").slice(0, 16);
 };
 
-export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string }) {
+export function AdminCampaignDetailPanel({
+  campaignId,
+  /**
+   * Whether this administrator may reveal an address (D10: `owner` and `ops`).
+   *
+   * Resolved on the server and passed down, for the reason the delivery screen
+   * gives: a browser deciding whether it may reveal is a browser that can
+   * decide it may. The server refuses regardless.
+   */
+  mayRevealAddresses,
+}: {
+  campaignId: string;
+  mayRevealAddresses: boolean;
+}) {
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  // At most one wave's ledger is open. D10 made the screen the unit of a
+  // reveal, and several ledgers on one page would leave "which screen"
+  // unanswered.
+  const [openLedgerWaveId, setOpenLedgerWaveId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -761,10 +779,10 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
           recorded for why it was not.
         </p>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Counts, not people. Each row holds the address it was written to, and
-          whether an operator may see addresses on a campaign screen is the same
-          open question as the one on Email delivery. Building the list would be
-          answering it.
+          Counts first, and the people behind them on request. Each row holds
+          the address it was written to, so the list follows the rule Email
+          delivery follows: addresses are masked, and showing them is a
+          deliberate act that is recorded.
         </p>
 
         {audience.length === 0 ? (
@@ -859,6 +877,35 @@ export function AdminCampaignDetailPanel({ campaignId }: { campaignId: string })
                         as it was — nothing rewrote it — so the count is here
                         rather than in a log nobody opens.
                       </p>
+                    ) : null}
+
+                    {/* The ledger is fetched only when asked for. It is one row
+                        per person, and loading it for every wave on every visit
+                        would read an audience-sized list for an operator who
+                        opened the page to check a schedule. */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenLedgerWaveId((current) =>
+                          current === wave.waveId ? null : wave.waveId
+                        )
+                      }
+                      className="mt-3 min-h-11 rounded-xl border border-zinc-800 px-3 text-sm font-bold text-zinc-300 hover:border-zinc-700"
+                      aria-expanded={openLedgerWaveId === wave.waveId}
+                      data-testid="admin-campaign-audience-open-ledger"
+                    >
+                      {openLedgerWaveId === wave.waveId
+                        ? "Hide the people"
+                        : "Show the people"}
+                    </button>
+
+                    {openLedgerWaveId === wave.waveId ? (
+                      <AdminWaveLedger
+                        campaignId={campaignId}
+                        waveId={wave.waveId}
+                        dryRun={wave.dryRun}
+                        mayRevealAddresses={mayRevealAddresses}
+                      />
                     ) : null}
                   </>
                 )}

@@ -831,3 +831,55 @@ export const setAppSettingDirectly = async (key: string, value: string) => {
     create: { key, value },
   });
 };
+
+/**
+ * A wave and a page of ledger rows for it, written straight to the database.
+ *
+ * The expansion writes these rows, and driving the expansion from a spec would
+ * mean standing up a template, a policy version, an event and a cron pass to
+ * produce a table the screen reads. That path is covered by
+ * `tests/integration/campaign-ledger-people.db.test.ts`, which asserts the rows
+ * the expander writes. What this spec is about is what the screen does with
+ * rows that exist — so it makes them exist.
+ *
+ * The addresses are real-shaped on purpose: a fixture of `x@y` would mask to
+ * something indistinguishable from an empty cell, and the assertion that the
+ * page never contains the raw local part would pass without meaning anything.
+ */
+export const seedCampaignLedger = async (input: {
+  campaignId: string;
+  addresses: readonly string[];
+}) => {
+  const prisma = adminFixtureDatabase();
+  const wave = await prisma.emailCampaignWave.create({
+    data: {
+      campaignId: input.campaignId,
+      kind: "launch",
+      sequence: 1,
+      dryRun: false,
+    },
+    select: { id: true },
+  });
+
+  let index = 0;
+  for (const address of input.addresses) {
+    index += 1;
+    const user = await prisma.user.create({
+      data: { email: `ledger-${index}-${wave.id}@example.test` },
+      select: { id: true },
+    });
+    await prisma.emailCampaignRecipient.create({
+      data: {
+        campaignId: input.campaignId,
+        waveId: wave.id,
+        userId: user.id,
+        emailAddress: address,
+        language: "en",
+        eligibilityReason: "default_model",
+        excludedReason: null,
+      },
+    });
+  }
+
+  return wave.id;
+};
