@@ -89,6 +89,24 @@ export type MemoryEvalCaseV2 = {
     language: MemoryEvalLanguage;
     expected: readonly ExpectedMemoryV2[];
     goldCompleteness: MemoryEvalGoldCompleteness;
+    /**
+     * The schema-1 case this one reworks, when it is a relabelling rather
+     * than a new conversation.
+     *
+     * The 2026-08-25 amendment reworks labels, not conversations: the 400
+     * category-1 conversations were drafted and adopted on 2026-08-23 and
+     * nothing in A–D touches them. So a successor case is, by construction,
+     * byte-identical to the frozen case it replaces — and the near-duplicate
+     * detector reads that as a draft repeating a template, which is the one
+     * thing it exists to catch.
+     *
+     * Declaring the pair is what separates the two. A successor case scoring
+     * high against the case it names is expected; scoring high against
+     * anything else is the finding. The successor set replaces the frozen
+     * one rather than extending it, so the comparison that matters is
+     * within the successor set.
+     */
+    sourceCaseId?: string;
     conversations: readonly {
         externalConversationId: string;
         title: string;
