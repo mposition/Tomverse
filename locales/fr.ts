@@ -165,6 +165,7 @@ export const fr = {
         imageGenerationSizeLandscape: "Paysage",
         imageGenerationSizePortrait: "Portrait",
         imageGenerationGenerate: "Générer",
+        imageGenerationAutoGenerateLabel: "Générer sans demander la prochaine fois",
         imageGenerationGeneratingModels: "Génération · {count} modèle(s)",
         imageGenerationGenerating: "Génération de l'image...",
         imageGenerationGeneratingHint: "Cela peut prendre jusqu'à deux minutes environ. Quitter la page n'annule pas la génération.",

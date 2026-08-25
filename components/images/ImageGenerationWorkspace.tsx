@@ -238,6 +238,27 @@ type ImageGenerationWorkspaceProps = {
   maxModels: number;
   /** Present only when there is a chat draft to go back to. */
   onCancelDraft?: () => void;
+  /**
+   * True for exactly one landing: the user pressed the chat image handoff on a
+   * request they had written in words, and this account has chosen to stop
+   * being asked. Spent on arrival -- `onAutoGenerateArrivalConsumed` is called
+   * whatever the outcome, so a refused submit does not leave a landing armed.
+   *
+   * Never true for the launcher or the tools menu. Those are someone opening
+   * the workspace to compose, and a workspace that generated because it was
+   * opened would spend credits on navigation.
+   */
+  autoGenerateOnArrival?: boolean;
+  onAutoGenerateArrivalConsumed?: () => void;
+  /**
+   * The account's stored choice, and the writer for it. Rendered beside the
+   * price, which is the point: the workspace contract's "quoted before
+   * submission" survives this feature as "quoted at least once, to the person
+   * who chose to stop being asked", and that is only true if the only place
+   * the choice can be made is a place the price is on screen.
+   */
+  autoGeneratePreference?: boolean;
+  onAutoGeneratePreferenceChange?: (next: boolean) => void;
 };
 
 export function ImageGenerationWorkspace({
@@ -249,6 +270,10 @@ export function ImageGenerationWorkspace({
   initialModelIds,
   maxModels,
   onCancelDraft,
+  autoGenerateOnArrival = false,
+  onAutoGenerateArrivalConsumed,
+  autoGeneratePreference = false,
+  onAutoGeneratePreferenceChange,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
   const isMobileShell = useIsMobileShell();
@@ -767,6 +792,58 @@ export function ImageGenerationWorkspace({
       setIsSubmitting(false);
     }
   };
+  const handleSubmitRef = useRef<(() => Promise<void>) | null>(null);
+  // Kept current rather than listed as a dependency of the arrival effect: the
+  // function is redefined on every render, and depending on it would re-run
+  // the effect continuously. Written in an effect with no dependency array --
+  // the "latest ref" idiom -- because a ref must not be assigned during render.
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  });
+
+  /*
+    The arrival that generates on its own.
+
+    Everything about this is a guard, because it is the one path in the product
+    where credits are spent without a click on the button that spends them.
+
+      * armed by exactly one caller -- the chat handoff, on a request the user
+        wrote in words -- and only for an account that turned the preference on
+        beside the price;
+      * fired at most once per mount, held by a ref rather than by the effect's
+        dependencies: `canSubmit` flickers while the catalogue and the price
+        resolve, and a dependency-guarded effect would fire again on the
+        flicker;
+      * conditional on the same `canSubmit` the button is, so a held price, an
+        over-long prompt, a viewer without the plan and a request already in
+        flight all refuse it exactly as they refuse a press;
+      * spent either way. A landing that could not submit is consumed, not left
+        armed to fire later when the user has changed the prompt to something
+        else entirely.
+
+    `void` rather than awaited: this is a fire-and-report path like the button's
+    own handler, and `handleSubmit` reports its own failures on screen.
+  */
+  const autoGenerateSpentRef = useRef(false);
+  useEffect(() => {
+    if (!autoGenerateOnArrival || autoGenerateSpentRef.current) return;
+    if (isSubmitting || hasActiveGeneration) return;
+    // Still resolving. Not spent, because nothing was decided yet.
+    if (selectedModelIds.length === 0 && !promptTooLong) return;
+    autoGenerateSpentRef.current = true;
+    onAutoGenerateArrivalConsumed?.();
+    if (!canSubmit) return;
+    void handleSubmitRef.current?.();
+  }, [
+    autoGenerateOnArrival,
+    canSubmit,
+    hasActiveGeneration,
+    isSubmitting,
+    promptTooLong,
+    selectedModelIds.length,
+    onAutoGenerateArrivalConsumed,
+  ]);
+
 
   const handleRetryTarget = async (generation: GenerationView) => {
     const targetId = generation.targetId;
@@ -1502,6 +1579,38 @@ export function ImageGenerationWorkspace({
               </span>
             )}
             <span className="min-w-0 flex-1" />
+            {/*
+              "Stop asking me", and the only place it can be set.
+
+              Beside the price on purpose. The workspace contract requires the
+              price to be quoted before submission, and this is what keeps that
+              true once a press can submit on its own: the choice to stop being
+              asked can only be made by someone who is looking at what a
+              request costs. Putting it in an account settings page would move
+              it away from the number it is a decision about.
+
+              It stays rendered while a generation is running, so the account
+              that has just watched a press spend credits can turn it off in
+              the same place it turned it on -- and only for a viewer who can
+              actually generate, because for anyone else it would be a control
+              over something they cannot do.
+            */}
+            {planAllowsImageGeneration && onAutoGeneratePreferenceChange && (
+              <label
+                data-testid="image-generation-auto-generate-toggle"
+                className="inline-flex cursor-pointer items-center gap-2 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300"
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-accent-image-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-image-500 dark:border-zinc-600"
+                  checked={autoGeneratePreference}
+                  onChange={(event) =>
+                    onAutoGeneratePreferenceChange(event.target.checked)
+                  }
+                />
+                {t("chat.imageGenerationAutoGenerateLabel")}
+              </label>
+            )}
             {/*
               While a comparison is running the button IS the progress: a
               separate sentence beside a button that still reads "Generate" at
