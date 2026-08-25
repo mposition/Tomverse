@@ -1,7 +1,8 @@
 # §12.3 채점·안전 계약 개정안 — 2026-08-25
 
-**승인 전입니다.** 아래 §승인 기록이 비어 있는 동안 이 문서는 제안이며, 정책
-문안에도 코드에도 반영하지 않습니다.
+**승인 완료 [2026-08-25 @mposition].** 아래 §승인 기록을 참조합니다. 이 승인은
+**평가·안전 계약의 확정**이며, eval 예산·v3 pair·decision-grade 실행·production
+pair·memory flag 활성화는 **포함하지 않습니다**.
 
 근거가 된 관측은 `docs/ops/memory-extraction-eval-diagnostics.md`이고, 개정
 대상은 `docs/policy/external-conversation-import-and-memory.md` §12.2·§12.3과
@@ -12,7 +13,8 @@
 > 허점 두 곳(과잉 sensitive 분류 게이트 부재, precision 모집단 변경의 미기재)이
 > 이 판에서 닫혔습니다. 변경된 곳은 §1·§4.1·§4.4·§5·§6 그리고 §0의 정정입니다.
 > 이어서 운영자 결정 [2026-08-25]으로 §4.5가 **채택**되고 그 집계 규칙과
-> 지표명이 확정됐으며, §4.4의 분자가 같은 이유로 좁혀졌습니다.
+> 지표명이 확정됐으며, §4.4의 분자가 같은 이유로 좁혀졌습니다. 승인 기록은
+> 같은 날 기입됐습니다.
 
 ## 왜 지금
 
@@ -388,9 +390,9 @@ precision을 대신하지 않는다는 경계입니다.
 ## 7. 실행 순서 [확정 · 2026-08-25]
 
 1. ~~전체 유료 eval 중단, 비용·결과를 진단으로 기록~~ **완료**
-2. ~~PR #981에 운영자 결정과 보완사항 반영~~ **이 판** ← 현재 단계
-3. **수정된 정책 초안에 사람이 승인 기록** — §승인 기록 기입
-4. 그 뒤에만 successor `datasetVersion` 착수 — kind 재라벨링,
+2. ~~운영자 결정과 보완사항 반영~~ **완료**
+3. ~~수정된 정책 초안에 사람이 승인 기록~~ **완료 [2026-08-25 @mposition]**
+4. 그 뒤에만 successor `datasetVersion` 착수 ← **현재 단계**. kind 재라벨링,
    `expectedDisposition` 부여, exhaustive gold 보완
 5. scorer·probe corpus 변경 — 추출 정확도 / bulk 활성화 안전성 분리,
    세 목록 분리
@@ -421,11 +423,29 @@ precision을 대신하지 않는다는 경계입니다.
 **범주 ①만 재작업 대상이고 critical negative 750건은 건드리지 않습니다** —
 A–D 중 어느 것도 ②③④의 "아무것도 뽑지 않아야 한다"를 바꾸지 않기 때문입니다.
 
-## 승인 기록 (사람이 기입)
+## 승인 기록
 
 | 항목 | 값 |
 |---|---|
-| 검토자 | |
-| 승인일 | |
-| 수정 요청 사항 | |
-| 승인 범위 | §1 A 출력 언어 / §2 B taxonomy·`decision` 경계 / §3 C sensitivity·의료 신호·probe corpus / §4 D gold 완전성·모집단·bulk eligibility recall / §4.5 sensitive-review bulk-safe 오분류 0건 — 채택 / §6 버전 처리 |
+| 검토자 | @mposition |
+| 승인일 | 2026-08-25 |
+| 승인 대상 | 검토한 commit `93234a05cfaffac385cbe4a93294cf0481cc0de3` (branch `claude/to-develop/eval-scoring-contract-draft`) |
+| 수정 요청 사항 | 없음. §4.5의 sensitive-review bulk-safe 오분류 0건 기준을 채택하며, 정상 sensitive-review 후보가 함께 있어도 bulk-safe 중복 후보를 독립적으로 위반 처리하는 집계 규칙을 포함한다. |
+| 승인 범위 | 본 개정안 §1–§6 전체: A 출력 언어, B canonical taxonomy와 `decision` 경계, C sensitivity·의료 신호·probe corpus, D gold 완전성·채점 모집단, bulk eligibility recall, sensitive-review bulk-safe 오분류 0건, successor `datasetVersion` 처리. |
+| 승인에서 제외 | eval 예산 승인, v3 pair 승인, decision-grade 실행 승인, production pair 승인 및 memory flag 활성화. |
+
+### 승인 대상 commit에 관한 기록
+
+운영자가 제시한 문안은 승인 대상을 "PR #981 head"로 적었습니다. **그 표현은 이
+승인에 대해 정확하지 않으므로 실제 검토 대상 commit으로 바꿔 적었습니다.**
+
+PR #981은 `Auto PR to Develop`이 열고 필수 검사 통과 직후 auto-merge 됐으며,
+merge 시점의 head는 **첫 초안 commit `2a81ebc1c3f1edcfc7b008e13d78f4b62c68e350`**
+입니다. 그 commit에는 열린 항목 4건이 그대로 있고 §4.4·§4.5·§0.1의 보완이
+없습니다. 즉 **PR #981이 develop에 넣은 것은 승인된 문안이 아닙니다.**
+
+운영자가 검토하고 승인한 문안은 그 뒤의 두 commit
+(`566d5c7` 결정 반영 + 보완, `93234a0` §4.5 채택·집계 규칙)이 얹힌
+`93234a05cfaffac385cbe4a93294cf0481cc0de3`이며, PR #981은 이미 병합·종료돼
+새 작업을 추적할 수 없으므로 **이 문안은 후속 PR로 develop에 들어갑니다.**
+승인의 내용과 범위는 바뀌지 않고, 어느 bytes가 승인됐는지만 정확히 남깁니다.
