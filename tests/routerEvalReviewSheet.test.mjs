@@ -322,3 +322,89 @@ test("a drafted item must say which api model was requested", () => {
     );
     assert.ok(problems.some((problem) => /has no requestedApiModel/.test(problem)));
 });
+
+// --- the alias behind the request ------------------------------------------
+
+// Wave 1's actual record. Mistral returned the requested alias as its own
+// `model`, so the sheet's old instruction -- compare "응답이 밝힌 version"
+// across a wave's batches -- would have matched two batches drafted by
+// different models. The sheet has to say the value is an echo, and must not
+// send the reviewer to it.
+test("a version that echoes the request is marked as an echo, not offered for comparison", () => {
+    const items = [
+        item("a", {
+            draftProvenance: provenance("batch-001", {
+                provider: "mistral",
+                modelId: "mistral-large-3",
+                requestedApiModel: "mistral-large-latest",
+                modelVersion: "mistral-large-latest",
+            }),
+        }),
+    ];
+    const sheet = renderReviewSheet({ set: makeSet(items), batchId: "batch-001", corpus: items });
+    assert.match(sheet, /요청의 에코입니다/);
+    assert.match(sheet, /실제 모델이 확정되지 않았습니다/);
+    assert.doesNotMatch(sheet, /「응답이 밝힌 version」을 wave의/);
+});
+
+test("a resolved alias is shown with the moment it was read, and becomes the comparison", () => {
+    const items = [
+        item("a", {
+            draftProvenance: provenance("batch-001", {
+                provider: "mistral",
+                modelId: "mistral-large-3",
+                requestedApiModel: "mistral-large-latest",
+                modelVersion: "mistral-large-latest",
+                aliasResolution: {
+                    resolvedModelId: "mistral-large-2512",
+                    outcome: "resolved",
+                    candidates: ["mistral-large-2512"],
+                    resolvedAt: "2026-08-25T11:17:00.000Z",
+                    source: "https://api.mistral.ai/v1/models",
+                },
+            }),
+        }),
+    ];
+    const sheet = renderReviewSheet({ set: makeSet(items), batchId: "batch-001", corpus: items });
+    assert.match(sheet, /별칭이 가리킨 실제 모델/);
+    assert.match(sheet, /mistral-large-2512/);
+    assert.match(sheet, /2026-08-25T11:17:00\.000Z/);
+    assert.match(sheet, /대조는 「별칭이 가리킨 실제 모델」로/);
+});
+
+// An unresolved alias is a stated gap, never a blank the reviewer might read
+// as "fine".
+test("an unresolved alias names why it is unresolved", () => {
+    const items = [
+        item("a", {
+            draftProvenance: provenance("batch-001", {
+                requestedApiModel: "mistral-large-latest",
+                aliasResolution: {
+                    resolvedModelId: null,
+                    outcome: "unavailable",
+                    candidates: [],
+                    resolvedAt: null,
+                    source: "https://api.mistral.ai/v1/models",
+                    note: "HTTP 401",
+                },
+            }),
+        }),
+    ];
+    const sheet = renderReviewSheet({ set: makeSet(items), batchId: "batch-001", corpus: items });
+    assert.match(sheet, /확정되지 않음 — unavailable/);
+});
+
+// Batches drafted before this was recorded carry no aliasResolution at all.
+// The sheet still has to render, and still has to withhold the comparison.
+test("a batch predating alias resolution renders without inventing one", () => {
+    const items = [
+        item("a", {
+            draftProvenance: provenance("batch-001", {
+                requestedApiModel: "mistral-large-latest",
+                modelVersion: "mistral-large-latest",
+            }),
+        }),
+    ];
+    const sheet = renderReviewSheet({ set: makeSet(items), batchId: "batch-001", corpus: items });
+    assert.match(sheet, /확정되지 않음 — 기록 없음/);
+});

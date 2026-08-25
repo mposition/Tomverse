@@ -96,11 +96,39 @@ export type EvalDraftProvenance = {
    */
   requestedApiModel: string;
   /**
-   * What the provider called itself in its own response, never an echo of
-   * `requestedApiModel`. Null when the provider returned nothing usable: a
-   * guessed snapshot id looks checkable and is not.
+   * What the provider called itself in its own response. Null when it
+   * returned nothing usable: a guessed snapshot id looks checkable and is
+   * not.
+   *
+   * This field was written to hold the version that answered, on the
+   * reasoning that an echo of the request would record nothing. Mistral
+   * returns the requested alias verbatim here, so for Wave 1 it held
+   * `mistral-large-latest` on both sides of a ko/en pair -- a match that
+   * proves nothing. Read it with `isEchoOfRequest`, and use
+   * `aliasResolution` for the comparison it was meant to support.
    */
   modelVersion: string | null;
+  /**
+   * The concrete model the provider's own listing puts behind
+   * `requestedApiModel`, read at a stated moment from a separate,
+   * unbilled call.
+   *
+   * Absent on batches drafted before this was recorded, and carrying a null
+   * `resolvedModelId` whenever the listing could not settle it. Neither
+   * absence is a defect to be filled in later by inference: an alias
+   * resolved after the fact says where it pointed then, not where it
+   * pointed during the request.
+   */
+  aliasResolution?: {
+    resolvedModelId: string | null;
+    outcome: "resolved" | "no-alias-recorded" | "ambiguous" | "not-listed" | "unavailable";
+    candidates: string[];
+    /** When the listing was read; null when it never was. */
+    resolvedAt: string | null;
+    source: string;
+    /** Why the listing could not be read, when that is the reason. */
+    note?: string | null;
+  };
   /**
    * The request parameters, so a batch can be reproduced rather than
    * approximated. A temperature or a cap that changed between batches is a
