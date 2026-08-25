@@ -1620,6 +1620,7 @@ export const en = {
         countSummary: "{count} of {max} assistants",
         atCapacity: "You have reached the assistant limit. Delete one to add another.",
         create: "New assistant",
+        importPackage: "Import an external setup",
         createAction: "Create assistant",
         empty: "You have no assistants yet. Create one to give an assistant your own instructions.",
         publishedStatus: "Published — revision {revision}, {files} knowledge file(s)",

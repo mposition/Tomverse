@@ -501,6 +501,7 @@ flag를 끄면 **wizard route와 import·export API만** 사라집니다. 이미
 | `AssistantProfileImport` 행 | **그대로 남습니다.** provenance가 flag와 함께 사라지면 이미 만들어진 profile이 "출처를 모르는 profile"이 됩니다 |
 | staging 중이던 import | 새 요청이 거절되므로 진행할 수 없고, 두 시계의 만료 sweep이 가져갑니다. 사람이 손으로 지우지 않습니다 |
 | `/settings/assistants/import` | 404 |
+| `/settings/assistants`의 **가져오기 진입점** | **렌더되지 않습니다.** 목록 endpoint가 `features.packageImport`로 답하고, 그 값은 이 route가 404를 내는 것과 **같은 판정**입니다 — 버튼이 보이는 것과 목적지가 존재하는 것이 어긋날 자리를 두지 않습니다. 응답에 그 field가 없으면 꺼짐으로 읽습니다 |
 
 **세 가지 답이 가능했고 두 개는 나빴습니다.** profile이 사라진다 — 되돌릴 수
 없는 손실이라 안 됩니다. profile은 남지만 쓸 수 없다 — 사용자가 자기 목록에서
