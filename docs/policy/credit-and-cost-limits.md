@@ -596,6 +596,25 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 - native web search가 켜지면 검색 결과가 프롬프트로 되돌아오므로 입력에
   `WEB_SEARCH_INPUT_TOKEN_OVERHEAD`(6,000) + tool 정의(400)를 더해 예약합니다.
   **크레딧에는 반영하지 않습니다** — 사용자 과금은 대화 길이 기준입니다.
+- **native web search의 질의당 비용은 요청이 상한을 강제할 때만 예약할 수
+  있습니다.** 상한을 보내는 방법은 provider마다 다릅니다 — Anthropic은 tool의
+  `maxUses`, OpenAI는 Responses 요청의 `max_tool_calls`
+  (`providerOptions.openai.maxToolCalls`)입니다. 두 값 모두
+  `WebSearchCapability.maxBillableSearchQueriesPerRequest` **한 필드**에서
+  읽으므로, 예약이 산정한 상한과 요청이 강제하는 상한은 복사본이 아니라 같은
+  값입니다. Google의 Search grounding은 tool에도 요청에도 상한 parameter가
+  없어서 **fail-closed로 남습니다.**
+- **provider capability와 operational dispatchability는 다릅니다.**
+  `nativeSearchIsDispatchable()`(`lib/webSearchCapability.ts`)이 유일한
+  판정이고, composer · credit estimate · model picker · router candidate ·
+  `/api/chat` · `/api/chat/preflight` · `/api/chat/availability`가 모두 이것을
+  묻습니다. **예약이 거절할 검색을 어떤 표면도 먼저 제안하지 않는다**는 것이
+  규칙입니다 — 반대로 하면 UI가 네 번 허용한 기능이 dispatch에서만 503을
+  냅니다(2026-08-25 `gpt-5-6-luna` · `WEB_SEARCH_COST_UNBOUNDED`).
+- **세 route는 같은 검색 비용을 예약합니다.** `/api/chat/preflight`와
+  `/api/chat/availability`도 `reserveNativeSearchCost()`를 부르고 결과를
+  `createChatBudget({ nativeSearch })`에 넘깁니다. 사전 확인이 실제 요청보다
+  적은 provider 비용을 계산하면 그것은 확인이 아닙니다.
 - 출력 예약은 모델별 p90입니다. premium 4,096, reasoning 모델 6,144
   (`maxOutputTokens` 8,192 유지).
 - 정산은 provider usage metadata를 우선 사용하고, 없을 때만 fallback

@@ -35,6 +35,14 @@ export const buildWebSearchToolConfig = (
   switch (capability.provider) {
     case "openai":
       return {
+        // No ceiling on the tool itself: OpenAI's is a request-level
+        // parameter, `max_tool_calls`, and it is sent through
+        // `providerOptions.openai.maxToolCalls` by
+        // `getModelGenerationSettings` -- see
+        // `openAiNativeSearchToolCallCeiling`. It cannot be set here without
+        // being lost: `attemptDispatchOptions` spreads this object over the
+        // generation settings, so a `providerOptions` returned from here would
+        // replace the one carrying `reasoningEffort`.
         tools: { web_search: openai.tools.webSearch({}) },
         // OpenAI is the only provider whose native tool can be forced to
         // execute -- "always" should mean always for the models that
@@ -57,7 +65,11 @@ export const buildWebSearchToolConfig = (
     case "google":
       return {
         tools: { google_search: google.tools.googleSearch({}) },
-        // Google's grounding tool is not forceable either.
+        // Google's grounding tool is not forceable either, and unlike OpenAI's
+        // it takes no per-request call ceiling, so `nativeSearchIsDispatchable`
+        // keeps callers from ever asking for this configuration today. Kept
+        // whole so the day a ceiling exists is a capability change and not a
+        // rewrite.
       };
     default:
       return null;

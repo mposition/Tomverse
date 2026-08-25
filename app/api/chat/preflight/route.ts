@@ -37,8 +37,12 @@ import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+    getWebSearchCapability,
+    nativeSearchIsDispatchable,
+} from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
+import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import {
     atLeastOneToken,
     createTokenEstimateAccumulator,
@@ -323,9 +327,13 @@ export async function POST(request: Request) {
             // report a forced search on a model whose search is not native --
             // and the artifact tool is refused on precisely that combination.
             const modelSearchCapability = getWebSearchCapability(model.id);
+            // `nativeSearchIsDispatchable`, exactly as the chat route derives
+            // it: a native capability with no enforceable per-request cost
+            // ceiling attaches no tool, so priced as though it did this quote
+            // would count 6,400 tool-overhead tokens the request never sends.
             const modelNativeSearchEnabled =
                 payload.webSearchMode === "always" &&
-                modelSearchCapability.support === "native";
+                nativeSearchIsDispatchable(modelSearchCapability);
             const turnSystemBlocks = buildChatTurnSystemBlocks({
                 modelId: model.id,
                 provider: model.provider,
@@ -366,7 +374,30 @@ export async function POST(request: Request) {
                 inputTokens: breakdown.rawTotal,
                 attachmentTokens,
             });
-            const capability = getWebSearchCapability(model.id);
+            // The provider cost the chat route will reserve for this model's
+            // search, reserved here too. Without it this quote covered the
+            // token half of a searching turn and none of the per-query half,
+            // so a comparison was admitted against a smaller provider cost
+            // than the requests it admits then spend -- and the guardrail this
+            // route exists to check ahead of time was checked against the
+            // wrong number.
+            const nativeSearchReservation = reserveNativeSearchCost({
+                model,
+                capability: modelSearchCapability,
+                nativeSearchEnabled: modelNativeSearchEnabled,
+            });
+            if (!nativeSearchReservation.ok) {
+                // The same refusal the chat route raises, for the same reason
+                // and with the same code: a quote that said yes to a request
+                // the dispatch will refuse is the defect, not the refusal.
+                throw new ChatAccessError(
+                    503,
+                    "WEB_SEARCH_COST_UNBOUNDED",
+                    "Web search is temporarily unavailable for this model.",
+                    undefined,
+                    { scope: nativeSearchReservation.reason }
+                );
+            }
             return createChatBudget(
                 access.kind,
                 model,
@@ -374,11 +405,10 @@ export async function POST(request: Request) {
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         payload.webSearchMode ?? "off",
-                        capability
+                        modelSearchCapability
                     ),
-                    nativeSearchEnabled:
-                        payload.webSearchMode === "always" &&
-                        capability.support === "native",
+                    nativeSearchEnabled: modelNativeSearchEnabled,
+                    nativeSearch: nativeSearchReservation,
                 }
             );
         });

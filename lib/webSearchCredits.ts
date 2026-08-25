@@ -11,6 +11,7 @@ import {
 } from "@/lib/models";
 import {
   getWebSearchCapability,
+  nativeSearchIsDispatchable,
   type WebSearchCapability,
 } from "@/lib/webSearchCapability";
 import type { WebSearchMode } from "@/lib/appDefaults";
@@ -18,15 +19,32 @@ import type { WebSearchMode } from "@/lib/appDefaults";
 export const WEB_SEARCH_SURCHARGE_CREDITS =
   MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge;
 
-/** Only provider-native search tools (OpenAI/Anthropic/Google) carry the surcharge -- Perplexity's search models are priced into their base weight already. */
+/**
+ * Which models carry the surcharge.
+ *
+ * Provider-native search tools only -- Perplexity's search models are priced
+ * into their base weight already -- and among those, only the ones a request
+ * can actually dispatch. A capability whose per-query cost the request cannot
+ * bound is refused before dispatch, so charging for it would be charging for a
+ * search that is never going to run; and the surcharge is also what
+ * `resolveAttemptSearchPath` reads to decide the search was paid for, so a
+ * surcharge on an undispatchable capability would report a search path that
+ * does not exist.
+ */
 export const modelEligibleForWebSearchSurcharge = (
-  capability: Pick<WebSearchCapability, "support">
-) => capability.support === "native";
+  capability: WebSearchSurchargeCapability
+) => nativeSearchIsDispatchable(capability);
+
+/** What the surcharge rules need to know about a capability. */
+type WebSearchSurchargeCapability = Pick<
+  WebSearchCapability,
+  "support" | "hasAdditionalCost" | "maxBillableSearchQueriesPerRequest"
+>;
 
 /** Flat surcharge credits for one model, given the requested mode and its (server-verified) capability. Never scaled by input length. */
 export const getWebSearchSurchargeCredits = (
   webSearchMode: WebSearchMode,
-  capability: Pick<WebSearchCapability, "support">
+  capability: WebSearchSurchargeCapability
 ) =>
   webSearchMode === "always" && modelEligibleForWebSearchSurcharge(capability)
     ? WEB_SEARCH_SURCHARGE_CREDITS

@@ -8,8 +8,15 @@ import {
   resetSearchQueryCeilingBreaches,
   settledNativeSearchCost,
 } from "../lib/webSearchNativeCostReservation.ts";
-import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
-import { getModel } from "../lib/models.ts";
+import {
+  getWebSearchCapability,
+  nativeSearchIsDispatchable,
+  openAiNativeSearchToolCallCeiling,
+  WEB_SEARCH_CAPABILITIES,
+} from "../lib/webSearchCapability.ts";
+import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
+import { getNativeSearchCostMicroUsdPerQuery } from "../lib/modelPricing.ts";
+import { getModel, PUBLIC_MODELS } from "../lib/models.ts";
 
 // A native search is billed per query on top of tokens. Reserving the worst
 // case only works if there is a worst case, and these are about refusing to
@@ -37,11 +44,13 @@ test("Anthropic reserves its enforced ceiling, because the request sends it", ()
 test("a paid search the request cannot bound is refused, not estimated", () => {
   // The tempting move is to reserve a typical query count. That is a
   // reservation which is right when it does not matter and wrong when it does.
-  for (const id of ["gpt-5-6-luna", "gemini-3-1-pro"]) {
+  // Google's Search grounding takes no cap on the tool and none on the
+  // request, so it is still the shape this refusal exists for.
+  for (const id of ["gemini-3-1-pro", "gemini-3-6-flash", "gemini-2-5-flash"]) {
     const model = modelFor(id);
     if (!model) continue;
     const capability = getWebSearchCapability(model.id);
-    if (!capability.hasAdditionalCost) continue;
+    assert.equal(capability.hasAdditionalCost, true, id);
     const reserved = reserveNativeSearchCost({
       model,
       capability,
@@ -49,6 +58,88 @@ test("a paid search the request cannot bound is refused, not estimated", () => {
     });
     assert.equal(reserved.ok, false, id);
     assert.equal(reserved.ok === false && reserved.reason, "unbounded_search_queries");
+    assert.equal(
+      nativeSearchIsDispatchable(capability),
+      false,
+      `${id}: nothing may offer a search the reservation would refuse`
+    );
+  }
+});
+
+test("every enabled OpenAI native-search model reserves its exact ceiling", () => {
+  // The defect this fixes: `gpt-5-6-luna` is a registered OpenAI native-search
+  // model, and every one of them refused at dispatch because the capability
+  // declared no ceiling. OpenAI's Responses API does take one --
+  // `max_tool_calls` -- so the whole family is bounded, and the reservation is
+  // that ceiling times the per-query rate rather than a guess.
+  const openAiSearchModels = PUBLIC_MODELS.filter(
+    (model) => getWebSearchCapability(model.id).provider === "openai"
+  );
+  assert.ok(
+    openAiSearchModels.some((model) => model.id === "gpt-5-6-luna"),
+    "the default model is one of them, and is why this test exists"
+  );
+  const perQuery = getNativeSearchCostMicroUsdPerQuery("openai");
+  assert.ok(perQuery > 0);
+
+  for (const model of openAiSearchModels) {
+    const capability = getWebSearchCapability(model.id);
+    assert.equal(nativeSearchIsDispatchable(capability), true, model.id);
+    const reserved = reserveNativeSearchCost({
+      model,
+      capability,
+      nativeSearchEnabled: true,
+    });
+    assert.equal(reserved.ok, true, model.id);
+    assert.equal(reserved.maxQueries, 5, model.id);
+    assert.equal(reserved.costPerQueryMicroUsd, perQuery, model.id);
+    assert.equal(
+      reserved.reservedCostMicroUsd,
+      perQuery * 5,
+      `${model.id}: ceiling times rate, not an observed average`
+    );
+  }
+});
+
+test("the ceiling the request enforces is the ceiling the reservation is sized on", () => {
+  // The two must not be able to drift, which is why neither reads a literal:
+  // both read `maxBillableSearchQueriesPerRequest` off the same capability. A
+  // second copy of the number in either place fails here.
+  for (const model of PUBLIC_MODELS) {
+    const capability = getWebSearchCapability(model.id);
+    if (capability.provider !== "openai") continue;
+    const reserved = reserveNativeSearchCost({
+      model,
+      capability,
+      nativeSearchEnabled: true,
+    });
+    assert.equal(reserved.ok, true, model.id);
+    const settings = getModelGenerationSettings(model, {
+      openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
+        capability,
+        nativeSearchEnabled: true,
+      }),
+    });
+    assert.equal(
+      settings.providerOptions?.openai?.maxToolCalls,
+      reserved.maxQueries,
+      `${model.id}: the request may spend exactly what was authorized`
+    );
+  }
+});
+
+test("no capability in the register declares a ceiling its provider cannot send", () => {
+  // A ceiling is only a ceiling if a request carries it. Anthropic sends
+  // `maxUses` on the tool, OpenAI sends `max_tool_calls` on the request, and
+  // no other provider has a parameter to send -- so declaring one for a third
+  // provider would be a reservation sized on a number nothing enforces.
+  const providersThatCanEnforceACeiling = new Set(["openai", "anthropic"]);
+  for (const [modelId, capability] of Object.entries(WEB_SEARCH_CAPABILITIES)) {
+    if (capability.maxBillableSearchQueriesPerRequest === undefined) continue;
+    assert.ok(
+      providersThatCanEnforceACeiling.has(capability.provider ?? ""),
+      `${modelId}: ${capability.provider} has no way to impose this ceiling`
+    );
   }
 });
 

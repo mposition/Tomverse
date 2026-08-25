@@ -50,6 +50,16 @@ export const SEARCH_PATH_GAPS = [
      */
     "mode_not_always",
     /**
+     * Native, the mode asked for it, and no request may carry it: the tool
+     * charges per query and neither the tool nor the request takes a ceiling,
+     * so the worst case cannot be reserved. Its own name rather than
+     * `tool_config_unavailable`, which is reserved for a genuine defect --
+     * this is a state the register knows about, and folding the two together
+     * would hide a builder that disagrees with the register behind a provider
+     * that simply has no cap to send.
+     */
+    "cost_unbounded",
+    /**
      * Native and enabled, and still no tool configuration was built. The
      * register and the tool builder disagree about the provider, which is a
      * defect rather than a state -- recorded as its own reason so it cannot
@@ -77,6 +87,19 @@ export type AttemptSearchPath =
 export type AttemptSearchPathInput = {
     /** What the capability register says about the model being dispatched. */
     support: WebSearchSupport;
+    /**
+     * Whether a request may actually carry this capability's native tool --
+     * `nativeSearchIsDispatchable`, computed by the caller from the same
+     * capability.
+     *
+     * Passed rather than derived because this module deliberately holds no
+     * capability record: it reads what the built plan carries. It is a
+     * separate input from `toolConfigBuilt` for the same reason the two gaps
+     * are separate -- "no configuration was built because none may be" and
+     * "no configuration was built and one should have been" are different
+     * answers, and only the second is a defect.
+     */
+    nativeSearchDispatchable: boolean;
     /** The turn's web search mode, as the request carries it. */
     webSearchMode: WebSearchMode | null;
     /** Whether a tool configuration was actually built for this attempt. */
@@ -87,6 +110,7 @@ export type AttemptSearchPathInput = {
 
 export const resolveAttemptSearchPath = ({
     support,
+    nativeSearchDispatchable,
     webSearchMode,
     toolConfigBuilt,
     surchargeCredits,
@@ -101,6 +125,12 @@ export const resolveAttemptSearchPath = ({
     // Native from here down.
     if (webSearchMode !== "always") {
         return { kind: "none", gap: "mode_not_always" };
+    }
+    // After the mode, deliberately: with the mode off nothing was going to
+    // search anyway, and the setting the user can change is the more useful
+    // answer than a provider's missing parameter.
+    if (!nativeSearchDispatchable) {
+        return { kind: "none", gap: "cost_unbounded" };
     }
     if (!toolConfigBuilt) {
         return { kind: "none", gap: "tool_config_unavailable" };

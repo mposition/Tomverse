@@ -6,7 +6,8 @@
 // the surcharge can never describe different selections.
 import {
   getWebSearchCapability,
-  type WebSearchSupport,
+  webSearchIsDispatchable,
+  type WebSearchCapability,
 } from "@/lib/webSearchCapability";
 import {
   modelEligibleForWebSearchSurcharge,
@@ -14,8 +15,22 @@ import {
 } from "@/lib/webSearchCredits";
 import type { WebSearchMode } from "@/lib/appDefaults";
 
-export const modelSupportsWebSearch = (support: WebSearchSupport) =>
-  support === "native" || support === "search-model";
+/**
+ * Whether the composer may count this model as one that will search.
+ *
+ * The whole capability, not its `support` alone. `support: "native"` says the
+ * provider has a tool; it does not say a request carrying it can be
+ * authorized, and a model counted here is a model the chip promises will
+ * search. Counting one whose search cost has no ceiling produced exactly the
+ * failure this contract forbids: the composer said search-ready, the request
+ * was sent, and the dispatch refused it.
+ */
+export const modelSupportsWebSearch = (
+  capability: Pick<
+    WebSearchCapability,
+    "support" | "hasAdditionalCost" | "maxBillableSearchQueriesPerRequest"
+  >
+) => webSearchIsDispatchable(capability);
 
 export type WebSearchComposerTone =
   /** Requested and every selected model can honour it. */
@@ -58,7 +73,7 @@ export function deriveWebSearchComposerState({
 
   for (const modelId of selectedModelIds) {
     const capability = getWebSearchCapability(modelId);
-    if (modelSupportsWebSearch(capability.support)) {
+    if (modelSupportsWebSearch(capability)) {
       supportedCount += 1;
     } else {
       unsupportedModelIds.push(modelId);
