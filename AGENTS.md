@@ -1052,7 +1052,7 @@ Non-negotiable requirements:
 <!-- BEGIN:admin-console-ia-invariant -->
 ## Admin Console information architecture invariant
 
-Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, or any route under `app/(site)/(application)/admin/**`, read:
+Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, **any panel under `components/admin/`**, or any route under `app/(site)/(application)/admin/**`, read:
 
 - `docs/ui-contracts/admin-console-ia.md`
 
@@ -1063,6 +1063,14 @@ Non-negotiable requirements:
 - Adding an entry means adding it in three places at once: the route table in `lib/adminNavigation.ts`, an icon in `adminNavigationIcons.ts`, and a real route segment. There is no catch-all `[section]` route — an unknown admin URL must answer 404, not 200.
 - A badge is for work, not decoration: only entries an operator acts on carry one, and an unknown count renders nothing rather than zero.
 - The layout loads counts; a page loads its own data. Nothing that only one workspace displays may move into `admin/layout.tsx`. A panel showing the newest N rows states N on screen and does not present its own counters as totals.
+- **A step-up refusal offers the way back.** A control refused because the
+  administrator's sign-in is no longer recent renders
+  `adminRecentAuthenticationHref(<this screen's path>)` — the step-up URL that
+  carries a callback and keeps the console session. **A toast alone is a
+  defect**: it names the remedy and gives no way to reach it, so the screen
+  reads as broken rather than gated. This has been got wrong three times;
+  `tests/adminReauthenticationCta.test.mjs` fails any panel that can be refused
+  and cannot render the link.
 - Authorization is out of this contract's scope and was not changed by it: `writeRoles` in the route table drives the sidebar's "Read" marker only, and access is still decided server-side by `lib/adminAuth.ts` and each `/api/admin/**` handler.
 - Any related change must keep `tests/adminNavigation.test.mjs` and the `tests/e2e-admin/**` suite (`npm run test:e2e:admin`, the "Admin Console E2E (PostgreSQL)" workflow) passing.
 - A change that violates the redirect rule is a release blocker; the rest is ordinary review.
