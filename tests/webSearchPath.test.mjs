@@ -22,6 +22,7 @@ import {
 const path = (overrides = {}) =>
   resolveAttemptSearchPath({
     support: "native",
+    nativeSearchDispatchable: true,
     webSearchMode: "always",
     toolConfigBuilt: true,
     surchargeCredits: 8,
@@ -74,6 +75,31 @@ test("a model that cannot search, and one nobody confirmed, are told apart", () 
   });
 });
 
+test("a native tool nothing may pay for is a state, not a builder defect", () => {
+  // Google's grounding: native, requested, and charged per query with no
+  // ceiling on the tool or on the request. No configuration is built, and the
+  // reason is the register's own, not a disagreement with the tool builder.
+  assert.deepEqual(
+    path({
+      nativeSearchDispatchable: false,
+      toolConfigBuilt: false,
+      surchargeCredits: 0,
+    }),
+    { kind: "none", gap: "cost_unbounded" }
+  );
+  // With the mode off it is still the mode that answers: that is the setting
+  // the person can change.
+  assert.deepEqual(
+    path({
+      nativeSearchDispatchable: false,
+      webSearchMode: "off",
+      toolConfigBuilt: false,
+      surchargeCredits: 0,
+    }),
+    { kind: "none", gap: "mode_not_always" }
+  );
+});
+
 test("a native tool that could not be built is its own failure, not a mode problem", () => {
   // The register and the tool builder disagreeing about a provider is a
   // defect. Folded into "the mode was wrong" it would look like ordinary
@@ -98,6 +124,7 @@ test("every gap is one of the declared identifiers", () => {
     { support: "unsupported" },
     { support: "unverified" },
     { webSearchMode: "off" },
+    { nativeSearchDispatchable: false },
     { toolConfigBuilt: false },
     { surchargeCredits: 0 },
   ];

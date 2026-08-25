@@ -38,7 +38,10 @@ import {
     type AiModel,
     type ModelTier,
 } from "@/lib/models";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+    getWebSearchCapability,
+    webSearchIsDispatchable,
+} from "@/lib/webSearchCapability";
 import type { TaskProfile } from "@/lib/taskProfileCore";
 
 /**
@@ -59,6 +62,14 @@ export const CANDIDATE_REJECTIONS = [
     "web_search_unsupported",
     /** Search support was never verified, so Auto will not assume it. */
     "web_search_unverified",
+    /**
+     * The provider has the tool, but its per-query cost has no enforceable
+     * per-request ceiling, so no request may carry it. Distinct from
+     * `web_search_unsupported` on purpose: the model can search and this
+     * application cannot pay for it, which is a fact about the guardrail and
+     * changes the day the provider ships a cap.
+     */
+    "web_search_cost_unbounded",
     /** No declared context window, so Auto cannot bound the request. */
     "context_window_undeclared",
     /** The input alone leaves no room for an answer. */
@@ -172,8 +183,8 @@ export function filterRouterCandidates(
             continue;
         }
         if (input.profile.needsCurrentInformation) {
-            const support = getWebSearchCapability(model.id).support;
-            if (support === "unsupported") {
+            const capability = getWebSearchCapability(model.id);
+            if (capability.support === "unsupported") {
                 reject(model.id, "web_search_unsupported");
                 continue;
             }
@@ -181,8 +192,18 @@ export function filterRouterCandidates(
             // model unverified precisely because nobody confirmed it, and
             // Auto choosing one on the user's behalf would turn an unchecked
             // assumption into a failed answer they paid for.
-            if (support === "unverified") {
+            if (capability.support === "unverified") {
                 reject(model.id, "web_search_unverified");
+                continue;
+            }
+            // Nor is an unbounded search cost. The register says native, and
+            // the dispatch will still refuse to attach the tool because the
+            // request cannot bound what it may spend -- so Auto picking this
+            // model for a turn that needs the web picks a model that will
+            // answer from training data. Same failure the two rejections above
+            // exist to prevent, arrived at by cost rather than by capability.
+            if (!webSearchIsDispatchable(capability)) {
+                reject(model.id, "web_search_cost_unbounded");
                 continue;
             }
         }

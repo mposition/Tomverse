@@ -5,7 +5,18 @@ import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 
 const openaiCapability = getWebSearchCapability("gpt-5-5");
 const anthropicCapability = getWebSearchCapability("claude-sonnet-5");
+// Native, priced per query, and with no ceiling any request can impose --
+// so nothing may dispatch it today. Kept under its own name because the
+// contract it exercises is "the register says native and the answer is still
+// no".
 const googleCapability = getWebSearchCapability("gemini-3-6-flash");
+// The same tool the day Google ships a per-request cap. Only the ceiling
+// differs, which is the point: the normalizer's cost arithmetic is keyed on
+// the provider and is ready for it.
+const boundedGoogleCapability = {
+  ...googleCapability,
+  maxBillableSearchQueriesPerRequest: 5,
+};
 const perplexityCapability = getWebSearchCapability("perplexity/sonar");
 const unsupportedCapability = getWebSearchCapability("codestral");
 
@@ -65,7 +76,7 @@ test("a native model that chose not to search is requested+supported but not exe
 
 test("a tool-error part is surfaced as a failure, never a false completion", () => {
   const result = normalizeWebSearchExecution({
-    capability: googleCapability,
+    capability: boundedGoogleCapability,
     searchRequested: true,
     provider: "google",
     toolName: "google_search",
@@ -75,6 +86,33 @@ test("a tool-error part is surfaced as a failure, never a false completion", () 
   assert.equal(result.supported, true);
   assert.equal(result.executed, false);
   assert.equal(result.failureCode, "provider_tool_error");
+  assert.deepEqual(result.citations, []);
+});
+
+test("a native capability nothing may dispatch reports unsupported, not searched", () => {
+  // Google's grounding takes no per-request call ceiling, so no request may
+  // carry it and none did. The parts below cannot have come from this turn,
+  // and reporting them would put a "searched the web" badge on an answer that
+  // was written from training data.
+  const result = normalizeWebSearchExecution({
+    capability: googleCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "google_search",
+    content: [
+      { type: "tool-result", toolName: "google_search" },
+      {
+        type: "source",
+        sourceType: "url",
+        url: "https://example.com/not-from-this-turn",
+      },
+    ],
+  });
+  assert.equal(result.requested, true);
+  assert.equal(result.supported, false, "the register says native; the budget says no");
+  assert.equal(result.executed, false);
+  assert.equal(result.queryCount, undefined);
+  assert.equal(result.costMetadata, undefined);
   assert.deepEqual(result.citations, []);
 });
 
@@ -107,7 +145,7 @@ test("OpenAI search cost is tracked internally at $10 per 1,000 queries", () => 
 
 test("Google search cost is tracked internally at $14 per 1,000 queries", () => {
   const result = normalizeWebSearchExecution({
-    capability: googleCapability,
+    capability: boundedGoogleCapability,
     searchRequested: true,
     provider: "google",
     toolName: "google_search",

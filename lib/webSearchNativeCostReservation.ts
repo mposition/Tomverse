@@ -11,11 +11,23 @@
  *
  * ## Why the ceiling has to be enforced, not estimated
  *
- * Reserving the worst case only works if there is a worst case. Anthropic's
- * tool takes `maxUses` and the request sends it, so five is a real ceiling and
- * five queries' worth is a real reservation. OpenAI's and Google's tools take
- * no such parameter, and neither API documents a per-request cap: the worst
- * case there is "as many as the model decides", which no number covers.
+ * Reserving the worst case only works if there is a worst case, and a worst
+ * case exists only where the request imposes one. Two providers let it:
+ *
+ * - Anthropic's `web_search_20250305` tool takes `maxUses`, and
+ *   `buildWebSearchToolConfig` sends it, so five is a real ceiling and five
+ *   queries' worth is a real reservation.
+ * - OpenAI's Responses API takes `max_tool_calls`, which bounds the built-in
+ *   tool calls one Response may make. The installed @ai-sdk/openai sends it
+ *   from `providerOptions.openai.maxToolCalls`, and
+ *   `getModelGenerationSettings` puts it there on every turn that attaches
+ *   the native search. So OpenAI is bounded too -- it was not always read
+ *   that way, and a whole family of models, the default one included, was
+ *   refused here as a result.
+ *
+ * Google's Search grounding still takes neither: no `maxUses` on the tool and
+ * no per-request cap, so the worst case there is "as many as the model
+ * decides", which no number covers.
  *
  * The tempting move is to pick something from observed traffic -- most turns
  * search once or twice, so reserve three and move on. That is a reservation
@@ -23,6 +35,11 @@
  * does, and the failure it produces is silent overspend on a budget that
  * believed it was bounded. So a paid search with no enforceable ceiling is
  * refused before dispatch instead.
+ *
+ * What this module does *not* do is decide what a surface may offer. That is
+ * `nativeSearchIsDispatchable` in `lib/webSearchCapability.ts`, which every
+ * surface asks so that nothing is offered that would be refused here. This
+ * stays fail-closed for whatever still reaches it.
  *
  * A search model like Perplexity is not this: its search is inside the
  * response cost the provider reports, `hasAdditionalCost` is false, and there

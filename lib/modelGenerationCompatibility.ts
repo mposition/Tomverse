@@ -62,11 +62,59 @@ export const getModelProviderOptions = (
   };
 };
 
+/**
+ * Two provider-options objects, merged one namespace deep.
+ *
+ * A shallow spread is wrong here and quietly so: `providerOptions` is keyed by
+ * provider namespace and every value under a namespace is a sibling, so
+ * `{...base, ...overlay}` replaces the whole `openai` object rather than adding
+ * to it. That is how a request ends up carrying `maxToolCalls` and no
+ * `reasoningEffort` -- both were set, in the same namespace, by two callers
+ * that never saw each other.
+ */
+const mergeProviderOptions = (
+  base: ProviderOptions | undefined,
+  overlay: ProviderOptions | undefined
+): ProviderOptions | undefined => {
+  if (!base) return overlay;
+  if (!overlay) return base;
+  const merged: ProviderOptions = { ...base };
+  for (const [namespace, values] of Object.entries(overlay)) {
+    merged[namespace] = { ...(merged[namespace] ?? {}), ...values };
+  }
+  return merged;
+};
+
 export const getModelGenerationSettings = (
   model: Pick<AiModel, "id" | "provider" | "reasoning">,
-  options?: { temperature?: number }
+  options?: {
+    temperature?: number;
+    /**
+     * OpenAI's `max_tool_calls` for this request, when the turn is dispatching
+     * OpenAI's native web search.
+     *
+     * Passed in rather than derived here because the ceiling belongs to the
+     * web-search capability, not to the model's generation profile, and
+     * because it must be absent on every turn that is not searching -- a
+     * request that is not attaching the tool has no built-in tool calls to
+     * bound and should send no parameter bounding them. Callers get it from
+     * `openAiNativeSearchToolCallCeiling`, which reads the same capability
+     * field the cost reservation is sized on.
+     */
+    openAiMaxToolCalls?: number;
+  }
 ) => {
-  const providerOptions = getModelProviderOptions(model);
+  const providerOptions = mergeProviderOptions(
+    getModelProviderOptions(model),
+    // Merged rather than assigned: a reasoning OpenAI model already has an
+    // `openai` namespace holding `reasoningEffort`, and this has to land
+    // beside it. It also has to be reachable on a model with no reasoning
+    // profile at all, where `getModelProviderOptions` returns undefined.
+    options?.openAiMaxToolCalls !== undefined &&
+      options.openAiMaxToolCalls > 0
+      ? { openai: { maxToolCalls: options.openAiMaxToolCalls } }
+      : undefined
+  );
   return {
     ...(options?.temperature !== undefined &&
     !GEMINI_STRICT_GENERATION_MODEL_IDS.has(model.id) &&

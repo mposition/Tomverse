@@ -1,5 +1,9 @@
 import { sanitizeWebSearchCitations, type WebSearchCitation } from "@/lib/webSearchCitations";
-import type { WebSearchCapability } from "@/lib/webSearchCapability";
+import {
+  nativeSearchIsDispatchable,
+  webSearchIsDispatchable,
+  type WebSearchCapability,
+} from "@/lib/webSearchCapability";
 import { getNativeSearchCostMicroUsdPerQuery } from "@/lib/modelPricing";
 
 export type WebSearchExecution = {
@@ -71,7 +75,12 @@ export function normalizeWebSearchExecution(args: {
     content,
     providerCitations,
   } = args;
-  const supported = capability.support === "native" || capability.support === "search-model";
+  // Dispatchability, not declared support: a model whose native search this
+  // request could never have carried did not search, and reporting it as
+  // "supported" would make the badge say the search was possible and simply
+  // did not happen. `webSearchIsDispatchable` is the same answer the composer
+  // and the credit estimate gave before the turn was sent.
+  const supported = webSearchIsDispatchable(capability);
 
   if (capability.support === "search-model") {
     // Perplexity's search-capable chat models search unconditionally as
@@ -96,7 +105,7 @@ export function normalizeWebSearchExecution(args: {
     return { requested: false, supported, executed: false, provider, citations: [] };
   }
 
-  if (capability.support !== "native" || !toolName) {
+  if (!nativeSearchIsDispatchable(capability) || !toolName) {
     return { requested: true, supported: false, executed: false, provider, citations: [] };
   }
 
