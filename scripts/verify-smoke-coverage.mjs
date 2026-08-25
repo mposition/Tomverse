@@ -70,6 +70,31 @@ const MANIFEST = [
   // a Geist variable on <html> with Arial actually drawn on screen.
   { file: "font-system.spec.ts", title: "English UI renders in Geist and never falls back to Arial", categories: ["typography"], mandatory: true },
 
+  // --- edge security --------------------------------------------------------
+  // proxy.ts is the only enforcement point for the host allowlist, the
+  // Cloudflare origin-secret check, the CSRF mutation-origin check and CSP
+  // delivery, and a `missing:` clause in its matcher once let any caller skip
+  // all four by sending `purpose: prefetch`. Both of these run against the real
+  // server with no mock, and they are the two cheapest tests in the file.
+  //
+  // They join the tier because until now nothing ran them before a merge: the
+  // whole go-live file was main-push only, so a regression in the edge layer
+  // could only be found on `main`, where it also blocks every release behind
+  // it. The other seven in that file stay on main/nightly -- the tier is
+  // capped at 25 and it is a gate, not a second regression suite.
+  { file: "go-live-regressions.spec.ts", title: "a prefetch header cannot bypass the edge security layer", categories: ["edgeSecurity"], mandatory: true },
+  { file: "go-live-regressions.spec.ts", title: "a normal document request still receives a CSP policy", categories: ["cspDelivery"], mandatory: true },
+
+  // --- composer input -------------------------------------------------------
+  // Enter during an IME composition commits a Korean/Japanese/Chinese syllable;
+  // submitting there sends a truncated prompt and burns credits. This is here
+  // because it is the regression that proved the point above: it went red on
+  // `main` and stayed red across six releases, and because the production
+  // service deploys with Wait for CI, each of those releases had its deployment
+  // skipped. A PR-tier failure costs one push; a main-tier failure costs the
+  // release train.
+  { file: "go-live-regressions.spec.ts", title: "Enter during a Korean IME composition does not send the message", categories: ["composerInput"], mandatory: true },
+
   // --- deployment integrity ------------------------------------------------
   // The real, unmocked endpoint: proves the route is wired, exposes exactly
   // the public field set with no-store, and never fabricates deployment
@@ -92,6 +117,9 @@ const CATEGORY_MINIMUMS = {
   uiContractMobile: 1,
   buildInfo: 1,
   typography: 1,
+  edgeSecurity: 1,
+  cspDelivery: 1,
+  composerInput: 1,
 };
 
 // The PR tier is a gate, not a second regression suite. Growing past this

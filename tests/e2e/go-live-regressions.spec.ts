@@ -14,7 +14,7 @@ import {
 // Cloudflare origin-secret check, the CSRF mutation-origin check and CSP
 // delivery. A `missing:` clause in its matcher let any caller skip all four by
 // sending `purpose: prefetch`.
-test("a prefetch header cannot bypass the edge security layer", async ({
+test("a prefetch header cannot bypass the edge security layer", { tag: "@smoke" }, async ({
   request,
   baseURL,
 }) => {
@@ -39,7 +39,7 @@ test("a prefetch header cannot bypass the edge security layer", async ({
   expect(await crossSiteMutation.text()).toContain("INVALID_REQUEST_ORIGIN");
 });
 
-test("a normal document request still receives a CSP policy", async ({
+test("a normal document request still receives a CSP policy", { tag: "@smoke" }, async ({
   request,
   baseURL,
 }) => {
@@ -72,7 +72,7 @@ test("the document opts into safe-area insets and themed browser chrome", async 
 
 // UX-001 - Enter during an IME composition commits a Korean/Japanese/Chinese
 // syllable. Submitting there sent a truncated prompt and burned credits.
-test("Enter during a Korean IME composition does not send the message", async ({
+test("Enter during a Korean IME composition does not send the message", { tag: "@smoke" }, async ({
   page,
 }) => {
   await prepareGuestPage(page, "ko");
@@ -88,22 +88,57 @@ test("Enter during a Korean IME composition does not send the message", async ({
   const textarea = page.getByTestId("chat-textarea");
   await textarea.click();
 
-  // Simulate the IME: text is in the composition buffer and Enter arrives with
-  // isComposing set, exactly as a Korean 2-set keyboard produces.
+  // Simulate the IME in two steps, so a failure says which half broke: first
+  // the syllable arrives in the composition buffer, then Enter commits it.
+  //
+  // The value goes in through the *prototype's* setter rather than
+  // `field.value = ...`. React installs a per-instance value tracker on a
+  // controlled field, and assigning `field.value` runs that tracker's setter,
+  // which records the new text as already-seen; the input event that follows
+  // is then read as "nothing changed" and onChange never fires. The composer
+  // is controlled (`value={value}` in ChatInput.tsx), so its state stays empty
+  // and the next render puts the empty string back into the DOM -- which is
+  // exactly what this test started reporting once the composer grew a
+  // compositionstart handler and therefore a render to trigger. Going through
+  // the prototype setter leaves the tracker stale, so React sees the edit, the
+  // same way a real keystroke is seen.
   await textarea.evaluate((element) => {
     const field = element as HTMLTextAreaElement;
     field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
-    field.value = "안녕하세요";
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-    field.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        keyCode: 229,
-        bubbles: true,
-        cancelable: true,
-      })
+    const nativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
     );
+    nativeValue?.set?.call(field, "안녕하세요");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
   });
+
+  // The composer must really hold the syllable before Enter can mean anything.
+  // Without this the rest of the test passes just as well on an empty composer,
+  // which is how a broken simulation stayed green for months.
+  await expect(textarea).toHaveValue("안녕하세요");
+
+  // Enter arrives with keyCode 229, exactly as a Korean 2-set keyboard
+  // produces. `isComposing` is deliberately left unset: keyCode 229 is the
+  // fallback signal in lib/chatKeyboardPolicy.ts, and it is the half that
+  // browsers without a composing flag rely on.
+  const keydownCarriedLegacyKeyCode = await textarea.evaluate((element) => {
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+    return event.keyCode === 229;
+  });
+  // `keyCode` is a deprecated KeyboardEventInit member. If an engine ever stops
+  // honouring it, this test would be pressing a plain Enter and proving nothing
+  // about the IME guard, so say so here rather than reporting a pass.
+  expect(
+    keydownCarriedLegacyKeyCode,
+    "the simulated keydown must carry keyCode 229, or no IME guard is exercised"
+  ).toBe(true);
 
   // The composition-commit Enter must neither send nor clear the composer.
   await expect(textarea).toHaveValue("안녕하세요");
