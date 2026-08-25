@@ -4,11 +4,17 @@ import { ImagePlus, LockKeyhole } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 
 /**
- * The composer's offer to take an image request to the image workspace.
+ * The offer to take an image request to the image workspace.
  *
  * Contract: `docs/ui-contracts/image-generation-workspace.md` -- entry point 5
  * and "The handoff chip is an entry point, not an execution".
  * Policy: `docs/policy/image-generation.md` §13.
+ *
+ * Rendered at two moments and identical in both: while an image request is
+ * being typed, and beside the answer to one already asked. `ChatInput` decides
+ * which -- see its image-handoff section -- and this component is deliberately
+ * not told, because a control that looked different after the send would be
+ * read as a different offer.
  *
  * The whole reason this is allowed to be a fifth entry point is that it does
  * nothing until it is pressed. It never switches the draft, never submits a

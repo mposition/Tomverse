@@ -123,7 +123,7 @@ export const en = {
         imageGenerationBackToChat: "Back to chat",
         toolsImageGeneration: "Image generation",
         toolsImageGenerationDescription: "Compare images from several models",
-        imageIntentSuggestionTitle: "Generate this as an image instead?",
+        imageIntentSuggestionTitle: "Generate this as an image?",
         imageIntentSuggestionAccept: "Open image generation",
         imageIntentSuggestionDismiss: "Not now",
         imageGenerationModelLabel: "Models",
