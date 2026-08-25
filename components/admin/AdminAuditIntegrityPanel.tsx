@@ -134,16 +134,32 @@ export function AdminAuditIntegrityPanel() {
             </div>
           </div>
 
-          {integrity.firstInvalidId && !entry ? (
-            <button
-              type="button"
-              data-testid="admin-audit-integrity-show-entry"
-              onClick={() => void loadEntry(integrity.firstInvalidId as string)}
-              disabled={entryLoading}
-              className="mt-3 inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Show this entry
-            </button>
+          {integrity.firstInvalidId ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!entry ? (
+                <button
+                  type="button"
+                  data-testid="admin-audit-integrity-show-entry"
+                  onClick={() => void loadEntry(integrity.firstInvalidId as string)}
+                  disabled={entryLoading}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Show this entry
+                </button>
+              ) : null}
+              {/* The same row in the audit workspace, which is where an
+                  operator goes next: the surrounding entries, the export, the
+                  filters. A link rather than a second copy of that screen. It
+                  resolves server-side, so it works for a row far older than the
+                  window that workspace lists. */}
+              <a
+                href={`/admin/audit?entry=${encodeURIComponent(integrity.firstInvalidId)}`}
+                data-testid="admin-audit-integrity-open-in-log"
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10"
+              >
+                Open in the audit log
+              </a>
+            </div>
           ) : null}
 
           {entry ? (

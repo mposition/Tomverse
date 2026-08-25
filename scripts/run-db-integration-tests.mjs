@@ -232,6 +232,10 @@ run(
     // the marketing sending stream.
     "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
+    // Opening one audit row by id. The property is the relationship between two
+    // reads of the same table -- the newest-N window and the single-row read --
+    // so a single process with no database proves neither.
+    "tests/integration/admin-audit-row-by-id.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
