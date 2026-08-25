@@ -35,8 +35,12 @@ import {
     createTokenEstimateAccumulator,
 } from "@/lib/chatTokenEstimate";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+    getWebSearchCapability,
+    nativeSearchIsDispatchable,
+} from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
+import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { futureResetAt } from "@/lib/chatLimitDecisionCore";
 
@@ -140,6 +144,36 @@ export async function POST(request: Request) {
                 model,
                 payload.attachments ?? []
             );
+            // Derived as the chat route derives it, from dispatchability
+            // rather than from declared support: this probe answers "can I
+            // send this right now", and a model whose native search no request
+            // may carry does not attach a tool, so pricing one here would
+            // quote a turn nobody is going to send.
+            const nativeSearchEnabled =
+                webSearchMode === "always" &&
+                nativeSearchIsDispatchable(capability);
+            // The per-query half of a searching turn's provider cost, which
+            // this probe used to leave out entirely -- so it could report a
+            // request runnable against a provider budget that the chat route
+            // then measured the same request against and refused.
+            const nativeSearchReservation = reserveNativeSearchCost({
+                model,
+                capability,
+                nativeSearchEnabled,
+            });
+            if (!nativeSearchReservation.ok) {
+                // The honest answer to "can I send this": no, with the reason
+                // the dispatch would give. Unreachable while every registered
+                // capability's ceiling is known, since `nativeSearchEnabled` is
+                // false for the ones without one.
+                throw new ChatAccessError(
+                    503,
+                    "WEB_SEARCH_COST_UNBOUNDED",
+                    "Web search is temporarily unavailable for this model.",
+                    undefined,
+                    { scope: nativeSearchReservation.reason }
+                );
+            }
             return createChatBudget(
                 access.kind,
                 model,
@@ -156,9 +190,8 @@ export async function POST(request: Request) {
                         webSearchMode,
                         capability
                     ),
-                    nativeSearchEnabled:
-                        webSearchMode === "always" &&
-                        capability.support === "native",
+                    nativeSearchEnabled,
+                    nativeSearch: nativeSearchReservation,
                 }
             );
         });

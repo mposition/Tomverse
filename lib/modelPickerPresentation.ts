@@ -1,5 +1,5 @@
 import type { AiModel } from "@/lib/models";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { modelWebSearchIsDispatchable } from "@/lib/webSearchCapability";
 
 export type ModelPickerLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 export type ModelPickerCapability = "all" | "favorites" | "recommended" | "fast" | "reasoning" | "search";
@@ -440,10 +440,12 @@ export const getModelPickerFeatures = (
   model: Pick<AiModel, "id" | "provider" | "reasoning" | "inputCapabilities">
 ): ModelPickerFeature[] => {
   const features: ModelPickerFeature[] = [];
-  const webSearchSupport = getWebSearchCapability(model.id).support;
   // "unverified" is deliberately excluded -- showing the badge would imply
-  // confirmed support this model doesn't officially have yet.
-  if (webSearchSupport === "native" || webSearchSupport === "search-model") {
+  // confirmed support this model doesn't officially have yet. So is a native
+  // capability whose per-query cost no request can bound: the badge tells the
+  // user this model answers from the live web, and one that will never be
+  // allowed to attach its tool does not.
+  if (modelWebSearchIsDispatchable(model.id)) {
     features.push("search");
   }
   if (model.reasoning && model.reasoning !== "none") features.push("reasoning");
@@ -475,8 +477,10 @@ export const modelMatchesCapability = (
     return Boolean(model.reasoning && model.reasoning !== "none");
   }
   if (capability === "search") {
-    const support = getWebSearchCapability(model.id).support;
-    return support === "native" || support === "search-model";
+    // The same answer the badge gives, from the same helper -- a filter that
+    // admitted a model the badge would not mark would list rows with no reason
+    // on them for being there.
+    return modelWebSearchIsDispatchable(model.id);
   }
   const name = `${model.id} ${model.name}`.toLowerCase();
   return ["mini", "flash", "haiku", "small", "lite", "luna"].some((term) =>

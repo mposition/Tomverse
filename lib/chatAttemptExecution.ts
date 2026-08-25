@@ -39,7 +39,12 @@ import {
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+    getWebSearchCapability,
+    nativeSearchIsDispatchable,
+    openAiNativeSearchToolCallCeiling,
+} from "@/lib/webSearchCapability";
+import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import {
     hasSearchPath,
@@ -186,8 +191,13 @@ export const planAttemptExecution = (
     request: AttemptExecutionRequest
 ): AttemptExecutionResult => {
     const capability = getWebSearchCapability(modelConfig.id);
+    // Dispatchability, not declared support. A candidate whose native search
+    // has no enforceable per-request ceiling cannot carry one, and enabling it
+    // here would build a plan whose only possible end is the 503 the
+    // reservation raises a few lines below.
     const nativeSearchEnabled =
-        request.webSearchMode === "always" && capability.support === "native";
+        request.webSearchMode === "always" &&
+        nativeSearchIsDispatchable(capability);
     const searchSurchargeCredits = getWebSearchSurchargeCredits(
         request.webSearchMode ?? "off",
         capability
@@ -200,6 +210,7 @@ export const planAttemptExecution = (
         : null;
     const searchPath = resolveAttemptSearchPath({
         support: capability.support,
+        nativeSearchDispatchable: nativeSearchIsDispatchable(capability),
         webSearchMode: request.webSearchMode,
         toolConfigBuilt: webSearchToolConfig !== null,
         surchargeCredits: searchSurchargeCredits,
@@ -221,6 +232,38 @@ export const planAttemptExecution = (
         };
     }
 
+    // The provider cost this attempt's search may add, decided before the
+    // budget rather than after it. The primary path in `app/api/chat/route.ts`
+    // reserves the same way; a fallback that skipped it would dispatch a
+    // searching turn against a reservation covering only its tokens, which is
+    // the exact hole `reserveNativeSearchCost` was written to close.
+    const nativeSearchReservation = reserveNativeSearchCost({
+        model: modelConfig,
+        capability,
+        nativeSearchEnabled,
+    });
+    if (!nativeSearchReservation.ok) {
+        // A value, like every other refusal here: on the primary the caller
+        // rethrows this error, and on a candidate it is one more model that did
+        // not qualify. Unreachable for a capability the register knows about,
+        // since `nativeSearchEnabled` is false for anything unbounded -- what
+        // stays reachable is the runtime breach latch and a missing price.
+        return {
+            ok: false,
+            refusal: {
+                kind: "budget_refused",
+                modelId: modelConfig.id,
+                error: new ChatAccessError(
+                    503,
+                    "WEB_SEARCH_COST_UNBOUNDED",
+                    "Web search is temporarily unavailable for this model.",
+                    undefined,
+                    { scope: nativeSearchReservation.reason }
+                ),
+            },
+        };
+    }
+
     let budget: ChatBudget;
     try {
         budget = createChatBudget(
@@ -230,6 +273,7 @@ export const planAttemptExecution = (
             {
                 webSearchSurchargeCredits: searchSurchargeCredits,
                 nativeSearchEnabled,
+                nativeSearch: nativeSearchReservation,
             }
         );
     } catch (error) {
@@ -276,7 +320,16 @@ export const planAttemptExecution = (
             nativeSearchEnabled,
             webSearchToolConfig,
             searchPath,
-            generationSettings: getModelGenerationSettings(modelConfig),
+            // This attempt's own ceiling, from this attempt's own capability.
+            // Reading the primary's would send a fallback the wrong
+            // `max_tool_calls` -- or send one to a model that is not searching
+            // at all.
+            generationSettings: getModelGenerationSettings(modelConfig, {
+                openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
+                    capability,
+                    nativeSearchEnabled,
+                }),
+            }),
             searchSurchargeCredits,
             usageCaptureKey: attemptUsageCaptureKey(
                 request.traceId,

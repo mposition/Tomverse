@@ -177,6 +177,27 @@ test("unverified search support is a refusal, not a maybe", () => {
     assert.equal(reasonFor(result, "gpt-5-4-mini"), "web_search_unverified");
 });
 
+test("an unbounded search cost is a refusal, and its own one", () => {
+    // Gemini's grounding is native and charged per query, and neither the tool
+    // nor the request takes a cap -- so the dispatch will attach no tool and
+    // the model will answer from training data. Auto picking it for a turn
+    // that needs the web is the same failure the two refusals above prevent,
+    // reached by cost rather than by capability, which is why it is counted
+    // separately: the day Google ships a cap this rejection disappears and the
+    // other two do not.
+    const profile = buildTaskProfile({ text: "x", webSearchRequested: true });
+    const result = filterRouterCandidates(
+        base({ profile, models: [model({ id: "gemini-3-6-flash" })] })
+    );
+    assert.equal(reasonFor(result, "gemini-3-6-flash"), "web_search_cost_unbounded");
+
+    // OpenAI's `max_tool_calls` does bound it, so Luna stays eligible.
+    const luna = filterRouterCandidates(
+        base({ profile, models: [model({ id: "gpt-5-6-luna" })] })
+    );
+    assert.equal(luna.eligible.length, 1);
+});
+
 test("a turn that needs nothing current does not consult search support", () => {
     const result = filterRouterCandidates(
         base({ profile: buildTaskProfile({ text: "정렬 알고리즘 설명해 줘" }) })

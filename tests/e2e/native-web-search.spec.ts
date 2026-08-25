@@ -165,9 +165,15 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
   });
 
-  test("3 different providers each get their own native tool, with independent per-panel outcomes and unchanged model list", async ({
+  test("each dispatchable provider gets its own native tool, one that cannot be bounded is marked unsupported, and the model list is unchanged", async ({
     page,
   }, testInfo) => {
+    // Three native providers, two of which a request may actually carry.
+    // OpenAI's ceiling rides on the request (`max_tool_calls`) and
+    // Anthropic's on the tool (`maxUses`); Google's grounding takes neither,
+    // so its per-query cost has no worst case to reserve and no tool is
+    // attached. That panel answers without a search and says so -- what it
+    // must never do is claim one.
     const models = ["gpt-5-6-sol", "claude-sonnet-5", "gemini-3-6-flash"];
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page);
@@ -225,14 +231,16 @@ test.describe("native web search (webSearchMode: always)", () => {
           status: 200,
           contentType: "text/plain; charset=utf-8",
           headers: { "X-Request-ID": "qa-trace-google" },
+          // What the server now reports for a native capability nothing may
+          // dispatch: the search was asked for and this model could not run
+          // one. Not `supported: true, executed: false`, which would read as
+          // "it could have and chose not to".
           body: withSearchMetadata("Falling back to a general answer.", {
             requested: true,
-            supported: true,
+            supported: false,
             executed: false,
             provider: "google",
-            tool: "google_search",
             citations: [],
-            failureCode: "provider_tool_error",
           }),
         });
         return;
@@ -266,7 +274,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
     await expect(assistantBadge(page, "gemini-3-6-flash")).toHaveAttribute(
       "data-search-status",
-      "failed"
+      "unsupported"
     );
 
     // Citations only render for the panel that actually executed a search,
@@ -347,10 +355,11 @@ test.describe("native web search (webSearchMode: always)", () => {
   test("mixed supported/unsupported selection shows a compact partial-support chip and an unsupported badge", async ({
     page,
   }, testInfo) => {
-    // gpt-5-4-mini remains unverified; Claude and the in-place upgraded
-    // Gemini 3.5 Flash-Lite have confirmed native search. This is the app's
-    // real guest default trio, so the test also covers the guest code path.
-    const models = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
+    // The app's real guest default trio, so this also covers the guest code
+    // path. Luna and Haiku both have a native search a request can bound;
+    // Gemini 3.5 Flash-Lite's grounding takes no per-request ceiling, so
+    // nothing may dispatch it and it is the panel that cannot search.
+    const models = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-2-5-flash"];
     const CHAT_ID = "guest_native_search_mixed";
     await prepareGuestPage(page, "en");
     await page.addInitScript(
@@ -383,11 +392,12 @@ test.describe("native web search (webSearchMode: always)", () => {
         return;
       }
       const body = route.request().postDataJSON() as { modelId?: string };
-      const executed = ["claude-haiku-4-5", "gemini-2-5-flash"].includes(
-        body.modelId || ""
-      );
-      const provider =
-        body.modelId === "gemini-2-5-flash" ? "google" : "anthropic";
+      const modelId = body.modelId || "";
+      // Gemini cannot search on this turn at all; the other two can, and one
+      // of them decided it did not need to. Three different answers to
+      // "did this panel search", which is what the badges have to keep apart.
+      const supported = modelId !== "gemini-2-5-flash";
+      const executed = modelId === "gpt-5-6-luna";
       await route.fulfill({
         status: 200,
         contentType: "text/plain; charset=utf-8",
@@ -396,9 +406,14 @@ test.describe("native web search (webSearchMode: always)", () => {
           executed ? "Searched and answered." : "Answered without search.",
           {
             requested: true,
-            supported: executed,
+            supported,
             executed,
-            provider: executed ? provider : "openai",
+            provider:
+              modelId === "gpt-5-6-luna"
+                ? "openai"
+                : modelId === "claude-haiku-4-5"
+                  ? "anthropic"
+                  : "google",
             citations: [],
           }
         ),
@@ -420,23 +435,27 @@ test.describe("native web search (webSearchMode: always)", () => {
     await page.getByTestId("web-search-exception-toggle").click();
     const detail = page.getByTestId("web-search-exception-detail");
     await expect(detail).toBeVisible();
-    await expect(detail).toContainText("GPT-5.4 mini");
+    await expect(detail).toContainText("Gemini");
     await expect(detail).toContainText("without a web search");
 
     await sendChatMessage(page, testInfo, "Any current news?");
 
-    await expect(page.getByText("Searched and answered.")).toHaveCount(2);
-    await expect(assistantBadge(page, "claude-haiku-4-5")).toHaveAttribute(
+    await expect(page.getByText("Searched and answered.")).toHaveCount(1);
+    await expect(page.getByText("Answered without search.")).toHaveCount(2);
+    // Three distinct honest statements: one search ran, one could have run and
+    // did not, and one was never possible. None of them says a search happened
+    // where none did.
+    await expect(assistantBadge(page, "gpt-5-6-luna")).toHaveAttribute(
       "data-search-status",
       "executed"
     );
-    await expect(assistantBadge(page, "gpt-5-4-mini")).toHaveAttribute(
+    await expect(assistantBadge(page, "claude-haiku-4-5")).toHaveAttribute(
       "data-search-status",
-      "unsupported"
+      "requested-not-executed"
     );
     await expect(assistantBadge(page, "gemini-2-5-flash")).toHaveAttribute(
       "data-search-status",
-      "executed"
+      "unsupported"
     );
   });
 
