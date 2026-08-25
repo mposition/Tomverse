@@ -404,6 +404,7 @@ export const ko = {
         toolsMemoryInheritOnDescription: "지금 계정 기본값은 사용입니다. 계정 설정을 바꾸면 이 대화도 따라갑니다",
         toolsAssistant: "어시스턴트",
         toolsAssistantNone: "어시스턴트 없음",
+        toolsAssistantRemoved: "이 대화의 어시스턴트가 삭제되었습니다",
         toolsAssistantNoneDescription: "모델만으로 답변합니다",
         toolsAssistantRevision: "개정 {revision}",
         toolsAssistantRevisionInUse: "개정 {revision} 사용 중 · 최신 {latest}",

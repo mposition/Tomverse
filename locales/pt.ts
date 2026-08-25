@@ -391,6 +391,7 @@ export const pt = {
         toolsMemoryInheritOnDescription: "Seu padrão atual é usar, e esta conversa acompanhará qualquer mudança",
         toolsAssistant: "Assistente",
         toolsAssistantNone: "Sem assistente",
+        toolsAssistantRemoved: "O assistente usado aqui foi excluído",
         toolsAssistantNoneDescription: "Responder apenas com o modelo",
         toolsAssistantRevision: "Revisão {revision}",
         toolsAssistantRevisionInUse: "Revisão {revision} em uso · a mais recente é {latest}",

@@ -659,6 +659,36 @@ export const deleteAssistantProfile = async (input: {
             { profileId: input.profileId },
             "profile_deleted"
         );
+        // Before the delete, not after. `Conversation.assistantProfileVersionId`
+        // is `SetNull`, so the moment this profile's versions go the rows that
+        // named them stop naming anything -- there is no query that can find
+        // them afterwards. This is the only window in which "which
+        // conversations were using this profile" is still a question the
+        // database can answer.
+        //
+        // `userId` is in the `where` even though a profile only its owner can
+        // delete can only be bound to that owner's conversations. Ownership
+        // belongs in the query rather than in an argument about why the query
+        // is safe.
+        // The version ids are read out rather than expressed as a relation
+        // filter on `updateMany`. Both would say the same thing, but only this
+        // one is the same query on every Prisma connector, and the cost is a
+        // primary-key read inside a transaction that is already open.
+        const versions = await tx.assistantProfileVersion.findMany({
+            where: { profileId: input.profileId, userId: input.userId },
+            select: { id: true },
+        });
+        if (versions.length > 0) {
+            await tx.conversation.updateMany({
+                where: {
+                    userId: input.userId,
+                    assistantProfileVersionId: {
+                        in: versions.map((version) => version.id),
+                    },
+                },
+                data: { assistantProfileRemovedAt: new Date() },
+            });
+        }
         await tx.assistantProfile.delete({ where: { id: input.profileId } });
     });
 

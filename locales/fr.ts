@@ -391,6 +391,7 @@ export const fr = {
         toolsMemoryInheritOnDescription: "Votre réglage est actuellement de l'utiliser, et cette conversation suivra tout changement",
         toolsAssistant: "Assistant",
         toolsAssistantNone: "Aucun assistant",
+        toolsAssistantRemoved: "L’assistant utilisé ici a été supprimé",
         toolsAssistantNoneDescription: "Répondre avec le modèle seul",
         toolsAssistantRevision: "Révision {revision}",
         toolsAssistantRevisionInUse: "Révision {revision} utilisée · la plus récente est {latest}",
