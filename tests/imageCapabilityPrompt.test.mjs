@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildImageCapabilitySystemPrompt,
   IMAGE_ARTIFACT_FRAGMENT,
+  IMAGE_ARTIFACT_MAKE_FRAGMENT,
   IMAGE_ARTIFACT_STATES,
   IMAGE_CAPABILITY_CORE,
   IMAGE_EDIT_LIMITATION_FRAGMENT,
@@ -12,7 +13,7 @@ import {
 } from "../lib/imageCapabilityPrompt.ts";
 import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 
-const INTENTS = ["none", "edit_or_reference"];
+const INTENTS = ["none", "edit_or_reference", "text_heavy_visual"];
 
 const everyState = () => {
   const rows = [];
@@ -32,13 +33,14 @@ const build = (input) => buildImageCapabilitySystemPrompt(input);
 /* The state space                                                           */
 /* ------------------------------------------------------------------------ */
 
-test("24 input states produce 9 distinct texts", () => {
+test("36 input states produce 13 distinct texts", () => {
   const states = everyState();
-  assert.equal(states.length, 24);
+  assert.equal(states.length, 36);
   const texts = new Set(states.map(build));
-  // Two of the artifact states say nothing, and the edit branch ignores the
-  // other two axes entirely -- so the 24 collapse to 9.
-  assert.equal(texts.size, 9);
+  // Two of the artifact states say nothing, the edit branch ignores the other
+  // two axes entirely, and a text-dense request with no file tool says exactly
+  // what any other request says -- so the 36 collapse to 13.
+  assert.equal(texts.size, 13);
 });
 
 test("every state produces a non-empty block", () => {
@@ -47,10 +49,13 @@ test("every state produces a non-empty block", () => {
   }
 });
 
-test("the token range is 231 to 351, and the edit branch is 302", () => {
+test("the token range is 231 to 396, and the edit branch is 302", () => {
   const tokens = everyState().map((state) => estimateTextTokens(build(state)));
   assert.equal(Math.min(...tokens), 231);
-  assert.equal(Math.max(...tokens), 351);
+  // The ceiling moved from 351 when the imperative paragraph replaced the
+  // offer on text-dense turns. 45 tokens buys back a whole turn the user
+  // would otherwise spend choosing a format they had already chosen.
+  assert.equal(Math.max(...tokens), 396);
   assert.equal(
     estimateTextTokens(
       build({ intent: "edit_or_reference", imageHandoff: "available", artifact: "available" })
@@ -71,6 +76,70 @@ test("the minimum is the core alone and the maximum is handoff plus SVG", () => 
   });
   assert.ok(max.includes(IMAGE_HANDOFF_FRAGMENTS.available));
   assert.ok(max.includes(IMAGE_ARTIFACT_FRAGMENT));
+});
+
+/* ------------------------------------------------------------------------ */
+/* The text-dense branch: make it, do not offer it                           */
+/* ------------------------------------------------------------------------ */
+
+test("a text-dense request with the file tool is told to make the file", () => {
+  // The wasted turn this closes: a model holding the file tool answered an
+  // infographic request with three format options and "which would you like?".
+  const text = build({
+    intent: "text_heavy_visual",
+    imageHandoff: "available",
+    artifact: "available",
+  });
+  assert.ok(text.includes(IMAGE_ARTIFACT_MAKE_FRAGMENT));
+  assert.equal(text.includes(IMAGE_ARTIFACT_FRAGMENT), false);
+  assert.ok(text.includes("Make it now"));
+  assert.ok(text.includes("do not ask which format"));
+  assert.ok(text.includes("do not offer a list of options"));
+});
+
+test("a raster request keeps the offer and is never told to make an SVG", () => {
+  // Someone asking for a photograph wants neither an SVG nor a lecture on one.
+  for (const imageHandoff of IMAGE_HANDOFF_STATES) {
+    const text = build({ intent: "none", imageHandoff, artifact: "available" });
+    assert.ok(text.includes(IMAGE_ARTIFACT_FRAGMENT), imageHandoff);
+    assert.equal(text.includes(IMAGE_ARTIFACT_MAKE_FRAGMENT), false, imageHandoff);
+  }
+});
+
+test("a text-dense request with no file tool is told to make nothing", () => {
+  // Nothing to instruct, so the branch collapses to what any other request
+  // gets and CORE's "state the limitation without inventing" is the answer.
+  for (const artifact of ["unavailable", "sign_in"]) {
+    const text = build({
+      intent: "text_heavy_visual",
+      imageHandoff: "available",
+      artifact,
+    });
+    assert.equal(text.includes(IMAGE_ARTIFACT_MAKE_FRAGMENT), false, artifact);
+    assert.equal(
+      text,
+      build({ intent: "none", imageHandoff: "available", artifact }),
+      artifact
+    );
+  }
+});
+
+test("the imperative paragraph never reaches an attachment turn", () => {
+  for (const artifact of IMAGE_ARTIFACT_STATES) {
+    const text = build({
+      intent: "edit_or_reference",
+      imageHandoff: "available",
+      artifact,
+    });
+    assert.equal(text.includes(IMAGE_ARTIFACT_MAKE_FRAGMENT), false, artifact);
+  }
+});
+
+test("the imperative paragraph does not repeat the artifact block's ordering rule", () => {
+  // Both blocks ride in the same request; "Call the tool first, then speak"
+  // is already there, and a second copy is priced input that adds nothing.
+  assert.equal(IMAGE_ARTIFACT_MAKE_FRAGMENT.includes("Call the tool"), false);
+  assert.ok(IMAGE_ARTIFACT_MAKE_FRAGMENT.includes("after the file exists"));
 });
 
 test("paragraphs are joined by exactly one blank line", () => {
