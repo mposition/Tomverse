@@ -231,6 +231,19 @@ Profiles가 앞입니다. **이 구획이 그 순서가 안전하다는 것을 �
 - [ ] 거절 사유가 `flag_off`로 관측된다 — `profile_off`가 아니다
       (profile이 껐기 때문이 아니라 운영 flag가 껐기 때문이라는 구분)
 
+`flag_off`가 관측되는 것은 **injection flag가 꺼져 있는 동안뿐**입니다.
+`decideMemoryInjection()`(`lib/memoryInjectionGate.ts`)은 `guest` → `flag_off`
+→ `no_approved_pair` → `account_off` → `conversation_off` 순으로 판정하므로,
+flag가 꺼져 있으면 승인된 extraction pair가 없어도 `flag_off`가 먼저 나옵니다 —
+**이 구획의 전제가 성립합니다.** Admin Console이 "injection refuses with
+`no_approved_pair`"라고 적는 것은 **flag를 켰을 때** 걸리는 다음 관문을 말한
+것입니다.
+
+**flag를 켠 뒤에 이 구획을 다시 볼 때는 기대값이 달라집니다.** 승인된 pair가
+없으면 사유는 `no_approved_pair`이고, 그 상태에서는 이 항목이 판별하려는
+`flag_off` 대 `profile_off` 구분을 관측할 수 없습니다. 그때는 pair가 승인된 뒤에
+실행합니다 (`docs/ops/memory-extraction-eval-program-kickoff.md`).
+
 ## F. 진입점과 노출
 
 **정보 구조가 세 번 바뀌었습니다.** #690이 profile과 memory를 Data 탭 밖으로

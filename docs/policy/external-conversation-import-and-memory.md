@@ -1093,6 +1093,16 @@ composer·comparison rail contract를 침범하지 않습니다.
   은 생성 시점 version 유지(소급 적용 금지, 이동은 명시적 사용자 동작).
   version snapshot: instructions, models, tools, memory policy, knowledge
   manifest, retrievalVersion, prompt format version.
+- **고정된 version은 superseded가 되어도 계속 실행합니다**
+  [개정 · 2026-08-25 @mposition]. 아래 runtime 검증의 "active version"은
+  **conversation이 가리키는 version 행이 존재하고 소유자의 것인가**를 뜻하며,
+  **그것이 profile의 현재 version인가**를 뜻하지 않습니다. 두 읽기가 구분되지
+  않아, 개정을 새로 낸 순간 그 profile을 쓰던 **기존 대화 전부가 아무 신호 없이
+  profile을 잃는** 동작이 배포돼 있었습니다(2026-08-25 staging 검증에서 발견,
+  `docs/ops/assistant-profile-staging-verification-records/` 참조). 고정이
+  소유자의 편집 한 번에 풀린다면 그것은 고정이 아니고, 이동은 이 문서가 이미
+  **명시적 사용자 동작**으로 정해 두었습니다. profile 행이 삭제된 경우만
+  실행할 version이 없는 경우입니다.
 - knowledge manifest는 감사용 metadata입니다. retrieval은 현재 존재·접근
   가능·처리 완료된 chunk만 사용하고, dangling manifest로 삭제 object를 복구·
   재조회하지 않으며, 같은 digest 재업로드를 과거 version에 자동 재연결하지
