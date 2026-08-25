@@ -4,6 +4,11 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import {
+  ADDRESS_REVEAL_MAX_IDS,
+  maskEmailAddress,
+  type AddressRevealKind,
+} from "@/lib/emailAddressMaskingCore";
+import {
   DELIVERY_STATUSES,
   type DeliveryFilters,
 } from "@/lib/adminEmailDeliveryFilters";
@@ -62,9 +67,30 @@ const LIST_SELECT = {
   },
 } satisfies Prisma.EmailDeliverySelect;
 
-export type AdminEmailDeliveryRow = Prisma.EmailDeliveryGetPayload<{
+type AdminEmailDeliveryRecord = Prisma.EmailDeliveryGetPayload<{
   select: typeof LIST_SELECT;
 }>;
+
+/**
+ * What a screen gets: the address masked, never the address (D10,
+ * .github/audits/model-lifecycle-email-2026-08-22.md §21).
+ *
+ * The type is the guarantee. `emailAddress` is gone rather than optional, so a
+ * panel cannot render it by forgetting to check something -- the field it would
+ * reach for does not exist, and the compiler says so.
+ */
+export type AdminEmailDeliveryRow = Omit<
+  AdminEmailDeliveryRecord,
+  "emailAddress"
+> & { emailAddressMasked: string | null };
+
+const maskDeliveryRow = ({
+  emailAddress,
+  ...rest
+}: AdminEmailDeliveryRecord): AdminEmailDeliveryRow => ({
+  ...rest,
+  emailAddressMasked: maskEmailAddress(emailAddress),
+});
 
 const whereFor = (filters: DeliveryFilters): Prisma.EmailDeliveryWhereInput => ({
   ...(filters.statuses.length > 0 ? { status: { in: filters.statuses } } : {}),
@@ -100,7 +126,7 @@ export async function listEmailDeliveries(filters: DeliveryFilters): Promise<{
   });
   const page = rows.slice(0, filters.limit);
   return {
-    rows: page,
+    rows: page.map(maskDeliveryRow),
     nextCursor: rows.length > filters.limit ? (page.at(-1)?.id ?? null) : null,
   };
 }
@@ -156,18 +182,55 @@ const SUPPRESSION_SELECT = {
   createdAt: true,
 } satisfies Prisma.SuppressionEntrySelect;
 
-export type AdminSuppressionRow = Prisma.SuppressionEntryGetPayload<{
+type AdminSuppressionRecord = Prisma.SuppressionEntryGetPayload<{
   select: typeof SUPPRESSION_SELECT;
 }>;
+
+/** Masked for the same reason, and by the same rule, as a delivery row. */
+export type AdminSuppressionRow = Omit<
+  AdminSuppressionRecord,
+  "emailAddress"
+> & { emailAddressMasked: string | null };
 
 export async function listSuppressions(input: {
   emailAddress: string | null;
   limit: number;
 }): Promise<AdminSuppressionRow[]> {
-  return prisma.suppressionEntry.findMany({
+  const rows = await prisma.suppressionEntry.findMany({
     where: input.emailAddress ? { emailAddress: input.emailAddress } : {},
     select: SUPPRESSION_SELECT,
     orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
     take: input.limit,
   });
+  return rows.map(({ emailAddress, ...rest }) => ({
+    ...rest,
+    emailAddressMasked: maskEmailAddress(emailAddress),
+  }));
+}
+
+/**
+ * The addresses behind a set of rows, for the audited reveal.
+ *
+ * Separate from the list reads on purpose: those can never return an address,
+ * and this can never be reached without the route having checked the role and
+ * written the audit entry first. Two functions rather than a flag, because a
+ * flag is a thing somebody passes wrongly.
+ */
+export async function revealEmailAddresses(input: {
+  kind: AddressRevealKind;
+  ids: readonly string[];
+}): Promise<Record<string, string | null>> {
+  const ids = Array.from(new Set(input.ids)).slice(0, ADDRESS_REVEAL_MAX_IDS);
+  if (ids.length === 0) return {};
+  const rows =
+    input.kind === "delivery"
+      ? await prisma.emailDelivery.findMany({
+          where: { id: { in: [...ids] } },
+          select: { id: true, emailAddress: true },
+        })
+      : await prisma.suppressionEntry.findMany({
+          where: { id: { in: [...ids] } },
+          select: { id: true, emailAddress: true },
+        });
+  return Object.fromEntries(rows.map((row) => [row.id, row.emailAddress]));
 }

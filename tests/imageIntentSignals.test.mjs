@@ -125,17 +125,22 @@ test("an attachment plus a producing request is a reference request, not a fresh
 /* Consumers narrow one value; they do not classify separately               */
 /* ------------------------------------------------------------------------ */
 
-test("L0 collapses everything except editing to none", () => {
+test("L0 keeps the two classes that change what the block says", () => {
+  // Editing replaces the alternatives; a text-dense visual replaces the offer
+  // with an instruction. Everything else shares the default branch.
   assert.equal(l0ImageIntent("edit_or_reference"), "edit_or_reference");
-  for (const other of [
-    "raster_generation",
-    "text_heavy_visual",
-    "analysis",
-    "explicit_text_art",
-    "none",
-  ]) {
+  assert.equal(l0ImageIntent("text_heavy_visual"), "text_heavy_visual");
+  for (const other of ["raster_generation", "analysis", "explicit_text_art", "none"]) {
     assert.equal(l0ImageIntent(other), "none");
   }
+});
+
+test("the chip is still not offered for the class L0 now acts on", () => {
+  // The block making the file and the composer offering the workspace are
+  // different answers to the same request; only the first applies to a
+  // text-dense visual.
+  assert.equal(l0ImageIntent("text_heavy_visual"), "text_heavy_visual");
+  assert.equal(offersImageHandoffChip("text_heavy_visual"), false);
 });
 
 test("the chip is offered for raster generation only", () => {

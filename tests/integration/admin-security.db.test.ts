@@ -370,8 +370,11 @@ const executeAsSoleApprover = (
       action: "retention.cleanup.execute",
       targetType: "Retention",
       targetId: "expired-data",
-      submittedRunId,
-      submittedDigest,
+      confirmation: {
+        kind: "retention_dry_run" as const,
+        submittedRunId,
+        submittedDigest,
+      },
     },
     operation
   );

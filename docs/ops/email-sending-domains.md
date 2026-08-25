@@ -351,6 +351,18 @@ Resend API 키에는 권한 등급이 있고, **sending 전용 키는 `POST /ema
 Admin → Overview → **Send test email**. 메일이 오면 sending 전용 키이고, 실패하면
 키가 무효입니다.
 
+화면과 보고서가 401일 때 이 문장을 함께 출력하므로, 매번 이 문서를 찾지 않아도
+됩니다. **2026-08-24 확인: production에서 sending 전용 키로 확정**됐습니다
+(테스트 발송 도착).
+
+**어느 키를 읽는지도 2026-08-24에 통일했습니다.** 도메인 조회는
+`process.env.RESEND_API_KEY`를 직접 읽고 있었고, 실제 발송은
+`providerApiKeyFor()`가 `TRANSACTIONAL_RESEND_API_KEY`를 먼저 봅니다. 두 이름이
+서로 다른 키를 담은 배포에서는 **보내는 키와 조회하는 키가 달라지고**, 그때의 401은
+도메인에 대한 사실처럼 보입니다. 네 곳(도메인 조회, 이 보고서 script,
+security environment 검사, Admin 환경 화면)이 모두 resolver를 지나도록 바꿨고,
+`npm run check:sending-identity`가 직접 읽기를 정적으로 막습니다.
+
 `/api/ready`의 `emailSendingIdentity`로는 구분되지 않습니다. **그 검사는 API 키를
 아예 보지 않습니다** — 주소 문자열의 파싱과 스트림 간 도메인 분리만 판정하므로,
 401 키를 가진 배포도 readiness를 통과합니다.
