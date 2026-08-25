@@ -135,25 +135,31 @@ test("L0 keeps the two classes that change what the block says", () => {
   }
 });
 
-test("the chip is still not offered for the class L0 now acts on", () => {
-  // The block making the file and the composer offering the workspace are
-  // different answers to the same request; only the first applies to a
-  // text-dense visual.
+test("a text-dense visual gets both answers, not one instead of the other", () => {
+  // The block still tells the model to make the SVG -- exact text is what an
+  // infographic is for -- and the handoff is offered beside it. Withholding
+  // the handoff was the old behaviour, and what it produced was the model
+  // naming the workspace in prose it could not act on.
   assert.equal(l0ImageIntent("text_heavy_visual"), "text_heavy_visual");
-  assert.equal(offersImageHandoffChip("text_heavy_visual"), false);
+  assert.equal(offersImageHandoffChip("text_heavy_visual"), true);
 });
 
-test("the chip is offered for raster generation only", () => {
+test("the handoff is offered for requests that want a picture, and nothing else", () => {
   assert.equal(offersImageHandoffChip("raster_generation"), true);
-  for (const other of [
-    "text_heavy_visual",
-    "edit_or_reference",
-    "analysis",
-    "explicit_text_art",
-    "none",
-  ]) {
-    assert.equal(offersImageHandoffChip(other), false);
+  assert.equal(offersImageHandoffChip("text_heavy_visual"), true);
+  for (const other of ["edit_or_reference", "analysis", "explicit_text_art", "none"]) {
+    assert.equal(offersImageHandoffChip(other), false, other);
   }
+});
+
+test("an attached image is never handed to a text-to-image workspace", () => {
+  // The workspace starts from text only, so offering it here would send the
+  // person somewhere that cannot do the thing they asked for.
+  assert.equal(offersImageHandoffChip("edit_or_reference"), false);
+});
+
+test("an explicit ASCII request is not a picture request", () => {
+  assert.equal(offersImageHandoffChip("explicit_text_art"), false);
 });
 
 /* ------------------------------------------------------------------------ */

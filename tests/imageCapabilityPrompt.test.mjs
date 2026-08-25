@@ -33,14 +33,16 @@ const build = (input) => buildImageCapabilitySystemPrompt(input);
 /* The state space                                                           */
 /* ------------------------------------------------------------------------ */
 
-test("36 input states produce 13 distinct texts", () => {
+test("36 input states produce 7 distinct texts", () => {
   const states = everyState();
   assert.equal(states.length, 36);
   const texts = new Set(states.map(build));
   // Two of the artifact states say nothing, the edit branch ignores the other
-  // two axes entirely, and a text-dense request with no file tool says exactly
-  // what any other request says -- so the 36 collapse to 13.
-  assert.equal(texts.size, 13);
+  // two axes entirely, a text-dense request with no file tool says exactly
+  // what any other request says -- and, since 2026-08-25, the three reachable
+  // handoff states say the same thing too, because none of them tells the user
+  // how to reach anything. So the 36 collapse to 7.
+  assert.equal(texts.size, 7);
 });
 
 test("every state produces a non-empty block", () => {
@@ -49,13 +51,13 @@ test("every state produces a non-empty block", () => {
   }
 });
 
-test("the token range is 231 to 396, and the edit branch is 302", () => {
+test("the token range is 231 to 409, and the edit branch is 302", () => {
   const tokens = everyState().map((state) => estimateTextTokens(build(state)));
   assert.equal(Math.min(...tokens), 231);
-  // The ceiling moved from 351 when the imperative paragraph replaced the
-  // offer on text-dense turns. 45 tokens buys back a whole turn the user
-  // would otherwise spend choosing a format they had already chosen.
-  assert.equal(Math.max(...tokens), 396);
+  // 396 -> 409 when the handoff paragraph became a prohibition. It is longer
+  // than the direction it replaced because it carries its own reason, and a
+  // rule whose reason the model cannot see is the one it argues with.
+  assert.equal(Math.max(...tokens), 409);
   assert.equal(
     estimateTextTokens(
       build({ intent: "edit_or_reference", imageHandoff: "available", artifact: "available" })
@@ -232,9 +234,29 @@ test("no unverified quality claim about the image models", () => {
   for (const claim of ["badly", "poorly", "not good at", "worse", "low quality"]) {
     assert.equal(everyFragment.includes(claim), false, claim);
   }
-  // The text-dense case is stated as product scope instead.
-  assert.ok(IMAGE_HANDOFF_FRAGMENTS.available.includes("outside that"));
-  assert.ok(IMAGE_HANDOFF_FRAGMENTS.available.includes("current scope"));
+});
+
+test("the handoff paragraph forbids naming a destination the model cannot reach", () => {
+  // The defect this replaced: the model listed the image workspace as option 4
+  // of 4, the user picked it, and the model had to answer that it cannot go
+  // there. The prohibition carries its own reason, which is the last clause.
+  const text = IMAGE_HANDOFF_FRAGMENTS.available;
+  assert.ok(text.includes("never present it as an option"));
+  assert.ok(text.includes("you cannot navigate there"));
+  assert.ok(text.includes("has been sent nowhere"));
+  // And it no longer gives directions of any kind.
+  assert.equal(text.includes("tools menu"), false);
+  assert.equal(text.includes("Point the user"), false);
+});
+
+test("the three reachable states say the same thing", () => {
+  // They differed only in what to tell the user about reachability, and the
+  // model no longer tells them anything about it. The ladder still decides
+  // what the *control* renders -- see the workspace contract -- which is why
+  // resolveImageHandoffState is still three states and not a boolean.
+  assert.equal(IMAGE_HANDOFF_FRAGMENTS.sign_in, IMAGE_HANDOFF_FRAGMENTS.available);
+  assert.equal(IMAGE_HANDOFF_FRAGMENTS.upgrade, IMAGE_HANDOFF_FRAGMENTS.available);
+  assert.equal(IMAGE_HANDOFF_FRAGMENTS.hidden, "");
 });
 
 test("the editing limitation is scoped to the workspace, not to the whole app", () => {
@@ -293,12 +315,16 @@ test("with the flag off the block never mentions the workspace", () => {
   }
 });
 
-test("a Free account is told the plan requirement and no route past it", () => {
+test("a Free account is given no route, and is not told about the plan either", () => {
+  // The plan requirement is the control's job now: it renders locked, with the
+  // requirement readable before the click. A sentence about paid plans in the
+  // answer would be the app quoting its own pricing at someone who did not ask.
   const text = build({ intent: "none", imageHandoff: "upgrade", artifact: "available" });
-  assert.ok(text.includes("included only in the paid"));
   assert.equal(text.includes("tools menu"), false);
+  assert.equal(text.includes("paid"), false);
+  assert.ok(text.includes("never present it as an option"));
   // Free accounts do have the file tool, so the SVG paragraph is present --
   // this combination is real, not hypothetical.
   assert.ok(text.includes("SVG"));
-  assert.equal(estimateTextTokens(text), 317);
+  assert.equal(estimateTextTokens(text), 364);
 });
