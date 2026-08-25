@@ -377,6 +377,14 @@ migration은 **코드로 명시적으로 작성**하며 관용적 파싱으로 �
 - **UI 문구가 주장임을 드러냅니다.** "Agent Skill에서 가져옴"이 아니라
   **"Agent Skill에서 가져왔다고 표시됨"**입니다.
 - 시각은 **서버 것만** 씁니다.
+- **`declaredSourceUrl`은 host만 화면에 나갑니다**
+  (`lib/assistantPackageProvenance.ts`). 경로·query는 토큰을 실을 수 있고 이
+  URL은 패키지가 쓴 것입니다. http(s)가 아닌 scheme은 아무것도 보여 주지
+  않습니다 — `javascript:`는 출처가 아니며, "어디에서 왔는가" 아래에 그리면
+  출처인 것처럼 제시됩니다. **링크로 만들지 않습니다**: §7이 저장된 source URL을
+  다시 읽는 것을 금지하고, 링크는 정확히 그것을 부릅니다.
+- 표시 대상은 **게시된 import뿐**입니다. staging 중인 것은 아직 revision을
+  만들지 않았고, 여기에 그리면 승인하지 않은 가져오기를 알리는 것이 됩니다.
 
 ## 7. 원격 source 자동 업데이트 금지
 
