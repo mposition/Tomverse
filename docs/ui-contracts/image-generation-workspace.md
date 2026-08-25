@@ -51,15 +51,21 @@ There are exactly five, and no standalone "New image" button:
 3. Chat composer **tools menu** → image generation, which switches to the image
    draft client-side.
 4. Model catalogue → **image tab** (see below).
-5. Chat composer **image-request handoff chip** — offered while the draft is
-   being typed, when the draft is an unmistakable raster-generation request.
+5. Chat **image-request handoff chip** — one control, offered at two moments:
+   while an image request is being typed, and beside the answer to one already
+   asked. Same component, same copy, same lock states; only the question it
+   carries differs.
 
 Requirements:
 
 - The launcher renders once per shell. A second image button anywhere is a
   contract violation, not a convenience. The chip is not a second launcher: it
-  is state-driven, appears at most once per draft, and offers the same handoff
-  the tools menu already performs.
+  is state-driven, appears at most once per question, and offers the same
+  handoff the tools menu already performs.
+- **The chip is one control in one place, not one per answer.** It renders in
+  the composer, which is shared. A control rendered under each assistant answer
+  would appear N times for one question in a comparison, and the offer belongs
+  to the question, not to any model's reply.
 - The menu is a real menu: `role="menu"`/`role="menuitem"`, focus moves into it
   on open, Escape closes it and returns focus to the trigger.
 - Switching to the image draft creates **no server row**. The conversation only
@@ -73,20 +79,64 @@ Non-negotiable, and the reason this entry point was allowed to exist at all
 - **The user must press it.** Switching to the image draft without a press —
   because the text "looked like" an image request — is forbidden. The chip
   changes nothing until it is clicked.
-- **Submitting a generation without confirmation is forbidden.** Price and
-  model selection stay where they are: quoted in the workspace composer before
-  submission.
+- **Submitting a generation without confirmation is forbidden, unless the
+  account has said otherwise while looking at the price.** The default is
+  unchanged: the press lands in the workspace with the prompt filled and the
+  price on the button, and generating is one more click.
+
+  `UserSettings.imageHandoffAutoGenerate` is the exception, and every part of
+  how it is offered is load-bearing:
+
+  - **It can only be set beside the price.** The only control that writes it is
+    the checkbox in the workspace composer, in the same row as the submit
+    button and the credit badge. An account settings page would move the choice
+    away from the number it is a decision about, and "quoted before submission"
+    would stop being true of it.
+  - **It is an account setting, not a browser one.** It decides whether one
+    click spends credits, and a per-device preference would let a shared
+    computer spend somebody else's.
+  - **Only the chat handoff may act on it.** The launcher, the drawer rows, the
+    tools menu and the catalogue tab are someone opening the workspace to
+    compose. A workspace that generated because it was opened would spend
+    credits on navigation.
+  - **It never bypasses a refusal.** The arrival submits only when the button
+    itself would be enabled, so a held price, an over-long prompt, a viewer
+    without the plan and a request already in flight all refuse it exactly as
+    they refuse a press.
+  - **It is spent once per landing**, and consumed even when the submit was
+    refused, so a landing that could not generate cannot fire later against a
+    prompt the user has since changed.
+  - **It stays visible and revocable on the screen it acts on**, including
+    while a generation is running, so the account that has just watched a press
+    spend credits can turn it off where it turned it on. It renders only for a
+    viewer who can actually generate.
 - **A visible chip never blocks an ordinary chat submit.** Ignoring it and
   pressing send sends the chat turn.
 - **Guest and Free see the requirement inside the chip**, before the click, and
   the click routes to sign-in or `/pricing` — the same locked-exposure rule the
   table below states for every other entry point.
 - **With the flag off the chip does not render**, like every other entry point.
-- The chip is offered only for unmistakable raster generation. A text-dense
-  chart or infographic, a request to edit or reference an attached image, and a
-  request to describe an attached image are all **out of scope** and get no
-  chip — routing them to a text-to-image workspace would be a wrong answer, not
-  a helpful one.
+- **The chip is offered for a request that wants a picture**: unmistakable
+  raster generation, and a text-dense chart or infographic. A request to edit
+  or reference an attached image, and a request to describe one, are **out of
+  scope** and get no chip — the workspace starts from text, so neither can be
+  answered there.
+- **A text-dense visual gets both answers, not one instead of the other.** The
+  system block still tells the model to make the SVG, because exact text is
+  what an infographic is for and a text-to-image model does not render Korean
+  reliably; the chip is offered beside it. Withholding the chip for this class
+  was the earlier rule, and what it produced is recorded in policy §13.
+- **The chip survives the send.** While the composer holds an image request the
+  offer is about the draft; once it is empty the offer is about the last
+  question asked in that conversation, and it carries that question rather than
+  the empty box. It is scoped to the conversation, so it never follows the user
+  to a question they are no longer looking at. A dismissal belongs to the
+  question's text, so "not now" before the send is still "not now" after it.
+- **The model never names the destination.** No answer may tell the user where
+  image generation is, how to reach it, or offer it as an item in a list —
+  `lib/imageCapabilityPrompt.ts` forbids it, because a model that cannot
+  navigate cannot honour a choice the user makes from such a list. The control
+  is the only offer.
 - It obeys the mobile composer contract: its own full-width row above the
   textarea, never sharing, overlapping or floating above it, and it is
   suppressed during IME composition so a chip cannot resize the composer
@@ -510,7 +560,9 @@ rather than the behaviour.
 - [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard
 - [ ] Selected models' exact prices are inline in both disclosure modes
 - [ ] A retry still replaces its card in place
-- [ ] Prices are quoted before submit, per model and in total
+- [ ] Prices are quoted before submit, per model and in total — and, for an
+      account with `imageHandoffAutoGenerate` on, were quoted beside the
+      control that granted it
 - [ ] `accent-image-*` tokens only; no reserved gradient
 - [ ] The state matrix passes on desktop **and** mobile
 
