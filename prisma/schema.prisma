@@ -133,6 +133,22 @@ model UserSettings {
   modelFinderDismissedAt  DateTime?
   timeZone                String    @default("UTC")
   timeZoneInitializedAt   DateTime?
+
+  /// Whether pressing the chat image handoff should generate straight away
+  /// instead of landing in the workspace with the prompt filled and the price
+  /// shown.
+  ///
+  /// An account setting rather than a browser one, deliberately: this decides
+  /// whether one click spends credits, and a preference stored per device
+  /// would let a shared computer spend somebody else's. It is also why the
+  /// only place it can be turned on is beside the price
+  /// (docs/ui-contracts/image-generation-workspace.md) -- the contract's
+  /// "quoted before submission" survives as "quoted at least once, by the
+  /// person who chose to stop being asked".
+  ///
+  /// Default false, and false is the whole behaviour for an account that never
+  /// opts in.
+  imageHandoffAutoGenerate Boolean  @default(false)
   timeZoneChangedAt       DateTime?
 
   /// The account's own statement of where it is, used to decide which
@@ -308,6 +324,27 @@ model Conversation {
   /// stops naming a profile.
   assistantProfileVersionId String?
   assistantProfileVersion   AssistantProfileVersion? @relation(fields: [assistantProfileVersionId], references: [id], onDelete: SetNull)
+
+  /// When the profile this conversation was using was deleted.
+  ///
+  /// `SetNull` above is what makes this column necessary. Once the profile is
+  /// gone its versions go with it and `assistantProfileVersionId` becomes
+  /// NULL, so the conversation reads exactly like one that never had an
+  /// assistant -- and that is what the composer showed: `어시스턴트 없음`,
+  /// with nothing to say the assistant had been removed. A staging round on
+  /// 2026-08-25 recorded that as §G-2; the owner only found out by opening the
+  /// menu.
+  ///
+  /// Only the time is kept, not the profile's name. The owner asked for that
+  /// profile to be deleted, and copying its name onto every conversation it
+  /// touched would be keeping the thing they removed. The time is enough for
+  /// the sentence the screen owes them: this conversation's assistant was
+  /// deleted.
+  ///
+  /// Cleared whenever the conversation's profile binding changes by either
+  /// route -- attaching a new assistant or detaching on purpose. After that
+  /// the deletion is no longer what the current state is explained by.
+  assistantProfileRemovedAt DateTime?
 
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
@@ -4020,6 +4057,21 @@ model EmailCampaign {
   /// old rather than merely stale.
   audienceVersion     Int  @default(1)
   estimatedRecipients Int?
+
+  /// When the estimate above was measured, and by whom.
+  ///
+  /// An estimate with no timestamp is a number of unknown age against an
+  /// audience that moves daily. Both are NULL until something measures it --
+  /// which, before the eighth slice, nothing did.
+  estimatedAt      DateTime?
+  estimatedByEmail String?
+
+  /// The full AudienceSummary the estimate came from.
+  ///
+  /// The exclusion breakdown is the part that says the audience query is
+  /// wrong, and keeping it only in the computing request's response would mean
+  /// the second administrator reviewing this campaign never sees it.
+  audienceEstimate Json?
 
   /// Whether the copy promises Tomverse will change the model automatically.
   ///

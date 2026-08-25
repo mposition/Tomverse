@@ -1,5 +1,10 @@
 import Link from "next/link";
 
+import {
+  AdminRevealableAddress,
+  AdminRevealAddressesButton,
+} from "@/components/admin/AdminAddressReveal";
+
 import type { AdminEmailDeliveryRow } from "@/lib/adminEmailDeliveries";
 import {
   DELIVERY_STATUSES,
@@ -50,11 +55,14 @@ export function AdminEmailDeliveriesPanel({
   filters,
   statusCounts,
   nextCursor,
+  mayRevealAddresses,
 }: {
   rows: AdminEmailDeliveryRow[];
   filters: DeliveryFilters;
   statusCounts: Record<string, number>;
   nextCursor: string | null;
+  /** D10: `owner` and `ops`. Resolved on the server. */
+  mayRevealAddresses: boolean;
 }) {
   const showing = new Set(filters.statuses);
   const hidden = DELIVERY_STATUSES.filter((status) => !showing.has(status));
@@ -74,6 +82,17 @@ export function AdminEmailDeliveriesPanel({
         rows are the dead-letter queue — they stay here with their attempt count
         and error rather than moving somewhere that loses both.
       </p>
+
+      {/* D10: masked by default, revealed by a deliberate audited act. The
+          sentence is on screen rather than in a comment -- an operator who sees
+          dots and no explanation concludes the data is missing. */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <AdminRevealAddressesButton
+          kind="delivery"
+          rowIds={rows.map((row) => row.id)}
+          allowed={mayRevealAddresses}
+        />
+      </div>
 
       <nav
         aria-label="Delivery status filters"
@@ -185,7 +204,10 @@ export function AdminEmailDeliveriesPanel({
                   ) : null}
                 </td>
                 <td className="py-3 pr-4">
-                  <span className="font-mono text-xs">{row.emailAddress}</span>
+                  <AdminRevealableAddress
+                    rowId={row.id}
+                    masked={row.emailAddressMasked}
+                  />
                   <span className="mt-1 block text-[11px] text-zinc-500">
                     {row.jurisdictionCountry} · {row.language}
                   </span>

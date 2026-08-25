@@ -18,9 +18,15 @@ import {
 } from "@/lib/apiSecurity";
 import {
   approveCampaign,
+  campaignDigest,
   campaignScheduleProblems,
   campaignTransitionClaim,
 } from "@/lib/emailCampaignService";
+import {
+  adminSoleApproverErrorResponse,
+  runAsSoleApprover,
+  soleApproverIsAvailable,
+} from "@/lib/adminSoleApproverExecution";
 import { prisma } from "@/lib/prisma";
 
 type Context = { params: Promise<{ campaignId: string }> };
@@ -62,6 +68,16 @@ const approveSchema = z
      * a fresh approval rather than inheriting the old one.
      */
     locales: z.array(z.string().trim().min(2).max(8)).min(1).max(7),
+    /**
+     * The digest of the copy the approver read (D5).
+     *
+     * Only the sole-approver path requires it, and only because that path has
+     * no second reader: the ordinary path's second administrator *is* the
+     * confirmation that the words were looked at. Supplying it is how one
+     * person says which words they are approving, and the server refuses if
+     * the copy has moved since.
+     */
+    copyDigest: z.string().trim().min(16).max(512).optional(),
   })
   .strict();
 
@@ -149,8 +165,43 @@ export async function POST(req: Request, context: Context) {
       }
     }
 
+    // D5 (.github/audits/model-lifecycle-email-2026-08-22.md §21): in a
+    // one-administrator organisation the two-person rule is not strict but
+    // unsatisfiable, so no campaign could ever be approved and the fan-out
+    // could never send at all. Closed again automatically the moment a second
+    // eligible administrator exists -- condition 6 recomputes per request.
+    const alone = soleApproverIsAvailable("email_campaign.approve", session);
+
     try {
-      const approved = await runWithAdminApproval(
+      const approved = alone
+        ? await runAsSoleApprover(
+            {
+              session,
+              request: req,
+              action: "email_campaign.approve",
+              targetType: "EmailCampaign",
+              targetId: campaignId,
+              confirmation: {
+                kind: "campaign_copy",
+                // Read here, not taken from the request: a confirmation
+                // checked against something the requester supplied confirms
+                // nothing.
+                currentDigest: await campaignDigest(campaignId),
+                submittedDigest: body.copyDigest ?? "",
+              },
+            },
+            () =>
+              approveCampaign({
+                campaignId,
+                // No `AdminActionApproval` row exists on this path, so the
+                // campaign points at the audited execution instead. The
+                // twelve-condition gate reads this field to answer
+                // "communication_approved", and it has to find something that
+                // names a real, recorded decision.
+                approvalId: `sole-approver:${campaignId}`,
+              })
+          )
+        : await runWithAdminApproval(
         {
           session,
           request: req,
@@ -189,11 +240,13 @@ export async function POST(req: Request, context: Context) {
         targetType: "EmailCampaign",
         targetId: campaignId,
         summary: `Approved the campaign: ${body.reason}`,
-        metadata: { locales: body.locales },
+        metadata: { locales: body.locales, soleApprover: alone },
       });
 
       return NextResponse.json({ campaign: approved });
     } catch (error) {
+      const soleApprover = adminSoleApproverErrorResponse(error);
+      if (soleApprover) return soleApprover;
       const response = adminApprovalErrorResponse(error);
       if (response) return response;
       throw error;

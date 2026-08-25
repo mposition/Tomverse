@@ -109,4 +109,39 @@ jobs:
         run: npm ci
 
       - name: Run financial DB integration tests
+        id: scenarios
         run: npm run test:db:integration
+
+      # Only the release-branch lane is worth an alert, and the notifier
+      # enforces that itself rather than trusting this condition -- a
+      # pull_request run that reached here would be refused by
+      # `resolveReleaseLaneAlert` on the branch name.
+      #
+      # This lane can be red on `develop` for hours without anyone seeing it,
+      # and was on 2026-08-25: the change that broke it touched no path in the
+      # `pull_request` filter above, so its own pull request never ran this
+      # suite, and every run afterwards was cancelled by the next merge until
+      # one finally survived. Four merges passed over it in between.
+      #
+      # Cancellation is deliberately not alerted on -- a superseded run answers
+      # nothing about the branch, and the newer run answers for both -- but it
+      # does delay this message, which is the cost of `cancel-in-progress` and
+      # is cheaper than queueing thirty-minute runs behind every merge.
+      #
+      # The commit message is passed through `env:` rather than interpolated
+      # into a `run:` line, so its contents are a string to the script and
+      # never shell.
+      - name: Report the red lane
+        if: always() && steps.scenarios.outcome == 'failure'
+        env:
+          RELEASE_LANE: db-integration
+          RELEASE_LANE_CONCLUSION: failure
+          RELEASE_LANE_BRANCH: ${{ github.ref_name }}
+          RELEASE_LANE_WORKFLOW: ${{ github.workflow }}
+          RELEASE_LANE_SHA: ${{ github.sha }}
+          RELEASE_LANE_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          RELEASE_LANE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL }}
+          OPS_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.OPS_ALERT_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: node scripts/notify-release-lane-failure.mjs

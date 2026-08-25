@@ -94,6 +94,15 @@ export const MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL: Readonly<
 };
 
 /** §12.3 acceptance thresholds. */
+/**
+ * The dataset schema a live run requires.
+ *
+ * Stated here rather than imported from `lib/memoryEvalDatasetSchema.ts` to
+ * keep the run-mode gate free of the schema module's own imports; the two are
+ * pinned to each other by `tests/memoryEvalDatasetSchema.test.mjs`.
+ */
+export const MEMORY_EVAL_DATASET_SCHEMA_VERSION = 2;
+
 export const MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN = 0.95;
 export const MEMORY_EVAL_RECALL_WILSON_LOWER_MIN = 0.85;
 
@@ -466,7 +475,9 @@ export type EvalRunModeDecision =
               | "no_eval_budget"
               | "no_api_key"
               | "dataset_not_frozen"
+              | "legacy_dataset_schema"
               | "unknown_commit"
+              | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
       };
 
@@ -487,7 +498,21 @@ export type EvalRunModeDecision =
  */
 export function decideEvalRunMode(input: {
     live: boolean;
-    registerEntry: { evalBudget: { maxUsd: number } | null } | null | undefined;
+    registerEntry:
+        | {
+              evalBudget: { maxUsd: number } | null;
+              /**
+               * Checked as well as the budget, because a revoked entry keeps
+               * its budget: the approval was real and the money was really
+               * spent against it. `mem-extract-v1` is exactly that -- revoked,
+               * never approved, US$20 still recorded -- and a runner reading
+               * only `evalBudget` would happily spend the rest of it on a pair
+               * the register has closed.
+               */
+              status?: "candidate" | "approved" | "revoked";
+          }
+        | null
+        | undefined;
     hasApiKey: boolean;
     datasetFrozen: boolean;
     /**
@@ -502,16 +527,42 @@ export function decideEvalRunMode(input: {
      * a verdict nobody can cite.
      */
     commitKnown: boolean;
+    /**
+     * The schema the dataset is written in.
+     *
+     * `mem-eval-seed-11` is schema 1 and has neither `expectedDisposition`
+     * nor `goldCompleteness`, so the metrics the 2026-08-25 amendment added
+     * cannot be computed against it at all — bulk eligibility recall and the
+     * sensitive-review misclassification count both read fields it does not
+     * have. A run against it would still produce numbers, which is the
+     * danger: they would be the old contract's numbers wearing the new
+     * contract's names.
+     *
+     * Fail-closed on anything that is not schema 2, including a dataset that
+     * declares nothing. Reproducing a past diagnostic goes through
+     * `lib/memoryEvalLegacyDataset.ts` instead, which is not a live run.
+     */
+    datasetSchemaVersion?: number | null;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
     if (!input.live) return { mode: "smoke" };
     if (!input.registerEntry) return { mode: "refused", reason: "unknown_pair" };
+    if (
+        input.registerEntry.status !== undefined &&
+        input.registerEntry.status !== "candidate" &&
+        input.registerEntry.status !== "approved"
+    ) {
+        return { mode: "refused", reason: "pair_not_runnable" };
+    }
     const budget = input.registerEntry.evalBudget;
     if (!budget) return { mode: "refused", reason: "no_eval_budget" };
     if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
     if (!input.datasetFrozen) {
         return { mode: "refused", reason: "dataset_not_frozen" };
+    }
+    if (input.datasetSchemaVersion !== MEMORY_EVAL_DATASET_SCHEMA_VERSION) {
+        return { mode: "refused", reason: "legacy_dataset_schema" };
     }
     if (!input.commitKnown) {
         return { mode: "refused", reason: "unknown_commit" };
@@ -526,6 +577,32 @@ export function decideEvalRunMode(input: {
         mode: "live",
         ceilingUsd: requested != null ? requested : budget.maxUsd,
     };
+}
+
+/**
+ * The distinct reasons cases failed, most common first.
+ *
+ * A run that stops on consecutive failures says the pair is "broken, not
+ * unlucky" and then does not say how — which leaves the one question worth
+ * asking answered only inside the artifact. The reasons are almost always a
+ * handful of repeats (one provider error, one parser complaint), so counting
+ * them turns a wall of records into the line somebody can act on.
+ *
+ * Grouped by the message verbatim. Normalising it would merge errors that
+ * differ in the part that matters, and these strings have already been
+ * stripped of anything key-shaped by the caller.
+ */
+export function summarizeFailures(
+    records: readonly { failure: string | null }[]
+): { reason: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const record of records) {
+        if (!record.failure) continue;
+        counts.set(record.failure, (counts.get(record.failure) ?? 0) + 1);
+    }
+    return [...counts]
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : 1));
 }
 
 /**

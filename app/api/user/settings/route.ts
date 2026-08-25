@@ -53,6 +53,11 @@ const settingsSchema = z
             .refine(isValidIanaTimeZone, "Invalid IANA time zone.")
             .optional(),
         timeZoneSource: z.enum(["browser", "user"]).optional(),
+        // Whether the chat image handoff generates on the press. A boolean and
+        // nothing else: the models and the price it would spend are chosen in
+        // the workspace, and a setting that also carried them would be a
+        // second, invisible selection.
+        imageHandoffAutoGenerate: z.boolean().optional(),
     })
     .strict()
     .refine((value) => Object.keys(value).length > 0)
@@ -190,6 +195,7 @@ export async function GET(req: Request) {
             usesFilesFrequently: settings.usesFilesFrequently,
             modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString() || null,
             modelFinderDismissedAt: settings.modelFinderDismissedAt?.toISOString() || null,
+            imageHandoffAutoGenerate: settings.imageHandoffAutoGenerate,
             ...timeZonePayload(settings),
         });
     } catch (error) {
@@ -219,6 +225,7 @@ export async function POST(req: Request) {
             newConversationModelIds,
             timeZone,
             timeZoneSource,
+            imageHandoffAutoGenerate,
         } = await readLimitedJson(req, 4 * 1024, settingsSchema);
 
         // Explicit combination save: every model must be selectable right now
@@ -335,6 +342,9 @@ export async function POST(req: Request) {
                 update: {
                     ...(theme !== undefined ? { theme } : {}),
                     ...(language !== undefined ? { language } : {}),
+                    ...(imageHandoffAutoGenerate !== undefined
+                        ? { imageHandoffAutoGenerate }
+                        : {}),
                     ...modelWrite,
                     ...(effectiveRequestedTimeZone !== undefined
                         ? {
@@ -365,6 +375,9 @@ export async function POST(req: Request) {
                     timeZoneInitializedAt:
                         effectiveRequestedTimeZone !== undefined ? now : null,
                     timeZoneChangedAt: null,
+                    ...(imageHandoffAutoGenerate !== undefined
+                        ? { imageHandoffAutoGenerate }
+                        : {}),
                 },
             });
         });

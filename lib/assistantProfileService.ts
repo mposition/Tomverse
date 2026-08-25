@@ -6,6 +6,7 @@ import { enqueueKnowledgeCleanupForFiles } from "@/lib/assistantKnowledgeLifecyc
 // approved table as the knowledge quotas, so it lives with them. Imported
 // rather than copied: two constants for one approved number is how they drift.
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
+import { declaredSourceHost } from "@/lib/assistantPackageProvenance";
 import { lockProfileImport } from "@/lib/assistantProfileImportLocks";
 import {
     ASSISTANT_PROMPT_FORMAT_VERSION,
@@ -262,7 +263,42 @@ export const readAssistantProfile = async (
                 take: 50,
                 select: { id: true, revision: true, createdAt: true },
             },
+            /**
+             * Where this assistant came from, when it came from a package.
+             *
+             * Published imports only: a staging one has not produced a
+             * revision, and showing it here would announce an import the
+             * owner has not approved.
+             *
+             * The declared fields are the *package's* claims -- the server
+             * never saw the container -- so
+             * `docs/policy/assistant-package-import.md` §6.5 keeps them
+             * display-only and the copy says "states" rather than "was". The
+             * times shown are the server's own.
+             */
+            imports: {
+                where: { status: "published" },
+                orderBy: { serverReceivedAt: "desc" },
+                take: 20,
+                select: {
+                    id: true,
+                    declaredSourceKind: true,
+                    declaredSourceName: true,
+                    declaredSourceUrl: true,
+                    serverReceivedAt: true,
+                    userApprovedAt: true,
+                    versionId: true,
+                },
+            },
             knowledgeFiles: {
+                // The same isolation `listKnowledgeFiles()` applies, and for
+                // the same reason -- this is the list the editor actually
+                // draws. The panel takes its files from here as a prop and
+                // calls the knowledge API only for capacity, so a filter that
+                // lived solely on that endpoint never reached a screen. A
+                // staged file appearing here is a file the owner can select
+                // into a revision before approving the import it came from.
+                where: { importId: null },
                 orderBy: { createdAt: "asc" },
                 select: {
                     id: true,
@@ -278,8 +314,25 @@ export const readAssistantProfile = async (
         },
     });
     if (!profile) notFound();
-    return profile;
+    return {
+        ...profile,
+        imports: profile.imports.map((row) => ({
+            id: row.id,
+            declaredSourceKind: row.declaredSourceKind,
+            declaredSourceName: row.declaredSourceName,
+            // The host, never the URL. A path can carry a token, and this one
+            // was written by the package rather than by anyone here -- the
+            // same reason the wizard shows hosts for the URLs it finds in
+            // instructions. Nothing fetches it either way
+            // (`docs/policy/assistant-package-import.md` §7).
+            declaredSourceHost: declaredSourceHost(row.declaredSourceUrl),
+            serverReceivedAt: row.serverReceivedAt,
+            userApprovedAt: row.userApprovedAt,
+            versionId: row.versionId,
+        })),
+    };
 };
+
 
 /**
  * Renames or re-describes a profile. Identity only.
@@ -606,6 +659,36 @@ export const deleteAssistantProfile = async (input: {
             { profileId: input.profileId },
             "profile_deleted"
         );
+        // Before the delete, not after. `Conversation.assistantProfileVersionId`
+        // is `SetNull`, so the moment this profile's versions go the rows that
+        // named them stop naming anything -- there is no query that can find
+        // them afterwards. This is the only window in which "which
+        // conversations were using this profile" is still a question the
+        // database can answer.
+        //
+        // `userId` is in the `where` even though a profile only its owner can
+        // delete can only be bound to that owner's conversations. Ownership
+        // belongs in the query rather than in an argument about why the query
+        // is safe.
+        // The version ids are read out rather than expressed as a relation
+        // filter on `updateMany`. Both would say the same thing, but only this
+        // one is the same query on every Prisma connector, and the cost is a
+        // primary-key read inside a transaction that is already open.
+        const versions = await tx.assistantProfileVersion.findMany({
+            where: { profileId: input.profileId, userId: input.userId },
+            select: { id: true },
+        });
+        if (versions.length > 0) {
+            await tx.conversation.updateMany({
+                where: {
+                    userId: input.userId,
+                    assistantProfileVersionId: {
+                        in: versions.map((version) => version.id),
+                    },
+                },
+                data: { assistantProfileRemovedAt: new Date() },
+            });
+        }
         await tx.assistantProfile.delete({ where: { id: input.profileId } });
     });
 

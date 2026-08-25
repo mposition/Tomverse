@@ -47,6 +47,7 @@
     "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
+    "draft:router-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-router-eval-candidates.mjs",
     "check:router-quality-eval": "node --import tsx scripts/check-router-quality-eval.mjs",
     "check:auto-rollout-readiness": "node --conditions=react-server --import tsx scripts/check-auto-rollout-readiness.mjs",
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
@@ -104,6 +105,7 @@
     "report:assistant-knowledge-invariants": "node --conditions=react-server --import tsx scripts/report-assistant-knowledge-invariants.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "make:memory-eval-blind-review": "node --import tsx scripts/make-memory-eval-blind-review.mjs",
+    "make:router-eval-review-sheet": "node --import tsx scripts/make-router-eval-review-sheet.mjs",
     "make:memory-eval-review-sheet": "node --import tsx scripts/make-memory-eval-review-sheet.mjs",
     "record:memory-eval-drafter": "node --import tsx scripts/record-memory-eval-drafter.mjs",
     "record:memory-eval-review": "node --import tsx scripts/record-memory-eval-review.mjs",
@@ -144,7 +146,8 @@
     "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs",
     "verify:package-build-matrix": "node scripts/verify-package-build-matrix.mjs",
     "check:release-records": "node scripts/check-release-records.mjs",
-    "backfill:model-lifecycle-work-items": "node --conditions=react-server --import tsx scripts/backfill-model-lifecycle-work-items.mjs"
+    "backfill:model-lifecycle-work-items": "node --conditions=react-server --import tsx scripts/backfill-model-lifecycle-work-items.mjs",
+    "check:edge-robots": "node --import tsx scripts/check-edge-robots.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.39",

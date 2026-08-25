@@ -1,4 +1,8 @@
 import type { AdminSuppressionRow } from "@/lib/adminEmailDeliveries";
+import {
+  AdminRevealableAddress,
+  AdminRevealAddressesButton,
+} from "@/components/admin/AdminAddressReveal";
 
 /**
  * Addresses we will not mail, and why.
@@ -31,8 +35,11 @@ const when = (value: Date | null) =>
 
 export function AdminEmailSuppressionsPanel({
   rows,
+  mayRevealAddresses,
 }: {
   rows: AdminSuppressionRow[];
+  /** D10: `owner` and `ops`. Resolved on the server. */
+  mayRevealAddresses: boolean;
 }) {
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
@@ -46,6 +53,17 @@ export function AdminEmailSuppressionsPanel({
         needs a written reason, and lifting a hard bounce or a complaint needs a
         second administrator.
       </p>
+
+      {/* D10: masked by default, revealed by a deliberate audited act. The
+          sentence is on screen rather than in a comment -- an operator who sees
+          dots and no explanation concludes the data is missing. */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <AdminRevealAddressesButton
+          kind="suppression"
+          rowIds={rows.map((row) => row.id)}
+          allowed={mayRevealAddresses}
+        />
+      </div>
 
       <p
         data-testid="email-suppression-provider-notice"
@@ -88,7 +106,10 @@ export function AdminEmailSuppressionsPanel({
                 className="border-t border-zinc-900 align-top"
               >
                 <td className="py-3 pr-4 font-mono text-xs">
-                  {row.emailAddress}
+                  <AdminRevealableAddress
+                    rowId={row.id}
+                    masked={row.emailAddressMasked}
+                  />
                 </td>
                 <td className="py-3 pr-4">
                   <span

@@ -40,6 +40,7 @@ import {
 import { toExtractionPromptInput } from "../lib/memoryExtractionPrompt.ts";
 import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
+import { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS } from "../lib/memoryExtractionWorker.ts";
 import { getModel } from "../lib/models.ts";
 
 const argValue = (name, fallback) => {
@@ -63,17 +64,24 @@ if (!model) {
     process.exit(1);
 }
 
-/** The harness's own per-call output ceiling. Kept in step by a test. */
-const MAX_OUTPUT_TOKENS = 4_096;
+
 
 /**
- * A stand-in for how long a real answer runs.
+ * How long an answer is assumed to run. **An assumption, not a measurement.**
  *
- * Not measured, and said so: it is a quarter of the ceiling, which is enough
- * to separate "the worst case is affordable" from "even the typical case is
- * not". The worst case is the number to set a ceiling from.
+ * It used to be a fraction of the output ceiling, which worked while that
+ * ceiling was 4,096 and stopped meaning anything when it became the model's
+ * real capability: a quarter of 128,000 is 32,000 tokens, which is nothing
+ * like an extraction answer.
+ *
+ * So the assumption is stated in tokens instead. A few hundred cover the JSON;
+ * the rest is headroom for reasoning tokens, which this model produces and
+ * which are billed as output. Nobody has measured them here, and the first
+ * live run that reports usage replaces this number -- until then the report
+ * prints the per-1,000-token slope so a reader can scale it themselves rather
+ * than trusting the guess.
  */
-const TYPICAL_OUTPUT_FRACTION = 0.25;
+const ASSUMED_OUTPUT_TOKENS = 1_024;
 
 /** Input tokens for one case, built from the prompt the harness actually sends. */
 const promptTokensFor = (testCase) => {
@@ -112,8 +120,23 @@ const costFor = (cases, outputTokens) => {
     return input + output;
 };
 
+/**
+ * The per-call output ceiling, read from the constant both the product and
+ * the harness send.
+ *
+ * It was briefly the model's `maxOutputTokens` -- its full capability -- on
+ * the reasoning that a reservation must not be used as a cap. That was the
+ * wrong reading of the right rule: 4,096 here is not
+ * `reservationOutputTokens`, it is `memoryExtractionWorker`'s deliberate
+ * ceiling on one chunk's answer, and pricing anything else would price a
+ * request nobody makes.
+ */
+const MAX_OUTPUT_TOKENS = MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS;
+
 const worstPerRun = costFor(floorTotal, MAX_OUTPUT_TOKENS);
-const typicalPerRun = costFor(floorTotal, MAX_OUTPUT_TOKENS * TYPICAL_OUTPUT_FRACTION);
+const assumedPerRun = costFor(floorTotal, ASSUMED_OUTPUT_TOKENS);
+const inputOnlyPerRun = costFor(floorTotal, 0);
+const perThousandOutputPerRun = costFor(floorTotal, 1_000) - inputOnlyPerRun;
 
 const usd = (value) => `US$${value.toFixed(2)}`;
 const line = (label, value) => console.log(`${label.padEnd(42)} ${value}`);
@@ -131,14 +154,22 @@ line("per-call output ceiling", MAX_OUTPUT_TOKENS);
 console.log(`\nprojected onto the §12.2 floor:`);
 line("cases per run", floorTotal);
 line("runs (§12.4 independent re-run)", runs);
-line("worst case, one run", usd(worstPerRun));
-line("worst case, all runs", usd(worstPerRun * runs));
-line(`typical (output at ${TYPICAL_OUTPUT_FRACTION * 100}% of ceiling), all runs`, usd(typicalPerRun * runs));
+
+console.log("\nmeasured — the input side:");
+line("input only, all runs", usd(inputOnlyPerRun * runs));
+
+console.log("\nassumed — the output side (nobody has measured it yet):");
+line("assumed output tokens per answer", ASSUMED_OUTPUT_TOKENS.toLocaleString("en-US"));
+line("at that assumption, all runs", usd(assumedPerRun * runs));
+line("per +1,000 output tokens/answer, all runs", usd(perThousandOutputPerRun * runs));
+line("if every answer hit the cap, all runs", usd(worstPerRun * runs));
 
 console.log(
-    `\nSet the ceiling from the worst case, not the typical one: ${usd(worstPerRun * runs)}.\n` +
+    `\nSet the ceiling from the worst case, not the assumption: ${usd(worstPerRun * runs)}.\n` +
         "A run that behaves cannot exceed it, and a run that does not is exactly what a\n" +
-        "ceiling is for."
+        "ceiling is for. A run stopped by that ceiling is truncated, and a truncated run\n" +
+        "is not decision-grade -- so the worst case is the number to approve, not the\n" +
+        "number to fear."
 );
 
 console.log(

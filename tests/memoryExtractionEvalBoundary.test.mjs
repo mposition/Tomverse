@@ -86,9 +86,30 @@ test("every missing precondition refuses a live run", () => {
             },
             "unknown_commit",
         ],
+        // `mem-eval-seed-11` is schema 1 and carries neither
+        // `expectedDisposition` nor `goldCompleteness`, so the metrics the
+        // 2026-08-25 amendment added cannot be computed against it. A run
+        // would still print numbers -- the old contract's, wearing the new
+        // contract's names.
+        [
+            {
+                registerEntry: budgeted,
+                hasApiKey: true,
+                datasetFrozen: true,
+                commitKnown: true,
+                datasetSchemaVersion: 1,
+            },
+            "legacy_dataset_schema",
+        ],
     ];
     for (const [input, reason] of cases) {
-        const decision = decideEvalRunMode({ live: true, ...input });
+        const decision = decideEvalRunMode({
+            live: true,
+            // Schema 2 unless the row is about the schema: every other row
+            // has to reach its own gate rather than stopping at this one.
+            datasetSchemaVersion: 2,
+            ...input,
+        });
         assert.equal(decision.mode, "refused", `${reason} must refuse`);
         assert.equal(decision.reason, reason);
     }
@@ -101,6 +122,7 @@ test("only every precondition together allows a live run", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
+        datasetSchemaVersion: 2,
     });
     assert.equal(decision.mode, "live");
     assert.equal(decision.ceilingUsd, 50);
@@ -113,6 +135,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
+        datasetSchemaVersion: 2,
         requestedRunCapUsd: 5,
     });
     assert.equal(narrowed.mode, "live");
@@ -124,6 +147,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
+        datasetSchemaVersion: 2,
         requestedRunCapUsd: 500,
     });
     assert.equal(widened.mode, "refused");
@@ -132,13 +156,12 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
 
 /* ------------------------------------------------------- shipped register -- */
 
-test("only the funded pair can run live against the shipped dataset", () => {
-    // Both entries used to be refused, first for want of a budget and then
-    // because the dataset was still moving. The dataset was frozen on
-    // 2026-08-24 (docs/ops/memory-extraction-eval-dataset.md §7.2), so what
-    // stops a pair now is the budget alone -- which is the state
-    // docs/policy/external-conversation-import-and-memory.md §12.5 describes,
-    // and the point of freezing.
+test("nothing in the shipped register can run live", () => {
+    // The state after the v2 diagnosis on 2026-08-25. All four entries are
+    // revoked: v1 for its wiring defect, v2 because the four contract defects
+    // its probes surfaced make the bounds unreachable regardless of the
+    // model (docs/ops/memory-extraction-eval-diagnostics.md). v3 is not registered
+    // yet, so there is no pair a key could spend against.
     //
     // `datasetFrozen` is read from the fixtures rather than forced. Forcing it
     // asserts a world of the test's own making, and the value that ships is
@@ -149,6 +172,7 @@ test("only the funded pair can run live against the shipped dataset", () => {
         "this test describes the frozen dataset that shipped"
     );
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
+        const label = `${entry.extractionModelId}::${entry.promptVersion}`;
         const decision = decideEvalRunMode({
             live: true,
             registerEntry: entry,
@@ -156,75 +180,87 @@ test("only the funded pair can run live against the shipped dataset", () => {
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
             commitKnown: true,
         });
-        if (entry.evalBudget) {
-            assert.equal(
-                decision.mode,
-                "live",
-                `${entry.extractionModelId} has an approved budget and a frozen dataset`
-            );
-            assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
-        } else {
-            assert.equal(
-                decision.mode,
-                "refused",
-                `${entry.extractionModelId} must not be live-runnable as shipped`
-            );
-            assert.equal(decision.reason, "no_eval_budget");
-        }
+        assert.equal(decision.mode, "refused", label);
+        // Status first, before the budget is consulted -- which is the point,
+        // because one of these still carries an approved US$20.
+        assert.equal(decision.reason, "pair_not_runnable", label);
     }
+    assert.ok(
+        MEMORY_EXTRACTION_EVAL_REGISTER.some((entry) => entry.evalBudget),
+        "a closed pair keeping its budget is what makes the status check load-bearing"
+    );
 });
 
-test("a live run still needs an API key the environment may not have", () => {
-    // Freezing removed one refusal and must not have removed another. Without
-    // a key the funded pair is refused for the key, not waved through on the
-    // strength of its budget.
-    for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
-        const decision = decideEvalRunMode({
+test("a revoked pair is refused even though it still has a budget", () => {
+    // The specific hole this closes. `mem-extract-v1` carries an approved
+    // US$20 and always will: deleting it would erase that the approval
+    // happened and that money was spent against it. A runner that read only
+    // `evalBudget` would spend the rest of it on a pair the register closed.
+    const revoked = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) => entry.status === "revoked" && entry.evalBudget
+    );
+    assert.ok(revoked, "expected a revoked entry that kept its budget");
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: revoked,
+        hasApiKey: true,
+        datasetFrozen: true,
+        commitKnown: true,
+    });
+    assert.equal(decision.mode, "refused");
+    assert.equal(decision.reason, "pair_not_runnable");
+});
+
+test("a budget opens the budget gate and nothing else", () => {
+    // What approving a budget buys, stated exactly, against a table rather
+    // than against the shipped register -- which currently has no funded
+    // candidate, and should not need one for this contract to be checked.
+    const candidate = { status: "candidate", evalBudget: { maxUsd: 50 } };
+    const unfunded = { status: "candidate", evalBudget: null };
+
+    assert.equal(
+        decideEvalRunMode({
             live: true,
-            registerEntry: entry,
-            hasApiKey: false,
-            datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+            registerEntry: candidate,
+            hasApiKey: true,
+            datasetFrozen: true,
             commitKnown: true,
-        });
-        assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
+            datasetSchemaVersion: 2,
+        }).mode,
+        "live"
+    );
+    // Every other gate still closes on the funded pair. An approval that
+    // quietly relaxed a second rule would be an approval nobody gave.
+    for (const [name, override] of [
+        ["no key", { hasApiKey: false }],
+        ["unfrozen dataset", { datasetFrozen: false }],
+        ["unknown commit", { commitKnown: false }],
+        ["legacy dataset schema", { datasetSchemaVersion: 1 }],
+    ]) {
         assert.equal(
-            decision.reason,
-            entry.evalBudget ? "no_api_key" : "no_eval_budget",
-            `${entry.extractionModelId} should name the first gate it fails`
+            decideEvalRunMode({
+                live: true,
+                registerEntry: candidate,
+                hasApiKey: true,
+                datasetFrozen: true,
+                commitKnown: true,
+                datasetSchemaVersion: 2,
+                ...override,
+            }).mode,
+            "refused",
+            `a budget must not open ${name}`
         );
     }
-});
-
-test("the budget is the only gate an approval opens", () => {
-    // What approving a budget bought, stated exactly. The funded pair stops
-    // being refused *for want of a budget* and goes on being refused for every
-    // other reason -- and the unfunded one is untouched. An approval that
-    // quietly relaxed a second rule would be an approval nobody gave.
-    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.filter((e) => e.evalBudget);
-    const unfunded = MEMORY_EXTRACTION_EVAL_REGISTER.filter((e) => !e.evalBudget);
-    assert.ok(funded.length > 0 && unfunded.length > 0, "expected one of each");
-
-    for (const entry of funded) {
-        const decision = decideEvalRunMode({
+    assert.equal(
+        decideEvalRunMode({
             live: true,
-            registerEntry: entry,
+            registerEntry: unfunded,
             hasApiKey: true,
             datasetFrozen: true,
             commitKnown: true,
-        });
-        assert.equal(decision.mode, "live", `${entry.extractionModelId}`);
-        assert.equal(decision.ceilingUsd, entry.evalBudget.maxUsd);
-    }
-    for (const entry of unfunded) {
-        const decision = decideEvalRunMode({
-            live: true,
-            registerEntry: entry,
-            hasApiKey: true,
-            datasetFrozen: true,
-            commitKnown: true,
-        });
-        assert.equal(decision.mode, "refused", `${entry.extractionModelId}`);
-    }
+        }).reason,
+        "no_eval_budget"
+    );
 });
 
 test("no pair in the shipped register resolves as approved for runtime use", () => {
@@ -277,18 +313,18 @@ const runHarness = (args, env = {}) => {
     }
 };
 
-test("--live with a key but no approved budget never reaches the network", () => {
-    // Named explicitly rather than relying on the default pair. The default is
-    // funded now (docs/policy/external-conversation-import-and-memory.md §12.5,
-    // issue #837), and a test that reads "no budget" from whichever pair
-    // happens to be default stops testing the budget refusal the moment one is
-    // approved -- silently, while still passing on a different rule.
+test("--live with a key never reaches the network for a closed pair", () => {
+    // This asserted the budget refusal by name. Every shipped pair is revoked
+    // now, so the harness stops at the status check first and saying "no
+    // approved eval budget" would be asserting a message the run no longer
+    // reaches -- a test that passes by describing the wrong gate is worse
+    // than one that fails.
     const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
         // Plausible enough that a missing-key check could not be what stops it.
         OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
     });
     assert.equal(result.status, 1, "the run must refuse");
-    assert.match(result.output, /no approved eval budget/i);
+    assert.match(result.output, /in the\s+register/i);
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,
@@ -296,7 +332,7 @@ test("--live with a key but no approved budget never reaches the network", () =>
     );
 });
 
-test("a funded pair with no key refuses, and still reaches no network", () => {
+test("the shipped pair refuses without a key, and reaches no network", () => {
     // Recording a budget opens `--live`; it does not open the run. Two gates
     // used to stand after the budget check and the dataset freeze took one of
     // them away, so this test now exercises the one that is left. The
@@ -306,9 +342,15 @@ test("a funded pair with no key refuses, and still reaches no network", () => {
         OPENAI_API_KEY: "",
     });
     assert.equal(result.status, 1, "the run must refuse");
-    assert.doesNotMatch(result.output, /no approved eval budget/i);
     assert.doesNotMatch(result.output, /is not frozen/i);
-    assert.match(result.output, /OPENAI_API_KEY/);
+    // Which gate stops it depends on what the register says today: with every
+    // pair revoked it is the status, and with a candidate registered it would
+    // be the key. Any refusal is correct; reaching the network is not, and
+    // that is what this test exists for.
+    assert.match(
+        result.output,
+        /OPENAI_API_KEY|no approved eval budget|in the\s+register/i
+    );
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,

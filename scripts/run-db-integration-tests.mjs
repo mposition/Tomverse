@@ -180,6 +180,10 @@ run(
     // the one that must NOT fire when a single model's answers are cleared.
     "tests/integration/message-attachments.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    // The three ADR flags against the rows that hold them: the acceptance
+    // criterion is about a delivery row *not* being created, which only the
+    // table can confirm, and the fan-out gate needs a real event to expand.
+    "tests/integration/email-feature-flags.db.test.ts",
     "tests/integration/credential-email-lane.db.test.ts",
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",
@@ -207,6 +211,22 @@ run(
     "tests/integration/campaign-audience.db.test.ts",
     "tests/integration/campaign-scheduling.db.test.ts",
     "tests/integration/campaign-attestations.db.test.ts",
+    // The expansion ledger read back: who each wave reached and who it did not.
+    // The counts come from grouped reads over rows no single process holds.
+    "tests/integration/campaign-audience-readback.db.test.ts",
+    // Measuring the audience rather than typing a number: the count is a scan
+    // across accounts, settings and conversations, and the completeness CHECK
+    // is the database's own statement that an estimate arrives whole.
+    "tests/integration/campaign-audience-estimate.db.test.ts",
+    // The people behind those counts, masked (D10). The masking has to happen
+    // on the way out of the query rather than at the edge, and the only way to
+    // show that is to write a row holding a real address and read it back
+    // through the function a route calls.
+    "tests/integration/campaign-ledger-people.db.test.ts",
+    // Two callers ensuring the same template at the same moment. Both races it
+    // covers are lost or won by the database's own unique indexes, so a single
+    // process proves nothing about either.
+    "tests/integration/email-template-registry-race.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.
@@ -271,6 +291,7 @@ run(
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
     "tests/integration/assistant-package-import.db.test.ts",
+    "tests/integration/assistant-package-import-flag.db.test.ts",
     "tests/integration/assistant-package-export.db.test.ts",
     // Release C3c: which row the runtime reads for a profile-backed turn --
     // Policy: docs/policy/external-conversation-import-and-memory.md.

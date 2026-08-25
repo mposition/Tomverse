@@ -34,7 +34,22 @@
  * in words not listed here is therefore under-read into "go look", which costs
  * one reading. The opposite mistake would cost the method.
  *
- * Pure: string inspection only. The script does the I/O.
+ * ## The success path is not a success
+ *
+ * HTTP 200 was, in the version after that one, printed as ACCEPTED with the
+ * words "the input fitted, so the window is larger than this request". Run
+ * against `perplexity/sonar` on 2026-08-24 with ~150,000 tokens of filler,
+ * that is exactly what it said -- while Perplexity's own model page puts
+ * sonar at 128K. A provider that silently truncates an over-long input
+ * answers 200, and the old line read that as a window measurement.
+ *
+ * 200 means the provider answered. Nothing more. What the provider will tell
+ * you is `usage.prompt_tokens`, and that is the number this module reads.
+ * Even then the claim it supports is narrow: the provider counted, and
+ * billed, that many input tokens. It is not evidence that the model attended
+ * to every position of what was sent.
+ *
+ * Pure: string and object inspection only. The script does the I/O.
  */
 
 /**
@@ -78,8 +93,8 @@ const LENGTH_PATTERN = new RegExp(
 /**
  * What a provider's answer to the trial was about.
  *
- * - `accepted`          HTTP 200. The input fitted; the window is larger than
- *                       what was sent. Not a disproof, an undersized try.
+ * - `answered`          HTTP 200. The provider replied. That alone says
+ *                       nothing about the window -- see classifyCountedInput.
  * - `refusedOnLength`   The refusal talks about input, prompt or context
  *                       length. This is the trial actually running, and the
  *                       only verdict from which the technique may be judged.
@@ -92,7 +107,7 @@ const LENGTH_PATTERN = new RegExp(
  *                       did not run, and a person should read the message.
  */
 export function classifyTrialAnswer({ status, message }) {
-    if (status === 200) return "accepted";
+    if (status === 200) return "answered";
     const text = typeof message === "string" ? message : "";
     // Length wins when a message carries both. "max_tokens plus your input
     // exceeds the context window" is a refusal about the window that happens to
@@ -116,3 +131,72 @@ export function classifyTrialAnswer({ status, message }) {
  * is the length of the answer that gets billed.
  */
 export const DEFAULT_COMPLETION_CAP = 16;
+
+/**
+ * The share of the requested input a provider must have counted before the run
+ * is described as having carried it.
+ *
+ * The figure is chosen against the case it exists to catch. A 128,000-token
+ * window truncating a ~150,000-token request counts 85% of what was sent, so
+ * any tolerance looser than that would report the truncation as a clean
+ * carry -- the precise mistake this file is here to stop. 0.9 sits above it
+ * with room left for the thing that is genuine slack: `--approx-input-tokens`
+ * is a repetition count, not a token count, and no two tokenisers agree on
+ * what a repeated word costs.
+ */
+export const COUNTED_INPUT_TOLERANCE = 0.9;
+
+/**
+ * The two facts a success body is worth reading for.
+ *
+ * `promptTokens` is null unless the provider gave a finite positive number:
+ * a string, an object or a missing field must not be coerced into a count,
+ * because "the provider did not say" and "the provider said a small number"
+ * lead to opposite conclusions. `requestId` is for quoting in the register or
+ * to the provider's support -- an observation nobody can look up again is
+ * weaker evidence than one they can.
+ */
+export function readSuccessTelemetry(body) {
+    if (!body || typeof body !== "object") return { promptTokens: null, requestId: null };
+    const raw = body.usage?.prompt_tokens;
+    const promptTokens =
+        typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : null;
+    const id = body.id ?? body.request_id ?? body.requestId;
+    return {
+        promptTokens,
+        requestId: typeof id === "string" && id.trim() ? id.trim() : null,
+    };
+}
+
+/**
+ * What the provider's own token count says about the input it received.
+ *
+ * Three readings, none of which is "the input fitted":
+ *
+ * - `INCONCLUSIVE`  the provider reported no usable count, so the run
+ *                   produced no measurement at all.
+ * - `POSSIBLE_TRUNCATION`
+ *                   it counted materially less than was sent. Either it
+ *                   truncated, or it pre-processed, or the filler tokenised
+ *                   far shorter than one token a word. Which of those it is
+ *                   cannot be told from here.
+ * - `PROVIDER_COUNTED_APPROXIMATELY_REQUESTED_INPUT`
+ *                   it counted about what was sent. This says the tokens were
+ *                   counted and billed; it does not say the model read them,
+ *                   and it does not name a window.
+ */
+export function classifyCountedInput({ promptTokens, approxRequestedTokens }) {
+    if (typeof promptTokens !== "number" || !Number.isFinite(promptTokens) || promptTokens <= 0) {
+        return "INCONCLUSIVE";
+    }
+    if (
+        typeof approxRequestedTokens !== "number" ||
+        !Number.isFinite(approxRequestedTokens) ||
+        approxRequestedTokens <= 0
+    ) {
+        return "INCONCLUSIVE";
+    }
+    return promptTokens >= approxRequestedTokens * COUNTED_INPUT_TOLERANCE
+        ? "PROVIDER_COUNTED_APPROXIMATELY_REQUESTED_INPUT"
+        : "POSSIBLE_TRUNCATION";
+}

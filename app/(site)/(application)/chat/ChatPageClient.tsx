@@ -434,7 +434,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500" />
           <div>
-            <div className="text-lg font-black">Tomverse Review</div>
+            <div className="text-lg font-black">Tomverse</div>
             <div className="mt-1 h-2 w-20 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
           </div>
         </div>
@@ -447,7 +447,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800 md:hidden">
           <div className="h-9 w-9 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
-          <span className="text-lg font-black">Tomverse Review</span>
+          <span className="text-lg font-black">Tomverse</span>
         </header>
         <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
           <div className="h-11 w-56 max-w-[70vw] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
@@ -523,6 +523,20 @@ export function ChatPageClient({
     return `image-draft:${imageDraftSerialRef.current}`;
   };
   const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
+  /*
+    The account's "stop asking me" choice, and whether this particular landing
+    is allowed to act on it.
+
+    Two values rather than one, because they answer different questions. The
+    preference belongs to the account and survives; the second is true only for
+    a landing that began with the user asking for a picture in words, and is
+    spent by the workspace on arrival. Opening the workspace from the launcher
+    or the tools menu is someone going there to compose, not someone
+    submitting a request they already wrote, and must never spend credits on
+    its own.
+  */
+  const [imageHandoffAutoGenerate, setImageHandoffAutoGenerate] = useState(false);
+  const [imageDraftAutoGenerate, setImageDraftAutoGenerate] = useState(false);
   // Set only when the user reached the draft by choosing a model in the
   // catalogue's image tab; otherwise the workspace keeps its own default.
   const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
@@ -783,6 +797,19 @@ export function ChatPageClient({
   // than a third piece of state that could disagree with both.
   const [assistantProfile, setAssistantProfile] =
     useState<ChatAssistantProfile | null>(null);
+  /**
+   * When this conversation's assistant was deleted, if it was.
+   *
+   * Separate state rather than a field on `assistantProfile`, because it is
+   * only ever meaningful while that one is null: the profile row is gone and
+   * `assistantProfileVersionId` was set to null with it. Without this the
+   * composer cannot tell a conversation whose assistant was removed from one
+   * that never had an assistant, and it showed the same sentence for both
+   * (staging §G-2, 2026-08-25).
+   */
+  const [assistantProfileRemovedAt, setAssistantProfileRemovedAt] = useState<
+    string | null
+  >(null);
   const [pendingProfileId, setPendingProfileId] = useState<string | null>(null);
   const [assistantProfileOptions, setAssistantProfileOptions] = useState<
     ChatAssistantProfileOption[] | null
@@ -1847,6 +1874,7 @@ export function ChatPageClient({
         selectionMode?: unknown;
         autoSelection?: { offered?: unknown } | null;
         assistantProfile?: ChatAssistantProfile | null;
+        assistantProfileRemovedAt?: string | null;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
         // A server *confirmation* is re-seeding this conversation's settings,
@@ -1904,6 +1932,7 @@ export function ChatPageClient({
         // past this conversation -- a screen that worked the revision out for
         // itself would be a second implementation of the pinning rule.
         setAssistantProfile(data.assistantProfile ?? null);
+        setAssistantProfileRemovedAt(data.assistantProfileRemovedAt ?? null);
         // Opening a real conversation ends whatever a not-yet-created one was
         // going to be created with; leaving it set would apply that choice to
         // the *next* new chat without the user asking again.
@@ -2202,6 +2231,9 @@ export function ChatPageClient({
                     return res.json();
                 })
                 .then((data) => {
+                    if (typeof data?.imageHandoffAutoGenerate === "boolean") {
+                        setImageHandoffAutoGenerate(data.imageHandoffAutoGenerate);
+                    }
                     if (data && isEnabledModelIdRef.current(data.defaultModel)) {
                         // The saved new-conversation combination (effective,
                         // resolved server-side); [defaultModel] when none.
@@ -2380,11 +2412,18 @@ export function ChatPageClient({
 
     // From the composer: carry the typed text into the image prompt and
     // remember the chat draft so cancelling restores it.
-    const handleStartImageDraft = (draftText: string, modelId?: string) => {
+    const handleStartImageDraft = (
+        draftText: string,
+        modelId?: string,
+        options?: { fromImageRequest?: boolean }
+    ) => {
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
             text: draftText,
         });
+        setImageDraftAutoGenerate(
+            Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
+        );
         setImageDraftSeedPrompt(draftText);
         setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
         setImageWorkspaceKey(nextImageDraftKey());
@@ -2394,6 +2433,31 @@ export function ChatPageClient({
         setPromptPayload(null);
         setIsDeepResearchPending(false);
         setIsInitialConversationResolved(true);
+    };
+
+    /*
+      Turning "stop asking me" on or off, from beside the price.
+
+      Optimistic, and deliberately so in both directions: the control has to
+      answer immediately or a person cannot tell whether their click landed,
+      and the value it writes is a preference rather than a fact about money
+      already spent. A failed save is put back rather than left showing a
+      choice the account does not hold -- silently keeping a failed "on" is
+      how an account ends up generating on a press it never agreed to.
+    */
+    const handleImageAutoGeneratePreferenceChange = (next: boolean) => {
+        const previous = imageHandoffAutoGenerate;
+        setImageHandoffAutoGenerate(next);
+        void fetch("/api/user/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageHandoffAutoGenerate: next }),
+        })
+            .then(async (response) => {
+                await discardResponseBody(response);
+                if (!response.ok) setImageHandoffAutoGenerate(previous);
+            })
+            .catch(() => setImageHandoffAutoGenerate(previous));
     };
 
     // Leaving the image draft without generating: the chat draft comes back
@@ -3270,6 +3334,7 @@ export function ChatPageClient({
           // The server pinned a revision; the pending choice has become a
           // binding and stops being pending.
           setAssistantProfile(data.assistantProfile ?? null);
+          setAssistantProfileRemovedAt(data.assistantProfileRemovedAt ?? null);
           setPendingProfileId(null);
           /**
            * The created conversation's own models, read back rather than
@@ -4161,6 +4226,7 @@ export function ChatPageClient({
         }
         const data = (await response.json().catch(() => null)) as {
           assistantProfile?: ChatAssistantProfile | null;
+          assistantProfileRemovedAt?: string | null;
         } | null;
         if (!responseStillApplies()) return;
         // The server's answer replaces the optimistic row: it is the only
@@ -4180,6 +4246,10 @@ export function ChatPageClient({
         // should too is a §14 product question, not something to smuggle in
         // through a response handler.
         setAssistantProfile(data?.assistantProfile ?? null);
+        // The server clears the tombstone on any deliberate binding change, so
+        // this reads back as null; taking it from the response rather than
+        // assuming keeps the two from drifting.
+        setAssistantProfileRemovedAt(data?.assistantProfileRemovedAt ?? null);
       })
       .catch(() => {
         if (!responseStillApplies()) return;
@@ -4780,6 +4850,10 @@ export function ChatPageClient({
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
       }
+      autoGenerateOnArrival={imageDraftAutoGenerate}
+      onAutoGenerateArrivalConsumed={() => setImageDraftAutoGenerate(false)}
+      autoGeneratePreference={imageHandoffAutoGenerate}
+      onAutoGeneratePreferenceChange={handleImageAutoGeneratePreferenceChange}
     />
   ) : null;
 
@@ -4882,6 +4956,7 @@ export function ChatPageClient({
           assistantProfile={
             assistantProfileOptions ? effectiveAssistantProfile : undefined
           }
+          assistantProfileRemovedAt={assistantProfileRemovedAt}
           assistantProfileOptions={assistantProfileOptions ?? []}
           onAssistantProfileChange={
             assistantProfileOptions ? handleAssistantProfileChange : undefined
@@ -4975,6 +5050,7 @@ export function ChatPageClient({
           assistantProfile={
             assistantProfileOptions ? effectiveAssistantProfile : undefined
           }
+          assistantProfileRemovedAt={assistantProfileRemovedAt}
           assistantProfileOptions={assistantProfileOptions ?? []}
           onAssistantProfileChange={
             assistantProfileOptions ? handleAssistantProfileChange : undefined

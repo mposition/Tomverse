@@ -149,6 +149,22 @@ export type ImportFieldEdits = {
 
 /* ------------------------------------------------------------------ state */
 
+/**
+ * An import the server is still holding, offered on step 1.
+ *
+ * Shaped for a list rather than for resuming: the wizard reads the import
+ * itself when the owner chooses one.
+ */
+export type ResumableImport = {
+    id: string;
+    mode: "create" | "merge";
+    profileId: string;
+    profileName: string;
+    published: boolean;
+    fileCount: number;
+    idleExpiresAt: string;
+};
+
 export type ImportTarget =
     | { kind: "new" }
     /**
@@ -285,6 +301,78 @@ export const initialImportState = (): AssistantPackageImportState => ({
     uploads: [],
 });
 
+/**
+ * The draft inside a stored `stagingManifest`, or null if it is not there.
+ *
+ * The manifest is this app's own JSON, but it was written by whatever version
+ * of the wizard created the import -- possibly one that is no longer deployed.
+ * So it is checked rather than trusted, and a manifest that does not carry a
+ * complete draft means the import cannot be resumed. That is a thing to say on
+ * screen, not a set of empty fields to publish.
+ */
+export function resumableDraftFromManifest(
+    manifest: unknown
+): ProfileDraftFromImport | null {
+    if (typeof manifest !== "object" || manifest === null) return null;
+    const draft = (manifest as { draft?: unknown }).draft;
+    if (typeof draft !== "object" || draft === null) return null;
+    const value = draft as Record<string, unknown>;
+
+    const text = (key: string): string | null =>
+        typeof value[key] === "string" ? (value[key] as string) : null;
+    const nullableText = (key: string): string | null | undefined =>
+        value[key] === null
+            ? null
+            : typeof value[key] === "string"
+              ? (value[key] as string)
+              : undefined;
+    const strings = (key: string): string[] | null =>
+        Array.isArray(value[key]) &&
+        (value[key] as unknown[]).every((entry) => typeof entry === "string")
+            ? ([...(value[key] as string[])] as string[])
+            : null;
+    const flag = (holder: unknown, key: string): boolean | null => {
+        if (typeof holder !== "object" || holder === null) return null;
+        const found = (holder as Record<string, unknown>)[key];
+        return typeof found === "boolean" ? found : null;
+    };
+
+    const name = text("name");
+    const instructions = text("instructions");
+    const icon = nullableText("icon");
+    const description = nullableText("description");
+    const starters = strings("starters");
+    const modelIds = strings("modelIds");
+    const webSearch = flag(value.toolPolicy, "webSearch");
+    const deepResearch = flag(value.toolPolicy, "deepResearch");
+    const useAccountMemory = flag(value.memoryPolicy, "useAccountMemory");
+
+    if (
+        name === null ||
+        instructions === null ||
+        icon === undefined ||
+        description === undefined ||
+        starters === null ||
+        modelIds === null ||
+        webSearch === null ||
+        deepResearch === null ||
+        useAccountMemory === null
+    ) {
+        return null;
+    }
+
+    return {
+        name,
+        icon,
+        description,
+        instructions,
+        starters,
+        modelIds,
+        toolPolicy: { webSearch, deepResearch },
+        memoryPolicy: { useAccountMemory },
+    };
+}
+
 /* ---------------------------------------------------------------- actions */
 
 export type AssistantPackageImportAction =
@@ -327,6 +415,22 @@ export type AssistantPackageImportAction =
     | { type: "run_failed"; code: string }
     | { type: "advanced" }
     | { type: "went_back" }
+    | {
+          /**
+           * Picking up an import the server already holds.
+           *
+           * Every field decision becomes `edit` and every edit is filled from
+           * the manifest the server stored, so `resolveImportDraft()` returns
+           * exactly what was staged. It has to: the container is gone, so
+           * there is no review to propose from, and a `use` decision would
+           * resolve against a review that is null.
+           */
+          type: "resumed";
+          importId: string;
+          target: ImportTarget;
+          draft: ProfileDraftFromImport;
+          uploads: ImportUploadFile[];
+      }
     | { type: "restarted" };
 
 const stepAfter = (
@@ -560,6 +664,49 @@ export function assistantPackageImportReducer(
             return canGoBack(state)
                 ? { ...state, step: stepBefore(state.step) }
                 : state;
+        case "resumed": {
+            const ready = action.uploads.every(
+                (upload) => upload.status === "ready"
+            );
+            return {
+                ...initialImportState(),
+                // Step 8 only when every document is ready, because that is
+                // the only state publishing may start from. Otherwise step 7,
+                // where the owner watches the rest finish -- which is also
+                // where the cancel control lives.
+                step: ready ? "confirm" : "upload",
+                decisions: {
+                    name: "edit",
+                    icon: "edit",
+                    description: "edit",
+                    instructions: "edit",
+                    starters: "edit",
+                    modelIds: "edit",
+                    toolPolicy: "edit",
+                    memoryPolicy: "edit",
+                },
+                edits: {
+                    name: action.draft.name,
+                    icon: action.draft.icon,
+                    description: action.draft.description,
+                    instructions: action.draft.instructions,
+                    starters: [...action.draft.starters],
+                    modelIds: [...action.draft.modelIds],
+                    toolPolicy: action.draft.toolPolicy,
+                    memoryPolicy: action.draft.memoryPolicy,
+                },
+                target: action.target,
+                // Both were agreed to before the import was created: the
+                // server would not be holding it otherwise. Asking again on
+                // resume would be asking about a boundary already crossed.
+                lossesAcknowledged: true,
+                uploadAcknowledged: true,
+                run: ready
+                    ? { kind: "ready", importId: action.importId }
+                    : { kind: "processing", importId: action.importId },
+                uploads: action.uploads,
+            };
+        }
         case "restarted":
             return initialImportState();
         default:

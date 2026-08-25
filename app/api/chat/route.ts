@@ -2747,6 +2747,10 @@ async function handleChatPost(
                 traceId,
                 userId: access.userId ?? null,
                 subjectKey: access.subjectKey,
+                // The same two the dispatch row carries. A shadow decision is
+                // about this turn, so it belongs to this turn's conversation.
+                conversationId: conversationId ?? null,
+                productKey: conversationProductKey,
                 // A signed-in account with no resolved plan reads as Guest
                 // rather than as a paid one: the filters use this to decide
                 // what the account may reach, and guessing upwards would let a

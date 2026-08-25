@@ -12,255 +12,1726 @@
     "its own phrasing, so adoption is a human act and is recorded per item.",
     "",
     "Its purpose is to exercise every cell in §2 so the harness can be run and the",
-    "pilot discordance measured. It is far too small to size a decision set from,",
-    "and lib/routerQualityEvalSet.ts refuses to let it be used as one."
+    "pilot discordance measured. lib/routerQualityEvalSet.ts refuses to let it be",
+    "used as a decision set.",
+    "",
+    "proposedPilotCellTarget is 14 per cell, 15 cells, 210 adopted items. It is a",
+    "proposal and not the §11 freeze record: cellTargets stays empty until a person",
+    "enters it. 210 is the floor §3's \"200-item pilot\" implies once cells are",
+    "counted separately -- 14 ADOPTED per cell, so a rejected draft is replaced",
+    "under a new id rather than counted, and the number of drafts written will",
+    "exceed 210.",
+    "",
+    "The first 24 items predate the per-item provenance schema. Their drafter was",
+    "not recorded at the time and is not reconstructable, so they carry",
+    "provider \"unrecorded\": a guessed drafter would look checkable and would not",
+    "be. They are marked so a reviewer can weigh them differently, or reject them",
+    "for that reason alone."
   ],
   "items": [
     {
       "id": "gen-ko-001",
       "stratum": "general_question_answering",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "전세와 월세의 차이를 처음 자취하는 사람에게 설명해 주세요. 보증금이 어떻게 다르게 쓰이는지도 알려주세요."
     },
     {
       "id": "gen-ko-002",
       "stratum": "general_question_answering",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "커피를 내릴 때 물 온도가 맛에 어떤 영향을 주나요? 온도별로 어떤 차이가 나는지 간단히 정리해 주세요."
     },
     {
       "id": "gen-en-001",
       "stratum": "general_question_answering",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "Why does bread go stale faster in the fridge than on the counter? Explain it for someone with no chemistry background."
     },
     {
       "id": "gen-en-002",
       "stratum": "general_question_answering",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "What actually happens to a package between 'out for delivery' and 'delivered'? I want to understand the scanning steps."
     },
     {
       "id": "write-ko-001",
       "stratum": "writing_and_rewriting",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "아래 문장을 고객에게 보낼 안내문으로 다듬어 주세요. 사과는 하되 변명처럼 들리지 않게 해 주세요.\n\n\"서버 문제로 어제 결제가 두 번 된 분들이 있는데 환불은 알아서 해드릴 예정입니다.\""
     },
     {
       "id": "write-ko-002",
       "stratum": "writing_and_rewriting",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "팀 회고에서 쓸 짧은 글을 써 주세요. 이번 분기에 배포 실패가 세 번 있었고, 원인은 매번 달랐습니다. 책임을 묻지 않으면서도 넘어가지 않는 톤으로 다섯 문장 이내."
     },
     {
       "id": "write-en-001",
       "stratum": "writing_and_rewriting",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "Rewrite this so it stops sounding like a threat, without dropping the deadline: \"If we do not receive your documents by Friday your application will be closed and you will need to start over.\""
     },
     {
       "id": "write-en-002",
       "stratum": "writing_and_rewriting",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "Write three subject lines for an email telling existing users that a feature they use is moving to a paid tier. No exclamation marks."
     },
     {
       "id": "code-ko-001",
       "stratum": "coding",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "다음 파이썬 함수가 빈 리스트를 받으면 ZeroDivisionError를 냅니다. 호출하는 쪽을 바꾸지 않고 고쳐 주세요. 왜 그 선택을 했는지도 한 줄로 설명해 주세요.\n\ndef average(values):\n    return sum(values) / len(values)"
     },
     {
       "id": "code-ko-002",
       "stratum": "coding",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "PostgreSQL에서 특정 사용자의 행만 남기고 나머지를 지우는 마이그레이션을 쓰려고 합니다. 외래 키가 여러 테이블에 걸려 있을 때 순서를 어떻게 잡아야 하나요? SQL 예시를 포함해 주세요."
     },
     {
       "id": "code-en-001",
       "stratum": "coding",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "This TypeScript compiles but throws at runtime for some inputs. Find the bug and fix it.\n\nconst firstMatch = (rows: string[], prefix: string) =>\n  rows.find((row) => row.startsWith(prefix))!.toUpperCase();"
     },
     {
       "id": "code-en-002",
       "stratum": "coding",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "Write a shell one-liner that finds every file larger than 100MB under the current directory, excluding node_modules, and prints size and path sorted largest first. Explain each part."
     },
     {
       "id": "reason-ko-001",
       "stratum": "analysis_and_reasoning",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "구독 서비스의 이번 달 해지율이 지난달보다 2배로 뛰었습니다. 같은 기간에 가격 인상, 앱 업데이트, 경쟁사 프로모션이 모두 있었습니다. 어느 것이 원인인지 가려내려면 무엇을 확인해야 하나요? 확인 순서까지 정해 주세요."
     },
     {
       "id": "reason-ko-002",
       "stratum": "analysis_and_reasoning",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "A/B 테스트에서 실험군 전환율이 3.1%, 대조군이 2.9%였고 각 군 표본은 1,200명입니다. 이 결과로 기능을 전체 출시해도 되나요? 판단 근거를 숫자로 보여 주세요."
     },
     {
       "id": "reason-en-001",
       "stratum": "analysis_and_reasoning",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "A team reports that their p50 latency improved 20% after a change, but users complain the app feels slower. Give the three most likely explanations and how you would tell them apart from the data they already have."
     },
     {
       "id": "reason-en-002",
       "stratum": "analysis_and_reasoning",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "Two departments each report saving $40k with the same headcount reduction. Finance says total savings were $40k, not $80k. Who is likely right, and what would you ask to settle it?"
     },
     {
       "id": "xlang-001",
       "stratum": "translation_cross_language",
       "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "다음 릴리스 노트를 영어로 번역해 주세요. 개발자 대상이고, 존댓말은 필요 없습니다.\n\n\"이번 업데이트부터 첨부 파일 용량 제한이 20MB에서 50MB로 늘어납니다. 기존에 업로드 실패로 남아 있던 파일은 자동으로 재시도되지 않으니 다시 올려 주세요.\""
     },
     {
       "id": "xlang-002",
       "stratum": "translation_cross_language",
       "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
       "prompt": "Translate this support reply into natural Korean for a customer, keeping the refund window exact: \"We've issued a full refund. It usually reaches your card within 5 to 10 business days, depending on your bank.\""
     },
     {
       "id": "current-ko-001",
       "stratum": "current_information",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
-      "webSearchRequested": true,
-      "prompt": "지금 한국에서 시행 중인 전자상거래 반품 규정에서, 단순 변심일 때 소비자가 부담하는 비용은 무엇인가요? 근거 조항을 함께 알려 주세요."
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
+      "prompt": "지금 한국에서 시행 중인 전자상거래 반품 규정에서, 단순 변심일 때 소비자가 부담하는 비용은 무엇인가요? 근거 조항을 함께 알려 주세요.",
+      "webSearchRequested": true
     },
     {
       "id": "current-en-001",
       "stratum": "current_information",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
-      "webSearchRequested": true,
-      "prompt": "What is the current recommended way to authenticate a server-side application to Google Cloud without a downloaded service-account key? Cite the documentation you used."
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
+      "prompt": "What is the current recommended way to authenticate a server-side application to Google Cloud without a downloaded service-account key? Cite the documentation you used.",
+      "webSearchRequested": true
     },
     {
       "id": "doc-ko-001",
       "stratum": "document_and_attachment",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
-      "attachments": [{ "mediaType": "application/pdf" }],
-      "prompt": "첨부한 계약서에서 자동 갱신 조항과 해지 통보 기한만 찾아서 정리해 주세요. 없으면 없다고 말해 주세요."
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
+      "prompt": "첨부한 계약서에서 자동 갱신 조항과 해지 통보 기한만 찾아서 정리해 주세요. 없으면 없다고 말해 주세요.",
+      "attachments": [
+        {
+          "mediaType": "application/pdf"
+        }
+      ]
     },
     {
       "id": "doc-en-001",
       "stratum": "document_and_attachment",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
-      "attachments": [{ "mediaType": "image/png" }],
-      "prompt": "The attached screenshot is a build failure. Tell me which step failed and what to change, and say so plainly if the screenshot does not contain enough to tell."
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
+      "prompt": "The attached screenshot is a build failure. Tell me which step failed and what to change, and say so plainly if the screenshot does not contain enough to tell.",
+      "attachments": [
+        {
+          "mediaType": "image/png"
+        }
+      ]
     },
     {
       "id": "long-ko-001",
       "stratum": "long_context_conversation",
       "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
-      "notes": "Collection note: the adopted version must carry a real prior turn history long enough to reach Pass 2. This prompt alone does not.",
-      "prompt": "앞에서 정한 규칙 세 가지를 다시 확인하고, 그중 두 번째 규칙이 이번 요청과 충돌하는지 판단해 주세요. 충돌한다면 어느 쪽을 따라야 하는지도 말해 주세요."
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
+      "prompt": "앞에서 정한 규칙 세 가지를 다시 확인하고, 그중 두 번째 규칙이 이번 요청과 충돌하는지 판단해 주세요. 충돌한다면 어느 쪽을 따라야 하는지도 말해 주세요.",
+      "notes": "Collection note: the adopted version must carry a real prior turn history long enough to reach Pass 2. This prompt alone does not."
     },
     {
       "id": "long-en-001",
       "stratum": "long_context_conversation",
       "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
       "source": "drafted",
       "status": "candidate",
       "adoptedBy": null,
       "adoptedAt": null,
-      "notes": "Collection note: same as long-ko-001 — needs a real long history attached before adoption.",
-      "prompt": "Summarise every decision we have made so far in this conversation, and flag any that we later reversed without saying so."
+      "draftProvenance": {
+        "batchId": "pre-provenance",
+        "provider": "unrecorded",
+        "modelId": "unrecorded",
+        "requestedApiModel": "unrecorded",
+        "modelVersion": null,
+        "generationParameters": {},
+        "promptTemplateVersion": "unrecorded",
+        "promptTemplateHash": "unrecorded",
+        "generatorCommit": null,
+        "draftedAt": "unrecorded"
+      },
+      "prompt": "Summarise every decision we have made so far in this conversation, and flag any that we later reversed without saying so.",
+      "notes": "Collection note: same as long-ko-001 — needs a real long history attached before adoption."
+    },
+    {
+      "id": "general-ko-001",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "지하철에서 핸드폰을 잃어버렸는데 어떻게 찾아야 하나요? 분실물센터 연락처랑 절차 좀 알려주세요."
+    },
+    {
+      "id": "general-ko-002",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "한국에서 가장 인기 있는 김치 종류 다섯 가지를 알려주고, 각각 어떤 재료로 만드는지 간단히 설명해 주세요."
+    },
+    {
+      "id": "general-ko-003",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "아이가 초등학교 입학하는데 준비해야 할 필수품 목록을 알려주세요. 교복, 책가방, 학용품 등 구체적으로요."
+    },
+    {
+      "id": "general-ko-004",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "집에서 간단하게 만들 수 있는 한식 반찬 세 가지 추천해 주세요. 재료도 쉽게 구할 수 있는 걸로요."
+    },
+    {
+      "id": "general-ko-005",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "공공 와이파이 사용하다가 개인정보 유출 위험이 있다고 들었는데, 어떻게 안전하게 쓸 수 있나요?"
+    },
+    {
+      "id": "general-ko-006",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "겨울에 실내에서 키우기 좋은 식물 세 가지 알려주시고, 관리법도 간단히 설명해 주세요."
+    },
+    {
+      "id": "general-ko-007",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "대학원 진학을 고민 중인데, 취업 시장에서 석사 학위가 실제로 도움이 되는 분야가 어떤 게 있나요?"
+    },
+    {
+      "id": "general-ko-008",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "집에서 에어컨 필터를 청소하려고 하는데, 어떤 도구가 필요하고 어떻게 해야 하는지 순서대로 알려주세요."
+    },
+    {
+      "id": "general-ko-009",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "한국에서 외국인 등록증을 발급받으려면 어떤 서류가 필요하고, 어디서 신청해야 하나요? 절차도 간단히 설명해 주세요."
+    },
+    {
+      "id": "general-ko-010",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "아이가 갑자기 고열이 나고 목이 부었는데, 집에서 할 수 있는 응급처리법과 병원 갈 시점을 알려주세요."
+    },
+    {
+      "id": "general-ko-011",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "서울에서 주말에 가족과 함께 가기 좋은 무료 또는 저렴한 문화 공간 세 군데 추천해 주세요. 교통편도 간단히 알려주시면 좋겠어요."
+    },
+    {
+      "id": "general-ko-012",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "노트북 배터리가 빨리 닳는 것 같아요. 배터리 수명을 늘리기 위한 실용적인 팁 다섯 가지 알려주세요."
+    },
+    {
+      "id": "general-ko-013",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "한국에서 직장인이 퇴근 후 자기계발을 위해 할 수 있는 활동 세 가지 추천해 주세요. 시간과 비용이 적게 드는 걸로요."
+    },
+    {
+      "id": "general-ko-014",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-ko-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "1d8171ee6fdd49d9",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:57:00.693Z"
+      },
+      "prompt": "집에서 라면 끓일 때 더 맛있게 만드는 비법 다섯 가지 알려주세요. 재료 추가 없이 할 수 있는 방법으로요."
+    },
+    {
+      "id": "general-en-001",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "How do fireworks get their different colors? Give me the simple version without too much science jargon."
+    },
+    {
+      "id": "general-en-002",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "Why do some people sneeze when they look at bright light, and is there a name for that?"
+    },
+    {
+      "id": "general-en-003",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "What’s the best way to remove a red wine stain from a white cotton shirt if I don’t have any special cleaners?"
+    },
+    {
+      "id": "general-en-004",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "Can you explain how a microwave oven actually heats food? I know it uses microwaves, but what’s happening inside the food?"
+    },
+    {
+      "id": "general-en-005",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "I keep hearing about '5G' but I don’t get what’s different from 4G. What does it let me do that I couldn’t before?"
+    },
+    {
+      "id": "general-en-006",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "How do those motion-sensor lights work? Do they detect heat, movement, or something else?"
+    },
+    {
+      "id": "general-en-007",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "What’s the deal with airplane turbulence? Is it dangerous, and why does it feel so much worse than bumps in a car?"
+    },
+    {
+      "id": "general-en-008",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "How do I tell if a battery is really dead or just needs a recharge? I have a drawer full of AAs and I don’t want to waste good ones."
+    },
+    {
+      "id": "general-en-009",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "Why do some songs get stuck in my head for days, and is there a trick to make them stop?"
+    },
+    {
+      "id": "general-en-010",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "What’s the difference between baking soda and baking powder, and can I swap one for the other in a recipe?"
+    },
+    {
+      "id": "general-en-011",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "How do those self-checkout machines at grocery stores know if I’m scanning the right item? Do they weigh everything?"
+    },
+    {
+      "id": "general-en-012",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "Why does my phone battery drain so much faster when it’s cold outside? Is there a way to protect it in winter?"
+    },
+    {
+      "id": "general-en-013",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "What’s the simplest way to keep my glasses from fogging up when I wear a mask? I’ve tried soap but it doesn’t last."
+    },
+    {
+      "id": "general-en-014",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "general_question_answering-en-003",
+        "provider": "mistral",
+        "modelId": "mistral-large-3",
+        "requestedApiModel": "mistral-large-latest",
+        "modelVersion": "mistral-large-latest",
+        "aliasResolution": {
+          "resolvedModelId": "mistral-large-2512",
+          "outcome": "resolved",
+          "candidates": [
+            "mistral-large-2512"
+          ],
+          "resolvedAt": "2026-08-25T11:52:23Z",
+          "source": "https://api.mistral.ai/v1/models",
+          "note": "Pinned by hand, not by the drafting run: the deployed commit 1ca47b2 predates automatic resolution. The listing was read twice, at 2026-08-25T11:52:23Z and 2026-08-25T12:15:34Z, and returned the same mapping both times. Those readings bracket both batches (ko 11:57:00.693Z, en 11:59:40.380Z), so the alias did not move between them."
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v1",
+        "promptTemplateHash": "e5a41a7216301745",
+        "generatorCommit": "1ca47b2",
+        "draftedAt": "2026-08-25T11:59:40.380Z"
+      },
+      "prompt": "How do those automatic soap dispensers work? Do they sense my hand, or is it just a timer?"
     }
-  ]
+  ],
+  "proposedPilotCellTarget": 14,
+  "pilotReady": false
 }

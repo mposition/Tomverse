@@ -1,9 +1,11 @@
 import "server-only";
 
-import { generateText } from "ai";
+import { generateText, jsonSchema, Output } from "ai";
+import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import type { ExtractionModelAdapter } from "@/lib/memoryExtractionPipeline";
 import type { AiModel } from "@/lib/models";
+import { MEMORY_EXTRACTION_OUTPUT_SCHEMA } from "@/lib/memoryExtractionPrompt";
 
 /**
  * The one place memory extraction actually calls a provider (policy §11).
@@ -62,6 +64,27 @@ export function createExtractionProviderAdapter(input: {
             maxOutputTokens: input.maxOutputTokens,
             maxRetries: 0,
             abortSignal: input.signal,
+            // The schema goes to the provider rather than being described in
+            // prose. v1 told the model to return JSON "matching the requested
+            // schema" and requested no schema, so the model guessed the field
+            // names and the type of `confidence`; the strict parser rejected
+            // every answer it produced.
+            output: Output.object({
+                // `as const` keeps the schema's literal types, which the
+                // fingerprint test reads; `JSONSchema7` wants them mutable.
+                // The object is the same either way, and losing the literals
+                // to satisfy a parameter would cost the test its precision.
+                schema: jsonSchema(
+                    MEMORY_EXTRACTION_OUTPUT_SCHEMA as unknown as JSONSchema7
+                ),
+                name: "memory_extraction_candidates",
+            }),
+            providerOptions: {
+                // Strict mode makes the provider enforce the schema instead of
+                // aiming at it. Ignored by providers that do not have it; the
+                // schema is written to satisfy it either way.
+                openai: { strictJsonSchema: true },
+            },
         });
 
         const usage = generated.usage as
@@ -82,9 +105,22 @@ export function createExtractionProviderAdapter(input: {
             responseId: generated.response?.id ?? null,
         });
 
-        // Text rather than a structured-output object: the strict parser in
-        // memoryExtractionOutput.ts is the contract, so every provider is
-        // decoded through one place where a malformed answer is judged.
-        return { text: generated.text };
+        // The object as the provider returned it, never re-serialised to text:
+        // a round trip through JSON.stringify would invent a formatting the
+        // model did not choose and hide a shape the parser should judge.
+        //
+        // There is no fall back to `generated.text`. A refusal, a schema
+        // violation or a truncated answer must be recorded as the failure it
+        // is; reading the text beside it would turn "the provider would not
+        // produce this shape" into a parse error somewhere further down, and
+        // docs/policy/external-conversation-import-and-memory.md §12.2 scores failures
+        // rather than reshaping them.
+        //
+        // Structured output does not replace the strict parser. It constrains
+        // the shape; `memoryExtractionOutput.ts` still binds every evidence
+        // label to a real message, normalises statements, enforces lengths,
+        // dates and kinds, and feeds the deterministic validator
+        // (docs/policy/external-conversation-import-and-memory.md §8.4).
+        return { output: generated.output };
     };
 }

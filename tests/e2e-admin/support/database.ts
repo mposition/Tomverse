@@ -30,9 +30,11 @@ import {
   FIXTURE_PROVIDER_USAGE,
   FIXTURE_REFUNDS,
   FIXTURE_RETENTION_RUN,
+  FIXTURE_SUPPRESSION,
   FIXTURE_USAGE,
   FIXTURE_WEBHOOK,
 } from "./fixture-data";
+import { EMAIL_CAMPAIGNS_FLAG_KEY } from "@/lib/emailFeatureFlags";
 
 /**
  * The fixture boundary for the Admin Console E2E suite.
@@ -699,7 +701,22 @@ export const seedAdminFixtures = async () => {
         key: "guestDefaultModelId",
         value: FIXTURE_APP_SETTINGS.guestDefaultModelId,
       },
+      // The campaign console lives behind this (EM-05, ADR section 15.2) and it
+      // is off everywhere it has not been switched on. The harness switches it
+      // on so the console's own specs exercise the feature; one spec turns it
+      // back off to check what an operator sees when it is not.
+      { key: EMAIL_CAMPAIGNS_FLAG_KEY, value: "true" },
     ],
+  });
+
+  await prisma.suppressionEntry.create({
+    data: {
+      emailAddress: FIXTURE_SUPPRESSION.emailAddress,
+      scope: FIXTURE_SUPPRESSION.scope,
+      purposeKey: FIXTURE_SUPPRESSION.purposeKey,
+      reason: FIXTURE_SUPPRESSION.reason,
+      source: FIXTURE_SUPPRESSION.source,
+    },
   });
 
   await prisma.adminAlertPolicy.create({
@@ -793,4 +810,76 @@ export const seedAdminFixtures = async () => {
 export const resetAndSeedAdminFixtures = async () => {
   await resetAdminDatabase();
   return seedAdminFixtures();
+};
+
+/**
+ * Writes an `AppSetting` row directly, for a spec that needs a flag in a state
+ * the harness does not seed.
+ *
+ * Test infrastructure, not a product path. The email feature flags are
+ * deliberately not writable through any admin API
+ * (docs/policy/email-notifications.md §15.2, registered in
+ * `tests/appSettingWriters.test.mjs`), so a spec about one of them being off
+ * cannot get there by driving the console — and hiding that by adding a writer
+ * for the test's convenience would remove the very decision the ADR made.
+ */
+export const setAppSettingDirectly = async (key: string, value: string) => {
+  const prisma = adminFixtureDatabase();
+  await prisma.appSetting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  });
+};
+
+/**
+ * A wave and a page of ledger rows for it, written straight to the database.
+ *
+ * The expansion writes these rows, and driving the expansion from a spec would
+ * mean standing up a template, a policy version, an event and a cron pass to
+ * produce a table the screen reads. That path is covered by
+ * `tests/integration/campaign-ledger-people.db.test.ts`, which asserts the rows
+ * the expander writes. What this spec is about is what the screen does with
+ * rows that exist — so it makes them exist.
+ *
+ * The addresses are real-shaped on purpose: a fixture of `x@y` would mask to
+ * something indistinguishable from an empty cell, and the assertion that the
+ * page never contains the raw local part would pass without meaning anything.
+ */
+export const seedCampaignLedger = async (input: {
+  campaignId: string;
+  addresses: readonly string[];
+}) => {
+  const prisma = adminFixtureDatabase();
+  const wave = await prisma.emailCampaignWave.create({
+    data: {
+      campaignId: input.campaignId,
+      kind: "launch",
+      sequence: 1,
+      dryRun: false,
+    },
+    select: { id: true },
+  });
+
+  let index = 0;
+  for (const address of input.addresses) {
+    index += 1;
+    const user = await prisma.user.create({
+      data: { email: `ledger-${index}-${wave.id}@example.test` },
+      select: { id: true },
+    });
+    await prisma.emailCampaignRecipient.create({
+      data: {
+        campaignId: input.campaignId,
+        waveId: wave.id,
+        userId: user.id,
+        emailAddress: address,
+        language: "en",
+        eligibilityReason: "default_model",
+        excludedReason: null,
+      },
+    });
+  }
+
+  return wave.id;
 };

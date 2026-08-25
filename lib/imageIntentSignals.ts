@@ -514,14 +514,34 @@ export const l0ImageIntent = (intentClass: ImageIntentClass): L0ImageIntent => {
 };
 
 /**
- * The chip is offered for unmistakable raster generation and nothing else.
+ * Which turns are offered a handoff to image generation.
  *
- * Text-heavy visuals are excluded on purpose: their destination is an open
- * product question (.github/audits/image-intent-auto-switch-2026-08-24.md §6),
- * and a chip is an answer to it.
+ * Both surfaces read this: the composer chip before sending, and the control
+ * under a finished answer. One predicate, because a person who is offered the
+ * workspace while typing and refused it after reading the answer would have
+ * learned nothing except that the offer is arbitrary.
+ *
+ * ## Why text-heavy visuals are in it now
+ *
+ * They were excluded while the destination was an open product question
+ * (.github/audits/image-intent-auto-switch-2026-08-24.md §6). It was settled
+ * on 2026-08-25 in favour of offering it, on the evidence of what the
+ * exclusion actually produced: the model, told to make a file and not to
+ * mention the workspace, listed the workspace as option 4 of 4 and asked
+ * which the user wanted. The user picked 4, and the model -- correctly, since
+ * it cannot navigate -- said it had no way to get there.
+ *
+ * The exclusion also never reached the person. It removed the *control* and
+ * left the *sentence*, which is the worst half: a destination named in prose
+ * that only the app can walk to.
+ *
+ * A text-to-image model still renders Korean text poorly, and that is the
+ * reason the SVG file remains what an infographic request produces first.
+ * The handoff is offered beside it, not instead of it -- see
+ * `lib/imageCapabilityPrompt.ts`.
  */
 export const offersImageHandoffChip = (intentClass: ImageIntentClass): boolean =>
-  intentClass === "raster_generation";
+  intentClass === "raster_generation" || intentClass === "text_heavy_visual";
 
 /**
  * Stable key for "have we already offered on this draft".

@@ -23,6 +23,7 @@ import {
 } from "@/lib/memoryAccess";
 import {
     MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL,
+    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
 } from "@/lib/memoryExtractionEvalCore";
 
@@ -55,6 +56,19 @@ export type MemoryExtractionEvalEntry = {
         artifactRef: string;
         evaluatedCommit: string;
         datasetVersion: string;
+        /**
+         * Which dataset schema that version is written in.
+         *
+         * Optional on the type and required on an approved entry, which is
+         * the fail-closed direction: an approval that does not say cannot be
+         * read as schema 2. A schema-1 dataset carries no
+         * `expectedDisposition` and no `goldCompleteness`, so it cannot
+         * produce bulk eligibility recall or the sensitive-review bulk-safe
+         * misclassification count — an approval resting on it would be
+         * resting on metrics that were never computed
+         * (`.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md`).
+         */
+        datasetSchemaVersion?: number;
         languages: readonly string[];
         /** per category (1-4) per language arm, §12.2: each ≥ 200. */
         sampleCounts: Readonly<Record<string, number>>;
@@ -75,25 +89,32 @@ export type MemoryExtractionEvalEntry = {
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
         {
-            // §12.5 first eval target. **Still a candidate.** The budget below
-            // is filled, which is what opens `--live`; it is not approval of
-            // the pair. That is the §12.4 procedure — decision-grade run,
-            // artifact preservation, blind review, independent re-run, §12.3
-            // judgement, approver signature, register merge, staging
-            // verification — and none of it has happened.
+            // **Never approved, superseded by v2.** The pair was the §12.5
+            // first eval target and its only live run reached five
+            // consecutive unscoreable answers: the prompt asked for JSON
+            // "matching the requested schema" and the adapter requested no
+            // schema, so the model guessed the field names and the type of
+            // `confidence`. That is a wiring defect, not a measurement, and
+            // the run is recorded as `abortedOnConsecutiveFailures` rather
+            // than as a verdict. US$0.0012 was spent reaching it.
+            //
+            // Kept rather than deleted because the budget below was really
+            // approved and really spent against, and a register that dropped
+            // the entry would lose both facts.
             extractionModelId: "gpt-5-6-luna",
-            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
-            status: "candidate",
+            // Written out, never `MEMORY_EXTRACTION_PROMPT_VERSION`. While
+            // these entries read the live constant, bumping it moved every
+            // approval onto the new version without anybody approving
+            // anything -- which is precisely what a version is for.
+            promptVersion: "mem-extract-v1",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-03",
+            notes:
+                "Never approved. Superseded by mem-extract-v2 (structured " +
+                "outputs) on 2026-08-24. US$0.0012 spent; no verdict exists.",
             evalBudget: {
                 approvedBy: "@mposition",
-                // US$17.36 is the worst case for three runs: §12.4 asks for two
-                // and the third absorbs one failed run without a second
-                // approval. The worst case prices every call at the harness's
-                // 4,096-token output ceiling, so a run that behaves cannot
-                // approach this — the typical figure for two runs is US$3.09.
-                // Derivation and what it does not measure: issue #837.
                 maxUsd: 20,
                 ticket: "https://github.com/mposition/Tomverse/issues/837",
                 approvedAt: "2026-08-23",
@@ -101,12 +122,91 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // §12.5 backup candidate, evaluated only if the primary fails.
             extractionModelId: "gpt-5-4-mini",
-            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
-            status: "candidate",
+            promptVersion: "mem-extract-v1",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-03",
+            notes:
+                "Never approved. Superseded by mem-extract-v2 on 2026-08-24; " +
+                "never had a budget and was never run.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
+            // **Never approved, diagnostic only, superseded by v3.** v2 fixed
+            // v1's wiring -- the schema is requested now, and two probes
+            // returned zero unparseable answers -- and in doing so let the
+            // measurement be read for the first time. What it showed was four
+            // contract defects, none of them the model:
+            //
+            //   A. the prompt never says which language a statement is
+            //      written in, and the ko gold labels are Korean tokens, so a
+            //      correct extraction written in English fails that arm;
+            //   B. the kind taxonomy is not mutually exclusive -- the model
+            //      picks `verbosity`/`tone` where the labels said the generic
+            //      `preference` -- and matching requires exact equality;
+            //   C. v2's strict schema made `sensitivity` required, so the
+            //      model now marks health facts `sensitive`; the validator
+            //      may raise that but never lower it, and a candidate that is
+            //      not bulk-safe can never match a gold label. "Correctly
+            //      extracted, awaiting review" scores as "not extracted";
+            //   D. gold labels enumerate one memory per case, so a correct
+            //      extra extraction costs precision.
+            //
+            // Together they make §12.3's bounds unreachable regardless of
+            // model quality, so the pair is closed here rather than run: a
+            // full run would have bought an uninterpretable number with the
+            // budget. The findings and both probes are recorded in
+            // docs/ops/memory-extraction-eval-diagnostics.md.
+            //
+            // Revoked rather than left a candidate because the budget below
+            // is real and stays: `decideEvalRunMode` reads status first, so a
+            // closed pair cannot spend what remains of it.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v2",
+            status: "revoked",
+            owner: "@mposition",
+            registeredAt: "2026-08-24",
+            notes:
+                "Never approved. Diagnostic only: two probes (20 cases, " +
+                "US$0.0056) established the wiring and surfaced findings A-D. " +
+                "Superseded by mem-extract-v3.",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Approved for v2 on its own, not carried across from v1:
+                // #837 was amended rather than reused, because a budget that
+                // migrates with a version bump is a budget nobody approved
+                // for the thing it ends up paying for.
+                //
+                // US$11.57 is the worst case for two runs at the 4,096-token
+                // output ceiling the product sends; the typical figure is
+                // US$3.09. The headroom to US$20 absorbs the compatibility
+                // probe and one failed run without a second approval.
+                //
+                // US$0.0012 was already spent under v1 finding the wiring
+                // defect v2 fixes. It counts against this programme, and
+                // nothing enforces that: the harness bounds a *run* through
+                // --max-cost-usd and has no cumulative ledger, so the figure
+                // is recorded here to be subtracted by a person.
+                maxUsd: 20,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-24",
+            },
+            evaluation: null,
+        },
+        {
+            // §12.5 backup candidate. Closed with the primary: the four
+            // findings are contract defects, not model behaviour, so nothing
+            // about them would differ under another model.
+            extractionModelId: "gpt-5-4-mini",
+            promptVersion: "mem-extract-v2",
+            status: "revoked",
+            owner: "@mposition",
+            registeredAt: "2026-08-24",
+            notes:
+                "Never approved. Superseded by mem-extract-v3; never had a " +
+                "budget and was never run.",
             evalBudget: null,
             evaluation: null,
         },
@@ -213,6 +313,16 @@ export function findEvalRegisterProblems(
                 problems.push(`${label}: evaluation evidence has empty fields`);
                 break;
             }
+        }
+        if (
+            evaluation.datasetSchemaVersion !==
+            MEMORY_EVAL_DATASET_SCHEMA_VERSION
+        ) {
+            problems.push(
+                `${label}: approved against dataset schema ` +
+                    `${evaluation.datasetSchemaVersion ?? "(unstated)"}; ` +
+                    `§12.3 as amended requires schema ${MEMORY_EVAL_DATASET_SCHEMA_VERSION}`
+            );
         }
         for (const language of MEMORY_EVAL_REQUIRED_LANGUAGES) {
             if (!evaluation.languages.includes(language)) {

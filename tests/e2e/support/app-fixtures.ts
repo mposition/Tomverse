@@ -468,6 +468,12 @@ export type AuthenticatedQaState = {
   timeZoneInitializedAt: string | null;
   timeZoneChangedAt: string | null;
   userSettingsReads: number;
+  /**
+   * `UserSettings.imageHandoffAutoGenerate`. Off by default, which is what a
+   * real account starts as: a test that wants the opt-in has to turn it on,
+   * so nothing generates on a press by accident.
+   */
+  imageHandoffAutoGenerate: boolean;
 };
 
 /**
@@ -674,6 +680,7 @@ export async function mockAuthenticatedApi(
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
     timeZoneChangedAt: "2026-05-01T00:00:00.000Z",
     userSettingsReads: 0,
+    imageHandoffAutoGenerate: false,
   };
 
   const conversation = () => ({
@@ -754,7 +761,11 @@ export async function mockAuthenticatedApi(
         defaultModel?: unknown;
         timeZone?: unknown;
         timeZoneSource?: unknown;
+        imageHandoffAutoGenerate?: unknown;
       };
+      if (typeof body.imageHandoffAutoGenerate === "boolean") {
+        state.imageHandoffAutoGenerate = body.imageHandoffAutoGenerate;
+      }
       if (body.theme === "dark" || body.theme === "light" || body.theme === "system") {
         state.theme = body.theme;
       }
@@ -779,6 +790,7 @@ export async function mockAuthenticatedApi(
             timeZoneInitializedAt: state.timeZoneInitializedAt,
             timeZoneChangedAt: state.timeZoneChangedAt,
             timeZoneChangeAllowedAt: "2026-05-31T00:00:00.000Z",
+            imageHandoffAutoGenerate: state.imageHandoffAutoGenerate,
           },
         })
       );
@@ -797,6 +809,7 @@ export async function mockAuthenticatedApi(
         timeZoneInitializedAt: state.timeZoneInitializedAt,
         timeZoneChangedAt: state.timeZoneChangedAt,
         timeZoneChangeAllowedAt: "2026-05-31T00:00:00.000Z",
+        imageHandoffAutoGenerate: state.imageHandoffAutoGenerate,
       })
     );
   });

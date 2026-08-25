@@ -372,10 +372,21 @@ export const summariseRetirementAudience = async (input: {
     purpose?: string | null;
     classification: Parameters<typeof suppressionCheck>[0]["classification"];
     pageSize?: number;
+    /**
+     * Stop after this many candidates and say so.
+     *
+     * A full scan walks every account that names the model, which is the number
+     * this is being asked about -- so on the audience it is most useful for, it
+     * is also most expensive. A caller with somebody waiting bounds it; the
+     * result then reports `truncated` and every figure in it is a floor.
+     */
+    maxCandidates?: number;
 }): Promise<AudienceSummary> => {
     const take = input.pageSize ?? 200;
     const members: AudienceMember[] = [];
     let after: string | null = null;
+    let scanned = 0;
+    let truncated = false;
 
     for (;;) {
         const page: AudienceCandidate[] = await audienceCandidatePage({
@@ -395,10 +406,23 @@ export const summariseRetirementAudience = async (input: {
             }))
         );
         after = page[page.length - 1].userId;
+        scanned += page.length;
         if (page.length < take) break;
+        // Checked after a whole page rather than mid-page: a partial page would
+        // make the figures depend on where the cap happened to fall inside a
+        // batch, and the cap is about bounding the work, not about a precise
+        // number of rows.
+        if (input.maxCandidates !== undefined && scanned >= input.maxCandidates) {
+            truncated = true;
+            break;
+        }
     }
 
-    return summariseAudience(members, await audienceCohortRows(input.targetModelId));
+    return summariseAudience(
+        members,
+        await audienceCohortRows(input.targetModelId),
+        truncated
+    );
 };
 
 export type { AudienceSummary };

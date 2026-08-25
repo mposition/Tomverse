@@ -15,7 +15,7 @@ import type { LifecycleReportRow } from "@/lib/modelLifecycleWorkItems";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
 import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
 import { prisma } from "@/lib/prisma";
-import { enqueueStandardEmail } from "@/lib/standardEmailLane";
+import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
 
 /**
  * Display names for the operator report.
@@ -472,7 +472,11 @@ export async function sendProviderModelCatalogReport(input: {
           recipient,
           delivered: false,
           status: "queued" as const,
-          deliveryId: queued?.deliveryId ?? null,
+          // A refusal is not a delivery. This template is `operations`, so the
+          // marketing flag never reaches it and the only refusal it can meet is
+          // an operator address that is missing -- which is worth `null` here
+          // rather than a crash.
+          deliveryId: enqueueRefused(queued) ? null : queued.deliveryId,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Email enqueue failed.";

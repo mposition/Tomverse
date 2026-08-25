@@ -181,18 +181,27 @@ export async function buildChatProfileContext(input: {
             memoryPolicy: true,
             knowledgeManifest: true,
             promptFormatVersion: true,
-            profile: { select: { currentVersionId: true } },
         },
     });
+    // The version the conversation names, whether or not it is still the
+    // profile's current one. A conversation pinned to a superseded revision
+    // runs that revision -- pinning that stops applying the moment the owner
+    // edits the profile is not pinning, and §14's "소급 적용 금지, 이동은
+    // 명시적 사용자 동작" says the move is the user's to make.
+    //
+    // This used to refuse, on the reasoning that running a replaced revision
+    // answers under instructions the owner has edited away. The cost of that
+    // reading was found in staging on 2026-08-25: publishing a revision left
+    // every existing conversation on the old one silently without a profile.
+    // Not the current version's instructions and not the pinned version's --
+    // none at all, with the API and the picker still reporting the profile as
+    // attached and running. Answering under the revision the conversation was
+    // pinned to is the behaviour the owner can see and reason about; answering
+    // under no profile while the screen says otherwise is not.
+    //
+    // Only "the row is gone" is left, which is a profile deleted out from
+    // under the conversation (§G-1 covers what the conversation does then).
     if (!version) return refused("no_active_version");
-    // The conversation may point at a superseded revision. That is a version
-    // the owner replaced, and running it would answer under instructions they
-    // have already edited away -- so it is refused rather than silently
-    // upgraded to the current one, which would be the same substitution
-    // `ASSISTANT_PROFILE_MODEL_UNAVAILABLE` refuses for models.
-    if (version.profile.currentVersionId !== version.id) {
-        return refused("no_active_version");
-    }
 
     const modelIds = storedModelIds(version.models);
     const primaryModelId = modelIds[0];

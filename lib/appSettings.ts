@@ -1,5 +1,14 @@
 import "server-only";
 
+import type { Session } from "next-auth";
+
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+import {
+  getAdminSessionAccessState,
+  hasAdminPermission,
+} from "@/lib/adminAuth";
+import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
+
 import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
 import {
   ASSISTANT_KNOWLEDGE_FLAG_KEY,
@@ -21,6 +30,12 @@ import {
   IMAGE_GENERATION_FLAG_KEY,
   imageGenerationEnabledFromValue,
 } from "@/lib/imageGenerationAccess";
+import {
+  EMAIL_CAMPAIGNS_FLAG_KEY,
+  EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
+  EMAIL_MARKETING_FLAG_KEY,
+  emailFeatureEnabledFromValue,
+} from "@/lib/emailFeatureFlags";
 import {
   MEMORY_EXTRACTION_FLAG_KEY,
   MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
@@ -330,6 +345,46 @@ export async function isMemoryInjectionEnabled(): Promise<boolean> {
   return memoryInjectionEnabledFromValue(row?.value);
 }
 
+/**
+ * The email ADR's three flags (docs/policy/email-notifications.md §15.2),
+ * read the same way as the two above.
+ *
+ * `e2eDatabaseDisabled()` returns false for the same reason it does there: a
+ * harness with no database must not be able to send marketing, and off is the
+ * answer that fails safely.
+ */
+export async function isEmailMarketingEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_MARKETING_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
+export async function isEmailCampaignsEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_CAMPAIGNS_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
+/**
+ * Read by nothing today: the two-year consent re-confirmation batch does not
+ * exist. Exported anyway so the ADR's name resolves to a real accessor rather
+ * than to a search with no results, which is the EM-05 finding.
+ */
+export async function isEmailConsentReconfirmEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_CONSENT_RECONFIRM_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
 export class MemoryFeatureDisabledError extends Error {
   constructor() {
     super("Account memory is not enabled.");
@@ -496,4 +551,109 @@ export async function isAssistantPackageImportEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return assistantPackageImportEnabledFromValue(row?.value);
+}
+
+/** Why a change to the import flag was refused, when it was. */
+export type AssistantPackageImportFlagRefusal =
+  | "reauthentication-required"
+  | "not-authorized"
+  | "rationale-required";
+
+export type AssistantPackageImportFlagOutcome =
+  | { outcome: "refused"; reason: AssistantPackageImportFlagRefusal }
+  | {
+      outcome: "changed" | "unchanged";
+      /** The stored value before this call. `null` when there was no row. */
+      before: string | null;
+      after: string;
+    };
+
+/**
+ * The only way the import flag changes
+ * (docs/policy/assistant-package-import.md §12.2.1).
+ *
+ * Turning it on and rolling it back are the same call with a different
+ * argument, deliberately. A control that only switches on leaves the reverse
+ * to a hand-typed `UPDATE`, and then the record says a feature was released
+ * and never says it was withdrawn -- which is the half anyone reading later
+ * actually needs.
+ *
+ * `ops:write` and a session that has not aged out, because this is the release
+ * of a feature that reads the owner's files. The rationale is required for the
+ * same reason the audit row exists at all: "who and when" without "why" does
+ * not answer the question the row is kept for.
+ *
+ * Not a field on the bulk settings PATCH. That request carries whatever the
+ * panel is holding and rewrites all of it, so an audit row from it can say
+ * that settings were saved and cannot say that this flag moved.
+ *
+ * The write and the audit row share one transaction: an enabled feature with
+ * no record of who enabled it is exactly the state this exists to prevent, and
+ * a failed audit write has to take the change with it.
+ */
+export async function setAssistantPackageImportEnabled(input: {
+  session: Session | null | undefined;
+  request?: Request;
+  enabled: boolean;
+  /** What this change is for. Stored on the audit row, never elsewhere. */
+  rationale: string;
+}): Promise<AssistantPackageImportFlagOutcome> {
+  const session = input.session;
+  // Age first, because `hasAdminPermission()` reads through `isAdminSession()`
+  // and an aged-out session has no role at all there. Asked in the other
+  // order, an operator whose session had simply gone stale would be told they
+  // are not allowed to do this -- which is both wrong and unactionable.
+  if (getAdminSessionAccessState(session) === "reauthentication-required") {
+    return { outcome: "refused", reason: "reauthentication-required" };
+  }
+  if (!session || !hasAdminPermission(session, "ops:write")) {
+    return { outcome: "refused", reason: "not-authorized" };
+  }
+  // The narrower step-up window, on top of the session's own lifetime: the
+  // same one `/api/admin/**` uses for its other high-risk actions, read
+  // through the same helper so this surface and the reauthentication page
+  // cannot reach different conclusions about one session.
+  if (!hasRecentAdminAuthentication(session)) {
+    return { outcome: "refused", reason: "reauthentication-required" };
+  }
+  const rationale = input.rationale.trim();
+  if (!rationale) {
+    return { outcome: "refused", reason: "rationale-required" };
+  }
+
+  const after = input.enabled ? "true" : "false";
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.appSetting.findUnique({
+      where: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY },
+      select: { value: true },
+    });
+    const before = existing?.value ?? null;
+    await tx.appSetting.upsert({
+      where: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY },
+      update: { value: after },
+      create: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY, value: after },
+    });
+    await writeAdminAuditLog({
+      session,
+      request: input.request,
+      action: input.enabled
+        ? "assistantPackageImport.enabled"
+        : "assistantPackageImport.disabled",
+      targetType: "appSetting",
+      targetId: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY,
+      summary: rationale,
+      // Both values, because "it is on now" does not say whether this call is
+      // what turned it on. A rollback of a flag that was already off is a
+      // different fact from a rollback of a live one.
+      metadata: { before, after },
+      tx,
+    });
+    // Reported apart from `changed` so a no-op is legible as one: the audit
+    // row is written either way, since deciding to press it is the event.
+    return {
+      outcome: before === after ? ("unchanged" as const) : ("changed" as const),
+      before,
+      after,
+    };
+  });
 }

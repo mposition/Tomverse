@@ -8,6 +8,7 @@ import { getConfiguredAdminAccess } from "@/lib/adminAuth";
 import { roleHasPermission, type AdminRole } from "@/lib/adminAuthCore";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
+    checkCampaignCopyBinding,
     checkDryRunBinding,
     decideSoleApproverEligibility,
     DRY_RUN_BINDING_MAX_AGE_MS,
@@ -57,6 +58,12 @@ const REFUSAL_MESSAGES: Record<string, string> = {
     preview_expired: "The dry run is too old. Run it again and execute from its result.",
     preview_belongs_to_another_administrator:
         "The dry run was created by a different administrator.",
+    copy_digest_missing:
+        "Confirm the copy you read: the approval has to name what it is approving.",
+    copy_digest_mismatch:
+        "The copy has changed since it was read. Read it again and approve from what it says now.",
+    copy_unreadable:
+        "This campaign's copy could not be rendered, so there is nothing to confirm against.",
 };
 
 const refuse = (reason: string): never => {
@@ -106,6 +113,46 @@ export const soleApproverIsAvailable = (
     session: Session
 ) => soleApproverAvailability(action, session).allowed;
 
+/**
+ * What the sole approver echoed back, and what it is checked against.
+ *
+ * The proof differs per action because the thing being confirmed differs. The
+ * retention path proves *you were shown this preview and nothing has
+ * superseded it*; the campaign path proves *you read this copy and it has not
+ * changed*. Both close the same hole -- one administrator confirming something
+ * other than what they saw -- and neither substitutes for the other, so this
+ * is a union rather than a shared "digest" field that would quietly accept the
+ * wrong kind.
+ */
+export type SoleApproverConfirmation =
+    | {
+          kind: "retention_dry_run";
+          submittedRunId: string;
+          submittedDigest: string;
+      }
+    | {
+          kind: "campaign_copy";
+          /** What the campaign's copy hashes to right now (`campaignDigest()`). */
+          currentDigest: string | null;
+          submittedDigest: string;
+      };
+
+/** What the audit record says was confirmed, without repeating the union. */
+const confirmationMetadata = (confirmation: SoleApproverConfirmation) =>
+    confirmation.kind === "retention_dry_run"
+        ? {
+              confirmed: confirmation.kind,
+              dryRunId: confirmation.submittedRunId,
+              dryRunDigest: confirmation.submittedDigest,
+              dryRunMaxAgeMs: DRY_RUN_BINDING_MAX_AGE_MS,
+          }
+        : {
+              confirmed: confirmation.kind,
+              // The digest, never the copy: the record says which words were
+              // approved without becoming a second copy of them.
+              copyDigest: confirmation.submittedDigest,
+          };
+
 export async function runAsSoleApprover<T>(
     input: {
         session: Session;
@@ -113,8 +160,7 @@ export async function runAsSoleApprover<T>(
         action: SoleApproverAction;
         targetType: string;
         targetId?: string | null;
-        submittedRunId: string;
-        submittedDigest: string;
+        confirmation: SoleApproverConfirmation;
     },
     operation: () => Promise<T>
 ): Promise<T> {
@@ -129,35 +175,47 @@ export async function runAsSoleApprover<T>(
     });
     if (!eligibility.allowed) refuse(eligibility.reason);
 
-    // The latest run of any mode, so a preview that something has already
-    // superseded is detectable. Fetching the submitted id instead would
-    // happily confirm stale numbers.
-    const latestRun = await prisma.adminRetentionRun.findFirst({
-        orderBy: { createdAt: "desc" },
-        select: {
-            id: true,
-            mode: true,
-            result: true,
-            createdAt: true,
-            createdById: true,
-        },
-    });
-    const binding = checkDryRunBinding({
-        submittedRunId: input.submittedRunId,
-        submittedDigest: input.submittedDigest,
-        latestRun: latestRun
-            ? {
-                  id: latestRun.id,
-                  mode: latestRun.mode,
-                  digest: approvalPayloadHash(latestRun.result),
-                  createdAt: latestRun.createdAt,
-                  createdById: latestRun.createdById,
-              }
-            : null,
-        requesterId: actorId,
-        now: new Date(),
-    });
-    if (!binding.bound) refuse(binding.reason);
+    if (input.confirmation.kind === "retention_dry_run") {
+        // The latest run of any mode, so a preview that something has already
+        // superseded is detectable. Fetching the submitted id instead would
+        // happily confirm stale numbers.
+        const latestRun = await prisma.adminRetentionRun.findFirst({
+            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                mode: true,
+                result: true,
+                createdAt: true,
+                createdById: true,
+            },
+        });
+        const binding = checkDryRunBinding({
+            submittedRunId: input.confirmation.submittedRunId,
+            submittedDigest: input.confirmation.submittedDigest,
+            latestRun: latestRun
+                ? {
+                      id: latestRun.id,
+                      mode: latestRun.mode,
+                      digest: approvalPayloadHash(latestRun.result),
+                      createdAt: latestRun.createdAt,
+                      createdById: latestRun.createdById,
+                  }
+                : null,
+            requesterId: actorId,
+            now: new Date(),
+        });
+        if (!binding.bound) refuse(binding.reason);
+    } else {
+        // The caller reads the current digest, for the same reason the branch
+        // above reads the latest run here rather than trusting the request:
+        // a confirmation checked against something the requester supplied
+        // confirms nothing.
+        const binding = checkCampaignCopyBinding({
+            submittedDigest: input.confirmation.submittedDigest,
+            currentDigest: input.confirmation.currentDigest,
+        });
+        if (!binding.bound) refuse(binding.reason);
+    }
 
     // Condition 5, first half. A durable record of the intent exists before
     // anything is deleted, for the same reason `runWithAdminApproval` writes
@@ -175,9 +233,7 @@ export async function runAsSoleApprover<T>(
             // than leaving a reader to work it out from configuration that
             // may have changed since.
             eligibleApproverCount: 1,
-            dryRunId: input.submittedRunId,
-            dryRunDigest: input.submittedDigest,
-            dryRunMaxAgeMs: DRY_RUN_BINDING_MAX_AGE_MS,
+            ...confirmationMetadata(input.confirmation),
         },
     });
 
@@ -194,7 +250,7 @@ export async function runAsSoleApprover<T>(
             summary: `Failed ${input.action} as the sole eligible administrator.`,
             metadata: {
                 action: input.action,
-                dryRunId: input.submittedRunId,
+                ...confirmationMetadata(input.confirmation),
                 error:
                     error instanceof Error
                         ? `${error.name}: ${error.message}`.slice(0, 1_000)
@@ -223,7 +279,7 @@ export async function runAsSoleApprover<T>(
         summary: `Executed ${input.action} as the sole eligible administrator.`,
         metadata: {
             action: input.action,
-            dryRunId: input.submittedRunId,
+            ...confirmationMetadata(input.confirmation),
             result: auditableResult,
         },
     });

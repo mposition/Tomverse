@@ -61,6 +61,20 @@ export type RoutingShadowInput = {
     traceId: string;
     userId?: string | null;
     subjectKey: string;
+    /**
+     * The conversation this decision was shadowing, and the product it ran
+     * for. Both are known at the call site and were being dropped: a shadow
+     * row is a routing decision about a real turn, so it belongs to that
+     * turn's conversation exactly as the dispatch row does.
+     *
+     * Null on a turn with no conversation -- a guest has no row to read a
+     * product from -- and null on a conversation written before
+     * `productKey` existed, which is a fact rather than a gap:
+     * `docs/policy/routing-run-product-attribution.md` §6 refuses to infer a
+     * product nobody recorded.
+     */
+    conversationId?: string | null;
+    productKey?: string | null;
     plan: RouterCandidateInput["plan"];
     profile: TaskProfile;
     /** The model the user's request actually ran on. */
@@ -88,6 +102,8 @@ export type RoutingShadowDecision = {
     traceId: string;
     userId: string | null;
     subjectKey: string;
+    conversationId: string | null;
+    productKey: string | null;
     plan: string;
     taskProfileVersion: string;
     candidateFilterVersion: string;
@@ -166,6 +182,8 @@ export function buildRoutingShadowDecision(
         traceId: input.traceId,
         userId: input.userId ?? null,
         subjectKey: input.subjectKey,
+        conversationId: input.conversationId ?? null,
+        productKey: input.productKey ?? null,
         plan: input.plan,
         taskProfileVersion: TASK_PROFILE_VERSION,
         candidateFilterVersion: ROUTER_CANDIDATE_VERSION,
