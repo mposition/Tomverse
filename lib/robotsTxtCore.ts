@@ -137,3 +137,32 @@ export const isPathAllowed = (
   // overrides every `Disallow: /` in it.
   return decisive.some((rule) => rule.kind === "allow");
 };
+
+/**
+ * The part of a served `robots.txt` the application actually produced.
+ *
+ * Cloudflare's managed block is prepended and closed by a marker line, so
+ * while the zone setting is on, a served file is two authors' work spliced
+ * together. Both halves matter, and they answer different questions:
+ *
+ * - the whole file says what a crawler will *do*;
+ * - this half says whether our own policy is carrying its weight.
+ *
+ * Keeping them apart is not pedantry. On 2026-08-25 the production check
+ * passed while `app/robots.ts` named no AI crawler at all -- Cloudflare's half
+ * was refusing them, and the merged file looked exactly as it should. A check
+ * that cannot tell the two apart cannot tell you it is safe to turn the
+ * managed block off, which is the one question it is being asked.
+ *
+ * Returns the whole body when no managed block is present, which is the state
+ * this is all working towards.
+ */
+const MANAGED_BLOCK_END = "# END Cloudflare Managed Content";
+
+export const carriesManagedBlock = (body: string) => body.includes(MANAGED_BLOCK_END);
+
+export const applicationServedBody = (body: string): string => {
+  const marker = body.indexOf(MANAGED_BLOCK_END);
+  if (marker === -1) return body;
+  return body.slice(marker + MANAGED_BLOCK_END.length);
+};

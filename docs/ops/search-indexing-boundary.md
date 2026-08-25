@@ -67,9 +67,13 @@ Cloudflare 관리 블록에는 우리가 잃으면 안 되는 절반(AI crawler 
 
 1. **먼저 이 변경을 production까지 배포합니다.** 그래야 AI crawler 차단이
    비어 있는 순간이 생기지 않습니다.
-2. `npm run check:edge-robots -- https://tomverse.app` 로 production이 AI crawler를
-   여전히 거부하는지 확인합니다. 이 시점에는 Cloudflare 블록과 우리 블록이 둘 다
-   있고, 둘 다 같은 방향이라 통과해야 합니다.
+2. `npm run check:edge-robots -- https://tomverse.app` 로 **우리 파일이** AI
+   crawler를 거부하는지 확인합니다. 병합된 파일 전체가 아니라 우리 절반을 봐야
+   합니다 — 2026-08-25에 이 구분 없이 돌렸더니, `app/robots.ts`에 AI crawler가
+   한 줄도 없는 상태에서 통과했습니다. Cloudflare 절반이 그 일을 하고 있었고,
+   병합된 파일은 정상으로 보였습니다. 그래서 스크립트는 `# END Cloudflare
+   Managed Content` 뒤쪽만 떼어 우리 정책을 판정하고, 관리 블록이 아직 있으면
+   그 사실을 출력합니다. **이 단계가 통과해야 3번이 안전합니다.**
 3. **그 다음** Cloudflare 대시보드에서 관리 robots.txt를 끕니다:
    Security Settings → **Bot traffic** → "Set your preference to block training in
    robots.txt" 를 off. zone 단위 설정이라 `staging.tomverse.app`도 같이 풀립니다.

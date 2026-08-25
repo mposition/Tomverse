@@ -400,6 +400,7 @@ export const en = {
         toolsMemoryInheritOnDescription: "Your default is currently to use it, and this conversation will follow a change",
         toolsAssistant: "Assistant",
         toolsAssistantNone: "No assistant",
+        toolsAssistantRemoved: "The assistant used here was deleted",
         toolsAssistantNoneDescription: "Answer with the model on its own",
         toolsAssistantRevision: "Revision {revision}",
         toolsAssistantRevisionInUse: "Revision {revision} in use · newest {latest}",

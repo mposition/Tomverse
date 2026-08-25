@@ -465,9 +465,93 @@ test("deleting a profile tombstones its knowledge bytes and unpins conversations
 
     const survivor = await prisma.conversation.findUniqueOrThrow({
         where: { id: conversation.id },
-        select: { assistantProfileVersionId: true },
+        select: {
+            assistantProfileVersionId: true,
+            assistantProfileRemovedAt: true,
+        },
     });
     assert.equal(survivor.assistantProfileVersionId, null);
+    // The pin going null is what makes the tombstone necessary: without it the
+    // row says nothing at all, and the composer showed a conversation whose
+    // assistant had been removed exactly as it shows one that never had an
+    // assistant (staging section G-2, 2026-08-25).
+    assert.ok(
+        survivor.assistantProfileRemovedAt instanceof Date,
+        "the conversation must record that its assistant was deleted"
+    );
+});
+
+test("deleting a profile leaves other conversations alone", async () => {
+    // The stamp is an `updateMany`, so the thing worth pinning is its `where`:
+    // one owner's other conversations, and another owner's, must not be
+    // touched by it.
+    const owner = await createUser();
+    const stranger = await createUser();
+
+    const doomed = await createAssistantProfile({
+        userId: owner.id,
+        identity: identity("Doomed"),
+    });
+    const kept = await createAssistantProfile({
+        userId: owner.id,
+        identity: identity("Kept"),
+    });
+    const doomedVersion = await publishAssistantProfileVersion({
+        userId: owner.id,
+        profileId: doomed.id,
+        draft: draft(),
+        expectedRevision: null,
+    });
+    const keptVersion = await publishAssistantProfileVersion({
+        userId: owner.id,
+        profileId: kept.id,
+        draft: draft({ instructions: "Answer briefly." }),
+        expectedRevision: null,
+    });
+    assert.ok(doomedVersion.outcome === "published");
+    assert.ok(keptVersion.outcome === "published");
+
+    const affected = await prisma.conversation.create({
+        data: {
+            userId: owner.id,
+            title: "Uses the doomed profile",
+            assistantProfileVersionId: doomedVersion.version.id,
+        },
+    });
+    const otherProfile = await prisma.conversation.create({
+        data: {
+            userId: owner.id,
+            title: "Uses a different profile",
+            assistantProfileVersionId: keptVersion.version.id,
+        },
+    });
+    const noProfile = await prisma.conversation.create({
+        data: { userId: owner.id, title: "Never had one" },
+    });
+    const strangers = await prisma.conversation.create({
+        data: { userId: stranger.id, title: "Someone else's" },
+    });
+
+    await deleteAssistantProfile({ userId: owner.id, profileId: doomed.id });
+
+    const removedAt = async (id: string) =>
+        (
+            await prisma.conversation.findUniqueOrThrow({
+                where: { id },
+                select: { assistantProfileRemovedAt: true },
+            })
+        ).assistantProfileRemovedAt;
+
+    assert.ok(await removedAt(affected.id), "the bound conversation is stamped");
+    assert.equal(await removedAt(otherProfile.id), null);
+    assert.equal(await removedAt(noProfile.id), null);
+    assert.equal(await removedAt(strangers.id), null);
+    // The other profile is untouched, so its conversation keeps its pin.
+    const stillPinned = await prisma.conversation.findUniqueOrThrow({
+        where: { id: otherProfile.id },
+        select: { assistantProfileVersionId: true },
+    });
+    assert.equal(stillPinned.assistantProfileVersionId, keptVersion.version.id);
 });
 
 /* ---------------------------------------------------------------- quota */
