@@ -198,6 +198,7 @@ jobs:
           fetch-depth: 0
 
       - name: Assert the invariant
+        id: invariant
         run: |
           set -uo pipefail
           git fetch origin main develop
@@ -209,3 +210,38 @@ jobs:
           fi
           echo "::error::main ($main_sha) is NOT an ancestor of develop ($develop_sha). The back-merge did not land -- check the job above for a conflict, a refused push, or a pull request waiting to be merged with a merge commit. Until this is fixed, the next change to already-released code will conflict."
           exit 1
+
+      # The alert. Everything above this point was already true on 2026-08-15;
+      # what was missing was anyone being told, and the cost of that silence
+      # was five merges reaching `main` over two days with the app service
+      # skipping every one of them.
+      #
+      # `if: always()` and keyed off the assert step's own outcome rather than
+      # `job.status`, so a future step added below cannot change what this
+      # reports. The notifier never exits non-zero -- see the module header --
+      # so a missing webhook or a Slack outage cannot turn a recoverable
+      # back-merge conflict into two red checks.
+      #
+      # The commit message is passed through `env:` rather than interpolated
+      # into a `run:` line, so its contents are a string to the script and
+      # never shell.
+      - name: Set up Node
+        if: always() && steps.invariant.outcome == 'failure'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Report the red lane
+        if: always() && steps.invariant.outcome == 'failure'
+        env:
+          RELEASE_LANE: back-merge
+          RELEASE_LANE_CONCLUSION: failure
+          RELEASE_LANE_BRANCH: ${{ github.ref_name }}
+          RELEASE_LANE_WORKFLOW: ${{ github.workflow }}
+          RELEASE_LANE_SHA: ${{ github.sha }}
+          RELEASE_LANE_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          RELEASE_LANE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL }}
+          OPS_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.OPS_ALERT_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: node scripts/notify-release-lane-failure.mjs
