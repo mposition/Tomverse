@@ -35,6 +35,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import { directProviderKeyReads } from "../lib/emailProviderPortCore.ts";
 import {
   SENDER_ROLES,
   SENDER_ROLE_SPECS,
@@ -92,6 +93,21 @@ const SENDING_SUBDOMAIN_ALLOWED = new Set(["lib/emailSendingIdentityCore.ts"]);
  */
 const SEND_ROLE_LITERAL_EXEMPT = new Set(["lib/email.ts"]);
 
+/**
+ * Files allowed to name a provider API key variable in a read position.
+ *
+ * One: `lib/emailProviderPortCore.ts` owns the precedence table and this rule.
+ *
+ * The rule is the sender rule applied to the credential. `providerApiKeyFor()`
+ * prefers `TRANSACTIONAL_RESEND_API_KEY` and falls back to `RESEND_API_KEY`, so
+ * a file reading the second name directly reports on -- or sends with -- a key
+ * the deployment may not be using. Four files did: the domain report, the
+ * report script, the security-environment check and the admin environment
+ * screen. The first of those turned a permission error on one credential into
+ * a screen that looked like a finding about the sending domains.
+ */
+const PROVIDER_KEY_READ_ALLOWED = new Set(["lib/emailProviderPortCore.ts"]);
+
 /** Files that legitimately mention the retired names: this check, and the record. */
 const RETIRED_NAME_ALLOWED = new Set([
   "scripts/check-sending-identity.mjs",
@@ -137,6 +153,14 @@ if (!runtimeMode) {
           "is whoever the general identity is."
       );
     }
+    if (!PROVIDER_KEY_READ_ALLOWED.has(file)) {
+      for (const found of directProviderKeyReads(source)) {
+        problems.push(
+          `${file}:${found.line}: reads a provider API key directly (${found.text}). ` +
+            "Resolve it with providerApiKeyFor(stream, env) so it uses the key the deployment sends with."
+        );
+      }
+    }
     if (!RETIRED_NAME_ALLOWED.has(file)) {
       for (const name of RETIRED_ENV_NAMES) {
         if (source.includes(name)) {
@@ -170,7 +194,8 @@ if (!runtimeMode) {
 
   console.log(
     "Sending identity check passed: no hard-coded sender, no address on a " +
-      "sending subdomain, no send without a role, and no retired sender variable."
+      "sending subdomain, no send without a role, no direct provider key read, " +
+      "and no retired sender variable."
   );
   process.exit(0);
 }

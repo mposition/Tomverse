@@ -211,6 +211,41 @@ export const EMAIL_PROVIDER_API_KEY_ENV_KEYS = {
 
 export type ProviderEnv = Readonly<Record<string, string | undefined>>;
 
+/**
+ * A provider key read straight off an environment, found in source text.
+ *
+ * Pure, so `npm run check:sending-identity` can fail on one. The rule is the
+ * same as the sender's and exists for the same reason: `providerApiKeyFor()`
+ * prefers `TRANSACTIONAL_RESEND_API_KEY` and falls back to `RESEND_API_KEY`, so
+ * a file reading the second name directly reports on -- or sends with -- a
+ * credential the deployment may not be using. Four files did, and the domain
+ * report's 401 was indistinguishable from a fact about the domains.
+ *
+ * Matches a property read (`process.env.RESEND_API_KEY`, `env["RESEND_API_KEY"]`)
+ * and not a bare mention, because the admin environment screen legitimately
+ * prints the variable's *name* as a label and its description says the
+ * stream-specific name satisfies it too. The dot has to be adjacent for the
+ * same reason: a sentence ending in one is prose, not an access.
+ */
+const DIRECT_PROVIDER_KEY_READ =
+  /(?:\.|\[\s*["'`])(?:TRANSACTIONAL_|MARKETING_)?RESEND_API_KEY\b/g;
+
+export type DirectProviderKeyRead = { line: number; text: string };
+
+export const directProviderKeyReads = (
+  source: string
+): DirectProviderKeyRead[] => {
+  const found: DirectProviderKeyRead[] = [];
+  source.split("\n").forEach((line, index) => {
+    // A comment explaining the rule is not a violation of it.
+    const code = line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
+    for (const match of code.matchAll(DIRECT_PROVIDER_KEY_READ)) {
+      found.push({ line: index + 1, text: match[0].trim() });
+    }
+  });
+  return found;
+};
+
 export const providerApiKeyFor = (
   stream: SendingStream,
   env: ProviderEnv
