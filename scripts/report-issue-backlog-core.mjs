@@ -110,13 +110,38 @@ export const parseModelPricingSource = (source) => {
  */
 export const modelIdsInIssueTitle = (title) => {
     const ids = new Set();
+    for (const { modelId } of pricingIssueTargets(title)) ids.add(modelId);
+    return ids;
+};
+
+/**
+ * What a pricing issue's title asks for, and about which model.
+ *
+ * The two shapes ask for **different things**, and the difference is the whole
+ * point of this function. "Move <id> pricing into MODEL_PRICING" is done when
+ * the profile exists. "Verify production pricing: <id>" is done when somebody
+ * has checked the numbers against the provider's own published prices — and a
+ * profile existing says nothing about that.
+ *
+ * Reading both as "does a profile exist" is what this repository did until
+ * 2026-08-25, and it could only ever answer yes: `check:model-pricing` is
+ * fail-closed on every enabled premium model having an explicit profile, and
+ * `PENDING_VERIFIED_PRICE_REGISTER` is empty. So the signal was true from the
+ * moment a model shipped, which is *before* anyone verified anything. Three
+ * issues (#246, #247, #248) were being reported as done on that basis while
+ * #244's own comment said in writing that they were not.
+ */
+export const pricingIssueTargets = (title) => {
+    const targets = [];
     const verify = title.match(/^Verify production pricing:\s*(\S+)\s*$/);
-    if (verify) ids.add(verify[1].toLowerCase());
+    if (verify) {
+        targets.push({ modelId: verify[1].toLowerCase(), asks: "verified" });
+    }
     const move = title.match(
         /^Move (\S+) pricing from environment variables into MODEL_PRICING$/
     );
-    if (move) ids.add(move[1].toLowerCase());
-    return ids;
+    if (move) targets.push({ modelId: move[1].toLowerCase(), asks: "profiled" });
+    return targets;
 };
 
 /**
@@ -285,22 +310,56 @@ export const VERDICTS = {
 const signalsForBranch = (issue, ref, state) => {
     const signals = [];
 
-    for (const modelId of modelIdsInIssueTitle(issue.title)) {
+    for (const { modelId, asks } of pricingIssueTargets(issue.title)) {
         const priced = [...state.pricedModelIds].find((id) =>
             matchesModelId(modelId, id)
         );
         const pending = [...state.pendingPriceModelIds].some((id) =>
             matchesModelId(modelId, id)
         );
+        const profiled = Boolean(priced) && !pending;
+
+        if (asks === "profiled") {
+            signals.push({
+                kind: "pricing",
+                ref,
+                resolved: profiled,
+                detail: !priced
+                    ? `No MODEL_PRICING profile matches ${modelId}.`
+                    : pending
+                      ? `${priced} has a profile but is still registered as pending verification.`
+                      : `${priced} has an explicit MODEL_PRICING profile and is not in PENDING_VERIFIED_PRICE_REGISTER.`,
+            });
+            continue;
+        }
+
+        // "Verify production pricing" asks for the numbers to have been checked
+        // against the provider's own published prices. The profile is a
+        // precondition for that, never evidence of it: every enabled premium
+        // model has one because `check:model-pricing` refuses to build
+        // otherwise. What distinguishes a verified model is the record the
+        // verification produced.
+        const record = state.pricingVerificationRecords
+            ? [...state.pricingVerificationRecords].find((id) =>
+                  matchesModelId(modelId, id)
+              )
+            : undefined;
         signals.push({
             kind: "pricing",
             ref,
-            resolved: Boolean(priced) && !pending,
+            resolved: profiled && Boolean(record),
+            // A model with no profile at all is a different problem from one
+            // nobody has checked, and an operator reading this needs to know
+            // which of the two they are looking at.
             detail: !priced
-                ? `No MODEL_PRICING profile matches ${modelId}.`
+                ? `No MODEL_PRICING profile matches ${modelId}, so there is nothing to verify yet.`
                 : pending
-                  ? `${priced} has a profile but is still registered as pending verification.`
-                  : `${priced} has an explicit MODEL_PRICING profile and is not in PENDING_VERIFIED_PRICE_REGISTER.`,
+                  ? `${priced} is still registered as pending verification.`
+                  : record
+                    ? `${priced} has a profile and a verification record naming it.`
+                    : `${priced} has a profile, but no pricing verification record names it — ` +
+                      `a profile exists for every enabled premium model, so it is not evidence ` +
+                      `that anybody checked the numbers.`,
         });
     }
 
