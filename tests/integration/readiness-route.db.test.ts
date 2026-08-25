@@ -164,6 +164,27 @@ const setNodeEnv = (value: string | undefined) => {
     else env.NODE_ENV = value;
 };
 
+/**
+ * The footer's business identity, complete.
+ *
+ * Set for every case rather than left unset, because an incomplete identity is
+ * fatal exactly when marketing has a sending address -- and several cases below
+ * set one to exercise the unsubscribe keyring. Without this they would fail two
+ * checks and the "only this one is false" assertion would stop meaning anything.
+ */
+const IDENTITY_ENV = {
+    EMAIL_BUSINESS_LEGAL_NAME: "Tomverse Pty Ltd",
+    EMAIL_BUSINESS_POSTAL_ADDRESS: "1 Example Street, Brisbane QLD 4000",
+    EMAIL_BUSINESS_CONTACT_EMAIL: "support@tomverse.app",
+};
+const setBusinessIdentity = (complete: boolean) => {
+    const env = process.env as Record<string, string | undefined>;
+    for (const [key, value] of Object.entries(IDENTITY_ENV)) {
+        if (complete) env[key] = value;
+        else delete env[key];
+    }
+};
+
 before(async () => {
     ({ prisma } = (await import(
         mod("lib/prisma.ts")
@@ -178,6 +199,7 @@ beforeEach(() => {
     securityChecks = { stripeLiveMode: true };
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
+    setBusinessIdentity(true);
     sendingIdentityReady = true;
     snapshotKeyringReady = true;
     setNodeEnv(originalNodeEnv);
@@ -198,6 +220,7 @@ type ReadinessBody = {
         emailSendingIdentity: boolean;
         emailSnapshotKeyring: boolean;
         emailUnsubscribeKeyring: boolean;
+        emailBusinessIdentity: boolean;
     };
     traceId: string;
 };
@@ -226,6 +249,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailSendingIdentity: true,
         emailSnapshotKeyring: true,
         emailUnsubscribeKeyring: true,
+        emailBusinessIdentity: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -287,6 +311,19 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
             },
         },
+        {
+            // Conditional in the same shape, and driven through the real
+            // environment for the same reason. The keys are supplied here so
+            // the only thing wrong is the identity -- otherwise turning
+            // marketing on would break two checks and prove neither.
+            name: "emailBusinessIdentity",
+            arrange: () => {
+                process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+                process.env.EMAIL_UNSUBSCRIBE_KEYS =
+                    "v1:0123456789abcdef0123456789abcdef";
+                setBusinessIdentity(false);
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -300,6 +337,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         snapshotKeyringReady = true;
         delete process.env.MARKETING_EMAIL_FROM;
         delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+        setBusinessIdentity(true);
         setNodeEnv(originalNodeEnv);
         arrange();
 
@@ -351,6 +389,36 @@ test("the unsubscribe keyring is required only once marketing can send", async (
     process.env.EMAIL_UNSUBSCRIBE_KEYS = "v1:0123456789abcdef0123456789abcdef";
     const configured = await get();
     assert.equal(configured.body.checks.emailUnsubscribeKeyring, true);
+    assert.equal(configured.body.ok, true);
+
+    delete process.env.MARKETING_EMAIL_FROM;
+    delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+});
+
+test("the footer identity is required only once marketing can send", async () => {
+    // An unset value drops the whole footer rather than one line of it, and
+    // transactional mail is deliberately not held for that -- an
+    // account-deletion notice is the message least able to wait for an
+    // environment variable. So it is a warning until marketing has an address,
+    // and fatal after, because from then on every marketing send is refused
+    // for having no business identity while this endpoint answers yes.
+    delete process.env.MARKETING_EMAIL_FROM;
+    process.env.EMAIL_UNSUBSCRIBE_KEYS = "v1:0123456789abcdef0123456789abcdef";
+    setBusinessIdentity(false);
+    const withoutMarketing = await get();
+    assert.equal(withoutMarketing.body.checks.emailBusinessIdentity, true);
+    assert.equal(withoutMarketing.body.ok, true);
+
+    process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+    const withMarketing = await get();
+    assert.equal(withMarketing.body.checks.emailBusinessIdentity, false);
+    assert.equal(withMarketing.response.status, 503);
+
+    // And it names something an operator can act on rather than a permanent
+    // state: supplying the values clears it.
+    setBusinessIdentity(true);
+    const configured = await get();
+    assert.equal(configured.body.checks.emailBusinessIdentity, true);
     assert.equal(configured.body.ok, true);
 
     delete process.env.MARKETING_EMAIL_FROM;
