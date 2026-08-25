@@ -14,7 +14,11 @@
 //   npm run check:edge-robots -- https://staging.tomverse.app
 //   npm run check:edge-robots -- https://tomverse.app
 
-import { isPathAllowed } from "../lib/robotsTxtCore.ts";
+import {
+  applicationServedBody,
+  carriesManagedBlock,
+  isPathAllowed,
+} from "../lib/robotsTxtCore.ts";
 import { REFUSED_AI_CRAWLERS, servesCanonicalSite } from "../lib/robotsPolicyCore.ts";
 import { SITE_ORIGIN } from "../lib/seo.ts";
 
@@ -50,28 +54,44 @@ const expect = (condition, message) => {
 const { body } = await fetchText("/robots.txt");
 const { headers: rootHeaders } = await fetchText("/");
 
+// Two bodies, two questions. `served` is what a crawler will act on, splice
+// and all. `own` is the half this application produced -- and while the
+// Cloudflare managed block is still on, only `own` can tell you whether our
+// policy would survive turning it off. Checking the merged file alone reported
+// production as correct on 2026-08-25 while `app/robots.ts` named no AI
+// crawler at all; Cloudflare's half was doing that work.
+const served = body;
+const own = applicationServedBody(body);
+const managed = carriesManagedBlock(body);
+
 if (canonical) {
-  expect(isPathAllowed(body, "Googlebot", "/"), "Googlebot is refused / on the canonical site");
-  expect(!isPathAllowed(body, "Googlebot", "/admin"), "/admin is not refused");
-  expect(!isPathAllowed(body, "Googlebot", "/share/x"), "/share is not refused");
+  // Effective, on the whole file.
+  expect(isPathAllowed(served, "Googlebot", "/"), "Googlebot is refused / on the canonical site");
+  expect(!isPathAllowed(served, "Googlebot", "/admin"), "/admin is not refused");
+  expect(!isPathAllowed(served, "Googlebot", "/share/x"), "/share is not refused");
+  // Ours, on our half only.
   for (const crawler of REFUSED_AI_CRAWLERS) {
-    expect(!isPathAllowed(body, crawler, "/"), `${crawler} is not refused`);
+    expect(
+      !isPathAllowed(own, crawler, "/"),
+      `${crawler} is not refused by our own robots.txt${managed ? " (only by Cloudflare's block)" : ""}`
+    );
   }
-  expect(/^Sitemap:/m.test(body), "the canonical site does not name its sitemap");
+  expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
+  expect(/^Host:/m.test(own), "the canonical site does not name its host");
   expect(
     !/noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
     "the canonical site sends X-Robots-Tag: noindex on /"
   );
 } else {
   for (const crawler of ["Googlebot", "Bingbot", "GPTBot"]) {
-    expect(!isPathAllowed(body, crawler, "/"), `${crawler} may crawl / on a non-canonical origin`);
+    expect(!isPathAllowed(served, crawler, "/"), `${crawler} may crawl / on a non-canonical origin`);
     expect(
-      !isPathAllowed(body, crawler, "/safety"),
+      !isPathAllowed(served, crawler, "/safety"),
       `${crawler} may crawl /safety on a non-canonical origin`
     );
   }
-  expect(!/^Sitemap:/m.test(body), "a non-canonical origin advertises a sitemap");
-  expect(!/^Host:/m.test(body), "a non-canonical origin claims a canonical host");
+  expect(!/^Sitemap:/m.test(own), "a non-canonical origin advertises a sitemap");
+  expect(!/^Host:/m.test(own), "a non-canonical origin claims a canonical host");
   // robots.txt suppresses the fetch; this suppresses the listing. Google is
   // explicit that a disallowed URL can still appear in results when something
   // links to it, so the header is the part that keeps staging out of the index.
@@ -82,6 +102,15 @@ if (canonical) {
 }
 
 const role = canonical ? "canonical site" : "non-canonical deployment";
+if (managed) {
+  // Not a failure. It is the state before step 3 of
+  // docs/ops/search-indexing-boundary.md, and a passing run here is exactly
+  // the evidence that step 3 is safe to take.
+  console.log(
+    `Note: Cloudflare's managed robots.txt block is still served on ${origin}. ` +
+      "Every assertion about our own policy above was made against our half of the file."
+  );
+}
 if (failures.length) {
   console.error(`Edge robots check FAILED for ${origin} (${role}):`);
   for (const failure of failures) console.error(`  - ${failure}`);
