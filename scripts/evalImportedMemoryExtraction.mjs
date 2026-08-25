@@ -464,6 +464,64 @@ if (!verdict.adequacy.decisionGrade) {
     );
 }
 if (probeLimit !== null) {
+    // What a probe is actually for. Without this it answers "did the answers
+    // parse", and the first one did -- while nine adoptions matched three
+    // gold labels and the summary could not say whether the other six were
+    // wrong, extra-but-correct, or right with a different `kind`. Those need
+    // different responses and the counts collapse them into one number.
+    //
+    // Bounded by --limit, so it cannot become a wall of text.
+    const byId = new Map(MEMORY_EVAL_CASES.map((entry) => [entry.id, entry]));
+    console.log("\nWhat the model returned, case by case");
+    for (const record of records) {
+        const testCase = byId.get(record.caseId);
+        const expected = testCase?.expected ?? [];
+        console.log(`\n  ${record.caseId}  (${record.category}:${record.language})`);
+        if (record.failure) {
+            console.log(`    failed: ${record.failure}`);
+            continue;
+        }
+        console.log(
+            expected.length === 0
+                ? "    expected: nothing (extracting anything is a false positive)"
+                : `    expected: ${expected
+                      .map((entry) => `${entry.kind} + [${entry.mustInclude.join(", ")}]`)
+                      .join("; ")}`
+        );
+        if (record.candidates.length === 0) {
+            console.log("    returned: (nothing)");
+            continue;
+        }
+        for (const candidate of record.candidates) {
+            // Why a candidate did not count, named rather than implied: a
+            // right statement filed under the wrong kind never matches, and
+            // that reads identically to a wrong statement in the totals.
+            const kindMatches = expected.some((entry) => entry.kind === candidate.kind);
+            const tokensMatch = expected.some((entry) =>
+                entry.mustInclude.every((token) =>
+                    candidate.statement.toLowerCase().includes(token.toLowerCase())
+                )
+            );
+            const verdict = !candidate.bulkSafe
+                ? "not adopted"
+                : kindMatches && tokensMatch
+                  ? "MATCH"
+                  : tokensMatch
+                    ? `tokens match, kind differs (expected ${expected.map((e) => e.kind).join("/")})`
+                    : kindMatches
+                      ? "kind matches, tokens do not"
+                      : "neither";
+            console.log(
+                `    [${verdict}] ${candidate.kind} · bulk-safe ${candidate.bulkSafe} — ${candidate.statement}`
+            );
+        }
+    }
+    console.log(
+        "\nA candidate that reads correctly but is filed under another kind counts as\n" +
+            "a false positive, because §12.3 is scored on the gold label. Whether that is\n" +
+            "the model, the label or the taxonomy is a question for a person -- the counts\n" +
+            "above cannot tell them apart, which is why the statements are printed."
+    );
     console.log(
         `\nPROBE — ran the first ${outcomes.length} case(s) of ${MEMORY_EVAL_CASES.length} and stopped at --limit.\n` +
             "This is a compatibility check, not a run: it says whether the request, the\n" +
