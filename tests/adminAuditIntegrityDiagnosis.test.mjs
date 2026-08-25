@@ -18,10 +18,13 @@ import test from "node:test";
  *
  * Two things fix it and both are asserted here. The row can be fetched, from
  * the endpoint that already existed and had never been linked to. And the
- * verdict says whether the failing row is the oldest one, which is the only
- * bit distinguishing the two stories a broken chain can tell — the verifier
- * stops at the first failure, so nothing else in the response reveals whether
- * anything verified before it.
+ * verdict says whether the failing row is the oldest one, which distinguishes
+ * the two stories a broken chain can tell: entries before it verified and this
+ * one did not, or nothing verified at all.
+ *
+ * The verifier no longer stops at that first failure — it counts every row —
+ * but the first one is still what the panel leads with, because it is where a
+ * reader starts.
  */
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -70,7 +73,7 @@ test("the verdict says whether the failing entry is the oldest one", () => {
     // second query that could disagree with the one being walked.
     assert.match(
         verifier,
-        /firstInvalidIsOldest:\s*rows\[0\]\?\.id === row\.id/,
+        /rows\[0\]\?\.id === firstInvalid\.id/,
         "the comparison must be against the first row of the same ordered read"
     );
     assert.match(

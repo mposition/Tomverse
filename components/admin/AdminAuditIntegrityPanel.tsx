@@ -13,6 +13,12 @@ type Integrity = {
   firstCheckedId: string | null;
   /** Whether the first failure is that oldest entry. */
   firstInvalidIsOldest: boolean;
+  verifiedEntries: number;
+  invalidEntries: number;
+  linkageBreaks: number;
+  keysAvailable: number;
+  /** How many of the available keys accounted for at least one entry. */
+  keysUsed: number;
   message: string;
 };
 
@@ -42,12 +48,16 @@ type AuditEntry = {
  * (`GET /api/admin/audit/{id}`) and had simply never been linked to anything.
  *
  * And whether that row is the *oldest* entry in the chain, which is the bit
- * that separates the two stories a failure can tell. The verifier stops at the
- * first bad row, so a reader cannot otherwise tell "everything before this
+ * that separates the two stories a failure can tell: "everything before this
  * verified and this one does not" — tampering — from "nothing has verified at
  * all" — a signing key that changed. `docs/ops/admin-audit-key-epochs.md`
  * records that the second is what happened here, and this is the panel that
  * should have been able to say so.
+ *
+ * The counts alongside are the other half. The verifier now checks every row
+ * rather than stopping at the first failure, so the panel can report how much
+ * of the chain verified rather than only where it first did not — and, when a
+ * rotation is spanned, that more than one signing key was needed to do it.
  */
 export function AdminAuditIntegrityPanel() {
   const [integrity, setIntegrity] = useState<Integrity | null>(null);
@@ -103,14 +113,22 @@ export function AdminAuditIntegrityPanel() {
             <div className="min-w-0">
               <p className="font-black">{integrity.message}</p>
               <p className="mt-1 text-xs opacity-80">
-                Checked {integrity.checkedEntries.toLocaleString()} entries
-                {integrity.firstInvalidId ? <> · first invalid <span className="font-mono">{integrity.firstInvalidId}</span></> : null}
+                {/* The counts sit together on purpose. "Checked 110" beside a
+                    green verdict once meant 110 entries were fine; with more
+                    than one signing key in play it has to say how many
+                    actually verified, or the number flatters the answer. */}
+                Verified {integrity.verifiedEntries.toLocaleString()} of{" "}
+                {integrity.checkedEntries.toLocaleString()} entries
+                {integrity.invalidEntries > 0 ? <> · {integrity.invalidEntries.toLocaleString()} unverified</> : null}
+                {integrity.linkageBreaks > 0 ? <> · {integrity.linkageBreaks.toLocaleString()} linkage {integrity.linkageBreaks === 1 ? "break" : "breaks"}</> : null}
+                {integrity.keysUsed > 1 ? <> · {integrity.keysUsed} signing keys</> : null}
+                {integrity.firstInvalidId ? <> · first unverified <span className="font-mono">{integrity.firstInvalidId}</span></> : null}
               </p>
               {integrity.firstInvalidId ? (
                 <p data-testid="admin-audit-integrity-reading" className="mt-2 text-xs opacity-90">
                   {integrity.firstInvalidIsOldest
-                    ? "This is the oldest entry in the chain, so no entry has verified under the current key. That is what a changed signing key looks like rather than an altered entry — see docs/ops/admin-audit-key-epochs.md."
-                    : "Entries before this one verified under the current key and this one did not, so a changed signing key does not explain it on its own."}
+                    ? "This is the oldest entry in the chain, so nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md."
+                    : "Entries before this one verified and this one did not, so a changed signing key does not explain it on its own."}
                 </p>
               ) : null}
             </div>
