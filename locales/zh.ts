@@ -199,6 +199,7 @@ export const zh = {
         imageGenerationHistoryError: "无法加载此对话的图像。请刷新页面重试。",
         imageGenerationOpenOriginal: "查看原图",
         imageGenerationDownload: "下载",
+        imageGenerationDownloadFailed: "无法保存图片，请稍后重试。",
         imageGenerationErrorInsufficientCredits: "积分不足：需要 {required}，可用 {available}。",
         imageGenerationErrorDailyLimit: "今天的方案积分已用完，将在午夜（UTC）重置。",
         imageGenerationErrorConcurrency: "另一张图像正在生成，请等待完成。",

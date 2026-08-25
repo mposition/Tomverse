@@ -183,6 +183,7 @@ export const ko = {
         imageGenerationHistoryError: "이 대화의 이미지를 불러오지 못했습니다. 페이지를 새로고침해 다시 시도해 주세요.",
         imageGenerationOpenOriginal: "원본 보기",
         imageGenerationDownload: "다운로드",
+        imageGenerationDownloadFailed: "이미지를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
         imageGenerationErrorInsufficientCredits: "크레딧이 부족합니다. {required} 필요, {available} 보유.",
         imageGenerationErrorDailyLimit: "오늘의 플랜 크레딧을 모두 사용했습니다. 자정(UTC)에 초기화됩니다.",
         imageGenerationErrorConcurrency: "다른 이미지가 생성 중입니다. 완료를 기다려 주세요.",

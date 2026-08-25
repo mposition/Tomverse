@@ -182,6 +182,7 @@ export const de = {
         imageGenerationHistoryError: "Die Bilder dieser Unterhaltung konnten nicht geladen werden. Lade die Seite neu.",
         imageGenerationOpenOriginal: "Originalgröße",
         imageGenerationDownload: "Herunterladen",
+        imageGenerationDownloadFailed: "Das Bild konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.",
         imageGenerationErrorInsufficientCredits: "Nicht genug Credits: {required} benötigt, {available} verfügbar.",
         imageGenerationErrorDailyLimit: "Die heutigen Plan-Credits sind aufgebraucht. Zurücksetzung um Mitternacht (UTC).",
         imageGenerationErrorConcurrency: "Ein anderes Bild wird bereits generiert. Warte, bis es fertig ist.",

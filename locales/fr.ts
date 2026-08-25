@@ -182,6 +182,7 @@ export const fr = {
         imageGenerationHistoryError: "Impossible de charger les images de cette conversation. Rechargez la page pour réessayer.",
         imageGenerationOpenOriginal: "Taille réelle",
         imageGenerationDownload: "Télécharger",
+        imageGenerationDownloadFailed: "Impossible d’enregistrer l’image. Veuillez réessayer.",
         imageGenerationErrorInsufficientCredits: "Crédits insuffisants : {required} nécessaires, {available} disponibles.",
         imageGenerationErrorDailyLimit: "Les crédits du plan d'aujourd'hui sont épuisés. Réinitialisation à minuit (UTC).",
         imageGenerationErrorConcurrency: "Une autre image est déjà en cours de génération. Attendez qu'elle se termine.",
