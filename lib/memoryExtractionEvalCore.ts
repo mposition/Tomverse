@@ -94,6 +94,15 @@ export const MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL: Readonly<
 };
 
 /** §12.3 acceptance thresholds. */
+/**
+ * The dataset schema a live run requires.
+ *
+ * Stated here rather than imported from `lib/memoryEvalDatasetSchema.ts` to
+ * keep the run-mode gate free of the schema module's own imports; the two are
+ * pinned to each other by `tests/memoryEvalDatasetSchema.test.mjs`.
+ */
+export const MEMORY_EVAL_DATASET_SCHEMA_VERSION = 2;
+
 export const MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN = 0.95;
 export const MEMORY_EVAL_RECALL_WILSON_LOWER_MIN = 0.85;
 
@@ -466,6 +475,7 @@ export type EvalRunModeDecision =
               | "no_eval_budget"
               | "no_api_key"
               | "dataset_not_frozen"
+              | "legacy_dataset_schema"
               | "unknown_commit"
               | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
@@ -517,6 +527,22 @@ export function decideEvalRunMode(input: {
      * a verdict nobody can cite.
      */
     commitKnown: boolean;
+    /**
+     * The schema the dataset is written in.
+     *
+     * `mem-eval-seed-11` is schema 1 and has neither `expectedDisposition`
+     * nor `goldCompleteness`, so the metrics the 2026-08-25 amendment added
+     * cannot be computed against it at all — bulk eligibility recall and the
+     * sensitive-review misclassification count both read fields it does not
+     * have. A run against it would still produce numbers, which is the
+     * danger: they would be the old contract's numbers wearing the new
+     * contract's names.
+     *
+     * Fail-closed on anything that is not schema 2, including a dataset that
+     * declares nothing. Reproducing a past diagnostic goes through
+     * `lib/memoryEvalLegacyDataset.ts` instead, which is not a live run.
+     */
+    datasetSchemaVersion?: number | null;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -534,6 +560,9 @@ export function decideEvalRunMode(input: {
     if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
     if (!input.datasetFrozen) {
         return { mode: "refused", reason: "dataset_not_frozen" };
+    }
+    if (input.datasetSchemaVersion !== MEMORY_EVAL_DATASET_SCHEMA_VERSION) {
+        return { mode: "refused", reason: "legacy_dataset_schema" };
     }
     if (!input.commitKnown) {
         return { mode: "refused", reason: "unknown_commit" };

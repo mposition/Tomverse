@@ -36,6 +36,11 @@ import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     findDuplicateCases,
 } from "../lib/memoryExtractionEvalCore.ts";
+import {
+    LEGACY_DATASET_SCHEMA_VERSION as DATASET_SCHEMA_VERSION,
+    LEGACY_DIAGNOSTIC_DATASET_VERSIONS,
+    legacyDatasetRefusal,
+} from "../lib/memoryEvalLegacyDataset.ts";
 
 /** The value of a named table row, stripped of the sheet's own annotations. */
 const cell = (source, label) => {
@@ -163,6 +168,29 @@ check(
     );
 }
 
+/* ------------------------------------------------- schema, fail-closed -- */
+
+// A freeze is one of the three uses the 2026-08-25 amendment closed to the
+// legacy schema, alongside a decision-grade run and a pair approval: a
+// dataset with no `expectedDisposition` and no `goldCompleteness` cannot
+// support the metrics the amendment added, so freezing one would be freezing
+// a sample nothing can score.
+//
+// `mem-eval-seed-11` is exempt because its freeze already happened, on
+// 2026-08-24, under the contract in force then. That is a fixed list of one,
+// not a rule: it grandfathers a historical fact and admits nothing new. A
+// second schema-1 dataset cannot be frozen by adding itself to it -- the
+// entry would have to be written here, deliberately, and there is no reason
+// to write one.
+const schemaRefusal = legacyDatasetRefusal({
+    datasetVersion: MEMORY_EVAL_DATASET_VERSION,
+    schemaVersion: DATASET_SCHEMA_VERSION,
+    use: "freeze",
+});
+const schemaExempt = LEGACY_DIAGNOSTIC_DATASET_VERSIONS.includes(
+    MEMORY_EVAL_DATASET_VERSION
+);
+
 /* ----------------------------------------------------------------- report -- */
 
 console.log(
@@ -194,4 +222,21 @@ if (MEMORY_EVAL_DATASET_FROZEN && missed.length > 0) {
         "\nMEMORY_EVAL_DATASET_FROZEN is true while a freeze condition is unmet."
     );
     process.exit(1);
+}
+
+if (MEMORY_EVAL_DATASET_FROZEN && schemaRefusal && !schemaExempt) {
+    console.error(`\n${schemaRefusal.detail}`);
+    console.error(
+        "A dataset that cannot be scored under the current contract cannot be frozen for it."
+    );
+    process.exit(1);
+}
+
+if (schemaRefusal && schemaExempt) {
+    console.log(
+        `\nNote: ${MEMORY_EVAL_DATASET_VERSION} is schema ${DATASET_SCHEMA_VERSION}. ` +
+            "Its freeze predates the 2026-08-25 scoring amendment and is kept as a\n" +
+            "historical fact; it cannot support a decision-grade run, and the harness\n" +
+            "refuses one (legacy_dataset_schema)."
+    );
 }

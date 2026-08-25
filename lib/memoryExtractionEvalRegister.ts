@@ -23,6 +23,7 @@ import {
 } from "@/lib/memoryAccess";
 import {
     MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL,
+    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
 } from "@/lib/memoryExtractionEvalCore";
 
@@ -55,6 +56,19 @@ export type MemoryExtractionEvalEntry = {
         artifactRef: string;
         evaluatedCommit: string;
         datasetVersion: string;
+        /**
+         * Which dataset schema that version is written in.
+         *
+         * Optional on the type and required on an approved entry, which is
+         * the fail-closed direction: an approval that does not say cannot be
+         * read as schema 2. A schema-1 dataset carries no
+         * `expectedDisposition` and no `goldCompleteness`, so it cannot
+         * produce bulk eligibility recall or the sensitive-review bulk-safe
+         * misclassification count — an approval resting on it would be
+         * resting on metrics that were never computed
+         * (`.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md`).
+         */
+        datasetSchemaVersion?: number;
         languages: readonly string[];
         /** per category (1-4) per language arm, §12.2: each ≥ 200. */
         sampleCounts: Readonly<Record<string, number>>;
@@ -299,6 +313,16 @@ export function findEvalRegisterProblems(
                 problems.push(`${label}: evaluation evidence has empty fields`);
                 break;
             }
+        }
+        if (
+            evaluation.datasetSchemaVersion !==
+            MEMORY_EVAL_DATASET_SCHEMA_VERSION
+        ) {
+            problems.push(
+                `${label}: approved against dataset schema ` +
+                    `${evaluation.datasetSchemaVersion ?? "(unstated)"}; ` +
+                    `§12.3 as amended requires schema ${MEMORY_EVAL_DATASET_SCHEMA_VERSION}`
+            );
         }
         for (const language of MEMORY_EVAL_REQUIRED_LANGUAGES) {
             if (!evaluation.languages.includes(language)) {
