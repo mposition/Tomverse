@@ -1,5 +1,9 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+// A relative path, not the `@/` alias: this file is loaded by Next's config
+// loader rather than by the app's module graph, so tsconfig paths do not
+// apply here.
+import { robotsDecision } from "./lib/robotsPolicyCore";
 
 const securityHeaders = [
   {
@@ -33,6 +37,12 @@ const securityHeaders = [
   },
 ];
 
+// lib/seo.ts is the canonical home for this, but importing it here would pull
+// the app's module graph into the config loader. The duplication is held to
+// one value and pinned by tests/robotsRoute.test.mjs, which reads this file
+// and compares the literal with `SITE_ORIGIN`.
+const CANONICAL_SITE_ORIGIN = "https://tomverse.app";
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ["officeparser"],
@@ -53,6 +63,34 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
+      // Belt to app/robots.ts's braces, on every response a non-canonical
+      // deployment serves.
+      //
+      // `robots.txt` and `X-Robots-Tag` do different jobs, and only the second
+      // one is about indexing: Google is explicit that a disallowed URL can
+      // still surface in results when something links to it, because the
+      // refusal stops the fetch and not the listing. A `noindex` header is
+      // read by whatever did fetch the page and keeps it out of the index.
+      //
+      // Neither is access control. If staging ever holds something that must
+      // not be read, the answer is authentication, not a header.
+      //
+      // Evaluated at build time, like the robots decision itself -- so a
+      // deployment that changes `PUBLIC_APP_URL` has to rebuild before either
+      // of them changes.
+      ...(robotsDecision(CANONICAL_SITE_ORIGIN, process.env).kind === "canonical"
+        ? []
+        : [
+            {
+              source: "/:path*",
+              headers: [
+                {
+                  key: "X-Robots-Tag",
+                  value: "noindex, nofollow, noarchive",
+                },
+              ],
+            },
+          ]),
       {
         source: "/share/:path*",
         headers: [
