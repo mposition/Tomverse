@@ -488,18 +488,30 @@ export const classifyImageIntent = (input: ImageIntentInput): ImageIntentClass =
 /* Consumers                                                                 */
 /* ------------------------------------------------------------------------ */
 
-/** What the notice block's branch is called. Two values, and only two. */
-export type L0ImageIntent = "none" | "edit_or_reference";
+/** What the notice block's branch is called. Three values, and only three. */
+export type L0ImageIntent = "none" | "edit_or_reference" | "text_heavy_visual";
 
 /**
- * The block only needs to know whether this turn is about an attached image.
+ * Which branch of the notice block this turn takes.
  *
- * Everything else -- raster, text-heavy, analysis, text art -- takes the same
- * branch, because the block's other paragraphs are chosen by what the *viewer*
- * can reach, not by what they asked for.
+ * Two of the six classes change what the block says, and for opposite reasons:
+ *
+ *   `edit_or_reference`   the turn is about a picture that is already here, so
+ *                         the workspace and the file alternative are both
+ *                         wrong and are replaced by the editing limitation;
+ *   `text_heavy_visual`   a chart or infographic is a file this app can
+ *                         actually produce, so the block stops *offering* one
+ *                         and tells the model to make it.
+ *
+ * The rest -- raster, analysis, text art, none -- share the default branch,
+ * because for them the block's paragraphs are chosen by what the *viewer* can
+ * reach rather than by what they asked for.
  */
-export const l0ImageIntent = (intentClass: ImageIntentClass): L0ImageIntent =>
-  intentClass === "edit_or_reference" ? "edit_or_reference" : "none";
+export const l0ImageIntent = (intentClass: ImageIntentClass): L0ImageIntent => {
+  if (intentClass === "edit_or_reference") return "edit_or_reference";
+  if (intentClass === "text_heavy_visual") return "text_heavy_visual";
+  return "none";
+};
 
 /**
  * The chip is offered for unmistakable raster generation and nothing else.
