@@ -51,15 +51,21 @@ There are exactly five, and no standalone "New image" button:
 3. Chat composer **tools menu** → image generation, which switches to the image
    draft client-side.
 4. Model catalogue → **image tab** (see below).
-5. Chat composer **image-request handoff chip** — offered while the draft is
-   being typed, when the draft is an unmistakable raster-generation request.
+5. Chat **image-request handoff chip** — one control, offered at two moments:
+   while an image request is being typed, and beside the answer to one already
+   asked. Same component, same copy, same lock states; only the question it
+   carries differs.
 
 Requirements:
 
 - The launcher renders once per shell. A second image button anywhere is a
   contract violation, not a convenience. The chip is not a second launcher: it
-  is state-driven, appears at most once per draft, and offers the same handoff
-  the tools menu already performs.
+  is state-driven, appears at most once per question, and offers the same
+  handoff the tools menu already performs.
+- **The chip is one control in one place, not one per answer.** It renders in
+  the composer, which is shared. A control rendered under each assistant answer
+  would appear N times for one question in a comparison, and the offer belongs
+  to the question, not to any model's reply.
 - The menu is a real menu: `role="menu"`/`role="menuitem"`, focus moves into it
   on open, Escape closes it and returns focus to the trigger.
 - Switching to the image draft creates **no server row**. The conversation only
@@ -82,11 +88,27 @@ Non-negotiable, and the reason this entry point was allowed to exist at all
   the click routes to sign-in or `/pricing` — the same locked-exposure rule the
   table below states for every other entry point.
 - **With the flag off the chip does not render**, like every other entry point.
-- The chip is offered only for unmistakable raster generation. A text-dense
-  chart or infographic, a request to edit or reference an attached image, and a
-  request to describe an attached image are all **out of scope** and get no
-  chip — routing them to a text-to-image workspace would be a wrong answer, not
-  a helpful one.
+- **The chip is offered for a request that wants a picture**: unmistakable
+  raster generation, and a text-dense chart or infographic. A request to edit
+  or reference an attached image, and a request to describe one, are **out of
+  scope** and get no chip — the workspace starts from text, so neither can be
+  answered there.
+- **A text-dense visual gets both answers, not one instead of the other.** The
+  system block still tells the model to make the SVG, because exact text is
+  what an infographic is for and a text-to-image model does not render Korean
+  reliably; the chip is offered beside it. Withholding the chip for this class
+  was the earlier rule, and what it produced is recorded in policy §13.
+- **The chip survives the send.** While the composer holds an image request the
+  offer is about the draft; once it is empty the offer is about the last
+  question asked in that conversation, and it carries that question rather than
+  the empty box. It is scoped to the conversation, so it never follows the user
+  to a question they are no longer looking at. A dismissal belongs to the
+  question's text, so "not now" before the send is still "not now" after it.
+- **The model never names the destination.** No answer may tell the user where
+  image generation is, how to reach it, or offer it as an item in a list —
+  `lib/imageCapabilityPrompt.ts` forbids it, because a model that cannot
+  navigate cannot honour a choice the user makes from such a list. The control
+  is the only offer.
 - It obeys the mobile composer contract: its own full-width row above the
   textarea, never sharing, overlapping or floating above it, and it is
   suppressed during IME composition so a chip cannot resize the composer

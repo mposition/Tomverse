@@ -81,7 +81,27 @@ test("a key a draft or a filename could travel in stops the event entirely", () 
   );
 });
 
-test("the composer sends only the two allowed properties with these events", () => {
+test("the surface property names the moment, and cannot widen into anything else", () => {
+  // Added when the offer grew a second moment. A closed enum for the same
+  // reason as the class above: "which surface" is a product question with two
+  // answers, and a free string is where a draft eventually gets put.
+  for (const value of ["composer", "after_answer"]) {
+    assert.equal(
+      analyticsPropertiesSchema.safeParse({ image_intent_surface: value }).success,
+      true,
+      value
+    );
+  }
+  for (const value of ["", "chat", "answer", "draw a picture of my house"]) {
+    assert.equal(
+      analyticsPropertiesSchema.safeParse({ image_intent_surface: value }).success,
+      false,
+      value
+    );
+  }
+});
+
+test("the composer sends only the three allowed properties with these events", () => {
   const source = readFileSync("components/chat/ChatInput.tsx", "utf8");
   for (const event of CHIP_EVENTS) {
     const at = source.indexOf(event);
@@ -101,7 +121,11 @@ test("the composer sends only the two allowed properties with these events", () 
     for (const property of properties) {
       const name = property.trim().replace(":", "");
       assert.ok(
-        ["image_intent_class", "image_intent_lock"].includes(name),
+        [
+          "image_intent_class",
+          "image_intent_lock",
+          "image_intent_surface",
+        ].includes(name),
         `unexpected property ${name}`
       );
     }
