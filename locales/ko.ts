@@ -166,6 +166,7 @@ export const ko = {
         imageGenerationSizeLandscape: "가로형",
         imageGenerationSizePortrait: "세로형",
         imageGenerationGenerate: "생성",
+        imageGenerationAutoGenerateLabel: "다음부터 묻지 않고 바로 생성",
         imageGenerationGeneratingModels: "{count}개 모델 생성 중",
         imageGenerationGenerating: "이미지를 생성하는 중...",
         imageGenerationGeneratingHint: "최대 2분 정도 걸릴 수 있어요. 페이지를 벗어나도 생성은 취소되지 않습니다.",

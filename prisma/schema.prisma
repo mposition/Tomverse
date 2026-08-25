@@ -133,6 +133,22 @@ model UserSettings {
   modelFinderDismissedAt  DateTime?
   timeZone                String    @default("UTC")
   timeZoneInitializedAt   DateTime?
+
+  /// Whether pressing the chat image handoff should generate straight away
+  /// instead of landing in the workspace with the prompt filled and the price
+  /// shown.
+  ///
+  /// An account setting rather than a browser one, deliberately: this decides
+  /// whether one click spends credits, and a preference stored per device
+  /// would let a shared computer spend somebody else's. It is also why the
+  /// only place it can be turned on is beside the price
+  /// (docs/ui-contracts/image-generation-workspace.md) -- the contract's
+  /// "quoted before submission" survives as "quoted at least once, by the
+  /// person who chose to stop being asked".
+  ///
+  /// Default false, and false is the whole behaviour for an account that never
+  /// opts in.
+  imageHandoffAutoGenerate Boolean  @default(false)
   timeZoneChangedAt       DateTime?
 
   /// The account's own statement of where it is, used to decide which

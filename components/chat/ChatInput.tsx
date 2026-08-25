@@ -629,8 +629,18 @@ type ChatInputProps = {
    * starting prompt. Absent when the image feature flag is off. `modelId` is
    * set when the user arrived from the catalogue's image tab and therefore
    * already chose which model to start from.
+   *
+   * `fromImageRequest` marks the one entry point that began with the user
+   * asking for a picture in words. Only that one may generate on the press
+   * for an account that has chosen to stop being asked -- the tools menu and
+   * the launcher are someone opening the workspace, not someone submitting a
+   * request they already wrote.
    */
-  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  onStartImageDraft?: (
+    draftText: string,
+    modelId?: string,
+    options?: { fromImageRequest?: boolean }
+  ) => void;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
@@ -2990,7 +3000,9 @@ export function ChatInput({
                 // created and cancelling restores this draft. The prompt is
                 // the question the offer is about -- which after the send is
                 // the one already answered, not the empty composer.
-                onStartImageDraft?.(imageIntentSourceText);
+                onStartImageDraft?.(imageIntentSourceText, undefined, {
+                  fromImageRequest: true,
+                });
               }}
               onDismiss={() => dismissImageIntentSuggestion(false)}
             />

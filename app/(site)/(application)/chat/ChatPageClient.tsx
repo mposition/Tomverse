@@ -523,6 +523,20 @@ export function ChatPageClient({
     return `image-draft:${imageDraftSerialRef.current}`;
   };
   const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
+  /*
+    The account's "stop asking me" choice, and whether this particular landing
+    is allowed to act on it.
+
+    Two values rather than one, because they answer different questions. The
+    preference belongs to the account and survives; the second is true only for
+    a landing that began with the user asking for a picture in words, and is
+    spent by the workspace on arrival. Opening the workspace from the launcher
+    or the tools menu is someone going there to compose, not someone
+    submitting a request they already wrote, and must never spend credits on
+    its own.
+  */
+  const [imageHandoffAutoGenerate, setImageHandoffAutoGenerate] = useState(false);
+  const [imageDraftAutoGenerate, setImageDraftAutoGenerate] = useState(false);
   // Set only when the user reached the draft by choosing a model in the
   // catalogue's image tab; otherwise the workspace keeps its own default.
   const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
@@ -2217,6 +2231,9 @@ export function ChatPageClient({
                     return res.json();
                 })
                 .then((data) => {
+                    if (typeof data?.imageHandoffAutoGenerate === "boolean") {
+                        setImageHandoffAutoGenerate(data.imageHandoffAutoGenerate);
+                    }
                     if (data && isEnabledModelIdRef.current(data.defaultModel)) {
                         // The saved new-conversation combination (effective,
                         // resolved server-side); [defaultModel] when none.
@@ -2395,11 +2412,18 @@ export function ChatPageClient({
 
     // From the composer: carry the typed text into the image prompt and
     // remember the chat draft so cancelling restores it.
-    const handleStartImageDraft = (draftText: string, modelId?: string) => {
+    const handleStartImageDraft = (
+        draftText: string,
+        modelId?: string,
+        options?: { fromImageRequest?: boolean }
+    ) => {
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
             text: draftText,
         });
+        setImageDraftAutoGenerate(
+            Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
+        );
         setImageDraftSeedPrompt(draftText);
         setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
         setImageWorkspaceKey(nextImageDraftKey());
@@ -2409,6 +2433,31 @@ export function ChatPageClient({
         setPromptPayload(null);
         setIsDeepResearchPending(false);
         setIsInitialConversationResolved(true);
+    };
+
+    /*
+      Turning "stop asking me" on or off, from beside the price.
+
+      Optimistic, and deliberately so in both directions: the control has to
+      answer immediately or a person cannot tell whether their click landed,
+      and the value it writes is a preference rather than a fact about money
+      already spent. A failed save is put back rather than left showing a
+      choice the account does not hold -- silently keeping a failed "on" is
+      how an account ends up generating on a press it never agreed to.
+    */
+    const handleImageAutoGeneratePreferenceChange = (next: boolean) => {
+        const previous = imageHandoffAutoGenerate;
+        setImageHandoffAutoGenerate(next);
+        void fetch("/api/user/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageHandoffAutoGenerate: next }),
+        })
+            .then(async (response) => {
+                await discardResponseBody(response);
+                if (!response.ok) setImageHandoffAutoGenerate(previous);
+            })
+            .catch(() => setImageHandoffAutoGenerate(previous));
     };
 
     // Leaving the image draft without generating: the chat draft comes back
@@ -4801,6 +4850,10 @@ export function ChatPageClient({
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
       }
+      autoGenerateOnArrival={imageDraftAutoGenerate}
+      onAutoGenerateArrivalConsumed={() => setImageDraftAutoGenerate(false)}
+      autoGeneratePreference={imageHandoffAutoGenerate}
+      onAutoGeneratePreferenceChange={handleImageAutoGeneratePreferenceChange}
     />
   ) : null;
 
