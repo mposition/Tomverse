@@ -179,6 +179,7 @@ export const en = {
         imageGenerationHistoryError: "Could not load the images for this conversation. Reload the page to retry.",
         imageGenerationOpenOriginal: "Full size",
         imageGenerationDownload: "Download",
+        imageGenerationDownloadFailed: "Could not save the image. Please try again.",
         imageGenerationErrorInsufficientCredits: "Not enough credits: {required} needed, {available} available.",
         imageGenerationErrorDailyLimit: "Today's plan credits are used up. They reset at midnight (UTC).",
         imageGenerationErrorConcurrency: "Another image is already generating. Wait for it to finish.",

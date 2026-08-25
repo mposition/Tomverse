@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi } from "./support/app-fixtures";
 import { mockUserUsage } from "./support/chat-state-fixtures";
 import { listImageModels } from "../../lib/imageModelRegistry";
+import { imageDownloadFilename } from "../../lib/imageAssetDownload";
 
 // Image generation workspace regression coverage (PR 5 UI + PR 3 API shape).
 //
@@ -227,6 +228,37 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
     await route.fulfill(json(resolveGeneration(state, generation)));
   });
 
+  // Saving the original. A separate endpoint from the read above because the
+  // signed R2 URL cannot answer this question at all: `Content-Type` says what
+  // the bytes are, and only a response from this origin can say what to do
+  // with them (docs/policy/image-generation.md §9.1).
+  await page.route("**/api/images/generations/*/download", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2);
+    const generation = state.generations.find((row) => row.generationId === id);
+    if (!generation || generation.status !== "succeeded") {
+      return route.fulfill(
+        json(
+          { error: "Image not found.", code: "IMAGE_GENERATION_NOT_FOUND" },
+          404
+        )
+      );
+    }
+    const asset = generation.assets.find((entry) => entry.role === "original")!;
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "content-type": asset.mimeType,
+        "content-disposition": `attachment; filename="${imageDownloadFilename({
+          generationId: generation.generationId,
+          modelId: generation.modelId,
+          mimeType: asset.mimeType,
+        })}"`,
+        "x-content-type-options": "nosniff",
+      },
+      body: PNG_1X1,
+    });
+  });
+
   await page.route("**/api/images/targets/*/retry", async (route) => {
     const targetId = new URL(route.request().url()).pathname.split("/").at(-2);
     const failed = state.generations.find((row) => row.targetId === targetId);
@@ -397,6 +429,42 @@ test("a Pro account generates an image end to end", async ({ page }) => {
         .filter({ hasText: "a single red apple" })
     ).toBeVisible();
   }
+});
+
+test("saving a generated image downloads a file rather than opening it in a tab", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-generation-prompt").fill("a single red apple");
+  await page.getByTestId("image-generation-submit").click();
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The reported defect: the control was `<a href={signedR2Url} download>`,
+  // and `download` is same-origin only. Browsers ignored it, followed the
+  // link, and rendered a correct image/png in a new tab. Nothing about the
+  // stored object was wrong, so nothing about the stored object could fix it.
+  const control = page.getByTestId("image-generation-download");
+  await expect(control).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    control.click(),
+  ]);
+  // Named from the recorded mime type and carrying the model, so a comparison
+  // does not land as `original.png`, `original (1).png`, `original (2).png`.
+  expect(download.suggestedFilename()).toMatch(
+    /^tomverse-.+-qa-generation-1\.png$/
+  );
+
+  // And the workspace the download was started from is still on screen.
+  await expect(page.getByTestId("image-generation-timeline")).toBeVisible();
 });
 
 test("a moderation failure explains itself and shows the refund", async ({ page }) => {
