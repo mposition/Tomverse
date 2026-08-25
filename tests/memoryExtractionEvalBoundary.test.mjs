@@ -86,9 +86,30 @@ test("every missing precondition refuses a live run", () => {
             },
             "unknown_commit",
         ],
+        // `mem-eval-seed-11` is schema 1 and carries neither
+        // `expectedDisposition` nor `goldCompleteness`, so the metrics the
+        // 2026-08-25 amendment added cannot be computed against it. A run
+        // would still print numbers -- the old contract's, wearing the new
+        // contract's names.
+        [
+            {
+                registerEntry: budgeted,
+                hasApiKey: true,
+                datasetFrozen: true,
+                commitKnown: true,
+                datasetSchemaVersion: 1,
+            },
+            "legacy_dataset_schema",
+        ],
     ];
     for (const [input, reason] of cases) {
-        const decision = decideEvalRunMode({ live: true, ...input });
+        const decision = decideEvalRunMode({
+            live: true,
+            // Schema 2 unless the row is about the schema: every other row
+            // has to reach its own gate rather than stopping at this one.
+            datasetSchemaVersion: 2,
+            ...input,
+        });
         assert.equal(decision.mode, "refused", `${reason} must refuse`);
         assert.equal(decision.reason, reason);
     }
@@ -101,6 +122,7 @@ test("only every precondition together allows a live run", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
+        datasetSchemaVersion: 2,
     });
     assert.equal(decision.mode, "live");
     assert.equal(decision.ceilingUsd, 50);
@@ -113,6 +135,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
+        datasetSchemaVersion: 2,
         requestedRunCapUsd: 5,
     });
     assert.equal(narrowed.mode, "live");
@@ -124,6 +147,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
+        datasetSchemaVersion: 2,
         requestedRunCapUsd: 500,
     });
     assert.equal(widened.mode, "refused");
@@ -201,6 +225,7 @@ test("a budget opens the budget gate and nothing else", () => {
             hasApiKey: true,
             datasetFrozen: true,
             commitKnown: true,
+            datasetSchemaVersion: 2,
         }).mode,
         "live"
     );
@@ -210,6 +235,7 @@ test("a budget opens the budget gate and nothing else", () => {
         ["no key", { hasApiKey: false }],
         ["unfrozen dataset", { datasetFrozen: false }],
         ["unknown commit", { commitKnown: false }],
+        ["legacy dataset schema", { datasetSchemaVersion: 1 }],
     ]) {
         assert.equal(
             decideEvalRunMode({
@@ -218,6 +244,7 @@ test("a budget opens the budget gate and nothing else", () => {
                 hasApiKey: true,
                 datasetFrozen: true,
                 commitKnown: true,
+                datasetSchemaVersion: 2,
                 ...override,
             }).mode,
             "refused",

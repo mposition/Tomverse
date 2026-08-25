@@ -54,6 +54,7 @@ import {
     scoreCase,
     summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
+import { LEGACY_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalLegacyDataset.ts";
 
 const argValue = (name, fallback) => {
     const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -141,6 +142,9 @@ const runMode = decideEvalRunMode({
     hasApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()),
     datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
     commitKnown: commitSha !== "unknown",
+    // The frozen fixtures are schema 1. Stated rather than assumed, so that
+    // the successor dataset switching this to 2 is a visible edit here.
+    datasetSchemaVersion: LEGACY_DATASET_SCHEMA_VERSION,
     requestedRunCapUsd: maxCostUsd,
 });
 
@@ -176,6 +180,17 @@ const REFUSAL_MESSAGES = {
         "edited cannot be cited. Freeze the dataset — every cell at or above the\n" +
         "floor, authoring and independent review complete — then set\n" +
         "MEMORY_EVAL_DATASET_FROZEN and bump MEMORY_EVAL_DATASET_VERSION.",
+    legacy_dataset_schema:
+        `Dataset ${MEMORY_EVAL_DATASET_VERSION} is schema ${LEGACY_DATASET_SCHEMA_VERSION}, ` +
+        "and a live run requires schema 2 (§12.2, amended 2026-08-25).\n\n" +
+        "It carries neither `expectedDisposition` nor `goldCompleteness`, so\n" +
+        "bulk eligibility recall and the sensitive-review bulk-safe\n" +
+        "misclassification count cannot be computed against it. A run would\n" +
+        "still print numbers, and that is the danger: they would be the old\n" +
+        "contract's numbers under the new contract's names.\n\n" +
+        "Reproducing the mem-extract-v2 diagnostics is a separate path --\n" +
+        "lib/memoryEvalLegacyDataset.ts, which is not a live run and cannot\n" +
+        "support a verdict, a freeze or a pair approval.",
     run_cap_above_approved_ceiling:
         `--max-cost-usd=${maxCostUsd} is above the approved ceiling for this pair ` +
         `(US$${registerEntry?.evalBudget?.maxUsd}).\n` +

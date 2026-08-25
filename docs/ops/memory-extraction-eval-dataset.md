@@ -143,6 +143,50 @@ expected: [
 틀린 문장"을 구분하지 못합니다. 그래서 §12.4가 blind qualitative review를 별도로
 요구하며, 이 점수는 게이트이지 판정 전부가 아닙니다.
 
+### 4.1.1 schema 2의 필수 항목 — [개정 · 2026-08-25 @mposition]
+
+승인된 개정안
+(`.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md` §3.4·§4.1)
+이 두 항목을 **필수**로 만들었습니다. 후속 `datasetVersion`부터 적용합니다.
+
+```ts
+{
+    id: "durable-ko-201",
+    category: "durable_facts",
+    language: "ko",
+    goldCompleteness: "exhaustive",
+    expected: [
+        {
+            id: "e1",
+            kind: "occupation",
+            mustInclude: ["간호사"],
+            expectedDisposition: "bulk_safe",
+        },
+    ],
+}
+```
+
+- **`expectedDisposition`**(`bulk_safe` | `sensitive_review`) — 이 기억이 어디로
+  가야 하는가. **기본값이 없습니다.** 건강·알레르기처럼 추출은 되되 자동 승인
+  되면 안 되는 것이 `sensitive_review`이고, 그것이 나오는 것은 recall 성공이지
+  실패가 아닙니다. 누락은 dataset validation 실패입니다 — `bulk_safe`로 읽으면
+  작성 실수가 가장 위험한 방향으로 통과합니다.
+- **`goldCompleteness`**(`exhaustive` | `partial`) — gold가 이 대화의 유효한
+  memory를 남김없이 열거하는가. **decision set은 전부 `exhaustive`여야 하고**,
+  범주 ① 한 건이라도 `partial`이면 decision-grade가 거부됩니다. arm당 200이라는
+  §12.2의 하한이 그 200건 위에서 유도됐기 때문입니다. `partial`은 development·
+  adjudication 세트에서만 씁니다.
+
+판정은 `validateSuccessorDataset()`(`lib/memoryEvalDatasetSchema.ts`)이 하고
+`tests/memoryEvalDatasetSchema.test.mjs`가 각 거부를 고정합니다. **batch마다
+실행합니다** — 400건을 다 쓴 뒤에 빈 칸을 발견하는 것이 이 검사를 먼저 내린
+이유입니다.
+
+`mem-eval-seed-11`은 schema 1이고 두 항목이 없습니다. 새 필드를 그 파일에
+채워 넣지 않습니다. 과거 진단 재현은 `lib/memoryEvalLegacyDataset.ts`가
+version-pinned로 읽으며, **decision-grade·동결·pair 승인에는 쓸 수 없습니다**
+(fail-closed). 일반 loader에는 `bulk_safe` fallback이 없습니다.
+
 ### 4.2 범주 ②③④의 `expected`
 
 **항상 빈 배열입니다.** 이 범주에서 채점되는 것은 "무엇이 나왔는가"가 아니라
@@ -169,6 +213,27 @@ expected: [
 - development set에서 발견한 개선점을 decision set에 반영하고 싶다면, 그것은
   **decision set 수정**이므로 §7의 재작업 규칙을 따릅니다.
 - 현재 저장소의 `mem-eval-seed-1`은 `development`이며 seed 규모입니다.
+
+### 5.1 작성자와 프롬프트 조정자의 분리 — [개정 · 2026-08-25 @mposition]
+
+§5의 "열람하지 않습니다"는 **decision set을 작성하는 사람에게는 성립할 수
+없습니다.** 400건을 쓰려면 400건을 봐야 합니다. 그래서 규칙을 열람이 아니라
+**행위**로 씁니다.
+
+- **decision set을 작성·검수한 주체는 그 내용을 근거로 프롬프트를 조정하지
+  않습니다.** `mem-extract-v3` 구현은 승인된 A(출력 언어)·B(kind 우선순위와
+  `decision` 경계) 규칙을 **기계적으로 옮기는 작업**이며, 그 두 규칙은
+  `.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md` §1·§2에
+  이미 문안으로 확정돼 있습니다.
+- **조정의 근거는 development set 결과뿐입니다.** decision set에서 본 특정
+  사례가 프롬프트 문안을 바꾸는 근거가 되면, 그 시점에 decision set은 test set이
+  아니라 training set이 되고 판정은 자기 과적합을 품질로 보고합니다.
+- 후속 dataset의 batch 기록에 **작성자와 v3 문안 작성자를 각각 적습니다.**
+  같은 사람이어도 적습니다 — 1인 조직에서 "서로 다른 두 사람"은 충족 불가능한
+  요구이고, 여기서 지켜야 하는 것은 신원 분리가 아니라 **근거의 분리**입니다.
+  기록이 있으면 나중에 "이 문구가 어느 세트를 보고 나왔는가"를 물을 수 있습니다.
+- v3 문안이 승인된 A·B 규칙 밖의 내용을 담게 되면, 그것은 프롬프트 조정이므로
+  development set 결과를 근거로 제시하고 §7의 재작업 규칙을 확인합니다.
 
 ## 6. Batch 절차
 
