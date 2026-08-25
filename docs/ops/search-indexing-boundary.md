@@ -74,7 +74,8 @@ Cloudflare 관리 블록에는 우리가 잃으면 안 되는 절반(AI crawler 
    병합된 파일은 정상으로 보였습니다. 그래서 스크립트는 `# END Cloudflare
    Managed Content` 뒤쪽만 떼어 우리 정책을 판정하고, 관리 블록이 아직 있으면
    그 사실을 출력합니다. **이 단계가 통과해야 3번이 안전합니다.**
-3. **그 다음** Cloudflare 대시보드에서 관리 robots.txt를 끕니다:
+3. **그 다음** Cloudflare 대시보드에서 관리 robots.txt를 끕니다 — **§4a 참조:
+   이 단계는 2026-08-25 현재 플랜 제한으로 보류돼 있습니다.**
    Security Settings → **Bot traffic** → "Set your preference to block training in
    robots.txt" 를 off. zone 단위 설정이라 `staging.tomverse.app`도 같이 풀립니다.
 4. `npm run check:edge-robots -- https://staging.tomverse.app` 와
@@ -83,6 +84,59 @@ Cloudflare 관리 블록에는 우리가 잃으면 안 되는 절반(AI crawler 
 `robots.txt`는 4시간 캐시(`max-age=14400`)로 나갑니다. 스크립트는 캐시 우회
 쿼리를 붙이지만, 크롤러가 보는 것은 캐시된 사본이므로 급하면 Cloudflare에서
 `/robots.txt` 를 purge 하십시오.
+
+## 4a. 3번은 보류됐습니다 (2026-08-25)
+
+**Cloudflare 플랜 제한으로 관리 robots.txt 설정을 끌 수 없습니다.** 1·2번은
+끝났습니다 — `596cbf31`이 production에 배포됐고
+`npm run check:edge-robots -- https://tomverse.app` 이 통과합니다. 우리 절반이
+크롤러 9종과 `Content-Signal`·`Host`·`Sitemap`을 직접 냅니다. 3번만 남았고, 그건
+계정 권한 문제라 코드로 풀 수 없습니다.
+
+**그런데 중요한 결과는 이미 나와 있습니다.** 두 가지를 분리해야 합니다.
+
+| | 상태 | 근거 |
+|---|---|---|
+| staging **색인** 방지 | **됨** | 모든 응답에 `X-Robots-Tag: noindex, nofollow, noarchive` (2026-08-25 확인: 루트, `/safety`) |
+| staging **크롤** 억제 | 안 됨 | Cloudflare의 `Allow: /` 가 우리 `Disallow: /` 를 병합에서 이깁니다 |
+
+그리고 이 조합은 **우연히 유리합니다.** Google은 `noindex`를 페이지를 가져와야
+읽습니다. 크롤이 차단된 URL은 가져올 수 없으니 `noindex`도 못 보고, 이미 색인된
+URL이 그대로 남습니다. 지금은 Googlebot이 staging을 가져가면서 `noindex`를 읽으므로
+**이미 색인된 `staging.tomverse.app/safety`가 빠지는 경로가 열려 있습니다.** 3번이
+성공했다면 그 URL은 더 오래 남았을 겁니다.
+
+남는 위험은 하나입니다 — 미출시 표면이 크롤러에게 읽힙니다. **이건 robots가 고칠 수
+있는 문제가 아니었습니다.** §3이 말한 그대로입니다: `robots.txt`도 `noindex`도
+요청이지 통제가 아니고, 무시하는 크롤러에게는 둘 다 효력이 없으며, staging 루트는
+지금도 인증 없이 200입니다. **플랜 제한이 막은 것은 방어의 두 번째 층이지 경계가
+아닙니다.** 크롤을 실제로 멈추려면 인증(Cloudflare Access 또는 앱 레벨)이고, 그건
+robots 우회보다 값이 확실합니다.
+
+검토했다가 채택하지 않은 것: `staging.tomverse.app/robots.txt` 를 Worker로 가로채기.
+Workers는 무료 플랜에 있지만 관리 블록 주입이 Worker 응답에도 적용되는지 확인되지
+않았고, 성공해도 얻는 것은 이미 되고 있는 색인 방지가 아니라 크롤 억제뿐입니다.
+
+### 검사는 어떻게 바뀌었나
+
+`npm run check:edge-robots` 가 non-canonical origin에서 두 종류를 구분합니다.
+
+- **우리가 소유한 것** — 우리 절반의 내용, `noindex` 헤더 — 은 그대로 실패시킵니다.
+- **병합 결과** 는 관리 블록이 있는 동안만 **이름 붙은 편차**로 보고하고 종료 코드에
+  넣지 않습니다.
+
+아무도 고칠 수 없는 것 때문에 항상 빨간 검사는 곧 아무도 안 읽는 검사가 되고, 이
+검사의 값어치는 빨간색이 의미를 갖는 데 있습니다. 편차는 매 실행마다 이름과 함께
+출력되므로 사라지지 않습니다. **관리 블록이 없어지는 순간 `managed`가 false가 되어
+같은 항목이 다시 보통의 실패로 돌아갑니다** — 나중에 꺼야 할 플래그가 없습니다.
+
+2026-08-25 staging 실행 결과: Googlebot·Bingbot이 편차 2건, GPTBot은 편차가 아닙니다
+— Cloudflare 블록이 GPTBot을 이름으로 거부하므로 병합 결과가 실제 거부입니다.
+
+### 플랜이 바뀌면
+
+3번을 그대로 실행하고 4번으로 검증하면 됩니다. 이 절은 그때 지우지 말고, 왜 한동안
+보류였는지의 기록으로 남기십시오.
 
 ## 5. bot 목록의 정본과 갱신 책임
 
@@ -119,6 +173,10 @@ npm run check:edge-robots -- https://tomverse.app
 우선순위로 평가해서 `/`가 정말 거부되는지, non-canonical 배포가 sitemap·host를
 광고하지 않는지, `X-Robots-Tag`가 붙는지를 봅니다. 대상은 **edge URL**입니다 —
 origin만 보면 이번 문제를 다시 놓칩니다.
+
+통과가 무엇을 뜻하는지는 §4a를 함께 읽어야 합니다. staging의 통과는 "크롤러가
+못 들어온다"가 아니라 "우리가 소유한 부분이 전부 맞고, 남은 항목은 편차로 이름이
+붙어 출력됐다"는 뜻입니다.
 
 단위 테스트는 `tests/robotsTxtCore.test.mjs`(평가기)와
 `tests/robotsRoute.test.mjs`(Next의 직렬화기로 실제 본문을 만들어 평가)에
