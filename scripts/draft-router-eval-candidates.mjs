@@ -39,6 +39,7 @@ import {
   templateHash,
 } from "../lib/routerEvalDraftPrompt.ts";
 import { EVAL_CELLS } from "../lib/routerQualityEvalSet.ts";
+import { resolveModelAlias } from "../lib/routerEvalModelAlias.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
 import { getModelPricingProfile } from "../lib/modelPricing.ts";
@@ -149,7 +150,12 @@ console.log(`  drafter   ${modelId} (${model.provider} ${model.apiModel})`);
 console.log(`  batch     ${resolvedBatch}`);
 console.log(`  count     ${count}`);
 console.log(`  template  ${DRAFT_TEMPLATE_VERSION} (${hash})`);
-console.log(`  api model  ${model.apiModel}${/latest$/.test(model.apiModel) ? "   (a MOVING alias — the version that answers is recorded per item)" : ""}`);
+console.log(
+  `  api model  ${model.apiModel}` +
+    (/latest$/.test(model.apiModel)
+      ? "   (a MOVING alias — resolved against the provider's model listing before sending)"
+      : "")
+);
 console.log(`  params    ${JSON.stringify(generationParameters)}`);
 console.log(`  already in this cell: ${inCell.length}`);
 console.log(`  key from ${configuration.apiKeyEnvName}: ${process.env[configuration.apiKeyEnvName] ? "present" : "MISSING"}`);
@@ -179,10 +185,71 @@ if (!send) {
 const apiKey = process.env[configuration.apiKeyEnvName];
 if (!apiKey) die(`\n${configuration.apiKeyEnvName} is not set.`);
 
+const endpoint = configuration.baseUrl.replace(/\/+$/, "");
+
+// Pin the alias BEFORE the billed call.
+//
+// Wave 1 asked for `mistral-large-latest` and the completion response handed
+// that same string back as its `model`. Recording it satisfied the letter of
+// "record what answered" while carrying no version at all, and the review
+// sheet then asked a reviewer to compare that value across a wave's ko and en
+// batches -- a comparison that always matches.
+//
+// The provider's model listing does carry the mapping, and reading it costs
+// nothing. It runs first so the recorded resolution is never newer than the
+// request it describes; a failure here is reported and recorded, not fatal,
+// because the drafting run is still worth making without it.
+const listingUrl = `${endpoint}/models`;
+let aliasResolution = {
+  resolvedModelId: null,
+  outcome: "unavailable",
+  candidates: [],
+  resolvedAt: null,
+  source: listingUrl,
+  note: null,
+};
+try {
+  const listing = await fetch(listingUrl, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(Number(process.env.DRAFT_MODEL_LISTING_TIMEOUT_MS || 30_000)),
+  });
+  const body = await listing.text();
+  if (!listing.ok) {
+    aliasResolution.note = `HTTP ${listing.status}`;
+  } else {
+    const parsed = JSON.parse(body);
+    const entries = Array.isArray(parsed?.data) ? parsed.data : Array.isArray(parsed) ? parsed : [];
+    aliasResolution = {
+      ...resolveModelAlias(entries, model.apiModel),
+      resolvedAt: new Date().toISOString(),
+      source: listingUrl,
+      note: null,
+    };
+  }
+} catch (error) {
+  aliasResolution.note = error instanceof Error ? error.message : String(error);
+}
+
+console.log(
+  `\n  alias      ${model.apiModel} -> ` +
+    (aliasResolution.resolvedModelId
+      ? `${aliasResolution.resolvedModelId}  (resolved from ${listingUrl} at ${aliasResolution.resolvedAt})`
+      : `NOT RESOLVED (${aliasResolution.outcome}${aliasResolution.note ? `: ${aliasResolution.note}` : ""})`)
+);
+if (!aliasResolution.resolvedModelId) {
+  console.log(
+    "             the batch cannot be tied to a concrete model version. A ko/en\n" +
+      "             comparison across this wave will not detect the alias moving."
+  );
+}
+if (aliasResolution.outcome === "ambiguous") {
+  console.log(`             candidates: ${aliasResolution.candidates.join(", ")}`);
+}
+
 let response;
 let text;
 try {
-  response = await fetch(`${configuration.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+  response = await fetch(`${endpoint}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -267,6 +334,7 @@ const drafted = prompts.map((prompt) => ({
     modelId,
     requestedApiModel: model.apiModel,
     modelVersion,
+    aliasResolution,
     generationParameters,
     promptTemplateVersion: DRAFT_TEMPLATE_VERSION,
     promptTemplateHash: hash,
@@ -295,8 +363,12 @@ console.log(`--- end drafted items ---`);
 
 console.log(`\n  ${drafted.length} candidate(s) written to ${setPath}`);
 console.log(
-  `  requested ${model.apiModel}; the provider answered as ` +
-    `${modelVersion ?? "(no model field in the response — recorded as null, not guessed)"}`
+  `  requested ${model.apiModel}; the response's model field said ` +
+    `${modelVersion ?? "(nothing — recorded as null, not guessed)"}` +
+    (modelVersion === model.apiModel ? "  — an ECHO of the request, not a version" : "")
+);
+console.log(
+  `  concrete model: ${aliasResolution.resolvedModelId ?? `unresolved (${aliasResolution.outcome})`}`
 );
 if (!generatorCommit) {
   console.log(

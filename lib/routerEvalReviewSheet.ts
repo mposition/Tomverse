@@ -24,6 +24,7 @@ import {
   type EvalSetItem,
 } from "./routerQualityEvalSet.ts";
 import { rankNearDuplicates, type NearDuplicatePairing } from "./nearDuplicateText.ts";
+import { isEchoOfRequest } from "./routerEvalModelAlias.ts";
 
 export type ReviewSheetInput = {
   set: EvalSet;
@@ -169,7 +170,24 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
         `${/latest$/.test(provenance.requestedApiModel ?? "") ? " — **이동형 별칭**" : ""} |`
     );
     lines.push(
-      `| 응답이 밝힌 version | ${provenance.modelVersion ? `\`${escapeCell(provenance.modelVersion)}\`` : "*제공자가 반환하지 않음 — 추측하지 않았습니다*"} |`
+      `| 응답이 밝힌 version | ${
+        provenance.modelVersion
+          ? `\`${escapeCell(provenance.modelVersion)}\`${
+              isEchoOfRequest(provenance.requestedApiModel, provenance.modelVersion)
+                ? " — **요청의 에코입니다. 버전 정보가 아닙니다**"
+                : ""
+            }`
+          : "*제공자가 반환하지 않음 — 추측하지 않았습니다*"
+      } |`
+    );
+    lines.push(
+      `| 별칭이 가리킨 실제 모델 | ${
+        provenance.aliasResolution?.resolvedModelId
+          ? `\`${escapeCell(provenance.aliasResolution.resolvedModelId)}\` (${escapeCell(
+              provenance.aliasResolution.resolvedAt ?? "시각 기록 없음"
+            )} 조회)`
+          : `*확정되지 않음 — ${escapeCell(provenance.aliasResolution?.outcome ?? "기록 없음")}*`
+      } |`
     );
     lines.push(
       `| 생성 파라미터 | \`${escapeCell(JSON.stringify(provenance.generationParameters ?? {}))}\` |`
@@ -190,10 +208,28 @@ export function renderReviewSheet(input: ReviewSheetInput): string {
     lines.push(
       "> 같은 wave의 ko·en batch가 서로 다른 version에서 나왔을 수 있습니다. 그렇다면 두 언어의"
     );
-    lines.push(
-      "> 차이로 읽히는 것이 실은 두 모델의 차이일 수 있습니다. 위 「응답이 밝힌 version」을 wave의"
-    );
-    lines.push("> 다른 batch와 대조해 주세요.");
+    lines.push("> 차이로 읽히는 것이 실은 두 모델의 차이일 수 있습니다.");
+    lines.push("");
+    if (provenance?.aliasResolution?.resolvedModelId) {
+      lines.push(
+        "> 대조는 「별칭이 가리킨 실제 모델」로 하십시오. wave의 다른 batch가 다른 값을 적고 있다면"
+      );
+      lines.push("> 그 wave는 한 모델의 산출물이 아닙니다.");
+    } else {
+      // The Wave 1 failure, stated where it can still change a decision: this
+      // sheet used to send the reviewer to a field that echoes the request, so
+      // two batches drafted by different models would have compared as equal.
+      lines.push(
+        "> **이 batch는 실제 모델이 확정되지 않았습니다.** 「응답이 밝힌 version」은 대조 근거로"
+      );
+      lines.push(
+        "> 쓸 수 없습니다 — 제공자가 요청한 별칭을 그대로 돌려주는 경우가 있고, 그때 두 batch는"
+      );
+      lines.push(
+        "> 서로 다른 모델에서 나왔더라도 같은 값으로 보입니다. 대조가 필요하면 제공자의 모델 목록"
+      );
+      lines.push("> 조회로 별칭을 먼저 고정한 뒤 판단해 주세요.");
+    }
     lines.push("");
   }
   if (!drafterIsRoutableFamily) {
