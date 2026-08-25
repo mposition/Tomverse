@@ -120,17 +120,44 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // §12.5 first eval target under v2. **Still a candidate.** The
-            // budget below is what opens `--live`; it is not approval of the
-            // pair. That is the §12.4 procedure — decision-grade run,
-            // artifact preservation, blind review, independent re-run, §12.3
-            // judgement, approver signature, register merge, staging
-            // verification — and none of it has happened for v2.
+            // **Never approved, diagnostic only, superseded by v3.** v2 fixed
+            // v1's wiring -- the schema is requested now, and two probes
+            // returned zero unparseable answers -- and in doing so let the
+            // measurement be read for the first time. What it showed was four
+            // contract defects, none of them the model:
+            //
+            //   A. the prompt never says which language a statement is
+            //      written in, and the ko gold labels are Korean tokens, so a
+            //      correct extraction written in English fails that arm;
+            //   B. the kind taxonomy is not mutually exclusive -- the model
+            //      picks `verbosity`/`tone` where the labels said the generic
+            //      `preference` -- and matching requires exact equality;
+            //   C. v2's strict schema made `sensitivity` required, so the
+            //      model now marks health facts `sensitive`; the validator
+            //      may raise that but never lower it, and a candidate that is
+            //      not bulk-safe can never match a gold label. "Correctly
+            //      extracted, awaiting review" scores as "not extracted";
+            //   D. gold labels enumerate one memory per case, so a correct
+            //      extra extraction costs precision.
+            //
+            // Together they make §12.3's bounds unreachable regardless of
+            // model quality, so the pair is closed here rather than run: a
+            // full run would have bought an uninterpretable number with the
+            // budget. The findings and both probes are recorded in
+            // docs/ops/memory-extraction-eval-diagnostics.md.
+            //
+            // Revoked rather than left a candidate because the budget below
+            // is real and stays: `decideEvalRunMode` reads status first, so a
+            // closed pair cannot spend what remains of it.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v2",
-            status: "candidate",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-24",
+            notes:
+                "Never approved. Diagnostic only: two probes (20 cases, " +
+                "US$0.0056) established the wiring and surfaced findings A-D. " +
+                "Superseded by mem-extract-v3.",
             evalBudget: {
                 approvedBy: "@mposition",
                 // Approved for v2 on its own, not carried across from v1:
@@ -155,12 +182,17 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // §12.5 backup candidate, evaluated only if the primary fails.
+            // §12.5 backup candidate. Closed with the primary: the four
+            // findings are contract defects, not model behaviour, so nothing
+            // about them would differ under another model.
             extractionModelId: "gpt-5-4-mini",
             promptVersion: "mem-extract-v2",
-            status: "candidate",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-24",
+            notes:
+                "Never approved. Superseded by mem-extract-v3; never had a " +
+                "budget and was never run.",
             evalBudget: null,
             evaluation: null,
         },

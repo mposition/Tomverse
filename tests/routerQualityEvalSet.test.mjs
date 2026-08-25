@@ -35,6 +35,8 @@ const item = (overrides = {}) => ({
     batchId: "test-batch",
     provider: "openai",
     modelId: "gpt-5-5",
+    requestedApiModel: "gpt-5.5",
+    generationParameters: { max_completion_tokens: 8000 },
     modelVersion: null,
     promptTemplateVersion: "router-eval-draft-v1",
     promptTemplateHash: "0000000000000000",

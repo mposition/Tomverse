@@ -882,8 +882,16 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 
 ### 12.5 첫 승인 후보 pair와 eval 예산 (§23 항목 4)
 
-- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v2)`입니다**
-  [개정 · 2026-08-24 @mposition]. v1은 **승인된 적 없이 종료**했습니다 —
+- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v3)`입니다**
+  [개정 · 2026-08-25 @mposition]. v3는 아직 등록 전이며, 그 전까지 **live 실행이
+  가능한 pair는 없습니다.** v2는 v1의 배선 결함(schema를 요청하지 않음)을
+  고쳤고 probe 두 번으로 failures 0을 확인했지만, 읽을 수 있게 된 측정값이 네
+  가지 계약 결함을 드러냈습니다 — 출력 언어 미지정, 상호 배타적이지 않은 kind
+  taxonomy, 모델의 `sensitive` 신고와 gold label의 충돌, 완전하지 않은 gold.
+  넷 다 모델 품질이 아닌데 넷 다 §12.3의 하한을 도달 불가능하게 만들므로, v2는
+  **진단 전용으로 종료**하고 평가 계약부터 고칩니다:
+  `docs/ops/memory-extraction-eval-diagnostics.md`. v2의 예산 승인도 v3로
+  이전되지 않습니다. v1은 **승인된 적 없이 종료**했습니다 —
   프롬프트가 "requested schema에 맞춰 JSON만 반환하라"고 하면서 어댑터가 schema를
   요청하지 않았고, 모델이 필드 이름과 `confidence` 타입을 추측해 strict parser가
   전건을 거절했습니다. 첫 live 실행이 5회 연속 실패로 중단되며 그 배선 결함을
@@ -1907,7 +1915,7 @@ A2 날짜로 덮으면 앞선 승인이 언제 이루어졌는지 말할 수 없
    §8.5 참조.
 3. **[확정]** source 삭제 시 파생 memory 상태 — 기본은 함께 삭제(`deleted`),
    사용자가 유지를 선택하면 `suspended_by_source_delete`. §8.3·§13.1 참조.
-4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v2)` [개정 · 2026-08-24]
+4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v3)` [개정 · 2026-08-25]
    (예비 `gpt-5-4-mini`), 둘 다 verified pricing 보유. **eval 실행 예산
    승인(승인자·상한·티켓)은 사람이 register entry와 함께 기입해야 하며
    아직 미기입** — §12.5 참조.
