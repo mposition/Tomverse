@@ -1,8 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useReducer, useRef } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, Upload } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+    AlertTriangle,
+    ArrowLeft,
+    ArrowRight,
+    Loader2,
+    RotateCcw,
+    Upload,
+} from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { ModelSelector } from "@/components/assistants/ModelSelector";
@@ -41,6 +49,7 @@ import {
     initialImportState,
     keepFileIds,
     resolveImportDraft,
+    resumableDraftFromManifest,
     unwaivedFindings,
     type AssistantPackageImportState,
     type AssistantPackageImportStep,
@@ -48,6 +57,7 @@ import {
     type ImportFieldKey,
     type ImportMergeTarget,
     type ImportUploadFile,
+    type ResumableImport,
 } from "@/lib/assistantPackageImportWizard";
 import {
     ImportRequestError,
@@ -292,11 +302,15 @@ const POLL_ATTEMPTS = 300;
 
 export function AssistantPackageImportWizard({
     mergeTargets,
+    resumable = [],
 }: {
     /** The owner's existing assistants, read by the page. May be empty. */
     mergeTargets: readonly ImportMergeTarget[];
+    /** Imports the server is still holding for this account. */
+    resumable?: readonly ResumableImport[];
 }) {
     const { t } = useLanguage();
+    const router = useRouter();
     const [state, dispatch] = useReducer(
         assistantPackageImportReducer,
         undefined,
@@ -678,6 +692,84 @@ export function AssistantPackageImportWizard({
         dispatch({ type: "restarted" });
     }, []);
 
+    /**
+     * Picking an import the server is still holding.
+     *
+     * Everything comes from the server: the draft from the manifest it stored,
+     * the documents from the rows it holds. Nothing is reconstructed from the
+     * container, because the container is gone -- which is exactly why this
+     * had to exist.
+     */
+    const [resumeBusyId, setResumeBusyId] = useState<string | null>(null);
+    const [resumeFailed, setResumeFailed] = useState<string | null>(null);
+
+    const resumeImport = useCallback(async (waiting: ResumableImport) => {
+        if (busyRef.current) return;
+        setResumeFailed(null);
+        setResumeBusyId(waiting.id);
+        try {
+            const snapshot = await readImport(waiting.id);
+            const draft = resumableDraftFromManifest(snapshot.stagingManifest);
+            if (!draft) {
+                // Cancelling is still offered, so an import this build cannot
+                // read is not a dead end either.
+                setResumeFailed(waiting.id);
+                return;
+            }
+            dispatch({
+                type: "resumed",
+                importId: snapshot.id,
+                target:
+                    waiting.mode === "merge"
+                        ? { kind: "merge", profileId: waiting.profileId }
+                        : { kind: "new" },
+                draft,
+                uploads: snapshot.files.map((file) => ({
+                    // The container path was this file's identity while the
+                    // archive was open. It is not recoverable here and nothing
+                    // downstream needs it, so the server's id stands in --
+                    // unique, and stable across the polls that follow.
+                    path: file.id,
+                    name: file.name,
+                    status:
+                        file.processingStatus === "ready"
+                            ? "ready"
+                            : file.processingStatus === "failed"
+                              ? "failed"
+                              : "processing",
+                    fileId: file.id,
+                    failureCode: file.failureCode,
+                })),
+            });
+        } catch {
+            setResumeFailed(waiting.id);
+        } finally {
+            if (!goneRef.current) setResumeBusyId(null);
+        }
+    }, []);
+
+    /**
+     * Letting go of one without opening it.
+     *
+     * The exit that was missing. In `create` mode an abandoned import could be
+     * cleared by deleting the draft profile it made; in `merge` mode the
+     * profile is one the owner uses, so there was nothing to do but wait out
+     * the idle sweep while ordinary publishing stayed refused.
+     */
+    const cancelStagedImport = useCallback(async (waiting: ResumableImport) => {
+        if (busyRef.current) return;
+        setResumeFailed(null);
+        setResumeBusyId(waiting.id);
+        try {
+            await cancelImport(waiting.id);
+            if (!goneRef.current) router.refresh();
+        } catch {
+            setResumeFailed(waiting.id);
+        } finally {
+            if (!goneRef.current) setResumeBusyId(null);
+        }
+    }, [router]);
+
     /** Step 8: the one action on the screen, and the only one that publishes. */
     const publish = useCallback(async () => {
         const current = stateRef.current;
@@ -790,7 +882,26 @@ export function AssistantPackageImportWizard({
 
             <div className="mt-5 flex flex-col gap-4">
                 {state.step === "source" && (
-                    <SourceStep state={state} onFile={openPackage} t={t} />
+                    <>
+                        {/*
+                          Before the file picker, because an import already
+                          staged is the thing to deal with first: starting a
+                          second one against the same assistant is refused at
+                          step 7, and the owner would find that out after
+                          reviewing a whole package.
+                        */}
+                        {state.file === null && resumable.length > 0 && (
+                            <ResumeStep
+                                resumable={resumable}
+                                busyId={resumeBusyId}
+                                failed={resumeFailed}
+                                onResume={resumeImport}
+                                onCancel={cancelStagedImport}
+                                t={t}
+                            />
+                        )}
+                        <SourceStep state={state} onFile={openPackage} t={t} />
+                    </>
                 )}
                 {state.step === "detect" && <DetectStep state={state} t={t} />}
                 {state.step === "inventory" && (
@@ -891,6 +1002,95 @@ export function AssistantPackageImportWizard({
 type Translate = (key: string) => string;
 type WizardState = AssistantPackageImportState;
 type Dispatch = (action: Parameters<typeof assistantPackageImportReducer>[1]) => void;
+
+/**
+ * Imports the server is still holding, offered before the file picker.
+ *
+ * The wizard keeps nothing across page loads, so a tab closed at step 7 or 8
+ * left its import unreachable: `create` mode could be cleared by deleting the
+ * draft profile it made, but `merge` mode stages into a profile the owner
+ * uses, and that profile then refuses ordinary publishing until the 24-hour
+ * idle sweep. Two controls, because the two answers are different: carry on
+ * with it, or let it go.
+ */
+function ResumeStep({
+    resumable,
+    busyId,
+    failed,
+    onResume,
+    onCancel,
+    t,
+}: {
+    resumable: readonly ResumableImport[];
+    busyId: string | null;
+    failed: string | null;
+    onResume: (waiting: ResumableImport) => void;
+    onCancel: (waiting: ResumableImport) => void;
+    t: Translate;
+}) {
+    return (
+        <section
+            className={`${sectionClass} border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40`}
+            data-testid="assistant-package-import-resume"
+        >
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-300">
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                {t("assistantPackageImport.resumeHeading")}
+            </h2>
+            <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
+                {t("assistantPackageImport.resumeBody")}
+            </p>
+            <ul className="mt-3 flex flex-col gap-2">
+                {resumable.map((waiting) => (
+                    <li
+                        key={waiting.id}
+                        className="flex flex-wrap items-center gap-2 text-sm"
+                    >
+                        <span className="flex-1">
+                            {interpolate(
+                                t(
+                                    waiting.mode === "merge"
+                                        ? "assistantPackageImport.resumeMerge"
+                                        : "assistantPackageImport.resumeCreate"
+                                ),
+                                {
+                                    name: waiting.profileName,
+                                    count: waiting.fileCount,
+                                }
+                            )}
+                        </span>
+                        <button
+                            type="button"
+                            className={secondaryButtonClass}
+                            disabled={busyId !== null}
+                            onClick={() => onResume(waiting)}
+                            data-testid={`assistant-package-import-resume-${waiting.id}`}
+                        >
+                            {t("assistantPackageImport.resumeContinue")}
+                        </button>
+                        <button
+                            type="button"
+                            className={secondaryButtonClass}
+                            disabled={busyId !== null}
+                            onClick={() => onCancel(waiting)}
+                            data-testid={`assistant-package-import-resume-cancel-${waiting.id}`}
+                        >
+                            {t("assistantPackageImport.runCancel")}
+                        </button>
+                    </li>
+                ))}
+            </ul>
+            {failed !== null && (
+                <p
+                    className="mt-2 text-sm text-amber-800 dark:text-amber-300"
+                    data-testid="assistant-package-import-resume-failed"
+                >
+                    {t("assistantPackageImport.resumeFailed")}
+                </p>
+            )}
+        </section>
+    );
+}
 
 function SourceStep({
     state,

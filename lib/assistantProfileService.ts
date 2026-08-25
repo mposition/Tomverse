@@ -6,6 +6,7 @@ import { enqueueKnowledgeCleanupForFiles } from "@/lib/assistantKnowledgeLifecyc
 // approved table as the knowledge quotas, so it lives with them. Imported
 // rather than copied: two constants for one approved number is how they drift.
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
+import { declaredSourceHost } from "@/lib/assistantPackageProvenance";
 import { lockProfileImport } from "@/lib/assistantProfileImportLocks";
 import {
     ASSISTANT_PROMPT_FORMAT_VERSION,
@@ -262,6 +263,33 @@ export const readAssistantProfile = async (
                 take: 50,
                 select: { id: true, revision: true, createdAt: true },
             },
+            /**
+             * Where this assistant came from, when it came from a package.
+             *
+             * Published imports only: a staging one has not produced a
+             * revision, and showing it here would announce an import the
+             * owner has not approved.
+             *
+             * The declared fields are the *package's* claims -- the server
+             * never saw the container -- so
+             * `docs/policy/assistant-package-import.md` §6.5 keeps them
+             * display-only and the copy says "states" rather than "was". The
+             * times shown are the server's own.
+             */
+            imports: {
+                where: { status: "published" },
+                orderBy: { serverReceivedAt: "desc" },
+                take: 20,
+                select: {
+                    id: true,
+                    declaredSourceKind: true,
+                    declaredSourceName: true,
+                    declaredSourceUrl: true,
+                    serverReceivedAt: true,
+                    userApprovedAt: true,
+                    versionId: true,
+                },
+            },
             knowledgeFiles: {
                 // The same isolation `listKnowledgeFiles()` applies, and for
                 // the same reason -- this is the list the editor actually
@@ -286,8 +314,25 @@ export const readAssistantProfile = async (
         },
     });
     if (!profile) notFound();
-    return profile;
+    return {
+        ...profile,
+        imports: profile.imports.map((row) => ({
+            id: row.id,
+            declaredSourceKind: row.declaredSourceKind,
+            declaredSourceName: row.declaredSourceName,
+            // The host, never the URL. A path can carry a token, and this one
+            // was written by the package rather than by anyone here -- the
+            // same reason the wizard shows hosts for the URLs it finds in
+            // instructions. Nothing fetches it either way
+            // (`docs/policy/assistant-package-import.md` §7).
+            declaredSourceHost: declaredSourceHost(row.declaredSourceUrl),
+            serverReceivedAt: row.serverReceivedAt,
+            userApprovedAt: row.userApprovedAt,
+            versionId: row.versionId,
+        })),
+    };
 };
+
 
 /**
  * Renames or re-describes a profile. Identity only.

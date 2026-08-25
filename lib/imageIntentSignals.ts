@@ -34,10 +34,12 @@
  *
  * Filenames, sizes and upload ids are deliberately absent. Not because the
  * attachment policy forbids them -- `uploadId`, `name`, `mediaType` and `size`
- * are returned to the client by design (docs/policy/user-attachment-persistence.md
- * §4) -- but because a classifier that reads filenames starts judging on
- * `logo.png` instead of on what the person wrote. Storage keys and raw bytes
- * are absent for the other reason: §2 refuses them everywhere.
+ * are returned to the client by design
+ * (docs/policy/user-attachment-persistence.md §4) -- but because a
+ * classifier that reads filenames starts judging on `logo.png` instead of on
+ * what the person wrote. Storage keys and raw bytes are absent for the other
+ * reason: docs/policy/user-attachment-persistence.md §2
+ * refuses them everywhere.
  *
  * Pure and synchronous: the composer calls it between keystrokes.
  */
@@ -183,8 +185,9 @@ const EN_RASTER_NOUNS = [
 ];
 
 // Visuals whose worth is the text inside them. Held apart from the raster
-// nouns because the destination question for these is still open (report §6,
-// L3): a text-to-image model is not obviously the right answer for a Korean
+// nouns because the destination question for these is still open -- see
+// .github/audits/image-intent-auto-switch-2026-08-24.md §6, the L3 item.
+// A text-to-image model is not obviously the right answer for a Korean
 // infographic, so they must never reach the chip.
 const KO_TEXT_HEAVY_NOUNS = [
   "인포그래픽",
@@ -511,13 +514,34 @@ export const l0ImageIntent = (intentClass: ImageIntentClass): L0ImageIntent => {
 };
 
 /**
- * The chip is offered for unmistakable raster generation and nothing else.
+ * Which turns are offered a handoff to image generation.
  *
- * Text-heavy visuals are excluded on purpose: their destination is an open
- * product question (report §6), and a chip is an answer to it.
+ * Both surfaces read this: the composer chip before sending, and the control
+ * under a finished answer. One predicate, because a person who is offered the
+ * workspace while typing and refused it after reading the answer would have
+ * learned nothing except that the offer is arbitrary.
+ *
+ * ## Why text-heavy visuals are in it now
+ *
+ * They were excluded while the destination was an open product question
+ * (.github/audits/image-intent-auto-switch-2026-08-24.md §6). It was settled
+ * on 2026-08-25 in favour of offering it, on the evidence of what the
+ * exclusion actually produced: the model, told to make a file and not to
+ * mention the workspace, listed the workspace as option 4 of 4 and asked
+ * which the user wanted. The user picked 4, and the model -- correctly, since
+ * it cannot navigate -- said it had no way to get there.
+ *
+ * The exclusion also never reached the person. It removed the *control* and
+ * left the *sentence*, which is the worst half: a destination named in prose
+ * that only the app can walk to.
+ *
+ * A text-to-image model still renders Korean text poorly, and that is the
+ * reason the SVG file remains what an infographic request produces first.
+ * The handoff is offered beside it, not instead of it -- see
+ * `lib/imageCapabilityPrompt.ts`.
  */
 export const offersImageHandoffChip = (intentClass: ImageIntentClass): boolean =>
-  intentClass === "raster_generation";
+  intentClass === "raster_generation" || intentClass === "text_heavy_visual";
 
 /**
  * Stable key for "have we already offered on this draft".
@@ -530,11 +554,12 @@ export const imageIntentDraftKey = (draft: string): string => normalize(draft);
 /**
  * How much a draft must move before the chip may be offered again.
  *
- * **An experimental constant, not a policy value** (report §5.3). There is no
- * evidence behind 0.3; it is a starting point, and §7's dismiss/re-show
- * measurements are what should move it. Named and exported so a change is a
- * change to one number with a test on it, rather than an edit inside a
- * condition.
+ * **An experimental constant, not a policy value**
+ * (.github/audits/image-intent-auto-switch-2026-08-24.md §5.3). There is no
+ * evidence behind 0.3; it is a starting point, and the measurements in
+ * .github/audits/image-intent-auto-switch-2026-08-24.md §7
+ * are what should move it. Named and exported so a change is a change to one
+ * number with a test on it, rather than an edit inside a condition.
  */
 export const IMAGE_INTENT_RESHOW_CHANGE_RATIO = 0.3;
 

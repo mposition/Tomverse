@@ -51,15 +51,21 @@ There are exactly five, and no standalone "New image" button:
 3. Chat composer **tools menu** → image generation, which switches to the image
    draft client-side.
 4. Model catalogue → **image tab** (see below).
-5. Chat composer **image-request handoff chip** — offered while the draft is
-   being typed, when the draft is an unmistakable raster-generation request.
+5. Chat **image-request handoff chip** — one control, offered at two moments:
+   while an image request is being typed, and beside the answer to one already
+   asked. Same component, same copy, same lock states; only the question it
+   carries differs.
 
 Requirements:
 
 - The launcher renders once per shell. A second image button anywhere is a
   contract violation, not a convenience. The chip is not a second launcher: it
-  is state-driven, appears at most once per draft, and offers the same handoff
-  the tools menu already performs.
+  is state-driven, appears at most once per question, and offers the same
+  handoff the tools menu already performs.
+- **The chip is one control in one place, not one per answer.** It renders in
+  the composer, which is shared. A control rendered under each assistant answer
+  would appear N times for one question in a comparison, and the offer belongs
+  to the question, not to any model's reply.
 - The menu is a real menu: `role="menu"`/`role="menuitem"`, focus moves into it
   on open, Escape closes it and returns focus to the trigger.
 - Switching to the image draft creates **no server row**. The conversation only
@@ -82,11 +88,27 @@ Non-negotiable, and the reason this entry point was allowed to exist at all
   the click routes to sign-in or `/pricing` — the same locked-exposure rule the
   table below states for every other entry point.
 - **With the flag off the chip does not render**, like every other entry point.
-- The chip is offered only for unmistakable raster generation. A text-dense
-  chart or infographic, a request to edit or reference an attached image, and a
-  request to describe an attached image are all **out of scope** and get no
-  chip — routing them to a text-to-image workspace would be a wrong answer, not
-  a helpful one.
+- **The chip is offered for a request that wants a picture**: unmistakable
+  raster generation, and a text-dense chart or infographic. A request to edit
+  or reference an attached image, and a request to describe one, are **out of
+  scope** and get no chip — the workspace starts from text, so neither can be
+  answered there.
+- **A text-dense visual gets both answers, not one instead of the other.** The
+  system block still tells the model to make the SVG, because exact text is
+  what an infographic is for and a text-to-image model does not render Korean
+  reliably; the chip is offered beside it. Withholding the chip for this class
+  was the earlier rule, and what it produced is recorded in policy §13.
+- **The chip survives the send.** While the composer holds an image request the
+  offer is about the draft; once it is empty the offer is about the last
+  question asked in that conversation, and it carries that question rather than
+  the empty box. It is scoped to the conversation, so it never follows the user
+  to a question they are no longer looking at. A dismissal belongs to the
+  question's text, so "not now" before the send is still "not now" after it.
+- **The model never names the destination.** No answer may tell the user where
+  image generation is, how to reach it, or offer it as an item in a list —
+  `lib/imageCapabilityPrompt.ts` forbids it, because a model that cannot
+  navigate cannot honour a choice the user makes from such a list. The control
+  is the only offer.
 - It obeys the mobile composer contract: its own full-width row above the
   textarea, never sharing, overlapping or floating above it, and it is
   suppressed during IME composition so a chip cannot resize the composer
@@ -402,6 +424,30 @@ and cancelling restores the chat draft **in the conversation it belonged to**.
   a visible caption. Removing either is a contract violation.
 - Assets exist only for a succeeded generation; a failed attempt must not
   surface a partially written object.
+- **Saving an image goes through this application's origin, never an
+  `<a download>` on the signed URL.** The `download` attribute is same-origin
+  only, so a link to R2 is followed rather than downloaded and the browser
+  renders the image — correct behaviour for a correct `image/png`, and not
+  fixable by anything stored on the object. The control fetches
+  `GET /api/images/generations/{id}/download`, which answers
+  `Content-Disposition: attachment`, and saves the response from the page so a
+  refusal stays on the page. Displaying an image (`<img src>`, "Full size")
+  keeps using the signed URL.
+- **A download filename is derived from the asset's recorded `mimeType`, never
+  from its R2 key.** Originals are keyed `original.png` whatever the provider
+  returned; naming a JPEG `.png` is the same defect wearing the fix's clothes.
+  `lib/imageAssetDownload.ts` owns the rule.
+- **"Full size" stays a link to the signed URL, and the card says how long that
+  link lasts.** The number is `IMAGE_ASSET_URL_TTL_MINUTES` from
+  `lib/imageAssetPayload.ts` — the same constant the server signs with — never a
+  literal in copy. A second copy of that number is a lie waiting for the day
+  somebody changes only the first.
+- **A click on a link known to be dead is refused, not followed.** The payload
+  carries `urlExpiresAt`; past it (less a few seconds' guard) the workspace
+  cancels the navigation, says so in a toast, and re-mints. It never navigates
+  to the storage provider's error document, and it never re-opens the image
+  itself — a `window.open()` after an await is a popup. An absent `urlExpiresAt`
+  is *not* expired: it is a payload from before the field existed.
 
 ## Accent colour role
 
@@ -508,4 +554,8 @@ rather than the behaviour.
   resolvable price can be submitted;
 - a generated image renders without its AI-generated label;
 - a signed asset URL is persisted client-side, or an R2 key reaches the client;
+- the download control links to a cross-origin asset URL, or a downloaded file
+  is named from the R2 key rather than from the recorded mime type;
+- the expiry copy quotes a literal instead of the signing constant, or an
+  expired "Full size" click navigates away from the workspace;
 - raw internal USD appears in any user-visible surface.
