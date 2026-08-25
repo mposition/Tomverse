@@ -56,7 +56,7 @@ test("a normal document request still receives a CSP policy", { tag: "@smoke" },
 
 // UI-004 - `env(safe-area-inset-*)` resolves to 0px unless the viewport meta
 // opts in, which silently disabled every safe-area accommodation in the app.
-test("the document opts into safe-area insets and themed browser chrome", { tag: "@smoke" }, async ({
+test("the document opts into safe-area insets and themed browser chrome", async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
@@ -148,7 +148,7 @@ test("Enter during a Korean IME composition does not send the message", { tag: "
 // UX-009 - the credit badge put `aria-label` on a roleless <span> (where it is
 // ignored) and aria-hidden the only text, so every cost was absent from the
 // accessibility tree.
-test("credit costs are exposed to assistive technology", { tag: "@smoke" }, async ({ page }) => {
+test("credit costs are exposed to assistive technology", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
 
@@ -159,7 +159,7 @@ test("credit costs are exposed to assistive technology", { tag: "@smoke" }, asyn
 
 // UX-008 - streaming, completion and failure were never announced, and the
 // typing indicator had no text alternative.
-test("the response lifecycle is announced to assistive technology", { tag: "@smoke" }, async ({
+test("the response lifecycle is announced to assistive technology", async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
@@ -184,7 +184,7 @@ test("the response lifecycle is announced to assistive technology", { tag: "@smo
 // UX-002 - opening a conversation was mouse-only: the row had no role, no tab
 // stop and no key handler, so keyboard and screen-reader users could never
 // return to a prior conversation.
-test("a conversation can be opened with the keyboard alone", { tag: "@smoke" }, async ({ page }) => {
+test("a conversation can be opened with the keyboard alone", async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto("/chat");
@@ -201,7 +201,7 @@ test("a conversation can be opened with the keyboard alone", { tag: "@smoke" }, 
 
 // UI-005 - there was no custom 404, so Next served an unbranded fallback whose
 // inline <style> is blocked outright under `CSP_MODE=enforce`.
-test("an unknown route renders a branded, navigable 404", { tag: "@smoke" }, async ({ page }) => {
+test("an unknown route renders a branded, navigable 404", async ({ page }) => {
   await prepareGuestPage(page, "en");
   const response = await page.goto("/this-route-does-not-exist");
   expect(response?.status()).toBe(404);
@@ -214,7 +214,7 @@ test("an unknown route renders a branded, navigable 404", { tag: "@smoke" }, asy
 
 // UI-003 - Tailwind preflight resets headings to inherit and zeroes borders, so
 // a model's structured answer rendered as undifferentiated body text.
-test("assistant markdown renders headings and tables as distinct blocks", { tag: "@smoke" }, async ({
+test("assistant markdown renders headings and tables as distinct blocks", async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
@@ -262,7 +262,7 @@ test("assistant markdown renders headings and tables as distinct blocks", { tag:
 
 // UX-011 - the primary composer set `outline-none` with no replacement ring, so
 // keyboard focus on the most important control was invisible.
-test("the composer shows a focus indicator when focused", { tag: "@smoke" }, async ({ page }) => {
+test("the composer shows a focus indicator when focused", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
 
