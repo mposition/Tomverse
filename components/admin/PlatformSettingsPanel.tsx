@@ -151,12 +151,23 @@ export function PlatformSettingsPanel({
         after?: string;
       };
       if (!response.ok) {
+        if (data.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
+          // A toast alone was the bug: it names the remedy and gives the
+          // operator no way to reach it, so the screen looks broken rather
+          // than gated. The banner above already carries the step-up link
+          // this panel's save uses, so raising the same flag reuses it
+          // instead of inventing a second way to say the same thing.
+          setReauthenticationRequired(true);
+          dispatchAppToast(
+            "Sign in again before changing this flag. Use the link at the top of this screen.",
+            "error"
+          );
+          return;
+        }
         dispatchAppToast(
-          data.code === "ADMIN_REAUTHENTICATION_REQUIRED"
-            ? "Sign in again before changing this flag."
-            : data.code === "ASSISTANT_PACKAGE_IMPORT_RATIONALE_REQUIRED"
-              ? "Say why this is changing. It goes on the audit row."
-              : "Refused. This needs ops:write.",
+          data.code === "ASSISTANT_PACKAGE_IMPORT_RATIONALE_REQUIRED"
+            ? "Say why this is changing. It goes on the audit row."
+            : "Refused. This needs ops:write.",
           "error"
         );
         return;

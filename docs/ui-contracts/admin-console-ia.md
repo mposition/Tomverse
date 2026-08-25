@@ -100,11 +100,28 @@ never its own `tab`, which the lookup has already consumed.
    workspace displays may move into `admin/layout.tsx`.
 6. **Bounded reads say they are bounded.** A panel showing the newest N rows
    states N on screen and does not present its own counters as totals.
-7. **Role, re-authentication, two-person approval, audit, credit/cost and
+7. **A step-up refusal must offer the way back.** When a control is refused
+   because the administrator's sign-in is no longer recent enough, the screen
+   renders a link to the step-up flow —
+   `adminRecentAuthenticationHref(<this screen's path>)`, which carries a
+   callback so the sign-in returns the operator to where they were and the
+   console session survives. **A toast alone is a defect**: it names the
+   remedy and gives no way to reach it, so the screen reads as broken rather
+   than gated and the only exit anyone finds is guessing a URL.
+
+   This has been got wrong three times. `tests/adminReauthenticationCta.test.mjs`
+   now fails any panel under `components/admin/` that can see a step-up
+   refusal and cannot render that link. A panel that already has the banner
+   raises its existing flag rather than adding a second way to say the same
+   thing.
+
+8. **Role, re-authentication, two-person approval, audit, credit/cost and
    provider-budget policy are out of scope for this contract** and were not
    changed by it. `writeRoles` in the route table drives the sidebar's "Read"
    marker only; authorization is still decided server-side by
-   `lib/adminAuth.ts` and each `/api/admin/**` route handler.
+   `lib/adminAuth.ts` and each `/api/admin/**` route handler. Rule 7 is not an
+   exception to this: *whether* to refuse is that policy's decision, and what
+   the screen owes the operator once refused is this contract's.
 
 ## What was removed, and what replaced it
 
