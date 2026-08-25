@@ -93,7 +93,8 @@ test.describe("signed in", () => {
     await type(page, INFOGRAPHIC_DRAFT);
     // Routing an infographic to a text-to-image workspace is a wrong answer,
     // not a shortcut: the destination for this class is still an open product
-    // question (report §6).
+    // question -- see
+    // .github/audits/image-intent-auto-switch-2026-08-24.md §6.
     await expect(chip(page)).toHaveCount(0);
   });
 

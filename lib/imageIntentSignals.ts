@@ -34,10 +34,12 @@
  *
  * Filenames, sizes and upload ids are deliberately absent. Not because the
  * attachment policy forbids them -- `uploadId`, `name`, `mediaType` and `size`
- * are returned to the client by design (docs/policy/user-attachment-persistence.md
- * §4) -- but because a classifier that reads filenames starts judging on
- * `logo.png` instead of on what the person wrote. Storage keys and raw bytes
- * are absent for the other reason: §2 refuses them everywhere.
+ * are returned to the client by design
+ * (docs/policy/user-attachment-persistence.md §4) -- but because a
+ * classifier that reads filenames starts judging on `logo.png` instead of on
+ * what the person wrote. Storage keys and raw bytes are absent for the other
+ * reason: docs/policy/user-attachment-persistence.md §2
+ * refuses them everywhere.
  *
  * Pure and synchronous: the composer calls it between keystrokes.
  */
@@ -183,8 +185,9 @@ const EN_RASTER_NOUNS = [
 ];
 
 // Visuals whose worth is the text inside them. Held apart from the raster
-// nouns because the destination question for these is still open (report §6,
-// L3): a text-to-image model is not obviously the right answer for a Korean
+// nouns because the destination question for these is still open -- see
+// .github/audits/image-intent-auto-switch-2026-08-24.md §6, the L3 item.
+// A text-to-image model is not obviously the right answer for a Korean
 // infographic, so they must never reach the chip.
 const KO_TEXT_HEAVY_NOUNS = [
   "인포그래픽",
@@ -502,7 +505,8 @@ export const l0ImageIntent = (intentClass: ImageIntentClass): L0ImageIntent =>
  * The chip is offered for unmistakable raster generation and nothing else.
  *
  * Text-heavy visuals are excluded on purpose: their destination is an open
- * product question (report §6), and a chip is an answer to it.
+ * product question (.github/audits/image-intent-auto-switch-2026-08-24.md §6),
+ * and a chip is an answer to it.
  */
 export const offersImageHandoffChip = (intentClass: ImageIntentClass): boolean =>
   intentClass === "raster_generation";
@@ -518,11 +522,12 @@ export const imageIntentDraftKey = (draft: string): string => normalize(draft);
 /**
  * How much a draft must move before the chip may be offered again.
  *
- * **An experimental constant, not a policy value** (report §5.3). There is no
- * evidence behind 0.3; it is a starting point, and §7's dismiss/re-show
- * measurements are what should move it. Named and exported so a change is a
- * change to one number with a test on it, rather than an edit inside a
- * condition.
+ * **An experimental constant, not a policy value**
+ * (.github/audits/image-intent-auto-switch-2026-08-24.md §5.3). There is no
+ * evidence behind 0.3; it is a starting point, and the measurements in
+ * .github/audits/image-intent-auto-switch-2026-08-24.md §7
+ * are what should move it. Named and exported so a change is a change to one
+ * number with a test on it, rather than an edit inside a condition.
  */
 export const IMAGE_INTENT_RESHOW_CHANGE_RATIO = 0.3;
 
