@@ -34,40 +34,13 @@ name: Back-merge main into develop
 #                   a pull request carrying the merge commit it already made.
 #
 #   verify      asserts the invariant afterwards -- `main` reachable from
-#               `develop` -- and reports loudly when it is not, which is the
-#               signal that a human has to finish the job. It reports on both
+#               `develop` -- and fails loudly when it is not, which is the
+#               signal that a human has to finish the job. It fails on both
 #               paths above, so neither is silent.
 #
 # The invariant, and the one command that decides it:
 #
 #   git merge-base --is-ancestor origin/main origin/develop   # must exit 0
-#
-# Why this workflow never fails its run
-# -------------------------------------
-#
-# Railway's production service runs with Wait for CI on, and Railway's rule is
-# all-or-nothing: "if any workflow fails, the deployments will be SKIPPED"
-# (docs.railway.com/deployments/github-autodeploys#wait-for-ci). It cannot be
-# told which workflows are the release verdict, and GitHub cannot mark a
-# workflow as outside a deploy gate. So while this workflow failed on a
-# conflict, every conflict here also cancelled the production deployment of a
-# release that had nothing to do with it. On 2026-08-25 that took out #953,
-# #954, #960, #968 and #969: the deployment was skipped 1-2 seconds after this
-# workflow reported failure, before the release suite had even finished.
-#
-# A develop-side conflict says nothing about whether `main` is deployable, so
-# it must not be able to answer that question. Both jobs therefore exit 0 and
-# the alarm moves to channels the gate does not read:
-#
-#   * a tracking issue, opened when the invariant breaks, kept current while it
-#     stays broken, and closed when it is restored. More durable than a red X,
-#     which scrolls out of the Actions list within a day.
-#   * `::error::` annotations and a job summary on the run itself, which render
-#     in red regardless of the run's conclusion.
-#
-# What this costs is the red X in the Actions list, and that is the trade being
-# made deliberately. What it must never become is silence -- if the issue
-# cannot be opened, that failure is itself annotated.
 
 on:
   push:
@@ -177,18 +150,12 @@ jobs:
       #                    discards the second parent and achieves nothing,
       #                    which is what happened to #203 and #213.
       #   conflicted    -- replaying it conflicts again, so this aborts and
-      #                    stops. NO branch is pushed and NO pull request is
+      #                    exits 1. NO branch is pushed and NO pull request is
       #                    opened: a pull request whose content a machine
-      #                    guessed is worse than the absence of one. The step
-      #                    annotates the conflict, `verify` opens the tracking
-      #                    issue after it, and a person picks it up from
-      #                    `origin/develop`.
-      #
-      # The conflict path exits 0 on purpose -- see "Why this workflow never
-      # fails its run" at the top. It is `verify` that decides whether the
-      # invariant holds, and it decides it from git rather than from this
-      # job's exit code, so nothing is lost by leaving the run green.
-      - name: Open a pull request when the push was refused, or report a conflict
+      #                    guessed is worse than the absence of one. The job
+      #                    fails, `verify` fails after it, and a person picks
+      #                    it up from `origin/develop`.
+      - name: Open a pull request when the push was refused, or fail on a conflict
         if: |
           steps.needed.outputs.needed == 'true' &&
           (steps.merge.outputs.conflicted == 'true' || steps.push.outputs.pushed == 'false')
@@ -202,7 +169,7 @@ jobs:
             # from this base. The branch is still the right starting point.
             git merge --abort || true
             echo "::error::The back-merge conflicts and needs a human. Start from origin/develop, merge origin/main, resolve, and merge the pull request WITH A MERGE COMMIT."
-            exit 0
+            exit 1
           fi
           git push -u origin "$branch"
           existing=$(gh pr list --head "$branch" --base develop --state open --json number --jq '.[0].number')
@@ -217,27 +184,12 @@ jobs:
   # Method 3: the guard. The back-merge above is the fix; this is what makes a
   # failed fix visible instead of silent. It runs even when the back-merge job
   # failed, because that is precisely when the invariant needs reporting.
-  #
-  # It reads git, not the job above: an exit code says what a script did, and
-  # the invariant is a fact about two refs. That is also what lets the whole
-  # workflow stay green without losing anything -- the verdict never came from
-  # the exit code in the first place.
   verify:
     name: main is in develop's ancestry
     runs-on: ubuntu-latest
     needs: back-merge
     if: always()
     timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # One issue, matched by exact title rather than by search. GitHub's search
-      # index lags a fresh issue by up to minutes, and two releases can land
-      # inside that window -- `gh issue list` reads the API directly, so it
-      # cannot open a second issue for a break it already reported.
-      GUARD_ISSUE_TITLE: "Back-merge main into develop is blocked"
 
     steps:
       - name: Checkout
@@ -246,84 +198,14 @@ jobs:
           fetch-depth: 0
 
       - name: Assert the invariant
-        id: invariant
         run: |
           set -uo pipefail
           git fetch origin main develop
           main_sha=$(git rev-parse --short origin/main)
           develop_sha=$(git rev-parse --short origin/develop)
-          {
-            echo "main_sha=$main_sha"
-            echo "develop_sha=$develop_sha"
-          } >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor origin/main origin/develop; then
             echo "main ($main_sha) is an ancestor of develop ($develop_sha)."
-            echo "holds=true" >> "$GITHUB_OUTPUT"
-            echo "main (\`$main_sha\`) is an ancestor of develop (\`$develop_sha\`)." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "::error::main ($main_sha) is NOT an ancestor of develop ($develop_sha). The back-merge did not land -- check the job above for a conflict, a refused push, or a pull request waiting to be merged with a merge commit. Until this is fixed, the next change to already-released code will conflict."
-          echo "holds=false" >> "$GITHUB_OUTPUT"
-          {
-            echo "### The back-merge did not land"
-            echo
-            echo "main (\`$main_sha\`) is **not** an ancestor of develop (\`$develop_sha\`)."
-            echo "Until this is fixed, the next change to already-released code will conflict."
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 0
-
-      # The alarm. Not a red X, because a red X here cancels the production
-      # deployment of whatever release happened to be waiting -- see the top of
-      # this file. An issue outlives the run, and the backlog report already
-      # reads open issues.
-      - name: Open or refresh the tracking issue
-        if: steps.invariant.outputs.holds == 'false'
-        run: |
-          set -uo pipefail
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          body=$(cat <<EOF
-          \`main\` (\`${{ steps.invariant.outputs.main_sha }}\`) is not an ancestor of
-          \`develop\` (\`${{ steps.invariant.outputs.develop_sha }}\`), so the automated
-          back-merge did not land. Until it does, the next change to code \`main\`
-          already carries has no common base and will conflict.
-
-          The check that decides this:
-
-          \`\`\`
-          git merge-base --is-ancestor origin/main origin/develop
-          \`\`\`
-
-          To fix it, start from \`origin/develop\`, merge \`origin/main\`, resolve, and
-          merge the pull request **with a merge commit** -- squashing it discards the
-          second parent and restores nothing.
-
-          Last checked by $run_url
-
-          This issue is opened, refreshed and closed by
-          \`.github/workflows/back-merge-main-to-develop.yml\`. It closes itself once
-          the invariant holds again.
-          EOF
-          )
-          number=$(gh issue list --state open --limit 100 --json number,title \
-            | jq -r --arg t "$GUARD_ISSUE_TITLE" '[.[] | select(.title == $t)] | .[0].number // empty') || number=""
-          if [ -n "$number" ]; then
-            gh issue edit "$number" --body "$body" \
-              || echo "::error::Could not refresh tracking issue #$number. The back-merge is still blocked -- see this run."
-          else
-            gh issue create --title "$GUARD_ISSUE_TITLE" --body "$body" \
-              || echo "::error::Could not open a tracking issue. The back-merge is blocked and nothing else is recording it -- see this run."
-          fi
-          exit 0
-
-      - name: Close the tracking issue once the ancestry is restored
-        if: steps.invariant.outputs.holds == 'true'
-        run: |
-          set -uo pipefail
-          number=$(gh issue list --state open --limit 100 --json number,title \
-            | jq -r --arg t "$GUARD_ISSUE_TITLE" '[.[] | select(.title == $t)] | .[0].number // empty') || number=""
-          if [ -n "$number" ]; then
-            gh issue close "$number" \
-              --comment "main (\`${{ steps.invariant.outputs.main_sha }}\`) is an ancestor of develop (\`${{ steps.invariant.outputs.develop_sha }}\`) again. Closed by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID." \
-              || echo "::warning::The ancestry is restored but tracking issue #$number could not be closed."
-          fi
-          exit 0
+          exit 1
