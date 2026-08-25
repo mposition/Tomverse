@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { providerApiKeyFor } from "../lib/emailProviderPortCore.ts";
 import { resolveSenderIdentity } from "../lib/emailSendingIdentityCore.ts";
 
 const CHECKS = [
@@ -223,11 +224,17 @@ const sendSlack = async () => {
 
 const sendEmails = async () => {
   const recipients = parseRecipients(process.env.SECURITY_AUDIT_EMAILS);
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+  // The resolver, so this script uses whichever key the deployment sends with
+  // rather than only the generic name.
+  const apiKey = providerApiKeyFor("transactional", process.env);
   if (recipients.length === 0) {
     throw new Error("Security audit email recipient is not configured.");
   }
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured for security reports.");
+  if (!apiKey) {
+    throw new Error(
+      "No provider API key is configured for security reports (RESEND_API_KEY or TRANSACTIONAL_RESEND_API_KEY)."
+    );
+  }
   // The same resolver every other sender uses, reached through the pure core
   // rather than lib/emailSendingIdentity.ts: that module is `server-only` and
   // this script runs in GitHub Actions, outside Next.js. A second copy of the

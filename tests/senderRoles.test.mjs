@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { directProviderKeyReads } from "../lib/emailProviderPortCore.ts";
 import {
   SENDER_ROLES,
   SENDER_ROLE_SPECS,
@@ -484,6 +485,33 @@ test("a send written without a role is found", () => {
   );
 });
 
+test("a provider key read straight off an environment is found", () => {
+  // The sender rule applied to the credential. Four files read `RESEND_API_KEY`
+  // directly while `providerApiKeyFor()` prefers `TRANSACTIONAL_RESEND_API_KEY`,
+  // so a deployment setting the specific name sent with one key and reported
+  // with another -- and the domain report's 401 then looked like a finding
+  // about the sending domains rather than a permission error on one credential.
+  for (const source of [
+    "const key = process.env.RESEND_API_KEY;",
+    'const key = env["TRANSACTIONAL_RESEND_API_KEY"];',
+    "if (process.env.MARKETING_RESEND_API_KEY) send();",
+  ]) {
+    assert.equal(directProviderKeyReads(source).length, 1, source);
+  }
+
+  // A name is not a read. The admin environment screen prints the variable as a
+  // label and says in prose that the stream-specific name satisfies it, and a
+  // comment may explain the rule without breaking it.
+  for (const source of [
+    '  name: "RESEND_API_KEY",',
+    '  description: "Required for email. TRANSACTIONAL_RESEND_API_KEY satisfies it too.",',
+    "// never read RESEND_API_KEY directly",
+    "const key = providerApiKeyFor('transactional', env);",
+  ]) {
+    assert.deepEqual(directProviderKeyReads(source), [], source);
+  }
+});
+
 test("the tree contains no bypass of the resolver", () => {
   // The check the PR gate runs, executed here too so a failure names the file
   // rather than only the gate.
@@ -502,6 +530,12 @@ test("the tree contains no bypass of the resolver", () => {
     const source = readFileSync(file, "utf8");
     for (const found of sendingSubdomainAddresses(source)) {
       findings.push(`${file}:${found.line}: ${found.literal}`);
+    }
+    // The core owns the key precedence table and the rule itself.
+    if (file !== "lib/emailProviderPortCore.ts") {
+      for (const found of directProviderKeyReads(source)) {
+        findings.push(`${file}:${found.line}: reads ${found.text} directly`);
+      }
     }
     if (file === "lib/email.ts") continue;
     for (const found of sendCallsMissingSenderRole(source)) {

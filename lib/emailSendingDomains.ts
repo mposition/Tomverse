@@ -1,5 +1,6 @@
 import "server-only";
 
+import { providerApiKeyFor } from "@/lib/emailProviderPortCore";
 import { configuredSendingDomains } from "@/lib/emailSendingIdentity";
 import {
   domainReportFindings,
@@ -45,7 +46,14 @@ export async function readSendingDomainReport(
 ): Promise<SendingDomainReport> {
   const configured = configuredSendingDomains(environment);
   const checkedAt = new Date().toISOString();
-  const apiKey = environment.RESEND_API_KEY;
+  // Through the same resolver the sender uses, not `RESEND_API_KEY` directly.
+  // This file read that one variable while `providerApiKeyFor()` prefers
+  // `TRANSACTIONAL_RESEND_API_KEY`, so a deployment that set the specific name
+  // would send with one key and report with another -- and the report's failure
+  // would look like a fact about the domains. Two readings of one credential is
+  // the same shape as the two readings of one sender that put three of four
+  // senders on a stale domain (docs/ops/email-sending-domains.md §1.2).
+  const apiKey = providerApiKeyFor("transactional", environment);
 
   if (!apiKey) {
     return {
@@ -53,7 +61,7 @@ export async function readSendingDomainReport(
       configured,
       providerDomains: null,
       providerError:
-        "RESEND_API_KEY is not set on this deployment, so the provider's domain status cannot be read.",
+        "No provider API key is set for the transactional stream on this deployment, so the provider's domain status cannot be read.",
       findings: [],
     };
   }
@@ -87,7 +95,14 @@ export async function readSendingDomainReport(
       checkedAt,
       configured,
       providerDomains: null,
-      providerError: `The provider answered ${response.status} when listing domains.`,
+      // 401 is the ordinary answer from a sending-only key: Resend permits
+      // `POST /emails` on one and refuses `GET /domains`. Said here rather than
+      // left to the runbook, because the screen showing this is where somebody
+      // reads it (docs/ops/email-sending-domains.md §3.5.2).
+      providerError:
+        response.status === 401
+          ? "The provider answered 401 when listing domains. A sending-only API key gets this and still sends mail normally, so this is expected unless a test send also fails."
+          : `The provider answered ${response.status} when listing domains.`,
       findings: [],
     };
   }
