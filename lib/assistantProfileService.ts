@@ -263,6 +263,14 @@ export const readAssistantProfile = async (
                 select: { id: true, revision: true, createdAt: true },
             },
             knowledgeFiles: {
+                // The same isolation `listKnowledgeFiles()` applies, and for
+                // the same reason -- this is the list the editor actually
+                // draws. The panel takes its files from here as a prop and
+                // calls the knowledge API only for capacity, so a filter that
+                // lived solely on that endpoint never reached a screen. A
+                // staged file appearing here is a file the owner can select
+                // into a revision before approving the import it came from.
+                where: { importId: null },
                 orderBy: { createdAt: "asc" },
                 select: {
                     id: true,

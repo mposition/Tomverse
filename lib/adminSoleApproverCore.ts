@@ -44,8 +44,37 @@
  *
  * A list rather than a predicate, and checked before anything else, so that
  * reaching the sole-approver path requires being named here.
+ *
+ * ## Two actions, two different arguments
+ *
+ * `retention.cleanup.execute` is here for the reason above: a schedule already
+ * performs the same deletions unattended, so the exception opens nothing new.
+ *
+ * **`email_campaign.approve` is here for a different reason, and the first
+ * argument does not apply to it.** Nothing approves campaign copy unattended;
+ * approval *is* the act of a person reading the words, which is what EM-06
+ * pins in place. What carries it instead is that in a one-administrator
+ * organisation the two-person rule is not strict but **unsatisfiable**: no
+ * campaign could ever be approved, so the whole fan-out could never send
+ * anything at all. That is the same reasoning the release-gate registry
+ * records as `approvalPolicy.soleApproverAllowed`, and it was decided as D5
+ * (.github/audits/model-lifecycle-email-2026-08-22.md §21) rather than assumed
+ * here.
+ *
+ * The distinction is written down because the two arguments justify different
+ * things. The retention one would extend to any action a schedule already
+ * performs; the campaign one extends only to actions that are otherwise
+ * impossible, and stops the moment a second administrator exists — which is
+ * condition 6, unchanged.
+ *
+ * Neither argument reaches `user.delete` or the refund actions: a schedule
+ * performs no equivalent, and they are perfectly possible with one
+ * administrator asking a second one.
  */
-export const SOLE_APPROVER_ACTIONS = ["retention.cleanup.execute"] as const;
+export const SOLE_APPROVER_ACTIONS = [
+    "retention.cleanup.execute",
+    "email_campaign.approve",
+] as const;
 
 export type SoleApproverAction = (typeof SOLE_APPROVER_ACTIONS)[number];
 
@@ -217,6 +246,54 @@ export function checkDryRunBinding(input: {
     const maxAgeMs = input.maxAgeMs ?? DRY_RUN_BINDING_MAX_AGE_MS;
     if (input.now.getTime() - latest.createdAt.getTime() > maxAgeMs) {
         return { bound: false, reason: "preview_expired" };
+    }
+    return { bound: true };
+}
+
+export type CampaignCopyBinding =
+    | { bound: true }
+    | {
+          bound: false;
+          reason: "copy_digest_missing" | "copy_digest_mismatch" | "copy_unreadable";
+      };
+
+/**
+ * The campaign equivalent of the dry-run binding: the approver echoes the
+ * digest of the copy they read, and the server compares it with what the
+ * campaign renders now.
+ *
+ * The retention binding proves *you were shown this preview and it has not
+ * been superseded*. This proves *you read this copy and it has not changed* —
+ * which is the same guarantee against the same failure, and the one EM-06
+ * exists for. Without it a sole approver approves "the campaign", and the
+ * campaign is whatever the template says at the moment the send runs.
+ *
+ * Three differences from the retention binding, each because the thing being
+ * confirmed is different:
+ *
+ *   - **No expiry.** A retention preview is a count of live rows and goes
+ *     stale on its own; copy does not change unless somebody edits it, and a
+ *     mismatch is then the whole signal. A clock here would refuse a correct
+ *     approval for no reason.
+ *   - **No owner check.** A digest is a property of the copy, not a stored
+ *     preview belonging to an administrator, so "somebody else ran it" has no
+ *     meaning.
+ *   - **A null current digest is a refusal, not a pass.** It means the copy
+ *     could not be rendered to compare against, and approving words nobody
+ *     could read is the failure this whole path is built around.
+ */
+export function checkCampaignCopyBinding(input: {
+    /** What the approver echoed back. */
+    submittedDigest: string | null | undefined;
+    /** What the campaign's copy hashes to right now, per `campaignDigest()`. */
+    currentDigest: string | null | undefined;
+}): CampaignCopyBinding {
+    const submitted = input.submittedDigest?.trim();
+    if (!submitted) return { bound: false, reason: "copy_digest_missing" };
+    const current = input.currentDigest?.trim();
+    if (!current) return { bound: false, reason: "copy_unreadable" };
+    if (submitted !== current) {
+        return { bound: false, reason: "copy_digest_mismatch" };
     }
     return { bound: true };
 }

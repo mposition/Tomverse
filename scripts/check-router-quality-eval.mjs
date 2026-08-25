@@ -25,7 +25,12 @@ import { join } from "node:path";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { evaluationRecordProblems } from "../lib/routerQualityEvalCore.ts";
-import { evalSetProblems } from "../lib/routerQualityEvalSet.ts";
+import {
+  cellFill,
+  evalSetProblems,
+  unrecordedProvenanceItems,
+} from "../lib/routerQualityEvalSet.ts";
+import { duplicatePrompts } from "../lib/routerEvalReviewSheet.ts";
 
 const SET_DIRECTORY = "docs/ops/router-evaluation-set";
 const MARGIN_PP = -2;
@@ -66,7 +71,71 @@ const checkSet = (path) => {
   // *allowed* to be full of candidates, and demanding otherwise would make
   // the drafting stage impossible. What the file may not do is claim to be a
   // decision set without carrying a decision set's records.
-  report(`${path} (${set.purpose ?? "no purpose"})`, [...evalSetProblems(set)]);
+  const problems = [...evalSetProblems(set)];
+
+  // Duplicate IDS are caught by evalSetProblems; duplicate TEXT is not, and it
+  // is the one that matters here. The same prompt under two ids is one item
+  // counted twice, which inflates a cell towards its target without adding
+  // anything for the Router to be measured on.
+  for (const duplicate of duplicatePrompts(set.items ?? [])) {
+    problems.push(
+      `${duplicate.ids.join(", ")} share one prompt; the same question under two ids ` +
+        "fills a cell without adding evidence"
+    );
+  }
+
+  // docs/ops/tomverse-chat-router-evaluation-set.md §2. Cells are independent, so fill is reported per cell and never pooled.
+  // A short cell is only an ERROR once a person has said the pool is finished:
+  // during collection every cell is short, and a check that is red throughout
+  // the work it is meant to supervise stops being read.
+  const fill = cellFill(set);
+  const short = fill.filter((cell) => cell.short > 0);
+  if (set.pilotReady === true && short.length > 0) {
+    for (const cell of short) {
+      problems.push(
+        `${cell.stratum}/${cell.cell} has ${cell.adopted} adopted of ${cell.target}; ` +
+          "the file declares pilotReady"
+      );
+    }
+  }
+
+  report(`${path} (${set.purpose ?? "no purpose"})`, problems);
+
+  if (fill.some((cell) => cell.target > 0)) {
+    const source = (set.cellTargets ?? []).length > 0 ? "frozen cellTargets" : "proposedPilotCellTarget (a proposal, not the docs/ops/tomverse-chat-router-evaluation-set.md §11 freeze record)";
+    console.log(`\n       cell fill against ${source}`);
+    for (const cell of fill) {
+      const bar = cell.short === 0 ? "full" : `short ${cell.short}`;
+      console.log(
+        `         ${`${cell.stratum}/${cell.cell}`.padEnd(44)}` +
+          `${String(cell.adopted).padStart(3)} adopted  ` +
+          `${String(cell.candidates).padStart(3)} candidate  of ${cell.target}  ${bar}`
+      );
+    }
+    const totalAdopted = fill.reduce((sum, cell) => sum + cell.adopted, 0);
+    const totalTarget = fill.reduce((sum, cell) => sum + cell.target, 0);
+    console.log(
+      `         ${"total".padEnd(44)}${String(totalAdopted).padStart(3)} adopted of ${totalTarget}` +
+        (set.pilotReady === true ? "  [pilotReady]" : "  [collection in progress]")
+    );
+  }
+
+  // A drafted item recording provider "unrecorded" satisfies the schema while
+  // reconstructing nothing. Counted here so the gap is visible rather than
+  // reading as a filled field.
+  const unrecorded = unrecordedProvenanceItems(set);
+  if (unrecorded.length > 0) {
+    console.log(
+      `\n       ${unrecorded.length} drafted item(s) have no reconstructable drafter ` +
+        `(provider "unrecorded"): ${unrecorded.slice(0, 4).map((item) => item.id).join(", ")}` +
+        `${unrecorded.length > 4 ? ", …" : ""}`
+    );
+    console.log(
+      "         Not a failure — a truthful record of a real gap. docs/ops/tomverse-chat-router-evaluation-set.md §8 makes the drafter a\n" +
+        "         confound the reviewer weighs, so an item that cannot name one is weaker\n" +
+        "         evidence and a reviewer may reject it on that ground alone."
+    );
+  }
 };
 
 const checkReport = (path) => {
