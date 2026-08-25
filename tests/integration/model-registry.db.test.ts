@@ -535,69 +535,100 @@ test("every cap-only model has its stranded cap lifted by the bootstrap", async 
   }
 });
 
-// The reservation-only scope, end to end. This is the one narrow entry that
+// The reservation-only scope, end to end. This is the one narrow scope that
 // moves a money figure, so what it must NOT touch is worth pinning as firmly
 // as what it does: docs/policy/credit-and-cost-limits.md section 4 approved
-// 6,144 for reasoning models, and nothing else about the row was approved
-// with it.
+// "premium 4,096, reasoning 6,144", and nothing else about the row was
+// approved with it.
+//
+// `staleReservation` is the figure the production row actually held, and the
+// two sources differ. gpt-5-5-thinking held today's premium class fallback.
+// gpt-5-5 and gemini-3-1-pro held 2,048 -- what BILLING_DEFAULTS.premium in
+// lib/models.ts read on 2026-07-17, before lib/modelPricing.ts existed.
+const RESERVATION_ONLY_EXPECTATIONS: Record<
+  string,
+  { staleReservation: number; approved: number }
+> = {
+  "gpt-5-5-thinking": { staleReservation: 4_096, approved: 6_144 },
+  "gpt-5-5": { staleReservation: 2_048, approved: 4_096 },
+  "gemini-3-1-pro": { staleReservation: 2_048, approved: 4_096 },
+};
+
 test("the reservation-only scope raises the held figure and leaves the cap and credits alone", async () => {
   assert.deepEqual(
-    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS],
-    ["gpt-5-5-thinking"]
+    [...RESERVATION_ONLY_RECONCILIATION_MODEL_IDS].sort(),
+    Object.keys(RESERVATION_ONLY_EXPECTATIONS).sort()
   );
-  const before = await prisma.modelRegistryEntry.findUniqueOrThrow({
-    where: { id: "gpt-5-5-thinking" },
-  });
 
-  await prisma.modelRegistryEntry.update({
-    where: { id: "gpt-5-5-thinking" },
-    data: {
-      // The premium class fallback a pre-2026-08-01 seed left behind.
-      reservationOutputTokens: 4_096,
-      // Deliberately wrong, and deliberately left wrong: this scope carries
-      // the reservation only, so an operator's cap survives it.
-      maxOutputTokens: 7_000,
-      creditWeight: 31,
-      inputUsdPerMillionTokens: 11.5,
-      updatedByEmail: "ops@tomverse.app",
-    },
-  });
+  const originals = new Map<
+    string,
+    Awaited<ReturnType<typeof prisma.modelRegistryEntry.findUniqueOrThrow>>
+  >();
+  for (const id of Object.keys(RESERVATION_ONLY_EXPECTATIONS)) {
+    originals.set(
+      id,
+      await prisma.modelRegistryEntry.findUniqueOrThrow({ where: { id } })
+    );
+  }
+
+  // Every row is put into its stranded shape before a single reconciliation
+  // runs, so the pass has to correct all three rather than one at a time.
+  for (const [id, expectation] of Object.entries(RESERVATION_ONLY_EXPECTATIONS)) {
+    await prisma.modelRegistryEntry.update({
+      where: { id },
+      data: {
+        reservationOutputTokens: expectation.staleReservation,
+        // Deliberately wrong, and deliberately left wrong: this scope carries
+        // the reservation only, so an operator's cap survives it.
+        maxOutputTokens: 7_000,
+        creditWeight: 31,
+        inputUsdPerMillionTokens: 11.5,
+        updatedByEmail: "ops@tomverse.app",
+      },
+    });
+  }
 
   await reconcileStaticCatalogMetadata();
 
-  const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
-    where: { id: "gpt-5-5-thinking" },
-  });
-  assert.equal(row.reservationOutputTokens, 6_144);
-  assert.equal(
-    row.maxOutputTokens,
-    7_000,
-    "the cap is outside this scope, so even a wrong one is left for a human"
-  );
-  assert.equal(row.creditWeight, 31);
-  assert.equal(Number(row.inputUsdPerMillionTokens), 11.5);
-  assert.equal(row.updatedByEmail, "ops@tomverse.app");
-  assert.equal(row.enabled, before.enabled);
-  assert.equal(row.status, before.status);
+  for (const [id, expectation] of Object.entries(RESERVATION_ONLY_EXPECTATIONS)) {
+    const row = await prisma.modelRegistryEntry.findUniqueOrThrow({
+      where: { id },
+    });
+    assert.equal(row.reservationOutputTokens, expectation.approved, id);
+    assert.equal(
+      row.maxOutputTokens,
+      7_000,
+      `${id}: the cap is outside this scope, so even a wrong one is left for a human`
+    );
+    assert.equal(row.creditWeight, 31, id);
+    assert.equal(Number(row.inputUsdPerMillionTokens), 11.5, id);
+    assert.equal(row.updatedByEmail, "ops@tomverse.app", id);
+    assert.equal(row.enabled, originals.get(id)!.enabled, id);
+    assert.equal(row.status, originals.get(id)!.status, id);
+  }
 
   // Idempotent.
   await reconcileStaticCatalogMetadata();
-  const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
-    where: { id: "gpt-5-5-thinking" },
-  });
-  assert.equal(again.reservationOutputTokens, 6_144);
-  assert.equal(again.creditWeight, 31);
+  for (const [id, expectation] of Object.entries(RESERVATION_ONLY_EXPECTATIONS)) {
+    const again = await prisma.modelRegistryEntry.findUniqueOrThrow({
+      where: { id },
+    });
+    assert.equal(again.reservationOutputTokens, expectation.approved, id);
+    assert.equal(again.creditWeight, 31, id);
+  }
 
-  await prisma.modelRegistryEntry.update({
-    where: { id: "gpt-5-5-thinking" },
-    data: {
-      maxOutputTokens: before.maxOutputTokens,
-      reservationOutputTokens: before.reservationOutputTokens,
-      creditWeight: before.creditWeight,
-      inputUsdPerMillionTokens: before.inputUsdPerMillionTokens,
-      updatedByEmail: before.updatedByEmail,
-    },
-  });
+  for (const [id, original] of originals) {
+    await prisma.modelRegistryEntry.update({
+      where: { id },
+      data: {
+        maxOutputTokens: original.maxOutputTokens,
+        reservationOutputTokens: original.reservationOutputTokens,
+        creditWeight: original.creditWeight,
+        inputUsdPerMillionTokens: original.inputUsdPerMillionTokens,
+        updatedByEmail: original.updatedByEmail,
+      },
+    });
+  }
 });
 
 test("stores limited availability and operational notes in the registry", async () => {
