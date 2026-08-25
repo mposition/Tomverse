@@ -1606,6 +1606,7 @@ export const es = {
         countSummary: "{count} de {max} asistentes",
         atCapacity: "Has alcanzado el límite de asistentes. Elimina uno para añadir otro.",
         create: "Nuevo asistente",
+        importPackage: "Importar configuración externa",
         createAction: "Crear asistente",
         empty: "Todavía no tienes asistentes. Crea uno para darle a un asistente tus propias instrucciones.",
         publishedStatus: "Publicado — revisión {revision}, {files} archivo(s) de conocimiento",

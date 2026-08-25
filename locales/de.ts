@@ -1609,6 +1609,7 @@ export const de = {
         countSummary: "{count} von {max} Assistenten",
         atCapacity: "Die Obergrenze für Assistenten ist erreicht. Löschen Sie einen, um einen weiteren anzulegen.",
         create: "Neuer Assistent",
+        importPackage: "Externe Konfiguration importieren",
         createAction: "Assistent anlegen",
         empty: "Sie haben noch keine Assistenten. Legen Sie einen an, um ihm eigene Anweisungen zu geben.",
         publishedStatus: "Veröffentlicht — Revision {revision}, {files} Wissensdatei(en)",

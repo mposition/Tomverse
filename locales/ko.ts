@@ -1608,6 +1608,7 @@ export const ko = {
         countSummary: "어시스턴트 {count}개 / 최대 {max}개",
         atCapacity: "어시스턴트 한도에 도달했습니다. 하나를 삭제하면 추가할 수 있습니다.",
         create: "새 어시스턴트",
+        importPackage: "외부 설정 가져오기",
         createAction: "어시스턴트 만들기",
         empty: "아직 어시스턴트가 없습니다. 하나 만들어 나만의 지시문을 지정해 보세요.",
         publishedStatus: "게시됨 — 개정 {revision}, 지식 파일 {files}개",
