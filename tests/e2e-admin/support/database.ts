@@ -30,6 +30,7 @@ import {
   FIXTURE_PROVIDER_USAGE,
   FIXTURE_REFUNDS,
   FIXTURE_RETENTION_RUN,
+  FIXTURE_SUPPRESSION,
   FIXTURE_USAGE,
   FIXTURE_WEBHOOK,
 } from "./fixture-data";
@@ -706,6 +707,16 @@ export const seedAdminFixtures = async () => {
       // back off to check what an operator sees when it is not.
       { key: EMAIL_CAMPAIGNS_FLAG_KEY, value: "true" },
     ],
+  });
+
+  await prisma.suppressionEntry.create({
+    data: {
+      emailAddress: FIXTURE_SUPPRESSION.emailAddress,
+      scope: FIXTURE_SUPPRESSION.scope,
+      purposeKey: FIXTURE_SUPPRESSION.purposeKey,
+      reason: FIXTURE_SUPPRESSION.reason,
+      source: FIXTURE_SUPPRESSION.source,
+    },
   });
 
   await prisma.adminAlertPolicy.create({

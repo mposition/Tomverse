@@ -3,6 +3,11 @@ export const dynamic = "force-dynamic";
 import { AdminEmailDeliveriesPanel } from "@/components/admin/AdminEmailDeliveriesPanel";
 import { AdminEmailSuppressionsPanel } from "@/components/admin/AdminEmailSuppressionsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminAddressRevealProvider } from "@/components/admin/AdminAddressReveal";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { getAdminRole } from "@/lib/adminAuth";
+import { roleMayRevealAddresses } from "@/lib/emailAddressMaskingCore";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import {
   emailDeliveryStatusCounts,
@@ -33,6 +38,11 @@ export default async function AdminEmailDeliveryPage({
 }: PageProps<"/admin/email-delivery">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
+  // Resolved here rather than in the client island: a browser deciding whether
+  // it may reveal is a browser that can decide it may.
+  const mayRevealAddresses = roleMayRevealAddresses(
+    getAdminRole(await getServerSession(authOptions))
+  );
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -44,9 +54,12 @@ export default async function AdminEmailDeliveryPage({
         query={query}
       />
       {tab.id === "suppressions" ? (
-        <AdminEmailSuppressionsPanel
-          rows={await listSuppressions({ emailAddress: null, limit: 100 })}
-        />
+        <AdminAddressRevealProvider>
+          <AdminEmailSuppressionsPanel
+            rows={await listSuppressions({ emailAddress: null, limit: 100 })}
+            mayRevealAddresses={mayRevealAddresses}
+          />
+        </AdminAddressRevealProvider>
       ) : (
         await (async () => {
           const filters = parseDeliveryFilters(query);
@@ -55,12 +68,15 @@ export default async function AdminEmailDeliveryPage({
             emailDeliveryStatusCounts(),
           ]);
           return (
-            <AdminEmailDeliveriesPanel
-              rows={page.rows}
-              filters={filters}
-              statusCounts={statusCounts}
-              nextCursor={page.nextCursor}
-            />
+            <AdminAddressRevealProvider>
+              <AdminEmailDeliveriesPanel
+                rows={page.rows}
+                filters={filters}
+                statusCounts={statusCounts}
+                nextCursor={page.nextCursor}
+                mayRevealAddresses={mayRevealAddresses}
+              />
+            </AdminAddressRevealProvider>
           );
         })()
       )}

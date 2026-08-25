@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
+import { maskEmailAddress } from "@/lib/emailAddressMaskingCore";
 import {
   ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
   ACCOUNT_WELCOME_TEMPLATE,
@@ -146,7 +147,14 @@ test("the address filter matches one address and not its neighbours", async () =
     parseDeliveryFilters({ address: address.toUpperCase() })
   );
   assert.equal(mine.rows.length, 1);
-  assert.equal(mine.rows[0].emailAddress, address);
+  // The right row, and no address on it (D10). Searching by an address the
+  // operator already has is not disclosure; returning it back is, and the list
+  // read never does -- the field is gone from the type, not left empty.
+  assert.equal(mine.rows[0].emailAddressMasked, maskEmailAddress(address));
+  assert.ok(
+    !JSON.stringify(mine.rows[0]).includes(address),
+    "a list row must not carry the address it matched"
+  );
 
   // A prefix is not a match. The alternative -- a LIKE over every address we
   // have mailed -- is the query that turns a support lookup into a way to
