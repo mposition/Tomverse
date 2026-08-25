@@ -89,11 +89,14 @@ export const BATCH_101_DURABLE_KO: readonly MemoryEvalCaseV2[] = [
         ],
     },
     {
-        // Two independently useful facts: the job, and the shift
-        // pattern that decides when this person is reachable. The sleep
-        // complaint is not gold — see the batch record.
+        // REWRITTEN, not reworked. The frozen `cand-durable-ko-2` carried at
+        // least four independently valid memories — the job, the shift
+        // pattern, an ongoing sleep problem and a coffee habit — and an
+        // exhaustive gold cannot survive that: leaving two out scores a
+        // correct extraction as a false positive, and putting all four in
+        // breaks the one-to-three rule. So the conversation is newly written
+        // and declares no source. See the batch record.
         id: "succ-durable-ko-2",
-        sourceCaseId: "cand-durable-ko-2",
         category: "durable_facts",
         language: "ko",
         goldCompleteness: "exhaustive",
@@ -113,11 +116,8 @@ export const BATCH_101_DURABLE_KO: readonly MemoryEvalCaseV2[] = [
         ],
         conversations: [
             conversation("교대 근무", [
-                [
-                    "user",
-                    "제가 종합병원 간호사인데 3교대라 수면 패턴이 계속 깨져요. 야간 근무 끝나고 낮에 자려고 하면 두세 시간 만에 깨고, 다시 잠들기가 어렵습니다. 커피는 근무 시작할 때 한 잔만 마셔요.",
-                ],
-                ["assistant", "교대 근무 수면은 빛 노출 관리가 핵심입니다. 몇 가지 정리해 드릴게요."],
+                ["user", "저 종합병원 간호사예요. 3교대라 근무 시간이 주마다 바뀝니다."],
+                ["assistant", "교대 주기를 알려주시면 일정 잡을 때 반영하겠습니다."],
             ]),
         ],
     },
@@ -334,9 +334,10 @@ export const BATCH_101_DURABLE_KO: readonly MemoryEvalCaseV2[] = [
         ],
     },
     {
-        // A family member's mobility. The sensitive scope names 진단·질환 without
-        // restricting it to the account holder, and the whole point of the
-        // sensitive lane is that nobody's health is auto-approved.
+        // A family member's mobility, normalised into this user's own travel
+        // constraint. Third-party health is extractable only as the minimum
+        // context the user needs, never as a medical profile, and never
+        // bulk-safe.
         id: "succ-durable-ko-12",
         sourceCaseId: "cand-durable-ko-12",
         category: "durable_facts",
@@ -346,7 +347,12 @@ export const BATCH_101_DURABLE_KO: readonly MemoryEvalCaseV2[] = [
             {
                 id: "e1",
                 kind: "constraint",
-                mustInclude: ["휠체어"],
+                // Both tokens on purpose. "사용자의 어머니가 휠체어를 쓴다"
+                // satisfies the first and not the second, and that sentence
+                // is a third party's medical profile rather than this user's
+                // travel constraint. The gold has to require the normalised
+                // form or it scores the wrong one as correct.
+                mustInclude: ["휠체어", "계단"],
                 expectedDisposition: "sensitive_review",
             },
         ],

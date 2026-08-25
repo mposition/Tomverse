@@ -20,6 +20,19 @@ import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 import type { EvalBatch } from "@/lib/memoryEvalBatchRecord";
 import { BATCH_101_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch101DurableKo";
+import { BATCH_102_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch102DurableEn";
+import { BATCH_103_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch103DurableKo";
+import { BATCH_104_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch104DurableKo";
+import { BATCH_105_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch105DurableEn";
+import { BATCH_106_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch106DurableEn";
+import { BATCH_107_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch107DurableKo";
+import { BATCH_108_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch108DurableKo";
+import { BATCH_109_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch109DurableEn";
+import { BATCH_110_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch110DurableEn";
+import { BATCH_111_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch111DurableKo";
+import { BATCH_112_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch112DurableEn";
+import { BATCH_113_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch113DurableKo";
+import { BATCH_114_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch114DurableEn";
 
 /**
  * Either schema. The successor batches are schema 2 and the frozen set's are
@@ -55,5 +68,109 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
             "docs/ops/memory-extraction-eval-batches/batch-101-successor-durable-ko.md",
         successorTo: "mem-eval-seed-11",
         cases: BATCH_101_DURABLE_KO,
+    },
+    {
+        id: "batch-102",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-102-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_102_DURABLE_EN,
+    },
+    {
+        id: "batch-103",
+        cell: "durable_facts:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-103-successor-durable-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_103_DURABLE_KO,
+    },
+    {
+        id: "batch-104",
+        cell: "durable_facts:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-104-successor-durable-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_104_DURABLE_KO,
+    },
+    {
+        id: "batch-105",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-105-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_105_DURABLE_EN,
+    },
+    {
+        id: "batch-106",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-106-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_106_DURABLE_EN,
+    },
+    {
+        id: "batch-107",
+        cell: "durable_facts:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-107-successor-durable-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_107_DURABLE_KO,
+    },
+    {
+        id: "batch-108",
+        cell: "durable_facts:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-108-successor-durable-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_108_DURABLE_KO,
+    },
+    {
+        id: "batch-109",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-109-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_109_DURABLE_EN,
+    },
+    {
+        id: "batch-110",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-110-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_110_DURABLE_EN,
+    },
+    {
+        id: "batch-111",
+        cell: "durable_facts:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-111-successor-durable-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_111_DURABLE_KO,
+    },
+    {
+        id: "batch-112",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-112-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_112_DURABLE_EN,
+    },
+    {
+        id: "batch-113",
+        cell: "durable_facts:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-113-successor-durable-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_113_DURABLE_KO,
+    },
+    {
+        id: "batch-114",
+        cell: "durable_facts:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-114-successor-durable-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_114_DURABLE_EN,
     },
 ];
