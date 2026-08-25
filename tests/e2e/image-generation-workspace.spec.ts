@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi } from "./support/app-fixtures";
 import { mockUserUsage } from "./support/chat-state-fixtures";
 import { listImageModels } from "../../lib/imageModelRegistry";
+import { imageDownloadFilename } from "../../lib/imageAssetDownload";
+import { IMAGE_ASSET_URL_TTL_MINUTES } from "../../lib/imageAssetPayload";
 
 // Image generation workspace regression coverage (PR 5 UI + PR 3 API shape).
 //
@@ -41,7 +43,12 @@ type MockGeneration = {
   createdAt: string;
   completedAt: string | null;
   failedAt: string | null;
-  assets: Array<{ role: string; mimeType: string; url: string }>;
+  assets: Array<{
+    role: string;
+    mimeType: string;
+    url: string;
+    urlExpiresAt: string;
+  }>;
   provider?: string;
   modelId?: string;
   groupId?: string;
@@ -60,20 +67,33 @@ type ImageApiState = {
   reads: { groups: number; generations: number };
   /** What the history read answers with, so restore can be driven per test. */
   composerRestore: Record<string, unknown> | null;
+  /** Hand out already-expired signed asset URLs. */
+  assetUrlsExpired: boolean;
 };
 
-const succeededAssets = () => [
-  {
-    role: "original" as const,
-    mimeType: "image/png",
-    url: `${BASE_URL}/e2e-assets/original.png`,
-  },
-  {
-    role: "thumbnail" as const,
-    mimeType: "image/webp",
-    url: `${BASE_URL}/e2e-assets/thumbnail.png`,
-  },
-];
+// Signed URLs expire, and the payload says when. `expired` is how a test gets
+// a card that arrives already dead: a settled row keeps the asset URLs it
+// already holds (lib/imageTimelineMerge.ts rule 2), so a later poll cannot
+// turn a live card into an expired one.
+const succeededAssets = (expired = false) => {
+  const urlExpiresAt = new Date(
+    Date.now() + (expired ? -60_000 : 300_000)
+  ).toISOString();
+  return [
+    {
+      role: "original" as const,
+      mimeType: "image/png",
+      url: `${BASE_URL}/e2e-assets/original.png`,
+      urlExpiresAt,
+    },
+    {
+      role: "thumbnail" as const,
+      mimeType: "image/webp",
+      url: `${BASE_URL}/e2e-assets/thumbnail.png`,
+      urlExpiresAt,
+    },
+  ];
+};
 
 const resolveGeneration = (state: ImageApiState, generation: MockGeneration) => {
   if (generation.status !== "pending" && generation.status !== "processing") {
@@ -87,7 +107,7 @@ const resolveGeneration = (state: ImageApiState, generation: MockGeneration) => 
   } else {
     generation.status = "succeeded";
     generation.completedAt = new Date().toISOString();
-    generation.assets = succeededAssets();
+    generation.assets = succeededAssets(state.assetUrlsExpired);
   }
   return generation;
 };
@@ -101,6 +121,7 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
     sequence: 0,
     reads: { groups: 0, generations: 0 },
     composerRestore: null,
+    assetUrlsExpired: false,
   };
 
   await page.route("**/e2e-assets/**", (route) =>
@@ -225,6 +246,37 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
       );
     }
     await route.fulfill(json(resolveGeneration(state, generation)));
+  });
+
+  // Saving the original. A separate endpoint from the read above because the
+  // signed R2 URL cannot answer this question at all: `Content-Type` says what
+  // the bytes are, and only a response from this origin can say what to do
+  // with them (docs/policy/image-generation.md §9.1).
+  await page.route("**/api/images/generations/*/download", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2);
+    const generation = state.generations.find((row) => row.generationId === id);
+    if (!generation || generation.status !== "succeeded") {
+      return route.fulfill(
+        json(
+          { error: "Image not found.", code: "IMAGE_GENERATION_NOT_FOUND" },
+          404
+        )
+      );
+    }
+    const asset = generation.assets.find((entry) => entry.role === "original")!;
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "content-type": asset.mimeType,
+        "content-disposition": `attachment; filename="${imageDownloadFilename({
+          generationId: generation.generationId,
+          modelId: generation.modelId,
+          mimeType: asset.mimeType,
+        })}"`,
+        "x-content-type-options": "nosniff",
+      },
+      body: PNG_1X1,
+    });
   });
 
   await page.route("**/api/images/targets/*/retry", async (route) => {
@@ -397,6 +449,106 @@ test("a Pro account generates an image end to end", async ({ page }) => {
         .filter({ hasText: "a single red apple" })
     ).toBeVisible();
   }
+});
+
+test("saving a generated image downloads a file rather than opening it in a tab", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-generation-prompt").fill("a single red apple");
+  await page.getByTestId("image-generation-submit").click();
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The reported defect: the control was `<a href={signedR2Url} download>`,
+  // and `download` is same-origin only. Browsers ignored it, followed the
+  // link, and rendered a correct image/png in a new tab. Nothing about the
+  // stored object was wrong, so nothing about the stored object could fix it.
+  const control = page.getByTestId("image-generation-download");
+  await expect(control).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    control.click(),
+  ]);
+  // Named from the recorded mime type and carrying the model, so a comparison
+  // does not land as `original.png`, `original (1).png`, `original (2).png`.
+  expect(download.suggestedFilename()).toMatch(
+    /^tomverse-.+-qa-generation-1\.png$/
+  );
+
+  // And the workspace the download was started from is still on screen.
+  await expect(page.getByTestId("image-generation-timeline")).toBeVisible();
+});
+
+test("the card says how long the original link lasts, before it matters", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-generation-prompt").fill("a single red apple");
+  await page.getByTestId("image-generation-submit").click();
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The number comes from IMAGE_ASSET_URL_TTL_MINUTES, the same constant the
+  // server signs with, so this cannot pass while the copy quotes a TTL nothing
+  // backs.
+  const expiry = page.getByTestId("image-original-link-expiry");
+  await expect(expiry).toBeVisible();
+  await expect(expiry).toContainText(String(IMAGE_ASSET_URL_TTL_MINUTES));
+});
+
+test("an expired original link answers with a message, not with an error page", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  // The card arrives with a signature that has already lapsed -- what a user
+  // sees six minutes after generating, without waiting six minutes.
+  api.assetUrlsExpired = true;
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-generation-prompt").fill("a single red apple");
+  await page.getByTestId("image-generation-submit").click();
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+
+  const openOriginal = page.getByTestId("image-generation-open-original");
+  // Still a real link to the signed URL: the href is untouched, and only a
+  // click that is known to be dead is refused.
+  await expect(openOriginal).toHaveAttribute("href", /e2e-assets\/original\.png/);
+
+  await openOriginal.click();
+
+  // The reason, in the product's own words, on the page that asked.
+  await expect(page.getByTestId("app-toast")).toBeVisible();
+
+  // And nothing was navigated to: no second tab, and the workspace is still
+  // the workspace. This is the whole point -- the alternative was an S3 error
+  // document where the comparison used to be.
+  expect(page.context().pages()).toHaveLength(1);
+  await expect(page.getByTestId("image-generation-timeline")).toBeVisible();
+
+  // The refused click also re-read the generation, so the card is holding a
+  // freshly minted URL rather than the dead one it was clicked with.
+  expect(api.reads.generations).toBeGreaterThan(0);
 });
 
 test("a moderation failure explains itself and shows the refund", async ({ page }) => {

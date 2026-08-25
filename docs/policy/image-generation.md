@@ -350,6 +350,77 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - R2 비용 계산 시 egress를 비용으로 잡지 않는다(R2 직접 egress 무료) —
   저장($/GB-month)과 Class A/B 연산, 연계 서비스 비용을 계산한다.
 
+### 9.1 저장은 이 앱의 origin에서만 한다 (2026-08-25)
+
+`Content-Type`은 **바이트가 무엇인지**를 말하고 `Content-Disposition`은
+**그것으로 무엇을 할지**를 말한다. 둘은 다른 질문이며, 서명 URL이 답할 수
+있는 것은 앞의 하나뿐이다.
+
+생성 결과의 "다운로드"는 서명된 R2 URL에 `<a download>`를 건 것이었다.
+`download` 속성은 **same-origin 전용**이므로 브라우저는 그것을 무시하고 링크를
+따라갔고, 올바른 `image/png`를 받아 올바르게 처리했다 — 새 탭에 렌더링했다.
+저장소 설정에 잘못된 것은 없었고, 저장된 metadata를 무엇으로 바꿔도 고쳐지지
+않는다. 첨부로 달라는 말은 응답만 할 수 있고, 그 응답은 이 앱의 것이어야 한다.
+
+- **저장 경로는 `GET /api/images/generations/{generationId}/download` 하나다.**
+  소유권은 조회 자체를 `userId`로 범위 잡아 정하고, 성공하지 않은 generation·
+  스윕된 원본·남의 행은 모두 404다 — 구분할 분기가 존재하지 않는다.
+- **파일 이름은 저장된 `mimeType`에서 만든다.** `imageAssetR2Key()`는 원본을
+  언제나 `original.png`로 이름 짓지만 provider가 전부 PNG를 주는 것은 아니다
+  (adapter는 `image/jpeg`·`image/webp`도 파싱한다). key는 저장 경로라 고정
+  접미사가 무해하지만, 같은 문자열을 **파일 이름**으로 쓰면 JPEG를 PNG라고
+  말하게 된다. 규칙은 `lib/imageAssetDownload.ts` 한 곳이다.
+- **바이트는 proxy하고 redirect하지 않는다.** redirect는 결과를 다시 브라우저
+  손에 넘기고 거기에는 실패도 포함된다 — 402·404가 workspace를 떠나는 navigation이
+  된다. 페이지에서 fetch해 blob으로 저장하면 거절은 그것을 요청한 페이지에
+  남는다(`lib/browserDownload.ts`).
+- **읽기는 `readOwnR2ObjectBytes`다.** `readR2Object`는 metadata 불일치 시
+  객체를 삭제하며, 사용자가 결제했고 재생성할 수 없는 원본에 그 경로를 쓰지
+  않는다(§9의 썸네일 재시도와 같은 이유).
+- **서명 URL은 표시용으로 남는다.** `<img src>`와 "원본 보기"는 그대로
+  `IMAGE_ASSET_URL_TTL_SECONDS` 서명 URL을 쓴다. 저장 경로만 앱 origin으로
+  옮긴 이유는 두 번째 결함 때문이다 — 서명 URL은 5분이면 만료되고, `<img>`는
+  `onError`로 다시 minting하지만 링크에는 그런 것이 없어서 6분 열어 둔 카드의
+  다운로드는 S3 오류 문서로 가는 navigation이었다. 이 route는 클라이언트가
+  보관할 것을 만들지 않으므로 카드는 한 시간 뒤에도 저장된다.
+- **egress 계산은 §9의 문장이 덮지 않는다.** R2 직접 egress는 무료지만 이
+  경로의 바이트는 R2 → 앱 → 사용자로 흐르므로 앱의 전송 비용이다. 사용자가
+  누르는 만큼만 발생하고 상한은 `IMAGE_ORIGINAL_MAX_READ_BYTES`이며, 표시
+  경로(썸네일·`<img>`)는 계속 R2가 직접 서빙한다.
+
+### 9.2 만료는 알리고, 만료된 클릭은 받지 않는다 (2026-08-25)
+
+**"원본 보기"는 계속 서명된 R2 URL입니다.** §9.1이 옮긴 것은 저장 경로 하나이며,
+표시(`<img src>`)와 원본 보기는 R2가 직접 서빙합니다 — 보기용 바이트까지 앱으로
+통과시키면 R2 직접 egress의 이점을 버립니다.
+
+그 대신 서명 URL의 수명을 **사용자가 알 수 있게 하고, 만료된 클릭을 앱이
+받습니다.**
+
+- **`ImageAssetPayload`가 `urlExpiresAt`을 함께 실어 보냅니다.** URL과 만료를 서로
+  다른 곳에서 정하면 어긋날 수 있는 두 사실이 되고, 클라이언트가 행동에 쓰는 쪽이
+  틀린 쪽이 됩니다. 그래서 minter가 URL과 만료를 **함께** 반환하고,
+  `serializeImageAssets()`에는 그것 없이 asset을 내보내는 분기가 없습니다.
+- **timestamp는 서명 전에 찍습니다.** `getSignedUrl()`은 실행 시점 시계로 서명하므로
+  먼저 찍은 값은 실제 만료보다 이르기만 합니다. 이르게 말하면 불필요한 refresh 한
+  번이고, 늦게 말하면 이 필드가 막으려는 오류 페이지입니다.
+- **TTL 상수는 `lib/imageAssetPayload.ts`가 소유합니다.** `imageGenerationRead.ts`는
+  `server-only`라 workspace가 import할 수 없고, 화면에 적는 숫자와 서명하는 숫자가
+  각각 존재하면 언젠가 한쪽만 바뀝니다. read 경로는 re-export합니다.
+- **만료 판정에는 몇 초의 여유를 둡니다**(`IMAGE_ASSET_URL_EXPIRY_GUARD_MS`).
+  T-1초의 클릭은 navigation과 서명 만료 사이의 경주이고, 두 결과는 이미지와 오류
+  문서로 전혀 다릅니다.
+- **`urlExpiresAt`이 없으면 만료가 아닙니다.** 배포 전에 열려 있던 탭의 payload가
+  그렇습니다. 이 필드의 역할은 **죽은 것이 확실한** 클릭을 막는 것이지 추측으로
+  살아 있는 링크를 끊는 것이 아닙니다.
+- **만료된 클릭은 navigation을 취소하고 토스트로 답한 뒤 URL을 새로 minting합니다.**
+  다시 열어 주지는 않습니다 — await 뒤의 `window.open()`은 popup이라 브라우저가
+  막습니다. `<img>`의 `onError` 복구는 이 경우를 덮지 못합니다: 살아 있을 때 로드된
+  이미지는 캐시에서 계속 그려지므로 error가 나지 않고, 따라서 아무것도 다시
+  minting하지 않습니다.
+- **href는 그대로 둡니다.** 평소 경로는 평범한 링크(새 탭, `rel="noreferrer"`)이고,
+  가로채는 것은 죽은 것이 확실한 클릭 하나뿐입니다.
+
 ## 10. 로그와 privacy
 
 - 구조화 로그·metric label·trace·error detail에 prompt 원문(부분 포함)을

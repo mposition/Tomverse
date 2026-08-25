@@ -51,6 +51,13 @@ import {
   toggleImageModelSelection,
 } from "@/lib/imageModelSelection";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { saveResponseAsFile } from "@/lib/browserDownload";
+import { imageDownloadFilename } from "@/lib/imageAssetDownload";
+import {
+  IMAGE_ASSET_URL_TTL_MINUTES,
+  isImageAssetUrlExpired,
+} from "@/lib/imageAssetPayload";
+import { dispatchAppToast } from "@/lib/appToast";
 
 // The image conversation surface: prompt composer, option pickers and the
 // generation timeline. Self-contained on purpose -- ChatInput, ChatApp and the
@@ -101,7 +108,15 @@ const POLL_INTERVAL_MS = 5_000;
  */
 const MODEL_LIMIT_NOTICE_ID = "image-model-limit-notice";
 
-type GenerationAsset = { role: string; mimeType: string; url: string };
+type GenerationAsset = {
+  role: string;
+  mimeType: string;
+  url: string;
+  // Optional only for a payload minted before the field existed -- a tab left
+  // open across the deploy. `isImageAssetUrlExpired()` reads absence as "not
+  // known to be dead" rather than as expired.
+  urlExpiresAt?: string;
+};
 
 type GenerationView = {
   generationId: string;
@@ -285,10 +300,19 @@ export function ImageGenerationWorkspace({
   const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [downloadingIds, setDownloadingIds] = useState<string[]>([]);
+  // Kept apart from submitError: a download that failed says nothing about the
+  // composer, and overwriting a submit refusal with it would lose the reason
+  // the user still has to act on.
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   // The poll loop's wall clock, read at render time in place of Date.now().
   const [pollClockMs, setPollClockMs] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const refreshedAssetIds = useRef(new Set<string>());
+  // Separate from refreshedAssetIds above, which caps the <img> repair at one
+  // attempt per generation for good: this one is only an in-flight guard, and
+  // clears, because re-opening the original is a repeatable thing to ask for.
+  const refreshingLinkIds = useRef(new Set<string>());
   // The id may arrive mid-flight via onConversationCreated; the ref keeps the
   // poll loop reading the current value without re-arming the effect.
   const conversationIdRef = useRef<string | null>(conversationId);
@@ -652,6 +676,8 @@ export function ImageGenerationWorkspace({
     if (!canSubmit) return;
     setIsSubmitting(true);
     setSubmitError(null);
+    // A download that failed a minute ago is not a fact about this request.
+    setDownloadError(null);
     const requestPrompt = prompt.trim();
     try {
       const response = await fetch("/api/images/generations", {
@@ -805,6 +831,95 @@ export function ImageGenerationWorkspace({
     }
   };
 
+  /**
+   * Saves the original as a file.
+   *
+   * Fetched and handed to the browser as a blob rather than linked, for the
+   * reason lib/browserDownload.ts sets out: a link hands the whole outcome to
+   * the browser, failures included, and a failure here would arrive as a
+   * navigation away from the workspace. The name the server sent is used --
+   * the fallback below only covers a response that carried none.
+   */
+  const handleDownload = async (
+    generation: GenerationView,
+    asset: { mimeType: string }
+  ) => {
+    if (downloadingIds.includes(generation.generationId)) return;
+    setDownloadingIds((current) => [...current, generation.generationId]);
+    setDownloadError(null);
+    try {
+      const response = await fetch(
+        `/api/images/generations/${generation.generationId}/download`,
+        { cache: "no-store" }
+      );
+      if (!response.ok) {
+        await discardResponseBody(response);
+        setDownloadError(t("chat.imageGenerationDownloadFailed"));
+        return;
+      }
+      await saveResponseAsFile(
+        response,
+        imageDownloadFilename({
+          generationId: generation.generationId,
+          modelId: generation.modelId,
+          mimeType: asset.mimeType,
+        })
+      );
+    } catch {
+      setDownloadError(t("chat.imageGenerationDownloadFailed"));
+    } finally {
+      setDownloadingIds((current) =>
+        current.filter((id) => id !== generation.generationId)
+      );
+    }
+  };
+
+  /**
+   * "Full size", when the link behind it has already lapsed.
+   *
+   * The href stays the signed R2 URL, so the normal path is an ordinary link
+   * and this does nothing. What it removes is the one outcome the user can
+   * neither predict nor recover from: a signature expires after five minutes,
+   * and a click after that navigated the whole workspace to an S3 error
+   * document. The `<img>`'s `onError` repair never fired for it, because an
+   * image that loaded while the URL was live goes on rendering from cache.
+   *
+   * So the click is refused, the reason is said out loud, and a fresh URL is
+   * fetched. Re-opening is left to the user rather than done here: a
+   * `window.open()` after an await is a popup, and browsers block it.
+   */
+  const handleOpenOriginal = useCallback(
+    async (
+      event: React.MouseEvent<HTMLAnchorElement>,
+      generation: GenerationView,
+      asset: GenerationAsset
+    ) => {
+      // In a useCallback rather than a plain arrow in the body, because
+      // `Date.now()` is impure and the compiler cannot see that this only ever
+      // runs from a click. The clock is genuinely needed here: pollClockMs
+      // advances every 5s and only while something is generating, so a card
+      // that finished ten minutes ago would be judged against a frozen time.
+      if (!isImageAssetUrlExpired(asset.urlExpiresAt, Date.now())) return;
+      event.preventDefault();
+      // A dead link invites repeated clicking; one refresh at a time is enough.
+      if (refreshingLinkIds.current.has(generation.generationId)) return;
+      refreshingLinkIds.current.add(generation.generationId);
+      dispatchAppToast(t("chat.imageGenerationOriginalLinkExpired"), "info");
+      try {
+        const refreshed = await refreshGeneration(generation.generationId);
+        if (!refreshed) {
+          dispatchAppToast(
+            t("chat.imageGenerationOriginalLinkRefreshFailed"),
+            "error"
+          );
+        }
+      } finally {
+        refreshingLinkIds.current.delete(generation.generationId);
+      }
+    },
+    [refreshGeneration, t]
+  );
+
   const handleAssetError = (generation: GenerationView) => {
     // Signed URLs live ~5 minutes; refresh once per generation, not per retry.
     if (refreshedAssetIds.current.has(generation.generationId)) return;
@@ -949,19 +1064,54 @@ export function ImageGenerationWorkspace({
             href={original.url}
             target="_blank"
             rel="noreferrer"
+            data-testid="image-generation-open-original"
+            onClick={(event) =>
+              void handleOpenOriginal(event, generation, original)
+            }
             className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-accent-image-700 hover:bg-accent-image-50 dark:text-accent-image-300 dark:hover:bg-accent-image-950/40"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
             {t("chat.imageGenerationOpenOriginal")}
           </a>
-          <a
-            href={original.url}
-            download
-            className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-accent-image-700 hover:bg-accent-image-50 dark:text-accent-image-300 dark:hover:bg-accent-image-950/40"
+          {/*
+            How long that link lasts, said before it matters rather than after.
+            The number is IMAGE_ASSET_URL_TTL_MINUTES, the same constant the
+            server signs with, so it cannot drift into a claim nothing backs.
+            It is the link that expires, not the image: the card keeps
+            rendering and the download button keeps working, which is why this
+            sits on the link and not on the figure.
+          */}
+          <span
+            data-testid="image-original-link-expiry"
+            className="text-[11px] font-normal text-zinc-400 dark:text-zinc-500"
           >
-            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            {interpolateCopy(t("chat.imageGenerationOriginalLinkExpiry"), {
+              minutes: IMAGE_ASSET_URL_TTL_MINUTES,
+            })}
+          </span>
+          {/*
+            A button, not `<a href={original.url} download>`. The `download`
+            attribute is same-origin-only and these URLs are R2's, so the
+            browser ignored it and rendered the image instead of saving it.
+            The route below is this application's own origin and answers
+            `Content-Disposition: attachment` (docs/policy/image-generation.md
+            §9.1); it also outlives the signed URL, which a link on a card left
+            open for six minutes would not.
+          */}
+          <button
+            type="button"
+            data-testid="image-generation-download"
+            onClick={() => void handleDownload(generation, original)}
+            disabled={downloadingIds.includes(generation.generationId)}
+            className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-accent-image-700 transition hover:bg-accent-image-50 disabled:cursor-not-allowed disabled:opacity-60 dark:text-accent-image-300 dark:hover:bg-accent-image-950/40"
+          >
+            {downloadingIds.includes(generation.generationId) ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
             {t("chat.imageGenerationDownload")}
-          </a>
+          </button>
         </figcaption>
       </figure>
     );
@@ -1094,13 +1244,13 @@ export function ImageGenerationWorkspace({
 
       <div className="shrink-0 border-t border-zinc-200 bg-white px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-2.5">
-          {(submitError || gateNotice) && (
+          {(submitError || downloadError || gateNotice) && (
             <p
               role="alert"
               data-testid="image-generation-error"
               className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
             >
-              {submitError ?? gateNotice}
+              {submitError ?? downloadError ?? gateNotice}
             </p>
           )}
           {/*
