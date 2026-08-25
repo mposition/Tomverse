@@ -446,32 +446,57 @@ export const OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS = [
  * The other narrow scope: carry the reservation figure onto an existing row,
  * and nothing else.
  *
- * One model, and it needed its own scope rather than a place in either list
- * above. `gpt-5-5-thinking`'s output cap already agrees (8,192 on both sides),
- * so the cap-only scope has nothing to carry for it; what its row can be
- * stranded on is the *reservation*, where the premium class fallback says
- * 4,096 and the profile says 6,144.
+ * These models needed their own scope rather than a place in either list
+ * above, because their output caps already agree (8,192 on both sides) and so
+ * the cap-only scope has nothing to carry for them. What their rows are
+ * stranded on is the *reservation*.
  *
  * Moving a reservation figure is normally an entitlement decision this
  * codebase refuses to make in a sweep -- it is what a turn holds against a
  * user's credits and against the provider budget. It is admissible here for
  * one reason: **the number is already approved and written down.**
  * docs/policy/credit-and-cost-limits.md section 4 fixes the output reservation
- * per model at "premium 4,096, reasoning 6,144 (maxOutputTokens 8,192)", and
- * `gpt-5-5-thinking` is premium-reasoning. So 6,144 is the decided figure and
- * a row holding 4,096 is holding the premium class fallback -- the same
- * pre-profile seed fossil the cap-only scope exists for, on the other column.
- * This carries a decision that was already made; it does not make one.
+ * per model at "premium 4,096, reasoning 6,144 (maxOutputTokens 8,192)". So
+ * the figure each entry below carries is the decided one, and the figure its
+ * row holds is a pre-profile seed fossil -- the same fossil the cap-only scope
+ * exists for, on the other column. This carries a decision that was already
+ * made; it does not make one.
+ *
+ * Every entry is admitted on production provenance, not on the divergence
+ * alone. A row that diverges may equally be an operator's deliberate
+ * override, and the column cannot tell the two apart
+ * (docs/policy/credit-and-cost-limits.md): `reservationOutputTokens` has no
+ * NULL-means-inherit convention, so the stored number never says where it came
+ * from. What admits a row here is that its provenance was read out of
+ * production and every part of it says seed:
+ *
+ *   * `updatedById` and `updatedByEmail` both absent,
+ *   * `updatedAt` equal to `createdAt` -- the row has never been rewritten,
+ *   * no `AdminAuditLog` row with targetType `Model` naming it, and
+ *   * that `updatedAt` shared with other rows to the millisecond, which is a
+ *     batch write and not the unique timestamp a hand edit leaves.
+ *
+ * For `gpt-5-5` and `gemini-3-1-pro` the stored figure was matched against the
+ * tree as it stood at their seed instant (2026-07-17T11:08:29.814Z, commit
+ * 987c8ba5): `lib/modelPricing.ts` did not exist yet, both models were already
+ * `usageClass: "premium"`, and `BILLING_DEFAULTS.premium` in `lib/models.ts`
+ * read `{ maxOutputTokens: 8_192, reservationOutputTokens: 2_048 }`. Cap and
+ * reservation in those rows are that one pair, not two unrelated numbers --
+ * the premium reservation was raised to 4,096 later, when profiles arrived.
  *
  * Not to be read as licence for the p90 basis generally.
  * docs/policy/default-model-luna-migration.md section 3.1 governs *moving* a
  * model onto `p90_output_tokens` and requires nine conditions plus a new
- * pricingVersion. This model's profile already carries that basis, set when
- * the section 4 figures were, and nothing here changes it. A model still on
- * `conservative_default` does not get an entry here.
+ * pricingVersion. Every profile named here already carries that basis, set
+ * when the section 4 figures were, and nothing here changes it. A model still
+ * on `conservative_default` does not get an entry here -- which is why
+ * `mistral-large-3`, `perplexity/sonar-deep-research` and `qwen3.7-max`
+ * diverge on reservation and are still absent from this list.
  */
 export const RESERVATION_ONLY_RECONCILIATION_MODEL_IDS = [
   "gpt-5-5-thinking", // premium fallback 4,096 -> approved 6,144; cap agrees
+  "gpt-5-5", //          2026-07-17 seed 2,048 -> approved 4,096; cap agrees
+  "gemini-3-1-pro", //   2026-07-17 seed 2,048 -> approved 4,096; cap agrees
 ] as const;
 
 /**

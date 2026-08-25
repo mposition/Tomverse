@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   ACTOR_ABSENT,
   ACTOR_PRESENT,
   AGREES,
   BOTH_DIVERGED,
   MAX_OUTPUT_DIVERGED,
+  EXPECTED_HISTORICAL_WITHDRAWAL,
+  HISTORICAL_WITHDRAWALS,
   MISSING_IN_DB,
   RESERVATION_DIVERGED,
+  STATE_COLUMN_WIDTH,
   UNKNOWN_TO_CODE,
   SCOPE_FULL,
   SCOPE_OUTPUT_CAP_ONLY,
@@ -420,4 +424,184 @@ test("the JSON form says whether a comparison happened, and omits findings when 
   assert.equal("entries" in parsed, false);
   assert.ok(Array.isArray(parsed.catalogue));
   assert.ok(parsed.catalogue.length > 0);
+});
+
+
+// A row the catalogue no longer names, whose every lifecycle column still
+// reads exactly as the migration that withdrew it wrote them. The existing
+// `groq-gpt-oss-120b` fixture above is the same id in the opposite state --
+// still enabled, no lifecycle columns read at all -- so the two together pin
+// that this classification turns on the row's contents and not on its name.
+const WITHDRAWN_ROW = {
+  id: "groq-gpt-oss-120b",
+  provider: "groq",
+  enabled: false,
+  publiclyListed: false,
+  status: "disabled",
+  replacementModelId: "mistral-medium-3-1",
+  operationalReason:
+    "Tomverse does not list GPT-OSS: it is an open-weight line, not OpenAI hosted GPT. Removed from the catalogue on 2026-08-01.",
+  userVisibleNote:
+    "This model is no longer offered. Please select Mistral Medium 3.5 or another current model.",
+  maxOutputTokens: 8_192,
+  reservationOutputTokens: 4_096,
+  updatedById: null,
+  updatedByEmail: null,
+  updatedAt: "2026-08-01T20:00:00.000Z",
+};
+
+const stateOfWithdrawnRow = (overrides = {}) => {
+  const row = { ...WITHDRAWN_ROW, ...overrides };
+  for (const [field, value] of Object.entries(overrides)) {
+    if (value === undefined) delete row[field];
+  }
+  const result = compareTokenLimits({
+    catalogueModels: catalogue,
+    storedRows: [...storedRows.filter((entry) => entry.id !== row.id), row],
+  });
+  return result.find((entry) => entry.modelId === row.id).state;
+};
+
+test("a row withdrawn exactly as the migration wrote it is not an open question", () => {
+  assert.equal(stateOfWithdrawnRow(), EXPECTED_HISTORICAL_WITHDRAWAL);
+
+  const findings = tokenLimitFindings(
+    compareTokenLimits({
+      catalogueModels: catalogue,
+      storedRows: [
+        ...storedRows.filter((entry) => entry.id !== WITHDRAWN_ROW.id),
+        WITHDRAWN_ROW,
+      ],
+    })
+  );
+  assert.deepEqual(
+    findings.expectedHistoricalWithdrawals.map((entry) => entry.modelId),
+    ["groq-gpt-oss-120b"]
+  );
+  // It leaves the unknown section rather than being counted in both.
+  assert.deepEqual(findings.unknownToCode, []);
+});
+
+// The point of writing the expectations by hand: a row that has been edited
+// since the withdrawal is no longer the decision this report can account for,
+// whichever field moved.
+test("any deviation from the withdrawal returns the row to unknown_to_code", () => {
+  const deviations = {
+    enabled: true,
+    publiclyListed: true,
+    status: "enabled",
+    replacementModelId: "mistral-medium-3-5",
+    operationalReason: "Withdrawn by an operator on 2026-08-20.",
+    userVisibleNote: "This model has been retired.",
+  };
+  for (const [field, value] of Object.entries(deviations)) {
+    assert.equal(
+      stateOfWithdrawnRow({ [field]: value }),
+      UNKNOWN_TO_CODE,
+      `${field} changed, so this is no longer that withdrawal`
+    );
+  }
+  assert.deepEqual(
+    Object.keys(deviations).sort(),
+    Object.keys(HISTORICAL_WITHDRAWALS["groq-gpt-oss-120b"]).sort(),
+    "every expected field must have a deviation case"
+  );
+});
+
+// A caller that narrows the query loses the distinction rather than getting
+// the quieter answer by accident.
+test("a row read without its lifecycle columns stays an open question", () => {
+  for (const field of Object.keys(HISTORICAL_WITHDRAWALS["groq-gpt-oss-120b"])) {
+    assert.equal(
+      stateOfWithdrawnRow({ [field]: undefined }),
+      UNKNOWN_TO_CODE,
+      `${field} was not selected`
+    );
+  }
+});
+
+// The classification is only ever reached for a row the catalogue does not
+// name. A live model that happens to be disabled is compared on its columns
+// like any other.
+test("a model the catalogue still names is never classified as withdrawn", () => {
+  const entries = compareTokenLimits({
+    catalogueModels: [
+      ...catalogue,
+      {
+        id: "groq-gpt-oss-120b",
+        provider: "groq",
+        enabled: false,
+        maxOutputTokens: 8_192,
+        reservationOutputTokens: 4_096,
+      },
+    ],
+    storedRows: [
+      ...storedRows.filter((entry) => entry.id !== WITHDRAWN_ROW.id),
+      WITHDRAWN_ROW,
+    ],
+  });
+  assert.equal(
+    entries.find((entry) => entry.modelId === "groq-gpt-oss-120b").state,
+    AGREES
+  );
+});
+
+// The expectations are a copy of what the migration writes, so they have to be
+// checked against it -- a copy nothing compares is a copy that drifts.
+test("the expected withdrawal text is the text the migration wrote", () => {
+  const migration = readFileSync(
+    "prisma/migrations/20260801200000_withdraw_orphaned_gpt_oss_row/migration.sql",
+    "utf8"
+  );
+  const expected = HISTORICAL_WITHDRAWALS["groq-gpt-oss-120b"];
+  assert.match(migration, /"id" = 'groq-gpt-oss-120b'/);
+  assert.ok(migration.includes(`'${expected.operationalReason}'`));
+  assert.ok(migration.includes(`'${expected.userVisibleNote}'`));
+  assert.ok(migration.includes(`'${expected.replacementModelId}'`));
+  assert.ok(migration.includes(`"status" = '${expected.status}'`));
+  assert.ok(migration.includes('"enabled" = false'));
+  assert.ok(migration.includes('"publiclyListed" = false'));
+});
+
+// The longest state name is wider than the column used to be, so the header
+// and the rows would part company without the shared width.
+test("the widest state still leaves the provenance column where the header says", () => {
+  const withdrawn = compareTokenLimits({
+    catalogueModels: catalogue,
+    storedRows: [WITHDRAWN_ROW],
+  }).find((entry) => entry.modelId === WITHDRAWN_ROW.id);
+  const line = formatTokenLimitRow(withdrawn);
+  assert.match(line, new RegExp(EXPECTED_HISTORICAL_WITHDRAWAL));
+  assert.ok(EXPECTED_HISTORICAL_WITHDRAWAL.length < STATE_COLUMN_WIDTH);
+  assert.equal(
+    line.indexOf(ACTOR_ABSENT),
+    formatTokenLimitRow(byId.get("claude-sonnet-5")).indexOf(ACTOR_ABSENT)
+  );
+});
+
+// A model id is whatever string the registry holds, and `Object.prototype`
+// answers to several of them. Looking the id up without an own-property check
+// would find a function for `constructor`, iterate none of its fields, and let
+// an `every` over nothing report the row as an expected withdrawal.
+test("a row named after an Object.prototype key is not a withdrawal", () => {
+  for (const id of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+    const entries = compareTokenLimits({
+      catalogueModels: catalogue,
+      storedRows: [
+        {
+          id,
+          provider: "groq",
+          enabled: true,
+          maxOutputTokens: 8_192,
+          reservationOutputTokens: 4_096,
+          updatedById: null,
+          updatedByEmail: null,
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const entry = entries.find((candidate) => candidate.modelId === id);
+    assert.ok(entry, id);
+    assert.equal(entry.state, UNKNOWN_TO_CODE, id);
+  }
 });
