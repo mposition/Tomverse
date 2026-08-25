@@ -98,9 +98,19 @@ live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 - artifact를 플랫폼이 보존하고, **그 run URL이 곧 §12.1의 `artifactRef`**입니다.
   로컬 실행은 이 불변 참조를 따로 만들어야 합니다.
 
-입력은 넷입니다 — `model`, `run_label`(`run1`·`run2`…), `max_cost_usd`, 그리고
-`confirm`에 **`SPEND`를 그대로 입력**해야 합니다. 유료 provider를 부르는
-dispatch이므로 오타나 실수로 눌리지 않게 한 겹 둡니다.
+입력은 다섯입니다 — `model`, `run_label`(`run1`·`run2`…), `max_cost_usd`,
+`limit`, 그리고 `confirm`에 **`SPEND`를 그대로 입력**해야 합니다. 유료 provider를
+부르는 dispatch이므로 오타나 실수로 눌리지 않게 한 겹 둡니다.
+
+**`limit`은 회차를 compatibility probe로 바꿉니다** — 앞의 N건만 돌고 멈춥니다.
+배선이 맞는지 1,150번 지불하며 배우지 않기 위한 것입니다. probe는 결과가
+아닙니다: artifact에 `probeLimit`이 남고 `decisionGrade`는 숫자와 무관하게
+false이며, admissibility 검사와 blind review 시트 단계는 건너뜁니다.
+
+`limit`을 준 채 **그 flag를 모르는 branch**를 고르면 실행 전에 멈춥니다. 옛
+harness는 모르는 flag를 조용히 버리므로 10건을 요청하고 1,150건을 청구받게
+되는데, 모르는 flag는 작은 회차가 아니라 전체 회차입니다. `main`의 harness가
+아직 그렇습니다 — probe는 `develop`에서 돌립니다.
 
 순서도 의도된 것입니다. 무료로 거절할 수 있는 것(동결 조건·register 구조·smoke)
 이 **키가 provider 앞에 놓이기 전에** 전부 돌고, artifact 업로드는 admissibility

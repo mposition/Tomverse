@@ -11,6 +11,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+/** The guard's own needle, written once so the escaping is stated in one place. */
+const HARNESS_LIMIT_GUARD = `harness.includes(${JSON.stringify('argValue("limit"')})`;
+
 const workflow = readFileSync(
     new URL("../.github/workflows/memory-eval-decision-grade.yml", import.meta.url),
     "utf8"
@@ -54,6 +57,44 @@ test("two runs cannot overlap, and neither is cancelled", () => {
     assert.match(workflow, /group: memory-eval-decision-grade/);
     // Cancelling mid-run abandons calls already paid for.
     assert.match(workflow, /cancel-in-progress: false/);
+});
+
+test("a probe skips the steps that would judge it as a run", () => {
+    // A probe's `decisionGrade` is false by construction, so the admissibility
+    // rules would discard it every time -- a red job saying "may not be cited"
+    // about something that was never a candidate for citation. The blind
+    // review sheet samples every cell and a probe reaches few of them.
+    for (const step of ["Admissibility", "Blind review sheet"]) {
+        const at = workflow.indexOf(`name: ${step}`);
+        assert.ok(at > 0, `${step} step missing`);
+        assert.match(
+            workflow.slice(at, at + 200),
+            /if: inputs\.limit == ''/,
+            `${step} should not run on a probe`
+        );
+    }
+});
+
+test("a branch that would ignore --limit refuses the probe", () => {
+    // The hazard this closes: a harness predating `--limit` drops the flag
+    // silently, so a request for ten cases runs all 1,150 and bills for them.
+    // An unknown flag is not a smaller run, it is a full one.
+    assert.match(workflow, /does not support --limit/);
+    // It decides by reading the harness for the flag's own parse site, so a
+    // branch that merely mentions `--limit` in a comment does not pass.
+    assert.match(workflow, /evalImportedMemoryExtraction\.mjs/);
+    assert.ok(workflow.includes(HARNESS_LIMIT_GUARD));
+});
+
+test("the limit reaches the command through the environment", () => {
+    // An input interpolated into a shell line is an input that can end it.
+    assert.match(workflow, /LIMIT: \$\{\{ inputs\.limit \}\}/);
+    assert.match(workflow, /\$\{LIMIT:\+--limit="\$LIMIT"\}/);
+    // And the key that pays for the run is still in the same env block.
+    const at = workflow.indexOf("name: Live run (this is the step that spends)");
+    const step = workflow.slice(at, workflow.indexOf("run: |", at));
+    assert.match(step, /OPENAI_API_KEY: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+    assert.match(step, /LIMIT:/);
 });
 
 test("the free refusals run before the paid ones", () => {
