@@ -388,6 +388,39 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   누르는 만큼만 발생하고 상한은 `IMAGE_ORIGINAL_MAX_READ_BYTES`이며, 표시
   경로(썸네일·`<img>`)는 계속 R2가 직접 서빙한다.
 
+### 9.2 만료는 알리고, 만료된 클릭은 받지 않는다 (2026-08-25)
+
+**"원본 보기"는 계속 서명된 R2 URL입니다.** §9.1이 옮긴 것은 저장 경로 하나이며,
+표시(`<img src>`)와 원본 보기는 R2가 직접 서빙합니다 — 보기용 바이트까지 앱으로
+통과시키면 R2 직접 egress의 이점을 버립니다.
+
+그 대신 서명 URL의 수명을 **사용자가 알 수 있게 하고, 만료된 클릭을 앱이
+받습니다.**
+
+- **`ImageAssetPayload`가 `urlExpiresAt`을 함께 실어 보냅니다.** URL과 만료를 서로
+  다른 곳에서 정하면 어긋날 수 있는 두 사실이 되고, 클라이언트가 행동에 쓰는 쪽이
+  틀린 쪽이 됩니다. 그래서 minter가 URL과 만료를 **함께** 반환하고,
+  `serializeImageAssets()`에는 그것 없이 asset을 내보내는 분기가 없습니다.
+- **timestamp는 서명 전에 찍습니다.** `getSignedUrl()`은 실행 시점 시계로 서명하므로
+  먼저 찍은 값은 실제 만료보다 이르기만 합니다. 이르게 말하면 불필요한 refresh 한
+  번이고, 늦게 말하면 이 필드가 막으려는 오류 페이지입니다.
+- **TTL 상수는 `lib/imageAssetPayload.ts`가 소유합니다.** `imageGenerationRead.ts`는
+  `server-only`라 workspace가 import할 수 없고, 화면에 적는 숫자와 서명하는 숫자가
+  각각 존재하면 언젠가 한쪽만 바뀝니다. read 경로는 re-export합니다.
+- **만료 판정에는 몇 초의 여유를 둡니다**(`IMAGE_ASSET_URL_EXPIRY_GUARD_MS`).
+  T-1초의 클릭은 navigation과 서명 만료 사이의 경주이고, 두 결과는 이미지와 오류
+  문서로 전혀 다릅니다.
+- **`urlExpiresAt`이 없으면 만료가 아닙니다.** 배포 전에 열려 있던 탭의 payload가
+  그렇습니다. 이 필드의 역할은 **죽은 것이 확실한** 클릭을 막는 것이지 추측으로
+  살아 있는 링크를 끊는 것이 아닙니다.
+- **만료된 클릭은 navigation을 취소하고 토스트로 답한 뒤 URL을 새로 minting합니다.**
+  다시 열어 주지는 않습니다 — await 뒤의 `window.open()`은 popup이라 브라우저가
+  막습니다. `<img>`의 `onError` 복구는 이 경우를 덮지 못합니다: 살아 있을 때 로드된
+  이미지는 캐시에서 계속 그려지므로 error가 나지 않고, 따라서 아무것도 다시
+  minting하지 않습니다.
+- **href는 그대로 둡니다.** 평소 경로는 평범한 링크(새 탭, `rel="noreferrer"`)이고,
+  가로채는 것은 죽은 것이 확실한 클릭 하나뿐입니다.
+
 ## 10. 로그와 privacy
 
 - 구조화 로그·metric label·trace·error detail에 prompt 원문(부분 포함)을

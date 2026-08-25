@@ -1,6 +1,9 @@
 import "server-only";
 
-import { serializeImageAssets } from "@/lib/imageAssetPayload";
+import {
+  IMAGE_ASSET_URL_TTL_SECONDS,
+  serializeImageAssets,
+} from "@/lib/imageAssetPayload";
 import {
   deriveImageComposerRestore,
   type ImageComposerRestore,
@@ -20,7 +23,28 @@ import { createR2ReadUrl } from "@/lib/r2";
 // never leave the server, and the URLs must never be persisted client-side
 // (they expire in IMAGE_ASSET_URL_TTL_SECONDS).
 
-export const IMAGE_ASSET_URL_TTL_SECONDS = 300;
+// Re-exported from the payload contract, which owns it: the workspace states
+// the same number on screen and cannot import a `server-only` module.
+export { IMAGE_ASSET_URL_TTL_SECONDS };
+
+/**
+ * One signed read URL and the instant it stops working.
+ *
+ * The timestamp is stamped *before* signing, never after. `getSignedUrl()`
+ * signs against the clock at the moment it runs, so a stamp taken first can
+ * only be earlier than the real expiry -- by the milliseconds the signing
+ * took. Understating it costs at worst one needless refresh; overstating it
+ * is the error page this field exists to prevent.
+ */
+const mintImageAssetUrl = async (r2Key: string) => {
+  const expiresAt = new Date(
+    Date.now() + IMAGE_ASSET_URL_TTL_SECONDS * 1_000
+  ).toISOString();
+  return {
+    url: await createR2ReadUrl(r2Key, IMAGE_ASSET_URL_TTL_SECONDS),
+    expiresAt,
+  };
+};
 
 export const IMAGE_GENERATION_READ_SELECT = {
   id: true,
@@ -88,7 +112,7 @@ export async function serializeImageGeneration(
   const assets = await serializeImageAssets(
     generation.status,
     generation.assets,
-    (r2Key) => createR2ReadUrl(r2Key, IMAGE_ASSET_URL_TTL_SECONDS)
+    mintImageAssetUrl
   );
 
   return {
