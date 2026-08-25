@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isPathAllowed, parseRobotsTxt, rulesForUserAgent } from "../lib/robotsTxtCore.ts";
+import {
+  applicationServedBody,
+  carriesManagedBlock,
+  isPathAllowed,
+  parseRobotsTxt,
+  rulesForUserAgent,
+} from "../lib/robotsTxtCore.ts";
 
 /**
  * The body staging actually served on 2026-08-25, trimmed to the parts that
@@ -127,4 +133,38 @@ Host: https://tomverse.app
 
 test("a path no rule matches is allowed", () => {
   assert.equal(isPathAllowed("User-Agent: *\nDisallow: /admin\n", "Googlebot", "/"), true);
+});
+
+/**
+ * Telling the two authors of a served file apart.
+ *
+ * The production edge check passed on 2026-08-25 while `app/robots.ts` named
+ * no AI crawler at all: Cloudflare's half was refusing them, the merged file
+ * read correctly, and the check could not see the difference. That made the
+ * check useless for the one decision it existed to support -- whether it is
+ * safe to turn the managed block off.
+ */
+test("our half of a served file can be read on its own", () => {
+  const served = `# BEGIN Cloudflare Managed content
+
+User-agent: GPTBot
+Disallow: /
+
+# END Cloudflare Managed Content
+
+User-Agent: *
+Allow: /
+`;
+  assert.equal(carriesManagedBlock(served), true);
+  const own = applicationServedBody(served);
+  // Cloudflare refuses it; we do not. Both facts are true, and only the second
+  // one decides whether their block can go.
+  assert.equal(isPathAllowed(served, "GPTBot", "/"), false);
+  assert.equal(isPathAllowed(own, "GPTBot", "/"), true);
+});
+
+test("a file with no managed block is entirely ours", () => {
+  const served = "User-Agent: *\nDisallow: /\n";
+  assert.equal(carriesManagedBlock(served), false);
+  assert.equal(applicationServedBody(served), served);
 });
