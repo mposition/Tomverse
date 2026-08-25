@@ -53,6 +53,11 @@ import {
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { imageDownloadFilename } from "@/lib/imageAssetDownload";
+import {
+  IMAGE_ASSET_URL_TTL_MINUTES,
+  isImageAssetUrlExpired,
+} from "@/lib/imageAssetPayload";
+import { dispatchAppToast } from "@/lib/appToast";
 
 // The image conversation surface: prompt composer, option pickers and the
 // generation timeline. Self-contained on purpose -- ChatInput, ChatApp and the
@@ -103,7 +108,15 @@ const POLL_INTERVAL_MS = 5_000;
  */
 const MODEL_LIMIT_NOTICE_ID = "image-model-limit-notice";
 
-type GenerationAsset = { role: string; mimeType: string; url: string };
+type GenerationAsset = {
+  role: string;
+  mimeType: string;
+  url: string;
+  // Optional only for a payload minted before the field existed -- a tab left
+  // open across the deploy. `isImageAssetUrlExpired()` reads absence as "not
+  // known to be dead" rather than as expired.
+  urlExpiresAt?: string;
+};
 
 type GenerationView = {
   generationId: string;
@@ -296,6 +309,10 @@ export function ImageGenerationWorkspace({
   const [pollClockMs, setPollClockMs] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const refreshedAssetIds = useRef(new Set<string>());
+  // Separate from refreshedAssetIds above, which caps the <img> repair at one
+  // attempt per generation for good: this one is only an in-flight guard, and
+  // clears, because re-opening the original is a repeatable thing to ask for.
+  const refreshingLinkIds = useRef(new Set<string>());
   // The id may arrive mid-flight via onConversationCreated; the ref keeps the
   // poll loop reading the current value without re-arming the effect.
   const conversationIdRef = useRef<string | null>(conversationId);
@@ -857,6 +874,52 @@ export function ImageGenerationWorkspace({
     }
   };
 
+  /**
+   * "Full size", when the link behind it has already lapsed.
+   *
+   * The href stays the signed R2 URL, so the normal path is an ordinary link
+   * and this does nothing. What it removes is the one outcome the user can
+   * neither predict nor recover from: a signature expires after five minutes,
+   * and a click after that navigated the whole workspace to an S3 error
+   * document. The `<img>`'s `onError` repair never fired for it, because an
+   * image that loaded while the URL was live goes on rendering from cache.
+   *
+   * So the click is refused, the reason is said out loud, and a fresh URL is
+   * fetched. Re-opening is left to the user rather than done here: a
+   * `window.open()` after an await is a popup, and browsers block it.
+   */
+  const handleOpenOriginal = useCallback(
+    async (
+      event: React.MouseEvent<HTMLAnchorElement>,
+      generation: GenerationView,
+      asset: GenerationAsset
+    ) => {
+      // In a useCallback rather than a plain arrow in the body, because
+      // `Date.now()` is impure and the compiler cannot see that this only ever
+      // runs from a click. The clock is genuinely needed here: pollClockMs
+      // advances every 5s and only while something is generating, so a card
+      // that finished ten minutes ago would be judged against a frozen time.
+      if (!isImageAssetUrlExpired(asset.urlExpiresAt, Date.now())) return;
+      event.preventDefault();
+      // A dead link invites repeated clicking; one refresh at a time is enough.
+      if (refreshingLinkIds.current.has(generation.generationId)) return;
+      refreshingLinkIds.current.add(generation.generationId);
+      dispatchAppToast(t("chat.imageGenerationOriginalLinkExpired"), "info");
+      try {
+        const refreshed = await refreshGeneration(generation.generationId);
+        if (!refreshed) {
+          dispatchAppToast(
+            t("chat.imageGenerationOriginalLinkRefreshFailed"),
+            "error"
+          );
+        }
+      } finally {
+        refreshingLinkIds.current.delete(generation.generationId);
+      }
+    },
+    [refreshGeneration, t]
+  );
+
   const handleAssetError = (generation: GenerationView) => {
     // Signed URLs live ~5 minutes; refresh once per generation, not per retry.
     if (refreshedAssetIds.current.has(generation.generationId)) return;
@@ -1001,11 +1064,31 @@ export function ImageGenerationWorkspace({
             href={original.url}
             target="_blank"
             rel="noreferrer"
+            data-testid="image-generation-open-original"
+            onClick={(event) =>
+              void handleOpenOriginal(event, generation, original)
+            }
             className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-accent-image-700 hover:bg-accent-image-50 dark:text-accent-image-300 dark:hover:bg-accent-image-950/40"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
             {t("chat.imageGenerationOpenOriginal")}
           </a>
+          {/*
+            How long that link lasts, said before it matters rather than after.
+            The number is IMAGE_ASSET_URL_TTL_MINUTES, the same constant the
+            server signs with, so it cannot drift into a claim nothing backs.
+            It is the link that expires, not the image: the card keeps
+            rendering and the download button keeps working, which is why this
+            sits on the link and not on the figure.
+          */}
+          <span
+            data-testid="image-original-link-expiry"
+            className="text-[11px] font-normal text-zinc-400 dark:text-zinc-500"
+          >
+            {interpolateCopy(t("chat.imageGenerationOriginalLinkExpiry"), {
+              minutes: IMAGE_ASSET_URL_TTL_MINUTES,
+            })}
+          </span>
           {/*
             A button, not `<a href={original.url} download>`. The `download`
             attribute is same-origin-only and these URLs are R2's, so the
