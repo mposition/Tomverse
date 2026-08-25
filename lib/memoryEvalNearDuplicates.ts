@@ -12,6 +12,7 @@
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
+import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 import {
     rankNearDuplicates,
     textShapeFeatures,
@@ -53,9 +54,31 @@ export function shapeFeatures(testCase: MemoryEvalCase): Set<string> {
     return textShapeFeatures(segmentsOf(testCase), conversationShapeFeatures(testCase));
 }
 
+/**
+ * Pairs a successor case declares with the case it reworks.
+ *
+ * Only the declared pair is dropped, and only in that one direction: a
+ * successor case that scores high against some *other* case is still
+ * reported, so the exemption cannot be used to hide a draft that repeats a
+ * template. `tests/memoryEvalNearDuplicates.test.mjs` pins both halves.
+ */
+const declaredReworkPairs = (
+    cases: readonly (MemoryEvalCase | MemoryEvalCaseV2)[]
+): ReadonlySet<string> => {
+    const pairs = new Set<string>();
+    for (const testCase of cases) {
+        const source = (testCase as MemoryEvalCaseV2).sourceCaseId;
+        if (!source) continue;
+        pairs.add(`${testCase.id}\u0000${source}`);
+        pairs.add(`${source}\u0000${testCase.id}`);
+    }
+    return pairs;
+};
+
 export function nearDuplicatePairs(
-    cases: readonly MemoryEvalCase[]
+    cases: readonly (MemoryEvalCase | MemoryEvalCaseV2)[]
 ): NearDuplicatePair[] {
+    const rework = declaredReworkPairs(cases);
     return rankNearDuplicates(
         cases.map((testCase) => ({
             id: testCase.id,
@@ -63,5 +86,5 @@ export function nearDuplicatePairs(
             segments: segmentsOf(testCase),
             extraShapeFeatures: conversationShapeFeatures(testCase),
         }))
-    );
+    ).filter((pair) => !rework.has(`${pair.a}\u0000${pair.b}`));
 }

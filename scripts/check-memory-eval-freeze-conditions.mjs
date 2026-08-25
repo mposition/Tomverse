@@ -85,10 +85,21 @@ const check = (condition, detail, ok) =>
 }
 
 /* --- ② no batch left unreviewed ------------------------------------------- */
+// Only batches drafted FOR this dataset. A batch that declares itself the
+// successor of this version is not waiting to join it -- it exists because
+// this version is finished and its scoring contract was superseded -- so it
+// says nothing about whether this one is frozen.
+const pendingForThisDataset = CANDIDATE_BATCHES.filter(
+    (batch) => batch.successorTo !== MEMORY_EVAL_DATASET_VERSION
+);
+const successorBatches = CANDIDATE_BATCHES.length - pendingForThisDataset.length;
 check(
     "no batch left unreviewed",
-    `${CANDIDATE_BATCHES.length} candidate batch(es)`,
-    CANDIDATE_BATCHES.length === 0
+    `${pendingForThisDataset.length} candidate batch(es)` +
+        (successorBatches > 0
+            ? `, plus ${successorBatches} for a successor version (not counted)`
+            : ""),
+    pendingForThisDataset.length === 0
 );
 
 /* --- ③ explicit adoption, verdicts, diversity and a date on every batch ---- */
