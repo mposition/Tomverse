@@ -40,6 +40,11 @@ const RASTER_DRAFT = "draw a picture of a cat sitting on a windowsill";
 const INFOGRAPHIC_DRAFT = "draw an infographic about blood pressure and food";
 
 const type = async (page: Page, text: string) => {
+  // A composer mid-send is not editable, and `fill` on a disabled textarea is
+  // silently a no-op -- which reads as the feature ignoring the new draft
+  // rather than as the test typing into a box that was not listening. The
+  // mobile shell locks the box while a turn is in flight; desktop does not.
+  await expect(composer(page)).toBeEditable();
   await composer(page).fill(text);
   // The verdict follows the settled draft rather than each keystroke.
   await page.waitForTimeout(300);
@@ -84,17 +89,30 @@ test.describe("guest", () => {
 });
 
 test.describe("signed in", () => {
-  test("a text-dense visual gets no chip", async ({ page }) => {
+  test("a text-dense visual gets the chip too", async ({ page }) => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
     await page.goto("/chat?lang=en");
 
     await type(page, INFOGRAPHIC_DRAFT);
-    // Routing an infographic to a text-to-image workspace is a wrong answer,
-    // not a shortcut: the destination for this class is still an open product
-    // question -- see
-    // .github/audits/image-intent-auto-switch-2026-08-24.md §6.
+    // It was excluded while the destination was an open product question. What
+    // the exclusion produced was the model naming the workspace in prose it
+    // could not act on -- see docs/policy/image-generation.md §13. The SVG is
+    // still what the answer makes; this is offered beside it.
+    await expect(chip(page)).toBeVisible();
+  });
+
+  test("an attached image still gets no chip", async ({ page }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await page.goto("/chat?lang=en");
+
+    // The workspace starts from text, so it cannot edit or describe a picture
+    // that is already here. Offering it would send the person somewhere that
+    // cannot do what they asked.
+    await type(page, "change the background of this");
     await expect(chip(page)).toHaveCount(0);
   });
 
@@ -210,6 +228,69 @@ test.describe("signed in", () => {
     expect(chipBox!.y + chipBox!.height).toBeLessThanOrEqual(textareaBox!.y + 1);
     expect(textareaBox!.height).toBeGreaterThanOrEqual(28);
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("the offer survives the send and carries the question that was asked", async ({
+    page,
+  }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await page.goto("/chat?lang=en");
+
+    await type(page, RASTER_DRAFT);
+    await expect(chip(page)).toBeVisible();
+
+    // Sending is what used to end the offer. It is also the moment most people
+    // decide they wanted the picture, having read what the chat could give
+    // them instead.
+    await page.getByTestId("chat-send-button").click();
+    await expect(composer(page)).toHaveValue("");
+    await expect(chip(page)).toBeVisible();
+
+    await page.getByTestId("image-intent-handoff-accept").click();
+    // The empty composer is not the prompt. The question that was asked is.
+    await expect(page.getByTestId("image-generation-prompt")).toHaveValue(
+      RASTER_DRAFT
+    );
+  });
+
+  test("a dismissal made before the send is still a dismissal after it", async ({
+    page,
+  }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await page.goto("/chat?lang=en");
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("image-intent-handoff-dismiss").click();
+    await expect(chip(page)).toHaveCount(0);
+
+    // Same question, already answered. Asking again after the send would be
+    // the product not listening.
+    await page.getByTestId("chat-send-button").click();
+    await expect(composer(page)).toHaveValue("");
+    await expect(chip(page)).toHaveCount(0);
+  });
+
+  test("an ordinary question sent afterwards ends the offer", async ({ page }) => {
+    await enableImageGenerationFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await page.goto("/chat?lang=en");
+
+    await type(page, RASTER_DRAFT);
+    await page.getByTestId("chat-send-button").click();
+    await expect(chip(page)).toBeVisible();
+
+    // The offer is about the last question asked, so a new question that wants
+    // no picture replaces it rather than leaving the old one on screen.
+    await type(page, "what foods help with high blood pressure?");
+    await expect(chip(page)).toHaveCount(0);
+    await page.getByTestId("chat-send-button").click();
+    await expect(composer(page)).toHaveValue("");
+    await expect(chip(page)).toHaveCount(0);
   });
 
   test("the chip is reachable and operable from the keyboard", async ({ page }) => {

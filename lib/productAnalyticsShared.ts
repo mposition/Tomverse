@@ -227,6 +227,11 @@ export const analyticsPropertiesSchema = z
     // Whether the chip was offered locked, and to which tier of viewer. Says
     // what the requirement was, never who the viewer is.
     image_intent_lock: z.enum(["none", "sign_in", "upgrade"]).optional(),
+    // Which of the two moments offered the handoff. The same predicate drives
+    // both, so without this the two are one number and the question "does
+    // anyone take it after reading the answer" -- the reason the second
+    // surface exists -- cannot be asked.
+    image_intent_surface: z.enum(["composer", "after_answer"]).optional(),
     method: z.string().trim().min(1).max(32).optional(),
     attachment_count: z.number().int().min(1).max(5).optional(),
     model_id: z.string().trim().min(1).max(80).optional(),

@@ -126,7 +126,7 @@ export const fr = {
         imageGenerationBackToChat: "Retour au chat",
         toolsImageGeneration: "Génération d'images",
         toolsImageGenerationDescription: "Comparer les images de plusieurs modèles",
-        imageIntentSuggestionTitle: "Générer plutôt une image ?",
+        imageIntentSuggestionTitle: "Générer une image ?",
         imageIntentSuggestionAccept: "Ouvrir la génération d'images",
         imageIntentSuggestionDismiss: "Pas maintenant",
         imageGenerationModelLabel: "Modèles",
