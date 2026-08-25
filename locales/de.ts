@@ -126,7 +126,7 @@ export const de = {
         imageGenerationBackToChat: "Zurück zum Chat",
         toolsImageGeneration: "Bildgenerierung",
         toolsImageGenerationDescription: "Bilder mehrerer Modelle vergleichen",
-        imageIntentSuggestionTitle: "Stattdessen als Bild erzeugen?",
+        imageIntentSuggestionTitle: "Als Bild erzeugen?",
         imageIntentSuggestionAccept: "Bildgenerierung öffnen",
         imageIntentSuggestionDismiss: "Jetzt nicht",
         imageGenerationModelLabel: "Modelle",
