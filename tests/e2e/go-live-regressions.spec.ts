@@ -14,7 +14,7 @@ import {
 // Cloudflare origin-secret check, the CSRF mutation-origin check and CSP
 // delivery. A `missing:` clause in its matcher let any caller skip all four by
 // sending `purpose: prefetch`.
-test("a prefetch header cannot bypass the edge security layer", async ({
+test("a prefetch header cannot bypass the edge security layer", { tag: "@smoke" }, async ({
   request,
   baseURL,
 }) => {
@@ -39,7 +39,7 @@ test("a prefetch header cannot bypass the edge security layer", async ({
   expect(await crossSiteMutation.text()).toContain("INVALID_REQUEST_ORIGIN");
 });
 
-test("a normal document request still receives a CSP policy", async ({
+test("a normal document request still receives a CSP policy", { tag: "@smoke" }, async ({
   request,
   baseURL,
 }) => {
@@ -56,7 +56,7 @@ test("a normal document request still receives a CSP policy", async ({
 
 // UI-004 - `env(safe-area-inset-*)` resolves to 0px unless the viewport meta
 // opts in, which silently disabled every safe-area accommodation in the app.
-test("the document opts into safe-area insets and themed browser chrome", async ({
+test("the document opts into safe-area insets and themed browser chrome", { tag: "@smoke" }, async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
@@ -72,7 +72,7 @@ test("the document opts into safe-area insets and themed browser chrome", async 
 
 // UX-001 - Enter during an IME composition commits a Korean/Japanese/Chinese
 // syllable. Submitting there sent a truncated prompt and burned credits.
-test("Enter during a Korean IME composition does not send the message", async ({
+test("Enter during a Korean IME composition does not send the message", { tag: "@smoke" }, async ({
   page,
 }) => {
   await prepareGuestPage(page, "ko");
@@ -88,22 +88,57 @@ test("Enter during a Korean IME composition does not send the message", async ({
   const textarea = page.getByTestId("chat-textarea");
   await textarea.click();
 
-  // Simulate the IME: text is in the composition buffer and Enter arrives with
-  // isComposing set, exactly as a Korean 2-set keyboard produces.
+  // Simulate the IME in two steps, so a failure says which half broke: first
+  // the syllable arrives in the composition buffer, then Enter commits it.
+  //
+  // The value goes in through the *prototype's* setter rather than
+  // `field.value = ...`. React installs a per-instance value tracker on a
+  // controlled field, and assigning `field.value` runs that tracker's setter,
+  // which records the new text as already-seen; the input event that follows
+  // is then read as "nothing changed" and onChange never fires. The composer
+  // is controlled (`value={value}` in ChatInput.tsx), so its state stays empty
+  // and the next render puts the empty string back into the DOM -- which is
+  // exactly what this test started reporting once the composer grew a
+  // compositionstart handler and therefore a render to trigger. Going through
+  // the prototype setter leaves the tracker stale, so React sees the edit, the
+  // same way a real keystroke is seen.
   await textarea.evaluate((element) => {
     const field = element as HTMLTextAreaElement;
     field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
-    field.value = "안녕하세요";
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-    field.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        keyCode: 229,
-        bubbles: true,
-        cancelable: true,
-      })
+    const nativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
     );
+    nativeValue?.set?.call(field, "안녕하세요");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
   });
+
+  // The composer must really hold the syllable before Enter can mean anything.
+  // Without this the rest of the test passes just as well on an empty composer,
+  // which is how a broken simulation stayed green for months.
+  await expect(textarea).toHaveValue("안녕하세요");
+
+  // Enter arrives with keyCode 229, exactly as a Korean 2-set keyboard
+  // produces. `isComposing` is deliberately left unset: keyCode 229 is the
+  // fallback signal in lib/chatKeyboardPolicy.ts, and it is the half that
+  // browsers without a composing flag rely on.
+  const keydownCarriedLegacyKeyCode = await textarea.evaluate((element) => {
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+    return event.keyCode === 229;
+  });
+  // `keyCode` is a deprecated KeyboardEventInit member. If an engine ever stops
+  // honouring it, this test would be pressing a plain Enter and proving nothing
+  // about the IME guard, so say so here rather than reporting a pass.
+  expect(
+    keydownCarriedLegacyKeyCode,
+    "the simulated keydown must carry keyCode 229, or no IME guard is exercised"
+  ).toBe(true);
 
   // The composition-commit Enter must neither send nor clear the composer.
   await expect(textarea).toHaveValue("안녕하세요");
@@ -113,7 +148,7 @@ test("Enter during a Korean IME composition does not send the message", async ({
 // UX-009 - the credit badge put `aria-label` on a roleless <span> (where it is
 // ignored) and aria-hidden the only text, so every cost was absent from the
 // accessibility tree.
-test("credit costs are exposed to assistive technology", async ({ page }) => {
+test("credit costs are exposed to assistive technology", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
 
@@ -124,7 +159,7 @@ test("credit costs are exposed to assistive technology", async ({ page }) => {
 
 // UX-008 - streaming, completion and failure were never announced, and the
 // typing indicator had no text alternative.
-test("the response lifecycle is announced to assistive technology", async ({
+test("the response lifecycle is announced to assistive technology", { tag: "@smoke" }, async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
@@ -149,7 +184,7 @@ test("the response lifecycle is announced to assistive technology", async ({
 // UX-002 - opening a conversation was mouse-only: the row had no role, no tab
 // stop and no key handler, so keyboard and screen-reader users could never
 // return to a prior conversation.
-test("a conversation can be opened with the keyboard alone", async ({ page }) => {
+test("a conversation can be opened with the keyboard alone", { tag: "@smoke" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto("/chat");
@@ -166,7 +201,7 @@ test("a conversation can be opened with the keyboard alone", async ({ page }) =>
 
 // UI-005 - there was no custom 404, so Next served an unbranded fallback whose
 // inline <style> is blocked outright under `CSP_MODE=enforce`.
-test("an unknown route renders a branded, navigable 404", async ({ page }) => {
+test("an unknown route renders a branded, navigable 404", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   const response = await page.goto("/this-route-does-not-exist");
   expect(response?.status()).toBe(404);
@@ -179,7 +214,7 @@ test("an unknown route renders a branded, navigable 404", async ({ page }) => {
 
 // UI-003 - Tailwind preflight resets headings to inherit and zeroes borders, so
 // a model's structured answer rendered as undifferentiated body text.
-test("assistant markdown renders headings and tables as distinct blocks", async ({
+test("assistant markdown renders headings and tables as distinct blocks", { tag: "@smoke" }, async ({
   page,
 }) => {
   await prepareGuestPage(page, "en");
@@ -227,7 +262,7 @@ test("assistant markdown renders headings and tables as distinct blocks", async 
 
 // UX-011 - the primary composer set `outline-none` with no replacement ring, so
 // keyboard focus on the most important control was invisible.
-test("the composer shows a focus indicator when focused", async ({ page }) => {
+test("the composer shows a focus indicator when focused", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
 
