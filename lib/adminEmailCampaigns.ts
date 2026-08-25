@@ -3,6 +3,10 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { WaveKind } from "@/lib/emailCampaignCore";
 import { CAMPAIGN_EXCLUDED_REASONS } from "@/lib/emailCampaignRecipientCore";
+import {
+  ADDRESS_REVEAL_MAX_IDS,
+  maskEmailAddress,
+} from "@/lib/emailAddressMaskingCore";
 import { AUDIENCE_COHORTS } from "@/lib/modelRetirementAudienceCore";
 import { WAVE_ORDER } from "@/lib/emailCampaignScheduleCore";
 
@@ -413,6 +417,119 @@ export const waveAudienceBreakdown = async (
         cohorts,
       };
     });
+};
+
+/**
+ * One person in one wave's expansion ledger, as a screen may see them.
+ *
+ * Contract: .github/audits/model-lifecycle-email-2026-08-22.md §21 (D10),
+ * decided 2026-08-24; the ledger itself is §44.
+ *
+ * ## Why this exists now and not in the seventh slice
+ *
+ * `waveAudienceBreakdown()` reports counts, and it reports them because when it
+ * was written the ledger held addresses and nobody had decided whether an
+ * operator may see one. Building the list then would have been answering that
+ * question by writing code. D10 answered it — masked by default, revealed by an
+ * audited act — so the list can exist, under the same rule as
+ * `/admin/email-delivery`.
+ *
+ * ## The address is masked here, not at the edge
+ *
+ * The raw value never leaves this function, so it is not in the API response
+ * and not in the browser. An operator who does not press the reveal never had
+ * it. `emailAddress` is *absent* from the type rather than optional, so a panel
+ * cannot render it by forgetting a check: the field it would reach for does not
+ * exist and the compiler says so.
+ */
+export type AdminWaveRecipientRow = {
+  id: string;
+  emailAddressMasked: string | null;
+  language: string | null;
+  jurisdictionCountry: string | null;
+  /** Which cohort put them in the audience; NULL means they left it. */
+  eligibilityReason: string | null;
+  /** NULL means a delivery row was written for them. */
+  excludedReason: string | null;
+  /** Whether a delivery row exists, without saying which one. */
+  hasDelivery: boolean;
+  malformed: boolean;
+  createdAt: Date;
+};
+
+export type AdminWaveRecipientPage = {
+  rows: AdminWaveRecipientRow[];
+  /** The `id` to pass as `cursor` for the next page, or null at the end. */
+  nextCursor: string | null;
+  /** What the caller asked for, so a screen can say what it is showing. */
+  limit: number;
+};
+
+/**
+ * The maximum page of ledger rows.
+ *
+ * The reveal cap, deliberately: D10 made the screen the unit, so a page that
+ * could hold more rows than one reveal covers would offer a button that fails
+ * on a page which looks like every other page.
+ */
+export const WAVE_RECIPIENT_PAGE_MAX = ADDRESS_REVEAL_MAX_IDS;
+export const WAVE_RECIPIENT_PAGE_SIZE = 50;
+
+/**
+ * One page of a wave's ledger.
+ *
+ * Scoped by campaign *and* wave, both in the `where`. The route resolves the
+ * campaign from the URL and takes the wave from a parameter, so a wave id
+ * belonging to another campaign has to be absent rather than refused -- the
+ * same reason `revealEmailAddresses` scopes by id alone and the route decides
+ * who may call it. Ordered by `createdAt` then `id`, which is the order the
+ * expansion wrote them and is total because `id` breaks the ties.
+ */
+export const listWaveRecipients = async (input: {
+  campaignId: string;
+  waveId: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<AdminWaveRecipientPage> => {
+  const limit = Math.min(
+    Math.max(Math.trunc(input.limit ?? WAVE_RECIPIENT_PAGE_SIZE), 1),
+    WAVE_RECIPIENT_PAGE_MAX
+  );
+
+  const rows = await prisma.emailCampaignRecipient.findMany({
+    where: { campaignId: input.campaignId, waveId: input.waveId },
+    select: {
+      id: true,
+      emailAddress: true,
+      language: true,
+      jurisdictionCountry: true,
+      eligibilityReason: true,
+      excludedReason: true,
+      deliveryId: true,
+      malformed: true,
+      createdAt: true,
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    // One more than asked for, to learn whether there is a next page without
+    // counting the table. A count would be a second query whose answer is stale
+    // by the time it is rendered.
+    take: limit + 1,
+    ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+  });
+
+  const page = rows.slice(0, limit);
+  return {
+    rows: page.map(({ emailAddress, deliveryId, ...rest }) => ({
+      ...rest,
+      emailAddressMasked: maskEmailAddress(emailAddress),
+      // Whether, not which. The delivery id is this row's link into the outbox
+      // and a screen showing people has no use for it, while an id in a
+      // response is an id somebody can ask another endpoint about.
+      hasDelivery: deliveryId !== null,
+    })),
+    nextCursor: rows.length > limit ? page[page.length - 1].id : null,
+    limit,
+  };
 };
 
 export type { WaveKind };

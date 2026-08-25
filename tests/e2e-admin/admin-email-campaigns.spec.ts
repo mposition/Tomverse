@@ -4,7 +4,10 @@ import {
   expect,
   test,
 } from "./support/console";
-import { setAppSettingDirectly } from "./support/database";
+import {
+  seedCampaignLedger,
+  setAppSettingDirectly,
+} from "./support/database";
 
 /**
  * The campaign console.
@@ -120,6 +123,81 @@ test.describe("Admin Console — email campaigns", () => {
       new RegExp(`/admin/email-campaigns/${campaignId}$`)
     );
     await expect(consoleHeading(page)).toHaveText("Campaign detail");
+  });
+
+  test("the expansion ledger names people, masked, and reveals them on the record", async ({
+    page,
+    signInAs,
+  }) => {
+    // D10 (§21), decided 2026-08-24. Until it was decided this screen showed
+    // counts and said on itself that building the list would be answering an
+    // open question.
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await seedCampaignLedger({
+      campaignId,
+      addresses: ["candidate@example.test", "another@example.test"],
+    });
+
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+
+    // The ledger is not loaded until it is asked for: one row per person is not
+    // what an operator opening a campaign to check its schedule asked to read.
+    await expect(page.getByTestId("admin-wave-ledger")).toHaveCount(0);
+
+    await page.getByTestId("admin-campaign-audience-open-ledger").click();
+    const ledger = page.getByTestId("admin-wave-ledger");
+    await expect(ledger).toBeVisible();
+    await expect(page.getByTestId("admin-wave-ledger-row")).toHaveCount(2);
+
+    // Masked, and the local part is genuinely absent from the page rather than
+    // merely not displayed -- the response never carried it.
+    await expect(ledger).toContainText("c•••e@example.test");
+    expect(await page.content()).not.toContain("candidate@example.test");
+
+    await page.getByTestId("admin-reveal-addresses").click();
+    await expect(page.getByTestId("admin-reveal-done")).toBeVisible();
+    await expect(ledger).toContainText("candidate@example.test");
+    await expect(ledger).toContainText("another@example.test");
+
+    // Reloading masks them again: the reveal is an event, not a state. Nothing
+    // about the page's URL carries it.
+    await page.reload();
+    await page.getByTestId("admin-campaign-audience-open-ledger").click();
+    await expect(page.getByTestId("admin-wave-ledger")).toContainText(
+      "c•••e@example.test"
+    );
+    expect(await page.content()).not.toContain("candidate@example.test");
+  });
+
+  test("support sees the ledger and is told why the addresses stay masked", async ({
+    page,
+    signInAs,
+  }) => {
+    // The control renders for everybody and says which it is. A button that
+    // vanishes for some administrators is indistinguishable from a screen that
+    // has no such feature.
+    await signInAs("owner");
+    const campaignId = await draftCampaign(adminApi(page));
+    await seedCampaignLedger({
+      campaignId,
+      addresses: ["candidate@example.test"],
+    });
+
+    await signInAs("support");
+    await page.goto(`/admin/email-campaigns/${campaignId}`);
+    await page.getByTestId("admin-campaign-audience-open-ledger").click();
+
+    await expect(page.getByTestId("admin-reveal-not-permitted")).toBeVisible();
+    await expect(page.getByTestId("admin-reveal-addresses")).toHaveCount(0);
+    expect(await page.content()).not.toContain("candidate@example.test");
+
+    // And the server refuses regardless of what the browser renders.
+    const refused = await adminApi(page).post(
+      "/api/admin/email-deliveries/reveal",
+      { kind: "campaign_recipient", ids: ["anything"] }
+    );
+    expect(refused.status()).toBe(403);
   });
 
   test("the detail page states what the send gate refuses, and does so from the server", async ({

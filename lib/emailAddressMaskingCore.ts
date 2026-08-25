@@ -91,20 +91,47 @@ export const roleMayRevealAddresses = (role: string | null | undefined) =>
 /**
  * The kinds of row an address can be revealed for.
  *
- * Both live on `/admin/email-delivery` and both hold addresses; they are
- * separate because they are separate tables and a reveal has to say which one
- * it is asking about.
+ * Separate entries because they are separate tables and a reveal has to say
+ * which one it is asking about. The first two live on `/admin/email-delivery`;
+ * `campaign_recipient` is the expansion ledger on a campaign's own page, which
+ * held counts only until D10 was decided.
  */
-export const ADDRESS_REVEAL_KINDS = ["delivery", "suppression"] as const;
+export const ADDRESS_REVEAL_KINDS = [
+  "delivery",
+  "suppression",
+  "campaign_recipient",
+] as const;
 
 export type AddressRevealKind = (typeof ADDRESS_REVEAL_KINDS)[number];
 
 /**
- * The most addresses one reveal may return.
+ * What the audit entry calls the thing that was revealed.
  *
- * D10 chose the **screen** as the unit, and the screen is a hundred rows. The
- * bound is what keeps "one reveal, one audit entry" honest: without it a single
- * audited call could return the whole table, and the record would say an
- * operator revealed one screen when they had taken everything.
+ * Derived from the kind rather than written at the call site: the reveal is one
+ * endpoint serving every kind, and a hardcoded target type would file a
+ * campaign ledger disclosure under `EmailDelivery` — findable only by somebody
+ * who already knew to look in the wrong place.
+ */
+export const ADDRESS_REVEAL_TARGET_TYPES: Record<AddressRevealKind, string> = {
+  delivery: "EmailDelivery",
+  suppression: "SuppressionEntry",
+  campaign_recipient: "EmailCampaignRecipient",
+};
+
+/**
+ * The most addresses one reveal may return, and therefore the most rows any
+ * screen that offers a reveal may list.
+ *
+ * D10 chose the **screen** as the unit. The bound is what keeps "one reveal,
+ * one audit entry" honest: without it a single audited call could return the
+ * whole table, and the record would say an operator revealed one screen when
+ * they had taken everything.
+ *
+ * **It is one number because the two would otherwise drift, and the drift is
+ * invisible until somebody presses the button.** `/admin/email-delivery`
+ * shipped with a page size an operator could raise to 200 while the reveal
+ * still capped at 100, so `?limit=101` and up produced a control that failed
+ * validation and said only "Could not show the addresses." A cap whose whole
+ * meaning is "one screen" has to *be* the screen.
  */
 export const ADDRESS_REVEAL_MAX_IDS = 100;
