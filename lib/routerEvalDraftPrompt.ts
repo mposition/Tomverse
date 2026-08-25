@@ -30,7 +30,20 @@ import { createHash } from "node:crypto";
 
 import { EVAL_CELLS, type EvalStratum } from "./routerQualityEvalSet.ts";
 
-export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v1";
+/**
+ * v2 replaced two qualitative rules with counted ones, because v1's produced
+ * neither thing it asked for. Wave 1 drafted 14 Korean prompts of which 7
+ * shared one sentence frame with the nouns swapped -- the failure "count as
+ * one prompt" was written to prevent -- and neither cell produced a single
+ * short prompt, though "some short" was asked for outright. Only the English
+ * cell produced prompts carrying a real constraint.
+ *
+ * A drafter satisfies "vary the length" by believing it already has. A quota
+ * it can count against is the difference, so the rules now name numbers
+ * derived from the batch size, and the frame rule states a cap rather than an
+ * accounting convention the drafter has no reason to apply to itself.
+ */
+export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v2";
 
 /**
  * What each stratum is for, in the drafter's terms.
@@ -98,6 +111,11 @@ export function draftInstruction(request: DraftRequest): string {
       ? "Korean"
       : "English";
 
+  // Counted, not exhorted: see DRAFT_TEMPLATE_VERSION. Both scale with the
+  // batch so a smaller batch is not asked for more short prompts than it has.
+  const shortQuota = Math.max(2, Math.round(request.count / 4));
+  const constraintQuota = Math.max(2, Math.round(request.count / 3));
+
   const lines = [
     "You are drafting candidate questions for an evaluation set that compares two",
     "answering systems on the SAME question. You are not answering anything.",
@@ -131,9 +149,14 @@ export function draftInstruction(request: DraftRequest): string {
     "",
     "Rules:",
     "- Each prompt is something a real person would send, not a benchmark item.",
-    "- Vary the FORM, not just the topic. Prompts that share a sentence frame with",
-    "  the nouns swapped count as one prompt, however many you write.",
-    "- Vary the length and the difficulty. Some short, some with real constraints.",
+    "- Vary the FORM, not just the topic. AT MOST TWO prompts may share a sentence",
+    "  frame. A third built on the same frame with the nouns swapped is a repeat,",
+    `  not a new prompt. Across ${request.count} prompts, expect several different openings.`,
+    `- AT LEAST ${shortQuota} must be SHORT: a single sentence, no second request attached,`,
+    "  the way someone types when they are in a hurry.",
+    `- AT LEAST ${constraintQuota} must carry a real constraint the answer has to respect — a`,
+    "  budget, a deadline, a tool that is not available, something already tried and",
+    '  failed. "Explain X" is not a constraint.',
     "- No personal data, no credentials, no customer-identifying content, no real",
     "  names of private individuals. Not even invented ones that look real.",
     "- Do not include the answer, a rubric, or any note about which model should",

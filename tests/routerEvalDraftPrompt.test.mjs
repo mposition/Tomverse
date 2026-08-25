@@ -71,10 +71,39 @@ test("the sourcing bans are in the instruction, not left to judgement", () => {
 });
 
 // Varying the topic while reusing one sentence frame is the failure the
-// near-duplicate report is built to catch. Saying so up front is cheaper than
-// catching it afterwards.
-test("the drafter is told that a reused frame is one prompt", () => {
-    assert.match(draftInstruction(base), /share a sentence frame with/);
+// near-duplicate report is built to catch, and v1's wording did not prevent
+// it: Wave 1 returned 14 Korean prompts of which 7 shared one frame. So the
+// rule now states a cap the drafter can count against.
+test("the frame rule is a cap, not an accounting convention", () => {
+    assert.match(draftInstruction(base), /AT MOST TWO prompts may share a sentence/);
+});
+
+// v1 asked for "some short, some with real constraints" and got neither: no
+// short prompt in either cell of Wave 1, and constraints only in English. The
+// quotas scale with the batch so a small batch is not asked for more short
+// prompts than it holds.
+test("the length and constraint rules carry counts derived from the batch size", () => {
+    const fourteen = draftInstruction(base);
+    assert.match(fourteen, /AT LEAST 4 must be SHORT/);
+    assert.match(fourteen, /AT LEAST 5 must carry a real constraint/);
+
+    const four = draftInstruction({ ...base, count: 4 });
+    assert.match(four, /AT LEAST 2 must be SHORT/);
+    assert.match(four, /AT LEAST 2 must carry a real constraint/);
+});
+
+// A quota of zero would read as permission to skip the rule entirely, so the
+// floor holds even for a batch small enough to round below it.
+test("the quotas never round down to nothing", () => {
+    for (const count of [1, 2, 3]) {
+        const instruction = draftInstruction({ ...base, count });
+        assert.match(instruction, /AT LEAST 2 must be SHORT/);
+        assert.match(instruction, /AT LEAST 2 must carry a real constraint/);
+    }
+});
+
+test("the template version moved with the rules it describes", () => {
+    assert.equal(DRAFT_TEMPLATE_VERSION, "router-eval-draft-v2");
 });
 
 test("strata with their own requirements get their own line", () => {
