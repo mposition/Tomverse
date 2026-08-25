@@ -15,10 +15,11 @@ import {
 import {
   ADDRESS_REVEAL_KINDS,
   ADDRESS_REVEAL_MAX_IDS,
+  ADDRESS_REVEAL_TARGET_TYPES,
   roleMayRevealAddresses,
   type AddressRevealKind,
 } from "@/lib/emailAddressMaskingCore";
-import { revealEmailAddresses } from "@/lib/adminEmailDeliveries";
+import { revealEmailAddresses } from "@/lib/adminEmailAddressReveal";
 
 /**
  * Showing the addresses on one screen, once, on the record.
@@ -82,7 +83,9 @@ export async function POST(req: Request) {
       session,
       request: req,
       action: "email_address.revealed",
-      targetType: "EmailDelivery",
+      // Named from the kind. A single hardcoded type would have filed a
+      // campaign ledger disclosure under `EmailDelivery`.
+      targetType: ADDRESS_REVEAL_TARGET_TYPES[body.kind],
       targetId: null,
       summary: `Revealed ${body.ids.length} ${body.kind} address(es).`,
       // The count and the ids, never the addresses. The record says what was

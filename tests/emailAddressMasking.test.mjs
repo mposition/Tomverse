@@ -6,11 +6,13 @@ import {
   ADDRESS_REVEAL_KINDS,
   ADDRESS_REVEAL_MAX_IDS,
   ADDRESS_REVEAL_ROLES,
+  ADDRESS_REVEAL_TARGET_TYPES,
   MASK_CHARACTER,
   looksMasked,
   maskEmailAddress,
   roleMayRevealAddresses,
 } from "../lib/emailAddressMaskingCore.ts";
+import { DELIVERY_PAGE_SIZE_MAX } from "../lib/adminEmailDeliveryFilters.ts";
 
 // D10, decided 2026-08-24: mask by default, reveal by a deliberate audited act,
 // no reason required, the screen is the unit, owner and ops only.
@@ -76,7 +78,76 @@ test("the reveal is bounded to a screen", () => {
   // the bound one audited call could return the whole table, and the record
   // would say an operator revealed a screen when they had taken everything.
   assert.equal(ADDRESS_REVEAL_MAX_IDS, 100);
-  assert.deepEqual([...ADDRESS_REVEAL_KINDS], ["delivery", "suppression"]);
+  assert.deepEqual(
+    [...ADDRESS_REVEAL_KINDS],
+    ["delivery", "suppression", "campaign_recipient"]
+  );
+});
+
+test("no screen may list more rows than one reveal covers", () => {
+  // Shipped wrong once: the delivery page allowed `?limit=200` while the cap
+  // was 100, so on a page that looked like every other page the button failed
+  // validation and said only "Could not show the addresses." A cap whose whole
+  // meaning is "one screen" has to be the screen, so it is one number.
+  assert.equal(DELIVERY_PAGE_SIZE_MAX, ADDRESS_REVEAL_MAX_IDS);
+});
+
+test("every kind names its own table in the audit record", () => {
+  // A single hardcoded target type filed a campaign ledger disclosure under
+  // `EmailDelivery`, where it is findable only by somebody who already knew to
+  // look in the wrong place.
+  const types = ADDRESS_REVEAL_KINDS.map((kind) => {
+    const target = ADDRESS_REVEAL_TARGET_TYPES[kind];
+    assert.ok(target, `${kind} has no target type`);
+    return target;
+  });
+  assert.equal(new Set(types).size, types.length, "two kinds share a target type");
+  assert.equal(ADDRESS_REVEAL_TARGET_TYPES.campaign_recipient, "EmailCampaignRecipient");
+});
+
+test("the campaign ledger reveals through the one shared path", () => {
+  // Three tables answer to the reveal now. A second implementation would be a
+  // second place the role check and the audit entry could be missing, so the
+  // route imports the shared module and the campaign screen has no reveal of
+  // its own.
+  const route = readFileSync(
+    "app/api/admin/email-deliveries/reveal/route.ts",
+    "utf8"
+  );
+  assert.ok(route.includes('from "@/lib/adminEmailAddressReveal"'));
+
+  const ledger = readFileSync("components/admin/AdminWaveLedger.tsx", "utf8");
+  assert.ok(
+    ledger.includes('kind="campaign_recipient"'),
+    "the ledger must reveal as its own kind"
+  );
+  assert.ok(
+    !/fetch\((?!.*email-campaigns).*reveal/.test(ledger),
+    "the ledger must not call a reveal endpoint of its own"
+  );
+});
+
+test("the campaign ledger page never carries a raw address", () => {
+  // The masked value is all the response holds, so an operator who does not
+  // press the button never had the address in their browser. Asserted as the
+  // absence of the field name the panel would have to reach for.
+  const ledger = readFileSync("components/admin/AdminWaveLedger.tsx", "utf8");
+  assert.ok(ledger.includes("emailAddressMasked"));
+  assert.ok(
+    !/\bemailAddress\b(?!Masked)/.test(ledger),
+    "the ledger row type must not name the raw field"
+  );
+});
+
+test("the campaign screen no longer defers the question D10 answered", () => {
+  // The seventh slice said on screen that building the list would be answering
+  // an open question. It is answered, so that sentence would now be false.
+  const panel = readFileSync(
+    "components/admin/AdminCampaignDetailPanel.tsx",
+    "utf8"
+  );
+  assert.ok(!panel.includes("Building the list would be"));
+  assert.ok(!panel.includes("Counts, not people"));
 });
 
 test("the reveal is a POST, never a query parameter", () => {
