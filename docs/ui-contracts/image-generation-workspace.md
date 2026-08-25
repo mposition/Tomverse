@@ -402,6 +402,30 @@ and cancelling restores the chat draft **in the conversation it belonged to**.
   a visible caption. Removing either is a contract violation.
 - Assets exist only for a succeeded generation; a failed attempt must not
   surface a partially written object.
+- **Saving an image goes through this application's origin, never an
+  `<a download>` on the signed URL.** The `download` attribute is same-origin
+  only, so a link to R2 is followed rather than downloaded and the browser
+  renders the image — correct behaviour for a correct `image/png`, and not
+  fixable by anything stored on the object. The control fetches
+  `GET /api/images/generations/{id}/download`, which answers
+  `Content-Disposition: attachment`, and saves the response from the page so a
+  refusal stays on the page. Displaying an image (`<img src>`, "Full size")
+  keeps using the signed URL.
+- **A download filename is derived from the asset's recorded `mimeType`, never
+  from its R2 key.** Originals are keyed `original.png` whatever the provider
+  returned; naming a JPEG `.png` is the same defect wearing the fix's clothes.
+  `lib/imageAssetDownload.ts` owns the rule.
+- **"Full size" stays a link to the signed URL, and the card says how long that
+  link lasts.** The number is `IMAGE_ASSET_URL_TTL_MINUTES` from
+  `lib/imageAssetPayload.ts` — the same constant the server signs with — never a
+  literal in copy. A second copy of that number is a lie waiting for the day
+  somebody changes only the first.
+- **A click on a link known to be dead is refused, not followed.** The payload
+  carries `urlExpiresAt`; past it (less a few seconds' guard) the workspace
+  cancels the navigation, says so in a toast, and re-mints. It never navigates
+  to the storage provider's error document, and it never re-opens the image
+  itself — a `window.open()` after an await is a popup. An absent `urlExpiresAt`
+  is *not* expired: it is a payload from before the field existed.
 
 ## Accent colour role
 
@@ -508,4 +532,8 @@ rather than the behaviour.
   resolvable price can be submitted;
 - a generated image renders without its AI-generated label;
 - a signed asset URL is persisted client-side, or an R2 key reaches the client;
+- the download control links to a cross-origin asset URL, or a downloaded file
+  is named from the R2 key rather than from the recorded mime type;
+- the expiry copy quotes a literal instead of the signing constant, or an
+  expired "Full size" click navigates away from the workspace;
 - raw internal USD appears in any user-visible surface.
