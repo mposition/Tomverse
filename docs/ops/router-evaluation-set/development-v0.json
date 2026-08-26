@@ -5772,9 +5772,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -5808,9 +5808,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -5844,9 +5844,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -5880,9 +5880,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -5916,9 +5916,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -5952,9 +5952,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -5988,9 +5988,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6024,9 +6024,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6060,9 +6060,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6096,9 +6096,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6132,9 +6132,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6168,9 +6168,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6204,9 +6204,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6240,9 +6240,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-en-003",
         "provider": "zhipu",
@@ -6276,9 +6276,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6312,9 +6312,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6348,9 +6348,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6384,9 +6384,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6420,9 +6420,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6456,9 +6456,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6492,9 +6492,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6528,9 +6528,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6564,9 +6564,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6600,9 +6600,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6636,9 +6636,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6672,9 +6672,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6708,9 +6708,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6744,9 +6744,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "document_and_attachment-en-002",
         "provider": "zhipu",
@@ -6780,9 +6780,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -6816,9 +6816,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -6852,9 +6852,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -6888,9 +6888,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -6924,9 +6924,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -6960,9 +6960,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -6996,9 +6996,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7032,9 +7032,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7068,9 +7068,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7104,9 +7104,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7140,9 +7140,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7176,9 +7176,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7212,9 +7212,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
@@ -7248,9 +7248,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "current_information-ko-002",
         "provider": "zhipu",
