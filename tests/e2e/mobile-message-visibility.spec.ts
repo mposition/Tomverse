@@ -9,7 +9,10 @@ import {
   freezeAnimations,
   restoreActiveConversation,
 } from "./support/chat-state-fixtures";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+  getWebSearchCapability,
+  webSearchIsDispatchable,
+} from "@/lib/webSearchCapability";
 
 // ---------------------------------------------------------------------------
 // How much of a phone screen the *answers* actually get.
@@ -38,7 +41,11 @@ test.beforeEach(async ({}, testInfo) => {
   );
 });
 
-/** 2 of these 3 have verified native web search -- gpt-5-4-mini does not. */
+/**
+ * The composer's partial-web-search fixture. Which of these can actually
+ * search is derived below rather than asserted here: `support: "native"` is a
+ * provider fact, and being dispatchable is a further one.
+ */
 const MODEL_A = "gpt-5-4-mini";
 const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gemini-3-6-flash";
@@ -251,10 +258,37 @@ test.describe("ChatMessageList visible height (multi-model, steady state)", () =
 // The bands that gave the space back, each pinned to what it must still say.
 // ===========================================================================
 
+// The default trio's web-search split, read from the capability table rather
+// than written down here. `support: "native"` is not the same as dispatchable:
+// a provider whose search takes no per-request cost ceiling cannot be bounded,
+// so the composer counts it unsupported (lib/webSearchCapability.ts,
+// `nativeSearchIsDispatchable`). Deriving the counts means the next catalogue
+// change fails on the guard below, which names what went wrong, instead of on
+// a ratio three tests had each copied out by hand.
+const SEARCHABLE_MODELS = THREE_MODELS.filter((modelId) =>
+  webSearchIsDispatchable(getWebSearchCapability(modelId))
+);
+const SUPPORTED_COUNT = SEARCHABLE_MODELS.length;
+const UNSUPPORTED_COUNT = THREE_MODELS.length - SUPPORTED_COUNT;
+const SUPPORT_RATIO = `${SUPPORTED_COUNT}/${THREE_MODELS.length}`;
+
 test.describe("Composer tool status", () => {
   test("partial web-search support stays legible in a row of its own", async ({
     page,
   }) => {
+    // Partial means both halves are non-empty. If a catalogue change ever
+    // makes the default trio all-searching or none-searching, this is a
+    // different state with a different chip, and the geometry below would be
+    // measuring something the test does not name.
+    expect(
+      SUPPORTED_COUNT,
+      `fixture error: none of ${THREE_MODELS.join(", ")} can search, so this is the blocked state, not the partial one`
+    ).toBeGreaterThan(0);
+    expect(
+      UNSUPPORTED_COUNT,
+      `fixture error: all of ${THREE_MODELS.join(", ")} can search, so this is the full-support state, not the partial one`
+    ).toBeGreaterThan(0);
+
     await enterMobileComparison(page, {
       lang: "en",
       viewport: { width: 390, height: 680 },
@@ -267,10 +301,16 @@ test.describe("Composer tool status", () => {
     const chip = page.getByTestId("web-search-mode-chip");
     await expect(chip).toBeVisible();
     await expect(chip).toHaveAttribute("data-tone", "warning");
-    await expect(chip).toHaveAttribute("data-supported-count", "2");
-    await expect(chip).toHaveAttribute("data-unsupported-count", "1");
+    await expect(chip).toHaveAttribute(
+      "data-supported-count",
+      String(SUPPORTED_COUNT)
+    );
+    await expect(chip).toHaveAttribute(
+      "data-unsupported-count",
+      String(UNSUPPORTED_COUNT)
+    );
     // Compact, but never reduced to a bare icon: the ratio is on screen.
-    await expect(chip).toContainText("2/3");
+    await expect(chip).toContainText(SUPPORT_RATIO);
 
     // The saving is the shorter *label*, never the textarea's row: the chip
     // sits entirely above the input line it used to share.
@@ -285,7 +325,7 @@ test.describe("Composer tool status", () => {
     // The whole sentence -- counts, credit ceiling, what the unsupported model
     // does instead -- is still what assistive tech gets.
     await expect(page.locator("#web-search-state-description")).toContainText(
-      "2 of 3 selected models can search"
+      `${SUPPORTED_COUNT} of ${THREE_MODELS.length} selected models can search`
     );
     await expect(page.locator("#web-search-state-description")).toContainText(
       "extra credits are reserved"
@@ -359,7 +399,9 @@ test.describe("Composer tool status", () => {
     // neither is shrunk into the other.
     expect(textareaBox!.y).toBeGreaterThan(chipBox!.y + chipBox!.height - 1);
     expect(textareaBox!.width).toBeGreaterThanOrEqual(rowBox!.width * 0.9);
-    await expect(page.getByTestId("web-search-mode-chip")).toContainText("2/3");
+    await expect(page.getByTestId("web-search-mode-chip")).toContainText(
+      SUPPORT_RATIO
+    );
     await expectNoHorizontalOverflow(page);
   });
 
@@ -385,7 +427,7 @@ test.describe("Composer tool status", () => {
     );
     // The full sentence, not the compact ratio, is what desktop shows.
     await expect(page.getByTestId("web-search-mode-chip")).toContainText(
-      "2/3 supported"
+      `${SUPPORT_RATIO} supported`
     );
   });
 });
