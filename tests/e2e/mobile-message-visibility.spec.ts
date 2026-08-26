@@ -9,7 +9,10 @@ import {
   freezeAnimations,
   restoreActiveConversation,
 } from "./support/chat-state-fixtures";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+  getWebSearchCapability,
+  modelWebSearchIsDispatchable,
+} from "@/lib/webSearchCapability";
 
 // ---------------------------------------------------------------------------
 // How much of a phone screen the *answers* actually get.
@@ -38,8 +41,15 @@ test.beforeEach(async ({}, testInfo) => {
   );
 });
 
-/** 2 of these 3 have verified native web search -- gpt-5-4-mini does not. */
-const MODEL_A = "gpt-5-4-mini";
+// Two models that can dispatch a search and one that cannot -- the partial
+// state the chip exists to make legible. `gpt-5-6-luna` replaced
+// `gpt-5-4-mini` here on 2026-08-26: mini is UNVERIFIED, so once Google's
+// grounding stopped counting (it is native but takes no per-request ceiling,
+// so its cost has no worst case to reserve) the fixture had one supported
+// model out of three and the chip correctly read 1/3. Luna carries OpenAI's
+// native search, which #1015 made dispatchable by bounding it with
+// `max_tool_calls`, and it sits in the same Guest/standard tier mini did.
+const MODEL_A = "gpt-5-6-luna";
 const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gemini-3-6-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
@@ -264,6 +274,18 @@ test.describe("Composer tool status", () => {
     await expect(chipRow).toHaveAttribute("data-placement", "row");
     await expect(chipRow).toHaveAttribute("data-label-variant", "compact");
 
+    // Say it in the fixture's own terms, the way the fully-blocked test below
+    // does. Without this the capability table moving under the fixture reads
+    // as a chip defect: on 2026-08-26 it surfaced as "expected 2/3, got 1/3"
+    // three tests deep, and the chip was right both times.
+    const dispatchable = THREE_MODELS.filter((modelId) =>
+      modelWebSearchIsDispatchable(modelId)
+    );
+    expect(
+      dispatchable.length,
+      `fixture error: ${dispatchable.length} of ${THREE_MODELS.length} selected models can dispatch a search, so this is no longer the partial-support state`
+    ).toBe(2);
+
     const chip = page.getByTestId("web-search-mode-chip");
     await expect(chip).toBeVisible();
     await expect(chip).toHaveAttribute("data-tone", "warning");
@@ -307,7 +329,7 @@ test.describe("Composer tool status", () => {
     await toggle.click();
     const detail = page.getByTestId("web-search-exception-detail");
     await expect(detail).toBeVisible();
-    await expect(detail).toContainText("GPT-5.4 mini");
+    await expect(detail).toContainText("Gemini 3.6 Flash");
     // The detail belongs below the chip that opened it, not above the textarea.
     const detailBox = await detail.boundingBox();
     const toggleBox = await toggle.boundingBox();
