@@ -1,3 +1,4 @@
+import { ADDRESS_REVEAL_MAX_IDS } from "@/lib/emailAddressMaskingCore";
 import type { EmailClassification } from "@/lib/emailTemplateDefinitions";
 
 /**
@@ -78,7 +79,16 @@ export type DeliveryFilters = {
 };
 
 export const DELIVERY_PAGE_SIZE = 50;
-export const DELIVERY_PAGE_SIZE_MAX = 200;
+
+/**
+ * The largest page an operator may ask for.
+ *
+ * Borrowed from the reveal cap rather than chosen here, because the cap means
+ * "one screen" and a screen that could hold more rows than one reveal covers
+ * makes the reveal button fail on a page that looks ordinary. Was 200 while the
+ * cap was 100; `?limit=101` and up left "Show addresses (200)" returning a 400.
+ */
+export const DELIVERY_PAGE_SIZE_MAX = ADDRESS_REVEAL_MAX_IDS;
 
 const asArray = (value: string | string[] | undefined): string[] => {
   if (value === undefined) return [];

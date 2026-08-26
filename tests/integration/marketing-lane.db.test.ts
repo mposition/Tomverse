@@ -7,6 +7,7 @@ import {
   MODEL_LAUNCH_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { MARKETING_HALT_SETTING_KEY } from "@/lib/marketingSendHealthCore";
+import { EMAIL_MARKETING_FLAG_KEY } from "@/lib/emailFeatureFlags";
 import {
   activatePolicyVersion,
   ensureJurisdictionPolicyDraft,
@@ -17,6 +18,8 @@ import {
   drainStandardEmailDeliveries,
   enqueueStandardEmail,
 } from "@/lib/standardEmailLane";
+import { enqueuedRow } from "../support/enqueuedEmail";
+import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // The marketing path, executed rather than assumed (EM-03).
 //
@@ -94,6 +97,10 @@ beforeEach(async () => {
   delete process.env.MARKETING_EMAIL_FROM;
   delete process.env.MARKETING_RESEND_API_KEY;
   for (const [key, value] of Object.entries(IDENTITY_ENV)) process.env[key] = value;
+  // Turned on explicitly, because it is off everywhere else (EM-05). This
+  // suite's whole subject is the marketing path, so it has to opt in -- and
+  // having to opt in is itself the evidence that the default is off.
+  await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
 });
 
 after(async () => {
@@ -143,13 +150,15 @@ const subscriber = async (options?: { country?: string; consented?: boolean }) =
 };
 
 const queue = async (user: { id: string; email: string | null }) =>
-  enqueueStandardEmail({
-    templateKey: MODEL_LAUNCH_TEMPLATE,
-    emailAddress: user.email,
-    userId: user.id,
-    language: "en",
-    payload: PAYLOAD,
-  });
+  enqueuedRow(
+    await enqueueStandardEmail({
+      templateKey: MODEL_LAUNCH_TEMPLATE,
+      emailAddress: user.email,
+      userId: user.id,
+      language: "en",
+      payload: PAYLOAD,
+    })
+  );
 
 test("an account that never opted in is not sent product news", async () => {
   await activatePolicy();
@@ -161,7 +170,7 @@ test("an account that never opted in is not sent product news", async () => {
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, skipReason: true },
   });
   assert.equal(delivery.status, "skipped");
@@ -189,7 +198,7 @@ test("an unconfirmed jurisdiction stops marketing, and says which", async () => 
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, skipReason: true },
   });
   assert.equal(delivery.status, "skipped");
@@ -217,7 +226,7 @@ test("with no marketing sending identity the send fails and reports once", async
 
   assert.equal(calls.length, 0, "nothing may reach the provider");
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, lastErrorKind: true },
   });
   // Permanent, not retried: no amount of waiting sets an environment variable.
@@ -244,7 +253,7 @@ test("with neither key nor domain the message waits rather than failing", async 
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, attempts: true, nextAttemptAt: true },
   });
   assert.equal(delivery.status, "pending");
@@ -333,7 +342,7 @@ test("an incomplete business identity holds marketing rather than sending it", a
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, skipReason: true },
   });
   assert.equal(delivery.status, "skipped");
@@ -349,13 +358,13 @@ test("a transactional message keeps its own stream and carries no unsubscribe", 
   await activatePolicy();
   const calls = stubProvider();
   const user = await subscriber();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: "account_welcome",
     emailAddress: user.email,
     userId: user.id,
     language: "en",
     payload: { name: user.name },
-  });
+  }));
 
   await drainStandardEmailDeliveries({ limit: 1 });
 
@@ -379,13 +388,13 @@ test("a billing notice arrives from the billing sender", async () => {
   await activatePolicy();
   const calls = stubProvider();
   const user = await subscriber();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: "billing_welcome",
     emailAddress: user.email,
     userId: user.id,
     language: "en",
     payload: { plan: "pro", billingInterval: "month", periodEnd: null },
-  });
+  }));
 
   await drainStandardEmailDeliveries({ limit: 1 });
 
@@ -403,7 +412,7 @@ test("the operator report arrives from the operations sender, with no reply-to",
   await activatePolicy();
   const calls = stubProvider();
   const user = await subscriber();
-  await enqueueStandardEmail({
+  enqueuedRow(await enqueueStandardEmail({
     templateKey: "ops_model_lifecycle_daily",
     emailAddress: user.email,
     userId: user.id,
@@ -418,7 +427,7 @@ test("the operator report arrives from the operations sender, with no reply-to",
       missing: [],
       registry: { ran: false, disabled: [], restored: [], held: [] },
     },
-  });
+  }));
 
   await drainStandardEmailDeliveries({ limit: 1 });
 
@@ -456,7 +465,7 @@ test("without an unsubscribe key marketing is refused by name, not as a render f
 
   assert.equal(calls.length, 0, "a message with no unsubscribe link must not send");
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, lastErrorKind: true },
   });
   // Permanent for the same reason the identity refusal is: no amount of
@@ -551,7 +560,7 @@ test("a complaint rate over the threshold halts the stream", async () => {
 
   assert.equal(calls.length, 0, "a halted stream sends nothing");
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, skipReason: true },
   });
   assert.equal(delivery.status, "skipped");
@@ -593,7 +602,7 @@ test("a halt does not lift when the numbers improve", async () => {
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { skipReason: true },
   });
   assert.equal(delivery.skipReason, "marketing_halted");
@@ -621,19 +630,19 @@ test("a halted marketing stream does not stop a transactional message", async ()
 
   const calls = stubProvider();
   const user = await subscriber();
-  const rows = await enqueueStandardEmail({
+  const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: ACCOUNT_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
     language: "en",
     payload: { name: "Subscriber" },
-  });
+  }));
 
   await drainStandardEmailDeliveries({ limit: 1 });
 
   assert.equal(calls.length, 1, "the welcome still goes out");
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
-    where: { id: rows!.deliveryId },
+    where: { id: rows.deliveryId },
     select: { status: true, skipReason: true },
   });
   assert.equal(delivery.status, "sent");

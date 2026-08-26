@@ -7,6 +7,7 @@ import {
     decideSoleApproverEligibility,
     DRY_RUN_BINDING_MAX_AGE_MS,
     SOLE_APPROVER_ACTIONS,
+    checkCampaignCopyBinding,
     SOLE_APPROVER_UNAVAILABLE_SENTENCES,
     soleApproverUnavailableSentence,
 } from "../lib/adminSoleApproverCore.ts";
@@ -30,16 +31,97 @@ const eligibility = (over = {}) =>
         ...over,
     });
 
-test("only the named action can reach this path", () => {
-    assert.deepEqual([...SOLE_APPROVER_ACTIONS], ["retention.cleanup.execute"]);
-    // The actions where no schedule performs the equivalent deletion on its
-    // own, and the second reviewer is therefore the only control there is.
+test("only the named actions can reach this path", () => {
+    // Two, for two different reasons. `retention.cleanup.execute` because a
+    // schedule already performs the same deletions unattended;
+    // `email_campaign.approve` because in a one-administrator organisation the
+    // two-person rule is unsatisfiable rather than strict, so no campaign
+    // could ever be approved (D5, .github/audits/model-lifecycle-email-2026-08-22.md §21).
+    assert.deepEqual([...SOLE_APPROVER_ACTIONS], [
+        "retention.cleanup.execute",
+        "email_campaign.approve",
+    ]);
+    // Neither reason reaches these: no schedule performs the equivalent, and
+    // they are perfectly possible with one administrator asking a second one.
     for (const action of ["user.delete", "refund.issue", "user.plan_adjust"]) {
         assert.deepEqual(eligibility({ action }), {
             allowed: false,
             reason: "action_not_eligible",
         });
     }
+});
+
+test("a second administrator closes the campaign path too", () => {
+    // Condition 6 is not action-specific, and it is the whole reason D5 is
+    // safe to grant: the exception exists only while it is the difference
+    // between approving and never approving at all.
+    assert.deepEqual(
+        eligibility({
+            action: "email_campaign.approve",
+            eligibleApproverIdentities: ["ops@example.invalid", "owner@example.invalid"],
+        }),
+        { allowed: false, reason: "multiple_eligible_approvers" }
+    );
+    assert.equal(
+        eligibility({ action: "email_campaign.approve" }).allowed,
+        true
+    );
+});
+
+test("the campaign binding refuses copy that moved, and copy that cannot be read", () => {
+    // The sole approver's substitute for a second reader: they echo the digest
+    // of what they read, and the server compares it with what the campaign
+    // renders now. Without it one person approves "the campaign", and the
+    // campaign is whatever the template says when the send runs.
+    assert.deepEqual(
+        checkCampaignCopyBinding({ submittedDigest: "abc", currentDigest: "abc" }),
+        { bound: true }
+    );
+    assert.deepEqual(
+        checkCampaignCopyBinding({ submittedDigest: "abc", currentDigest: "def" }),
+        { bound: false, reason: "copy_digest_mismatch" }
+    );
+    assert.deepEqual(
+        checkCampaignCopyBinding({ submittedDigest: "", currentDigest: "abc" }),
+        { bound: false, reason: "copy_digest_missing" }
+    );
+    // A null current digest is a refusal, not a pass: it means the copy could
+    // not be rendered to compare against, and approving words nobody could
+    // read is the failure this path is built around.
+    assert.deepEqual(
+        checkCampaignCopyBinding({ submittedDigest: "abc", currentDigest: null }),
+        { bound: false, reason: "copy_unreadable" }
+    );
+});
+
+test("time can expire a retention preview and can never expire approved copy", () => {
+    // The contrast is the point, not a detail. A retention preview is a count
+    // of live rows and goes stale on its own, so the dry-run binding expires.
+    const old = new Date("2026-08-24T00:00:00.000Z");
+    assert.deepEqual(
+        checkDryRunBinding({
+            submittedRunId: "run-1",
+            submittedDigest: "digest-1",
+            latestRun: {
+                id: "run-1",
+                mode: "dry-run",
+                digest: "digest-1",
+                createdAt: old,
+                createdById: "admin-1",
+            },
+            requesterId: "admin-1",
+            now: new Date(old.getTime() + DRY_RUN_BINDING_MAX_AGE_MS + 1),
+        }),
+        { bound: false, reason: "preview_expired" }
+    );
+
+    // Copy does not change unless somebody edits it, so a mismatch is the whole
+    // signal and the binding takes no clock at all -- there is no argument
+    // through which time could refuse a correct approval.
+    assert.deepEqual(
+        checkCampaignCopyBinding({ submittedDigest: "abc", currentDigest: "abc" }),
+        { bound: true }
+    );
 });
 
 test("a second eligible administrator closes the path", () => {

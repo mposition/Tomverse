@@ -1,4 +1,5 @@
 import {
+  adminApi,
   ADMIN_E2E_IDENTITIES,
   FIXTURE_ALERT_POLICY,
   FIXTURE_ANALYTICS,
@@ -19,6 +20,7 @@ import {
   consoleHeading,
   expect,
   test,
+  FIXTURE_SUPPRESSION,
 } from "./support/console";
 
 /**
@@ -630,6 +632,72 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByTestId("email-suppression-provider-notice")
     ).toContainText("not the provider");
+  });
+
+  test("addresses are masked by default, and revealing them is an owner action", async ({
+    page,
+    signInAs,
+  }) => {
+    // D10 (.github/audits/model-lifecycle-email-2026-08-22.md §21, decided
+    // 2026-08-24): masked by default, revealed by a deliberate audited act.
+    // Exposure is an event now, not a state.
+    await signInAs("owner");
+    // The suppressions tab, because the harness seeds a row there: the two
+    // tabs share the same address component and the same reveal API, so this
+    // exercises both through the browser without building an EmailDelivery's
+    // event, policy version and template version in the fixture.
+    await page.goto("/admin/email-delivery?tab=suppressions");
+
+    // The mask is on screen and the address is not.
+    await expect(page.locator("main")).toContainText("\u2022\u2022\u2022");
+    await expect(page.locator("main")).not.toContainText(
+      FIXTURE_SUPPRESSION.emailAddress
+    );
+    await expect(page.getByTestId("admin-address-revealed")).toHaveCount(0);
+
+    const reveal = page.getByTestId("admin-reveal-addresses");
+    await expect(reveal).toBeVisible();
+    await reveal.click();
+
+    await expect(page.locator("main")).toContainText(
+      FIXTURE_SUPPRESSION.emailAddress,
+      { timeout: 15_000 }
+    );
+    // The button is gone and the screen says the act was recorded, so nobody
+    // has to wonder whether it was.
+    await expect(page.getByTestId("admin-reveal-done")).toContainText(
+      "audit log"
+    );
+
+    // And it does not survive the page. That is what makes it an event: there
+    // is nothing to bookmark and nothing that keeps being true.
+    await page.reload();
+    await expect(page.locator("main")).not.toContainText(
+      FIXTURE_SUPPRESSION.emailAddress
+    );
+  });
+
+  test("support reads the screen and is told revealing is not theirs", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("support");
+    await page.goto("/admin/email-delivery?tab=suppressions");
+
+    // The control renders and says which it is. A button that vanishes for some
+    // administrators is indistinguishable from a screen that has no such
+    // feature, and the next question gets asked of whoever built it.
+    await expect(
+      page.getByTestId("admin-reveal-not-permitted")
+    ).toContainText("owner or ops");
+    await expect(page.getByTestId("admin-reveal-addresses")).toHaveCount(0);
+
+    // And the server does not take their word for it either.
+    const refused = await adminApi(page).post(
+      "/api/admin/email-deliveries/reveal",
+      { kind: "suppression", ids: ["any-id"] }
+    );
+    expect(refused.status()).toBe(403);
   });
 
   test("retention renders its cleanup controls", async ({ page }) => {

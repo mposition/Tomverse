@@ -27,6 +27,16 @@ export type AdminNavigationCounts = {
    * backlog.
    */
   openModelLifecycle: number | null;
+  /**
+   * Campaign waves the scheduler has passed over.
+   *
+   * A wave stays `pending` when it comes due and is refused, so the row itself
+   * records neither the attempt nor the reason -- and nothing else in the
+   * console reads `EmailCampaignWave` at all. Without this count an operator
+   * learns that an approved send did not happen from the people who never
+   * received it.
+   */
+  overdueCampaignWaves: number | null;
   openFeedback: number | null;
   openPrivacyRequests: number | null;
   pendingRefunds: number | null;
@@ -40,6 +50,7 @@ export type AdminNavigationCounts = {
 export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   abandonedLegalEmail: null,
   openModelLifecycle: null,
+  overdueCampaignWaves: null,
   openFeedback: null,
   openPrivacyRequests: null,
   pendingRefunds: null,
@@ -89,6 +100,8 @@ export const adminNavigationBadge = (
       return counts.abandonedLegalEmail;
     case "modelLifecycle":
       return counts.openModelLifecycle;
+    case "emailCampaigns":
+      return counts.overdueCampaignWaves;
     default:
       return null;
   }
