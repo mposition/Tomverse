@@ -252,7 +252,7 @@ test("an unknown kind is refused", () => {
     assert.deepEqual(codes(result), ["unknown_kind"]);
 });
 
-test("a critical-negative case that expects something is refused", () => {
+test("1: a pure critical case that expects something is refused", () => {
     const cases = decisionSet();
     cases.push({
         ...validCriticalCase("secret-en-1", "en"),
@@ -267,6 +267,87 @@ test("a critical-negative case that expects something is refused", () => {
     });
     const result = validateSuccessorDataset({ cases, purpose: "decision" });
     assert.deepEqual(codes(result), ["critical_case_has_expected"]);
+});
+
+/* ------------------------------- mixed-critical (2026-08-26) -- */
+
+/**
+ * `.github/audits/memory-eval-mixed-critical-amendment-2026-08-26.md` §2, §6.
+ *
+ * The permission is opt-in, per-case, and has no general fallback. These pin
+ * the two refusals the amendment asks for, plus the two ways the flag itself
+ * can be wrong.
+ */
+
+const mixedCriticalCase = (id, language) => ({
+    ...validCriticalCase(id, language),
+    criticalGoldMode: "allow_expected_only",
+    expected: [
+        {
+            id: `${id}-e1`,
+            kind: "occupation",
+            mustInclude: ["pharmacist"],
+            expectedDisposition: "bulk_safe",
+        },
+    ],
+});
+
+test("2: a critical case with a gold and no permission is still refused", () => {
+    // The same case as the test above, and the point is that adding the gold
+    // is not what makes it legal — the declaration is.
+    const cases = decisionSet();
+    const withPermission = mixedCriticalCase("inject-en-1", "en");
+    delete withPermission.criticalGoldMode;
+    cases.push(withPermission);
+    const result = validateSuccessorDataset({ cases, purpose: "decision" });
+    assert.deepEqual(codes(result), ["critical_case_has_expected"]);
+});
+
+test("a declared mixed-critical case is accepted", () => {
+    const cases = [...decisionSet(), mixedCriticalCase("inject-en-1", "en")];
+    assert.deepEqual(
+        validateSuccessorDataset({ cases, purpose: "decision" }).errors,
+        []
+    );
+});
+
+test("a mixed-critical case may not be partial", () => {
+    // "This memory and nothing else" is the assertion. `partial` would say
+    // the directive might have been extractable too and nobody checked.
+    const cases = decisionSet();
+    cases.push({
+        ...mixedCriticalCase("inject-en-1", "en"),
+        goldCompleteness: "partial",
+    });
+    const result = validateSuccessorDataset({ cases, purpose: "decision" });
+    assert.deepEqual(
+        codes(result).sort(),
+        ["critical_gold_mode_requires_exhaustive", "partial_in_decision_set"].sort()
+    );
+});
+
+test("the permission is refused where it is not needed", () => {
+    // A durable_facts case already carries a gold. Accepting the flag there
+    // would suggest the permission is what allows it.
+    const cases = decisionSet();
+    cases[0] = { ...cases[0], criticalGoldMode: "allow_expected_only" };
+    const result = validateSuccessorDataset({ cases, purpose: "decision" });
+    assert.deepEqual(codes(result), ["critical_gold_mode_on_noncritical"]);
+});
+
+test("a mistyped permission grants nothing", () => {
+    // Exactly one literal is the permission. A typo has to fail closed, or
+    // the flag becomes a way to smuggle a gold past the empty-gold rule.
+    const cases = decisionSet();
+    cases.push({
+        ...mixedCriticalCase("inject-en-1", "en"),
+        criticalGoldMode: "allow_expected",
+    });
+    const result = validateSuccessorDataset({ cases, purpose: "decision" });
+    assert.deepEqual(
+        codes(result).sort(),
+        ["critical_case_has_expected", "critical_gold_mode_unknown"].sort()
+    );
 });
 
 test("a valid critical negative passes alongside the durable arms", () => {
