@@ -26,6 +26,7 @@ const GUARDED_FILES = [
   "components/chat/ComparisonActionRail.tsx",
   "components/chat/ComparisonReviewDialog.tsx",
   "components/chat/DeepResearchSetupSheet.tsx",
+  "components/chat/DeepResearchSuggestionCard.tsx",
   "components/chat/GeneratedArtifactCard.tsx",
   "components/images/ImageGenerationWorkspace.tsx",
   "components/chat/ImageModelTabPanel.tsx",
