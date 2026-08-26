@@ -121,3 +121,27 @@ A·B·C·D 중 **어느 것도 모델 품질이 아닌데 넷 다 precision과 r
 - 승인된 판정은 존재한 적이 없으므로, 재작업 규칙
   (`docs/ops/memory-extraction-eval-dataset.md` §7.3)이 무효화할 verdict가
   없습니다.
+
+## 후속 — `mem-extract-v3` [2026-08-26]
+
+네 결함이 v3 프롬프트에 반영됐습니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §1·§2·§9).
+
+| 결함 | v3가 바꾼 것 |
+|---|---|
+| A 출력 언어 | 인용한 사용자 근거의 언어를 쓰고, 혼합이면 다수, 동률이면 최근 근거. assistant 발화는 언어를 정하지 않음 |
+| B kind 불일치 | kind는 상호 배타적이며 3단계 판정 순서(전용 style → `communication_style` residual → `preference`) |
+| B `decision` | 확정·실행 결정만. 검토·비교·고민은 어느 kind로도 추출하지 않음 |
+| C sensitivity | 건강 정보는 추출하되 언제나 `sensitive`. 최소화한 파생 문장도 sensitive. 제3자는 의료 프로필이 아니라 사용자 중심 제약으로만 |
+| D gold 완전성 | 프롬프트가 아니라 dataset·scorer 쪽에서 해결(schema 2, `goldCompleteness`) |
+
+fingerprint는 `fdba01bf…5698eec7`이고 `tests/memoryExtractionPromptFingerprint.test.mjs`가
+고정합니다. **fingerprint는 프롬프트가 몰래 바뀌지 않았다는 것만 말하고 무엇을
+말하는지는 말하지 못하므로**, 규칙 자체는
+`tests/memoryExtractionPromptV3Rules.test.mjs`가 발송되는 bytes에 대해 따로
+단언합니다 — 규칙을 지우고 버전을 올리면 fingerprint 검사는 깨끗이 통과합니다.
+
+v3 pair 둘(`gpt-5-6-luna`·`gpt-5-4-mini`)은 **예산 없는 candidate**로 등록했습니다.
+예산은 버전 bump를 따라오지 않습니다 — v2의 US$20은 v2에 대한 승인입니다
+(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §6).
+따라서 live 실행은 `no_eval_budget`으로 거부되고, 예산이 생기더라도 schema-2
+dataset이 채택·동결되기 전에는 `legacy_dataset_schema`로 거부됩니다.

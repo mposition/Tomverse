@@ -30,6 +30,7 @@ import { MEMORY_KINDS, MEMORY_SENSITIVITIES } from "../lib/memoryValidatorCore.t
 const FINGERPRINTS = {
     "mem-extract-v2":
         "600af30a3047faec36d786e1b049e1d72ab59d4f4ce39ce8a4e3a58aa608428a",
+    "mem-extract-v3": "fdba01bfe18f2cf29a656cc255aad57df7e041360d717cf6aa824e625698eec7",
 };
 
 test("the shipped version matches its recorded fingerprint", () => {

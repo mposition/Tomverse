@@ -1,5 +1,5 @@
 /**
- * `mem-extract-v1` — the extraction prompt and its structured output schema
+ * `mem-extract-v3` — the extraction prompt and its structured output schema
  * (Release B, policy §8.2, §9.1, §12.1).
  *
  * Pure and provider-free by construction. Nothing in this module imports an
@@ -8,6 +8,24 @@
  * the exact shape a provider is expected to return. Whoever eventually calls
  * a provider does so elsewhere, which is what keeps "is a model being called
  * yet?" answerable by reading imports rather than by tracing control flow.
+ *
+ * ## What v3 added
+ *
+ * v2 fixed the transport and, in doing so, made the answers readable for the
+ * first time. What they showed was not a weak model but four defects in what
+ * the prompt asked for, and v3 answers them
+ * (.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §1, §2, §9):
+ *
+ *   * **language** — statements came back in the wrong language, and the gold
+ *     tokens are language-specific, so a correct extraction scored as a miss;
+ *   * **kind priority** — nothing said a dedicated answer-style kind beats the
+ *     generic `preference`, so the model chose the specific one and the gold
+ *     had the generic;
+ *   * **`decision`** — "considering X" was extracted as a settled choice;
+ *   * **health** — extractable, always sensitive, and for a third party only
+ *     as the minimum context written as the user's own constraint. A statement
+ *     minimised that way is still health information, which the prompt now
+ *     says outright rather than leaving to the validator alone.
  *
  * Two contracts are carried by the prompt text itself and are the reason it
  * lives in one reviewable place:
@@ -47,7 +65,7 @@ import {
  * `tests/memoryExtractionPromptFingerprint.test.mjs` pins a digest over all
  * four, so changing any of them without bumping this fails the build.
  */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v2";
+export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v3";
 
 /** Bounds carried into the schema so the model is told them, not just checked. */
 export const MEMORY_EXTRACTION_MAX_CANDIDATES_PER_CHUNK = 25;
@@ -165,12 +183,30 @@ const SYSTEM_PROMPT = [
     "",
     "Cite evidence by message label only. Every label you cite must be one that appears in the input. Never invent a label.",
     "",
+    "Write each statement in the language of the user evidence you cite. If the evidence you cite is in more than one language, use the language of most of it; if that is even, use the language of the most recent piece of user evidence you cite. The assistant's own messages never decide the language.",
+    "",
+    "Health information — allergies and intolerances, diagnoses and conditions, medication and treatment, mental health, pregnancy and reproductive health — is worth extracting, and you must mark it \"sensitive\". Mark it sensitive whether it is about the user or about someone in their life, and whether you state it plainly or only as the constraint it creates: \"The user needs step-free routes when travelling with a wheelchair-using relative\" is still sensitive.",
+    "",
+    "For someone other than the user, never store a medical profile. Store only the minimum context the user needs, written as the user's own constraint. \"The user's daughter is coeliac\" is a profile; \"The user cooks gluten free at home because their daughter is coeliac\" is the constraint. If another person's condition is mentioned but changes nothing for the user, extract nothing.",
+    "",
     "Return JSON only, matching the requested schema. If the conversations support nothing durable, return an empty candidates array — an empty answer is correct and expected.",
 ].join("\n");
 
 const KIND_GUIDE = [
     "Factual kinds: identity, preference, occupation, expertise, long_term_goal, project, constraint, decision, relationship, recurring_context.",
     "Answer-style kinds: communication_style, tone, verbosity, structure, formatting, language, explanation_depth, citation_preference, code_style.",
+    "",
+    "Kinds are mutually exclusive. Choose one in this order:",
+    "1. If the fact is about how you should answer, use the specific kind for it: tone, verbosity, structure, formatting, language, explanation_depth, citation_preference or code_style. \"Conclusion first\" is structure; \"use a table\" is formatting; \"keep it short\" is verbosity; \"reply in Korean\" is language.",
+    "2. If it is about how the exchange should go and none of those fits exactly, use communication_style. \"Ask me before assuming\" and \"say when you are unsure\" are this.",
+    "3. Use preference only for a general liking that is not about how you answer, such as a window seat or buying secondhand.",
+    "",
+    "occupation is the job or role held now. expertise is durable skill shown independently of it. Do not take both from the same clause.",
+    "project is a piece of work in progress. recurring_context is a repeating situation, and is not another word for a project.",
+    "",
+    "Use decision only for a choice the user has settled or committed to acting on. \"We decided on Postgres\" is a decision; \"I am weighing up moving into platform work\" is not — weighing up, comparing, considering and wondering are extracted as nothing at all. A future direction the user states as settled may be a long_term_goal.",
+    "",
+    "Never write two candidates from the same clause. When one sentence carries two facts that are useful independently — a job and the shift pattern that decides when the user is reachable — write both. When a clause only elaborates a fact you already wrote, leave it inside that statement.",
 ].join("\n");
 
 /**

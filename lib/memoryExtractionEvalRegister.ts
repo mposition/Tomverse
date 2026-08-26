@@ -210,6 +210,49 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evalBudget: null,
             evaluation: null,
         },
+        {
+            // The pair the amended contract will actually be measured on.
+            // v3 carries the four fixes v2's probes surfaced: the output
+            // language rule, a mutually exclusive kind order with a
+            // residual, the settled-choice boundary on `decision`, and
+            // health information as extractable-but-always-sensitive
+            // including the minimised third-party form
+            // (.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §1, §2, §9).
+            //
+            // **No budget, deliberately.** A budget does not travel with a
+            // version bump: v2's US$20 was approved for v2, and reusing it
+            // here would be spending an approval nobody gave for this pair
+            // (.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §6).
+            // Until a person records one, `decideEvalRunMode` refuses a live
+            // run with `no_eval_budget` and only smoke mode works.
+            //
+            // The successor dataset is also still a candidate pool, so even
+            // a funded run would be refused: `legacy_dataset_schema` holds
+            // until the schema-2 set is adopted and frozen.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v3",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-26",
+            notes:
+                "Awaiting a human eval-budget approval (§12.5). Not runnable " +
+                "live until the schema-2 dataset is adopted and frozen.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
+            // §12.5 backup candidate for v3, on the same terms.
+            extractionModelId: "gpt-5-4-mini",
+            promptVersion: "mem-extract-v3",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-26",
+            notes:
+                "Backup candidate. No budget; smoke mode only until a person " +
+                "records one.",
+            evalBudget: null,
+            evaluation: null,
+        },
     ];
 
 /** §12.3 acceptance thresholds — the register check re-verifies them. */
