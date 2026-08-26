@@ -19,7 +19,11 @@ import {
   carriesManagedBlock,
   isPathAllowed,
 } from "../lib/robotsTxtCore.ts";
-import { REFUSED_AI_CRAWLERS, servesCanonicalSite } from "../lib/robotsPolicyCore.ts";
+import {
+  CONTENT_SIGNAL,
+  REFUSED_AI_CRAWLERS,
+  servesCanonicalSite,
+} from "../lib/robotsPolicyCore.ts";
 import { SITE_ORIGIN } from "../lib/seo.ts";
 
 const target = process.argv[2];
@@ -142,6 +146,36 @@ if (canonical) {
   }
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
   expect(/^Host:/m.test(own), "the canonical site does not name its host");
+
+  // Content-Signal is checked across the whole served file, not our half, and
+  // the rule is "one meaning" rather than "one line".
+  //
+  // While Cloudflare's managed block cannot be turned off (§4a), production
+  // declares this twice: once from their block, once from ours. That is not a
+  // second policy owner -- ours is the copy that survives if their block ever
+  // goes -- and it is harmless only for as long as the two agree. The Content
+  // Signals spec does not say how a consumer resolves duplicate directives, so
+  // the safety here rests on the values being identical, not on a rule saying
+  // duplicates are fine. Guard exactly that:
+  //
+  //   * zero declarations fails -- the policy would have vanished;
+  //   * duplicates do not fail -- that is the expected state today;
+  //   * declarations that disagree once normalised fail, and so does one that
+  //     disagrees with what we ship.
+  const normaliseSignal = (value) =>
+    value.replace(/\s+/g, "").toLowerCase();
+  const declared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+    normaliseSignal(match[1])
+  );
+  expect(declared.length > 0, "the canonical site declares no Content-Signal");
+  expect(
+    new Set(declared).size <= 1,
+    `Content-Signal declarations disagree: ${[...new Set(declared)].join(" vs ")}`
+  );
+  expect(
+    declared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    `a served Content-Signal differs from ${CONTENT_SIGNAL}`
+  );
   expect(
     !/noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
     "the canonical site sends X-Robots-Tag: noindex on /"
