@@ -83,36 +83,48 @@ test("the verdict says whether the failing entry is the oldest one", () => {
     );
 });
 
-test("the panel says something different for each of the three readings", () => {
-    // One sentence for two of them would put the reader back where they
-    // started, with the distinction computed and not communicated. That is
-    // what happened on the first attempt: the oldest-row branch claimed
-    // *nothing has verified* whatever the counts said, and the 2026-08-25
-    // staging chain then showed it beside 115 of 116 entries verified.
+test("the panel says something different for each of the four readings", () => {
+    // One sentence covering two of them puts the reader back where they
+    // started, with the distinction computed and not communicated. That has
+    // happened twice: first a sentence claiming *nothing has verified*
+    // whatever the counts said, then one calling a single failing row an
+    // unlisted *span*. Both sent the reader after a key that was not missing.
     const reading = panel.slice(panel.indexOf("function auditIntegrityReading"));
     const body = reading.slice(0, reading.indexOf("\n}"));
-    const sentences = [...body.matchAll(/return "([^"]+)";/g)].map((m) => m[1]);
-    assert.equal(sentences.length, 3, "three readings, three sentences");
+    const sentences = [
+        ...body.matchAll(/return [`"]([^`"]+)[`"];/g),
+    ].map((match) => match[1]);
+    assert.equal(sentences.length, 4, "four readings, four sentences");
     assert.equal(
         new Set(sentences).size,
-        3,
+        4,
         "two readings sharing a sentence is the defect this asserts against"
     );
 
-    const [midChain, nothingVerified, oldestSpan] = sentences;
+    const [noPrefix, nothingVerified, singleRow, longerSpan] = sentences;
     assert.ok(
-        midChain.includes("Entries before this one verified"),
-        "the mid-chain reading is the one a key change does not explain"
+        noPrefix.includes("does not explain this on its own"),
+        "a chain whose head verified is not a key story"
     );
     assert.ok(
-        nothingVerified.includes("nothing has verified"),
+        nothingVerified.includes("Nothing has verified"),
         "the nothing-verified reading is the whole-key-absent one"
     );
+    for (const sentence of [noPrefix, singleRow, longerSpan]) {
+        assert.ok(
+            !sentence.includes("Nothing has verified"),
+            "a chain with entries verified must never be told nothing verified"
+        );
+    }
     assert.ok(
-        !oldestSpan.includes("nothing has verified"),
-        "a chain with entries verified must never be told nothing verified"
+        singleRow.includes("contiguous span"),
+        "the single-row reading has to say why one row is not a key boundary"
     );
-    for (const sentence of [nothingVerified, oldestSpan]) {
+    assert.ok(
+        !singleRow.includes("ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"),
+        "telling the reader to add a key for a single row sends them after nothing"
+    );
+    for (const sentence of [nothingVerified, longerSpan]) {
         assert.ok(
             sentence.includes("ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS") &&
                 sentence.includes("admin-audit-key-epochs"),
@@ -121,32 +133,61 @@ test("the panel says something different for each of the three readings", () => 
     }
 });
 
-test("the nothing-verified sentence is guarded by the count, not by the position", () => {
+test("the readings are chosen by the size of the unverified prefix", () => {
     // `firstInvalidIsOldest` says where the first failure is. It says nothing
     // about how much of the chain opened, and reading it as though it did is
-    // exactly how the panel came to deny a verification the operator had just
-    // achieved.
+    // how the panel twice described a chain it had not measured.
     const reading = panel.slice(panel.indexOf("function auditIntegrityReading"));
     const body = reading.slice(0, reading.indexOf("\n}"));
+    assert.ok(
+        !body.includes("firstInvalidIsOldest"),
+        "position alone cannot distinguish these readings"
+    );
+    assert.match(body, /unverifiedPrefix === 0/);
+    assert.match(body, /unverifiedPrefix === 1/);
+    assert.match(body, /verifiedEntries === 0/);
+});
+
+test("the prefix counts only leading entries, and stops at the first that opens", () => {
+    // Counted from the same ordered walk rather than from the failure list:
+    // failures include linkage breaks, and a linkage break on a row whose
+    // content verified is not a key boundary.
     assert.match(
-        body,
-        /verifiedEntries === 0/,
-        "the whole-key-absent claim must be conditioned on nothing having verified"
+        verifier,
+        /orderBy:\s*\[\{ createdAt: "asc" \}, \{ id: "asc" \}\]/,
+        "`prefix` only means `oldest first` while the read is ordered ascending"
+    );
+    assert.match(
+        verifier,
+        /stillInPrefix = false/,
+        "the first entry that opens must end the prefix"
+    );
+    assert.match(
+        verifier,
+        /else if \(stillInPrefix\) \{\s*unverifiedPrefix \+= 1;/,
+        "only entries no key opened may extend the prefix"
     );
 });
 
-test("a listed key that opened nothing is reported", () => {
-    // `keysUsed` alone cannot say that: two keys used is the same number
-    // whether two or five were offered. The difference is what tells an
-    // operator a value is wrong — or that a key is still listed for a span
-    // that no longer needs it, which the epochs document asks them to drop.
+test("the panel reports what each listed key opened, by position", () => {
+    // `keysUsed` alone cannot say which listed key is doing nothing: two keys
+    // used is the same number whether two or five were offered. Without the
+    // per-key counts the only way to find a dead key is to redeploy with each
+    // one alone.
     assert.ok(
-        panel.includes("integrity.keysUsed < integrity.keysAvailable"),
-        "the panel must compare what was used against what was available"
+        panel.includes("integrity.keyEntryCounts"),
+        "the panel must render the per-key counts"
     );
     assert.ok(
-        panel.includes('data-testid="admin-audit-integrity-unused-keys"'),
-        "the unused-key report needs somewhere to render"
+        panel.includes('data-testid="admin-audit-integrity-key-counts"'),
+        "the per-key counts need somewhere to render"
+    );
+    // Positions only. A key, or anything derived from one, must never reach a
+    // response: the panel is how an operator diagnoses a chain, not a place to
+    // learn what signs it.
+    assert.ok(
+        !verifier.includes("keys[keyIndex]") && !verifier.includes("keysUsedValues"),
+        "no key value may leave the verifier"
     );
 });
 
