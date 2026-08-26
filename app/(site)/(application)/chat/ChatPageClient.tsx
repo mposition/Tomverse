@@ -65,6 +65,7 @@ import {
   createGuestEligibilityCheck,
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
+  isWebSearchEnabled,
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
@@ -3649,9 +3650,11 @@ export function ChatPageClient({
                 name: attachment.name,
                 mediaType: attachment.mediaType,
               })),
-              // "auto" only ever raises a suggestion; "always" is the one
-              // mode that actually asks for a search (lib/appDefaults.ts).
-              webSearchRequested: webSearchMode === "always",
+              // Through the shared reader, not a comparison of my own: web
+              // search is a switch now, and `isWebSearchEnabled` is where the
+              // decision that a stored "auto" reads as off lives
+              // (lib/appDefaults.ts).
+              webSearchRequested: isWebSearchEnabled(webSearchMode),
             }
       );
       setCachedCompareSummaryChatId(null);

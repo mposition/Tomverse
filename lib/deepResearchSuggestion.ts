@@ -46,7 +46,6 @@
 
 import type { ComparisonModelStatus } from "@/lib/comparisonReadiness";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
-import { draftSuggestionKey } from "@/lib/webSearchSuggestion";
 
 /**
  * The one model this offer expands into.
@@ -228,14 +227,19 @@ export const classifyDeepResearchTopic = (
  * Stable key for "this topic has already been answered for in this
  * conversation".
  *
- * The same shape and the same reason as `draftSuggestionKey` in
- * `lib/webSearchSuggestion.ts` and `imageIntentDraftKey` in
+ * The same shape and the same reason as `imageIntentDraftKey` in
  * `lib/imageIntentSignals.ts`: deterministic per trimmed question, not
- * cryptographic. Shared with them outright rather than reimplemented, so
- * "same topic" cannot come to mean two things in one product.
+ * cryptographic.
+ *
+ * Written out here rather than imported. `lib/webSearchSuggestion.ts` used to
+ * export a `draftSuggestionKey` of exactly this shape, and it was removed with
+ * the composer's "auto" mode when web search became a switch -- there was no
+ * nudge left to de-duplicate. `tests/webSearchSuggestion.test.mjs` now asserts
+ * that it stays gone, so reaching for it again would be reviving a function
+ * that module deliberately no longer has.
  */
 export const deepResearchTopicKey = (text: string): string =>
-  draftSuggestionKey(text);
+  text.trim().toLowerCase();
 
 /* ------------------------------------------------------------------------ */
 /* The offer                                                                 */
