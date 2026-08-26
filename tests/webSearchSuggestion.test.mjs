@@ -1,49 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  draftSuggestionKey,
   hasExplicitSourceOrSearchIntent,
   suggestsRecentInformationNeeded,
-  suggestsWebSearchInComposer,
 } from "../lib/webSearchSuggestion.ts";
 
-// The composer's nudge. Every case below behaved this way before the split and
-// must keep behaving this way: the four-character floor is a typing-time rule
-// and nothing about the UI changed.
+// The composer's mid-draft nudge is gone -- web search is a switch, so there
+// is no "ask me first" state left for a nudge to turn on. What routing reads
+// is unchanged, and that is what the rest of this file pins: the two halves of
+// the split behave exactly as they did before the composer stopped calling
+// either of them.
 
-test("the composer nudge flags Korean recency keywords", () => {
-  assert.equal(suggestsWebSearchInComposer("오늘 환율이 어떻게 돼?"), true);
-  assert.equal(suggestsWebSearchInComposer("최신 뉴스 알려줘"), true);
-});
-
-test("the composer nudge flags English recency keywords", () => {
-  assert.equal(suggestsWebSearchInComposer("What's the latest news on this?"), true);
-  assert.equal(suggestsWebSearchInComposer("What is today's weather forecast?"), true);
-});
-
-test("the composer nudge flags research/citation intent (shared with modelFinder)", () => {
-  assert.equal(
-    suggestsWebSearchInComposer("Can you give me sources for this claim?"),
-    true
-  );
-});
-
-test("the composer nudge does not flag ordinary questions", () => {
-  assert.equal(suggestsWebSearchInComposer("Explain how photosynthesis works."), false);
-  assert.equal(suggestsWebSearchInComposer("파이썬 리스트 정렬하는 법 알려줘"), false);
-});
-
-test("the composer nudge ignores very short or empty drafts", () => {
-  // Unchanged, and deliberately so: a suggestion that appears after two
-  // keystrokes flickers under the cursor. This floor is about typing.
-  assert.equal(suggestsWebSearchInComposer(""), false);
-  assert.equal(suggestsWebSearchInComposer("hi"), false);
-  assert.equal(suggestsWebSearchInComposer("출처"), false);
-});
-
-test("the composer nudge requires a bare recent year alongside other context, not a random old year", () => {
-  assert.equal(suggestsWebSearchInComposer("Tell me about the iPhone 15"), false);
-  assert.equal(suggestsWebSearchInComposer("What happened in 2026 so far"), true);
+test("the retired composer helpers are no longer exported", async () => {
+  const exported = await import("../lib/webSearchSuggestion.ts");
+  assert.equal("suggestsWebSearchInComposer" in exported, false);
+  assert.equal("draftSuggestionKey" in exported, false);
 });
 
 // Stated intent, for routing and capability. This is the half that must not
@@ -78,12 +49,4 @@ test("the recency reading keeps its floor wherever it is used", () => {
   assert.equal(suggestsRecentInformationNeeded("오늘 서울 날씨"), true);
   assert.equal(suggestsRecentInformationNeeded("오늘"), false);
   assert.equal(suggestsRecentInformationNeeded("출처"), false);
-});
-
-test("draftSuggestionKey normalizes for dedupe (trim + case)", () => {
-  assert.equal(draftSuggestionKey("  Today's News  "), "today's news");
-  assert.equal(
-    draftSuggestionKey("Today's News"),
-    draftSuggestionKey("  today's news ")
-  );
 });

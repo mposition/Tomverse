@@ -8,11 +8,10 @@
 // sources, citations or a search. It has no length floor, because "출처" is a
 // complete request and its length says nothing about how sure we are.
 //
-// `suggestsWebSearchInComposer` asks whether ChatInput should offer an inline
-// "use web search" nudge while somebody is still typing. It folds the explicit
-// intent together with softer recency wording, and it ignores drafts shorter
-// than four characters -- a suggestion that appears after two keystrokes is
-// noise, and a nudge that is wrong costs the user a glance.
+// `suggestsRecentInformationNeeded` asks the softer question -- does the
+// wording merely suggest the answer has to be fresh -- and keeps a four
+// character floor, because a bare "오늘" under a moving cursor is a guess
+// about a half-typed word rather than a statement of intent.
 //
 // They were one function, and the routing path reused it. That put a
 // typing-time floor -- an anti-nagging rule -- inside a safety boundary: the
@@ -23,6 +22,13 @@
 // a capability decision. Whether a *selected* model then really searches is a
 // separate check again, at dispatch: see
 // `docs/policy/tomverse-chat-router-score-policy.md` §8.
+//
+// A third function used to live here, `suggestsWebSearchInComposer`, together
+// with a `draftSuggestionKey` for de-duplicating its nudge. Both belonged to
+// the composer's "auto" mode -- offer a search before running one -- and went
+// with it when web search became a switch: the switch is the consent, so there
+// is nothing left to offer mid-draft. Neither of the two above changed, which
+// is the point: what routing reads is the same algorithm it read before.
 import { RESEARCH_PATTERN } from "@/lib/modelFinder";
 
 const RECENCY_KEYWORDS = [
@@ -69,24 +75,3 @@ export const suggestsRecentInformationNeeded = (text: string): boolean => {
 
   return RECENT_YEAR_PATTERN.test(normalized) && normalized.length <= 200;
 };
-
-/**
- * Whether the composer should offer its inline "use web search" nudge.
- *
- * Both signals, and the floor applies to both here: while somebody is typing,
- * even an explicit two-character request is more likely to be the start of a
- * longer word than a finished instruction, and the cost of guessing early is a
- * suggestion that flickers in and out under the cursor.
- */
-export const suggestsWebSearchInComposer = (draft: string): boolean => {
-  const normalized = draft.trim();
-  if (normalized.length < 4) return false;
-  return (
-    suggestsRecentInformationNeeded(normalized) ||
-    hasExplicitSourceOrSearchIntent(normalized)
-  );
-};
-
-// Cheap, stable key for "have we already suggested for this exact draft" --
-// not cryptographic, just needs to be deterministic per trimmed input.
-export const draftSuggestionKey = (draft: string): string => draft.trim().toLowerCase();

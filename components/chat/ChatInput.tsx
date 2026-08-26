@@ -65,7 +65,12 @@ import {
   resolveChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
-import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
+import {
+  APP_DEFAULTS,
+  isWebSearchEnabled,
+  webSearchModeForToggle,
+  type WebSearchMode,
+} from "@/lib/appDefaults";
 import {
   CONVERSATION_MEMORY_MODES,
   type ConversationMemoryMode,
@@ -78,7 +83,10 @@ import {
   resolveSelectableModelId,
   type AiModel,
 } from "@/lib/models";
-import { estimateRequestCredits } from "@/lib/webSearchCredits";
+import {
+  estimateRequestCredits,
+  WEB_SEARCH_SURCHARGE_CREDITS,
+} from "@/lib/webSearchCredits";
 import { useChatAvailability } from "@/components/chat/useChatAvailability";
 import {
   ModelPickerPanel,
@@ -103,7 +111,6 @@ import {
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
-import { draftSuggestionKey, suggestsWebSearchInComposer } from "@/lib/webSearchSuggestion";
 import {
   allowsImageHandoffReshow,
   classifyImageIntent,
@@ -842,9 +849,6 @@ export function ChatInput({
   // Collapsed by default: the exception detail (which models cannot search and
   // what they do instead) is a user-initiated disclosure, never a permanent row.
   const [isWebSearchExceptionOpen, setIsWebSearchExceptionOpen] = useState(false);
-  const [dismissedWebSearchSuggestionKey, setDismissedWebSearchSuggestionKey] = useState<
-    string | null
-  >(null);
   const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
   /*
     The image-request handoff chip's own state (entry point 5 of
@@ -1053,9 +1057,7 @@ export function ChatInput({
           supported: webSearchState.supportedCount,
           total: webSearchState.selectedCount,
         })
-      : webSearchMode === "auto"
-        ? t("chat.webSearchChipAuto")
-        : t("chat.webSearchChipOn");
+      : t("chat.webSearchChipOn");
   // The mobile chip no longer owns a row of its own -- it shares the
   // composer's first input line -- so it drops the separator and the word
   // "supported" while keeping every state distinguishable: "Web search",
@@ -1070,22 +1072,27 @@ export function ChatInput({
           supported: webSearchState.supportedCount,
           total: webSearchState.selectedCount,
         })
-      : webSearchMode === "auto"
-        ? t("chat.webSearchChipAutoCompact")
-        : t("chat.webSearchChipOnCompact");
-  const webSearchStateDescription =
-    webSearchMode === "always"
-      ? interpolateCopy(t("chat.webSearchChipDescriptionAlways"), {
-          supported: webSearchState.supportedCount,
-          total: webSearchState.selectedCount,
-          unsupported: webSearchState.unsupportedCount,
-          credits: webSearchState.estimatedSurchargeCredits,
-        })
-      : interpolateCopy(t("chat.webSearchChipDescriptionAuto"), {
-          supported: webSearchState.supportedCount,
-          total: webSearchState.selectedCount,
-          unsupported: webSearchState.unsupportedCount,
-        });
+      : t("chat.webSearchChipOnCompact");
+  const webSearchStateDescription = interpolateCopy(
+    t("chat.webSearchChipDescriptionOn"),
+    {
+      supported: webSearchState.supportedCount,
+      total: webSearchState.selectedCount,
+      unsupported: webSearchState.unsupportedCount,
+      credits: webSearchState.estimatedSurchargeCredits,
+    }
+  );
+  // The switch is the whole control, so both of its states are said in words:
+  // "on" carries the conditional-search sentence so it never reads as "every
+  // question is searched", and the cost note quotes the surcharge from the
+  // same constant the reservation uses.
+  const isWebSearchOn = isWebSearchEnabled(webSearchMode);
+  const webSearchSwitchDescription = isWebSearchOn
+    ? t("chat.toolsWebSearchOnDescription")
+    : t("chat.toolsWebSearchOffDescription");
+  const webSearchSwitchCostNote = interpolateCopy(t("chat.toolsWebSearchCostNote"), {
+    credits: WEB_SEARCH_SURCHARGE_CREDITS,
+  });
   const webSearchUnsupportedModelNames = webSearchState.unsupportedModelIds
     .map(
       (modelId) =>
@@ -1187,7 +1194,7 @@ export function ChatInput({
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<
-    "actions" | "models" | "webSearch" | "memory" | "assistant" | "attachSource"
+    "actions" | "models" | "memory" | "assistant" | "attachSource"
   >("actions");
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
@@ -1251,23 +1258,11 @@ export function ChatInput({
       !selectedModels.includes(contextualModel.id) &&
       contextualLiveStatus !== "unavailable"
   );
-  // "웹 검색: 자동" only ever shows this dismissible suggestion -- it never
-  // sends a search on its own. Never shown once a mode is already forced on
-  // (nothing to suggest), and never repeats for the exact same draft text.
-  const webSearchSuggestionKey =
-    webSearchMode === "auto" && suggestsWebSearchInComposer(value)
-      ? draftSuggestionKey(value)
-      : null;
-  const showWebSearchSuggestion = Boolean(
-    webSearchSuggestionKey && webSearchSuggestionKey !== dismissedWebSearchSuggestionKey
-  );
-  const trackedWebSearchSuggestionKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!showWebSearchSuggestion || !webSearchSuggestionKey) return;
-    if (trackedWebSearchSuggestionKeyRef.current === webSearchSuggestionKey) return;
-    trackedWebSearchSuggestionKeyRef.current = webSearchSuggestionKey;
-    trackProductEvent("web_search_suggestion_shown", selectedModels.length, {});
-  }, [showWebSearchSuggestion, webSearchSuggestionKey, selectedModels.length]);
+  // Web search has no mid-draft nudge any more. It used to: an "auto" mode
+  // watched the draft and offered a search before running one. A switch has no
+  // position that means "ask me", so the offer had nothing left to turn on --
+  // flipping the switch is itself the consent to search and to the surcharge,
+  // and the switch's own description says the search is conditional.
 
   /*
     The image-request handoff.
@@ -3007,57 +3002,6 @@ export function ChatInput({
               onDismiss={() => dismissImageIntentSuggestion(false)}
             />
           )}
-          {showWebSearchSuggestion && (
-            <div
-              data-testid="web-search-auto-suggestion"
-              className="mb-2 rounded-2xl border border-accent-web-search-200 bg-accent-web-search-50 px-3 py-3 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/20"
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-zinc-900 dark:text-white">
-                    {t("chat.webSearchSuggestionTitle")}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    data-testid="web-search-suggestion-accept"
-                    onClick={() => {
-                      onWebSearchModeChange?.("always");
-                      trackProductEvent(
-                        "web_search_suggestion_accepted",
-                        selectedModels.length,
-                        {}
-                      );
-                      if (webSearchSuggestionKey) {
-                        setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
-                      }
-                    }}
-                    className="rounded-xl bg-accent-web-search-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-accent-web-search-500"
-                  >
-                    {t("chat.webSearchSuggestionAccept")}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="web-search-suggestion-decline"
-                    onClick={() => {
-                      trackProductEvent(
-                        "web_search_suggestion_declined",
-                        selectedModels.length,
-                        {}
-                      );
-                      if (webSearchSuggestionKey) {
-                        setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
-                      }
-                    }}
-                    className="rounded-xl border border-accent-web-search-300 bg-white px-3 py-2 text-[11px] font-bold text-accent-web-search-900 hover:bg-accent-web-search-100 dark:border-accent-web-search-800 dark:bg-zinc-950 dark:text-accent-web-search-200"
-                  >
-                    {t("chat.webSearchSuggestionDecline")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           {/*
             The chips own a row of their own in *both* shells. They used to ride
             the mobile textarea's first line, which left the input whatever
@@ -3580,15 +3524,13 @@ export function ChatInput({
               aria-label={
                 menuView === "models"
                   ? t("chat.modelSelect")
-                  : menuView === "webSearch"
-                    ? t("chat.toolsWebSearch")
-                    : menuView === "attachSource"
-                      ? t("chat.attachSourceTitle")
-                      : menuView === "assistant"
-                        ? t("chat.assistantPickerTitle")
-                        : menuView === "memory"
-                          ? t("chat.toolsMemory")
-                          : t("chat.addAndTools")
+                  : menuView === "attachSource"
+                    ? t("chat.attachSourceTitle")
+                    : menuView === "assistant"
+                      ? t("chat.assistantPickerTitle")
+                      : menuView === "memory"
+                        ? t("chat.toolsMemory")
+                        : t("chat.addAndTools")
               }
               tabIndex={-1}
               // Exposed for the responsive suite so a keyboard fixture can
@@ -3629,22 +3571,16 @@ export function ChatInput({
                         not web search, which described one row of one of
                         them. */}
                     <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                      {menuView === "webSearch"
-                        ? t("chat.toolsWebSearch")
-                        : menuView === "attachSource"
-                          ? t("chat.attachSourceTitle")
-                          : menuView === "assistant"
-                            ? t("chat.assistantPickerTitle")
-                            : menuView === "memory"
-                              ? t("chat.toolsMemory")
-                              : t("chat.addAndTools")}
+                      {menuView === "attachSource"
+                        ? t("chat.attachSourceTitle")
+                        : menuView === "assistant"
+                          ? t("chat.assistantPickerTitle")
+                          : menuView === "memory"
+                            ? t("chat.toolsMemory")
+                            : t("chat.addAndTools")}
                     </p>
                     <p className="text-xs text-zinc-500">
-                      {menuView === "webSearch"
-                        ? t("chat.toolsWebSearchDescription")
-                        : menuView === "attachSource"
-                          ? t("chat.attachSourceSubtitle")
-                          : ""}
+                      {menuView === "attachSource" ? t("chat.attachSourceSubtitle") : ""}
                     </p>
                   </div>
                   <button
@@ -3685,24 +3621,76 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                  {/*
+                    One switch, flipped in place -- not a row that opens a
+                    screen of choices. Web search is a single yes/no decision,
+                    so the row that used to lead to three radio-like options
+                    (off / ask me first / search) is the control itself: the
+                    menu stays open so the state change is visible where it
+                    was made, and the composer chip below confirms it.
+
+                    `role="switch"` with `aria-checked` is what makes the two
+                    states readable to assistive tech; the accessible name is
+                    the feature's name alone, and both the state sentence and
+                    the cost note reach it through `aria-describedby` so the
+                    name never grows into a paragraph.
+                  */}
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={isWebSearchOn}
+                    // Named by the feature, described by the rest. Without
+                    // `aria-labelledby` the accessible name is computed from
+                    // the button's contents, which would make the switch
+                    // announce itself as its own name plus two sentences of
+                    // state and pricing every time focus lands on it.
+                    aria-labelledby="tools-web-search-label"
+                    aria-describedby="tools-web-search-description"
                     data-testid="tools-web-search-row"
-                    onClick={() => setMenuView("webSearch")}
+                    onClick={() => {
+                      const nextMode = webSearchModeForToggle(!isWebSearchOn);
+                      onWebSearchModeChange?.(nextMode);
+                      trackProductEvent(
+                        "web_search_mode_selected",
+                        selectedModels.length,
+                        { web_search_mode: nextMode }
+                      );
+                    }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
                       <Globe2 className="h-5 w-5" />
                     </span>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsWebSearch")}</span>
-                      <span className="text-xs text-zinc-500">
-                        {webSearchMode === "always"
-                          ? t("chat.toolsWebSearchAlways")
-                          : webSearchMode === "auto"
-                            ? t("chat.toolsWebSearchAuto")
-                            : t("chat.toolsWebSearchOff")}
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span
+                        id="tools-web-search-label"
+                        className="text-sm font-medium text-zinc-900 dark:text-zinc-100"
+                      >
+                        {t("chat.toolsWebSearch")}
                       </span>
+                      <span id="tools-web-search-description" className="text-xs text-zinc-500">
+                        {webSearchSwitchDescription}
+                        {isWebSearchOn ? ` ${webSearchSwitchCostNote}` : ""}
+                      </span>
+                    </span>
+                    {/* The track is decorative: the button already carries the
+                        state as `aria-checked`, so repeating it here would
+                        announce the switch twice. */}
+                    <span
+                      aria-hidden="true"
+                      data-testid="tools-web-search-switch-track"
+                      data-state={isWebSearchOn ? "on" : "off"}
+                      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                        isWebSearchOn
+                          ? "bg-accent-web-search-500"
+                          : "bg-zinc-300 dark:bg-zinc-700"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                          isWebSearchOn ? "left-[1.375rem]" : "left-0.5"
+                        }`}
+                      />
                     </span>
                   </button>
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
@@ -3872,60 +3860,6 @@ export function ChatInput({
                       </span>
                     </button>
                   )}
-                </div>
-              ) : menuView === "webSearch" ? (
-                <div className="space-y-1">
-                  <button
-                    type="button"
-                    onClick={() => setMenuView("actions")}
-                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
-                    aria-label={t("auth.cancel")}
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </button>
-                  {WEB_SEARCH_MODES.map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      data-testid={`web-search-mode-option-${mode}`}
-                      aria-pressed={webSearchMode === mode}
-                      onClick={() => {
-                        onWebSearchModeChange?.(mode);
-                        trackProductEvent(
-                          "web_search_mode_selected",
-                          selectedModels.length,
-                          { web_search_mode: mode }
-                        );
-                        closeMenu(false);
-                      }}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                        webSearchMode === mode ? "bg-accent-web-search-500/10" : ""
-                      }`}
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
-                        <Globe2 className="h-5 w-5" />
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                          {mode === "always"
-                            ? t("chat.toolsWebSearchAlways")
-                            : mode === "auto"
-                              ? t("chat.toolsWebSearchAuto")
-                              : t("chat.toolsWebSearchOff")}
-                        </span>
-                        <span className="text-xs text-zinc-500">
-                          {mode === "always"
-                            ? t("chat.toolsWebSearchAlwaysDescription")
-                            : mode === "auto"
-                              ? t("chat.toolsWebSearchAutoDescription")
-                              : t("chat.toolsWebSearchOffDescription")}
-                        </span>
-                      </span>
-                      {webSearchMode === mode && (
-                        <Check className="h-4 w-4 shrink-0 text-accent-web-search-500" aria-hidden="true" />
-                      )}
-                    </button>
-                  ))}
                 </div>
               ) : menuView === "memory" ? (
                 <div className="space-y-1">

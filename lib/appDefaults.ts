@@ -83,12 +83,47 @@ export const APP_DEFAULTS = {
 } as const;
 
 // Per-conversation, not per-message -- see components/chat/ChatInput.tsx's
-// tools sheet. "auto" only ever triggers a dismissible inline suggestion,
-// it never sends a search request on its own.
+// tools sheet.
+//
+// The *stored* vocabulary still has three members; the *offered* one has two.
+// "auto" is a retired state: it used to mean "offer a search before running
+// one", and the composer's binary switch no longer has a position that means
+// that. It stays in the enum because rows and request bodies written before
+// the switch existed still carry the string, and rejecting it would turn old
+// conversations into errors rather than into a decided state.
 export const WEB_SEARCH_MODES = ["off", "auto", "always"] as const;
 export type WebSearchMode = (typeof WEB_SEARCH_MODES)[number];
 export const isWebSearchMode = (value: unknown): value is WebSearchMode =>
   typeof value === "string" && (WEB_SEARCH_MODES as readonly string[]).includes(value);
+
+/** The two states the switch can be in -- what a user can actually choose. */
+export const WEB_SEARCH_TOGGLE_MODES = ["off", "always"] as const;
+export type WebSearchToggleMode = (typeof WEB_SEARCH_TOGGLE_MODES)[number];
+
+/**
+ * What a stored value means now that the choice is binary.
+ *
+ * Read-time only: nothing rewrites the row, so a conversation saved as "auto"
+ * keeps saying "auto" in the database until its owner touches the switch.
+ *
+ * "always" is the only value that survives, and that asymmetry is the point.
+ * "always" was already an unconditional instruction to search, so reading it
+ * as on takes nothing back. "auto" was the opposite -- the account had asked
+ * to be *asked* -- so reading it as on would turn a request for confirmation
+ * into standing permission to search and to spend the surcharge, which is
+ * consent nobody gave. Off is the safe reading, and turning the switch on is
+ * one click away.
+ */
+export const normalizeWebSearchMode = (value: unknown): WebSearchToggleMode =>
+  value === "always" ? "always" : "off";
+
+/** Whether the switch renders as checked. */
+export const isWebSearchEnabled = (value: unknown): boolean =>
+  normalizeWebSearchMode(value) === "always";
+
+/** The mode a switch in the given position writes back. */
+export const webSearchModeForToggle = (enabled: boolean): WebSearchToggleMode =>
+  enabled ? "always" : "off";
 
 export const getDefaultSelectedModels = () => [APP_DEFAULTS.defaultModelId];
 
