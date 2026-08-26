@@ -1208,9 +1208,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1246,9 +1246,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1284,9 +1284,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1322,9 +1322,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1360,9 +1360,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1398,9 +1398,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1436,9 +1436,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1474,9 +1474,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1512,9 +1512,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1550,9 +1550,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1588,9 +1588,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1626,9 +1626,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1664,9 +1664,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
@@ -1702,9 +1702,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "general_question_answering-en-003",
         "provider": "mistral",
