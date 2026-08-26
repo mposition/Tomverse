@@ -23,7 +23,12 @@ async function installClipboardMock(page: Page) {
 
 async function openSidebarOnMobile(page: Page) {
   if (await page.getByTestId("mobile-chat-shell").isVisible()) {
-    if (await page.getByRole("dialog", { name: "Tomverse Review" }).isVisible()) {
+    // The drawer, not a brand string: this guard used to name the sidebar's
+    // aria-label, and silently stopped matching when the brand cutover renamed
+    // it. A missed guard is not a missed assertion -- the helper then clicks the
+    // button that opens a drawer already open, and the drawer's own overlay
+    // intercepts it for the full timeout. Every other spec locates it this way.
+    if (await page.getByTestId("mobile-sidebar-drawer").isVisible()) {
       return;
     }
 
