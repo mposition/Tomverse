@@ -112,6 +112,22 @@ golden baseline은 `visual-baseline/**` 사람 diff 절차를 지납니다. 여�
 파일명을 적지 않는 것은 `check:ui-tier-coverage`가 이 절의 spec 언급을
 tier 소속으로 읽기 때문입니다.
 
+이 합류로 tier가 예산의 어디쯤에 왔는지는 따로 적어 둡니다. CI 실측
+(2026-08-26, PR Fast Gate run 32936185087, 25분 job 예산은 install·build·test를
+함께 덮습니다):
+
+| Project | test 단계 | job 전체 | 예산 대비 |
+|---|---|---|---|
+| desktop-chromium | 18분 51초 | **20분 15초** | 81% |
+| mobile-chromium | 11분 08초 | 14분 16초 | 57% |
+
+**같은 test 목록을 돌리는데도 두 project의 비용이 대칭이 아니고, desktop은
+남은 여유가 5분이 안 됩니다.** project 분할은 이제 한 수 남았습니다 —
+`scripts/run-ui-risk-shard.mjs`가 예고한 파일 단위 샤딩은 이 실측 기준으로
+가정이 아니라 **다음에 tier를 늘리기 전에 해야 할 일**입니다. 첫 timeout을
+보고 하는 것이 아니라 그 전에 합니다. 로컬 값은 근거로 쓰지 않습니다(이
+컨테이너의 desktop 측정은 13분 56초로 CI보다 한참 낮았습니다).
+
 합류한 것: `chat-keyboard-policy` · `chat-tools` · `comparison-action-rail` ·
 `comparison-rate-limit` · `credit-entitlement-disclosure` ·
 `guest-account-identity-transition` · `guest-attachment-ai-review-flow` ·
