@@ -34,6 +34,33 @@ type AuditEntry = {
 };
 
 /**
+ * What a failure means, in the reader's terms.
+ *
+ * There are three readings and they have to stay distinct, because the first
+ * attempt here collapsed two of them. It branched on "the first failure is the
+ * oldest row" and said *nothing has verified under any available key* — which
+ * was true only while no historical key was listed. The moment one was, the
+ * 2026-08-25 staging chain came back with 115 of 116 entries verified and the
+ * panel still announced that nothing had, which is worse than saying nothing:
+ * the operator had just fixed most of it and the screen denied it.
+ *
+ * So the oldest-row case splits on whether anything verified at all. Nothing
+ * verified is a chain whose whole signing key is absent. Some verified, oldest
+ * did not, is a chain whose *earliest span* is still signed with a key nobody
+ * has listed — one rotation further back than the keys account for, and a
+ * narrower thing to go looking for.
+ */
+function auditIntegrityReading(integrity: Integrity): string {
+  if (!integrity.firstInvalidIsOldest) {
+    return "Entries before this one verified and this one did not, so a changed signing key does not explain it on its own.";
+  }
+  if (integrity.verifiedEntries === 0) {
+    return "This is the oldest entry in the chain and nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
+  }
+  return "Later entries verified and the oldest ones did not, so the earliest span was signed with a key that is not listed — one rotation further back than the current keys account for. Add that older key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
+}
+
+/**
  * Verifying the chain, and — when it fails — showing the row it failed on.
  *
  * The 2026-08-21 staging round recorded that this panel named `firstInvalidId`
@@ -121,14 +148,21 @@ export function AdminAuditIntegrityPanel() {
                 {integrity.checkedEntries.toLocaleString()} entries
                 {integrity.invalidEntries > 0 ? <> · {integrity.invalidEntries.toLocaleString()} unverified</> : null}
                 {integrity.linkageBreaks > 0 ? <> · {integrity.linkageBreaks.toLocaleString()} linkage {integrity.linkageBreaks === 1 ? "break" : "breaks"}</> : null}
-                {integrity.keysUsed > 1 ? <> · {integrity.keysUsed} signing keys</> : null}
+                {integrity.keysUsed > 1 ? <> · {integrity.keysUsed} of {integrity.keysAvailable} keys used</> : null}
                 {integrity.firstInvalidId ? <> · first unverified <span className="font-mono">{integrity.firstInvalidId}</span></> : null}
               </p>
               {integrity.firstInvalidId ? (
                 <p data-testid="admin-audit-integrity-reading" className="mt-2 text-xs opacity-90">
-                  {integrity.firstInvalidIsOldest
-                    ? "This is the oldest entry in the chain, so nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md."
-                    : "Entries before this one verified and this one did not, so a changed signing key does not explain it on its own."}
+                  {auditIntegrityReading(integrity)}
+                </p>
+              ) : null}
+              {integrity.keysUsed < integrity.keysAvailable ? (
+                <p data-testid="admin-audit-integrity-unused-keys" className="mt-2 text-xs opacity-90">
+                  {integrity.keysAvailable - integrity.keysUsed} of the{" "}
+                  {integrity.keysAvailable} available keys accounted for no entry.
+                  A listed key that opens nothing is either the wrong value or
+                  covers a span this chain does not contain — and it can still
+                  produce entries that verify, so drop it rather than leave it.
                 </p>
               ) : null}
             </div>

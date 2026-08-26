@@ -83,22 +83,70 @@ test("the verdict says whether the failing entry is the oldest one", () => {
     );
 });
 
-test("the panel says something different for each reading", () => {
-    // One sentence for both would put the reader back where they started, with
-    // the distinction computed and not communicated.
-    const branch = panel.match(
-        /firstInvalidIsOldest\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/
+test("the panel says something different for each of the three readings", () => {
+    // One sentence for two of them would put the reader back where they
+    // started, with the distinction computed and not communicated. That is
+    // what happened on the first attempt: the oldest-row branch claimed
+    // *nothing has verified* whatever the counts said, and the 2026-08-25
+    // staging chain then showed it beside 115 of 116 entries verified.
+    const reading = panel.slice(panel.indexOf("function auditIntegrityReading"));
+    const body = reading.slice(0, reading.indexOf("\n}"));
+    const sentences = [...body.matchAll(/return "([^"]+)";/g)].map((m) => m[1]);
+    assert.equal(sentences.length, 3, "three readings, three sentences");
+    assert.equal(
+        new Set(sentences).size,
+        3,
+        "two readings sharing a sentence is the defect this asserts against"
     );
-    assert.ok(branch, "the panel must render both readings");
-    const [, oldest, midChain] = branch;
-    assert.notEqual(oldest, midChain);
+
+    const [midChain, nothingVerified, oldestSpan] = sentences;
     assert.ok(
-        oldest.includes("signing key"),
-        "the oldest-entry reading is the changed-key one and should say so"
+        midChain.includes("Entries before this one verified"),
+        "the mid-chain reading is the one a key change does not explain"
     );
     assert.ok(
-        oldest.includes("admin-audit-key-epochs"),
-        "point at where the key changes are actually recorded"
+        nothingVerified.includes("nothing has verified"),
+        "the nothing-verified reading is the whole-key-absent one"
+    );
+    assert.ok(
+        !oldestSpan.includes("nothing has verified"),
+        "a chain with entries verified must never be told nothing verified"
+    );
+    for (const sentence of [nothingVerified, oldestSpan]) {
+        assert.ok(
+            sentence.includes("ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS") &&
+                sentence.includes("admin-audit-key-epochs"),
+            "a key reading names the remedy and where the epochs are recorded"
+        );
+    }
+});
+
+test("the nothing-verified sentence is guarded by the count, not by the position", () => {
+    // `firstInvalidIsOldest` says where the first failure is. It says nothing
+    // about how much of the chain opened, and reading it as though it did is
+    // exactly how the panel came to deny a verification the operator had just
+    // achieved.
+    const reading = panel.slice(panel.indexOf("function auditIntegrityReading"));
+    const body = reading.slice(0, reading.indexOf("\n}"));
+    assert.match(
+        body,
+        /verifiedEntries === 0/,
+        "the whole-key-absent claim must be conditioned on nothing having verified"
+    );
+});
+
+test("a listed key that opened nothing is reported", () => {
+    // `keysUsed` alone cannot say that: two keys used is the same number
+    // whether two or five were offered. The difference is what tells an
+    // operator a value is wrong — or that a key is still listed for a span
+    // that no longer needs it, which the epochs document asks them to drop.
+    assert.ok(
+        panel.includes("integrity.keysUsed < integrity.keysAvailable"),
+        "the panel must compare what was used against what was available"
+    );
+    assert.ok(
+        panel.includes('data-testid="admin-audit-integrity-unused-keys"'),
+        "the unused-key report needs somewhere to render"
     );
 });
 
