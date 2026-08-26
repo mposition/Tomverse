@@ -43,6 +43,7 @@ import {
 } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
     webSearchCostRefusalError,
@@ -325,6 +326,11 @@ export async function POST(request: Request) {
             access.plan && planAllowsImageGeneration(access.plan)
         );
 
+        // Bring the shared ceiling latch up to date before anything is
+        // priced. A breach recorded by another instance, or by this one before
+        // a restart, has to be visible here or the refusal it earned lasts
+        // only as long as the process that saw it.
+        await refreshSearchQueryCeilingBreaches();
         const budgets = models.map((model) => {
             // Per model, because history is filtered per model: a comparison
             // turn charges each model for the branch it can actually see.

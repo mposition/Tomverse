@@ -53,12 +53,27 @@ export type WebSearchCapability = {
    * Google's Search grounding still takes neither, on the tool or on the
    * request, so it stays undefined and fails closed.
    *
+   * This is the *billable* bound, which for OpenAI is no longer the same
+   * number the request carries -- see `OPENAI_SEARCH_OVERSHOOT_ALLOWANCE`.
+   * Read `requestEnforcedSearchToolCalls` to build a request; read this to
+   * size money.
+   *
    * Undefined on a `hasAdditionalCost` capability means the worst-case cost of
    * a request cannot be computed, so the request cannot be authorized -- see
    * `nativeSearchIsDispatchable` below, which is the one place that reads it
    * as a yes/no.
    */
   maxBillableSearchQueriesPerRequest?: number;
+
+  /**
+   * The ceiling the request itself carries, where that differs from the
+   * billable bound above.
+   *
+   * Only OpenAI has both today, and only because the two turned out not to be
+   * the same number. Undefined everywhere else: Anthropic's ceiling rides on
+   * the tool rather than the request, and Google has none to send.
+   */
+  requestEnforcedSearchToolCalls?: number;
 };
 
 /**
@@ -82,12 +97,53 @@ export const ANTHROPIC_MAX_SEARCH_USES = 5;
  * Five because there is no other approved figure in this repository and
  * Anthropic's ceiling is the one the product has already been operating
  * under -- not because five was measured. Nothing reads this constant to
- * build a request: `NATIVE_OPENAI` declares it as the capability's ceiling
- * and both the reservation and the request read it back off the capability,
- * so the number the budget is sized on and the number the request enforces
- * are the same field rather than two copies of a literal.
+ * build a request: `NATIVE_OPENAI` declares it on the capability and the
+ * request reads it back from there.
  */
 export const OPENAI_MAX_SEARCH_TOOL_CALLS = 5;
+
+/**
+ * How far past `max_tool_calls` OpenAI has been seen to go, in searches.
+ *
+ * The reservation and the request used to be the same field, on the reasoning
+ * that a ceiling the request enforces is a ceiling the budget can be sized on.
+ * That reasoning was tested on 2026-08-26 and did not hold: a Luna turn sent
+ * `max_tool_calls: 5` and OpenAI ran six `web_search_call` items. The whole
+ * chain was checked before concluding it -- the SDK sends the parameter from
+ * `providerOptions.openai.maxToolCalls`, the app is on the Responses model
+ * that reads it, `buildWebSearchToolConfig` does not overwrite it, and the
+ * stream emits exactly one `tool-result` per `web_search_call`, so six parts
+ * were six searches (Sentry `NATIVE_SEARCH_QUERY_CEILING_BREACHED`,
+ * `observedQueries: 6`).
+ *
+ * So the request ceiling bounds what OpenAI *starts*, not what it bills, and
+ * the two numbers are now separate: five goes in the request, six is what a
+ * turn may be charged for. Raising the request ceiling instead would have
+ * moved the boundary rather than removed it -- at `max_tool_calls: 6` the
+ * same overshoot bills seven.
+ *
+ * **This allowance rests on one observation.** It is not a measured bound on
+ * how far OpenAI can overshoot, and nothing here can make it one; it is the
+ * smallest number consistent with what was seen, chosen so a single extra
+ * search stops latching the capability off. A second overshoot past *this*
+ * bound is still a breach, still an incident, and still stops dispatch -- now
+ * durably (see `lib/webSearchCeilingBreachStore.ts`). If that fires, the
+ * answer is not a larger allowance: it is that OpenAI's per-search cost has
+ * no enforceable worst case and belongs where Google's is.
+ *
+ * Raising this changes the authorized worst-case spend of a searching turn,
+ * which docs/policy/credit-and-cost-limits.md makes a decision rather than a
+ * tuning knob. US$0.06 was approved on 2026-08-26.
+ */
+export const OPENAI_SEARCH_OVERSHOOT_ALLOWANCE = 1;
+
+/**
+ * What one OpenAI turn may be billed for: what the request permits, plus the
+ * overshoot that has been observed past it. Derived rather than written down,
+ * so the two cannot drift apart.
+ */
+export const OPENAI_MAX_BILLABLE_SEARCH_QUERIES =
+  OPENAI_MAX_SEARCH_TOOL_CALLS + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE;
 
 const NATIVE_OPENAI: WebSearchCapability = {
   support: "native",
@@ -95,12 +151,14 @@ const NATIVE_OPENAI: WebSearchCapability = {
   canForceExecution: true,
   returnsCitations: true,
   hasAdditionalCost: true,
-  // `openai.tools.webSearch({})` takes no ceiling of its own, but the
-  // Responses API request does: `max_tool_calls` bounds how many built-in
-  // tool calls one Response may make, and the installed @ai-sdk/openai sends
-  // `providerOptions.openai.maxToolCalls` straight through to it. So the
-  // worst case is bounded after all, and it is bounded by this number.
-  maxBillableSearchQueriesPerRequest: OPENAI_MAX_SEARCH_TOOL_CALLS,
+  // `openai.tools.webSearch({})` takes no ceiling of its own; the Responses
+  // API request does. `max_tool_calls` bounds how many built-in tool calls
+  // one Response may *make*, and the installed @ai-sdk/openai sends
+  // `providerOptions.openai.maxToolCalls` straight through to it -- but a
+  // turn has been billed for one more than it permitted, so the money is
+  // sized on the larger of the two. See `OPENAI_SEARCH_OVERSHOOT_ALLOWANCE`.
+  requestEnforcedSearchToolCalls: OPENAI_MAX_SEARCH_TOOL_CALLS,
+  maxBillableSearchQueriesPerRequest: OPENAI_MAX_BILLABLE_SEARCH_QUERIES,
 };
 
 const NATIVE_ANTHROPIC: WebSearchCapability = {
@@ -267,7 +325,11 @@ export const modelWebSearchIsDispatchable = (modelId: string) =>
 export const openAiNativeSearchToolCallCeiling = (input: {
   capability: Pick<
     WebSearchCapability,
-    "support" | "provider" | "hasAdditionalCost" | "maxBillableSearchQueriesPerRequest"
+    | "support"
+    | "provider"
+    | "hasAdditionalCost"
+    | "maxBillableSearchQueriesPerRequest"
+    | "requestEnforcedSearchToolCalls"
   >;
   nativeSearchEnabled: boolean;
 }): number | undefined => {
@@ -275,5 +337,8 @@ export const openAiNativeSearchToolCallCeiling = (input: {
   if (!nativeSearchEnabled) return undefined;
   if (capability.provider !== "openai") return undefined;
   if (!nativeSearchIsDispatchable(capability)) return undefined;
-  return capability.maxBillableSearchQueriesPerRequest;
+  // The request carries what the request enforces, never the billable bound.
+  // Sending the larger number would raise the ceiling OpenAI overshoots from
+  // and bill one more again -- which is the reason these are two fields.
+  return capability.requestEnforcedSearchToolCalls;
 };

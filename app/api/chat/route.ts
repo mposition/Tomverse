@@ -83,6 +83,7 @@ import {
     openAiNativeSearchToolCallCeiling,
 } from "@/lib/webSearchCapability";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
     webSearchCostRefusalError,
@@ -2683,6 +2684,11 @@ async function handleChatPost(
         // gone. Reserving the worst case requires there to be one: a provider
         // whose request cannot bound the query count is refused here rather
         // than dispatched against a reservation that does not cover it.
+        // Bring the shared ceiling latch up to date before anything is
+        // priced. A breach recorded by another instance, or by this one before
+        // a restart, has to be visible here or the refusal it earned lasts
+        // only as long as the process that saw it.
+        await refreshSearchQueryCeilingBreaches();
         const nativeSearchReservation = reserveNativeSearchCost({
             model: modelConfig,
             capability: webSearchCapability,

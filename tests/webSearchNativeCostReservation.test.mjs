@@ -2,16 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyDurableSearchQueryCeilingBreaches,
   missingAuthorizationIsADefect,
   recordSearchQueryCeilingBreach,
   reserveNativeSearchCost,
   resetSearchQueryCeilingBreaches,
+  searchQueryCeilingBreached,
   settledNativeSearchCost,
 } from "../lib/webSearchNativeCostReservation.ts";
 import {
   getWebSearchCapability,
   nativeSearchIsDispatchable,
   openAiNativeSearchToolCallCeiling,
+  OPENAI_MAX_SEARCH_TOOL_CALLS,
+  OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   WEB_SEARCH_CAPABILITIES,
 } from "../lib/webSearchCapability.ts";
 import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
@@ -66,12 +70,20 @@ test("a paid search the request cannot bound is refused, not estimated", () => {
   }
 });
 
-test("every enabled OpenAI native-search model reserves its exact ceiling", () => {
+test("every enabled OpenAI native-search model reserves its billable bound", () => {
   // The defect this fixes: `gpt-5-6-luna` is a registered OpenAI native-search
   // model, and every one of them refused at dispatch because the capability
   // declared no ceiling. OpenAI's Responses API does take one --
-  // `max_tool_calls` -- so the whole family is bounded, and the reservation is
-  // that ceiling times the per-query rate rather than a guess.
+  // `max_tool_calls` -- so the family is bounded, and the reservation is a
+  // ceiling times the per-query rate rather than a guess.
+  //
+  // The bound is not the number the request carries. A turn that sent
+  // `max_tool_calls: 5` was billed for six searches on 2026-08-26, so the
+  // money is sized on the request's ceiling plus the overshoot observed past
+  // it -- see `OPENAI_SEARCH_OVERSHOOT_ALLOWANCE`. Written here as that sum,
+  // not as a literal `6`: a literal would still pass if someone raised the
+  // request ceiling and left the reservation behind, which is the exact
+  // mistake that would put this back where it started.
   const openAiSearchModels = PUBLIC_MODELS.filter(
     (model) => getWebSearchCapability(model.id).provider === "openai"
   );
@@ -91,20 +103,28 @@ test("every enabled OpenAI native-search model reserves its exact ceiling", () =
       nativeSearchEnabled: true,
     });
     assert.equal(reserved.ok, true, model.id);
-    assert.equal(reserved.maxQueries, 5, model.id);
+    const billable =
+      OPENAI_MAX_SEARCH_TOOL_CALLS + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE;
+    assert.equal(reserved.maxQueries, billable, model.id);
     assert.equal(reserved.costPerQueryMicroUsd, perQuery, model.id);
     assert.equal(
       reserved.reservedCostMicroUsd,
-      perQuery * 5,
-      `${model.id}: ceiling times rate, not an observed average`
+      perQuery * billable,
+      `${model.id}: billable bound times rate, not an observed average`
     );
   }
 });
 
-test("the ceiling the request enforces is the ceiling the reservation is sized on", () => {
-  // The two must not be able to drift, which is why neither reads a literal:
-  // both read `maxBillableSearchQueriesPerRequest` off the same capability. A
-  // second copy of the number in either place fails here.
+test("the request never carries more than the reservation authorized", () => {
+  // These were the same number until 2026-08-26, when a turn that sent
+  // `max_tool_calls: 5` was billed for six searches. They are two fields now,
+  // both derived from one literal plus a named allowance so they still cannot
+  // drift, and the invariant is the direction rather than the equality: the
+  // request may enforce less than the money covers, never more.
+  //
+  // Equality is what the old version asserted, and re-tightening it here would
+  // undo the fix rather than catch a regression -- so the gap is checked
+  // against the declared allowance instead of being allowed to be anything.
   for (const model of PUBLIC_MODELS) {
     const capability = getWebSearchCapability(model.id);
     if (capability.provider !== "openai") continue;
@@ -120,10 +140,20 @@ test("the ceiling the request enforces is the ceiling the reservation is sized o
         nativeSearchEnabled: true,
       }),
     });
+    const sent = settings.providerOptions?.openai?.maxToolCalls;
     assert.equal(
-      settings.providerOptions?.openai?.maxToolCalls,
+      sent,
+      OPENAI_MAX_SEARCH_TOOL_CALLS,
+      `${model.id}: the request carries the ceiling it enforces, not the billable bound`
+    );
+    assert.equal(
       reserved.maxQueries,
-      `${model.id}: the request may spend exactly what was authorized`
+      sent + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
+      `${model.id}: the reservation covers the request's ceiling plus the observed overshoot`
+    );
+    assert.ok(
+      reserved.maxQueries >= sent,
+      `${model.id}: the request may never spend more than was authorized`
     );
   }
 });
@@ -259,4 +289,68 @@ test("an unparseable cutover is treated as unset rather than as now", () => {
   } finally {
     delete process.env.NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT;
   }
+});
+
+test("a shared refresh cannot clear a breach this process saw itself", () => {
+  // The latch has two halves for one reason: the durable set is replaced
+  // wholesale on every refresh, so if the process-local observation lived in
+  // it, a refresh that ran before the write landed -- or after an operator
+  // cleared the row -- would un-latch the very instance holding first-hand
+  // evidence of the overshoot. It is the one direction that must not be
+  // possible, because it is the direction that resumes spending.
+  resetSearchQueryCeilingBreaches();
+  recordSearchQueryCeilingBreach("openai");
+  assert.equal(searchQueryCeilingBreached("openai"), true);
+
+  applyDurableSearchQueryCeilingBreaches([]);
+  assert.equal(
+    searchQueryCeilingBreached("openai"),
+    true,
+    "an empty durable set must not clear what this process observed"
+  );
+
+  applyDurableSearchQueryCeilingBreaches(["anthropic"]);
+  assert.equal(
+    searchQueryCeilingBreached("openai"),
+    true,
+    "nor does a refresh that names some other provider"
+  );
+  resetSearchQueryCeilingBreaches();
+});
+
+test("a breach recorded elsewhere latches this process through the refresh", () => {
+  // The other half of the reason it is durable: an instance that never saw
+  // the overshoot still has to stop, or the capability keeps dispatching from
+  // every instance but one.
+  resetSearchQueryCeilingBreaches();
+  assert.equal(searchQueryCeilingBreached("openai"), false);
+  applyDurableSearchQueryCeilingBreaches(["openai"]);
+  assert.equal(searchQueryCeilingBreached("openai"), true);
+
+  // And an operator who clears the row re-enables the instances that only
+  // ever knew about it through the refresh. Not the one that saw it: that
+  // half only clears on restart, which is the asymmetry the store documents.
+  applyDurableSearchQueryCeilingBreaches([]);
+  assert.equal(searchQueryCeilingBreached("openai"), false);
+  resetSearchQueryCeilingBreaches();
+});
+
+test("a durably latched provider is refused before any cost is computed", () => {
+  // The refusal reason has to survive the round trip: a request path reading
+  // the shared latch must produce the same `search_query_ceiling_breached`
+  // that the process which saw the overshoot produces, or the two instances
+  // answer the same request differently.
+  resetSearchQueryCeilingBreaches();
+  const model = PUBLIC_MODELS.find((entry) => entry.id === "gpt-5-6-luna");
+  assert.ok(model);
+  const capability = getWebSearchCapability(model.id);
+  applyDurableSearchQueryCeilingBreaches(["openai"]);
+  const reserved = reserveNativeSearchCost({
+    model,
+    capability,
+    nativeSearchEnabled: true,
+  });
+  assert.equal(reserved.ok, false);
+  assert.equal(reserved.reason, "search_query_ceiling_breached");
+  resetSearchQueryCeilingBreaches();
 });
