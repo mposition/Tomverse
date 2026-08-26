@@ -39,6 +39,8 @@ type Diagnosis = {
   matches: Array<{ label: string; keyPosition: number }>;
   /** The row names an actor by address but carries no user id. */
   actorIdMissingWithEmail: boolean;
+  /** The row verifies when keys are sorted by code point rather than by collation. */
+  verifiesUnderCodepointKeyOrder: boolean;
 };
 
 /** The identifying half of an audit row. Not its metadata, which can be large. */
@@ -369,6 +371,17 @@ export function AdminAuditIntegrityPanel() {
                   </p>
                 </>
               )}
+              {/* Its own finding, because the remedy is not the one a field
+                  mismatch calls for: nothing about the entry is wrong. */}
+              {diagnosis.result.verifiesUnderCodepointKeyOrder ? (
+                <p data-testid="admin-audit-integrity-collation" className="mt-2 font-black">
+                  This entry verifies when object keys are sorted by code point
+                  instead of by collation, which is what signing uses. Nothing
+                  about the row changed — it was signed by a runtime whose
+                  locale data ordered two of its keys the other way. See
+                  docs/ops/admin-audit-key-epochs.md.
+                </p>
+              ) : null}
               {/* Not a match, and said separately because it is not one: a cuid
                   is not a value any candidate set can try, so the id cannot be
                   reconstructed. What can be said is which mechanism fits. */}

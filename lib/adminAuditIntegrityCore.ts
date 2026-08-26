@@ -1,16 +1,60 @@
 import { createHmac } from "node:crypto";
 
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical);
+/**
+ * Object keys are sorted before hashing, and *how* they are sorted is part of
+ * the signature.
+ *
+ * The signing order is `localeCompare`, and that is a defect kept deliberately
+ * rather than corrected in place. `localeCompare` compares under the runtime's
+ * collation -- ICU data and the default locale -- which is not a property of
+ * the data being signed. Two of this repository's own audit metadata keys
+ * order differently under it than by code point:
+ *
+ *   creditUsd    vs creditsPurchased
+ *   requestType  vs requestedById
+ *
+ * so a row carrying such a pair hashes differently under a different
+ * collation, with nothing about the row having changed. A canonical form for a
+ * digest must depend only on the bytes.
+ *
+ * It cannot simply be swapped: every existing entry was signed under
+ * `localeCompare`, and changing the signing order would invalidate all of them
+ * at once -- the same wholesale loss that key rotation caused, for the same
+ * reason. Migrating it is a deliberate change with its own epoch, recorded in
+ * docs/ops/admin-audit-key-epochs.md.
+ *
+ * What is safe now is *verifying* under either order, which is what the
+ * comparator argument is for: `adminAuditEntryHashVariants()` re-derives a
+ * digest under code-point order so a diagnosis can say outright whether a
+ * collation change is what broke a row. Signing never uses it.
+ */
+export const ADMIN_AUDIT_KEY_ORDERS = {
+  /** What every entry to date was signed under. Collation-dependent. */
+  locale: (left: string, right: string) => left.localeCompare(right),
+  /** Byte order. Depends on nothing but the key names themselves. */
+  codepoint: (left: string, right: string) =>
+    left < right ? -1 : left > right ? 1 : 0,
+} as const;
+
+export type AdminAuditKeyOrder = keyof typeof ADMIN_AUDIT_KEY_ORDERS;
+
+const canonicalWith = (
+  compare: (left: string, right: string) => number,
+  value: unknown
+): unknown => {
+  if (Array.isArray(value)) return value.map((item) => canonicalWith(compare, item));
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonical(nested)])
+        .sort(([left], [right]) => compare(left, right))
+        .map(([key, nested]) => [key, canonicalWith(compare, nested)])
     );
   }
   return value;
 };
+
+const canonical = (value: unknown): unknown =>
+  canonicalWith(ADMIN_AUDIT_KEY_ORDERS.locale, value);
 
 export type AdminAuditHashInput = {
   previousHash: string | null;
@@ -33,6 +77,28 @@ export const computeAdminAuditEntryHash = (
   createHmac("sha256", secret)
     .update(JSON.stringify(canonical(input)))
     .digest("hex");
+
+/**
+ * The same digest under each key order, for diagnosis only.
+ *
+ * A row that verifies under `codepoint` but not under `locale` was signed by a
+ * runtime whose collation differed from this one's -- which is a fact about
+ * the container, not about the row, and not something an operator could ever
+ * have worked out from "an audit entry hash does not match its stored
+ * content".
+ */
+export const adminAuditEntryHashVariants = (
+  input: AdminAuditHashInput,
+  secret: string
+): Record<AdminAuditKeyOrder, string> =>
+  Object.fromEntries(
+    Object.entries(ADMIN_AUDIT_KEY_ORDERS).map(([order, compare]) => [
+      order,
+      createHmac("sha256", secret)
+        .update(JSON.stringify(canonicalWith(compare, input)))
+        .digest("hex"),
+    ])
+  ) as Record<AdminAuditKeyOrder, string>;
 
 /**
  * The keys an audit entry may have been signed with, newest first.

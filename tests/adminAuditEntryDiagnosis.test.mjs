@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { computeAdminAuditEntryHash } from "../lib/adminAuditIntegrityCore.ts";
+import { diagnoseAdminAuditEntry } from "../lib/adminAuditEntryDiagnosis.ts";
+import {
+    adminAuditEntryHashVariants,
+    computeAdminAuditEntryHash,
+} from "../lib/adminAuditIntegrityCore.ts";
 
 /**
  * Naming what changed on an entry that no longer verifies.
@@ -184,4 +188,52 @@ test("the script neither writes nor prints key material", () => {
         script.includes("keyPosition") || script.includes("diagnosis"),
         "the key is reported by position, the same way the integrity panel does"
     );
+});
+
+test("a collation difference is detectable, and is not a changed field", () => {
+    // `localeCompare` sorts under the runtime's collation, so the canonical
+    // form of a row depends on the container rather than on the bytes. Two of
+    // this repository's own audit metadata key pairs order differently under
+    // it than by code point, so a collation change breaks a scattered subset
+    // of rows -- which is what a key change can never look like, and what
+    // staging showed on 2026-08-26 when eight rows that had verified an hour
+    // earlier stopped.
+    const metadata = { creditUsd: 12, creditsPurchased: 3 };
+    assert.notEqual(
+        "creditUsd".localeCompare("creditsPurchased") < 0,
+        "creditUsd" < "creditsPurchased",
+        "this pair is the whole point: the two orders must disagree about it"
+    );
+
+    const row = { ...SIGNED, metadata };
+    const variants = adminAuditEntryHashVariants(row, SECRET);
+    assert.notEqual(
+        variants.locale,
+        variants.codepoint,
+        "the two key orders must produce different digests for such a row"
+    );
+    assert.equal(
+        computeAdminAuditEntryHash(row, SECRET),
+        variants.locale,
+        "signing must stay on the locale order until it is migrated deliberately"
+    );
+
+    // A row signed under the other collation is reported as a collation
+    // finding and not as a field that changed, because nothing about it did.
+    const diagnosis = diagnoseAdminAuditEntry(row, variants.codepoint, [SECRET]);
+    assert.equal(diagnosis.verifiesUnderCodepointKeyOrder, true);
+    assert.equal(diagnosis.verifiesAsStored, false);
+    assert.deepEqual(diagnosis.matches, [], "no field differs; do not claim one does");
+});
+
+test("a row that verifies normally is never called a collation problem", () => {
+    // The flag must not fire whenever the two orders happen to agree, which is
+    // the ordinary case: it would then appear on every healthy row.
+    const diagnosis = diagnoseAdminAuditEntry(
+        SIGNED,
+        computeAdminAuditEntryHash(SIGNED, SECRET),
+        [SECRET]
+    );
+    assert.equal(diagnosis.verifiesAsStored, true);
+    assert.equal(diagnosis.verifiesUnderCodepointKeyOrder, false);
 });
