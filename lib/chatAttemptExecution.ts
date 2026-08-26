@@ -45,6 +45,7 @@ import {
     openAiNativeSearchToolCallCeiling,
 } from "@/lib/webSearchCapability";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { webSearchCostRefusalError } from "@/lib/webSearchCostRefusal";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import {
     hasSearchPath,
@@ -253,12 +254,8 @@ export const planAttemptExecution = (
             refusal: {
                 kind: "budget_refused",
                 modelId: modelConfig.id,
-                error: new ChatAccessError(
-                    503,
-                    "WEB_SEARCH_COST_UNBOUNDED",
-                    "Web search is temporarily unavailable for this model.",
-                    undefined,
-                    { scope: nativeSearchReservation.reason }
+                error: webSearchCostRefusalError(
+                    nativeSearchReservation.reason
                 ),
             },
         };

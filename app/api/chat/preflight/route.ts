@@ -44,6 +44,10 @@ import {
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import {
+    recordWebSearchCostRefusal,
+    webSearchCostRefusalError,
+} from "@/lib/webSearchCostRefusal";
+import {
     atLeastOneToken,
     createTokenEstimateAccumulator,
 } from "@/lib/chatTokenEstimate";
@@ -114,6 +118,13 @@ export async function POST(request: Request) {
         inputTokens: number;
         attachmentTokens: number;
     }> = [];
+    /** The comparison's models and caller, hoisted for the catch. */
+    let refusalModelsForLog: Array<{ modelId: string; provider: string }> = [];
+    let refusalSubjectForLog: {
+        subjectKey: string;
+        userId: string | null;
+        plan: string | null;
+    } | null = null;
     try {
         const session = await getServerSession(authOptions);
         // Guests reach this route too, and must: a three-model comparison is
@@ -177,6 +188,11 @@ export async function POST(request: Request) {
                     monthlyMessageLimit: billingPlan!.monthlyMessageLimit,
                 }
             );
+        refusalSubjectForLog = {
+            subjectKey: access.subjectKey,
+            userId: access.userId ?? null,
+            plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+        };
         const runtimeModels = await getRuntimeModels();
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const models = uniqueModelIds.map((modelId) => {
@@ -192,6 +208,10 @@ export async function POST(request: Request) {
             assertModelAccess(access, model);
             return model;
         });
+        refusalModelsForLog = models.map((model) => ({
+            modelId: model.id,
+            provider: model.provider,
+        }));
 
         let history: Array<{
             role: string;
@@ -390,12 +410,8 @@ export async function POST(request: Request) {
                 // The same refusal the chat route raises, for the same reason
                 // and with the same code: a quote that said yes to a request
                 // the dispatch will refuse is the defect, not the refusal.
-                throw new ChatAccessError(
-                    503,
-                    "WEB_SEARCH_COST_UNBOUNDED",
-                    "Web search is temporarily unavailable for this model.",
-                    undefined,
-                    { scope: nativeSearchReservation.reason }
+                throw webSearchCostRefusalError(
+                    nativeSearchReservation.reason
                 );
             }
             return createChatBudget(
@@ -520,6 +536,19 @@ export async function POST(request: Request) {
         }
         const accessResponse = chatErrorResponse(error);
         if (accessResponse) {
+            // Raised inside the synchronous budgets map, so it is recorded
+            // here rather than at the throw. Every model in the comparison is
+            // named: an all-or-nothing preflight refused the whole set, and a
+            // row naming only the one that tripped would misdescribe what was
+            // blocked.
+            await recordWebSearchCostRefusal(error, {
+                traceId,
+                phase: "comparison_preflight",
+                subjectKey: refusalSubjectForLog?.subjectKey ?? null,
+                userId: refusalSubjectForLog?.userId ?? null,
+                plan: refusalSubjectForLog?.plan ?? null,
+                models: refusalModelsForLog,
+            });
             if (
                 error instanceof ChatAccessError &&
                 isChatCostSafetyCode(error.code)
