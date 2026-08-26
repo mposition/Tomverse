@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { ko } from "../../locales/ko";
 
 /**
  * /settings/assistants (Release C, slice C3b).
@@ -247,6 +248,44 @@ test.describe("assistant profile settings", () => {
 
         await expect(page.getByTestId("assistants-notice-saved")).toBeVisible();
         expect(publishCalls).toHaveLength(0);
+    });
+
+    test("the two saves name different things, and the publish says what it does", async ({
+        page,
+    }) => {
+        // The 2026-08-21 staging round found two identical primary buttons with
+        // labels that overlapped: "Save name" and "Save changes", where the
+        // vaguer word sat on the more consequential control and a name change
+        // is also a change. Each names its own section now.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants/p-published");
+
+        // Asserted in the locale this harness renders, which is Korean.
+        const identity = page.getByTestId("assistant-save-identity");
+        const publish = page.getByTestId("assistant-publish");
+        await expect(identity).toHaveText(ko.assistantProfiles.saveIdentity);
+        await expect(publish).toHaveText(ko.assistantProfiles.saveChanges);
+
+        // Neither label may be a prefix of the other, which is the shape that
+        // made them read as the same button doing more or less of the job.
+        const identityLabel = ko.assistantProfiles.saveIdentity;
+        const publishLabel = ko.assistantProfiles.saveChanges;
+        expect(publishLabel.startsWith(identityLabel)).toBe(false);
+        expect(identityLabel.startsWith(publishLabel)).toBe(false);
+
+        // And the consequence is at the point of the click, not only in the
+        // hint at the top of the section, and it is the button's own
+        // description rather than nearby text a screen reader would not tie to
+        // it.
+        const consequence = page.getByTestId("assistant-publish-consequence");
+        await expect(consequence).toHaveText(
+            ko.assistantProfiles.publishConsequence
+        );
+        await expect(publish).toHaveAttribute(
+            "aria-describedby",
+            await consequence.getAttribute("id") as string
+        );
     });
 
     test("publishing sends the revision it loaded, and reports an unchanged save", async ({
