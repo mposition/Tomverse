@@ -829,13 +829,21 @@ Decision-grade 표본 하한은 **범주별로 다릅니다** [개정 · 2026-08
 arm당 200개로 돌아갑니다. 이것은 문서상의 약속이 아니라
 `tests/memoryExtractionEvalCore.test.mjs`가 강제하는 상태입니다.
 
-1. `lib/memoryValidatorProbeCorpus.ts`의 `MUST_REFUSE`가 ②③④ 각 범주와 **양쪽
+1. `lib/memoryValidatorProbeCorpus.ts`의 `MUST_REJECT`가 ②③④ 각 범주와 **양쪽
    언어 arm**을 모두 덮고, 전건이 `bulkSafe: false`일 것.
-2. 같은 corpus의 `MUST_ACCEPT`가 비어 있지 않고 전건 통과할 것 — 조이는 방향의
-   변경이 기능을 조용히 죽이지 않았음을 같은 실행에서 보일 것.
-3. 규칙이 판정할 수 없는 모양은 `NEEDS_JUDGEMENT`에 남기고 단언하지 않을 것.
+2. 같은 corpus의 `MUST_ACCEPT_BULK`가 비어 있지 않고 전건 bulk-safe로 통과할 것
+   — 조이는 방향의 변경이 기능을 조용히 죽이지 않았음을 같은 실행에서 보일 것.
+3. **[개정 · 2026-08-25]** `MUST_REQUIRE_SENSITIVE_REVIEW`가 비어 있지 않고,
+   전건이 **추출되되 bulk-safe가 아닐 것**. 두 방향을 한 실행에서 함께 보입니다
+   — 추출조차 되지 않으면 recall 실패이고, bulk-safe로 통과하면 안전성
+   실패입니다. 한쪽만 단언하면 건강 정보를 아예 거절하는 validator도 조건을
+   통과합니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §3.5).
+4. 규칙이 판정할 수 없는 모양은 `NEEDS_JUDGEMENT`에 남기고 단언하지 않을 것.
    이 목록이 비면 "규칙이 다 판단한다"는 뜻이 되며, 그것은 사실이 아닙니다.
-4. 위 셋이 PR Fast Gate에서 실행될 것.
+5. 위 넷이 PR Fast Gate에서 실행될 것.
+
+세 목록은 **양쪽 언어 arm을 각각** 덮어야 합니다. 완화가 arm 단위이므로 한쪽
+언어만 덮은 목록은 다른 arm의 하한을 사 주지 못합니다.
 
 이 완화의 근거는 §12.3이 처음부터 **두 개의 독립한 증거**를 요구했다는 것입니다
 — eval에서 관측 0건, 그리고 결정적 validator 테스트. 2026-08-23 이전에는 뒤쪽

@@ -23,6 +23,11 @@
  * is a policy change, not a refactor.
  */
 
+import {
+    MEMORY_SENSITIVE_HEALTH,
+    carriesHealthSignal,
+} from "@/lib/memoryHealthSignals";
+
 export const FACTUAL_MEMORY_KINDS = [
     "identity",
     "preference",
@@ -382,6 +387,17 @@ export function validateMemoryCandidate(
     // 승인만 가능).
     if (matchesAny(SENSITIVE_PII_PATTERNS, statement)) {
         violations.push("MEMORY_SENSITIVE_PII_PATTERN");
+        sensitiveReview = true;
+        sensitivity = "sensitive";
+    }
+    // Health information is extractable and never auto-approved. This runs on
+    // the candidate's own statement, not on the message it came from: a
+    // message carrying an allergy and an answer-style preference must not drag
+    // the style memory into review with it. A statement minimised from a
+    // health fact is still health information, so the check is on the stored
+    // sentence rather than on where it came from.
+    if (carriesHealthSignal(statement)) {
+        violations.push(MEMORY_SENSITIVE_HEALTH);
         sensitiveReview = true;
         sensitivity = "sensitive";
     }
