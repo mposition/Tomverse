@@ -7284,9 +7284,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7320,9 +7320,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7356,9 +7356,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7392,9 +7392,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7428,9 +7428,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7464,9 +7464,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7500,9 +7500,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7536,9 +7536,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7572,9 +7572,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7608,9 +7608,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7644,9 +7644,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7680,9 +7680,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7716,9 +7716,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
@@ -7752,9 +7752,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "coding-ko-003",
         "provider": "zhipu",
