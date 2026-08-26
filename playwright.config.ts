@@ -101,6 +101,12 @@ export default defineConfig({
         "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1",
       E2E_AUTH_BYPASS: "true",
       E2E_DISABLE_DATABASE: "true",
+      // The assistant knowledge flag lives in `AppSetting`, which the line
+      // above removes -- so without this the panel never renders and the
+      // specs that mock its endpoint assert against nothing. Safe only in
+      // company: `isE2EAssistantKnowledgeEnabled()` additionally requires
+      // loopback and both short-circuits above.
+      E2E_ASSISTANT_KNOWLEDGE_ENABLED: "true",
       NEXTAUTH_URL: baseURL,
       NEXTAUTH_SECRET: e2eNextAuthSecret,
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: e2eTurnstileSiteKey,
