@@ -325,6 +325,27 @@ model Conversation {
   assistantProfileVersionId String?
   assistantProfileVersion   AssistantProfileVersion? @relation(fields: [assistantProfileVersionId], references: [id], onDelete: SetNull)
 
+  /// When the profile this conversation was using was deleted.
+  ///
+  /// `SetNull` above is what makes this column necessary. Once the profile is
+  /// gone its versions go with it and `assistantProfileVersionId` becomes
+  /// NULL, so the conversation reads exactly like one that never had an
+  /// assistant -- and that is what the composer showed: `어시스턴트 없음`,
+  /// with nothing to say the assistant had been removed. A staging round on
+  /// 2026-08-25 recorded that as §G-2; the owner only found out by opening the
+  /// menu.
+  ///
+  /// Only the time is kept, not the profile's name. The owner asked for that
+  /// profile to be deleted, and copying its name onto every conversation it
+  /// touched would be keeping the thing they removed. The time is enough for
+  /// the sentence the screen owes them: this conversation's assistant was
+  /// deleted.
+  ///
+  /// Cleared whenever the conversation's profile binding changes by either
+  /// route -- attaching a new assistant or detaching on purpose. After that
+  /// the deletion is no longer what the current state is explained by.
+  assistantProfileRemovedAt DateTime?
+
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
   sharedAt       DateTime?

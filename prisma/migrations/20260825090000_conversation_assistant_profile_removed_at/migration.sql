@@ -1,0 +1,12 @@
+-- Conversation.assistantProfileRemovedAt
+--
+-- `Conversation.assistantProfileVersionId` is `ON DELETE SET NULL`, so deleting
+-- an assistant profile cascades to its versions and leaves every conversation
+-- that used it indistinguishable from one that never had an assistant. This
+-- column is the only thing that keeps the difference.
+--
+-- Nullable with no default and no backfill. NULL means "no assistant was
+-- deleted from this conversation", which is true of every row that exists
+-- today: the profiles deleted before this migration left no record, and
+-- inventing a timestamp for them would be asserting something nobody observed.
+ALTER TABLE "Conversation" ADD COLUMN "assistantProfileRemovedAt" TIMESTAMP(3);

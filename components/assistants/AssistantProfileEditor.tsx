@@ -163,8 +163,18 @@ type Notice =
 export function AssistantProfileEditor({
     profileId,
     onCreated,
+    knowledgeEnabled = false,
 }: {
     profileId?: string;
+    /**
+     * Whether assistant knowledge files are enabled, resolved on the server.
+     *
+     * Defaults to `false` because the one caller that omits it is the create
+     * screen, which has no `profileId` and so never renders the knowledge
+     * panel at all. Defaulting the other way would make a screen that cannot
+     * show the panel claim the feature is on.
+     */
+    knowledgeEnabled?: boolean;
     /**
      * Where a create should go instead of the profile's own edit page.
      *
@@ -916,6 +926,7 @@ export function AssistantProfileEditor({
                                     {profileId && profile && (
                                         <KnowledgeFilesPanel
                                             profileId={profileId}
+                                            knowledgeEnabled={knowledgeEnabled}
                                             files={profile.knowledgeFiles}
                                             publishedManifest={
                                                 profile.currentVersion
