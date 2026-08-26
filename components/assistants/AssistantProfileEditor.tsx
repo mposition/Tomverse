@@ -7,6 +7,9 @@ import {
     AlertTriangle,
     ArrowLeft,
     ChevronDown,
+    // A different mark for the save that cuts a revision: two identical Save
+    // icons on one screen carried the difference to nobody.
+    FilePlus2,
     Loader2,
     Save,
     Trash2,
@@ -967,12 +970,33 @@ export function AssistantProfileEditor({
                                     )}
                                 </div>
 
+                                {/* Two primary buttons on one screen, and the
+                                    2026-08-21 staging round found that neither
+                                    label said which one cut a revision. Both
+                                    said "Save", and the vaguer word --
+                                    "changes" -- was on the more consequential
+                                    one, while a name change is also a change.
+                                    Each button names its own section now, so
+                                    the two labels partition the screen instead
+                                    of overlapping.
+
+                                    The consequence is stated here rather than
+                                    only in the section hint above, and it is
+                                    this button's `aria-describedby`: a sentence
+                                    at the top of a section is not what somebody
+                                    reads before pressing a button they think
+                                    means "save". Deliberately not "Publish
+                                    revision 3" -- revision numbers stay out of
+                                    the everyday path and live in the history
+                                    section, which is a decision this file
+                                    already carries. */}
                                 <button
                                     type="button"
                                     className={`mt-4 ${primaryButtonClass}`}
                                     onClick={() => void publish()}
                                     disabled={busy}
                                     data-testid="assistant-publish"
+                                    aria-describedby="assistant-publish-consequence"
                                 >
                                     {busy ? (
                                         <Loader2
@@ -980,10 +1004,20 @@ export function AssistantProfileEditor({
                                             aria-hidden="true"
                                         />
                                     ) : (
-                                        <Save className="h-4 w-4" aria-hidden="true" />
+                                        <FilePlus2
+                                            className="h-4 w-4"
+                                            aria-hidden="true"
+                                        />
                                     )}
                                     {t("assistantProfiles.saveChanges")}
                                 </button>
+                                <p
+                                    id="assistant-publish-consequence"
+                                    data-testid="assistant-publish-consequence"
+                                    className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400"
+                                >
+                                    {t("assistantProfiles.publishConsequence")}
+                                </p>
                             </section>
 
                             <section className={`mt-4 ${sectionClass}`}>

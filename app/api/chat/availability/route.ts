@@ -41,6 +41,10 @@ import {
 } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import {
+    recordWebSearchCostRefusal,
+    webSearchCostRefusalError,
+} from "@/lib/webSearchCostRefusal";
 import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { futureResetAt } from "@/lib/chatLimitDecisionCore";
 
@@ -79,6 +83,13 @@ const nextMonthStartUtc = (now: Date) =>
  */
 export async function POST(request: Request) {
     const traceId = randomUUID();
+    /** The probe's models and caller, hoisted for the catch. */
+    let refusalModelsForLog: Array<{ modelId: string; provider: string }> = [];
+    let refusalSubjectForLog: {
+        subjectKey: string;
+        userId: string | null;
+        plan: string | null;
+    } | null = null;
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
@@ -136,6 +147,15 @@ export async function POST(request: Request) {
             assertModelAccess(access, model);
             return model;
         });
+        refusalSubjectForLog = {
+            subjectKey: access.subjectKey,
+            userId: access.userId ?? null,
+            plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+        };
+        refusalModelsForLog = models.map((model) => ({
+            modelId: model.id,
+            provider: model.provider,
+        }));
 
         const webSearchMode = payload.webSearchMode ?? "off";
         const budgets = models.map((model) => {
@@ -166,12 +186,8 @@ export async function POST(request: Request) {
                 // the dispatch would give. Unreachable while every registered
                 // capability's ceiling is known, since `nativeSearchEnabled` is
                 // false for the ones without one.
-                throw new ChatAccessError(
-                    503,
-                    "WEB_SEARCH_COST_UNBOUNDED",
-                    "Web search is temporarily unavailable for this model.",
-                    undefined,
-                    { scope: nativeSearchReservation.reason }
+                throw webSearchCostRefusalError(
+                    nativeSearchReservation.reason
                 );
             }
             return createChatBudget(
@@ -392,6 +408,18 @@ export async function POST(request: Request) {
         }
         const accessResponse = chatErrorResponse(error);
         if (accessResponse) {
+            // This probe writes nothing by design -- no bucket, no credit. A
+            // refusal is the exception: it is the one thing here worth being
+            // able to look up afterwards, and it is a decision the probe made
+            // rather than usage it recorded.
+            await recordWebSearchCostRefusal(error, {
+                traceId,
+                phase: "availability_probe",
+                subjectKey: refusalSubjectForLog?.subjectKey ?? null,
+                userId: refusalSubjectForLog?.userId ?? null,
+                plan: refusalSubjectForLog?.plan ?? null,
+                models: refusalModelsForLog,
+            });
             accessResponse.headers.set("X-Request-ID", traceId);
             return accessResponse;
         }

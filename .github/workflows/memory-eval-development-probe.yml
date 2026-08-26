@@ -1,0 +1,143 @@
+name: Memory eval — development probe
+#
+# The step-7 probe: does a number from this pipeline mean anything?
+#
+# ############################################################################
+# # THIS WORKFLOW SPENDS MONEY. It makes one provider call per probe case.   #
+# # Manual dispatch only, with a typed confirmation, and never on push.      #
+# ############################################################################
+#
+# It is far cheaper than the decision-grade run — seventeen cases rather than
+# 1,150 — and it is the run that decides whether the expensive one is worth
+# dispatching. `mem-extract-v2` spent US$0.0056 to learn that its precision of
+# 0.12 meant nothing, because four contract defects were being measured at
+# once. Everything since was written so a number would mean something, and
+# this is where that gets checked.
+#
+# Why here rather than a local shell
+# (docs/ops/memory-extraction-decision-grade-run.md §2.5, and the same reasons
+# apply at any price):
+#
+#   * the checkout is clean by construction, so the artifact's commitSha names
+#     a real commit — a run from a deployed container reports "unknown" and is
+#     refused before it spends;
+#   * the key is a repository secret rather than a shell history;
+#   * the artifact is preserved by the platform.
+#
+# There is a fourth reason this workflow exists at all: the agent container's
+# egress proxy refuses api.openai.com at the CONNECT tunnel, so a live run
+# cannot be issued from there however good the credentials are.
+#
+# **This run cannot produce evidence.** The probe set is `development` and far
+# below the §12.2 floor of
+# docs/policy/external-conversation-import-and-memory.md, so `judgeEvalV2`
+# refuses a pass at any quality and the artifact records
+# `decisionGrade: false`. What it answers is whether the answers can be read.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Pair under probe"
+        required: true
+        default: gpt-5-6-luna
+      run_label:
+        description: "Names the artifact — probe1, probe2…"
+        required: true
+        default: probe1
+      max_cost_usd:
+        description: "Per-run ceiling in USD. May only narrow the approved budget."
+        required: true
+        default: "1"
+      confirm:
+        description: "Type SPEND to confirm this dispatch will call a paid provider"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-eval-development-probe
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Development probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Confirm the spend
+        if: inputs.confirm != 'SPEND'
+        run: |
+          echo "::error::confirm must be exactly SPEND. Nothing was run."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The workflow file has to exist on the default branch for GitHub to
+      # offer it at all, so it lives on `main` while the script it calls lives
+      # on `develop`. Dispatching with the default ref therefore selects a
+      # branch that cannot run it, and `npm run` would answer "Missing script"
+      # — a message that says nothing about which branch to pick.
+      - name: The selected ref can run this
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts ?? {};
+            if (!("probe:memory-extraction" in scripts)) {
+              console.log(
+                "::error::This branch does not carry probe:memory-extraction. " +
+                  "Re-dispatch with Branch: develop, or a branch that has it."
+              );
+              process.exit(1);
+            }
+            // The live path loads `memoryExtractionWorker`, which imports
+            // `server-only`. Without this flag every case fails with a module
+            // error before a single request — which is what the first live
+            // probe did. It cost no money and a run.
+            if (!scripts["probe:memory-extraction"].includes("--conditions=react-server")) {
+              console.log(
+                "::error::probe:memory-extraction does not run under the server " +
+                  "condition. Every case would fail on server-only."
+              );
+              process.exit(1);
+            }
+          '
+
+      # Everything that can refuse for free refuses here, before the key is
+      # ever put in front of a provider. The smoke probe is one of them: it
+      # exercises the whole chain against a stub, so a wiring fault costs
+      # nothing rather than seventeen calls.
+      - name: Preconditions
+        run: |
+          npm run check:memory-extraction-eval
+          npm run probe:memory-extraction
+
+      - name: Live probe (this is the step that spends)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          mkdir -p artifacts
+          npm run probe:memory-extraction -- \
+            --live \
+            --model='${{ inputs.model }}' \
+            --json=artifacts/mem-probe-${{ inputs.run_label }}.json \
+            --max-cost-usd='${{ inputs.max_cost_usd }}'
+
+      # Before anything that can fail: a run that paid must not lose its
+      # records because a later step exited non-zero.
+      - name: Preserve the artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mem-probe-${{ inputs.run_label }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 90

@@ -76,6 +76,7 @@
     "report:product-key-backfill": "node --conditions=react-server --import tsx scripts/report-product-key-backfill.mjs",
     "maintenance:memory-search-terms": "node --import tsx scripts/backfill-memory-search-terms.mjs",
     "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
+    "probe:memory-extraction": "node --conditions=react-server --import tsx scripts/probeMemoryExtractionDevelopment.mjs",
     "eval:memory-extraction": "node --conditions=react-server --import tsx scripts/evalImportedMemoryExtraction.mjs",
     "eval:router-quality": "node --conditions=react-server --import tsx scripts/eval-router-quality.mjs",
     "postinstall": "prisma generate",
