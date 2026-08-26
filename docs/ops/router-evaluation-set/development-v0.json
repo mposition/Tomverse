@@ -125,7 +125,13 @@
     "reserve items and these notes are outside it on purpose: this file has to",
     "stay editable after the freeze, so \"frozen\" had to mean something a later",
     "run can test rather than something the file asserts about itself. A pilot",
-    "run recomputes it and refuses if it moved."
+    "run recomputes it and refuses if it moved.",
+    "",
+    "pilotReady is true as of the freeze: mposition declaring the pool finished,",
+    "which is what turns a short cell from work in progress into an error. It is",
+    "not permission to run. purpose stays \"development\", so --mode=decision still",
+    "refuses this file outright, and the cost approval, the judge model and the",
+    "seed are all still outstanding."
   ],
   "items": [
     {
@@ -8384,5 +8390,5 @@
     }
   ],
   "proposedPilotCellTarget": 14,
-  "pilotReady": false
+  "pilotReady": true
 }
