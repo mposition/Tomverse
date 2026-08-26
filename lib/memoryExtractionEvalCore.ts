@@ -544,6 +544,24 @@ export function decideEvalRunMode(input: {
      * `lib/memoryEvalLegacyDataset.ts` instead, which is not a live run.
      */
     datasetSchemaVersion?: number | null;
+    /**
+     * What the dataset is for.
+     *
+     * `decision` is the default and the only value that can produce evidence.
+     * `development` exists for one step: the probe that checks the numbers are
+     * readable before a sample is frozen and 1,150 paid calls rest on it. A
+     * development set is expected to still be moving, so `dataset_not_frozen`
+     * does not apply to it.
+     *
+     * That is the ONLY gate this relaxes. The pair still has to be runnable
+     * and funded, the key still has to exist, the commit still has to be
+     * nameable, the schema still has to be 2, and the run cap still cannot
+     * exceed the approval. And the artifact a development run produces is
+     * `decisionGrade: false`, which
+     * `scripts/check-memory-eval-run-admissibility.mjs` discards as evidence —
+     * so nothing here can turn an unfrozen sample into a verdict.
+     */
+    datasetPurpose?: "decision" | "development";
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -559,7 +577,7 @@ export function decideEvalRunMode(input: {
     const budget = input.registerEntry.evalBudget;
     if (!budget) return { mode: "refused", reason: "no_eval_budget" };
     if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
-    if (!input.datasetFrozen) {
+    if (!input.datasetFrozen && input.datasetPurpose !== "development") {
         return { mode: "refused", reason: "dataset_not_frozen" };
     }
     if (input.datasetSchemaVersion !== MEMORY_EVAL_DATASET_SCHEMA_VERSION) {
