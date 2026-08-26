@@ -298,7 +298,7 @@ async function expectComposerContract(page: Page, label: string) {
   return geometry;
 }
 
-test.describe("Mobile composer: the textarea owns its row", () => {
+test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" }, () => {
   for (const width of MOBILE_WIDTHS) {
     test(`${width}px keeps a full-width input line beside a partial-support chip`, async ({
       page,
@@ -442,7 +442,7 @@ test.describe("Mobile composer: the textarea owns its row", () => {
   });
 });
 
-test.describe("Mobile composer: disabled actions state their reason", () => {
+test.describe("Mobile composer: disabled actions state their reason", { tag: "@ui-risk" }, () => {
   test("a blocked send names why, not just 'Send'", async ({ page }) => {
     // `title` alone reaches neither a screen reader nor a keyboard user, so
     // the reason is rendered as text the button points at.
@@ -467,7 +467,7 @@ test.describe("Mobile composer: disabled actions state their reason", () => {
   });
 });
 
-test.describe("Mobile composer: two chips at once", () => {
+test.describe("Mobile composer: two chips at once", { tag: "@ui-risk" }, () => {
   // Web search *and* a pending deep-research job is the widest tool state the
   // composer can be in. The chips wrap onto a second chip row; what they must
   // never do is wrap into -- or scroll across -- the input row.
@@ -493,7 +493,7 @@ test.describe("Mobile composer: two chips at once", () => {
   }
 });
 
-test.describe("Mobile composer: input remains reviewable", () => {
+test.describe("Mobile composer: input remains reviewable", { tag: "@ui-risk" }, () => {
   test("Korean text and an in-flight IME composition stay fully visible", async ({
     page,
   }) => {
@@ -578,7 +578,7 @@ test.describe("Mobile composer: input remains reviewable", () => {
   });
 });
 
-test.describe("Mobile composer: keyboard, zoom and text scaling", () => {
+test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
   test("an on-screen keyboard does not collapse the input row", async ({ page }) => {
     await enterMobileComposer(page, { viewport: { width: 390, height: 680 } });
     await page.getByTestId("chat-textarea").click();
@@ -733,7 +733,7 @@ const guestTextFile = (name = "guest-notes.txt") => ({
   bytes: Array.from(Buffer.from("Compare these two approaches.", "utf8")),
 });
 
-test.describe("Mobile composer: guest attachments", () => {
+test.describe("Mobile composer: guest attachments", { tag: "@ui-risk" }, () => {
   const openActions = async (page: Page) => {
     await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
   };
@@ -866,7 +866,7 @@ test.describe("Mobile composer: guest attachments", () => {
   });
 });
 
-test.describe("Mobile composer: visual record", () => {
+test.describe("Mobile composer: visual record", { tag: "@ui-risk" }, () => {
   // The before/after screenshots the change checklist asks reviewers to
   // compare, pinned as goldens so the next change has to update them
   // deliberately.
