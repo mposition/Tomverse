@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { getWeightedUsageCredits, type AiModel } from "@/lib/models";
 import type { DeepResearchDepth } from "@/lib/perplexityDeepResearch";
+import { DEEP_RESEARCH_DEFAULT_DEPTH } from "@/lib/deepResearchSuggestion";
 
 const DEPTHS: DeepResearchDepth[] = ["quick", "standard", "deep"];
 
@@ -33,7 +34,12 @@ export function DeepResearchSetupSheet({
   hasDraftText,
 }: DeepResearchSetupSheetProps) {
   const { t } = useLanguage();
-  const [depth, setDepth] = useState<DeepResearchDepth>("standard");
+  // Shared with the expansion offer under a finished answer, which starts a
+  // run without asking for a depth and must not therefore start a different
+  // amount of work than this sheet opens on.
+  const [depth, setDepth] = useState<DeepResearchDepth>(
+    DEEP_RESEARCH_DEFAULT_DEPTH
+  );
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
