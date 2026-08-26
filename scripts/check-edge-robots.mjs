@@ -150,7 +150,8 @@ if (canonical) {
   // Content-Signal is checked across the whole served file, not our half, and
   // the rule is "one meaning" rather than "one line".
   //
-  // While Cloudflare's managed block cannot be turned off (§4a), production
+  // While Cloudflare's managed block cannot be turned off
+  // (docs/ops/search-indexing-boundary.md §4a), production
   // declares this twice: once from their block, once from ours. That is not a
   // second policy owner -- ours is the copy that survives if their block ever
   // goes -- and it is harmless only for as long as the two agree. The Content
