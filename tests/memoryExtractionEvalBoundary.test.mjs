@@ -203,9 +203,10 @@ test("only a funded, open pair can run live, and it is named", () => {
     );
     assert.equal(funded.status, "candidate");
     assert.ok(funded.evalBudget, "the runnable pair is the funded one");
-    // Probe-scoped. A decision-grade run needs its own approval, and this
-    // number is what says the difference is real rather than intended.
-    assert.equal(funded.evalBudget.maxUsd, 1);
+    // Decision-grade, raised from the probe's US$1 on 2026-08-26. Pinned
+    // rather than range-checked: a budget that drifts upward without this
+    // line moving is a budget nobody approved for the figure it became.
+    assert.equal(funded.evalBudget.maxUsd, 15);
 
     assert.ok(
         MEMORY_EXTRACTION_EVAL_REGISTER.some(
