@@ -23,6 +23,10 @@ type Integrity = {
   keyEntryCounts: number[];
   /** Leading entries, oldest first, that no available key opens. */
   unverifiedPrefix: number;
+  /** Every entry that did not verify, oldest first, bounded. */
+  unverifiedIds: string[];
+  /** Failing entries beyond the ones listed. */
+  unverifiedIdsTruncated: number;
   message: string;
 };
 
@@ -33,6 +37,8 @@ type Diagnosis = {
   keysTried: number;
   /** Each match names the field that differs; the key is a position, never a value. */
   matches: Array<{ label: string; keyPosition: number }>;
+  /** The row names an actor by address but carries no user id. */
+  actorIdMissingWithEmail: boolean;
 };
 
 /** The identifying half of an audit row. Not its metadata, which can be large. */
@@ -49,33 +55,44 @@ type AuditEntry = {
 /**
  * What a failure means, in the reader's terms.
  *
- * The distinction that matters is not where the first failure is but how many
- * entries at the head of the chain no key opens, because a changed signing key
- * invalidates a *contiguous span*. Two earlier versions of this got it wrong in
- * the same direction, each time by reading `firstInvalidIsOldest` as though it
- * carried information it does not.
+ * Three attempts, each corrected by a chain the previous one described wrongly.
  *
- * The first said "nothing has verified under any available key" whenever the
- * oldest row failed. On 2026-08-25 staging that sentence appeared beside 115 of
- * 116 entries verified — the operator had just recovered the chain and the
- * screen denied it.
+ * The first branched on "the first failure is the oldest row" and said
+ * *nothing has verified under any available key*. Staging then came back 115
+ * of 116 verified and the panel announced that nothing had.
  *
- * The second called any oldest-row failure an unlisted earlier *span*. That is
- * right for a real epoch and wrong for this chain: the 2026-08-16 audit
- * recorded 53 entries verifying, so the span containing that oldest row holds
- * 53 entries, and 52 of them verify today. A missing key cannot leave its own
- * span 52/53 opened. One row failing while everything after it verifies is a
- * row whose stored content no longer reproduces its hash, and saying "add a key"
- * to that sends the reader looking for something that does not exist.
+ * The second called any oldest-row failure an unlisted earlier *span*. The
+ * 2026-08-16 audit recorded 53 entries verifying, so that span holds 53 rows
+ * and 52 of them verify -- which a missing key cannot do.
  *
- * So the prefix size decides: the whole chain, several entries, or exactly one.
+ * The third said "only the chain's first entry does not verify, and every
+ * entry after it does" whenever the unverified *prefix* was one. An hour
+ * later nine entries were failing, eight of them past the prefix, and that
+ * sentence was simply false about the chain in front of it.
+ *
+ * The lesson each time is the same: a sentence about the whole chain cannot
+ * be chosen from one statistic about part of it. So the prefix decides the
+ * *shape* of the story and the failure count decides whether that story is
+ * the whole of it -- and when it is not, the reading says so and stops,
+ * because scattered failures after a verified run are not a key problem and
+ * there is nothing honest to add without looking at the rows.
  */
 function auditIntegrityReading(integrity: Integrity): string {
-  if (integrity.unverifiedPrefix === 0) {
-    return "Entries at the start of the chain verified, so a changed signing key does not explain this on its own.";
-  }
+  const scattered = integrity.invalidEntries - integrity.unverifiedPrefix;
   if (integrity.verifiedEntries === 0) {
     return "Nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
+  }
+  if (scattered > 0) {
+    // Entries interleaved with verified ones. No key boundary produces that,
+    // so naming a key here would send the reader somewhere there is nothing.
+    const head =
+      integrity.unverifiedPrefix > 0
+        ? `The oldest ${integrity.unverifiedPrefix.toLocaleString()} ${integrity.unverifiedPrefix === 1 ? "entry does" : "entries do"} not verify, and ${scattered.toLocaleString()} later ${scattered === 1 ? "entry does" : "entries do"} not either`
+        : `${scattered.toLocaleString()} ${scattered === 1 ? "entry does" : "entries do"} not verify, scattered among entries that do`;
+    return `${head}. Entries that fail among entries that pass are not a signing-key boundary — a key change invalidates a contiguous run. Something has rewritten these rows since they were signed. Diagnose them below, newest first: a row that verified recently bounds the window it changed in.`;
+  }
+  if (integrity.unverifiedPrefix === 0) {
+    return "Entries at the start of the chain verified, so a changed signing key does not explain this on its own.";
   }
   if (integrity.unverifiedPrefix === 1) {
     return "Only the chain's first entry does not verify, and every entry after it does. A changed signing key invalidates a contiguous span rather than a single row, so this points at that entry's stored content rather than at a missing key — open it and compare it against the change it describes.";
@@ -114,8 +131,8 @@ export function AdminAuditIntegrityPanel() {
   const [loading, setLoading] = useState(false);
   const [entry, setEntry] = useState<AuditEntry | null>(null);
   const [entryLoading, setEntryLoading] = useState(false);
-  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
-  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<{ auditId: string; result: Diagnosis } | null>(null);
+  const [diagnosing, setDiagnosing] = useState<string | null>(null);
 
   const verify = async () => {
     setLoading(true);
@@ -141,7 +158,7 @@ export function AdminAuditIntegrityPanel() {
    * production secrets somewhere new on the way.
    */
   const diagnose = async (auditId: string) => {
-    setDiagnosing(true);
+    setDiagnosing(auditId);
     try {
       const response = await fetch(
         `/api/admin/audit/${encodeURIComponent(auditId)}/diagnose`,
@@ -153,14 +170,14 @@ export function AdminAuditIntegrityPanel() {
       if (!response.ok || !data?.diagnosis) {
         throw new Error(data?.error || "Could not diagnose this entry.");
       }
-      setDiagnosis(data.diagnosis);
+      setDiagnosis({ auditId, result: data.diagnosis });
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Could not diagnose this entry.",
         "error"
       );
     } finally {
-      setDiagnosing(false);
+      setDiagnosing(null);
     }
   };
 
@@ -255,17 +272,64 @@ export function AdminAuditIntegrityPanel() {
               >
                 Open in the audit log
               </a>
-              {!diagnosis ? (
-                <button
-                  type="button"
-                  data-testid="admin-audit-integrity-diagnose"
-                  onClick={() => void diagnose(integrity.firstInvalidId as string)}
-                  disabled={diagnosing}
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
-                >
-                  {diagnosing ? <Loader2 className="h-4 w-4 animate-spin" /> : null} What changed?
-                </button>
-              ) : null}
+              <button
+                type="button"
+                data-testid="admin-audit-integrity-diagnose"
+                onClick={() => void diagnose(integrity.firstInvalidId as string)}
+                disabled={diagnosing !== null}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
+              >
+                {diagnosing === integrity.firstInvalidId ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}{" "}
+                What changed?
+              </button>
+            </div>
+          ) : null}
+
+          {/* Every failing entry, not only the first.
+              Reporting one was enough while one failed. On 2026-08-26 nine
+              did -- eight of them rows that had verified an hour before -- and
+              the only one reachable was the oldest, which is the least
+              informative of the nine: a row that was fine an hour ago bounds
+              the window it changed in, and a row broken since July does not.
+              Newest first for the same reason. */}
+          {integrity.unverifiedIds.length > 1 ? (
+            <div
+              data-testid="admin-audit-integrity-unverified-list"
+              className="mt-3 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs"
+            >
+              <p className="font-black">
+                Every unverified entry, newest first
+                {integrity.unverifiedIdsTruncated > 0 ? (
+                  <> · {integrity.unverifiedIdsTruncated.toLocaleString()} more not listed</>
+                ) : null}
+              </p>
+              <ul className="mt-2 space-y-1">
+                {[...integrity.unverifiedIds].reverse().map((auditId) => (
+                  <li key={auditId} className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono break-all">{auditId}</span>
+                    <a
+                      href={`/admin/audit?entry=${encodeURIComponent(auditId)}`}
+                      className="underline decoration-red-400/50 underline-offset-2 hover:text-white"
+                    >
+                      open
+                    </a>
+                    <button
+                      type="button"
+                      data-testid="admin-audit-integrity-diagnose-one"
+                      onClick={() => void diagnose(auditId)}
+                      disabled={diagnosing !== null}
+                      className="inline-flex items-center gap-1 rounded-lg border border-red-400/30 px-2 py-0.5 font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
+                    >
+                      {diagnosing === auditId ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : null}
+                      what changed?
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
@@ -274,38 +338,53 @@ export function AdminAuditIntegrityPanel() {
               data-testid="admin-audit-integrity-diagnosis"
               className="mt-3 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs"
             >
+              <p className="font-mono opacity-70 break-all">{diagnosis.auditId}</p>
               {/* A match is proof, not a hint: the digest is reproduced
                   exactly, under content differing in one named field. So the
                   wording commits, and no-match commits to the opposite. */}
-              {diagnosis.matches.length === 0 ? (
-                <p>
+              {diagnosis.result.matches.length === 0 ? (
+                <p className="mt-1">
                   No single-field change reproduces this entry&apos;s hash.{" "}
-                  {diagnosis.candidatesTried.toLocaleString()} reconstructions were tried
-                  against {diagnosis.keysTried} key
-                  {diagnosis.keysTried === 1 ? "" : "s"}. More than one field
+                  {diagnosis.result.candidatesTried.toLocaleString()} reconstructions were
+                  tried against {diagnosis.result.keysTried} key
+                  {diagnosis.result.keysTried === 1 ? "" : "s"}. More than one field
                   differs from what was signed, or a field this does not vary
                   does, or it was signed with a key this environment no longer
                   has.
                 </p>
               ) : (
                 <>
-                  <p className="font-black">
+                  <p className="mt-1 font-black">
                     The hash is reproduced by content differing in one field:
                   </p>
                   <ul className="mt-1 space-y-0.5">
-                    {diagnosis.matches.map((match) => (
+                    {diagnosis.result.matches.map((match) => (
                       <li key={`${match.label}-${match.keyPosition}`} className="font-mono">
                         {match.label} <span className="opacity-70">(key {match.keyPosition})</span>
                       </li>
                     ))}
                   </ul>
                   <p className="mt-2 opacity-90">
-                    That is what changed since the entry was signed. Do not
-                    re-hash the row: rewriting an audit entry to satisfy its own
-                    checker ends what the chain proves.
+                    That is what changed since the entry was signed.
                   </p>
                 </>
               )}
+              {/* Not a match, and said separately because it is not one: a cuid
+                  is not a value any candidate set can try, so the id cannot be
+                  reconstructed. What can be said is which mechanism fits. */}
+              {diagnosis.result.actorIdMissingWithEmail ? (
+                <p data-testid="admin-audit-integrity-actor-fingerprint" className="mt-2 opacity-90">
+                  This row names an actor by address but carries no user id.
+                  That is what deleting a user leaves behind: `actorUserId` is
+                  in the hash and also a foreign key set to null on delete, so
+                  the database rewrote the row with no application code
+                  involved. The id it was signed with cannot be recovered.
+                </p>
+              ) : null}
+              <p className="mt-2 opacity-90">
+                Do not re-hash the row: rewriting an audit entry to satisfy its
+                own checker ends what the chain proves.
+              </p>
             </div>
           ) : null}
 

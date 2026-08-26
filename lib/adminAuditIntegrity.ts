@@ -36,6 +36,9 @@ import { prisma } from "@/lib/prisma";
  * are different answers rather than the same one.
  */
 
+/** How many failing ids a response carries. The counts stay exact. */
+const UNVERIFIED_IDS_REPORTED = 25;
+
 type Failure = {
   id: string;
   createdAt: string;
@@ -53,6 +56,8 @@ export async function verifyAdminAuditIntegrity() {
       verifiedEntries: 0,
       firstInvalidId: null as string | null,
       firstCheckedId: null as string | null,
+      unverifiedIds: [] as string[],
+      unverifiedIdsTruncated: 0,
       firstInvalidIsOldest: false,
       invalidEntries: 0,
       linkageBreaks: 0,
@@ -144,6 +149,25 @@ export async function verifyAdminAuditIntegrity() {
     linkageBreaks,
     firstInvalidId: firstInvalid?.id ?? null,
     firstCheckedId: rows[0]?.id ?? null,
+    /**
+     * Every entry that did not verify, oldest first, bounded.
+     *
+     * Reporting only the first was enough while one row failed. On
+     * 2026-08-26 nine did -- eight of them rows that had verified an hour
+     * earlier -- and the panel could still name and diagnose exactly one: the
+     * oldest, which is the least informative of the nine. A row that was fine
+     * an hour ago and is not now bounds the window it changed in; a row that
+     * has been broken since July does not.
+     *
+     * Bounded because a chain that fails wholesale would otherwise put every
+     * id it has into a response and a screen. The count above stays exact, so
+     * the cap shortens the list without softening the verdict.
+     */
+    unverifiedIds: failures.slice(0, UNVERIFIED_IDS_REPORTED).map((f) => f.id),
+    unverifiedIdsTruncated: Math.max(
+      0,
+      failures.length - UNVERIFIED_IDS_REPORTED
+    ),
     // Kept from the previous shape: the panel reads it to say whether a
     // changed key explains the failure on its own.
     firstInvalidIsOldest: Boolean(

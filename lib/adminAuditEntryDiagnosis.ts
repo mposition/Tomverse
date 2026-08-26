@@ -50,6 +50,20 @@ export type AdminAuditDiagnosis = {
   candidatesTried: number;
   keysTried: number;
   matches: AdminAuditDiagnosisMatch[];
+  /**
+   * The row names an actor by address but carries no user id.
+   *
+   * That is what `onDelete: SetNull` leaves behind: `actorUserId` is in the
+   * hash input and also a foreign key, so deleting a user makes the database
+   * null it on every audit row that user wrote, with no application code
+   * involved. `actorEmail` is a plain column and survives, which is why the
+   * pair is a fingerprint rather than a guess.
+   *
+   * Reported separately from `matches` because it is not one: the id cannot be
+   * reconstructed. A cuid is not a value any candidate set can try, so this
+   * says which mechanism fits without claiming to have reproduced the digest.
+   */
+  actorIdMissingWithEmail: boolean;
 };
 
 /** The input the verifier builds today, from the row exactly as stored. */
@@ -181,5 +195,7 @@ export function diagnoseAdminAuditEntry(
     candidatesTried: candidates.length,
     keysTried: keys.length,
     matches,
+    actorIdMissingWithEmail:
+      stored.actorUserId === null && Boolean(stored.actorEmail),
   };
 }

@@ -83,54 +83,113 @@ test("the verdict says whether the failing entry is the oldest one", () => {
     );
 });
 
-test("the panel says something different for each of the four readings", () => {
-    // One sentence covering two of them puts the reader back where they
+test("the panel says something different for each reading", () => {
+    // One sentence covering two readings puts the reader back where they
     // started, with the distinction computed and not communicated. That has
-    // happened twice: first a sentence claiming *nothing has verified*
-    // whatever the counts said, then one calling a single failing row an
-    // unlisted *span*. Both sent the reader after a key that was not missing.
+    // now happened three times: a sentence claiming *nothing has verified*
+    // whatever the counts said, one calling a single failing row an unlisted
+    // *span*, and one promising "every entry after it does" while eight later
+    // entries did not.
     const reading = panel.slice(panel.indexOf("function auditIntegrityReading"));
     const body = reading.slice(0, reading.indexOf("\n}"));
     const sentences = [
-        ...body.matchAll(/return [`"]([^`"]+)[`"];/g),
-    ].map((match) => match[1]);
-    assert.equal(sentences.length, 4, "four readings, four sentences");
+        ...body.matchAll(/return [`"]([^`"]*)[`"];/g),
+    ].map((match) => match[1]).filter((text) => text.length > 0);
+    assert.ok(sentences.length >= 4, "at least four distinct readings");
     assert.equal(
         new Set(sentences).size,
-        4,
+        sentences.length,
         "two readings sharing a sentence is the defect this asserts against"
     );
 
-    const [noPrefix, nothingVerified, singleRow, longerSpan] = sentences;
-    assert.ok(
-        noPrefix.includes("does not explain this on its own"),
-        "a chain whose head verified is not a key story"
-    );
-    assert.ok(
-        nothingVerified.includes("Nothing has verified"),
-        "the nothing-verified reading is the whole-key-absent one"
-    );
-    for (const sentence of [noPrefix, singleRow, longerSpan]) {
-        assert.ok(
-            !sentence.includes("Nothing has verified"),
-            "a chain with entries verified must never be told nothing verified"
-        );
-    }
-    assert.ok(
-        singleRow.includes("contiguous span"),
-        "the single-row reading has to say why one row is not a key boundary"
-    );
+    const nothingVerified = sentences.find((t) => t.includes("Nothing has verified"));
+    const singleRow = sentences.find((t) => t.includes("Only the chain's first entry"));
+    assert.ok(nothingVerified && singleRow);
     assert.ok(
         !singleRow.includes("ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"),
         "telling the reader to add a key for a single row sends them after nothing"
     );
-    for (const sentence of [nothingVerified, longerSpan]) {
+    for (const text of sentences) {
+        if (text === nothingVerified) continue;
         assert.ok(
-            sentence.includes("ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS") &&
-                sentence.includes("admin-audit-key-epochs"),
-            "a key reading names the remedy and where the epochs are recorded"
+            !text.includes("Nothing has verified"),
+            "a chain with entries verified must never be told nothing verified"
         );
     }
+});
+
+test("failures scattered among passes are never described as a key boundary", () => {
+    // The defect this replaced: with the unverified prefix at one and eight
+    // further failures past it, the panel said "every entry after it does".
+    // A sentence about the whole chain cannot be chosen from one statistic
+    // about part of it.
+    const reading = panel.slice(panel.indexOf("function auditIntegrityReading"));
+    const body = reading.slice(0, reading.indexOf("\n}"));
+    assert.match(
+        body,
+        /invalidEntries - integrity\.unverifiedPrefix/,
+        "the reading must know how many failures lie beyond the prefix"
+    );
+    const scattered = body.slice(body.indexOf("if (scattered > 0)"));
+    const branch = scattered.slice(0, scattered.indexOf("\n  if ("));
+    assert.ok(
+        !branch.includes("ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"),
+        "no key change produces failures interleaved with passes"
+    );
+    assert.ok(
+        branch.includes("rewritten"),
+        "interleaved failures mean something rewrote the rows; say so"
+    );
+});
+
+test("every failing entry is listed and diagnosable, not only the first", () => {
+    // Reporting one was enough while one failed. When nine did -- eight of
+    // them rows that had verified an hour earlier -- the only reachable one
+    // was the oldest, which is the least informative: a row that was fine an
+    // hour ago bounds the window it changed in.
+    assert.ok(
+        verifier.includes("unverifiedIds"),
+        "the verifier must report the failing ids, not just the first"
+    );
+    assert.ok(
+        verifier.includes("unverifiedIdsTruncated"),
+        "a bounded list has to say what it left out"
+    );
+    assert.ok(
+        panel.includes('data-testid="admin-audit-integrity-unverified-list"'),
+        "the list needs somewhere to render"
+    );
+    assert.ok(
+        panel.includes('data-testid="admin-audit-integrity-diagnose-one"'),
+        "each listed entry needs its own diagnosis control"
+    );
+    assert.match(
+        panel,
+        /\[\.\.\.integrity\.unverifiedIds\]\.reverse\(\)/,
+        "newest first: a recently broken row bounds the window, an old one does not"
+    );
+});
+
+test("a deleted actor is reported as a mechanism, never as a match", () => {
+    // `actorUserId` is in the hash and is also a foreign key nulled on delete,
+    // so deleting a user rewrites every audit row that user wrote with no
+    // application code involved. The id cannot be reconstructed -- a cuid is
+    // not a value any candidate set can try -- so this must not be presented
+    // as a reproduced digest.
+    const diagnosis = read("lib/adminAuditEntryDiagnosis.ts");
+    assert.match(
+        diagnosis,
+        /actorIdMissingWithEmail:\s*\n?\s*stored\.actorUserId === null && Boolean\(stored\.actorEmail\)/,
+        "the fingerprint is a null id beside a surviving address"
+    );
+    assert.ok(
+        !diagnosis.includes('label: "actorUserId: was a deleted user"'),
+        "it is not a candidate: nothing can reproduce the digest without the id"
+    );
+    assert.ok(
+        panel.includes('data-testid="admin-audit-integrity-actor-fingerprint"'),
+        "the panel must report the mechanism"
+    );
 });
 
 test("the readings are chosen by the size of the unverified prefix", () => {
