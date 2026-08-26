@@ -9,6 +9,7 @@ import {
   EVAL_CELLS,
   EVAL_STRATA,
   adoptedItems,
+  evalSampleDigest,
   evalSetProblems,
   uniformCellTargets,
 } from "../lib/routerQualityEvalSet.ts";
@@ -58,7 +59,15 @@ const developmentSet = (overrides = {}) => ({
   ...overrides,
 });
 
-const decisionSet = (overrides = {}) => ({
+// frozenDigest is derived rather than written in, so a test that changes the
+// items keeps testing what it changed instead of tripping the freeze check.
+// The drift tests set it by hand.
+const decisionSet = (overrides = {}) => {
+  const base = decisionSetFields(overrides);
+  return { frozenDigest: evalSampleDigest(base), ...base };
+};
+
+const decisionSetFields = (overrides = {}) => ({
   version: "router-eval-decision-v1",
   purpose: "decision",
   frozenAt: "2026-08-10T00:00:00.000Z",

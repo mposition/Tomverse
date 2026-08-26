@@ -15,6 +15,8 @@
  * neither check catches alone.
  */
 
+import { createHash } from "node:crypto";
+
 /** §2. Cells are managed independently; a short cell is not averaged away. */
 export const EVAL_STRATA = [
   "general_question_answering",
@@ -197,6 +199,16 @@ export type EvalSet = {
   purpose: "development" | "decision";
   frozenAt: string | null;
   frozenBy: string | null;
+  /**
+   * `evalSampleDigest` of the sample as it stood at the freeze, so the freeze
+   * can be checked rather than believed.
+   *
+   * Without it `frozenAt` records only that somebody typed a date. The set
+   * file stays editable afterwards -- it has to, since the reserve items and
+   * the notes live in the same file -- so "frozen" has to mean something a
+   * later run can test, not something the file asserts about itself.
+   */
+  frozenDigest?: string | null;
   baseline: EvalSetBaseline | null;
   /**
    * docs/ops/tomverse-chat-router-evaluation-set.md §11's "Strata and cell targets frozen" record. A human entry: filled when
@@ -351,9 +363,8 @@ export const evalSetProblems = (
   if (candidate.purpose !== "decision") return problems;
 
   // §7 and §4: everything a decision set needs beyond being well-formed.
-  if (!(isNonEmptyString(candidate.frozenAt) && isNonEmptyString(candidate.frozenBy))) {
-    problems.push("a decision set must carry a freeze record (who froze it, and when)");
-  }
+  const drift = freezeDrift(candidate as EvalSet);
+  if (drift) problems.push(drift);
   const unadopted = items.filter((item) => item.status !== "adopted");
   if (unadopted.length > 0) {
     problems.push(
@@ -392,6 +403,77 @@ export const evalSetProblems = (
 /** Adopted items only. A candidate is a proposal, not a member of the set. */
 export const adoptedItems = (set: EvalSet): readonly EvalSetItem[] =>
   set.items.filter((item) => item.status === "adopted");
+
+/**
+ * A fingerprint of what the frozen sample asks, for checking a set against its
+ * own freeze record.
+ *
+ * ## What it covers, and why not everything
+ *
+ * Only the adopted items, and of those only the fields that decide what a
+ * model is handed: the id it is filed under, its cell, its language, the
+ * prompt, the shape of any attachment, and whether web search was requested.
+ * Those are what a run's numbers are attributable to, so a change to any of
+ * them makes the run a measurement of a different thing.
+ *
+ * Deliberately excluded: `notes`, `adoptedBy`, `adoptedAt`, `draftProvenance`,
+ * and every candidate item. Fixing a typo in a reviewer's note, or drafting a
+ * replacement into the reserve, does not change what the sample asks -- and a
+ * digest that flagged it would be turned off within a week, which is the
+ * failure mode of a check that cries wolf.
+ *
+ * A candidate flipping to adopted, or an adopted item flipping back, does
+ * change the digest: `adoptedItems` filters on status, so membership is part
+ * of the fingerprint without status needing to be hashed.
+ */
+export const evalSampleDigest = (set: EvalSet): string => {
+  const sample = adoptedItems(set)
+    .map((item) => ({
+      id: item.id,
+      stratum: item.stratum,
+      cell: item.cell,
+      language: item.language,
+      prompt: item.prompt,
+      // Array.isArray rather than `?? []`: `evalSetProblems` reaches here with
+      // a set it has already found malformed, and a digest that throws would
+      // replace a list of problems with a stack trace.
+      attachments: (Array.isArray(item.attachments) ? item.attachments : []).map(
+        (attachment) => attachment?.mediaType ?? null
+      ),
+      webSearchRequested: item.webSearchRequested === true,
+    }))
+    // Sorted so a reordering of the file is not a change to the sample. The
+    // ids are unique, so this is a total order.
+    .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  return `sha256:${createHash("sha256").update(JSON.stringify(sample)).digest("hex")}`;
+};
+
+/**
+ * Why the set no longer matches its freeze record, or null if it does.
+ *
+ * Separated from the callers because both `evalSetProblems` and
+ * `decisionRunRefusals` need the same answer phrased the same way, and a set
+ * that drifted after freezing should read identically whichever one caught it.
+ */
+export const freezeDrift = (set: EvalSet): string | null => {
+  if (!(isNonEmptyString(set.frozenAt) && isNonEmptyString(set.frozenBy))) {
+    return "the set carries no freeze record, so there is no moment its contents are pinned to";
+  }
+  if (!isNonEmptyString(set.frozenDigest)) {
+    return (
+      `the freeze record (${set.frozenAt}, ${set.frozenBy}) carries no digest, so nothing ` +
+      `distinguishes the set that was frozen from the set as it stands now`
+    );
+  }
+  const now = evalSampleDigest(set);
+  if (set.frozenDigest !== now) {
+    return (
+      `the sample has changed since it was frozen at ${set.frozenAt}: ` +
+      `frozen as ${set.frozenDigest}, now ${now}`
+    );
+  }
+  return null;
+};
 
 /**
  * Cell targets covering every cell of every stratum at the same size.
@@ -478,6 +560,11 @@ export const decisionRunRefusals = (set: EvalSet): readonly string[] => {
   if (!set.baseline?.modelId) {
     refusals.push("no baseline is pre-registered, so there is nothing to compare against");
   }
+  // The one condition the other four cannot stand in for: every one of them
+  // reads the set as it is now, and all four can be satisfied by a set edited
+  // this morning. This one asks whether it is still the set that was frozen.
+  const drift = freezeDrift(set);
+  if (drift) refusals.push(drift);
   return refusals;
 };
 

@@ -27,6 +27,7 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { evaluationRecordProblems } from "../lib/routerQualityEvalCore.ts";
 import {
   cellFill,
+  freezeDrift,
   evalSetProblems,
   unrecordedProvenanceItems,
 } from "../lib/routerQualityEvalSet.ts";
@@ -131,10 +132,16 @@ const checkSet = (path) => {
           `by ${baseline.preRegisteredBy ?? "nobody named"}, catalogue ${baseline.catalogueVersion ?? "unpinned"}`
       : "\n       no baseline pre-registered — a run against this set would have nothing to beat"
   );
+  // freezeDrift, not `set.frozenAt`: a date in the file says a person typed
+  // one, and the question a reader has is whether the set still holds what was
+  // frozen. Reported for a development set too -- it is not a failure there,
+  // but it is the same fact, and a check that only mentions drift once it is
+  // fatal teaches nobody to look for it.
+  const drift = freezeDrift(set);
   console.log(
-    set.frozenAt
-      ? `       frozen ${set.frozenAt} by ${set.frozenBy ?? "nobody named"}`
-      : "       not frozen"
+    drift
+      ? `       ${drift}`
+      : `       frozen ${set.frozenAt} by ${set.frozenBy}, sample digest verified`
   );
 
   // A drafted item recording provider "unrecorded" satisfies the schema while

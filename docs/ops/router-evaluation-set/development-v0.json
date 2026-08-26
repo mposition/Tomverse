@@ -1,8 +1,9 @@
 {
   "version": "router-eval-development-v0",
   "purpose": "development",
-  "frozenAt": null,
-  "frozenBy": null,
+  "frozenAt": "2026-08-26T08:22:51Z",
+  "frozenBy": "mposition",
+  "frozenDigest": "sha256:cdb307958ed3a713fa7d1c85a3d67be9f65ba2875a299f46f4d271db2106a096",
   "baseline": {
     "modelId": "gpt-5-6-luna",
     "catalogueVersion": "1e5d6058762d9d43cfb14297d2d85da5799907d9",
@@ -117,7 +118,14 @@
     "not recorded at the time and is not reconstructable, so they carry",
     "provider \"unrecorded\": a guessed drafter would look checkable and would not",
     "be. They are marked so a reviewer can weigh them differently, or reject them",
-    "for that reason alone."
+    "for that reason alone.",
+    "",
+    "frozenDigest is sha256 over what the 210 adopted items ask -- id, cell,",
+    "language, prompt, attachment shape, web-search flag -- sorted by id. The",
+    "reserve items and these notes are outside it on purpose: this file has to",
+    "stay editable after the freeze, so \"frozen\" had to mean something a later",
+    "run can test rather than something the file asserts about itself. A pilot",
+    "run recomputes it and refuses if it moved."
   ],
   "items": [
     {
