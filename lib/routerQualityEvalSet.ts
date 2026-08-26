@@ -437,6 +437,50 @@ export type CellFill = {
  * shortfall is an error, because during collection every cell is short and
  * that is not a failure.
  */
+/**
+ * Why a decision run must be refused, or an empty list if it may proceed.
+ *
+ * `evalSetProblems` already refuses a decision set that is unfrozen, still
+ * holds candidates, declares no cell targets or pre-registers no baseline.
+ * Two things it does not say, and both decide whether a *run* is the pilot
+ * that was designed:
+ *
+ *   - `pilotReady` is the flag a person sets to mean "measure this now". The
+ *     runner never read it, so setting it or not made no difference.
+ *   - A cell holding MORE than its target is as wrong as one holding less.
+ *     Collection overshoots on purpose -- spare candidates cover review
+ *     rejections -- and a run that takes all of them silently reweights the
+ *     strata and resizes an n that
+ *     docs/ops/tomverse-chat-router-evaluation-set.md §3 fixes in advance.
+ *
+ * Kept out of `evalSetProblems` because that answers "is this set usable",
+ * which a set with spare adopted items still is. This answers "is this run
+ * the pre-registered one", which is a different question with a different
+ * answer.
+ */
+export const decisionRunRefusals = (set: EvalSet): readonly string[] => {
+  const refusals: string[] = [];
+  if (set.pilotReady !== true) {
+    refusals.push(
+      `the set does not say it is ready: pilotReady is ${JSON.stringify(set.pilotReady ?? null)}, not true`
+    );
+  }
+  if ((set.cellTargets ?? []).length === 0) {
+    refusals.push("cellTargets is empty, so no cell has a frozen target to match");
+  }
+  for (const cell of cellFill(set)) {
+    if (cell.adopted !== cell.target) {
+      refusals.push(
+        `${cell.stratum}/${cell.cell} holds ${cell.adopted} adopted against a target of ${cell.target}`
+      );
+    }
+  }
+  if (!set.baseline?.modelId) {
+    refusals.push("no baseline is pre-registered, so there is nothing to compare against");
+  }
+  return refusals;
+};
+
 export const cellFill = (set: EvalSet): readonly CellFill[] => {
   const frozen = new Map(
     (set.cellTargets ?? []).map((target) => [`${target.stratum}/${target.cell}`, target.target])

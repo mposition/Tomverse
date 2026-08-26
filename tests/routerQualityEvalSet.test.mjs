@@ -250,10 +250,29 @@ test("the committed candidate pool is well formed and covers every cell", () => 
       assert.ok(covered.has(`${stratum}/${cell}`), `the pool has no item for ${stratum}/${cell}`);
     }
   }
-  // §8: a model-drafted pool is a candidate pool. Nothing here is adopted, and
-  // adoption is not something this repository can perform.
-  assert.equal(adoptedItems(set).length, 0);
-  assert.ok(set.items.every((entry) => entry.status === "candidate"));
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8: a model-drafted pool is
+  // a candidate pool, and adoption is a human act. This used to assert that
+  // nothing was adopted, which held only until a person adopted something --
+  // it fixed a state rather than the rule. The rule is that an adopted item
+  // names who adopted it and when; an agent writing `adopted` has no adopter
+  // to name, so the assertion still catches exactly what it was for.
+  for (const entry of set.items) {
+    assert.ok(
+      entry.status === "candidate" || entry.status === "adopted",
+      `${entry.id} has status ${entry.status}`
+    );
+    if (entry.status === "adopted") {
+      assert.ok(entry.adoptedBy, `${entry.id} is adopted but names no adopter`);
+      assert.ok(entry.adoptedAt, `${entry.id} is adopted but records no date`);
+    } else {
+      assert.equal(entry.adoptedBy, null, `${entry.id} is a candidate but names an adopter`);
+      assert.equal(entry.adoptedAt, null, `${entry.id} is a candidate but records a date`);
+    }
+  }
+  assert.equal(
+    adoptedItems(set).length,
+    set.items.filter((entry) => entry.status === "adopted").length
+  );
 });
 
 // The gate check is the thing an operator runs before citing a report, so its

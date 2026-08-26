@@ -62,7 +62,7 @@ import {
   requiredSampleSize,
   seededRandom,
 } from "../lib/routerQualityEvalCore.ts";
-import { adoptedItems, evalSetProblems } from "../lib/routerQualityEvalSet.ts";
+import { adoptedItems, decisionRunRefusals, evalSetProblems } from "../lib/routerQualityEvalSet.ts";
 
 const argValue = (name, fallback) => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -72,6 +72,7 @@ const argValue = (name, fallback) => {
 const mode = argValue("mode", "pilot");
 const setPath = argValue("set", "");
 const baselineModelId = argValue("baseline", "");
+const allowCandidates = process.argv.includes("--allow-candidates");
 const judgeModelId = argValue("judge", "");
 const seed = Number(argValue("seed", "")) || 0;
 const jsonPath = argValue("json", "");
@@ -279,7 +280,55 @@ const routerInputFor = (item) => {
   };
 };
 
-const items = adoptedItems(evaluationSet).length > 0 ? adoptedItems(evaluationSet) : evaluationSet.items;
+// Which items a run may bill against, decided before anything is sent.
+//
+// This used to read: adopted items if there are any, otherwise every item in
+// the set. Three ways that goes wrong, each of which bills:
+//
+//   - Nothing adopted yet, so it runs the whole candidate pool -- a pool that
+//     grew to 234 during collection, against a pilot designed for 210.
+//   - Some cells adopted and others not, so it runs whatever happens to be
+//     ready and reports it as the pilot. The strata are the design; a subset
+//     of them measures something the pre-registration never described.
+//   - `pilotReady` never consulted at all, so the flag a person sets to say
+//     "this set is ready to be measured" had no effect on whether it was.
+//
+// A decision run now refuses unless the set says it is ready, every cell holds
+// exactly its frozen target, and a baseline is pre-registered. Exploratory
+// modes still run, but never by silently falling back to candidates: that
+// needs --allow-candidates, said out loud.
+const adopted = adoptedItems(evaluationSet);
+
+if (mode === "decision") {
+  const refusals = decisionRunRefusals(evaluationSet);
+  if (refusals.length > 0) {
+    die(
+      `\nA decision run is refused. It is the only mode that produces ROUTE-01\n` +
+        `evidence, so it runs on the set that was pre-registered or not at all.\n\n` +
+        refusals.map((reason) => `  - ${reason}`).join("\n") +
+        `\n\nNothing was sent and nothing was billed.`
+    );
+  }
+}
+
+let items;
+if (adopted.length > 0) {
+  items = adopted;
+} else if (allowCandidates) {
+  items = evaluationSet.items;
+  console.log(
+    `  NOTE: no item is adopted, so this runs ${items.length} candidate(s) because\n` +
+      "        --allow-candidates was given. Candidates are unreviewed."
+  );
+} else {
+  die(
+    `\nNo item in the set is adopted, and this run would otherwise bill against\n` +
+      `all ${evaluationSet.items.length} candidate(s) -- unreviewed prompts, in whatever\n` +
+      `number collection happens to have reached.\n\n` +
+      `  Adopt the items first, or pass --allow-candidates to run them knowingly.`
+  );
+}
+
 const planned = limit > 0 ? items.slice(0, limit) : items;
 
 console.log(`Router quality evaluation — ${mode} run`);
