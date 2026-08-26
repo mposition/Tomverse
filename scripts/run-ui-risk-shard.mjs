@@ -21,15 +21,28 @@ import { spawnSync } from "node:child_process";
  *   desktop-chromium  18m51s test step, 20m15s job  (81% of budget)
  *   mobile-chromium   11m08s test step, 14m16s job  (57% of budget)
  *
- * So the seam has one move left in it. Desktop is the project to watch: the
- * two are not symmetric in cost even though they run the same test list, and
- * desktop has under five minutes of headroom. File-level sharding within a
- * project is the next step, and on this measurement it is due rather than
- * hypothetical -- do it before adding to the tier again, not after the first
- * timeout. Re-measure from the job's own step durations rather than a local
- * run: this container measured desktop at 13m56s, well under CI.
+ * 81% is not headroom, so the workflow now passes `--shard=i/N` through to
+ * Playwright and runs each project in two shards -- the file-level split the
+ * earlier version of this comment named as the next step. This script needed
+ * no change for it: everything after the project flag is forwarded verbatim,
+ * which is what `process.argv.slice(2)` below is for.
  *
- * `npm run test:e2e:ui-risk` still runs both, so local use is unchanged.
+ * Two shards, not more, and measured rather than assumed. `--shard` divides
+ * by test count and not by work; e2e.yml records a three-way split where the
+ * counts matched and the work did not, because skips are not spread evenly.
+ * Desktop's two shards ran 7m38s (349 passed, 20 skipped) and 6m51s (306
+ * passed, 33 skipped) against 13m56s unsharded on the same machine -- a 53/47
+ * split, so the slowest shard is ~55% of the whole. That puts desktop's CI
+ * test step near 10m and its job near half the budget. A third shard would
+ * buy less than this one did and cost another runner.
+ *
+ * Desktop is still the project to watch: the two are not symmetric in cost
+ * even though the tag selects the same list in both. Re-measure from the
+ * job's own step durations rather than a local run -- this container measured
+ * desktop at 13m56s where CI measured 18m51s.
+ *
+ * `npm run test:e2e:ui-risk` still runs both projects unsharded, so local use
+ * is unchanged.
  */
 
 const PROJECTS = ["desktop-chromium", "mobile-chromium"];

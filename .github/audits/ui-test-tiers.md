@@ -11,7 +11,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 |---|---|---|---|---|
 | PR static | `pr-fast-gate.yml` | `npm run check:accent-tokens` (UI-012 역할 token 강제) | 모든 PR | 예 |
 | PR contract | `pr-fast-gate.yml` | `npm run test:e2e:smoke` (`--grep=@smoke`, `desktop-chromium`) | 모든 PR | 예 |
-| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk` (`--grep=@ui-risk`, `desktop-chromium` + `mobile-chromium`) | 모든 PR | 예 |
+| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk:shard -- --shard=i/2` (`--grep=@ui-risk`, `desktop-chromium` + `mobile-chromium` × 2 shard = 4 job) | 모든 PR | 예 |
 | Main regression | `e2e.yml` | `npm run test:e2e:chromium` (필터 없음) | `main` push | 아니오 |
 | Nightly visual | `nightly-visual-regression.yml` | `npm run test:e2e:visual -- --retries=0` | 매일 | 아니오 |
 | Nightly full | `daily-security-audit.yml` | `npm run test:e2e:run` (chromium + webkit, 필터 없음) | 매일 | 아니오 |
@@ -122,11 +122,33 @@ tier 소속으로 읽기 때문입니다.
 | mobile-chromium | 11분 08초 | 14분 16초 | 57% |
 
 **같은 test 목록을 돌리는데도 두 project의 비용이 대칭이 아니고, desktop은
-남은 여유가 5분이 안 됩니다.** project 분할은 이제 한 수 남았습니다 —
-`scripts/run-ui-risk-shard.mjs`가 예고한 파일 단위 샤딩은 이 실측 기준으로
-가정이 아니라 **다음에 tier를 늘리기 전에 해야 할 일**입니다. 첫 timeout을
-보고 하는 것이 아니라 그 전에 합니다. 로컬 값은 근거로 쓰지 않습니다(이
-컨테이너의 desktop 측정은 13분 56초로 CI보다 한참 낮았습니다).
+남은 여유가 5분이 안 됐습니다.** 81%는 여유가 아니고, 그 상태가 사는 실패는
+이 job이 `build-and-e2e`에서 분리돼 나온 바로 그 실패입니다 — 모든 test가
+통과하는 중에 timeout이 나서, 제품에 대해 아무 말도 안 하는 빨간 required
+check가 됩니다.
+
+그래서 같은 변경에서 **project마다 shard 2개**로 나눴습니다(2 × 2 = 4 job).
+`scripts/run-ui-risk-shard.mjs`가 예고한 파일 단위 샤딩이며, 스크립트는 고칠
+것이 없었습니다 — project flag 뒤의 인자를 그대로 Playwright에 넘깁니다.
+
+**shard 수는 추측이 아니라 실측입니다.** `--shard`는 test count로 나누지
+work로 나누지 않고, `e2e.yml`이 개수는 맞는데 work는 안 맞았던 3분할을
+기록해 두었습니다(skip이 고르게 퍼지지 않기 때문). 그래서 desktop을 실제로
+갈라 재 봤습니다.
+
+| Shard | 시간 | passed | skipped |
+|---|---|---|---|
+| 1/2 | 7분 38초 | 349 | 20 |
+| 2/2 | 6분 51초 | 306 | 33 |
+| (분할 없음) | 13분 56초 | 654 | 53 |
+
+53/47로 갈리므로 느린 shard가 전체의 약 55%입니다. CI 기준 desktop의 test
+단계는 10분 근처, job은 예산의 절반 근처가 됩니다. shard를 하나 더 늘려도
+이번만큼 얻지 못하면서 runner만 하나 더 씁니다.
+
+로컬 값은 예산 판단의 근거로 쓰지 않습니다 — 이 컨테이너의 desktop 측정은
+13분 56초로 CI의 18분 51초보다 한참 낮았습니다. 위 표는 **비율**을 정하는
+데만 씁니다.
 
 합류한 것: `chat-keyboard-policy` · `chat-tools` · `comparison-action-rail` ·
 `comparison-rate-limit` · `credit-entitlement-disclosure` ·

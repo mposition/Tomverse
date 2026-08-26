@@ -12,14 +12,18 @@ name: PR Fast Gate
 # # open PR waiting forever on a check that no longer exists.                #
 # ############################################################################
 #
-# The build-and-e2e job runs two Playwright tiers: the @smoke contract set and
-# the @ui-risk layout/accessibility set (UI-008). Neither is the full suite --
-# see .github/audits/ui-test-tiers.md for what runs where.
+# Two Playwright tiers run here, in two jobs: build-and-e2e runs the @smoke
+# contract set, and ui-risk runs the @ui-risk layout/accessibility set
+# (UI-008) as a matrix over both Chromium projects and two shards each.
+# Neither tier is the full suite -- see .github/audits/ui-test-tiers.md for
+# what runs where.
 #
-# secret-scan, static-and-unit and build-and-e2e run concurrently; fast-gate
-# waits for all three and fails unless every one of them succeeded. Nothing
-# merges on a green fast-gate that did not pass all three, and no upstream
-# job can go green by being skipped -- see the aggregation step.
+# secret-scan, static-and-unit, build-and-e2e and ui-risk run concurrently;
+# fast-gate waits for all four and fails unless every one of them succeeded.
+# A matrix job's result is the roll-up of its shards, so all four of ui-risk's
+# must pass for it to count as one success. Nothing merges on a green
+# fast-gate that did not pass all four, and no upstream job can go green by
+# being skipped -- see the aggregation step.
 
 on:
   pull_request:
@@ -634,29 +638,54 @@ jobs:
   # test still passing -- a red required check that said nothing about the
   # product. Raising the number alone would only move the same cliff.
   #
-  # Sharded by project because that is the seam the tests already have: the
-  # two Chromium projects are independent browser configurations, the split is
-  # almost exactly even (244 each), and a failure names the viewport class it
-  # belongs to rather than an arbitrary shard index. Each shard builds its own
-  # copy rather than sharing an artifact -- the shards run concurrently, so the
-  # cost is runner time, not wall clock, and it keeps this job independent of
+  # Split first by project, because that is the seam the tests already have:
+  # the two Chromium projects are independent browser configurations, the tag
+  # selects the same list in both, and a failure names the viewport class it
+  # belongs to rather than an arbitrary index. Each job builds its own copy
+  # rather than sharing an artifact -- they run concurrently, so the cost is
+  # runner time, not wall clock, and it keeps this job independent of
   # build-and-e2e's success.
+  #
+  # Then split each project in two, which is the file-level sharding the
+  # earlier note said would be the next step. It became due on 2026-08-26,
+  # when the tier went from 34 files to 51 (1,416 tests, 708 per project) as
+  # every contract spec the PR gate did not run joined it. Measured on that
+  # run, unsharded, against this job's 25-minute budget:
+  #
+  #   desktop-chromium  18m51s test step, 20m15s job  (81% of budget)
+  #   mobile-chromium   11m08s test step, 14m16s job  (57%)
+  #
+  # 81% is not headroom, and the failure mode it buys is the one this job was
+  # split out of build-and-e2e to escape: a timeout mid-run with every test
+  # passing, a red required check that says nothing about the product.
+  #
+  # Two shards, not more. `--shard` divides by test count and not by work --
+  # e2e.yml records a three-way split where the counts matched and the work
+  # did not, because skips are not spread evenly. So this was measured rather
+  # than assumed: desktop's two shards ran 7m38s (349 passed, 20 skipped) and
+  # 6m51s (306 passed, 33 skipped), a 53/47 split of a 13m56s unsharded run
+  # on the same machine. The slowest shard is ~55% of the whole, which puts
+  # desktop's CI test step near 10m and the job near half its budget. A third
+  # shard would buy less than this one did and cost another runner.
   #
   # The full 63-golden visual matrix stays out of the PR tier -- it runs
   # unfiltered on main push and nightly.
   ui-risk:
-    name: High-risk UI regression checks (${{ matrix.project }})
+    name: High-risk UI regression checks (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
-    # Each shard: install, build, then ~half of the tier. 25 minutes is well
+    # Each job: install, build, then a quarter of the tier. 25 minutes is well
     # above the measured work so a slow runner does not fail a passing suite,
     # while still bounding a hung Playwright web server.
     timeout-minutes: 25
     strategy:
-      # One shard's failure must not cancel the other: the second result is
-      # what tells a reviewer whether the defect is viewport-specific.
+      # One job's failure must not cancel its siblings: the other results are
+      # what tell a reviewer whether the defect is viewport-specific, and
+      # cancelling them turns one red spec into an unreadable run.
       fail-fast: false
       matrix:
         project: [desktop-chromium, mobile-chromium]
+        shard: [1, 2]
+        shards: [2]
     env:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
@@ -756,14 +785,14 @@ jobs:
         timeout-minutes: 20
         env:
           UI_RISK_PROJECT: ${{ matrix.project }}
-        run: npm run test:e2e:ui-risk:shard
+        run: npm run test:e2e:ui-risk:shard -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence
         if: failure()
         timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
-          name: pr-fast-gate-ui-risk-${{ matrix.project }}-${{ github.run_id }}
+          name: pr-fast-gate-ui-risk-${{ matrix.project }}-${{ matrix.shard }}-${{ github.run_id }}
           path: |
             test-results
             playwright-report
