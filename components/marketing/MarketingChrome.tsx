@@ -288,7 +288,7 @@ export function MarketingHeader({
         {/*
           FINAL-F004: the brand used to be the only shrinkable item in this
           row, so the language switcher's 10.5rem cap pushed it down to 60px
-          at 320px and the `truncate` collapsed "Tomverse Review" to "T.".
+          at 320px and the `truncate` collapsed the brand to "T.".
           The brand is now shrink-0 and drops the qualifier (never a partial
           word) on narrow viewports, while the switcher absorbs the shrink.
           The logo is decorative here, so its alt is empty and the link's
@@ -317,9 +317,13 @@ export function MarketingHeader({
               to a fragment, so the link keeps its accessible name and the logo
               still reads as home. FINAL-F004's "never a partial word" contract
               is preserved: the word is either whole or absent.
+
+              There used to be two spans here, a short one and a wide one, and
+              the only difference between them was the `Review` qualifier. The
+              brand is the platform now, so there is one word at every width
+              and the pair collapsed into this line.
             */}
-            <span className="max-[240px]:sr-only sm:hidden">Tomverse</span>
-            <span className="hidden sm:inline">Tomverse Review</span>
+            <span className="max-[240px]:sr-only">Tomverse</span>
           </span>
         </Link>
         <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 lg:flex">
@@ -475,7 +479,7 @@ export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/tomverse-logo.png" alt="Tomverse" className="h-full w-full object-cover" />
           </span>
-          <span className="font-bold text-zinc-700 dark:text-zinc-300">Tomverse Review</span>
+          <span className="font-bold text-zinc-700 dark:text-zinc-300">Tomverse</span>
           <span>© 2026</span>
         </div>
         <nav className="flex flex-wrap gap-4">

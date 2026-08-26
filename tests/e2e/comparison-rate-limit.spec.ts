@@ -84,7 +84,7 @@ async function mockRateLimitedPreflight(page: Page): Promise<RateLimitWorld> {
 const toast = (page: Page) => page.getByTestId("app-toast");
 const textarea = (page: Page) => page.getByTestId("chat-textarea");
 
-test.describe("a rate-limited comparison", () => {
+test.describe("a rate-limited comparison", { tag: "@ui-risk" }, () => {
   test("tells a Korean guest how long to wait, with the Trace ID", async ({
     page,
   }, testInfo) => {

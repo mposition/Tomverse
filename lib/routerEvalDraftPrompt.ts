@@ -1,0 +1,418 @@
+/**
+ * The instruction a drafting model is given, and what comes back from it.
+ *
+ * ## Why this is a versioned, hashed template rather than a string in a script
+ *
+ * §8 of `docs/ops/tomverse-chat-router-evaluation-set.md` makes a drafted item
+ * a candidate because *"a set drafted by a routable model measures how well
+ * that model handles its own phrasing"*. That is a confound the reviewer has
+ * to weigh, and weighing it means knowing what the drafter was asked. A
+ * template that lives inline and changes silently between batches makes two
+ * batches incomparable while looking identical in the record.
+ *
+ * So the template is versioned, hashed, and the hash goes on every item.
+ * Change the wording and the hash changes, which is the point.
+ *
+ * ## The Korean rule is enforced here, not left to the prompt
+ *
+ * docs/ops/tomverse-chat-router-evaluation-set.md §2:
+ * *"Korean is a first-class cell in every stratum, not a translation of the
+ * English one. Translated prompts measure translation quality, not Korean
+ * usage."* A drafting model handed an English list and asked for Korean will
+ * translate, because that is the easier task and nothing in the request
+ * distinguishes it. The template therefore never shows the model the other
+ * cell's items, and `draftInstruction` refuses to build a request that would.
+ *
+ * Pure: template construction and response parsing. The script does the I/O.
+ */
+
+import { createHash } from "node:crypto";
+
+import { EVAL_CELLS, type EvalStratum } from "./routerQualityEvalSet.ts";
+
+/**
+ * v2 replaced two qualitative rules with counted ones, because v1's produced
+ * neither thing it asked for. Wave 1 drafted 14 Korean prompts of which 7
+ * shared one sentence frame with the nouns swapped -- the failure "count as
+ * one prompt" was written to prevent -- and neither cell produced a single
+ * short prompt, though "some short" was asked for outright. Only the English
+ * cell produced prompts carrying a real constraint.
+ *
+ * A drafter satisfies "vary the length" by believing it already has. A quota
+ * it can count against is the difference, so the rules now name numbers
+ * derived from the batch size, and the frame rule states a cap rather than an
+ * accounting convention the drafter has no reason to apply to itself.
+ */
+/**
+ * v3 gave `coding` and `current_information` the stratum line each was
+ * missing, on evidence from Wave 2.
+ *
+ * Seven of coding/en's fourteen prompts said "this function", "this
+ * template", "this query" with nothing attached. Both systems answering such
+ * a prompt reply by asking for the code, so the item measures clarification
+ * behaviour rather than routing. The cell's own seeds inline their code; the
+ * instruction never said to. `document_and_attachment`, whose stratum line
+ * does say it, returned fourteen self-contained prompts out of fourteen --
+ * the line is the whole difference.
+ *
+ * Five of current_information/en's turned on values that move hourly: a spot
+ * price, today's mortgage rate, last weekend's box office, live dealership
+ * stock. Needing current information is what the stratum is for, but the set
+ * is frozen and re-run against a baseline, and an item whose correct answer
+ * changes between runs cannot be compared across them. The cell's seed shows
+ * the form that works: current, citable, and steady for months.
+ */
+/**
+ * v4 settled a conflict between two v2 rules, and gave two more strata the
+ * line Wave 3 showed they needed.
+ *
+ * The conflict: `long_context_conversation` is told to carry the earlier
+ * conversation the request depends on, and was also told that some prompts
+ * must be a single sentence with no second request attached. Both cannot
+ * hold, and the cheapest way to satisfy the second is to drop the history --
+ * which is what the Korean cell did. One prompt read "아까 말하신 두 번째
+ * 프로세스는…" and named no process, so both systems would answer by asking
+ * which one. The short quota is now lifted for that stratum rather than left
+ * to fight the thing the stratum exists to measure.
+ *
+ * `analysis_and_reasoning` came back twelve-fourteenths software engineering
+ * -- cloud cost, caching, scaling, migrations. The stratum measures
+ * multi-step reasoning, not a technical field, and the Korean cell of the
+ * previous wave had ranged over deposits, exam prep, tax and supply chains.
+ * A pool that narrow could tilt the comparison it exists to make.
+ *
+ * `current_information` anchored three prompts to 2024 and 2025 while the
+ * year was 2026: a drafter treats its own training horizon as the present,
+ * and a literal year turns "what is current" into "what was true then".
+ */
+export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v4";
+
+/**
+ * What each stratum is for, in the drafter's terms.
+ *
+ * Taken from the "why it is separate" column of
+ * docs/ops/tomverse-chat-router-evaluation-set.md §2 rather than reworded, so
+ * the drafter is aiming at the thing the stratum exists to measure.
+ */
+export const STRATUM_BRIEF: Readonly<Record<EvalStratum, string>> = {
+  general_question_answering:
+    "everyday questions a person asks an assistant: explanations, how-things-work, " +
+    "practical advice. This is the default path and the largest share of real traffic.",
+  writing_and_rewriting:
+    "asking for text to be written, rewritten, shortened, or changed in tone. " +
+    "Style-sensitive work, where differences between models are most visible.",
+  coding:
+    "programming questions where an answer is right or wrong and can be checked: " +
+    "write this, fix this, explain why this fails.",
+  analysis_and_reasoning:
+    "multi-step reasoning, comparison, trade-off analysis, or working through a " +
+    "problem that cannot be answered by recall alone.",
+  translation_cross_language:
+    "translation and cross-language work, where the request itself mixes languages.",
+  current_information:
+    "questions that need up-to-date facts the model cannot know from training, so " +
+    "a web search is required to answer them well.",
+  document_and_attachment:
+    "questions asked about an attached document or image, where the attachment " +
+    "carries the content and the prompt asks something of it.",
+  long_context_conversation:
+    "requests that arrive late in a long conversation and depend on what came " +
+    "before, so the prompt must carry that history.",
+};
+
+export type DraftRequest = {
+  stratum: EvalStratum;
+  cell: string;
+  count: number;
+  /**
+   * Prompts already in this cell. Sent so the drafter avoids repeating them,
+   * never so it can translate them: a cross-cell list is refused below.
+   */
+  avoid: readonly string[];
+};
+
+/**
+ * A drafter from a family that is also a routing candidate -- the confound
+ * named by docs/ops/tomverse-chat-router-evaluation-set.md §8.
+ */
+export const isRoutableFamily = (provider: string, routableProviders: readonly string[]): boolean =>
+  routableProviders.includes(provider);
+
+export function draftInstruction(request: DraftRequest): string {
+  if (!EVAL_CELLS[request.stratum]?.includes(request.cell)) {
+    throw new Error(`"${request.cell}" is not a cell of ${request.stratum}.`);
+  }
+  if (!Number.isInteger(request.count) || request.count < 1) {
+    throw new Error("count must be a whole number of at least 1.");
+  }
+
+  const isCrossLanguage = request.cell === "ko-en";
+  const language = isCrossLanguage
+    ? "Korean, asking for something in English"
+    : request.cell === "ko"
+      ? "Korean"
+      : "English";
+
+  // Counted, not exhorted: see DRAFT_TEMPLATE_VERSION. Both scale with the
+  // batch so a smaller batch is not asked for more short prompts than it has.
+  const wantsShortPrompts = request.stratum !== "long_context_conversation";
+  const shortQuota = Math.max(2, Math.round(request.count / 4));
+  const constraintQuota = Math.max(2, Math.round(request.count / 3));
+
+  const lines = [
+    "You are drafting candidate questions for an evaluation set that compares two",
+    "answering systems on the SAME question. You are not answering anything.",
+    "",
+    `Write ${request.count} distinct prompts for this category:`,
+    "",
+    `  ${request.stratum} — ${STRATUM_BRIEF[request.stratum]}`,
+    "",
+    `Language: ${language}.`,
+  ];
+
+  if (request.cell === "ko") {
+    lines.push(
+      "",
+      "Write them AS A KOREAN SPEAKER WOULD ASK THEM. Do not translate an English",
+      "question. A translated prompt measures translation quality rather than how",
+      "the systems handle Korean, which is the opposite of what this cell is for.",
+      "Draw on situations, institutions and references a Korean user would actually",
+      "bring — not the Korean words for an American example."
+    );
+  }
+  if (isCrossLanguage) {
+    lines.push(
+      "",
+      "The prompt is written in Korean and asks for output in English. The mix is",
+      "the point: it is what the language signal has to survive."
+    );
+  }
+
+  lines.push(
+    "",
+    "Rules:",
+    "- Each prompt is something a real person would send, not a benchmark item.",
+    "- Vary the FORM, not just the topic. AT MOST TWO prompts may share a sentence",
+    "  frame. A third built on the same frame with the nouns swapped is a repeat,",
+    `  not a new prompt. Across ${request.count} prompts, expect several different openings.`,
+    // Not asked of long_context_conversation: see DRAFT_TEMPLATE_VERSION. A
+    // prompt in that stratum has to carry the conversation it depends on, and
+    // "one sentence, nothing attached" is satisfied most easily by deleting
+    // exactly that.
+    ...(wantsShortPrompts
+      ? [
+          `- AT LEAST ${shortQuota} must be SHORT: a single sentence, no second request attached,`,
+          "  the way someone types when they are in a hurry.",
+        ]
+      : []),
+    `- AT LEAST ${constraintQuota} must carry a real constraint the answer has to respect — a`,
+    "  budget, a deadline, a tool that is not available, something already tried and",
+    '  failed. "Explain X" is not a constraint.',
+    "- No personal data, no credentials, no customer-identifying content, no real",
+    "  names of private individuals. Not even invented ones that look real.",
+    "- Do not include the answer, a rubric, or any note about which model should",
+    "  handle it. The prompt is all that is wanted."
+  );
+
+  if (request.stratum === "coding") {
+    lines.push(
+      "- Include the code the prompt is about, inline, whenever the prompt refers",
+      "  to any. \"Fix this function\" with no function attached is answerable only",
+      "  by asking for it, which is not what this category measures."
+    );
+  }
+  if (request.stratum === "current_information") {
+    lines.push(
+      "- These must genuinely require current information. A question answerable",
+      "  from general knowledge belongs in another category.",
+      "- Ask for something current that stays true for months and can be checked",
+      "  against a citable source: a released version, a recommended practice, a",
+      "  published rule, a decision that was taken. NOT a value that moves by the",
+      "  hour — a live price, today's rate, this weekend's figures, current stock.",
+      "  Those have a different right answer at every run, so the same item cannot",
+      "  be compared between runs.",
+      "- Do not write a literal year. Say \"current\", \"the latest\", \"most recently\".",
+      "  A year you believe is the present may already be past by the time anyone",
+      "  runs the item, and then it asks about history rather than about now."
+    );
+  }
+  if (request.stratum === "document_and_attachment") {
+    lines.push(
+      "- Write the prompt as though a document or image is attached, and say what",
+      "  kind it is. The set records the attachment's media type, never a file."
+    );
+  }
+  if (request.stratum === "long_context_conversation") {
+    lines.push(
+      "- Include the earlier conversation the request depends on, then the request.",
+      "  Without the history the prompt is not in this category. Referring to it is",
+      "  not including it: \"the second process you mentioned\" names no process, and",
+      "  a system can only answer by asking which one. State the facts the request",
+      "  turns on, in the prompt, however long that makes it."
+    );
+  }
+  if (request.stratum === "analysis_and_reasoning") {
+    lines.push(
+      "- Range across walks of life, not one field. This category is about reasoning",
+      "  in several steps, not about any subject; fourteen prompts all set in software",
+      "  engineering, or all in personal finance, measure that subject instead."
+    );
+  }
+
+  if (request.avoid.length > 0) {
+    lines.push(
+      "",
+      "Already in this cell — do not repeat these, and do not write variants of them:",
+      ...request.avoid.map((prompt) => `- ${prompt.replace(/\s+/g, " ").slice(0, 200)}`)
+    );
+  }
+
+  lines.push(
+    "",
+    "Return ONLY a JSON array of objects, no prose around it:",
+    '  [{"prompt": "..."}, ...]',
+    `Exactly ${request.count} objects.`
+  );
+
+  return lines.join("\n");
+}
+
+export const templateHash = (instruction: string): string =>
+  createHash("sha256").update(instruction, "utf8").digest("hex").slice(0, 16);
+
+/**
+ * The prompts in a drafter's reply.
+ *
+ * Models wrap JSON in prose and in code fences whatever the instruction says,
+ * so the array is located rather than assumed to be the whole body. Anything
+ * that is not an object with a non-empty `prompt` string is dropped and
+ * counted: a short batch a person can see is better than a padded one they
+ * cannot.
+ */
+/**
+ * Read the entries of a JSON array out of `text`, one at a time, without
+ * requiring the array to be closed.
+ *
+ * A reply cut off by the output cap is not malformed prose -- it is a correct
+ * array missing its tail. `JSON.parse` rejects the whole thing, so a single
+ * truncated entry discards thirteen good ones that were already paid for.
+ * This walks the text instead, closing over each complete `{...}` or bare
+ * string and parsing it on its own.
+ */
+function readArrayEntries(text: string, start: number): { entries: unknown[]; closed: boolean } {
+  const entries: unknown[] = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let entryStart = -1;
+
+  for (let index = start + 1; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') {
+        inString = false;
+        // A bare string entry: the value is the string itself.
+        if (depth === 0 && entryStart >= 0) {
+          try {
+            entries.push(JSON.parse(text.slice(entryStart, index + 1)));
+          } catch {
+            // Unreadable despite looking complete. Left out; the caller counts
+            // the shortfall against what was asked for.
+          }
+          entryStart = -1;
+        }
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      if (depth === 0 && entryStart < 0) entryStart = index;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      if (depth === 0) entryStart = index;
+      depth += 1;
+      continue;
+    }
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0 && entryStart >= 0) {
+        try {
+          entries.push(JSON.parse(text.slice(entryStart, index + 1)));
+        } catch {
+          // As above.
+        }
+        entryStart = -1;
+      }
+      continue;
+    }
+    if (character === "]") {
+      if (depth === 0) return { entries, closed: true };
+      depth -= 1;
+      if (depth === 0 && entryStart >= 0) {
+        try {
+          entries.push(JSON.parse(text.slice(entryStart, index + 1)));
+        } catch {
+          // As above.
+        }
+        entryStart = -1;
+      }
+    }
+  }
+
+  return { entries, closed: false };
+}
+
+export function parseDraftedPrompts(body: string): {
+  prompts: readonly string[];
+  dropped: number;
+  /**
+   * The array was never closed -- the reply stops mid-way, which for a model
+   * asked for a fixed number of items means the output cap was reached. The
+   * caller should say so rather than reporting a short batch as if the model
+   * simply wrote fewer.
+   */
+  truncated: boolean;
+} {
+  const text = typeof body === "string" ? body : "";
+  const start = text.indexOf("[");
+  if (start < 0) return { prompts: [], dropped: 0, truncated: false };
+
+  let entries: unknown[] | null = null;
+  let truncated = false;
+
+  const end = text.lastIndexOf("]");
+  if (end > start) {
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+      if (Array.isArray(parsed)) entries = parsed;
+    } catch {
+      // Fall through to the entry-by-entry read below.
+    }
+  }
+
+  if (entries === null) {
+    const salvaged = readArrayEntries(text, start);
+    entries = salvaged.entries;
+    truncated = !salvaged.closed;
+    if (entries.length === 0) return { prompts: [], dropped: 0, truncated };
+  }
+
+  const prompts: string[] = [];
+  let dropped = 0;
+  for (const entry of entries) {
+    const prompt =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && typeof (entry as { prompt?: unknown }).prompt === "string"
+          ? (entry as { prompt: string }).prompt
+          : null;
+    if (prompt && prompt.trim() !== "") prompts.push(prompt.trim());
+    else dropped += 1;
+  }
+  return { prompts, dropped, truncated };
+}

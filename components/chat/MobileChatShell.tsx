@@ -191,6 +191,8 @@ type MobileChatShellProps = {
   onSelectionModeChange?: (next: boolean) => void;
   /** §14. Passed straight through to the composer's tools menu. */
   assistantProfile?: ChatAssistantProfile | null;
+  /** ISO time this conversation's assistant was deleted, if it was. */
+  assistantProfileRemovedAt?: string | null;
   assistantProfileOptions?: ChatAssistantProfileOption[];
   onAssistantProfileChange?: (profileId: string | null) => void;
   onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
@@ -298,6 +300,7 @@ export function MobileChatShell({
   selectionModePending,
   onSelectionModeChange,
   assistantProfile,
+  assistantProfileRemovedAt,
   assistantProfileOptions,
   onAssistantProfileChange,
   onMemoryModeChange,
@@ -924,7 +927,7 @@ export function MobileChatShell({
         because the header already shows the brand mark; this is the structure,
         not a second copy of it.
       */}
-      <h1 className="sr-only">Tomverse Review</h1>
+      <h1 className="sr-only">Tomverse</h1>
       <header
         ref={headerRef}
         data-testid="mobile-chat-header"
@@ -1417,6 +1420,7 @@ export function MobileChatShell({
             selectionModePending={selectionModePending}
             onSelectionModeChange={onSelectionModeChange}
             assistantProfile={assistantProfile}
+            assistantProfileRemovedAt={assistantProfileRemovedAt}
             assistantProfileOptions={assistantProfileOptions}
             onAssistantProfileChange={onAssistantProfileChange}
             onMemoryModeChange={onMemoryModeChange}

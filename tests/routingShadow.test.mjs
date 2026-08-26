@@ -165,3 +165,41 @@ test("with the flag off, scheduling does not even build the input", () => {
     }, {});
     assert.equal(built, 0);
 });
+
+/**
+ * A shadow row is a routing decision about a real turn, so it belongs to that
+ * turn's conversation exactly as the dispatch row does.
+ *
+ * These two fields were dropped on the floor. `RoutingRun` gained
+ * `conversationId` and `productKey` so a run could be attributed to a product,
+ * and only `beginInstrumentedDispatch` was taught to write them -- because
+ * `docs/policy/routing-run-product-attribution.md` §5 adopted writer coverage
+ * on the stated ground that there is exactly one writer, and there were two.
+ * A staging run found it: every `mode='shadow'` row carried nulls while the
+ * `mode='manual'` row beside it, two seconds earlier and from the same turn,
+ * carried the conversation.
+ */
+test("a shadow decision carries the conversation and product it ran for", () => {
+    const decision = buildRoutingShadowDecision(
+        input({ conversationId: "conv-1", productKey: "review" })
+    );
+    assert.equal(decision.conversationId, "conv-1");
+    assert.equal(decision.productKey, "review");
+});
+
+/**
+ * Null is the honest answer twice over, and neither is a gap.
+ *
+ * A guest turn has no conversation row to read a product from, and a
+ * conversation written before `productKey` existed has none stored -- §6 of
+ * the same policy refuses to infer one nobody recorded. What must not happen
+ * is the field going missing from the row entirely, because a column that is
+ * sometimes absent cannot be counted.
+ */
+test("a shadow decision with no conversation records null, not nothing", () => {
+    const decision = buildRoutingShadowDecision(input());
+    assert.equal(decision.conversationId, null);
+    assert.equal(decision.productKey, null);
+    assert.ok("conversationId" in decision);
+    assert.ok("productKey" in decision);
+});

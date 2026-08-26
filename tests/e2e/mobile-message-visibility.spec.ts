@@ -175,7 +175,7 @@ function reportMetrics(label: string, metrics: ShellMetrics) {
   );
 }
 
-test.describe("ChatMessageList visible height (multi-model, steady state)", () => {
+test.describe("ChatMessageList visible height (multi-model, steady state)", { tag: "@ui-risk" }, () => {
   test("390x680 keeps at least a third of the shell for the answers", async ({
     page,
   }) => {
@@ -261,7 +261,7 @@ test.describe("ChatMessageList visible height (multi-model, steady state)", () =
 // The bands that gave the space back, each pinned to what it must still say.
 // ===========================================================================
 
-test.describe("Composer tool status", () => {
+test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
   test("partial web-search support stays legible in a row of its own", async ({
     page,
   }) => {
@@ -412,7 +412,7 @@ test.describe("Composer tool status", () => {
   });
 });
 
-test.describe("AI and security disclaimer", () => {
+test.describe("AI and security disclaimer", { tag: "@ui-risk" }, () => {
   const disclaimer = (page: Page) => page.getByTestId("chat-ai-disclaimer-mobile");
   const details = (page: Page) => page.getByTestId("chat-ai-disclaimer-details");
 
@@ -493,7 +493,7 @@ test.describe("AI and security disclaimer", () => {
   });
 });
 
-test.describe("Answer canvas protections", () => {
+test.describe("Answer canvas protections", { tag: "@ui-risk" }, () => {
   test("an on-screen keyboard collapses the rail but keeps the composer usable", async ({
     page,
   }) => {

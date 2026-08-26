@@ -52,7 +52,7 @@ async function startNewChat(page: Page) {
   }
 }
 
-test("saving the combination persists it for the next new chat and across a reload", async ({
+test("saving the combination persists it for the next new chat and across a reload", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
@@ -193,7 +193,7 @@ test("saving the combination persists it for the next new chat and across a relo
   await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
 });
 
-test("the finder can be closed mid-flow without completing it", async ({ page }) => {
+test("the finder can be closed mid-flow without completing it", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.goto("/chat?lang=ko");
 
@@ -209,7 +209,7 @@ test("the finder can be closed mid-flow without completing it", async ({ page })
   await expect(finder).toBeHidden();
 });
 
-test("using the combination for this conversation only does not save it as the account default", async ({
+test("using the combination for this conversation only does not save it as the account default", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
@@ -235,7 +235,7 @@ test("using the combination for this conversation only does not save it as the a
   expect(saveRequestCount).toBe(0);
 });
 
-test("selecting two models suggests one complementary model instead of the full questionnaire", async ({
+test("selecting two models suggests one complementary model instead of the full questionnaire", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
@@ -272,7 +272,7 @@ test("selecting two models suggests one complementary model instead of the full 
   await expect(suggestedOption).toHaveAttribute("aria-pressed", "false");
 });
 
-test("the picker shows a compact re-recommend link once the model cap is reached", async ({
+test("the picker shows a compact re-recommend link once the model cap is reached", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);

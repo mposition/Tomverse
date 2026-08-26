@@ -829,13 +829,21 @@ Decision-grade 표본 하한은 **범주별로 다릅니다** [개정 · 2026-08
 arm당 200개로 돌아갑니다. 이것은 문서상의 약속이 아니라
 `tests/memoryExtractionEvalCore.test.mjs`가 강제하는 상태입니다.
 
-1. `lib/memoryValidatorProbeCorpus.ts`의 `MUST_REFUSE`가 ②③④ 각 범주와 **양쪽
+1. `lib/memoryValidatorProbeCorpus.ts`의 `MUST_REJECT`가 ②③④ 각 범주와 **양쪽
    언어 arm**을 모두 덮고, 전건이 `bulkSafe: false`일 것.
-2. 같은 corpus의 `MUST_ACCEPT`가 비어 있지 않고 전건 통과할 것 — 조이는 방향의
-   변경이 기능을 조용히 죽이지 않았음을 같은 실행에서 보일 것.
-3. 규칙이 판정할 수 없는 모양은 `NEEDS_JUDGEMENT`에 남기고 단언하지 않을 것.
+2. 같은 corpus의 `MUST_ACCEPT_BULK`가 비어 있지 않고 전건 bulk-safe로 통과할 것
+   — 조이는 방향의 변경이 기능을 조용히 죽이지 않았음을 같은 실행에서 보일 것.
+3. **[개정 · 2026-08-25]** `MUST_REQUIRE_SENSITIVE_REVIEW`가 비어 있지 않고,
+   전건이 **추출되되 bulk-safe가 아닐 것**. 두 방향을 한 실행에서 함께 보입니다
+   — 추출조차 되지 않으면 recall 실패이고, bulk-safe로 통과하면 안전성
+   실패입니다. 한쪽만 단언하면 건강 정보를 아예 거절하는 validator도 조건을
+   통과합니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §3.5).
+4. 규칙이 판정할 수 없는 모양은 `NEEDS_JUDGEMENT`에 남기고 단언하지 않을 것.
    이 목록이 비면 "규칙이 다 판단한다"는 뜻이 되며, 그것은 사실이 아닙니다.
-4. 위 셋이 PR Fast Gate에서 실행될 것.
+5. 위 넷이 PR Fast Gate에서 실행될 것.
+
+세 목록은 **양쪽 언어 arm을 각각** 덮어야 합니다. 완화가 arm 단위이므로 한쪽
+언어만 덮은 목록은 다른 arm의 하한을 사 주지 못합니다.
 
 이 완화의 근거는 §12.3이 처음부터 **두 개의 독립한 증거**를 요구했다는 것입니다
 — eval에서 관측 0건, 그리고 결정적 validator 테스트. 2026-08-23 이전에는 뒤쪽
@@ -882,7 +890,22 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 
 ### 12.5 첫 승인 후보 pair와 eval 예산 (§23 항목 4)
 
-- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v1)`입니다.** 선정 근거:
+- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v3)`입니다**
+  [개정 · 2026-08-25 @mposition]. v3는 아직 등록 전이며, 그 전까지 **live 실행이
+  가능한 pair는 없습니다.** v2는 v1의 배선 결함(schema를 요청하지 않음)을
+  고쳤고 probe 두 번으로 failures 0을 확인했지만, 읽을 수 있게 된 측정값이 네
+  가지 계약 결함을 드러냈습니다 — 출력 언어 미지정, 상호 배타적이지 않은 kind
+  taxonomy, 모델의 `sensitive` 신고와 gold label의 충돌, 완전하지 않은 gold.
+  넷 다 모델 품질이 아닌데 넷 다 §12.3의 하한을 도달 불가능하게 만들므로, v2는
+  **진단 전용으로 종료**하고 평가 계약부터 고칩니다:
+  `docs/ops/memory-extraction-eval-diagnostics.md`. v2의 예산 승인도 v3로
+  이전되지 않습니다. v1은 **승인된 적 없이 종료**했습니다 —
+  프롬프트가 "requested schema에 맞춰 JSON만 반환하라"고 하면서 어댑터가 schema를
+  요청하지 않았고, 모델이 필드 이름과 `confidence` 타입을 추측해 strict parser가
+  전건을 거절했습니다. 첫 live 실행이 5회 연속 실패로 중단되며 그 배선 결함을
+  찾아냈고(US$0.0012), v2는 그 schema를 Structured Outputs로 실제 요청에
+  연결합니다. v1 entry는 `revoked`로 보존합니다 — 승인과 지출이 실재했기
+  때문입니다. **v1의 예산 승인은 v2로 이전되지 않습니다.** 선정 근거:
   기본 모델로서 verified pricing profile이 이미 `lib/modelPricing.ts`에
   있고(§ "가격 profile" 검사 대상), Standard 계층이라 batch 비용이 낮으며,
   ko/en 양쪽에서 운영 실적이 가장 많습니다. 예비 후보는 `gpt-5-4-mini`
@@ -1086,6 +1109,16 @@ composer·comparison rail contract를 침범하지 않습니다.
   은 생성 시점 version 유지(소급 적용 금지, 이동은 명시적 사용자 동작).
   version snapshot: instructions, models, tools, memory policy, knowledge
   manifest, retrievalVersion, prompt format version.
+- **고정된 version은 superseded가 되어도 계속 실행합니다**
+  [개정 · 2026-08-25 @mposition]. 아래 runtime 검증의 "active version"은
+  **conversation이 가리키는 version 행이 존재하고 소유자의 것인가**를 뜻하며,
+  **그것이 profile의 현재 version인가**를 뜻하지 않습니다. 두 읽기가 구분되지
+  않아, 개정을 새로 낸 순간 그 profile을 쓰던 **기존 대화 전부가 아무 신호 없이
+  profile을 잃는** 동작이 배포돼 있었습니다(2026-08-25 staging 검증에서 발견,
+  `docs/ops/assistant-profile-staging-verification-records/` 참조). 고정이
+  소유자의 편집 한 번에 풀린다면 그것은 고정이 아니고, 이동은 이 문서가 이미
+  **명시적 사용자 동작**으로 정해 두었습니다. profile 행이 삭제된 경우만
+  실행할 version이 없는 경우입니다.
 - knowledge manifest는 감사용 metadata입니다. retrieval은 현재 존재·접근
   가능·처리 완료된 chunk만 사용하고, dangling manifest로 삭제 object를 복구·
   재조회하지 않으며, 같은 digest 재업로드를 과거 version에 자동 재연결하지
@@ -1231,6 +1264,48 @@ audit에 남지 않습니다.
 
 승인자가 결정해야 하는 것은 위 네 개의 기간과, **활성 파일에 만료를 두지 않는다**는
 방향입니다.
+
+### 14.4 assistant 삭제가 남기는 것 — [확정 · 2026-08-25 @mposition]
+
+> **기록이 구현보다 늦었습니다.** #882는 이 결정을 코드보다 먼저 적으라고 했고,
+> 그 이유도 적었습니다 — 스키마를 먼저 바꾸면 결정이 우연히 내려집니다. 실제로
+> 그렇게 됐으므로, 이 절은 이미 배포된 동작을 **결정으로 확정**하는 것입니다.
+> 다르게 정하려면 이 절을 고치고 구현을 따라오게 합니다.
+
+**남는 것은 시각 하나입니다.** `Conversation.assistantProfileRemovedAt`이 전부이고,
+profile 이름도 revision 번호도 지시문도 남지 않습니다.
+
+`Conversation.assistantProfileVersionId`는 `ON DELETE SET NULL`이라, 삭제 뒤의
+행은 **어시스턴트를 쓴 적 없는 대화와 글자 그대로 동일**했습니다. 화면은 둘 다에
+대해 "어시스턴트 없음"이라고 말했고, 소유자는 자기 어시스턴트가 사라진 것을 도구
+메뉴를 열어 줄이 바뀐 걸 알아채는 방식으로만 알 수 있었습니다.
+
+#882가 정리한 네 선택지 중 **두 번째**입니다.
+
+| 선택지 | 남기는 것 | 왜 아닌가 / 왜 이것인가 |
+|---|---|---|
+| 아무것도 안 남김 | — | 귀속이 조용히 사라집니다. 이것이 고친 상태입니다 |
+| **표식만** | 삭제됐다는 사실과 시각 | **채택.** 구멍을 닫는 가장 작은 것이고, 사용자가 지운 내용은 하나도 붙들지 않습니다 |
+| 표식 + 이름 + revision | 사용자가 쓴 이름 | 사용자가 지워 달라고 한 **자기 텍스트**가 그 대화 전부에 복사돼 남습니다 |
+| version 전체 snapshot | 전부 | 삭제 약속과 정면으로 충돌합니다 |
+
+**이름을 남기지 않는 것이 이 결정의 핵심입니다.** profile 이름은 사용자가 쓴
+텍스트이고, 삭제는 그것을 없애 달라는 요청입니다. 그것을 그 profile이 닿았던 모든
+대화에 복사해 두는 것은 지운 것을 보관하는 일입니다. 시각만으로도 화면이 사용자에게
+갚아야 할 문장은 성립합니다 — **이 대화의 어시스턴트는 삭제됐습니다.**
+
+**표식은 지워집니다.** 대화의 profile 결속이 어느 쪽으로든 바뀌면 — 새 어시스턴트를
+붙이든, 의도적으로 떼든 — `assistantProfileRemovedAt`은 `NULL`로 돌아갑니다. 그
+시점 이후로는 현재 상태를 설명하는 것이 그 삭제가 아니기 때문입니다.
+
+**세 상태이지 둘이 아닙니다.** 어시스턴트가 붙어 있음 · 삭제돼서 없음 · 애초에 없음.
+셋이 서로 다른 문구를 갖고, 7개 로케일 전부에 있습니다
+(`tests/assistantProfileRemovedNotice.test.mjs`가 강제).
+
+**이 절이 프라이버시 문구와 어긋나면 문구가 아니라 이 절이 먼저입니다.**
+`locales/*.ts`의 `assistantProfiles` 정책 문구는 어시스턴트를 지워도 그것을 쓰던
+대화가 계정에 남는다고 말합니다. 남습니다 — 그리고 이제 **무엇이 달라졌는지도
+말합니다.**
 
 ### 14.3 Knowledge 사용 투명성 — 답변별 귀속
 
@@ -1890,7 +1965,7 @@ A2 날짜로 덮으면 앞선 승인이 언제 이루어졌는지 말할 수 없
    §8.5 참조.
 3. **[확정]** source 삭제 시 파생 memory 상태 — 기본은 함께 삭제(`deleted`),
    사용자가 유지를 선택하면 `suspended_by_source_delete`. §8.3·§13.1 참조.
-4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v1)`
+4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v3)` [개정 · 2026-08-25]
    (예비 `gpt-5-4-mini`), 둘 다 verified pricing 보유. **eval 실행 예산
    승인(승인자·상한·티켓)은 사람이 register entry와 함께 기입해야 하며
    아직 미기입** — §12.5 참조.

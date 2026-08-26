@@ -169,6 +169,7 @@ const approvedEntry = (overrides = {}) => ({
         artifactRef: "artifacts/mem-extract-v1",
         evaluatedCommit: "a".repeat(40),
         datasetVersion: "v1",
+        datasetSchemaVersion: 2,
         languages: ["ko", "en"],
         sampleCounts: Object.fromEntries(
             ["1", "2", "3", "4"].flatMap((category) =>
@@ -222,6 +223,29 @@ test("a complete approved entry passes and resolves, unless revoked", () => {
     assert.equal(
         findApprovedEvalPair(pair, { kind: "revoke_all", reason: "malformed" }, register),
         null
+    );
+});
+
+test("an approval that does not state the dataset schema fails closed", () => {
+    // The 2026-08-25 scoring amendment added two metrics that a schema-1
+    // dataset cannot produce. Silence is refused rather than read as
+    // schema 2: an approval nobody wrote the schema on is an approval
+    // nobody checked it on.
+    const unstated = approvedEntry();
+    delete unstated.evaluation.datasetSchemaVersion;
+    const problems = findEvalRegisterProblems([unstated], NOW);
+    assert.ok(
+        problems.some((line) => line.includes("(unstated)")),
+        problems.join("\n")
+    );
+
+    const legacy = approvedEntry({
+        evaluation: { ...approvedEntry().evaluation, datasetSchemaVersion: 1 },
+    });
+    assert.ok(
+        findEvalRegisterProblems([legacy], NOW).some((line) =>
+            line.includes("dataset schema 1")
+        )
     );
 });
 

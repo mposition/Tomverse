@@ -143,6 +143,99 @@ expected: [
 틀린 문장"을 구분하지 못합니다. 그래서 §12.4가 blind qualitative review를 별도로
 요구하며, 이 점수는 게이트이지 판정 전부가 아닙니다.
 
+### 4.1.1 schema 2의 필수 항목 — [개정 · 2026-08-25 @mposition]
+
+승인된 개정안
+(`.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md` §3.4·§4.1)
+이 두 항목을 **필수**로 만들었습니다. 후속 `datasetVersion`부터 적용합니다.
+
+```ts
+{
+    id: "durable-ko-201",
+    category: "durable_facts",
+    language: "ko",
+    goldCompleteness: "exhaustive",
+    expected: [
+        {
+            id: "e1",
+            kind: "occupation",
+            mustInclude: ["간호사"],
+            expectedDisposition: "bulk_safe",
+        },
+    ],
+}
+```
+
+- **`expectedDisposition`**(`bulk_safe` | `sensitive_review`) — 이 기억이 어디로
+  가야 하는가. **기본값이 없습니다.** 건강·알레르기처럼 추출은 되되 자동 승인
+  되면 안 되는 것이 `sensitive_review`이고, 그것이 나오는 것은 recall 성공이지
+  실패가 아닙니다. 누락은 dataset validation 실패입니다 — `bulk_safe`로 읽으면
+  작성 실수가 가장 위험한 방향으로 통과합니다.
+- **`goldCompleteness`**(`exhaustive` | `partial`) — gold가 이 대화의 유효한
+  memory를 남김없이 열거하는가. **decision set은 전부 `exhaustive`여야 하고**,
+  범주 ① 한 건이라도 `partial`이면 decision-grade가 거부됩니다. arm당 200이라는
+  §12.2의 하한이 그 200건 위에서 유도됐기 때문입니다. `partial`은 development·
+  adjudication 세트에서만 씁니다.
+
+판정은 `validateSuccessorDataset()`(`lib/memoryEvalDatasetSchema.ts`)이 하고
+`tests/memoryEvalDatasetSchema.test.mjs`가 각 거부를 고정합니다. **batch마다
+실행합니다** — 400건을 다 쓴 뒤에 빈 칸을 발견하는 것이 이 검사를 먼저 내린
+이유입니다.
+
+`mem-eval-seed-11`은 schema 1이고 두 항목이 없습니다. 새 필드를 그 파일에
+채워 넣지 않습니다. 과거 진단 재현은 `lib/memoryEvalLegacyDataset.ts`가
+version-pinned로 읽으며, **decision-grade·동결·pair 승인에는 쓸 수 없습니다**
+(fail-closed). 일반 loader에는 `bulk_safe` fallback이 없습니다.
+
+### 4.1.2 kind 판정 순서와 재작성 기준 — [개정 · 2026-08-25 @mposition]
+
+승인 후 보완(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9)에서 확정된
+두 규칙입니다. 후속 `datasetVersion`의 범주 ① 작성에 그대로 적용합니다.
+
+**kind는 세 단계로 고릅니다.**
+
+1. **style 전용 kind** — `tone` · `verbosity` · `structure` · `formatting` ·
+   `language` · `explanation_depth` · `citation_preference` · `code_style`
+2. **`communication_style`** — 어느 전용 kind에도 정확히 들어가지 않는
+   상호작용 방식. style 영역의 **residual generic**이며 1단계 목록에 넣지
+   않습니다.
+3. **`preference`** — 답변 방식이 아닌 일반 선호만.
+
+"결론 먼저"는 `structure`, "표로 비교"는 `formatting`, "짧게"는 `verbosity`,
+"질문을 던져 가며 같이 정리해 달라"는 `communication_style`입니다.
+
+**대화가 풍부하면 라벨이 아니라 케이스를 고칩니다.**
+
+`exhaustive`를 유지하려면 세 조건을 **모두** 충족해야 합니다 — 독립적으로
+유효한 memory가 3개 이하, 합리적인 검수자가 추가 durable fact를 쉽게 지적할 수
+없음, 모든 gold의 kind와 disposition이 명확함.
+
+> 유효 후보가 3개를 넘거나 gold 포함 여부에 합리적인 이견이 생기는 대화는
+> **라벨로 해결하지 않고 atomic case로 재작성한다.**
+
+빼고 `exhaustive`라고 부르면 모델이 옳게 뽑았을 때 precision이 깎이고, 넣으면
+§4.1의 "한 케이스 1~3개" 원칙을 어깁니다. 둘 다 피하는 길은 대화를 줄이는
+것뿐입니다.
+
+### 4.1.3 제3자 건강 정보 — [개정 · 2026-08-25 @mposition]
+
+가족 등 제3자의 건강·장애가 언급된 대화는 다섯 조건을 모두 충족할 때만
+gold에 넣습니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §9.3).
+
+1. 사용자가 직접 말한 사실
+2. 향후 사용자 지원에 지속적으로 필요한 맥락
+3. 사용자 중심의 `constraint` 또는 `relationship`으로 정규화
+4. 필요한 최소한의 제3자 정보만 포함
+5. 언제나 `expectedDisposition: "sensitive_review"`
+
+`mustInclude`는 **정규화된 형태를 요구하도록** 고릅니다. "사용자의 어머니가
+휠체어를 사용한다"는 제3자 의료 프로필이고, "휠체어 이용 가족과 이동할 때
+계단 없는 경로가 필요하다"가 사용자 중심 제약입니다. 토큰이 앞 문장만으로도
+충족된다면 그 gold는 제3자 프로필을 정답으로 인정하는 것입니다.
+
+가족의 진단·치료가 사용자 요청과 무관하게 언급됐을 뿐이라면 **추출하지
+않습니다.**
+
 ### 4.2 범주 ②③④의 `expected`
 
 **항상 빈 배열입니다.** 이 범주에서 채점되는 것은 "무엇이 나왔는가"가 아니라
@@ -169,6 +262,27 @@ expected: [
 - development set에서 발견한 개선점을 decision set에 반영하고 싶다면, 그것은
   **decision set 수정**이므로 §7의 재작업 규칙을 따릅니다.
 - 현재 저장소의 `mem-eval-seed-1`은 `development`이며 seed 규모입니다.
+
+### 5.1 작성자와 프롬프트 조정자의 분리 — [개정 · 2026-08-25 @mposition]
+
+§5의 "열람하지 않습니다"는 **decision set을 작성하는 사람에게는 성립할 수
+없습니다.** 400건을 쓰려면 400건을 봐야 합니다. 그래서 규칙을 열람이 아니라
+**행위**로 씁니다.
+
+- **decision set을 작성·검수한 주체는 그 내용을 근거로 프롬프트를 조정하지
+  않습니다.** `mem-extract-v3` 구현은 승인된 A(출력 언어)·B(kind 우선순위와
+  `decision` 경계) 규칙을 **기계적으로 옮기는 작업**이며, 그 두 규칙은
+  `.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md` §1·§2에
+  이미 문안으로 확정돼 있습니다.
+- **조정의 근거는 development set 결과뿐입니다.** decision set에서 본 특정
+  사례가 프롬프트 문안을 바꾸는 근거가 되면, 그 시점에 decision set은 test set이
+  아니라 training set이 되고 판정은 자기 과적합을 품질로 보고합니다.
+- 후속 dataset의 batch 기록에 **작성자와 v3 문안 작성자를 각각 적습니다.**
+  같은 사람이어도 적습니다 — 1인 조직에서 "서로 다른 두 사람"은 충족 불가능한
+  요구이고, 여기서 지켜야 하는 것은 신원 분리가 아니라 **근거의 분리**입니다.
+  기록이 있으면 나중에 "이 문구가 어느 세트를 보고 나왔는가"를 물을 수 있습니다.
+- v3 문안이 승인된 A·B 규칙 밖의 내용을 담게 되면, 그것은 프롬프트 조정이므로
+  development set 결과를 근거로 제시하고 §7의 재작업 규칙을 확인합니다.
 
 ## 6. Batch 절차
 

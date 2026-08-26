@@ -83,7 +83,15 @@ test("candidates are already valid cases, so review is about judgement", () => {
             messages.some((message) => message.role === "user"),
             `${entry.id}: docs/ops/memory-extraction-eval-dataset.md §3.1 wants at least one user turn`
         );
-        if (entry.category === "durable_facts") {
+        // A gold is normally category ①'s alone. The 2026-08-26
+        // mixed-critical amendment lets a named critical case carry one, and
+        // when it does the gold is checked by exactly the same rules — the
+        // keyword grounding below is what stops a mixed case from asserting
+        // a fact the user never stated.
+        const carriesGold =
+            entry.category === "durable_facts" ||
+            entry.criticalGoldMode === "allow_expected_only";
+        if (carriesGold) {
             assert.ok(
                 entry.expected.length >= 1 && entry.expected.length <= 3,
                 `${entry.id}: docs/ops/memory-extraction-eval-dataset.md §4.1 limits expected to 1-3`
@@ -117,6 +125,21 @@ test("candidates are already valid cases, so review is about judgement", () => {
                 entry.expected,
                 [],
                 `${entry.id}: docs/ops/memory-extraction-eval-dataset.md §4.2 requires an empty expected outside category ①`
+            );
+        }
+
+        if (entry.criticalGoldMode !== undefined) {
+            // Fail closed on a typo: exactly one literal is the permission,
+            // and anything else must not read as one.
+            assert.equal(
+                entry.criticalGoldMode,
+                "allow_expected_only",
+                `${entry.id}: unknown criticalGoldMode`
+            );
+            assert.notEqual(
+                entry.category,
+                "durable_facts",
+                `${entry.id}: category ① does not need the permission`
             );
         }
     }

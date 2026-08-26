@@ -358,7 +358,7 @@ const openNewImageEntry = async (page: Page) => {
   }
 };
 
-test("the entry point does not exist while the flag is off", async ({ page }) => {
+test("the entry point does not exist while the flag is off", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.goto("/chat");
   if (isMobileShell()) {
@@ -371,7 +371,7 @@ test("the entry point does not exist while the flag is off", async ({ page }) =>
   await expect(page.getByTestId("new-conversation-menu-image")).toHaveCount(0);
 });
 
-test("a Free plan is routed to the upgrade, never into a composer it cannot submit", async ({
+test("a Free plan is routed to the upgrade, never into a composer it cannot submit", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -392,7 +392,7 @@ test("a Free plan is routed to the upgrade, never into a composer it cannot subm
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
-test("a Pro account generates an image end to end", async ({ page }) => {
+test("a Pro account generates an image end to end", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -451,7 +451,7 @@ test("a Pro account generates an image end to end", async ({ page }) => {
   }
 });
 
-test("saving a generated image downloads a file rather than opening it in a tab", async ({
+test("saving a generated image downloads a file rather than opening it in a tab", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -487,7 +487,7 @@ test("saving a generated image downloads a file rather than opening it in a tab"
   await expect(page.getByTestId("image-generation-timeline")).toBeVisible();
 });
 
-test("the card says how long the original link lasts, before it matters", async ({
+test("the card says how long the original link lasts, before it matters", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -511,7 +511,7 @@ test("the card says how long the original link lasts, before it matters", async 
   await expect(expiry).toContainText(String(IMAGE_ASSET_URL_TTL_MINUTES));
 });
 
-test("an expired original link answers with a message, not with an error page", async ({
+test("an expired original link answers with a message, not with an error page", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -551,7 +551,7 @@ test("an expired original link answers with a message, not with an error page", 
   expect(api.reads.generations).toBeGreaterThan(0);
 });
 
-test("a moderation failure explains itself and shows the refund", async ({ page }) => {
+test("a moderation failure explains itself and shows the refund", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -571,7 +571,7 @@ test("a moderation failure explains itself and shows the refund", async ({ page 
   await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
 });
 
-test("a reloaded image conversation rebuilds its timeline from the server", async ({ page }) => {
+test("a reloaded image conversation rebuilds its timeline from the server", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -633,7 +633,7 @@ test("a reloaded image conversation rebuilds its timeline from the server", asyn
   await expect(page.getByText("sunset over mountains").first()).toBeVisible();
 });
 
-test("an over-limit prompt disables generation before any request", async ({ page }) => {
+test("an over-limit prompt disables generation before any request", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -651,7 +651,7 @@ test("an over-limit prompt disables generation before any request", async ({ pag
   expect(api.createBodies).toHaveLength(0);
 });
 
-test("the model picker drives the request and the quoted total", async ({ page }) => {
+test("the model picker drives the request and the quoted total", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -684,7 +684,7 @@ test("the model picker drives the request and the quoted total", async ({ page }
   expect(api.createBodies[0].modelIds).toEqual(["gpt-image-2"]);
 });
 
-test("two providers can be compared in one request, priced per model and in total", async ({ page }) => {
+test("two providers can be compared in one request, priced per model and in total", { tag: "@ui-risk" }, async ({ page }) => {
   // The first cross-provider comparison the feature was built for: OpenAI and
   // xAI in one group. Both prices are quoted before submission and the total is
   // their sum -- a comparison whose cost only appears afterwards is the thing
@@ -719,7 +719,7 @@ test("two providers can be compared in one request, priced per model and in tota
   await expect(page.getByTestId("image-generation-entry")).toHaveCount(1);
 });
 
-test("an option one selected model cannot be priced blocks submission", async ({ page }) => {
+test("an option one selected model cannot be priced blocks submission", { tag: "@ui-risk" }, async ({ page }) => {
   // Grok ships 1K square Standard only. Rather than quoting a guess for Final,
   // or silently dropping the model from a group the user asked for, the
   // composer refuses -- the price has to be true before anything is spent.
@@ -744,7 +744,7 @@ test("an option one selected model cannot be priced blocks submission", async ({
   await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
 });
 
-test("promoting a draft keeps the composer settings and clears the prompt", async ({ page }) => {
+test("promoting a draft keeps the composer settings and clears the prompt", { tag: "@ui-risk" }, async ({ page }) => {
   // The draft becoming the conversation it just created is not a conversation
   // switch. Remounting there discarded the model selection, quality and size
   // the user had chosen -- so a two-model comparison silently became a
@@ -790,7 +790,7 @@ test("promoting a draft keeps the composer settings and clears the prompt", asyn
   ]);
 });
 
-test("Enter submits on desktop and breaks the line on mobile", async ({ page }) => {
+test("Enter submits on desktop and breaks the line on mobile", { tag: "@ui-risk" }, async ({ page }) => {
   // The shared chat contract, through the shared helper. Ctrl/Cmd+Enter kept
   // working either way -- desktop Enter is the only behaviour this adds.
   await enableImageGenerationFlag(page);
@@ -814,7 +814,7 @@ test("Enter submits on desktop and breaks the line on mobile", async ({ page }) 
   }
 });
 
-test("Shift+Enter never submits, on either shell", async ({ page }) => {
+test("Shift+Enter never submits, on either shell", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -872,7 +872,7 @@ const openExistingImageConversation = async (
   await row.click();
 };
 
-test("re-entering a conversation restores the last comparison's models", async ({ page }) => {
+test("re-entering a conversation restores the last comparison's models", { tag: "@ui-risk" }, async ({ page }) => {
   // Fixing draft promotion alone left the same complaint reachable by another
   // route: refresh, or open the conversation again, and the composer was back
   // to one default model.
@@ -903,7 +903,7 @@ test("re-entering a conversation restores the last comparison's models", async (
   await expect(page.getByTestId("image-generation-prompt")).toHaveValue("");
 });
 
-test("a restore that drops a model says so instead of quietly changing the selection", async ({
+test("a restore that drops a model says so instead of quietly changing the selection", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -933,7 +933,7 @@ test("a restore that drops a model says so instead of quietly changing the selec
   );
 });
 
-test("the timeline polls the group, never one request per model", async ({ page }) => {
+test("the timeline polls the group, never one request per model", { tag: "@ui-risk" }, async ({ page }) => {
   // Policy §11: one poll per comparison group. Per-generation polling makes the
   // read cost of a comparison scale with the number of models compared -- and
   // because the client reads a refused poll as "no update", spending the status
@@ -957,7 +957,7 @@ test("the timeline polls the group, never one request per model", async ({ page 
   expect(api.reads.generations).toBe(0);
 });
 
-test("while a comparison runs the button is the progress, and it is disabled", async ({
+test("while a comparison runs the button is the progress, and it is disabled", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   // A separate "already generating" sentence beside a button still reading
@@ -999,7 +999,7 @@ test("while a comparison runs the button is the progress, and it is disabled", a
   await expect(submit).toHaveAttribute("data-generating", "false");
 });
 
-test("a failed model retries in place while the group keeps its shape", async ({ page }) => {
+test("a failed model retries in place while the group keeps its shape", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
@@ -1023,7 +1023,7 @@ test("a failed model retries in place while the group keeps its shape", async ({
   await expect(page.getByTestId("image-comparison-card")).toHaveCount(1);
 });
 
-test("a Free plan sees the image entry locked, not hidden", async ({ page }) => {
+test("a Free plan sees the image entry locked, not hidden", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await installImageGenerationApi(page);
@@ -1041,7 +1041,7 @@ test("a Free plan sees the image entry locked, not hidden", async ({ page }) => 
   await expect(entry).toHaveAttribute("data-locked", "true");
 });
 
-test("the catalogue's image tab is its own list and seeds the picked model", async ({
+test("the catalogue's image tab is its own list and seeds the picked model", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -1110,7 +1110,7 @@ test("the catalogue's image tab is its own list and seeds the picked model", asy
   );
 });
 
-test("a Free plan sees the image tab locked, not hidden", async ({ page }) => {
+test("a Free plan sees the image tab locked, not hidden", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await installImageGenerationApi(page);
@@ -1132,7 +1132,7 @@ test("a Free plan sees the image tab locked, not hidden", async ({ page }) => {
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
-test("the composer entry carries the chat draft and restores it on cancel", async ({
+test("the composer entry carries the chat draft and restores it on cancel", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -1179,7 +1179,7 @@ const setImageGroupMaxModels = async (page: Page, value: string) => {
   ]);
 };
 
-test("at a limit of two, the third model is refused and the reason is specific", async ({
+test("at a limit of two, the third model is refused and the reason is specific", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   // The defect this covers: all three chips selected cleanly, the total read
@@ -1250,7 +1250,7 @@ test("at a limit of two, the third model is refused and the reason is specific",
   await expect(nano).not.toHaveAttribute("aria-disabled", "true");
 });
 
-test("at a limit of three, all three providers compare in one request", async ({
+test("at a limit of three, all three providers compare in one request", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await enableImageGenerationFlag(page);
@@ -1290,7 +1290,7 @@ test("at a limit of three, all three providers compare in one request", async ({
   await expect(page.getByTestId("image-comparison-card")).toHaveCount(3);
 });
 
-test("a server refusal a stale composer could not predict names the limit", async ({
+test("a server refusal a stale composer could not predict names the limit", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   // The composer believes 3 and admission applied 2 -- a tab left open across

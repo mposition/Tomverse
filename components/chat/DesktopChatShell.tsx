@@ -143,6 +143,8 @@ type DesktopChatShellProps = {
   onSelectionModeChange?: (next: boolean) => void;
   /** §14. Passed straight through to the composer's tools menu. */
   assistantProfile?: ChatAssistantProfile | null;
+  /** ISO time this conversation's assistant was deleted, if it was. */
+  assistantProfileRemovedAt?: string | null;
   assistantProfileOptions?: ChatAssistantProfileOption[];
   onAssistantProfileChange?: (profileId: string | null) => void;
   onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
@@ -248,6 +250,7 @@ export function DesktopChatShell({
   selectionModePending,
   onSelectionModeChange,
   assistantProfile,
+  assistantProfileRemovedAt,
   assistantProfileOptions,
   onAssistantProfileChange,
   onMemoryModeChange,
@@ -1046,6 +1049,7 @@ export function DesktopChatShell({
               selectionModePending={selectionModePending}
               onSelectionModeChange={onSelectionModeChange}
               assistantProfile={assistantProfile}
+              assistantProfileRemovedAt={assistantProfileRemovedAt}
               assistantProfileOptions={assistantProfileOptions}
               onAssistantProfileChange={onAssistantProfileChange}
               onMemoryModeChange={onMemoryModeChange}

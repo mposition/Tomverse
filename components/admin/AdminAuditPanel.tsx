@@ -23,6 +23,16 @@ type Props = {
   rows: AdminAuditRow[];
   /** How many entries the server read, stated so the list is not read as all. */
   rowLimit?: number;
+  /**
+   * The id `?entry=` asked for, and the row it resolved to.
+   *
+   * Both, because they are different facts: an id with no row is a stale link
+   * and has something to say on screen, while no id at all is the ordinary
+   * case and says nothing. Resolved on the server so a directly-opened link
+   * works even when the row is older than the window this panel lists.
+   */
+  requestedEntryId?: string | null;
+  requestedEntry?: AdminAuditRow | null;
 };
 
 const dateTimeLabel = (value: string) => {
@@ -41,7 +51,12 @@ const actionTone = (action: string) => {
   return "border-blue-500/30 bg-blue-500/10 text-blue-200";
 };
 
-export function AdminAuditPanel({ rows, rowLimit }: Props) {
+export function AdminAuditPanel({
+  rows,
+  rowLimit,
+  requestedEntryId = null,
+  requestedEntry = null,
+}: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -66,6 +81,9 @@ export function AdminAuditPanel({ rows, rowLimit }: Props) {
       if (targetFilter !== "all" && row.targetType !== targetFilter) return false;
       if (!normalizedQuery) return true;
       return [
+        // `id` first, because the id is what the integrity checker hands an
+        // operator and pasting it in was the obvious thing that did nothing.
+        row.id,
         row.actorEmail,
         row.actorUserId,
         row.action,
@@ -181,6 +199,62 @@ export function AdminAuditPanel({ rows, rowLimit }: Props) {
               ? ` The ${rowLimit} most recent entries; filters below search within them.`
               : ""}
           </p>
+
+          {/* A row named in the URL, rendered whether or not it is in that
+              window. The integrity checker walks oldest-first and stops at the
+              first bad row, so the id it hands over is usually older than
+              anything listed below -- which is why "entry X is invalid" used to
+              be a dead end. */}
+          {requestedEntryId && requestedEntry ? (
+            <div
+              className="mt-3 rounded-2xl border border-blue-900 bg-blue-950/30 p-4"
+              data-testid="admin-audit-requested-entry"
+            >
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-300">
+                Entry from the link
+              </p>
+              <p className="mt-2 font-mono text-xs break-all text-zinc-400">
+                {requestedEntry.id}
+              </p>
+              <p className="mt-2 text-sm font-bold text-white">
+                {requestedEntry.action}
+              </p>
+              <p className="mt-1 text-xs text-zinc-400">
+                {dateTimeLabel(requestedEntry.createdAt)} UTC ·{" "}
+                {requestedEntry.actorEmail ||
+                  requestedEntry.actorUserId ||
+                  "Unknown admin"}{" "}
+                · {requestedEntry.targetType}
+                {requestedEntry.targetId ? ` ${requestedEntry.targetId}` : ""}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-zinc-200">
+                {requestedEntry.summary}
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadDetail(requestedEntry)}
+                className="mt-3 min-h-11 rounded-xl border border-zinc-800 px-3 text-sm font-bold text-zinc-200 hover:border-zinc-700"
+                data-testid="admin-audit-requested-entry-open"
+              >
+                Open the full entry
+              </button>
+            </div>
+          ) : null}
+
+          {/* A link that resolves to nothing is a different fact from no link,
+              and saying so beats a workspace that silently ignores its own
+              query string. */}
+          {requestedEntryId && !requestedEntry ? (
+            <p
+              className="mt-3 rounded-2xl border border-amber-900 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"
+              data-testid="admin-audit-requested-entry-missing"
+            >
+              No audit entry has the id{" "}
+              <span className="font-mono break-all">{requestedEntryId}</span>. The
+              link may be stale, or the entry may belong to a different
+              environment.
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { ko } from "../../locales/ko";
 
 /**
  * /settings/assistants (Release C, slice C3b).
@@ -136,6 +137,61 @@ test.describe("assistant profile settings", () => {
         await expect(page.getByTestId("assistants-create")).toHaveCount(0);
     });
 
+    test("the import entry point follows the flag the destination reads", async ({
+        page,
+    }) => {
+        // The feature shipped with no way in at all: nothing in the tree
+        // linked to /settings/assistants/import, so the wizard was reachable
+        // only by typing the URL. The button is offered exactly when that
+        // route does not answer 404, and the list endpoint is what says so --
+        // the same probe this screen already uses for availability.
+        await prepareGuestPage(page);
+        await mockProfileApis(page, {
+            list: { ...PROFILE_LIST, features: { packageImport: true } },
+        });
+        await page.goto("/settings/assistants");
+
+        const entry = page.getByTestId("assistants-import-package");
+        await expect(entry).toBeVisible();
+        await expect(entry).toHaveAttribute("href", "/settings/assistants/import");
+    });
+
+    test("no import entry point while the flag is off, including when absent", async ({
+        page,
+    }) => {
+        // `PROFILE_LIST` carries no `features` at all, which is what a client
+        // gets from a deploy older than the field. Absent has to read as off:
+        // a button offered against a 404 is worse than no button.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants");
+
+        await expect(page.getByTestId("assistants-create")).toBeVisible();
+        await expect(page.getByTestId("assistants-import-package")).toHaveCount(0);
+    });
+
+    test("an account at its profile ceiling can still import", async ({
+        page,
+    }) => {
+        // A merge import publishes a revision of a profile that already
+        // exists and occupies no slot, so the ceiling that hides "new
+        // assistant" does not apply here. Hiding it anyway would be this
+        // screen inventing a rule the server does not have.
+        await prepareGuestPage(page);
+        await mockProfileApis(page, {
+            list: {
+                ...PROFILE_LIST,
+                limits: { maxProfilesPerAccount: PROFILE_LIST.profiles.length },
+                features: { packageImport: true },
+            },
+        });
+        await page.goto("/settings/assistants");
+
+        await expect(page.getByTestId("assistants-at-capacity")).toBeVisible();
+        await expect(page.getByTestId("assistants-create")).toHaveCount(0);
+        await expect(page.getByTestId("assistants-import-package")).toBeVisible();
+    });
+
     test("an unpublished profile reads as a draft, not as revision 0", async ({
         page,
     }) => {
@@ -192,6 +248,44 @@ test.describe("assistant profile settings", () => {
 
         await expect(page.getByTestId("assistants-notice-saved")).toBeVisible();
         expect(publishCalls).toHaveLength(0);
+    });
+
+    test("the two saves name different things, and the publish says what it does", async ({
+        page,
+    }) => {
+        // The 2026-08-21 staging round found two identical primary buttons with
+        // labels that overlapped: "Save name" and "Save changes", where the
+        // vaguer word sat on the more consequential control and a name change
+        // is also a change. Each names its own section now.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants/p-published");
+
+        // Asserted in the locale this harness renders, which is Korean.
+        const identity = page.getByTestId("assistant-save-identity");
+        const publish = page.getByTestId("assistant-publish");
+        await expect(identity).toHaveText(ko.assistantProfiles.saveIdentity);
+        await expect(publish).toHaveText(ko.assistantProfiles.saveChanges);
+
+        // Neither label may be a prefix of the other, which is the shape that
+        // made them read as the same button doing more or less of the job.
+        const identityLabel = ko.assistantProfiles.saveIdentity;
+        const publishLabel = ko.assistantProfiles.saveChanges;
+        expect(publishLabel.startsWith(identityLabel)).toBe(false);
+        expect(identityLabel.startsWith(publishLabel)).toBe(false);
+
+        // And the consequence is at the point of the click, not only in the
+        // hint at the top of the section, and it is the button's own
+        // description rather than nearby text a screen reader would not tie to
+        // it.
+        const consequence = page.getByTestId("assistant-publish-consequence");
+        await expect(consequence).toHaveText(
+            ko.assistantProfiles.publishConsequence
+        );
+        await expect(publish).toHaveAttribute(
+            "aria-describedby",
+            await consequence.getAttribute("id") as string
+        );
     });
 
     test("publishing sends the revision it loaded, and reports an unchanged save", async ({

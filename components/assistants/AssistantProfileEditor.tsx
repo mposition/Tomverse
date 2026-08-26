@@ -7,6 +7,9 @@ import {
     AlertTriangle,
     ArrowLeft,
     ChevronDown,
+    // A different mark for the save that cuts a revision: two identical Save
+    // icons on one screen carried the difference to nobody.
+    FilePlus2,
     Loader2,
     Save,
     Trash2,
@@ -140,6 +143,26 @@ type LoadedProfile = {
     } | null;
     versions: VersionSummary[];
     knowledgeFiles: KnowledgeFile[];
+    /** Published package imports, newest first. Absent on older payloads. */
+    imports?: ImportProvenance[];
+};
+
+/**
+ * What a package said about itself, and what the server observed.
+ *
+ * The `declared*` half is the package's claim -- the server never saw the
+ * container -- so it is display-only and the copy says so
+ * (`docs/policy/assistant-package-import.md` §6.5). The timestamp is the
+ * server's own, and the host is all that survives of a URL nothing ever
+ * fetches (same document, §7).
+ */
+type ImportProvenance = {
+    id: string;
+    declaredSourceKind: string | null;
+    declaredSourceName: string | null;
+    declaredSourceHost: string | null;
+    serverReceivedAt: string;
+    versionId: string | null;
 };
 
 type Notice =
@@ -163,8 +186,18 @@ type Notice =
 export function AssistantProfileEditor({
     profileId,
     onCreated,
+    knowledgeEnabled = false,
 }: {
     profileId?: string;
+    /**
+     * Whether assistant knowledge files are enabled, resolved on the server.
+     *
+     * Defaults to `false` because the one caller that omits it is the create
+     * screen, which has no `profileId` and so never renders the knowledge
+     * panel at all. Defaulting the other way would make a screen that cannot
+     * show the panel claim the feature is on.
+     */
+    knowledgeEnabled?: boolean;
     /**
      * Where a create should go instead of the profile's own edit page.
      *
@@ -916,6 +949,7 @@ export function AssistantProfileEditor({
                                     {profileId && profile && (
                                         <KnowledgeFilesPanel
                                             profileId={profileId}
+                                            knowledgeEnabled={knowledgeEnabled}
                                             files={profile.knowledgeFiles}
                                             publishedManifest={
                                                 profile.currentVersion
@@ -936,12 +970,33 @@ export function AssistantProfileEditor({
                                     )}
                                 </div>
 
+                                {/* Two primary buttons on one screen, and the
+                                    2026-08-21 staging round found that neither
+                                    label said which one cut a revision. Both
+                                    said "Save", and the vaguer word --
+                                    "changes" -- was on the more consequential
+                                    one, while a name change is also a change.
+                                    Each button names its own section now, so
+                                    the two labels partition the screen instead
+                                    of overlapping.
+
+                                    The consequence is stated here rather than
+                                    only in the section hint above, and it is
+                                    this button's `aria-describedby`: a sentence
+                                    at the top of a section is not what somebody
+                                    reads before pressing a button they think
+                                    means "save". Deliberately not "Publish
+                                    revision 3" -- revision numbers stay out of
+                                    the everyday path and live in the history
+                                    section, which is a decision this file
+                                    already carries. */}
                                 <button
                                     type="button"
                                     className={`mt-4 ${primaryButtonClass}`}
                                     onClick={() => void publish()}
                                     disabled={busy}
                                     data-testid="assistant-publish"
+                                    aria-describedby="assistant-publish-consequence"
                                 >
                                     {busy ? (
                                         <Loader2
@@ -949,10 +1004,20 @@ export function AssistantProfileEditor({
                                             aria-hidden="true"
                                         />
                                     ) : (
-                                        <Save className="h-4 w-4" aria-hidden="true" />
+                                        <FilePlus2
+                                            className="h-4 w-4"
+                                            aria-hidden="true"
+                                        />
                                     )}
                                     {t("assistantProfiles.saveChanges")}
                                 </button>
+                                <p
+                                    id="assistant-publish-consequence"
+                                    data-testid="assistant-publish-consequence"
+                                    className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400"
+                                >
+                                    {t("assistantProfiles.publishConsequence")}
+                                </p>
                             </section>
 
                             <section className={`mt-4 ${sectionClass}`}>
@@ -984,6 +1049,84 @@ export function AssistantProfileEditor({
                                     </p>
                                 )}
                             </section>
+
+                            {profile && (profile.imports?.length ?? 0) > 0 && (
+                                <section
+                                    className={`mt-4 ${sectionClass}`}
+                                    data-testid="assistant-provenance"
+                                >
+                                    <h2 className="text-lg font-bold">
+                                        {t("assistantProfiles.provenanceHeading")}
+                                    </h2>
+                                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                                        {t("assistantProfiles.provenanceHint")}
+                                    </p>
+                                    <ul className="mt-3 flex flex-col gap-2 text-sm">
+                                        {(profile.imports ?? []).map((entry) => (
+                                            <li key={entry.id}>
+                                                <p>
+                                                    {interpolate(
+                                                        t(
+                                                            "assistantProfiles.provenanceEntry"
+                                                        ),
+                                                        {
+                                                            // Both are the
+                                                            // package's own
+                                                            // words. The copy
+                                                            // reads "states"
+                                                            // for that reason.
+                                                            kind:
+                                                                entry.declaredSourceKind ??
+                                                                t(
+                                                                    "assistantProfiles.provenanceUnstated"
+                                                                ),
+                                                            name:
+                                                                entry.declaredSourceName ??
+                                                                t(
+                                                                    "assistantProfiles.provenanceUnstated"
+                                                                ),
+                                                        }
+                                                    )}
+                                                </p>
+                                                <p className="text-xs text-zinc-500">
+                                                    {interpolate(
+                                                        t(
+                                                            "assistantProfiles.provenanceReceived"
+                                                        ),
+                                                        {
+                                                            date: new Date(
+                                                                entry.serverReceivedAt
+                                                            ).toLocaleString(),
+                                                        }
+                                                    )}
+                                                    {entry.declaredSourceHost && (
+                                                        <>
+                                                            {" · "}
+                                                            {/*
+                                                              The host, and not
+                                                              a link: a stored
+                                                              URL is never
+                                                              fetched, and one
+                                                              rendered as a
+                                                              link invites
+                                                              exactly that.
+                                                            */}
+                                                            {interpolate(
+                                                                t(
+                                                                    "assistantProfiles.provenanceHost"
+                                                                ),
+                                                                {
+                                                                    host: entry.declaredSourceHost,
+                                                                }
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </p>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </section>
+                            )}
 
                             <section className={`mt-4 ${sectionClass}`}>
                                 <h2 className="text-lg font-bold">

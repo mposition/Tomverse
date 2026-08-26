@@ -996,6 +996,13 @@ is recommended; when omitted, `NEXTAUTH_SECRET` is used:
 ADMIN_AUDIT_INTEGRITY_KEY=<independent random value with at least 32 characters>
 ```
 
+Verification tries `ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS` as well — a
+comma-separated list of retired keys, newest first — so a chain written before
+a key change can still be verified. Only the key above ever signs a new entry.
+A key believed compromised does not belong on that list, and a key whose span
+no longer needs verifying should come off it;
+`docs/ops/admin-audit-key-epochs.md` records which span each one is for.
+
 The Admin Overview includes scheduled-job delay detection, privacy-request
 deadlines, operational verification checkpoints, and audit-chain verification.
 The Platform tab contains server-enforced emergency switches for AI chat,
