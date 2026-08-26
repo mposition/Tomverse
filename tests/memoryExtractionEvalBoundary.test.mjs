@@ -156,31 +156,20 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
 
 /* ------------------------------------------------------- shipped register -- */
 
-test("nothing in the shipped register can run live", () => {
-    // The state after v3 was registered on 2026-08-26. Every entry refuses,
-    // for one of two reasons, and which reason belongs to which entry is part
-    // of what is asserted — a blanket "refused" would pass on a pair that
-    // stopped for the wrong gate.
-    //
-    //   * v1 and v2 are `revoked`: v1 for its wiring defect, v2 because the
-    //     four contract defects its probes surfaced make the bounds
-    //     unreachable regardless of the model
-    //     (docs/ops/memory-extraction-eval-diagnostics.md). One of them still
-    //     carries an approved US$20, which is what makes the status check
-    //     load-bearing;
-    //   * v3 is a `candidate` with no budget. A budget does not travel with a
-    //     version bump, so the pair the amended contract will be measured on
-    //     starts unfunded and smoke-only — the §12.5 waiting state
-    //     (docs/policy/external-conversation-import-and-memory.md).
-    //
-    // `datasetFrozen` is read from the fixtures rather than forced. Forcing it
-    // asserts a world of the test's own making, and the value that ships is
-    // the only one that decides what an operator can actually run.
+test("only a funded, open pair can run live, and it is named", () => {
+    // The state after the US$1 probe budget was approved on 2026-08-26. This
+    // used to assert that NOTHING could run — which was true, and stopped
+    // being true the moment a person funded a pair. A test that asserts the
+    // absence of an approval fails on the day the approval arrives, and the
+    // honest thing to check is that the funding reaches exactly one pair and
+    // that everything else still refuses for its own reason.
     assert.equal(
         MEMORY_EVAL_DATASET_FROZEN,
         true,
         "this test describes the frozen dataset that shipped"
     );
+
+    const runnable = [];
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
         const label = `${entry.extractionModelId}::${entry.promptVersion}`;
         const decision = decideEvalRunMode({
@@ -189,28 +178,64 @@ test("nothing in the shipped register can run live", () => {
             hasApiKey: true,
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
             commitKnown: true,
+            // The frozen set is schema 1, so a decision-grade run against it
+            // is refused whatever the register says. Passing schema 2 here
+            // isolates the register's own contribution, which is what this
+            // test is about.
+            datasetSchemaVersion: 2,
         });
-        assert.equal(decision.mode, "refused", label);
-        // Status first, before the budget is consulted. A revoked pair stops
-        // there even when it is funded; a candidate reaches the budget gate
-        // and stops on the missing approval.
+        if (decision.mode === "live") {
+            runnable.push(label);
+            continue;
+        }
         assert.equal(
             decision.reason,
             entry.status === "revoked" ? "pair_not_runnable" : "no_eval_budget",
             label
         );
     }
+
+    // Named, not counted. A second funded pair has to be argued for.
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v3"]);
+    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            `${entry.extractionModelId}::${entry.promptVersion}` === runnable[0]
+    );
+    assert.equal(funded.status, "candidate");
+    assert.ok(funded.evalBudget, "the runnable pair is the funded one");
+    // Probe-scoped. A decision-grade run needs its own approval, and this
+    // number is what says the difference is real rather than intended.
+    assert.equal(funded.evalBudget.maxUsd, 1);
+
     assert.ok(
         MEMORY_EXTRACTION_EVAL_REGISTER.some(
             (entry) => entry.status === "revoked" && entry.evalBudget
         ),
         "a closed pair keeping its budget is what makes the status check load-bearing"
     );
-    assert.ok(
-        MEMORY_EXTRACTION_EVAL_REGISTER.some(
-            (entry) => entry.status === "candidate" && !entry.evalBudget
-        ),
-        "the v3 pairs are registered and unfunded, which is the waiting state"
+});
+
+test("the funded pair still cannot run the decision-grade dataset", () => {
+    // The second lock, and the reason the budget above is safe to hold. The
+    // shipped dataset is schema 1; the amended metrics cannot be computed
+    // against it, so the run is refused before it spends whatever the
+    // register says.
+    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === "mem-extract-v3"
+    );
+    assert.ok(funded);
+    assert.deepEqual(
+        decideEvalRunMode({
+            live: true,
+            registerEntry: funded,
+            hasApiKey: true,
+            datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+            commitKnown: true,
+            datasetSchemaVersion: 1,
+        }),
+        { mode: "refused", reason: "legacy_dataset_schema" }
     );
 });
 

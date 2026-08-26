@@ -103,3 +103,22 @@ test("no system message is constructed anywhere in the harness", () => {
         "the system prompt travels as the adapter sends it"
     );
 });
+
+test("both eval entry points run under the server condition", () => {
+    // The live path loads `memoryExtractionWorker`, which imports
+    // `server-only`. Without `--conditions=react-server` that throws before a
+    // single provider call — so a live run fails every case with a module
+    // error and reports it as seventeen extraction failures.
+    //
+    // The probe shipped without the flag and did exactly that on its first
+    // live run. Nothing was spent, because the failure lands before the
+    // request; what it cost was a run and the minutes to read it.
+    const scripts = JSON.parse(read("../package.json")).scripts;
+    for (const name of ["eval:memory-extraction", "probe:memory-extraction"]) {
+        assert.match(
+            scripts[name],
+            /--conditions=react-server/,
+            `${name} must run under the server condition`
+        );
+    }
+});

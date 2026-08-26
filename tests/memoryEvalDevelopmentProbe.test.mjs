@@ -7,8 +7,6 @@ import {
     MEMORY_EVAL_DEVELOPMENT_PROBE_PURPOSE,
 } from "../lib/memoryEvalDevelopmentProbeSet.ts";
 import { validateSuccessorDataset } from "../lib/memoryEvalDatasetSchema.ts";
-import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
-import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 import { scoreCaseV2, judgeEvalV2 } from "../lib/memoryEvalScoringV2.ts";
 
 /**
@@ -189,49 +187,38 @@ test("the smoke probe runs clean end to end", () => {
     assert.match(output, /bulk eligibility recall\s+\d+\/\d+ = 1\.000/);
 });
 
-test("a live probe is refused, at the lock the register actually presents", () => {
-    // Which lock fires depends on the shipped register, so the expectation is
-    // read from it rather than written down. Hard-coding one reason made this
-    // test assert a world that changed the moment a prompt version was bumped
-    // — and a test that passes by describing the wrong gate is worse than one
-    // that fails.
-    const entry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
-        (candidate) =>
-            candidate.extractionModelId === "gpt-5-6-luna" &&
-            candidate.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
-    );
-    assert.ok(entry, "the default probe pair is not registered at all");
-    const expected =
-        entry.status === "revoked"
-            ? /is `revoked` in the register/i
-            : /no approved eval budget/i;
+test("a live probe with no key refuses before it reaches a provider", () => {
+    // The key is removed rather than faked. This test used to supply a
+    // plausible key and rely on the pair being unfunded — and the moment a
+    // person funded the probe pair, that made the test itself dispatch a paid
+    // run. A test must not be one approval away from spending money.
+    //
+    // With no key the refusal is deterministic and provider-independent, and
+    // it still proves the property that matters: nothing reaches the network
+    // before the gate says so.
+    const env = { ...process.env };
+    delete env.OPENAI_API_KEY;
+
     let output = "";
     let status = 0;
     try {
         execFileSync(
             process.execPath,
             [
+                "--conditions=react-server",
                 "--import",
                 "tsx",
                 "scripts/probeMemoryExtractionDevelopment.mjs",
                 "--live",
             ],
-            {
-                cwd: REPO_ROOT,
-                encoding: "utf8",
-                env: {
-                    ...process.env,
-                    OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-0000",
-                },
-            }
+            { cwd: REPO_ROOT, encoding: "utf8", env }
         );
     } catch (error) {
         status = error.status ?? 1;
         output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
     }
-    assert.equal(status, 1, "a live probe must refuse");
-    assert.match(output, expected);
-    // Whichever lock fired, it fired before the run: no report was printed,
-    // so nothing reached a provider.
+    assert.equal(status, 1, "a live probe without a key must refuse");
+    assert.match(output, /OPENAI_API_KEY is required/i);
+    // The refusal came before the run: no report was printed.
     assert.doesNotMatch(output, /Extraction accuracy/);
 });
