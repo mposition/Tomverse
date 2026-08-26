@@ -36,14 +36,46 @@ const canonical = servesCanonicalSite(SITE_ORIGIN, { PUBLIC_APP_URL: origin });
 // the deployment it is meant to be checking.
 const bust = `cb=${Date.now()}`;
 
-const fetchText = async (path) => {
+// `manual`, so that an access gate is something this script can see rather
+// than something it follows. Cloudflare Access answers an unauthenticated
+// request with a redirect to its own login host for interactive requests and a
+// 401 otherwise; following the redirect would fetch a login page from a
+// different host and report it as a 200 with no `noindex`, which is a
+// confusing way to say "the gate is on".
+const fetchPath = async (path) => {
   const response = await fetch(`${origin}${path}${path.includes("?") ? "&" : "?"}${bust}`, {
-    redirect: "follow",
+    redirect: "manual",
   });
-  if (!response.ok) {
-    throw new Error(`${path} returned ${response.status}`);
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: response.ok ? await response.text() : "",
+  };
+};
+
+/**
+ * Whether something in front of the app refused this request.
+ *
+ * 401 and 403 are the plain cases. The redirect case is Access sending an
+ * interactive request to its login host: a 3xx whose `location` leaves this
+ * origin's host is a gate, while a 3xx that stays on it is the app's own
+ * routing.
+ *
+ * The exact shape Access answers with is unverified until it is switched on
+ * (docs/ops/staging-access-boundary.md). That is deliberate rather than
+ * hopeful: anything this does not recognise fails the run and says so, which
+ * is the direction a check should be wrong in.
+ */
+const isAccessGated = ({ status, headers }) => {
+  if (status === 401 || status === 403) return true;
+  if (status < 300 || status >= 400) return false;
+  const location = headers.get("location");
+  if (!location) return false;
+  try {
+    return new URL(location, origin).host !== new URL(origin).host;
+  } catch {
+    return false;
   }
-  return { body: await response.text(), headers: response.headers };
 };
 
 const failures = [];
@@ -72,8 +104,19 @@ const expectOrDeviate = (condition, message, deviate) => {
   (deviate ? deviations : failures).push(message);
 };
 
-const { body } = await fetchText("/robots.txt");
-const { headers: rootHeaders } = await fetchText("/");
+// `robots.txt` stays public on every deployment, gate or no gate: it is a
+// file whose whole purpose is to be read unauthenticated, and a crawler that
+// receives a correct `Disallow: /` is better served than one that receives a
+// 403 it has to interpret. So this one is required to answer.
+const robots = await fetchPath("/robots.txt");
+if (robots.status !== 200) {
+  console.error(`/robots.txt returned ${robots.status}; it must stay publicly readable.`);
+  process.exit(1);
+}
+const body = robots.body;
+const root = await fetchPath("/");
+const rootHeaders = root.headers;
+const rootGated = isAccessGated(root);
 
 // Two bodies, two questions. `served` is what a crawler will act on, splice
 // and all. `own` is the half this application produced -- and while the
@@ -103,6 +146,9 @@ if (canonical) {
     !/noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
     "the canonical site sends X-Robots-Tag: noindex on /"
   );
+  // The canonical site is the public one. A gate here is a misconfiguration
+  // pointed at the wrong hostname, and it would take the site down quietly.
+  expect(!rootGated, "the canonical site refuses / behind an access gate");
 } else {
   // What our own file says is ours, and is never excused.
   for (const crawler of ["Googlebot", "Bingbot", "GPTBot"]) {
@@ -127,13 +173,21 @@ if (canonical) {
   // fetch; this suppresses the listing, and Google reads it only on a page it
   // was allowed to fetch -- so with crawling permitted this is both what keeps
   // staging out of the index and what gets an already-indexed URL dropped.
+  //
+  // An access gate satisfies it outright and by a wider margin: a crawler that
+  // cannot fetch the page has nothing to index, and neither has anyone else.
+  // `noindex` is a request; a 403 is not. So either passes, and the message
+  // names both so a failure says what is actually missing.
   expect(
-    /noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
-    "a non-canonical origin does not send X-Robots-Tag: noindex on /"
+    rootGated || /noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
+    "a non-canonical origin neither refuses / nor sends X-Robots-Tag: noindex on it"
   );
 }
 
 const role = canonical ? "canonical site" : "non-canonical deployment";
+if (rootGated) {
+  console.log(`Note: / is behind an access gate on ${origin} (status ${root.status}).`);
+}
 if (managed) {
   console.log(
     `Note: Cloudflare's managed robots.txt block is still served on ${origin}. ` +
