@@ -196,7 +196,7 @@ test("only a funded, open pair can run live, and it is named", () => {
     }
 
     // Named, not counted. A second funded pair has to be argued for.
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v3"]);
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
     const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
             `${entry.extractionModelId}::${entry.promptVersion}` === runnable[0]
@@ -223,7 +223,7 @@ test("the funded pair still cannot run the decision-grade dataset", () => {
     const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
             entry.extractionModelId === "gpt-5-6-luna" &&
-            entry.promptVersion === "mem-extract-v3"
+            entry.promptVersion === "mem-extract-v4"
     );
     assert.ok(funded);
     assert.deepEqual(
