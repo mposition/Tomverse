@@ -75,7 +75,6 @@ model User {
   imageGenerationGroups                ImageGenerationGroup[]
   imageCreditReservations              ImageCreditReservation[]
   memoryExtractionCreditReservations   MemoryExtractionCreditReservation[]
-  adminAuditLogs                       AdminAuditLog[]
   adminNotes                           AdminNote[]
   modelOverrides                       ModelOverride[]
   conversations                        Conversation[]
@@ -148,8 +147,8 @@ model UserSettings {
   ///
   /// Default false, and false is the whole behaviour for an account that never
   /// opts in.
-  imageHandoffAutoGenerate Boolean  @default(false)
-  timeZoneChangedAt       DateTime?
+  imageHandoffAutoGenerate Boolean   @default(false)
+  timeZoneChangedAt        DateTime?
 
   /// The account's own statement of where it is, used to decide which
   /// jurisdiction's email rules apply. Deliberately separate from the IP
@@ -1808,7 +1807,13 @@ model AdminAuditLog {
   entryHash    String?  @unique
   createdAt    DateTime @default(now())
 
-  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  /// No relation on purpose: see
+  /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
+  /// `actorUserId` is part of this row's HMAC input, so a foreign-key action
+  /// rewriting it makes an audit entry indistinguishable from a forged one --
+  /// which is what ON DELETE SET NULL did to eight rows on staging. The
+  /// column records who acted at the time; it is not a pointer to a row that
+  /// still exists.
 
   @@index([action, createdAt])
   @@index([targetType, targetId])
