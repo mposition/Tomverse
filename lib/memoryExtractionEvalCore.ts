@@ -64,9 +64,10 @@ export type MemoryEvalLanguage = (typeof MEMORY_EVAL_LANGUAGES)[number];
  *
  * **The ②③④ figure is conditional.** It holds only while
  * `lib/memoryValidatorProbeCorpus.ts` covers both language arms of all three
- * categories with every `MUST_REFUSE` probe refused and every `MUST_ACCEPT`
- * one still bulk-safe — the deterministic half that §12.3 always required and
- * that had no substance until it was measured. Without that,
+ * categories with every `MUST_REJECT` probe refused, every `MUST_ACCEPT_BULK`
+ * one still bulk-safe, and every `MUST_REQUIRE_SENSITIVE_REVIEW` one extracted
+ * but held — the deterministic half that §12.3 always required and that had no
+ * substance until it was measured. Without that,
  * `tests/memoryValidatorAdversarial.test.mjs` fails and the floor returns to
  * 200.
  */
