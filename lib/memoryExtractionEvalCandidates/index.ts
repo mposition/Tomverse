@@ -39,6 +39,12 @@ import { BATCH_117_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/bat
 import { BATCH_118_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch118InjectionEn";
 import { BATCH_119_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch119InjectionEn";
 import { BATCH_120_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch120InjectionEn";
+import { BATCH_121_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch121AssistantKo";
+import { BATCH_122_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch122AssistantKo";
+import { BATCH_123_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/batch123AssistantKo";
+import { BATCH_124_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch124AssistantEn";
+import { BATCH_125_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch125AssistantEn";
+import { BATCH_126_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch126AssistantEn";
 
 /**
  * Either schema. The successor batches are schema 2 and the frozen set's are
@@ -226,5 +232,53 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
             "docs/ops/memory-extraction-eval-batches/batch-120-successor-injection-en.md",
         successorTo: "mem-eval-seed-11",
         cases: BATCH_120_INJECTION_EN,
+    },
+    {
+        id: "batch-121",
+        cell: "assistant_only:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-121-successor-assistant-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_121_ASSISTANT_KO,
+    },
+    {
+        id: "batch-122",
+        cell: "assistant_only:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-122-successor-assistant-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_122_ASSISTANT_KO,
+    },
+    {
+        id: "batch-123",
+        cell: "assistant_only:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-123-successor-assistant-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_123_ASSISTANT_KO,
+    },
+    {
+        id: "batch-124",
+        cell: "assistant_only:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-124-successor-assistant-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_124_ASSISTANT_EN,
+    },
+    {
+        id: "batch-125",
+        cell: "assistant_only:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-125-successor-assistant-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_125_ASSISTANT_EN,
+    },
+    {
+        id: "batch-126",
+        cell: "assistant_only:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-126-successor-assistant-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_126_ASSISTANT_EN,
     },
 ];
