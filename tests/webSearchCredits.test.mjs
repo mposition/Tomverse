@@ -15,7 +15,23 @@ test("the surcharge constant matches the shared credit weight table", () => {
 });
 
 test("only native capability is eligible for the surcharge", () => {
-  assert.equal(modelEligibleForWebSearchSurcharge({ support: "native" }), true);
+  assert.equal(
+    modelEligibleForWebSearchSurcharge({
+      support: "native",
+      hasAdditionalCost: true,
+      maxBillableSearchQueriesPerRequest: 5,
+    }),
+    true
+  );
+  // Native, paid per query, no enforceable ceiling: undispatchable, so
+  // unsurcharged.
+  assert.equal(
+    modelEligibleForWebSearchSurcharge({
+      support: "native",
+      hasAdditionalCost: true,
+    }),
+    false
+  );
   assert.equal(modelEligibleForWebSearchSurcharge({ support: "search-model" }), false);
   assert.equal(modelEligibleForWebSearchSurcharge({ support: "unverified" }), false);
   assert.equal(modelEligibleForWebSearchSurcharge({ support: "unsupported" }), false);
@@ -62,14 +78,34 @@ test("always mode + one native-supported model reserves 8 credits", () => {
   assert.equal(estimate.models[0].webSearchSurchargeCredits, 8);
 });
 
-test("always mode + three native-supported models reserves 24 credits total", () => {
+test("always mode + three dispatchable native models reserves 24 credits total", () => {
   const estimate = estimateRequestCredits({
-    models: [getModel("gpt-5-5"), getModel("claude-sonnet-5"), getModel("gemini-3-6-flash")],
+    models: [
+      getModel("gpt-5-5"),
+      getModel("gpt-5-6-luna"),
+      getModel("claude-sonnet-5"),
+    ],
     estimatedInputTokens: 100,
     webSearchMode: "always",
   });
   assert.equal(estimate.webSearchReservationCredits, 24);
   assert.equal(estimate.models.every((m) => m.nativeSearchEligible), true);
+});
+
+test("a native model whose search cost has no ceiling is not surcharged", () => {
+  // Gemini's grounding is native and charged per query, and no request can
+  // bound how many queries it makes -- so the dispatch attaches no tool.
+  // Charging the surcharge would be charging for a search that is never going
+  // to run, and `resolveAttemptSearchPath` reads the surcharge as proof the
+  // search was paid for, so it would also report a search path that does not
+  // exist.
+  const estimate = estimateRequestCredits({
+    models: [getModel("gemini-3-6-flash")],
+    estimatedInputTokens: 100,
+    webSearchMode: "always",
+  });
+  assert.equal(estimate.webSearchReservationCredits, 0);
+  assert.equal(estimate.models[0].nativeSearchEligible, false);
 });
 
 test("always mode + an unsupported model reserves 0 for that model", () => {

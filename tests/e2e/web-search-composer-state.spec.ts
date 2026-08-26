@@ -19,6 +19,16 @@ import {
 // unsupported. All three are guest-selectable.
 const SUPPORTED = "claude-haiku-4-5";
 const UNSUPPORTED = ["gpt-5-4-mini", "deepseek-v4-flash"];
+/**
+ * Native, and still counted as one that cannot search.
+ *
+ * Gemini's Search grounding is charged per query and takes no ceiling -- not
+ * on the tool and not on the request -- so no request may carry it. The
+ * composer has to say so before the send: the alternative is what this whole
+ * area was fixed for, a chip that promises a search and a dispatch that
+ * refuses one.
+ */
+const UNBOUNDED_NATIVE = "gemini-2-5-flash";
 const TITLE = "Web search state";
 const CHAT_ID = "guest_web_search_state";
 
@@ -227,4 +237,37 @@ test("adding a model that cannot search updates the chip and the reservation tog
   await expect(page.getByTestId("request-credit-estimate")).not.toHaveText(
     creditsBefore
   );
+});
+
+test("a native model whose search cost has no ceiling is counted as unsupported", async ({
+  page,
+}) => {
+  await seedGuestConversation(page, [SUPPORTED, UNBOUNDED_NATIVE], "always");
+  await open(page);
+
+  await expect(chip(page)).toHaveAttribute("data-tone", "warning");
+  await expect(chip(page)).toHaveAttribute("data-supported-count", "1");
+  await expect(chip(page)).toHaveAttribute("data-unsupported-count", "1");
+
+  await page.getByTestId("web-search-exception-toggle").click();
+  const detail = page.getByTestId("web-search-exception-detail");
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText("Gemini");
+  await expect(detail).toContainText("without a web search");
+});
+
+test("a selection of only unbounded native models blocks rather than promising a search", async ({
+  page,
+}) => {
+  await seedGuestConversation(page, [UNBOUNDED_NATIVE], "always");
+  await open(page);
+
+  await expect(chip(page)).toHaveAttribute("data-tone", "blocked");
+  await expectChipLabel(page, {
+    full: "Web search unavailable",
+    compact: "No web search",
+  });
+  await expect(
+    page.getByTestId("web-search-unavailable-notice")
+  ).toContainText("Add a search-capable model");
 });

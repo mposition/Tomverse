@@ -38,7 +38,10 @@ import {
   type ChatScrollMode,
 } from "@/lib/chatAutoScroll";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
-import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
+import {
+  modelEligibleForWebSearchSurcharge,
+  WEB_SEARCH_SURCHARGE_CREDITS,
+} from "@/lib/webSearchCredits";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 
@@ -563,13 +566,22 @@ export function ChatMessageList({
                       });
                       if (!decision.shown) return null;
                       const status = decision.status;
-                      // "requested-not-executed" only ever occurs for native
-                      // (surcharge-eligible) capability -- unsupported/unverified
-                      // models are routed to the "unsupported" status instead,
-                      // so the surcharge was always reserved (and refunded) here.
+                      // "requested-not-executed" only ever occurs for a
+                      // dispatchable native capability -- unsupported,
+                      // unverified and cost-unbounded models are routed to the
+                      // "unsupported" status instead, so the surcharge was
+                      // always reserved (and refunded) here.
+                      //
+                      // Asked of the same predicate that decides the charge,
+                      // rather than re-read off `support`: a native capability
+                      // no request may dispatch is never surcharged, and a
+                      // badge quoting "+N" beside it would name a price nobody
+                      // paid.
                       const nativeSearchSurcharged =
                         status === "executed" &&
-                        getWebSearchCapability(modelInfo.id).support === "native";
+                        modelEligibleForWebSearchSurcharge(
+                          getWebSearchCapability(modelInfo.id)
+                        );
                       const label =
                         status === "deep-research"
                           ? t("chat.searchStatusDeepResearch")

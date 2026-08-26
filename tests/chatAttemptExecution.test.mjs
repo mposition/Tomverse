@@ -305,3 +305,73 @@ test("the refusal maps to an error rather than falling through to a plan", () =>
   // Content-free: the message names no model and no request text.
   assert.ok(!error.message.includes("deepseek"));
 });
+
+
+// A fallback attempt spends money on its own terms, and the two figures that
+// bound a searching turn -- the per-request tool-call ceiling and the provider
+// cost reserved against it -- are both per model. Reusing the primary's would
+// send the second model the first model's ceiling, or reserve nothing at all.
+
+test("a searching plan carries its own OpenAI tool-call ceiling", () => {
+  const searching = planFor(modelById("gpt-5-6-luna"), {
+    webSearchMode: "always",
+  });
+  const options = attemptDispatchOptions(searching);
+  assert.equal(options.providerOptions.openai.maxToolCalls, 5);
+  // The reasoning effort the model's profile declares is still there: the
+  // ceiling is merged into the namespace, not written over it.
+  assert.equal(options.providerOptions.openai.reasoningEffort, "medium");
+
+  const idle = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "off" });
+  const idleOptions = attemptDispatchOptions(idle);
+  assert.equal("maxToolCalls" in idleOptions.providerOptions.openai, false);
+  assert.equal(idleOptions.providerOptions.openai.reasoningEffort, "medium");
+});
+
+test("the tool config never overwrites the plan's provider options", () => {
+  // `attemptDispatchOptions` spreads the tool config over the generation
+  // settings, so a tool config that returned its own `providerOptions` would
+  // silently replace the one carrying the ceiling and the reasoning effort.
+  const plan = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "always" });
+  assert.equal(
+    "providerOptions" in (plan.webSearchToolConfig ?? {}),
+    false,
+    "a web search tool config must not carry provider options of its own"
+  );
+});
+
+test("a plan reserves the provider cost of its own attempt's search", () => {
+  const searching = planFor(modelById("gpt-5-6-luna"), {
+    webSearchMode: "always",
+  });
+  // Five queries at OpenAI's registered per-query rate. Zero here would mean a
+  // fallback dispatching a searching turn against a token-only reservation,
+  // which is the hole the reservation exists to close.
+  assert.equal(searching.budget.nativeSearchMaxQueries, 5);
+  assert.ok(searching.budget.nativeSearchCostPerQueryMicroUsd > 0);
+  assert.equal(
+    searching.budget.nativeSearchReservedCostMicroUsd,
+    searching.budget.nativeSearchCostPerQueryMicroUsd * 5
+  );
+
+  const idle = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "off" });
+  assert.equal(idle.budget.nativeSearchReservedCostMicroUsd, 0);
+  assert.equal(idle.budget.nativeSearchMaxQueries, 0);
+});
+
+test("a native model whose search cost has no ceiling plans no search at all", () => {
+  // Not a refusal: the turn is still answered, without a search and marked as
+  // such. What must not happen is a plan that configures a tool the dispatch
+  // cannot pay for and then fails at the provider.
+  const plan = planFor(modelById("gemini-3-6-flash"), {
+    webSearchMode: "always",
+  });
+  assert.equal(plan.nativeSearchEnabled, false);
+  assert.equal(plan.webSearchToolConfig, null);
+  assert.equal(plan.searchSurchargeCredits, 0);
+  assert.equal(plan.budget.nativeSearchReservedCostMicroUsd, 0);
+  assert.deepEqual(plan.searchPath, {
+    kind: "none",
+    gap: "cost_unbounded",
+  });
+});

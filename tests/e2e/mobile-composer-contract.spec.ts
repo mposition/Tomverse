@@ -55,16 +55,21 @@ test.beforeEach(async ({}, testInfo) => {
   );
 });
 
-/** 2 of these 3 have verified native web search -- gpt-5-4-mini does not, so
- *  the composer sits in the partial-support state the contract calls out. */
+/** 2 of these 3 can search on a request -- gpt-5-4-mini cannot, so the
+ *  composer sits in the partial-support state the contract calls out. */
 const MODEL_A = "gpt-5-4-mini";
 const MODEL_B = "claude-sonnet-5";
-const MODEL_C = "gemini-3-6-flash";
+const MODEL_C = "gpt-5-6-luna";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 /** Neither of these can search: the fully blocked state. */
 const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
-/** All three verified for provider-native search: the full-support state. */
-const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gemini-3-6-flash"];
+/**
+ * All three dispatchable: the full-support state. Gemini is deliberately not
+ * here -- its grounding is native but takes no per-request cost ceiling, so
+ * the composer counts it unsupported and this would not be the full-support
+ * case at all (lib/webSearchCapability.ts `nativeSearchIsDispatchable`).
+ */
+const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gpt-5-6-luna"];
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
 
 /** The contract's floor: the input keeps ~all of the composer's inner width. */

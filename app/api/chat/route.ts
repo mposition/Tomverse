@@ -77,7 +77,11 @@ import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+    getWebSearchCapability,
+    nativeSearchIsDispatchable,
+    openAiNativeSearchToolCallCeiling,
+} from "@/lib/webSearchCapability";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
@@ -1367,8 +1371,15 @@ async function handleChatPost(
         // model (see lib/webSearchCapability.ts for the support matrix).
         const webSearchCapability = getWebSearchCapability(modelConfig.id);
         const webSearchRequested = webSearchMode === "always";
+        // Dispatchability, not declared support -- the same question the
+        // composer, the credit estimate, preflight and availability all answer
+        // with `nativeSearchIsDispatchable`. A native capability whose
+        // per-query cost the request cannot bound is one nothing may attach,
+        // and deciding that here rather than at the reservation is what keeps
+        // this turn from being the only place that says no.
         const nativeSearchEnabled =
-            webSearchRequested && webSearchCapability.support === "native";
+            webSearchRequested &&
+            nativeSearchIsDispatchable(webSearchCapability);
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -2980,6 +2991,8 @@ async function handleChatPost(
         // reserve. See docs/policy/tomverse-chat-router-score-policy.md §8.
         const primarySearchPath = resolveAttemptSearchPath({
             support: webSearchCapability.support,
+            nativeSearchDispatchable:
+                nativeSearchIsDispatchable(webSearchCapability),
             webSearchMode: webSearchMode ?? null,
             toolConfigBuilt: webSearchToolConfig !== null,
             surchargeCredits: getWebSearchSurchargeCredits(
@@ -3143,7 +3156,18 @@ async function handleChatPost(
                           : {}),
                   }
                 : null;
-        const generationSettings = getModelGenerationSettings(modelConfig);
+        // `max_tool_calls` on a searching OpenAI turn, and nothing at all on
+        // any other turn. Read off the capability that sized the reservation
+        // above, so the ceiling the request enforces and the ceiling the budget
+        // authorized are the same number by construction. Merged into
+        // `providerOptions.openai` beside `reasoningEffort` rather than over
+        // it -- see `getModelGenerationSettings`.
+        const generationSettings = getModelGenerationSettings(modelConfig, {
+            openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
+                capability: webSearchCapability,
+                nativeSearchEnabled,
+            }),
+        });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
         // §5 records can be produced at all, and what they cost, before Auto

@@ -34,8 +34,11 @@ test("picker exposes only decision-relevant special features", () => {
     "search",
     "reasoning",
   ]);
+  // Gemini's Search grounding is native and takes no per-request call
+  // ceiling, so no request may carry it -- and a badge saying this model
+  // answers from the live web would be promising a tool the dispatch will
+  // never attach. `image` is what it genuinely has.
   assert.deepEqual(getModelPickerFeatures(getModel("gemini-2-5-flash")), [
-    "search",
     "image",
   ]);
   assert.deepEqual(getModelPickerFeatures(getModel("perplexity/sonar")), [
