@@ -41,6 +41,49 @@ name: Back-merge main into develop
 # The invariant, and the one command that decides it:
 #
 #   git merge-base --is-ancestor origin/main origin/develop   # must exit 0
+#
+# Why both jobs carry `continue-on-error`
+# ---------------------------------------
+#
+# The production service deploys `main` with Railway's Wait for CI, and that
+# rule is all-or-nothing: "if any workflow fails, the deployments will be
+# SKIPPED" (docs.railway.com/deployments/github-autodeploys#wait-for-ci).
+# Railway cannot be told which workflows are the release verdict, and GitHub
+# cannot mark a workflow as exempt from one. So while this workflow's *run*
+# could fail, a conflict between `main` and `develop` -- which says nothing
+# about whether `main` is deployable -- cancelled the production deployment of
+# whatever release happened to be waiting. On 2026-08-25 that skipped #953,
+# #954, #960, #968 and #969, each 1-2 seconds after this workflow reported
+# failure and before the release suite had finished. It happened again on
+# 2026-08-26 to #1023.
+#
+# `continue-on-error` at the job level makes the *run* conclude success while
+# leaving the jobs themselves red. Measured on 2026-08-26 against a throwaway
+# branch: a failing `continue-on-error` job reports check run conclusion
+# `failure` and the commit's Actions check *suite* concludes `success`. That
+# split is the whole mechanism -- Railway reads the suite, a person reads the
+# job.
+#
+# Nothing else changes, and deliberately so. The conflict path still exits
+# non-zero, still pushes no branch and opens no pull request; `verify` still
+# decides the invariant from `git merge-base --is-ancestor` rather than from
+# the job above it; and `scripts/security-regression-check.mjs` passes
+# unmodified, because it pins the step ordering and that ordering is untouched.
+# The release checklist stays true as written: the job does fail, and the
+# operator is still asked to confirm that `verify` passed.
+#
+# What is given up is the red X at the *run* level in the Actions list. Two
+# things still say so loudly: the job stays red inside the run, and the
+# "Report the red lane" step below pages Slack -- it is keyed off the assert
+# step's own outcome rather than `job.status`, so making the run green does not
+# quiet it.
+#
+# The residual risk, stated because it is not zero: the evidence that Railway
+# reads the suite rather than the individual check runs is one direct
+# measurement (`c8e0a23`, where a failing check run did not skip the deploy)
+# plus the setting's own name. If that is wrong, this change no-ops and the
+# next conflict skips a deployment exactly as before -- visible immediately,
+# reversible by deleting two lines, and costing one manual redeploy.
 
 on:
   push:
@@ -60,6 +103,8 @@ jobs:
   back-merge:
     name: Back-merge main into develop
     runs-on: ubuntu-latest
+    # The run must not fail; this job still may. See the header.
+    continue-on-error: true
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
@@ -188,7 +233,13 @@ jobs:
     name: main is in develop's ancestry
     runs-on: ubuntu-latest
     needs: back-merge
+    # `needs` a job that may now be an allowed failure, so `if: always()` is
+    # doing more work than before: without it this would be skipped exactly
+    # when the invariant most needs reporting.
     if: always()
+    # As above -- the assert step keeps its `exit 1` and this job keeps going
+    # red; only the run's own conclusion changes.
+    continue-on-error: true
     timeout-minutes: 5
 
     steps:
