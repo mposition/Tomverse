@@ -13,7 +13,11 @@ import {
   modelEligibleForWebSearchSurcharge,
   WEB_SEARCH_SURCHARGE_CREDITS,
 } from "@/lib/webSearchCredits";
-import type { WebSearchMode } from "@/lib/appDefaults";
+import {
+  normalizeWebSearchMode,
+  type WebSearchMode,
+  type WebSearchToggleMode,
+} from "@/lib/appDefaults";
 
 /**
  * Whether the composer may count this model as one that will search.
@@ -41,7 +45,8 @@ export type WebSearchComposerTone =
   | "blocked";
 
 export type WebSearchComposerState = {
-  mode: WebSearchMode;
+  /** Always one of the two states the switch offers, never the retired "auto". */
+  mode: WebSearchToggleMode;
   /** The chip (and everything below it) is hidden entirely when false. */
   isVisible: boolean;
   selectedCount: number;
@@ -61,12 +66,17 @@ export type WebSearchComposerState = {
 };
 
 export function deriveWebSearchComposerState({
-  webSearchMode,
+  webSearchMode: storedMode,
   selectedModelIds,
 }: {
   webSearchMode: WebSearchMode;
   selectedModelIds: readonly string[];
 }): WebSearchComposerState {
+  // Normalized here as well as at every read path, because this is what the
+  // chip, the exception row and the surcharge estimate are all derived from:
+  // a stored "auto" reaching this function must not produce a chip promising
+  // a search, or a credit ceiling for one.
+  const webSearchMode = normalizeWebSearchMode(storedMode);
   const unsupportedModelIds: string[] = [];
   let supportedCount = 0;
   let estimatedSurchargeCredits = 0;
@@ -88,14 +98,9 @@ export function deriveWebSearchComposerState({
 
   const selectedCount = selectedModelIds.length;
   const unsupportedCount = unsupportedModelIds.length;
-  const isVisible = webSearchMode !== "off";
-  // "Auto" only *offers* a search, so a model that cannot search is not an
-  // exception the user has to resolve before sending -- it becomes one once
-  // the request is unconditional.
-  const allUnsupported =
-    isVisible && selectedCount > 0 && supportedCount === 0;
-  const hasException =
-    isVisible && webSearchMode === "always" && unsupportedCount > 0;
+  const isVisible = webSearchMode === "always";
+  const allUnsupported = isVisible && selectedCount > 0 && supportedCount === 0;
+  const hasException = isVisible && unsupportedCount > 0;
 
   return {
     mode: webSearchMode,
@@ -104,10 +109,10 @@ export function deriveWebSearchComposerState({
     supportedCount,
     unsupportedCount,
     unsupportedModelIds,
-    allUnsupported: allUnsupported && webSearchMode === "always",
+    allUnsupported,
     tone: !isVisible
       ? "neutral"
-      : webSearchMode === "always" && allUnsupported
+      : allUnsupported
         ? "blocked"
         : hasException
           ? "warning"

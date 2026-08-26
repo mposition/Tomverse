@@ -26,10 +26,16 @@ const withSearchMetadata = (
 const toolsMenuTrigger = (page: Page) =>
   page.locator('button[aria-controls="chat-input-popover"]').nth(0);
 
+// Web search is one switch, flipped in place. The menu deliberately stays
+// open afterwards (the row's own description and cost note are what change),
+// so it is dismissed here rather than closing itself.
 const setWebSearchModeAlways = async (page: Page) => {
   await toolsMenuTrigger(page).click();
-  await page.getByTestId("tools-web-search-row").click();
-  await page.getByTestId("web-search-mode-option-always").click();
+  const toggle = page.getByTestId("tools-web-search-row");
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
 };
 
 // GPT-5.6 Sol and Claude Sonnet 5 are Pro-tier; the default mocked plan is Free.
@@ -505,8 +511,11 @@ test.describe("native web search (webSearchMode: always)", () => {
 
   const setWebSearchModeOff = async (page: Page) => {
     await toolsMenuTrigger(page).click();
-    await page.getByTestId("tools-web-search-row").click();
-    await page.getByTestId("web-search-mode-option-off").click();
+    const toggle = page.getByTestId("tools-web-search-row");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await page.keyboard.press("Escape");
   };
 
   const prepareTwoModelChat = async (page: Page) => {

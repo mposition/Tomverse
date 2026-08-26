@@ -8,7 +8,7 @@ import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { APP_DEFAULTS, isWebSearchMode } from "@/lib/appDefaults";
+import { APP_DEFAULTS, normalizeWebSearchMode } from "@/lib/appDefaults";
 import {
   clampSelectedModelsAgainstRuntime,
   getRuntimeModels,
@@ -115,9 +115,10 @@ export async function GET(req: Request) {
         disabledPanels: safeParse(conv.disabledPanels, []).filter((modelId) =>
           selectedModels.includes(modelId)
         ),
-        webSearchMode: isWebSearchMode(conv.webSearchMode)
-          ? conv.webSearchMode
-          : APP_DEFAULTS.defaultWebSearchMode,
+        // Normalized rather than echoed: the column still accepts the
+        // retired "auto", and a client reading it back would render a switch
+        // that is on for a state whose whole meaning was "ask me first".
+        webSearchMode: normalizeWebSearchMode(conv.webSearchMode),
         isLocked: !!conv.password,
         shareEnabled:
           conv.shareEnabled &&
