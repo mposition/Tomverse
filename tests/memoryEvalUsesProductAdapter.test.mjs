@@ -17,18 +17,65 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS } from "../lib/memoryExtractionWorker.ts";
 
-const harness = readFileSync(
-    new URL("../scripts/evalImportedMemoryExtraction.mjs", import.meta.url),
-    "utf8"
+/**
+ * The delegation moved into a module, and gained a second caller.
+ *
+ * It used to live inside the harness, and these assertions read the harness's
+ * source. Then the development probe needed the same call, and "both build
+ * the same adapter" is a claim nobody checks — so the definition became
+ * `lib/memoryEvalLiveAdapter.ts` and both scripts import it.
+ *
+ * So the property is now checked in three places rather than one: the module
+ * delegates, and neither script builds a call of its own.
+ */
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+/**
+ * Comments stripped, because these assertions are about what the code does.
+ *
+ * The probe's header explains that the shared adapter delegates to
+ * `createExtractionProviderAdapter` — and the un-stripped check read that
+ * sentence as a second call site. A source-text assertion that fires on prose
+ * is one that will be silenced by editing a comment.
+ */
+const code = (source) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+const adapterModule = code(read("../lib/memoryEvalLiveAdapter.ts"));
+const harnessScript = code(read("../scripts/evalImportedMemoryExtraction.mjs"));
+const probeScript = code(
+    read("../scripts/probeMemoryExtractionDevelopment.mjs")
 );
+const callers = [
+    ["harness", harnessScript],
+    ["probe", probeScript],
+];
+/** What the old assertions read: the module plus every caller. */
+const harness = [adapterModule, harnessScript, probeScript].join("\n");
 
 test("the live path goes through createExtractionProviderAdapter", () => {
-    assert.match(harness, /createExtractionProviderAdapter/);
+    assert.match(adapterModule, /createExtractionProviderAdapter/);
     // Not a second call site beside it: the adapter is the call.
     assert.ok(
         !/generateText\(/.test(harness),
-        "the harness must not build its own provider call"
+        "nothing here may build its own provider call"
     );
+});
+
+test("every caller uses the shared adapter rather than its own", () => {
+    // The reason the module exists. A script that built the adapter itself
+    // would be the defect that killed three live runs, with a new filename.
+    for (const [name, source] of callers) {
+        assert.match(
+            source,
+            /createEvalLiveAdapter/,
+            `${name} does not use the shared adapter`
+        );
+        assert.ok(
+            !/createExtractionProviderAdapter/.test(source),
+            `${name} builds the product adapter itself instead of importing the shared one`
+        );
+    }
 });
 
 test("the output ceiling is the product's constant, not a local number", () => {
