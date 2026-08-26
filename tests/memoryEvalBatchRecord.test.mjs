@@ -285,10 +285,18 @@ test("the batch report's outstanding count is the sum of its own batches", () =>
         // The sample the sheet *offers*, not the part still unjudged. Counting
         // unjudged rows would make this fail the moment someone reviews a
         // batch, which is the one event it should be indifferent to.
-        assert.equal(
-            record.cases.length,
-            Math.max(1, Math.ceil(batch.cases.length * 0.2)),
-            `${batch.id} offers ${record.cases.length} verdicts for ${batch.cases.length} cases`
+        //
+        // Two legal sizes, not one. docs/ops/memory-extraction-eval-dataset.md §6.3 returns a batch to full review when
+        // the drafting setup changes, and batch-101 is recorded that way — so
+        // asserting the 20% sample everywhere would fail on the batch the rule
+        // exempts, and quietly demand the exemption be removed.
+        const sampled = Math.max(1, Math.ceil(batch.cases.length * 0.2));
+        assert.ok(
+            record.cases.length === sampled ||
+                record.cases.length === batch.cases.length,
+            `${batch.id} offers ${record.cases.length} verdicts for ` +
+                `${batch.cases.length} cases; expected ${sampled} (sample) or ` +
+                `${batch.cases.length} (full review)`
         );
     }
 });

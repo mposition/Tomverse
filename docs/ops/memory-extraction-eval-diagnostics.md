@@ -145,3 +145,64 @@ v3 pair 둘(`gpt-5-6-luna`·`gpt-5-4-mini`)은 **예산 없는 candidate**로 �
 (.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §6).
 따라서 live 실행은 `no_eval_budget`으로 거부되고, 예산이 생기더라도 schema-2
 dataset이 채택·동결되기 전에는 `legacy_dataset_schema`로 거부됩니다.
+
+## Development probe 시도 — 2026-08-26
+
+**유료 호출은 0건이고 비용도 0입니다.** 두 번 시도했고 둘 다 provider에 닿기
+전에 멈췄습니다. 기록하는 이유는 둘 다 실제 결함이었기 때문입니다.
+
+### 1회차 — `server-only`
+
+17건 전부 실패:
+
+```
+failed: This module cannot be imported from a Client Component module.
+```
+
+live 경로가 `memoryExtractionWorker`를 불러오고 그 모듈이 `server-only`를
+import합니다. `npm run eval:memory-extraction`에는 `--conditions=react-server`가
+있었지만 **새로 만든 `probe:memory-extraction`에는 빠져 있었습니다.**
+
+요청 전에 죽으므로 비용은 0이고, 잃은 것은 실행 한 번입니다. `package.json`에
+flag를 추가하고 `tests/memoryEvalUsesProductAdapter.test.mjs`가 **두 진입점 모두**
+그 flag를 갖는지 검사하도록 고정했습니다 — 공유 adapter가 코드 수준에서 막은
+것과 같은 종류의 어긋남이 npm script 수준에 남아 있었습니다.
+
+### 2회차 — egress proxy
+
+```
+failed: Forbidden
+curl: (56) CONNECT tunnel failed, response 403
+```
+
+에이전트 컨테이너의 egress proxy가 `api.openai.com`을 CONNECT 단계에서
+거부합니다. 자격 증명 문제가 아니라 환경 정책이고, **이 컨테이너에서는 어떤
+유료 eval도 실행할 수 없습니다.**
+
+### 그래서 workflow
+
+`.github/workflows/memory-eval-development-probe.yml`을 추가했습니다.
+decision-grade workflow와 같은 이유로 CI에서 돕니다 — 깨끗한 checkout, secret
+key, 보존되는 artifact — 그리고 **네 번째 이유가 위의 proxy**입니다.
+
+dispatch 전에 무료로 거절할 수 있는 것은 전부 먼저 거절합니다: register 검사,
+그리고 smoke probe 자체(stub으로 전 구간을 지나므로 배선 결함이 17번의 호출이
+아니라 0원에 드러납니다). `--conditions=react-server`가 npm script에 있는지도
+dispatch 시점에 확인합니다 — 1회차가 그것 없이 돌았기 때문입니다.
+
+**`workflow_dispatch`는 workflow 파일이 default branch에 있어야 목록에
+나타납니다.** develop 병합만으로는 dispatch 할 수 없고 main PR이 따로 필요합니다.
+
+### smoke는 통과합니다
+
+```
+precision                 11/11 = 1.000
+recall                    12/12 = 1.000
+bulk eligibility recall   10/10 = 1.000
+critical bulk-safe adoptions          0
+sensitive-review misclassifications   0
+```
+
+프롬프트 → 파서 → §8.4 validator → schema-2 scorer가 끝까지 합의합니다. 남은
+질문은 **모델이 무엇을 답하는가** 하나이고, 그것은 위 workflow를 dispatch 해야
+답이 나옵니다(.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md §7 7번).
