@@ -599,11 +599,38 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 - **native web search의 질의당 비용은 요청이 상한을 강제할 때만 예약할 수
   있습니다.** 상한을 보내는 방법은 provider마다 다릅니다 — Anthropic은 tool의
   `maxUses`, OpenAI는 Responses 요청의 `max_tool_calls`
-  (`providerOptions.openai.maxToolCalls`)입니다. 두 값 모두
-  `WebSearchCapability.maxBillableSearchQueriesPerRequest` **한 필드**에서
-  읽으므로, 예약이 산정한 상한과 요청이 강제하는 상한은 복사본이 아니라 같은
-  값입니다. Google의 Search grounding은 tool에도 요청에도 상한 parameter가
-  없어서 **fail-closed로 남습니다.**
+  (`providerOptions.openai.maxToolCalls`)입니다. Google의 Search grounding은
+  tool에도 요청에도 상한 parameter가 없어서 **fail-closed로 남습니다.**
+- **OpenAI에서는 요청이 강제하는 상한과 청구되는 상한이 같은 수가
+  아닙니다.** 원래는 한 필드였고 근거는 "요청이 강제하는 상한이면 예산을
+  그 위에 올려도 된다"였는데, 2026-08-26에 그 근거가 반증됐습니다 — Luna
+  turn이 `max_tool_calls: 5`를 보내고 `web_search_call` 6건으로 청구됐습니다
+  (Sentry `NATIVE_SEARCH_QUERY_CEILING_BREACHED`, `observedQueries: 6`).
+  결론 전에 전 구간을 확인했습니다: SDK가 parameter를 전송하고, 앱이 그것을
+  읽는 Responses 모델을 쓰며, `buildWebSearchToolConfig`가 `providerOptions`를
+  덮지 않고, stream이 `web_search_call`당 `tool-result`를 정확히 하나 냅니다.
+  따라서 6개 part는 6번의 검색입니다.
+  - `requestEnforcedSearchToolCalls`(5)가 요청에 실리고
+    `maxBillableSearchQueriesPerRequest`(6)가 돈을 산정합니다. 둘 다
+    `OPENAI_MAX_SEARCH_TOOL_CALLS`와 `OPENAI_SEARCH_OVERSHOOT_ALLOWANCE`에서
+    **파생**되므로 여전히 복사본이 아닙니다.
+  - **요청 상한을 6으로 올리는 것은 답이 아닙니다.** 초과가 "보낸 값 +1"이면
+    경계만 옮겨 7건이 청구됩니다.
+  - **이 허용치의 근거는 관측 1건입니다.** OpenAI가 얼마나 넘을 수 있는지를
+    잰 값이 아니고, 본 것과 모순되지 않는 가장 작은 수입니다. 이 bound를 또
+    넘으면 답은 허용치를 키우는 것이 아니라 **OpenAI의 검색에는 강제 가능한
+    최악값이 없다고 인정하고 Google과 같은 자리로 옮기는 것**입니다.
+  - 검색 turn의 승인된 최악 비용이 US$0.05 → **US$0.06**으로 바뀝니다. 이는
+    tuning이 아니라 승인 사항이며 2026-08-26에 승인됐습니다.
+- **ceiling breach latch는 프로세스를 넘어 지속됩니다.**
+  `lib/webSearchCeilingBreachStore.ts`가 provider별 `AppSetting` 행으로 기록하고
+  최대 `REFRESH_INTERVAL_MS`(60초)마다 새로 읽습니다. 이전에는 메모리 Set
+  하나였고 실제 보장은 "다음 배포까지"였습니다 — 2026-08-26 staging에서 latch가
+  걸렸고, 다음 배포가 아무 흔적 없이 그것을 지웠을 것입니다. latch는 두
+  집합입니다: **직접 관측한 것(`localBreaches`)은 새로고침이 지울 수
+  없고**(쓰기 실패나 조기 새로고침이 목격자 프로세스를 풀어 주면 안 됩니다),
+  공유분(`durableBreaches`)은 통째로 교체되므로 운영자가 행을 지우면 한 주기
+  안에 모든 인스턴스가 재개합니다.
 - **provider capability와 operational dispatchability는 다릅니다.**
   `nativeSearchIsDispatchable()`(`lib/webSearchCapability.ts`)이 유일한
   판정이고, composer · credit estimate · model picker · router candidate ·
