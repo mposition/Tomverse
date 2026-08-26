@@ -24,19 +24,23 @@ import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegi
  * survived. These tests stand in for it.
  */
 
-const harness = readFileSync(
-    fileURLToPath(
-        new URL("../scripts/evalImportedMemoryExtraction.mjs", import.meta.url)
-    ),
-    "utf8"
-);
+/**
+ * The pricing and the output ceiling moved into
+ * `lib/memoryEvalLiveAdapter.ts` when the development probe needed the same
+ * provider call. These assertions follow the code: what they pin is that the
+ * eval's *live path* prices with a model and sends the product's ceiling, and
+ * that path is now the module plus the two scripts that use it.
+ */
+const readSource = (path) =>
+    readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 
-const estimator = readFileSync(
-    fileURLToPath(
-        new URL("../scripts/report-memory-eval-cost-estimate.mjs", import.meta.url)
-    ),
-    "utf8"
-);
+const harness = [
+    readSource("../lib/memoryEvalLiveAdapter.ts"),
+    readSource("../scripts/evalImportedMemoryExtraction.mjs"),
+    readSource("../scripts/probeMemoryExtractionDevelopment.mjs"),
+].join("\n");
+
+const estimator = readSource("../scripts/report-memory-eval-cost-estimate.mjs");
 
 test("the eval's pricing basis resolves for every registered pair", () => {
     // If this cannot resolve, the ceiling has no number behind it and a live

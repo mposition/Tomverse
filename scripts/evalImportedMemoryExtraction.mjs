@@ -55,6 +55,7 @@ import {
     summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
 import { LEGACY_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalLegacyDataset.ts";
+import { createEvalLiveAdapter } from "../lib/memoryEvalLiveAdapter.ts";
 
 const argValue = (name, fallback) => {
     const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -263,64 +264,20 @@ const MAX_CONSECUTIVE_FAILURES = 5;
 /**
  * The live adapter is the product's adapter.
  *
- * It used to build its own `generateText` call, and three runs died on the
- * difference: a system message the SDK refuses, then an output ceiling this
- * file had picked for itself. Both were invented here, and the second was
- * worse than the first -- an eval that sends a request the product never
- * sends is not measuring the product, however green its numbers come out.
- *
- * So the call comes from `createExtractionProviderAdapter`, the same function
- * `memoryExtractionWorker` uses, and this file supplies only what an eval
- * needs to differ in: nothing to abort, no durable cost row, and a usage hook
- * so the spend ceiling has real numbers rather than an estimate.
+ * The delegation lives in `lib/memoryEvalLiveAdapter.ts` rather than here,
+ * because it now has two callers: this harness and the development probe.
+ * "Both build the same adapter" is a claim nobody checks until a run fails,
+ * and three runs already died on exactly that kind of difference.
  */
-const liveAdapter = async (input) => {
-    const [
-        { createExtractionProviderAdapter },
-        { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS },
-        { getModel },
-        { resolveModelPricing },
-    ] = await Promise.all([
-        import("../lib/memoryExtractionProvider.ts"),
-        import("../lib/memoryExtractionWorker.ts"),
-        import("../lib/models.ts"),
-        import("../lib/modelPricing.ts"),
-    ]);
-    const model = getModel(modelId);
-    const adapter = createExtractionProviderAdapter({
-        model,
-        maxOutputTokens: MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS,
-        // An eval has no deadline of its own: the run is bounded by the spend
-        // ceiling and the consecutive-failure guard, both of which stop it
-        // between cases rather than mid-request.
-        signal: new AbortController().signal,
-        onCallIssued: () => {},
-        onResult: (result) => {
-            try {
-                // `resolveModelPricing` takes the model and an options object,
-                // not an id and a bare number. Called with `(modelId, tokens)`
-                // it threw on every single call, and the catch below swallowed
-                // it, so `accruedCostUsd` stayed at zero for a whole live run
-                // and the §12.5 spend ceiling never bound.
-                const pricing = resolveModelPricing(model, {
-                    estimatedPromptTokens: result.usage.inputTokens ?? 0,
-                });
-                accruedCostUsd +=
-                    ((result.usage.inputTokens ?? 0) *
-                        pricing.inputUsdPerMillionTokens +
-                        (result.usage.outputTokens ?? 0) *
-                            pricing.outputUsdPerMillionTokens) /
-                    1_000_000;
-            } catch {
-                // Pricing is for the spend ceiling only, so a resolution
-                // failure does not abort a run that is otherwise fine. It is
-                // counted, though: silence here is what hid the bug above.
-                pricingFailures += 1;
-            }
-        },
-    });
-    return adapter(input);
-};
+const liveAdapter = createEvalLiveAdapter({
+    modelId,
+    onCostUsd: (usd) => {
+        accruedCostUsd += usd;
+    },
+    onPricingFailure: () => {
+        pricingFailures += 1;
+    },
+});
 
 /* -------------------------------------------------------------------- run -- */
 

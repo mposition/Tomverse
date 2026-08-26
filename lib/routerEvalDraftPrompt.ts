@@ -43,7 +43,26 @@ import { EVAL_CELLS, type EvalStratum } from "./routerQualityEvalSet.ts";
  * derived from the batch size, and the frame rule states a cap rather than an
  * accounting convention the drafter has no reason to apply to itself.
  */
-export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v2";
+/**
+ * v3 gave `coding` and `current_information` the stratum line each was
+ * missing, on evidence from Wave 2.
+ *
+ * Seven of coding/en's fourteen prompts said "this function", "this
+ * template", "this query" with nothing attached. Both systems answering such
+ * a prompt reply by asking for the code, so the item measures clarification
+ * behaviour rather than routing. The cell's own seeds inline their code; the
+ * instruction never said to. `document_and_attachment`, whose stratum line
+ * does say it, returned fourteen self-contained prompts out of fourteen --
+ * the line is the whole difference.
+ *
+ * Five of current_information/en's turned on values that move hourly: a spot
+ * price, today's mortgage rate, last weekend's box office, live dealership
+ * stock. Needing current information is what the stratum is for, but the set
+ * is frozen and re-run against a baseline, and an item whose correct answer
+ * changes between runs cannot be compared across them. The cell's seed shows
+ * the form that works: current, citable, and steady for months.
+ */
+export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v3";
 
 /**
  * What each stratum is for, in the drafter's terms.
@@ -163,10 +182,23 @@ export function draftInstruction(request: DraftRequest): string {
     "  handle it. The prompt is all that is wanted."
   );
 
+  if (request.stratum === "coding") {
+    lines.push(
+      "- Include the code the prompt is about, inline, whenever the prompt refers",
+      "  to any. \"Fix this function\" with no function attached is answerable only",
+      "  by asking for it, which is not what this category measures."
+    );
+  }
   if (request.stratum === "current_information") {
     lines.push(
       "- These must genuinely require current information. A question answerable",
-      "  from general knowledge belongs in another category."
+      "  from general knowledge belongs in another category.",
+      "- Ask for something current that stays true for months and can be checked",
+      "  against a citable source: a released version, a recommended practice, a",
+      "  published rule, a decision that was taken. NOT a value that moves by the",
+      "  hour — a live price, today's rate, this weekend's figures, current stock.",
+      "  Those have a different right answer at every run, so the same item cannot",
+      "  be compared between runs."
     );
   }
   if (request.stratum === "document_and_attachment") {
