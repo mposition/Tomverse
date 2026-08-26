@@ -42,8 +42,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-23 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **33개 파일, 752 test**를 선택합니다.
+실측: 2026-08-26 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니다
+(project당 708).
 
 | Spec |
 |---|
@@ -75,6 +76,51 @@ mobile-chromium 두 project에서 **33개 파일, 752 test**를 선택합니다.
 | `signin-analytics-placement.spec.ts` |
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
+| `chat-keyboard-policy.spec.ts` |
+| `chat-tools.spec.ts` |
+| `comparison-action-rail.spec.ts` |
+| `comparison-rate-limit.spec.ts` |
+| `credit-entitlement-disclosure.spec.ts` |
+| `guest-account-identity-transition.spec.ts` |
+| `guest-attachment-ai-review-flow.spec.ts` |
+| `guest-turnstile-verification.spec.ts` |
+| `image-generation-workspace.spec.ts` |
+| `mobile-composer-contract.spec.ts` |
+| `mobile-header-spacing.spec.ts` |
+| `mobile-message-visibility.spec.ts` |
+| `model-finder.spec.ts` |
+| `model-picker.spec.ts` |
+| `plan-change-dialog.spec.ts` |
+| `pricing-purchase-cta.spec.ts` |
+| `web-search-composer-state.spec.ts` |
+
+2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
+project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
+`AGENTS.md`·`docs/ui-contracts/`·`docs/policy/`가 **릴리스 차단**이라고 이름을
+댄 spec 중 PR tier에 없던 전부입니다.
+
+근거는 이날 실제로 일어난 일입니다. native search 비용 상한(#1015)이 어떤
+모델을 web search 가능으로 세는지 바꿨는데, `mobile-message-visibility.spec.ts`
+가 PR tier에 없어서 그 PR의 게이트는 깨끗하게 통과했습니다. 낡은 기대값은
+`main`에서 드러났고, 거기서 Main Chromium Regression은 Railway 배포를
+게이트하므로 production 배포 다섯 건이 네 시간 가까이 SKIP됐습니다. **PR이
+계약 spec으로 실패할 수 없으면, 리뷰 코멘트로 끝날 일이 배포 장애가 됩니다.**
+
+같은 기준을 만족하지만 일부러 제외한 것이 하나 있습니다 — 아래 "PR tier에
+두지 않는 것"이 이름을 댄 golden spec입니다. 그 결정이 그대로 유효하고,
+golden baseline은 `visual-baseline/**` 사람 diff 절차를 지납니다. 여기에
+파일명을 적지 않는 것은 `check:ui-tier-coverage`가 이 절의 spec 언급을
+tier 소속으로 읽기 때문입니다.
+
+합류한 것: `chat-keyboard-policy` · `chat-tools` · `comparison-action-rail` ·
+`comparison-rate-limit` · `credit-entitlement-disclosure` ·
+`guest-account-identity-transition` · `guest-attachment-ai-review-flow` ·
+`guest-turnstile-verification` · `image-generation-workspace` ·
+`mobile-composer-contract` · `mobile-header-spacing` ·
+`mobile-message-visibility` · `model-finder` · `model-picker` ·
+`plan-change-dialog` · `pricing-purchase-cta` · `web-search-composer-state`.
+
+그 이전 기록은 다음과 같습니다.
 
 검토 시점 실측(2026-08-23, `--list`): **33개 파일 752 test** (두 project 합계).
 `answer-header-layout.spec.ts`(+8 — 이 spec을 빼고 다시 재면 32개 파일
