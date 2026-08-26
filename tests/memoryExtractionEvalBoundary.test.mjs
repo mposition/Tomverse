@@ -426,3 +426,55 @@ test("the harness imports no provider SDK at module load", () => {
         "the live adapter should reach the SDK dynamically"
     );
 });
+
+test("a development purpose waives the freeze gate and nothing else", () => {
+    // The one relaxation, and the assertion that it is only one. A
+    // development probe runs against a sample that is still moving — that is
+    // what it is for — but every other gate has to keep closing, or
+    // "development" becomes a way round the approval.
+    const funded = { status: "candidate", evalBudget: { maxUsd: 5 } };
+    const base = {
+        live: true,
+        registerEntry: funded,
+        hasApiKey: true,
+        datasetFrozen: false,
+        commitKnown: true,
+        datasetSchemaVersion: 2,
+        datasetPurpose: "development",
+    };
+
+    assert.deepEqual(decideEvalRunMode(base), { mode: "live", ceilingUsd: 5 });
+    // Same input without the purpose: refused for the freeze.
+    assert.deepEqual(
+        decideEvalRunMode({ ...base, datasetPurpose: undefined }),
+        { mode: "refused", reason: "dataset_not_frozen" }
+    );
+
+    for (const [name, override, reason] of [
+        ["no pair", { registerEntry: null }, "unknown_pair"],
+        [
+            "closed pair",
+            { registerEntry: { status: "revoked", evalBudget: { maxUsd: 5 } } },
+            "pair_not_runnable",
+        ],
+        [
+            "no budget",
+            { registerEntry: { status: "candidate", evalBudget: null } },
+            "no_eval_budget",
+        ],
+        ["no key", { hasApiKey: false }, "no_api_key"],
+        ["schema 1", { datasetSchemaVersion: 1 }, "legacy_dataset_schema"],
+        ["unknown commit", { commitKnown: false }, "unknown_commit"],
+        [
+            "cap above the approval",
+            { requestedRunCapUsd: 50 },
+            "run_cap_above_approved_ceiling",
+        ],
+    ]) {
+        assert.deepEqual(
+            decideEvalRunMode({ ...base, ...override }),
+            { mode: "refused", reason },
+            name
+        );
+    }
+});
