@@ -134,7 +134,15 @@ export const BATCH_101_DURABLE_KO: readonly MemoryEvalCaseV2[] = [
             {
                 id: "e1",
                 kind: "verbosity",
-                mustInclude: ["짧게"],
+                // The stem, not the user's adverb. `짧게` is how the user
+                // wrote it, and docs/policy/external-conversation-import-and-memory.md §8.2
+                // requires the statement to be rewritten into declarative
+                // third person — where the natural forms are 짧은 and 짧고. So the
+                // old token could only match a statement that had NOT been
+                // rewritten: the gold demanded what the prompt forbids.
+                // Observed on probe1 (over mem-eval-succ-1, 2026-08-26):
+                // "사용자는 짧고 간결한 답변을 선호한다" scored as a miss.
+                mustInclude: ["짧"],
                 expectedDisposition: "bulk_safe",
             },
         ],

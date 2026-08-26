@@ -480,7 +480,13 @@ export const BATCH_108_DURABLE_KO: readonly MemoryEvalCaseV2[] = [
             {
                 id: "e1",
                 kind: "formatting",
-                mustInclude: ["굵게"],
+                // Same shape as succ-durable-ko-3, corrected with it.
+                // Unlike that one this was NOT observed failing — "굵게
+                // 표시한다" is a natural declarative, so the adverb survives
+                // the rewrite here. The stem is taken anyway because it costs
+                // nothing: every statement containing 굵게 contains 굵, and
+                // the kind must still match exactly.
+                mustInclude: ["굵"],
                 expectedDisposition: "bulk_safe",
             },
         ],
