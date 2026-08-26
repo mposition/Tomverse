@@ -103,7 +103,30 @@ test("the quotas never round down to nothing", () => {
 });
 
 test("the template version moved with the rules it describes", () => {
-    assert.equal(DRAFT_TEMPLATE_VERSION, "router-eval-draft-v2");
+    assert.equal(DRAFT_TEMPLATE_VERSION, "router-eval-draft-v3");
+});
+
+// Wave 2's coding cell returned 7 of 14 prompts pointing at code that was not
+// there -- "fix this function", no function. Both systems would answer by
+// asking for it, which measures clarification, not routing. The cell's own
+// seeds inline their code; nothing told the drafter to.
+test("the coding cell is told to inline the code it refers to", () => {
+    const instruction = draftInstruction({ ...base, stratum: "coding", cell: "en" });
+    assert.match(instruction, /Include the code the prompt is about, inline/);
+    assert.doesNotMatch(
+        draftInstruction({ ...base, stratum: "writing_and_rewriting", cell: "en" }),
+        /Include the code/
+    );
+});
+
+// A frozen set is re-run against a baseline. An item whose right answer moves
+// by the hour scores differently every run for reasons that have nothing to do
+// with the systems being compared.
+test("current information must be current but stable enough to re-run", () => {
+    const instruction = draftInstruction({ ...base, stratum: "current_information", cell: "en" });
+    assert.match(instruction, /stays true for months/);
+    assert.match(instruction, /NOT a value that moves by the/);
+    assert.match(instruction, /genuinely require current information/);
 });
 
 test("strata with their own requirements get their own line", () => {
