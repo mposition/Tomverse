@@ -216,7 +216,7 @@ const intersectionArea = (
 // Desktop
 // ---------------------------------------------------------------------------
 
-test.describe("Guest verification: desktop shell", () => {
+test.describe("Guest verification: desktop shell", { tag: "@ui-risk" }, () => {
   test("an automatic pass shows no verification UI at all", async ({ page }) => {
     const chat = await enterGuestChat(page, { viewport: DESKTOP_VIEWPORT });
 
@@ -506,7 +506,7 @@ test.describe("Guest verification: desktop shell", () => {
 // Mobile
 // ---------------------------------------------------------------------------
 
-test.describe("Guest verification: mobile shell", () => {
+test.describe("Guest verification: mobile shell", { tag: "@ui-risk" }, () => {
   test("the sheet is inert and costs the composer nothing before a challenge", async ({
     page,
   }) => {
@@ -932,7 +932,7 @@ test.describe("Guest verification: mobile shell", () => {
 // next manual send rides that grant without a second challenge.
 // ---------------------------------------------------------------------------
 
-test.describe("Guest verification: verified retry meets a later gate", () => {
+test.describe("Guest verification: verified retry meets a later gate", { tag: "@ui-risk" }, () => {
   test("a rate-limited verified retry fails the waiting panels without a tokenless retry storm", async ({
     page,
   }) => {
@@ -1048,7 +1048,7 @@ test.describe("Guest verification: verified retry meets a later gate", () => {
 // Background work vs. user-initiated work
 // ---------------------------------------------------------------------------
 
-test.describe("Guest verification: background vs user-initiated", () => {
+test.describe("Guest verification: background vs user-initiated", { tag: "@ui-risk" }, () => {
   test("a background title generation never opens a challenge", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "interactive");
@@ -1169,7 +1169,7 @@ test.describe("Guest verification: background vs user-initiated", () => {
 // EXT-REAUDIT-F004: a stalled interactive challenge must not stay silent
 // ---------------------------------------------------------------------------
 
-test.describe("Guest verification: long-wait feedback", () => {
+test.describe("Guest verification: long-wait feedback", { tag: "@ui-risk" }, () => {
   // The "interactive" script fires before-interactive-callback and then never
   // calls back -- exactly what an unreachable Cloudflare looks like from the
   // app's side. The app clears its own silent timeout at that point on purpose

@@ -355,7 +355,7 @@ const SHELLS = [
   { name: "mobile-320", viewport: { width: 320, height: 640 }, isMobile: true },
 ] as const;
 
-test.describe("guest journey: attach a file, compare, review", () => {
+test.describe("guest journey: attach a file, compare, review", { tag: "@ui-risk" }, () => {
   test.use({ hasTouch: true });
 
   test.beforeEach(async ({}, testInfo) => {
