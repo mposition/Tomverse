@@ -318,7 +318,9 @@ reader to discover.
     this direction too.
 
   What stays open is the primary of a routed turn whose profile needs the web
-  while the account's web search mode is `auto` or `off`. The filter admitted a
+  while the account's web search mode is not `always`. (`auto` is a retired
+  stored value — the composer offers a switch, and a row still carrying `auto`
+  is read as off — so the two non-searching cases are one case now.) The filter admitted a
   native model *because* it can search; on that turn it will not. The dispatch
   records it (`chat_auto_search_path_missing`, model id and gap identifier
   only) and answers anyway, because the alternatives — refusing a turn the user

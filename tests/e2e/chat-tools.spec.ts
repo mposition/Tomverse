@@ -103,7 +103,7 @@ test("selecting a web search mode shows a removable status chip", { tag: "@ui-ri
 
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-web-search-row").click();
-  await page.getByTestId("web-search-mode-option-always").click();
+  await page.keyboard.press("Escape");
 
   // The chip carries the request state itself instead of echoing the menu
   // label ("Web search - Use web search"): the only selected model here is
@@ -167,7 +167,7 @@ test("web search mode selection does not repeat across a new chat", { tag: "@ui-
 
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-web-search-row").click();
-  await page.getByTestId("web-search-mode-option-always").click();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
 
   const newChatButton = page.getByRole("button", { name: "New chat" }).first();

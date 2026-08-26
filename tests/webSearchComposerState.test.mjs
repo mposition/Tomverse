@@ -66,16 +66,33 @@ test("no supported model at all blocks rather than silently falling back", () =>
   assert.equal(state.estimatedSurchargeCredits, 0);
 });
 
-test("auto mode never reserves credits and never blocks on support", () => {
-  const state = deriveWebSearchComposerState({
+// The retired "auto" mode. A row saved before web search became a switch can
+// still carry it, and it has to read as off everywhere the composer looks --
+// no chip, no exception row, and above all no credit ceiling for a search this
+// account never agreed to run unprompted.
+test("a stored auto mode reads exactly like off", () => {
+  const auto = deriveWebSearchComposerState({
     webSearchMode: "auto",
-    selectedModelIds: [UNSUPPORTED, UNSUPPORTED],
+    selectedModelIds: [NATIVE, UNSUPPORTED],
   });
+  const off = deriveWebSearchComposerState({
+    webSearchMode: "off",
+    selectedModelIds: [NATIVE, UNSUPPORTED],
+  });
+  assert.deepEqual(auto, off);
+  assert.equal(auto.mode, "off");
+  assert.equal(auto.isVisible, false);
+  assert.equal(auto.estimatedSurchargeCredits, 0);
+});
+
+test("a stored always mode stays on", () => {
+  const state = deriveWebSearchComposerState({
+    webSearchMode: "always",
+    selectedModelIds: [NATIVE],
+  });
+  assert.equal(state.mode, "always");
   assert.equal(state.isVisible, true);
-  assert.equal(state.hasException, false);
-  assert.equal(state.allUnsupported, false);
-  assert.equal(state.tone, "neutral");
-  assert.equal(state.estimatedSurchargeCredits, 0);
+  assert.equal(state.estimatedSurchargeCredits, WEB_SEARCH_SURCHARGE_CREDITS);
 });
 
 test("the surcharge estimate tracks the selection, one charge per native model", () => {
