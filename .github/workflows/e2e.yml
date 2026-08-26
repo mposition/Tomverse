@@ -32,7 +32,7 @@ permissions:
 
 # Every push to `main` is a release, so every push needs its own verdict.
 #
-# This run takes ~25 minutes wall clock (~125 runner-minutes across the five
+# This run takes ~28 minutes wall clock (~106 runner-minutes across the five
 # shards). On 2026-08-02 seven releases landed 11-20 minutes apart, and with
 # `cancel-in-progress: true` each one killed the previous run before it could
 # finish: `14ecd96`, `cd3e1b0` and `2a7eb03` were all cancelled in a row. The
@@ -88,8 +88,9 @@ jobs:
     #
     # Playwright's own test times, for whoever tunes this next:
     #
-    #   5673158  31.1m  29.3m  22.1m     three shards, all finished
-    #   c8e0a23  killed 29.1m  29.1m     same three, a slower set of runners
+    #   5673158  31.1m  29.3m  22.1m                three shards, all finished
+    #   c8e0a23  killed 29.1m  29.1m                same three, slower runners
+    #   2596e0e  25.4m  20.1m  17.3m  16.4m  17.9m  five, the first run
     #
     # Two things that run reveals. The suite is ~83 minutes of execution and
     # was ~41 at the note above, so it doubled. And the split is even by test
@@ -98,19 +99,24 @@ jobs:
     # specs belong to one project, and `--shard` cannot see that.
     #
     # So the lever is the shard count, which is what the original note said it
-    # would be. Five puts a typical shard near 20 minutes of tests plus about
-    # four of npm, build and browser install, which leaves the 40-minute
-    # ceiling roughly 40% of headroom -- enough to absorb the ~25% runner-speed
-    # variance visible between those two runs. The ceiling itself stays where
-    # it is: it is what stops a hung Playwright server burning a full hour, and
-    # raising it to buy headroom would spend exactly the protection it exists
-    # for. The cost is two more duplicated builds, which on a public repository
-    # is queue time rather than money.
+    # would be. `2596e0e` above is the measurement, not the estimate: the
+    # slowest shard took 26m48s of job time for 25m24s of tests, which leaves
+    # the 40-minute ceiling 13 minutes -- a third of it -- in hand. That run
+    # was 97 minutes of execution against the 83 of `5673158`, so the margin
+    # was measured on a slow set of runners rather than a kind one. Wall clock
+    # came to 28m24s for 106 runner-minutes across the five.
     #
-    # `--list` puts the five at 1016 / 1044 / 940 / 1007 / 991 specs, against
-    # ~1665 each at three. That is the count, not the work -- the runtime skips
-    # above are invisible to `--list`, so the duration tail is still bounded by
-    # file granularity and still wants watching.
+    # The ceiling itself stays where it is: it is what stops a hung Playwright
+    # server burning a full hour, and raising it to buy headroom would spend
+    # exactly the protection it exists for. The cost is two more duplicated
+    # builds, which on a public repository is queue time rather than money.
+    #
+    # What did not change is the imbalance. `--list` puts the five at
+    # 1016 / 1044 / 940 / 1007 / 991 specs, and shard 1 still came in five
+    # minutes above the next one -- the count is even, the work is not,
+    # because the runtime skips above are invisible to `--list`. So the tail
+    # is still one shard wide, and the next release that lands 10 minutes of
+    # tests in the wrong file spends them out of shard 1's 13.
     timeout-minutes: 40
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
