@@ -1730,6 +1730,3534 @@
         "draftedAt": "2026-08-25T11:59:40.380Z"
       },
       "prompt": "How do those automatic soap dispensers work? Do they sense my hand, or is it just a timer?"
+    },
+    {
+      "id": "writing-ko-001",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "당근마켓에 올릴 텐데 “직거래만 되고 택배 안 됨, 사용감 좀 있음” 이걸 정중하게 다듬어 줘."
+    },
+    {
+      "id": "writing-ko-002",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "모바일 청첩장 문구 좀 써줘. 신랑 신부가 30대 후반이라 너무 오글거리는 시적인 말은 빼고, 하객들이 읽기 편하게 300자 이내로 담백하게 부탁해. 화환은 정중히 거절하는 문장도 꼭 넣어줘."
+    },
+    {
+      "id": "writing-ko-003",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "내일 연차 쓰려고 팀장님께 슬랙 드리는데 “급한 건 대리한테 물어보세요”라는 뉘앙스를 업무용 예의 갖추어 한 문장으로 어떻게 표현해야 할까?"
+    },
+    {
+      "id": "writing-ko-004",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "아파트 관리실 안내문 작성해 줘. 지난달에 엘리베이터 CCTV 교체 예산이 부족해서 못 했거든. 이번 달 관리비 고지서에 포함해서 다음 주에 무조건 교체한다는 내용으로, 입주민들이 항의하지 않게 정중하고 명확하게 써줘."
+    },
+    {
+      "id": "writing-ko-005",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "내가 쓴 맛집 리뷰 초안인데 좀 건조해. “음식이 빨리 나오고 맛있었다. 직원도 친절했다. 재방문 의사 있음.” 이걸 네이버 블로그 맛집 리뷰 특유의 이모티콘이랑 느낌표 팍팍 들어가는 과장된 톤으로 바꿔봐."
+    },
+    {
+      "id": "writing-ko-006",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "동아리 신입생 모집 포스터에 들어갈 카피 라이팅 5개만 뽑아줘. 디자인 툴을 못 다뤄서 텍스트만 크게 넣을 거라, 글자 수 10자 이내의 강렬한 한 줄 문장들로만 구성해 줘. 내일까지 인쇄소 넘겨야 하니까 MZ세대 타겟이라는 핑계로 너무 추상적인 영어 단어는 쓰지 마."
+    },
+    {
+      "id": "writing-ko-007",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "동료 아버지상 부의금 보낼 때 카톡으로 같이 보낼 짧은 위로의 말 좀 적어줘."
+    },
+    {
+      "id": "writing-ko-008",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "룸메이트 구하는 글 써줘. 전에 올렸을 때 ‘소음 민감’이라고 썼더니 너무 예민해 보인다는 댓글만 달려서 실패했어. 이번엔 “서로 생활 패턴 존중하며 조용히 지내실 분” 정도로 순화하되, 반려동물은 절대 안 된다는 조건은 확실하게 박아줘."
+    },
+    {
+      "id": "writing-ko-009",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "“귀사의 노고에 감사드립니다. 금번 프로젝트 납기일을 오는 15일까지 준수하여 주시기를 바랍니다.” 이 문장, 파트너십을 강조하는 부드러운 비즈니스 메일 톤으로 다듬어 주세요."
+    },
+    {
+      "id": "writing-ko-010",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "카페 내일 휴무인데 인스타 스토리에 올릴 감성적인 공지 문구 좀 지어줘. 개인 사정 때문에 쉰다는 사실만 자연스럽게 녹이면 돼."
+    },
+    {
+      "id": "writing-ko-011",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "공공기관 자기소개서 ‘직무 관련 경험’ 항목 써줘. 분량은 정확히 500자 공백 포함이야. 인턴 경험은 없고 아르바이트 경험밖에 없는데, 이걸 데이터 분석 역량과 억지로라도 연결해서 논리적으로 포장해 줘."
+    },
+    {
+      "id": "writing-ko-012",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "유튜브 쇼츠 오프닝 대본 고쳐줘. “오늘은 서울 시내 교통 통제 구간에 대해 알아보겠습니다.” 이걸 20대 유튜버가 카메라 보며 친구한테 말하듯 반말하고 추임새 팍팍 들어가는 스타일로 만들어 줘."
+    },
+    {
+      "id": "writing-ko-013",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "“내일 소풍 버스비가 안 걷힌 집은 아이를 못 보냅니다” 유치원 학부모 단톡방에 올릴 건데, 미납 시 참여 불가라는 사실은 유지하되 교육적이고 정중한 안내문 톤으로 순화해 주세요."
+    },
+    {
+      "id": "writing-ko-014",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:41:59.506Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "2312b923ccd98bd9",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:44:08.168Z"
+      },
+      "prompt": "트윗 스레드로 영화 리뷰 올리려는데, 본문을 4개로 쪼개야 해. 각 트윗은 공백 포함 140자 이내여야 하고, 첫 번째 트윗 맨 앞에는 시선 끌 만한 훅(Hook) 문장이 들어가게 써줘. 스포일러는 절대 포함하지 마."
+    },
+    {
+      "id": "coding-en-001",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Why does my React useEffect infinite loop when I put an object in the dependency array?"
+    },
+    {
+      "id": "coding-en-002",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "I need to parse a 5GB CSV file and aggregate sales by region. The server only has 512MB of RAM and I'm not allowed to install pandas or any third-party packages. Write a Python script that handles this without crashing."
+    },
+    {
+      "id": "coding-en-003",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Rewrite this recursive tree traversal to use an explicit stack instead."
+    },
+    {
+      "id": "coding-en-004",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "I'm trying to use fetch with AbortController to cancel requests in our web app. It throws an \"AbortController is not defined\" error because we still have to support IE11. Give me a polyfill or workaround that actually works in that browser without using axios."
+    },
+    {
+      "id": "coding-en-005",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Here is a Django model for a blog post. Add a custom manager method that returns only posts published in the last 7 days, ordered by view count descending."
+    },
+    {
+      "id": "coding-en-006",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "We need to add a unique constraint on the email column in our production PostgreSQL database. The table has 50 million rows and we cannot afford any downtime or table locks. Write the exact SQL migration steps to do this safely using a concurrent index."
+    },
+    {
+      "id": "coding-en-007",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Fix the memory leak in this C++ linked list destructor."
+    },
+    {
+      "id": "coding-en-008",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Implement a rate limiter using the token bucket algorithm in Redis. You can only use a single Lua script to ensure atomicity since we don't have Redis transactions enabled in our cluster."
+    },
+    {
+      "id": "coding-en-009",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Can you write a regular expression that validates a password? It needs to require at least one uppercase letter, one number, and one special character, but explicitly reject the word \"password\" in any case."
+    },
+    {
+      "id": "coding-en-010",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Convert this monolithic Express route handler into three separate middleware functions."
+    },
+    {
+      "id": "coding-en-011",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "I tried using json_normalize to flatten a nested JSON API response into a DataFrame, but it completely drops the arrays inside the \"tags\" key. Write a custom Python function to flatten this specific JSON structure into a flat dictionary list without losing the array data."
+    },
+    {
+      "id": "coding-en-012",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "What is the exact time complexity of the std::map::insert operation in C++ when the map already contains N elements? Also, explain why it differs from std::unordered_map."
+    },
+    {
+      "id": "coding-en-013",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Please debug this AWS CloudFormation template. It keeps failing with a \"Circular dependency\" error between the IAM role and the S3 bucket policy."
+    },
+    {
+      "id": "coding-en-014",
+      "stratum": "coding",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:46:39.547Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "1fb7b029ccccc56c",
+        "generatorCommit": "fde8f05",
+        "draftedAt": "2026-08-26T00:48:13.904Z"
+      },
+      "prompt": "Figure out why this SQL query returns duplicate rows when joining the users and orders tables."
+    },
+    {
+      "id": "analysis-ko-001",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "전세로 들어갈 집 등기부등본에 근저당이 3억 있고 집값이 5억인데 전세가가 3억 5천이면 내가 후순위라 위험한 건가요?"
+    },
+    {
+      "id": "analysis-ko-002",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "예산이 딱 500만 원 남았는데 다음 주까지 신제품 론칭 홍보를 해야 해. 인플루언서 마케팅이랑 메타 광고 중 하나만 골라야 한다면 어떤 기준으로 판단해서 어디에 몰빵해야 할까?"
+    },
+    {
+      "id": "analysis-ko-003",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "NCS 준비하는데 모듈형이랑 국가직무능력표준 기반 문제가 섞여 나오잖아. 내가 수리 능력은 강한데 상황 판단이 약한데, 남은 한 달 동안 어떤 비율로 공부 시간을 배분하는 게 합리적일까?"
+    },
+    {
+      "id": "analysis-ko-004",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "사설 업체에서 아이폰 배터리를 13만 원보다 싸게 교체할 때 정품 대비 감수해야 할 장기적 리스크와 이득의 균형을 어떻게 봐야 할까요?"
+    },
+    {
+      "id": "analysis-ko-005",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "우리 팀에 백엔드 개발자가 나랑 주니어 한 명밖에 없어서 MSA는 엄두도 못 내고 모놀리식으로 가고 있는데, 트래픽이 다음 달에 10배로 뛸 게 확실시되는 상황에서 DB 샤딩 없이 버틸 수 있는 아키텍처 대안이 뭐가 있을까?"
+    },
+    {
+      "id": "analysis-ko-006",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "중소기업 재직자 소득세 감면 신청을 뒤늦게 하게 됐는데, 소급 적용이 안 되는 기간에 대한 세금 불이익을 최소화할 현실적인 방법이 있나요?"
+    },
+    {
+      "id": "analysis-ko-007",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "사내 워크숍 장소로 제주도를 보려 했는데 항공권이 이미 다 매진되었고, 예산은 1인당 50만 원으로 고정되어 있어. 이 조건에서 대체지로 가장 합리적인 국내 지역 두 곳과 그 선정 이유를 비교 분석해 줘."
+    },
+    {
+      "id": "analysis-ko-008",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "올해 주식 양도소득세 대주주 요건이 10억 원으로 바뀌면서 연말에 일부러 매도하는 물량이 나올 텐데, 내가 보유한 중소형주도 이 영향에서 자유로울지 시나리오별로 따져보고 대응 전략을 짜고 싶어."
+    },
+    {
+      "id": "analysis-ko-009",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "간헐적 단식 16:8 유지 중 오후 3시 피로로 업무 효율이 떨어지는데 인슐린 스파이크 없이 이 시간대만 공복을 깨지 않고 버틸 수 있는 영양학적 대안이 뭔가요?"
+    },
+    {
+      "id": "analysis-ko-010",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "공공기관 납품용 소프트웨어 입찰을 준비해야 하는데, 요구사항에 오픈소스 라이선스 중 GPL 계열은 절대 포함되면 안 된다는 조항이 있어. 이 제약 하에서 React 대신 쓸 수 있는 프론트엔드 프레임워크 후보들을 비교해 주고, 각 라이선스 리스크도 평가해 줘."
+    },
+    {
+      "id": "analysis-ko-011",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "수시 전형으로 의대랑 약대 동시 지원을 고려 중인데, 내신은 1.2등급이지만 비교과 활동이 전부 환경 봉사 위주라 의학적 적합성을 어필하기 애매해. 이 스토리를 어떻게 재구성해야 두 전공의 면접관 모두에게 통할 수 있을지 교집합을 찾아줘."
+    },
+    {
+      "id": "analysis-ko-012",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "중국발 요소수 대란 때처럼 이번 달에 핵심 원자재 납기가 3주 지연될 전망인데, 우리 공장 재고로는 10일치밖에 안 남아. 가동률을 70%로 줄여서 버티는 것과 대체 공급처에서 2배 비싼 값에 긴급 조달하는 것 중 재무적 타격이 적은 쪽은 어디야?"
+    },
+    {
+      "id": "analysis-ko-013",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "키오스크 주문 화면에서 장년층의 이탈률이 유독 높은데, 글자 크기를 키우는 것 말고도 인지 부하를 줄일 수 있는 UI 흐름 개선안을 연령대별 디지털 리터러시 차이 관점에서 도출해 봐."
+    },
+    {
+      "id": "analysis-ko-014",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-ko-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:50:14.877Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "5cf41fa8fc102528",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:52:07.422Z"
+      },
+      "prompt": "만약 내일 당장 기준금리가 1% 포인트 긴급 인상된다면, 변동금리 주택담보대출을 고정금리로 갈아타기 위한 골든타임과 손익분기점을 어떻게 계산해야 할까?"
+    },
+    {
+      "id": "current-en-002",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "What are the current 30-year fixed mortgage rates in the US today?"
+    },
+    {
+      "id": "current-en-003",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "Tell me the exact price of Bitcoin in USD right now."
+    },
+    {
+      "id": "current-en-004",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "Did any spacecraft successfully land on the moon this year?"
+    },
+    {
+      "id": "current-en-005",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "I need the latest stable release version of the Rust programming language."
+    },
+    {
+      "id": "current-en-006",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "My budget is strictly under $400 for a flight from New York to London next weekend, and I can only fly out of JFK, so what are my options?"
+    },
+    {
+      "id": "current-en-007",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "Since my company blocks Yahoo Finance, find the top three trending tech stocks on the NASDAQ this week using alternative sources and format the output as a markdown table."
+    },
+    {
+      "id": "current-en-008",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "I've been trying to use the standard pip install for the new PyTorch update but it keeps failing with a CUDA mismatch on my Ubuntu 22.04 machine; I need this fixed by tomorrow morning for a presentation, so please provide the exact workaround posted in the last 48 hours."
+    },
+    {
+      "id": "current-en-009",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "Apple rejected my build when I tried downgrading to iOS 17.2 to fix the React Native Hermes crash, meaning I'm stuck on 17.4, so what official patch or community workaround was published this month to resolve this?"
+    },
+    {
+      "id": "current-en-010",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "With a strict budget of $25,000 and a 50-mile pickup radius around Chicago, show me the current dealership listings for used electric vehicles from the current model year."
+    },
+    {
+      "id": "current-en-011",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "I'm writing a blog post about the recent changes to the EU AI Act, so could you summarize the key amendments that were voted on in the last parliamentary session?"
+    },
+    {
+      "id": "current-en-012",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "List the box office numbers for the top 5 movies this past weekend in North America."
+    },
+    {
+      "id": "current-en-013",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "If the Federal Reserve raised rates at their most recent meeting, what was the exact basis point increase and what did the chair say in the press conference?"
+    },
+    {
+      "id": "current-en-014",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "Our Kubernetes cluster just threw a bunch of CVE alerts for the latest containerd update, so which specific CVEs were published this week and are there patched versions available yet?"
+    },
+    {
+      "id": "current-en-015",
+      "stratum": "current_information",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-en-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:54:46.180Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "fc934b606e7320d6",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:56:22.469Z"
+      },
+      "prompt": "Compare the battery life and camera specs of the newest iPhone and the latest Samsung Galaxy based exclusively on tech reviews published in the last thirty days."
+    },
+    {
+      "id": "document-ko-001",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "이 카페 영수증 이미지보고 총 할인 금액이 얼마인지 딱 숫자만 알려줘."
+    },
+    {
+      "id": "document-ko-002",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "첨부한 PDF 공고문에 접수 마감일이랑 제출 서류 목록 어디에 나와 있어?"
+    },
+    {
+      "id": "document-ko-003",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "붙여넣은 엑셀 가계부에서 이번 달 식비랑 교통비 합계 좀 뽑아줄래?"
+    },
+    {
+      "id": "document-ko-004",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "이 오류 화면 캡처본 봐도 어떤 프로그램 충돌인지 감이 안 오는데 뭐가 문제일까?"
+    },
+    {
+      "id": "document-ko-005",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "첨부한 PPT 기획안 내용 바탕으로 10장 내외의 발표 대본을 써줘. 근데 나 PPT 노트 기능 못 쓰니까 A4 용지에 인쇄해서 볼 수 있게 타임라인 형태로 정리해 줘."
+    },
+    {
+      "id": "document-ko-006",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "이 여행 계획서 엑셀 파일에 적힌 숙박비랑 식비 다 더하면 50만 원 넘을까? 50만 원 안에서 맞춰야 하는데 초과하는 항목만 골라서 빼자."
+    },
+    {
+      "id": "document-ko-007",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "첨부한 병원 진료비 세부내역서 이미지로 실비 보험 청구서 쓰려고 하는데, 내가 직접 엑셀로 쳐보려다 질병코드 매핑하는 거 실패했어. 질병코드랑 비급여 항목만 추려서 CSV 포맷 텍스트로 바로 복사할 수 있게 뽑아줘."
+    },
+    {
+      "id": "document-ko-008",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "내일 오전 9시까지 제출해야 하는 국세청 연말정산 간소화 PDF 자료인데, 의료비랑 교육비 공제 한도 초과분만 빠르게 계산해서 알려줄 수 있어? 시간 없어서 전체 다 못 보겠어."
+    },
+    {
+      "id": "document-ko-009",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "첨부한 아파트 관리비 고지서 이미지에서 전기요금, 수도요금, 장기수선충당금은 내가 이미 장부에 적었어. 나머지 항목들만 이름이랑 금액 짝 맞춰서 마크다운 표로 만들어 줘."
+    },
+    {
+      "id": "document-ko-010",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "제가 쓴 자기소개서 한글 파일 첨부했는데, 지원하려는 공공기관 직무 특성상 너무 주관적인 표현은 피하는 게 좋대요. 문장별로 너무 감성적인 단어 쓰인 부분 몇 군데만 집어서 어떻게 고치면 좋을지 조언 좀 해주세요."
+    },
+    {
+      "id": "document-ko-011",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "첨부된 등기부등본 PDF 열어서 근저당권 설정 금액이랑 채권최고액이랑 비교해 보고, 만약 집주인이 이자까지 포함해서 설정해 놓은 게 맞는지 법적 상식 선에서 검토해 봐."
+    },
+    {
+      "id": "document-ko-012",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "이 계약서 스캔본 이미지 봤을 때 특약사항에 '원상복구'랑 관련된 문구가 애매하게 적혀 있는데, 세입자한테 불리하게 해석될 여지가 있는 건지 솔직하게 평가해 줄래?"
+    },
+    {
+      "id": "document-ko-013",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "첨부한 사내 보안 지침 PDF 파일을 신입사원들도 한눈에 이해할 수 있게 핵심 금지 사항 위주로 3줄 요약해 줘. 이모티콘은 쓰지 말고 딱딱한 사내 메일 톤으로."
+    },
+    {
+      "id": "document-ko-014",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-ko-002",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T00:58:18.650Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "f21349bfb3763aef",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T00:59:40.757Z"
+      },
+      "prompt": "캡처로 붙여넣은 두 장의 인터넷 요금제 비교표 이미지에서, 약정 기간이랑 위약금 조건만 쏙 빼서 서로 뭐가 다른지 대조표로 만들어 줄 수 있니?"
+    },
+    {
+      "id": "long-en-016",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "We spent the last three sessions building a custom woodworking jig for cutting dovetail joints, relying heavily on a router table and a specific brass guide bushing. I just dropped my router and the motor is completely burnt out, and I won't have the budget to buy a new one for at least two months.\n\nHow can I adapt the jig design to work with a handheld circular saw and a straight edge instead?"
+    },
+    {
+      "id": "long-en-017",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "We've been outlining the plot for a mystery novel where the detective is colorblind and the crucial clue relies on distinguishing between red and green wires.\n\nSince we established he can't tell those colors apart, what other sensory detail could he use to identify the cut wire in the dark?"
+    },
+    {
+      "id": "long-en-018",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "Goal: Remove a stripped screw from the laptop chassis.\n- Tried: Rubber band method (slipped).\n- Tried: Super glue on the screwdriver tip (broke off).\n- Tried: Drilling it out (drill bit broke).\n\nI only have a soldering iron and some basic hand tools left in my apartment, so what's my next move to get this thing open without damaging the motherboard?"
+    },
+    {
+      "id": "long-en-019",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "Earlier we mapped out a week-long meal prep menu focusing on high-protein, low-carb dinners using chicken, tofu, and salmon.\n\nMy fridge just died and I'm relying on a mini-cooler with ice packs for the next three days; which of those proteins should I cook first?"
+    },
+    {
+      "id": "long-en-020",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "In our previous chats, we designed a DIY backyard water feature using a 50-gallon stock tank, a solar-powered pump, and stacked slate rocks. We agreed the total cost needed to stay under $150.\n\nI just priced out the slate rocks at the local quarry and they are $200 alone, so what cheaper alternative material can we use for the waterfall cascade that still looks natural?"
+    },
+    {
+      "id": "long-en-021",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "We've been analyzing the character arc of the protagonist in the screenplay, specifically how her fear of deep water prevents her from saving her brother in act one.\n\nKeeping in mind she hasn't overcome this phobia yet, how should she realistically react when the villain traps her on a sinking boat in the climax?"
+    },
+    {
+      "id": "long-en-022",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "Okay so we finally finalized the guest list for the outdoor wedding, seated 120 people across 15 tables, and chose a family-style Italian menu. The caterer needs the final seating chart and dietary restriction breakdown by 8 AM tomorrow.\n\nI just got a text from the groom's aunt saying she's now strictly vegan and allergic to nuts, so how do I adjust the menu and seating without messing up the already printed place cards?"
+    },
+    {
+      "id": "long-en-023",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "We've been going over the chord progressions for my acoustic song, settling on a verse in E minor and a chorus in G major.\n\nMy pinky finger is currently injured, so what voicing should I use for the transition chord on a standard-tuned guitar?"
+    },
+    {
+      "id": "long-en-024",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "1. We picked a mid-century modern aesthetic for the living room.\n2. We selected a low-profile velvet sofa in emerald green.\n3. We agreed on a large abstract rug to anchor the space.\n\nMy apartment is on the fourth floor with no elevator, and the sofa I ordered won't fit up the stairwell. What type of modular or flat-pack seating alternatives fit the mid-century vibe but can actually be carried up in boxes?"
+    },
+    {
+      "id": "long-en-025",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "Over the last few days we've been building a Python script to automate my freelance invoicing, pulling hours from a CSV and generating PDFs with ReportLab. We got the text alignment working perfectly and added the company logo to the header.\n\nThe client just emailed me asking for the invoices to be strictly in HTML format so they can parse them directly into their accounting software, so how do I refactor the PDF generation logic?"
+    },
+    {
+      "id": "long-en-026",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "We spent the whole afternoon planning a stealth section for my tabletop RPG campaign, where the party has to sneak past a sleeping dragon using only shadows and silence spells.\n\nThe rogue just rolled a critical fail on their stealth check and knocked over a suit of armor; what is the most immediate consequence that doesn't result in a total party kill?"
+    },
+    {
+      "id": "long-en-027",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "I've been trying to get my smart TV to connect to the hidden 5GHz network we set up last week. I tried forgetting the network, restarting the router, changing the SSID to remove spaces, and even factory resetting the TV. Nothing works, and I absolutely refuse to pay for a tech support call or buy a new streaming stick right now.\n\nWhat obscure network setting or workaround on the router side can force the TV to see the hidden SSID without compromising my security?"
+    },
+    {
+      "id": "long-en-028",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "In our study session, we broke down the causes of the 1970s oil crisis, focusing on the OAPEC embargo, the devaluation of the dollar, and the peak oil theory. We also outlined how this led to the creation of the Strategic Petroleum Reserve.\n\nIf I need to write a 500-word essay comparing this event to the 2022 energy crisis in Europe, which two specific economic indicators should I focus on to show the strongest parallel?"
+    },
+    {
+      "id": "long-en-029",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-en-016",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:06:05.511Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "57040f0721513a79",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:08:13.191Z"
+      },
+      "prompt": "We've been designing a custom terrarium for a dart frog, selecting sphagnum moss, a false bottom with LECA clay, and a background of cork bark.\n\nThe glass enclosure I bought lacks a pre-drilled hole for the misting system tubing, so how can I route the water line without compromising the seal?"
+    },
+    {
+      "id": "translation-ko-en-001",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "'배송 출발 후 주소 변경은 불가능합니다'를 영어로 어떻게 쓰는 게 가장 자연스러울지 알려줘."
+    },
+    {
+      "id": "translation-ko-en-002",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "'본인 확인을 위해 여권 사본을 제출해 주시기 바랍니다' 이 문장 영어로 번역 좀 해줘."
+    },
+    {
+      "id": "translation-ko-en-003",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "모바일 앱 버튼에 들어갈 텍스트인데 '계정 삭제 및 모든 데이터 영구 삭제' 이걸 영어로 번역해 줘. 근데 버튼 너비 때문에 공백 포함 25자 안쪽으로 만들어야 해."
+    },
+    {
+      "id": "translation-ko-en-004",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "해외 파트너사한테 보내는 이메일 초안 써줘. '귀사의 제안서 잘 받아보았습니다. 다만 현재 분기 예산이 소진되어 다음 분기에 다시 논의하고 싶습니다.' 이 내용을 영어로 옮기는데, 'budget'이나 'money' 같은 직접적인 돈 관련 단어는 안 쓰고 완곡하게 표현해 줘."
+    },
+    {
+      "id": "translation-ko-en-005",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "정기 점검 관계로 오늘 밤 12시부터 다음 날 새벽 4시까지 서비스 이용이 제한된다는 안내문 영어로 번역해."
+    },
+    {
+      "id": "translation-ko-en-006",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "학회 발표 슬라이드에 넣을 불렛 포인트 3개로 나눠서 번역해 줘. 원문: '첫째, 기존 모델 대비 추론 속도가 40% 향상되었습니다. 둘째, 메모리 사용량을 절반으로 줄였습니다. 셋째, 멀티모달 입력을 기본으로 지원합니다.' 각 불렛은 동사로 시작하게 맞춰주고."
+    },
+    {
+      "id": "translation-ko-en-007",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "주차장 만차 시 인근 공영 주차장을 이용해 주시기 바랍니다라는 문구를 영어로 뭐라고 안내하는 게 좋은지 추천해."
+    },
+    {
+      "id": "translation-ko-en-008",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "사내 위키에 올릴 FAQ 답변인데, '비밀번호 재설정 이메일이 오지 않는 경우 스팸함 확인 후 24시간이 지나도 없으면 IT 지원팀에 티켓을 발급하세요.' 이걸 영어로 번역해. 근데 우리 티켓팅 시스템 링크를 넣을 자리가 마땅찮으니까 'IT 지원팀에 티켓을 발급하세요' 부분은 그냥 'contact the IT helpdesk' 정도로 뭉뚱그려서 번역해 줘."
+    },
+    {
+      "id": "translation-ko-en-009",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "'식물성 재료만 사용한 비건 인증 제품입니다.' 이걸 영어로 쓸 건데, 마케팅 배너에 쓸 거라 좀 임팩트 있는 버전이랑, 제품 뒷면 성분표 옆에 쓸 점잖은 버전 두 가지로 줘봐."
+    },
+    {
+      "id": "translation-ko-en-010",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "트위터에 올릴 회사 공지야. '신규 입사자 대상 보안 교육 일정이 다음 주 월요일로 변경되었습니다. 반드시 사전에 배포된 교재를 읽어오세요.' 이걸 영어로 번역하되, 해시태그 2개를 포함해서 전체 280자 제한에 맞게 써줘."
+    },
+    {
+      "id": "translation-ko-en-011",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "번역기 돌린 건데 너무 어색해서. 'The room is cleaned every day at 10 AM. If you do not want it, hang the sign.' 이거 호텔 객실 안내문 원문이 '매일 오전 10시에 객실 청소가 이루어집니다. 원치 않으실 경우 문고리에 표지를 걸어주세요'거든. 이 원문 느낌 살려서 자연스러운 영어로 고쳐줘."
+    },
+    {
+      "id": "translation-ko-en-012",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "한국 추석 연휴 휴무 안내를 해외 지사 직원들에게 보내려고 해. '추석 연휴 관계로 9월 28일부터 30일까지 한국 오피스는 쉽니다. 긴급한 건은 온콜 번호로 연락 바랍니다.' 이걸 그냥 날짜만 바꾸는 게 아니라, 한국 명절이라 오피스가 쉰다는 뉘앙스를 살리면서 미국 본사 사람들이 이해하기 쉬운 비즈니스 영어로 다듬어 줘."
+    },
+    {
+      "id": "translation-ko-en-013",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "보행자 보호를 위해 캠퍼스 내에서는 시속 20km 이하로 서행해 주십시오라는 안내문을 영어로 바꿔."
+    },
+    {
+      "id": "translation-ko-en-014",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "translation_cross_language-ko-en-003",
+        "provider": "qwen",
+        "modelId": "qwen3.7-max",
+        "requestedApiModel": "qwen3.7-max",
+        "modelVersion": "qwen3.7-max",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T01:10:52.541Z",
+          "source": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v2",
+        "promptTemplateHash": "01ba29d3ee8751b1",
+        "generatorCommit": "7eb0f88",
+        "draftedAt": "2026-08-26T01:12:33.909Z"
+      },
+      "prompt": "'사용자가 결제를 취소하면, 시스템은 자동으로 재고를 복구하고 관리자에게 알림을 보냅니다.' 이 아키텍처 문서 문장을 영어로 번역해 줘. 단, '재고'는 'inventory'가 아니라 우리 회사 내부 용어인 'stock pool'로, '관리자'는 'admin' 대신 'system operator'로 고정해서 써야 해."
     }
   ],
   "proposedPilotCellTarget": 14,
