@@ -4,7 +4,83 @@
   "frozenAt": null,
   "frozenBy": null,
   "baseline": null,
-  "cellTargets": [],
+  "cellTargets": [
+    {
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "target": 14
+    },
+    {
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "target": 14
+    },
+    {
+      "stratum": "coding",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "coding",
+      "cell": "en",
+      "target": 14
+    },
+    {
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "target": 14
+    },
+    {
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "target": 14
+    },
+    {
+      "stratum": "current_information",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "current_information",
+      "cell": "en",
+      "target": 14
+    },
+    {
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "target": 14
+    },
+    {
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "target": 14
+    },
+    {
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "target": 14
+    }
+  ],
   "notes": [
     "A drafted candidate pool, not a set. Every item here is status: candidate,",
     "which is what §8 of docs/ops/tomverse-chat-router-evaluation-set.md allows an",
