@@ -180,26 +180,58 @@ jobs:
       # (docs/ops/memory-extraction-decision-grade-run.md §3). Failing here
       # means the run may not be cited -- its numbers are not a result either
       # way -- and the artifact above is still preserved.
+      #
+      # `always()` because the harness reports the §12.3 judgement through its
+      # exit status, and a not-a-pass is a RESULT rather than an error.
+      # Admissibility asks a different question -- may this run be cited -- and
+      # the pre-registered table it applies names commitSha, a dirty tree,
+      # truncation, an aborted run, decisionGrade and the spend ceiling. Not
+      # one of them is the verdict. A failing run that is admissible is a
+      # citable negative result, and that is the run whose records someone most
+      # needs to read. Without `always()` the two steps that diagnose a failing
+      # run were the two steps a failing run skipped: run1 on 2026-08-26
+      # measured all 1,150 cases, missed the critical bulk-safe gate 49 times,
+      # and produced neither.
+      #
       # Skipped on a probe, and not because the check would be inconvenient:
       # a probe's `decisionGrade` is false by construction, so the rules would
       # discard it every time and the red job would say "this run may not be
       # cited" about something that was never going to be. What a probe is
       # judged on is whether the answers parsed, which is on the summary above.
       - name: Admissibility
-        if: inputs.limit == ''
+        if: always() && inputs.limit == ''
+        env:
+          # Through the environment for the same reason the limit is: an input
+          # that lands inside the command is an input that can end it.
+          RUN_LABEL: ${{ inputs.run_label }}
         run: |
-          npm run check:memory-eval-run -- \
-            --artifact=artifacts/mem-eval-${{ inputs.run_label }}.json
+          artifact="artifacts/mem-eval-$RUN_LABEL.json"
+          if [ ! -f "$artifact" ]; then
+            echo "::notice::No artifact was written, so there is nothing to judge." \
+              "The live step did not reach the end of the run; its own error says why."
+            exit 0
+          fi
+          npm run check:memory-eval-run -- --artifact="$artifact"
 
-      # Same reason, plus a mechanical one: the sheet samples every cell, and
-      # a probe of the first N cases does not reach most of them.
+      # Same conditions, for the same reasons, plus a mechanical one: the
+      # sheet samples every cell, and a probe of the first N cases does not
+      # reach most of them. On a failing run the sheet is the point -- the
+      # numbers say a rule was missed and the sheet is where a person reads
+      # what the answers actually were.
       - name: Blind review sheet
-        if: inputs.limit == ''
+        if: always() && inputs.limit == ''
+        env:
+          RUN_LABEL: ${{ inputs.run_label }}
         run: |
+          artifact="artifacts/mem-eval-$RUN_LABEL.json"
+          if [ ! -f "$artifact" ]; then
+            echo "::notice::No artifact was written, so there is nothing to sample."
+            exit 0
+          fi
           npm run make:memory-eval-blind-review -- \
-            --artifact=artifacts/mem-eval-${{ inputs.run_label }}.json \
+            --artifact="$artifact" \
             --per-cell=5 \
-            --out=artifacts/blind-review-${{ inputs.run_label }}.md
+            --out="artifacts/blind-review-$RUN_LABEL.md"
 
       - name: Preserve the blind review sheet
         if: always() && inputs.limit == ''
