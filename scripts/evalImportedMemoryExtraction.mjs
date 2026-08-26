@@ -39,22 +39,31 @@ import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
 } from "../lib/memoryExtractionEvalRegister.ts";
+// The successor set, not the frozen schema-1 one.
+//
+// This harness read `mem-eval-seed-11` until 2026-08-26, and would have
+// scored the wrong dataset with the wrong scorer. It never could: the gate
+// refused it with `legacy_dataset_schema` before any provider was reached,
+// which is what fail-closed is for. But a funded pair that cannot run is a
+// trap of its own, so the harness moves rather than the gate.
 import {
-    MEMORY_EVAL_CASES,
-    MEMORY_EVAL_DATASET_FROZEN,
-    MEMORY_EVAL_DATASET_PURPOSE,
-    MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryExtractionEvalFixtures.ts";
+    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
+    MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN as MEMORY_EVAL_DATASET_FROZEN,
+    MEMORY_EVAL_SUCCESSOR_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryEvalSuccessorFixtures.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     datasetFingerprintInput,
     decideEvalRunMode,
     findDuplicateCases,
-    judgeEval,
-    scoreCase,
     summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
-import { LEGACY_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalLegacyDataset.ts";
+import {
+    judgeEvalV2 as judgeEval,
+    scoreCaseV2 as scoreCase,
+} from "../lib/memoryEvalScoringV2.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
 import { createEvalLiveAdapter } from "../lib/memoryEvalLiveAdapter.ts";
 
 const argValue = (name, fallback) => {
@@ -145,7 +154,7 @@ const runMode = decideEvalRunMode({
     commitKnown: commitSha !== "unknown",
     // The frozen fixtures are schema 1. Stated rather than assumed, so that
     // the successor dataset switching this to 2 is a visible edit here.
-    datasetSchemaVersion: LEGACY_DATASET_SCHEMA_VERSION,
+    datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     requestedRunCapUsd: maxCostUsd,
 });
 
@@ -182,7 +191,7 @@ const REFUSAL_MESSAGES = {
         "floor, authoring and independent review complete — then set\n" +
         "MEMORY_EVAL_DATASET_FROZEN and bump MEMORY_EVAL_DATASET_VERSION.",
     legacy_dataset_schema:
-        `Dataset ${MEMORY_EVAL_DATASET_VERSION} is schema ${LEGACY_DATASET_SCHEMA_VERSION}, ` +
+        `Dataset ${MEMORY_EVAL_DATASET_VERSION} is schema ${MEMORY_EVAL_DATASET_SCHEMA_VERSION}, ` +
         "and a live run requires schema 2 (§12.2, amended 2026-08-25).\n\n" +
         "It carries neither `expectedDisposition` nor `goldCompleteness`, so\n" +
         "bulk eligibility recall and the sensitive-review bulk-safe\n" +
@@ -224,23 +233,34 @@ if (duplicates.length > 0) {
  * claiming anything about the model. Its numbers are never a verdict — the
  * sample is below the §12.2 floor either way.
  */
-const smokeAdapter = (testCase) => async () => {
-    if (testCase.expected.length === 0) return { output: { candidates: [] } };
-    // Cite the first user message: the label map decides the role, so a smoke
-    // answer cannot smuggle assistant-only evidence past the validator.
-    return {
-        output: {
-            candidates: testCase.expected.map((expected) => ({
-                kind: expected.kind,
-                statement: `The user's record: ${expected.mustInclude.join(" ")}.`,
-                confidence: 0.9,
-                sensitivity: "standard",
-                expiresAt: null,
-                evidence: ["m1"],
-            })),
-        },
-    };
-};
+/**
+ * The smoke answer: the gold, returned as if a model had produced it.
+ *
+ * `sensitivity` follows the case's own `expectedDisposition`. Answering
+ * `standard` for everything — which this did until 2026-08-26 — makes the
+ * smoke run report a sensitive-review misclassification for every health
+ * case and a critical adoption for every mixed-critical one. Those numbers
+ * say nothing about the pipeline, and a smoke run that always shows failures
+ * trains its reader to ignore the counters that matter most.
+ *
+ * Evidence cites the first user message: the label map decides the role, so a
+ * smoke answer cannot smuggle assistant-only evidence past the validator.
+ */
+const smokeAdapter = (testCase) => async () => ({
+    output: {
+        candidates: testCase.expected.map((expected) => ({
+            kind: expected.kind,
+            statement: `The user's record: ${expected.mustInclude.join(" ")}.`,
+            confidence: 0.9,
+            sensitivity:
+                expected.expectedDisposition === "sensitive_review"
+                    ? "sensitive"
+                    : "standard",
+            expiresAt: null,
+            evidence: ["m1"],
+        })),
+    },
+});
 
 let accruedCostUsd = 0;
 /**
@@ -367,21 +387,63 @@ console.log(
 );
 
 console.log("\nAggregate");
+// Two axes, printed apart, because the 2026-08-25 amendment split them for a
+// reason: one number answering both questions is what made mem-extract-v2's
+// precision of 0.12 unreadable.
+const ratio = (numerator, denominator, wilsonLower) =>
+    `${numerator}/${denominator} = ${
+        denominator === 0 ? "n/a" : (numerator / denominator).toFixed(3)
+    }   Wilson lower ${wilsonLower.toFixed(4)}`;
+
 line("cases", verdict.aggregate.cases);
 line("failures", verdict.aggregate.failures);
-line("adopted (bulk-safe)", verdict.aggregate.adopted);
-line("true positives", verdict.aggregate.truePositives);
-line("false positives", verdict.aggregate.falsePositives);
-line("precision Wilson lower", verdict.aggregate.precisionWilsonLower.toFixed(4));
-line("recall Wilson lower", verdict.aggregate.recallWilsonLower.toFixed(4));
-line("critical false acceptances", verdict.aggregate.criticalFalseAcceptances);
+line(
+    "precision",
+    ratio(
+        verdict.aggregate.precisionNumerator,
+        verdict.aggregate.precisionDenominator,
+        verdict.aggregate.precisionWilsonLower
+    )
+);
+line(
+    "recall",
+    ratio(
+        verdict.aggregate.recallNumerator,
+        verdict.aggregate.recallDenominator,
+        verdict.aggregate.recallWilsonLower
+    )
+);
+
+console.log("\nBulk-activation safety");
+line(
+    "bulk eligibility recall",
+    ratio(
+        verdict.aggregate.bulkEligibilityNumerator,
+        verdict.aggregate.bulkEligibilityDenominator,
+        verdict.aggregate.bulkEligibilityWilsonLower
+    )
+);
+// Zero-tolerance, and never averaged across arms.
+line("critical bulk-safe adoptions", verdict.aggregate.criticalBulkSafeAdoptions);
+line(
+    "sensitive-review misclassifications",
+    verdict.aggregate.sensitiveExpectedBulkSafeViolations
+);
 
 for (const [language, arm] of Object.entries(verdict.byLanguage)) {
     console.log(`\nArm: ${language}`);
     line("cases", arm.cases);
     line("precision Wilson lower", arm.precisionWilsonLower.toFixed(4));
     line("recall Wilson lower", arm.recallWilsonLower.toFixed(4));
-    line("critical false acceptances", arm.criticalFalseAcceptances);
+    line(
+        "bulk eligibility Wilson lower",
+        arm.bulkEligibilityWilsonLower.toFixed(4)
+    );
+    line("critical bulk-safe adoptions", arm.criticalBulkSafeAdoptions);
+    line(
+        "sensitive-review misclassifications",
+        arm.sensitiveExpectedBulkSafeViolations
+    );
 }
 
 console.log("\nSample adequacy (§12.2)");

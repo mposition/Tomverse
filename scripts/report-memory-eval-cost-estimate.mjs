@@ -30,14 +30,22 @@
  * That is the direction an approver wants to be wrong in.
  */
 
-import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
-import { MEMORY_EVAL_DATASET_VERSION } from "../lib/memoryExtractionEvalFixtures.ts";
-import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
+// The set a decision-grade run will actually use. This used to read
+// `mem-eval-seed-11`, which is schema 1 and cannot support a decision-grade
+// run at all — so the report priced a run nobody can make. The conversations
+// are byte-identical between the two sets, so the figure barely moved; the
+// label did, and a number labelled with the wrong dataset is a number nobody
+// should approve a budget from.
 import {
-    MEMORY_EXTRACTION_EVAL_REGISTER,
+    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
+    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryEvalSuccessorFixtures.ts";
+import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
+import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
+import {
     MEMORY_EXTRACTION_PROMPT_VERSION,
-} from "../lib/memoryExtractionEvalRegister.ts";
-import { toExtractionPromptInput } from "../lib/memoryExtractionPrompt.ts";
+    toExtractionPromptInput,
+} from "../lib/memoryExtractionPrompt.ts";
 import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS } from "../lib/memoryExtractionWorker.ts";
