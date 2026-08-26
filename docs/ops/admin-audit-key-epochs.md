@@ -218,8 +218,26 @@ epoch가 있다는 것을 아는 것과 그 구간을 검증할 수 있는 것�
    에만 손이 닿았습니다. **최근에 깨진 행은 바뀐 창을 좁혀 주고, 7월부터 깨져
    있던 행은 그러지 못합니다.**
 
-   2026-08-26 확인: **그 창에 삭제된 계정은 없습니다.** `SetNull` 경로가
-   아닙니다. 유력한 남은 후보는 아래 collation입니다.
+   **2026-08-26 확정: `onDelete: SetNull`입니다.**
+
+   패널이 실패 9건을 전부 나열하게 된 뒤 두 건을 진단했고, 둘 다 같은 답이었습니다.
+
+   > This row names an actor by address but carries no user id.
+
+   그리고 cuid에 박힌 생성 시각이 8건의 정체를 말합니다 — 전부 **2026-07-29**,
+   01:30:54 ~ 01:36:12의 5분 창, **네 쌍**(각 쌍 30~40ms 간격, counter 연속,
+   fingerprint 동일). 한 동작이 감사 행 두 개를 쓰는 일이 네 번 일어난 모양이며
+   `lib/adminApproval.ts`가 그렇게 씁니다.
+
+   **`actorUserId`가 NULL인데 `actorEmail`이 살아 있는 행은 쓰일 수 없습니다.**
+   감사 행을 쓰는 admin route 47개가 **전부** 쓰기 전에 `session?.user?.id`를
+   검사하므로, 쓰기 시점에 NULL인 경우가 없습니다. 그러므로 그 NULL은 **나중에
+   DB가 만든 것**이고, 그렇게 만들 수 있는 것은 외래키의 `ON DELETE SET NULL`
+   하나뿐입니다.
+
+   실행자는 계정을 지운 기억이 없다고 답했습니다. **그것이 바로 이 결함의
+   증상입니다** — 감사 로그가 무관한 동작에 의해, 아무 코드도 관여하지 않은 채,
+   조용히 다시 쓰였습니다.
 
 ## 정규화가 collation에 의존합니다
 
@@ -256,7 +274,10 @@ requestType  vs requestedById
 
 ## 감사 행은 스스로 바뀔 수 있습니다 — `onDelete: SetNull`
 
-이 행의 원인은 아니지만(위 확인), 실재하는 구멍이므로 함께 적습니다.
+**2026-08-26에 고쳤습니다** — migration
+`20260826070000_admin_audit_actor_not_a_foreign_key`가 외래키 제약을 제거합니다.
+컬럼·값·해시는 그대로이고 **행은 한 줄도 건드리지 않습니다.** 이미 깨진 행은
+깨진 채로 둡니다.
 
 `AdminAuditLog.actorUserId`는 **해시 입력에 들어갑니다**
 (`lib/adminAuditIntegrityCore.ts`의 `AdminAuditHashInput`). 그리고 같은 컬럼이
@@ -272,7 +293,7 @@ actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull
 해시가 더 이상 재현되지 않습니다. 감사 로그가 **자기와 무관한 동작에 의해 조용히
 다시 쓰이고**, 그 결과는 위조와 구분되지 않습니다.
 
-**이 relation은 아무 데도 쓰이지 않습니다.** 저장소 전체에서 `actor`를 include
+**이 relation은 아무 데도 쓰이지 않았습니다.** 저장소 전체에서 `actor`를 include
 하거나 `User.adminAuditLogs`를 읽는 코드가 없습니다. 남은 유일한 런타임 효과가
 위의 `SetNull`입니다.
 
