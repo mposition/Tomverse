@@ -68,6 +68,7 @@ const megabytes = (bytes: number) => Math.floor(bytes / (1024 * 1024));
 
 export function KnowledgeFilesPanel({
     profileId,
+    knowledgeEnabled,
     files,
     publishedManifest,
     selectedFileIds,
@@ -75,6 +76,16 @@ export function KnowledgeFilesPanel({
     onChanged,
 }: {
     profileId: string;
+    /**
+     * Whether knowledge files are enabled, resolved on the server and handed
+     * down (`settings/assistants/[profileId]/page.tsx`).
+     *
+     * This panel used to find out by calling its own endpoint and reading the
+     * 403, which put a failed request in the console on every visit with the
+     * flag off -- an error the reader did not cause and cannot act on. It also
+     * meant the panel rendered for a moment before hiding itself.
+     */
+    knowledgeEnabled: boolean;
     files: KnowledgeFile[];
     /** The manifest of the revision that is currently published, if any. */
     publishedManifest: ManifestEntry[];
@@ -87,7 +98,11 @@ export function KnowledgeFilesPanel({
     const inputId = useId();
     const inputRef = useRef<HTMLInputElement>(null);
     const [capacity, setCapacity] = useState<Capacity | null>(null);
-    const [enabled, setEnabled] = useState<boolean | null>(null);
+    // Seeded from the server's answer rather than from `null`: there is no
+    // window in which the panel does not know. The 403 branch below stays as a
+    // fallback, because the flag can be turned off between this page being
+    // rendered and the capacity read landing.
+    const [enabled, setEnabled] = useState<boolean>(knowledgeEnabled);
     const [upload, setUpload] = useState<UploadState>({ kind: "idle" });
     const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -117,13 +132,16 @@ export function KnowledgeFilesPanel({
     }, [api]);
 
     useEffect(() => {
+        // Nothing to read when the feature is off: the only thing this request
+        // could return is the 403 the server already told us about.
+        if (!knowledgeEnabled) return;
         // Deferred the way the editor defers its own load: a state update
         // reachable synchronously from an effect is what
         // `react-hooks/set-state-in-effect` refuses.
         queueMicrotask(() => {
             void readCapacity();
         });
-    }, [readCapacity]);
+    }, [knowledgeEnabled, readCapacity]);
 
     const addFile = useCallback(
         async (file: File) => {
@@ -216,7 +234,7 @@ export function KnowledgeFilesPanel({
         [api, onChanged, readCapacity]
     );
 
-    if (enabled === false) return null;
+    if (!enabled) return null;
 
     // A manifest entry whose file is gone. §14 makes the manifest audit
     // metadata: it records what a published revision was given and cannot

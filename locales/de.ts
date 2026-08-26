@@ -13,7 +13,7 @@ export const de = {
         dismiss: "Benachrichtigung schließen",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Konto & Plan",
         accountTooltipGuest: "Anmelden oder registrieren",
         guestMenuTitle: "Gastmodus",
@@ -392,6 +392,7 @@ export const de = {
         toolsMemoryInheritOnDescription: "Deine Einstellung ist derzeit, es zu verwenden; diese Unterhaltung folgt einer Änderung",
         toolsAssistant: "Assistent",
         toolsAssistantNone: "Kein Assistent",
+        toolsAssistantRemoved: "Der hier verwendete Assistent wurde gelöscht",
         toolsAssistantNoneDescription: "Nur mit dem Modell antworten",
         toolsAssistantRevision: "Revision {revision}",
         toolsAssistantRevisionInUse: "Revision {revision} in Verwendung · neueste {latest}",
