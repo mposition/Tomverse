@@ -4764,9 +4764,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -4800,9 +4800,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -4836,9 +4836,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -4872,9 +4872,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -4908,9 +4908,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -4944,9 +4944,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -4980,9 +4980,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5016,9 +5016,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5052,9 +5052,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5088,9 +5088,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5124,9 +5124,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5160,9 +5160,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5196,9 +5196,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
@@ -5232,9 +5232,9 @@
         "expectedResponse": "en"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "translation_cross_language-ko-en-003",
         "provider": "qwen",
