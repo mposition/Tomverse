@@ -169,6 +169,20 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "image_intent_suggestion_shown",
   "image_intent_suggestion_accepted",
   "image_intent_suggestion_dismissed",
+  // The Deep Research expansion offer under a finished answer
+  // (lib/deepResearchSuggestion.ts). The same three questions the image chip's
+  // events answer, for the same reason: how often the offer was made, how
+  // often it was right, and how often it was in the way. Two of the three
+  // would leave the acceptance rate with no denominator.
+  //
+  // Content-free by schema, like the trio above. Acceptance carries the depth
+  // it started at -- a closed enum -- and the other two carry nothing. No
+  // topic, no signals: the classifier's signal names are fixed identifiers,
+  // but a set of them beside a timestamp narrows a small population toward one
+  // question, which is what §9 keeps out of this list.
+  "deep_research_suggestion_shown",
+  "deep_research_suggestion_accepted",
+  "deep_research_suggestion_dismissed",
 ] as const;
 
 export type ProductAnalyticsEventName =

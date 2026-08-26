@@ -37,6 +37,13 @@ import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
 import { normalizeCreditPackId } from "@/lib/purchaseIntent";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { DeepResearchSetupSheet } from "@/components/chat/DeepResearchSetupSheet";
+import {
+  DEEP_RESEARCH_DEFAULT_DEPTH,
+  DEEP_RESEARCH_MODEL_ID,
+  deepResearchTopicKey,
+  type DeepResearchAvailability,
+  type DeepResearchSuggestionTurn,
+} from "@/lib/deepResearchSuggestion";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -79,9 +86,11 @@ import {
   canUseModelWithPlan,
   getModel as getStaticModel,
   getModelUsageProfile,
+  getWeightedUsageCredits,
   resolveSelectableModelId,
   type AiModel,
 } from "@/lib/models";
+import { resolveDeepResearchSuggestionCopy } from "@/components/chat/deepResearchSuggestionCopy";
 import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import {
   USER_SETTINGS_UPDATED_EVENT,
@@ -460,6 +469,20 @@ function ChatShellSkeleton({ label }: { label: string }) {
   );
 }
 
+/**
+ * What a global send may be told beyond the composer's own contents.
+ *
+ * `overrideText` is what lets a send carry a question this page already holds
+ * instead of the draft. It exists so the Deep Research expansion under a
+ * finished answer runs the send path every other question runs, rather than
+ * a parallel one that would have to re-derive preflight, admission, context
+ * and persistence for itself.
+ */
+type GlobalSubmitOptions = {
+  deepResearchDepth?: "quick" | "standard" | "deep";
+  overrideText?: string;
+};
+
 export function ChatPageClient({
   // Resolved on the server (see page.tsx) rather than fetched after mount, so
   // this component's very first render already knows the guest default.
@@ -823,6 +846,52 @@ export function ChatPageClient({
   // callback is threaded up from ChatApp today), which is disclosed in the
   // chip's own copy rather than silently claimed as a real cancel.
   const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
+  /**
+   * The last ordinary question asked in this conversation, kept so a finished
+   * answer can be offered an expansion into Deep Research
+   * (`lib/deepResearchSuggestion.ts`).
+   *
+   * One record, not one per panel: a three-model comparison answers *one*
+   * question, and the offer is about the question. It carries the
+   * conversation it belongs to so the shells can ignore it after a switch,
+   * rather than every conversation-change path having to remember to clear it.
+   *
+   * Never set for a send that was already deep research -- there is nothing to
+   * expand -- which is also what keeps the offer away from its own result.
+   */
+  const [deepResearchSuggestionTurn, setDeepResearchSuggestionTurn] =
+    useState<DeepResearchSuggestionTurn | null>(null);
+  /**
+   * Topics this conversation has already settled, as `conversationId::topic`.
+   *
+   * Dismissal and acceptance both land here, because both are an answer to
+   * the offer: re-asking after either would be the app not listening. Held in
+   * component state rather than storage on purpose -- the rule is "at least
+   * for this conversation", and a durable record of what somebody declined is
+   * more than this feature needs to know about them.
+   */
+  const [deepResearchResolvedTopics, setDeepResearchResolvedTopics] = useState<
+    readonly string[]
+  >([]);
+  /**
+   * Topics this page has already put the card on screen for, as
+   * `conversationId::topicKey::promptId`.
+   *
+   * Written by the shells the moment the card appears, because that is the
+   * only place that knows it did: the page holds the question and the access,
+   * the shell holds the panel statuses that decide whether the answer is
+   * finished. Carrying the promptId is what lets the same question asked
+   * twice be told from the same question being looked at twice.
+   */
+  const [deepResearchOfferedTopics, setDeepResearchOfferedTopics] = useState<
+    readonly string[]
+  >([]);
+  /**
+   * Held from the press on "expand" until the send has been accepted or
+   * refused, so the card's buttons are disabled for exactly that window and a
+   * second click (or a re-render) cannot start a second run.
+   */
+  const [isDeepResearchExpanding, setIsDeepResearchExpanding] = useState(false);
   // The latest committed selection, readable synchronously by the send
   // barrier (state values close over stale renders inside async handlers).
   // Written by the central mutation below and kept aligned with React state
@@ -3195,9 +3264,7 @@ export function ChatPageClient({
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
   const submitInFlightRef = useRef(false);
-  const handleGlobalSubmit = async (options?: {
-    deepResearchDepth?: "quick" | "standard" | "deep";
-  }) => {
+  const handleGlobalSubmit = async (options?: GlobalSubmitOptions) => {
     if (submitInFlightRef.current) return;
     submitInFlightRef.current = true;
     // Which conversation this send started from, published for the shells.
@@ -3213,6 +3280,10 @@ export function ChatPageClient({
       await runGlobalSubmit(options);
     } finally {
       submitInFlightRef.current = false;
+      // Whatever this send was, the expansion offer is no longer waiting on
+      // it: accepted, refused or thrown, the card's buttons come back. The
+      // run's own progress is the deep research chip's to report from here.
+      setIsDeepResearchExpanding(false);
       // Cleared in the same commit as the promptPayload a successful send
       // sets, so there is no frame between "no longer pending" and "accepted".
       // A refused send clears it with no payload, and the conversation goes
@@ -3222,10 +3293,19 @@ export function ChatPageClient({
     }
   };
 
-  const runGlobalSubmit = async (options?: {
-    deepResearchDepth?: "quick" | "standard" | "deep";
-  }) => {
-    const trimmed = inputValue.trim();
+  const runGlobalSubmit = async (options?: GlobalSubmitOptions) => {
+    /*
+      `overrideText` is a question this page already has, re-sent on the user's
+      behalf -- today, the Deep Research expansion under a finished answer. It
+      deliberately does not touch the composer: the draft the user may be part
+      way through typing is theirs, so an override send carries no attachments
+      from it and does not clear it on the way out. Everything after this line
+      is the ordinary send path, which is the point -- the expansion runs the
+      workflow that already exists rather than a second one beside it.
+    */
+    const trimmed = (options?.overrideText ?? inputValue).trim();
+    const isOverrideSend = typeof options?.overrideText === "string";
+    if (!trimmed && isOverrideSend) return;
     if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
     if (activeModelCount === 0) {
       showToast(t("chat.chooseModel"), "error");
@@ -3235,7 +3315,9 @@ export function ChatPageClient({
     // user is looking somewhere else, and this draft must only ever be
     // cleared once this send has actually been accepted.
     const originScopeId = currentChatId;
-    const promptAttachments = await cloneAttachmentPreviews(attachments);
+    const promptAttachments = isOverrideSend
+      ? []
+      : await cloneAttachmentPreviews(attachments);
 	
     if (isGuestMode) {
       const requestCredits = estimateWeightedRequestCredits(trimmed, promptAttachments);
@@ -3532,6 +3614,34 @@ export function ChatPageClient({
         prompt: trimmed,
       });
       localComparisonQuestionsRef.current.set(comparisonId, trimmed);
+      /*
+        The question a Deep Research expansion could be offered for, recorded
+        at the one place a send is accepted.
+
+        A deep research send records nothing: its own answer is the deeper
+        pass, so there is nothing left to offer. Neither does a send that
+        already has Deep Research among its models -- `deriveDeepResearchSuggestion`
+        refuses that case too, and recording it would leave a stale turn behind
+        for the moment the model is later deselected.
+      */
+      setDeepResearchSuggestionTurn(
+        options?.deepResearchDepth ||
+          activeModelIds.includes(DEEP_RESEARCH_MODEL_ID) ||
+          !trimmed
+          ? null
+          : {
+              conversationId: activeChatId,
+              promptId: comparisonId,
+              text: trimmed,
+              attachments: savedAttachments.map((attachment) => ({
+                name: attachment.name,
+                mediaType: attachment.mediaType,
+              })),
+              // "auto" only ever raises a suggestion; "always" is the one
+              // mode that actually asks for a search (lib/appDefaults.ts).
+              webSearchRequested: webSearchMode === "always",
+            }
+      );
       setCachedCompareSummaryChatId(null);
       if (pendingScreenModels) setSelectedModels(pendingScreenModels);
       if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
@@ -3565,7 +3675,9 @@ export function ChatPageClient({
       // return above -- no model, guest limit, conversation create, model
       // settings, preflight -- leaves it exactly as the user typed it, and no
       // other conversation's draft is touched either way.
-      discardDraft(activeChatId, promptAttachments);
+      // An override send never spent a draft, so it must not clear one: the
+      // question it carried came from a finished turn, not from the composer.
+      if (!isOverrideSend) discardDraft(activeChatId, promptAttachments);
       setConversations((current) =>
         current.map((item) =>
           item.id === activeChatId
@@ -4296,14 +4408,24 @@ export function ChatPageClient({
   });
   const pendingDeepResearchSubmitRef = useRef<{
     depth: "quick" | "standard" | "deep";
+    /**
+     * The question to send once the model is selected. Absent for the
+     * composer's own path, which sends whatever the draft holds by then --
+     * present for the expansion, which carries a question the composer no
+     * longer contains.
+     */
+    text?: string;
   } | null>(null);
 
   useEffect(() => {
     if (!pendingDeepResearchSubmitRef.current) return;
-    if (!selectedModels.includes("perplexity/sonar-deep-research")) return;
-    const { depth } = pendingDeepResearchSubmitRef.current;
+    if (!selectedModels.includes(DEEP_RESEARCH_MODEL_ID)) return;
+    const { depth, text } = pendingDeepResearchSubmitRef.current;
     pendingDeepResearchSubmitRef.current = null;
-    void handleGlobalSubmitRef.current({ deepResearchDepth: depth });
+    void handleGlobalSubmitRef.current({
+      deepResearchDepth: depth,
+      ...(text ? { overrideText: text } : {}),
+    });
   }, [selectedModels]);
 
   const dismissDeepResearchChip = () => {
@@ -4311,25 +4433,56 @@ export function ChatPageClient({
     trackProductEvent("deep_research_cancelled", activeModelCount, {});
   };
 
-  const confirmDeepResearchSetup = (depth: "quick" | "standard" | "deep") => {
-    if (!inputValue.trim()) return;
-    setIsDeepResearchSetupOpen(false);
+  /**
+   * The one way a deep research run is started from this page.
+   *
+   * Both entry points land here -- the composer's setup sheet and the
+   * expansion offered under a finished answer -- so a run is prepared exactly
+   * once: select the model if it is not selected, then send. The expansion is
+   * not a second workflow and not a model-id swap; it is this, with the
+   * question supplied instead of read from the draft.
+   */
+  const startDeepResearch = ({
+    depth,
+    text,
+  }: {
+    depth: "quick" | "standard" | "deep";
+    /** Omitted by the composer path, which sends the current draft. */
+    text?: string;
+  }) => {
     setIsDeepResearchPending(true);
     trackProductEvent("deep_research_started", activeModelCount, {
       deep_research_depth: depth,
     });
-    const searchModelId = "perplexity/sonar-deep-research";
-    if (selectedModels.includes(searchModelId)) {
-      void handleGlobalSubmitRef.current({ deepResearchDepth: depth });
+    if (selectedModels.includes(DEEP_RESEARCH_MODEL_ID)) {
+      void handleGlobalSubmitRef.current({
+        deepResearchDepth: depth,
+        ...(text ? { overrideText: text } : {}),
+      });
       return;
     }
-    pendingDeepResearchSubmitRef.current = { depth };
+    pendingDeepResearchSubmitRef.current = { depth, ...(text ? { text } : {}) };
     if (selectedModels.length < maxSelectableModels) {
-      toggleModel(searchModelId);
+      toggleModel(DEEP_RESEARCH_MODEL_ID);
     } else {
       const removeModelId = selectedModels[selectedModels.length - 1];
-      if (removeModelId) swapSelectedModel(removeModelId, searchModelId);
+      if (removeModelId) swapSelectedModel(removeModelId, DEEP_RESEARCH_MODEL_ID);
     }
+  };
+
+  // `startDeepResearch` closes over this render's selection and is rebuilt
+  // every render; the offer's handler is memoised, so it reaches the current
+  // one through a ref rather than by taking a dependency that would defeat the
+  // memo. Same reason as `handleGlobalSubmitRef` directly above.
+  const startDeepResearchRef = useRef(startDeepResearch);
+  useEffect(() => {
+    startDeepResearchRef.current = startDeepResearch;
+  });
+
+  const confirmDeepResearchSetup = (depth: "quick" | "standard" | "deep") => {
+    if (!inputValue.trim()) return;
+    setIsDeepResearchSetupOpen(false);
+    startDeepResearch({ depth });
   };
 
   const handleModelFinderComplete = ({
@@ -4779,12 +4932,135 @@ export function ChatPageClient({
   );
 
   const deepResearchSetupModel = AVAILABLE_MODELS.find(
-    (model) => model.id === "perplexity/sonar-deep-research"
+    (model) => model.id === DEEP_RESEARCH_MODEL_ID
   ) || null;
-  const deepResearchEstimatedInputTokens = Math.max(
-    1,
-    Math.ceil(new TextEncoder().encode(inputValue).length / 4)
+  /*
+    One estimator for both surfaces that quote deep research.
+
+    The setup sheet and the expansion card price the same action, so a
+    different arithmetic in each would show two numbers for one run. It stays
+    the byte-length approximation the sheet has always used rather than being
+    "improved" here: changing what is quoted is a pricing-copy decision, and
+    this change is not entitled to make it.
+  */
+  const estimateDeepResearchInputTokens = (text: string) =>
+    Math.max(1, Math.ceil(new TextEncoder().encode(text).length / 4));
+  const deepResearchEstimatedInputTokens =
+    estimateDeepResearchInputTokens(inputValue);
+
+  /*
+    Whether this viewer could run Deep Research at all -- read from exactly the
+    facts the setup sheet reads, so the offer and the composer entry point
+    cannot disagree about who has it. `unavailable` covers a catalogue with no
+    such model, which is a deployment fact rather than anything about the user.
+  */
+  const deepResearchAvailability: DeepResearchAvailability =
+    !deepResearchSetupModel
+      ? "unavailable"
+      : isGuestMode
+        ? "sign_in_required"
+        : !canUseModelWithPlan(currentAccessPlan, deepResearchSetupModel)
+          ? "plan_locked"
+          : "available";
+  const deepResearchSuggestionCredits =
+    deepResearchSetupModel && deepResearchSuggestionTurn
+      ? getWeightedUsageCredits(
+          deepResearchSetupModel,
+          estimateDeepResearchInputTokens(deepResearchSuggestionTurn.text)
+        )
+      : null;
+  /*
+    Both dismissal and acceptance close the topic, so both write here. Keyed by
+    conversation as well as topic: the same question asked again in a different
+    chat is a different question, and the rule is only ever "at least in this
+    conversation".
+  */
+  const resolveDeepResearchTopic = useCallback(
+    (conversationId: string, text: string) => {
+      const key = `${conversationId}::${deepResearchTopicKey(text)}`;
+      setDeepResearchResolvedTopics((current) =>
+        current.includes(key) ? current : [...current, key]
+      );
+    },
+    []
   );
+  const deepResearchResolvedTopicKeys = useMemo(
+    () =>
+      currentChatId
+        ? deepResearchResolvedTopics
+            .filter((entry) => entry.startsWith(`${currentChatId}::`))
+            .map((entry) => entry.slice(currentChatId.length + 2))
+        : [],
+    [currentChatId, deepResearchResolvedTopics]
+  );
+  const deepResearchOfferedTopicEntries = useMemo(() => {
+    if (!currentChatId) return [];
+    const prefix = `${currentChatId}::`;
+    return deepResearchOfferedTopics
+      .filter((entry) => entry.startsWith(prefix))
+      .map((entry) => {
+        const rest = entry.slice(prefix.length);
+        const separator = rest.lastIndexOf("::");
+        return {
+          topicKey: rest.slice(0, separator),
+          promptId: rest.slice(separator + 2),
+        };
+      });
+  }, [currentChatId, deepResearchOfferedTopics]);
+  const handleDeepResearchSuggestionShown = useCallback(
+    ({ topicKey, promptId }: { topicKey: string; promptId: string }) => {
+      const conversationId = currentChatIdRef.current;
+      if (!conversationId) return;
+      const entry = `${conversationId}::${topicKey}::${promptId}`;
+      setDeepResearchOfferedTopics((current) =>
+        current.includes(entry) ? current : [...current, entry]
+      );
+      trackProductEvent("deep_research_suggestion_shown", activeModelCount, {});
+    },
+    [activeModelCount]
+  );
+  const handleDeepResearchSuggestionExpand = useCallback(
+    (turn: { conversationId: string; text: string }) => {
+      // The guard the contract asks for is here rather than in the card: a
+      // disabled button is a rendering, and a second press that arrives
+      // between the press and the re-render must still find the door shut.
+      if (isDeepResearchExpanding || isDeepResearchPending) return;
+      setIsDeepResearchExpanding(true);
+      resolveDeepResearchTopic(turn.conversationId, turn.text);
+      trackProductEvent("deep_research_suggestion_accepted", activeModelCount, {
+        deep_research_depth: DEEP_RESEARCH_DEFAULT_DEPTH,
+      });
+      startDeepResearchRef.current({
+        depth: DEEP_RESEARCH_DEFAULT_DEPTH,
+        text: turn.text,
+      });
+    },
+    [
+      activeModelCount,
+      isDeepResearchExpanding,
+      isDeepResearchPending,
+      resolveDeepResearchTopic,
+    ]
+  );
+  const handleDeepResearchSuggestionDismiss = useCallback(
+    (turn: { conversationId: string; text: string }) => {
+      /*
+        Declining is not a message. Nothing is written to the transcript, and
+        nothing is sent: the card closes and this topic stops asking.
+      */
+      resolveDeepResearchTopic(turn.conversationId, turn.text);
+      setDeepResearchSuggestionTurn(null);
+      trackProductEvent("deep_research_suggestion_dismissed", activeModelCount, {});
+    },
+    [activeModelCount, resolveDeepResearchTopic]
+  );
+  // Plain, not memoised: it is a handful of string substitutions, and a
+  // `useMemo` over a value derived from the catalogue is the shape the React
+  // Compiler refuses to optimise around.
+  const deepResearchSuggestionCopy = resolveDeepResearchSuggestionCopy({
+    t,
+    estimatedCredits: deepResearchSuggestionCredits,
+  });
 
   const activeImageConversation = conversations.find(
     (conversation) =>
@@ -4942,6 +5218,15 @@ export function ChatPageClient({
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
+          deepResearchSuggestionTurn={deepResearchSuggestionTurn}
+          deepResearchAvailability={deepResearchAvailability}
+          deepResearchResolvedTopicKeys={deepResearchResolvedTopicKeys}
+          deepResearchOfferedTopics={deepResearchOfferedTopicEntries}
+          onDeepResearchSuggestionShown={handleDeepResearchSuggestionShown}
+          deepResearchSuggestionCopy={deepResearchSuggestionCopy}
+          isDeepResearchExpanding={isDeepResearchExpanding}
+          onDeepResearchSuggestionExpand={handleDeepResearchSuggestionExpand}
+          onDeepResearchSuggestionDismiss={handleDeepResearchSuggestionDismiss}
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
@@ -5035,6 +5320,15 @@ export function ChatPageClient({
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
+          deepResearchSuggestionTurn={deepResearchSuggestionTurn}
+          deepResearchAvailability={deepResearchAvailability}
+          deepResearchResolvedTopicKeys={deepResearchResolvedTopicKeys}
+          deepResearchOfferedTopics={deepResearchOfferedTopicEntries}
+          onDeepResearchSuggestionShown={handleDeepResearchSuggestionShown}
+          deepResearchSuggestionCopy={deepResearchSuggestionCopy}
+          isDeepResearchExpanding={isDeepResearchExpanding}
+          onDeepResearchSuggestionExpand={handleDeepResearchSuggestionExpand}
+          onDeepResearchSuggestionDismiss={handleDeepResearchSuggestionDismiss}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}
