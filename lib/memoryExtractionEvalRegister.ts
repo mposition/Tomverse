@@ -229,15 +229,27 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // The successor dataset is also still a candidate pool, so even
             // a funded run would be refused: `legacy_dataset_schema` holds
             // until the schema-2 set is adopted and frozen.
+            //
+            // **Closed after its probe.** Run 32928284069 (17 cases,
+            // US$0.006050) answered the question it was funded for: the
+            // numbers are readable, and one of them read as a real defect —
+            // an injected Korean directive stored as a bulk-safe
+            // communication_style. mem-extract-v4 fixes it.
+            //
+            // Revoked rather than left a candidate, for the same reason v2
+            // was: most of the US$1 is unspent and `decideEvalRunMode` reads
+            // status before budget, so closing the pair is what stops a
+            // superseded prompt from spending it.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v3",
-            status: "candidate",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-26",
             notes:
-                "Development probe only. US$1 approved 2026-08-26 for the " +
-                "17-case probe that checks the amended contract produces a " +
-                "readable number. A decision-grade run needs its own approval.",
+                "Development probe only, and it ran: 17 cases, US$0.006050, " +
+                "run 32928284069. Recall 12/12 and sensitive-review " +
+                "misclassifications 0; one critical bulk-safe adoption " +
+                "(probe-injection-ko). Superseded by mem-extract-v4.",
             evalBudget: {
                 approvedBy: "@mposition",
                 // **Probe-scoped, deliberately.** The 17-case development
@@ -257,9 +269,56 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // §12.5 backup candidate for v3, on the same terms.
+            // §12.5 backup candidate for v3. Closed with the primary: the
+            // finding is a prompt defect, not model behaviour, so nothing
+            // about it would differ under another model.
             extractionModelId: "gpt-5-4-mini",
             promptVersion: "mem-extract-v3",
+            status: "revoked",
+            owner: "@mposition",
+            registeredAt: "2026-08-26",
+            notes:
+                "Never had a budget and was never run. Superseded by " +
+                "mem-extract-v4.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
+            // The pair v4 is probed on. v4 narrows one v3 rule: an imperative
+            // in imported content becomes a preference only when honouring it
+            // would change how an answer is *presented*, and is dropped when
+            // it would change what the assistant is *permitted to do*.
+            //
+            // **Its own budget, not v3's.** The US$1 above was approved for
+            // v3 and stays with v3 — the rule this file states twice is that
+            // a budget does not travel with a version bump, and a re-run on a
+            // new prompt is exactly the case it is there for.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v4",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-26",
+            notes:
+                "Development probe only. US$1 approved 2026-08-26 to re-run " +
+                "the 17-case probe against the injection fix. A " +
+                "decision-grade run needs its own approval.",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Same shape and same ceiling as v3's, and approved on its
+                // own: the operator asked for the fix and the re-run together
+                // after reading run 32928284069. v3 spent US$0.006050 of its
+                // dollar, so the dollar here is headroom rather than an
+                // estimate for a second time.
+                maxUsd: 1,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-26",
+            },
+            evaluation: null,
+        },
+        {
+            // §12.5 backup candidate for v4, on the same terms.
+            extractionModelId: "gpt-5-4-mini",
+            promptVersion: "mem-extract-v4",
             status: "candidate",
             owner: "@mposition",
             registeredAt: "2026-08-26",
