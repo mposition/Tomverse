@@ -52,3 +52,24 @@ export const isE2EDatabaseDisabled = () =>
 /** True only on a loopback server, when both Playwright short-circuits are active. */
 export const isE2EFixtureMode = () =>
   isE2EAuthBypassEnabled() && isE2EDatabaseDisabled();
+
+/**
+ * True only in full fixture mode, when the assistant knowledge flag is requested.
+ *
+ * The flag it stands in for lives in `AppSetting`, and `isE2EDatabaseDisabled()`
+ * means there is no row to read -- so `isAssistantKnowledgeEnabled()` answered
+ * `false` for every Playwright run and the knowledge panel never rendered. That
+ * was invisible while the panel discovered its own availability from an endpoint
+ * the specs could mock; it stopped being invisible when the availability became
+ * a server-rendered prop and seven specs began asserting against a panel that
+ * was not there.
+ *
+ * Gated on `isE2EFixtureMode()` rather than the variable alone, and deliberately
+ * stricter than the two flags beside it: those each need loopback, this needs
+ * loopback *and* both of them already active. A server with a real database and
+ * real sessions has no business reading a feature flag out of the environment,
+ * so the only configuration that can reach this is the one that is already
+ * entirely fabricated.
+ */
+export const isE2EAssistantKnowledgeEnabled = () =>
+  process.env.E2E_ASSISTANT_KNOWLEDGE_ENABLED === "true" && isE2EFixtureMode();
