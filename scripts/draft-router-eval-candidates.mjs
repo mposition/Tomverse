@@ -128,7 +128,18 @@ const resolvedBatch = batchId ?? `${stratum}-${cell}-${String(inCell.length + 1)
 // copies would drift, and a recorded parameter that was not the one sent is
 // worse than none.
 const capField = model.provider === "openai" ? "max_completion_tokens" : "max_tokens";
-const generationParameters = { [capField]: 8000 };
+// 8,000 was enough until router-eval-draft-v3 told the coding cell to inline
+// the code its prompts refer to. The first Korean coding batch under v3 was
+// billed in full and returned nothing usable: the reply stopped mid-string in
+// its sixth entry. Korean costs more tokens per character than English and a
+// fenced code block adds more again, so the cap is now a knob rather than a
+// constant, and it is recorded per batch either way.
+const DEFAULT_OUTPUT_TOKEN_CAP = 8000;
+const outputTokenCap = Number(argValue("max-output-tokens") ?? DEFAULT_OUTPUT_TOKEN_CAP);
+if (!Number.isInteger(outputTokenCap) || outputTokenCap <= 0) {
+  die(`--max-output-tokens must be a whole positive number; got "${argValue("max-output-tokens")}".`);
+}
+const generationParameters = { [capField]: outputTokenCap };
 
 // Cost, from lib/modelPricing.ts rather than from a figure typed into a
 // conversation: the repository's own table is what the rest of the product
@@ -274,9 +285,35 @@ try {
 }
 
 const content = payload?.choices?.[0]?.message?.content ?? "";
-const { prompts, dropped } = parseDraftedPrompts(content);
+const finishReason = payload?.choices?.[0]?.finish_reason ?? null;
+const usage = payload?.usage ?? null;
+const { prompts, dropped, truncated } = parseDraftedPrompts(content);
+
+// Why a reply yielded nothing is the first thing anyone asks, and the answer
+// is in the response rather than in the prose. "The cap was reached", "the
+// model declined" and "it answered in prose" are different problems with
+// different fixes, and only the first is solved by asking again.
+const diagnosis = () =>
+  `  finish_reason: ${finishReason ?? "(not reported)"}\n` +
+  `  usage: ${usage ? JSON.stringify(usage) : "(not reported)"}\n` +
+  `  output cap in force: ${outputTokenCap.toLocaleString("en-US")}` +
+  (truncated || finishReason === "length"
+    ? `\n\n  The reply was cut off. Re-run with a smaller --count, or a larger\n` +
+      `  --max-output-tokens, rather than the same request again.`
+    : "");
+
 if (prompts.length === 0) {
-  die(`\nNo prompts found in the reply:\n${String(content).slice(0, 600)}`);
+  die(
+    `\nNo prompts found in the reply.\n\n${diagnosis()}\n\n` +
+      `  first 600 characters of the content:\n${String(content).slice(0, 600)}`
+  );
+}
+if (truncated || finishReason === "length") {
+  console.log(
+    `\n  THE REPLY WAS CUT OFF. ${prompts.length} complete item(s) were recovered from it;\n` +
+      `  the rest of the array never arrived. This batch is short of the ${count} asked for.\n` +
+      `${diagnosis()}`
+  );
 }
 
 // The deployed image has no git binary -- the first Wave 1 run printed

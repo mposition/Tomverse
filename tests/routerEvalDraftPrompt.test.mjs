@@ -188,3 +188,49 @@ test("surrounding whitespace is trimmed but the prompt is otherwise untouched", 
     const result = parseDraftedPrompts('[{"prompt":"  두 줄\\n짜리 프롬프트  "}]');
     assert.deepEqual(result.prompts, ["두 줄\n짜리 프롬프트"]);
 });
+
+// --- truncation ------------------------------------------------------------
+
+// The coding/ko run of Wave 3 was billed and returned nothing. v3 asks the
+// drafter to inline the code a prompt refers to, which lengthened the reply
+// past the 8,000-token output cap; the array stopped mid-string in its sixth
+// entry, JSON.parse rejected the whole thing, and five complete prompts that
+// had already been paid for were discarded with it.
+test("complete entries survive a reply the output cap cut off", () => {
+    const cut =
+        '```json\n[\n  {"prompt": "장고 ORM에서 related_name 없이 역참조하면 어떻게 되나요?"},\n' +
+        '  {"prompt": "사내 서버라 Java 8밖에 못 씁니다.\\n\\n```java\\npublic record UserDto(String id) {}\\n```"},\n' +
+        '  {"prompt": "운영에선 이 배치가 멈춰요.\\n\\n```python\\ndef collect(rows):\\n    acc = []\\';
+    const result = parseDraftedPrompts(cut);
+    assert.equal(result.prompts.length, 2);
+    assert.match(result.prompts[1], /public record UserDto/);
+    assert.equal(result.truncated, true);
+});
+
+// A closed array is not truncated, however it was wrapped.
+test("a complete reply is not reported as truncated", () => {
+    for (const body of [
+        '[{"prompt":"하나"},{"prompt":"둘"}]',
+        'Here you go:\n```json\n[{"prompt":"하나"}]\n```\nHope that helps.',
+        '["하나","둘"]',
+    ]) {
+        assert.equal(parseDraftedPrompts(body).truncated, false);
+    }
+});
+
+// Braces and brackets inside a prompt's own text must not be read as entry
+// boundaries -- code is exactly what v3 asks the drafter to include.
+test("brackets inside a prompt string do not split the entry", () => {
+    const withCode =
+        '[{"prompt":"이 함수 고쳐 주세요.\\n\\ndef f(xs):\\n    return {k: [v] for k, v in xs}\\n"},{"prompt":"둘"}]';
+    const result = parseDraftedPrompts(withCode);
+    assert.equal(result.prompts.length, 2);
+    assert.match(result.prompts[0], /return \{k: \[v\]/);
+});
+
+// A reply cut off before any entry closed yields nothing, and says why.
+test("a reply cut off before the first entry closes reports truncation, not silence", () => {
+    const result = parseDraftedPrompts('[\n  {"prompt": "여기서 잘림');
+    assert.deepEqual(result.prompts, []);
+    assert.equal(result.truncated, true);
+});

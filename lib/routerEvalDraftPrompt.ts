@@ -244,26 +244,122 @@ export const templateHash = (instruction: string): string =>
  * counted: a short batch a person can see is better than a padded one they
  * cannot.
  */
+/**
+ * Read the entries of a JSON array out of `text`, one at a time, without
+ * requiring the array to be closed.
+ *
+ * A reply cut off by the output cap is not malformed prose -- it is a correct
+ * array missing its tail. `JSON.parse` rejects the whole thing, so a single
+ * truncated entry discards thirteen good ones that were already paid for.
+ * This walks the text instead, closing over each complete `{...}` or bare
+ * string and parsing it on its own.
+ */
+function readArrayEntries(text: string, start: number): { entries: unknown[]; closed: boolean } {
+  const entries: unknown[] = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let entryStart = -1;
+
+  for (let index = start + 1; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') {
+        inString = false;
+        // A bare string entry: the value is the string itself.
+        if (depth === 0 && entryStart >= 0) {
+          try {
+            entries.push(JSON.parse(text.slice(entryStart, index + 1)));
+          } catch {
+            // Unreadable despite looking complete. Left out; the caller counts
+            // the shortfall against what was asked for.
+          }
+          entryStart = -1;
+        }
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      if (depth === 0 && entryStart < 0) entryStart = index;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      if (depth === 0) entryStart = index;
+      depth += 1;
+      continue;
+    }
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0 && entryStart >= 0) {
+        try {
+          entries.push(JSON.parse(text.slice(entryStart, index + 1)));
+        } catch {
+          // As above.
+        }
+        entryStart = -1;
+      }
+      continue;
+    }
+    if (character === "]") {
+      if (depth === 0) return { entries, closed: true };
+      depth -= 1;
+      if (depth === 0 && entryStart >= 0) {
+        try {
+          entries.push(JSON.parse(text.slice(entryStart, index + 1)));
+        } catch {
+          // As above.
+        }
+        entryStart = -1;
+      }
+    }
+  }
+
+  return { entries, closed: false };
+}
+
 export function parseDraftedPrompts(body: string): {
   prompts: readonly string[];
   dropped: number;
+  /**
+   * The array was never closed -- the reply stops mid-way, which for a model
+   * asked for a fixed number of items means the output cap was reached. The
+   * caller should say so rather than reporting a short batch as if the model
+   * simply wrote fewer.
+   */
+  truncated: boolean;
 } {
   const text = typeof body === "string" ? body : "";
   const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start < 0 || end <= start) return { prompts: [], dropped: 0 };
+  if (start < 0) return { prompts: [], dropped: 0, truncated: false };
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return { prompts: [], dropped: 0 };
+  let entries: unknown[] | null = null;
+  let truncated = false;
+
+  const end = text.lastIndexOf("]");
+  if (end > start) {
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+      if (Array.isArray(parsed)) entries = parsed;
+    } catch {
+      // Fall through to the entry-by-entry read below.
+    }
   }
-  if (!Array.isArray(parsed)) return { prompts: [], dropped: 0 };
+
+  if (entries === null) {
+    const salvaged = readArrayEntries(text, start);
+    entries = salvaged.entries;
+    truncated = !salvaged.closed;
+    if (entries.length === 0) return { prompts: [], dropped: 0, truncated };
+  }
 
   const prompts: string[] = [];
   let dropped = 0;
-  for (const entry of parsed) {
+  for (const entry of entries) {
     const prompt =
       typeof entry === "string"
         ? entry
@@ -273,5 +369,5 @@ export function parseDraftedPrompts(body: string): {
     if (prompt && prompt.trim() !== "") prompts.push(prompt.trim());
     else dropped += 1;
   }
-  return { prompts, dropped };
+  return { prompts, dropped, truncated };
 }
