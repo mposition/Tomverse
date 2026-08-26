@@ -83,6 +83,10 @@ import {
     openAiNativeSearchToolCallCeiling,
 } from "@/lib/webSearchCapability";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import {
+    recordWebSearchCostRefusal,
+    webSearchCostRefusalError,
+} from "@/lib/webSearchCostRefusal";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
@@ -961,6 +965,19 @@ async function handleChatPost(
     // turn -- credits an outage to a model nobody dispatched.
     let dispatchModelIdForLog: string | undefined;
     let dispatchProviderForLog: AiModel["provider"] | undefined;
+    /**
+     * Who this turn was for, hoisted for the catch.
+     *
+     * `access` is resolved inside the try and a refusal thrown after it has to
+     * be recorded from outside, against the subject it was refused for. Left
+     * null until identity exists, so a request refused before that records as
+     * unknown rather than as somebody.
+     */
+    let refusalSubjectForLog: {
+        subjectKey: string;
+        userId: string | null;
+        plan: string | null;
+    } | null = null;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -1505,6 +1522,13 @@ async function handleChatPost(
                   }
                 : undefined
         );
+        refusalSubjectForLog = {
+            subjectKey: access.subjectKey,
+            userId: access.userId ?? null,
+            // A signed-in account with no resolved plan reads as Guest rather
+            // than as a paid one -- the same rule the shadow router uses.
+            plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+        };
         // Attachments are gated per access kind rather than by "is there a
         // session". A guest may send one ephemeral file per message, uploaded
         // through /api/chat/guest-attachment and already validated and parsed
@@ -2665,13 +2689,7 @@ async function handleChatPost(
             nativeSearchEnabled,
         });
         if (!nativeSearchReservation.ok) {
-            throw new ChatAccessError(
-                503,
-                "WEB_SEARCH_COST_UNBOUNDED",
-                "Web search is temporarily unavailable for this model.",
-                undefined,
-                { scope: nativeSearchReservation.reason }
-            );
+            throw webSearchCostRefusalError(nativeSearchReservation.reason);
         }
         const budget = createChatBudget(
             access.kind,
@@ -5074,6 +5092,27 @@ async function handleChatPost(
         }
         const accessError = chatErrorResponse(error);
         if (accessError) {
+            // Its own record, because it qualifies for neither of the two this
+            // route already writes: the code is not a cost-safety code, so the
+            // log below skips it, and the throw is before `acquireChatAccess`,
+            // so no limit-decision row exists for it either. Awaited so the row
+            // is written before the response goes out, and never throwing, so
+            // recording a refusal cannot become a second one.
+            await recordWebSearchCostRefusal(error, {
+                traceId,
+                phase: "chat_reservation",
+                subjectKey: refusalSubjectForLog?.subjectKey ?? null,
+                userId: refusalSubjectForLog?.userId ?? null,
+                plan: refusalSubjectForLog?.plan ?? null,
+                models: dispatchModelIdForLog
+                    ? [
+                          {
+                              modelId: dispatchModelIdForLog,
+                              provider: dispatchProviderForLog ?? "",
+                          },
+                      ]
+                    : [],
+            });
             if (
                 error instanceof ChatAccessError &&
                 isChatCostSafetyCode(error.code)
