@@ -71,26 +71,58 @@ export type NativeSearchRefusal =
 /**
  * Capabilities whose declared ceiling a provider has already exceeded.
  *
- * A per-process latch, and deliberately a blunt one: a provider that billed
- * more searches than the request authorized has broken the assumption every
- * reservation for it rests on, and continuing to dispatch would keep
- * authorizing amounts that have been demonstrated not to bound anything.
+ * A provider that billed more searches than the request authorized has broken
+ * the assumption every reservation for it rests on, so it stops dispatching:
+ * continuing would keep authorizing amounts demonstrated not to bound
+ * anything.
  *
- * Per process is not durable, and the incident raised beside it is what
- * actually reaches an operator -- the latch stops the bleeding in the instance
- * that saw it, and the durable stop is disabling the model or the feature.
+ * This used to be one per-process Set, with a comment conceding that "the
+ * durable stop is disabling the model or the feature". That was the wrong
+ * shape for what actually happens. The latch fired on staging on 2026-08-26,
+ * and the next deploy would have cleared it silently -- so the guarantee was
+ * really "safe until the next deploy", which is not a guarantee, and on more
+ * than one instance only the instance that saw the overshoot stopped.
+ *
+ * So there are two sets now, and the split matters:
+ *
+ * - `localBreaches` is what *this* process observed. Append-only, never
+ *   cleared by a refresh, because a durable write that failed must not be
+ *   able to un-latch the process that saw the breach.
+ * - `durableBreaches` is the shared record, replaced wholesale on each
+ *   refresh. Replaced rather than merged so that an operator who has dealt
+ *   with a breach can clear the row and have every instance resume within one
+ *   refresh, instead of needing a deploy to forget.
+ *
+ * The store and the refresh live in `lib/webSearchCeilingBreachStore.ts`;
+ * this module stays synchronous and free of database access so the reservation
+ * path is still a pure function of the catalogue.
  */
-const breachedProviders = new Set<string>();
+const localBreaches = new Set<string>();
+const durableBreaches = new Set<string>();
 
 export const recordSearchQueryCeilingBreach = (provider: string) => {
-    breachedProviders.add(provider);
+    localBreaches.add(provider);
+};
+
+/**
+ * Replaces the shared half of the latch. Called by the refresh, never by a
+ * request path deciding anything.
+ */
+export const applyDurableSearchQueryCeilingBreaches = (
+    providers: Iterable<string>
+) => {
+    durableBreaches.clear();
+    for (const provider of providers) durableBreaches.add(provider);
 };
 
 export const searchQueryCeilingBreached = (provider: string) =>
-    breachedProviders.has(provider);
+    localBreaches.has(provider) || durableBreaches.has(provider);
 
 /** Test seam. Never called on a request path. */
-export const resetSearchQueryCeilingBreaches = () => breachedProviders.clear();
+export const resetSearchQueryCeilingBreaches = () => {
+    localBreaches.clear();
+    durableBreaches.clear();
+};
 
 /**
  * The worst case this turn's native search can cost, or why it cannot be run.

@@ -76,6 +76,7 @@ import {
     recordSearchQueryCeilingBreach,
     settledNativeSearchCost,
 } from "@/lib/webSearchNativeCostReservation";
+import { persistSearchQueryCeilingBreach } from "@/lib/webSearchCeilingBreachStore";
 import {
     boundedProviderIdentifier,
     recordAttemptCost,
@@ -3388,6 +3389,18 @@ export const settleChatUsage = async (
                         costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
                     },
                 })
+            );
+            // Beside the incident, not instead of it. The incident is what
+            // reaches a person; this is what keeps the capability stopped
+            // after the deploy that would otherwise forget.
+            deliveries.push(
+                persistSearchQueryCeilingBreach(
+                    reported.searchCeilingBreach.provider,
+                    {
+                        observedQueries: reported.searchCeilingBreach.observed,
+                        authorizedQueries: reported.searchCeilingBreach.authorized,
+                    }
+                )
             );
         }
         if (reported.missingSearchAuthorization) {

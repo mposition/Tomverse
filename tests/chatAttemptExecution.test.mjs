@@ -9,6 +9,10 @@ import {
   planAttemptExecution,
 } from "../lib/chatAttemptExecution.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
+import {
+  OPENAI_MAX_SEARCH_TOOL_CALLS,
+  OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
+} from "../lib/webSearchCapability.ts";
 import { createTokenEstimateAccumulator } from "../lib/chatTokenEstimate.ts";
 
 // §9.1: "the closure also holds modelConfig, generationSettings,
@@ -344,14 +348,18 @@ test("a plan reserves the provider cost of its own attempt's search", () => {
   const searching = planFor(modelById("gpt-5-6-luna"), {
     webSearchMode: "always",
   });
-  // Five queries at OpenAI's registered per-query rate. Zero here would mean a
+  // OpenAI's billable bound at its registered per-query rate -- the request's
+  // `max_tool_calls` plus the overshoot observed past it, not the request's
+  // ceiling alone (lib/webSearchCapability.ts). Zero here would mean a
   // fallback dispatching a searching turn against a token-only reservation,
   // which is the hole the reservation exists to close.
-  assert.equal(searching.budget.nativeSearchMaxQueries, 5);
+  const billable =
+    OPENAI_MAX_SEARCH_TOOL_CALLS + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE;
+  assert.equal(searching.budget.nativeSearchMaxQueries, billable);
   assert.ok(searching.budget.nativeSearchCostPerQueryMicroUsd > 0);
   assert.equal(
     searching.budget.nativeSearchReservedCostMicroUsd,
-    searching.budget.nativeSearchCostPerQueryMicroUsd * 5
+    searching.budget.nativeSearchCostPerQueryMicroUsd * billable
   );
 
   const idle = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "off" });
