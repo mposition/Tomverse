@@ -39,9 +39,24 @@ on:
         required: true
         default: run1
       max_cost_usd:
+        # 7, and the number is bounded from both sides.
+        #
+        # Below: one run's worst case on mem-eval-succ-1 is US$5.99, if every
+        # one of the 1,150 answers hits the 4,096-token cap
+        # (`npm run report:memory-eval-cost-estimate`). The old default of 6
+        # predates this dataset and left 1.7% of headroom — and a default that
+        # stops a run short does not save money, because a truncated run is
+        # not decision-grade and the whole spend is lost rather than part of
+        # it.
+        #
+        # Above: this is a PER-RUN ceiling and the harness keeps no cumulative
+        # ledger, so §12.4's two independent runs can spend it twice. Two at 7
+        # is 14, inside the approved US$15; two at 12 would be 24, outside it.
+        # The approved ceiling bounds the programme, this bounds one dispatch,
+        # and nothing but arithmetic connects them.
         description: "Per-run ceiling in USD. May only narrow the approved budget."
         required: true
-        default: "6"
+        default: "7"
       limit:
         description: "Compatibility probe: run only the first N cases. Empty means a full run."
         required: false

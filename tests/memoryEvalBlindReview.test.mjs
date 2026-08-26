@@ -15,11 +15,17 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
-import {
-    datasetFingerprintInput,
-    scoreCase,
-} from "../lib/memoryExtractionEvalCore.ts";
+// The successor set: a §12.4 blind review is of a decision-grade run, and
+// only mem-eval-succ-1 can produce one. Built against seed-11 these fixtures
+// were rejected by the script's own digest guard — which is the guard working,
+// not the guard being in the way.
+import { MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES } from "../lib/memoryEvalSuccessorFixtures.ts";
+import { datasetFingerprintInput } from "../lib/memoryExtractionEvalCore.ts";
+// The v2 scorer, matching the set above. The v1 scoreCase reads neither
+// `expectedDisposition` nor `goldCompleteness`, so it would have written a
+// schema-1 outcome shape into a manifest labelled schema 2 — and the sheet
+// under test hides the score, so nothing here would have noticed.
+import { scoreCaseV2 as scoreCase } from "../lib/memoryEvalScoringV2.ts";
 
 const ROOT = new URL("..", import.meta.url);
 const digest = createHash("sha256")
@@ -54,8 +60,13 @@ const artifact = (overrides = {}) => {
     return {
         manifest: {
             modelId: "gpt-5-6-luna",
-            promptVersion: "mem-extract-v1",
-            datasetVersion: "mem-eval-seed-11",
+            // The pair and version this fixture's digest actually belongs to.
+            // They were "mem-extract-v1" and "mem-eval-seed-11" while the
+            // digest was already computed from the successor set — a manifest
+            // that named one dataset and hashed another, which is exactly the
+            // mismatch the digest guard exists to catch.
+            promptVersion: "mem-extract-v4",
+            datasetVersion: "mem-eval-succ-1",
             datasetDigest: digest,
             mode: "live",
             commitSha: "0".repeat(40),
