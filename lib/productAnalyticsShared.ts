@@ -179,7 +179,8 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   // it started at -- a closed enum -- and the other two carry nothing. No
   // topic, no signals: the classifier's signal names are fixed identifiers,
   // but a set of them beside a timestamp narrows a small population toward one
-  // question, which is what §9 keeps out of this list.
+  // question, and `analyticsPropertiesSchema` is strict, so there is no key
+  // the question could travel in even by accident.
   "deep_research_suggestion_shown",
   "deep_research_suggestion_accepted",
   "deep_research_suggestion_dismissed",

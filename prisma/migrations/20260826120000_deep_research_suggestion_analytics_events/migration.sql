@@ -13,7 +13,8 @@
 -- Content-free by schema: acceptance carries the depth the run started at (a
 -- closed enum) and the other two carry nothing. The classifier's signal names
 -- are fixed identifiers but are deliberately not sent -- a set of them beside
--- a timestamp narrows a small population toward one question.
+-- a timestamp narrows a small population toward one question, and the
+-- properties schema is strict, so none of them has a key to travel in.
 --
 -- Additive and reversible by the same shape: the constraint is dropped and
 -- recreated, no row is read or written, and the previous list is one migration
