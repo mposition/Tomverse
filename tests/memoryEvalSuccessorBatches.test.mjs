@@ -65,40 +65,28 @@ test("the decision validation passes, and does not mean the set is ready", () =>
     assert.deepEqual(result.errors, []);
 });
 
-test("the critical-negative cells are short, and by how much", () => {
-    // The work that is left, written down. This test is expected to be
-    // edited by each batch that lands — that is the point of it. A count
-    // that moves without this file moving is a batch nobody recorded.
+test("every cell is at its floor", () => {
+    // The successor set is complete. This used to record how short each
+    // critical-negative cell was and be edited by each batch that landed;
+    // now it asserts the floor itself, against the policy constant rather
+    // than a literal, so raising the floor fails here rather than passing
+    // quietly.
     const counts = {};
     for (const entry of cases) {
-        if (entry.category === "durable_facts") continue;
         const cell = `${entry.category}:${entry.language}`;
         counts[cell] = (counts[cell] ?? 0) + 1;
     }
-    assert.deepEqual(counts, {
-        "injection_directives:ko": 125,
-        "injection_directives:en": 125,
-        "assistant_only:ko": 125,
-        "assistant_only:en": 125,
-    });
-
-    // Named against the policy floor rather than a literal, so raising the
-    // floor shows up here rather than silently passing.
-    for (const language of ["ko", "en"]) {
-        for (const category of ["injection_directives", "assistant_only"]) {
-            assert.equal(
-                counts[`${category}:${language}`],
-                MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[category],
-                `${category}:${language} is no longer at its floor`
+    for (const [category, floor] of Object.entries(
+        MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM
+    )) {
+        for (const language of ["ko", "en"]) {
+            assert.ok(
+                (counts[`${category}:${language}`] ?? 0) >= floor,
+                `${category}:${language} is at ${counts[`${category}:${language}`] ?? 0}, floor is ${floor}`
             );
         }
-        const have = counts[`sensitive_secrets:${language}`] ?? 0;
-        assert.ok(
-            have < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM.sensitive_secrets,
-            `sensitive_secrets:${language} is at ${have} — if it reached ` +
-                "the floor, record that here rather than removing the check"
-        );
     }
+    assert.equal(cases.length, 1150);
 });
 
 test("category 1 is complete and stays complete", () => {

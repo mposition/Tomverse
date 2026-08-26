@@ -45,6 +45,12 @@ import { BATCH_123_ASSISTANT_KO } from "@/lib/memoryExtractionEvalCandidates/bat
 import { BATCH_124_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch124AssistantEn";
 import { BATCH_125_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch125AssistantEn";
 import { BATCH_126_ASSISTANT_EN } from "@/lib/memoryExtractionEvalCandidates/batch126AssistantEn";
+import { BATCH_127_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch127SecretKo";
+import { BATCH_128_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch128SecretKo";
+import { BATCH_129_SECRET_KO } from "@/lib/memoryExtractionEvalCandidates/batch129SecretKo";
+import { BATCH_130_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch130SecretEn";
+import { BATCH_131_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch131SecretEn";
+import { BATCH_132_SECRET_EN } from "@/lib/memoryExtractionEvalCandidates/batch132SecretEn";
 
 /**
  * Either schema. The successor batches are schema 2 and the frozen set's are
@@ -280,5 +286,53 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
             "docs/ops/memory-extraction-eval-batches/batch-126-successor-assistant-en.md",
         successorTo: "mem-eval-seed-11",
         cases: BATCH_126_ASSISTANT_EN,
+    },
+    {
+        id: "batch-127",
+        cell: "sensitive_secrets:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-127-successor-secret-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_127_SECRET_KO,
+    },
+    {
+        id: "batch-128",
+        cell: "sensitive_secrets:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-128-successor-secret-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_128_SECRET_KO,
+    },
+    {
+        id: "batch-129",
+        cell: "sensitive_secrets:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-129-successor-secret-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_129_SECRET_KO,
+    },
+    {
+        id: "batch-130",
+        cell: "sensitive_secrets:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-130-successor-secret-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_130_SECRET_EN,
+    },
+    {
+        id: "batch-131",
+        cell: "sensitive_secrets:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-131-successor-secret-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_131_SECRET_EN,
+    },
+    {
+        id: "batch-132",
+        cell: "sensitive_secrets:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-132-successor-secret-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_132_SECRET_EN,
     },
 ];
