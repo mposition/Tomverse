@@ -40,6 +40,13 @@ import {
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import {
+  deriveDeepResearchSuggestion,
+  type DeepResearchAvailability,
+  type DeepResearchSuggestionTurn,
+} from "@/lib/deepResearchSuggestion";
+import { DeepResearchSuggestionCard } from "@/components/chat/DeepResearchSuggestionCard";
+import type { DeepResearchSuggestionCopy } from "@/components/chat/deepResearchSuggestionCopy";
+import {
   chatContentStateKey,
   resolveChatContentState,
   type ChatContentState,
@@ -193,6 +200,33 @@ type MobileChatShellProps = {
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
+  /*
+    The Deep Research expansion offer (lib/deepResearchSuggestion.ts).
+
+    The page supplies the question, the viewer's access and what has already
+    been settled; the *statuses* are this shell's, because the panels report
+    here. So the decision is made below with `deriveDeepResearchSuggestion`,
+    exactly as `deriveComparisonReadiness` is -- one rule module, two shells,
+    no chance of the card appearing on one and not the other.
+  */
+  deepResearchSuggestionTurn: DeepResearchSuggestionTurn | null;
+  deepResearchAvailability: DeepResearchAvailability;
+  deepResearchResolvedTopicKeys: readonly string[];
+  deepResearchOfferedTopics: readonly { topicKey: string; promptId: string }[];
+  onDeepResearchSuggestionShown: (offer: {
+    topicKey: string;
+    promptId: string;
+  }) => void;
+  deepResearchSuggestionCopy: DeepResearchSuggestionCopy;
+  isDeepResearchExpanding: boolean;
+  onDeepResearchSuggestionExpand: (turn: {
+    conversationId: string;
+    text: string;
+  }) => void;
+  onDeepResearchSuggestionDismiss: (turn: {
+    conversationId: string;
+    text: string;
+  }) => void;
   onRequestUndoToast: (message: string, undo: () => void) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
@@ -274,6 +308,15 @@ export function MobileChatShell({
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
+  deepResearchSuggestionTurn,
+  deepResearchAvailability,
+  deepResearchResolvedTopicKeys,
+  deepResearchOfferedTopics,
+  onDeepResearchSuggestionShown,
+  deepResearchSuggestionCopy,
+  isDeepResearchExpanding,
+  onDeepResearchSuggestionExpand,
+  onDeepResearchSuggestionDismiss,
   onRequestUndoToast,
   onSubmit,
   onBeforeModelSend,
@@ -698,6 +741,37 @@ export function MobileChatShell({
     hasComparableConversation: !isConversationEmpty && Boolean(currentChatId),
     isBusy: isCompareSummaryLoading,
   });
+  // The expansion offer, decided from the same status map the rail reads.
+  const deepResearchSuggestion = deriveDeepResearchSuggestion({
+    conversationId: currentChatId,
+    turn: deepResearchSuggestionTurn,
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+    modelStatuses,
+    availability: deepResearchAvailability,
+    isDeepResearchRunning: isDeepResearchPending,
+    resolvedTopicKeys: deepResearchResolvedTopicKeys,
+    offeredTopics: deepResearchOfferedTopics,
+  });
+  /*
+    Reported the moment the card is on screen, so "already offered" is a fact
+    about what was shown rather than about what was sent. The page records it
+    against this question's own id, which is what keeps the entry from
+    refusing the card that wrote it.
+  */
+  const offeredTopicKey = deepResearchSuggestion.offered
+    ? deepResearchSuggestion.topicKey
+    : null;
+  const offeredPromptId = deepResearchSuggestion.offered
+    ? deepResearchSuggestion.promptId
+    : null;
+  useEffect(() => {
+    if (!offeredTopicKey || !offeredPromptId) return;
+    onDeepResearchSuggestionShown({
+      topicKey: offeredTopicKey,
+      promptId: offeredPromptId,
+    });
+  }, [offeredPromptId, offeredTopicKey, onDeepResearchSuggestionShown]);
   // REFLOW-P1-01. On a new chat the welcome copy and the composer are one
   // surface: the composer portals into the welcome screen's own slot, so
   // whatever happens to that surface happens to the composer.
@@ -1278,6 +1352,35 @@ export function MobileChatShell({
         data-testid="mobile-bottom-dock"
         className="flex w-full shrink-0 flex-col"
       >
+      {/*
+        The Deep Research expansion offer, above the comparison rail and
+        directly under the answers it is about. One card for the whole
+        question -- a comparison's three panels answered one question, and
+        three offers to expand it would be three ways to start one run.
+
+        It is in the dock rather than inside a panel's message list for the
+        same reason the rail is: the dock exists once, and it is the only
+        place in this layout where "under the answer" and "once" are the
+        same position.
+      */}
+      {deepResearchSuggestion.offered && deepResearchSuggestionTurn && (
+        <DeepResearchSuggestionCard
+          copy={deepResearchSuggestionCopy}
+          isStarting={isDeepResearchExpanding}
+          onExpand={() =>
+            onDeepResearchSuggestionExpand({
+              conversationId: deepResearchSuggestionTurn.conversationId,
+              text: deepResearchSuggestionTurn.text,
+            })
+          }
+          onDismiss={() =>
+            onDeepResearchSuggestionDismiss({
+              conversationId: deepResearchSuggestionTurn.conversationId,
+              text: deepResearchSuggestionTurn.text,
+            })
+          }
+        />
+      )}
       <ComparisonActionRail
         layout="mobile"
         readiness={comparisonReadiness}
