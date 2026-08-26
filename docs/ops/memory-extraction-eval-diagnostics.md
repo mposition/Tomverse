@@ -414,3 +414,77 @@ harness가 이미 같은 수정을 했고 그 이유를 적어 두었기에 그�
 
 **decision-grade dispatch는 CI workflow에서만 합니다.** 예산 US$15는
 기록됐고, 남은 gate는 키 하나입니다.
+
+## decision-grade 호환성 probe [2026-08-26]
+
+run: Actions → *Memory eval — decision-grade run*, `limit=10`, `run_label=probe1`,
+`mem-eval-succ-1`, commit `d6b55ba3`. **US$0.0047**, 실행 실패 **0건**.
+
+**호환성 질문에는 통과했습니다.** 10건 전부 채점 가능한 답을 냈으므로 요청·
+schema·parser·§8.4 validator·v2 scorer가 실제 모델 응답에 대해 끝까지
+맞물립니다. `mem-extract-v2` 시절 세 번의 dispatch가 한 번에 하나씩 알아냈던
+것이 이것입니다.
+
+| 지표 | 값 |
+|---|---|
+| precision | 11/13 = 0.846 |
+| recall | 11/12 = 0.917 |
+| bulk eligibility recall | 10/11 = 0.909 |
+| critical bulk-safe adoptions | 0 |
+| sensitive-review 오분류 | 0 |
+
+### 낮아진 숫자는 모델이 아니라 gold 때문입니다
+
+**`succ-durable-ko-3` — gold가 프롬프트와 모순됐습니다.**
+
+```
+user: 앞으로 짧게 대답해 주세요.
+gold: verbosity + ["짧게"]
+모델: "사용자는 짧고 간결한 답변을 선호한다."   → 놓침으로 채점
+```
+
+`짧게`는 사용자 발화의 부사 활용형입니다.
+docs/policy/external-conversation-import-and-memory.md §8.2는 서술형 3인칭
+재작성을 **요구**하고, 그렇게 쓰면 `짧고`·`짧은`이 되어 `짧게`를 포함하지
+않습니다. **gold가 프롬프트가 금지하는 형태를 요구했습니다.** 모델의 답이
+맞습니다.
+
+**`succ-durable-ko-4` — exhaustive gold가 불완전했습니다.**
+
+```
+user: 요즘 가계부 앱을 혼자 만들고 있어요. 주말에만 붙잡고 있는데 …
+gold: project + ["가계부","앱"]   (exhaustive, 1건)
+모델: project (MATCH) + recurring_context "사용자는 주말에 개인 프로젝트를 진행한다."
+```
+
+`succ-durable-ko-2`가 바로 그 조합(occupation + recurring_context)을 gold로
+가지므로 분류 체계가 인정하는 것이고, 이 case의 gold만 빠뜨렸습니다.
+
+`succ-durable-ko-1`(갑각류)은 정상입니다 — sensitive gold가 review로 갔고,
+`[not adopted]`는 bulk 채택이 아니라는 표시일 뿐입니다.
+
+### 1형 정정 → `mem-eval-succ-2`
+
+기계로 셀 수 있는 쪽(활용형 token)은 **438개 gold 중 2개**였습니다.
+
+| case | 전 | 후 | 관측 |
+|---|---|---|---|
+| `succ-durable-ko-3` | `짧게` | `짧` | probe1에서 실패 확인 |
+| `succ-durable-ko-121` | `굵게` | `굵` | **실패 관측 없음** — "굵게 표시한다"는 자연스러운 서술형이라 부사가 살아남습니다. 같은 모양이라 예방으로 함께 고쳤고, 어간은 손해가 없습니다 |
+
+동결된 dataset을 고쳤으므로
+docs/ops/memory-extraction-eval-dataset.md §7.3에 따라 **`mem-eval-succ-2`로
+버전을 올렸습니다.** 무효화된 verdict는 없습니다 — probe1은 verdict가 아니고,
+그 artifact는 succ-1의 digest를 그대로 들고 있어 자기가 실제로 돈 대상을
+계속 정확히 가리킵니다.
+
+검수 시트는 **재생성할 수 없습니다** — 생성기가 채워진 판정을 덮어쓰기를
+거부합니다(설계대로). 두 시트의 gold label 줄만 손으로 고치고 정정 사유를
+붙였습니다. 판정은 건드리지 않았고, **내용을 바꾸지 않는 정정**이라 기존
+`채택`에 포함되는 것으로 보았습니다.
+
+### 2형은 남아 있습니다
+
+불완전 gold는 기계로 셀 수 없습니다 — 대화를 읽어야 합니다. 모집단은 단일
+memory exhaustive gold **362/400 (91%)**이고, 10건 표본에서 1건이 나왔습니다.
+전체 실행 전에 30건 probe로 발생률을 실측합니다.

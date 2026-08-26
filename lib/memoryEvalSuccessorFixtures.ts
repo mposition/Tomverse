@@ -40,7 +40,20 @@
 import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 import { SUCCESSOR_ADOPTED_BATCHES } from "@/lib/memoryEvalSuccessorAdopted";
 
-export const MEMORY_EVAL_SUCCESSOR_DATASET_VERSION = "mem-eval-succ-1";
+/**
+ * Bumped from `mem-eval-succ-1` on 2026-08-26.
+ *
+ * docs/ops/memory-extraction-eval-dataset.md §7.3: editing a frozen dataset
+ * means a new version. Two gold tokens changed — `짧게` → `짧` and
+ * `굵게` → `굵` — so the digest moves and this must move with it, or an
+ * artifact would name a version whose contents it was not computed against.
+ *
+ * No verdict is invalidated, because none existed. `probe1` ran against
+ * succ-1 and is explicitly not a verdict; its artifact keeps succ-1's digest
+ * and still describes exactly what it ran on, which is the point of bumping
+ * rather than editing in place.
+ */
+export const MEMORY_EVAL_SUCCESSOR_DATASET_VERSION = "mem-eval-succ-2";
 
 /**
  * The version this one replaces, named rather than implied.

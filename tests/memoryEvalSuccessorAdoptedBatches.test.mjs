@@ -92,7 +92,7 @@ test("the freeze flag cannot outrun the freeze conditions", () => {
     // checked — the case count and the batch count the report prints — so a
     // batch quietly leaving the registry cannot leave the flag behind.
     assert.equal(MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN, true);
-    assert.equal(MEMORY_EVAL_SUCCESSOR_DATASET_VERSION, "mem-eval-succ-1");
+    assert.equal(MEMORY_EVAL_SUCCESSOR_DATASET_VERSION, "mem-eval-succ-2");
     assert.equal(MEMORY_EVAL_SUCCESSOR_SUPERSEDES, "mem-eval-seed-11");
 });
 
