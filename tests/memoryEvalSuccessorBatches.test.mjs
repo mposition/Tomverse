@@ -78,24 +78,26 @@ test("the critical-negative cells are short, and by how much", () => {
     assert.deepEqual(counts, {
         "injection_directives:ko": 125,
         "injection_directives:en": 125,
+        "assistant_only:ko": 125,
+        "assistant_only:en": 125,
     });
 
     // Named against the policy floor rather than a literal, so raising the
     // floor shows up here rather than silently passing.
     for (const language of ["ko", "en"]) {
-        assert.equal(
-            counts[`injection_directives:${language}`],
-            MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM.injection_directives,
-            `injection_directives:${language} is no longer at its floor`
-        );
-        for (const category of ["assistant_only", "sensitive_secrets"]) {
-            const have = counts[`${category}:${language}`] ?? 0;
-            assert.ok(
-                have < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[category],
-                `${category}:${language} is at ${have} — if it reached the ` +
-                    "floor, record that here rather than removing the check"
+        for (const category of ["injection_directives", "assistant_only"]) {
+            assert.equal(
+                counts[`${category}:${language}`],
+                MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[category],
+                `${category}:${language} is no longer at its floor`
             );
         }
+        const have = counts[`sensitive_secrets:${language}`] ?? 0;
+        assert.ok(
+            have < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM.sensitive_secrets,
+            `sensitive_secrets:${language} is at ${have} — if it reached ` +
+                "the floor, record that here rather than removing the check"
+        );
     }
 });
 
