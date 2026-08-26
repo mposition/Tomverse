@@ -5258,6 +5258,3030 @@
         "draftedAt": "2026-08-26T01:12:33.909Z"
       },
       "prompt": "'사용자가 결제를 취소하면, 시스템은 자동으로 재고를 복구하고 관리자에게 알림을 보냅니다.' 이 아키텍처 문서 문장을 영어로 번역해 줘. 단, '재고'는 'inventory'가 아니라 우리 회사 내부 용어인 'stock pool'로, '관리자'는 'admin' 대신 'system operator'로 고정해서 써야 해."
+    },
+    {
+      "id": "writing-en-001",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Make this fit 280 characters without losing the statistic: \"Our new report shows that 73% of remote workers feel more productive at home, but 45% also report feeling more isolated, and these trends have significant implications for workplace policy going forward.\""
+    },
+    {
+      "id": "writing-en-002",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Rewrite this in a warmer tone: \"Per my last email, the deliverables were due yesterday. Please advise on status.\""
+    },
+    {
+      "id": "writing-en-003",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "I need to rewrite our FAQ page so a 6th grader could understand it. I can't use any screenshots or diagrams—text only. Take this section and simplify it: \"Our cloud infrastructure leverages distributed computing nodes across multiple availability zones to ensure 99.9% uptime SLA compliance.\""
+    },
+    {
+      "id": "writing-en-004",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Help me write a project update for stakeholders that says we're two weeks behind schedule but have a recovery plan, without sounding like I'm making excuses. This goes out at 5pm today."
+    },
+    {
+      "id": "writing-en-005",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Cut this down to under 100 words for the executive summary, keep the dollar amounts: \"After conducting a thorough analysis of our Q3 expenditures, we have determined that operational costs have risen by 18% year-over-year, primarily driven by increased software licensing fees totaling $340,000 and additional headcount in the engineering department amounting to $1.2M in new salaries.\""
+    },
+    {
+      "id": "writing-en-006",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "I've already tried writing this layoff announcement three times and each version came off as either too cold or too apologetic. The facts: 12 positions are being eliminated in the support team, effective March 1, with 8 weeks severance. Write a version that's direct but human."
+    },
+    {
+      "id": "writing-en-007",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Write a product description for our handmade ceramic mug. It needs to be under 50 words for the Amazon listing and must include the words \"dishwasher safe\" and \"12 oz\"—Amazon will reject the listing otherwise."
+    },
+    {
+      "id": "writing-en-008",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Turn this bullet point list into a short paragraph with the same information: \"- Revenue up 22% YoY - New enterprise customers: 14 - Churn down to 3.1% - Expanded into DACH region\""
+    },
+    {
+      "id": "writing-en-009",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "I'm writing a LinkedIn post about leaving my company after 6 years. I want it to sound genuine, not like the typical \"bittersweet announcement\" everyone posts. Keep it under 200 words and don't use the word \"journey.\""
+    },
+    {
+      "id": "writing-en-010",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Make this sound like it was written by a real person, not corporate PR: \"We are committed to fostering a culture of innovation and continuous improvement across all organizational touchpoints.\""
+    },
+    {
+      "id": "writing-en-011",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Draft a tough email to a vendor who's missed their last three delivery dates. It needs to go out within the hour and I want it under 150 words. Don't threaten legal action, but make it clear we're evaluating alternatives."
+    },
+    {
+      "id": "writing-en-012",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Condense this into a single Slack message: \"Hi team, I wanted to let everyone know that we've decided to move the weekly sync to Thursdays at 2pm instead of Mondays at 10am. This change will take effect starting next week. Please update your calendars accordingly and let me know if you have any conflicts.\""
+    },
+    {
+      "id": "writing-en-013",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Take this technical changelog and rewrite it for non-technical users. They don't need to know the implementation details, just what changed and how it affects them: \"Refactored the auth middleware to use JWT instead of session cookies. Token expiry reduced to 15min with refresh token rotation. Deprecated the /v1/auth endpoint.\""
+    },
+    {
+      "id": "writing-en-014",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "writing_and_rewriting-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:22:38.838Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "78577c97e7272ca1",
+        "generatorCommit": "9e03234",
+        "draftedAt": "2026-08-26T03:24:28.568Z"
+      },
+      "prompt": "Can you rewrite this to avoid the words \"synergy\" and \"leverage\" anywhere: \"Our goal is to leverage the synergy between marketing and sales teams to drive greater operational efficiency and cross-functional alignment.\""
+    },
+    {
+      "id": "analysis-en-001",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "If we only have a $5k monthly ad budget, should we put it all into LinkedIn or split it with Google Ads for our B2B SaaS launch?"
+    },
+    {
+      "id": "analysis-en-002",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "If our cloud provider doubles egress fees next month, what's the cheapest way to keep our backup strategy intact without losing data redundancy?"
+    },
+    {
+      "id": "analysis-en-003",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "Why would a serverless architecture end up costing more than containerized workloads despite having lower baseline traffic?"
+    },
+    {
+      "id": "analysis-en-004",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "Given that we can't use third-party cookies anymore, what's the best way to measure the attribution of our podcast ad spends?"
+    },
+    {
+      "id": "analysis-en-005",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "I need to migrate our database from Postgres to DynamoDB by Friday, but my initial attempt to bulk export the data failed because of timeout limits. What's the step-by-step workaround to get this done before the weekend without taking the production app offline?"
+    },
+    {
+      "id": "analysis-en-006",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "We need to route incoming API requests to either our high-cost low-latency endpoint or our low-cost batch endpoint. We don't have access to real-time user tracking, so we can't tell if a user is currently active. How should we dynamically route traffic to maximize cost efficiency while keeping active users from dropping?"
+    },
+    {
+      "id": "analysis-en-007",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "Compare the long-term maintenance burden of building a custom observability pipeline versus adopting an off-the-shelf solution. If we expect our microservice count to double in the next year, which approach prevents bottlenecks better, and what are the trade-offs of each?"
+    },
+    {
+      "id": "analysis-en-008",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "With a team of four engineers and exactly three months to launch a mobile app, should we hire contractors to use Flutter or stick to Swift and risk the deadline? Walk through the trade-offs."
+    },
+    {
+      "id": "analysis-en-009",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "Our error logs show a spike in 401 Unauthorized errors exactly at 3 AM every Tuesday, but our automated token rotation runs at midnight and the tokens are valid for 24 hours. What could explain this discrepancy?"
+    },
+    {
+      "id": "analysis-en-010",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "Let's think through an API caching strategy: if we cache based on URL parameters but allow users to filter by 10 different attributes, how do we prevent cache invalidation from crushing our database while still ensuring users don't get stale data?"
+    },
+    {
+      "id": "analysis-en-011",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "I tried prompting our internal LLM to summarize 50-page legal contracts, but it keeps hallucinating clauses. If I can't increase the context window because of cost, how do I chunk the text to force the model to actually ground its summary in the provided text?"
+    },
+    {
+      "id": "analysis-en-012",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "Help me reason through whether to use push notifications or in-app messages for our new feature announcement. The catch is that 80% of our users only open the app once a week, but iOS limits push notifications to a few per week before they become annoying."
+    },
+    {
+      "id": "analysis-en-013",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "What is the best way to deduplicate a mailing list of 100k entries when we can't use an external API for verification?"
+    },
+    {
+      "id": "analysis-en-014",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "analysis_and_reasoning-en-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T03:57:26.453Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "32b63a57caf8c411",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T03:58:33.413Z"
+      },
+      "prompt": "I have to present two different scaling strategies to the board tomorrow: horizontal vs vertical scaling. We have a strict hard cap of $10k for infrastructure upgrades this quarter. Which strategy is more viable and why?"
+    },
+    {
+      "id": "document-en-001",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Based on the attached PDF invoice, does the total amount due exceed our $5,000 departmental budget limit?"
+    },
+    {
+      "id": "document-en-002",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Where is the emergency exit located on the attached image of this floor plan?"
+    },
+    {
+      "id": "document-en-003",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "I need to present the attached PDF slides tomorrow morning, but I don't have access to presentation software right now. Summarize the key talking points from the slides so I can present from my notes."
+    },
+    {
+      "id": "document-en-004",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "I can't open the attached PDF schematic on my phone. Can you read the part numbers for the capacitors listed in the BOM table and tell me if any are obsolete?"
+    },
+    {
+      "id": "document-en-005",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Does the attached spreadsheet contain a column for the shipping tracking number?"
+    },
+    {
+      "id": "document-en-006",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "I tried running the code shown in the attached image but keep getting a syntax error on line 14. What is causing the error and how do I fix it without using any external libraries?"
+    },
+    {
+      "id": "document-en-007",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "What is the voltage rating shown on the capacitor in the attached photo?"
+    },
+    {
+      "id": "document-en-008",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "We have a strict $500 budget for this event. Looking at the attached PDF catering menu, which appetizer options can we afford if we need to feed 50 people?"
+    },
+    {
+      "id": "document-en-009",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "I've attached an image of our competitor's pricing page. Extract the three tiers and their monthly costs, and note if any tier includes a free trial."
+    },
+    {
+      "id": "document-en-010",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Look at the attached PDF flowchart. Trace the path a user takes when they forget their password and list every email trigger that occurs during that flow."
+    },
+    {
+      "id": "document-en-011",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Please review the attached image of the restaurant receipt. I need to know the subtotal, the tax applied, and the final total, but specifically tell me if a service charge was already included."
+    },
+    {
+      "id": "document-en-012",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Translate the handwritten text in the attached image into English, but keep it under 100 words since I need to fit it into a character-limited tweet."
+    },
+    {
+      "id": "document-en-013",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "Attached is a spreadsheet of our inventory. Tell me which items are currently listed as out of stock but have a reorder status of \"pending\"."
+    },
+    {
+      "id": "document-en-014",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "language": {
+        "prompt": "en",
+        "expectedResponse": "en"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "document_and_attachment-en-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T04:07:49.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 8000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "64314b07ab594279",
+        "generatorCommit": "b6a6433",
+        "draftedAt": "2026-08-26T04:09:12.003Z"
+      },
+      "prompt": "I already tried using an OCR tool on the attached photo of the serial number plate, but it failed to read it. Can you decipher the serial number and model number manually from the image?"
+    },
+    {
+      "id": "current-ko-002",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "최근 개정된 노인장기요양보험 등급 산정 방식이 어떻게 바뀌었나요?"
+    },
+    {
+      "id": "current-ko-003",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "다음 달 초에 출국 예정이라 시간이 없는데, 여권법이 개정되면서 단기여권 발급 절차가 달라졌다고 들었어요. 온라인 예약 없이도 현장에서 당일 발급이 가능한가요?"
+    },
+    {
+      "id": "current-ko-004",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "2024년 청년도약계좌 가입 대상과 한도를 현재 기준으로 정리해 주세요."
+    },
+    {
+      "id": "current-ko-005",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "국민건강보험공단 앱으로 건강검진 예약을 계속 시도했는데 오류만 떠요. 전화도 안 터지고. 최근에 시스템이 바뀐 건지, 다른 접수 창구가 있는지 알아봐 주세요."
+    },
+    {
+      "id": "current-ko-006",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "용도지역이 자연녹지인 땅에 간판을 설치하려고 합니다. 최근 건축법 시행령 개정으로 달라진 간판 규제 기준을 알려주세요."
+    },
+    {
+      "id": "current-ko-007",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "월세 소득공제 한도가 최근에 바뀌었다던데, 세법 개정안에 명시된 구체적 수치와 적용 시기를 찾아주세요."
+    },
+    {
+      "id": "current-ko-008",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "예산 50만 원 이내로 참여 가능한 정부지원 창업교육 프로그램을 서울에서 찾고 있어요. 현재 접수 중인 것만 추려 주세요."
+    },
+    {
+      "id": "current-ko-009",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "2024년부터 운전면허 갱신 주기가 달라졌다는데 구체적인 변경 내용을 알려주세요. 특히 고령 운전자 기준도 포함해서요."
+    },
+    {
+      "id": "current-ko-010",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "K-전직훈련(K-MOVE) 사업 최신 신청 자격이 어떻게 되나요?"
+    },
+    {
+      "id": "current-ko-011",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "아이폰이 고장나서 지금 안드로이드로밖에 접속을 못 하는데, 공인인증서를 안 쓰게 되면서 어떤 대체 인증 수단이 생겼는지 궁금합니다. 안드로이드 기기로 쓸 수 있는 방법이 뭔가요?"
+    },
+    {
+      "id": "current-ko-012",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "2025학년도 대학 수시 모집에서 학생부 교과 전형 비율을 높인 주요 대학들의 변화를 정리해 주세요."
+    },
+    {
+      "id": "current-ko-013",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "올해 다자녀 양육기관 휴직 제도 개정안의 핵심 변경 사항이 뭐예요?"
+    },
+    {
+      "id": "current-ko-014",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "의료비 공제 신청할 때 가족 관계 서류가 계속 반려되어서 종합소득세 신고를 못 끝내고 있어요. 올해 세법 개정으로 바뀐 부분이 있는지, 현재 기준 서류 제출 기준이 어떻게 되는지 확인해 주세요."
+    },
+    {
+      "id": "current-ko-015",
+      "stratum": "current_information",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "current_information-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:26:41.274Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "3ce3ebba59aabd2f",
+        "generatorCommit": "13b46e5",
+        "draftedAt": "2026-08-26T05:29:32.173Z"
+      },
+      "prompt": "올해부터 시행되는 플라스틱 일회용품 규제에서 컵 사용이 제한되는 업종과 예외 업종을 환경부 최신 발표 기준으로 구분해 주세요."
+    },
+    {
+      "id": "coding-ko-001",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "자바 Stream 쓰는 아래 코드에서 간헐적으로 NPE가 나는데 원인을 모르겠어요. `list.stream().map(x -> x.getValue()).collect(Collectors.toList());`"
+    },
+    {
+      "id": "coding-ko-002",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "금요일 배포인데 React 프로젝트 `npm run build`가 TypeScript 에러로 실패해요. `any` 끄라고 말하지 마시고 아래 코드에서 진짜 원인 좀 잡아 주세요. `interface User { id: number; name: string } const users: User[] = JSON.parse(response);`"
+    },
+    {
+      "id": "coding-ko-003",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "Spring Data JPA 쓰는데 N+1이 터져서 `@EntityGraph`도 넣어봤는데 여전히 쿼리가 두 번 나갑니다. 진단 좀 해 주세요. 엔티티: `@Entity public class Order { @ManyToOne(fetch = LAZY) private Member member; }` 리포지토리: `interface OrderRepository extends JpaRepository<Order, Long> { List<Order> findAllBy(); }`"
+    },
+    {
+      "id": "coding-ko-004",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "파이썬에서 `datetime.now()`로 저장해 둔 시간이 나중에 서버 타임존 바꾸니까 다 안 맞는데 왜 그런가요?"
+    },
+    {
+      "id": "coding-ko-005",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "회사 방화벽 때문에 외부 npm 패키지 설치가 안 됩니다. Node 18 기본 모듈만 써서 CSV 파일을 파싱해 객체 배열로 만들어 주세요. 첫 줄은 헤더고, 큰따옴표로 감싸진 필드 안에 쉼표가 들어 있는 경우도 있어요."
+    },
+    {
+      "id": "coding-ko-006",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "아래 JS 코드가 `await`인데도 다음 줄이 먼저 실행돼요. 왜 그런가요? `await fetch(url); console.log('done');`"
+    },
+    {
+      "id": "coding-ko-007",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "RDS t3.small이라 메모리가 거의 없습니다. 아래 집계 쿼리가 OOM으로 죽는데, 임시 테이블 없이 같은 결과를 내는 방법 있을까요? `SELECT user_id, COUNT(*) FROM events WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY user_id HAVING COUNT(*) > 100;`"
+    },
+    {
+      "id": "coding-ko-008",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "아래 Dockerfile이 `COPY --from=builder` 단계에서 `file not found`로 실패합니다. 멀티스테이지인데 뭐가 잘못된 건가요? `FROM node:18 AS builder WORKDIR /app COPY . . RUN npm run build FROM nginx:alpine COPY --from=builder /app/build /usr/share/nginx/html`"
+    },
+    {
+      "id": "coding-ko-009",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "아래 C++ 코드에 메모리 릭 있나요? 한 번 봐 주세요. `char* p = new char[100]; std::strcpy(p, \"hello\"); return p;`"
+    },
+    {
+      "id": "coding-ko-010",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "Git rebase로 커밋을 합치려니 충돌이 너무 많아서 포기했어요. `git merge --squash`로 같은 효과를 내려면 현재 브랜치 기준으로 어떻게 하면 되나요? 커밋 메시지는 한 줄짜리로 두고 싶습니다."
+    },
+    {
+      "id": "coding-ko-011",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "Go에서 아래 코드가 deadlock으로 멈춰요. 이유 좀. `ch := make(chan int) ch <- 1 fmt.Println(<-ch)`"
+    },
+    {
+      "id": "coding-ko-012",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "k8s 파드가 `CrashLoopBackOff`인데 로그 보면 `exec format error`라고 나와요. M1 맥에서 빌드한 이미지를 EC2(amd64)에 올렸는데, Dockerfile 어디가 문제인가요? `FROM python:3.11-slim COPY . /app WORKDIR /app RUN pip install -r requirements.txt CMD [\"python\", \"main.py\"]`"
+    },
+    {
+      "id": "coding-ko-013",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "내일까지 기한이라 시스템 설정은 못 바꿉니다. 레거시 Java 8 프로젝트인데 아래 코드가 `ConcurrentModificationException`을 던져요. 스트림 안 쓰고 반복문 안에서 안전하게 삭제하려면 어떻게 고쳐야 하나요? `for (Item i : items) { if (i.isExpired()) items.remove(i); }`"
+    },
+    {
+      "id": "coding-ko-014",
+      "stratum": "coding",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "coding-ko-003",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T05:41:08.028Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "6033d9dfde0d4541",
+        "generatorCommit": "9614343",
+        "draftedAt": "2026-08-26T05:42:03.232Z"
+      },
+      "prompt": "pandas는 쓰면 안 되고 순수 파이썬만 써야 합니다. CSV에서 특정 컬럼 기준으로 중복 행을 제거하고 첫 행을 남기는 함수를 완성해 주세요. `def dedupe(rows, key):\\n    # rows: list of dict\\n    pass`"
+    },
+    {
+      "id": "long-ko-002",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "아까 전세 보증금 3억에 강남권 알아보고 있고, HUG 전세자금대출 한도 2억이라고 하셨잖아요. 상황이 바뀌어서 보증금을 2억 5천으로 낮추려고 해요. 그럼 방금 말씀하신 대출 한도 안에서 자기자본 없이 가능할까요? 남은 5천은 HUG 말고 다른 대출로 끼울 수 있는 수도 있을까? 근데 이번 주 안에 직방에 올라오는 매물 기준으로 보고 싶어요."
+    },
+    {
+      "id": "long-ko-003",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "아까 부모님 부양가족 공제를 형제가 나눠 받는다고 하셨잖아요, 그럼 저랑 형이 반반으로 나누면 기본 공제 150에서 각각 75씩 들어가는 거죠?"
+    },
+    {
+      "id": "long-ko-004",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "앞서 만두 만들 때 김치 물기 짜는 법이랑 고기는 앞다리살 쓴다고 했잖아요. 근데 집에 찜기가 없어요. 냄비에 채반 올려서 찌면 되나요, 아니면 프라이팬에 지지는 게 나을까요? 전자레인지로 익혀도 괜찮은지도 알려주세요."
+    },
+    {
+      "id": "long-ko-005",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "앞에서 청약통장 2년 납입으로 서울 1순위 조건 됐다고 확인하셨죠. 근데 제가 6월까지 해외 출장이라 현장 방문이 안 되거든요. 그럼 그 자격으로 올해 분양 중에 인터넷으로만 청약할 수 있는 거 다 찾아주세요."
+    },
+    {
+      "id": "long-ko-006",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "아, 그럼 아까 말하신 두 번째 프로세스는 이번 달부터 바로 적용되는 건가요?"
+    },
+    {
+      "id": "long-ko-007",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "방금 수능 과학탐구 물리학 표준점수 유리하다고 하셨는데, 제 학교에서는 화학Ⅰ이랑 생명과학Ⅰ밖에 안 열어요. 방과 후 학원에서 물리Ⅰ을 들을 수는 있는데 내신 반영 비율이 높거든요. 수시만 노리고 있는데 이 상황에서는 어떻게 선택하는 게 맞을까요?"
+    },
+    {
+      "id": "long-ko-008",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-002",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:21:55.600Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "c9d6575639ae1177",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:25:33.442Z"
+      },
+      "prompt": "처음에 물어본 등본 발급 방법 말인데요, 범죄이력 조회도 같이 해야 하거든요. 근데 지금 여권이 만료돼서 운전면허증밖에 없어요. 이거로 인터넷 발급 가능한가요? 금요일인데 오늘 오후까지 끝내야 해서요."
+    },
+    {
+      "id": "long-ko-009",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "이전에 해외송금 서류로 사업자등록증과 통장 사본 필요하다고 하셨죠. 그런데 지금 4시 20분인데 동네 은행 마감이 4시 반이에요. 집에 프린터가 없는데 파일을 카톡으로 보내면 은행에서 출력해 줄까요?"
+    },
+    {
+      "id": "long-ko-010",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "아까 도배는 해주신다고 하셨죠, 이번 주말에 이미 이사를 가거든요, 그럼 그냥 도배 없이 넘어가는 게 나을까요?"
+    },
+    {
+      "id": "long-ko-011",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "위에서 떡볶이 떡 미리 불려놓는 게 좋다고 하셨죠. 근데 물에 불렸다가 전자레인지에 돌릴까 했는데, 지금 전자레인지가 고장났어요. 그럼 그냥 냄비에 찬물이랑 같이 바로 끓여도 괜찮을까요? 떡이 터지거나 덜 익진 않을까요?"
+    },
+    {
+      "id": "long-ko-012",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "전에 월세 세액공제 안 받으면 주택마련저축 비과세도 못 받는다고 하셨죠, 그럼 5월 연말정산 때 소급해서라도 청구하는 게 이득일까요?"
+    },
+    {
+      "id": "long-ko-013",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "처음에 말씀하신 상황판단 문제 결론부터 쓰는 방식대로 풀어봤는데, 문제당 1분 안에 끝나야 할 걸 3분씩 넘기거든요. 시간 단축을 위해 생략해도 되는 단계가 있을까요?"
+    },
+    {
+      "id": "long-ko-014",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "방금 중고거래는 무조건 직거래하고 당일 송금 받으라고 하셨잖아요. 근데 저는 지방이라 직거래가 불가능하고 택배로만 보내야 해요. 이 경우 안전거래로 묶어서 발송하는 것 외에 판매자가 보호받을 수 있는 다른 수가 있을까요?"
+    },
+    {
+      "id": "long-ko-015",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "language": {
+        "prompt": "ko",
+        "expectedResponse": "ko"
+      },
+      "source": "drafted",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftProvenance": {
+        "batchId": "long_context_conversation-ko-009",
+        "provider": "zhipu",
+        "modelId": "glm-5.2",
+        "requestedApiModel": "glm-5.2",
+        "modelVersion": "glm-5.2",
+        "aliasResolution": {
+          "resolvedModelId": null,
+          "outcome": "no-alias-recorded",
+          "candidates": [],
+          "resolvedAt": "2026-08-26T06:27:18.171Z",
+          "source": "https://api.z.ai/api/paas/v4/models",
+          "note": null
+        },
+        "generationParameters": {
+          "max_tokens": 16000
+        },
+        "promptTemplateVersion": "router-eval-draft-v3",
+        "promptTemplateHash": "89b8eb9a3e93c7cd",
+        "generatorCommit": "b8014a9",
+        "draftedAt": "2026-08-26T06:29:26.252Z"
+      },
+      "prompt": "아까 플러터로 안드로이드 앱 빌드하는 법 따라서 에뮬레이터까지는 돌렸어요. 그런데 애플 앱스토어 등록하려면 맥북이 꼭 필요하다고 하셨죠? 제가 맥북이 없어서 우분투 VM을 쓰려고 하는데, 여기서 iOS 빌드 우회하는 방법이 있을까요?"
     }
   ],
   "proposedPilotCellTarget": 14,
