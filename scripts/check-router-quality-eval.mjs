@@ -120,6 +120,23 @@ const checkSet = (path) => {
     );
   }
 
+  // The baseline decides what a run is compared against, so a run reported
+  // without one has no verdict in it. Printed next to the fill because the two
+  // together are what docs/ops/tomverse-chat-router-evaluation-set.md §11 asks of
+  // a set before it is frozen: a stated target, and a stated thing to beat.
+  const baseline = set.baseline ?? null;
+  console.log(
+    baseline?.modelId
+      ? `\n       baseline ${baseline.modelId}, pre-registered ${baseline.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${baseline.preRegisteredBy ?? "nobody named"}, catalogue ${baseline.catalogueVersion ?? "unpinned"}`
+      : "\n       no baseline pre-registered — a run against this set would have nothing to beat"
+  );
+  console.log(
+    set.frozenAt
+      ? `       frozen ${set.frozenAt} by ${set.frozenBy ?? "nobody named"}`
+      : "       not frozen"
+  );
+
   // A drafted item recording provider "unrecorded" satisfies the schema while
   // reconstructing nothing. Counted here so the gap is visible rather than
   // reading as a filled field.
