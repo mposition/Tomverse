@@ -27,8 +27,6 @@ import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
 } from "@/lib/memoryExtractionEvalCore";
 
-/** The prompt contract version the B2 pipeline implements. */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v1";
 
 export type MemoryExtractionEvalEntry = {
     extractionModelId: string;
@@ -102,7 +100,7 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // approved and really spent against, and a register that dropped
             // the entry would lose both facts.
             extractionModelId: "gpt-5-6-luna",
-            // Written out, never `MEMORY_EXTRACTION_PROMPT_VERSION`. While
+            // Written out, never the shipped constant. While
             // these entries read the live constant, bumping it moved every
             // approval onto the new version without anybody approving
             // anything -- which is precisely what a version is for.
