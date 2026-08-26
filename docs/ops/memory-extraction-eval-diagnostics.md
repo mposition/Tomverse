@@ -377,5 +377,40 @@ eligibility recall·critical bulk-safe adoptions·sensitive-review 오분류) �
 `scripts/probeMemoryExtractionDevelopment.mjs`가 이미 v2로 채점·보고하므로
 그 형태를 따르는 것이 안전합니다.
 
-**이것이 끝나기 전에는 decision-grade를 dispatch하지 않습니다.** 예산은
-기록됐고 harness는 여전히 fail-closed입니다.
+### 이식 완료 [2026-08-26]
+
+harness가 `mem-eval-succ-1` + v2 scorer를 읽습니다. smoke 실행이 1,150건에서
+정확도·안전성 양쪽 모두 깨끗합니다(precision 448/448, recall 448/448, bulk
+eligibility 411/411, critical adoption 0, sensitive 오분류 0). precision 분모
+448은 범주 ① gold 438 + mixed-critical 10과 일치합니다.
+
+**smoke stub도 함께 고쳤습니다.** `sensitivity: "standard"`를 고정으로 답하고
+있어서, 이식 직후 첫 smoke가 sensitive-review 오분류 31건과 critical adoption
+1건을 보고했습니다. 파이프라인이 아니라 stub이 틀린 것이고, **늘 실패를 보여
+주는 smoke는 읽는 사람에게 가장 중요한 counter를 무시하도록 가르칩니다.** probe
+harness가 이미 같은 수정을 했고 그 이유를 적어 두었기에 그대로 옮겼습니다.
+
+### 이 컨테이너에 실제 `OPENAI_API_KEY`가 있습니다
+
+이식 검증 중 `--live`를 두 번 실행했습니다. 그때까지 **키가 없다고 가정**하고
+있었고, 확인하지 않았습니다. 실제로는 환경에 진짜 키가 있었습니다.
+
+**지출은 없었습니다** — harness의 accrued cost가 `0.0000`이고 5회 연속 실패로
+중단됐습니다. 이 컨테이너의 egress proxy가 `api.openai.com`을 CONNECT 단계에서
+막기 때문입니다(2026-08-26 1회차 probe에서 확인된 사실). **막아 준 것은 절차가
+아니라 환경이었습니다.**
+
+- 이 컨테이너에서 `--live`를 실행하지 않습니다. proxy는 지출을 막는 장치가
+  아니라 우연히 그 역할을 한 것뿐입니다.
+- `tests/memoryExtractionEvalBoundary.test.mjs`의 `runHarness`는
+  `env: { ...process.env, ...env }`로 실제 키를 상속합니다. `--live`를 도는 두
+  test는 각각 키를 명시적으로 덮어쓰고(가짜 키 / 빈 문자열) network guard도
+  걸려 있어 안전합니다.
+- 다만 가짜 키를 쓰는 쪽은 **`gpt-5-4-mini::mem-extract-v4`가 자금 없이 남아
+  있다는 전제**에 안전이 걸려 있었습니다. 그 pair에 예산을 넣으면 1,150건짜리
+  진짜 실행이 되고 network guard만 남습니다 — **guard는 예산이 아닙니다.**
+  전제를 단언으로 바꿨습니다: 그 pair를 funding하면 이 test가 그 자리에서
+  실패합니다.
+
+**decision-grade dispatch는 CI workflow에서만 합니다.** 예산 US$15는
+기록됐고, 남은 gate는 키 하나입니다.
