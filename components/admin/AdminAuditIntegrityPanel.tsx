@@ -26,6 +26,15 @@ type Integrity = {
   message: string;
 };
 
+/** What a single-field reconstruction found, or did not. */
+type Diagnosis = {
+  verifiesAsStored: boolean;
+  candidatesTried: number;
+  keysTried: number;
+  /** Each match names the field that differs; the key is a position, never a value. */
+  matches: Array<{ label: string; keyPosition: number }>;
+};
+
 /** The identifying half of an audit row. Not its metadata, which can be large. */
 type AuditEntry = {
   id: string;
@@ -105,12 +114,15 @@ export function AdminAuditIntegrityPanel() {
   const [loading, setLoading] = useState(false);
   const [entry, setEntry] = useState<AuditEntry | null>(null);
   const [entryLoading, setEntryLoading] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
 
   const verify = async () => {
     setLoading(true);
     // A previous failure's row must not survive into a new verification: it
     // would sit under a fresh verdict describing a different entry.
     setEntry(null);
+    setDiagnosis(null);
     try {
       const response = await fetch("/api/admin/audit-integrity", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { integrity?: Integrity; error?: string } | null;
@@ -120,6 +132,36 @@ export function AdminAuditIntegrityPanel() {
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : "Audit verification failed.", "error");
     } finally { setLoading(false); }
+  };
+
+  /**
+   * The diagnosis needs the database and the signing keys, so it runs on the
+   * server and comes back as field names. Telling an operator to clone the
+   * repository and run a script would move the work rather than do it, and put
+   * production secrets somewhere new on the way.
+   */
+  const diagnose = async (auditId: string) => {
+    setDiagnosing(true);
+    try {
+      const response = await fetch(
+        `/api/admin/audit/${encodeURIComponent(auditId)}/diagnose`,
+        { cache: "no-store" }
+      );
+      const data = (await response.json().catch(() => null)) as
+        | { diagnosis?: Diagnosis; error?: string }
+        | null;
+      if (!response.ok || !data?.diagnosis) {
+        throw new Error(data?.error || "Could not diagnose this entry.");
+      }
+      setDiagnosis(data.diagnosis);
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Could not diagnose this entry.",
+        "error"
+      );
+    } finally {
+      setDiagnosing(false);
+    }
   };
 
   const loadEntry = async (auditId: string) => {
@@ -213,6 +255,57 @@ export function AdminAuditIntegrityPanel() {
               >
                 Open in the audit log
               </a>
+              {!diagnosis ? (
+                <button
+                  type="button"
+                  data-testid="admin-audit-integrity-diagnose"
+                  onClick={() => void diagnose(integrity.firstInvalidId as string)}
+                  disabled={diagnosing}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  {diagnosing ? <Loader2 className="h-4 w-4 animate-spin" /> : null} What changed?
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {diagnosis ? (
+            <div
+              data-testid="admin-audit-integrity-diagnosis"
+              className="mt-3 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs"
+            >
+              {/* A match is proof, not a hint: the digest is reproduced
+                  exactly, under content differing in one named field. So the
+                  wording commits, and no-match commits to the opposite. */}
+              {diagnosis.matches.length === 0 ? (
+                <p>
+                  No single-field change reproduces this entry&apos;s hash.{" "}
+                  {diagnosis.candidatesTried.toLocaleString()} reconstructions were tried
+                  against {diagnosis.keysTried} key
+                  {diagnosis.keysTried === 1 ? "" : "s"}. More than one field
+                  differs from what was signed, or a field this does not vary
+                  does, or it was signed with a key this environment no longer
+                  has.
+                </p>
+              ) : (
+                <>
+                  <p className="font-black">
+                    The hash is reproduced by content differing in one field:
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {diagnosis.matches.map((match) => (
+                      <li key={`${match.label}-${match.keyPosition}`} className="font-mono">
+                        {match.label} <span className="opacity-70">(key {match.keyPosition})</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 opacity-90">
+                    That is what changed since the entry was signed. Do not
+                    re-hash the row: rewriting an audit entry to satisfy its own
+                    checker ends what the chain proves.
+                  </p>
+                </>
+              )}
             </div>
           ) : null}
 
