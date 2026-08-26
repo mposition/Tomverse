@@ -1,6 +1,14 @@
 # 검색 색인 경계 — 어떤 배포가 크롤러를 받는가
 
-정본은 코드입니다: `app/robots.ts`, `lib/robotsPolicyCore.ts`, `next.config.ts`.
+**edge가 실제로 내는 robots.txt는 합성물입니다.** Cloudflare 관리 블록이 앞에
+주입되고, 그 뒤에 애플리케이션이 낸 절반이 붙습니다. 관리 블록을 끄는 것은
+플랜 제한으로 막혔습니다(§4a).
+
+- **애플리케이션 절반의 정본은 코드입니다**: `app/robots.ts`,
+  `lib/robotsPolicyCore.ts`, `next.config.ts`.
+- **edge 응답 전체**를 물으려면 `npm run check:edge-robots` 를 돌리십시오. 두
+  절반이 무엇을 말하는지 갈라서 판정합니다.
+
 이 문서는 **왜 그렇게 됐는지**와 **저장소 밖에서 해야 하는 일**을 기록합니다.
 
 ## 1. 결정 (2026-08-25)
@@ -12,6 +20,12 @@
 > 응답에 `X-Robots-Tag: noindex, nofollow, noarchive`를 적용한다. 변경 후 검증은
 > origin 응답이 아니라 Cloudflare를 통과한 실제 edge 응답을 대상으로 수행한다.
 > B안의 DNS-only 전환은 origin 보호 경계 변경 때문에 채택하지 않는다.
+
+> **이 결정문의 첫 문장은 실현되지 않았습니다.** "Cloudflare managed robots.txt를
+> 비활성화하고"가 전제였는데, 그 설정이 플랜 제한으로 잠겨 있습니다(§4a). 결정문은
+> 2026-08-25 시점의 기록이므로 고치지 않고, **지금 실제 상태는 §4a와 §6에**
+> 있습니다. 요약하면: 애플리케이션이 정책을 **단독 소유하지 않고**, edge 응답은
+> Cloudflare 선언과 애플리케이션 보존본의 합성입니다.
 
 B안(staging을 Cloudflare 프록시에서 제외)을 버린 이유는 범위입니다. robots 충돌
 하나를 고치려고 origin secret 검증, WAF, bot protection, origin IP 노출, TLS·캐시
@@ -193,8 +207,11 @@ staging을 다시 가져가더라도 `noindex`를 읽고 색인하지 않습니�
 
 ## 5. bot 목록의 정본과 갱신 책임
 
-`lib/robotsPolicyCore.ts`의 `REFUSED_AI_CRAWLERS`가 정본입니다. **2026-08-25
-Cloudflare 관리 블록의 스냅샷이며, 자동으로 갱신되지 않습니다.** Cloudflare가
+`lib/robotsPolicyCore.ts`의 `REFUSED_AI_CRAWLERS`가 **애플리케이션 절반의**
+정본입니다. 관리 블록을 끌 수 없으므로 **edge가 내는 거부는 지금 두 곳에서
+옵니다** — Cloudflare 목록과 우리 목록. 우리 것은 그 블록이 사라지는 날을 위한
+보존본이고, 그때까지는 같은 거부를 두 번 말합니다. **2026-08-25 Cloudflare 관리
+블록의 스냅샷이며, 자동으로 갱신되지 않습니다.** Cloudflare가
 관리해 주던 일을 이제 사람이 합니다. 새 크롤러가 문제가 되면 손으로 추가하고,
 비교 대상은 Cloudflare의 공개 목록
 (https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/)
@@ -206,14 +223,60 @@ Cloudflare 관리 블록의 스냅샷이며, 자동으로 갱신되지 않습니
 제품(Cloudflare AI Crawl Control)이고, 관리 robots.txt를 끄는 것이 AI Crawl
 Control을 끄는 것은 아닙니다.**
 
-## 6. 미결
+## 6. Content-Signal — 결정됨 (2026-08-26)
 
-**`Content-Signal`을 계속 쓸지는 별도 결정으로 남깁니다.** 지금은 Cloudflare가
-내던 값(`search=yes, ai-train=no, use=reference`)을 그대로 승계했습니다 — 끄는
-결정을 한 적이 없으므로 조용히 사라지게 두지 않는다는 뜻이지, 이 값이 옳다고
-판단했다는 뜻은 아닙니다. Google Search Console이 `Content-Signal`에 대해
-`Syntax not understood`를 보고할 수 있으나 크롤·SEO 영향은 관측되지 않았다고
-Cloudflare가 안내합니다.
+**애플리케이션의 선언을 유지합니다.** 다만 성격을 정확히 부르는 것이 중요합니다:
+이것은 **두 정책 소유자**가 아니라 **Cloudflare 선언 + 애플리케이션의 비상
+보존본**입니다.
+
+production은 지금 이 줄을 **두 번** 냅니다 — 관리 블록에서 한 번,
+`app/robots.ts`에서 한 번. 값은 같고 공백만 다릅니다.
+
+유지하는 이유:
+
+- 관리 블록이 사라져도 선언이 남습니다.
+- 두 줄의 값이 완전히 같아 **현재 정책 모순이 없습니다.**
+- Cloudflare 설정·플랜 변경에 대한 복구력이 빼는 쪽보다 높습니다.
+- 비용은 robots.txt의 중복 한 줄뿐입니다.
+
+**중복의 안전성은 "문제없음"이 아니라 "관측된 충돌 없음"으로 적습니다.** Google은
+`Content-Signal`을 robots 표준 규칙으로 해석하지 않고, Cloudflare 계열 소비자도
+같은 값을 같은 정책으로 읽을 가능성이 높습니다. 다만 **중복 지시문의 처리 방식
+자체가 Content Signals 문서에 명시돼 있지 않습니다.** 값이 같은 동안에만 성립하는
+안전이라는 뜻입니다 — 그래서 아래 invariant가 있습니다.
+
+### 값이 무엇을 말하고, 무엇을 말하지 않는가
+
+```
+search=yes       일반 검색 색인, 링크와 짧은 발췌 허용
+ai-train=no      학습·파인튜닝 사용 거부
+use=reference    Cloudflare가 시험 중인 확장. 색인·발췌·링크 수준 허용
+```
+
+**`ai-input`은 명시되지 않았습니다.** Content Signals에서 누락된 항목은 허용도
+거부도 하지 않은 것으로 취급됩니다. 따라서 **현재 선언은 AI 검색 요약·RAG·실시간
+모델 입력에 대해 `no`라고 말한 정책이 아닙니다.** `search`의 정의도 AI 생성 검색
+요약을 포함하지 않습니다.
+
+> 현재 정책은 일반 검색을 허용하고 AI 학습을 거부하며 reference 수준의 사용을
+> 허용합니다. **`ai-input`은 아직 결정하지 않았으며, 현재 선언은 이를 허용하거나
+> 금지하지 않습니다.**
+
+### 값 변경(C안)은 지금 하지 않습니다
+
+애플리케이션 값만 바꾸면 Cloudflare가 계속 이전 값을 앞에 붙여 **서로 다른 두
+선언**이 생깁니다. 중복이 동일할 때는 무해하지만, 값이 갈리는 순간 파서별 해석이
+불확실해집니다. **정책 변경은 Cloudflare 관리값을 제어할 수 있는 방법과 함께
+결정해야 합니다.**
+
+### invariant — "정확히 한 줄"이 아니라 "한 가지 의미"
+
+`npm run check:edge-robots` 가 production에서 검사합니다.
+
+- 선언이 **1개 이상** 존재해야 합니다. **0건이면 실패.**
+- 공백·대소문자를 정규화한 **모든 선언이 서로 같아야** 합니다.
+- 기대값과 다르거나 선언끼리 다르면 **실패.**
+- **중복 개수 자체는 실패 사유가 아닙니다.**
 
 ## 7. 검증
 
@@ -227,9 +290,25 @@ npm run check:edge-robots -- https://tomverse.app
 광고하지 않는지, `X-Robots-Tag`가 붙는지를 봅니다. 대상은 **edge URL**입니다 —
 origin만 보면 이번 문제를 다시 놓칩니다.
 
-통과가 무엇을 뜻하는지는 §4a를 함께 읽어야 합니다. staging의 통과는 "크롤러가
-못 들어온다"가 아니라 "우리가 소유한 부분이 전부 맞고, 남은 항목은 편차로 이름이
-붙어 출력됐다"는 뜻입니다.
+통과가 무엇을 뜻하는지는 §4a를 함께 읽어야 합니다. staging의 통과는 "우리가 소유한
+부분이 전부 맞고, 남은 항목은 편차로 이름이 붙어 출력됐다"는 뜻입니다.
+
+**그리고 두 상태를 같은 판정으로 묶지 마십시오** (2026-08-26 실측):
+
+| | 상태 |
+|---|---|
+| production `Content-Signal` 중복 | 값이 같아 **관측된 충돌 없음**. invariant가 감시 |
+| staging robots.txt의 `Allow: /` | **선언과 실제가 불일치.** 파일은 허용한다고 말합니다 |
+| staging 실제 접근 | **막혀 있음.** `/`·`/safety`·`/review`·`/chat` 전부 익명 요청에 302 |
+
+`robots.txt`가 여전히 Cloudflare의 `Allow: /`를 담는 것은 사실입니다. 그러나
+**크롤이 실제로 허용되는 것은 아닙니다** — Access가 모든 콘텐츠 경로를 로그인
+호스트로 돌려보내므로, robots.txt를 지키는 크롤러도 무시하는 크롤러도 똑같이
+302를 받습니다. 남은 것은 접근 문제가 아니라 **파일이 사실과 다른 말을 하고 있다**는
+것입니다.
+
+루트 응답에 `X-Robots-Tag`가 없는 것도 결함이 아닙니다. 게이트가 먼저 답하므로
+헤더를 실을 앱 응답 자체가 없고, 검사는 게이트를 `noindex` **이상**으로 인정합니다.
 
 단위 테스트는 `tests/robotsTxtCore.test.mjs`(평가기)와
 `tests/robotsRoute.test.mjs`(Next의 직렬화기로 실제 본문을 만들어 평가)에
