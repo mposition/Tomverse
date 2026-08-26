@@ -179,7 +179,7 @@ const openDialog = async (page: Page, target: "pro" | "max") => {
   await expect(page.getByTestId("plan-change-modal")).toBeVisible();
 };
 
-test.describe("plan change dialog", () => {
+test.describe("plan change dialog", { tag: "@ui-risk" }, () => {
   test("an upgrade shows the amount before anything is charged", async ({
     page,
   }) => {
