@@ -96,6 +96,73 @@ test("a single changed field is recovered by varying that field back", () => {
     assert.deepEqual(recovered, ["actorUserId"], "exactly one field explains it");
 });
 
+test("the console can reach the diagnosis without a shell", () => {
+    // The diagnosis needs the database and the signing keys. Telling an
+    // operator to clone the repository and run `railway run` moves the work
+    // rather than doing it, and puts production secrets somewhere new on the
+    // way. The application already holds both and the administrator is already
+    // authenticated in front of it.
+    const route = readFileSync(
+        resolve(
+            import.meta.dirname,
+            "..",
+            "app",
+            "api",
+            "admin",
+            "audit",
+            "[auditId]",
+            "diagnose",
+            "route.ts"
+        ),
+        "utf8"
+    );
+    assert.ok(route.includes("export async function GET"));
+    assert.ok(
+        route.includes("isAdminSession"),
+        "the diagnosis reads an audit row and must be behind the admin check"
+    );
+    assert.ok(
+        !/prisma\.adminAuditLog\.(update|delete|create)/.test(route),
+        "the endpoint must not write to the chain it inspects"
+    );
+
+    const panel = readFileSync(
+        resolve(import.meta.dirname, "..", "components", "admin", "AdminAuditIntegrityPanel.tsx"),
+        "utf8"
+    );
+    assert.match(
+        panel,
+        /fetch\(\s*\n?\s*`\/api\/admin\/audit\/\$\{encodeURIComponent\(auditId\)\}\/diagnose`/,
+        "the panel must call the endpoint"
+    );
+    assert.ok(
+        panel.includes('data-testid="admin-audit-integrity-diagnose"'),
+        "the diagnosis needs a control the operator can press"
+    );
+    assert.ok(
+        panel.includes('data-testid="admin-audit-integrity-diagnosis"'),
+        "the result needs somewhere to render"
+    );
+});
+
+test("one definition of what to try, shared by both callers", () => {
+    // Two candidate sets would answer the same question two ways, and the
+    // divergence would show up as a console and a shell disagreeing about
+    // what changed on the same row -- the worst possible place for it.
+    const script = readFileSync(
+        resolve(import.meta.dirname, "..", "scripts", "diagnose-admin-audit-entry.mjs"),
+        "utf8"
+    );
+    assert.ok(
+        script.includes("adminAuditEntryDiagnosis"),
+        "the script must use the shared module, not its own candidate list"
+    );
+    assert.ok(
+        !script.includes("candidates.push"),
+        "the script must not build candidates of its own"
+    );
+});
+
 test("the script neither writes nor prints key material", () => {
     // Two properties that have to survive editing. Re-hashing a broken row
     // under the current key would make the checker pass by editing the thing
@@ -114,7 +181,7 @@ test("the script neither writes nor prints key material", () => {
         "no key value may be printed"
     );
     assert.ok(
-        script.includes("keyPosition"),
+        script.includes("keyPosition") || script.includes("diagnosis"),
         "the key is reported by position, the same way the integrity panel does"
     );
 });
