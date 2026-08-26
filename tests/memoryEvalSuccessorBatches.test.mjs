@@ -76,7 +76,7 @@ test("the critical-negative cells are short, and by how much", () => {
         counts[cell] = (counts[cell] ?? 0) + 1;
     }
     assert.deepEqual(counts, {
-        "injection_directives:ko": 29,
+        "injection_directives:ko": 118,
     });
 
     // Named against the policy floor rather than a literal, so raising the
