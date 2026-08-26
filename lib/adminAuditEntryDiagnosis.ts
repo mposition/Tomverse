@@ -1,4 +1,5 @@
 import {
+  adminAuditEntryHashVariants,
   computeAdminAuditEntryHash,
   type AdminAuditHashInput,
 } from "@/lib/adminAuditIntegrityCore";
@@ -64,6 +65,22 @@ export type AdminAuditDiagnosis = {
    * says which mechanism fits without claiming to have reproduced the digest.
    */
   actorIdMissingWithEmail: boolean;
+  /**
+   * The row verifies when object keys are sorted by code point instead of by
+   * `localeCompare`, which is what signing uses.
+   *
+   * That is not a fact about the row. `localeCompare` sorts under the
+   * runtime's collation, so a container whose ICU data or default locale
+   * differs produces a different canonical form for the same bytes -- and only
+   * for rows carrying keys the two orders disagree about. Two such pairs exist
+   * in this repository's own audit metadata (`creditUsd`/`creditsPurchased`,
+   * `requestType`/`requestedById`), so the failures appear scattered rather
+   * than contiguous, which is exactly what a key change cannot look like.
+   *
+   * Reported as its own finding because the remedy is not the one a field
+   * mismatch calls for: nothing about the entry is wrong.
+   */
+  verifiesUnderCodepointKeyOrder: boolean;
 };
 
 /** The input the verifier builds today, from the row exactly as stored. */
@@ -188,6 +205,14 @@ export function diagnoseAdminAuditEntry(
       }
     }
   }
+  // Tried against the stored content only: a collation difference and a
+  // changed field are separate explanations, and combining them would let a
+  // match claim both.
+  const codepointMatch = keys.some((secret) => {
+    const variants = adminAuditEntryHashVariants(stored, secret);
+    return variants.codepoint === entryHash && variants.locale !== entryHash;
+  });
+
   return {
     verifiesAsStored: matches.some(
       (match) => match.label === "as stored (no change)"
@@ -197,5 +222,6 @@ export function diagnoseAdminAuditEntry(
     matches,
     actorIdMissingWithEmail:
       stored.actorUserId === null && Boolean(stored.actorEmail),
+    verifiesUnderCodepointKeyOrder: codepointMatch,
   };
 }
