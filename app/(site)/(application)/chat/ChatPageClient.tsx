@@ -58,7 +58,7 @@ import {
   createGuestEligibilityCheck,
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
-  isWebSearchMode,
+  normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
 } from "@/lib/appDefaults";
@@ -1886,11 +1886,13 @@ export function ChatPageClient({
             models: appliedModels,
             disabled: nextDisabled,
         };
-        setWebSearchMode(
-            isWebSearchMode(data.webSearchMode)
-                ? data.webSearchMode
-                : APP_DEFAULTS.defaultWebSearchMode
-        );
+        // Normalized, not just validated. A row saved before web search
+        // became a switch may still say "auto" -- a request to be *asked*
+        // before searching, which no longer has a control that can honour it.
+        // Reading it as off is what keeps the switch from claiming a consent
+        // the account never gave; nothing is written back, so the row keeps
+        // its value until the switch is touched.
+        setWebSearchMode(normalizeWebSearchMode(data.webSearchMode));
         setMemoryMode(
             isConversationMemoryMode(data.memoryMode)
                 ? data.memoryMode
@@ -2028,9 +2030,7 @@ export function ChatPageClient({
               )
             );
             setWebSearchMode(
-              isWebSearchMode(restoredConversation.webSearchMode)
-                ? restoredConversation.webSearchMode
-                : APP_DEFAULTS.defaultWebSearchMode
+              normalizeWebSearchMode(restoredConversation.webSearchMode)
             );
           }
         } catch (e) {
@@ -2598,11 +2598,7 @@ export function ChatPageClient({
               (modelId) => restoredModels.includes(modelId)
             )
           );
-          setWebSearchMode(
-            isWebSearchMode(targetConv.webSearchMode)
-              ? targetConv.webSearchMode
-              : APP_DEFAULTS.defaultWebSearchMode
-          );
+          setWebSearchMode(normalizeWebSearchMode(targetConv.webSearchMode));
           setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
         } else {
           setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
