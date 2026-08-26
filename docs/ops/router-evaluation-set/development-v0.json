@@ -2748,9 +2748,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -2784,9 +2784,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -2820,9 +2820,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -2856,9 +2856,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -2892,9 +2892,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -2928,9 +2928,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -2964,9 +2964,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3000,9 +3000,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3036,9 +3036,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3072,9 +3072,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3108,9 +3108,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3144,9 +3144,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3180,9 +3180,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
@@ -3216,9 +3216,9 @@
         "expectedResponse": "ko"
       },
       "source": "drafted",
-      "status": "candidate",
-      "adoptedBy": null,
-      "adoptedAt": null,
+      "status": "adopted",
+      "adoptedBy": "mposition",
+      "adoptedAt": "2026-08-26",
       "draftProvenance": {
         "batchId": "analysis_and_reasoning-ko-003",
         "provider": "qwen",
