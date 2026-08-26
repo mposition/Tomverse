@@ -65,6 +65,7 @@ import {
   createGuestEligibilityCheck,
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
+  isWebSearchEnabled,
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
@@ -3649,13 +3650,12 @@ export function ChatPageClient({
                 name: attachment.name,
                 mediaType: attachment.mediaType,
               })),
-              // "auto" only ever raises a suggestion mid-draft; "always" is
-              // the one mode that actually asks for a search
-              // (lib/appDefaults.ts). develop has since replaced the three
-              // modes with a switch and put this decision behind
-              // `isWebSearchEnabled`; on this branch that function does not
-              // exist yet, and the comparison is what it reads on main.
-              webSearchRequested: webSearchMode === "always",
+              // Through the shared reader rather than a comparison of my own.
+              // `isWebSearchEnabled` is where the decision lives that a
+              // conversation stored as the retired "auto" reads as *off*:
+              // being asked to confirm a search is not standing permission to
+              // run one and spend its surcharge (lib/appDefaults.ts).
+              webSearchRequested: isWebSearchEnabled(webSearchMode),
             }
       );
       setCachedCompareSummaryChatId(null);

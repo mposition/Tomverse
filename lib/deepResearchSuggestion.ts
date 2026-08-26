@@ -231,12 +231,14 @@ export const classifyDeepResearchTopic = (
  * `lib/imageIntentSignals.ts`: deterministic per trimmed question, not
  * cryptographic.
  *
- * Written out here rather than imported. `lib/webSearchSuggestion.ts` exports a
- * `draftSuggestionKey` of exactly this shape today, but it belongs to the
- * composer's "auto" web-search nudge -- and that nudge is on its way out with
- * the switch that replaces the three modes with two. Borrowing it would tie
- * this offer's "same topic" rule to the lifetime of an unrelated feature, and
- * three lines are cheaper than that coupling.
+ * Written out here rather than imported. `lib/webSearchSuggestion.ts` used to
+ * export a `draftSuggestionKey` of exactly this shape, and it went with the
+ * composer's "auto" nudge when web search became a switch -- there was no
+ * mid-draft offer left to de-duplicate. `tests/webSearchSuggestion.test.mjs`
+ * now asserts that it stays gone, so reaching for it again would be reviving a
+ * function that module deliberately no longer has. Three lines were the
+ * cheaper side of that coupling before the removal, and are the only side
+ * after it.
  */
 export const deepResearchTopicKey = (text: string): string =>
   text.trim().toLowerCase();
