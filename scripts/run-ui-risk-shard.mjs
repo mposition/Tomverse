@@ -30,16 +30,23 @@ import { spawnSync } from "node:child_process";
  * Two shards, not more, and measured rather than assumed. `--shard` divides
  * by test count and not by work; e2e.yml records a three-way split where the
  * counts matched and the work did not, because skips are not spread evenly.
- * Desktop's two shards ran 7m38s (349 passed, 20 skipped) and 6m51s (306
- * passed, 33 skipped) against 13m56s unsharded on the same machine -- a 53/47
- * split, so the slowest shard is ~55% of the whole. That puts desktop's CI
- * test step near 10m and its job near half the budget. A third shard would
- * buy less than this one did and cost another runner.
+ * That did not happen here. Locally, desktop's two shards ran 7m38s (349
+ * passed, 20 skipped) and 6m51s (306 passed, 33 skipped) against 13m56s
+ * unsharded -- 53/47. CI on the run that introduced the shard axis agrees:
+ *
+ *   desktop-chromium 1/2   10m10s job  (41% of budget)
+ *   desktop-chromium 2/2    9m09s job  (37%)
+ *   mobile-chromium  1/2    7m46s job  (31%)
+ *   mobile-chromium  2/2    7m35s job  (30%)
+ *
+ * So the worst job went from 81% of the budget to 41%, and the split held to
+ * 53/47 on the machine that matters. A third shard would buy a few minutes
+ * against a fixed ~1m30s of setup and build per job, and cost another runner.
  *
  * Desktop is still the project to watch: the two are not symmetric in cost
  * even though the tag selects the same list in both. Re-measure from the
- * job's own step durations rather than a local run -- this container measured
- * desktop at 13m56s where CI measured 18m51s.
+ * job's own durations rather than a local run -- this container measured
+ * desktop unsharded at 13m56s where CI measured 18m51s.
  *
  * `npm run test:e2e:ui-risk` still runs both projects unsharded, so local use
  * is unchanged.
