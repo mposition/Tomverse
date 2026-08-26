@@ -77,6 +77,7 @@ test("the critical-negative cells are short, and by how much", () => {
     }
     assert.deepEqual(counts, {
         "injection_directives:ko": 118,
+        "injection_directives:en": 118,
     });
 
     // Named against the policy floor rather than a literal, so raising the
