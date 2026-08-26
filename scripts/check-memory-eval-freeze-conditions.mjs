@@ -33,6 +33,13 @@ import {
     MEMORY_EVAL_DATASET_VERSION,
 } from "../lib/memoryExtractionEvalFixtures.ts";
 import {
+    MEMORY_EVAL_SUCCESSOR_CASES,
+    MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
+    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
+} from "../lib/memoryEvalSuccessorFixtures.ts";
+import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     findDuplicateCases,
 } from "../lib/memoryExtractionEvalCore.ts";
@@ -52,7 +59,18 @@ const cell = (source, label) => {
         .trim();
 };
 
-const records = ADOPTED_BATCHES.map((batch) => ({
+/**
+ * Both datasets, checked the same way.
+ *
+ * The script used to read the seed-11 globals directly. There are two sets
+ * now — the frozen schema-1 one, kept as a historical fact, and the schema-2
+ * successor a decision-grade run will actually use — and a report that named
+ * only the first would have said "all 7 conditions hold" on the very day the
+ * second was the one anybody cared about.
+ */
+const evaluate = (target) => {
+const { version, frozen, cases, batches, schemaVersion } = target;
+const records = batches.map((batch) => ({
     batch,
     source: readFileSync(batch.record, "utf8"),
     record: parseBatchRecord(readFileSync(batch.record, "utf8")),
@@ -65,7 +83,7 @@ const check = (condition, detail, ok) =>
 /* --- ① cell floors — docs/policy/external-conversation-import-and-memory.md §12.2 --- */
 {
     const counts = new Map();
-    for (const testCase of MEMORY_EVAL_CASES) {
+    for (const testCase of cases) {
         const key = `${testCase.category}:${testCase.language}`;
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
@@ -78,7 +96,7 @@ const check = (condition, detail, ok) =>
     check(
         "cell floors",
         short.length === 0
-            ? `${MEMORY_EVAL_CASES.length} cases across ${counts.size} cells`
+            ? `${cases.length} cases across ${counts.size} cells`
             : `below floor: ${short.join(", ")}`,
         short.length === 0
     );
@@ -90,7 +108,7 @@ const check = (condition, detail, ok) =>
 // this version is finished and its scoring contract was superseded -- so it
 // says nothing about whether this one is frozen.
 const pendingForThisDataset = CANDIDATE_BATCHES.filter(
-    (batch) => batch.successorTo !== MEMORY_EVAL_DATASET_VERSION
+    (batch) => batch.successorTo !== version
 );
 const successorBatches = CANDIDATE_BATCHES.length - pendingForThisDataset.length;
 check(
@@ -140,7 +158,7 @@ check(
 
 /* --- ⑤ findDuplicateCases() ----------------------------------------------- */
 {
-    const duplicates = findDuplicateCases(MEMORY_EVAL_CASES);
+    const duplicates = findDuplicateCases(cases);
     check(
         "findDuplicateCases()",
         duplicates.length === 0
@@ -194,19 +212,17 @@ check(
 // entry would have to be written here, deliberately, and there is no reason
 // to write one.
 const schemaRefusal = legacyDatasetRefusal({
-    datasetVersion: MEMORY_EVAL_DATASET_VERSION,
-    schemaVersion: DATASET_SCHEMA_VERSION,
+    datasetVersion: version,
+    schemaVersion,
     use: "freeze",
 });
-const schemaExempt = LEGACY_DIAGNOSTIC_DATASET_VERSIONS.includes(
-    MEMORY_EVAL_DATASET_VERSION
-);
+const schemaExempt = LEGACY_DIAGNOSTIC_DATASET_VERSIONS.includes(version);
 
 /* ----------------------------------------------------------------- report -- */
 
 console.log(
-    `Freeze conditions for ${MEMORY_EVAL_DATASET_VERSION} ` +
-        `(currently ${MEMORY_EVAL_DATASET_FROZEN ? "frozen" : "not frozen"})\n`
+    `Freeze conditions for ${version} ` +
+        `(currently ${frozen ? "frozen" : "not frozen"})\n`
 );
 for (const result of results) {
     console.log(
@@ -228,14 +244,14 @@ if (missed.length === 0) {
 // Before the freeze this script is a progress report, and exiting non-zero on
 // a half-authored dataset would make it useless during the months it is most
 // worth running.
-if (MEMORY_EVAL_DATASET_FROZEN && missed.length > 0) {
+if (frozen && missed.length > 0) {
     console.error(
-        "\nMEMORY_EVAL_DATASET_FROZEN is true while a freeze condition is unmet."
+        `\n${version} is marked frozen while a freeze condition is unmet.`
     );
     process.exit(1);
 }
 
-if (MEMORY_EVAL_DATASET_FROZEN && schemaRefusal && !schemaExempt) {
+if (frozen && schemaRefusal && !schemaExempt) {
     console.error(`\n${schemaRefusal.detail}`);
     console.error(
         "A dataset that cannot be scored under the current contract cannot be frozen for it."
@@ -245,9 +261,28 @@ if (MEMORY_EVAL_DATASET_FROZEN && schemaRefusal && !schemaExempt) {
 
 if (schemaRefusal && schemaExempt) {
     console.log(
-        `\nNote: ${MEMORY_EVAL_DATASET_VERSION} is schema ${DATASET_SCHEMA_VERSION}. ` +
+        `\nNote: ${version} is schema ${schemaVersion}. ` +
             "Its freeze predates the 2026-08-25 scoring amendment and is kept as a\n" +
             "historical fact; it cannot support a decision-grade run, and the harness\n" +
             "refuses one (legacy_dataset_schema)."
     );
 }
+};
+
+evaluate({
+    version: MEMORY_EVAL_DATASET_VERSION,
+    frozen: MEMORY_EVAL_DATASET_FROZEN,
+    cases: MEMORY_EVAL_CASES,
+    batches: ADOPTED_BATCHES,
+    schemaVersion: DATASET_SCHEMA_VERSION,
+});
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+evaluate({
+    version: MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
+    frozen: MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
+    cases: MEMORY_EVAL_SUCCESSOR_CASES,
+    batches: SUCCESSOR_ADOPTED_BATCHES,
+    schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+});

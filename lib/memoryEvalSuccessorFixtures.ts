@@ -56,17 +56,32 @@ export const MEMORY_EVAL_SUCCESSOR_SUPERSEDES = "mem-eval-seed-11";
  * Whether this dataset is frozen for a decision-grade run
  * (docs/policy/external-conversation-import-and-memory.md §12.2).
  *
- * **Still false.** Every case is written, reviewed and adopted, and
- * `npm run check:memory-eval-freeze` is what decides when this may change —
- * not a judgement made here. The outstanding condition is §7.1's drafting
- * tool/model/version on each batch record, which only a person can fill:
- * this repository does not record an agent's model identifier in its
- * artefacts.
+ * Frozen on 2026-08-26, against the seven conditions in
+ * `docs/ops/memory-extraction-eval-dataset.md` §7.1 — all of them checked
+ * mechanically by `npm run check:memory-eval-freeze` before this line
+ * changed, and the script re-checks them on every run:
  *
- * The harness refuses `--live` on this flag alone, which is the point. A
- * number computed against a set that can still move cannot be cited.
+ *   * every cell at or above the §12.2 floor (1,150 cases across 8 cells);
+ *   * no batch left unreviewed;
+ *   * explicit adoption, verdicts, a diversity judgement and a date on all
+ *     32 batches;
+ *   * draft disagreement recorded on every batch (max 0%);
+ *   * `findDuplicateCases()` clean;
+ *   * the drafting tool, model and version on all 32 records;
+ *   * a named reviewer on all 32.
+ *
+ * The last two are a person's to supply and were supplied on 2026-08-26 by
+ * @mposition, who also reviewed and adopted all 32 batches that day.
+ *
+ * The flag is not the freeze — the check is. It exits non-zero if this says
+ * true while a condition is unmet, so the two cannot drift apart.
+ *
+ * Editing a frozen dataset means a NEW version and invalidates any verdict
+ * computed against this one — docs/ops/memory-extraction-eval-dataset.md §7.3.
+ * The harness refuses `--live` on an unfrozen set, which is the point:
+ * a number computed against a set that can still move cannot be cited.
  */
-export const MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN = true;
 
 /**
  * Which set this is. `mem-extract-v3` and `v4` were tuned against the

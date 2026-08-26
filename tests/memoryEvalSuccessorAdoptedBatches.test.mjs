@@ -3,7 +3,16 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
-import { MEMORY_EVAL_SUCCESSOR_CASES } from "../lib/memoryEvalSuccessorFixtures.ts";
+import {
+    MEMORY_EVAL_SUCCESSOR_CASES,
+    MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
+    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
+    MEMORY_EVAL_SUCCESSOR_SUPERSEDES,
+} from "../lib/memoryEvalSuccessorFixtures.ts";
+import {
+    MEMORY_EVAL_CASES,
+    MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryExtractionEvalFixtures.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 import {
     parseBatchRecord,
@@ -74,4 +83,27 @@ test("the registry and the fixtures agree on the case list", () => {
         )
     );
     assert.equal(MEMORY_EVAL_SUCCESSOR_CASES.length, 1150);
+});
+
+test("the freeze flag cannot outrun the freeze conditions", () => {
+    // The flag is a claim; `npm run check:memory-eval-freeze` is what makes
+    // it true, and it exits non-zero if the claim stands while a condition is
+    // unmet. This asserts the claim's two halves are the ones that were
+    // checked — the case count and the batch count the report prints — so a
+    // batch quietly leaving the registry cannot leave the flag behind.
+    assert.equal(MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN, true);
+    assert.equal(MEMORY_EVAL_SUCCESSOR_DATASET_VERSION, "mem-eval-succ-1");
+    assert.equal(MEMORY_EVAL_SUCCESSOR_SUPERSEDES, "mem-eval-seed-11");
+});
+
+test("freezing the successor did not touch the frozen predecessor", () => {
+    // The rule the whole two-registry split exists for: a frozen dataset is
+    // never edited. seed-11 keeps its 1,150 schema-1 cases and its own
+    // version string, and no successor case can reach it.
+    assert.equal(MEMORY_EVAL_CASES.length, 1150);
+    assert.equal(MEMORY_EVAL_DATASET_VERSION, "mem-eval-seed-11");
+    const successorIds = new Set(MEMORY_EVAL_SUCCESSOR_CASES.map((c) => c.id));
+    for (const entry of MEMORY_EVAL_CASES) {
+        assert.equal(successorIds.has(entry.id), false, entry.id);
+    }
 });
