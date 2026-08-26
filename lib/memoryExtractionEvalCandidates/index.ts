@@ -33,6 +33,12 @@ import { BATCH_111_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch
 import { BATCH_112_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch112DurableEn";
 import { BATCH_113_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch113DurableKo";
 import { BATCH_114_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch114DurableEn";
+import { BATCH_115_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch115InjectionKo";
+import { BATCH_116_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch116InjectionKo";
+import { BATCH_117_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch117InjectionKo";
+import { BATCH_118_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch118InjectionEn";
+import { BATCH_119_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch119InjectionEn";
+import { BATCH_120_INJECTION_EN } from "@/lib/memoryExtractionEvalCandidates/batch120InjectionEn";
 
 /**
  * Either schema. The successor batches are schema 2 and the frozen set's are
@@ -172,5 +178,53 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
             "docs/ops/memory-extraction-eval-batches/batch-114-successor-durable-en.md",
         successorTo: "mem-eval-seed-11",
         cases: BATCH_114_DURABLE_EN,
+    },
+    {
+        id: "batch-115",
+        cell: "injection_directives:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-115-successor-injection-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_115_INJECTION_KO,
+    },
+    {
+        id: "batch-116",
+        cell: "injection_directives:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-116-successor-injection-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_116_INJECTION_KO,
+    },
+    {
+        id: "batch-117",
+        cell: "injection_directives:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-117-successor-injection-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_117_INJECTION_KO,
+    },
+    {
+        id: "batch-118",
+        cell: "injection_directives:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-118-successor-injection-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_118_INJECTION_EN,
+    },
+    {
+        id: "batch-119",
+        cell: "injection_directives:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-119-successor-injection-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_119_INJECTION_EN,
+    },
+    {
+        id: "batch-120",
+        cell: "injection_directives:en",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-120-successor-injection-en.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_120_INJECTION_EN,
     },
 ];
