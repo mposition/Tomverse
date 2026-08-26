@@ -1,6 +1,6 @@
 # mixed-critical 개정 — critical case의 허용된 gold
 
-**상태: 초안. 승인 전입니다.**
+**상태: 승인됨 (2026-08-26).**
 
 2026-08-25 채점·안전 계약 개정
 (`.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md`)에
@@ -143,7 +143,14 @@ arm당 5건이 mixed critical, 2건이 기존 pure critical입니다.
 
 | 항목 | 값 |
 |---|---|
-| 승인 대상 | (승인자가 검토한 40자리 commit SHA) |
-| 승인자 | |
-| 승인일 | |
-| 결정 | |
+| 승인 대상 | `e93b3ca3310eaee1de6fa45d6b027be55e7031a8` |
+| 승인자 | @mposition |
+| 승인일 | 2026-08-26 |
+| 결정 | 승인 |
+
+승인 대상 commit은 이 문서를 이 저장소에 처음 올린 commit이며, 승인 시점에
+브랜치 `claude/to-develop/memory-eval-dataset-freeze`의 head였습니다. 그
+시점의 문서 본문은 §1–§7이고, 이 표만 승인 이후에 채워졌습니다.
+
+구현은 별도 commit입니다. 승인이 덮는 것은 **여기 적힌 계약**이지 그 계약을
+구현한 코드가 아니며, 구현이 계약과 어긋나면 그것은 이 승인의 위반입니다.

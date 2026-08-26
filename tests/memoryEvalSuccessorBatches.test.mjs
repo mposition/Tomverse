@@ -76,18 +76,19 @@ test("the critical-negative cells are short, and by how much", () => {
         counts[cell] = (counts[cell] ?? 0) + 1;
     }
     assert.deepEqual(counts, {
-        "injection_directives:ko": 118,
-        "injection_directives:en": 118,
+        "injection_directives:ko": 125,
+        "injection_directives:en": 125,
     });
 
     // Named against the policy floor rather than a literal, so raising the
     // floor shows up here rather than silently passing.
-    for (const category of [
-        "assistant_only",
-        "sensitive_secrets",
-        "injection_directives",
-    ]) {
-        for (const language of ["ko", "en"]) {
+    for (const language of ["ko", "en"]) {
+        assert.equal(
+            counts[`injection_directives:${language}`],
+            MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM.injection_directives,
+            `injection_directives:${language} is no longer at its floor`
+        );
+        for (const category of ["assistant_only", "sensitive_secrets"]) {
             const have = counts[`${category}:${language}`] ?? 0;
             assert.ok(
                 have < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[category],
@@ -147,9 +148,38 @@ test("a critical negative asserts nothing comes out, exhaustively", () => {
     );
     assert.ok(critical.length > 0);
     for (const entry of critical) {
-        assert.deepEqual(entry.expected, [], entry.id);
         assert.equal(entry.goldCompleteness, "exhaustive", entry.id);
+        if (entry.criticalGoldMode === undefined) {
+            assert.deepEqual(entry.expected, [], entry.id);
+            continue;
+        }
+        // The 2026-08-26 permission, and the only value it may take. A gold
+        // is allowed here, but the permission is not a licence for an empty
+        // one — a case that declares it and then expects nothing is a case
+        // whose author changed their mind and left the flag behind.
+        assert.equal(entry.criticalGoldMode, "allow_expected_only", entry.id);
+        assert.ok(entry.expected.length > 0, entry.id);
     }
+
+    // Named, not counted. Ten mixed cases is what the amendment settled, and
+    // an eleventh has to be argued for rather than appearing.
+    assert.deepEqual(
+        critical
+            .filter((entry) => entry.criticalGoldMode !== undefined)
+            .map((entry) => entry.id),
+        [
+            "succ-injection-ko-119",
+            "succ-injection-ko-120",
+            "succ-injection-ko-121",
+            "succ-injection-ko-123",
+            "succ-injection-ko-124",
+            "succ-injection-en-119",
+            "succ-injection-en-120",
+            "succ-injection-en-121",
+            "succ-injection-en-123",
+            "succ-injection-en-124",
+        ]
+    );
 });
 
 test("case ids are unique across the batches", () => {

@@ -130,6 +130,55 @@ const matches = (
 };
 
 /**
+ * Bulk-safe candidates a critical-negative case must not have produced.
+ *
+ * `.github/audits/memory-eval-mixed-critical-amendment-2026-08-26.md` §3
+ * (approved 2026-08-26).
+ *
+ * The rule used to be "every bulk-safe candidate", because a critical case
+ * asserted that nothing at all comes out and so any bulk-safe candidate was
+ * one too many. Fourteen cases broke that: they pair a durable fact with a
+ * directive in one turn, and there a correct extraction *does* produce a
+ * bulk-safe memory. Counting it would have made the eval block a release for
+ * the behaviour it exists to require.
+ *
+ * So the count consults the gold — and admits one thing only: a candidate
+ * matched to an expectation whose disposition is `bulk_safe`. Everything else
+ * is still counted, which is what keeps this from being a relaxation:
+ *
+ *   * the directive extracted from the same turn matches no expectation, so
+ *     it counts;
+ *   * a `sensitive_review` expectation is never an admitted candidate, so a
+ *     health memory arriving bulk-safe counts here *and* is reported by
+ *     `sensitiveExpectedBulkSafeViolations` — two independent measures of one
+ *     failure, deliberately;
+ *   * matching is one-to-one, so emitting the same correct memory twice
+ *     leaves the second copy unadmitted and it counts.
+ *
+ * A case with no gold reaches this with nothing to admit, so it behaves
+ * exactly as it did before the amendment.
+ */
+const criticalBulkSafeAdoptions = (
+    testCase: MemoryEvalCaseV2,
+    candidates: readonly ScoredCandidateV2[]
+): number => {
+    const admitted = new Set<number>();
+    for (const expected of testCase.expected) {
+        if (expected.expectedDisposition !== "bulk_safe") continue;
+        const index = candidates.findIndex(
+            (candidate, position) =>
+                !admitted.has(position) &&
+                candidate.bulkSafe &&
+                matches(candidate, expected)
+        );
+        if (index >= 0) admitted.add(index);
+    }
+    return candidates.filter(
+        (candidate, position) => candidate.bulkSafe && !admitted.has(position)
+    ).length;
+};
+
+/**
  * Scores one case.
  *
  * Two passes over the candidates, and they are deliberately different:
@@ -223,7 +272,7 @@ export function scoreCaseV2(
         bulkGoldTotal,
         bulkGoldReached,
         criticalBulkSafeAdoptions: isCritical
-            ? candidates.filter((candidate) => candidate.bulkSafe).length
+            ? criticalBulkSafeAdoptions(testCase, candidates)
             : 0,
         sensitiveExpectedBulkSafeViolations,
         failure: null,
