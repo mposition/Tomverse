@@ -1,6 +1,6 @@
 # staging 접근 경계 — 열린 항목
 
-**상태: 방식 결정됨 (2026-08-26). Cloudflare Access 설정은 아직 안 됐습니다.**
+**상태: Access 켜짐 (2026-08-26). 실제 호출 확인만 남았습니다.**
 §0에 결정과 남은 순서가 있습니다. §1~§3은 결정에 이르기까지의 조사이고,
 §3의 저울질은 §0이 뒤집은 부분이 있으므로 §0을 먼저 읽으십시오.
 
@@ -52,9 +52,67 @@ Access를 켜면 `/`가 게이트 뒤로 들어가고, 그때 `check:edge-robots
    `Note:` 로 알립니다.
 4. Stripe test mode 결제와 크론 한 바퀴가 staging에서 여전히 도는지 확인합니다.
 
-**Access가 어떤 형태로 거절하는지는 켜기 전까지 확인되지 않았습니다.** 검사는 401,
-403, 그리고 다른 호스트로 나가는 3xx를 인식하고 **그 밖의 것은 실패시킵니다** —
-모르는 응답에 통과를 주지 않는 방향으로 틀리게 해 뒀습니다.
+검사는 401, 403, 그리고 다른 호스트로 나가는 3xx를 인식하고 **그 밖의 것은
+실패시킵니다** — 모르는 응답에 통과를 주지 않는 방향으로 틀리게 해 뒀습니다.
+
+### 켜고 나서 확인된 것 (2026-08-26)
+
+**켰습니다.** 애플리케이션 둘 — 호스트 전체(Allow, Include Emails)와 bypass
+destination 4개를 묶은 앱(Bypass, Everyone) — 으로 구성했습니다. Cloudflare UI가
+앱당 destination을 다섯 개까지 허용하므로 경로마다 앱을 만들 필요는 없었습니다.
+
+켜기 전까지 모른다고 적어 뒀던 두 가지에 답이 나왔습니다.
+
+**Access는 302로 거절합니다.** 로그인 호스트로 나가는 리다이렉트이고, 검사가
+인식하는 세 형태 중 하나입니다. `check:edge-robots` 가 통과하며
+`Note: / is behind an access gate on https://staging.tomverse.app (status 302).` 를
+출력합니다.
+
+**Path는 접두어로 매칭됩니다.** 이것이 실제로 중요했습니다 — 크론이 치는 주소는
+`/api/internal` 이 아니라 `/api/internal/maintenance/cleanup` 이고, Resend는
+`/api/webhooks/email/resend` 입니다. 정확히 일치해야 하는 방식이었다면 둘 다
+막혔을 것입니다. 서명 없는 요청으로 확인한 결과:
+
+| 경로 | 응답 | 낸 주체 |
+|---|---|---|
+| `/` | 302 | Access |
+| `/robots.txt` | 405 (POST라서) | 앱 |
+| `/api/internal/maintenance/cleanup` | 401 | 앱의 시크릿 검사 |
+| `/api/webhooks/email/resend` | 503 `Email webhook is not configured` | 앱 |
+| `/api/billing/webhook` | 503 `Stripe webhook is not configured` | 앱 |
+
+401·503은 전부 앱 자신의 거절이므로 **요청이 원본까지 갔다**는 증거입니다.
+Access가 막았다면 `/` 처럼 302가 왔을 것입니다.
+
+### Railway 생성 도메인은 이미 막혀 있습니다 — 그런데 코드가 아니라 변수로
+
+`tomverse-staging.up.railway.app` 은 Cloudflare를 거치지 않으므로 살아 있으면
+Access를 통째로 우회합니다. 확인 결과 **421 `Misdirected Request`** 를 반환합니다 —
+`proxy.ts`의 `blockedOriginResponse()` 가 내는 바로 그 응답이고,
+`isAllowedRequestHost()` 가 실패했다는 뜻입니다. 그 호스트가 staging의
+`ALLOWED_REQUEST_HOSTS` 에 없습니다.
+
+`REQUIRE_CLOUDFLARE_ORIGIN_SECRET` 과는 무관합니다. 두 검사가 OR로 묶여 있어 호스트
+검사만으로 거절이 성립하고, 값을 확인할 수 없는 변수에 의존하지 않는다는 점에서
+오히려 낫습니다.
+
+**여기에 이 경계의 유일한 무른 지점이 있습니다.** 방어가 걸려 있는 것은
+`ALLOWED_REQUEST_HOSTS` 에 Railway 도메인이 **없다**는 사실 하나이고, 그것은
+환경변수라 **어떤 테스트도 고정할 수 없습니다.**
+`scripts/security-regression-check.mjs` 는 `proxy.ts` 가 `isAllowedRequestHost`·
+`hasRequiredOriginSecret`·`"Misdirected Request"` 를 담고 있는지까지만 봅니다 —
+장치가 있는지는 지키지만 변수 내용은 못 지킵니다.
+
+그러므로: **디버깅한다고 Railway 도메인을 `ALLOWED_REQUEST_HOSTS` 에 넣지 마십시오.**
+넣는 순간 Access가 조용히 무의미해지고, 알려줄 검사가 없습니다. 더 확실히 하려면
+Railway 서비스에서 생성 도메인 자체를 제거하는 방법이 있고, `README.md` 도 Cloudflare
+프록시를 쓸 때 그렇게 권합니다.
+
+### 아직 안 한 것
+
+Stripe test mode 결제 한 번과 크론 한 바퀴를 실제로 돌려본 확인은 남아 있습니다.
+위 표가 "Access가 그 경로를 통과시킨다"까지는 보였지만, 올바른 시크릿·서명을 든
+진짜 호출이 끝까지 도는 것을 본 것은 아닙니다.
 
 ### 우선순위는 낮아졌습니다
 
