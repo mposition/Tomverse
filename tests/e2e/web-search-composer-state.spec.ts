@@ -144,7 +144,7 @@ test("the composer does not grow extra rows just to say the normal state", { tag
 
   await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
   await page.getByTestId("tools-web-search-row").click();
-  await page.getByTestId("web-search-mode-option-always").click();
+  await page.keyboard.press("Escape");
 
   await expect(chip(page)).toBeVisible();
   const after = (await page.getByTestId("chat-input").boundingBox())!.height;
@@ -196,20 +196,29 @@ test("no capable model blocks with a way out instead of a silent fallback", { ta
   await expect(notice).toHaveCount(0);
 });
 
-test("auto mode never claims a search will happen", { tag: "@ui-risk" }, async ({ page }) => {
-  await seedGuestConversation(page, UNSUPPORTED, "auto");
+test(
+  "a conversation stored as the retired auto mode opens with the switch off",
+  { tag: "@ui-risk" },
+  async ({ page }) => {
+  // "auto" meant "ask me before searching", and the switch has no position
+  // that can honour that. Reading it as on would turn a request to be asked
+  // into standing permission to search and to spend the surcharge, so it opens
+  // off -- indistinguishable from off, with nothing left over that promises a
+  // search.
+  await seedGuestConversation(page, [SUPPORTED, ...UNSUPPORTED], "auto");
   await open(page);
 
-  await expect(chip(page)).toHaveAttribute("data-tone", "neutral");
-  await expectChipLabel(page, {
-    full: "Web search · Auto",
-    compact: "Web search auto",
-  });
-  // "Auto" only offers a search, so an unsupported model is not yet an
-  // exception the user has to resolve before sending.
+  await expect(chip(page)).toHaveCount(0);
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
   await expect(page.getByTestId("web-search-exception-toggle")).toHaveCount(0);
-});
+
+  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await expect(page.getByTestId("tools-web-search-row")).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
+  }
+);
 
 test("adding a model that cannot search updates the chip and the reservation together", { tag: "@ui-risk" }, async ({
   page,
