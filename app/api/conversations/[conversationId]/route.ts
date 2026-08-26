@@ -10,7 +10,7 @@ import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
+import { APP_DEFAULTS, normalizeWebSearchMode, WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import {
   CONVERSATION_MEMORY_MODES,
   DEFAULT_CONVERSATION_MEMORY_MODE,
@@ -388,9 +388,8 @@ export async function GET(
         memoryMode: isConversationMemoryMode(conversation.memoryMode)
           ? conversation.memoryMode
           : DEFAULT_CONVERSATION_MEMORY_MODE,
-        webSearchMode: isWebSearchMode(conversation.webSearchMode)
-          ? conversation.webSearchMode
-          : APP_DEFAULTS.defaultWebSearchMode,
+        // See the list route: "auto" is still storable and is read as off.
+        webSearchMode: normalizeWebSearchMode(conversation.webSearchMode),
         // The stored mode, and whether this account would be offered Auto at
         // all. `offered` is one boolean by design: the refusals are internal
         // rollout state (which bucket, what share, which gate), and a client
@@ -788,9 +787,7 @@ export async function PATCH(
         memoryMode: isConversationMemoryMode(updatedConversation.memoryMode)
           ? updatedConversation.memoryMode
           : DEFAULT_CONVERSATION_MEMORY_MODE,
-        webSearchMode: isWebSearchMode(updatedConversation.webSearchMode)
-          ? updatedConversation.webSearchMode
-          : APP_DEFAULTS.defaultWebSearchMode,
+        webSearchMode: normalizeWebSearchMode(updatedConversation.webSearchMode),
         isLocked: !!updatedConversation.password,
         shareEnabled:
           updatedConversation.shareEnabled &&
