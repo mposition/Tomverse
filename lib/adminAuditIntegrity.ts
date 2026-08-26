@@ -58,6 +58,8 @@ export async function verifyAdminAuditIntegrity() {
       linkageBreaks: 0,
       keysAvailable: 0,
       keysUsed: 0,
+      keyEntryCounts: [] as number[],
+      unverifiedPrefix: 0,
       message: "ADMIN_AUDIT_INTEGRITY_KEY or NEXTAUTH_SECRET is not configured.",
     };
   }
@@ -71,10 +73,19 @@ export async function verifyAdminAuditIntegrity() {
   let verified = 0;
   let linkageBreaks = 0;
   const failures: Failure[] = [];
-  // Which of the supplied keys actually accounted for something. Reported
-  // because "two keys were needed" is the observation that a rotation happened
-  // inside this chain, and it is the only place that fact survives.
-  const keysThatWorked = new Set<number>();
+  // How many entries each supplied key accounted for, index-aligned with
+  // `keys`. The count, not just the fact that a key worked: a rotation splits
+  // the chain into spans, and the sizes of those spans are what tell an
+  // operator whether a listed key is doing the job they listed it for. Only
+  // positions are reported -- never a key, and nothing derived from one.
+  const keyEntryCounts = keys.map(() => 0);
+  // Leading entries, oldest first, whose content no verification key opens.
+  // A changed signing key invalidates a *contiguous span*, so the size of this
+  // prefix is what separates "an epoch nobody has the key for" from "one row
+  // that no longer reproduces its own hash" -- readings the first-failure id
+  // alone cannot tell apart.
+  let unverifiedPrefix = 0;
+  let stillInPrefix = true;
 
   for (const row of rows) {
     const hashed = (secret: string) =>
@@ -105,8 +116,11 @@ export async function verifyAdminAuditIntegrity() {
     if (!linkageValid) linkageBreaks += 1;
 
     if (keyIndex >= 0) {
-      keysThatWorked.add(keyIndex);
+      keyEntryCounts[keyIndex] += 1;
       verified += 1;
+      stillInPrefix = false;
+    } else if (stillInPrefix) {
+      unverifiedPrefix += 1;
     }
     if (keyIndex < 0 || !linkageValid) {
       failures.push({
@@ -120,6 +134,7 @@ export async function verifyAdminAuditIntegrity() {
 
   const firstInvalid = failures[0] ?? null;
   const valid = failures.length === 0;
+  const keysUsedCount = keyEntryCounts.filter((count) => count > 0).length;
   return {
     configured: true,
     valid,
@@ -135,12 +150,14 @@ export async function verifyAdminAuditIntegrity() {
       firstInvalid && rows[0]?.id === firstInvalid.id
     ),
     keysAvailable: keys.length,
-    keysUsed: keysThatWorked.size,
+    keysUsed: keysUsedCount,
+    keyEntryCounts,
+    unverifiedPrefix,
     message: valid
       ? rows.length === 0
         ? "No hash-chained audit entries exist yet."
-        : keysThatWorked.size > 1
-          ? `The HMAC audit chain is valid across ${keysThatWorked.size} signing keys.`
+        : keysUsedCount > 1
+          ? `The HMAC audit chain is valid across ${keysUsedCount} signing keys.`
           : "The HMAC audit chain is valid."
       : linkageBreaks > 0
         ? "The audit chain linkage is broken."

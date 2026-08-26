@@ -19,6 +19,10 @@ type Integrity = {
   keysAvailable: number;
   /** How many of the available keys accounted for at least one entry. */
   keysUsed: number;
+  /** Entries each available key accounted for, index-aligned with the key list. */
+  keyEntryCounts: number[];
+  /** Leading entries, oldest first, that no available key opens. */
+  unverifiedPrefix: number;
   message: string;
 };
 
@@ -36,28 +40,38 @@ type AuditEntry = {
 /**
  * What a failure means, in the reader's terms.
  *
- * There are three readings and they have to stay distinct, because the first
- * attempt here collapsed two of them. It branched on "the first failure is the
- * oldest row" and said *nothing has verified under any available key* — which
- * was true only while no historical key was listed. The moment one was, the
- * 2026-08-25 staging chain came back with 115 of 116 entries verified and the
- * panel still announced that nothing had, which is worse than saying nothing:
- * the operator had just fixed most of it and the screen denied it.
+ * The distinction that matters is not where the first failure is but how many
+ * entries at the head of the chain no key opens, because a changed signing key
+ * invalidates a *contiguous span*. Two earlier versions of this got it wrong in
+ * the same direction, each time by reading `firstInvalidIsOldest` as though it
+ * carried information it does not.
  *
- * So the oldest-row case splits on whether anything verified at all. Nothing
- * verified is a chain whose whole signing key is absent. Some verified, oldest
- * did not, is a chain whose *earliest span* is still signed with a key nobody
- * has listed — one rotation further back than the keys account for, and a
- * narrower thing to go looking for.
+ * The first said "nothing has verified under any available key" whenever the
+ * oldest row failed. On 2026-08-25 staging that sentence appeared beside 115 of
+ * 116 entries verified — the operator had just recovered the chain and the
+ * screen denied it.
+ *
+ * The second called any oldest-row failure an unlisted earlier *span*. That is
+ * right for a real epoch and wrong for this chain: the 2026-08-16 audit
+ * recorded 53 entries verifying, so the span containing that oldest row holds
+ * 53 entries, and 52 of them verify today. A missing key cannot leave its own
+ * span 52/53 opened. One row failing while everything after it verifies is a
+ * row whose stored content no longer reproduces its hash, and saying "add a key"
+ * to that sends the reader looking for something that does not exist.
+ *
+ * So the prefix size decides: the whole chain, several entries, or exactly one.
  */
 function auditIntegrityReading(integrity: Integrity): string {
-  if (!integrity.firstInvalidIsOldest) {
-    return "Entries before this one verified and this one did not, so a changed signing key does not explain it on its own.";
+  if (integrity.unverifiedPrefix === 0) {
+    return "Entries at the start of the chain verified, so a changed signing key does not explain this on its own.";
   }
   if (integrity.verifiedEntries === 0) {
-    return "This is the oldest entry in the chain and nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
+    return "Nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
   }
-  return "Later entries verified and the oldest ones did not, so the earliest span was signed with a key that is not listed — one rotation further back than the current keys account for. Add that older key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
+  if (integrity.unverifiedPrefix === 1) {
+    return "Only the chain's first entry does not verify, and every entry after it does. A changed signing key invalidates a contiguous span rather than a single row, so this points at that entry's stored content rather than at a missing key — open it and compare it against the change it describes.";
+  }
+  return `The oldest ${integrity.unverifiedPrefix.toLocaleString()} entries do not verify and everything after them does, so that span was signed with a key that is not listed — one rotation further back than the current keys account for. Add that older key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.`;
 }
 
 /**
@@ -156,13 +170,19 @@ export function AdminAuditIntegrityPanel() {
                   {auditIntegrityReading(integrity)}
                 </p>
               ) : null}
-              {integrity.keysUsed < integrity.keysAvailable ? (
-                <p data-testid="admin-audit-integrity-unused-keys" className="mt-2 text-xs opacity-90">
-                  {integrity.keysAvailable - integrity.keysUsed} of the{" "}
-                  {integrity.keysAvailable} available keys accounted for no entry.
-                  A listed key that opens nothing is either the wrong value or
-                  covers a span this chain does not contain — and it can still
-                  produce entries that verify, so drop it rather than leave it.
+              {integrity.keysAvailable > 1 ? (
+                <p data-testid="admin-audit-integrity-key-counts" className="mt-2 text-xs opacity-90">
+                  {/* Positions, never values. Which listed key opened what is
+                      the difference between one click and two redeploys, and
+                      a key that opened nothing is either the wrong value or
+                      one covering a span this chain does not contain — it can
+                      still produce entries that verify, so it should be
+                      dropped rather than left. Key 1 is the signing key; the
+                      rest are ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS in order. */}
+                  Entries opened per key:{" "}
+                  {integrity.keyEntryCounts
+                    .map((count, index) => `key ${index + 1} — ${count.toLocaleString()}`)
+                    .join(" · ")}
                 </p>
               ) : null}
             </div>
