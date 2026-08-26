@@ -1,0 +1,158 @@
+name: Router eval — ROUTE-01 pilot
+#
+# The §3 sizing run: measure the discordance rate so the decision set's `n` is
+# computed rather than guessed.
+#
+# ############################################################################
+# # THIS WORKFLOW SPENDS MONEY. Three provider calls per item, 210 items.    #
+# # Manual dispatch only, with a typed confirmation, and never on push.      #
+# ############################################################################
+#
+# Why here rather than a shell on a deployed container. The same three reasons
+# `.github/workflows/memory-eval-development-probe.yml` gives, and they bite
+# harder here because this run is long:
+#
+#   * the checkout is clean by construction and carries a git directory, so
+#     the artifact's commitSha names a real commit. scripts/eval-router-quality.mjs
+#     reads it with `git rev-parse HEAD` and records null when that fails --
+#     which is what a Railway container does, because it has no git;
+#   * the keys are repository secrets rather than a container's environment,
+#     so adding one does not mean waiting for a container to be replaced;
+#   * the artifact is preserved by the platform. A console session that
+#     refreshes takes the run and the file with it, and 630 calls is long
+#     enough for that to happen.
+#
+# **This run produces no ROUTE-01 evidence.** The set is `development`, so
+# `--mode=decision` refuses it outright. What it produces is the discordance
+# rate §3 needs, and the judge's self-preference is a known confound recorded
+# in the set: the pre-registered judge is also the baseline.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_label:
+        description: "Names the artifact — e.g. 20260826"
+        required: true
+        default: ""
+      max_cost_usd:
+        description: "Per-run ceiling in USD. The estimate is well under 1."
+        required: true
+        default: "3"
+      confirm:
+        description: "Type SPEND to confirm this dispatch will call a paid provider"
+        required: true
+        default: ""
+
+# Deliberately not inputs: the baseline, the judge and the seed. They are
+# pre-registered in the set file and scripts/eval-router-quality.mjs refuses a
+# run that disagrees with them. Offering them here would put the choice back
+# on whoever dispatches, which is the drift that pre-registration exists to
+# stop.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: router-eval-pilot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: ROUTE-01 pilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Confirm the spend
+        if: inputs.confirm != 'SPEND'
+        run: |
+          echo "::error::confirm must be exactly SPEND. Nothing was run."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The workflow file has to exist on the default branch for GitHub to
+      # offer it at all, so it can be dispatched against a ref that does not
+      # carry the script. `npm run` would answer "Missing script", which says
+      # nothing about which branch to pick.
+      - name: The selected ref can run this
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts ?? {};
+            if (!("eval:router-quality" in scripts)) {
+              console.log(
+                "::error::This branch does not carry eval:router-quality. " +
+                  "Re-dispatch with Branch: develop, or a branch that has it."
+              );
+              process.exit(1);
+            }
+            // decideRouterModel pulls in server-only modules. Without the
+            // condition every item fails on import, before a single request.
+            if (!scripts["eval:router-quality"].includes("--conditions=react-server")) {
+              console.log(
+                "::error::eval:router-quality does not run under the server condition."
+              );
+              process.exit(1);
+            }
+          '
+
+      # Everything that can refuse for free refuses here, before a key is put
+      # in front of a provider: the set must be well formed, every cell must
+      # hold its frozen target, and the freeze digest must still verify.
+      - name: Preconditions
+        run: npm run check:router-quality-eval
+
+      # Read from the set rather than retyped, so this file cannot drift from
+      # the pre-registration. The runner checks them again and refuses on any
+      # disagreement, so a mistake here costs nothing.
+      - name: Read the pre-registered configuration
+        id: preregistered
+        run: |
+          node -e '
+            const set = require("./docs/ops/router-evaluation-set/development-v0.json");
+            const out = {
+              baseline: set.baseline?.modelId,
+              judge: set.judge?.modelId,
+              seed: set.seed?.value,
+            };
+            for (const [key, value] of Object.entries(out)) {
+              if (!value) {
+                console.log(`::error::the set pre-registers no ${key}`);
+                process.exit(1);
+              }
+              console.log(`${key}=${value}`);
+            }
+          ' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Pilot run (this is the step that spends)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          mkdir -p artifacts
+          npm run eval:router-quality -- \
+            --mode=pilot \
+            --set=docs/ops/router-evaluation-set/development-v0.json \
+            --baseline='${{ steps.preregistered.outputs.baseline }}' \
+            --judge='${{ steps.preregistered.outputs.judge }}' \
+            --seed='${{ steps.preregistered.outputs.seed }}' \
+            --max-cost-usd='${{ inputs.max_cost_usd }}' \
+            --json=artifacts/route01-pilot-${{ inputs.run_label }}.json
+
+      # Before anything that can fail: a run that paid must not lose its
+      # records because a later step exited non-zero.
+      - name: Preserve the artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: route01-pilot-${{ inputs.run_label }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 90
