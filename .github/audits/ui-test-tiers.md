@@ -142,13 +142,23 @@ work로 나누지 않고, `e2e.yml`이 개수는 맞는데 work는 안 맞았던
 | 2/2 | 6분 51초 | 306 | 33 |
 | (분할 없음) | 13분 56초 | 654 | 53 |
 
-53/47로 갈리므로 느린 shard가 전체의 약 55%입니다. CI 기준 desktop의 test
-단계는 10분 근처, job은 예산의 절반 근처가 됩니다. shard를 하나 더 늘려도
-이번만큼 얻지 못하면서 runner만 하나 더 씁니다.
+53/47로 갈리므로 느린 shard가 전체의 약 55%입니다.
 
 로컬 값은 예산 판단의 근거로 쓰지 않습니다 — 이 컨테이너의 desktop 측정은
 13분 56초로 CI의 18분 51초보다 한참 낮았습니다. 위 표는 **비율**을 정하는
-데만 씁니다.
+데만 썼고, 예산 판정은 CI 실측입니다(run 32939237227, 4개 job 전부 통과):
+
+| Job | job 전체 | 예산 대비 |
+|---|---|---|
+| desktop-chromium 1/2 | 10분 10초 | 41% |
+| desktop-chromium 2/2 | 9분 09초 | 37% |
+| mobile-chromium 1/2 | 7분 46초 | 31% |
+| mobile-chromium 2/2 | 7분 35초 | 30% |
+
+**가장 무거운 job이 81%에서 41%로 내려갔고, 53/47 비율은 CI에서도 유지됐습니다**
+— `e2e.yml`이 겪은 count-vs-work 편향은 이 tier에서는 나타나지 않았습니다.
+shard를 하나 더 늘리면 job마다 고정으로 드는 약 1분 30초(setup·build)에 비해
+얻는 것이 적고 runner만 하나 더 씁니다.
 
 합류한 것: `chat-keyboard-policy` · `chat-tools` · `comparison-action-rail` ·
 `comparison-rate-limit` · `credit-entitlement-disclosure` ·
