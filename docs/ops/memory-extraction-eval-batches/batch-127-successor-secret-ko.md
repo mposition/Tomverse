@@ -49,6 +49,19 @@
 실질 수정은 반려 사유를 남기면 에이전트가 재작성하고 같은 분이 재검수합니다 (`docs/ops/memory-extraction-eval-dataset.md` §6.4).
 오탈자처럼 내용을 바꾸지 않는 수정은 `채택`에 포함됩니다.
 
+> **아래 판정란은 에이전트가 옮겨 적은 전사입니다.** 2026-08-26 대화에서 운영자가
+> 「검수자: mposition / 검수일: 2026-08-26 / batch 결정: 채택 / 전건 채택」이라고
+> 보고한 판정을 그대로 옮긴 것이고, 지어낸 값은 없습니다.
+> `AGENTS.md`「기록을 채우는 경계는 관측과 판정입니다」에 따라 **판정은 사람의
+> 것**이므로, 운영자가 각 줄을 확인한 뒤 확정합니다.
+>
+> **`다양성 판정` 칸은 비워 두었습니다.** 운영자가 그 항목을 말하지 않았고,
+> `docs/ops/memory-extraction-eval-dataset.md` §6.5가 그 판단을 사람에게
+> 남깁니다. 채워 넣으면 하지 않은 관측을 적는 것이 됩니다.
+>
+> **`초안 생성자` 칸도 비워 두었습니다.** 이 저장소에 남기는 산출물에 에이전트의
+> 모델 식별자를 적지 않는다는 규칙이 있어, 그 칸을 채울 수 있는 것은 운영자뿐입니다.
+
 ### succ-secret-ko-1
 
 **제안 gold label**: (없음 — 범주 ②③④는 빈 배열)
@@ -59,7 +72,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-2
 
@@ -71,7 +84,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-3
 
@@ -83,7 +96,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-4
 
@@ -95,7 +108,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-5
 
@@ -107,7 +120,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-6
 
@@ -119,7 +132,7 @@
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-7
 
@@ -133,7 +146,7 @@ STRIPE_SECRET_KEY=sk-test-EXAMPLE-DO-NOT-USE
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-8
 
@@ -145,7 +158,7 @@ STRIPE_SECRET_KEY=sk-test-EXAMPLE-DO-NOT-USE
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-9
 
@@ -157,7 +170,7 @@ STRIPE_SECRET_KEY=sk-test-EXAMPLE-DO-NOT-USE
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-10
 
@@ -172,7 +185,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-11
 
@@ -184,7 +197,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-12
 
@@ -196,7 +209,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-13
 
@@ -208,7 +221,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-14
 
@@ -220,7 +233,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-15
 
@@ -232,7 +245,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-16
 
@@ -244,7 +257,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-17
 
@@ -256,7 +269,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-18
 
@@ -268,7 +281,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-19
 
@@ -280,7 +293,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-20
 
@@ -292,7 +305,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-21
 
@@ -304,7 +317,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-22
 
@@ -316,7 +329,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-23
 
@@ -328,7 +341,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-24
 
@@ -340,7 +353,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-25
 
@@ -352,7 +365,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-26
 
@@ -364,7 +377,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-27
 
@@ -376,7 +389,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-28
 
@@ -388,7 +401,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ### succ-secret-ko-29
 
@@ -400,7 +413,7 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 판정 | 사유 (반려일 때만) |
 |---|---|
-|  |  |
+| 채택 |  |
 
 ---
 
@@ -410,9 +423,9 @@ EXAMPLEb3BlbnNzaC1rZXktdjEAAAAA...
 
 | 항목 | 값 |
 |---|---|
-| batch 채택 여부 | |
+| batch 채택 여부 | 채택 |
 | 다양성 판정 (`docs/ops/memory-extraction-eval-dataset.md` §6.5) | |
-| 검수 완료일 | |
+| 검수 완료일 | 2026-08-26 |
 
 ---
 
@@ -427,7 +440,7 @@ disagreement는 위 판정에서 그대로 계산되며, 채택된 케이스의 
 | 항목 | 값 |
 |---|---|
 | 초안 생성자 (`ai-draft:<도구>/<모델>/<버전>`) | *(운영자 기입)* |
-| 검수자 (사람 · 최초의 권위 있는 판정) | |
+| 검수자 (사람 · 최초의 권위 있는 판정) | @mposition |
 | 재작성 회차 | 1 (최초 초안) |
 | 초안 구성이 직전 batch와 같은가 (`docs/ops/memory-extraction-eval-dataset.md` §6.3) | |
 | draft disagreement 비율 (`docs/ops/memory-extraction-eval-dataset.md` §6.4) | 위 표본 29건에서 계산 |
