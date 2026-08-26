@@ -112,6 +112,8 @@ test("a blank webhook variable does not shadow the next one", () => {
 /* What it says                                                              */
 /* ------------------------------------------------------------------------ */
 
+const RUN_URL = "https://github.com/mposition/Tomverse/actions/runs/1";
+
 const message = (overrides = {}) =>
   buildReleaseLaneFailureMessage({
     lane: "back-merge",
@@ -119,16 +121,27 @@ const message = (overrides = {}) =>
     branch: "main",
     commitSha: "e98169afa4d81c63e53b5e8ae3b2fae26cc7447c",
     commitMessage: "Merge pull request #969 from x\n\nbody that is not the subject",
-    runUrl: "https://github.com/mposition/Tomverse/actions/runs/1",
+    runUrl: RUN_URL,
     ...overrides,
   });
+
+/** The message's lines, so an assertion can name a whole one. */
+const linesOf = (text) => text.split("\n").map((line) => line.trim());
 
 test("the message names the workflow, the branch, the commit and the run", () => {
   const text = message();
   assert.ok(text.includes("Back-merge main into develop"));
   assert.ok(text.includes("main"));
   assert.ok(text.includes("e98169af"));
-  assert.ok(text.includes("https://github.com/mposition/Tomverse/actions/runs/1"));
+  // The whole line, not a substring of the message. `includes` on a URL is
+  // how a check that meant "this is the run link" ends up passing for a link
+  // that merely contains it -- CodeQL flags the shape wherever it appears,
+  // and it is right to: a test written that way would still pass if the
+  // builder wrapped the URL in something else entirely.
+  assert.ok(
+    linesOf(text).includes(`Run: ${RUN_URL}`),
+    "the run link must be its own line, exactly"
+  );
 });
 
 test("only the commit subject travels, never the body", () => {
