@@ -62,7 +62,12 @@ import {
   requiredSampleSize,
   seededRandom,
 } from "../lib/routerQualityEvalCore.ts";
-import { adoptedItems, decisionRunRefusals, evalSetProblems } from "../lib/routerQualityEvalSet.ts";
+import {
+  adoptedItems,
+  decisionRunRefusals,
+  evalSetProblems,
+  runParameterMismatches,
+} from "../lib/routerQualityEvalSet.ts";
 
 const argValue = (name, fallback) => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -110,6 +115,27 @@ if (setProblems.length > 0) {
   die(
     `The evaluation set at ${setPath} cannot be used for a ${mode} run:\n` +
       setProblems.map((problem) => `  - ${problem}`).join("\n")
+  );
+}
+
+// Before anything is resolved or sent: the arguments must be the ones the set
+// pre-registered. The report copies the set's pre-registration provenance in
+// beside whatever was passed on the command line, so an unchecked argument
+// would produce a record that names a person and a date for a choice they
+// never made. Checked in every mode -- a pilot run on a different judge or a
+// different seed is a different measurement, whatever it is called.
+const mismatches = runParameterMismatches(evaluationSet, {
+  mode,
+  baselineModelId,
+  judgeModelId,
+  seed,
+});
+if (mismatches.length > 0) {
+  die(
+    `\nThe run does not match what ${setPath} pre-registered:\n\n` +
+      mismatches.map((reason) => `  - ${reason}`).join("\n") +
+      `\n\nEither run the pre-registered configuration, or pre-register the one you\n` +
+      `want first. Nothing was sent and nothing was billed.`
   );
 }
 
@@ -579,9 +605,15 @@ const record = {
   meetsMargin: verdict.meetsMargin,
   positionBias: verdict.positionBias,
   routedAwayRate: verdict.routedAwayRate,
+  seedPreRegistration: {
+    preRegisteredAt: evaluationSet.seed?.preRegisteredAt ?? null,
+    preRegisteredBy: evaluationSet.seed?.preRegisteredBy ?? null,
+  },
   judge: {
     identity: judgeModelId,
     isRoutableModel: judgeIsRoutable,
+    preRegisteredAt: evaluationSet.judge?.preRegisteredAt ?? null,
+    preRegisteredBy: evaluationSet.judge?.preRegisteredBy ?? null,
     // In a bias run this artefact *is* the measurement; elsewhere it carries
     // whatever earlier bias run was passed in, so a decision report is never
     // the only place its own judge's bias is recorded.

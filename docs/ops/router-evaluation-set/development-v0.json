@@ -11,6 +11,18 @@
     "preRegisteredBy": "mposition",
     "rationale": "gpt-5-6-luna is DEFAULT_MODEL_ID -- the fixed path every request takes today, and therefore the thing Auto has to beat to justify replacing it. gpt-5-4-mini is the baseline for the separate question of changing that default, not for ROUTE-01."
   },
+  "judge": {
+    "modelId": "gpt-5-6-luna",
+    "preRegisteredAt": "2026-08-26",
+    "preRegisteredBy": "mposition",
+    "rationale": "mposition's choice. It is also the baseline, so it grades its own answer in every pair -- the baseline arm is gpt-5-6-luna on all 210. That is the self-preference docs/ops/tomverse-chat-router-evaluation-set.md §5 is about, and it is why a decision run refuses this judge without a --mode=judge-bias artefact. Recorded as a known confound rather than avoided: the pilot exists to measure discordance so §3's n can be computed, and a judge that reads Korean and English equally well matters more to that number than independence from the baseline does."
+  },
+  "seed": {
+    "value": 20260826,
+    "preRegisteredAt": "2026-08-26",
+    "preRegisteredBy": "mposition",
+    "rationale": "mposition's choice. The seed draws the per-item arm ordering, so it decides which answer the judge reads first and position bias is real. Fixed before the run so this is one run rather than the best of several."
+  },
   "cellTargets": [
     {
       "stratum": "general_question_answering",
@@ -131,7 +143,13 @@
     "which is what turns a short cell from work in progress into an error. It is",
     "not permission to run. purpose stays \"development\", so --mode=decision still",
     "refuses this file outright, and the cost approval, the judge model and the",
-    "seed are all still outstanding."
+    "seed are all still outstanding.",
+    "",
+    "judge and seed are pre-registered beside the baseline, and the runner now",
+    "refuses a run whose --baseline, --judge or --seed disagrees with them. They",
+    "were free arguments before, while the report copied these pre-registration",
+    "fields in beside whatever was passed: a record could name a person and a",
+    "date for a choice they never made."
   ],
   "items": [
     {
