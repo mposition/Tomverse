@@ -203,9 +203,10 @@ test("only a funded, open pair can run live, and it is named", () => {
     );
     assert.equal(funded.status, "candidate");
     assert.ok(funded.evalBudget, "the runnable pair is the funded one");
-    // Probe-scoped. A decision-grade run needs its own approval, and this
-    // number is what says the difference is real rather than intended.
-    assert.equal(funded.evalBudget.maxUsd, 1);
+    // Decision-grade, raised from the probe's US$1 on 2026-08-26. Pinned
+    // rather than range-checked: a budget that drifts upward without this
+    // line moving is a budget nobody approved for the figure it became.
+    assert.equal(funded.evalBudget.maxUsd, 15);
 
     assert.ok(
         MEMORY_EXTRACTION_EVAL_REGISTER.some(
@@ -362,10 +363,29 @@ const runHarness = (args, env = {}) => {
 };
 
 test("--live with a key never reaches the network for an unfunded pair", () => {
-    // The default prompt version is v3 now, and its pairs are candidates
-    // without a budget, so the harness stops at the budget gate. Asserting the
-    // message the run actually reaches is the point: a test that passes by
-    // describing the wrong gate is worse than one that fails.
+    // The backup pair is a candidate with no budget, so the harness stops at
+    // the budget gate. Asserting the message the run actually reaches is the
+    // point: a test that passes by describing the wrong gate is worse than
+    // one that fails.
+    //
+    // **This test supplies a key on purpose, so its safety is the pair being
+    // unfunded.** Funding gpt-5-4-mini would turn it into a real
+    // decision-grade run against a 1,150-case dataset, stopped only by the
+    // network guard — and a guard is not a budget. So the premise is asserted
+    // rather than assumed: fund that pair and this fails here, loudly, before
+    // it can fail expensively.
+    const backup = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-4-mini" &&
+            entry.promptVersion === "mem-extract-v4"
+    );
+    assert.ok(backup, "the backup pair this test relies on is gone");
+    assert.equal(
+        backup.evalBudget,
+        null,
+        "gpt-5-4-mini::mem-extract-v4 is funded — this test now spends money"
+    );
+
     const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
         // Plausible enough that a missing-key check could not be what stops it.
         OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",

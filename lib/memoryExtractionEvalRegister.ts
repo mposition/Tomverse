@@ -27,8 +27,6 @@ import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
 } from "@/lib/memoryExtractionEvalCore";
 
-/** The prompt contract version the B2 pipeline implements. */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v1";
 
 export type MemoryExtractionEvalEntry = {
     extractionModelId: string;
@@ -102,7 +100,7 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // approved and really spent against, and a register that dropped
             // the entry would lose both facts.
             extractionModelId: "gpt-5-6-luna",
-            // Written out, never `MEMORY_EXTRACTION_PROMPT_VERSION`. While
+            // Written out, never the shipped constant. While
             // these entries read the live constant, bumping it moved every
             // approval onto the new version without anybody approving
             // anything -- which is precisely what a version is for.
@@ -299,17 +297,28 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             owner: "@mposition",
             registeredAt: "2026-08-26",
             notes:
-                "Development probe only. US$1 approved 2026-08-26 to re-run " +
-                "the 17-case probe against the injection fix. A " +
-                "decision-grade run needs its own approval.",
+                "Decision-grade approved. US$1 on 2026-08-26 for the 18-case " +
+                "development probe (run 32929511265, US$0.006917 spent), then " +
+                "raised to US$15 the same day for the decision-grade run over " +
+                "mem-eval-succ-1 once the probe showed the numbers are readable.",
             evalBudget: {
                 approvedBy: "@mposition",
-                // Same shape and same ceiling as v3's, and approved on its
-                // own: the operator asked for the fix and the re-run together
-                // after reading run 32928284069. v3 spent US$0.006050 of its
-                // dollar, so the dollar here is headroom rather than an
-                // estimate for a second time.
-                maxUsd: 1,
+                // **US$15, and the worst case is what it covers.**
+                //
+                // `npm run report:memory-eval-cost-estimate` measures the
+                // input side at US$0.68 for the two §12.4 runs and prices the
+                // output side three ways: US$0.89 at the rate probe2 actually
+                // showed (~77 tokens an answer), US$3.51 at the report's
+                // standing assumption, US$11.98 if every answer hit the 4,096
+                // ceiling.
+                //
+                // The ceiling is set from the last of those and not the
+                // first. A run stopped by --max-cost-usd is truncated, and a
+                // truncated run is not decision-grade — so a ceiling set to
+                // the expected spend buys nothing and loses the run. The
+                // headroom over US$11.98 absorbs a longer mean prompt than
+                // the 18-case probe showed, and provider-side rounding.
+                maxUsd: 15,
                 ticket: "https://github.com/mposition/Tomverse/issues/837",
                 approvedAt: "2026-08-26",
             },

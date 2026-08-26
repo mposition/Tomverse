@@ -331,3 +331,86 @@ candidate 2건을 냈고 `partial` gold라 둘 다 precision에서 제외됐습�
 
 `0.917 → 1.000`을 "정확도가 올랐다"로 읽으면 안 됩니다. **읽어야 할 것은
 critical bulk-safe adoptions `1 → 0`이고, 나머지는 그대로입니다.**
+
+## decision-grade 실행 전 — harness가 아직 옛 dataset을 읽습니다 [2026-08-26]
+
+US$15 예산이 승인된 뒤 `scripts/evalImportedMemoryExtraction.mjs`를 확인한
+결과, **decision-grade harness가 `mem-eval-seed-11`과 v1 scorer를 읽고
+있습니다.**
+
+```
+43:    MEMORY_EVAL_CASES,              ← seed-11 (schema 1)
+53:    judgeEval,                      ← v1 scorer
+54:    scoreCase,                      ← v1 scorer
+148:    datasetSchemaVersion: LEGACY_DATASET_SCHEMA_VERSION,   ← 1로 고정
+```
+
+**돈은 위험하지 않았습니다.** 실제로 `--live`를 걸어 확인했습니다.
+
+```
+Dataset mem-eval-seed-11 is schema 1, and a live run requires schema 2
+(§12.2, amended 2026-08-25).
+```
+
+`legacy_dataset_schema`로 **provider에 닿기 전에 거절**됩니다. fail-closed가
+설계대로 동작합니다.
+
+### 같은 결함이 세 번째입니다
+
+seed-11 전역을 상대로 쓰인 도구가 전부 같은 방식으로 낡았습니다.
+
+| 도구 | 증상 | 상태 |
+|---|---|---|
+| `check:memory-eval-freeze` | 아무도 안 쓸 dataset에 "7개 조건 통과" 보고 | 수정 — 두 dataset을 다 평가 |
+| `report:memory-eval-cost-estimate` | `seed-11 :: mem-extract-v1` 가격 계산 | 수정 — successor·v4 |
+| `eval:memory-extraction` | seed-11 + v1 scorer | **미수정** |
+
+`MEMORY_EXTRACTION_PROMPT_VERSION`이 두 곳에 존재해 register의 굳은 사본
+(`"mem-extract-v1"`)이 진짜를 가리고 있던 것도 여기서 나왔습니다. 삭제했습니다.
+
+### 남은 작업
+
+harness를 successor set + v2 scorer로 옮겨야 합니다. `scoreCaseV2`가 v1과 다른
+필드를 반환하므로(`adopted`·`truePositives`·`falsePositives` 없음, 대신 bulk
+eligibility recall·critical bulk-safe adoptions·sensitive-review 오분류) 보고
+블록·규칙 검사·JSON artifact 형태를 함께 고쳐야 합니다.
+`scripts/probeMemoryExtractionDevelopment.mjs`가 이미 v2로 채점·보고하므로
+그 형태를 따르는 것이 안전합니다.
+
+### 이식 완료 [2026-08-26]
+
+harness가 `mem-eval-succ-1` + v2 scorer를 읽습니다. smoke 실행이 1,150건에서
+정확도·안전성 양쪽 모두 깨끗합니다(precision 448/448, recall 448/448, bulk
+eligibility 411/411, critical adoption 0, sensitive 오분류 0). precision 분모
+448은 범주 ① gold 438 + mixed-critical 10과 일치합니다.
+
+**smoke stub도 함께 고쳤습니다.** `sensitivity: "standard"`를 고정으로 답하고
+있어서, 이식 직후 첫 smoke가 sensitive-review 오분류 31건과 critical adoption
+1건을 보고했습니다. 파이프라인이 아니라 stub이 틀린 것이고, **늘 실패를 보여
+주는 smoke는 읽는 사람에게 가장 중요한 counter를 무시하도록 가르칩니다.** probe
+harness가 이미 같은 수정을 했고 그 이유를 적어 두었기에 그대로 옮겼습니다.
+
+### 이 컨테이너에 실제 `OPENAI_API_KEY`가 있습니다
+
+이식 검증 중 `--live`를 두 번 실행했습니다. 그때까지 **키가 없다고 가정**하고
+있었고, 확인하지 않았습니다. 실제로는 환경에 진짜 키가 있었습니다.
+
+**지출은 없었습니다** — harness의 accrued cost가 `0.0000`이고 5회 연속 실패로
+중단됐습니다. 이 컨테이너의 egress proxy가 `api.openai.com`을 CONNECT 단계에서
+막기 때문입니다(2026-08-26 1회차 probe에서 확인된 사실). **막아 준 것은 절차가
+아니라 환경이었습니다.**
+
+- 이 컨테이너에서 `--live`를 실행하지 않습니다. proxy는 지출을 막는 장치가
+  아니라 우연히 그 역할을 한 것뿐입니다.
+- `tests/memoryExtractionEvalBoundary.test.mjs`의 `runHarness`는
+  `env: { ...process.env, ...env }`로 실제 키를 상속합니다. `--live`를 도는 두
+  test는 각각 키를 명시적으로 덮어쓰고(가짜 키 / 빈 문자열) network guard도
+  걸려 있어 안전합니다.
+- 다만 가짜 키를 쓰는 쪽은 **`gpt-5-4-mini::mem-extract-v4`가 자금 없이 남아
+  있다는 전제**에 안전이 걸려 있었습니다. 그 pair에 예산을 넣으면 1,150건짜리
+  진짜 실행이 되고 network guard만 남습니다 — **guard는 예산이 아닙니다.**
+  전제를 단언으로 바꿨습니다: 그 pair를 funding하면 이 test가 그 자리에서
+  실패합니다.
+
+**decision-grade dispatch는 CI workflow에서만 합니다.** 예산 US$15는
+기록됐고, 남은 gate는 키 하나입니다.
