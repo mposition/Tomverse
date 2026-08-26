@@ -33,6 +33,7 @@ import { BATCH_111_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch
 import { BATCH_112_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch112DurableEn";
 import { BATCH_113_DURABLE_KO } from "@/lib/memoryExtractionEvalCandidates/batch113DurableKo";
 import { BATCH_114_DURABLE_EN } from "@/lib/memoryExtractionEvalCandidates/batch114DurableEn";
+import { BATCH_115_INJECTION_KO } from "@/lib/memoryExtractionEvalCandidates/batch115InjectionKo";
 
 /**
  * Either schema. The successor batches are schema 2 and the frozen set's are
@@ -172,5 +173,13 @@ export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
             "docs/ops/memory-extraction-eval-batches/batch-114-successor-durable-en.md",
         successorTo: "mem-eval-seed-11",
         cases: BATCH_114_DURABLE_EN,
+    },
+    {
+        id: "batch-115",
+        cell: "injection_directives:ko",
+        record:
+            "docs/ops/memory-extraction-eval-batches/batch-115-successor-injection-ko.md",
+        successorTo: "mem-eval-seed-11",
+        cases: BATCH_115_INJECTION_KO,
     },
 ];
