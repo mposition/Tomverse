@@ -235,9 +235,25 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             owner: "@mposition",
             registeredAt: "2026-08-26",
             notes:
-                "Awaiting a human eval-budget approval (§12.5). Not runnable " +
-                "live until the schema-2 dataset is adopted and frozen.",
-            evalBudget: null,
+                "Development probe only. US$1 approved 2026-08-26 for the " +
+                "17-case probe that checks the amended contract produces a " +
+                "readable number. A decision-grade run needs its own approval.",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // **Probe-scoped, deliberately.** The 17-case development
+                // probe costs well under a cent at v2's observed rate; the
+                // dollar is headroom, not an estimate.
+                //
+                // Not the US$11.57-worst-case figure a decision-grade run
+                // needs, because that approval should rest on the probe's
+                // answer. mem-extract-v2 spent US$0.0056 buying a precision of
+                // 0.12 that meant nothing, and a full run under a contract
+                // nobody had checked would have spent three to eleven dollars
+                // on the same kind of number. This buys the check first.
+                maxUsd: 1,
+                ticket: "https://github.com/mposition/Tomverse/issues/837",
+                approvedAt: "2026-08-26",
+            },
             evaluation: null,
         },
         {
