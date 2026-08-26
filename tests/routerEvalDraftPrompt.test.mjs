@@ -103,7 +103,7 @@ test("the quotas never round down to nothing", () => {
 });
 
 test("the template version moved with the rules it describes", () => {
-    assert.equal(DRAFT_TEMPLATE_VERSION, "router-eval-draft-v3");
+    assert.equal(DRAFT_TEMPLATE_VERSION, "router-eval-draft-v4");
 });
 
 // Wave 2's coding cell returned 7 of 14 prompts pointing at code that was not
@@ -233,4 +233,53 @@ test("a reply cut off before the first entry closes reports truncation, not sile
     const result = parseDraftedPrompts('[\n  {"prompt": "여기서 잘림');
     assert.deepEqual(result.prompts, []);
     assert.equal(result.truncated, true);
+});
+
+// --- v4 -------------------------------------------------------------------
+
+// "One sentence, no second request attached" and "include the earlier
+// conversation" cannot both hold, and Wave 3's Korean cell satisfied the first
+// by dropping the history -- producing a prompt that named no process and could
+// only be answered by asking which one. The quota is lifted here rather than
+// left to compete with the thing the stratum measures.
+test("the long-context stratum is not asked for short prompts", () => {
+    const longContext = draftInstruction({
+        ...base,
+        stratum: "long_context_conversation",
+        cell: "ko",
+    });
+    assert.doesNotMatch(longContext, /must be SHORT/);
+    assert.match(longContext, /Referring to it is/);
+    assert.match(longContext, /however long that makes it/);
+
+    // Every other stratum still carries it.
+    for (const stratum of ["coding", "writing_and_rewriting", "current_information"]) {
+        assert.match(draftInstruction({ ...base, stratum, cell: "ko" }), /must be SHORT/);
+    }
+});
+
+// The constraint quota is unaffected: it does not fight the history rule.
+test("lifting the short quota leaves the constraint quota in place", () => {
+    assert.match(
+        draftInstruction({ ...base, stratum: "long_context_conversation", cell: "ko" }),
+        /AT LEAST 5 must carry a real constraint/
+    );
+});
+
+// Twelve of fourteen analysis prompts landed in software engineering, which
+// measures that field rather than reasoning in several steps.
+test("the analysis stratum is told to range across walks of life", () => {
+    assert.match(
+        draftInstruction({ ...base, stratum: "analysis_and_reasoning", cell: "en" }),
+        /Range across walks of life, not one field/
+    );
+});
+
+// A drafter treats its training horizon as the present, so it wrote 2024 and
+// 2025 into prompts read in 2026 -- turning "what is current" into history.
+test("current information may not name a literal year", () => {
+    assert.match(
+        draftInstruction({ ...base, stratum: "current_information", cell: "ko" }),
+        /Do not write a literal year/
+    );
 });
