@@ -36,10 +36,15 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+// The successor set, for the same reason the harness reads it: a §12.4 blind
+// review is of a decision-grade run, and only mem-eval-succ-1 can produce
+// one. Pointed at the frozen schema-1 set this script would refuse every real
+// artifact on the digest guard below — safe, but it would have looked like
+// the artifact was wrong rather than the script.
 import {
-    MEMORY_EVAL_CASES,
-    MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryExtractionEvalFixtures.ts";
+    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
+    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryEvalSuccessorFixtures.ts";
 import { datasetFingerprintInput } from "../lib/memoryExtractionEvalCore.ts";
 
 const argValue = (name, fallback) => {
