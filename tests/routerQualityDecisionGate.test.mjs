@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decisionRunRefusals, evalSampleDigest, freezeDrift } from "../lib/routerQualityEvalSet.ts";
+import {
+    decisionRunRefusals,
+    evalSampleDigest,
+    freezeDrift,
+    runParameterMismatches,
+} from "../lib/routerQualityEvalSet.ts";
 
 const CELLS = [
     ["general_question_answering", "ko"], ["general_question_answering", "en"],
@@ -36,6 +41,8 @@ const set = (overrides = {}) => {
         frozenBy: "mposition",
         cellTargets: CELLS.map(([stratum, cell]) => ({ stratum, cell, target: 14 })),
         baseline: { modelId: "gpt-5-6-luna" },
+        judge: { modelId: "gpt-5-6-luna" },
+        seed: { value: 20260826 },
         pilotReady: true,
         items: items(14),
         ...overrides,
@@ -172,4 +179,66 @@ test("the digest survives a malformed attachment rather than throwing", () => {
     const malformed = set();
     malformed.items = [{ ...malformed.items[0], attachments: "image/png" }, ...malformed.items.slice(1)];
     assert.doesNotThrow(() => evalSampleDigest(malformed));
+});
+
+// --- judge and seed --------------------------------------------------------
+
+test("a set with no judge or seed pre-registered is refused", () => {
+    const refusals = decisionRunRefusals(set({ judge: null, seed: null }));
+    assert.deepEqual(refusals, [
+        "no judge is pre-registered, so nothing fixes who grades the pairs",
+        "no seed is pre-registered, so the arm ordering was not fixed in advance",
+    ]);
+});
+
+const run = (overrides = {}) => ({
+    mode: "pilot",
+    baselineModelId: "gpt-5-6-luna",
+    judgeModelId: "gpt-5-6-luna",
+    seed: 20260826,
+    ...overrides,
+});
+
+test("the pre-registered configuration passes", () => {
+    assert.deepEqual(runParameterMismatches(set(), run()), []);
+});
+
+// The report copies the set's pre-registration provenance in beside whatever
+// was passed on the command line, so an unchecked argument produces a record
+// naming a person and a date for a choice they never made.
+test("each run argument is checked against what the set registered", () => {
+    assert.deepEqual(runParameterMismatches(set(), run({ seed: 20260812 })), [
+        "--seed=20260812, but the set pre-registered 20260826",
+    ]);
+    assert.deepEqual(runParameterMismatches(set(), run({ judgeModelId: "claude-sonnet-5" })), [
+        "--judge=claude-sonnet-5, but the set pre-registered gpt-5-6-luna",
+    ]);
+    assert.deepEqual(runParameterMismatches(set(), run({ baselineModelId: "gpt-5-4-mini" })), [
+        "--baseline=gpt-5-4-mini, but the set pre-registered gpt-5-6-luna",
+    ]);
+    assert.equal(
+        runParameterMismatches(set(), run({ baselineModelId: "x", judgeModelId: "y", seed: 1 })).length,
+        3
+    );
+});
+
+// The bias run of docs/ops/tomverse-chat-router-evaluation-set.md §5 puts a
+// different model in the baseline arm on purpose: a judge
+// compared against itself measures nothing. Its judge and seed are still the
+// pre-registered ones.
+test("a bias run may differ in baseline, but not in judge or seed", () => {
+    const bias = run({ mode: "judge-bias", baselineModelId: "deepseek-v4-flash" });
+    assert.deepEqual(runParameterMismatches(set(), bias), []);
+    assert.deepEqual(runParameterMismatches(set(), { ...bias, seed: 7 }), [
+        "--seed=7, but the set pre-registered 20260826",
+    ]);
+});
+
+// A set that registered nothing cannot contradict anything. The refusal for
+// that state is decisionRunRefusals'; this function only reports disagreement.
+test("nothing registered is not a mismatch", () => {
+    assert.deepEqual(
+        runParameterMismatches(set({ baseline: null, judge: null, seed: null }), run({ seed: 1 })),
+        []
+    );
 });

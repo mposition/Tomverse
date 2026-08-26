@@ -193,6 +193,36 @@ export type EvalSetBaseline = {
   rationale: string;
 };
 
+/**
+ * Which model grades the pairs, fixed before the run.
+ *
+ * Separate from the baseline because they answer different questions and can
+ * be the same model without being the same decision: naming one as the thing
+ * to beat says nothing about whether it should also be the one deciding who
+ * won.
+ */
+export type EvalSetJudge = {
+  modelId: string;
+  preRegisteredAt: string;
+  preRegisteredBy: string;
+  rationale: string;
+};
+
+/**
+ * The seed the arm ordering is drawn from, fixed before the run.
+ *
+ * A seed chosen after seeing a result is a result chosen: the ordering decides
+ * which answer the judge reads first, and position bias is real. Recording it
+ * afterwards makes the run replayable; recording it beforehand makes it one
+ * run rather than the best of several.
+ */
+export type EvalSetSeed = {
+  value: number;
+  preRegisteredAt: string;
+  preRegisteredBy: string;
+  rationale: string;
+};
+
 export type EvalSet = {
   version: string;
   /** §7: two disjoint sets. Looking at the decision set costs a use. */
@@ -210,6 +240,8 @@ export type EvalSet = {
    */
   frozenDigest?: string | null;
   baseline: EvalSetBaseline | null;
+  judge?: EvalSetJudge | null;
+  seed?: EvalSetSeed | null;
   /**
    * docs/ops/tomverse-chat-router-evaluation-set.md §11's "Strata and cell targets frozen" record. A human entry: filled when
    * a person freezes the targets, and what `cellShortfalls` grades against.
@@ -397,6 +429,39 @@ export const evalSetProblems = (
     }
   }
 
+  const judge = candidate.judge;
+  if (!judge) {
+    problems.push("a decision set must pre-register its judge model");
+  } else {
+    for (const [label, value] of [
+      ["model id", judge.modelId],
+      ["pre-registration date", judge.preRegisteredAt],
+      ["pre-registering person", judge.preRegisteredBy],
+      ["rationale", judge.rationale],
+    ] as const) {
+      if (!isNonEmptyString(value)) problems.push(`the pre-registered judge has no ${label}`);
+    }
+  }
+
+  const seed = candidate.seed;
+  if (!seed) {
+    problems.push("a decision set must pre-register its seed");
+  } else {
+    // Zero is not a seed here: `seededRandom(0)` is what the runner falls back
+    // to when --seed is absent, so a stored 0 would read as a choice and act
+    // as an omission.
+    if (!(typeof seed.value === "number" && Number.isInteger(seed.value) && seed.value > 0)) {
+      problems.push("the pre-registered seed is not a positive integer");
+    }
+    for (const [label, value] of [
+      ["pre-registration date", seed.preRegisteredAt],
+      ["pre-registering person", seed.preRegisteredBy],
+      ["rationale", seed.rationale],
+    ] as const) {
+      if (!isNonEmptyString(value)) problems.push(`the pre-registered seed has no ${label}`);
+    }
+  }
+
   return problems;
 };
 
@@ -560,12 +625,53 @@ export const decisionRunRefusals = (set: EvalSet): readonly string[] => {
   if (!set.baseline?.modelId) {
     refusals.push("no baseline is pre-registered, so there is nothing to compare against");
   }
-  // The one condition the other four cannot stand in for: every one of them
-  // reads the set as it is now, and all four can be satisfied by a set edited
-  // this morning. This one asks whether it is still the set that was frozen.
+  if (!set.judge?.modelId) {
+    refusals.push("no judge is pre-registered, so nothing fixes who grades the pairs");
+  }
+  if (!set.seed?.value) {
+    refusals.push("no seed is pre-registered, so the arm ordering was not fixed in advance");
+  }
+  // The one condition the other conditions cannot stand in for: every one of
+  // them reads the set as it is now, and all of them can be satisfied by a set
+  // edited this morning. This one asks whether it is still the set that was
+  // frozen.
   const drift = freezeDrift(set);
   if (drift) refusals.push(drift);
   return refusals;
+};
+
+/**
+ * Where a run's arguments disagree with what the set pre-registered.
+ *
+ * The runner takes `--baseline`, `--judge` and `--seed` as free arguments and
+ * writes the set's pre-registration provenance into the report beside them. So
+ * a run could be given a model nobody registered and produce a record saying
+ * it was registered by a named person on a stated date -- the provenance would
+ * be true of the field it was copied from and false of the run it described.
+ *
+ * `mode` is read for one exception: the bias run of
+ * docs/ops/tomverse-chat-router-evaluation-set.md §5 deliberately puts a
+ * different model in the baseline arm, because a judge compared against itself
+ * measures nothing. Its judge and seed are still the pre-registered ones.
+ */
+export const runParameterMismatches = (
+  set: EvalSet,
+  run: { mode: string; baselineModelId: string; judgeModelId: string; seed: number }
+): readonly string[] => {
+  const mismatches: string[] = [];
+  const registered = set.baseline?.modelId;
+  if (run.mode !== "judge-bias" && registered && run.baselineModelId !== registered) {
+    mismatches.push(
+      `--baseline=${run.baselineModelId}, but the set pre-registered ${registered}`
+    );
+  }
+  if (set.judge?.modelId && run.judgeModelId !== set.judge.modelId) {
+    mismatches.push(`--judge=${run.judgeModelId}, but the set pre-registered ${set.judge.modelId}`);
+  }
+  if (set.seed?.value && run.seed !== set.seed.value) {
+    mismatches.push(`--seed=${run.seed}, but the set pre-registered ${set.seed.value}`);
+  }
+  return mismatches;
 };
 
 export const cellFill = (set: EvalSet): readonly CellFill[] => {

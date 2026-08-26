@@ -143,6 +143,21 @@ const checkSet = (path) => {
       ? `       ${drift}`
       : `       frozen ${set.frozenAt} by ${set.frozenBy}, sample digest verified`
   );
+  // The judge and the seed decide what the numbers mean as much as the
+  // baseline does: who grades, and which answer they read first. Printed here
+  // so a reader can see all three fixed points at once, or see one missing.
+  console.log(
+    set.judge?.modelId
+      ? `       judge ${set.judge.modelId}, pre-registered ${set.judge.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${set.judge.preRegisteredBy ?? "nobody named"}`
+      : "       no judge pre-registered — nothing fixes who grades the pairs"
+  );
+  console.log(
+    set.seed?.value
+      ? `       seed ${set.seed.value}, pre-registered ${set.seed.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${set.seed.preRegisteredBy ?? "nobody named"}`
+      : "       no seed pre-registered — the arm ordering was not fixed in advance"
+  );
 
   // A drafted item recording provider "unrecorded" satisfies the schema while
   // reconstructing nothing. Counted here so the gap is visible rather than

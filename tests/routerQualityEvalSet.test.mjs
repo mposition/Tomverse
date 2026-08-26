@@ -79,6 +79,18 @@ const decisionSetFields = (overrides = {}) => ({
     preRegisteredBy: "backend-ai-lead",
     rationale: "the shipping default, so non-inferiority is measured against what users get today",
   },
+  judge: {
+    modelId: "gpt-5-6-luna",
+    preRegisteredAt: "2026-08-01T00:00:00.000Z",
+    preRegisteredBy: "backend-ai-lead",
+    rationale: "reads both cell languages, and its self-preference is measured separately",
+  },
+  seed: {
+    value: 20260812,
+    preRegisteredAt: "2026-08-01T00:00:00.000Z",
+    preRegisteredBy: "backend-ai-lead",
+    rationale: "fixed before the run so this is one run rather than the best of several",
+  },
   cellTargets: [{ stratum: "general_question_answering", cell: "ko", target: 120 }],
   items: [
     item({ status: "adopted", adoptedBy: "qa-lead", adoptedAt: "2026-08-05", source: "real" }),
@@ -340,4 +352,29 @@ test("the gate check refuses a pilot report as ROUTE-01 evidence", { timeout: 12
   assert.equal(code, 1, "a pilot report was accepted as ROUTE-01 evidence");
   assert.match(output, /only --mode=decision produces ROUTE-01 evidence/);
   assert.match(output, /§7 keeps separate/);
+});
+
+test("a decision set must pre-register a complete judge and seed", () => {
+  assert.match(evalSetProblems(decisionSet({ judge: null })).join(" "), /pre-register its judge/);
+  assert.match(evalSetProblems(decisionSet({ seed: null })).join(" "), /pre-register its seed/);
+  for (const field of ["modelId", "preRegisteredAt", "preRegisteredBy", "rationale"]) {
+    const judge = { ...decisionSet().judge, [field]: "" };
+    assert.ok(
+      evalSetProblems(decisionSet({ judge })).length > 0,
+      `an empty judge ${field} should be reported`
+    );
+  }
+});
+
+// seededRandom(0) is the runner's fallback when --seed is absent, so a stored
+// 0 would read as a choice and act as an omission.
+test("a seed of zero, or a non-integer, is not a pre-registered seed", () => {
+  for (const value of [0, -1, 1.5, "20260812", null]) {
+    const seed = { ...decisionSet().seed, value };
+    assert.match(
+      evalSetProblems(decisionSet({ seed })).join(" "),
+      /seed is not a positive integer/,
+      `${JSON.stringify(value)} should be rejected`
+    );
+  }
 });
