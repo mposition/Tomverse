@@ -23,7 +23,19 @@ async function installClipboardMock(page: Page) {
 
 async function openSidebarOnMobile(page: Page) {
   if (await page.getByTestId("mobile-chat-shell").isVisible()) {
-    if (await page.getByRole("dialog", { name: "Tomverse Review" }).isVisible()) {
+    // The drawer is already open whenever a test reaches for the account or
+    // conversation menu a second time: closing the menu does not close the
+    // drawer behind it. Clicking the header button again would land on the
+    // drawer's own full-viewport scrim, so the click retries until the test
+    // times out rather than quietly doing nothing.
+    //
+    // Identify the open drawer by its test id, never by its accessible name.
+    // That name is `sidebar.title`, which is a *brand* string: when the brand
+    // layer cutover renamed it from "Tomverse Review" to "Tomverse" this guard
+    // stopped matching anything at all, and the two specs that reopen a menu
+    // failed on every commit to main -- holding up production deploys, because
+    // the app service waits on this workflow's check suite.
+    if (await page.getByTestId("mobile-sidebar-drawer").isVisible()) {
       return;
     }
 
