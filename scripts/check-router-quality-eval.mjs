@@ -27,6 +27,7 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { evaluationRecordProblems } from "../lib/routerQualityEvalCore.ts";
 import {
   cellFill,
+  freezeDrift,
   evalSetProblems,
   unrecordedProvenanceItems,
 } from "../lib/routerQualityEvalSet.ts";
@@ -119,6 +120,29 @@ const checkSet = (path) => {
         (set.pilotReady === true ? "  [pilotReady]" : "  [collection in progress]")
     );
   }
+
+  // The baseline decides what a run is compared against, so a run reported
+  // without one has no verdict in it. Printed next to the fill because the two
+  // together are what docs/ops/tomverse-chat-router-evaluation-set.md §11 asks of
+  // a set before it is frozen: a stated target, and a stated thing to beat.
+  const baseline = set.baseline ?? null;
+  console.log(
+    baseline?.modelId
+      ? `\n       baseline ${baseline.modelId}, pre-registered ${baseline.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${baseline.preRegisteredBy ?? "nobody named"}, catalogue ${baseline.catalogueVersion ?? "unpinned"}`
+      : "\n       no baseline pre-registered — a run against this set would have nothing to beat"
+  );
+  // freezeDrift, not `set.frozenAt`: a date in the file says a person typed
+  // one, and the question a reader has is whether the set still holds what was
+  // frozen. Reported for a development set too -- it is not a failure there,
+  // but it is the same fact, and a check that only mentions drift once it is
+  // fatal teaches nobody to look for it.
+  const drift = freezeDrift(set);
+  console.log(
+    drift
+      ? `       ${drift}`
+      : `       frozen ${set.frozenAt} by ${set.frozenBy}, sample digest verified`
+  );
 
   // A drafted item recording provider "unrecorded" satisfies the schema while
   // reconstructing nothing. Counted here so the gap is visible rather than

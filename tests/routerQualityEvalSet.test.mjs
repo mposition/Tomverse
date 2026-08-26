@@ -9,6 +9,7 @@ import {
   EVAL_CELLS,
   EVAL_STRATA,
   adoptedItems,
+  evalSampleDigest,
   evalSetProblems,
   uniformCellTargets,
 } from "../lib/routerQualityEvalSet.ts";
@@ -58,7 +59,15 @@ const developmentSet = (overrides = {}) => ({
   ...overrides,
 });
 
-const decisionSet = (overrides = {}) => ({
+// frozenDigest is derived rather than written in, so a test that changes the
+// items keeps testing what it changed instead of tripping the freeze check.
+// The drift tests set it by hand.
+const decisionSet = (overrides = {}) => {
+  const base = decisionSetFields(overrides);
+  return { frozenDigest: evalSampleDigest(base), ...base };
+};
+
+const decisionSetFields = (overrides = {}) => ({
   version: "router-eval-decision-v1",
   purpose: "decision",
   frozenAt: "2026-08-10T00:00:00.000Z",
@@ -250,10 +259,29 @@ test("the committed candidate pool is well formed and covers every cell", () => 
       assert.ok(covered.has(`${stratum}/${cell}`), `the pool has no item for ${stratum}/${cell}`);
     }
   }
-  // §8: a model-drafted pool is a candidate pool. Nothing here is adopted, and
-  // adoption is not something this repository can perform.
-  assert.equal(adoptedItems(set).length, 0);
-  assert.ok(set.items.every((entry) => entry.status === "candidate"));
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8: a model-drafted pool is
+  // a candidate pool, and adoption is a human act. This used to assert that
+  // nothing was adopted, which held only until a person adopted something --
+  // it fixed a state rather than the rule. The rule is that an adopted item
+  // names who adopted it and when; an agent writing `adopted` has no adopter
+  // to name, so the assertion still catches exactly what it was for.
+  for (const entry of set.items) {
+    assert.ok(
+      entry.status === "candidate" || entry.status === "adopted",
+      `${entry.id} has status ${entry.status}`
+    );
+    if (entry.status === "adopted") {
+      assert.ok(entry.adoptedBy, `${entry.id} is adopted but names no adopter`);
+      assert.ok(entry.adoptedAt, `${entry.id} is adopted but records no date`);
+    } else {
+      assert.equal(entry.adoptedBy, null, `${entry.id} is a candidate but names an adopter`);
+      assert.equal(entry.adoptedAt, null, `${entry.id} is a candidate but records a date`);
+    }
+  }
+  assert.equal(
+    adoptedItems(set).length,
+    set.items.filter((entry) => entry.status === "adopted").length
+  );
 });
 
 // The gate check is the thing an operator runs before citing a report, so its
