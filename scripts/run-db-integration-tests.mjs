@@ -1,6 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
+import {
+  DB_INTEGRATION_GROUPS,
+  dbIntegrationGroupOf,
+} from "./db-integration-groups.mjs";
+
 const fail = (message) => {
   console.error(`DB integration test safety check failed: ${message}`);
   process.exit(1);
@@ -74,9 +79,41 @@ const testEnvironment = {
   CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "100000000",
 };
 
+/**
+ * Which lane this process runs. Unset runs everything, which is what a
+ * developer wants locally and what `workflow_dispatch` gives an operator who
+ * wants one answer rather than seven.
+ */
+const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
+if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+  fail(
+    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+  );
+}
+if (group) {
+  console.log(`[db-integration] Lane ${group}. Suites outside it run elsewhere.`);
+}
+
+/**
+ * Runs a step, dropping the suites that belong to another lane.
+ *
+ * Filtering here rather than at each call site is what lets the list below
+ * stay one ordered list with its reasoning attached: every `run()` keeps every
+ * file it always named, and a lane simply skips the ones that are not its own.
+ *
+ * A step whose arguments name no suite at all -- the Prisma schema build -- is
+ * never filtered. Each lane gets its own database and has to build it.
+ */
 const run = (args, label) => {
+  const suites = args.filter((arg) => arg.startsWith("tests/"));
+  let selected = args;
+  if (group && suites.length > 0) {
+    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    if (mine.length === 0) return;
+    selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
+  }
   console.log(`\n[db-integration] ${label}`);
-  const result = spawnSync(process.execPath, args, {
+  const result = spawnSync(process.execPath, selected, {
     cwd: resolve(import.meta.dirname, ".."),
     env: testEnvironment,
     stdio: "inherit",
@@ -232,6 +269,10 @@ run(
     // the marketing sending stream.
     "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
+    // Opening one audit row by id. The property is the relationship between two
+    // reads of the same table -- the newest-N window and the single-row read --
+    // so a single process with no database proves neither.
+    "tests/integration/admin-audit-row-by-id.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
@@ -291,6 +332,7 @@ run(
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
     "tests/integration/assistant-package-import.db.test.ts",
+    "tests/integration/assistant-package-import-flag.db.test.ts",
     "tests/integration/assistant-package-export.db.test.ts",
     // Release C3c: which row the runtime reads for a profile-backed turn --
     // Policy: docs/policy/external-conversation-import-and-memory.md.

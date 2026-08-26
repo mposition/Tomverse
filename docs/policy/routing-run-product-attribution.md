@@ -64,24 +64,55 @@ PostgreSQL은 PRIMARY KEY와 UNIQUE에는 인덱스를 만들지만, 외래 키�
 
 ### 안 B — writer coverage (**채택**)
 
-- `RoutingRun`을 만드는 곳은 `lib/routingDispatchInstrumentation.ts`의
-  `beginInstrumentedDispatch` **한 곳**입니다. `Conversation`의 writer가 셋이라
-  공통 서비스와 정적 검사가 필요했던 것과 달리, 여기는 이미 하나입니다.
-- 그 한 곳이 `conversationId`가 있는 turn에 대해 `productKey`를 **반드시** 함께
-  받도록 하고, 테스트가 그것을 고정합니다.
+> **정정 (2026-08-24).** 이 절은 원래 *"`RoutingRun`을 만드는 곳은
+> `beginInstrumentedDispatch` **한 곳**"*이라고 썼습니다. **사실이 아니었고,
+> 쓰인 시점에 이미 아니었습니다.** 아래에 실제 writer 둘을 적습니다. 채택안은
+> 유지하되, 근거를 "하나뿐이라 안전하다"에서 "둘 다 덮었고 테스트가 고정한다"로
+> 바꿉니다.
+
+- `RoutingRun`을 만드는 곳은 **둘**입니다.
+
+  | writer | 쓰는 행 | `conversationId`·`productKey` |
+  |---|---|---|
+  | `lib/routingDispatchInstrumentation.ts`의 `beginInstrumentedDispatch` | 디스패치된 turn | 채움 |
+  | `lib/routingShadow.ts`의 `recordRoutingShadowRun` | shadow 평가 | 채움 (2026-08-24부터) |
+
+- 두 곳 모두 호출부에서 두 값을 받습니다. `app/api/chat/route.ts`의 같은 스코프에
+  `conversationId`와 `conversationProductKey`가 이미 있으므로, shadow 쪽이 그것을
+  안 넘기고 있었을 뿐입니다.
+- 테스트가 고정합니다 — `tests/routingShadow.test.mjs`가 두 값이 실려 나가는 것과,
+  대화가 없을 때 **필드가 사라지지 않고 `null`로 남는** 것을 각각 봅니다.
+  되돌리면 그 둘이 실패하는 것까지 확인했습니다.
 - 허용값은 여전히 DB가 강제합니다 — `RoutingRun_product_key_check`가
   `Conversation_product_key_check`와 같은 목록을 NOT VALID로 들고 있으므로,
-  `insight`나 `code`가 들어오면 거부됩니다. **막지 못하는 것은 누락뿐이고, 누락은
-  writer가 하나이므로 검사 가능한 범위 안에 있습니다.**
+  `insight`나 `code`가 들어오면 거부됩니다. **막지 못하는 것은 누락이고, 누락은
+  writer 수만큼의 검사 대상입니다.**
 
 **근거**: 저장소 관례는 "제약은 잘못된 값을, 코드와 테스트는 누락을"입니다
 (`docs/policy/conversation-product-key.md` §5). 안 A는 유지 비용이 상수 하나에
 묶여 있고 정당한 NULL 때문에 예외를 요구하는데, 그 예외가 바로 구멍입니다.
 
+### 이 결정이 어떻게 뚫렸는가
+
+원래 "다시 볼 조건"은 *"두 번째 writer가 생기면 이 결정을 다시 읽는다"*였습니다.
+**두 번째 writer는 생긴 것이 아니라 이미 있었습니다.** 조건이 미래형으로 쓰였기
+때문에, 이미 충족돼 있다는 사실을 아무도 확인하지 않았습니다.
+
+발견은 코드 리뷰가 아니라 **staging 실행**에서 나왔습니다. 한 turn 뒤에 행이 둘
+쓰였고, `manual` 행은 대화를 담았는데 2초 뒤 `shadow` 행은 비어 있었습니다
+(`docs/ops/product-boundary-v1-2-staging-verification-records/`의 2026-08-24 기록,
+발견-1).
+
 ### 다시 볼 조건
 
-`RoutingRun`을 만드는 두 번째 writer가 생기면 이 결정을 다시 읽습니다. 그때는
-`Conversation`이 그랬듯 공통 서비스 + 정적 검사가 필요해집니다.
+**`RoutingRun`을 만드는 세 번째 writer가 생기면** 이 결정을 다시 읽습니다. 그때는
+`Conversation`이 그랬듯 공통 서비스 + 정적 검사(`check:conversation-writers`에
+해당하는 것)가 필요해집니다.
+
+지금은 만들지 않았습니다. writer가 둘이고 둘 다 같은 호출부에서 같은 두 변수를
+받으므로, 검사 하나를 더 유지하는 비용이 그것이 막는 위험보다 큽니다. **그 판단이
+뒤집히는 지점이 세 번째 writer입니다** — 이 문단이 그 지점을 미래형이 아니라
+**세는 방법**으로 적어 두는 이유입니다.
 
 ## 6. 과거 행을 추정하지 않습니다
 

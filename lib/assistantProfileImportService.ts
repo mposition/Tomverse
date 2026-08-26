@@ -354,6 +354,50 @@ async function touchImport(
  * it. Content, digests and storage keys are not here for the reason §9 keeps
  * them out of every response.
  */
+/**
+ * The account's imports that are still staging.
+ *
+ * The wizard has no state of its own between page loads, so without this an
+ * import interrupted at step 7 or 8 is unreachable: `create` mode can be
+ * cleared by deleting the draft profile it made, but `merge` stages into a
+ * profile the owner actually uses, and deleting that is not a way out. The
+ * only remaining exit was the 24-hour idle sweep, during which the profile
+ * refuses ordinary publishing.
+ *
+ * Counts and names, not manifests: this answers "is anything waiting, and
+ * against what" for a list. `readProfileImport()` is what resuming reads.
+ */
+export async function listStagingImports(userId: string) {
+    const rows = await prisma.assistantProfileImport.findMany({
+        where: { userId, status: "staging" },
+        orderBy: { createdAt: "asc" },
+        select: {
+            id: true,
+            mode: true,
+            profileId: true,
+            createdAt: true,
+            idleExpiresAt: true,
+            absoluteExpiresAt: true,
+            profile: { select: { name: true, currentVersionId: true } },
+            _count: { select: { stagedFiles: true } },
+        },
+    });
+    return rows.map((row) => ({
+        id: row.id,
+        mode: row.mode,
+        profileId: row.profileId,
+        profileName: row.profile.name,
+        // A `create` import's profile is the draft it made itself, which is
+        // not something the owner chose a name for -- saying "merging into
+        // Scheduling helper" about it would be false.
+        published: row.profile.currentVersionId !== null,
+        fileCount: row._count.stagedFiles,
+        createdAt: row.createdAt,
+        idleExpiresAt: row.idleExpiresAt,
+        absoluteExpiresAt: row.absoluteExpiresAt,
+    }));
+}
+
 export async function readProfileImport(input: {
     userId: string;
     importId: string;

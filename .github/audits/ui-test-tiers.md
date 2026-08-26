@@ -11,7 +11,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 |---|---|---|---|---|
 | PR static | `pr-fast-gate.yml` | `npm run check:accent-tokens` (UI-012 역할 token 강제) | 모든 PR | 예 |
 | PR contract | `pr-fast-gate.yml` | `npm run test:e2e:smoke` (`--grep=@smoke`, `desktop-chromium`) | 모든 PR | 예 |
-| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk` (`--grep=@ui-risk`, `desktop-chromium` + `mobile-chromium`) | 모든 PR | 예 |
+| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk:shard -- --shard=i/2` (`--grep=@ui-risk`, `desktop-chromium` + `mobile-chromium` × 2 shard = 4 job) | 모든 PR | 예 |
 | Main regression | `e2e.yml` | `npm run test:e2e:chromium` (필터 없음) | `main` push | 아니오 |
 | Nightly visual | `nightly-visual-regression.yml` | `npm run test:e2e:visual -- --retries=0` | 매일 | 아니오 |
 | Nightly full | `daily-security-audit.yml` | `npm run test:e2e:run` (chromium + webkit, 필터 없음) | 매일 | 아니오 |
@@ -42,8 +42,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-23 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **33개 파일, 752 test**를 선택합니다.
+실측: 2026-08-26 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니다
+(project당 708).
 
 | Spec |
 |---|
@@ -75,6 +76,99 @@ mobile-chromium 두 project에서 **33개 파일, 752 test**를 선택합니다.
 | `signin-analytics-placement.spec.ts` |
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
+| `chat-keyboard-policy.spec.ts` |
+| `chat-tools.spec.ts` |
+| `comparison-action-rail.spec.ts` |
+| `comparison-rate-limit.spec.ts` |
+| `credit-entitlement-disclosure.spec.ts` |
+| `guest-account-identity-transition.spec.ts` |
+| `guest-attachment-ai-review-flow.spec.ts` |
+| `guest-turnstile-verification.spec.ts` |
+| `image-generation-workspace.spec.ts` |
+| `mobile-composer-contract.spec.ts` |
+| `mobile-header-spacing.spec.ts` |
+| `mobile-message-visibility.spec.ts` |
+| `model-finder.spec.ts` |
+| `model-picker.spec.ts` |
+| `plan-change-dialog.spec.ts` |
+| `pricing-purchase-cta.spec.ts` |
+| `web-search-composer-state.spec.ts` |
+
+2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
+project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
+`AGENTS.md`·`docs/ui-contracts/`·`docs/policy/`가 **릴리스 차단**이라고 이름을
+댄 spec 중 PR tier에 없던 전부입니다.
+
+근거는 이날 실제로 일어난 일입니다. native search 비용 상한(#1015)이 어떤
+모델을 web search 가능으로 세는지 바꿨는데, `mobile-message-visibility.spec.ts`
+가 PR tier에 없어서 그 PR의 게이트는 깨끗하게 통과했습니다. 낡은 기대값은
+`main`에서 드러났고, 거기서 Main Chromium Regression은 Railway 배포를
+게이트하므로 production 배포 다섯 건이 네 시간 가까이 SKIP됐습니다. **PR이
+계약 spec으로 실패할 수 없으면, 리뷰 코멘트로 끝날 일이 배포 장애가 됩니다.**
+
+같은 기준을 만족하지만 일부러 제외한 것이 하나 있습니다 — 아래 "PR tier에
+두지 않는 것"이 이름을 댄 golden spec입니다. 그 결정이 그대로 유효하고,
+golden baseline은 `visual-baseline/**` 사람 diff 절차를 지납니다. 여기에
+파일명을 적지 않는 것은 `check:ui-tier-coverage`가 이 절의 spec 언급을
+tier 소속으로 읽기 때문입니다.
+
+이 합류로 tier가 예산의 어디쯤에 왔는지는 따로 적어 둡니다. CI 실측
+(2026-08-26, PR Fast Gate run 32936185087, 25분 job 예산은 install·build·test를
+함께 덮습니다):
+
+| Project | test 단계 | job 전체 | 예산 대비 |
+|---|---|---|---|
+| desktop-chromium | 18분 51초 | **20분 15초** | 81% |
+| mobile-chromium | 11분 08초 | 14분 16초 | 57% |
+
+**같은 test 목록을 돌리는데도 두 project의 비용이 대칭이 아니고, desktop은
+남은 여유가 5분이 안 됐습니다.** 81%는 여유가 아니고, 그 상태가 사는 실패는
+이 job이 `build-and-e2e`에서 분리돼 나온 바로 그 실패입니다 — 모든 test가
+통과하는 중에 timeout이 나서, 제품에 대해 아무 말도 안 하는 빨간 required
+check가 됩니다.
+
+그래서 같은 변경에서 **project마다 shard 2개**로 나눴습니다(2 × 2 = 4 job).
+`scripts/run-ui-risk-shard.mjs`가 예고한 파일 단위 샤딩이며, 스크립트는 고칠
+것이 없었습니다 — project flag 뒤의 인자를 그대로 Playwright에 넘깁니다.
+
+**shard 수는 추측이 아니라 실측입니다.** `--shard`는 test count로 나누지
+work로 나누지 않고, `e2e.yml`이 개수는 맞는데 work는 안 맞았던 3분할을
+기록해 두었습니다(skip이 고르게 퍼지지 않기 때문). 그래서 desktop을 실제로
+갈라 재 봤습니다.
+
+| Shard | 시간 | passed | skipped |
+|---|---|---|---|
+| 1/2 | 7분 38초 | 349 | 20 |
+| 2/2 | 6분 51초 | 306 | 33 |
+| (분할 없음) | 13분 56초 | 654 | 53 |
+
+53/47로 갈리므로 느린 shard가 전체의 약 55%입니다.
+
+로컬 값은 예산 판단의 근거로 쓰지 않습니다 — 이 컨테이너의 desktop 측정은
+13분 56초로 CI의 18분 51초보다 한참 낮았습니다. 위 표는 **비율**을 정하는
+데만 썼고, 예산 판정은 CI 실측입니다(run 32939237227, 4개 job 전부 통과):
+
+| Job | job 전체 | 예산 대비 |
+|---|---|---|
+| desktop-chromium 1/2 | 10분 10초 | 41% |
+| desktop-chromium 2/2 | 9분 09초 | 37% |
+| mobile-chromium 1/2 | 7분 46초 | 31% |
+| mobile-chromium 2/2 | 7분 35초 | 30% |
+
+**가장 무거운 job이 81%에서 41%로 내려갔고, 53/47 비율은 CI에서도 유지됐습니다**
+— `e2e.yml`이 겪은 count-vs-work 편향은 이 tier에서는 나타나지 않았습니다.
+shard를 하나 더 늘리면 job마다 고정으로 드는 약 1분 30초(setup·build)에 비해
+얻는 것이 적고 runner만 하나 더 씁니다.
+
+합류한 것: `chat-keyboard-policy` · `chat-tools` · `comparison-action-rail` ·
+`comparison-rate-limit` · `credit-entitlement-disclosure` ·
+`guest-account-identity-transition` · `guest-attachment-ai-review-flow` ·
+`guest-turnstile-verification` · `image-generation-workspace` ·
+`mobile-composer-contract` · `mobile-header-spacing` ·
+`mobile-message-visibility` · `model-finder` · `model-picker` ·
+`plan-change-dialog` · `pricing-purchase-cta` · `web-search-composer-state`.
+
+그 이전 기록은 다음과 같습니다.
 
 검토 시점 실측(2026-08-23, `--list`): **33개 파일 752 test** (두 project 합계).
 `answer-header-layout.spec.ts`(+8 — 이 spec을 빼고 다시 재면 32개 파일

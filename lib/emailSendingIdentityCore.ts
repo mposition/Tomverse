@@ -102,7 +102,7 @@ export const rootDomainOf = (domain: string) =>
  * address, not something a deploy may do by editing a default. The health
  * check reports the gap instead.
  */
-export const TRANSACTIONAL_FROM_FALLBACK = "Tomverse Review <hello@tomverse.app>";
+export const TRANSACTIONAL_FROM_FALLBACK = "Tomverse <hello@tomverse.app>";
 
 /**
  * The variables each stream reads, most specific first.

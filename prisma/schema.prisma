@@ -75,7 +75,6 @@ model User {
   imageGenerationGroups                ImageGenerationGroup[]
   imageCreditReservations              ImageCreditReservation[]
   memoryExtractionCreditReservations   MemoryExtractionCreditReservation[]
-  adminAuditLogs                       AdminAuditLog[]
   adminNotes                           AdminNote[]
   modelOverrides                       ModelOverride[]
   conversations                        Conversation[]
@@ -148,8 +147,8 @@ model UserSettings {
   ///
   /// Default false, and false is the whole behaviour for an account that never
   /// opts in.
-  imageHandoffAutoGenerate Boolean  @default(false)
-  timeZoneChangedAt       DateTime?
+  imageHandoffAutoGenerate Boolean   @default(false)
+  timeZoneChangedAt        DateTime?
 
   /// The account's own statement of where it is, used to decide which
   /// jurisdiction's email rules apply. Deliberately separate from the IP
@@ -324,6 +323,27 @@ model Conversation {
   /// stops naming a profile.
   assistantProfileVersionId String?
   assistantProfileVersion   AssistantProfileVersion? @relation(fields: [assistantProfileVersionId], references: [id], onDelete: SetNull)
+
+  /// When the profile this conversation was using was deleted.
+  ///
+  /// `SetNull` above is what makes this column necessary. Once the profile is
+  /// gone its versions go with it and `assistantProfileVersionId` becomes
+  /// NULL, so the conversation reads exactly like one that never had an
+  /// assistant -- and that is what the composer showed: `어시스턴트 없음`,
+  /// with nothing to say the assistant had been removed. A staging round on
+  /// 2026-08-25 recorded that as §G-2; the owner only found out by opening the
+  /// menu.
+  ///
+  /// Only the time is kept, not the profile's name. The owner asked for that
+  /// profile to be deleted, and copying its name onto every conversation it
+  /// touched would be keeping the thing they removed. The time is enough for
+  /// the sentence the screen owes them: this conversation's assistant was
+  /// deleted.
+  ///
+  /// Cleared whenever the conversation's profile binding changes by either
+  /// route -- attaching a new assistant or detaching on purpose. After that
+  /// the deletion is no longer what the current state is explained by.
+  assistantProfileRemovedAt DateTime?
 
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
@@ -1787,7 +1807,13 @@ model AdminAuditLog {
   entryHash    String?  @unique
   createdAt    DateTime @default(now())
 
-  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  /// No relation on purpose: see
+  /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
+  /// `actorUserId` is part of this row's HMAC input, so a foreign-key action
+  /// rewriting it makes an audit entry indistinguishable from a forged one --
+  /// which is what ON DELETE SET NULL did to eight rows on staging. The
+  /// column records who acted at the time; it is not a pointer to a row that
+  /// still exists.
 
   @@index([action, createdAt])
   @@index([targetType, targetId])

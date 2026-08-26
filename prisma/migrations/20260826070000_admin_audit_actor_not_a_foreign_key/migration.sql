@@ -1,0 +1,27 @@
+-- An audit row must not be rewritten by anything but the write that created it.
+--
+-- `AdminAuditLog.actorUserId` was a foreign key with ON DELETE SET NULL, and it
+-- is also part of the HMAC input. Deleting a user therefore made the database
+-- null that column on every audit row the user had written -- with no
+-- application code involved -- and the hashes stopped reproducing. The chain
+-- then reported those rows exactly as it reports a forged one.
+--
+-- Observed on staging 2026-08-26: eight rows written in one five-minute window
+-- on 2026-07-29 all carried a null `actorUserId` beside a surviving
+-- `actorEmail`, and all failed verification. That pair cannot be written: all
+-- 47 audit-writing admin routes guard on `session.user.id` first, so the value
+-- was never null at write time. The database set it afterwards.
+--
+-- The relation bought nothing to weigh against that. No query in the
+-- repository includes `actor` or reads `User.adminAuditLogs`; the constraint's
+-- only runtime effect was this write.
+--
+-- An audit row records who acted at that time. It is not a pointer to a row
+-- that still exists, and referential integrity to a mutable table is the wrong
+-- shape for it -- `actorEmail` has always been a plain column for the same
+-- reason, which is why these rows still name their actor.
+--
+-- Data-preserving: the column, its values and every hash stay exactly as they
+-- are. Rows already broken stay broken, because re-hashing an audit entry to
+-- satisfy its own checker would end what the chain proves.
+ALTER TABLE "AdminAuditLog" DROP CONSTRAINT "AdminAuditLog_actorUserId_fkey";

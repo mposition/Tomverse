@@ -208,6 +208,7 @@ export async function GET(
         updatedAt: true,
         password: true,
         assistantProfileVersionId: true,
+        assistantProfileRemovedAt: true,
       },
     });
 
@@ -414,6 +415,12 @@ export async function GET(
           userId,
           profileVersionId: conversation.assistantProfileVersionId,
         }),
+        // A sibling of `assistantProfile`, not a field inside it: it is
+        // present exactly when that one is null and the reason for the null is
+        // a deletion. Folding it in would mean inventing a profile object to
+        // carry the fact that there is no profile.
+        assistantProfileRemovedAt:
+          conversation.assistantProfileRemovedAt?.toISOString() ?? null,
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined
@@ -474,6 +481,7 @@ export async function PATCH(
                 routerModelId: true,
                 routerChallengerTurns: true,
                 assistantProfileVersionId: true,
+                assistantProfileRemovedAt: true,
                 assistantProfileVersion: { select: { profileId: true } },
             }
         });
@@ -643,6 +651,17 @@ export async function PATCH(
     // pinned version id is what decides whether anything changed, which is
     // why the comparison is here and not in the planner.
     if (body.assistantProfileId !== undefined) {
+      // Any deliberate move of the binding ends the deletion's claim on this
+      // conversation, in both directions: attaching a new assistant, and
+      // detaching on purpose. `어시스턴트가 삭제되었습니다` explains a state
+      // the owner did not choose; once they have chosen one, it does not.
+      //
+      // Written unconditionally rather than only when the binding changes.
+      // Re-selecting the same profile is `unchanged` and writes nothing else,
+      // but a conversation whose assistant was deleted cannot be bound to that
+      // profile any more -- so an `unchanged` outcome here means the tombstone
+      // was already clear, and setting null again costs nothing.
+      updateData.assistantProfileRemovedAt = null;
       const binding = await resolveProfileBinding({
         userId,
         requestedProfileId: body.assistantProfileId,
@@ -780,6 +799,12 @@ export async function PATCH(
           userId,
           profileVersionId: updatedConversation.assistantProfileVersionId,
         }),
+        // A sibling of `assistantProfile`, not a field inside it: it is
+        // present exactly when that one is null and the reason for the null is
+        // a deletion. Folding it in would mean inventing a profile object to
+        // carry the fact that there is no profile.
+        assistantProfileRemovedAt:
+          updatedConversation.assistantProfileRemovedAt?.toISOString() ?? null,
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined

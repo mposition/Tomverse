@@ -35,7 +35,7 @@ export function GET() {
           >
             T
           </div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>Tomverse Review</div>
+          <div style={{ fontSize: 34, fontWeight: 800 }}>Tomverse</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <div
@@ -47,7 +47,7 @@ export function GET() {
               letterSpacing: "-2px",
             }}
           >
-            Tomverse Review · Multi-AI Comparison & Review
+            Tomverse · Multi-AI Comparison & Review
           </div>
           <div style={{ fontSize: 28, color: "#bfdbfe" }}>
             Compare GPT, Claude, and Gemini side by side, run AI Review, then check what still needs verifying

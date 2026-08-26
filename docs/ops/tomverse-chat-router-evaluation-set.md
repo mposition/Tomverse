@@ -256,6 +256,60 @@ is not a set: nothing in it is adopted, §8 forbids an agent adopting anything,
 and `lib/routerQualityEvalSet.ts` refuses to let a development file stand in
 for a decision one.
 
+## 10.1 Growing the pool to pilot size
+
+§3 needs a 200-item pilot. Counted the way §2 requires — per cell, with a short
+cell reported rather than averaged away — that is **14 adopted items in each of
+the 15 cells, 210 in total**. Adopted, not drafted: a rejected candidate is
+redrafted under a new id and the rejected one stays rejected, so the number of
+drafts written will exceed 210.
+
+The pool carries `proposedPilotCellTarget` for that figure. It is deliberately
+a different field from `cellTargets`, which is §11's "Strata and cell targets
+frozen" record: a proposal and a freeze are different acts by different
+parties, and one field holding both would leave no way to tell them apart.
+
+```
+# Draft one cell. Refuses a Claude drafter outright and warns on any routable
+# family; every item lands status: candidate with its drafter recorded.
+npm run draft:router-eval-candidates -- \
+  --model=<non-Claude model id> --stratum=coding --cell=ko --count=14 --send
+
+# The sheet a person judges from. One file, prompts inlined, verdicts empty.
+npm run make:router-eval-review-sheet -- --batch=<batchId>
+```
+
+Three properties of that loop, each answering a way it could go wrong:
+
+- **The drafter is recorded per item**, as provider, model, the version string
+  the provider itself returned, and the template hash. §8 makes the drafter a
+  confound the reviewer weighs, and "drafted by AI" lets nobody weigh anything.
+  A model that returns no version string leaves the field null rather than
+  having one guessed for it.
+- **Korean cells are never drafted from the English ones.** The drafting
+  instruction is given only the cell it is filling, so the other cell's prompts
+  are not available to translate, and the instruction says so as well. §2's
+  rule is enforced by what the drafter can see, not only by what it is told.
+- **Near-duplicates are ranked over the whole pool, not the batch.** Two
+  batches that each look varied can repeat each other; a within-batch
+  comparison cannot see it. Still advisory: diversity is the reviewer's call.
+
+Collection runs in waves, and each wave waits for review before the next is
+drafted, because a systematic flaw in the drafting shows up in the first cell
+and drafting all fifteen first would reproduce it 210 times:
+
+| Wave | Cells | What its review is for |
+| --- | --- | --- |
+| 1 | one stratum's `ko` and `en` | whether the Korean cell reads as translated, whether the two languages are of comparable difficulty, and whether the sheet is judgeable |
+| 2 | one cell from each remaining stratum, plus `translation_cross_language` | flaws specific to a stratum, and the cross-language schema |
+| 3 | every remaining cell | drafted with waves 1 and 2's rejections applied |
+
+`npm run check:router-quality-eval` prints the fill of every cell — including
+the full ones, so that no output cannot mean both "all full" and "nothing
+counted" — and turns a short cell into a failure only once a person sets
+`pilotReady`. During collection every cell is short, and a check that is red
+throughout the work it supervises stops being read.
+
 ## 11. Sign-off
 
 An agent may draft candidates, run the harness, and update this procedure. An
@@ -270,3 +324,28 @@ of record, approve the budget, or enter the records below.
 | Final `n` pre-registered | | |
 | Baseline pre-registered | | |
 | Decision set frozen | | |
+
+## 11.1 What is waiting on a person, and why it cannot be delegated
+
+The tooling in §10.1 exists so that nothing on this list is waiting on work an
+agent could have done. Each row says what makes it a human act — not as a
+formality, but because in each case an agent doing it would destroy the thing
+the step establishes.
+
+| Waiting on | Why an agent cannot do it |
+| --- | --- |
+| **Reviewing a batch and recording verdicts** | The drafter's phrasing is the confound (§8). A reviewer who is the drafter cannot detect it, and one who is the drafter's family cannot either. |
+| **Adopting items** (`status`, `adoptedBy`, `adoptedAt`) | §8 makes model-drafted items a candidate pool *because* a human decides adoption. An agent adopting its own drafts is the pool adopting itself. |
+| **Freezing the cell targets** (`cellTargets`) | §11's record. `proposedPilotCellTarget` is what an agent may write; a number nobody chose is not a target, it is an assumption with a field. |
+| **Setting `pilotReady`** | It converts a short cell from work-in-progress into a failure. Only someone who knows collection is finished can say so. |
+| **Pre-registering the baseline** (§4) | The point is that it is named *before* the comparison. An agent naming it during the run would make the pre-registration date meaningless, and §10's checker refuses a baseline registered after the run started. |
+| **Approving the pilot budget** | It spends money on provider calls. §0 puts the evaluation budget outside this document, with human sign-off. |
+| **Running `--mode=pilot`** | Not because the command is hard, but because it is the first spend and the operator decides when. The command is prepared in §10.1; the decision is not. |
+| **Computing and pre-registering the final `n`** (§3) | It follows the measured discordance, and choosing it after seeing a result is how a sample size becomes an outcome that was chosen rather than measured. |
+| **Judging, or naming the model judge** (§5, §6) | §11: an agent may not act as the adjudicating judge of record. A model judge additionally needs its bias measured and reported. |
+| **Freezing the decision set** (`frozenAt`, `frozenBy`) | §7: every look at the decision set costs a use. The freeze is what makes the count meaningful, and a self-entered freeze counts nothing. |
+| **Approving `ROUTE-01`** | `approvedBy` in `docs/release-gates/tomverse-chat-v1.yaml`, and `attestedBy` in `lib/autoRolloutReadiness.ts`. Both are people by construction. |
+
+Two of these an agent may *prepare* fully: the pilot command is written out in
+§10.1, and the candidate pool is drafted to size. Neither preparation moves the
+record, which is the line this document draws.

@@ -557,6 +557,50 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(/most recent entries/)).toBeVisible();
   });
 
+  test("an audit row named in the URL opens from a directly-opened link", async ({
+    page,
+  }) => {
+    // The integrity checker answers a failure with an id and nothing could take
+    // it: the search did not look at `id`, and the list is the newest N anyway
+    // while the checker stops at the oldest bad row. Resolved on the server, so
+    // this works for a row the list does not hold.
+    await page.goto(`/admin/audit?entry=${FIXTURE_AUDIT_LOG.id}`);
+
+    const card = page.getByTestId("admin-audit-requested-entry");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(FIXTURE_AUDIT_LOG.id);
+    await expect(card).toContainText(FIXTURE_AUDIT_LOG.summary);
+  });
+
+  test("a stale entry link says so instead of 404ing the workspace", async ({
+    page,
+  }) => {
+    // The workspace exists and the operator is looking at it; what is missing is
+    // one row. Answering 404 for the page would say the wrong thing.
+    await page.goto("/admin/audit?entry=audit-no-such-entry");
+
+    await expect(
+      page.getByRole("heading", { name: "Admin activity log" })
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("admin-audit-requested-entry-missing")
+    ).toContainText("audit-no-such-entry");
+    await expect(page.getByTestId("admin-audit-requested-entry")).toHaveCount(0);
+  });
+
+  test("the audit search accepts an id, which is what the checker hands over", async ({
+    page,
+  }) => {
+    await page.goto("/admin/audit");
+    await page
+      .getByPlaceholder(/Search/)
+      .first()
+      .fill(FIXTURE_AUDIT_LOG.id);
+    await expect(
+      page.getByRole("cell", { name: FIXTURE_AUDIT_LOG.summary }).first()
+    ).toBeVisible();
+  });
+
   test("the sending-domain tab reports what it could not read", async ({
     page,
   }) => {

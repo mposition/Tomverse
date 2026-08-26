@@ -117,10 +117,40 @@ const models = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)].map(([, na
 // is User, optional or not, is what the rule was always supposed to say.
 const USER_LINK = /\buserId\s+String|\bownerId\s+String|\w+\s+User\??\s+@relation/;
 const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map(({ name }) => name));
+
+// Two questions, and they stopped having the same answer.
+//
+// "Does this registered row still hold user data?" guards a stale registry
+// entry. "Does this model hold user data, so it must register?" is the sweep
+// below. One rule answered both while every user-holding table had a User
+// relation -- and on 2026-08-26 `AdminAuditLog` stopped having one, on purpose:
+// `actorUserId` is part of that row's HMAC input, so `ON DELETE SET NULL`
+// rewrote signed audit rows whenever an account was deleted and made them
+// indistinguishable from forged ones. See
+// prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
+//
+// The row still holds a user's id and address; only the foreign key is gone.
+// Reading "no relation" as "no user data" would have deleted its registry row
+// and let the most privacy-sensitive table in the schema out of the workflows
+// -- the same escape the USER_LINK comment above records catching once.
+//
+// So the registered-row check reads columns. The sweep keeps the narrower rule
+// deliberately: widening it would newly require FeedbackLifecycleEvent and
+// RefundRequestTimelineEvent to register, and those rows carry decisions --
+// owner, legal basis, retention period, review date -- that no script can
+// derive. They escape today too; widening the sweep is a governance change
+// with an owner, not a side effect of this one.
+const USER_COLUMN = /^\s{2}\w*[Uu]serId\s+String\b/m;
+const holdsUserData = new Set(
+  models
+    .filter(({ body }) => USER_LINK.test(body) || USER_COLUMN.test(body))
+    .map(({ name }) => name)
+);
 // User does not point at a user; it is one. The derivation cannot see that, and
 // leaving the root out would let the account's own profile escape both
 // workflows -- which is exactly what the registry exists to prevent.
 userLinked.add("User");
+holdsUserData.add("User");
 
 // Scalar columns and their nullability, so an anonymisation can be checked
 // against the table it claims to scrub. Relation fields are skipped: they are
@@ -211,7 +241,7 @@ for (const row of registry.domains) {
   if (!isFilledString(row.domain)) fail(`${model}: needs a domain name`);
   if (!isFilledString(row.owner)) fail(`${model}: needs an owner`);
 
-  if (!userLinked.has(model)) {
+  if (!holdsUserData.has(model)) {
     fail(
       `${model}: registered but carries no user data in the schema. Remove the row, or add the ` +
         "user column or relation that makes it a data domain."

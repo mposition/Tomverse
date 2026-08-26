@@ -16,10 +16,10 @@ import { prisma } from "@/lib/prisma";
  * The pure modules already decide the order of the system block and whether a
  * profile may run. What only a database settles is which row the runtime
  * actually reads: whether an owner boundary holds when a conversation names
- * another account's version, whether a superseded revision is refused rather
+ * another account's version, whether a conversation pinned to a superseded
+ * revision still runs *that* revision rather than the profile's current one,
+ * and whether the §10 identity the bundle binds moves when the profile does.
  * Policy: docs/policy/external-conversation-import-and-memory.md.
- * than silently upgraded to the current one, and whether the §10 identity the
- * bundle binds moves when the profile does.
  */
 
 const MODEL_ID = "gpt-5-6-luna";
@@ -136,10 +136,17 @@ test("another account's version is not readable through a conversation id", asyn
     assert.equal(result.instructionsPrompt, null);
 });
 
-test("a superseded revision is refused, never upgraded to the current one", async () => {
-    // Running the current version instead would answer under instructions the
-    // owner has already edited away -- the same substitution
-    // ASSISTANT_PROFILE_MODEL_UNAVAILABLE refuses for models.
+test("a pinned revision keeps running after it is superseded, and is never upgraded", async () => {
+    // Found in staging on 2026-08-25. This used to assert a refusal, and the
+    // refusal is what shipped: publishing a revision left every conversation
+    // pinned to the old one silently without a profile -- not the current
+    // version's instructions and not the pinned version's, none at all, while
+    // the API and the picker both still reported the profile as attached.
+    //
+    // Two things are asserted here because the defect sat between them: the
+    // pinned revision *runs* (its instructions reach the prompt), and it is
+    // still not *upgraded* (the current version's instructions do not).
+    // Policy section 14: 소급 적용 금지, 이동은 명시적 사용자 동작.
     const user = await createUser();
     const { profile, version } = await publishProfile(user.id);
     const next = await prisma.assistantProfileVersion.create({
@@ -164,8 +171,24 @@ test("a superseded revision is refused, never upgraded to the current one", asyn
 
     const result = await context(user.id, version.id);
 
-    assert.equal(result.refusal, "no_active_version");
-    assert.equal(result.instructionsPrompt, null);
+    assert.equal(result.refusal, null);
+    assert.equal(result.version?.profileVersionId, version.id);
+    assert.equal(result.version?.revision, 1);
+    assert.ok(
+        result.instructionsPrompt?.includes(
+            "Answer in Korean, and prefer short examples."
+        ),
+        "the pinned revision's own instructions must reach the prompt"
+    );
+    assert.ok(
+        result.profileTokens > 0,
+        "a profile that runs is priced input, so its tokens are counted"
+    );
+    // Never upgraded: revision 2's text must not appear.
+    assert.ok(
+        !result.instructionsPrompt?.includes("Answer in English now."),
+        "the current version's instructions must not be substituted"
+    );
 });
 
 test("the flag being off refuses the profile without reading its row", async () => {

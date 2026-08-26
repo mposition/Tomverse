@@ -1,6 +1,6 @@
 # memory extraction decision-grade eval 실행 절차
 
-`(gpt-5-6-luna, mem-extract-v1)` 쌍을 실제로 재고, 그 결과로 register를
+`(gpt-5-6-luna, mem-extract-v2)` 쌍을 실제로 재고, 그 결과로 register를
 승인하기까지의 절차입니다. 근거는
 `docs/policy/external-conversation-import-and-memory.md` §12.2~§12.5이고,
 표본을 만들고 동결한 절차는 `docs/ops/memory-extraction-eval-dataset.md`입니다.
@@ -103,14 +103,15 @@ live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 부르는 dispatch이므로 오타나 실수로 눌리지 않게 한 겹 둡니다.
 
 **`limit`은 회차를 compatibility probe로 바꿉니다** — 앞의 N건만 돌고 멈춥니다.
-배선이 맞는지 1,150번 지불하며 배우지 않기 위한 것입니다. probe는 결과가
-아닙니다: artifact에 `probeLimit`이 남고 `decisionGrade`는 숫자와 무관하게
-false이며, admissibility 검사와 blind review 시트 단계는 건너뜁니다.
+배선이 맞는지 1,150번 지불하며 배우지 않기 위한 것이고, v1이 정확히 그렇게
+세 번의 dispatch를 썼습니다. probe는 결과가 아닙니다: artifact에 `probeLimit`이
+남고 `decisionGrade`는 숫자와 무관하게 false이며, admissibility 검사와 blind
+review 시트 단계는 건너뜁니다(전자는 매번 폐기 판정을 낼 뿐이고, 후자는 8개
+cell을 표집하는데 probe가 대부분에 닿지 않습니다).
 
 `limit`을 준 채 **그 flag를 모르는 branch**를 고르면 실행 전에 멈춥니다. 옛
 harness는 모르는 flag를 조용히 버리므로 10건을 요청하고 1,150건을 청구받게
-되는데, 모르는 flag는 작은 회차가 아니라 전체 회차입니다. `main`의 harness가
-아직 그렇습니다 — probe는 `develop`에서 돌립니다.
+되는데, 모르는 flag는 작은 회차가 아니라 전체 회차입니다.
 
 순서도 의도된 것입니다. 무료로 거절할 수 있는 것(동결 조건·register 구조·smoke)
 이 **키가 provider 앞에 놓이기 전에** 전부 돌고, artifact 업로드는 admissibility
@@ -195,9 +196,18 @@ npm run check:memory-eval-run -- --artifact=artifacts/mem-eval-run1.json
 **소식이 아닙니다.** 순서가 이런 이유는 화면에 판정이 떠 있는 상태에서 인용
 가능성을 따지면 그 판단이 판정을 따라가기 때문입니다.
 
-예상 비용은 `npm run report:memory-eval-cost-estimate`가 계산합니다 — 현재
-최악 기준 회차당 US$5.78, 2회 US$11.57입니다. 상한은 최악 기준으로 잡습니다.
-얌전한 회차는 상한에 닿지 않고, 닿는 회차가 바로 상한이 존재하는 이유입니다.
+예상 비용은 `npm run report:memory-eval-cost-estimate`가 계산합니다. **입력 쪽만
+측정값이고 출력 쪽은 가정입니다** — 답변 하나에 1,024 토큰을 가정하면 2회 합계
+US$3.09이고, 가정을 1,000 토큰 올릴 때마다 US$2.76이 붙습니다. 이 모델은
+reasoning 토큰을 만들고 그것도 출력으로 과금되는데, 여기서 그것을 잰 사람이
+아직 없습니다.
+
+**출력 상한은 비용을 묶지 않습니다.** 상한은 모델의 능력치(128,000)이고, 매
+답변이 거기 닿으면 US$353이 됩니다 — 그건 예산이 아니라 상한의 부재입니다.
+비용을 묶는 것은 `--max-cost-usd`이며, 누적 지출이 거기 닿는 순간 harness가
+멈춥니다. 다만 그렇게 멈춘 회차는 **truncated이고 decision-grade가 아니므로**,
+가정치보다 넉넉하되 예산을 비우지 않는 값으로 잡습니다. usage를 보고하는 첫
+실행이 그 가정을 숫자로 바꿉니다.
 
 ## 5. blind qualitative review
 

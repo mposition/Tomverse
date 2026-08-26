@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   auditReleaseGateCoverage,
+  enforcedByCi,
   MANUALLY_GATED_CHECKS,
   scriptMentions,
 } from "./check-release-gate-coverage-core.mjs";
@@ -23,9 +24,11 @@ const workflowsDir = join(root, ".github", "workflows");
 const ciMentions = new Set();
 for (const entry of readdirSync(workflowsDir)) {
   if (!entry.endsWith(".yml") && !entry.endsWith(".yaml")) continue;
-  for (const script of scriptMentions(
-    readFileSync(join(workflowsDir, entry), "utf8")
-  )) {
+  const source = readFileSync(join(workflowsDir, entry), "utf8");
+  // A dispatch-only workflow stops nothing, so what it runs is a step of a
+  // procedure rather than a gate the checklist has to carry.
+  if (!enforcedByCi(source)) continue;
+  for (const script of scriptMentions(source)) {
     ciMentions.add(script);
   }
 }

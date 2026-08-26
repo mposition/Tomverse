@@ -13,7 +13,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.ts";
+import {
+    MEMORY_EVAL_DATASET_FROZEN,
+    MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryExtractionEvalFixtures.ts";
+import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 
 const SCRIPT = "scripts/check-memory-eval-freeze-conditions.mjs";
 
@@ -37,10 +41,16 @@ test("the PR gate runs the freeze check", () => {
     const packageJson = JSON.parse(
         readFileSync(new URL("../package.json", import.meta.url), "utf8")
     );
-    assert.match(
-        packageJson.scripts["check:memory-eval-freeze"] ?? "",
-        new RegExp(SCRIPT.replace(/[/.]/g, "\\$&")),
-        "the npm script the workflow calls should reach this script"
+    // A substring test, said as one. This was a regex built from `SCRIPT` with
+    // `/` and `.` escaped, which is every metacharacter that path happens to
+    // contain today and none of the ones a future path might -- a `+` or a `(`
+    // in a renamed script would quietly change what the assertion matches, and
+    // a backslash would make it a regex nobody wrote. The question here is only
+    // whether the npm script names this file, and `includes` asks exactly that.
+    const script = packageJson.scripts["check:memory-eval-freeze"] ?? "";
+    assert.ok(
+        script.includes(SCRIPT),
+        `the npm script the workflow calls should reach ${SCRIPT}, got: ${script}`
     );
 });
 
@@ -62,6 +72,43 @@ test("the check reports every freeze condition", () => {
             result.stdout.includes(condition),
             `the report should name "${condition}"`
         );
+    }
+});
+
+test("a successor batch does not block this dataset's freeze, and an ordinary one does", () => {
+    // The interaction that broke the moment the first successor batch was
+    // drafted: an unreviewed candidate blocks a freeze, but a successor batch
+    // is not waiting to join this dataset -- it exists because this one is
+    // finished and its scoring contract was superseded.
+    //
+    // The exemption is keyed on the batch declaring which version it replaces,
+    // so a batch drafted FOR this dataset still blocks it.
+    const stdout = run().stdout;
+    assert.match(stdout, /no batch left unreviewed/);
+    assert.match(
+        stdout,
+        /0 candidate batch\(es\)/,
+        "no batch is pending for this dataset"
+    );
+
+    const successor = CANDIDATE_BATCHES.filter(
+        (batch) => batch.successorTo === MEMORY_EVAL_DATASET_VERSION
+    );
+    const ordinary = CANDIDATE_BATCHES.filter(
+        (batch) => batch.successorTo !== MEMORY_EVAL_DATASET_VERSION
+    );
+    assert.equal(
+        ordinary.length,
+        0,
+        "a batch drafted for this dataset is still counted, and one is pending"
+    );
+    if (successor.length > 0) {
+        assert.match(stdout, /for a successor version \(not counted\)/);
+        // Named, not silent: a condition that quietly stops counting things
+        // is a condition nobody can check.
+        for (const batch of successor) {
+            assert.equal(batch.successorTo, MEMORY_EVAL_DATASET_VERSION);
+        }
     }
 });
 

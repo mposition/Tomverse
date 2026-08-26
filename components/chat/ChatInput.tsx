@@ -613,6 +613,16 @@ type ChatInputProps = {
    * screen that only knew the profile's name could not say so.
    */
   assistantProfile?: ChatAssistantProfile | null;
+  /**
+   * ISO time this conversation's assistant was deleted, if it was.
+   *
+   * Meaningful only while `assistantProfile` is null: deleting a profile
+   * cascades to its versions and sets the conversation's pin to null, so the
+   * row is left saying nothing at all. Without this the composer showed
+   * `어시스턴트 없음` for a conversation whose assistant had been removed --
+   * the same sentence it shows for one that never had one (staging §G-2).
+   */
+  assistantProfileRemovedAt?: string | null;
   /** The account's published profiles, for the picker. Empty is a valid list. */
   assistantProfileOptions?: ChatAssistantProfileOption[];
   /** `null` detaches. Re-sending the bound id moves it to the newest revision. */
@@ -764,6 +774,7 @@ export function ChatInput({
   selectionModePending = false,
   onSelectionModeChange,
   assistantProfile,
+  assistantProfileRemovedAt,
   assistantProfileOptions = [],
   onAssistantProfileChange,
   accountMemoryDefault = "on",
@@ -3703,7 +3714,9 @@ export function ChatInput({
                         <span className="truncate text-xs text-zinc-500">
                           {assistantProfile
                             ? `${assistantProfile.name} \u00B7 ${t("chat.toolsAssistantRevision").replace("{revision}", String(assistantProfile.revision))}`
-                            : t("chat.toolsAssistantNone")}
+                            : assistantProfileRemovedAt
+                              ? t("chat.toolsAssistantRemoved")
+                              : t("chat.toolsAssistantNone")}
                         </span>
                       </span>
                       {/* A dot, which is what this was, carried the state to
