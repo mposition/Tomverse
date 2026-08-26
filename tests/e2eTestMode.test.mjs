@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isE2EAssistantKnowledgeEnabled,
   isE2EAuthBypassEnabled,
   isE2EDatabaseDisabled,
   isE2EFixtureMode,
@@ -20,7 +21,12 @@ import {
  * between these flags and a real deployment is the loopback origin check.
  */
 
-const FLAG_KEYS = ["E2E_AUTH_BYPASS", "E2E_DISABLE_DATABASE", "NEXTAUTH_URL"];
+const FLAG_KEYS = [
+  "E2E_AUTH_BYPASS",
+  "E2E_DISABLE_DATABASE",
+  "E2E_ASSISTANT_KNOWLEDGE_ENABLED",
+  "NEXTAUTH_URL",
+];
 
 /**
  * Runs `body` with exactly `environment` applied on top of the current
@@ -177,4 +183,88 @@ test("the harness environment is restored after every case", () => {
       `${key} presence was not restored by the harness`
     );
   }
+});
+
+/**
+ * The assistant knowledge override is a feature flag read from the
+ * environment, which is a thing a real server must never do. It is therefore
+ * gated harder than the two flags beside it: loopback is not enough, both
+ * short-circuits have to be active as well, so the only configuration that can
+ * reach it is one whose database and sessions are already fabricated.
+ */
+const LOOPBACK = "http://127.0.0.1:3100";
+const PUBLIC = "https://tomverse.app";
+
+test("the assistant knowledge override needs the flag, loopback and fixture mode", () => {
+  withEnvironment(
+    {
+      E2E_ASSISTANT_KNOWLEDGE_ENABLED: "true",
+      E2E_AUTH_BYPASS: "true",
+      E2E_DISABLE_DATABASE: "true",
+      NEXTAUTH_URL: LOOPBACK,
+    },
+    () => {
+      assert.equal(isE2EFixtureMode(), true, "precondition");
+      assert.equal(isE2EAssistantKnowledgeEnabled(), true);
+    }
+  );
+});
+
+test("a public deployment ignores the assistant knowledge override entirely", () => {
+  // The one that matters. Every variable is set exactly as the Playwright
+  // server sets them, and the only difference is a real hostname -- which is
+  // the difference a leaked or copied environment would not have.
+  withEnvironment(
+    {
+      E2E_ASSISTANT_KNOWLEDGE_ENABLED: "true",
+      E2E_AUTH_BYPASS: "true",
+      E2E_DISABLE_DATABASE: "true",
+      NEXTAUTH_URL: PUBLIC,
+    },
+    () => {
+      assert.equal(isE2EAssistantKnowledgeEnabled(), false);
+      assert.equal(isE2EFixtureMode(), false, "and neither does anything else");
+    }
+  );
+});
+
+test("the assistant knowledge override is refused without full fixture mode", () => {
+  // Loopback alone is what the other two flags require. This one requires
+  // more, so each half is checked on its own: a server with a real database,
+  // or with real sessions, does not get to read a feature flag out of its
+  // environment even on localhost.
+  for (const partial of [
+    { E2E_AUTH_BYPASS: "true" },
+    { E2E_DISABLE_DATABASE: "true" },
+    {},
+  ]) {
+    withEnvironment(
+      {
+        E2E_ASSISTANT_KNOWLEDGE_ENABLED: "true",
+        NEXTAUTH_URL: LOOPBACK,
+        ...partial,
+      },
+      () => {
+        assert.equal(
+          isE2EAssistantKnowledgeEnabled(),
+          false,
+          `enabled with only ${JSON.stringify(partial)}`
+        );
+      }
+    );
+  }
+});
+
+test("full fixture mode alone does not enable it -- the flag is still required", () => {
+  withEnvironment(
+    {
+      E2E_AUTH_BYPASS: "true",
+      E2E_DISABLE_DATABASE: "true",
+      NEXTAUTH_URL: LOOPBACK,
+    },
+    () => {
+      assert.equal(isE2EFixtureMode(), true, "precondition");
+      assert.equal(isE2EAssistantKnowledgeEnabled(), false);
+    }
+  );
 });

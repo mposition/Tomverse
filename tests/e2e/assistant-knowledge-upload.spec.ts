@@ -183,17 +183,72 @@ const chooseFile = (page: Page) =>
     });
 
 test.describe("assistant knowledge files", () => {
-    test("the feature being off removes the panel rather than disabling it", async ({
-        page,
-    }) => {
-        await prepareGuestPage(page);
-        await mockEditor(page, { knowledge: { listStatus: 403 } });
-        await page.goto("/settings/assistants/p-1");
+    test(
+        "the feature being off removes the panel rather than disabling it",
+        { tag: "@ui-risk" },
+        async ({ page }) => {
+            // Ordered so it cannot pass for the wrong reason.
+            //
+            // The previous version asked only whether the panel was absent
+            // after a 403. Absence is also what a Playwright run produces when
+            // the feature flag is off -- which it silently was, because the
+            // flag lives in `AppSetting` and the fixture server has no
+            // database. So this test went on passing while the seven around it
+            // failed, and it would have kept passing with the 403 branch
+            // deleted outright.
+            //
+            // The answer is held open instead. The panel has to mount, ask the
+            // endpoint, and be on screen *before* the refusal arrives, so
+            // every step that a flag-off run cannot reach is asserted first
+            // and absence is only accepted at the end.
+            let refuse: (() => void) | null = null;
+            const held = new Promise<void>((resolve) => {
+                refuse = resolve;
+            });
+            let capacityReads = 0;
 
-        await expect(page.getByTestId("assistant-instructions")).toBeVisible();
-        await expect(page.getByTestId("knowledge-panel")).toHaveCount(0);
-        await expect(page.getByTestId("knowledge-add-input")).toHaveCount(0);
-    });
+            await prepareGuestPage(page);
+            await mockEditor(page);
+            await page.route(
+                (url) =>
+                    /^\/api\/assistant-profiles\/[^/]+\/knowledge$/.test(
+                        url.pathname
+                    ),
+                async (route) => {
+                    if (route.request().method() !== "GET") return route.fallback();
+                    capacityReads += 1;
+                    await held;
+                    return route.fulfill({
+                        status: 403,
+                        contentType: "application/json",
+                        body: JSON.stringify({
+                            code: "ASSISTANT_KNOWLEDGE_DISABLED",
+                        }),
+                    });
+                }
+            );
+            await page.goto("/settings/assistants/p-1");
+
+            await expect(page.getByTestId("assistant-instructions")).toBeVisible();
+            // 1. the endpoint was actually reached. Without this the rest of
+            //    the test is satisfied by a page that never rendered a panel.
+            await expect
+                .poll(() => capacityReads, {
+                    message:
+                        "the knowledge panel never asked the endpoint, so its absence below proves nothing",
+                })
+                .toBeGreaterThan(0);
+            // 2. and the panel is up while the answer is outstanding.
+            await expect(page.getByTestId("knowledge-panel")).toBeVisible();
+
+            // 3. now refuse.
+            refuse!();
+
+            // 4. and it goes, rather than staying and disabling its controls.
+            await expect(page.getByTestId("knowledge-panel")).toHaveCount(0);
+            await expect(page.getByTestId("knowledge-add-input")).toHaveCount(0);
+        }
+    );
 
     test("what is left is stated before a file is chosen", async ({ page }) => {
         await prepareGuestPage(page);

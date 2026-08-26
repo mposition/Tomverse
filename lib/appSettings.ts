@@ -17,7 +17,10 @@ import {
   assistantKnowledgeUsable,
   assistantProfilesEnabledFromValue,
 } from "@/lib/assistantProfileAccess";
-import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
+import {
+  isE2EAssistantKnowledgeEnabled,
+  isE2EDatabaseDisabled,
+} from "@/lib/e2eTestMode";
 import {
   EXTERNAL_IMPORT_FLAG_KEY,
   externalImportEnabledFromValue,
@@ -411,6 +414,14 @@ export async function isAssistantProfilesEnabled(): Promise<boolean> {
 }
 
 export async function isAssistantKnowledgeEnabled(): Promise<boolean> {
+  // Before the database short-circuit, not after it. The flag lives in
+  // `AppSetting`, so with no database there is no row and the honest answer is
+  // `false` -- which is why every Playwright run rendered no knowledge panel
+  // and seven specs asserted against something that was not there. The
+  // override is checked first so the fixture server can say otherwise, and it
+  // carries its own loopback-and-fixture guard rather than reading the
+  // variable here (lib/e2eTestMode.ts).
+  if (isE2EAssistantKnowledgeEnabled()) return true;
   if (e2eDatabaseDisabled()) return false;
   const [profiles, knowledge] = await Promise.all([
     isAssistantProfilesEnabled(),

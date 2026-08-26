@@ -93,6 +93,7 @@ mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니�
 | `plan-change-dialog.spec.ts` |
 | `pricing-purchase-cta.spec.ts` |
 | `web-search-composer-state.spec.ts` |
+| `assistant-knowledge-upload.spec.ts` |
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
@@ -167,6 +168,21 @@ shard를 하나 더 늘리면 job마다 고정으로 드는 약 1분 30초(setup
 `mobile-composer-contract` · `mobile-header-spacing` ·
 `mobile-message-visibility` · `model-finder` · `model-picker` ·
 `plan-change-dialog` · `pricing-purchase-cta` · `web-search-composer-state`.
+
+2026-08-26에 `assistant-knowledge-upload.spec.ts`가 **한 test만** 합류했습니다
+(`the feature being off removes the panel rather than disabling it`). 파일
+전체가 아니라 한 건인 이유는, 나머지 일곱 건이 파일 업로드 왕복을 돌아 PR
+예산에 비해 비싸고 main 회귀에서 이미 돌기 때문입니다.
+
+합류 근거는 그 한 건이 **헛통과하고 있었다**는 것입니다. #1058이 knowledge
+패널의 가용성 판정을 endpoint 호출에서 서버 prop으로 옮겼는데, 그 flag는
+`AppSetting`에 있고 Playwright 서버에는 DB가 없어 항상 `false`였습니다. 그래서
+패널이 렌더되지 않았고 — 나머지 일곱 건은 실패했지만 **"패널이 없어야 한다"고
+주장하는 이 한 건은 계속 초록색이었습니다.** 403 분기를 통째로 지워도
+통과했을 것입니다.
+
+이 유형은 PR에서 잡혀야 합니다. main 회귀에서만 도는 spec은 헛통과를
+알려 줄 사람이 없고, 실제로 #1058부터 발견까지 그대로 있었습니다.
 
 그 이전 기록은 다음과 같습니다.
 

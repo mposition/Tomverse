@@ -130,10 +130,18 @@ export const getSecurityEnvironmentStatus = () => {
     turnstile: !production || turnstileConfigured,
     operationalAlertChannel: !production || alertChannelConfigured,
     sentry: !production || configured(process.env.SENTRY_DSN),
+    // Every Playwright-only variable, not just the two that grant access.
+    // `E2E_ASSISTANT_KNOWLEDGE_ENABLED` turns a feature flag on from the
+    // environment, and a production server reading a flag out of its own
+    // environment is exactly the misconfiguration this check exists to catch --
+    // its loopback guard would already refuse it, and a readiness gate that
+    // stayed green while it was set would be reporting on a narrower set of
+    // variables than the one that actually exists.
     e2eBypassDisabled:
       !production ||
       (process.env.E2E_AUTH_BYPASS !== "true" &&
-        process.env.E2E_DISABLE_DATABASE !== "true"),
+        process.env.E2E_DISABLE_DATABASE !== "true" &&
+        process.env.E2E_ASSISTANT_KNOWLEDGE_ENABLED !== "true"),
     databaseTransportSecurity:
       !production ||
       (databaseUrls.length > 0 && databaseUrls.every(databaseTransportStatus)),
