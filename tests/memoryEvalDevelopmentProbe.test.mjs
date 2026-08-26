@@ -7,8 +7,6 @@ import {
     MEMORY_EVAL_DEVELOPMENT_PROBE_PURPOSE,
 } from "../lib/memoryEvalDevelopmentProbeSet.ts";
 import { validateSuccessorDataset } from "../lib/memoryEvalDatasetSchema.ts";
-import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
-import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 import { scoreCaseV2, judgeEvalV2 } from "../lib/memoryEvalScoringV2.ts";
 
 /**
