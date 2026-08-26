@@ -197,6 +197,7 @@ const apiKey = process.env[configuration.apiKeyEnvName];
 if (!apiKey) die(`\n${configuration.apiKeyEnvName} is not set.`);
 
 const endpoint = configuration.baseUrl.replace(/\/+$/, "");
+const timeoutMs = Number(process.env.DRAFT_TIMEOUT_MS || 180_000);
 
 // Pin the alias BEFORE the billed call.
 //
@@ -268,11 +269,26 @@ try {
       messages: [{ role: "user", content: instruction }],
       ...generationParameters,
     }),
-    signal: AbortSignal.timeout(Number(process.env.DRAFT_TIMEOUT_MS || 180_000)),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   text = await response.text();
 } catch (error) {
-  die(`\nNo answer: ${error instanceof Error ? error.message : error}`);
+  // A timeout reads as a dead provider unless the message says the limit is
+  // ours and adjustable. Wave 3's long-context Korean cell timed out three
+  // times at the 180-second default before anyone thought to look for the
+  // variable, and the reply had probably been billed each time.
+  const reason = error instanceof Error ? error.message : String(error);
+  const timedOut = error instanceof Error && (error.name === "TimeoutError" || /abort|timeout/i.test(reason));
+  die(
+    `\nNo answer: ${reason}` +
+      (timedOut
+        ? `\n\n  The ${(timeoutMs / 1000).toLocaleString("en-US")}s limit is this script's, not the provider's, and the\n` +
+          `  request may have been billed anyway. A long reply in Korean, or one\n` +
+          `  carrying code or conversation history, can outrun it.\n\n` +
+          `    DRAFT_TIMEOUT_MS=600000 npm run draft:router-eval-candidates -- ...\n\n` +
+          `  Halving --count is the other way, and costs less when it fails again.`
+        : "")
+  );
 }
 
 if (!response.ok) die(`\nHTTP ${response.status}: ${text.slice(0, 600)}`);

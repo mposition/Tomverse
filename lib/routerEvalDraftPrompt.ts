@@ -62,7 +62,30 @@ import { EVAL_CELLS, type EvalStratum } from "./routerQualityEvalSet.ts";
  * changes between runs cannot be compared across them. The cell's seed shows
  * the form that works: current, citable, and steady for months.
  */
-export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v3";
+/**
+ * v4 settled a conflict between two v2 rules, and gave two more strata the
+ * line Wave 3 showed they needed.
+ *
+ * The conflict: `long_context_conversation` is told to carry the earlier
+ * conversation the request depends on, and was also told that some prompts
+ * must be a single sentence with no second request attached. Both cannot
+ * hold, and the cheapest way to satisfy the second is to drop the history --
+ * which is what the Korean cell did. One prompt read "아까 말하신 두 번째
+ * 프로세스는…" and named no process, so both systems would answer by asking
+ * which one. The short quota is now lifted for that stratum rather than left
+ * to fight the thing the stratum exists to measure.
+ *
+ * `analysis_and_reasoning` came back twelve-fourteenths software engineering
+ * -- cloud cost, caching, scaling, migrations. The stratum measures
+ * multi-step reasoning, not a technical field, and the Korean cell of the
+ * previous wave had ranged over deposits, exam prep, tax and supply chains.
+ * A pool that narrow could tilt the comparison it exists to make.
+ *
+ * `current_information` anchored three prompts to 2024 and 2025 while the
+ * year was 2026: a drafter treats its own training horizon as the present,
+ * and a literal year turns "what is current" into "what was true then".
+ */
+export const DRAFT_TEMPLATE_VERSION = "router-eval-draft-v4";
 
 /**
  * What each stratum is for, in the drafter's terms.
@@ -132,6 +155,7 @@ export function draftInstruction(request: DraftRequest): string {
 
   // Counted, not exhorted: see DRAFT_TEMPLATE_VERSION. Both scale with the
   // batch so a smaller batch is not asked for more short prompts than it has.
+  const wantsShortPrompts = request.stratum !== "long_context_conversation";
   const shortQuota = Math.max(2, Math.round(request.count / 4));
   const constraintQuota = Math.max(2, Math.round(request.count / 3));
 
@@ -171,8 +195,16 @@ export function draftInstruction(request: DraftRequest): string {
     "- Vary the FORM, not just the topic. AT MOST TWO prompts may share a sentence",
     "  frame. A third built on the same frame with the nouns swapped is a repeat,",
     `  not a new prompt. Across ${request.count} prompts, expect several different openings.`,
-    `- AT LEAST ${shortQuota} must be SHORT: a single sentence, no second request attached,`,
-    "  the way someone types when they are in a hurry.",
+    // Not asked of long_context_conversation: see DRAFT_TEMPLATE_VERSION. A
+    // prompt in that stratum has to carry the conversation it depends on, and
+    // "one sentence, nothing attached" is satisfied most easily by deleting
+    // exactly that.
+    ...(wantsShortPrompts
+      ? [
+          `- AT LEAST ${shortQuota} must be SHORT: a single sentence, no second request attached,`,
+          "  the way someone types when they are in a hurry.",
+        ]
+      : []),
     `- AT LEAST ${constraintQuota} must carry a real constraint the answer has to respect — a`,
     "  budget, a deadline, a tool that is not available, something already tried and",
     '  failed. "Explain X" is not a constraint.',
@@ -198,7 +230,10 @@ export function draftInstruction(request: DraftRequest): string {
       "  published rule, a decision that was taken. NOT a value that moves by the",
       "  hour — a live price, today's rate, this weekend's figures, current stock.",
       "  Those have a different right answer at every run, so the same item cannot",
-      "  be compared between runs."
+      "  be compared between runs.",
+      "- Do not write a literal year. Say \"current\", \"the latest\", \"most recently\".",
+      "  A year you believe is the present may already be past by the time anyone",
+      "  runs the item, and then it asks about history rather than about now."
     );
   }
   if (request.stratum === "document_and_attachment") {
@@ -210,7 +245,17 @@ export function draftInstruction(request: DraftRequest): string {
   if (request.stratum === "long_context_conversation") {
     lines.push(
       "- Include the earlier conversation the request depends on, then the request.",
-      "  Without the history the prompt is not in this category."
+      "  Without the history the prompt is not in this category. Referring to it is",
+      "  not including it: \"the second process you mentioned\" names no process, and",
+      "  a system can only answer by asking which one. State the facts the request",
+      "  turns on, in the prompt, however long that makes it."
+    );
+  }
+  if (request.stratum === "analysis_and_reasoning") {
+    lines.push(
+      "- Range across walks of life, not one field. This category is about reasoning",
+      "  in several steps, not about any subject; fourteen prompts all set in software",
+      "  engineering, or all in personal finance, measure that subject instead."
     );
   }
 
