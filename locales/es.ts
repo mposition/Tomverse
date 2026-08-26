@@ -13,7 +13,7 @@ export const es = {
         dismiss: "Cerrar la notificación",
     },
     sidebar: {
-        title: "Tomverse Review",
+        title: "Tomverse",
         accountTooltip: "Cuenta y plan",
         accountTooltipGuest: "Iniciar sesión o registrarte",
         guestMenuTitle: "Modo invitado",
@@ -813,7 +813,7 @@ export const es = {
         close: "Cerrar",
         paymentSuccessfulEyebrow: "Pago correcto",
         paymentSuccessfulTitle: "Tu pago se completó correctamente.",
-        paymentSuccessfulWelcome: "Bienvenido a la familia de Tomverse Review. Ahora puedes usar mayores límites y funciones avanzadas en tu espacio {plan}.",
+        paymentSuccessfulWelcome: "Bienvenido a la familia de Tomverse. Ahora puedes usar mayores límites y funciones avanzadas en tu espacio {plan}.",
         testerPassActivatedEyebrow: "Pase de prueba activado",
         testerPassActivatedTitle: "Tu pase Founding Tester de 60 días está activo.",
         testerPassActivatedWelcome: "Ya puedes usar el espacio {plan} como Founding Tester.",
