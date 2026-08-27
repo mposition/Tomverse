@@ -21,7 +21,7 @@ import {
     preRegistrationProblems,
 } from "../lib/routerDecisionPreRegistration.ts";
 
-const COMMITTED = "docs/ops/router-evaluation-set/decision-preregistration-v1.json";
+const COMMITTED = "docs/ops/router-decision-preregistration/v1.json";
 
 const ROUTER = {
     decision: "router-decision-v3",

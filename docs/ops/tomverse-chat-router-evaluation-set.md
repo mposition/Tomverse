@@ -109,7 +109,7 @@ borderline result undecidable. `n` is 223 per cell across the 15 cells —
 remainder.
 
 It is committed at
-`docs/ops/router-evaluation-set/decision-preregistration-v1.json` and it is
+`docs/ops/router-decision-preregistration/v1.json` and it is
 **pending**, conditional on the judge calibration being accepted. A decision
 run against a pending registration is refused, as is one whose
 `--preregistered-n` is not the registered number, and the registration binds to

@@ -19,8 +19,11 @@ import {
   preRegistrationProblems,
 } from "../lib/routerDecisionPreRegistration.ts";
 
-const DIRECTORY = "docs/ops/router-evaluation-set";
-const PREFIX = "decision-preregistration-";
+// Its own directory, not docs/ops/router-evaluation-set/. That one is
+// scanned as "every .json here is an evaluation set", and a pre-registration
+// is not one -- it lived there for one commit and broke that scan.
+const DIRECTORY = "docs/ops/router-decision-preregistration";
+const PREFIX = "v";
 
 const problems = [];
 const note = (where, message) => problems.push(`${where}: ${message}`);
