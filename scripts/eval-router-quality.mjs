@@ -411,10 +411,21 @@ const journal = (entry) => {
   appendFileSync(journalPath, `${JSON.stringify(entry)}\n`, "utf8");
 };
 
-const recordPair = (pair, excluded = null) => {
+// A single character per item never reaches a CI log. The runner flushes on
+// newline, so 210 characters sit in one unfinished line and go with the
+// process when it is killed -- the first pilot ran for 89 minutes and printed
+// not one of them, which is also why watching for a run of "x" could not have
+// worked. A counted line every so often flushes what came before it.
+const PROGRESS_EVERY = 10;
+
+const recordPair = (pair, mark, excluded = null) => {
   pairs.push(pair);
   if (excluded) excludedLog.push(excluded);
   journal({ kind: "pair", pair, excluded, accruedCostUsd });
+  process.stdout.write(mark);
+  if (pairs.length % PROGRESS_EVERY === 0 || pairs.length === planned.length) {
+    console.log(`  ${pairs.length}/${planned.length}  $${accruedCostUsd.toFixed(4)}`);
+  }
 };
 
 journal({
@@ -481,11 +492,11 @@ for (const [index, item] of liveItems.entries()) {
   };
 
   const exclude = (reason, detail) => {
-    recordPair(
-      { ...base, outcome: { status: "excluded", reason } },
-      { itemId: item.id, reason, detail: detail ?? null }
-    );
-    process.stdout.write("x");
+    recordPair({ ...base, outcome: { status: "excluded", reason } }, "x", {
+      itemId: item.id,
+      reason,
+      detail: detail ?? null,
+    });
   };
 
   // A refusal to route is a routing outcome, not a quality loss. It is
@@ -549,8 +560,10 @@ for (const [index, item] of liveItems.entries()) {
         ? "auto"
         : "baseline";
 
-  recordPair({ ...base, outcome: { status: "judged", verdict: arm } });
-  process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
+  recordPair(
+    { ...base, outcome: { status: "judged", verdict: arm } },
+    arm === "auto" ? "+" : arm === "baseline" ? "-" : "."
+  );
 }
 
 let stoppedReason = truncatedByCost ? "cost-ceiling" : "completed";

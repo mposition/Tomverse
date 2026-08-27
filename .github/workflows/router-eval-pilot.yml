@@ -60,7 +60,11 @@ jobs:
   run:
     name: ROUTE-01 pilot
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Measured, not guessed. The first pilot ran 89.5 minutes against a
+    # 90-minute limit and was killed before it finished 210 items -- roughly
+    # 8 seconds per provider call, three calls per item. 300 leaves room for a
+    # slower day without leaving a runaway to burn a whole runner slot.
+    timeout-minutes: 300
     steps:
       - name: Confirm the spend
         if: inputs.confirm != 'SPEND'
