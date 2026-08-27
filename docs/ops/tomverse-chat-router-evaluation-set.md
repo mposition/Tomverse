@@ -252,6 +252,13 @@ npm run eval:router-quality -- --mode=decision \
   --calibration=calibration.json --json=decision.json
 ```
 
+What each of those stages costs, fitted to the pilot that actually ran and
+checked against its own total, is in
+`docs/ops/tomverse-chat-router-calibration-cost.md`, with the
+`--max-cost-usd` guard recommended for each. A run stopped at its cost ceiling
+is refused as a calibration source, so those guards are set to catch a runaway
+rather than to cap a budget.
+
 `--mode=judge-bias` still runs and still prints its number as a diagnostic, but
 `--judge-bias=<path>` is refused outright: an artefact nobody may cite is not
 one the harness should let an operator pay for and then discover is unusable.
