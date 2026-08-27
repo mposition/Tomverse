@@ -1,52 +1,88 @@
 /**
  * How an assistant answer's markdown is parsed.
  *
- * ## `~` is a range in Korean, not a strikethrough
+ * Two changes to the default GitHub-flavoured parse, both for the same
+ * reason: this product renders unsupervised AI-generated Markdown, mostly in
+ * Korean, and CommonMark's inline rules were written for a language that puts
+ * spaces around things.
+ *
+ * ## 1. `~` is a range in Korean, not a strikethrough
  *
  * `remark-gfm` enables single-tilde strikethrough by default, matching
  * GitHub: `~text~` renders struck through. That is right for a repository
- * README and wrong for this product's answers, because `~` is the ordinary
- * range separator in Korean — "오전 9시~오후 10시", "26~28°C", "3~4일" — and it
- * arrives in pairs by nature. Two of them in one paragraph and everything
- * between is struck out.
- *
- * Found on staging, 2026-08-27, in a searched answer about a shop's opening
- * hours. The model wrote
- *
- *   **교보문고 강남점 영업시간은 매일 오전 9시 30분~오후 10시(09:30~22:00)**입니다.
- *
- * and the reader was shown "오후 10시(09:30" with a line through it, the rest
- * of the sentence unbolded, and a literal `**` at each end — the two tildes
- * had been consumed as a `delete` node, which also broke the emphasis run that
- * spanned them. A correct answer, rendered as damage.
+ * README and wrong here, because `~` is the ordinary range separator in
+ * Korean -- "오전 9시~오후 10시", "26~28°C", "3~4일" -- and so it arrives in
+ * pairs by nature. Two in one paragraph and everything between is struck out.
  *
  * `~~text~~` still works, so nothing that meant strikethrough loses it. What
  * is given up is the one-tilde shorthand, which no user of this product has a
  * reason to reach for and which the model has no reason to emit.
  *
- * ## What this does not fix
+ * ## 2. A closing delimiter followed by a Korean particle
  *
- * The literal `**` in that same sentence has a second, independent cause, and
- * it is not a bug in any renderer: CommonMark's flanking rules. A closing `**`
- * preceded by punctuation and followed by a letter — `(09:30)**입니다` — is not
- * right-flanking, so it cannot close, and the asterisks stay on screen. It is
- * a known CJK gap in the specification (Korean and Japanese put particles
- * straight after a closing delimiter, with no space), and closing it means a
- * parser extension rather than an option. Deliberately left alone here: this
- * module changes one flag, and that change is worth having on its own.
+ * CommonMark decides whether `**` may close by looking at the characters
+ * either side of it. A run preceded by punctuation and followed by a letter is
+ * not right-flanking, so it cannot close -- and `(09:30)**입니다` is exactly
+ * that shape. Korean, Japanese and Chinese attach particles and clauses
+ * directly to a closing delimiter with no space, so the shape is not an edge
+ * case in those languages; it is how sentences are written.
+ *
+ * This is not an error in `react-markdown`'s implementation of the
+ * specification. It is still a defect of this product, because what reaches
+ * the reader is a literal `**`. Behaving to specification is not a licence to
+ * show markup to a user.
+ *
+ * The fix is a parser extension rather than an option, so it is deliberately
+ * two: `remark-cjk-friendly` relaxes the flanking rules for emphasis, and
+ * `remark-cjk-friendly-gfm-strikethrough` does the same for GFM's `~~`.
+ * Taking only the first would leave `~~취소선(가격)~~입니다` broken in exactly
+ * the way `**` was, which is the half-fix its own documentation warns about.
+ * Both are the `/parseOnly` entry points -- this repository renders Markdown
+ * and never serialises it back, so the bidirectional builds would be dependency
+ * weight with nothing to do -- and both are placed after `remarkGfm`, which is
+ * what the plugins require to take effect.
+ *
+ * ## What was considered and rejected
+ *
+ * Telling the model in a system prompt to leave a space before a particle:
+ * unenforceable, and it would make the app's Korean read wrongly on purpose.
+ * Pre-processing the text with a regular expression before parsing: it cannot
+ * see code fences, link destinations or escapes, so it would corrupt the cases
+ * it did not understand. Neither is worth doing when the parse itself can be
+ * told the truth about the language.
  */
 
 import remarkGfm from "remark-gfm";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
+import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough/parseOnly";
 import type { PluggableList } from "unified";
+
+/**
+ * Read by `remarkGfm` and by the strikethrough extension, from one object.
+ *
+ * The extension re-registers the strikethrough construct with its own flanking
+ * rules and takes its own `singleTilde`, so it does not inherit the one given
+ * to `remarkGfm`. Adding the extension with no options put the single-tilde
+ * behaviour straight back, and the staging sentence this file exists for
+ * struck through "오후 10시(09:30" again -- a fix for one defect quietly
+ * undoing the fix for the other. One object rather than two literals, so they
+ * cannot drift apart again.
+ */
+const GFM_OPTIONS = { singleTilde: false } as const;
 
 /**
  * The plugin list every assistant answer is rendered with.
  *
  * Exported as the list rather than as options so there is one place to add to,
  * and one place a test can read. `tests/chatMarkdownPlugins.test.mjs` executes
- * the parse rather than asserting on the option, because the option is only
+ * the parse rather than asserting on the options, because an option is only
  * interesting for what it does to a sentence.
+ *
+ * Order is part of the contract: both extensions amend constructs `remarkGfm`
+ * registers, so they follow it.
  */
 export const CHAT_MARKDOWN_REMARK_PLUGINS: PluggableList = [
-  [remarkGfm, { singleTilde: false }],
+  [remarkGfm, GFM_OPTIONS],
+  remarkCjkFriendly,
+  [remarkCjkFriendlyGfmStrikethrough, GFM_OPTIONS],
 ];
