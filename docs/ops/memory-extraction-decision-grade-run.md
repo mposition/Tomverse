@@ -181,6 +181,12 @@ Memory eval — inspect a preserved artifact   (run_id, artifact_name, max_rows)
 구조적으로 불가능하고**, 그래서 `SPEND` 확인도 예산 산술도 없습니다. 권한은
 `contents: read` + `actions: read`뿐입니다.
 
+**Branch는 `develop`을 고릅니다.** workflow 파일은 GitHub이 dispatch 목록에
+띄우려면 기본 브랜치에 있어야 해서 `main`에 있고, 그것이 부르는 script는
+`develop`에 있습니다. 즉 UI가 먼저 내미는 ref가 곧 실행할 수 없는 ref입니다.
+decision-grade workflow와 같은 사전 검사를 두어, 그 경우 `Missing script` 대신
+어느 브랜치를 고르라고 말하고 멈춥니다 — 다운로드 **앞**에서.
+
 이것이 있는 이유는 **회차를 읽으려고 회차를 만들지 않기 위해서**입니다. 기록을
 90일 보존하는 것이 바로 그 때문이고, 읽기 단계가 `if: always()`를 갖기 전에
 만들어진 회차(2026-08-26 run1)에도 소급해 닿습니다.

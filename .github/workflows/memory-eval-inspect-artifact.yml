@@ -54,6 +54,31 @@ jobs:
 
       - run: npm ci
 
+      # The workflow file has to exist on the default branch for GitHub to
+      # offer it at all, so it lives on `main` while the scripts it calls live
+      # on `develop`. Dispatching with the default ref therefore selects a
+      # branch that cannot run it, and `npm run` would answer with "Missing
+      # script" -- a message that says nothing about which branch to pick.
+      # Free to get wrong, unlike the decision-grade run, and for that reason
+      # more likely to be dispatched casually from the branch the UI offers
+      # first.
+      - name: The selected ref can run this
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts ?? {};
+            const missing = [
+              "report:memory-eval-failures",
+              "check:memory-eval-run",
+              "make:memory-eval-blind-review",
+            ].filter((name) => !(name in scripts));
+            if (missing.length === 0) process.exit(0);
+            console.log(
+              "::error::This branch does not carry " + missing.join(", ") +
+                ". Re-dispatch with Branch: develop, or a branch that has them."
+            );
+            process.exit(1);
+          '
+
       - name: Download the artifact
         uses: actions/download-artifact@v4
         with:
