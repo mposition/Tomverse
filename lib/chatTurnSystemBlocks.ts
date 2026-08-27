@@ -49,6 +49,11 @@ import {
   planGeneratedArtifactTool,
   type ArtifactToolPlan,
 } from "@/lib/generatedArtifactToolPolicy";
+import {
+  buildWebSearchCapabilitySystemPrompt,
+  resolveWebSearchTurnState,
+  type WebSearchTurnState,
+} from "@/lib/webSearchCapabilityPrompt";
 import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
 
 export type ChatTurnSystemBlocksInput = {
@@ -90,6 +95,13 @@ export type ChatTurnSystemBlocks = {
   /** Empty on a deep-research turn. */
   imageCapabilityPrompt: string;
   imageIntentClass: ImageIntentClass;
+  /**
+   * Whether this turn can reach the live web, and the paragraph that follows
+   * from it (`lib/webSearchCapabilityPrompt.ts`). Empty on a searching turn
+   * and on deep research, both of which reach it.
+   */
+  webSearchTurnState: WebSearchTurnState;
+  webSearchCapabilityPrompt: string;
   /** In request order, ready to push after the context block. */
   systemMessages: { role: "system"; content: string }[];
   /**
@@ -116,6 +128,10 @@ export const buildChatTurnSystemBlocks = (
       artifactPlan: null,
       imageCapabilityPrompt: "",
       imageIntentClass: "none",
+      // Deep research searches by construction, so it is not a turn that has
+      // to explain being unable to.
+      webSearchTurnState: "searching",
+      webSearchCapabilityPrompt: "",
       systemMessages: [],
       promptTokens: 0,
     };
@@ -149,9 +165,21 @@ export const buildChatTurnSystemBlocks = (
     artifact: artifactStateOf(artifactPlan),
   });
 
+  const webSearchTurnState = resolveWebSearchTurnState({
+    modelId: input.modelId,
+    nativeSearchEnabled: input.nativeSearchEnabled,
+  });
+  const webSearchCapabilityPrompt =
+    buildWebSearchCapabilitySystemPrompt(webSearchTurnState);
+
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: artifactPlan.systemPrompt },
     { role: "system", content: imageCapabilityPrompt },
+    // Only on a turn that cannot search; an empty block would be a system
+    // message saying nothing, priced and sent.
+    ...(webSearchCapabilityPrompt
+      ? [{ role: "system" as const, content: webSearchCapabilityPrompt }]
+      : []),
   ];
 
   // Priced like any other input. The tool *definitions* are a separate cost
@@ -160,6 +188,7 @@ export const buildChatTurnSystemBlocks = (
   const promptTokens =
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
+    estimateTextTokens(webSearchCapabilityPrompt) +
     (artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0) +
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
@@ -169,6 +198,8 @@ export const buildChatTurnSystemBlocks = (
     artifactPlan,
     imageCapabilityPrompt,
     imageIntentClass,
+    webSearchTurnState,
+    webSearchCapabilityPrompt,
     systemMessages,
     promptTokens,
   };
