@@ -4,29 +4,41 @@ import { createHmac } from "node:crypto";
  * Object keys are sorted before hashing, and *how* they are sorted is part of
  * the signature.
  *
- * The signing order is `localeCompare`, and that is a defect kept deliberately
- * rather than corrected in place. `localeCompare` compares under the runtime's
- * collation -- ICU data and the default locale -- which is not a property of
- * the data being signed. Two of this repository's own audit metadata keys
- * order differently under it than by code point:
+ * Signing orders by **code point**, and did not always. Until 2026-08-27 it
+ * ordered with `localeCompare`, which compares under the runtime's collation --
+ * ICU data and the default locale -- and that is not a property of the data
+ * being signed. Two of this repository's own audit metadata keys order
+ * differently under it than by code point:
  *
  *   creditUsd    vs creditsPurchased
  *   requestType  vs requestedById
  *
- * so a row carrying such a pair hashes differently under a different
+ * so a row carrying such a pair hashed differently under a different
  * collation, with nothing about the row having changed. A canonical form for a
  * digest must depend only on the bytes.
  *
- * It cannot simply be swapped: every existing entry was signed under
- * `localeCompare`, and changing the signing order would invalidate all of them
- * at once -- the same wholesale loss that key rotation caused, for the same
- * reason. Migrating it is a deliberate change with its own epoch, recorded in
- * docs/ops/admin-audit-key-epochs.md.
+ * The reason it was not simply swapped is that every entry written before the
+ * change was signed under `localeCompare`, and moving the signing order alone
+ * would have invalidated all of them at once -- the same wholesale loss key
+ * rotation caused, for the same reason.
  *
- * What is safe now is *verifying* under either order, which is what the
- * comparator argument is for: `adminAuditEntryHashVariants()` re-derives a
- * digest under code-point order so a diagnosis can say outright whether a
- * collation change is what broke a row. Signing never uses it.
+ * So the order moved *after* verification learned to try both. `localeCompare`
+ * is now a verification-only order: `verifyAdminAuditIntegrity()` accepts an
+ * entry that reproduces under either, which keeps every pre-migration entry
+ * verifiable while making every new one depend on bytes alone. The two orders
+ * agree on all but the pairs above, so for almost every row this is one digest
+ * under two names.
+ *
+ * What this does not do is make the old rows collation-independent. A row
+ * signed under `localeCompare` that carries a divergent pair still fails if
+ * this runtime's collation differs from the one that signed it -- nothing can
+ * reach back and re-sign it, and re-hashing an audit row is forbidden. The
+ * exposure is now *frozen* rather than growing, and it is counted:
+ * `legacyOrderEntries` is how many entries reproduce only under the legacy
+ * order. When it reaches zero the legacy order can be dropped entirely.
+ *
+ * The migration is recorded in docs/ops/admin-audit-key-epochs.md. It is not a
+ * key epoch: the key did not change, so `keyEntryCounts` is unaffected.
  */
 export const ADMIN_AUDIT_KEY_ORDERS = {
   /** What every entry to date was signed under. Collation-dependent. */
@@ -53,8 +65,22 @@ const canonicalWith = (
   return value;
 };
 
+/**
+ * The order new entries are signed under. Verification tries this one first
+ * and falls back to the rest; signing never uses anything else.
+ */
+export const ADMIN_AUDIT_SIGNING_KEY_ORDER: AdminAuditKeyOrder = "codepoint";
+
+/** Orders verification will try, signing order first. */
+export const ADMIN_AUDIT_VERIFICATION_KEY_ORDERS: AdminAuditKeyOrder[] = [
+  ADMIN_AUDIT_SIGNING_KEY_ORDER,
+  ...(Object.keys(ADMIN_AUDIT_KEY_ORDERS) as AdminAuditKeyOrder[]).filter(
+    (order) => order !== ADMIN_AUDIT_SIGNING_KEY_ORDER
+  ),
+];
+
 const canonical = (value: unknown): unknown =>
-  canonicalWith(ADMIN_AUDIT_KEY_ORDERS.locale, value);
+  canonicalWith(ADMIN_AUDIT_KEY_ORDERS[ADMIN_AUDIT_SIGNING_KEY_ORDER], value);
 
 export type AdminAuditHashInput = {
   previousHash: string | null;
@@ -79,13 +105,13 @@ export const computeAdminAuditEntryHash = (
     .digest("hex");
 
 /**
- * The same digest under each key order, for diagnosis only.
+ * The same digest under each key order.
  *
- * A row that verifies under `codepoint` but not under `locale` was signed by a
- * runtime whose collation differed from this one's -- which is a fact about
- * the container, not about the row, and not something an operator could ever
- * have worked out from "an audit entry hash does not match its stored
- * content".
+ * Verification uses this to accept an entry signed before the signing order
+ * moved to code point, and a diagnosis uses it to say *which* order reproduced
+ * a digest -- a fact about the runtime that signed the row, not about the row,
+ * and not something an operator could ever have worked out from "an audit
+ * entry hash does not match its stored content".
  */
 export const adminAuditEntryHashVariants = (
   input: AdminAuditHashInput,

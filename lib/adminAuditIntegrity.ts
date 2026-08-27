@@ -1,8 +1,10 @@
 import "server-only";
 
 import {
+  ADMIN_AUDIT_SIGNING_KEY_ORDER,
+  ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
+  adminAuditEntryHashVariants,
   adminAuditIntegrityKeys,
-  computeAdminAuditEntryHash,
 } from "@/lib/adminAuditIntegrityCore";
 import { prisma } from "@/lib/prisma";
 
@@ -64,6 +66,7 @@ export async function verifyAdminAuditIntegrity() {
       keysAvailable: 0,
       keysUsed: 0,
       keyEntryCounts: [] as number[],
+      legacyOrderEntries: 0,
       unverifiedPrefix: 0,
       message: "ADMIN_AUDIT_INTEGRITY_KEY or NEXTAUTH_SECRET is not configured.",
     };
@@ -84,6 +87,13 @@ export async function verifyAdminAuditIntegrity() {
   // operator whether a listed key is doing the job they listed it for. Only
   // positions are reported -- never a key, and nothing derived from one.
   const keyEntryCounts = keys.map(() => 0);
+  // Entries that reproduce only under the *legacy* key order -- signed before
+  // 2026-08-27, and carrying one of the metadata key pairs `localeCompare`
+  // orders differently from code point. These are the rows that would break if
+  // this runtime's collation changed, and nothing can re-sign them. The number
+  // only falls, and at zero the legacy order can be dropped from
+  // `ADMIN_AUDIT_VERIFICATION_KEY_ORDERS`.
+  let legacyOrderEntries = 0;
   // Leading entries, oldest first, whose content no verification key opens.
   // A changed signing key invalidates a *contiguous span*, so the size of this
   // prefix is what separates "an epoch nobody has the key for" from "one row
@@ -93,25 +103,39 @@ export async function verifyAdminAuditIntegrity() {
   let stillInPrefix = true;
 
   for (const row of rows) {
-    const hashed = (secret: string) =>
-      computeAdminAuditEntryHash(
-        {
-          previousHash: row.previousHash,
-          actorUserId: row.actorUserId,
-          actorEmail: row.actorEmail,
-          action: row.action,
-          targetType: row.targetType,
-          targetId: row.targetId,
-          summary: row.summary,
-          metadata: row.metadata || null,
-          ipAddress: row.ipAddress,
-          userAgent: row.userAgent,
-          createdAt: row.createdAt.toISOString(),
-        },
-        secret
-      );
+    const input = {
+      previousHash: row.previousHash,
+      actorUserId: row.actorUserId,
+      actorEmail: row.actorEmail,
+      action: row.action,
+      targetType: row.targetType,
+      targetId: row.targetId,
+      summary: row.summary,
+      metadata: row.metadata || null,
+      ipAddress: row.ipAddress,
+      userAgent: row.userAgent,
+      createdAt: row.createdAt.toISOString(),
+    };
 
-    const keyIndex = keys.findIndex((secret) => hashed(secret) === row.entryHash);
+    // Each key against each order, signing order first. The orders agree on
+    // every object whose keys do not straddle a collation difference, so for
+    // almost every row the second one is never reached.
+    let keyIndex = -1;
+    let matchedOrder: (typeof ADMIN_AUDIT_VERIFICATION_KEY_ORDERS)[number] | null =
+      null;
+    for (let index = 0; index < keys.length && keyIndex < 0; index += 1) {
+      const variants = adminAuditEntryHashVariants(input, keys[index]);
+      for (const order of ADMIN_AUDIT_VERIFICATION_KEY_ORDERS) {
+        if (variants[order] === row.entryHash) {
+          keyIndex = index;
+          matchedOrder = order;
+          break;
+        }
+      }
+    }
+    if (matchedOrder && matchedOrder !== ADMIN_AUDIT_SIGNING_KEY_ORDER) {
+      legacyOrderEntries += 1;
+    }
     // Linkage is checked whether or not the content verified, and it is worth
     // having separately: `previousHash` is a stored value compared against a
     // stored value, so a deletion or a reordering is still detectable in a span
@@ -176,6 +200,7 @@ export async function verifyAdminAuditIntegrity() {
     keysAvailable: keys.length,
     keysUsed: keysUsedCount,
     keyEntryCounts,
+    legacyOrderEntries,
     unverifiedPrefix,
     message: valid
       ? rows.length === 0
