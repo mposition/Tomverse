@@ -5,6 +5,7 @@ import {
     ROUTER_SHADOW_FLAG,
     recordRoutingShadowRun,
 } from "@/lib/routingShadow";
+import { NO_WEB_SEARCH_BACKENDS } from "@/lib/webSearchBackends";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { prisma } from "@/lib/prisma";
 
@@ -48,6 +49,11 @@ const input = (overrides: Record<string, unknown> = {}) => ({
     reservedInputTokens: 1_300,
     requestOutputCapTokens: 4_000,
     models: [model(), model({ id: "deepseek-v4-flash" })],
+    // No application-managed search backend reachable in this fixture. These
+    // cases are about the shadow row being written, not about which models
+    // could have searched, and the conservative map keeps them independent of
+    // the search register.
+    searchBackendReadiness: NO_WEB_SEARCH_BACKENDS,
     ...overrides,
 });
 

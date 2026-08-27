@@ -40,11 +40,19 @@ import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
+    appManagedSearchIsDispatchable,
+    appManagedSearchQueryCeiling,
     getWebSearchCapability,
     nativeSearchIsDispatchable,
     openAiNativeSearchToolCallCeiling,
 } from "@/lib/webSearchCapability";
-import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { reserveTurnSearchCost } from "@/lib/webSearchNativeCostReservation";
+import {
+    buildAppManagedWebSearchTool,
+    type AppManagedWebSearchToolConfig,
+} from "@/lib/appManagedWebSearchTool";
+import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
+import { stepCountIs } from "ai";
 import { webSearchCostRefusalError } from "@/lib/webSearchCostRefusal";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import {
@@ -75,6 +83,12 @@ export const ATTEMPT_BOUND_FIELDS = [
     "activeModel",
     "generationSettings",
     "webSearchToolConfig",
+    // The application-managed search tool *and its counter*. This is the field
+    // whose reuse would be worst: a second attempt handed the first attempt's
+    // session would inherit a spent allowance (and answer with no search) or,
+    // if the first attempt had not searched, would spend an allowance the
+    // second attempt's own reservation never paid for.
+    "appManagedSearch",
     "maxOutputTokens",
     "maxRetries",
     "headers",
@@ -89,6 +103,22 @@ export type AttemptExecutionRequest = {
     accessKind: Parameters<typeof createChatBudget>[0];
     inputBreakdown: TokenEstimateBreakdown;
     webSearchMode: WebSearchMode | null;
+    /**
+     * Which application-managed search backends this deployment can reach.
+     *
+     * Required, and the same map the primary path resolved. A fallback plan that
+     * assumed a backend was reachable would register a tool whose every call
+     * fails, having charged the surcharge for it.
+     */
+    searchBackendReadiness: WebSearchBackendReadiness;
+    /**
+     * Aborts an in-flight backend request when this attempt's turn ends.
+     *
+     * Per attempt, like everything else here: the primary's signal would abort
+     * a fallback's search when the primary was abandoned, which is exactly
+     * backwards.
+     */
+    searchAbortSignal?: AbortSignal;
     traceId: string;
     /** 0 for the primary. Keys the provider usage capture -- see below. */
     attemptIndex: number;
@@ -129,6 +159,13 @@ export type AttemptExecutionPlan = {
     maxOutputTokens: number;
     nativeSearchEnabled: boolean;
     webSearchToolConfig: WebSearchToolConfig | null;
+    /** Whether this attempt registers this application's own `web_search`. */
+    appManagedSearchEnabled: boolean;
+    /**
+     * This attempt's own search tool and its own counter, built here and never
+     * shared. Null on every attempt that runs no application-managed search.
+     */
+    appManagedSearch: AppManagedWebSearchToolConfig | null;
     /**
      * Whether this attempt can actually search, and why not when it cannot.
      *
@@ -196,12 +233,19 @@ export const planAttemptExecution = (
     // has no enforceable per-request ceiling cannot carry one, and enabling it
     // here would build a plan whose only possible end is the 503 the
     // reservation raises a few lines below.
+    const nativeSearchDispatchable = nativeSearchIsDispatchable(capability);
+    const appManagedSearchDispatchable = appManagedSearchIsDispatchable(
+        capability,
+        request.searchBackendReadiness
+    );
     const nativeSearchEnabled =
-        request.webSearchMode === "always" &&
-        nativeSearchIsDispatchable(capability);
+        request.webSearchMode === "always" && nativeSearchDispatchable;
+    const appManagedSearchEnabled =
+        request.webSearchMode === "always" && appManagedSearchDispatchable;
     const searchSurchargeCredits = getWebSearchSurchargeCredits(
         request.webSearchMode ?? "off",
-        capability
+        capability,
+        request.searchBackendReadiness
     );
     // Built once and read, never rebuilt: the tool configuration this attempt
     // will dispatch is the same object the search-path check is answered from,
@@ -209,11 +253,30 @@ export const planAttemptExecution = (
     const webSearchToolConfig = nativeSearchEnabled
         ? buildWebSearchToolConfig(capability)
         : null;
+    // This attempt's own tool, with this attempt's own counter, sized from this
+    // attempt's own capability. Nothing about it comes from the primary.
+    const appManagedSearch =
+        appManagedSearchEnabled && capability.searchBackend
+            ? buildAppManagedWebSearchTool({
+                  backend: capability.searchBackend,
+                  maxQueries:
+                      appManagedSearchQueryCeiling({
+                          capability,
+                          readiness: request.searchBackendReadiness,
+                          webSearchEnabled: true,
+                      }) ?? 0,
+                  ...(request.searchAbortSignal
+                      ? { signal: request.searchAbortSignal }
+                      : {}),
+              })
+            : null;
     const searchPath = resolveAttemptSearchPath({
         support: capability.support,
-        nativeSearchDispatchable: nativeSearchIsDispatchable(capability),
+        nativeSearchDispatchable,
+        appManagedSearchDispatchable,
         webSearchMode: request.webSearchMode,
-        toolConfigBuilt: webSearchToolConfig !== null,
+        toolConfigBuilt:
+            webSearchToolConfig !== null || appManagedSearch !== null,
         surchargeCredits: searchSurchargeCredits,
     });
 
@@ -238,10 +301,11 @@ export const planAttemptExecution = (
     // reserves the same way; a fallback that skipped it would dispatch a
     // searching turn against a reservation covering only its tokens, which is
     // the exact hole `reserveNativeSearchCost` was written to close.
-    const nativeSearchReservation = reserveNativeSearchCost({
+    const nativeSearchReservation = reserveTurnSearchCost({
         model: modelConfig,
         capability,
         nativeSearchEnabled,
+        appManagedSearchEnabled,
     });
     if (!nativeSearchReservation.ok) {
         // A value, like every other refusal here: on the primary the caller
@@ -270,7 +334,9 @@ export const planAttemptExecution = (
             {
                 webSearchSurchargeCredits: searchSurchargeCredits,
                 nativeSearchEnabled,
-                nativeSearch: nativeSearchReservation,
+                appManagedSearchEnabled,
+                nativeSearch: nativeSearchReservation.native,
+                searchBackend: nativeSearchReservation.searchBackend,
             }
         );
     } catch (error) {
@@ -316,6 +382,8 @@ export const planAttemptExecution = (
             maxOutputTokens: outputBudget.outputTokens,
             nativeSearchEnabled,
             webSearchToolConfig,
+            appManagedSearchEnabled,
+            appManagedSearch,
             searchPath,
             // This attempt's own ceiling, from this attempt's own capability.
             // Reading the primary's would send a fallback the wrong
@@ -356,7 +424,34 @@ export const attemptDispatchOptions = (plan: AttemptExecutionPlan) => ({
             : undefined,
     ...plan.generationSettings,
     ...(plan.webSearchToolConfig ?? {}),
+    // The application-managed search is a function tool, so it needs a tool
+    // loop: without `stopWhen` the SDK stops after one step and the model never
+    // gets to read what it searched for. The step budget is not the cost
+    // ceiling and must never be read as one -- the counter in the session is --
+    // it only bounds how many rounds of back-and-forth one answer may take.
+    ...(plan.appManagedSearch
+        ? {
+              tools: {
+                  ...(plan.webSearchToolConfig?.tools ?? {}),
+                  ...plan.appManagedSearch.tools,
+              },
+              stopWhen: stepCountIs(APP_MANAGED_SEARCH_MAX_STEPS),
+          }
+        : {}),
 });
+
+/**
+ * How many rounds of tool calling one application-managed searching answer may
+ * take.
+ *
+ * Deliberately larger than the five-request ceiling: a step can carry a search
+ * and then a step of writing, and an answer that searches twice, reads, and
+ * searches again is the behaviour this feature is for. It is *not* a cost
+ * bound. The cost bound is `AppManagedSearchSession`'s counter, which refuses
+ * the sixth backend request whatever step it arrives on; this only stops a
+ * pathological loop from running forever.
+ */
+export const APP_MANAGED_SEARCH_MAX_STEPS = 8;
 
 /** The refusal, as the error the primary path has always raised for it. */
 export const attemptRefusalError = (

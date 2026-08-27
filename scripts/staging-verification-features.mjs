@@ -64,6 +64,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/chat-attachment-staging-verification-records",
     },
     {
+        key: "app-managed-web-search",
+        label: "application-managed web search (Google models, Brave backend)",
+        checklist: "docs/ops/app-managed-web-search-staging-checklist.md",
+        records: "docs/ops/app-managed-web-search-staging-verification-records",
+    },
+    {
         key: "deep-research",
         label: "deep research expansion offer and the model swap at the cap",
         checklist: "docs/ops/deep-research-staging-checklist.md",

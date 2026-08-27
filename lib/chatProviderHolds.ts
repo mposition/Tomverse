@@ -289,6 +289,26 @@ export type AttemptCostIntent = {
         costPerQueryMicroUsd: number;
         maxQueries: number;
     };
+    /**
+     * The application-managed search this attempt was authorized to run, if any.
+     *
+     * A second field rather than a variant of the one above, because the two
+     * settle into different buckets and only this one names a vendor. An
+     * attempt has at most one of them: a model's capability is native or
+     * application-managed, never both.
+     *
+     * Frozen for the same reason, and one step further: `pricingVersion` is
+     * stored so a settled turn can say which price list it was authorized
+     * against, which is what makes a search price change non-retroactive rather
+     * than merely intended to be.
+     */
+    searchBackendAuthorization?: {
+        backend: string;
+        reservedCostMicroUsd: number;
+        costPerQueryMicroUsd: number;
+        maxQueries: number;
+        pricingVersion: string;
+    };
 };
 
 /**

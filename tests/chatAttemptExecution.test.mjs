@@ -13,6 +13,7 @@ import {
   OPENAI_MAX_SEARCH_TOOL_CALLS,
   OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
 } from "../lib/webSearchCapability.ts";
+import { ALL_WEB_SEARCH_BACKENDS_READY } from "../lib/webSearchBackends.ts";
 import { createTokenEstimateAccumulator } from "../lib/chatTokenEstimate.ts";
 
 // §9.1: "the closure also holds modelConfig, generationSettings,
@@ -36,6 +37,10 @@ const request = (overrides = {}) => ({
   accessKind: "user",
   inputBreakdown: 1000,
   webSearchMode: "off",
+  // Every backend reachable by default, so a test that says "this model plans a
+  // search" is testing the plan rather than the fixture's environment. The
+  // no-backend case is asserted explicitly below, with an empty map.
+  searchBackendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
   traceId: "trace-1",
   attemptIndex: 0,
   ...overrides,
@@ -367,19 +372,74 @@ test("a plan reserves the provider cost of its own attempt's search", () => {
   assert.equal(idle.budget.nativeSearchMaxQueries, 0);
 });
 
-test("a native model whose search cost has no ceiling plans no search at all", () => {
-  // Not a refusal: the turn is still answered, without a search and marked as
-  // such. What must not happen is a plan that configures a tool the dispatch
-  // cannot pay for and then fails at the provider.
+test("a Google model plans an application-managed search, not a native one", () => {
   const plan = planFor(modelById("gemini-3-6-flash"), {
     webSearchMode: "always",
   });
+  // Never native: no provider tool is attached, so nothing is billed to Google
+  // for the search and no grounding tool goes on the request.
   assert.equal(plan.nativeSearchEnabled, false);
   assert.equal(plan.webSearchToolConfig, null);
-  assert.equal(plan.searchSurchargeCredits, 0);
   assert.equal(plan.budget.nativeSearchReservedCostMicroUsd, 0);
+
+  assert.equal(plan.appManagedSearchEnabled, true);
+  assert.ok(plan.appManagedSearch, "expected this attempt's own search tool");
+  assert.equal(plan.appManagedSearch.session.maxQueries, 5);
+  assert.equal(plan.searchSurchargeCredits, 8);
+  assert.deepEqual(plan.searchPath, { kind: "app_managed_tool" });
+  // The search vendor's worst case, on its own field and at its own rate.
+  assert.deepEqual(plan.budget.searchBackend, {
+    backend: "brave",
+    reservedCostMicroUsd: 25_000,
+    costPerQueryMicroUsd: 5_000,
+    maxQueries: 5,
+    pricingVersion: plan.budget.searchBackend.pricingVersion,
+  });
+  // The tool reaches the dispatch, and with a step budget -- a search tool with
+  // no tool loop is a search the model never gets to read.
+  const options = attemptDispatchOptions(plan);
+  assert.ok(options.tools?.web_search);
+  assert.ok(options.stopWhen);
+});
+
+test("with no reachable backend the same model plans no search at all", () => {
+  // Not a refusal: the turn is still answered, without a search and marked as
+  // such. What must not happen is a plan that registers a tool whose every call
+  // fails, having taken the surcharge for it.
+  const plan = planFor(modelById("gemini-3-6-flash"), {
+    webSearchMode: "always",
+    searchBackendReadiness: {},
+  });
+  assert.equal(plan.appManagedSearchEnabled, false);
+  assert.equal(plan.appManagedSearch, null);
+  assert.equal(plan.searchSurchargeCredits, 0);
+  assert.equal(plan.budget.searchBackend, null);
   assert.deepEqual(plan.searchPath, {
     kind: "none",
-    gap: "cost_unbounded",
+    // Its own gap: a missing credential is fixed by an environment file, and a
+    // provider with no ceiling parameter is not fixed at all.
+    gap: "backend_unavailable",
   });
+});
+
+test("two attempts never share a search counter", () => {
+  // The worst possible reuse. A second attempt handed the first attempt's
+  // session inherits a spent allowance -- and answers with no search -- or an
+  // unspent one it never paid for.
+  const first = planFor(modelById("gemini-3-6-flash"), {
+    webSearchMode: "always",
+  });
+  const second = planFor(modelById("gemini-3-7-flash"), {
+    webSearchMode: "always",
+    attemptIndex: 1,
+  });
+  assert.notEqual(first.appManagedSearch.session, second.appManagedSearch.session);
+  first.appManagedSearch.session.claim();
+  first.appManagedSearch.session.claim();
+  assert.equal(first.appManagedSearch.session.remaining(), 3);
+  assert.equal(
+    second.appManagedSearch.session.remaining(),
+    5,
+    "the second attempt's allowance is its own"
+  );
 });

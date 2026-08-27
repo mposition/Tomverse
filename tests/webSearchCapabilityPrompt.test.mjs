@@ -57,9 +57,6 @@ test("a model that searches inside its own completion is searching, flag or no f
 
 test("a model with no search this request may carry is unavailable", () => {
   for (const modelId of [
-    // Native, but its per-query cost has no enforceable worst case, so the
-    // dispatch refuses it and the caller's flag is false.
-    "gemini-3-1-pro",
     // Nobody confirmed it can search.
     "gpt-5-4-mini",
     // No search at all.
@@ -71,6 +68,55 @@ test("a model with no search this request may carry is unavailable", () => {
       modelId
     );
   }
+});
+
+test("a turn carrying this application's own search tool is a searching turn", () => {
+  // The contradiction this flag exists to prevent. Without it a Gemini turn
+  // would be handed `WEB_SEARCH_UNAVAILABLE_PROMPT` -- told, in the same
+  // request that carries a working `web_search` tool, that nothing in its
+  // answer can come from the live web. The model would then either obey the
+  // block and refuse to search, or search and open by saying it could not.
+  for (const modelId of [
+    "gemini-3-7-flash",
+    "gemini-3-6-flash",
+    "gemini-3-1-pro",
+    "gemini-2-5-flash",
+  ]) {
+    assert.equal(
+      resolveWebSearchTurnState({
+        modelId,
+        nativeSearchEnabled: false,
+        appManagedSearchEnabled: true,
+      }),
+      "searching",
+      modelId
+    );
+    assert.equal(
+      buildWebSearchCapabilitySystemPrompt(
+        resolveWebSearchTurnState({
+          modelId,
+          nativeSearchEnabled: false,
+          appManagedSearchEnabled: true,
+        })
+      ),
+      "",
+      `${modelId}: a searching turn gets no "cannot search" paragraph`
+    );
+  }
+});
+
+test("the same model with the tool not registered is unavailable again", () => {
+  // Off, or a deployment with no reachable backend. The caller's flag is the
+  // whole input: this module does not re-derive dispatchability, so it cannot
+  // disagree with the plan that decided it.
+  assert.equal(
+    resolveWebSearchTurnState({
+      modelId: "gemini-3-6-flash",
+      nativeSearchEnabled: false,
+      appManagedSearchEnabled: false,
+    }),
+    "unavailable"
+  );
 });
 
 /* -------------------------------------------------------------- the block */

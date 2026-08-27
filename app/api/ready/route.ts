@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
+import { getSearchProviderBudgetReadiness } from "@/lib/searchProviderBudgetReadiness";
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
@@ -87,6 +88,33 @@ const readinessResponse = async (head = false) => {
     })
   );
   const imageProviderBudget = imageBudgetStatus.status?.ready ?? false;
+  // The search vendor this application calls itself. Unlike the image budget
+  // there is no flag to be off: the capability register is compiled in, so a
+  // build that ships Google models searching through a backend has already
+  // decided. What this refuses is a production deployment that would offer the
+  // search switch with no credential behind it, or spend at a vendor whose
+  // operational cap could not be read. Deploy the variables first, the build
+  // second -- the same order the provider budgets take.
+  const searchBudgetStatus = (() => {
+    try {
+      return {
+        status: getSearchProviderBudgetReadiness(),
+        error: null as string | null,
+      };
+    } catch (error) {
+      // The derivation itself failed, which is never "the budget is fine". Same
+      // reasoning as the image budget above: the louder the failure, the
+      // quieter this endpoint must not become.
+      return {
+        status: null,
+        error:
+          error instanceof Error
+            ? error.message
+            : "The search provider budget readiness check threw.",
+      };
+    }
+  })();
+  const searchProviderBudget = searchBudgetStatus.status?.ready ?? false;
   // The sending domains. Errors here are configurations that would send from
   // the wrong domain or from nothing at all; the outstanding move of
   // transactional mail onto its own subdomain
@@ -126,8 +154,8 @@ const readinessResponse = async (head = false) => {
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
-    imageProviderBudget && emailSendingIdentity && emailSnapshotKeyring &&
-    emailUnsubscribeKeyring && emailBusinessIdentity;
+    imageProviderBudget && searchProviderBudget && emailSendingIdentity &&
+    emailSnapshotKeyring && emailUnsubscribeKeyring && emailBusinessIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -204,6 +232,34 @@ const readinessResponse = async (head = false) => {
             (imageBudgetStatus.status?.providers ?? [])
               .map((entry) => entry.provider)
               .join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "search-provider-cost-budget",
+        healthy: searchProviderBudget,
+        code: "SEARCH_PROVIDER_COST_BUDGET_NOT_READY",
+        title: "Application-managed web search is not configured correctly",
+        error: searchProviderBudget
+          ? "Search backend credentials and spend budget are configured."
+          : searchBudgetStatus.error ??
+            ((searchBudgetStatus.status?.problems ?? [])
+              .map((problem) => problem.message)
+              .join(" | ") ||
+              "A search backend is unusable."),
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          searchBudgetCheckThrew: searchBudgetStatus.error !== null,
+          // Names, never values. Which backends this deployment holds a
+          // credential for is operational fact; the credential is not.
+          configuredSearchBackends:
+            (searchBudgetStatus.status?.configuredBackends ?? []).join(",") ||
+            "none",
+          requiredSearchBackends:
+            (searchBudgetStatus.status?.requiredBackends ?? []).join(",") ||
+            "none",
           traceId,
         },
       }),
@@ -337,6 +393,7 @@ const readinessResponse = async (head = false) => {
         securityEnvironment,
         providerBudgets,
         imageProviderBudget,
+        searchProviderBudget,
         emailSendingIdentity,
         emailSnapshotKeyring,
         emailUnsubscribeKeyring,

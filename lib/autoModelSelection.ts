@@ -44,6 +44,7 @@ import {
   type RouterVersions,
   ROUTER_VERSIONS,
 } from "@/lib/routerDecision";
+import type { RouterCandidateInput } from "@/lib/routerCandidates";
 import type { RouterTieBreakSignals } from "@/lib/routerScorePolicy";
 import type { RouterStickyState } from "@/lib/routerSelection";
 import type { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
@@ -154,6 +155,15 @@ export type AutoSelectionInput = {
   text: string;
   attachments: readonly { mediaType?: string }[];
   webSearchRequested: boolean;
+  /**
+   * Which application-managed search backends this deployment can reach.
+   *
+   * Auto's whole justification for preferring a search-capable model on a turn
+   * that needs current information is that the model will actually search. On a
+   * deployment holding no credential for that model's backend it will not, so
+   * the preference would be choosing a model on a property it does not have.
+   */
+  searchBackendReadiness: RouterCandidateInput["searchBackendReadiness"];
   models: readonly AiModel[];
   reservedInputTokens: number;
   /**
@@ -265,6 +275,7 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
       text: input.text,
       attachments: input.attachments,
       webSearchRequested: input.webSearchRequested,
+      searchBackendReadiness: input.searchBackendReadiness,
       models: input.models,
       // Non-null here: the cohort refused a guest and a plan-less account
       // above, so a plan that reached this line is one the filters accept.

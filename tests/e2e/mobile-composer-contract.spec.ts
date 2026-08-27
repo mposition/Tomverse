@@ -64,10 +64,15 @@ const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 /** Neither of these can search: the fully blocked state. */
 const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
 /**
- * All three dispatchable: the full-support state. Gemini is deliberately not
- * here -- its grounding is native but takes no per-request cost ceiling, so
- * the composer counts it unsupported and this would not be the full-support
- * case at all (lib/webSearchCapability.ts `nativeSearchIsDispatchable`).
+ * All three dispatchable: the full-support state.
+ *
+ * Anthropic and OpenAI only, which is a choice about the *golden images* rather
+ * than about capability: these three have been the recorded composer since the
+ * baselines were taken, and swapping a model in would change every pixel of a
+ * screenshot whose job is to change only when the layout does. Gemini's own
+ * search -- application-managed since 2026-08-27, and dispatchable -- is
+ * covered by `web-search-composer-state.spec.ts`, which measures state rather
+ * than pixels.
  */
 const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gpt-5-6-luna"];
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
