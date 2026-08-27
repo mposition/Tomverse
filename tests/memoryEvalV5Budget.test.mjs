@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import {
@@ -16,8 +18,9 @@ import {
  * read off the register rather than off the issue that records it.
  *
  * v5-run1 measured `mem-extract-v5` on all 1,150 cases of `mem-eval-succ-3`
- * and missed every §12.3 floor and the hard-zero gate, so both v5 pairs are
- * `revoked` (.github/audits/memory-eval-v5-run1-2026-08-27.md). The budget
+ * and missed every docs/policy/external-conversation-import-and-memory.md
+ * §12.3 floor and the hard-zero gate, so both v5 pairs are `revoked`
+ * (.github/audits/memory-eval-v5-run1-2026-08-27.md). The budget
  * stays on the record — the approval was real and US$0.5877 of it was really
  * spent — which makes this file's job the ordering of two facts: a ceiling
  * that is still recorded, and a gate that no longer opens for it.
@@ -69,7 +72,8 @@ test("the closed pair still carries the ceiling and the ticket it ran on", () =>
     assert.equal(budget.maxUsd, 20);
     assert.ok(budget.maxUsd > 18.54, "a repeat run would need a second approval");
     assert.match(budget.ticket, /^https:\/\/github\.com\/mposition\/Tomverse\/issues\/\d+$/);
-    // Closed after v5-run1. `evaluation` stays null: §12.1's block is an
+    // Closed after v5-run1. `evaluation` stays null: docs/policy/external-conversation-import-and-memory.md
+    // §12.1's block is an
     // approval record — approver, approvedAt, expiresAt — and there was no
     // approval. The evidence for a negative result is the audit, not a
     // half-filled approval.
@@ -123,4 +127,80 @@ test("nothing on the register can run live any more", () => {
                 .mode === "live"
     ).map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`);
     assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
+});
+
+/* ------------------------------------------- the gate, end to end ------- */
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
+const NETWORK_GUARD = fileURLToPath(
+    new URL("./e2e/block-external-network.cjs", import.meta.url)
+);
+
+/** The real entry point, under a guard that throws on any non-loopback dial. */
+const runHarness = (args, env = {}) => {
+    try {
+        const stdout = execFileSync(
+            process.execPath,
+            ["--require", NETWORK_GUARD, "--import", "tsx", HARNESS, ...args],
+            {
+                cwd: REPO_ROOT,
+                encoding: "utf8",
+                env: { ...process.env, ...env },
+                stdio: ["ignore", "pipe", "pipe"],
+            }
+        );
+        return { status: 0, output: stdout };
+    } catch (error) {
+        return {
+            status: error.status ?? 1,
+            output: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+        };
+    }
+};
+
+test("both revoked v5 pairs refuse for the status exactly, and call nothing", () => {
+    // **This assertion is not interchangeable with "some refusal happened".**
+    // The integration tests around this one accept any refusal on purpose,
+    // because which gate speaks is the register's business and has moved
+    // three times. That tolerance has a cost: a missing key or a lost budget
+    // would satisfy them too, and a register gate that stopped working would
+    // go unnoticed behind a refusal that came from somewhere else.
+    //
+    // So this test pins the one thing those cannot: the refusal is the
+    // status gate, named, for both v5 pairs, with a key present and the
+    // dataset frozen — every other reason removed rather than absent.
+    assert.equal(MEMORY_EVAL_SUCC3_DATASET_FROZEN, true);
+
+    for (const entry of [LUNA_V5, MINI_V5]) {
+        const label = `${entry.extractionModelId}::${entry.promptVersion}`;
+        assert.equal(entry.status, "revoked", label);
+        assert.equal(
+            decideEvalRunMode(onSucc3({ registerEntry: entry, hasApiKey: true }))
+                .reason,
+            "pair_not_runnable",
+            label
+        );
+
+        // And the real entry point, with a key that would satisfy the key
+        // gate and a budget that would satisfy the budget gate on the luna
+        // pair. Nothing may reach a provider.
+        const result = runHarness(
+            ["--live", `--model=${entry.extractionModelId}`],
+            { OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000" }
+        );
+        assert.equal(result.status, 1, `${label} did not refuse`);
+        assert.match(
+            result.output,
+            new RegExp(`${label}[^\\n]*revoked`),
+            `${label} refused for something other than its status:\n${result.output}`
+        );
+        assert.doesNotMatch(
+            result.output,
+            /QA_EXTERNAL_NETWORK_BLOCKED/,
+            `${label} attempted an outbound connection`
+        );
+        // No report was printed: the refusal came before the run, not after.
+        assert.doesNotMatch(result.output, /Extraction accuracy|Aggregate/);
+    }
 });

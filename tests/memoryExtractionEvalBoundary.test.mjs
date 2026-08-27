@@ -202,7 +202,8 @@ test("only a funded, open pair can run live, and it is named", () => {
     }
 
     // Named, not counted. `mem-extract-v5` was funded on 2026-08-27, ran, and
-    // was closed the same day: v5-run1 missed every §12.3 floor and the
+    // was closed the same day: v5-run1 missed every
+    // docs/policy/external-conversation-import-and-memory.md §12.3 floor and the
     // hard-zero gate, so both v5 pairs are `revoked` and refuse for the
     // status ahead of the budget
     // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
