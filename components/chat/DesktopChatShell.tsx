@@ -36,6 +36,7 @@ import {
   type WebSearchTopicSignal,
 } from "@/lib/webSearchRetrySuggestion";
 import { WebSearchSuggestionCard } from "@/components/chat/WebSearchSuggestionCard";
+import { arbitrateWebSearchOffer } from "@/lib/answerSuggestionArbitration";
 import type { WebSearchSuggestionCopy } from "@/components/chat/webSearchSuggestionCopy";
 import {
   chatContentStateKey,
@@ -505,7 +506,7 @@ export function DesktopChatShell({
     The web-search offer, decided from the same status map the rail and the
     expansion offer read.
   */
-  const webSearchSuggestion = deriveWebSearchSuggestion({
+  const webSearchSuggestionForTurn = deriveWebSearchSuggestion({
     conversationId: currentChatId,
     turn: webSearchSuggestionTurn,
     selectedModelIds: selectedModels,
@@ -515,6 +516,21 @@ export function DesktopChatShell({
     retryFailure: webSearchRetryFailure,
     resolvedTopicKeys: webSearchResolvedTopicKeys,
     offeredTopics: webSearchOfferedTopics,
+  });
+  /*
+    A question can satisfy both offers -- recency and a depth signal together --
+    and Deep Research outranks this one when it does
+    (lib/answerSuggestionArbitration.ts).
+
+    Applied here and not at the render site: the impression effect below writes
+    `offeredTopics`, and a card that was never drawn must not be recorded as
+    having been offered, or a later turn refuses the offer for a question nobody
+    was asked about.
+  */
+  const webSearchSuggestion = arbitrateWebSearchOffer({
+    webSearch: webSearchSuggestionForTurn,
+    deepResearch: deepResearchSuggestion,
+    retryFailure: webSearchRetryFailure,
   });
   /*
     The strongest signal, and only that one. The classifier reports every
@@ -1110,11 +1126,14 @@ export function DesktopChatShell({
           for the same reason the expansion is: the dock exists once however
           many panels are on screen.
 
-          The two can never be on screen together. This one is made about a
-          question whose only signal is that it needs current information, and
-          `classifyDeepResearchTopic` refuses exactly that case -- recency alone
-          is the one thing it will not offer a report for. A question with both
-          goes to Deep Research, which is the deeper of the two answers.
+          The two are never on screen together, and `arbitrateWebSearchOffer`
+          above is what makes that true. It used to be argued from the rules --
+          this offer needs only recency and `classifyDeepResearchTopic` refuses
+          recency alone -- but needing only recency is not firing only on it: a
+          question carrying recency *and* a depth signal satisfied both, and drew
+          both cards. Deep Research wins that question, as the deeper of the two
+          answers; a failed re-run's own report is the one thing the arbitration
+          does not take away.
         */}
         {webSearchSuggestion.offered &&
           webSearchSuggestion.state &&
