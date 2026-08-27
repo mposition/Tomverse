@@ -53,6 +53,7 @@
     "check:router-quality-eval": "node --import tsx scripts/check-router-quality-eval.mjs",
     "check:router-human-review": "node --import tsx scripts/check-router-human-review.mjs",
     "check:router-decision-preregistration": "node --import tsx scripts/check-router-decision-preregistration.mjs",
+    "check:router-answer-bundle": "node --import tsx scripts/check-router-answer-bundle.mjs",
     "check:auto-rollout-readiness": "node --conditions=react-server --import tsx scripts/check-auto-rollout-readiness.mjs",
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
     "check:image-eval-evidence": "node scripts/check-image-eval-evidence.mjs",

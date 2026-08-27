@@ -187,6 +187,20 @@ jobs:
             --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
             --json=artifacts/route01-pilot-${{ inputs.run_label }}.json
 
+      # The gate mposition set, in front of the expensive call: 200 of 210
+      # overall, 13 of 14 in every cell, and no bundle problems at all. A
+      # bundle short of those is a calibration over the pairs that happened to
+      # survive, and the judge that would grade it costs ten times the run that
+      # produced the answers.
+      #
+      # It runs whatever the pilot's exit code was, so a pilot that stopped
+      # early is refused here by name rather than silently followed.
+      - name: The bundle may be judged
+        run: |
+          npm run check:router-answer-bundle -- \
+            --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
+            --set=docs/ops/router-evaluation-set/development-v0.json
+
       # The same answers, graded by the independent judge. No answer is
       # regenerated and the display order is the one the bundle fixed, so the
       # only thing that differs between the two passes is who graded.

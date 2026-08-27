@@ -90,6 +90,11 @@ import { ACTIVE_ESTIMATOR_VERSION, estimateRawTextTokens } from "../lib/chatToke
 import { decideRouterModel, ROUTER_VERSIONS } from "../lib/routerDecision.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import {
+  failed as answerFailed,
+  failureRecord,
+  outcomeFromReply,
+} from "../lib/routerAnswerOutcome.ts";
+import {
   JUDGE_TEMPLATE_VERSION,
   identifiesItself,
   judgePrompt,
@@ -100,6 +105,10 @@ import {
   PAIRED_EVALUATION_UNIT,
   ROUTER_QUALITY_EVAL_VERSION,
   computeWinRateDelta,
+  decidePairFromAnswers,
+  outcomeScore,
+  pairAccounting,
+  pairAccountingProblems,
   evaluateRouterQualityRun,
   evaluationRecordProblems,
   requiredSampleSize,
@@ -333,20 +342,47 @@ const costMicroUsd = (model, usage) => {
   );
 };
 
-const answer = async (model, prompt) => {
+/**
+ * One provider call, as an outcome rather than a string.
+ *
+ * A failed call is billed the same as a successful one where the provider got
+ * far enough to charge, so the cost is accrued on both paths: a total that
+ * counted only the answers it kept would understate what the run spent.
+ *
+ * `arm` is passed in because the failure journal is useless without it -- "an
+ * answer was empty" says nothing; "the auto arm on deepseek-v4-flash returned
+ * 0 characters with finishReason=length" says what to look at.
+ */
+const answer = async (model, prompt, arm) => {
   const startedAt = process.hrtime.bigint();
-  const result = await generateText({
-    model: getActiveAiModel(model),
-    messages: [{ role: "user", content: prompt }],
-    maxOutputTokens: 2_048,
-  });
+  const identity = {
+    arm,
+    modelId: model.id,
+    provider: model.provider,
+    apiModel: model.apiModel,
+  };
+  let result;
+  try {
+    result = await generateText({
+      model: getActiveAiModel(model),
+      messages: [{ role: "user", content: prompt }],
+      maxOutputTokens: 2_048,
+    });
+  } catch (error) {
+    return answerFailed("provider_error", String(error), {
+      ...identity,
+      finishReason: null,
+      usage: {},
+      latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      rawTextLength: 0,
+    });
+  }
   const usage = result.usage ?? {};
   accruedCostUsd += costMicroUsd(model, usage) / 1_000_000;
-  return {
-    text: result.text ?? "",
-    latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
-    usage,
-  };
+  return outcomeFromReply(
+    { text: result.text, finishReason: result.finishReason ?? null, usage },
+    { ...identity, latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6 }
+  );
 };
 
 
@@ -435,7 +471,11 @@ if (rejudgePath) {
     }
     let text;
     try {
-      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text));
+      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text), "judge");
+      if (judgement.status === "failed") {
+        console.log(`\n  ${pair.pairId}: judge failed — ${judgement.reason}: ${judgement.detail}`);
+        continue;
+      }
       text = judgement.text;
     } catch (error) {
       console.log(`\n  ${pair.pairId}: judge failed — ${String(error)}`);
@@ -885,18 +925,27 @@ for (const [index, item] of liveItems.entries()) {
     continue;
   }
 
-  let autoAnswer;
-  let baselineAnswer;
-  try {
-    autoAnswer = await answer(autoModel, item.prompt);
-  } catch (error) {
-    exclude("auto_arm_failed", String(error));
-    continue;
+  // Both arms are asked before either outcome is inspected. Skipping the
+  // second call once the first came back empty would make the failure journal
+  // silent about an arm nobody asked, and "the baseline was not called" is not
+  // the same finding as "the baseline answered".
+  const autoAnswer = await answer(autoModel, item.prompt, "auto");
+  const baselineAnswer = await answer(baselineModel, item.prompt, "baseline");
+
+  for (const outcome of [autoAnswer, baselineAnswer]) {
+    if (outcome.status === "failed") journal(failureRecord(outcome));
   }
-  try {
-    baselineAnswer = await answer(baselineModel, item.prompt);
-  } catch (error) {
-    exclude("baseline_arm_failed", String(error));
+
+  // mposition's ruling. An empty answer is a real failure for the person who
+  // asked, so it is recorded as that arm losing rather than dropped -- dropping
+  // it would delete an arm's worst turns from the comparison and flatter
+  // whichever arm fails less gracefully. No judge is called: there is nothing
+  // to compare an answer against nothing.
+  // The judge below is reachable only through `action: "judge"`, which
+  // lib/routerQualityEvalCore.ts returns only when both arms produced text.
+  const pairDecision = decidePairFromAnswers(autoAnswer, baselineAnswer);
+  if (pairDecision.action === "exclude") {
+    exclude(pairDecision.reason, pairDecision.detail);
     continue;
   }
 
@@ -937,8 +986,8 @@ for (const [index, item] of liveItems.entries()) {
 
   let verdict;
   try {
-    const judgement = await answer(judgeModel, judgePrompt(item.prompt, first, second));
-    verdict = readVerdict(judgement.text);
+    const judgement = await answer(judgeModel, judgePrompt(item.prompt, first, second), "judge");
+    verdict = judgement.status === "ok" ? readVerdict(judgement.text) : null;
   } catch (error) {
     exclude("judge_failed", String(error));
     continue;
@@ -1037,12 +1086,41 @@ for (const pair of pairs) {
 const pct = (value) => (Number.isNaN(value) ? "n/a" : `${(value * 100).toFixed(1)}%`);
 const pp = (value) => (Number.isNaN(value) ? "n/a" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}pp`);
 
+// Two estimates of two different things, reported together because either one
+// alone is misleading. The quality delta answers "when both arms answered,
+// which answer was better"; the end-to-end delta answers "which arm served the
+// person", and counts an arm that produced nothing as losing that pair.
+const accounting = pairAccounting(pairs);
+const accountingTrouble = pairAccountingProblems(accounting);
+if (accountingTrouble.length > 0) {
+  die(`\nThe pair accounting does not add up:\n\n  - ${accountingTrouble.join("\n  - ")}\n`);
+}
+const endToEndDelta = computeWinRateDelta(pairs, {
+  method: ciMethod,
+  seed,
+  score: outcomeScore,
+});
+
 console.log(`Outcome        ${verdict.outcome.toUpperCase()}`);
 for (const reason of verdict.reasons) console.log(`  - ${reason}`);
 console.log("");
+console.log(
+  `Pairs          ${accounting.total} = ${accounting.judgeable} judgeable + ` +
+    `${accounting.singleArmFailure} single-arm failure + ${accounting.doubleArmFailure} double-arm failure + ` +
+    `${accounting.otherExclusions} other`
+);
+console.log("");
 console.log(`Judged pairs   ${verdict.delta.n}  (auto ${verdict.delta.wins} / baseline ${verdict.delta.losses} / equivalent ${verdict.delta.ties})`);
 console.log(`Discordance    ${pct(verdict.delta.discordanceRate)}`);
-console.log(`Win-rate delta ${pp(verdict.delta.pointEstimatePp)}  95% CI [${pp(verdict.delta.ci95LowerPp)}, ${pp(verdict.delta.ci95UpperPp)}]  (${verdict.delta.method}, seed ${seed})`);
+console.log(
+  `semanticQualityDelta   ${pp(verdict.delta.pointEstimatePp)}  95% CI [${pp(verdict.delta.ci95LowerPp)}, ${pp(verdict.delta.ci95UpperPp)}]` +
+    `  over ${verdict.delta.n} pair(s) both arms answered`
+);
+console.log(
+  `endToEndOutcomeDelta   ${pp(endToEndDelta.pointEstimatePp)}  95% CI [${pp(endToEndDelta.ci95LowerPp)}, ${pp(endToEndDelta.ci95UpperPp)}]` +
+    `  over ${endToEndDelta.n} pair(s), an arm that produced nothing losing`
+);
+console.log(`               (${verdict.delta.method}, seed ${seed})`);
 const exclusionBreakdown = Object.entries(verdict.exclusions.byReason)
   .filter(([, count]) => count > 0)
   .map(([reason, count]) => `${reason} ${count}`)
@@ -1150,6 +1228,13 @@ const record = {
   sampleSize: verdict.delta.n,
   discordantPairs: verdict.delta.discordantPairs,
   pointEstimatePp: verdict.delta.pointEstimatePp,
+  // Both estimates in the record, not only the one in the headline. A reader
+  // who sees a quality delta over 179 pairs and a total of 210 has to be able
+  // to find out where the other 31 went, and what they did to the number that
+  // describes what the person received.
+  pairAccounting: accounting,
+  semanticQualityDelta: verdict.delta,
+  endToEndOutcomeDelta: endToEndDelta,
   ci95LowerPp: verdict.delta.ci95LowerPp,
   ci95UpperPp: verdict.delta.ci95UpperPp,
   outcome: verdict.outcome,
