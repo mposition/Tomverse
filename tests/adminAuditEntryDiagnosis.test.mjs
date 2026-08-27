@@ -214,26 +214,43 @@ test("a collation difference is detectable, and is not a changed field", () => {
     );
     assert.equal(
         computeAdminAuditEntryHash(row, SECRET),
-        variants.locale,
-        "signing must stay on the locale order until it is migrated deliberately"
+        variants.codepoint,
+        "signing moved to code point on 2026-08-27; it must not depend on collation"
     );
 
-    // A row signed under the other collation is reported as a collation
-    // finding and not as a field that changed, because nothing about it did.
-    const diagnosis = diagnoseAdminAuditEntry(row, variants.codepoint, [SECRET]);
-    assert.equal(diagnosis.verifiesUnderCodepointKeyOrder, true);
-    assert.equal(diagnosis.verifiesAsStored, false);
-    assert.deepEqual(diagnosis.matches, [], "no field differs; do not claim one does");
+    // A row signed before that move reproduces under the legacy order, and is
+    // reported as that rather than as a field that changed -- nothing about it
+    // did. Verification accepts it, so this is a statement of provenance.
+    const legacy = diagnoseAdminAuditEntry(row, variants.locale, [SECRET]);
+    assert.equal(legacy.reproducesUnderOrder, "locale");
+    assert.equal(legacy.verifiesAsStored, false);
+    assert.deepEqual(legacy.matches, [], "no field differs; do not claim one does");
+
+    // And a row signed after it answers with the signing order, not the legacy
+    // one: the search must report the order that actually matched.
+    const current = diagnoseAdminAuditEntry(row, variants.codepoint, [SECRET]);
+    assert.equal(current.reproducesUnderOrder, "codepoint");
+    assert.equal(current.verifiesAsStored, true);
 });
 
-test("a row that verifies normally is never called a collation problem", () => {
-    // The flag must not fire whenever the two orders happen to agree, which is
-    // the ordinary case: it would then appear on every healthy row.
+test("a row that verifies normally reports the signing order, not the legacy one", () => {
+    // The two orders agree on an object with no divergent pair, which is the
+    // ordinary case. The report must name the signing order it tried first,
+    // never the legacy one -- otherwise every healthy row would read as though
+    // it predated the migration.
     const diagnosis = diagnoseAdminAuditEntry(
         SIGNED,
         computeAdminAuditEntryHash(SIGNED, SECRET),
         [SECRET]
     );
     assert.equal(diagnosis.verifiesAsStored, true);
-    assert.equal(diagnosis.verifiesUnderCodepointKeyOrder, false);
+    assert.equal(diagnosis.reproducesUnderOrder, "codepoint");
+});
+
+test("a row nothing reproduces reports no order at all", () => {
+    // The useful half of the finding: `null` rules the collation story out
+    // rather than leaving it open, which is what a genuinely broken row needs.
+    const diagnosis = diagnoseAdminAuditEntry(SIGNED, "0".repeat(64), [SECRET]);
+    assert.equal(diagnosis.verifiesAsStored, false);
+    assert.equal(diagnosis.reproducesUnderOrder, null);
 });
