@@ -74,6 +74,64 @@ test("emphasis spanning a range is no longer torn apart by it", () => {
   assert.ok(!textOf(tree).includes("*"));
 });
 
+/* ------------------------- the closing delimiter and the Korean particle */
+
+test("bold closed by punctuation and followed by a particle is bold", () => {
+  /*
+    Staging, 2026-08-27. `(09:30)**입니다` is not right-flanking under
+    CommonMark, so the run could not close and the reader was shown a literal
+    `**`. Korean attaches the particle straight to the closing delimiter, so
+    this is not an edge case in the language -- it is how the sentence is
+    written.
+  */
+  const tree = parse("**오전 9시(09:30)**입니다.");
+  assert.ok(nodeTypes(tree).includes("strong"));
+  assert.ok(!textOf(tree).includes("*"));
+  assert.equal(textOf(tree), "오전 9시(09:30)입니다.");
+});
+
+test("the staging sentence that started this parses whole", () => {
+  const tree = parse(
+    "**교보문고 강남점 영업시간은 매일 오전 9시 30분~오후 10시(09:30~22:00)**입니다."
+  );
+  const types = nodeTypes(tree);
+  assert.ok(types.includes("strong"));
+  // Both defects at once: the emphasis closes, and the tildes are not eaten.
+  assert.ok(!types.includes("delete"));
+  assert.equal(
+    textOf(tree),
+    "교보문고 강남점 영업시간은 매일 오전 9시 30분~오후 10시(09:30~22:00)입니다."
+  );
+});
+
+test("strikethrough gets the same treatment, not half of it", () => {
+  /*
+    Taking the emphasis extension alone would leave `~~...~~입니다` broken in
+    exactly the way `**` was. The GFM strikethrough extension is what covers
+    it, and it is why there are two plugins rather than one.
+  */
+  const tree = parse("~~취소선(가격)~~입니다.");
+  assert.ok(nodeTypes(tree).includes("delete"));
+  assert.ok(!textOf(tree).includes("~"));
+});
+
+test("adding the strikethrough extension did not put single-tilde back", () => {
+  /*
+    It registers its own strikethrough construct with its own `singleTilde`,
+    so it does not inherit the option given to remark-gfm. Added with no
+    options, it struck "오후 10시(09:30" through again -- one fix undoing the
+    other.
+  */
+  for (const input of [
+    "오전 9시 30분~오후 10시(09:30~22:00)입니다.",
+    "밤에는 26~28°C, 낮에는 30~32°C입니다.",
+  ]) {
+    const tree = parse(input);
+    assert.ok(!nodeTypes(tree).includes("delete"), input);
+    assert.equal(textOf(tree), input);
+  }
+});
+
 /* ------------------------------------------------------ what is kept */
 
 test("the two-tilde strikethrough still works", () => {
@@ -90,6 +148,23 @@ test("the rest of GitHub-flavoured markdown is untouched", () => {
   assert.ok(nodeTypes(task).includes("listItem"));
   const strike = parse("~~gone~~");
   assert.ok(nodeTypes(strike).includes("delete"));
+});
+
+test("code, links and escapes still parse as themselves", () => {
+  // The reason a regular expression over the raw text was not the fix: it
+  // cannot see any of these, and would corrupt the ones it did not understand.
+  const code = parse("`code(x)`입니다.");
+  assert.ok(nodeTypes(code).includes("inlineCode"));
+  assert.equal(textOf(code), "code(x)입니다.");
+
+  const link = parse("[링크(주석)](https://example.com)입니다.");
+  assert.ok(nodeTypes(link).includes("link"));
+
+  const fenced = parse("```js\nconst a = `x~y`;\n```");
+  assert.ok(nodeTypes(fenced).includes("code"));
+
+  const escaped = parse("\\*\\*굵게가 아닙니다\\*\\*");
+  assert.ok(!nodeTypes(escaped).includes("strong"));
 });
 
 test("ordinary emphasis is unaffected", () => {
