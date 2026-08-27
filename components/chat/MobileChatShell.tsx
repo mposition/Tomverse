@@ -18,6 +18,7 @@ import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
+import type { AiModel } from "@/lib/models";
 import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -174,6 +175,9 @@ type MobileChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  /** Threaded to the composer; see `ChatInput`'s own prop docs. */
+  modelSwapRequest?: AiModel | null;
+  onModelSwapRequestResolved?: (swapped: boolean) => void;
   /** Plan/guest entitlement check, so the outage banner never offers a swap this viewer cannot run. */
   canSelectModel?: (modelId: string) => boolean;
   webSearchMode: WebSearchMode;
@@ -291,6 +295,8 @@ export function MobileChatShell({
   onDownload,
   onToggleModel,
   onSwapModel,
+  modelSwapRequest = null,
+  onModelSwapRequestResolved,
   canSelectModel,
   webSearchMode,
   onWebSearchModeChange,
@@ -1412,6 +1418,8 @@ export function MobileChatShell({
             disabledModelIds={disabledPanels}
             onToggleModel={onToggleModel}
             onSwapModel={onSwapModel}
+            modelSwapRequest={modelSwapRequest}
+            onModelSwapRequestResolved={onModelSwapRequestResolved}
             webSearchMode={webSearchMode}
             onWebSearchModeChange={onWebSearchModeChange}
             memoryMode={memoryMode}

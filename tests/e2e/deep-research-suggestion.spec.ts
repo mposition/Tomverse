@@ -170,13 +170,55 @@ const mockChatAndDeepResearch = async (page: Page) => {
   };
 };
 
-const openChat = async (page: Page) => {
+const openChat = async (
+  page: Page,
+  options: { selectedModels?: string[]; beforeNavigate?: (page: Page) => Promise<void> } = {}
+) => {
+  const selectedModels = options.selectedModels ?? [CHAT_MODEL_ID];
   await prepareGuestPage(page, "en");
-  await mockAuthenticatedApi(page, { selectedModels: [CHAT_MODEL_ID] });
+  await mockAuthenticatedApi(page, { selectedModels });
   await asProPlan(page);
   const chat = await mockChatAndDeepResearch(page);
+  // Routes have to be in place before the first load: the settings the client
+  // seeds a new conversation from are read once, on mount.
+  await options.beforeNavigate?.(page);
   await page.goto("/chat?lang=en");
   return chat;
+};
+
+/**
+ * Exactly `limits.maxModels` in `asProPlan`, so the expansion has no free slot
+ * to put Deep Research in.
+ */
+const FULL_SELECTION = [CHAT_MODEL_ID, "gpt-5-6-luna", "claude-sonnet-5"];
+
+/**
+ * The cap has to be reached by the conversation the test actually sends in,
+ * and that is a *new* one -- `sendChatMessage` creates it, and the client
+ * seeds it from the account's new-conversation combination, not from whatever
+ * the seeded QA conversation holds. Setting `selectedModels` alone left the
+ * send on the single default model, one slot short of the cap, so the
+ * expansion took the free-slot branch and proved nothing.
+ */
+const withFullDefaultCombination = async (page: Page) => {
+  await page.unroute("**/api/user/settings**");
+  await page.route("**/api/user/settings**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        theme: "system",
+        language: "en",
+        defaultModel: CHAT_MODEL_ID,
+        newConversationModelIds: FULL_SELECTION,
+        timeZone: "UTC",
+        timeZoneInitializedAt: null,
+        timeZoneChangedAt: null,
+        timeZoneChangeAllowedAt: "2026-05-31T00:00:00.000Z",
+        imageHandoffAutoGenerate: false,
+      }),
+    })
+  );
 };
 
 const card = (page: Page) => page.getByTestId("deep-research-suggestion");
@@ -313,4 +355,99 @@ test("a question Deep Research would not improve is never offered it", async ({
   // Given a moment for the offer to appear if it were going to.
   await page.waitForTimeout(1_000);
   await expect(card(page)).toHaveCount(0);
+});
+
+/**
+ * At the model cap the expansion has to take a slot from something already
+ * selected. It asks which one.
+ *
+ * The panels are rendered straight from `selectedModels`, so dropping a model
+ * takes its panel -- and the answers already in it -- out of the conversation,
+ * and the change is written to `Conversation.selectedModels`, a column with no
+ * history table. Picking the victim silently made that a single unconfirmed
+ * press; these two cases are what stops it coming back.
+ *
+ * The assertion is on the PATCH rather than on what is drawn: the selection
+ * reaching the server is the part that cannot be taken back.
+ */
+const watchSelectionWrites = async (page: Page) => {
+  const writes: string[][] = [];
+  await page.route(/.*\/api\/conversations\/[^/]+(\?.*)?$/, async (route) => {
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON() as { models?: unknown } | null;
+      if (Array.isArray(body?.models)) writes.push(body.models as string[]);
+    }
+    // Straight on to the fixture that actually stores it.
+    await route.fallback();
+  });
+  return writes;
+};
+
+test("at the model cap the expansion asks which model to replace", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const chat = await openChat(page, {
+    selectedModels: FULL_SELECTION,
+    beforeNavigate: withFullDefaultCombination,
+  });
+  const selectionWrites = await watchSelectionWrites(page);
+
+  await sendChatMessage(page, testInfo, RESEARCH_QUESTION);
+  chat.releaseChatAnswer();
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible({ timeout: 30_000 });
+  await expect(card(page)).toBeVisible({ timeout: 15_000 });
+
+  const writesBefore = selectionWrites.length;
+  await page.getByTestId("deep-research-suggestion-expand").click();
+
+  // The choice is put to the user rather than made for them, and no selection
+  // has been written while it is open.
+  const dialog = page.getByTestId("replace-model-dialog");
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  expect(chat.deepResearchRequests()).toHaveLength(0);
+  expect(selectionWrites).toHaveLength(writesBefore);
+
+  // Choosing one runs the research, and only then. The model the user picked
+  // is the one that leaves; the two they did not pick stay.
+  await dialog.getByRole("button", { name: /Luna/i }).first().click();
+  await expect(dialog).toHaveCount(0);
+  await expect
+    .poll(() => chat.deepResearchRequests().length, { timeout: 30_000 })
+    .toBe(1);
+  const written = selectionWrites.at(-1) ?? [];
+  expect(written).toContain(DEEP_RESEARCH_MODEL_ID);
+  expect(written).toContain(CHAT_MODEL_ID);
+  expect(written).not.toContain("gpt-5-6-luna");
+});
+
+test("cancelling the cap dialog abandons the run and keeps every model", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const chat = await openChat(page, {
+    selectedModels: FULL_SELECTION,
+    beforeNavigate: withFullDefaultCombination,
+  });
+  const selectionWrites = await watchSelectionWrites(page);
+
+  await sendChatMessage(page, testInfo, RESEARCH_QUESTION);
+  chat.releaseChatAnswer();
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible({ timeout: 30_000 });
+  await expect(card(page)).toBeVisible({ timeout: 15_000 });
+
+  const writesBefore = selectionWrites.length;
+  await page.getByTestId("deep-research-suggestion-expand").click();
+  const dialog = page.getByTestId("replace-model-dialog");
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  // Nothing ran, nothing was written, and the answer that prompted the offer
+  // is still there. The pause is for a send that must not arrive.
+  await page.waitForTimeout(1_000);
+  expect(chat.deepResearchRequests()).toHaveLength(0);
+  expect(selectionWrites).toHaveLength(writesBefore);
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible();
 });
