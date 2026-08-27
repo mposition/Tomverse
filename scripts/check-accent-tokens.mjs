@@ -31,6 +31,7 @@ const GUARDED_FILES = [
   "components/images/ImageGenerationWorkspace.tsx",
   "components/chat/ImageModelTabPanel.tsx",
   "components/chat/ImageIntentHandoffChip.tsx",
+  "components/chat/WebSearchSuggestionCard.tsx",
   "components/chat/ModelPickerPanel.tsx",
   "components/chat/ModelSelectionBadge.tsx",
   "components/chat/SidebarAccountRailButton.tsx",

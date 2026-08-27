@@ -30,6 +30,14 @@ import {
 import { DeepResearchSuggestionCard } from "@/components/chat/DeepResearchSuggestionCard";
 import type { DeepResearchSuggestionCopy } from "@/components/chat/deepResearchSuggestionCopy";
 import {
+  deriveWebSearchSuggestion,
+  type WebSearchSuggestionState,
+  type WebSearchSuggestionTurn,
+  type WebSearchTopicSignal,
+} from "@/lib/webSearchRetrySuggestion";
+import { WebSearchSuggestionCard } from "@/components/chat/WebSearchSuggestionCard";
+import type { WebSearchSuggestionCopy } from "@/components/chat/webSearchSuggestionCopy";
+import {
   chatContentStateKey,
   resolveChatContentState,
   type ChatContentState,
@@ -183,6 +191,45 @@ type DesktopChatShellProps = {
     conversationId: string;
     text: string;
   }) => void;
+  /*
+    The web-search offer (lib/webSearchRetrySuggestion.ts).
+
+    Same division of labour as the Deep Research offer directly above: the page
+    holds the question, the access and the bookkeeping; this shell holds the
+    panel status map that says whether the answers are finished. So the page
+    passes what it knows and `deriveWebSearchSuggestion` below decides, which
+    is what stops desktop and mobile drifting into different rules for the same
+    card.
+  */
+  webSearchSuggestionTurn: WebSearchSuggestionTurn | null;
+  webSearchAvailability: "available" | "unsupported" | "blocked";
+  /** A re-run of this question failed, and how. Null when none has. */
+  webSearchRetryFailure: "error" | "blocked" | null;
+  webSearchResolvedTopicKeys: readonly string[];
+  webSearchOfferedTopics: readonly { topicKey: string; promptId: string }[];
+  isWebSearchRetrying: boolean;
+  onWebSearchSuggestionShown: (offer: {
+    topicKey: string;
+    promptId: string;
+    state: WebSearchSuggestionState;
+    reason: WebSearchTopicSignal | null;
+  }) => void;
+  /** The card's strings for one state; see ChatPageClient for why it is a function. */
+  webSearchSuggestionCopyFor: (
+    state: WebSearchSuggestionState
+  ) => WebSearchSuggestionCopy;
+  onWebSearchSuggestionConfirm: (turn: {
+    conversationId: string;
+    text: string;
+    state: WebSearchSuggestionState;
+    reason: WebSearchTopicSignal | null;
+  }) => void;
+  onWebSearchSuggestionDismiss: (turn: {
+    conversationId: string;
+    text: string;
+    state: WebSearchSuggestionState;
+    reason: WebSearchTopicSignal | null;
+  }) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
@@ -195,6 +242,12 @@ type DesktopChatShellProps = {
   onComparisonReview: () => void;
   onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
+  /** A panel's turn ended in an error. Forwarded straight to the page. */
+  onTurnError: (
+    promptId: string | null,
+    modelId: string,
+    errorCode: string
+  ) => void;
   onFollowupSent: (modelId: string) => void;
   /**
    * Re-prepares the §10 context for a whole run after a panel's bundle was
@@ -273,6 +326,16 @@ export function DesktopChatShell({
   isDeepResearchExpanding,
   onDeepResearchSuggestionExpand,
   onDeepResearchSuggestionDismiss,
+  webSearchSuggestionTurn,
+  webSearchAvailability,
+  webSearchRetryFailure,
+  webSearchResolvedTopicKeys,
+  webSearchOfferedTopics,
+  isWebSearchRetrying,
+  onWebSearchSuggestionShown,
+  webSearchSuggestionCopyFor,
+  onWebSearchSuggestionConfirm,
+  onWebSearchSuggestionDismiss,
   onSubmit,
   onBeforeModelSend,
   onChangePanelModel,
@@ -285,6 +348,7 @@ export function DesktopChatShell({
   onComparisonReview,
   onGuestSignInPrompt,
   onResponseComplete,
+  onTurnError,
   onFollowupSent,
   onContextBundleStale,
 }: DesktopChatShellProps) {
@@ -437,6 +501,58 @@ export function DesktopChatShell({
       promptId: offeredPromptId,
     });
   }, [offeredPromptId, offeredTopicKey, onDeepResearchSuggestionShown]);
+  /*
+    The web-search offer, decided from the same status map the rail and the
+    expansion offer read.
+  */
+  const webSearchSuggestion = deriveWebSearchSuggestion({
+    conversationId: currentChatId,
+    turn: webSearchSuggestionTurn,
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+    modelStatuses,
+    availability: webSearchAvailability,
+    retryFailure: webSearchRetryFailure,
+    resolvedTopicKeys: webSearchResolvedTopicKeys,
+    offeredTopics: webSearchOfferedTopics,
+  });
+  /*
+    The strongest signal, and only that one. The classifier reports every
+    signal that fired; the impression event carries one, because a set of fixed
+    identifiers beside a timestamp is closer to an identifier than a single one
+    is (lib/productAnalyticsShared.ts). Ordered as the classifier lists them --
+    what the person said, then what the wording implies, then the category.
+  */
+  const webSearchOfferReason: WebSearchTopicSignal | null =
+    webSearchSuggestion.signals.find(
+      (signal) => signal === "explicit_search_request"
+    ) ??
+    webSearchSuggestion.signals.find((signal) => signal === "recency") ??
+    webSearchSuggestion.signals[0] ??
+    null;
+  const webSearchOfferedTopicKey = webSearchSuggestion.offered
+    ? webSearchSuggestion.topicKey
+    : null;
+  const webSearchOfferedPromptId = webSearchSuggestion.offered
+    ? webSearchSuggestion.promptId
+    : null;
+  const webSearchOfferedState = webSearchSuggestion.state;
+  useEffect(() => {
+    if (!webSearchOfferedTopicKey || !webSearchOfferedPromptId) return;
+    if (!webSearchOfferedState) return;
+    onWebSearchSuggestionShown({
+      topicKey: webSearchOfferedTopicKey,
+      promptId: webSearchOfferedPromptId,
+      state: webSearchOfferedState,
+      reason: webSearchOfferReason,
+    });
+  }, [
+    onWebSearchSuggestionShown,
+    webSearchOfferReason,
+    webSearchOfferedPromptId,
+    webSearchOfferedState,
+    webSearchOfferedTopicKey,
+  ]);
   // The answer canvas, handed to the composer as a drop target. Held in state
   // rather than in a ref so the composer re-registers its listeners when the
   // element appears, and loses them when an image conversation replaces the
@@ -953,6 +1069,7 @@ export function DesktopChatShell({
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
+                  onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
                   hideModelOnlyInput={selectedModels.length <= 1}
@@ -987,6 +1104,43 @@ export function DesktopChatShell({
           place in this layout where "under the answer" and "once" are the
           same position.
         */}
+        {/*
+          The web-search offer, directly above the expansion offer and under the
+          answers both are about. One card for the whole question, in the dock,
+          for the same reason the expansion is: the dock exists once however
+          many panels are on screen.
+
+          The two can never be on screen together. This one is made about a
+          question whose only signal is that it needs current information, and
+          `classifyDeepResearchTopic` refuses exactly that case -- recency alone
+          is the one thing it will not offer a report for. A question with both
+          goes to Deep Research, which is the deeper of the two answers.
+        */}
+        {webSearchSuggestion.offered &&
+          webSearchSuggestion.state &&
+          webSearchSuggestionTurn && (
+            <WebSearchSuggestionCard
+              state={webSearchSuggestion.state}
+              copy={webSearchSuggestionCopyFor(webSearchSuggestion.state)}
+              isStarting={isWebSearchRetrying}
+              onConfirm={() =>
+                onWebSearchSuggestionConfirm({
+                  conversationId: webSearchSuggestionTurn.conversationId,
+                  text: webSearchSuggestionTurn.text,
+                  state: webSearchSuggestion.state!,
+                  reason: webSearchOfferReason,
+                })
+              }
+              onDismiss={() =>
+                onWebSearchSuggestionDismiss({
+                  conversationId: webSearchSuggestionTurn.conversationId,
+                  text: webSearchSuggestionTurn.text,
+                  state: webSearchSuggestion.state!,
+                  reason: webSearchOfferReason,
+                })
+              }
+            />
+          )}
         {deepResearchSuggestion.offered && deepResearchSuggestionTurn && (
           <DeepResearchSuggestionCard
             copy={deepResearchSuggestionCopy}
