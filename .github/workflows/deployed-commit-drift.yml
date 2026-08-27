@@ -1,0 +1,86 @@
+name: Deployed Commit Drift
+#
+# Asks each environment which commit it is actually serving, and compares that
+# against the branch it deploys from.
+#
+# On 2026-08-26 three pull requests merged into `main` inside three minutes and
+# none of them deployed. Railway's Wait for CI holds a deployment until the
+# commit's own check suite finishes; the suites were still running, and the
+# deployment that eventually succeeded was an *older* commit whose checks had
+# already passed. Production served that older commit for over an hour.
+#
+# Nothing was broken and nothing was red. The pull requests were merged, the
+# Actions list was green, and `/api/build-info` had the answer the whole time
+# -- unauthenticated, one request away, and asked by nobody. That is the gap
+# this closes: not the mechanism, which the release checklist §7.9.4 already
+# documents, but the absence of anything that would notice.
+#
+# Deliberately its own scheduled workflow rather than a step in PR Fast Gate.
+# A deployment lagging is not something a pull request caused and not something
+# a pull request should be stopped for; it is also not true yet at the moment a
+# pull request runs. Blocking merges on it would gate every change on a
+# third-party platform being current, which is a single point of failure
+# wearing a safety feature's clothes.
+#
+# Hourly, because the failure it exists for is measured in hours and a daily
+# run would have reported this one the next morning. The threshold does the
+# noise control instead of the schedule: a merge that has not deployed yet is
+# ordinary and passes.
+
+on:
+  schedule:
+    # Every hour at :20, away from the top of the hour where scheduled runs
+    # queue behind each other on shared runners.
+    - cron: "20 * * * *"
+  workflow_dispatch:
+    inputs:
+      threshold-minutes:
+        description: "How long a gap may stand before the run fails"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel a run in progress: each one is a fresh reading, and a
+  # cancelled reading is indistinguishable from an environment that could not
+  # be reached -- the exact confusion this workflow exists to remove.
+  group: deployed-commit-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Deployed commit vs branch head
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Both branches are compared, and the deployed commit may be well
+          # behind either. A shallow clone answers "the deployed commit is not
+          # in this checkout" -- true, and useless.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # No `npm ci`: the report reads `/api/build-info` with fetch and shells
+      # out to git. Installing the dependency tree to run it would make an
+      # hourly job depend on the registry being up, for nothing.
+      - name: Compare each environment against its branch
+        timeout-minutes: 5
+        env:
+          # Overrides for a renamed host. Absent, the script falls back to the
+          # public addresses, which is what these environments actually are.
+          PRODUCTION_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
+          STAGING_APP_URL: ${{ vars.STAGING_APP_URL }}
+        run: |
+          node scripts/report-deployed-commit-drift.mjs \
+            --gate \
+            --fetch \
+            --threshold-minutes="${{ inputs.threshold-minutes || '60' }}"
