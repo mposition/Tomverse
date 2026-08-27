@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import { findApprovedEvalPair } from "../lib/memoryExtractionEvalRegister.ts";
-import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
+import {
+    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+    decideEvalRunMode,
+} from "../lib/memoryExtractionEvalCore.ts";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.ts";
 
 /**
@@ -197,21 +201,19 @@ test("only a funded, open pair can run live, and it is named", () => {
         );
     }
 
-    // Named, not counted. A second funded pair had to be argued for, and on
-    // 2026-08-27 one was: `mem-extract-v5` carries the five rules frozen
-    // after run1 and was approved for a decision-grade run on
-    // `mem-eval-succ-3` (issue 1135). v4's budget did not travel to it — the
-    // two figures differ because succ-3's mean prompt is four times succ-2's.
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        "gpt-5-6-luna::mem-extract-v5",
-    ]);
+    // Named, not counted. `mem-extract-v5` was funded on 2026-08-27, ran, and
+    // was closed the same day: v5-run1 missed every §12.3 floor and the
+    // hard-zero gate, so both v5 pairs are `revoked` and refuse for the
+    // status ahead of the budget
+    // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
+    // the record -- the approval was real and part of it was really spent --
+    // which is why "funded" and "runnable" are not the same list.
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
-        "gpt-5-6-luna::mem-extract-v5": 20,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
@@ -233,6 +235,15 @@ test("only a funded, open pair can run live, and it is named", () => {
         );
         assert.equal(backup.evalBudget, null, `${version} backup is funded`);
     }
+    // And a funded pair that has been closed keeps its budget while refusing
+    // to run -- the two facts the `runnable` list above separates.
+    const closed = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === "mem-extract-v5"
+    );
+    assert.equal(closed.status, "revoked");
+    assert.ok(closed.evalBudget, "the closed pair lost the budget it spent");
 
     assert.ok(
         MEMORY_EXTRACTION_EVAL_REGISTER.some(
@@ -388,28 +399,38 @@ const runHarness = (args, env = {}) => {
     }
 };
 
-test("--live with a key never reaches the network for an unfunded pair", () => {
-    // The backup pair is a candidate with no budget, so the harness stops at
-    // the budget gate. Asserting the message the run actually reaches is the
-    // point: a test that passes by describing the wrong gate is worse than
-    // one that fails.
-    //
+test("--live with a key never reaches the network for a pair that cannot run", () => {
     // **This test supplies a key on purpose, so its safety is the pair being
-    // unfunded.** Funding gpt-5-4-mini would turn it into a real
-    // decision-grade run against a 1,150-case dataset, stopped only by the
-    // network guard — and a guard is not a budget. So the premise is asserted
-    // rather than assumed: fund that pair and this fails here, loudly, before
-    // it can fail expensively.
-    const backup = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+    // unable to run.** If gpt-5-4-mini's live pair could, this would become a
+    // real decision-grade run against 1,150 cases, stopped only by the network
+    // guard -- and a guard is not a budget. So the premise is asserted rather
+    // than assumed: make that pair runnable and this fails here, loudly,
+    // before it can fail expensively.
+    //
+    // The pair is resolved the way the harness resolves it -- the model from
+    // the flag, the prompt version from the tree -- rather than named. Naming
+    // `mem-extract-v4` while the tree carried v5 is how this test came to
+    // assert one gate's message about a different entry: it passed only while
+    // both happened to be unfunded, and broke the day v5 was closed.
+    const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
             entry.extractionModelId === "gpt-5-4-mini" &&
-            entry.promptVersion === "mem-extract-v4"
+            entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
     );
-    assert.ok(backup, "the backup pair this test relies on is gone");
-    assert.equal(
-        backup.evalBudget,
-        null,
-        "gpt-5-4-mini::mem-extract-v4 is funded — this test now spends money"
+    assert.ok(pair, "the pair this test relies on is not registered");
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: pair,
+        hasApiKey: true,
+        datasetFrozen: true,
+        datasetPurpose: "decision",
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        commitKnown: true,
+    });
+    assert.notEqual(
+        decision.mode,
+        "live",
+        `gpt-5-4-mini::${MEMORY_EXTRACTION_PROMPT_VERSION} can run -- this test now spends money`
     );
 
     const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
@@ -417,7 +438,13 @@ test("--live with a key never reaches the network for an unfunded pair", () => {
         OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
     });
     assert.equal(result.status, 1, "the run must refuse");
-    assert.match(result.output, /no approved eval budget/i);
+    // Which gate speaks is the register's business and changes with it. What
+    // this test owns is that the refusal happened before anything dialled out.
+    assert.match(
+        result.output,
+        /no approved eval budget|in the\s+register/i,
+        result.output
+    );
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,
