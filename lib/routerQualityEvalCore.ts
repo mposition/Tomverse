@@ -549,7 +549,23 @@ const present = (value: unknown) =>
  */
 export const evaluationRecordProblems = (
   record: EvaluationRecord | null | undefined,
-  options: { routableModelIds?: readonly string[] } = {}
+  options: {
+    routableModelIds?: readonly string[];
+    /**
+     * Checks the cited calibration artefact, returning what is wrong with it.
+     *
+     * Injected rather than imported so this module stays arithmetic and shape:
+     * lib/routerJudgeCalibration.ts already depends on it, and the dependency
+     * cannot run both ways. `scripts/check-router-quality-eval.mjs` and the
+     * harness both pass `calibrationArtefactProblems` bound to the run.
+     *
+     * Omitting it is not a way to skip the check. A routable judge with a
+     * calibration nobody validated is reported below, because "there is an
+     * object in the biasMeasurement field" was the whole of the old check and
+     * is satisfied by the artefact of a different judge on a different set.
+     */
+    checkCalibration?: (artefact: unknown) => readonly string[];
+  } = {}
 ): readonly string[] => {
   if (!record || typeof record !== "object") {
     return ["the report is not an object"];
@@ -610,10 +626,24 @@ export const evaluationRecordProblems = (
   const judgesItself =
     record.judge?.isRoutableModel === true ||
     (typeof identity === "string" && routable.includes(identity));
-  if (judgesItself && !present(record.judge?.biasMeasurement)) {
-    problems.push(
-      `the judge (${String(identity)}) is itself routable and carries no bias measurement`
-    );
+  if (judgesItself) {
+    const artefact = record.judge?.biasMeasurement;
+    if (!present(artefact)) {
+      problems.push(
+        `the judge (${String(identity)}) is itself routable and carries no calibration against an ` +
+          "independent judge"
+      );
+    } else if (!options.checkCalibration) {
+      problems.push(
+        `the judge (${String(identity)}) is itself routable and the cited calibration was not ` +
+          "checked, so nothing establishes that it is a calibration of this judge, on these answers, " +
+          "from a run that finished"
+      );
+    } else {
+      for (const problem of options.checkCalibration(artefact)) {
+        problems.push(`the cited calibration: ${problem}`);
+      }
+    }
   }
 
   return problems;

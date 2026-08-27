@@ -68,6 +68,24 @@ export type AnswerBundleHeader = {
     /** The run that generated the answers. */
     mode: string;
     evaluationSetVersion: string;
+    /**
+     * Which set the answers came from.
+     *
+     * Carried here so a later pass can tell a development bundle from a
+     * decision one without holding the set: calibrating a judge on the
+     * decision set would spend one of its uses
+     * (docs/ops/tomverse-chat-router-evaluation-set.md §7).
+     */
+    evaluationSetPurpose: string;
+    /**
+     * How many items the run set out to cover.
+     *
+     * Written with the header, before anything ran, so a bundle that stopped
+     * early is one whose entry count falls short of it. Nothing can be added
+     * to a header after the fact, and a run that dies at its cost ceiling is
+     * exactly the run that would not get the chance.
+     */
+    plannedItems: number;
     commitSha: string | null;
     /** The seed that fixed the display order, so a rejudge cannot reorder. */
     seed: number;
@@ -125,8 +143,21 @@ export const answerBundleProblems = (bundle: AnswerBundle): readonly string[] =>
             `bundle version ${String(header.bundleVersion)} is not ${ANSWER_BUNDLE_VERSION}`
         );
     }
-    for (const field of ["mode", "evaluationSetVersion", "judgeTemplateVersion", "createdAt"] as const) {
+    for (const field of [
+        "mode",
+        "evaluationSetVersion",
+        "evaluationSetPurpose",
+        "judgeTemplateVersion",
+        "createdAt",
+    ] as const) {
         if (!isNonEmptyString(header[field])) problems.push(`the header has no ${field}`);
+    }
+    if (!(typeof header.plannedItems === "number" && Number.isInteger(header.plannedItems) && header.plannedItems > 0)) {
+        problems.push("the header has no plannedItems, so a bundle that stopped early cannot be told from a complete one");
+    } else if (bundle.entries.length > header.plannedItems) {
+        problems.push(
+            `the bundle holds ${bundle.entries.length} pairs against ${header.plannedItems} planned`
+        );
     }
     if (!(typeof header.seed === "number" && Number.isInteger(header.seed) && header.seed > 0)) {
         problems.push("the header has no seed, so the display order was not fixed");

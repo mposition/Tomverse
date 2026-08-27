@@ -39,6 +39,8 @@ export const bundle = (perCell = 14) => ({
         bundleVersion: ANSWER_BUNDLE_VERSION,
         mode: "pilot",
         evaluationSetVersion: "router-eval-development-v0",
+        evaluationSetPurpose: "development",
+        plannedItems: 210,
         commitSha: "0".repeat(40),
         seed: 20260826,
         judgeTemplateVersion: "judge-rubric-v1",
