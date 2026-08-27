@@ -36,13 +36,14 @@ const GUARDED_FILES = [
   "components/chat/ModelSelectionBadge.tsx",
   "components/chat/SidebarAccountRailButton.tsx",
   "components/marketing/AiReviewDemo.tsx",
-  "components/marketing/ComparisonBasicsSection.tsx",
+  "components/marketing/AiReviewLoopSection.tsx",
+  // Not name-matched to AI Review on purpose: the rails are neutral, so if
+  // the reserved gradient ever appears here the reservation check fires.
+  "components/marketing/AnswerRails.tsx",
   "components/marketing/EvidenceSection.tsx",
   "components/marketing/LandingPageContent.tsx",
-  "components/marketing/LandingHeroAiReviewDemo.tsx",
   "components/marketing/ModelCatalogueSection.tsx",
   "components/marketing/PricingPageContent.tsx",
-  "components/marketing/ProductProofSection.tsx",
   "components/marketing/TrustSection.tsx",
 ];
 

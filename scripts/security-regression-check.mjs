@@ -2504,14 +2504,30 @@ const checks = [
     file: "components/marketing/LandingPageContent.tsx",
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
+      const continuity = read(
+        "components/marketing/WorkflowContinuitySection.tsx"
+      );
       return (
-        copy.includes('primaryCta: "Start chatting free"') &&
-        copy.includes('primaryCta: "무료로 채팅 시작하기"') &&
+        // The CTA names the action it starts. It used to read "Start chatting
+        // free", which names Tomverse Chat -- a product in the brand tree that
+        // is not released -- so a visitor could not tell what the button
+        // opened. The old wording is banned rather than merely replaced.
+        copy.includes('primaryCta: "Start comparing free"') &&
+        copy.includes('primaryCta: "무료로 비교 시작하기"') &&
+        !copy.includes('primaryCta: "Start chatting free"') &&
+        !copy.includes('primaryCta: "무료로 채팅 시작하기"') &&
+        // The no-sign-up promise renders in the hero, once. The page used to
+        // carry it twice, in `heroSignupNote` and again in `guestNote`, in
+        // near-identical words; `guestNote` is gone and this is the survivor.
         copy.includes(
-          'guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side."'
+          'heroSignupNote: "No sign-up required. Start with three models."'
         ) &&
-        copy.includes("Get a one-minute recommendation after sign-up") &&
-        source.includes('data-testid="landing-guest-note"') &&
+        source.includes('data-testid="landing-hero-signup-note"') &&
+        // Model Finder still reaches the page, and still states that it needs
+        // an account. It moved out of the catalogue copy into the continuity
+        // section's secondary list, where its condition renders with it.
+        continuity.includes("copy.secondary.map") &&
+        copy.includes("Model Finder") &&
         !source.includes('data-testid="landing-guest-cta"') &&
         // The account CTA belongs to the post-comparison section, never the
         // hero: signup is still offered only after the page has shown what an
@@ -2531,12 +2547,17 @@ const checks = [
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
       return (
-        copy.includes('badge: "Tomverse Review · Multi-AI Comparison & Review"') &&
+        // The badge is the product name and nothing else. It used to read
+        // "Tomverse Review · Multi-AI Comparison & Review", which restated the
+        // H1 sitting directly beneath it; the qualifier lives in `brandNote`,
+        // which is the line that explains the brand-to-product relationship.
+        copy.includes('badge: "Tomverse Review"') &&
         copy.includes(
           'brandNote: "Tomverse Review is the multi-AI comparison and review experience from Tomverse."'
         ) &&
+        // No em dash: customer-facing landing copy uses a full stop here.
         copy.includes(
-          'heroSignupNote: "No sign-up required—start with three models."'
+          'heroSignupNote: "No sign-up required. Start with three models."'
         ) &&
         source.includes('data-testid="landing-brand-note"') &&
         source.includes('data-testid="landing-hero-signup-note"') &&
@@ -2599,20 +2620,30 @@ const checks = [
   },
   {
     name: "Landing product proof covers comparison, AI Review, and permission-safe evidence",
-    file: "components/marketing/ProductProofSection.tsx",
+    // Was `ProductProofSection.tsx`. The landing redesign merged the loop and
+    // the AI Review detail into one section, because the page told the same
+    // "one question, three answers, one review" story four separate times.
+    // What this rule protects is unchanged: every promised section renders,
+    // the public counts keep their threshold disclosure, the review boundary
+    // survives, the evidence features are named with their real conditions,
+    // and no superseded capture comes back.
+    file: "components/marketing/AiReviewLoopSection.tsx",
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
       const landing = read("components/marketing/LandingPageContent.tsx");
       const trust = read("components/marketing/TrustSection.tsx");
       const evidence = read("components/marketing/EvidenceSection.tsx");
       return (
-        // Every section the page promises actually gets rendered.
-        landing.includes("<ComparisonBasicsSection />") &&
+        // Every section the page promises actually gets rendered. Five now:
+        // `ai-review` folded into `how-it-works` and `model-catalogue` into
+        // `trust`, each pair having answered one question in two scroll stops.
+        landing.includes("<AiReviewLoopSection />") &&
         landing.includes("<EvidenceSection />") &&
-        landing.includes("<ProductProofSection />") &&
         landing.includes("<WorkflowContinuitySection />") &&
-        landing.includes("<ModelCatalogueSection />") &&
         landing.includes("<TrustSection />") &&
+        // The catalogue is a block inside the trust section rather than a
+        // section of its own, so it is asserted where it now lives.
+        trust.includes("<ModelCatalogueBlock />") &&
         // The public usage counts keep their threshold-and-rounding
         // disclosure, and still come from the permission-safe endpoint.
         trust.includes('fetch("/api/public/proof-metrics"') &&
@@ -2630,17 +2661,26 @@ const checks = [
         evidence.includes('"landing-item-verification-card"') &&
         copy.includes("Pro plan and above. Uses credits.") &&
         copy.includes("It measures quote matching") &&
-        // The walkthrough is an illustration, not a stale capture: the
-        // 2026-07-27 recording showed a superseded credit figure and the
-        // pre-rename "Review confidence" label, so the landing page must not
-        // embed it and must not claim to be a product recording.
+        // The 2026-07-27 recording showed a superseded credit figure and the
+        // pre-rename "Review confidence" label, so no landing surface may
+        // embed it.
         !source.includes('src="/marketing-proof/') &&
         !source.includes('poster="/marketing-proof/') &&
         !source.includes("<video") &&
         !copy.includes("Real product UI") &&
         !copy.includes("Review confidence") &&
         !copy.includes("4 credits used") &&
-        copy.includes("Illustrative diagram, not a product recording") &&
+        // The page's visuals are real screenshots of the current interface
+        // now, generated by tests/e2e/marketing-capture.spec.ts. The
+        // disclosure previously had to say the opposite ("Illustrative
+        // diagram, not a product recording") because they were drawings;
+        // asserting that sentence today would be pinning a false disclosure
+        // in place. What has to hold instead is that the capture declares its
+        // demonstration data and refuses the endorsement reading, and that no
+        // server-derived figure is claimed in copy.
+        copy.includes("demonstration data") &&
+        copy.includes("Not a provider endorsement") &&
+        !copy.includes("Illustrative diagram, not a product recording") &&
         // Claims the product does not make: no source-linked extraction
         // guarantee on the file case.
         !copy.includes("source-linked")
@@ -2651,7 +2691,10 @@ const checks = [
     name: "No customer surface embeds the superseded walkthrough capture",
     file: "components/marketing/ChatWorkspaceGuide.tsx",
     test: (source) => {
-      const landing = read("components/marketing/ProductProofSection.tsx");
+      // Reads the landing shell rather than the retired `ProductProofSection`:
+      // the workflow diagram that file owned is gone, and the hero is where
+      // the landing page's product evidence and its disclosure now live.
+      const landing = read("components/marketing/LandingPageContent.tsx");
       // The 2026-07-27 recording showed "4 credits used" (a cost corrected two
       // days later, because two independent reviewers run) and "Review
       // confidence" (renamed to source grounding). Both are server-side, so no
@@ -2668,7 +2711,10 @@ const checks = [
         source.includes('data-testid="guide-review-workflow"') &&
         source.includes("workflowStages.map") &&
         source.includes("workflowDisclosure") &&
-        landing.includes('data-testid="landing-workflow-diagram"')
+        // The landing page still discloses what its visual is. The testid
+        // outlived the diagram it was named for and now labels the caption
+        // under the hero capture, which is the element carrying that duty.
+        landing.includes('data-testid="landing-workflow-disclosure"')
       );
     },
   },
