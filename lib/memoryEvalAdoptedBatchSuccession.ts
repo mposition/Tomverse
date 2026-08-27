@@ -36,12 +36,24 @@
 
 import { createHash } from "node:crypto";
 
-import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
+import {
+    datasetFingerprintInput,
+    type MemoryEvalCase,
+} from "@/lib/memoryExtractionEvalCore";
 import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 
-/** The pinned identity of an adopted batch, over the same canonical form the dataset digest uses. */
+/**
+ * The pinned identity of an adopted batch, over the same canonical form the
+ * dataset digest uses.
+ *
+ * Typed on schema 1 rather than schema 2 because that is all
+ * `datasetFingerprintInput()` reads, and `lib/memoryEvalDatasetManifests.ts`
+ * has to take the digest of `mem-eval-seed-11`'s batches too. A second
+ * definition for the schema-1 side would be one edit away from disagreeing
+ * with this one about what a batch's identity is.
+ */
 export const adoptedBatchDigest = (
-    cases: readonly MemoryEvalCaseV2[]
+    cases: readonly MemoryEvalCase[]
 ): string =>
     createHash("sha256")
         .update(datasetFingerprintInput(cases), "utf8")

@@ -1,6 +1,11 @@
 /**
  * The corpus that authored the rules stays out of the set that measures them.
  *
+ * "The set that measures them" is `mem-eval-succ-3` from 2026-08-27.
+ * `mem-eval-succ-2` still holds all 99 and is meant to: it was not edited, it
+ * is what run1 was scored against, and its manifest still recomputes. The
+ * separation is about the set the *next* verdict comes from.
+ *
  * Five invariants, and none of them is a style preference. Each is a way the
  * separation has failed or could fail silently: a case in both sets, a digest
  * that quietly covers the corpus, a loader that imports it, a move with no
@@ -21,7 +26,7 @@ import {
     MEMORY_EVAL_REGRESSION_CASES,
     MEMORY_EVAL_REGRESSION_PROVENANCE,
 } from "../lib/memoryEvalRegressionCorpus/index.ts";
-import { MEMORY_EVAL_SUCCESSOR_CASES } from "../lib/memoryEvalSuccessorFixtures.ts";
+import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
 import {
     assessSampleAdequacy,
     datasetFingerprintInput,
@@ -29,9 +34,9 @@ import {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CORPUS_DIR = "memoryEvalRegressionCorpus";
-const DECISION_LOADER = "lib/memoryEvalSuccessorFixtures.ts";
+const DECISION_LOADER = "lib/memoryEvalSucc3Fixtures.ts";
 
-const decisionIds = new Set(MEMORY_EVAL_SUCCESSOR_CASES.map((c) => c.id));
+const decisionIds = new Set(MEMORY_EVAL_SUCC3_CASES.map((c) => c.id));
 const regressionIds = new Set(MEMORY_EVAL_REGRESSION_CASES.map((c) => c.id));
 
 test("1. no case is in both sets", () => {
@@ -51,28 +56,21 @@ test("2. the decision digest is computed without the corpus", () => {
         createHash("sha256")
             .update(datasetFingerprintInput(cases), "utf8")
             .digest("hex");
-    const before = digest(MEMORY_EVAL_SUCCESSOR_CASES);
+    const before = digest(MEMORY_EVAL_SUCC3_CASES);
     const withCorpus = digest([
-        ...MEMORY_EVAL_SUCCESSOR_CASES,
+        ...MEMORY_EVAL_SUCC3_CASES,
         ...MEMORY_EVAL_REGRESSION_CASES,
-        // A stand-in, so the assertion holds while the corpus is still empty.
-        // Without it this test would pass by having nothing to add.
-        {
-            id: "regression-probe-case",
-            category: "durable_facts",
-            language: "ko",
-            goldCompleteness: "exhaustive",
-            expected: [],
-            conversations: [],
-        },
     ]);
+    // The stand-in this used to need is gone: the corpus holds 99 cases now,
+    // so adding it is a real change to the input rather than an empty spread.
+    assert.equal(MEMORY_EVAL_REGRESSION_CASES.length, 99);
     assert.notEqual(
         before,
         withCorpus,
         "the fingerprint must react to what is in the array it is given"
     );
     assert.equal(
-        digest(MEMORY_EVAL_SUCCESSOR_CASES),
+        digest(MEMORY_EVAL_SUCC3_CASES),
         before,
         "and the decision digest is computed from the decision cases alone"
     );
@@ -177,7 +175,7 @@ test("5. every cell still meets its floor", () => {
     // restatement would be one edit away from this test and the harness
     // disagreeing about what §12.2 requires.
     const adequacy = assessSampleAdequacy(
-        MEMORY_EVAL_SUCCESSOR_CASES.map((testCase) => ({
+        MEMORY_EVAL_SUCC3_CASES.map((testCase) => ({
             caseId: testCase.id,
             category: testCase.category,
             language: testCase.language,

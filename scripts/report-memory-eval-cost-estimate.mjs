@@ -37,9 +37,9 @@
 // label did, and a number labelled with the wrong dataset is a number nobody
 // should approve a budget from.
 import {
-    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
-    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryEvalSuccessorFixtures.ts";
+    MEMORY_EVAL_SUCC3_CASES as MEMORY_EVAL_CASES,
+    MEMORY_EVAL_SUCC3_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryEvalSucc3Fixtures.ts";
 import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import {

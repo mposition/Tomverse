@@ -46,12 +46,25 @@ import {
 // refused it with `legacy_dataset_schema` before any provider was reached,
 // which is what fail-closed is for. But a funded pair that cannot run is a
 // trap of its own, so the harness moves rather than the gate.
+// Moved from succ-2 to succ-3 on 2026-08-27. The harness is pinned to one
+// approved target on purpose -- there is no reason to make an arbitrary past
+// dataset billable -- and reading a past one is `resolveArtifactDataset`'s
+// job, which needs no provider and cannot spend.
 import {
-    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
-    MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN as MEMORY_EVAL_DATASET_FROZEN,
-    MEMORY_EVAL_SUCCESSOR_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
-    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryEvalSuccessorFixtures.ts";
+    MEMORY_EVAL_SUCC3_CASES as MEMORY_EVAL_CASES,
+    MEMORY_EVAL_SUCC3_DATASET_FROZEN as MEMORY_EVAL_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC3_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC3_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryEvalSucc3Fixtures.ts";
+// The artifact envelope version and the second digest. The harness stays
+// pinned to the approved current target -- there is no need to make an
+// arbitrary past dataset billable -- but what it writes has to say which
+// version and which labelling it ran on, or a later reader has to guess.
+import { MEMORY_EVAL_ARTIFACT_SCHEMA } from "../lib/memoryEvalDatasetRegistry.ts";
+import {
+    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    scoringContractDigest as scoringContractDigestOf,
+} from "../lib/memoryEvalScoringContractDigest.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     datasetFingerprintInput,
@@ -120,6 +133,7 @@ const redactSecrets = (message) => {
 const datasetDigest = createHash("sha256")
     .update(datasetFingerprintInput(MEMORY_EVAL_CASES), "utf8")
     .digest("hex");
+const scoringContractDigest = scoringContractDigestOf(MEMORY_EVAL_CASES);
 
 const contentDigest = (content) =>
     createHash("sha256")
@@ -243,6 +257,13 @@ if (duplicates.length > 0) {
  * say nothing about the pipeline, and a smoke run that always shows failures
  * trains its reader to ignore the counters that matter most.
  *
+ * The statement satisfies `mustIncludeAny` as well as `mustInclude`, for the
+ * same reason. A correct extractor answering a gold that states a polarity
+ * writes that polarity; a stub that wrote only the conjunction misses its own
+ * gold, and on 2026-08-27 that reported 14 critical bulk-safe adoptions on
+ * `mem-eval-succ-3` — one per `mustIncludeAny` gold in a critical category,
+ * and none of them about the pipeline.
+ *
  * Evidence cites the first user message: the label map decides the role, so a
  * smoke answer cannot smuggle assistant-only evidence past the validator.
  */
@@ -250,7 +271,10 @@ const smokeAdapter = (testCase) => async () => ({
     output: {
         candidates: testCase.expected.map((expected) => ({
             kind: expected.kind,
-            statement: `The user's record: ${expected.mustInclude.join(" ")}.`,
+            statement: `The user's record: ${[
+                ...expected.mustInclude,
+                ...(expected.mustIncludeAny ?? []).slice(0, 1),
+            ].join(" ")}.`,
             confidence: 0.9,
             sensitivity:
                 expected.expectedDisposition === "sensitive_review"
@@ -600,10 +624,21 @@ if (runMode.mode === "live") {
 
 const artifact = {
     manifest: {
+        // The envelope version a reader uses to tell a current artifact from
+        // one written before `scoringContractDigest` existed. An artifact at
+        // this schema that lost either digest is refused rather than read as
+        // historical: lib/memoryEvalDatasetRegistry.ts.
+        artifactSchema: MEMORY_EVAL_ARTIFACT_SCHEMA,
         modelId,
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         datasetVersion: MEMORY_EVAL_DATASET_VERSION,
         datasetDigest,
+        // The second digest, and not a duplicate of the first: the dataset
+        // digest does not cover expectedDisposition, goldCompleteness,
+        // mustIncludeAny or criticalGoldMode, so two runs can agree on it and
+        // still have been scored on different labels.
+        scoringContractDigest,
+        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
         mode: runMode.mode,
         commitSha,
         workingTreeDirty,

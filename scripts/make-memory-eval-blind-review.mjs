@@ -36,16 +36,11 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-// The successor set, for the same reason the harness reads it: a §12.4 blind
-// review is of a decision-grade run, and only mem-eval-succ-1 can produce
-// one. Pointed at the frozen schema-1 set this script would refuse every real
-// artifact on the digest guard below — safe, but it would have looked like
-// the artifact was wrong rather than the script.
-import {
-    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
-    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryEvalSuccessorFixtures.ts";
-import { datasetFingerprintInput } from "../lib/memoryExtractionEvalCore.ts";
+// Which dataset the artifact names, resolved rather than imported. A sheet
+// built from the wrong version would print one run's conversation beside
+// another run's answer, so selection is fail-closed and every refusal is
+// named: lib/memoryEvalDatasetRegistry.ts.
+import { resolveArtifactDataset } from "../lib/memoryEvalDatasetRegistry.ts";
 
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -71,23 +66,14 @@ if (!Number.isInteger(perCell) || perCell < 1) {
 const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
 const manifest = artifact.manifest ?? {};
 
-/**
- * The artifact has to be about the cases in this tree, or the sheet would
- * print one conversation beside another run's answer. The digest is the
- * check that catches it, which is what it is for.
- */
-const localDigest = createHash("sha256")
-    .update(datasetFingerprintInput(MEMORY_EVAL_CASES), "utf8")
-    .digest("hex");
-if (manifest.datasetDigest !== localDigest) {
+const resolved = resolveArtifactDataset(manifest);
+if (!resolved.ok) {
     console.error(
-        `The artifact was computed against a different sample.\n` +
-            `  artifact: ${manifest.datasetVersion} ${manifest.datasetDigest}\n` +
-            `  this tree: ${MEMORY_EVAL_DATASET_VERSION} ${localDigest}\n\n` +
-            "Check out the commit the run was made from, or re-run the eval."
+        `Cannot build a sheet from this artifact (${resolved.reason}).\n\n${resolved.detail}`
     );
     process.exit(1);
 }
+const MEMORY_EVAL_CASES = resolved.composition.cases;
 if (manifest.mode !== "live") {
     console.error(
         "This artifact is a smoke run. Its answers come from a deterministic\n" +
@@ -97,6 +83,10 @@ if (manifest.mode !== "live") {
 }
 
 const caseById = new Map(MEMORY_EVAL_CASES.map((entry) => [entry.id, entry]));
+// Seeded from the resolved dataset digest, which the resolver has just held
+// equal to the artifact's. Same artifact, same sheet: a reviewer cannot draw
+// again for a friendlier sample.
+const localDigest = resolved.manifest.datasetDigest;
 const order = (caseId) =>
     createHash("sha256").update(`${localDigest}:${caseId}`, "utf8").digest("hex");
 

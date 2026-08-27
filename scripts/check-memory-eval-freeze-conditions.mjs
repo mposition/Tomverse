@@ -38,6 +38,12 @@ import {
     MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
 } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
+import {
+    MEMORY_EVAL_SUCC3_CASES,
+    MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC3_DATASET_VERSION,
+} from "../lib/memoryEvalSucc3Fixtures.ts";
+import { SUCC3_ADOPTED_BATCHES } from "../lib/memoryEvalSucc3Adopted/index.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
@@ -284,5 +290,19 @@ evaluate({
     frozen: MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
     cases: MEMORY_EVAL_SUCCESSOR_CASES,
     batches: SUCCESSOR_ADOPTED_BATCHES,
+    schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+});
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+// Every frozen version is re-checked, not only the current target. A dataset
+// stops being frozen the moment it stops holding the conditions, and a
+// superseded one that quietly moved would take the artifacts scored against
+// it with it.
+evaluate({
+    version: MEMORY_EVAL_SUCC3_DATASET_VERSION,
+    frozen: MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+    cases: MEMORY_EVAL_SUCC3_CASES,
+    batches: SUCC3_ADOPTED_BATCHES,
     schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
 });
