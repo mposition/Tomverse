@@ -510,7 +510,7 @@ test("expanding asks only Deep Research, not the models already answered", async
 
 test("the composer's own deep research still asks every selected model", async ({
   page,
-}, testInfo) => {
+}) => {
   test.setTimeout(120_000);
   const chat = await openChat(page, { selectedModels: [CHAT_MODEL_ID] });
   await page.goto("/chat?lang=en");
