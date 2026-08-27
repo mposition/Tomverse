@@ -70,6 +70,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included",
   },
   { domain: "feedback", publicName: "feedback", prismaModel: "Feedback", state: "included" },
+  // Registered on 2026-08-27 having escaped the sweep entirely: both carry
+  // actorUserId but no User relation. "unverified" is the honest state -- what
+  // the export should do with a child row of an anonymised parent has not been
+  // decided, and claiming "excluded" would assert a decision nobody made.
+  {
+    domain: "feedbackLifecycleEvent",
+    publicName: "feedback_lifecycle_events",
+    prismaModel: "FeedbackLifecycleEvent",
+    state: "unverified",
+  },
+  {
+    domain: "refundRequestTimelineEvent",
+    publicName: "refund_request_timeline_events",
+    prismaModel: "RefundRequestTimelineEvent",
+    state: "unverified",
+  },
   {
     domain: "privacyRequest",
     publicName: "privacy_requests",

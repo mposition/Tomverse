@@ -1,8 +1,8 @@
-schemaVersion: 3
+schemaVersion: 4
 
 metadata:
   status: draft
-  lastUpdated: "2026-08-06"
+  lastUpdated: "2026-08-27"
   owner: security-privacy
   validatorCommand: npm run check:data-domain-registry
   purpose: >-
@@ -108,6 +108,28 @@ rules:
 # fails if the two drift. Writing it twice is the point: this file is the
 # decision, that file is the implementation, and neither can quietly stop
 # matching the other.
+# Why an actor row can now point at a parent row.
+#
+# schemaVersion 3 let an "actor" row reach the person it is about in two ways:
+# an untyped targetType/targetId pair, or "none" -- there is no such person.
+# Two tables fit neither. FeedbackLifecycleEvent and RefundRequestTimelineEvent
+# each hang off a registered parent by a real foreign key, and the person they
+# are about is that parent's subject.
+#
+# Saying "none" for them would have been false. Saying "untyped_target" would
+# have named columns they do not have. So they said nothing at all: neither was
+# in this registry, and the sweep that catches an unregistered table used the
+# narrower relation rule precisely because widening it would have failed the
+# build on a question no script can answer.
+#
+# `parent_row` is the third kind, and unlike the other two it is checkable: the
+# validator requires the named parent to be registered here, so the reference
+# cannot point at a table nothing grades.
+#
+# Both rows land as `unverified` on both axes. That is not a placeholder -- it
+# is what this registry says when the decision is outstanding, and it is far
+# better than the table being absent, because absent was invisible.
+
 domains:
   # --- the account itself ---------------------------------------------------
   - domain: user
@@ -571,6 +593,56 @@ domains:
           remain. They are a financial shape, not an identifier, and the row is
           kept so a refund dispute can still be answered.
     inUnifiedExport: included_filtered
+
+  # --- decision outstanding: child rows of an anonymised parent -------------
+  #
+  # Both were registered on 2026-08-27, having escaped the sweep entirely: they
+  # carry `actorUserId` but no User relation, and the sweep matched relations.
+  # Their parents already name them as OPEN re-identification risks (see
+  # `feedback` and `refundRequest` above), so the gap was recorded in prose on
+  # one row while the table itself was graded by nothing.
+  - domain: feedbackLifecycleEvent
+    prismaModel: FeedbackLifecycleEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: parent_row
+      parentColumn: feedbackId
+      parentModel: Feedback
+    inUnifiedExport: unverified
+    note: >-
+      One row per lifecycle stage of a feedback report. `actorUserId` is the
+      administrator who made the transition and is null for the submission
+      itself; the person the row is about is the parent report's submitter.
+      The parent is anonymised at deletion and these children are not, which
+      the parent's reidentificationReview already carries as OPEN. What is
+      still undecided is what should happen to `userReply` -- a snapshot of the
+      text sent to the submitter, which survives the parent's scrub -- and
+      whether the operator's own deletion should touch `actorUserId`. Neither
+      is derivable from the schema; both belong to security-privacy.
+
+  - domain: refundRequestTimelineEvent
+    prismaModel: RefundRequestTimelineEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: parent_row
+      parentColumn: refundRequestId
+      parentModel: RefundRequest
+    inUnifiedExport: unverified
+    note: >-
+      One row per transition of a refund request. `actorEmail` survives here
+      after the parent's own email is cleared, and the requester is the actor
+      on the events they raised -- which the parent's reidentificationReview
+      already carries as OPEN. Undecided: whether these rows are anonymised
+      with the parent, and what retention a financial dispute record needs.
+      The second is a finance question, not a schema one.
 
   # --- anonymised at deletion, decided but not yet built ---------------------
   - domain: chatLimitDecisionEvent
