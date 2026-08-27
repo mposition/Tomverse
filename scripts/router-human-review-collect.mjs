@@ -1,5 +1,11 @@
 // Read the reviewers' sheets back, and settle the sample.
 //
+// Works on either kind of draw: the primary sample from
+// eval:router-human-sheets, or the diagnostic supplement from
+// eval:router-human-diagnostic. It never mixes them -- one run reads one
+// directory -- and it says which it is reading, because a diagnostic result is
+// an illustration and the primary one is an estimate.
+//
 // Run it twice. The first time, with the two reviewers' filled-in sheets: it
 // validates them, reports anything ungradable, and -- where the two split --
 // writes a blind adjudication sheet holding only the disputed pairs. The
@@ -30,7 +36,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseAnswerBundle } from "../lib/routerAnswerBundle.ts";
-import { effectiveSample, manifestProblems } from "../lib/routerHumanReviewSample.ts";
+import {
+  HUMAN_REVIEWERS_PER_PAIR,
+  effectiveSample,
+  manifestProblems,
+} from "../lib/routerHumanReviewSample.ts";
+import { diagnosticSample } from "../lib/routerHumanReviewDiagnostic.ts";
 import {
   parseSubmissionMarkdown,
   structuralFailures,
@@ -83,22 +94,41 @@ const listed = (problems, what) =>
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
-const manifest = readJson(join(sheetsDirectory, "manifest.json"));
-const keyFile = readJson(join(sheetsDirectory, "key.json"));
 const bundle = parseAnswerBundle(readFileSync(bundlePath, "utf8"));
+const keyFile = readJson(join(sheetsDirectory, "key.json"));
 
-const drawTrouble = manifestProblems(manifest, bundle);
-if (drawTrouble.length > 0) {
-  die(listed(drawTrouble, `${sheetsDirectory}/manifest.json does not describe a usable draw`));
-}
-if (keyFile.populationDigest !== manifest.populationDigest) {
-  die("key.json and manifest.json describe different populations. Nothing was read.");
+// One directory, one kind of draw. A run that read a manifest and a diagnostic
+// draw together would be a run that pooled a random sample with a sample
+// selected on the judges' verdicts.
+const primaryPath = join(sheetsDirectory, "manifest.json");
+const diagnosticPath = join(sheetsDirectory, "diagnostic-draw.json");
+const isDiagnostic = !existsSync(primaryPath) && existsSync(diagnosticPath);
+if (!existsSync(primaryPath) && !existsSync(diagnosticPath)) {
+  die(`${sheetsDirectory} holds neither manifest.json nor diagnostic-draw.json, so there is no draw to read.`);
 }
 
+const draw = readJson(isDiagnostic ? diagnosticPath : primaryPath);
+if (!isDiagnostic) {
+  const drawTrouble = manifestProblems(draw, bundle);
+  if (drawTrouble.length > 0) {
+    die(listed(drawTrouble, `${primaryPath} does not describe a usable draw`));
+  }
+}
+if (keyFile.populationDigest !== draw.populationDigest) {
+  die("key.json and the draw describe different populations. Nothing was read.");
+}
+
+const reviewersPerPair = isDiagnostic ? HUMAN_REVIEWERS_PER_PAIR : draw.reviewersPerPair;
 const submissionArgs = flags("submission").map((value) => named(value, "submission"));
-if (submissionArgs.length !== manifest.reviewersPerPair) {
-  die(`--submission=<reviewerId>=<path> is required ${manifest.reviewersPerPair} times, once per reviewer.`);
+if (submissionArgs.length !== reviewersPerPair) {
+  die(`--submission=<reviewerId>=<path> is required ${reviewersPerPair} times, once per reviewer.`);
 }
+
+console.log(
+  isDiagnostic
+    ? `Reading the diagnostic supplement — ${draw.targetJudge} against ${draw.referenceJudge}, seed ${draw.seed}.`
+    : `Reading the primary sample, seed ${draw.seed}.`
+);
 
 const sheetFor = (reviewerId) => {
   const path = join(sheetsDirectory, `sheet-${reviewerId}.json`);
@@ -116,7 +146,7 @@ for (const { reviewerId, path } of submissionArgs) {
   const { submission, unreadable } = parseSubmissionMarkdown({
     text: readFileSync(path, "utf8"),
     reviewerId,
-    populationDigest: manifest.populationDigest,
+    populationDigest: draw.populationDigest,
     submittedAt: settledAt,
   });
   const problems = submissionProblems(submission, sheet);
@@ -136,8 +166,10 @@ if (failures.length > 0) {
   for (const failure of failures) {
     console.log(`  ${failure.reviewerId} ${failure.itemId}: ${failure.reason} -- ${failure.detail}`);
   }
-  const candidates = unreviewablePairs(failures, key, reviewerIds);
-  if (candidates.length === 0) {
+  const candidates = isDiagnostic ? [] : unreviewablePairs(failures, key, reviewerIds);
+  if (isDiagnostic) {
+    console.log("\nThe diagnostic supplement has no reserve. An ungradable pair is dropped from it and said so.");
+  } else if (candidates.length === 0) {
     console.log("\nNo pair was ungradable for every reviewer, so nothing here calls for a reserve.");
     console.log("Go back to the reviewer rather than replacing the pair.");
   } else {
@@ -149,7 +181,7 @@ if (failures.length > 0) {
   }
 }
 
-const pairIds = effectiveSample(manifest);
+const pairIds = isDiagnostic ? diagnosticSample(draw) : effectiveSample(draw);
 const adjudicationArg = flag("adjudication") ? named(flag("adjudication"), "adjudication") : null;
 let adjudication = null;
 
@@ -159,15 +191,15 @@ if (adjudicationArg) {
     adjudicatorId: adjudicationArg.reviewerId,
     collated,
     bundle,
-    seed: manifest.seed,
-    populationDigest: manifest.populationDigest,
+    seed: draw.seed,
+    populationDigest: draw.populationDigest,
     reviewerIds,
   });
   key = [...key, ...built.key];
   const parsed = parseSubmissionMarkdown({
     text: readFileSync(adjudicationArg.path, "utf8"),
     reviewerId: adjudicationArg.reviewerId,
-    populationDigest: manifest.populationDigest,
+    populationDigest: draw.populationDigest,
     submittedAt: settledAt,
   });
   const problems = [
@@ -186,7 +218,7 @@ const settled = settleSample({
   key,
   reviewerIds,
   pairIds,
-  populationDigest: manifest.populationDigest,
+  populationDigest: draw.populationDigest,
   settledAt,
   settledBy,
 });
@@ -220,8 +252,8 @@ if (settled.counts.needsAdjudication > 0) {
     adjudicatorId,
     collated: settled.pairs,
     bundle,
-    seed: manifest.seed,
-    populationDigest: manifest.populationDigest,
+    seed: draw.seed,
+    populationDigest: draw.populationDigest,
     reviewerIds,
   });
   written.push(
@@ -229,7 +261,7 @@ if (settled.counts.needsAdjudication > 0) {
     write(`sheet-${adjudicatorId}.json`, `${JSON.stringify(built.sheet, null, 2)}\n`),
     write(
       `key-${adjudicatorId}.json`,
-      `${JSON.stringify({ populationDigest: manifest.populationDigest, key: built.key }, null, 2)}\n`
+      `${JSON.stringify({ populationDigest: draw.populationDigest, key: built.key }, null, 2)}\n`
     )
   );
   console.log(
@@ -245,6 +277,13 @@ if (settled.counts.needsAdjudication > 0) {
       `equivalent ${count("equivalent")}.`
   );
   console.log("Undecided pairs are left out rather than counted as ties.");
+  if (isDiagnostic) {
+    console.log(
+      "\nThese pairs were chosen because the two judges split on them. What people said about them is an\n" +
+        "illustration of where the judges differ, not a rate, and it must not be pooled with the primary\n" +
+        "sample or reported beside it as though the two measured the same thing."
+    );
+  }
 }
 
 for (const path of written) console.log(`  wrote ${path}`);
