@@ -262,3 +262,56 @@ test("an anonymisation that leaves any email column behind is rejected", () => {
   assert.equal(code, 1);
   assert.match(output, /omits "createdByEmail", which still names the person/);
 });
+
+// --- schemaVersion 4: an actor row that points at a registered parent --------
+
+test("a parent_row reference needs a column the model actually has", () => {
+    const { code, output } = run((_registry, find) => {
+        find("feedbackLifecycleEvent").subjectReference.parentColumn = "notAColumn";
+    });
+    assert.equal(code, 1);
+    assert.match(output, /parentColumn names "notAColumn", which is not a column/);
+});
+
+test("a parent_row reference needs the parent named", () => {
+    const { code, output } = run((_registry, find) => {
+        delete find("refundRequestTimelineEvent").subjectReference.parentModel;
+    });
+    assert.equal(code, 1);
+    assert.match(output, /subjectReference\.parentModel is missing/);
+});
+
+// What makes parent_row worth more than a note. The other two kinds are prose
+// the validator takes on trust; this one resolves to a row that is itself
+// graded, so the subject cannot be reached through a table nothing checks.
+test("a parent_row reference cannot point at an unregistered table", () => {
+    const { code, output } = run((registry, find) => {
+        find("feedbackLifecycleEvent").subjectReference.parentModel = "Feedback";
+        registry.domains = registry.domains.filter((row) => row.domain !== "feedback");
+    });
+    assert.equal(code, 1);
+    assert.match(output, /parentModel "Feedback" is not in the registry/);
+});
+
+test("a table with a user id column and no relation cannot escape the sweep", () => {
+    // The escape itself. Both of these carry actorUserId and no User relation,
+    // so the old relation-shaped sweep graded neither -- and the only record
+    // that they held anyone's data was a sentence on somebody else's row.
+    for (const domain of ["feedbackLifecycleEvent", "refundRequestTimelineEvent"]) {
+        const { code, output } = run((registry) => {
+            registry.domains = registry.domains.filter((row) => row.domain !== domain);
+        });
+        assert.equal(code, 1, `removing ${domain} should fail the sweep`);
+        assert.match(output, /holds user data but is not in the registry/);
+    }
+});
+
+test("an unverified deletion path must be unverified on both axes", () => {
+    // Kept honest: a row whose deletion nobody has traced cannot have a known
+    // retention. Half-answering would let the pair read as a decision.
+    const { code, output } = run((_registry, find) => {
+        find("feedbackLifecycleEvent").retentionPolicy = "immediate";
+    });
+    assert.equal(code, 1);
+    assert.match(output, /must both be "unverified" or neither/);
+});

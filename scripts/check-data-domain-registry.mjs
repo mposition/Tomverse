@@ -48,7 +48,7 @@ const DEFAULT_REGISTRY = path.join(
 const REGISTRY = process.argv[2] ? path.resolve(process.argv[2]) : DEFAULT_REGISTRY;
 const REGISTRY_RELATIVE = path.relative(repoRoot, REGISTRY);
 
-const REGISTRY_SCHEMA_VERSION = 3;
+const REGISTRY_SCHEMA_VERSION = 4;
 
 // Whose data the User link represents.
 //
@@ -59,7 +59,25 @@ const REGISTRY_SCHEMA_VERSION = 3;
 //            over the schema can see. Saying so in the registry is the only way
 //            that linkage gets graded at all.
 const ALLOWED_LINKAGE_ROLES = new Set(["subject", "actor"]);
-const ALLOWED_SUBJECT_REFERENCE_KINDS = new Set(["untyped_target", "none"]);
+// How an actor row names the person it is *about*, since its own User column is
+// the operator rather than the subject.
+//
+//   untyped_target  a targetType/targetId pair, resolved by convention only
+//   parent_row      a real foreign key to a row that is registered itself
+//   none            the row is about no data subject at all
+//
+// `parent_row` was added in schemaVersion 4 for FeedbackLifecycleEvent and
+// RefundRequestTimelineEvent. Both hang off a registered parent by a foreign
+// key, so the subject's fate is whatever that parent's row already says -- and
+// unlike the other two kinds that is *checkable*: the parent must be registered
+// here, so the reference cannot point at a table nothing grades. Saying `none`
+// for them would have been false, and `untyped_target` describes a pair of
+// columns they do not have.
+const ALLOWED_SUBJECT_REFERENCE_KINDS = new Set([
+  "untyped_target",
+  "parent_row",
+  "none",
+]);
 const ALLOWED_SUBJECT_ACTIONS = new Set(["delete", "retain"]);
 
 const ALLOWED_ACTIONS = new Set(["delete", "anonymise", "retain", "unverified"]);
@@ -99,6 +117,9 @@ const RETENTION_FIELDS = [
 const errors = [];
 const fail = (message) => errors.push(message);
 
+/** parent_row references, checked once every row has been read. */
+const parentReferences = [];
+
 const isFilledString = (value) => typeof value === "string" && value.trim() !== "";
 
 const schema = readFileSync(SCHEMA, "utf8");
@@ -134,12 +155,13 @@ const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map
 // and let the most privacy-sensitive table in the schema out of the workflows
 // -- the same escape the USER_LINK comment above records catching once.
 //
-// So the registered-row check reads columns. The sweep keeps the narrower rule
-// deliberately: widening it would newly require FeedbackLifecycleEvent and
-// RefundRequestTimelineEvent to register, and those rows carry decisions --
-// owner, legal basis, retention period, review date -- that no script can
-// derive. They escape today too; widening the sweep is a governance change
-// with an owner, not a side effect of this one.
+// So the registered-row check reads columns -- and since 2026-08-27 so does the
+// sweep. It could not until then: widening it would have newly required
+// FeedbackLifecycleEvent and RefundRequestTimelineEvent to register, and those
+// rows carry decisions -- owner, legal basis, retention period, review date --
+// that no script can derive, so widening it would have failed the build on a
+// governance question. Both are registered now as `unverified` on both axes,
+// which records the outstanding decision without letting the table escape.
 const USER_COLUMN = /^\s{2}\w*[Uu]serId\s+String\b/m;
 const holdsUserData = new Set(
   models
@@ -198,7 +220,7 @@ try {
 if (registry?.schemaVersion !== REGISTRY_SCHEMA_VERSION) {
   fail(
     `unsupported schemaVersion ${registry?.schemaVersion}; this validator reads ` +
-      `${REGISTRY_SCHEMA_VERSION} (deletionAction and retentionPolicy as separate axes)`
+      `${REGISTRY_SCHEMA_VERSION} (subjectReference.kind "parent_row")`
   );
 }
 if (!Array.isArray(registry?.domains) || registry.domains.length === 0) {
@@ -277,6 +299,19 @@ for (const row of registry.domains) {
         `${model}: subjectReference.kind "${reference.kind}" must be one of ` +
           [...ALLOWED_SUBJECT_REFERENCE_KINDS].join(", ")
       );
+    } else if (reference.kind === "parent_row") {
+      const columns = columnsByModel.get(model) ?? new Map();
+      const column = reference.parentColumn;
+      if (!isFilledString(column)) {
+        fail(`${model}: subjectReference.parentColumn is missing.`);
+      } else if (!columns.has(column)) {
+        fail(`${model}: subjectReference.parentColumn names "${column}", which is not a column.`);
+      }
+      if (!isFilledString(reference.parentModel)) {
+        fail(`${model}: subjectReference.parentModel is missing.`);
+      } else {
+        parentReferences.push({ model, parentModel: reference.parentModel });
+      }
     } else if (reference.kind === "untyped_target") {
       const columns = columnsByModel.get(model) ?? new Map();
       for (const key of ["targetTypeColumn", "targetIdColumn"]) {
@@ -566,8 +601,30 @@ for (const declaration of EXPORT_DOMAIN_DECLARATIONS) {
   }
 }
 
+// A parent_row reference is only worth more than a note if the parent is itself
+// graded. Checked after the loop because the registry is not fully read until
+// then, and a forward reference is legitimate.
+for (const { model, parentModel } of parentReferences) {
+  if (!registered.has(parentModel)) {
+    fail(
+      `${model}: subjectReference.parentModel "${parentModel}" is not in the registry, so the ` +
+        "subject is reached through a table whose own deletion path is unrecorded."
+    );
+  }
+}
+
 // The promise itself: a new table cannot escape the privacy workflows.
-for (const model of userLinked) {
+//
+// Widened on 2026-08-27 from the relation rule to the column rule, which is the
+// same question the registered-row check above asks. It could not be widened
+// before: FeedbackLifecycleEvent and RefundRequestTimelineEvent would have
+// failed it, and they carry decisions -- owner, legal basis, retention period --
+// no script can derive. They are registered now, as `unverified` on both axes,
+// which is the registry's own way of saying the decision is outstanding without
+// letting the table escape. With those two in, the delta between the two rules
+// is empty, so the narrower rule was protecting nothing except the next table
+// to drop a relation while keeping the column.
+for (const model of holdsUserData) {
   if (!registered.has(model)) {
     fail(
       `${model} holds user data but is not in the registry. Add a row with its deletion action ` +
