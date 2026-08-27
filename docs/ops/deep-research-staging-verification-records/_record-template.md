@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/deep-research-staging-checklist.md
-templateRevision: 2026-08-27a
+templateRevision: 2026-08-27b
 environment:
 deploySha:
 startedAtUtc:
@@ -22,7 +22,7 @@ digest:
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
-| template revision | 2026-08-27a |
+| template revision | 2026-08-27b |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -92,16 +92,20 @@ digest:
 
 ## 사용한 크레딧
 
-거절·취소 경로는 0크레딧입니다. 유료는 A-2(일반 답변)와 B-2(딥 리서치
-16크레딧)이고, 선택 구획을 하면 C-1·D-1이 더해집니다.
+거절·취소 경로는 0크레딧입니다. 유료는 A-2(일반 답변)와 B-2(딥 리서치)이고,
+선택 구획을 하면 C-1·D-1이 더해집니다.
 
-| 구획 | 모델 | turn 수 | 크레딧 |
-|---|---|---|---|
-| A-2 | | | |
-| B-2 | | | |
-| C-1 (선택) | | | |
-| D-1 (선택) | | | |
-| 합계 | | | |
+딥 리서치는 **고정 30크레딧이 아니라** 기본 30에 입력 길이 배수가 곱해진
+값입니다(체크리스트의 배수 표). 그래서 **카드에 뜬 예상치와 실제 정산값을 함께**
+적습니다.
+
+| 구획 | 모델 | turn 수 | 카드 예상 크레딧 | 실제 정산 크레딧 |
+|---|---|---|---|---|
+| A-2 | | | | |
+| B-2 | | | | |
+| C-1 (선택) | | | | |
+| D-1 (선택) | | | | |
+| 합계 | | | | |
 
 ## 판정
 
