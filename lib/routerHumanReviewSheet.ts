@@ -149,6 +149,71 @@ const orderedByLabel = (rows: readonly SheetKeyRow[]): readonly SheetKeyRow[] =>
  * or built over a bundle the manifest was not drawn from, is not something a
  * caller should be able to hand to a person by ignoring a return value.
  */
+export const buildSheetFor = (input: {
+    reviewerId: string;
+    /** The pairs this sheet asks about, in any order: the sheet fixes its own. */
+    pairIds: readonly string[];
+    bundle: AnswerBundle;
+    seed: number;
+    populationDigest: string;
+}): { sheet: ReviewSheet; key: readonly SheetKeyRow[] } => {
+    const byPairId = new Map<string, AnswerBundleEntry>(
+        input.bundle.entries.map((entry) => [entry.pairId, entry])
+    );
+    const rows: SheetKeyRow[] = input.pairIds.map((pairId) => {
+        const entry = byPairId.get(pairId);
+        if (!entry) {
+            throw new Error(`${pairId} is in the sample but not in the bundle, so no sheet can be built for it`);
+        }
+        return {
+            reviewerId: input.reviewerId,
+            itemId: sheetItemId({ reviewerId: input.reviewerId, seed: input.seed, pairId }),
+            pairId,
+            cell: `${entry.stratum}/${entry.cell}`,
+            aArm: entry.first.arm,
+            bArm: entry.second.arm,
+            aDigest: entry.first.digest,
+            bDigest: entry.second.digest,
+        };
+    });
+    // Sorting by the opaque label is the shuffle: it is a hash of the reviewer
+    // and the pair, so each reviewer gets a different order and neither order
+    // tracks the bundle's.
+    const ordered = orderedByLabel(rows);
+    return {
+        sheet: {
+            sheetVersion: HUMAN_REVIEW_SHEET_VERSION,
+            reviewerId: input.reviewerId,
+            populationDigest: input.populationDigest,
+            judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+            rubric: {
+                task: JUDGE_TASK_LINE,
+                criteriaLine: JUDGE_CRITERIA_LINE,
+                criteria: JUDGE_RUBRIC_CRITERIA,
+                verdictWords: JUDGE_VERDICT_WORDS,
+                equivalentLine: JUDGE_EQUIVALENT_LINE,
+            },
+            items: ordered.map((row) => {
+                const entry = byPairId.get(row.pairId) as AnswerBundleEntry;
+                return {
+                    itemId: row.itemId,
+                    question: entry.prompt,
+                    answerA: entry.first.text,
+                    answerB: entry.second.text,
+                };
+            }),
+        },
+        key: ordered,
+    };
+};
+
+/**
+ * Build the sheets and the key for one drawn sample.
+ *
+ * Throws rather than returning a half-built package: a sheet missing an item,
+ * or built over a bundle the manifest was not drawn from, is not something a
+ * caller should be able to hand to a person by ignoring a return value.
+ */
 export const buildReviewPackage = (input: {
     manifest: HumanSampleManifest;
     bundle: AnswerBundle;
@@ -178,61 +243,24 @@ export const buildReviewPackage = (input: {
         );
     }
 
-    const byPairId = new Map<string, AnswerBundleEntry>(bundle.entries.map((entry) => [entry.pairId, entry]));
     const pairIds = effectiveSample(manifest);
-
-    const markers = selfIdentificationMarkers(input.routableModelIds);
-    const disclosures: { pairId: string; side: "A" | "B"; markers: readonly string[] }[] = [];
     const key: SheetKeyRow[] = [];
     const sheets: ReviewSheet[] = [];
-
     for (const reviewerId of input.reviewerIds) {
-        const rows: SheetKeyRow[] = [];
-        for (const pairId of pairIds) {
-            const entry = byPairId.get(pairId);
-            if (!entry) {
-                throw new Error(`${pairId} is in the sample but not in the bundle, so no sheet can be built for it`);
-            }
-            rows.push({
-                reviewerId,
-                itemId: sheetItemId({ reviewerId, seed: manifest.seed, pairId }),
-                pairId,
-                cell: `${entry.stratum}/${entry.cell}`,
-                aArm: entry.first.arm,
-                bArm: entry.second.arm,
-                aDigest: entry.first.digest,
-                bDigest: entry.second.digest,
-            });
-        }
-        // Sorting by the opaque label is the shuffle: it is a hash of the
-        // reviewer and the pair, so each reviewer gets a different order and
-        // neither order tracks the bundle's.
-        const ordered = orderedByLabel(rows);
-        key.push(...ordered);
-        sheets.push({
-            sheetVersion: HUMAN_REVIEW_SHEET_VERSION,
+        const built = buildSheetFor({
             reviewerId,
+            pairIds,
+            bundle,
+            seed: manifest.seed,
             populationDigest: manifest.populationDigest,
-            judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
-            rubric: {
-                task: JUDGE_TASK_LINE,
-                criteriaLine: JUDGE_CRITERIA_LINE,
-                criteria: JUDGE_RUBRIC_CRITERIA,
-                verdictWords: JUDGE_VERDICT_WORDS,
-                equivalentLine: JUDGE_EQUIVALENT_LINE,
-            },
-            items: ordered.map((row) => {
-                const entry = byPairId.get(row.pairId) as AnswerBundleEntry;
-                return {
-                    itemId: row.itemId,
-                    question: entry.prompt,
-                    answerA: entry.first.text,
-                    answerB: entry.second.text,
-                };
-            }),
         });
+        sheets.push(built.sheet);
+        key.push(...built.key);
     }
 
+    const markers = selfIdentificationMarkers(input.routableModelIds);
+    const byPairId = new Map<string, AnswerBundleEntry>(bundle.entries.map((entry) => [entry.pairId, entry]));
+    const disclosures: { pairId: string; side: "A" | "B"; markers: readonly string[] }[] = [];
     for (const pairId of pairIds) {
         const entry = byPairId.get(pairId) as AnswerBundleEntry;
         for (const [side, answer] of [["A", entry.first], ["B", entry.second]] as const) {
