@@ -69,8 +69,51 @@ test("a probe skips the steps that would judge it as a run", () => {
         assert.ok(at > 0, `${step} step missing`);
         assert.match(
             workflow.slice(at, at + 200),
-            /if: inputs\.limit == ''/,
+            /if: always\(\) && inputs\.limit == ''/,
             `${step} should not run on a probe`
+        );
+    }
+});
+
+test("a failing verdict still gets diagnosed", () => {
+    // The harness reports the judgement of
+    // docs/policy/external-conversation-import-and-memory.md §12.3 through its
+    // exit status, so a not-a-pass leaves the live step red -- a result, not
+    // an error. Admissibility asks a different question, may this run be
+    // cited, and none of the signals it reads is the verdict, so a failing
+    // run can be perfectly admissible. Without `always()` the two steps that
+    // read a failing run were the two steps a failing run skipped: run1 on
+    // 2026-08-26 measured all 1,150 cases, missed the critical bulk-safe gate
+    // 49 times, and produced neither an admissibility verdict nor a sheet to
+    // read the answers with.
+    for (const step of ["Admissibility", "Blind review sheet"]) {
+        const at = workflow.indexOf(`name: ${step}`);
+        assert.match(
+            workflow.slice(at, at + 200),
+            /if: always\(\)/,
+            `${step} must survive a red live step`
+        );
+    }
+    const admissibility = workflow.indexOf("name: Admissibility");
+    const sheet = workflow.indexOf("name: Blind review sheet");
+    const preserve = workflow.indexOf("name: Preserve the blind review sheet");
+    for (const [name, step] of [
+        ["Admissibility", workflow.slice(admissibility, sheet)],
+        ["Blind review sheet", workflow.slice(sheet, preserve)],
+    ]) {
+        // A run that died before writing its artifact already has an error of
+        // its own; ENOENT on top of it names neither the cause nor the remedy.
+        assert.match(
+            step,
+            /if \[ ! -f "\$artifact" \]/,
+            `${name} should say so rather than fail on a missing artifact`
+        );
+        // Same rule as the limit: an input interpolated into a shell line is
+        // an input that can end it.
+        assert.match(step, /RUN_LABEL: \$\{\{ inputs\.run_label \}\}/);
+        assert.ok(
+            !/run: \|[\s\S]*\$\{\{ inputs\./.test(step),
+            `${name} should read its inputs through the environment`
         );
     }
 });
