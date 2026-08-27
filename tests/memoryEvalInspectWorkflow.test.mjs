@@ -46,6 +46,31 @@ test("it runs only on manual dispatch", () => {
     }
 });
 
+test("a branch without the scripts says which branch to pick", () => {
+    // The file lives on `main` so GitHub will offer it, while the scripts it
+    // calls live on `develop`. The default ref is therefore the one that
+    // cannot run it, and "Missing script" says nothing about that. Free to get
+    // wrong, unlike the decision-grade run, and for that reason more likely to
+    // be dispatched casually from whichever branch the UI offers first.
+    assert.match(workflow, /Re-dispatch with Branch: develop/);
+    for (const script of [
+        "report:memory-eval-failures",
+        "check:memory-eval-run",
+        "make:memory-eval-blind-review",
+    ]) {
+        assert.ok(
+            workflow.includes(`"${script}"`),
+            `the guard should name ${script}`
+        );
+    }
+    // Before the download, so a branch that cannot read the artifact does not
+    // fetch it first.
+    assert.ok(
+        workflow.indexOf("The selected ref can run this") <
+            workflow.indexOf("name: Download the artifact")
+    );
+});
+
 test("it reaches other runs read-only", () => {
     // `actions: read` is the only extra permission downloading another run's
     // artifact needs. `contents: write` would let a reading job edit its own
