@@ -882,10 +882,6 @@ test.describe("Neighbouring surfaces", { tag: "@ui-risk" }, () => {
     // Same entry point analytics-consent.spec.ts uses to land on the chat
     // with the notice still undecided.
     await page.goto("/chat?lang=en&entry=guest-preview");
-    const onboarding = page.getByRole("button", { name: "Start using Tomverse" });
-    if (await onboarding.isVisible().catch(() => false)) {
-      await onboarding.click();
-    }
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await settleModelSummary(page);
 
