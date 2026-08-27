@@ -12,6 +12,7 @@ import {
   Bot,
   Braces,
   Check,
+  CircleAlert,
   Copy,
   File as FileIcon,
   FileText,
@@ -514,8 +515,15 @@ export function ChatMessageList({
                 ? msg.content.split("\n").slice(1).filter(Boolean)
                 : [];
 
+            // UI-ERR-001. A failed turn is a state of one answer, not of the
+            // conversation: three failed panels used to paint the whole
+            // workspace red, which reads as "something is wrong with the app"
+            // rather than "this request did not go through". The surface is
+            // the ordinary assistant card; what marks it as an error is the
+            // alert icon, the error sentence itself, role="alert", and a
+            // 2px red edge -- red as a marker, not as a field.
             const assistantBoxClass = msg.status === "error"
-                  ? "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-800"
+                  ? "bg-zinc-50 text-zinc-800 border border-zinc-200 border-l-2 border-l-red-500 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700/50 dark:border-l-red-400"
                   : msg.status === "cancelled"
                       ? "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300 italic"
                       : "bg-zinc-50 text-zinc-800 border border-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700/50";
@@ -655,8 +663,29 @@ export function ChatMessageList({
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
                   className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
-                  } ${!isUser && msg.content && msg.status !== "error" ? "pr-8 md:pr-9" : ""}`}
+                  } ${!isUser && msg.content && msg.status !== "error" ? "pr-8 md:pr-9" : ""} ${
+                    !isUser && msg.status === "error" ? "pl-9 md:pl-11" : ""
+                  }`}
                 >
+                  {/*
+                    The error marker. Positioned rather than placed in the
+                    flow so the markdown body below is rendered by exactly the
+                    same code on an error as on a normal answer -- and so a
+                    wrapped first line keeps the icon on the line it belongs
+                    to. The card reserves the space with `pl-9 md:pl-11`, so
+                    nothing overlaps.
+
+                    aria-hidden: the meaning is already carried by the error
+                    sentence beside it and by role="alert" on the card. An
+                    accessible name here would announce the failure twice.
+                  */}
+                  {!isUser && msg.status === "error" && (
+                    <CircleAlert
+                      data-testid="chat-error-icon"
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-[10px] h-4 w-4 text-red-600 dark:text-red-400 md:left-4 md:top-[15px] md:h-[18px] md:w-[18px]"
+                    />
+                  )}
                   {!isUser && msg.content && msg.status !== "error" && (
                     <button
                       type="button"
@@ -987,15 +1016,33 @@ export function ChatMessageList({
                   )}
                   {!isUser && msg.status === "error" && (() => {
                     const errorCategory = classifyError(msg);
+                    // UI-ERR-001. These actions move the conversation
+                    // forward -- retry, pick another model, sign in and
+                    // continue -- so they wear the app's ordinary primary,
+                    // the same blue the composer's send button uses. A red
+                    // filled button is reserved for destructive actions
+                    // (delete, stop); spending it on "try again" told the
+                    // user the recovery itself was dangerous.
                     const secondaryButtonClass =
-                      "inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900";
+                      "inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700";
                     const primaryButtonClass =
-                      "inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500";
+                      "inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-500";
                     return (
-                      <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
+                      <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-700/60">
                         {errorCategory === "attachment" && (
-                          <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
-                            <p className="font-bold">{t("chat.fileErrorHelpTitle")}</p>
+                          // Neutral like its parent -- a red card nested
+                          // inside a red card was the densest patch of the
+                          // old design, and it is the part that explains how
+                          // to recover rather than what went wrong. The red
+                          // stays as the icon beside the title.
+                          <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3 text-xs leading-5 text-zinc-700 dark:border-zinc-700/60 dark:bg-zinc-800/60 dark:text-zinc-200">
+                            <p className="flex items-center gap-1.5 font-bold">
+                              <CircleAlert
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400"
+                              />
+                              {t("chat.fileErrorHelpTitle")}
+                            </p>
                             <ul className="mt-1 list-disc space-y-1 pl-4">
                               <li>{t("chat.fileErrorHelpResave")}</li>
                               <li>{t("chat.fileErrorHelpLimit")}</li>
@@ -1003,7 +1050,7 @@ export function ChatMessageList({
                             </ul>
                             <Link
                               href="/support/help-centre"
-                              className="mt-2 inline-flex font-bold text-red-700 underline underline-offset-2 dark:text-red-100"
+                              className="mt-2 inline-flex font-bold text-blue-600 underline underline-offset-2 dark:text-blue-400"
                             >
                               {t("chat.fileErrorHelpLink")}
                             </Link>
@@ -1077,13 +1124,13 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           {(errorCategory === "generic" || errorCategory === "attachment") && (
-                            <span className="flex items-center text-xs font-semibold text-red-700 dark:text-red-200">
+                            <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                               {t("chat.tryAnotherModelHint")}
                             </span>
                           )}
                         </div>
                         {errorCategory === "quota" && isGuestMode && (
-                          <p className="mt-2 text-xs leading-5 text-red-700 dark:text-red-200">
+                          <p className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
                             {t("chat.guestQuotaLoginBenefitHint")}
                           </p>
                         )}
@@ -1096,9 +1143,11 @@ export function ChatMessageList({
                                 // has to read back to support, and at
                                 // 10px/red-500-at-70% it measured 2.63:1 on
                                 // light and 3.84:1 on dark against the card it
-                                // sits on. Solid red at the readable floor
-                                // clears AA in both themes.
-                                className="text-[11px] leading-4 text-red-700 dark:text-red-200"
+                                // sits on. It is supporting detail, not the
+                                // error itself, so on the neutral card it is
+                                // zinc at the readable floor -- 7.0:1 on
+                                // zinc-50, 6.1:1 on zinc-900.
+                                className="text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
                               >
                                 {line}
                               </p>
