@@ -75,6 +75,14 @@ test("a model with no search this request may carry is unavailable", () => {
 
 /* -------------------------------------------------------------- the block */
 
+/*
+  Read with newlines collapsed. The paragraph is stored as wrapped lines for
+  readability, and a rule that broke because a sentence happened to straddle a
+  wrap would be a test about formatting rather than about the instruction.
+*/
+const prose = () =>
+  WEB_SEARCH_UNAVAILABLE_PROMPT.replace(/\s+/g, " ").toLowerCase();
+
 test("a searching turn is given no paragraph at all", () => {
   assert.equal(buildWebSearchCapabilitySystemPrompt("searching"), "");
 });
@@ -87,23 +95,43 @@ test("a turn that cannot search is given the paragraph", () => {
   assert.ok(WEB_SEARCH_UNAVAILABLE_PROMPT.includes("# Current information"));
 });
 
-test("it forbids handing the search back to the user", () => {
+test("it forbids handing the search back to the user, anywhere", () => {
   /*
-    The failure this block exists for, in the model's own words on 2026-08-27:
-    "기상청 날씨누리나 휴대폰 날씨 앱에서 서울을 검색해 확인해 주세요." A search
-    engine is one control away from the user; naming it is the app declining
-    work it is built to do.
+    Two staging observations, 2026-08-27, and the second is why this rule names
+    no destination:
+
+      기상청 날씨누리나 휴대폰 날씨 앱에서 서울을 검색해 확인해 주세요.
+      앱에서 실시간 날씨를 요청해 주시면 최신 정보를 바탕으로 안내해 드릴게요.
+
+    A block that forbade only the first moved the sentence indoors. What is
+    wrong with it is not where it points but that it points at all.
   */
-  const text = WEB_SEARCH_UNAVAILABLE_PROMPT.toLowerCase();
-  assert.ok(text.includes("do not send the user elsewhere"));
-  assert.ok(text.includes("search engines"));
-  assert.ok(text.includes("check the official page"));
+  const text = prose();
+  assert.ok(text.includes("do not tell the user to go and get the information"));
+  assert.ok(text.includes("anywhere"));
+  assert.ok(text.includes("search engine"));
+  assert.ok(text.includes("check the official"));
+  // The half that was missing the first time.
+  assert.ok(text.includes("not in this interface either"));
+  assert.ok(text.includes("re-send the question"));
+});
+
+test("it requires an answer, not just a report of the limit", () => {
+  /*
+    The same run showed the other half not landing: the answer stopped at
+    "실시간 날씨 정보에는 접근할 수 없어" and said nothing about what late-August
+    Seoul is usually like. Permissive wording produced a refusal; this is
+    imperative.
+  */
+  const text = prose();
+  assert.ok(text.includes("then answer the question"));
+  assert.ok(text.includes("never stop at the limitation"));
 });
 
 test("it forbids claiming a search that did not happen", () => {
-  const text = WEB_SEARCH_UNAVAILABLE_PROMPT.toLowerCase();
+  const text = prose();
   assert.ok(text.includes("never say or imply that you searched"));
-  assert.ok(text.includes("never give a current figure"));
+  assert.ok(text.includes("never give a live figure"));
 });
 
 test("it never describes the offer the interface renders", () => {
@@ -114,7 +142,7 @@ test("it never describes the offer the interface renders", () => {
     something that may not appear -- and every string it could name lives in
     `locales/*.ts`, in seven languages this file does not read.
   */
-  const text = WEB_SEARCH_UNAVAILABLE_PROMPT.toLowerCase();
+  const text = prose();
   for (const forbidden of [
     "button",
     "click",
@@ -128,16 +156,16 @@ test("it never describes the offer the interface renders", () => {
 });
 
 test("it does not tell the model to apologise or to pad the refusal", () => {
-  // The answer is still worth writing. The limit is one sentence, then what
-  // general knowledge can honestly give.
-  const text = WEB_SEARCH_UNAVAILABLE_PROMPT.toLowerCase();
-  assert.ok(text.includes("one sentence"));
-  assert.ok(text.includes("then give what you can from general knowledge"));
+  // The answer is still worth writing. The limit is one short sentence, then
+  // what general knowledge can honestly give.
+  const text = prose();
+  assert.ok(text.includes("one short sentence"));
+  assert.ok(text.includes("honest general knowledge"));
   assert.ok(!text.includes("apolog"));
 });
 
 test("the paragraph stays small enough to sit on every non-searching turn", () => {
   // It is priced input on the majority of turns. A guard rather than a
   // measurement: what matters is that it cannot quietly grow into a page.
-  assert.ok(WEB_SEARCH_UNAVAILABLE_PROMPT.length < 900);
+  assert.ok(WEB_SEARCH_UNAVAILABLE_PROMPT.length < 1200);
 });
