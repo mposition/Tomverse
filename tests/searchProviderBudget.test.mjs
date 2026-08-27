@@ -39,7 +39,13 @@ test("the Brave rate is its own price, never the Google grounding rate", () => {
   // US$5.00 per 1,000 requests. 14,000 here would be Google's Gemini grounding
   // list rate, which is a different vendor's price for a different product.
   assert.equal(profile.costMicroUsdPerRequest, 5_000);
-  assert.ok(profile.priceSource.includes("brave.com"));
+  // The official source, checked by *host* rather than by substring. A
+  // substring check passes for `brave.com.example.net` and for
+  // `http://evil.test/?ref=brave.com`, and a price whose provenance is a
+  // lookalike domain has no provenance at all. `priceSource` is prose with the
+  // URL first, so the URL is what is parsed.
+  const [sourceUrl] = profile.priceSource.split(/\s+/);
+  assert.equal(new URL(sourceUrl).hostname, "brave.com");
   assert.ok(profile.effectiveDate);
   assert.ok(profile.pricingVersion);
   // Five requests per model per turn.
