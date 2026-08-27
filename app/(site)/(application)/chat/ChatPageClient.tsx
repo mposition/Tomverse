@@ -3654,10 +3654,11 @@ export function ChatPageClient({
                 name: attachment.name,
                 mediaType: attachment.mediaType,
               })),
-              // Through the shared reader, not a comparison of my own: web
-              // search is a switch now, and `isWebSearchEnabled` is where the
-              // decision that a stored "auto" reads as off lives
-              // (lib/appDefaults.ts).
+              // Through the shared reader rather than a comparison of my own.
+              // `isWebSearchEnabled` is where the decision lives that a
+              // conversation stored as the retired "auto" reads as *off*:
+              // being asked to confirm a search is not standing permission to
+              // run one and spend its surcharge (lib/appDefaults.ts).
               webSearchRequested: isWebSearchEnabled(webSearchMode),
             }
       );
