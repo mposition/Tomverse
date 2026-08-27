@@ -36,12 +36,17 @@ import "server-only";
  */
 
 import { ChatAccessError } from "@/lib/chatSecurity";
+import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { classifyChatLimitCode } from "@/lib/chatCostSafetyCore";
 import type { ChatLimitDecisionPhase } from "@/lib/chatLimitDecisionCore";
 import type { NativeSearchRefusal } from "@/lib/webSearchNativeCostReservation";
 
-export const WEB_SEARCH_COST_UNBOUNDED = "WEB_SEARCH_COST_UNBOUNDED";
+// Re-exported rather than declared, so the client that has to recognise this
+// code and the server that raises it cannot end up naming two different
+// strings. Imported as well as re-exported: this module refuses with it two
+// functions below. See lib/webSearchCostRefusalCode.ts.
+export { WEB_SEARCH_COST_UNBOUNDED };
 
 /**
  * The refusal, built once.
