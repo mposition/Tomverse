@@ -390,7 +390,9 @@ export const renderSheetMarkdown = (sheet: ReviewSheet): string => {
             "",
             "### Your verdict",
             "",
-            `\`${item.itemId}\`: ______________  (${sheet.rubric.verdictWords.join(" / ")})`,
+            `One of ${sheet.rubric.verdictWords.join(", ")}, written after the colon:`,
+            "",
+            `\`${item.itemId}\`: ______________`,
             ""
         );
     });
