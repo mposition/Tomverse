@@ -70,7 +70,7 @@ test.beforeEach(async ({ page }) => {
   await mockChatStream(page, "QA mock response");
 });
 
-test("a guest reload returns to the same guest conversation", async ({
+test("a guest reload returns to the same guest conversation", { tag: "@ui-risk" }, async ({
   page,
 }, testInfo) => {
   await createGuestConversation(page, testInfo, "Guest keeps this on reload");
@@ -87,7 +87,7 @@ test("a guest reload returns to the same guest conversation", async ({
   ).toBeVisible();
 });
 
-test("signing in with a guest conversation open never calls an account API with a guest id", async ({
+test("signing in with a guest conversation open never calls an account API with a guest id", { tag: "@ui-risk" }, async ({
   page,
 }, testInfo) => {
   await createGuestConversation(page, testInfo);
@@ -110,7 +110,7 @@ test("signing in with a guest conversation open never calls an account API with 
   expect(afterState.messageKeys.length).toBeGreaterThan(0);
 });
 
-test("accepting the import selects the conversation id the server returned", async ({
+test("accepting the import selects the conversation id the server returned", { tag: "@ui-risk" }, async ({
   page,
 }, testInfo) => {
   await createGuestConversation(page, testInfo);
@@ -141,7 +141,7 @@ test("accepting the import selects the conversation id the server returned", asy
   );
 });
 
-test("skipping the import lands on a usable account screen, with no guest id in flight", async ({
+test("skipping the import lands on a usable account screen, with no guest id in flight", { tag: "@ui-risk" }, async ({
   page,
 }, testInfo) => {
   await createGuestConversation(page, testInfo);
@@ -166,7 +166,7 @@ test("skipping the import lands on a usable account screen, with no guest id in 
   expect(afterState.messageKeys.length).toBeGreaterThan(0);
 });
 
-test("dismissing the import modal never leaks the guest id either", async ({
+test("dismissing the import modal never leaks the guest id either", { tag: "@ui-risk" }, async ({
   page,
 }, testInfo) => {
   await createGuestConversation(page, testInfo);
@@ -182,7 +182,7 @@ test("dismissing the import modal never leaks the guest id either", async ({
   expect(log.guestConversationRequests).toEqual([]);
 });
 
-test("a conversation this account cannot open is released once, without retrying", async ({
+test("a conversation this account cannot open is released once, without retrying", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);

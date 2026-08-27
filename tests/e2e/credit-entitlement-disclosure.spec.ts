@@ -52,7 +52,7 @@ async function prepareChat(page: Page, patch: Parameters<typeof mockUserUsage>[1
 }
 
 for (const shell of ["desktop", "mobile"] as const) {
-    test.describe(`${shell} credit entitlement disclosure`, () => {
+    test.describe(`${shell} credit entitlement disclosure`, { tag: "@ui-risk" }, () => {
         test.beforeEach(async ({}, testInfo) => {
             test.skip(
                 !testInfo.project.name.startsWith(shell),
