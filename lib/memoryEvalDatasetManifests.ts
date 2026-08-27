@@ -56,6 +56,7 @@ import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 import { adoptedBatchDigest } from "@/lib/memoryEvalAdoptedBatchSuccession";
 import {
     MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    scoringContractDescriptorInput,
     scoringContractDigest,
 } from "@/lib/memoryEvalScoringContractDigest";
 
@@ -588,3 +589,143 @@ export const evalDatasetManifest = (
         (manifest) => manifest.datasetVersion === datasetVersion
     );
 
+/* =========================================================================
+ * The contract itself
+ * ====================================================================== */
+
+/**
+ * One frozen scoring contract, recorded the way a dataset is.
+ *
+ * ## Why the contract needs a manifest of its own
+ *
+ * A dataset manifest pins its contract digest, and
+ * `verifyEvalDatasetManifest()` recomputes it only while the entry's contract
+ * version is still the live one. Every entry pinned to an older version
+ * reports `superseded` and is not recomputed — deliberately, because the entry
+ * records what that run was scored under.
+ *
+ * The consequence is a gap at exactly the moment a contract is frozen: on the
+ * day `mem-score-v3` became live, every dataset entry named `mem-score-v2.3`,
+ * so **nothing in the repository recomputed a v3 digest at all**. The contract
+ * could have been edited freely until the first v3 dataset was authored, which
+ * is the window in which its terms are most likely to be adjusted and least
+ * likely to be noticed.
+ *
+ * So a contract is pinned when it is frozen, not when something is scored
+ * under it.
+ *
+ * The digest here is over the **descriptor only** — the contract without any
+ * dataset. That is what a contract version is: `scoringContractDigest()` mixes
+ * in per-case labelling and answers a different question, one about a sample.
+ */
+export type ScoringContractManifest = {
+    version: string;
+    /** Approved on, as the record that froze it says. */
+    approvedOn: string;
+    /** sha256 of `scoringContractDescriptorInput()` under that version. */
+    descriptorDigest: string;
+    /**
+     * Rules the contract states that nothing executes yet.
+     *
+     * Recorded rather than assumed empty. A contract may be frozen with a
+     * pending rule; a dataset may not be frozen under one
+     * (`memoryEvalScoringContractReadiness()`), and reading that list here
+     * says which rules were outstanding at freeze rather than which are
+     * outstanding today.
+     */
+    pendingRules: readonly string[];
+};
+
+export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractManifest[] =
+    [
+        {
+            version: "mem-score-v3",
+            approvedOn: "2026-08-27",
+            descriptorDigest:
+                "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc",
+            pendingRules: ["v3-unfixable-evidence-emits-nothing"],
+        },
+        {
+            /**
+             * Two corrections found while authoring `succ-4`'s golds, which is
+             * where a contract meets the thing it describes.
+             *
+             * The evidence reference became `evidenceMessageId` — the
+             * `externalMessageId` the extraction pipeline already speaks from
+             * prompt label to parsed candidate — instead of the integer
+             * position v3 froze. And `gold-evidence-covers-fact` was added: a
+             * gold's quote must contain the fact it is about, or the anchor
+             * names the right message and points at something else.
+             *
+             * Nothing was scored under v3: no dataset was frozen against it,
+             * so this supersedes it without leaving a run behind. The v3 entry
+             * stays because the version existed and was pinned.
+             */
+            version: "mem-score-v3.1",
+            approvedOn: "2026-08-27",
+            descriptorDigest:
+                "4097096dae9060e44b0c6a0dbc5803dbdf1f22d6c80505306a70113794cb3658",
+            pendingRules: ["v3-unfixable-evidence-emits-nothing"],
+        },
+        {
+            /**
+             * The third correction from authoring, and the one that mattered
+             * most: the contract declared a `polarity` field and never said
+             * what it was a field *about*. Drafting `succ-4` put roughly a
+             * hundred golds in front of a reviewer where both values were
+             * defensible — is *the user cannot drive at night* an assertion of
+             * a constraint or a denial of an ability? — and a field answered
+             * by preference is not a measurement.
+             *
+             * `MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE` settles it against the
+             * anchor quote, and carries the demand that follows: a token list
+             * an opposite-polarity memory could also contain is
+             * under-specified, because the field it was given changes nothing.
+             */
+            version: "mem-score-v3.2",
+            approvedOn: "2026-08-27",
+            descriptorDigest:
+                "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b",
+            pendingRules: ["v3-unfixable-evidence-emits-nothing"],
+        },
+    ];
+
+/**
+ * Recomputes the live contract's descriptor and reports what no longer agrees.
+ *
+ * Only the live version is checkable: an earlier contract's constants are gone
+ * from the tree, so its descriptor cannot be rebuilt and its recorded digest
+ * stands as the record. `null` means this version has no manifest entry, which
+ * is itself a finding — a contract in use and never frozen.
+ */
+export function verifyScoringContractManifest(): {
+    version: string;
+    entry: ScoringContractManifest | null;
+    mismatches: readonly string[];
+} {
+    const entry =
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find(
+            (manifest) => manifest.version === MEMORY_EVAL_SCORING_CONTRACT_VERSION
+        ) ?? null;
+    if (!entry) {
+        return {
+            version: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+            entry: null,
+            mismatches: [
+                `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} is the live contract and no ` +
+                    `manifest entry records it. Freezing a contract means pinning it.`,
+            ],
+        };
+    }
+    const digest = createHash("sha256")
+        .update(scoringContractDescriptorInput(), "utf8")
+        .digest("hex");
+    return {
+        version: entry.version,
+        entry,
+        mismatches:
+            digest === entry.descriptorDigest
+                ? []
+                : [`descriptor digest: ${entry.descriptorDigest} -> ${digest}`],
+    };
+}

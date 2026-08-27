@@ -3,9 +3,12 @@ import { test } from "node:test";
 
 import {
     MEMORY_EVAL_DATASET_MANIFESTS,
+    MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS,
     evalDatasetManifest,
     verifyEvalDatasetManifest,
+    verifyScoringContractManifest,
 } from "../lib/memoryEvalDatasetManifests.ts";
+import { memoryEvalScoringContractReadiness } from "../lib/memoryEvalScoringContractDigest.ts";
 import { EVAL_DATASET_COMPOSITIONS } from "../lib/memoryEvalDatasetRegistry.ts";
 import { MEMORY_EVAL_SUCCESSOR_CASES } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
@@ -66,7 +69,78 @@ test("every manifest recomputes exactly from the live tree", (t) => {
 
 test("the scoring contract is checked where it applies and skipped where it cannot", () => {
     assert.equal(verify("mem-eval-seed-11").scoringContract, "not_applicable_schema_1");
-    assert.equal(verify("mem-eval-succ-2").scoringContract, "verified");
+    // succ-2 and succ-3 were authored and scored under mem-score-v2.3. The
+    // live contract is mem-score-v3, so their entries report `superseded` and
+    // their contract digests are not recomputed -- recomputing them would make
+    // each manifest describe a contract its run never saw. Everything that
+    // does not depend on the contract is still checked exactly, above.
+    assert.equal(verify("mem-eval-succ-2").scoringContract, "superseded");
+    assert.equal(verify("mem-eval-succ-3").scoringContract, "superseded");
+    for (const version of ["mem-eval-succ-2", "mem-eval-succ-3"]) {
+        assert.equal(
+            evalDatasetManifest(version).scoringContractVersion,
+            "mem-score-v2.3"
+        );
+    }
+});
+
+test("freezing mem-score-v3 left every dataset digest where it was", () => {
+    // The contract bump must not touch a dataset digest: the two are disjoint
+    // by construction, and this is the assertion that says so out loud rather
+    // than trusting the construction. Values written out, so a test that
+    // recomputed them could not agree with any tree at all.
+    assert.equal(
+        evalDatasetManifest("mem-eval-seed-11").datasetDigest,
+        "a3b0c18e3c66d31f3eed7d8f7e7acbb94bee9146fff153ac89f91e6151e07a67"
+    );
+    assert.equal(
+        evalDatasetManifest("mem-eval-succ-2").datasetDigest,
+        "60aa43f1cf8ea23b715d200b897abfb3bedb8a7fe7d352d2cf85b6a56be91e5c"
+    );
+    assert.equal(
+        evalDatasetManifest("mem-eval-succ-3").datasetDigest,
+        "38468da0dce31a144d61d360189b4ce9e1d55e0e914ae66a2d61bfb1e793dc3b"
+    );
+    // And their recorded contract digests are untouched too: a superseded
+    // entry is a record, not a value to refresh.
+    assert.equal(
+        evalDatasetManifest("mem-eval-succ-2").scoringContractDigest,
+        "b07632843d748fcc5773e210b113e0d9e7770aa3a91bf8e20b453e72480b7fb9"
+    );
+});
+
+test("mem-score-v3 is pinned, and the tree still computes it", () => {
+    // The gap this closes: on the day a contract is frozen, every dataset
+    // entry names the previous one, so nothing recomputes the new contract's
+    // digest at all. That window -- when its terms are most likely to be
+    // adjusted and least likely to be noticed -- is exactly when it needs a
+    // record of its own.
+    const result = verifyScoringContractManifest();
+    assert.deepEqual(result.mismatches, []);
+    assert.equal(result.version, "mem-score-v3.2");
+    assert.equal(
+        result.entry.descriptorDigest,
+        "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b"
+    );
+    // v3 stays pinned. It existed, it was frozen, and nothing was scored under
+    // it -- but a version whose record is deleted once it is superseded is a
+    // version nobody can check a later claim against.
+    assert.equal(
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find((m) => m.version === "mem-score-v3")
+            .descriptorDigest,
+        "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc"
+    );
+    assert.equal(result.entry.approvedOn, "2026-08-27");
+    // Frozen with one rule nothing executes yet, recorded rather than assumed
+    // empty: §10.2's rules 5 and 6 belong to the v6 prompt and to gold review.
+    assert.deepEqual(result.entry.pendingRules, [
+        "v3-unfixable-evidence-emits-nothing",
+    ]);
+    assert.deepEqual(
+        [...result.entry.pendingRules],
+        [...memoryEvalScoringContractReadiness()],
+        "the entry records rules outstanding at freeze; they are still the live ones"
+    );
 });
 
 test("succ-2 still carries the digest run1's artifact was scored against", () => {

@@ -4,8 +4,8 @@
 
 결정 2(polarity 판정 방법)는 §9의 calibration이 거리 방식의 불성립을 보인 뒤
 **A안 — 출력 schema의 필드 대 필드 비교**로 확정됐습니다 (§9.3). 거리 상수 `K`는
-계약에 **들어가지 않습니다.** 남은 것은 §5(succ-4 gold와 evidence 작성·검수)와
-§6(v6 prompt 설계)이며, 그 앞에 `mem-score-v3` 동결이 있습니다.
+계약에 **들어가지 않습니다.** `mem-score-v3`는 2026-08-27에 동결됐습니다(§11).
+남은 것은 succ-4 gold와 evidence 작성·검수, 그다음 v6 prompt 설계입니다.
 
 `mem-eval-succ-4`부터 적용할 계약입니다. v5-run1이 드러낸 것은 모델 결함만이
 아니라 **gold가 정답을 담지 못한다**는 사실이었고
@@ -469,3 +469,85 @@ assistant 발화를 사용자 사실로 저장한 13건이 그 실패의 모습�
 결속 검사는 **채점 시점**에 원본 대화를 다시 읽어 수행합니다. 모델이 낸 index와
 span을 그 대화의 메시지와 대조하며, 모델이 낸 어떤 값도 검사의 입력이지 근거가
 아닙니다.
+
+참조: OpenAI API Structured Outputs —
+<https://developers.openai.com/api/reference/cli/resources/beta/subresources/responses>
+
+## 11. mem-score-v3 동결 (2026-08-27 승인)
+
+`MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3"`.
+descriptor digest `0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc`,
+`lib/memoryEvalDatasetManifests.ts`의 `MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS`에
+고정돼 있습니다.
+
+### 11.1 digest에 들어간 것
+
+| 항목 | 출처 |
+|---|---|
+| schema version과 required·optional 필드 | `lib/memoryEvalDatasetSchemaV3.ts` |
+| `polarity` enum과 **각 값의 의미** | 같은 파일 |
+| evidence 구조와 검증 규칙 4개 | `MEMORY_EVAL_EVIDENCE_RULES` |
+| `factValueAll` / `factValueAny` 판정 | rule `v3-gold-match` |
+| canonicalization 표와 **적용 순서** | `lib/memoryEvalCanonicalisation.ts` |
+| 언어별 stem 목록 | `APPROVED_STEMS` — **비어 있음** |
+| exact kind·polarity 매칭 | rule `v3-gold-match` |
+
+**enum 이름만이 아니라 의미가 들어갑니다.** 이름만 넣으면 `negated`를 "감정이
+부정적인 사실"로 재정의해도 digest가 움직이지 않고, 그 혼동이 이름을 이렇게 고른
+이유입니다.
+
+**canonicalization은 표와 순서가 **둘 다** 들어갑니다.** `2,000`은 구두점이
+공백이 되기 **전에** 구분자를 잃어야 하고, 같은 항목을 다른 순서로 적용하는 표는
+다른 matcher입니다. 반대로 조회표의 **키 순서**는 표현이므로 정렬 후 해시합니다 —
+literal을 재배열한 merge에서 실패하면서 채점에 대해서는 아무것도 말하지 않는
+digest는 쓸모가 없습니다.
+
+### 11.2 들어가지 않은 것
+
+거리 계산 코드, `K`, 미검수 `assertsGold`, 진단 통계. `tests/memoryEvalScoringContractDigest.test.mjs`의
+「the distance diagnostic cannot reach the digest」가 descriptor에서 이들의 부재를
+검사하고, `tests/memoryEvalPolarityDistance.test.mjs`가 digest 모듈이 calibration
+모듈을 **참조하기만 해도** 실패시킵니다.
+
+### 11.3 stem 목록이 비어 있는 것은 기록입니다
+
+`mem-score-v3`로 작성된 dataset이 아직 없으므로 검수된 stem도 없습니다. 빈 목록은
+placeholder가 아니라 **그 사실의 기록**이고, 첫 stem을 등록하면 digest가
+움직입니다 — §2.1대로 그것은 새 scoring contract version입니다. succ-4 gold 작성
+(실행 순서 5번)에서 stem이 필요해지면 `mem-score-v3.1`이 됩니다.
+
+### 11.4 미구현 규칙 하나를 안고 동결했습니다
+
+`v3-unfixable-evidence-emits-nothing`(§10.2의 5·6)은 v6 prompt와 gold 검수의
+규칙이고 둘 다 아직 없습니다. **계약은 미구현 규칙을 안고 동결할 수 있고,
+dataset은 그 아래에서 동결될 수 없습니다** — 아무도 적용하지 않은 기준을 적용한
+것처럼 인용하게 되기 때문입니다.
+
+`memoryEvalScoringContractReadiness()`가 미구현 규칙을 이름으로 보고하고,
+`npm run check:memory-eval-freeze`의 여덟 번째 조건이 **schema 3 dataset에
+한해** 그것을 차단합니다. seed-11·succ-2·succ-3은 이전 계약에서 동결됐으므로
+해당하지 않습니다 — 끝난 뒤에 쓰인 규칙을 요구하면 역사적 사실이 실패하는
+검사가 됩니다.
+
+### 11.5 계약 자체의 manifest
+
+dataset manifest는 자기 계약 digest를 고정하되, **live 버전일 때만** 재계산합니다.
+그래서 계약을 동결한 날에는 모든 dataset entry가 이전 버전을 가리키고 **저장소의
+어떤 것도 새 계약의 digest를 재계산하지 않습니다.** 조항이 가장 손보기 쉽고 가장
+눈에 안 띄는 시기가 정확히 그때입니다.
+
+그래서 계약은 **무언가가 그 아래에서 채점될 때가 아니라 동결될 때** 고정합니다.
+`verifyScoringContractManifest()`가 descriptor를 재계산해 대조하고,
+`tests/memoryEvalDatasetManifests.test.mjs`가 상수를 글자 그대로 검증합니다.
+
+### 11.6 기존 dataset은 그대로입니다
+
+seed-11·succ-2·succ-3의 **dataset digest 세 개와 succ-2·succ-3의 계약 digest 두
+개는 한 글자도 바뀌지 않았습니다.** 두 entry는 이제 `superseded`로 보고되며 계약
+digest를 재계산하지 않습니다 — 재계산하면 각 manifest가 자기 run이 본 적 없는
+계약을 기술하게 됩니다. 계약에 의존하지 않는 것(개수, cell 수, batch digest,
+dataset digest)은 전과 똑같이 정확히 검사됩니다.
+
+### 11.7 이번 단계에서 하지 않은 것
+
+succ-4 dataset 동결, pair 등록, 예산 승인. 전부 이후 단계입니다.

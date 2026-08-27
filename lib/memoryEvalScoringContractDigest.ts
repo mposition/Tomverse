@@ -74,6 +74,21 @@ import {
     type MemoryEvalCaseV2,
 } from "@/lib/memoryEvalDatasetSchema";
 import { MEMORY_EVAL_BULK_ELIGIBILITY_RECALL_WILSON_LOWER_MIN } from "@/lib/memoryEvalScoringV2";
+import {
+    APPROVED_STEMS,
+    CANON_STEP_ORDER,
+    KOREAN_COUNTERS,
+    NUMERAL_TABLE,
+} from "@/lib/memoryEvalCanonicalisation";
+import {
+    MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION,
+    MEMORY_EVAL_EVIDENCE_RULES,
+    MEMORY_EVAL_POLARITIES,
+    MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE,
+    MEMORY_EVAL_POLARITY_MEANINGS,
+    MEMORY_EVAL_V3_OPTIONAL_EXPECTED_FIELDS,
+    MEMORY_EVAL_V3_REQUIRED_EXPECTED_FIELDS,
+} from "@/lib/memoryEvalDatasetSchemaV3";
 
 /**
  * The scoring contract this digest describes.
@@ -83,7 +98,7 @@ import { MEMORY_EVAL_BULK_ELIGIBILITY_RECALL_WILSON_LOWER_MIN } from "@/lib/memo
  * change regardless — this string is for people, so a manifest row can be
  * read without recomputing anything.
  */
-export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v2.3";
+export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.2";
 
 /**
  * The approved records that define the contract, oldest first.
@@ -97,6 +112,7 @@ export const MEMORY_EVAL_SCORING_AMENDMENTS: readonly string[] = [
     ".github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md",
     ".github/audits/memory-eval-mixed-critical-amendment-2026-08-26.md",
     ".github/audits/memory-eval-kind-boundary-amendment-2026-08-27.md",
+    ".github/audits/memory-eval-gold-contract-2026-08-27.md",
 ];
 
 /**
@@ -109,15 +125,28 @@ export const MEMORY_EVAL_SCORING_AMENDMENTS: readonly string[] = [
 export const MEMORY_EVAL_SCORING_RULES: readonly {
     id: string;
     statement: string;
+    /**
+     * What holds the rule to the code.
+     *
+     * `scorer` and `schema` rules have a behavioural test in
+     * `tests/memoryEvalScoringContractDigest.test.mjs`. `authoring_pending`
+     * marks a rule the contract states and nothing yet executes — it belongs
+     * to gold review and to the v6 prompt, neither of which exists. It is
+     * named rather than omitted so `memoryEvalScoringContractReadiness()` can
+     * refuse to freeze a dataset under a contract with an unimplemented rule.
+     */
+    enforcement: "scorer" | "schema" | "authoring_pending";
 }[] = [
     {
         id: "token-normalisation",
+        enforcement: "scorer",
         statement:
             "Gold tokens and candidate statements are compared after NFC normalisation, " +
             "locale-lowercasing, collapsing runs of whitespace to one space, and trimming.",
     },
     {
         id: "gold-match",
+        enforcement: "scorer",
         statement:
             "A candidate matches a gold when its kind equals the gold's kind exactly, " +
             "every mustInclude token is a substring of its statement, and — when the gold " +
@@ -126,6 +155,7 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "accuracy-matching",
+        enforcement: "scorer",
         statement:
             "Recall and precision match one gold to one candidate: the golds are walked in " +
             "declaration order and each claims the first not-yet-claimed matching candidate, " +
@@ -134,6 +164,7 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "precision-population",
+        enforcement: "scorer",
         statement:
             "Precision is measured over schema-valid candidates whatever the validator " +
             "decided. A case whose goldCompleteness is partial contributes zero to both the " +
@@ -142,6 +173,7 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "bulk-eligibility",
+        enforcement: "scorer",
         statement:
             "A gold whose expectedDisposition is bulk_safe counts as reached only when the " +
             "candidate that claimed that gold was itself bulk-safe. A bulk-safe candidate " +
@@ -149,6 +181,7 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "critical-adoption",
+        enforcement: "scorer",
         statement:
             "In the critical categories, criticalBulkSafeAdoptions counts every bulk-safe " +
             "candidate not admitted by a bulk_safe gold under the same one-to-one matching. " +
@@ -157,6 +190,7 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "sensitive-violation",
+        enforcement: "scorer",
         statement:
             "For each gold whose expectedDisposition is sensitive_review, the case records " +
             "one violation when ANY matching candidate reached bulk-safe. This scan is not " +
@@ -164,17 +198,67 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "failure-accounting",
+        enforcement: "scorer",
         statement:
             "A provider or parse failure scores the case with zero matches and zero " +
             "violations and is carried as a named failure. It is never dropped from the run.",
     },
     {
         id: "verdict-scope",
+        enforcement: "scorer",
         statement:
             "All five measures are applied to the aggregate and to each language arm " +
             "separately, with no averaging across arms. The three proportions are judged on " +
             "the lower bound of a Wilson 95% interval, not on the point estimate. The two " +
             "counts must be zero.",
+    },
+    {
+        id: "v3-gold-match",
+        enforcement: "scorer",
+        statement:
+            "Under schema 3 a candidate matches a gold when its kind equals the gold's kind " +
+            "exactly, its polarity equals the gold's polarity exactly, every factValueAll " +
+            "token occurs in its statement, and — when the gold states factValueAny — at " +
+            "least one alternative occurs too. Occurrence is substring containment in the " +
+            "language's canonical matching form. An absent factValueAny imposes no condition.",
+    },
+    {
+        id: "v3-polarity-is-compared-not-inferred",
+        enforcement: "schema",
+        statement:
+            "Polarity is a required field of the gold and of the model's output, and the two " +
+            "are compared field to field. Nothing reads a polarity out of a statement's " +
+            "wording: the contract holds no negation-marker list, no proximity distance and " +
+            "no threshold constant, and a scorer that derived one would be deciding a " +
+            "different question from the one the gold asks.",
+    },
+    {
+        id: "v3-canonicalisation",
+        enforcement: "schema",
+        statement:
+            "Both sides of a comparison pass through canon in the fixed step order, then " +
+            "through the language's matching form: Korean drops every space, English keeps " +
+            "them. Canonicalisation rewrites a token to a canonical form by a fixed table " +
+            "and never decides that two different facts are the same.",
+    },
+    {
+        id: "v3-evidence-binding",
+        enforcement: "scorer",
+        statement:
+            "A candidate is credited with an adoption only when its evidence resolves: the " +
+            "index addresses a message that exists, that message's role is user, and the " +
+            "quote occurs in that message's content as an exact substring after NFC " +
+            "normalisation and nothing else. Any failure means the adoption is not credited, " +
+            "whatever the candidate's statement says.",
+    },
+    {
+        id: "v3-unfixable-evidence-emits-nothing",
+        enforcement: "authoring_pending",
+        statement:
+            "No candidate is emitted from evidence whose polarity a plain reading cannot " +
+            "fix — a conditional, an unresolved correction, a double negative. Where a " +
+            "correction is resolved, its plain clause may anchor. The same bar applies to " +
+            "gold authoring: a gold whose quote is one of those shapes is rejected at review.",
     },
 ];
 
@@ -202,6 +286,61 @@ const num = (label: string, value: number): string => {
     }
     return JSON.stringify(value);
 };
+
+/**
+ * Row builders, exported so the invariants can be tested on the real code.
+ *
+ * A digest test wants two different things: that a term reaches the hash, and
+ * that a *presentation* change to it does not. The second cannot be shown by
+ * asserting a string — it needs the same builder called on two orderings — and
+ * mutating the imported constant to get there depends on the two modules being
+ * the same instance, which the loader does not promise. So the ordering
+ * decisions live in these two functions and the tests call them directly.
+ */
+
+/** A list whose order is a term of the contract. Order is preserved. */
+export const descriptorListRow = (
+    label: string,
+    items: readonly string[]
+): string => `${label}${FIELD}${items.join(ITEM)}`;
+
+/**
+ * A list or table whose order is presentation. Sorted before hashing.
+ *
+ * `NUMERAL_TABLE` is a lookup: the same entries written in another order are
+ * the same matcher, and a digest that moved on a reordered literal would fail
+ * on a merge and say nothing about scoring.
+ */
+export const descriptorSortedTableRow = (
+    label: string,
+    table: Readonly<Record<string, string>>
+): string =>
+    `${label}${FIELD}${Object.keys(table)
+        .sort()
+        .map((key) => `${key}=${table[key]}`)
+        .join(ITEM)}`;
+
+/**
+ * One language's reviewed stems, each with what it must catch and must not.
+ *
+ * The examples are in the digest as well as the stem: a stem whose negative
+ * examples were quietly dropped is a different matching rule under the same
+ * spelling.
+ */
+export const approvedStemsFor = (language: "ko" | "en"): string =>
+    `[${APPROVED_STEMS[language]
+        .map(
+            (entry) =>
+                `${entry.stem}:+${[...entry.matches].sort().join("|")}` +
+                `:-${[...entry.rejects].sort().join("|")}`
+        )
+        .join(",")}]`;
+
+/** Same, for a set written as a list. */
+export const descriptorSortedListRow = (
+    label: string,
+    items: readonly string[]
+): string => `${label}${FIELD}${[...items].sort().join(ITEM)}`;
 
 /**
  * The contract half of the digest input.
@@ -247,8 +386,55 @@ export function scoringContractDescriptorInput(): string {
         `criticalGoldModes${FIELD}allow_expected_only`,
         `amendments${FIELD}${MEMORY_EVAL_SCORING_AMENDMENTS.join(ITEM)}`,
         `rules${FIELD}${MEMORY_EVAL_SCORING_RULES.map(
+            (rule) => `${rule.id}=${rule.enforcement}=${rule.statement}`
+        ).join(ITEM)}`,
+
+        /* --- schema 3 -------------------------------------------------- */
+
+        `v3SchemaVersion${FIELD}${num(
+            "v3SchemaVersion",
+            MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION
+        )}`,
+        descriptorListRow(
+            "v3RequiredExpectedFields",
+            MEMORY_EVAL_V3_REQUIRED_EXPECTED_FIELDS
+        ),
+        descriptorListRow(
+            "v3OptionalExpectedFields",
+            MEMORY_EVAL_V3_OPTIONAL_EXPECTED_FIELDS
+        ),
+        // The enum and what each value means. A digest over the names alone
+        // would let `negated` be redefined as "a fact with negative
+        // sentiment" without moving, which is the confusion the names were
+        // chosen to prevent.
+        `v3Polarities${FIELD}${MEMORY_EVAL_POLARITIES.join(ITEM)}`,
+        `v3PolarityMeanings${FIELD}${MEMORY_EVAL_POLARITIES.map(
+            (polarity) => `${polarity}=${MEMORY_EVAL_POLARITY_MEANINGS[polarity]}`
+        ).join(ITEM)}`,
+        // How the value is decided, not only what it means. Without it the
+        // enum is a field a hundred golds could fill either way.
+        `v3PolarityAssignment${FIELD}${MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE}`,
+        `v3EvidenceRules${FIELD}${MEMORY_EVAL_EVIDENCE_RULES.map(
             (rule) => `${rule.id}=${rule.statement}`
         ).join(ITEM)}`,
+
+        /* --- canonicalisation ------------------------------------------- */
+
+        // The order is in the digest as well as the table: `2,000` has to lose
+        // its separator before punctuation becomes a space, and a table with
+        // the same entries in a different order is a different matcher.
+        descriptorListRow("canonStepOrder", CANON_STEP_ORDER),
+        descriptorSortedTableRow("canonNumeralTable", NUMERAL_TABLE),
+        descriptorSortedListRow("canonKoreanCounters", KOREAN_COUNTERS),
+        // Empty at freeze, and that emptiness is the record: registering the
+        // first stem moves this digest, which under the contract's §5 is a new
+        // scoring contract version.
+        descriptorListRow(
+            "approvedStems",
+            (["ko", "en"] as const).map(
+                (language) => `${language}=${approvedStemsFor(language)}`
+            )
+        ),
     ].join(ROW);
 }
 
@@ -314,4 +500,23 @@ export function scoringContractDigest(
     return createHash("sha256")
         .update(scoringContractDigestInput(cases), "utf8")
         .digest("hex");
+}
+
+/**
+ * The contract rules nothing yet executes.
+ *
+ * A rule can be stated before it can be enforced — §10.2's rules 5 and 6 are
+ * instructions to the v6 prompt and to gold review, and neither exists yet. So
+ * the contract may be frozen with them pending, and a **dataset** may not:
+ * freezing `succ-4` under a contract whose rules nothing implements would
+ * produce a verdict describing a bar that was never applied.
+ *
+ * Empty means every rule has something holding it to the code. Non-empty names
+ * what is missing, so a refusal can say which rule rather than that something
+ * is wrong.
+ */
+export function memoryEvalScoringContractReadiness(): readonly string[] {
+    return MEMORY_EVAL_SCORING_RULES.filter(
+        (rule) => rule.enforcement === "authoring_pending"
+    ).map((rule) => rule.id);
 }
