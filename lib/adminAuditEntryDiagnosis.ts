@@ -1,4 +1,6 @@
+import type { AdminAuditKeyOrder } from "@/lib/adminAuditIntegrityCore";
 import {
+  ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
   adminAuditEntryHashVariants,
   computeAdminAuditEntryHash,
   type AdminAuditHashInput,
@@ -80,7 +82,7 @@ export type AdminAuditDiagnosis = {
    * Reported as its own finding because the remedy is not the one a field
    * mismatch calls for: nothing about the entry is wrong.
    */
-  verifiesUnderCodepointKeyOrder: boolean;
+  reproducesUnderOrder: AdminAuditKeyOrder | null;
 };
 
 /** The input the verifier builds today, from the row exactly as stored. */
@@ -205,13 +207,25 @@ export function diagnoseAdminAuditEntry(
       }
     }
   }
+  // Which key order reproduces the digest from the *stored* content, if any.
   // Tried against the stored content only: a collation difference and a
   // changed field are separate explanations, and combining them would let a
   // match claim both.
-  const codepointMatch = keys.some((secret) => {
+  //
+  // Since 2026-08-27 verification accepts either order, so a row reaching this
+  // function as a failure will answer `null` -- and that is the useful part:
+  // it rules the collation story out rather than leaving it open.
+  let reproducesUnderOrder: AdminAuditKeyOrder | null = null;
+  for (const secret of keys) {
     const variants = adminAuditEntryHashVariants(stored, secret);
-    return variants.codepoint === entryHash && variants.locale !== entryHash;
-  });
+    const order = ADMIN_AUDIT_VERIFICATION_KEY_ORDERS.find(
+      (candidate) => variants[candidate] === entryHash
+    );
+    if (order) {
+      reproducesUnderOrder = order;
+      break;
+    }
+  }
 
   return {
     verifiesAsStored: matches.some(
@@ -222,6 +236,6 @@ export function diagnoseAdminAuditEntry(
     matches,
     actorIdMissingWithEmail:
       stored.actorUserId === null && Boolean(stored.actorEmail),
-    verifiesUnderCodepointKeyOrder: codepointMatch,
+    reproducesUnderOrder,
   };
 }
