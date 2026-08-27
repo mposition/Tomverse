@@ -83,13 +83,22 @@ export const MEMORY_EVAL_POLARITY_MEANINGS: Readonly<
  */
 export type EvidenceAnchor = {
     /**
-     * The message's index within the conversation, zero-based.
+     * The message, by the `externalMessageId` the case itself declares.
      *
-     * An index rather than a runtime id: the same artifact has to resolve to
-     * the same message when it is re-scored months later, and a runtime id
-     * does not survive that.
+     * **Not an integer index.** `mem-score-v3` froze this as
+     * `evidenceMessageIndex: number` and authoring `succ-4` showed that to be
+     * wrong: the extraction pipeline already has a stable message reference
+     * and speaks it end to end. `toExtractionPromptInput()` labels each
+     * message `m1`, `m2`, … by position, the model cites those labels, and
+     * `parseExtractionOutput()` resolves each label back to the row's
+     * `externalMessageId` — refusing any label the chunk did not issue, so an
+     * invented citation resolves to nothing.
+     *
+     * A gold naming a position would have made the scorer translate between
+     * two spellings of the same fact, and that translation is the second copy
+     * of the contract §1④ exists to prevent. Amended in `mem-score-v3.1`.
      */
-    evidenceMessageIndex: number;
+    evidenceMessageId: string;
     /** An exact substring of that message's content. */
     evidenceQuote: string;
 };
@@ -108,8 +117,9 @@ export const MEMORY_EVAL_EVIDENCE_RULES: readonly {
     {
         id: "evidence-message-exists",
         statement:
-            "evidenceMessageIndex must address a message that exists in the conversation " +
-            "the case presents. An index outside that range is a refusal, never a miss.",
+            "evidenceMessageId must name a message the case actually presents, by the " +
+            "externalMessageId the case declares. A name the conversation does not carry " +
+            "is a refusal, never a miss.",
     },
     {
         id: "evidence-role-user",
@@ -125,6 +135,16 @@ export const MEMORY_EVAL_EVIDENCE_RULES: readonly {
             "canonicalised: a quote is a claim about what was written.",
     },
     {
+        id: "gold-evidence-covers-fact",
+        statement:
+            "A gold's own evidenceQuote must contain every factValueAll token, under the " +
+            "language's canonical matching form. An anchor naming the right message and " +
+            "quoting a span the fact is not in cites a source for something else, and no " +
+            "later check would notice. This binds gold authoring only: a candidate's quote " +
+            "is the model's claim about where it read the fact, and judging it against the " +
+            "gold's tokens would score the citation instead of the extraction.",
+    },
+    {
         id: "evidence-mismatch-refuses-adoption",
         statement:
             "A candidate failing any of the three above is not credited with the adoption, " +
@@ -132,6 +152,66 @@ export const MEMORY_EVAL_EVIDENCE_RULES: readonly {
             "that cites a source it invented score the same.",
     },
 ];
+
+/**
+ * How a gold's polarity is decided, and what that demands of `factValueAll`.
+ *
+ * Added in `mem-score-v3.2`, from authoring `succ-4`: with the field declared
+ * and nothing saying what it is a field *about*, a hundred golds had two
+ * defensible answers each.
+ *
+ * The rule is one question asked of the anchor quote:
+ *
+ *   > Does the memory assert `factValueAll` **of the user**, or assert that it
+ *   > is not so of them?
+ *
+ * `affirmed` for the first, `negated` for the second. Worked:
+ *
+ *   | quote                                   | factValueAll          | polarity |
+ *   |-----------------------------------------|-----------------------|----------|
+ *   | I'm not teetotal.                       | `teetotal`            | negated  |
+ *   | There's no printer here.                | `printer`             | negated  |
+ *   | 저는 한양대를 다닌 적 없습니다.          | `한양대`               | negated  |
+ *   | I'm allergic to penicillin.             | `allerg`, `penicillin`| affirmed |
+ *   | I always take the aisle seat, no        | `aisle`               | affirmed |
+ *   | exceptions.                             |                       |          |
+ *
+ * The last row is why a marker in the quote decides nothing: `no exceptions`
+ * belongs to the frequency, not to the seat.
+ *
+ * ## The demand this places on factValueAll
+ *
+ * A polarity is only well defined against something specific enough to be
+ * denied. `["drive"]` fails that where the conversation is about not driving:
+ * *the user cannot drive* and *the user drives* contain the same token, so the
+ * gold is matched by a candidate asserting its opposite and the field it was
+ * given changes nothing.
+ *
+ * The bar is deliberately narrow, because a bar every gold fails is a bar
+ * nobody applies. It is asked **where the opposite reading is live in that
+ * conversation** — the quote denies the topic, or the exchange is about
+ * whether it holds:
+ *
+ *   > Could a memory of the opposite polarity, drawn from **this**
+ *   > conversation, contain every factValueAll token? If it could, the list
+ *   > names a topic where it should name a predicate.
+ *
+ * `["견과류"]` fails it in a conversation correcting an assumed nut allergy,
+ * and becomes `["견과류", "알레르기"]`. It passes untouched in a conversation
+ * where the user states the allergy and nothing contests it.
+ *
+ * This is what §2.1's stem registry is for: `allerg` covers allergic and
+ * allergy, and writing one inflection instead is how `succ-3` lost golds.
+ */
+export const MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE =
+    "A gold's polarity answers one question of its anchor quote: does the memory " +
+    "assert factValueAll of the user, or assert that it is not so of them? affirmed " +
+    "for the first, negated for the second. A negation marker elsewhere in the quote " +
+    "decides nothing. Where the opposite reading is live in that conversation -- the " +
+    "quote denies the topic, or the exchange is about whether it holds -- factValueAll " +
+    "must name the predicate rather than the topic: if a memory of the opposite " +
+    "polarity drawn from the same conversation could contain every token, the gold is " +
+    "under-specified and the field it was given changes nothing.";
 
 /** One thing a schema-3 case expects. */
 export type ExpectedMemoryV3 = {
@@ -149,14 +229,27 @@ export type ExpectedMemoryV3 = {
     expectedDisposition: MemoryEvalExpectedDisposition;
 };
 
+/** The conversation shape, unchanged from schema 2 — this schema relabels. */
+export type MemoryEvalConversation = {
+    externalConversationId: string;
+    title: string;
+    messages: readonly {
+        externalMessageId: string;
+        role: "user" | "assistant";
+        content: string;
+    }[];
+};
+
 export type MemoryEvalCaseV3 = {
     id: string;
     category: MemoryEvalCategory;
     language: MemoryEvalLanguage;
-    messages: readonly { role: "user" | "assistant"; content: string }[];
     expected: readonly ExpectedMemoryV3[];
     goldCompleteness: MemoryEvalGoldCompleteness;
+    /** The schema-2 case this one relabels, when it is not a new conversation. */
+    sourceCaseId?: string;
     criticalGoldMode?: "allow_expected_only";
+    conversations: readonly MemoryEvalConversation[];
 };
 
 /**
@@ -192,12 +285,16 @@ export type EvidenceFailure = (typeof MEMORY_EVAL_EVIDENCE_RULES)[number]["id"];
  */
 export function evidenceFailure(
     anchor: EvidenceAnchor,
-    messages: readonly { role: "user" | "assistant"; content: string }[]
+    messages: readonly {
+        externalMessageId: string;
+        role: "user" | "assistant";
+        content: string;
+    }[]
 ): EvidenceFailure | null {
-    const message = messages[anchor.evidenceMessageIndex];
-    if (!Number.isInteger(anchor.evidenceMessageIndex) || !message) {
-        return "evidence-message-exists";
-    }
+    const message = messages.find(
+        (candidate) => candidate.externalMessageId === anchor.evidenceMessageId
+    );
+    if (!message) return "evidence-message-exists";
     if (message.role !== "user") return "evidence-role-user";
     // NFC only. Canonicalising here would let a quote that was never written
     // resolve against one that was, which is the opposite of what a quote is.
@@ -207,6 +304,29 @@ export function evidenceFailure(
         return "evidence-quote-exact";
     }
     return null;
+}
+
+/**
+ * Whether a gold's own anchor is admissible, at authoring and review time.
+ *
+ * Everything `evidenceFailure()` asks of a candidate, plus
+ * `gold-evidence-covers-fact`: the quote has to contain the fact the gold is
+ * about. Applied to golds only — see that rule's statement for why a
+ * candidate's quote is not held to the same test.
+ */
+export function goldEvidenceFailure(
+    gold: ExpectedMemoryV3,
+    conversations: readonly MemoryEvalConversation[],
+    language: MemoryEvalLanguage
+): EvidenceFailure | "gold-evidence-covers-fact" | null {
+    const messages = conversations.flatMap((conversation) => conversation.messages);
+    const failure = evidenceFailure(gold.evidence, messages);
+    if (failure) return failure;
+    const quote = canonMatch(gold.evidence.evidenceQuote, language);
+    const covered = gold.factValueAll.every((token) =>
+        quote.includes(canonMatch(token, language))
+    );
+    return covered ? null : "gold-evidence-covers-fact";
 }
 
 /**

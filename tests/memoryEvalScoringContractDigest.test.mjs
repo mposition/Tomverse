@@ -27,6 +27,7 @@ import {
     MEMORY_EVAL_POLARITY_MEANINGS,
     candidateMatchesGoldV3,
     evidenceFailure,
+    goldEvidenceFailure,
 } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
 import {
@@ -507,6 +508,7 @@ test("the evidence rules reach the digest, statement and all", () => {
             "evidence-message-exists",
             "evidence-role-user",
             "evidence-quote-exact",
+            "gold-evidence-covers-fact",
             "evidence-mismatch-refuses-adoption",
         ]
     );
@@ -710,31 +712,60 @@ test("rule: v3-canonicalisation", () => {
 
 test("rule: v3-evidence-binding", () => {
     const messages = [
-        { role: "user", content: "저는 인천에 삽니다." },
-        { role: "assistant", content: "인천에 사시는군요." },
+        { externalMessageId: "c1-m1", role: "user", content: "저는 인천에 삽니다." },
+        { externalMessageId: "c1-m2", role: "assistant", content: "인천에 사시는군요." },
     ];
+    const at = (evidenceMessageId, evidenceQuote) =>
+        evidenceFailure({ evidenceMessageId, evidenceQuote }, messages);
+
+    assert.equal(at("c1-m1", "인천에 삽니다"), null);
+    // The id the case declares, not a position: the extraction pipeline
+    // labels, cites and resolves by this identifier end to end, and a gold
+    // naming a position would make the scorer translate between two spellings
+    // of the same fact.
+    assert.equal(at("c1-m9", "인천"), "evidence-message-exists");
     assert.equal(
-        evidenceFailure({ evidenceMessageIndex: 0, evidenceQuote: "인천에 삽니다" }, messages),
-        null
-    );
-    assert.equal(
-        evidenceFailure({ evidenceMessageIndex: 5, evidenceQuote: "인천" }, messages),
-        "evidence-message-exists"
-    );
-    assert.equal(
-        evidenceFailure({ evidenceMessageIndex: 1, evidenceQuote: "인천" }, messages),
+        at("c1-m2", "인천"),
         "evidence-role-user",
         "an assistant message is never evidence for a fact about the user"
     );
-    assert.equal(
-        evidenceFailure({ evidenceMessageIndex: 0, evidenceQuote: "부산" }, messages),
-        "evidence-quote-exact"
-    );
+    assert.equal(at("c1-m1", "부산"), "evidence-quote-exact");
     // A quote is a claim about what was written, so it is not canonicalised:
-    // a lowercased or de-punctuated near-miss does not resolve.
+    // a de-spaced near-miss does not resolve.
+    assert.equal(at("c1-m1", "인천에삽니다"), "evidence-quote-exact");
+});
+
+test("rule: gold-evidence-covers-fact", () => {
+    const conversations = [
+        {
+            externalConversationId: "c1",
+            title: "t",
+            messages: [
+                {
+                    externalMessageId: "c1-m1",
+                    role: "user",
+                    content: "저는 인천에 살고 견과류 알레르기가 있습니다.",
+                },
+            ],
+        },
+    ];
+    const gold = (factValueAll, evidenceQuote) => ({
+        id: "g1",
+        kind: "constraint",
+        polarity: "affirmed",
+        factValueAll,
+        evidence: { evidenceMessageId: "c1-m1", evidenceQuote },
+        expectedDisposition: "bulk_safe",
+    });
     assert.equal(
-        evidenceFailure({ evidenceMessageIndex: 0, evidenceQuote: "인천에삽니다" }, messages),
-        "evidence-quote-exact"
+        goldEvidenceFailure(gold(["견과류"], "견과류 알레르기가 있습니다"), conversations, "ko"),
+        null
+    );
+    // The right message, a real span of it, and the fact is somewhere else in
+    // the sentence. Nothing downstream would have noticed.
+    assert.equal(
+        goldEvidenceFailure(gold(["견과류"], "저는 인천에 살고"), conversations, "ko"),
+        "gold-evidence-covers-fact"
     );
 });
 

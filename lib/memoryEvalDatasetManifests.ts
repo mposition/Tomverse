@@ -645,6 +645,49 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
                 "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc",
             pendingRules: ["v3-unfixable-evidence-emits-nothing"],
         },
+        {
+            /**
+             * Two corrections found while authoring `succ-4`'s golds, which is
+             * where a contract meets the thing it describes.
+             *
+             * The evidence reference became `evidenceMessageId` — the
+             * `externalMessageId` the extraction pipeline already speaks from
+             * prompt label to parsed candidate — instead of the integer
+             * position v3 froze. And `gold-evidence-covers-fact` was added: a
+             * gold's quote must contain the fact it is about, or the anchor
+             * names the right message and points at something else.
+             *
+             * Nothing was scored under v3: no dataset was frozen against it,
+             * so this supersedes it without leaving a run behind. The v3 entry
+             * stays because the version existed and was pinned.
+             */
+            version: "mem-score-v3.1",
+            approvedOn: "2026-08-27",
+            descriptorDigest:
+                "4097096dae9060e44b0c6a0dbc5803dbdf1f22d6c80505306a70113794cb3658",
+            pendingRules: ["v3-unfixable-evidence-emits-nothing"],
+        },
+        {
+            /**
+             * The third correction from authoring, and the one that mattered
+             * most: the contract declared a `polarity` field and never said
+             * what it was a field *about*. Drafting `succ-4` put roughly a
+             * hundred golds in front of a reviewer where both values were
+             * defensible — is *the user cannot drive at night* an assertion of
+             * a constraint or a denial of an ability? — and a field answered
+             * by preference is not a measurement.
+             *
+             * `MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE` settles it against the
+             * anchor quote, and carries the demand that follows: a token list
+             * an opposite-polarity memory could also contain is
+             * under-specified, because the field it was given changes nothing.
+             */
+            version: "mem-score-v3.2",
+            approvedOn: "2026-08-27",
+            descriptorDigest:
+                "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b",
+            pendingRules: ["v3-unfixable-evidence-emits-nothing"],
+        },
     ];
 
 /**

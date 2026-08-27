@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
     MEMORY_EVAL_DATASET_MANIFESTS,
+    MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS,
     evalDatasetManifest,
     verifyEvalDatasetManifest,
     verifyScoringContractManifest,
@@ -116,9 +117,17 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
     // record of its own.
     const result = verifyScoringContractManifest();
     assert.deepEqual(result.mismatches, []);
-    assert.equal(result.version, "mem-score-v3");
+    assert.equal(result.version, "mem-score-v3.2");
     assert.equal(
         result.entry.descriptorDigest,
+        "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b"
+    );
+    // v3 stays pinned. It existed, it was frozen, and nothing was scored under
+    // it -- but a version whose record is deleted once it is superseded is a
+    // version nobody can check a later claim against.
+    assert.equal(
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find((m) => m.version === "mem-score-v3")
+            .descriptorDigest,
         "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc"
     );
     assert.equal(result.entry.approvedOn, "2026-08-27");

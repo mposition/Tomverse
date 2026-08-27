@@ -84,6 +84,7 @@ import {
     MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION,
     MEMORY_EVAL_EVIDENCE_RULES,
     MEMORY_EVAL_POLARITIES,
+    MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE,
     MEMORY_EVAL_POLARITY_MEANINGS,
     MEMORY_EVAL_V3_OPTIONAL_EXPECTED_FIELDS,
     MEMORY_EVAL_V3_REQUIRED_EXPECTED_FIELDS,
@@ -97,7 +98,7 @@ import {
  * change regardless — this string is for people, so a manifest row can be
  * read without recomputing anything.
  */
-export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3";
+export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.2";
 
 /**
  * The approved records that define the contract, oldest first.
@@ -410,6 +411,9 @@ export function scoringContractDescriptorInput(): string {
         `v3PolarityMeanings${FIELD}${MEMORY_EVAL_POLARITIES.map(
             (polarity) => `${polarity}=${MEMORY_EVAL_POLARITY_MEANINGS[polarity]}`
         ).join(ITEM)}`,
+        // How the value is decided, not only what it means. Without it the
+        // enum is a field a hundred golds could fill either way.
+        `v3PolarityAssignment${FIELD}${MEMORY_EVAL_POLARITY_ASSIGNMENT_RULE}`,
         `v3EvidenceRules${FIELD}${MEMORY_EVAL_EVIDENCE_RULES.map(
             (rule) => `${rule.id}=${rule.statement}`
         ).join(ITEM)}`,
