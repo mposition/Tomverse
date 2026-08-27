@@ -12,7 +12,8 @@ import { AiReviewLoopSection } from "./AiReviewLoopSection";
 import { EvidenceSection } from "./EvidenceSection";
 import { getLandingCopy } from "./landingContent";
 import { LandingPricingSection } from "./LandingPricingSection";
-import { LandingHeroAiReviewDemo } from "./LandingHeroAiReviewDemo";
+import { AnswerRails } from "./AnswerRails";
+import { ProductCapture } from "./ProductCapture";
 import { TrustSection } from "./TrustSection";
 import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
 import { workspaceDestination } from "@/lib/productEntryDestination";
@@ -93,28 +94,15 @@ export function LandingPageContent({
 
       <section
         aria-labelledby="landing-hero-title"
-        className="relative isolate overflow-hidden border-b border-zinc-200 dark:border-zinc-800"
+        className="relative isolate"
       >
         {/*
-          The measured plane the whole page is named after: four faint column
-          rules, the same four the answers are compared across, running behind
-          the hero and fading out before they reach the copy. It is a
-          background-image on one aria-hidden element, so it costs no DOM, no
-          asset request and no paint on scroll.
-
-          It organises rather than decorates -- the demonstration to its right
-          sets its answers on exactly this rhythm -- which is the only reason
-          a ruled ground earns its place here.
+          No ruled background and no gradient blob. Both were decoration
+          standing in for structure; the three rails below the comparison are
+          the structure, and they are drawn from something the page actually
+          claims rather than sprinkled behind the copy.
         */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 -z-10 hidden bg-[length:25%_100%] bg-[linear-gradient(to_right,rgb(9_9_11/0.06)_1px,transparent_1px)] [mask-image:linear-gradient(to_bottom,black,transparent)] lg:block dark:bg-[linear-gradient(to_right,rgb(255_255_255/0.07)_1px,transparent_1px)]"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute right-0 top-[64px] -z-10 h-[384px] w-full max-w-[384px] rounded-full bg-blue-500/10 blur-3xl dark:bg-blue-500/15"
-        />
-        <div className="mx-auto grid max-w-7xl gap-10 px-[16px] pb-12 pt-10 sm:px-6 sm:pb-14 sm:pt-12 lg:grid-cols-[1.03fr_0.97fr] lg:items-center lg:px-8 lg:py-24">
+        <div className="mx-auto max-w-7xl px-[16px] pb-10 pt-10 sm:px-6 sm:pt-14 lg:px-8 lg:pb-12 lg:pt-20">
           {/*
             No `min-w-0` here, deliberately. Shrinking this grid item below its
             min-content does make the hero fit a 320px viewport at 200% zoom --
@@ -156,14 +144,15 @@ export function LandingPageContent({
               // 320px viewport, so the column overflowed. A `clamp()` in `vw` does
               // not grow with the root font (text scaling) and does shrink with the
               // layout viewport (browser zoom), so the minimum fits in both cases.
-              // `lg:text-6xl` rather than `text-7xl`: at 72px in this column
-              // the English headline set four lines ("Ask once. / Compare /
-              // multiple AI / answers.") when the copy's own line break asks
-              // for two. A four-line hero headline is a font-size error, not a
-              // copy-length one. 60px keeps the Korean desktop assertion in
-              // tests/e2e/korean-typography.spec.ts satisfied, which requires
-              // at least 48px and at most three lines at 1440px.
-              className={`mt-5 max-w-4xl whitespace-pre-line break-words text-[clamp(1.75rem,9vw,2.25rem)] font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl ${displayHeadingClass(lang)}`}
+              // `lg:text-7xl` is affordable again because the headline spans
+              // the container rather than sharing a row with a mock-up. At
+              // 60px in the old half-width column the English headline set
+              // four lines when its copy asks for two; at 72px across the full
+              // width it sets the two the copy wrote. Still inside the Korean
+              // desktop assertion in tests/e2e/korean-typography.spec.ts,
+              // which requires at least 48px and at most three lines at
+              // 1440px.
+              className={`mt-6 max-w-5xl whitespace-pre-line break-words text-[clamp(1.75rem,9vw,2.25rem)] font-black leading-[1.02] tracking-[-0.035em] sm:text-6xl lg:text-7xl ${displayHeadingClass(lang)}`}
             >
               {content.title}
             </h1>
@@ -221,8 +210,38 @@ export function LandingPageContent({
             </div>
           </div>
 
-          <LandingHeroAiReviewDemo preview={content.preview} />
         </div>
+
+        {/*
+          The evidence, and the only thing in the hero that is not type: the
+          real comparison, three answers to one question, captured from the
+          current interface.
+
+          It replaces a product mock-up built out of styled divs. That mock-up
+          was the page's most recognisable machine-generated tell, and it was
+          also the weaker argument: a drawing of the product proves nothing a
+          visitor could not have drawn themselves.
+        */}
+        <div className="mx-auto max-w-7xl px-[16px] sm:px-6 lg:px-8">
+          <figure className="m-0">
+            <div className="overflow-hidden rounded-2xl border border-zinc-200 shadow-2xl shadow-zinc-300/50 dark:border-zinc-800 dark:shadow-black/60">
+              <ProductCapture
+                name="comparison"
+                priority
+                alt={content.preview.srDescription}
+              />
+            </div>
+            <figcaption
+              data-testid="landing-workflow-disclosure"
+              className="mt-3 break-words text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+            >
+              {content.preview.disclosure}
+            </figcaption>
+          </figure>
+        </div>
+
+        {/* Three answers leave the comparison and carry down the page. */}
+        <AnswerRails variant="descend" />
       </section>
 
       <AiReviewLoopSection />

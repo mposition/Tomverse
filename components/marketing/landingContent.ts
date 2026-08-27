@@ -58,8 +58,18 @@ export type LandingCopy = {
     srDescription: string;
     /** The four stages the hero demonstration plays through. */
     stages: Array<{ title: string; caption: string }>;
-    /** States that the demonstration is an illustration, not a capture. */
+    /**
+     * What the two captures are: the current interface, demonstration data,
+     * no customer content, no provider endorsement.
+     *
+     * This used to say the opposite ("illustrative diagram, not a product
+     * recording") because the page's visuals were drawings. They are real
+     * screenshots now, so the old sentence would have been a false disclosure
+     * rather than a cautious one.
+     */
     disclosure: string;
+    /** Alt text for the AI Review result capture. */
+    reviewAlt: string;
   };
   /**
    * The core loop, told once: ask, compare, review, act. Everything the page
@@ -156,7 +166,7 @@ const en: LandingCopy = {
     answers: ["Clear next steps", "Risks and trade-offs", "Concise operating plan"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["Common ground", "Contradiction", "Missing point", "Verify next"],
-    srDescription: "Illustration: one question answered by three models side by side, with an AI Review panel grouping common ground, contradictions, missing points, and what to verify next.",
+    srDescription: "Tomverse Review with one question sent to three models, their answers side by side.",
     stages: [
       { title: "One question", caption: "Sent once to every selected model." },
       { title: "Parallel answers", caption: "Up to three answers, side by side." },
@@ -166,7 +176,8 @@ const en: LandingCopy = {
       },
       { title: "Next action", caption: "Follow up with one model, or share the result." },
     ],
-    disclosure: "Illustrative diagram, not a product recording · no customer content · no provider endorsement",
+    disclosure: "Product screenshots, taken from the current interface with demonstration data. No customer content. Not a provider endorsement.",
+    reviewAlt: "An AI Review result listing common ground, important differences, contradictions, missing points and what still needs verifying, each quoting the answer it came from.",
   },
   loop: {
     eyebrow: "The core loop",
@@ -376,14 +387,15 @@ const ko: LandingCopy = {
     answers: ["명확한 다음 단계", "위험과 장단점", "간결한 실행 계획"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["공통점", "모순", "누락", "추가 검증"],
-    srDescription: "설명 이미지: 하나의 질문에 3개 모델이 나란히 답하고, AI Review 패널이 공통점·모순·누락·추가 검증 항목을 정리하는 화면입니다.",
+    srDescription: "Tomverse Review 화면. 질문 하나를 세 모델에 보내고 답변을 나란히 놓은 모습입니다.",
     stages: [
       { title: "질문 하나", caption: "선택한 모든 모델에 한 번만 보냅니다." },
       { title: "동시 답변", caption: "최대 3개 답변을 나란히 봅니다." },
       { title: "AI Review", caption: "공통점, 모순, 누락, 확인할 항목을 정리합니다." },
       { title: "다음 작업", caption: "한 모델에만 이어서 묻거나 결과를 공유합니다." },
     ],
-    disclosure: "제품 녹화가 아닌 설명용 도식 · 고객 콘텐츠 없음 · 공급자 보증 아님",
+    disclosure: "현재 화면을 시연용 데이터로 캡처한 제품 스크린샷입니다. 고객 콘텐츠는 없으며, 공급자 보증이 아닙니다.",
+    reviewAlt: "AI Review 결과 화면. 공통점, 주요 차이, 모순, 누락, 추가 검증 항목을 각각 출처 답변 인용과 함께 정리한 모습입니다.",
   },
   loop: {
     eyebrow: "핵심 흐름",
@@ -577,14 +589,15 @@ const zh: LandingCopy = {
     answers: ["清晰的下一步", "风险与取舍", "简洁的执行计划"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["共识", "矛盾", "遗漏", "下一步核实"],
-    srDescription: "示意图：一个问题由三个模型并排回答，AI Review 面板整理共识、矛盾、遗漏和待核实项目。",
+    srDescription: "Tomverse Review 界面：一个问题发送给三个模型，回答并排显示。",
     stages: [
       { title: "一个问题", caption: "只发送一次，送达每个所选模型。" },
       { title: "并行回答", caption: "最多三个回答并排显示。" },
       { title: "AI Review", caption: "整理共识、矛盾、遗漏与待核实项目。" },
       { title: "下一步", caption: "只向一个模型追问，或分享结果。" },
     ],
-    disclosure: "说明性示意图，非产品录屏 · 无客户内容 · 非供应商背书",
+    disclosure: "以演示数据拍摄的当前界面产品截图。不含客户内容，也不代表供应商背书。",
+    reviewAlt: "AI Review 结果界面：共识、主要差异、矛盾、遗漏与待核实项，每项都附上出处回答的引用。",
   },
   loop: {
     eyebrow: "核心流程",
@@ -751,7 +764,7 @@ const fr: LandingCopy = {
     answers: ["Prochaines étapes", "Risques et compromis", "Plan d’action concis"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["Points communs", "Contradiction", "Omission", "À vérifier"],
-    srDescription: "Illustration : une question traitée en parallèle par trois modèles, avec un panneau AI Review regroupant points communs, contradictions, omissions et éléments à vérifier.",
+    srDescription: "Tomverse Review : une question envoyée à trois modèles, leurs réponses côte à côte.",
     stages: [
       { title: "Une question", caption: "Envoyée une seule fois à chaque modèle choisi." },
       { title: "Réponses parallèles", caption: "Jusqu’à trois réponses côte à côte." },
@@ -764,7 +777,8 @@ const fr: LandingCopy = {
         caption: "Relancer un seul modèle, ou partager le résultat.",
       },
     ],
-    disclosure: "Schéma explicatif, pas un enregistrement du produit · aucun contenu client · aucune approbation de fournisseur",
+    disclosure: "Captures du produit, prises sur l'interface actuelle avec des données de démonstration. Aucun contenu client. Pas une recommandation de fournisseur.",
+    reviewAlt: "Un résultat d'AI Review listant les points communs, les différences, les contradictions, les omissions et ce qui reste à vérifier, chacun citant la réponse dont il provient.",
   },
   loop: {
     eyebrow: "Le cœur du flux",
@@ -974,7 +988,7 @@ const de: LandingCopy = {
     answers: ["Klare nächste Schritte", "Risiken und Abwägungen", "Kompakter Betriebsplan"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["Gemeinsamkeit", "Widerspruch", "Lücke", "Zu prüfen"],
-    srDescription: "Illustration: Eine Frage, die drei Modelle nebeneinander beantworten, mit einem AI-Review-Panel für Gemeinsamkeiten, Widersprüche, Lücken und Prüfbedarf.",
+    srDescription: "Tomverse Review: eine Frage an drei Modelle, ihre Antworten nebeneinander.",
     stages: [
       { title: "Eine Frage", caption: "Einmal an jedes gewählte Modell gesendet." },
       { title: "Parallele Antworten", caption: "Bis zu drei Antworten nebeneinander." },
@@ -987,7 +1001,8 @@ const de: LandingCopy = {
         caption: "Bei einem Modell nachfragen oder das Ergebnis teilen.",
       },
     ],
-    disclosure: "Erklärende Grafik, keine Produktaufnahme · keine Kundeninhalte · keine Anbieterempfehlung",
+    disclosure: "Produkt-Screenshots der aktuellen Oberfläche mit Demonstrationsdaten. Keine Kundeninhalte. Keine Empfehlung eines Anbieters.",
+    reviewAlt: "Ein AI-Review-Ergebnis mit Übereinstimmungen, wesentlichen Unterschieden, Widersprüchen, Lücken und offenen Prüfpunkten, jeweils mit Zitat aus der Antwort.",
   },
   loop: {
     eyebrow: "Der Kernablauf",
@@ -1197,7 +1212,7 @@ const es: LandingCopy = {
     answers: ["Próximos pasos claros", "Riesgos y alternativas", "Plan operativo conciso"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["Coincidencias", "Contradicción", "Omisión", "Por verificar"],
-    srDescription: "Ilustración: una pregunta respondida en paralelo por tres modelos, con un panel de AI Review que agrupa coincidencias, contradicciones, omisiones y puntos por verificar.",
+    srDescription: "Tomverse Review: una pregunta enviada a tres modelos, con sus respuestas una junto a otra.",
     stages: [
       { title: "Una pregunta", caption: "Se envía una sola vez a cada modelo elegido." },
       { title: "Respuestas en paralelo", caption: "Hasta tres respuestas, lado a lado." },
@@ -1210,7 +1225,8 @@ const es: LandingCopy = {
         caption: "Continuar con un modelo o compartir el resultado.",
       },
     ],
-    disclosure: "Diagrama ilustrativo, no una grabación del producto · sin contenido de clientes · sin respaldo de proveedores",
+    disclosure: "Capturas del producto, tomadas de la interfaz actual con datos de demostración. Sin contenido de clientes. No es un aval del proveedor.",
+    reviewAlt: "Un resultado de AI Review con acuerdos, diferencias importantes, contradicciones, omisiones y lo que falta verificar, cada uno citando la respuesta de la que procede.",
   },
   loop: {
     eyebrow: "El flujo principal",
@@ -1420,7 +1436,7 @@ const pt: LandingCopy = {
     answers: ["Próximos passos claros", "Riscos e escolhas", "Plano operacional conciso"],
     reviewTitle: "Tomverse AI Review",
     reviewItems: ["Consenso", "Contradição", "Omissão", "A verificar"],
-    srDescription: "Ilustração: uma pergunta respondida em paralelo por três modelos, com um painel de AI Review agrupando consensos, contradições, omissões e pontos a verificar.",
+    srDescription: "Tomverse Review: uma pergunta enviada a três modelos, com as respostas lado a lado.",
     stages: [
       { title: "Uma pergunta", caption: "Enviada uma só vez a cada modelo escolhido." },
       { title: "Respostas paralelas", caption: "Até três respostas, lado a lado." },
@@ -1433,7 +1449,8 @@ const pt: LandingCopy = {
         caption: "Continuar com um modelo ou compartilhar o resultado.",
       },
     ],
-    disclosure: "Diagrama ilustrativo, não uma gravação do produto · sem conteúdo de clientes · sem endosso de provedores",
+    disclosure: "Capturas do produto, feitas na interface atual com dados de demonstração. Sem conteúdo de clientes. Não é um endosso de fornecedor.",
+    reviewAlt: "Um resultado do AI Review com pontos em comum, diferenças importantes, contradições, omissões e o que ainda precisa de verificação, cada um citando a resposta de origem.",
   },
   loop: {
     eyebrow: "O fluxo principal",

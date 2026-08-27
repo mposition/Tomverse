@@ -212,13 +212,22 @@ for (const path of ["/", "/ko"] as const) {
     expect(main).not.toContain("4 credits used");
     expect(main).not.toContain("Review confidence");
 
-    // The disclosure now sits under the hero demonstration, which is the
-    // illustration it describes.
+    // The disclosure sits under the hero capture. It no longer claims the
+    // visual is a drawing: the page's two visuals are real screenshots of the
+    // current interface now, so "illustrative diagram, not a product
+    // recording" would be a false disclosure rather than a cautious one. What
+    // it must still do is name the demonstration data and refuse the
+    // endorsement reading.
     const disclosure = await page
       .getByTestId("landing-workflow-disclosure")
       .innerText();
     expect(disclosure).not.toMatch(/Real product UI/i);
-    expect(disclosure).toMatch(path === "/ko" ? /설명용 도식/ : /Illustrative/i);
+    expect(disclosure).toMatch(
+      path === "/ko" ? /시연용 데이터/ : /demonstration data/i
+    );
+    expect(disclosure).toMatch(
+      path === "/ko" ? /공급자 보증이 아닙니다/ : /Not a provider endorsement/i
+    );
   });
 
   test(`${path} drops the unguaranteed file-analysis outcome claims`, async ({

@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { getLandingCopy } from "./landingContent";
-import { ConditionLine, SectionHeading } from "./landingPrimitives";
+import { ConditionLine } from "./landingPrimitives";
+import { AnswerRails } from "./AnswerRails";
+import { ProductCapture } from "./ProductCapture";
 
 /**
  * What the product does, told once.
@@ -46,18 +49,55 @@ export function AiReviewLoopSection() {
       id="how-it-works"
       aria-labelledby="landing-loop-heading"
       data-testid="landing-loop-section"
-      className="border-b border-zinc-200 py-12 dark:border-zinc-800 sm:py-24"
+      className="border-b border-zinc-200 pb-12 dark:border-zinc-800 sm:pb-24"
     >
-      <div className="mx-auto max-w-7xl px-[16px] sm:px-6 lg:px-8">
-        <SectionHeading
-          eyebrow={copy.eyebrow}
-          title={copy.title}
-          description={copy.description}
-          lang={lang}
-          headingId="landing-loop-heading"
-        />
+      {/*
+        The three rails arrive from the hero and merge. This is the one place
+        on the page where the reserved cyan/blue/purple gradient appears: it
+        marks the join, which is the moment AI Review exists for. Using it
+        anywhere else would spend the product's one distinguishing mark on
+        decoration.
+      */}
+      <AnswerRails variant="converge" />
+      <div
+        aria-hidden="true"
+        className="h-1.5 bg-linear-to-r from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600"
+      />
 
-        <div className="mt-10 grid gap-8 lg:grid-cols-12 lg:items-start lg:gap-10">
+      {/*
+        The reviewed plane. Full bleed and inverted, once, because the whole
+        page is built around three things becoming one here; every other
+        section stays on the page's own ground so this reversal keeps meaning
+        something.
+      */}
+      <div className="bg-zinc-950 py-14 text-white sm:py-20 dark:bg-zinc-900">
+        <div className="mx-auto max-w-7xl px-[16px] sm:px-6 lg:px-8">
+          <h2
+            id="landing-loop-heading"
+            className={`max-w-3xl break-words text-3xl font-black leading-[1.02] tracking-[-0.03em] sm:text-5xl ${displayHeadingClass(lang)}`}
+          >
+            {copy.title}
+          </h2>
+          <p className="mt-5 max-w-2xl break-words text-base leading-7 text-zinc-300">
+            {copy.description}
+          </p>
+
+          <figure className="m-0 mt-9">
+            <div className="overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/40 dark:bg-zinc-950">
+              <ProductCapture
+                name="review-findings"
+                alt={preview.reviewAlt}
+              />
+            </div>
+            <figcaption className="mt-3 break-words text-xs leading-5 text-zinc-400">
+              {preview.disclosure}
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-7xl px-[16px] pt-12 sm:px-6 sm:pt-20 lg:px-8">
+        <div className="grid gap-8 lg:grid-cols-12 lg:items-start lg:gap-10">
           {/*
             The dominant object. It is the review output rather than a picture
             of the app: every line in it is translated product copy, so it
@@ -68,10 +108,11 @@ export function AiReviewLoopSection() {
             data-testid="landing-review-anatomy"
             className="landing-reveal min-w-0 overflow-hidden rounded-2xl border border-tomverse-review-border bg-tomverse-review-surface lg:col-span-7"
           >
-            <div
-              aria-hidden="true"
-              className="h-1.5 bg-linear-to-r from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600"
-            />
+            {/*
+              No gradient edge here. The convergence above owns it, and a mark
+              reserved for one moment stops being a mark the second it appears
+              twice on the same page.
+            */}
             <div className="p-[20px] sm:p-[32px]">
               <p className="flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-tomverse-review-selected-text dark:text-blue-200">
                 <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -79,31 +120,12 @@ export function AiReviewLoopSection() {
               </p>
 
               {/*
-                What a review comes back with. Set at display weight, numbered
-                in monospace, and divided by rules: four labelled findings, not
-                four chips.
+                The four findings are not listed again here. The capture in
+                the band above shows them, in the product's own rendering,
+                with the quotes attached -- listing them a second time in
+                plain text is the retelling this redesign exists to remove.
               */}
-              <ol className="mt-6 grid grid-cols-2 border-t border-tomverse-review-selected-border/30">
-                {preview.reviewItems.map((item, index) => (
-                  <li
-                    key={item}
-                    className={`min-w-0 border-b border-tomverse-review-selected-border/30 py-[16px] ${
-                      index % 2 === 0
-                        ? "border-r border-tomverse-review-selected-border/30 pr-[14px]"
-                        : "pl-[14px]"
-                    }`}
-                  >
-                    <span className="font-mono text-[11px] font-semibold tabular-nums text-zinc-500 dark:text-zinc-400">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <p className="mt-1.5 break-words text-lg font-black leading-tight tracking-[-0.01em] text-tomverse-review-selected-text dark:text-white sm:text-xl">
-                      {item}
-                    </p>
-                  </li>
-                ))}
-              </ol>
-
-              <p className="mt-6 break-words text-base font-semibold leading-7 text-zinc-700 dark:text-zinc-200">
+              <p className="mt-5 break-words text-base font-semibold leading-7 text-zinc-700 dark:text-zinc-200">
                 {copy.aiReviewBridge}
               </p>
 
