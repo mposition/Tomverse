@@ -317,6 +317,14 @@ jobs:
       - name: Router quality evaluation evidence
         timeout-minutes: 5
         run: npm run check:router-quality-eval
+      # The human review sample calibrates the model judges, so its shape has
+      # to survive contact with a text editor. A cell quietly short of four, a
+      # reserve that is also a primary, a diagnostic pair that has wandered
+      # into the sixty, or a substitution recorded against a verdict all leave
+      # a file that still looks like a draw. This reads the committed ones.
+      - name: Router human review draws
+        timeout-minutes: 5
+        run: npm run check:router-human-review
       # PACKAGE-01. The shared packages are the mechanism that stops the web
       # app and the native shell from becoming two products; that only holds
       # while the shared half runs unchanged in all three environments. The

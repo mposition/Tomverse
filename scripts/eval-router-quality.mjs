@@ -69,6 +69,13 @@ import { ACTIVE_ESTIMATOR_VERSION, estimateRawTextTokens } from "../lib/chatToke
 import { decideRouterModel, ROUTER_VERSIONS } from "../lib/routerDecision.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import {
+  JUDGE_TEMPLATE_VERSION,
+  identifiesItself,
+  judgePrompt,
+  readVerdict,
+  selfIdentificationMarkers,
+} from "../lib/routerJudgeRubric.ts";
+import {
   PAIRED_EVALUATION_UNIT,
   ROUTER_QUALITY_EVAL_VERSION,
   computeWinRateDelta,
@@ -356,54 +363,13 @@ const answer = async (model, prompt) => {
 // §5. An answer that names its own model defeats the blinding, and the
 // procedure says such an item is excluded and logged rather than quietly
 // scrubbed -- a scrub changes the answer the judge grades.
-const SELF_IDENTIFICATION = [
-  ...routableModelIds,
-  "openai",
-  "anthropic",
-  "deepseek",
-  "gemini",
-  "claude",
-  "gpt-",
-  "as an ai language model",
-  "저는 ai 언어 모델",
-];
+const selfIdMarkers = selfIdentificationMarkers(routableModelIds);
 
-const identifiesItself = (text) => {
-  const lowered = text.toLowerCase();
-  return SELF_IDENTIFICATION.some((marker) => lowered.includes(marker.toLowerCase()));
-};
-
-// §6, verbatim in its tie-break order. The judge sees two answers and no arm
-// labels, no model ids and no routing reason.
-const JUDGE_TEMPLATE_VERSION = "judge-rubric-v1";
-const judgePrompt = (question, first, second) =>
-  [
-    "You are grading two answers to the same question. Decide which better serves the person who asked.",
-    "",
-    "Apply these criteria in order, and stop at the first one that separates them:",
-    "1. Correctness. A factual or logical error outweighs everything below.",
-    "2. Instruction compliance. Format, length, language and explicit constraints. Answering in the wrong language is a failure, not a style difference.",
-    "3. Usefulness. Does it resolve the request, or only describe it.",
-    "4. Grounding. Sourced claims beat confident unsourced ones.",
-    "5. Concision. Only as a tie-break. Length is not quality.",
-    "",
-    'Reply with exactly one word: "FIRST", "SECOND", or "EQUIVALENT".',
-    'If the two answers serve the person equally well, reply "EQUIVALENT". This is a real verdict, not a way to avoid deciding, and a forced preference between equal answers makes the measurement worse.',
-    "",
-    `QUESTION:\n${question}`,
-    "",
-    `ANSWER A:\n${first}`,
-    "",
-    `ANSWER B:\n${second}`,
-  ].join("\n");
-
-const readVerdict = (text) => {
-  const upper = (text ?? "").toUpperCase();
-  if (upper.includes("EQUIVALENT")) return "equivalent";
-  if (upper.includes("FIRST")) return "first";
-  if (upper.includes("SECOND")) return "second";
-  return null;
-};
+// docs/ops/tomverse-chat-router-evaluation-set.md §6 lives in
+// lib/routerJudgeRubric.ts, shared with the human review sheets:
+// the model judges and the human reviewers have to grade against the same
+// words for their agreement to mean anything. The judge sees two answers and
+// no arm labels, no model ids and no routing reason.
 
 // Grade a bundle that already exists. The answers are not regenerated and the
 // display order is the one the bundle fixed, so the only thing that differs
@@ -732,7 +698,10 @@ for (const [index, item] of liveItems.entries()) {
     continue;
   }
 
-  if (identifiesItself(autoAnswer.text) || identifiesItself(baselineAnswer.text)) {
+  if (
+    identifiesItself(autoAnswer.text, selfIdMarkers) ||
+    identifiesItself(baselineAnswer.text, selfIdMarkers)
+  ) {
     exclude("self_identified");
     continue;
   }
