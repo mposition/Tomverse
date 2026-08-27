@@ -130,7 +130,7 @@ export function AiReviewLoopSection() {
               </p>
 
               <div className="mt-7 border-t border-tomverse-review-selected-border/30 pt-6">
-                <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+                <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600 dark:text-zinc-300">
                   {copy.reviewModesLabel}
                 </h3>
                 <ul className="mt-4 grid gap-2.5">
@@ -158,7 +158,7 @@ export function AiReviewLoopSection() {
                 </p>
                 <p
                   data-testid="landing-review-terminology"
-                  className="mt-4 break-words text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                  className="mt-4 break-words text-xs leading-5 text-zinc-600 dark:text-zinc-300"
                 >
                   {copy.terminologyNote}
                 </p>
@@ -255,7 +255,7 @@ export function AiReviewLoopSection() {
                   href={localizedPath(lang, casePaths[index])}
                   className="group grid min-w-0 grid-cols-[38px_1fr_auto] items-baseline gap-x-3 py-[20px] transition-colors"
                 >
-                  <span className="font-mono text-xs font-semibold tabular-nums text-zinc-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                  <span className="font-mono text-xs font-semibold tabular-nums text-zinc-600 transition-colors group-hover:text-blue-600 dark:text-zinc-300 dark:group-hover:text-blue-400">
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <span className="min-w-0">
