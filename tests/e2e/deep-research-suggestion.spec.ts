@@ -374,8 +374,13 @@ const watchSelectionWrites = async (page: Page) => {
   const writes: string[][] = [];
   await page.route(/.*\/api\/conversations\/[^/]+(\?.*)?$/, async (route) => {
     if (route.request().method() === "PATCH") {
-      const body = route.request().postDataJSON() as { models?: unknown } | null;
-      if (Array.isArray(body?.models)) writes.push(body.models as string[]);
+      // `selectedModels`, the key the sync queue's PATCH actually carries.
+      // Watching `models` recorded nothing at all, which would have made the
+      // "nothing was written" assertion below pass without observing anything.
+      const body = route.request().postDataJSON() as { selectedModels?: unknown } | null;
+      if (Array.isArray(body?.selectedModels)) {
+        writes.push(body.selectedModels as string[]);
+      }
     }
     // Straight on to the fixture that actually stores it.
     await route.fallback();
@@ -395,7 +400,11 @@ test("at the model cap the expansion asks which model to replace", async ({
 
   await sendChatMessage(page, testInfo, RESEARCH_QUESTION);
   chat.releaseChatAnswer();
-  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible({ timeout: 30_000 });
+  // Attached, not visible: at the cap the mobile shell puts each model in its
+  // own tab and only the selected one is on screen, so the first panel's copy
+  // of the answer is legitimately hidden. What this waits for is the turn
+  // having finished, which the offer below then depends on.
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeAttached({ timeout: 30_000 });
   await expect(card(page)).toBeVisible({ timeout: 15_000 });
 
   const writesBefore = selectionWrites.length;
@@ -433,7 +442,11 @@ test("cancelling the cap dialog abandons the run and keeps every model", async (
 
   await sendChatMessage(page, testInfo, RESEARCH_QUESTION);
   chat.releaseChatAnswer();
-  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible({ timeout: 30_000 });
+  // Attached, not visible: at the cap the mobile shell puts each model in its
+  // own tab and only the selected one is on screen, so the first panel's copy
+  // of the answer is legitimately hidden. What this waits for is the turn
+  // having finished, which the offer below then depends on.
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeAttached({ timeout: 30_000 });
   await expect(card(page)).toBeVisible({ timeout: 15_000 });
 
   const writesBefore = selectionWrites.length;
@@ -449,5 +462,5 @@ test("cancelling the cap dialog abandons the run and keeps every model", async (
   await page.waitForTimeout(1_000);
   expect(chat.deepResearchRequests()).toHaveLength(0);
   expect(selectionWrites).toHaveLength(writesBefore);
-  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible();
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeAttached();
 });
