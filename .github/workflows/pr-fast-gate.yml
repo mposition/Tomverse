@@ -180,6 +180,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:accent-tokens
 
+      # A copy-based locator that steers a branch, on copy that no longer
+      # exists, neither passes nor fails -- it quietly takes the other path.
+      # A brand rename left one such guard in `openSidebarOnMobile`, and the
+      # mobile suite failed on every commit to main for ten runs while
+      # production deploys waited on that check suite.
+      - name: E2E copy selectors
+        timeout-minutes: 5
+        run: npm run check:e2e-copy-selectors
+
       # Every locale carries every key, so a missing translation never fails
       # the build -- it ships the English sentence as the value. That is how the
       # account-data-export UI reached five locales in English.

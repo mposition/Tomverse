@@ -143,6 +143,19 @@ async function startDeepResearch(page: Page) {
   await page.getByTestId("deep-research-confirm-start").click();
   // Wait for the sheet (and its full-screen backdrop) to actually close.
   await expect(page.getByTestId("deep-research-confirm-start")).toHaveCount(0);
+  // This fixture starts at the model cap (THREE_MODELS, Pro), so the run has
+  // no free slot and asks which model to give up rather than dropping one on
+  // the user's behalf -- the panels are drawn from `selectedModels`, and a
+  // dropped model takes its answers out of the conversation. Choosing here is
+  // what the composer state under test comes after; the dialog itself is
+  // covered by tests/e2e/deep-research-suggestion.spec.ts.
+  // Asserted, not probed: this helper's only caller starts at the cap, so the
+  // dialog is always due. A conditional here would quietly skip the step if it
+  // ever stopped appearing, and the test would then fail somewhere else.
+  const replaceDialog = page.getByTestId("replace-model-dialog");
+  await expect(replaceDialog).toBeVisible();
+  await replaceDialog.getByRole("button").first().click();
+  await expect(replaceDialog).toHaveCount(0);
   // Confirming submits, so the composer comes back empty -- and, with this
   // fixture's quota bookkeeping, disabled. The contract holds in that state
   // too: a disabled input is still an input the user has to be able to read.

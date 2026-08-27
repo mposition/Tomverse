@@ -182,11 +182,6 @@ test("Deep Research is gated behind login for guests", { tag: "@ui-risk" }, asyn
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
 
-  const dismissOnboarding = page.getByRole("button", { name: "Start using Tomverse" });
-  if (await dismissOnboarding.isVisible()) {
-    await dismissOnboarding.click();
-  }
-
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-deep-research-row").click();
   // Guests never reach the setup sheet -- the click reuses the existing

@@ -42,6 +42,7 @@
     "check:encoding": "node scripts/check-text-encoding.mjs",
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
     "check:accent-tokens": "node scripts/check-accent-tokens.mjs",
+    "check:e2e-copy-selectors": "node scripts/check-e2e-copy-selectors.mjs",
     "verify:fixture-route-gate": "node scripts/verify-fixture-route-gate.mjs",
     "check:memory-eval-run": "node scripts/check-memory-eval-run-admissibility.mjs",
     "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
