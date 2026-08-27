@@ -43,7 +43,8 @@
 // database, never edits the gate registry. Its outputs are console text and,
 // with --json, the artefact a human cites.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { generateText } from "ai";
@@ -81,6 +82,14 @@ const allowCandidates = process.argv.includes("--allow-candidates");
 const judgeModelId = argValue("judge", "");
 const seed = Number(argValue("seed", "")) || 0;
 const jsonPath = argValue("json", "");
+// Where each pair is appended as it completes, so a run that is killed still
+// has a record of what it paid for. Defaults beside --json rather than needing
+// its own flag: a run worth preserving is one worth journalling.
+const journalPath = argValue("journal", "") || (jsonPath ? `${jsonPath}.jsonl` : "");
+// Rebuild a report from a journal instead of running. Without this the journal
+// would be data nobody can turn back into a report, which is the shape of
+// record this harness refuses everywhere else.
+const fromJournalPath = argValue("from-journal", "");
 const limit = Number(argValue("limit", "0")) || 0;
 const judgeBiasPath = argValue("judge-bias", "");
 const useIndex = Number(argValue("use-index", "0")) || 0;
@@ -193,7 +202,7 @@ if (mode === "decision") {
   }
 }
 
-const commitSha = (() => {
+let commitSha = (() => {
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   } catch {
@@ -356,6 +365,10 @@ if (adopted.length > 0) {
 }
 
 const planned = limit > 0 ? items.slice(0, limit) : items;
+// A rebuild reads its pairs from the journal, so the provider loop has nothing
+// to iterate. Everything after the loop is unchanged and unaware of which of
+// the two produced the pairs.
+const liveItems = fromJournalPath ? [] : planned;
 
 console.log(`Router quality evaluation — ${mode} run`);
 console.log(`  set            ${evaluationSet.version} (${evaluationSet.purpose})`);
@@ -371,9 +384,77 @@ console.log("");
 const pairs = [];
 const excludedLog = [];
 
-for (const [index, item] of planned.entries()) {
+// The run's own start, taken before the first request rather than after the
+// last. `evaluationRecordProblems` refuses a baseline pre-registered after the
+// run began, and a `startedAt` stamped at the end weakens exactly that check.
+let startedAt = new Date().toISOString();
+
+const ensureDirectory = (path) => {
+  const directory = dirname(path);
+  if (directory && directory !== "." && !existsSync(directory)) {
+    mkdirSync(directory, { recursive: true });
+  }
+};
+
+/**
+ * Append one line to the journal.
+ *
+ * Append-only and synchronous on purpose. The artefact is written once, at the
+ * end, after 630 provider calls -- so a run killed at 629 paid for everything
+ * and recorded nothing. A line per pair survives a SIGTERM, a runner timeout
+ * and a hard kill alike, because the bytes are already on disk when the next
+ * call starts.
+ */
+const journal = (entry) => {
+  if (!journalPath) return;
+  ensureDirectory(journalPath);
+  appendFileSync(journalPath, `${JSON.stringify(entry)}\n`, "utf8");
+};
+
+const recordPair = (pair, excluded = null) => {
+  pairs.push(pair);
+  if (excluded) excludedLog.push(excluded);
+  journal({ kind: "pair", pair, excluded, accruedCostUsd });
+};
+
+journal({
+  kind: "header",
+  mode,
+  setPath,
+  evaluationSetVersion: evaluationSet.version,
+  evaluationSetPurpose: evaluationSet.purpose,
+  commitSha,
+  baselineModelId,
+  judgeModelId,
+  seed,
+  ciMethod,
+  plannedItems: planned.length,
+  startedAt,
+});
+
+// The interruption this exists for. Node's default SIGTERM handling exits
+// without running anything, so the message that tells a reader the journal is
+// there -- and that the run was killed rather than finished -- has to be
+// installed explicitly.
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    journal({ kind: "stopped", reason: signal.toLowerCase(), completedItems: pairs.length });
+    console.log(
+      `\n\n${signal} at ${pairs.length}/${planned.length} item(s). ` +
+        `$${accruedCostUsd.toFixed(4)} spent.` +
+        (journalPath
+          ? `\nThe journal has every pair up to here:\n  ${journalPath}\n` +
+            `Rebuild a report from it with --from-journal=${journalPath}`
+          : "\nNo --json path was given, so nothing was journalled and the spend bought nothing.")
+    );
+    process.exit(1);
+  });
+}
+
+for (const [index, item] of liveItems.entries()) {
   if (maxCostUsd !== null && accruedCostUsd >= maxCostUsd) {
     truncatedByCost = true;
+    journal({ kind: "stopped", reason: "cost-ceiling", completedItems: pairs.length });
     console.log(`\nStopped at item ${index} — cost ceiling $${maxCostUsd} reached.`);
     break;
   }
@@ -400,8 +481,10 @@ for (const [index, item] of planned.entries()) {
   };
 
   const exclude = (reason, detail) => {
-    pairs.push({ ...base, outcome: { status: "excluded", reason } });
-    excludedLog.push({ itemId: item.id, reason, detail: detail ?? null });
+    recordPair(
+      { ...base, outcome: { status: "excluded", reason } },
+      { itemId: item.id, reason, detail: detail ?? null }
+    );
     process.stdout.write("x");
   };
 
@@ -466,13 +549,56 @@ for (const [index, item] of planned.entries()) {
         ? "auto"
         : "baseline";
 
-  pairs.push({ ...base, outcome: { status: "judged", verdict: arm } });
+  recordPair({ ...base, outcome: { status: "judged", verdict: arm } });
   process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
+}
+
+let stoppedReason = truncatedByCost ? "cost-ceiling" : "completed";
+// How many items the run that produced these pairs set out to do. On a rebuild
+// that is the journal's number, not this invocation's: the set may hold 210
+// while the journal came from a run of 4.
+let plannedItems = planned.length;
+
+if (fromJournalPath) {
+  // A rebuild reports what the journal holds and nothing more. It never
+  // reaches a provider, so it cannot fill a gap the interrupted run left.
+  const lines = readFileSync(fromJournalPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line));
+  const header = lines.find((entry) => entry.kind === "header");
+  if (!header) die(`${fromJournalPath} has no header line, so it is not a run journal.`);
+  if (header.seed !== seed || header.baselineModelId !== baselineModelId || header.judgeModelId !== judgeModelId) {
+    die(
+      `${fromJournalPath} was written by a different run:\n` +
+        `  journal: baseline ${header.baselineModelId}, judge ${header.judgeModelId}, seed ${header.seed}\n` +
+        `  asked:   baseline ${baselineModelId}, judge ${judgeModelId}, seed ${seed}`
+    );
+  }
+  for (const entry of lines) {
+    if (entry.kind !== "pair") continue;
+    pairs.push(entry.pair);
+    if (entry.excluded) excludedLog.push(entry.excluded);
+    accruedCostUsd = entry.accruedCostUsd ?? accruedCostUsd;
+  }
+  // The report names the run that spent the money, not the machine rebuilding
+  // it. Taking these from the rebuild would put a different commit and a later
+  // clock against pairs it did not produce, and the pre-registration check
+  // reads startedAt.
+  if (header.commitSha) commitSha = header.commitSha;
+  if (header.startedAt) startedAt = header.startedAt;
+  if (typeof header.plannedItems === "number") plannedItems = header.plannedItems;
+  const stopped = lines.find((entry) => entry.kind === "stopped");
+  stoppedReason = stopped ? stopped.reason : "journal-ends-without-a-stop-record";
+  truncatedByCost = stopped?.reason === "cost-ceiling";
+  console.log(
+    `Rebuilt from ${fromJournalPath}: ${pairs.length} of ${plannedItems} planned item(s), ` +
+      `stopped by ${stoppedReason}.`
+  );
 }
 
 console.log("\n");
 
-const startedAt = new Date().toISOString();
 const verdict = evaluateRouterQualityRun({
   pairs,
   // Cell targets grade the decision set. A pilot is deliberately small and a
@@ -632,6 +758,13 @@ const record = {
   },
   exclusions: excludedLog,
   truncatedByCost,
+  // What the run actually covered, so a partial report says so in the file
+  // rather than only in the console output nobody kept. `truncatedByCost`
+  // answers one of the ways a run stops; this answers all of them.
+  plannedItems,
+  completedItems: pairs.length,
+  stoppedReason,
+  rebuiltFromJournal: fromJournalPath || null,
   providerCostUsd: Number(accruedCostUsd.toFixed(6)),
   pairs,
 };
@@ -639,6 +772,15 @@ const record = {
 // The §9 completeness check runs against the harness's own output. A report
 // that cannot be cited should say so at the moment it is written, not when
 // somebody tries to attach it to the gate.
+if (record.completedItems < record.plannedItems) {
+  console.log(
+    `\nPARTIAL — ${record.completedItems} of ${record.plannedItems} planned item(s), ` +
+      `stopped by ${stoppedReason}. The cells this leaves short are not evidence of\n` +
+      "anything, and the docs/ops/tomverse-chat-router-evaluation-set.md §3 sizing\n" +
+      "computed from a partial sample is a smaller sample reported as a measurement."
+  );
+}
+
 const recordProblems = evaluationRecordProblems(record, { routableModelIds });
 if (recordProblems.length > 0) {
   console.log("");
@@ -647,6 +789,7 @@ if (recordProblems.length > 0) {
 }
 
 if (jsonPath) {
+  ensureDirectory(jsonPath);
   writeFileSync(jsonPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   console.log(`\nWrote ${jsonPath}`);
 }
