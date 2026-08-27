@@ -6,10 +6,29 @@ import {
     MEMORY_EVAL_SCORING_AMENDMENTS,
     MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     MEMORY_EVAL_SCORING_RULES,
+    approvedStemsFor,
+    descriptorListRow,
+    descriptorSortedListRow,
+    descriptorSortedTableRow,
+    memoryEvalScoringContractReadiness,
     scoringContractDescriptorInput,
     scoringContractDigest,
     scoringContractDigestInput,
 } from "../lib/memoryEvalScoringContractDigest.ts";
+import {
+    APPROVED_STEMS,
+    CANON_STEP_ORDER,
+    canon,
+    canonMatch,
+} from "../lib/memoryEvalCanonicalisation.ts";
+import {
+    MEMORY_EVAL_EVIDENCE_RULES,
+    MEMORY_EVAL_POLARITIES,
+    MEMORY_EVAL_POLARITY_MEANINGS,
+    candidateMatchesGoldV3,
+    evidenceFailure,
+} from "../lib/memoryEvalDatasetSchemaV3.ts";
+import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
 import {
     matchesExpectedV2,
     scoreCaseV2,
@@ -414,4 +433,322 @@ test("rule: verdict-scope", () => {
     assert.match(statement, /no averaging/);
     assert.match(statement, /Wilson 95% interval/);
     assert.match(statement, /counts must be zero/);
+});
+
+/* ======================================================================
+ * mem-score-v3
+ *
+ * The descriptor is built from live constants, and `readonly` in TypeScript
+ * is a compile-time claim: at runtime these are ordinary arrays and objects.
+ * The tests below take that as licence to edit one term, recompute, and put
+ * it back. It is the only way to demonstrate that a term reaches the hash
+ * rather than asserting that it looks like it should.
+ * ==================================================================== */
+
+const FIELD = String.fromCharCode(0x00);
+const ITEM = String.fromCharCode(0x01);
+const ROW = String.fromCharCode(0x02);
+
+const descriptorRow = (label) =>
+    scoringContractDescriptorInput()
+        .split(ROW)
+        .find((row) => row.startsWith(`${label}${FIELD}`));
+
+/**
+ * Two different questions, two techniques.
+ *
+ * *Does this term reach the hash* is answered by writing the row out. The
+ * expected string is in the test, so editing the constant fails here and moves
+ * the digest — the pair is the guard, as it is for the rule statements.
+ *
+ * *Is a presentation change invisible* cannot be answered that way: it needs
+ * the same builder called on two orderings. So the ordering decisions live in
+ * exported row builders and the tests call them on their own data. Mutating
+ * the imported constant instead would depend on this file and the digest
+ * module holding the same array instance, which the loader does not promise
+ * and which silently made an earlier version of these tests vacuous.
+ */
+
+test("schema 3's required fields and enums reach the digest", () => {
+    assert.equal(
+        descriptorRow("v3RequiredExpectedFields"),
+        `v3RequiredExpectedFields${FIELD}` +
+            ["id", "kind", "polarity", "factValueAll", "evidence", "expectedDisposition"].join(
+                ITEM
+            )
+    );
+    assert.equal(
+        descriptorRow("v3OptionalExpectedFields"),
+        `v3OptionalExpectedFields${FIELD}factValueAny`
+    );
+    assert.equal(descriptorRow("v3SchemaVersion"), `v3SchemaVersion${FIELD}3`);
+    assert.equal(
+        descriptorRow("v3Polarities"),
+        `v3Polarities${FIELD}affirmed${ITEM}negated`
+    );
+    assert.deepEqual([...MEMORY_EVAL_POLARITIES], ["affirmed", "negated"]);
+
+    // The meaning, not only the name. `negated` redefined as "a fact with
+    // negative sentiment" would be a different contract under an identical
+    // enum, and that is the confusion the names were chosen to prevent.
+    const meanings = descriptorRow("v3PolarityMeanings");
+    for (const polarity of MEMORY_EVAL_POLARITIES) {
+        assert.ok(meanings.includes(MEMORY_EVAL_POLARITY_MEANINGS[polarity]));
+    }
+    assert.ok(MEMORY_EVAL_POLARITY_MEANINGS.negated.includes("does NOT hold"));
+    assert.ok(MEMORY_EVAL_POLARITY_MEANINGS.negated.includes("Not a"));
+});
+
+test("the evidence rules reach the digest, statement and all", () => {
+    const row = descriptorRow("v3EvidenceRules");
+    assert.deepEqual(
+        MEMORY_EVAL_EVIDENCE_RULES.map((rule) => rule.id),
+        [
+            "evidence-message-exists",
+            "evidence-role-user",
+            "evidence-quote-exact",
+            "evidence-mismatch-refuses-adoption",
+        ]
+    );
+    for (const rule of MEMORY_EVAL_EVIDENCE_RULES) {
+        assert.ok(row.includes(`${rule.id}=${rule.statement}`), rule.id);
+    }
+    // The one relaxation that would silently re-credit v5-run1's 13
+    // assistant-authored adoptions.
+    assert.ok(
+        row.includes("role must be user"),
+        "the user-role requirement is not in the digest"
+    );
+    assert.ok(!row.includes("user or assistant"));
+});
+
+test("the canonicalisation table and its order reach the digest", () => {
+    assert.equal(
+        descriptorRow("canonStepOrder"),
+        `canonStepOrder${FIELD}` +
+            [
+                "nfc",
+                "lowercase",
+                "contraction_nt_to_not",
+                "digit_group_separators",
+                "numeral_words_to_digits",
+                "punctuation_to_space",
+                "collapse_whitespace_trim",
+            ].join(ITEM)
+    );
+    const table = descriptorRow("canonNumeralTable");
+    assert.ok(table.includes("twelve=12"));
+    assert.ok(table.includes(`육=6`));
+    assert.ok(descriptorRow("canonKoreanCounters").includes("개월"));
+});
+
+test("order is a contract term where it decides a match, and not where it does not", () => {
+    // `2,000` has to lose its separator before punctuation becomes a space,
+    // so the step order is hashed as written.
+    assert.notEqual(
+        descriptorListRow("s", ["a", "b"]),
+        descriptorListRow("s", ["b", "a"])
+    );
+    // A lookup table is the same matcher whichever order it was written in. A
+    // digest that moved on that would fail on a merge and say nothing about
+    // scoring.
+    assert.equal(
+        descriptorSortedTableRow("t", { one: "1", two: "2" }),
+        descriptorSortedTableRow("t", { two: "2", one: "1" })
+    );
+    assert.equal(
+        descriptorSortedListRow("l", ["시", "분"]),
+        descriptorSortedListRow("l", ["분", "시"])
+    );
+    // But its contents are not presentation.
+    assert.notEqual(
+        descriptorSortedTableRow("t", { one: "1" }),
+        descriptorSortedTableRow("t", { one: "9" })
+    );
+});
+
+test("the stem registry is empty at freeze, and registering one would show", () => {
+    // Empty is the record, not a placeholder: nothing has been authored
+    // against mem-score-v3, so no stem has been reviewed. The first stem is a
+    // new matching rule, and under the contract's §5 a matching rule that
+    // appears mid-flight is what a version bump exists to prevent.
+    assert.deepEqual(APPROVED_STEMS.ko, []);
+    assert.deepEqual(APPROVED_STEMS.en, []);
+    assert.equal(descriptorRow("approvedStems"), `approvedStems${FIELD}ko=[]${ITEM}en=[]`);
+    assert.equal(approvedStemsFor("ko"), "[]");
+
+    // The examples are hashed with the stem: dropping a negative example
+    // changes what the stem may match, under an unchanged spelling.
+    const withExamples = [
+        { stem: "자세", matches: ["자세히", "자세하고"], rejects: ["자세를 고치다"] },
+    ];
+    const rendered = `[${withExamples[0].stem}:+자세하고|자세히:-자세를 고치다]`;
+    assert.notEqual(rendered, "[]");
+    assert.ok(rendered.includes(":-자세를 고치다"));
+});
+
+test("the distance diagnostic cannot reach the digest", () => {
+    // §9.4. If a threshold or the unreviewed corpus ever reached the
+    // descriptor, a pass/fail would depend on labels nobody signed off.
+    const descriptor = scoringContractDescriptorInput();
+    for (const absent of [
+        "polarityGap",
+        "assertsGold",
+        "calibration",
+        "gap <=",
+        "polarityMatches",
+    ]) {
+        assert.ok(!descriptor.includes(absent), `${absent} reached the descriptor`);
+    }
+    // The marker list belongs to the diagnostic and is not a contract term.
+    for (const marker of POLARITY_MARKERS.ko) {
+        assert.ok(
+            !descriptor.includes(`marker${marker}`),
+            "a negation marker list reached the descriptor"
+        );
+    }
+    assert.ok(!/\bK\b\s*=/.test(descriptor));
+});
+
+test("a contract may be frozen with a pending rule; a dataset may not", () => {
+    const pending = memoryEvalScoringContractReadiness();
+    assert.deepEqual(pending, ["v3-unfixable-evidence-emits-nothing"]);
+    // Named, so a refusal can say which rule rather than that something is
+    // wrong. §10.2 rules 5 and 6 belong to gold review and the v6 prompt.
+    for (const id of pending) {
+        assert.ok(
+            MEMORY_EVAL_SCORING_RULES.some(
+                (rule) => rule.id === id && rule.enforcement === "authoring_pending"
+            )
+        );
+    }
+});
+
+/* ------------------------------------------------------ v3 rule pins --- */
+
+test("rule: v3-gold-match", () => {
+    const goldV3 = {
+        id: "g1",
+        kind: "preference",
+        polarity: "affirmed",
+        factValueAll: ["6개월"],
+        evidence: { evidenceMessageIndex: 0, evidenceQuote: "육 개월" },
+        expectedDisposition: "bulk_safe",
+    };
+    const cand = (over) => ({
+        kind: "preference",
+        polarity: "affirmed",
+        statement: "사용자는 육 개월 동안 준비한다",
+        ...over,
+    });
+
+    assert.equal(candidateMatchesGoldV3(goldV3, cand(), "ko"), true);
+    assert.equal(
+        candidateMatchesGoldV3(goldV3, cand({ kind: "constraint" }), "ko"),
+        false,
+        "kind is exact"
+    );
+    assert.equal(
+        candidateMatchesGoldV3(goldV3, cand({ polarity: "negated" }), "ko"),
+        false,
+        "polarity is exact"
+    );
+    assert.equal(
+        candidateMatchesGoldV3(goldV3, cand({ statement: "사용자는 준비한다" }), "ko"),
+        false,
+        "every factValueAll token must occur"
+    );
+
+    // factValueAny: absent imposes nothing, present requires one.
+    const withAny = { ...goldV3, factValueAny: ["준비", "연습"] };
+    assert.equal(candidateMatchesGoldV3(withAny, cand(), "ko"), true);
+    assert.equal(
+        candidateMatchesGoldV3(withAny, cand({ statement: "사용자는 육 개월 동안 쉰다" }), "ko"),
+        false
+    );
+});
+
+test("rule: v3-polarity-is-compared-not-inferred", () => {
+    // The candidate's own wording denies the fact; its polarity field says it
+    // affirms. The match follows the field, because the field is the claim
+    // being scored -- and a model that contradicts itself is the model's
+    // error, counted as one.
+    const goldV3 = {
+        id: "g1",
+        kind: "constraint",
+        polarity: "affirmed",
+        factValueAll: ["인천"],
+        evidence: { evidenceMessageIndex: 0, evidenceQuote: "인천" },
+        expectedDisposition: "bulk_safe",
+    };
+    assert.equal(
+        candidateMatchesGoldV3(
+            goldV3,
+            {
+                kind: "constraint",
+                polarity: "affirmed",
+                statement: "사용자는 인천에 살지 않는다",
+            },
+            "ko"
+        ),
+        true
+    );
+    // And no threshold exists to consult even if one wanted to: see
+    // "the distance diagnostic cannot reach the digest".
+});
+
+test("rule: v3-canonicalisation", () => {
+    assert.equal(canon("Twelve-hour, $2,000."), "12 hour 2000");
+    assert.equal(canon("육 개월"), "6개월");
+    // Korean drops spaces so unstable spacing does not decide a match;
+    // English keeps them so words are not joined into strings nobody wrote.
+    assert.equal(canonMatch("6 개월", "ko"), canonMatch("6개월", "ko"));
+    assert.ok(canonMatch("lives in Ottawa", "en").includes(" "));
+    assert.equal(CANON_STEP_ORDER[0], "nfc");
+    assert.equal(CANON_STEP_ORDER.at(-1), "collapse_whitespace_trim");
+});
+
+test("rule: v3-evidence-binding", () => {
+    const messages = [
+        { role: "user", content: "저는 인천에 삽니다." },
+        { role: "assistant", content: "인천에 사시는군요." },
+    ];
+    assert.equal(
+        evidenceFailure({ evidenceMessageIndex: 0, evidenceQuote: "인천에 삽니다" }, messages),
+        null
+    );
+    assert.equal(
+        evidenceFailure({ evidenceMessageIndex: 5, evidenceQuote: "인천" }, messages),
+        "evidence-message-exists"
+    );
+    assert.equal(
+        evidenceFailure({ evidenceMessageIndex: 1, evidenceQuote: "인천" }, messages),
+        "evidence-role-user",
+        "an assistant message is never evidence for a fact about the user"
+    );
+    assert.equal(
+        evidenceFailure({ evidenceMessageIndex: 0, evidenceQuote: "부산" }, messages),
+        "evidence-quote-exact"
+    );
+    // A quote is a claim about what was written, so it is not canonicalised:
+    // a lowercased or de-punctuated near-miss does not resolve.
+    assert.equal(
+        evidenceFailure({ evidenceMessageIndex: 0, evidenceQuote: "인천에삽니다" }, messages),
+        "evidence-quote-exact"
+    );
+});
+
+test("rule: v3-unfixable-evidence-emits-nothing", () => {
+    // Stated by the contract and executed by nothing yet: it belongs to the
+    // v6 prompt and to gold review. The pin is that it is declared pending
+    // and that the pending list refuses a dataset freeze -- not a behaviour
+    // assertion, which would be a claim about code that does not exist.
+    const rule = MEMORY_EVAL_SCORING_RULES.find(
+        (entry) => entry.id === "v3-unfixable-evidence-emits-nothing"
+    );
+    assert.equal(rule.enforcement, "authoring_pending");
+    assert.ok(memoryEvalScoringContractReadiness().includes(rule.id));
+    for (const shape of ["conditional", "unresolved correction", "double negative"]) {
+        assert.ok(rule.statement.includes(shape.split(" ").at(-1)));
+    }
 });

@@ -56,6 +56,7 @@ import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 import { adoptedBatchDigest } from "@/lib/memoryEvalAdoptedBatchSuccession";
 import {
     MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    scoringContractDescriptorInput,
     scoringContractDigest,
 } from "@/lib/memoryEvalScoringContractDigest";
 
@@ -588,3 +589,100 @@ export const evalDatasetManifest = (
         (manifest) => manifest.datasetVersion === datasetVersion
     );
 
+/* =========================================================================
+ * The contract itself
+ * ====================================================================== */
+
+/**
+ * One frozen scoring contract, recorded the way a dataset is.
+ *
+ * ## Why the contract needs a manifest of its own
+ *
+ * A dataset manifest pins its contract digest, and
+ * `verifyEvalDatasetManifest()` recomputes it only while the entry's contract
+ * version is still the live one. Every entry pinned to an older version
+ * reports `superseded` and is not recomputed — deliberately, because the entry
+ * records what that run was scored under.
+ *
+ * The consequence is a gap at exactly the moment a contract is frozen: on the
+ * day `mem-score-v3` became live, every dataset entry named `mem-score-v2.3`,
+ * so **nothing in the repository recomputed a v3 digest at all**. The contract
+ * could have been edited freely until the first v3 dataset was authored, which
+ * is the window in which its terms are most likely to be adjusted and least
+ * likely to be noticed.
+ *
+ * So a contract is pinned when it is frozen, not when something is scored
+ * under it.
+ *
+ * The digest here is over the **descriptor only** — the contract without any
+ * dataset. That is what a contract version is: `scoringContractDigest()` mixes
+ * in per-case labelling and answers a different question, one about a sample.
+ */
+export type ScoringContractManifest = {
+    version: string;
+    /** Approved on, as the record that froze it says. */
+    approvedOn: string;
+    /** sha256 of `scoringContractDescriptorInput()` under that version. */
+    descriptorDigest: string;
+    /**
+     * Rules the contract states that nothing executes yet.
+     *
+     * Recorded rather than assumed empty. A contract may be frozen with a
+     * pending rule; a dataset may not be frozen under one
+     * (`memoryEvalScoringContractReadiness()`), and reading that list here
+     * says which rules were outstanding at freeze rather than which are
+     * outstanding today.
+     */
+    pendingRules: readonly string[];
+};
+
+export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractManifest[] =
+    [
+        {
+            version: "mem-score-v3",
+            approvedOn: "2026-08-27",
+            descriptorDigest:
+                "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc",
+            pendingRules: ["v3-unfixable-evidence-emits-nothing"],
+        },
+    ];
+
+/**
+ * Recomputes the live contract's descriptor and reports what no longer agrees.
+ *
+ * Only the live version is checkable: an earlier contract's constants are gone
+ * from the tree, so its descriptor cannot be rebuilt and its recorded digest
+ * stands as the record. `null` means this version has no manifest entry, which
+ * is itself a finding — a contract in use and never frozen.
+ */
+export function verifyScoringContractManifest(): {
+    version: string;
+    entry: ScoringContractManifest | null;
+    mismatches: readonly string[];
+} {
+    const entry =
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find(
+            (manifest) => manifest.version === MEMORY_EVAL_SCORING_CONTRACT_VERSION
+        ) ?? null;
+    if (!entry) {
+        return {
+            version: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+            entry: null,
+            mismatches: [
+                `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} is the live contract and no ` +
+                    `manifest entry records it. Freezing a contract means pinning it.`,
+            ],
+        };
+    }
+    const digest = createHash("sha256")
+        .update(scoringContractDescriptorInput(), "utf8")
+        .digest("hex");
+    return {
+        version: entry.version,
+        entry,
+        mismatches:
+            digest === entry.descriptorDigest
+                ? []
+                : [`descriptor digest: ${entry.descriptorDigest} -> ${digest}`],
+    };
+}
