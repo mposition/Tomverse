@@ -15,6 +15,25 @@
  * it up for you?". So the sentence has to stop being written, and the only
  * place that decides what the model writes is the request.
  *
+ * ## The second version of the same sentence
+ *
+ * A first block forbade sending the user to another site or app, and the next
+ * staging run produced this instead:
+ *
+ *   "앱에서 실시간 날씨를 요청해 주시면 최신 정보를 바탕으로 안내해 드릴게요."
+ *
+ * The destination had moved inside the product and the failure had not. It is
+ * still the answer handing the task back, it is still vague about how, and it
+ * is now *wrong*: the offer under it re-runs the question as it stands, so
+ * there is nothing for the user to re-request. The model cannot know that, and
+ * cannot know whether the card is on screen at all -- which is precisely why
+ * it must not write about it.
+ *
+ * That run also showed the block's other half not landing: the answer stopped
+ * at the limitation and said nothing about what late-August Seoul is usually
+ * like. A turn that only reports what it cannot do is not an answer, so the
+ * instruction to go on and answer is now imperative rather than permissive.
+ *
  * ## The same rule the image block already carries
  *
  * `lib/imageCapabilityPrompt.ts` learned this one modality over, from a
@@ -79,15 +98,18 @@ export const resolveWebSearchTurnState = (input: {
 /**
  * The paragraph, on a turn that cannot search.
  *
- * Three rules, in the order the failures happened. State the limit once --
- * not at length, and not as an apology. Do not hand the task back. Do not
- * dress training data up as something checked.
+ * Four rules, in the order the failures happened. State the limit once, not at
+ * length and not as an apology. Then answer anyway. Do not hand the task back
+ * -- to anywhere, this interface included. Do not dress training data up as
+ * something checked.
  *
- * It says nothing about the offer the interface renders under the answer, on
- * purpose and for the reason the image block gives about its own control: a
- * sentence cannot know whether this viewer's models can search, cannot carry
- * the question, and cannot press itself. Describing it would put the model in
- * the position of promising a card that may not appear.
+ * The third rule covers both destinations deliberately. Splitting it produced
+ * the second failure: a block that named only external sites moved the same
+ * sentence indoors. What is wrong with it is not where it points but that it
+ * points at all -- the model cannot see whether the offer is on screen, cannot
+ * know it re-runs the question without a re-request, and cannot press it. That
+ * is the reason `lib/imageCapabilityPrompt.ts` gives for its own control, and
+ * it holds identically here.
  */
 export const WEB_SEARCH_UNAVAILABLE_PROMPT = [
   "# Current information",
@@ -95,17 +117,21 @@ export const WEB_SEARCH_UNAVAILABLE_PROMPT = [
   "Web search is not running on this turn: nothing in your answer can come",
   "from the live web.",
   "",
-  "If answering well needs information that may have changed since your",
-  "training data, say so plainly in one sentence, in the user's language,",
-  "then give what you can from general knowledge.",
+  "Say that limit once, in one short sentence, in the user's language. Then",
+  "answer the question as far as honest general knowledge allows -- the",
+  "stable background, what usually holds, what the answer depends on. Never",
+  "stop at the limitation: a turn that only reports what you cannot do is",
+  "not an answer.",
   "",
-  "Do not send the user elsewhere to look it up -- no search engines, no",
-  "other apps or sites, no \"check the official page\", no naming a service",
-  "that would have the answer. This product runs the search itself when the",
-  "user asks it to, and a sentence handing the task back to them is a dead",
-  "end offered in place of the thing the app can do.",
+  "Do not tell the user to go and get the information themselves, anywhere.",
+  "Not on another site, app or search engine; not \"check the official",
+  "page\"; and not in this interface either -- do not ask them to switch",
+  "anything on, re-send the question, or request it again. Whether a search",
+  "can be run, and how, is the interface's business and not yours; a",
+  "sentence about it can only be wrong about what this user is being",
+  "offered.",
   "",
-  "Never say or imply that you searched, and never give a current figure --",
+  "Never say or imply that you searched, and never give a live figure --",
   "today's price, temperature, score or headline -- as though you had",
   "checked it.",
 ].join("\n");

@@ -5,7 +5,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
-import remarkGfm from "remark-gfm";
+import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
 import rehypeHighlight from "rehype-highlight";
 import {
   ArrowDown,
@@ -758,7 +758,7 @@ export function ChatMessageList({
                   ) : msg.role === "assistant" ? (
                     <>
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
                       rehypePlugins={[rehypeHighlight]}
                       components={{
                         /*
