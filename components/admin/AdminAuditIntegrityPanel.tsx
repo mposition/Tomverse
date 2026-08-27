@@ -21,6 +21,7 @@ type Integrity = {
   keysUsed: number;
   /** Entries each available key accounted for, index-aligned with the key list. */
   keyEntryCounts: number[];
+  legacyOrderEntries: number;
   /** Leading entries, oldest first, that no available key opens. */
   unverifiedPrefix: number;
   /** Every entry that did not verify, oldest first, bounded. */
@@ -40,7 +41,7 @@ type Diagnosis = {
   /** The row names an actor by address but carries no user id. */
   actorIdMissingWithEmail: boolean;
   /** The row verifies when keys are sorted by code point rather than by collation. */
-  verifiesUnderCodepointKeyOrder: boolean;
+  reproducesUnderOrder: "locale" | "codepoint" | null;
 };
 
 /** The identifying half of an audit row. Not its metadata, which can be large. */
@@ -231,6 +232,22 @@ export function AdminAuditIntegrityPanel() {
                   {auditIntegrityReading(integrity)}
                 </p>
               ) : null}
+              {integrity.legacyOrderEntries > 0 ? (
+                <p data-testid="admin-audit-integrity-legacy-order" className="mt-2 text-xs opacity-90">
+                  {/* The rows still exposed to a collation change, and the
+                      only number that says when the legacy order can be
+                      dropped. It cannot be repaired -- re-hashing an audit row
+                      ends what the chain proves -- so it falls only as those
+                      rows age out. Absent when zero: a count of nothing is a
+                      line of noise on every healthy chain. */}
+                  {integrity.legacyOrderEntries.toLocaleString()}{" "}
+                  {integrity.legacyOrderEntries === 1 ? "entry was" : "entries were"} signed
+                  before the key order moved to code point and{" "}
+                  {integrity.legacyOrderEntries === 1 ? "reproduces" : "reproduce"} only under
+                  the older order. Verification accepts them; they stay exposed to a change
+                  of runtime collation. See docs/ops/admin-audit-key-epochs.md.
+                </p>
+              ) : null}
               {integrity.keysAvailable > 1 ? (
                 <p data-testid="admin-audit-integrity-key-counts" className="mt-2 text-xs opacity-90">
                   {/* Positions, never values. Which listed key opened what is
@@ -373,12 +390,12 @@ export function AdminAuditIntegrityPanel() {
               )}
               {/* Its own finding, because the remedy is not the one a field
                   mismatch calls for: nothing about the entry is wrong. */}
-              {diagnosis.result.verifiesUnderCodepointKeyOrder ? (
+              {diagnosis.result.reproducesUnderOrder === "locale" ? (
                 <p data-testid="admin-audit-integrity-collation" className="mt-2 font-black">
-                  This entry verifies when object keys are sorted by code point
-                  instead of by collation, which is what signing uses. Nothing
-                  about the row changed — it was signed by a runtime whose
-                  locale data ordered two of its keys the other way. See
+                  This entry reproduces its stored digest when object keys are
+                  sorted by collation rather than by code point — the order
+                  signing used before 2026-08-27. Nothing about the row
+                  changed, and verification accepts it. See
                   docs/ops/admin-audit-key-epochs.md.
                 </p>
               ) : null}
