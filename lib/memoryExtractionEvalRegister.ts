@@ -344,16 +344,14 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // failed: precision 0.720, recall 0.797, and 49 critical
             // bulk-safe adoptions against a gate of zero.
             //
-            // **No budget, deliberately.** v4's US$15 stays with v4. This
-            // file states the rule twice already and a third case does not
-            // weaken it: a budget does not travel with a version bump, and a
-            // re-run on a new prompt is exactly what it exists for. The
-            // approval on 2026-08-27 covered the wording and the case
-            // verdicts and said outright that it did not cover this.
-            //
-            // **Smoke mode only until a person records one**, which is what
-            // `decideEvalRunMode` enforces — so nothing here can spend before
-            // that entry exists.
+            // **v4's US$15 did not travel here.** A budget does not follow a
+            // version bump, and this one was approved on its own figures: the
+            // ceiling below rests on `mem-eval-succ-3`, whose mean prompt is
+            // 2,298 tokens against succ-2's 579, because 99 cases were
+            // replaced with new conversations and the set's mean length moved
+            // with them. US$15 still covers two runs on succ-3 and not the
+            // third a repeat would need, so carrying it across would have
+            // looked like a decision and been an accident.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v5",
             status: "candidate",
@@ -361,14 +359,32 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             registeredAt: "2026-08-27",
             notes:
                 "Carries the five rules frozen on 2026-08-27 after run1 " +
-                "(run 32972243326, mem-eval-succ-2). No budget; smoke mode " +
-                "only until a person records one. A run on this pair also " +
-                "needs mem-eval-succ-3, which is not frozen yet.",
-            evalBudget: null,
+                "(run 32972243326, mem-eval-succ-2). Budget approved " +
+                "2026-08-27 for a decision-grade run on mem-eval-succ-3. " +
+                "That set is not frozen yet — the 초안 도구·모델·버전 row is " +
+                "blank on the eight replacement batches — so a live run is " +
+                "refused on the freeze gate, not on this budget.",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // The §12.4 independent re-run's worst case on succ-3 is
+                // US$12.36; a third run is US$18.54. US$20 is the same
+                // reasoning issue 837 gave for its own ceiling — one failed
+                // run can be repeated without a second approval — and a run
+                // that behaves cannot approach it: at an assumed 1,024 output
+                // tokens per answer, two runs cost US$3.88.
+                maxUsd: 20,
+                ticket: "https://github.com/mposition/Tomverse/issues/1135",
+                approvedAt: "2026-08-27",
+            },
             evaluation: null,
         },
         {
             // §12.5 backup candidate for v5, on the same terms as v4's.
+            //
+            // **Deliberately outside the 2026-08-27 approval.** Issue 1135
+            // names one pair, and v4's backup carries no budget either. A
+            // backup that quietly inherited the primary's ceiling would be a
+            // second funded pair nobody approved.
             extractionModelId: "gpt-5-4-mini",
             promptVersion: "mem-extract-v5",
             status: "candidate",
@@ -376,7 +392,7 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             registeredAt: "2026-08-27",
             notes:
                 "Backup candidate. No budget; smoke mode only until a person " +
-                "records one.",
+                "records one. Issue 1135 funds the gpt-5-6-luna pair only.",
             evalBudget: null,
             evaluation: null,
         },

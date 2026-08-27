@@ -197,18 +197,42 @@ test("only a funded, open pair can run live, and it is named", () => {
         );
     }
 
-    // Named, not counted. A second funded pair has to be argued for.
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
-    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
-        (entry) =>
-            `${entry.extractionModelId}::${entry.promptVersion}` === runnable[0]
-    );
-    assert.equal(funded.status, "candidate");
-    assert.ok(funded.evalBudget, "the runnable pair is the funded one");
-    // Decision-grade, raised from the probe's US$1 on 2026-08-26. Pinned
-    // rather than range-checked: a budget that drifts upward without this
-    // line moving is a budget nobody approved for the figure it became.
-    assert.equal(funded.evalBudget.maxUsd, 15);
+    // Named, not counted. A second funded pair had to be argued for, and on
+    // 2026-08-27 one was: `mem-extract-v5` carries the five rules frozen
+    // after run1 and was approved for a decision-grade run on
+    // `mem-eval-succ-3` (issue 1135). v4's budget did not travel to it — the
+    // two figures differ because succ-3's mean prompt is four times succ-2's.
+    assert.deepEqual(runnable, [
+        "gpt-5-6-luna::mem-extract-v4",
+        "gpt-5-6-luna::mem-extract-v5",
+    ]);
+    // Pinned rather than range-checked: a budget that drifts upward without
+    // these lines moving is a budget nobody approved for the figure it
+    // became.
+    const ceilings = {
+        "gpt-5-6-luna::mem-extract-v4": 15,
+        "gpt-5-6-luna::mem-extract-v5": 20,
+    };
+    for (const label of runnable) {
+        const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+            (entry) =>
+                `${entry.extractionModelId}::${entry.promptVersion}` === label
+        );
+        assert.equal(funded.status, "candidate", label);
+        assert.ok(funded.evalBudget, `${label} is runnable but unfunded`);
+        assert.equal(funded.evalBudget.maxUsd, ceilings[label], label);
+        assert.ok(funded.evalBudget.ticket, `${label} names no approval record`);
+    }
+    // Both backups stay unfunded. A backup that inherited its primary's
+    // ceiling would be a funded pair nobody approved.
+    for (const version of ["mem-extract-v4", "mem-extract-v5"]) {
+        const backup = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+            (entry) =>
+                entry.extractionModelId === "gpt-5-4-mini" &&
+                entry.promptVersion === version
+        );
+        assert.equal(backup.evalBudget, null, `${version} backup is funded`);
+    }
 
     assert.ok(
         MEMORY_EXTRACTION_EVAL_REGISTER.some(
