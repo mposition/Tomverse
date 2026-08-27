@@ -130,6 +130,44 @@ mock.module(mod("lib/emailSnapshotCrypto.ts"), {
     },
 });
 
+/**
+ * The search backend readiness the route folds in.
+ *
+ * `null` stands for "the derivation itself threw", exactly as the image budget
+ * above does -- the route wraps this call in the same try/catch and answers
+ * `false` rather than `true` when it explodes, and that branch is worth pinning
+ * for the same reason it was worth pinning there.
+ *
+ * Mocked rather than driven through the real environment because the live read
+ * depends on the compiled capability register: it needs a credential for every
+ * backend an enabled model searches through, and this container has none. A
+ * live read would therefore be stuck on one branch, and which branch would
+ * depend on `NODE_ENV` -- which several cases below set for unrelated reasons.
+ */
+let searchBudget: { ready: boolean } | null = { ready: true };
+mock.module(mod("lib/searchProviderBudgetReadiness.ts"), {
+    namedExports: {
+        getSearchProviderBudgetReadiness: () => {
+            if (!searchBudget) throw new Error("search budget derivation exploded");
+            return {
+                ...searchBudget,
+                configuredBackends: searchBudget.ready ? ["brave"] : [],
+                requiredBackends: ["brave"],
+                budgets: [],
+                problems: searchBudget.ready
+                    ? []
+                    : [
+                          {
+                              code: "no_backend_configured",
+                              backend: "brave",
+                              message: "no credential for brave",
+                          },
+                      ],
+            };
+        },
+    },
+});
+
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
 mock.module(mod("lib/operationalMonitoring.ts"), {
@@ -199,6 +237,7 @@ beforeEach(() => {
     securityChecks = { stripeLiveMode: true };
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
+    searchBudget = { ready: true };
     setBusinessIdentity(true);
     sendingIdentityReady = true;
     snapshotKeyringReady = true;
@@ -221,6 +260,7 @@ type ReadinessBody = {
         emailSnapshotKeyring: boolean;
         emailUnsubscribeKeyring: boolean;
         emailBusinessIdentity: boolean;
+        searchProviderBudget: boolean;
     };
     traceId: string;
 };
@@ -250,6 +290,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailSnapshotKeyring: true,
         emailUnsubscribeKeyring: true,
         emailBusinessIdentity: true,
+        searchProviderBudget: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -289,6 +330,18 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             name: "emailSendingIdentity",
             arrange: () => {
                 sendingIdentityReady = false;
+            },
+        },
+        {
+            // A deployment that would offer the web-search switch with no
+            // credential behind it, or spend at a search vendor whose
+            // operational cap could not be read. Unlike the image budget there
+            // is no flag to be off: the capability register is compiled in, so
+            // a build shipping models that search through a backend has already
+            // decided that the backend is required.
+            name: "searchProviderBudget",
+            arrange: () => {
+                searchBudget = { ready: false };
             },
         },
         {
@@ -333,6 +386,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         securityChecks = { stripeLiveMode: true };
         providerBudgetReady = true;
         imageBudget = { ready: true, flagEnabled: false };
+        searchBudget = { ready: true };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
         delete process.env.MARKETING_EMAIL_FROM;
@@ -423,6 +477,25 @@ test("the footer identity is required only once marketing can send", async () =>
 
     delete process.env.MARKETING_EMAIL_FROM;
     delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+});
+
+test("the search budget check throwing is not ready", async () => {
+    // The same regression, guarded on the same shape. The search check derives
+    // a spend floor from the price list and the plan grants, and that
+    // derivation throws rather than returning a verdict when an enabled model
+    // has no price -- so `?? true` here would let a build that cannot price its
+    // own search answer healthy.
+    searchBudget = null;
+
+    const { response, body } = await get();
+    assert.equal(response.status, 503);
+    assert.equal(body.checks.searchProviderBudget, false);
+
+    await runDeferred();
+    assert.deepEqual(
+        reported.find((entry) => entry.dependency === "search-provider-cost-budget"),
+        { dependency: "search-provider-cost-budget", healthy: false }
+    );
 });
 
 test("the image budget check throwing is not ready", async () => {
