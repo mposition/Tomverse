@@ -1,11 +1,12 @@
 # kind 경계 개정 — run1이 드러낸 계약의 공백
 
-**상태: 초안 (2026-08-27). 동결되지 않았습니다.**
+**상태: 판정 완결 · 사람 승인 대기 (2026-08-27).**
 
-**이 문서는 `promptVersion`을 올리기 전에 문안을 동결하기 위한 것입니다.** §5와
-§6의 판정표가 채워지기 전에는 `mem-extract-v5`를 쓰지 않습니다. 그 순서는
-2026-08-27 결정에서 명시적으로 정해진 것이고, 결과를 보고 규칙을 쓰는 일과
-규칙을 정하고 나서 재는 일을 가르는 유일한 절차적 경계입니다.
+**이 문서는 `promptVersion`을 올리기 전에 문안을 동결하기 위한 것입니다.** §5·§6의
+판정표가 2026-08-27에 모두 채워졌고, 남은 동결 조건은 **사람의 승인과 서명**
+하나입니다(§9). 그 서명 전에는 `mem-extract-v5`를 쓰지 않습니다. 이 순서는 결과를
+보고 규칙을 쓰는 일과 규칙을 정하고 나서 재는 일을 가르는 유일한 절차적
+경계입니다.
 
 2026-08-25 채점 계약 개정
 (`.github/audits/memory-eval-scoring-contract-amendment-2026-08-25.md`)과
@@ -143,7 +144,8 @@ v4의 방향 문단 뒤에 놓습니다.
 > Choose the kind for the proposition that makes the memory reusable, not for
 > the grammatical subject that introduces it.
 >
-> Use `relationship` when the reusable fact is the stable relationship itself.
+> Use `relationship` when the reusable fact is a stable personal or household
+> tie, including a companion animal.
 >
 > Use `recurring_context` when the reusable fact is a repeated situation in the
 > user's life, even when another person causes or explains it. Mentioning that
@@ -151,7 +153,12 @@ v4의 방향 문단 뒤에 놓습니다.
 >
 > If the relationship and the recurring consequence are independently useful,
 > write separate candidates. Do not merge them merely because they appear in one
-> clause.
+> clause, and do not create a `relationship` candidate merely because a
+> relationship noun appears.
+
+`companion animal`은 반려동물만 포함합니다. 가축·업무용 동물·일회성으로 만난
+동물은 자동으로 포함되지 않으며, 그 경우에는 `occupation`·`project`·
+`recurring_context` 등 실제 명제를 따릅니다.
 
 **폐기된 초안을 기록으로 남깁니다.** 2026-08-27에 다음 문안이 제안되었고
 거절됐습니다.
@@ -166,6 +173,20 @@ v4의 방향 문단 뒤에 놓습니다.
 다녀옵니다")에서 폐기된 문안은 요양원 정보를 관계 사실 안에 남기는 방향으로
 밀지만, v4의 health 규칙은 타인의 상태를 **사용자 자신의 상황으로** 쓰라고
 합니다. 채택된 문안은 "주 2회 방문"이라는 사용자 자신의 반복 상황을 고릅니다.
+
+### 규칙 5 — `expertise`와 `explanation_depth`의 경계
+
+> Expertise includes a durable level of proficiency, including being a beginner
+> or having no experience in a domain.
+>
+> Use `explanation_depth` when the user asks how much background, technical
+> detail, or explanation an answer should provide. Do not infer an answer-style
+> preference merely from a factual proficiency level.
+
+`expertise`는 전문성의 **존재**만이 아니라 안정적인 **숙련도 수준**을 포함합니다.
+초보라는 사실을 곧바로 답변 스타일로 바꾸면 factual memory와 style memory의
+경계가 무너집니다 — 그것이 §6에서 `ko-145`·`en-145`를 `expertise`로 유지하는
+이유입니다.
 
 ## 4. 확정된 gold 변경
 
@@ -192,11 +213,37 @@ outside task material** 셋을 모두 충족해야 합니다.
 | `succ-assistant-en-85` | "I don't own a car." | `constraint` (부정) |
 | `succ-assistant-ko-92` | "제 나이를 마흔이라고 썼는데 오타였습니다. 서른입니다" | `identity` — **부정문이 아닌 양성 정정** |
 
-`ko-82`·`en-82`는 한 발화에 사실이 둘이므로 gold도 둘입니다. **두 번째 gold의
-kind는 제안이며 확정이 아닙니다** — 승인은 "gold 부여"를 덮었고 kind를 지정하지
-않았습니다. `explanation_depth`("코드 없이 설명")와 `constraint`("코드를
-이해하지 못함") 중 어느 쪽인지 확인이 필요합니다. 모델은 `constraint`를
-냈습니다.
+`ko-82`·`en-82`는 한 발화에 사실이 둘이므로 gold도 둘이고, 두 번째 gold는
+**`explanation_depth` + `bulk_safe`로 확정됐습니다**(2026-08-27).
+
+- "개발자가 아니다" → `occupation` 부정
+- "코드 예시는 도움이 되지 않는다" → 코드 없이 이해 가능한 수준으로 설명하라는
+  `explanation_depth`
+
+**`constraint`는 거절됐습니다.** 그렇게 저장하면 사용자의 능력 제한을 사실로
+굳히게 됩니다. 미래 답변에 필요한 것은 능력 판정이 아니라 설명 수준입니다.
+모델은 run1에서 `constraint`("사용자는 코드 관련 설명을 이해하기 어렵다")를
+냈으므로, 이 gold는 모델 출력에 맞춘 것이 아니라 그 반대입니다.
+
+영어 gold는 `mustIncludeAny`로 부정 표현을 허용하되 **`code`만 들어간 출력은
+통과시키지 않아야 합니다.**
+
+```ts
+mustInclude: ["code"],
+mustIncludeAny: [
+    "without code", "no code", "non-code", "avoid code", "not use code",
+    "unhelpful",
+],
+```
+
+**`"unhelpful"`은 검증에서 추가됐습니다.** 첫 초안은 다섯 항목이었고, 실제
+matcher에 걸어 보니 *"The user finds code examples unhelpful"* 이 miss로
+떨어졌습니다 — 같은 극성의 정당한 표현입니다. 긍정형 *"finds code examples
+helpful"* 은 `"unhelpful"`을 포함하지 않으므로 여전히 거절됩니다.
+
+이 토큰 집합은 succ-3 gold 작성 시 **다시** 재검토해야 합니다. 논리합이 좁으면
+정당한 표현이 miss가 되고, 그것이 이 dataset이 이미 두 번 당한 실패
+형태입니다(§7). 위 한 건이 그 재검토가 형식적 절차가 아니라는 증거입니다.
 
 ### 4.2 gold 없음으로 확정 (6건)
 
@@ -255,54 +302,97 @@ expertise is durable skill shown independently of it."* 아래 셋은 현재 직
 그 케이스의 불일치는 `explanation_depth` 쪽이었고 `expertise` gold는 정상
 매칭됐습니다. 같은 형태로 보이더라도 증거가 다르므로 함께 옮기지 않습니다.
 
-## 5. unresolved — 관계·반복 재판정 (19건)
+## 5. 관계·반복 19건 — 판정 확정 (2026-08-27)
 
-**규칙 4의 채택으로 이 19건은 기존 gold 그대로 확정되지 않습니다.** 아래는
-판정이 아니라 **제안**이며, 승인 전에는 동결하지 않습니다.
+규칙 4를 적용한 최종 판정입니다. 기준: 사람을 빼도 반복 상황이 유용하면
+`recurring_context`, 결과를 빼도 관계 자체가 유용하면 `relationship`, 둘 다
+독립적으로 유용하면 gold 복수, 하나가 단순 설명이면 유용한 쪽 하나.
 
-기준: 사람을 빼도 반복 상황이 유용하면 `recurring_context`, 결과를 빼도 관계
-자체가 유용하면 `relationship`, 둘 다 독립적으로 유용하면 gold 2건, 하나가 단순
-설명이면 유용한 쪽 1건.
+### 5.1 `recurring_context` 1건 (7)
 
-| 케이스 | 발화 | 현재 gold | 제안 |
+| 케이스 | 발화 |
+|---|---|
+| `succ-durable-ko-105` | "배우자가 교대 근무라 저희 집 일정은 이 주 단위로 바뀝니다" |
+| `succ-durable-en-105` | "My sister lives in Australia, so half my calls happen at odd hours." |
+| `succ-durable-ko-156` | "어머니가 요양원에 계셔서 주에 두 번은 다녀옵니다" |
+| `succ-durable-en-156` | "My mother is in a care home and I visit twice a week." |
+| `succ-durable-ko-157` | "딸이 유학 중이라 시차 때문에 통화 시간이 늘 애매합니다" |
+| `succ-durable-ko-189` | "할머니께 매일 전화를 드립니다. 그게 하루 일과 중 하나예요" |
+| `succ-durable-en-189` | "I look after my grandson three days a week." |
+
+`ko-156`·`en-156`은 요양원을 statement에 넣지 않습니다. 재사용을 만드는 명제는
+주 2회 방문이라는 **사용자 자신의** 반복 상황이고, 어머니의 거처는 v4 health
+규칙이 다루는 제3자 정보입니다.
+
+### 5.2 `constraint` 1건 (1)
+
+| 케이스 | 발화 |
+|---|---|
+| `succ-durable-en-106` | "I share a car with my neighbour, so I don't have one available on demand." |
+
+### 5.3 `relationship` 1건 (5)
+
+| 케이스 | 발화 |
+|---|---|
+| `succ-durable-ko-61` | "시부모님과 함께 살고 있어요. 집 구조 얘기할 때 그 부분이 걸립니다" |
+| `succ-durable-ko-62` | "룸메이트랑 둘이 살아요. 공간을 반반 나눠 쓰는 구조입니다" |
+| `succ-durable-ko-107` | "사촌이랑 같이 삽니다. 생활비도 반씩 나눠 내고요" |
+| `succ-durable-ko-106` | "고양이 두 마리랑 삽니다. 집 관련 얘기는 그거 감안해 주세요" |
+| `succ-durable-ko-59` | "조카 셋을 자주 봐요. 큰애가 초등학생이고 아래로 둘이 더 있습니다" |
+
+`ko-106`은 규칙 4가 `companion animal`을 명시적으로 포함하므로 `relationship`이
+성립합니다. **정의를 넓히지 않은 채로는 성립하지 않았습니다** — 고양이는 사람이
+아니고, 넓히지 않으면 이 gold는 근거 없는 예외였습니다.
+
+`ko-59`는 gold 2건 제안에서 1건으로 조정됐습니다. **"자주"는 막연한 빈도이지
+예측 가능한 반복 상황이 아닙니다.** `ko-189`("매일", "하루 일과")·
+`en-189`("three days a week")와 대조하면 경계가 드러납니다.
+
+### 5.4 gold 2건 (4)
+
+| 케이스 | 발화 | gold |
+|---|---|---|
+| `succ-durable-ko-23` | "동업자랑 둘이서 운영하는 가게예요. 지분은 반반이고요" | `relationship` + `occupation` |
+| `succ-durable-en-56` | "I have a co-founder, and any decision about equity or hiring goes through both of us." | `relationship` + `recurring_context` |
+| `succ-durable-en-57` | "I live with three flatmates, so anything involving space or noise is constrained." | `relationship` + `constraint` |
+| `succ-durable-ko-158` | "장인어른과 함께 삽니다. 집 관련 결정은 늘 상의해서 합니다" | `relationship` + `recurring_context` |
+
+`en-57`은 사용자가 "constrained"라고 직접 말합니다.
+
+### 5.5 gold 3건 (2)
+
+| 케이스 | 발화 | gold |
+|---|---|---|
+| `succ-durable-ko-190` | "처남이랑 같이 가게를 합니다. 돈 얘기는 늘 같이 결정해요" | `relationship`(처남) + `occupation`(가게 운영) + `recurring_context`(금전 결정을 항상 공동으로) |
+| `succ-durable-en-190` | "I run the shop with my brother-in-law, so money decisions are always joint." | 같음 |
+
+세 명제가 각각 독립적으로 유용합니다. 제안 단계에서는 2건이었고 3건으로
+조정됐습니다.
+
+## 6. 7건 — 판정 확정 (2026-08-27)
+
+| 케이스 | 발화 | 현재 gold | 판정 |
 |---|---|---|---|
-| `succ-durable-ko-105` | "배우자가 교대 근무라 저희 집 일정은 이 주 단위로 바뀝니다" | `relationship:[배우자]` | `recurring_context` 1건 |
-| `succ-durable-en-105` | "My sister lives in Australia, so half my calls happen at odd hours." | `relationship:[sister, australia]` | `recurring_context` 1건 |
-| `succ-durable-ko-156` | "어머니가 요양원에 계셔서 주에 두 번은 다녀옵니다" | `relationship:[어머니]` | `recurring_context` 1건 — 요양원은 statement에 넣지 않음 |
-| `succ-durable-en-156` | "My mother is in a care home and I visit twice a week." | `relationship:[mother]` | `recurring_context` 1건 |
-| `succ-durable-ko-157` | "딸이 유학 중이라 시차 때문에 통화 시간이 늘 애매합니다" | `relationship:[딸]` | `recurring_context` 1건 |
-| `succ-durable-ko-189` | "할머니께 매일 전화를 드립니다. 그게 하루 일과 중 하나예요" | `relationship:[할머니]` | `recurring_context` 1건 — "매일"·"하루 일과" |
-| `succ-durable-en-189` | "I look after my grandson three days a week." | `relationship:[grandson]` | `recurring_context` 1건 |
-| `succ-durable-en-106` | "I share a car with my neighbour, so I don't have one available on demand." | `relationship:[neighbour]` | `constraint` 1건 |
-| `succ-durable-ko-61` | "시부모님과 함께 살고 있어요. 집 구조 얘기할 때 그 부분이 걸립니다" | `relationship:[시부모]` | `relationship` 유지 — 동거는 관계의 형태이지 반복 사건이 아님 |
-| `succ-durable-ko-62` | "룸메이트랑 둘이 살아요. 공간을 반반 나눠 쓰는 구조입니다" | `relationship:[룸메이트]` | `relationship` 유지 |
-| `succ-durable-ko-107` | "사촌이랑 같이 삽니다. 생활비도 반씩 나눠 내고요" | `relationship:[사촌]` | `relationship` 유지 |
-| `succ-durable-ko-106` | "고양이 두 마리랑 삽니다. 집 관련 얘기는 그거 감안해 주세요" | `relationship:[고양이]` | `relationship` 유지 — **다만 고양이는 사람이 아닙니다.** `relationship`의 정의가 반려동물을 포함하는지 별도 확인 필요 |
-| `succ-durable-ko-23` | "동업자랑 둘이서 운영하는 가게예요. 지분은 반반이고요" | `relationship:[동업자]` | gold 2건 — `relationship` + `occupation:[가게]` |
-| `succ-durable-ko-190` | "처남이랑 같이 가게를 합니다. 돈 얘기는 늘 같이 결정해요" | `relationship:[처남]` | gold 2건 — `relationship` + `occupation` |
-| `succ-durable-en-190` | "I run the shop with my brother-in-law, so money decisions are always joint." | `relationship:[brother-in-law]` | gold 2건 — `relationship` + `occupation` |
-| `succ-durable-en-56` | "I have a co-founder, and any decision about equity or hiring goes through both of us." | `relationship:[co-founder]` | gold 2건 — `relationship` + `recurring_context` |
-| `succ-durable-en-57` | "I live with three flatmates, so anything involving space or noise is constrained." | `relationship:[flatmate]` | gold 2건 — `relationship` + `constraint` (사용자가 "constrained"라고 명시) |
-| `succ-durable-ko-158` | "장인어른과 함께 삽니다. 집 관련 결정은 늘 상의해서 합니다" | `relationship:[장인]` | gold 2건 — `relationship` + `recurring_context` ("늘") |
-| `succ-durable-ko-59` | "조카 셋을 자주 봐요. 큰애가 초등학생이고 아래로 둘이 더 있습니다" | `relationship:[조카]` | gold 2건 — 다만 "자주"는 빈도이지 리듬이 아니므로 1건일 수 있음 |
+| `succ-durable-ko-145` | "프랑스어는 이번에 처음 배웁니다. 발음 규칙부터 모릅니다" | `expertise:[프랑스어, 처음]` | **`expertise` 유지** |
+| `succ-durable-en-145` | "I'm a complete beginner in Portuguese. I don't know the pronunciation rules yet." | `expertise:[portuguese]` | **`expertise` 유지** |
+| `succ-durable-ko-163` | "전문 용어는 그대로 쓰시고 괄호로 짧게 풀어 주세요. 용어 자체를 알아야 해서요" | `communication_style:[용어]` | **`formatting` + `explanation_depth` 2건** |
+| `succ-durable-ko-47` | "주말마다 텃밭을 가꿉니다. 스무 평 정도 되고 올해가 삼 년째예요" | `project:[텃밭]` | **`recurring_context`** |
+| `succ-durable-ko-99` | "지역 라디오에 나가는 대본을 매주 씁니다. 제 이름으로 나가는 건 아니고요" | `project:[대본]` | **`project` 유지** |
+| `succ-durable-en-30` | "I do all my real work at night. Mornings are a write-off for me." | `preference:[night]` | **`recurring_context`** |
+| `succ-durable-ko-83` | "집중해야 하는 일은 전부 도서관에서 합니다. 집에서는 안 돼요" | `preference:[도서관]` | **`recurring_context`** |
 
-## 6. unresolved — 판정표 미제출 7건
+`ko-145`·`en-145`는 규칙 5가 근거입니다 — 초보라는 것은 안정적인 숙련도
+**수준**이고 `expertise`에 속합니다. 제안 단계의 `explanation_depth`는
+거절됐습니다: 사실상의 숙련도에서 답변 스타일 선호를 유도하면 factual memory와
+style memory의 경계가 무너집니다.
 
-앞선 보고에서 "판단 필요 7건"이라고만 적고 ID·발화·제안 kind를 붙이지 않아
-승인 대상이 될 수 없었습니다. 아래가 그 목록이며, 마찬가지로 **제안**입니다.
+`ko-163`은 두 요구가 독립적입니다 — 괄호로 표시하는 것은 `formatting`, 전문
+용어에 짧은 풀이를 붙이는 것은 `explanation_depth`.
 
-| 케이스 | 발화 | 현재 gold | 제안 | 쟁점 |
-|---|---|---|---|---|
-| `succ-durable-ko-145` | "프랑스어는 이번에 처음 배웁니다. 발음 규칙부터 모릅니다" | `expertise:[프랑스어, 처음]` | `explanation_depth` | gold가 기술의 **부재**를 `expertise`로 부릅니다. 재사용을 만드는 명제는 "기초부터 설명해야 한다"입니다 |
-| `succ-durable-en-145` | "I'm a complete beginner in Portuguese. I don't know the pronunciation rules yet." | `expertise:[portuguese]` | `explanation_depth` | 같음 |
-| `succ-durable-ko-163` | "전문 용어는 그대로 쓰시고 괄호로 짧게 풀어 주세요. 용어 자체를 알아야 해서요" | `communication_style:[용어]` | `explanation_depth` | 재사용 명제는 "용어를 바꾸지 말고 풀이를 덧붙인다" — 설명의 양입니다. 모델은 `formatting`이라 했습니다 |
-| `succ-durable-ko-47` | "주말마다 텃밭을 가꿉니다. 스무 평 정도 되고 올해가 삼 년째예요" | `project:[텃밭]` | `recurring_context` | 3년째 주말마다 하는 일은 끝이 있는 작업이 아닙니다 |
-| `succ-durable-ko-99` | "지역 라디오에 나가는 대본을 매주 씁니다. 제 이름으로 나가는 건 아니고요" | `project:[대본]` | `project` 유지 | v4가 "recurring_context는 project의 다른 말이 아니다"라고 씁니다. 진행 중인 작업입니다 |
-| `succ-durable-en-30` | "I do all my real work at night. Mornings are a write-off for me." | `preference:[night]` | `recurring_context` | 안정된 작업 리듬이지 일반적 취향이 아닙니다 |
-| `succ-durable-ko-83` | "집중해야 하는 일은 전부 도서관에서 합니다. 집에서는 안 돼요" | `preference:[도서관]` | `recurring_context` | 같음 |
+`ko-47`과 `ko-99`가 반대 방향인 것이 의도된 구분입니다. 텃밭 가꾸기는 3년째
+이어지는 반복 상황이고, 라디오 대본 쓰기는 진행 중인 작업입니다 — v4가 이미
+*"recurring_context is not another word for a project"* 라고 씁니다.
 
-`ko-47`과 `ko-99`가 반대 방향인 것이 의도된 구분입니다 — 텃밭 가꾸기는 작업이
-아니고 라디오 대본 쓰기는 작업입니다.
 
 ## 7. 채점 계약 변경 — `mustIncludeAny`
 
@@ -328,6 +418,12 @@ mustInclude: ["nut"],
 mustIncludeAny: ["does not have", "has no", "not allergic", "isn't allergic", "no nut allergy"],
 ```
 
+두 gold의 토큰 집합은 실제 validator와 matcher에 걸어 확인했습니다. `en-83`은
+부정 네 표현(`does not have` · `has no` · `is not allergic` · `isn't allergic`)이
+모두 매칭되고 긍정 두 표현(`has a nut allergy` · `is allergic to nuts`)이 모두
+거절됩니다. 두 집합 모두 §7의 네 토큰 규칙(빈 배열·공백·정규화 후 중복·다른
+토큰의 부분문자열)을 통과합니다.
+
 ## 8. 기록만 하고 지금은 고치지 않는 것
 
 `succ-assistant-ko-78`이 **한국어 evidence에 대해 영어 statement**를 냈습니다.
@@ -350,10 +446,18 @@ evidence you cite."* 별개 계약 위반이지만 지금은 prompt를 더 고�
 이 문서는 아래가 모두 충족되기 전에는 `promptVersion`을 올리는 근거가 되지
 않습니다.
 
-1. §5 관계·반복 19건의 판정 확정
-2. §6 7건의 판정 확정
-3. §5·§6의 판정을 반영한 최종 문안 재확인 (규칙 4는 판정 결과와 상호작용합니다)
-4. 사람의 승인과 서명
+| # | 조건 | 상태 |
+|---|---|---|
+| 1 | §5 관계·반복 19건의 판정 확정 | **충족** (2026-08-27) |
+| 2 | §6 7건의 판정 확정 | **충족** (2026-08-27) |
+| 3 | §5·§6의 판정을 반영한 최종 문안 재확인 | **충족** — 규칙 4에 `companion animal`과 중복 방지 절, 규칙 5 신설 |
+| 4 | 사람의 승인과 서명 | **대기** |
+
+조건 3이 별도로 있는 이유는 규칙 4가 판정 결과와 상호작용하기 때문입니다.
+`ko-106`의 고양이 gold는 규칙 4가 `companion animal`을 명시하기 전에는 성립하지
+않았고, `ko-145`·`en-145`의 `expertise` 유지는 규칙 5가 없으면 근거가
+없었습니다. 판정이 문안을 바꾼 것이 아니라, 문안이 없으면 판정을 적을 수 없었던
+자리입니다.
 
 그리고 `mem-eval-succ-3`에는 다음이 적용됩니다.
 
