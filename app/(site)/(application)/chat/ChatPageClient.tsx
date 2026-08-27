@@ -179,6 +179,11 @@ import {
 import { GuestImportModal } from "@/components/chat/GuestImportModal";
 import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
+import { WebSearchBackendReadinessProvider } from "@/components/chat/WebSearchBackendReadinessProvider";
+import {
+  NO_WEB_SEARCH_BACKENDS,
+  type WebSearchBackendReadiness,
+} from "@/lib/webSearchBackends";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -528,6 +533,7 @@ export function ChatPageClient({
   guestDefaultModelId,
   imageGenerationEnabled = false,
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
+  webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
@@ -539,6 +545,18 @@ export function ChatPageClient({
    * from admission the moment a deployment changed the variable.
    */
   imageGroupMaxModels?: number;
+  /**
+   * Which application-managed search backends the running server can reach,
+   * resolved in the shell for the same reason `imageGroupMaxModels` is: the
+   * only client-visible alternative would be a public environment variable,
+   * and a public variable saying whether an API key is set is a public
+   * variable saying whether an API key is set.
+   *
+   * Defaulted to "none reachable" so a caller that has not been wired to it
+   * offers no search rather than promising one -- the conservative direction,
+   * and the same default the context itself carries.
+   */
+  webSearchBackendReadiness?: WebSearchBackendReadiness;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -1312,9 +1330,16 @@ export function ChatPageClient({
         models: activeModels,
         estimatedInputTokens,
         webSearchMode,
+        backendReadiness: webSearchBackendReadiness,
       }).totalEstimatedCredits;
     },
-    [AVAILABLE_MODELS, effectiveDisabledPanels, selectedModels, webSearchMode]
+    [
+      AVAILABLE_MODELS,
+      effectiveDisabledPanels,
+      selectedModels,
+      webSearchMode,
+      webSearchBackendReadiness,
+    ]
   );
 
   const isInitialSelectedRef = useRef(false);
@@ -5551,6 +5576,7 @@ export function ChatPageClient({
     anySelectedModelCanSearch({
       selectedModelIds: selectedModels,
       disabledModelIds: effectiveDisabledPanels,
+      searchBackendReadiness: webSearchBackendReadiness,
     })
       ? "available"
       : "unsupported";
@@ -5566,6 +5592,7 @@ export function ChatPageClient({
     selectedModelIds: selectedModels.filter(
       (modelId) => !effectiveDisabledPanels.includes(modelId)
     ),
+    backendReadiness: webSearchBackendReadiness,
   }).estimatedSurchargeCredits;
   const webSearchResolvedTopicKeys = useMemo(
     () =>
@@ -5772,7 +5799,11 @@ export function ChatPageClient({
   ) : null;
 
   return (
-    <>
+    // Every surface that decides whether a model searches reads this: the
+    // composer's chip and credit estimate, the picker's badge and "Web search"
+    // filter, and the per-message badge. One provider rather than a prop through
+    // five intermediate components that do not use it.
+    <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
@@ -6784,6 +6815,6 @@ export function ChatPageClient({
         </form>
       </div>
     )}
-    </>
+    </WebSearchBackendReadinessProvider>
   );
 }

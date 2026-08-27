@@ -475,10 +475,30 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
      쓰고 검색을 건너뛰어도 조건을 만족한다 — "항상 검색"이 조용히 "항상"이
      아니게 된다. 검색이 이긴다: 사용자가 명시적으로 켰고, 파일 요청에는
      분명한 대안(검색을 끄고 다시 묻기)이 있다.
-  2. Google Search grounding은 function declaration과 배타적이다. 둘 다 보내면
-     provider가 400으로 거절한다 — 파일 요청이 오류가 된다.
+  2. **Google Search grounding**은 built-in retrieval tool이며 function
+     declaration과 함께 보낼 수 없다. 둘 다 보내면 provider가 400으로 거절한다
+     — 파일 요청이 오류가 된다.
 
   Anthropic의 `web_search_20250305`는 두 문제가 모두 없어 공존한다.
+
+  **2번은 "provider가 Google이면"이 아니다** (2026-08-27 정정). 배타성은
+  *grounding*의 성질이지 Gemini의 성질이 아니다. 평범한 function declaration을
+  실은 Gemini 요청은 평범하고, Gemini 3는 built-in tool과 custom function을 함께
+  쓰는 것도 지원한다. 그럼에도 규칙을 좁히는 근거는 문서가 아니라 **이 앱이 무엇을
+  보내는가**다: Google 모델의 웹 검색은 이제 grounding이 아니라 이 앱이 실행하는
+  function tool(`web_search`, `lib/appManagedWebSearchTool.ts`)이고,
+  `buildWebSearchToolConfig`는 grounding을 **아예 만들지 않는다**. 요청에
+  배타적일 대상이 없으므로 파일 생성을 막는 것은 존재하지 않는 이유로 거절하는
+  일이 된다.
+
+  그래서 `nativeSearchBlocksArtifactTool()`은 `nativeSearchEnabled`를 본다.
+  application-managed 경로에서는 그 값이 false이므로 검색과 파일 생성이
+  공존하고, 누군가 grounding을 다시 켜면 Google 모델에서 그 값이 다시 true가
+  되어 규칙을 기억하지 않아도 다시 fail-closed가 된다.
+
+  검색과 artifact가 한 turn에 함께 있을 때 `stopWhen`은 두 step 예산 중 큰
+  쪽이다. 어느 쪽도 비용 상한이 아니므로(검색의 상한은 session counter, 파일의
+  상한은 turn당 artifact 수) 큰 쪽을 택해도 지출 bound가 올라가지 않는다.
 
 ## 11. 요금
 

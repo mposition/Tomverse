@@ -127,6 +127,57 @@ test("search that is not running blocks nothing", () => {
   );
 });
 
+test("a Google turn searching through the application's own tool keeps the artifact tools", () => {
+  // The rule this replaced was "provider is Google", and it was wrong in a way
+  // that only mattered once the Google models started searching. The
+  // exclusivity belongs to *grounding* -- a built-in retrieval tool -- and this
+  // application no longer sends one to Google at all: `web_search` here is a
+  // function declaration like the five `create_*` tools beside it.
+  //
+  // So an application-managed searching turn sets `nativeSearchEnabled: false`,
+  // and the artifact tools stay registered. A user who asks for "search this
+  // and give me a spreadsheet" gets both.
+  const result = plan({
+    modelId: "gemini-3-6-flash",
+    provider: "google",
+    nativeSearchEnabled: false,
+    nativeSearchForced: false,
+  });
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerTool, true);
+  assert.equal(
+    nativeSearchBlocksArtifactTool({
+      provider: "google",
+      nativeSearchEnabled: false,
+      nativeSearchForced: false,
+    }),
+    false
+  );
+});
+
+test("re-enabling Google's grounding still takes the artifact tools away", () => {
+  // Fail-closed without the rule having to be remembered: whoever turns
+  // grounding back on sets `nativeSearchEnabled` true for a Google model, and
+  // this refuses again. A request carrying grounding and function declarations
+  // together is rejected by the provider, so a file request would become a 400.
+  assert.equal(
+    nativeSearchBlocksArtifactTool({
+      provider: "google",
+      nativeSearchEnabled: true,
+      nativeSearchForced: false,
+    }),
+    true
+  );
+  const result = plan({
+    modelId: "gemini-3-6-flash",
+    provider: "google",
+    nativeSearchEnabled: true,
+    nativeSearchForced: false,
+  });
+  assert.equal(result.mode, "off");
+  assert.equal(result.offReason, "native_search_conflict");
+});
+
 test("the forced-search rule reads the capability, not the provider name", () => {
   // OpenAI is the only provider whose native tool can be forced, and
   // lib/webSearchCapability.ts is where that is recorded. The two must not

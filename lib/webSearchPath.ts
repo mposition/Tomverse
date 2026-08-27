@@ -73,6 +73,19 @@ export const SEARCH_PATH_GAPS = [
      * a name.
      */
     "surcharge_unreserved",
+    /**
+     * Application-managed, the mode asked for it, and this deployment cannot
+     * reach the backend -- no credential, or a search-provider budget that
+     * could not be read.
+     *
+     * Its own name rather than `cost_unbounded`, which it superficially
+     * resembles. `cost_unbounded` is a property of the register that no
+     * environment changes: Google's grounding has no ceiling anywhere, ever.
+     * This is a property of *one deployment*, fixed by setting a variable, and
+     * folding the two together would send an operator to read a provider's API
+     * documentation when what they needed was an environment file.
+     */
+    "backend_unavailable",
 ] as const;
 
 export type SearchPathGap = (typeof SEARCH_PATH_GAPS)[number];
@@ -82,6 +95,16 @@ export type AttemptSearchPath =
     | { kind: "search_model" }
     /** The provider-native tool is configured and paid for on this attempt. */
     | { kind: "native_tool" }
+    /**
+     * This application's own search tool is registered, counted and paid for on
+     * this attempt.
+     *
+     * A third kind rather than a flag on `native_tool`, because the two differ
+     * in every consequence a reader of this value cares about: which budget the
+     * provider spend lands in, where the citations came from, whether the
+     * artifact tools can coexist with it, and what a fallback may inherit.
+     */
+    | { kind: "app_managed_tool" }
     | { kind: "none"; gap: SearchPathGap };
 
 export type AttemptSearchPathInput = {
@@ -100,6 +123,17 @@ export type AttemptSearchPathInput = {
      * answers, and only the second is a defect.
      */
     nativeSearchDispatchable: boolean;
+    /**
+     * Whether this deployment may actually run this capability's
+     * application-managed search -- `appManagedSearchIsDispatchable`, computed
+     * by the caller from the same capability and the same readiness map every
+     * other surface was given.
+     *
+     * Separate from `nativeSearchDispatchable` rather than merged into one
+     * "can search" boolean, because the two produce different gaps and the gap
+     * is the whole output of this function for a turn that did not search.
+     */
+    appManagedSearchDispatchable: boolean;
     /** The turn's web search mode, as the request carries it. */
     webSearchMode: WebSearchMode | null;
     /** Whether a tool configuration was actually built for this attempt. */
@@ -111,6 +145,7 @@ export type AttemptSearchPathInput = {
 export const resolveAttemptSearchPath = ({
     support,
     nativeSearchDispatchable,
+    appManagedSearchDispatchable,
     webSearchMode,
     toolConfigBuilt,
     surchargeCredits,
@@ -122,13 +157,25 @@ export const resolveAttemptSearchPath = ({
     if (support === "unverified") {
         return { kind: "none", gap: "capability_unverified" };
     }
-    // Native from here down.
+    // A tool-based capability from here down: native, or this application's own.
     if (webSearchMode !== "always") {
         return { kind: "none", gap: "mode_not_always" };
     }
     // After the mode, deliberately: with the mode off nothing was going to
     // search anyway, and the setting the user can change is the more useful
-    // answer than a provider's missing parameter.
+    // answer than a provider's missing parameter or an unset credential.
+    if (support === "app-managed") {
+        if (!appManagedSearchDispatchable) {
+            return { kind: "none", gap: "backend_unavailable" };
+        }
+        if (!toolConfigBuilt) {
+            return { kind: "none", gap: "tool_config_unavailable" };
+        }
+        if (!(surchargeCredits > 0)) {
+            return { kind: "none", gap: "surcharge_unreserved" };
+        }
+        return { kind: "app_managed_tool" };
+    }
     if (!nativeSearchDispatchable) {
         return { kind: "none", gap: "cost_unbounded" };
     }

@@ -89,8 +89,25 @@ export const resolveWebSearchTurnState = (input: {
   modelId: string;
   /** `webSearchMode === "always" && nativeSearchIsDispatchable(...)`, from the caller. */
   nativeSearchEnabled: boolean;
+  /**
+   * `webSearchMode === "always" && appManagedSearchIsDispatchable(...)`, from
+   * the caller.
+   *
+   * A third way a turn can be searching, and the one that makes reading only
+   * the first two dangerous. A Gemini turn searches through this application's
+   * own `web_search` tool; without this flag it would be handed
+   * `WEB_SEARCH_UNAVAILABLE_PROMPT` -- told, in the same request that carries a
+   * working search tool, that nothing in its answer can come from the live web.
+   * The model would then either obey the block and refuse to search, or search
+   * and open with a sentence saying it could not.
+   *
+   * Defaulted so a caller written before this route existed keeps its exact
+   * behaviour rather than silently claiming a search it did not enable.
+   */
+  appManagedSearchEnabled?: boolean;
 }): WebSearchTurnState =>
   input.nativeSearchEnabled ||
+  input.appManagedSearchEnabled === true ||
   getWebSearchCapability(input.modelId).support === "search-model"
     ? "searching"
     : "unavailable";
