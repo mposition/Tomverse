@@ -62,7 +62,14 @@ about Auto's quality, for one reason: **the judge is the baseline model.** The
 baseline arm is `gpt-5-6-luna` on all 210 pairs, so the judge graded its own
 answer every time. That is the self-preference
 `docs/ops/tomverse-chat-router-evaluation-set.md` §5 exists to measure, and
-`judge.biasMeasurement` is null. A `--mode=judge-bias` run has to come first.
+`judge.biasMeasurement` is null.
+
+This run also predates the answer bundle, so there is nothing to re-grade. The
+calibration now asked for by
+`docs/ops/tomverse-chat-router-evaluation-set.md` §5 compares two judges over
+the **same** answers, and these answers were not kept. Measuring it means a
+fresh pilot run with `--bundle=`, then `--rejudge=` with an independent judge,
+then `--mode=judge-calibration`.
 
 45 of the 210 pairs are ones where the Router chose the baseline model, so both
 answers came from `gpt-5-6-luna`. They are worth reporting separately, with
@@ -112,7 +119,7 @@ itself. `writing_and_rewriting/en` is the only cell where Auto is not behind.
 
 `analysis_and_reasoning` is 1 win in 28 across both languages. That is a routing
 signal worth investigating on its own, before and regardless of anything the
-judge-bias question settles.
+judge calibration settles.
 
 ### A correction to an earlier version of this file
 

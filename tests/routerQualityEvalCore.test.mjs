@@ -407,14 +407,17 @@ test("a baseline pre-registered after the run started is refused", () => {
   assert.match(problems.join(" "), /with the answers in hand/);
 });
 
-test("a routable model may judge only with its bias measured", () => {
+test("a routable model may judge only with a calibration that was checked", () => {
   const unmeasured = evaluationRecordProblems(
     record({ judge: { identity: "gpt-5-6-luna", isRoutableModel: true } }),
     { routableModelIds: ["gpt-5-6-luna", "deepseek-v4-flash"] }
   );
-  assert.match(unmeasured.join(" "), /bias measurement/);
+  assert.match(unmeasured.join(" "), /no calibration against an independent judge/);
 
-  const measured = evaluationRecordProblems(
+  // The old check asked only whether the field held something, which any
+  // object satisfies. Citing one without a checker is now itself a problem,
+  // so the omission is loud rather than a silent pass.
+  const unchecked = evaluationRecordProblems(
     record({
       judge: {
         identity: "gpt-5-6-luna",
@@ -424,7 +427,34 @@ test("a routable model may judge only with its bias measured", () => {
     }),
     { routableModelIds: ["gpt-5-6-luna"] }
   );
-  assert.deepEqual(measured, []);
+  assert.match(unchecked.join(" "), /was not\s+checked/);
+
+  const rejected = evaluationRecordProblems(
+    record({
+      judge: {
+        identity: "gpt-5-6-luna",
+        isRoutableModel: true,
+        biasMeasurement: { heldOutPairs: 120, ownAnswerPreferenceRate: 0.53 },
+      },
+    }),
+    {
+      routableModelIds: ["gpt-5-6-luna"],
+      checkCalibration: () => ["it is of a different judge"],
+    }
+  );
+  assert.deepEqual(rejected, ["the cited calibration: it is of a different judge"]);
+
+  const accepted = evaluationRecordProblems(
+    record({
+      judge: {
+        identity: "gpt-5-6-luna",
+        isRoutableModel: true,
+        biasMeasurement: { calibrationVersion: "router-judge-calibration-v1" },
+      },
+    }),
+    { routableModelIds: ["gpt-5-6-luna"], checkCalibration: () => [] }
+  );
+  assert.deepEqual(accepted, []);
 });
 
 test("a judge named in the routable catalogue is caught even when unflagged", () => {

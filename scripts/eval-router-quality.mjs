@@ -15,12 +15,25 @@
 //   --mode=pilot        200-ish items from the development set. Measures the
 //                       discordance rate so §3's `n` can be computed instead
 //                       of guessed. Emits no decision evidence, ever.
-//   --mode=judge-bias   §5. Measures a routable judge's preference for its own
-//                       output on held-out pairs, so the bias is a number
-//                       beside the result rather than a caveat under it.
+//   --mode=judge-bias   Superseded. Its own-answer preference rate mixes the
+//                       two models' quality difference with the judge's
+//                       preference for its own output, and 50% reads as "no
+//                       self-preference" only if the models are equally good.
+//                       Kept runnable because the number is still a diagnostic;
+//                       it is no longer citable, and --judge-bias=<path> is
+//                       refused outright.
+//   --mode=judge-calibration
+//                       docs/ops/tomverse-chat-router-evaluation-set.md §5, in
+//                       the shape that can be defended: two judges over the
+//                       SAME answers, reported as a paired shift with a
+//                       pair-level bootstrap interval. Pure analysis of two
+//                       verdict files -- it sends nothing.
 //   --mode=decision     The run ROUTE-01 cites. Requires a frozen decision
 //                       set, a pre-registered `n`, and -- when the judge is
-//                       routable -- a bias artefact from the mode above.
+//                       routable -- a calibration artefact that names this
+//                       judge, grades development-set answers from a run that
+//                       finished, and carries both judges' verdicts on every
+//                       pair. Checked before anything is sent.
 //
 // Splitting them is the point. "Run it and see, then decide how big it should
 // have been" is how a sample size becomes an outcome that was chosen rather
@@ -35,7 +48,9 @@
 //   ... --limit=50            stop after this many items
 //   ... --max-cost-usd=5      stop once this much provider cost has accrued
 //   ... --use-index=1         decision mode: which use of the decision set this is
-//   ... --judge-bias=<path>   decision mode: the artefact from --mode=judge-bias
+//   ... --calibration=<path>  decision mode: the artefact from
+//                            --mode=judge-calibration, checked against this run
+//                            before anything is sent
 //
 // Requires provider keys for every model it touches.
 //
@@ -56,6 +71,7 @@ import {
 } from "../lib/routerAnswerBundle.ts";
 import {
   calibrateJudges,
+  calibrationArtefactProblems,
   calibrationProblems,
 } from "../lib/routerJudgeCalibration.ts";
 import { dirname } from "node:path";
@@ -124,7 +140,8 @@ const verdictPaths = process.argv
   .filter((argument) => argument.startsWith("--verdicts="))
   .map((argument) => argument.slice("--verdicts=".length));
 const limit = Number(argValue("limit", "0")) || 0;
-const judgeBiasPath = argValue("judge-bias", "");
+const calibrationPath = argValue("calibration", "");
+const legacyBiasPath = argValue("judge-bias", "");
 const useIndex = Number(argValue("use-index", "0")) || 0;
 const preRegisteredN = Number(argValue("preregistered-n", "0")) || 0;
 const ciMethod = argValue("method", "bootstrap_percentile");
@@ -142,6 +159,16 @@ const ensureDirectory = (path) => {
     mkdirSync(directory, { recursive: true });
   }
 };
+
+if (legacyBiasPath) {
+  die(
+    "--judge-bias=<path> is no longer accepted. Its own-answer preference rate mixes the two\n" +
+      "models' quality difference with the judge's preference for its own output, so it cannot\n" +
+      "settle docs/ops/tomverse-chat-router-evaluation-set.md §5. Run\n" +
+      "--mode=judge-calibration against an independent judge and pass that artefact with\n" +
+      "--calibration=<path>."
+  );
+}
 
 if (!["pilot", "decision", "judge-bias", "judge-calibration"].includes(mode)) {
   die(`--mode must be pilot, decision, judge-bias or judge-calibration (got "${mode}").`);
@@ -169,13 +196,32 @@ if (mode === "judge-calibration") {
       identity: header.judge,
       bundleDigest: header.bundleDigest,
       answerIdentities: header.answerIdentities ?? [],
+      bundleMode: header.bundleMode ?? null,
+      evaluationSetVersion: header.evaluationSetVersion ?? null,
+      evaluationSetPurpose: header.evaluationSetPurpose ?? null,
+      bundlePairs: header.bundlePairs ?? null,
+      bundlePlannedItems: header.bundlePlannedItems ?? null,
+      judgeTemplateVersion: header.judgeTemplateVersion ?? null,
       verdicts: lines
         .filter((line) => line.kind === "verdict")
         .map((line) => ({ pairId: line.pairId, verdict: line.verdict })),
     };
   };
   const [target, reference] = verdictPaths.map(readPass);
-  const problems = calibrationProblems(target, reference, target.answerIdentities);
+  const problems = [
+    ...calibrationProblems(target, reference, target.answerIdentities),
+    // The digest proves both passes graded the same answers; it says nothing
+    // about the provenance the two files claim for them. A disagreement here
+    // is a hand-edited header, and the artefact would otherwise take the
+    // target's version of it without saying so.
+    ...["bundleMode", "evaluationSetVersion", "evaluationSetPurpose", "bundlePairs", "bundlePlannedItems"]
+      .filter((field) => target[field] !== reference[field])
+      .map(
+        (field) =>
+          `the two passes disagree about ${field}: ${JSON.stringify(target[field])} against ` +
+          `${JSON.stringify(reference[field])}, over a bundle they agree on`
+      ),
+  ];
   if (problems.length > 0) {
     die(
       "\nThese two passes cannot be compared:\n\n" +
@@ -210,13 +256,42 @@ if (mode === "judge-calibration") {
       "  and not a result -- human labels on a stratified sample are what settle it."
   );
   if (jsonPath) {
+    // The numbers alone cannot be checked against the run that later cites
+    // them, so the file carries what the check needs: whose bias this is
+    // about, which answers were graded, whether the run producing them
+    // finished, and which set they came from.
+    const artefact = {
+      ...result,
+      targetIdentity: target.identity,
+      referenceIdentity: reference.identity,
+      answerIdentities: target.answerIdentities,
+      bundleDigest: target.bundleDigest,
+      bundlePairs: target.bundlePairs,
+      bundlePlannedItems: target.bundlePlannedItems,
+      bundleMode: target.bundleMode,
+      evaluationSetVersion: target.evaluationSetVersion,
+      evaluationSetPurpose: target.evaluationSetPurpose,
+      judgeTemplateVersion: target.judgeTemplateVersion,
+      producedAt: new Date().toISOString(),
+      targetPath: target.path,
+      referencePath: reference.path,
+    };
+    const artefactTrouble = calibrationArtefactProblems(artefact, {
+      judgeIdentity: target.identity,
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+    });
     ensureDirectory(jsonPath);
-    writeFileSync(
-      jsonPath,
-      `${JSON.stringify({ ...result, targetPath: target.path, referencePath: reference.path }, null, 2)}\n`,
-      "utf8"
-    );
+    writeFileSync(jsonPath, `${JSON.stringify(artefact, null, 2)}\n`, "utf8");
     console.log(`\nWrote ${jsonPath}`);
+    if (artefactTrouble.length > 0) {
+      // Written either way -- the numbers are still the numbers -- but a
+      // decision run will refuse it, and the operator finds that out now
+      // rather than after paying for the decision run.
+      console.log(
+        "\nThis artefact will NOT be accepted by a decision run:\n" +
+          artefactTrouble.map((problem) => `  - ${problem}`).join("\n")
+      );
+    }
   }
   process.exit(0);
 }
@@ -280,9 +355,9 @@ if (evaluationSet.baseline && evaluationSet.baseline.modelId !== baselineModelId
   );
 }
 
-let judgeBias = null;
-if (judgeBiasPath) {
-  judgeBias = JSON.parse(readFileSync(judgeBiasPath, "utf8"));
+let judgeCalibration = null;
+if (calibrationPath) {
+  judgeCalibration = JSON.parse(readFileSync(calibrationPath, "utf8"));
 }
 if (mode === "judge-bias") {
   if (!judgeIsRoutable) {
@@ -308,11 +383,34 @@ if (mode === "decision") {
         "and a second run against the same frozen set reports how well the Router fits its own test set."
     );
   }
-  if (judgeIsRoutable && !judgeBias) {
-    die(
-      `The judge "${judgeModelId}" is itself routable, so §5 requires a bias measurement. ` +
-        "Run --mode=judge-bias first and pass its artefact with --judge-bias=<path>."
-    );
+  if (judgeIsRoutable) {
+    if (!judgeCalibration) {
+      die(
+        `The judge "${judgeModelId}" is itself routable, so ` +
+          "docs/ops/tomverse-chat-router-evaluation-set.md §5 requires a calibration against an\n" +
+          "independent judge. Run --mode=judge-calibration and pass its artefact with\n" +
+          "--calibration=<path>."
+      );
+    }
+    // Checked here, before anything is sent, rather than at report time: a
+    // decision run that discovers its calibration is the wrong one after
+    // paying for the run has paid for a report nobody can cite.
+    const trouble = calibrationArtefactProblems(judgeCalibration, {
+      judgeIdentity: {
+        modelId: judgeModel.id,
+        provider: judgeModel.provider,
+        apiModel: judgeModel.apiModel,
+      },
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+      evaluationSetPurpose: evaluationSet.purpose,
+    });
+    if (trouble.length > 0) {
+      die(
+        `\n${calibrationPath} cannot be cited by this run:\n\n` +
+          trouble.map((problem) => `  - ${problem}`).join("\n") +
+          "\n\nNothing was sent and nothing was billed."
+      );
+    }
   }
 }
 
@@ -408,6 +506,14 @@ if (rejudgePath) {
       bundleDigest: digest,
       bundlePath: rejudgePath,
       answerIdentities,
+      // Carried through from the bundle so a calibration built from two
+      // verdict files can say which set the answers came from and whether the
+      // run that produced them finished, without holding the bundle.
+      bundleMode: parsed.header.mode,
+      evaluationSetVersion: parsed.header.evaluationSetVersion,
+      evaluationSetPurpose: parsed.header.evaluationSetPurpose,
+      bundlePairs: parsed.entries.length,
+      bundlePlannedItems: parsed.header.plannedItems,
       judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
       rejudgedAt: new Date().toISOString(),
       commitSha,
@@ -592,6 +698,12 @@ bundle({
   bundleVersion: ANSWER_BUNDLE_VERSION,
   mode,
   evaluationSetVersion: evaluationSet.version,
+  // Written before anything runs, so a bundle that stopped at its cost
+  // ceiling is one whose entry count falls short of what it planned. A header
+  // cannot be amended afterwards, and the run that dies early is exactly the
+  // one that never gets to amend it.
+  evaluationSetPurpose: evaluationSet.purpose,
+  plannedItems: planned.length,
   commitSha,
   seed,
   judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
@@ -978,7 +1090,7 @@ const record = {
             evaluationSetVersion: evaluationSet.version,
             seed,
           }
-        : judgeBias,
+        : judgeCalibration,
   },
   exclusions: excludedLog,
   truncatedByCost,
@@ -1005,7 +1117,19 @@ if (record.completedItems < record.plannedItems) {
   );
 }
 
-const recordProblems = evaluationRecordProblems(record, { routableModelIds });
+const recordProblems = evaluationRecordProblems(record, {
+  routableModelIds,
+  checkCalibration: (artefact) =>
+    calibrationArtefactProblems(artefact, {
+      judgeIdentity: {
+        modelId: judgeModel.id,
+        provider: judgeModel.provider,
+        apiModel: judgeModel.apiModel,
+      },
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+      evaluationSetPurpose: evaluationSet.purpose,
+    }),
+});
 if (recordProblems.length > 0) {
   console.log("");
   console.log("This report is NOT decision-grade evidence:");
