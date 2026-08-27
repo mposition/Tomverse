@@ -419,7 +419,7 @@ test("a routable model may judge only with its bias measured", () => {
       judge: {
         identity: "gpt-5-6-luna",
         isRoutableModel: true,
-        biasMeasurement: { heldOutPairs: 120, selfPreferenceRate: 0.53 },
+        biasMeasurement: { heldOutPairs: 120, ownAnswerPreferenceRate: 0.53 },
       },
     }),
     { routableModelIds: ["gpt-5-6-luna"] }

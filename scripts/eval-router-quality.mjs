@@ -44,6 +44,20 @@
 // with --json, the artefact a human cites.
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+import {
+  ANSWER_BUNDLE_VERSION,
+  answerBundleProblems,
+  bundleAnswerIdentities,
+  bundleDigest,
+  canonicalIdentity,
+  parseAnswerBundle,
+  sha256,
+} from "../lib/routerAnswerBundle.ts";
+import {
+  calibrateJudges,
+  calibrationProblems,
+} from "../lib/routerJudgeCalibration.ts";
 import { dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -90,6 +104,18 @@ const journalPath = argValue("journal", "") || (jsonPath ? `${jsonPath}.jsonl` :
 // would be data nobody can turn back into a report, which is the shape of
 // record this harness refuses everywhere else.
 const fromJournalPath = argValue("from-journal", "");
+// Where the answers themselves go, so a second judge can grade the same words
+// rather than freshly generated ones. Beside --json for the same reason the
+// journal is: a run worth preserving is one worth being able to re-judge.
+const bundlePath = argValue("bundle", "") || (jsonPath ? `${jsonPath}.answers.jsonl` : "");
+// Grade an existing bundle instead of generating anything. Calls only the
+// judge, so the answers -- and the order they are shown in -- are identical to
+// the pass this is being compared against.
+const rejudgePath = argValue("rejudge", "");
+// Two verdict files, compared. No provider is called.
+const verdictPaths = process.argv
+  .filter((argument) => argument.startsWith("--verdicts="))
+  .map((argument) => argument.slice("--verdicts=".length));
 const limit = Number(argValue("limit", "0")) || 0;
 const judgeBiasPath = argValue("judge-bias", "");
 const useIndex = Number(argValue("use-index", "0")) || 0;
@@ -103,8 +129,89 @@ const die = (message) => {
   process.exit(1);
 };
 
-if (!["pilot", "decision", "judge-bias"].includes(mode)) {
-  die(`--mode must be pilot, decision or judge-bias (got "${mode}").`);
+const ensureDirectory = (path) => {
+  const directory = dirname(path);
+  if (directory && directory !== "." && !existsSync(directory)) {
+    mkdirSync(directory, { recursive: true });
+  }
+};
+
+if (!["pilot", "decision", "judge-bias", "judge-calibration"].includes(mode)) {
+  die(`--mode must be pilot, decision, judge-bias or judge-calibration (got "${mode}").`);
+}
+
+// A pure analysis of two judging passes. It calls no provider and scores no
+// run, so it exits here rather than through the set, pre-registration and
+// billing machinery that a scoring run needs and this one has no use for.
+if (mode === "judge-calibration") {
+  if (verdictPaths.length !== 2) {
+    die(
+      "--mode=judge-calibration needs exactly two --verdicts=<path>: the judge under\n" +
+        "test first, then the independent one it is compared against."
+    );
+  }
+  const readPass = (path) => {
+    const lines = readFileSync(path, "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line));
+    const header = lines.find((line) => line.kind === "header");
+    if (!header) die(`${path} has no header line, so it is not a verdict file.`);
+    return {
+      path,
+      identity: header.judge,
+      bundleDigest: header.bundleDigest,
+      answerIdentities: header.answerIdentities ?? [],
+      verdicts: lines
+        .filter((line) => line.kind === "verdict")
+        .map((line) => ({ pairId: line.pairId, verdict: line.verdict })),
+    };
+  };
+  const [target, reference] = verdictPaths.map(readPass);
+  const problems = calibrationProblems(target, reference, target.answerIdentities);
+  if (problems.length > 0) {
+    die(
+      "\nThese two passes cannot be compared:\n\n" +
+        problems.map((problem) => `  - ${problem}`).join("\n") +
+        "\n\nNothing was computed."
+    );
+  }
+  const result = calibrateJudges(target, reference, { seed: seed || 1 });
+  const pp = (value) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}pp`;
+  console.log(`Judge calibration — ${result.targetJudge} against ${result.referenceJudge}`);
+  console.log(`  pairs            ${result.pairs}`);
+  console.log(`  exact agreement  ${(result.exactAgreementRate * 100).toFixed(1)}%`);
+  console.log(`  baseline margin  target ${pp(result.targetBaselineMarginPp)}, reference ${pp(result.referenceBaselineMarginPp)}`);
+  console.log(
+    `  judge shift      ${pp(result.judgeShiftPp)}  95% CI [${pp(result.ci95LowerPp)}, ${pp(result.ci95UpperPp)}]  ` +
+      `(paired bootstrap, seed ${result.seed})`
+  );
+  console.log("");
+  console.log("  rows are the target judge's verdict, columns the reference judge's");
+  console.log(`  ${"".padEnd(12)}${["auto", "baseline", "equivalent"].map((v) => v.padStart(11)).join("")}`);
+  for (const row of ["auto", "baseline", "equivalent"]) {
+    console.log(
+      `  ${row.padEnd(12)}` +
+        ["auto", "baseline", "equivalent"].map((column) => String(result.crossTab[row][column]).padStart(11)).join("")
+    );
+  }
+  console.log(
+    "\n  A positive shift means the target judge favours the baseline arm more than\n" +
+      "  the reference judge does, over the same answers. That is disagreement\n" +
+      "  between judges. Reading it as self-preference assumes the reference judge\n" +
+      "  has no preference of its own between these models, which is an assumption\n" +
+      "  and not a result -- human labels on a stratified sample are what settle it."
+  );
+  if (jsonPath) {
+    ensureDirectory(jsonPath);
+    writeFileSync(
+      jsonPath,
+      `${JSON.stringify({ ...result, targetPath: target.path, referencePath: reference.path }, null, 2)}\n`,
+      "utf8"
+    );
+    console.log(`\nWrote ${jsonPath}`);
+  }
+  process.exit(0);
 }
 if (!setPath) die("--set=<path to the evaluation set JSON> is required.");
 if (!baselineModelId) die("--baseline=<model id> is required and must be pre-registered.");
@@ -298,6 +405,85 @@ const readVerdict = (text) => {
   return null;
 };
 
+// Grade a bundle that already exists. The answers are not regenerated and the
+// display order is the one the bundle fixed, so the only thing that differs
+// from the pass this will be compared against is who graded.
+if (rejudgePath) {
+  if (!judgeModelId) die("--judge=<model id> is required.");
+  const parsed = parseAnswerBundle(readFileSync(rejudgePath, "utf8"));
+  const problems = answerBundleProblems(parsed);
+  if (problems.length > 0) {
+    die(
+      `\n${rejudgePath} cannot be judged:\n\n` +
+        problems.slice(0, 10).map((problem) => `  - ${problem}`).join("\n") +
+        (problems.length > 10 ? `\n  ... and ${problems.length - 10} more` : "") +
+        "\n\nNothing was sent and nothing was billed."
+    );
+  }
+  const judge = getModel(judgeModelId);
+  if (!judge) die(`Unknown judge model "${judgeModelId}".`);
+  const identity = { modelId: judge.id, provider: judge.provider, apiModel: judge.apiModel };
+  const answerIdentities = bundleAnswerIdentities(parsed);
+  if (answerIdentities.includes(canonicalIdentity(identity))) {
+    console.log(
+      `NOTE: ${canonicalIdentity(identity)} wrote answers in this bundle, so this pass\n` +
+        "grades its own output. That is a valid pass to run -- it is the one whose bias\n" +
+        "is in question -- but it cannot be the independent side of a comparison."
+    );
+  }
+  const out = jsonPath || `${rejudgePath}.${judge.id}.verdicts.jsonl`;
+  ensureDirectory(out);
+  const digest = bundleDigest(parsed);
+  writeFileSync(
+    out,
+    `${JSON.stringify({
+      kind: "header",
+      judge: identity,
+      bundleDigest: digest,
+      bundlePath: rejudgePath,
+      answerIdentities,
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+      rejudgedAt: new Date().toISOString(),
+      commitSha,
+    })}\n`,
+    "utf8"
+  );
+  console.log(`Re-judging ${parsed.entries.length} pair(s) from ${rejudgePath} with ${judge.id}`);
+  let graded = 0;
+  for (const [index, pair] of parsed.entries.entries()) {
+    let text;
+    try {
+      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text));
+      text = judgement.text;
+    } catch (error) {
+      console.log(`\n  ${pair.pairId}: judge failed — ${String(error)}`);
+      continue;
+    }
+    const verdictWord = readVerdict(text);
+    if (verdictWord === null) {
+      console.log(`\n  ${pair.pairId}: no recognisable verdict`);
+      continue;
+    }
+    // Back to arm terms, using the order the bundle fixed rather than a
+    // position this pass chose.
+    const firstArm = pair.first.arm;
+    const arm =
+      verdictWord === "equivalent"
+        ? "equivalent"
+        : (verdictWord === "first") === (firstArm === "auto")
+          ? "auto"
+          : "baseline";
+    appendFileSync(out, `${JSON.stringify({ kind: "verdict", pairId: pair.pairId, verdict: arm })}\n`, "utf8");
+    graded += 1;
+    process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
+    if (graded % 10 === 0 || index === parsed.entries.length - 1) {
+      console.log(`  ${graded}/${parsed.entries.length}  $${accruedCostUsd.toFixed(4)}`);
+    }
+  }
+  console.log(`\nWrote ${out} — ${graded} verdict(s), $${accruedCostUsd.toFixed(4)}`);
+  process.exit(graded === parsed.entries.length ? 0 : 1);
+}
+
 const routerInputFor = (item) => {
   const reservedInputTokens = estimateRawTextTokens(item.prompt);
   return {
@@ -389,13 +575,6 @@ const excludedLog = [];
 // run began, and a `startedAt` stamped at the end weakens exactly that check.
 let startedAt = new Date().toISOString();
 
-const ensureDirectory = (path) => {
-  const directory = dirname(path);
-  if (directory && directory !== "." && !existsSync(directory)) {
-    mkdirSync(directory, { recursive: true });
-  }
-};
-
 /**
  * Append one line to the journal.
  *
@@ -418,6 +597,20 @@ const journal = (entry) => {
 // worked. A counted line every so often flushes what came before it.
 const PROGRESS_EVERY = 10;
 
+/**
+ * Append one line to the answer bundle.
+ *
+ * Separate from the journal because they answer different questions: the
+ * journal is what this run scored, the bundle is what a judge was shown. Only
+ * the bundle can be re-judged, and only the journal can rebuild this run's own
+ * report.
+ */
+const bundle = (entry) => {
+  if (!bundlePath) return;
+  ensureDirectory(bundlePath);
+  appendFileSync(bundlePath, `${JSON.stringify(entry)}\n`, "utf8");
+};
+
 const recordPair = (pair, mark, excluded = null) => {
   pairs.push(pair);
   if (excluded) excludedLog.push(excluded);
@@ -427,6 +620,17 @@ const recordPair = (pair, mark, excluded = null) => {
     console.log(`  ${pairs.length}/${planned.length}  $${accruedCostUsd.toFixed(4)}`);
   }
 };
+
+bundle({
+  kind: "header",
+  bundleVersion: ANSWER_BUNDLE_VERSION,
+  mode,
+  evaluationSetVersion: evaluationSet.version,
+  commitSha,
+  seed,
+  judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+  createdAt: startedAt,
+});
 
 journal({
   kind: "header",
@@ -533,10 +737,32 @@ for (const [index, item] of liveItems.entries()) {
     continue;
   }
 
-  const [first, second] =
-    base.autoPosition === "first"
-      ? [autoAnswer.text, baselineAnswer.text]
-      : [baselineAnswer.text, autoAnswer.text];
+  const bundledSide = (arm, model, text) => ({
+    arm,
+    modelId: model.id,
+    provider: model.provider,
+    apiModel: model.apiModel,
+    text,
+    digest: sha256(text),
+  });
+  const autoSide = bundledSide("auto", autoModel, autoAnswer.text);
+  const baselineSide = bundledSide("baseline", baselineModel, baselineAnswer.text);
+  const [firstSide, secondSide] =
+    base.autoPosition === "first" ? [autoSide, baselineSide] : [baselineSide, autoSide];
+  const [first, second] = [firstSide.text, secondSide.text];
+
+  // Written before the judge is called. A judge failure excludes the pair from
+  // the score, but the answers were still paid for and a later pass can still
+  // grade them.
+  bundle({
+    kind: "pair",
+    pairId: item.id,
+    stratum: item.stratum,
+    cell: item.cell,
+    prompt: item.prompt,
+    first: firstSide,
+    second: secondSide,
+  });
 
   let verdict;
   try {
@@ -683,8 +909,13 @@ if (mode === "pilot") {
   }
 }
 
-// §5's number, in the form the decision run consumes it.
-const selfPreferenceRate =
+// How often the judge's own answer won, when the judge's model was the Auto
+// arm. Named for what it counts and nothing more: it mixes the two models'
+// real quality difference with the judge's preference for its own output, and
+// 50% is only "no self-preference" if the two models are equally good, which
+// nothing here establishes. --mode=judge-calibration is the measurement that
+// separates them.
+const ownAnswerPreferenceRate =
   verdict.delta.discordantPairs === 0
     ? Number.NaN
     : verdict.delta.wins / verdict.delta.discordantPairs;
@@ -692,10 +923,14 @@ const selfPreferenceRate =
 if (mode === "judge-bias") {
   console.log("");
   console.log(
-    `Self-preference ${pct(selfPreferenceRate)} of decided pairs went to ${judgeModelId}'s own answer`
+    `Own-answer preference ${pct(ownAnswerPreferenceRate)} of decided pairs went to ${judgeModelId}'s own answer`
   );
   console.log(
-    "  50% is no self-preference. This measures the judge, not the Router, and it is\n" +
+    "  This is NOT a self-preference measurement. It mixes the two models' real\n" +
+      "  quality difference with the judge's preference for its own output, and 50%\n" +
+      "  reads as \"no self-preference\" only if the two models are equally good.\n" +
+      "  --mode=judge-calibration compares two judges over the same answers, which\n" +
+      "  is the comparison that can separate them.\n" +
       "  reported beside a decision run rather than subtracted from it -- a correction\n" +
       "  would claim a precision this measurement does not have."
   );
@@ -770,7 +1005,7 @@ const record = {
             comparedAgainstModelId: baselineModelId,
             heldOutPairs: verdict.delta.n,
             decidedPairs: verdict.delta.discordantPairs,
-            selfPreferenceRate,
+            ownAnswerPreferenceRate,
             evaluationSetVersion: evaluationSet.version,
             seed,
           }
