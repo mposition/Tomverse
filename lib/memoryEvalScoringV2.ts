@@ -118,7 +118,7 @@ const normalize = (value: string): string =>
  * matching, because relaxing it would let a memory stored under the wrong
  * kind pass the eval that exists to catch exactly that.
  */
-const matches = (
+export const matchesExpectedV2 = (
     candidate: ScoredCandidateV2,
     expected: ExpectedMemoryV2
 ): boolean => {
@@ -128,6 +128,9 @@ const matches = (
         statement.includes(normalize(token))
     );
 };
+
+/** The name the rest of this module reads it by. */
+const matches = matchesExpectedV2;
 
 /**
  * Bulk-safe candidates a critical-negative case must not have produced.
@@ -158,10 +161,10 @@ const matches = (
  * A case with no gold reaches this with nothing to admit, so it behaves
  * exactly as it did before the amendment.
  */
-const criticalBulkSafeAdoptions = (
+export const unadmittedCriticalBulkSafeCandidates = (
     testCase: MemoryEvalCaseV2,
     candidates: readonly ScoredCandidateV2[]
-): number => {
+): readonly ScoredCandidateV2[] => {
     const admitted = new Set<number>();
     for (const expected of testCase.expected) {
         if (expected.expectedDisposition !== "bulk_safe") continue;
@@ -175,7 +178,19 @@ const criticalBulkSafeAdoptions = (
     }
     return candidates.filter(
         (candidate, position) => candidate.bulkSafe && !admitted.has(position)
-    ).length;
+    );
+};
+
+/**
+ * The count the verdict is computed from. It is the length of the list above
+ * and nothing else: a report that named a different set of candidates from
+ * the one the gate counted would be describing a failure nobody had.
+ */
+const criticalBulkSafeAdoptions = (
+    testCase: MemoryEvalCaseV2,
+    candidates: readonly ScoredCandidateV2[]
+): number => {
+    return unadmittedCriticalBulkSafeCandidates(testCase, candidates).length;
 };
 
 /**
