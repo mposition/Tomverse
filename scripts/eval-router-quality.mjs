@@ -73,6 +73,7 @@ import {
   sha256,
 } from "../lib/routerAnswerBundle.ts";
 import {
+  CALIBRATION_MIN_COVERAGE,
   calibrateJudges,
   calibrationArtefactProblems,
   calibrationProblems,
@@ -300,14 +301,203 @@ if (mode === "judge-calibration") {
   }
   process.exit(0);
 }
+if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
+  die(`--max-cost-usd must be a positive number (got "${rawMaxCost}").`);
+}
+
+let commitSha = (() => {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+})();
+
+const random = seededRandom(seed);
+let accruedCostUsd = 0;
+let truncatedByCost = false;
+
+// Priced through the same lib/modelPricing.ts profile the product bills from,
+// so the figure this prints is the one the run actually costs rather than a
+// list price. Micro-USD per the pricing table's own units.
+const costMicroUsd = (model, usage) => {
+  const pricing = resolveModelPricing(model, {
+    estimatedPromptTokens: usage.inputTokens ?? 0,
+  });
+  const cachedTokens = usage.cachedInputTokens ?? 0;
+  const uncachedInput = Math.max(0, (usage.inputTokens ?? 0) - cachedTokens);
+  return (
+    uncachedInput * pricing.inputUsdPerMillionTokens +
+    cachedTokens * pricing.inputUsdPerMillionTokens * pricing.cachedInputPriceMultiplier +
+    (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens
+  );
+};
+
+const answer = async (model, prompt) => {
+  const startedAt = process.hrtime.bigint();
+  const result = await generateText({
+    model: getActiveAiModel(model),
+    messages: [{ role: "user", content: prompt }],
+    maxOutputTokens: 2_048,
+  });
+  const usage = result.usage ?? {};
+  accruedCostUsd += costMicroUsd(model, usage) / 1_000_000;
+  return {
+    text: result.text ?? "",
+    latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+    usage,
+  };
+};
+
+
+// docs/ops/tomverse-chat-router-evaluation-set.md §6 lives in
+// lib/routerJudgeRubric.ts, shared with the human review sheets:
+// the model judges and the human reviewers have to grade against the same
+// words for their agreement to mean anything. The judge sees two answers and
+// no arm labels, no model ids and no routing reason.
+
+// Grade a bundle that already exists. The answers are not regenerated and the
+// display order is the one the bundle fixed, so the only thing that differs
+// from the pass this will be compared against is who graded.
+if (rejudgePath) {
+  if (!judgeModelId) die("--judge=<model id> is required.");
+  // --set is optional here and the bundle does not need it. When it is given,
+  // it is checked: the two judges a calibration compares are pre-registered,
+  // and picking either one at dispatch time is the drift pre-registration
+  // exists to stop.
+  if (setPath) {
+    const registered = JSON.parse(readFileSync(setPath, "utf8"));
+    const allowed = [registered.judge?.modelId, registered.independentJudge?.modelId].filter(Boolean);
+    if (!allowed.includes(judgeModelId)) {
+      die(
+        `--judge=${judgeModelId}, but ${setPath} pre-registers ${allowed.join(" and ") || "no judge"}.\n` +
+          "Either re-grade with a pre-registered judge, or pre-register the one you want first."
+      );
+    }
+  }
+  const parsed = parseAnswerBundle(readFileSync(rejudgePath, "utf8"));
+  const problems = answerBundleProblems(parsed);
+  if (problems.length > 0) {
+    die(
+      `\n${rejudgePath} cannot be judged:\n\n` +
+        problems.slice(0, 10).map((problem) => `  - ${problem}`).join("\n") +
+        (problems.length > 10 ? `\n  ... and ${problems.length - 10} more` : "") +
+        "\n\nNothing was sent and nothing was billed."
+    );
+  }
+  const judge = getModel(judgeModelId);
+  if (!judge) die(`Unknown judge model "${judgeModelId}".`);
+  const identity = { modelId: judge.id, provider: judge.provider, apiModel: judge.apiModel };
+  const answerIdentities = bundleAnswerIdentities(parsed);
+  if (answerIdentities.includes(canonicalIdentity(identity))) {
+    console.log(
+      `NOTE: ${canonicalIdentity(identity)} wrote answers in this bundle, so this pass\n` +
+        "grades its own output. That is a valid pass to run -- it is the one whose bias\n" +
+        "is in question -- but it cannot be the independent side of a comparison."
+    );
+  }
+  const out = jsonPath || `${rejudgePath}.${judge.id}.verdicts.jsonl`;
+  ensureDirectory(out);
+  const digest = bundleDigest(parsed);
+  writeFileSync(
+    out,
+    `${JSON.stringify({
+      kind: "header",
+      judge: identity,
+      bundleDigest: digest,
+      bundlePath: rejudgePath,
+      answerIdentities,
+      // Carried through from the bundle so a calibration built from two
+      // verdict files can say which set the answers came from and whether the
+      // run that produced them finished, without holding the bundle.
+      bundleMode: parsed.header.mode,
+      evaluationSetVersion: parsed.header.evaluationSetVersion,
+      evaluationSetPurpose: parsed.header.evaluationSetPurpose,
+      bundlePairs: parsed.entries.length,
+      bundlePlannedItems: parsed.header.plannedItems,
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+      rejudgedAt: new Date().toISOString(),
+      commitSha,
+    })}\n`,
+    "utf8"
+  );
+  console.log(`Re-judging ${parsed.entries.length} pair(s) from ${rejudgePath} with ${judge.id}`);
+  let graded = 0;
+  let stoppedByCost = false;
+  for (const [index, pair] of parsed.entries.entries()) {
+    // The ceiling applies here too, and this is the stage where it matters:
+    // an independent judge can cost an order of magnitude more per call than
+    // the run that produced the answers.
+    if (maxCostUsd !== null && accruedCostUsd >= maxCostUsd) {
+      stoppedByCost = true;
+      console.log(`\nStopped at pair ${index} — cost ceiling $${maxCostUsd} reached.`);
+      break;
+    }
+    let text;
+    try {
+      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text));
+      text = judgement.text;
+    } catch (error) {
+      console.log(`\n  ${pair.pairId}: judge failed — ${String(error)}`);
+      continue;
+    }
+    const verdictWord = readVerdict(text);
+    if (verdictWord === null) {
+      console.log(`\n  ${pair.pairId}: no recognisable verdict`);
+      continue;
+    }
+    // Back to arm terms, using the order the bundle fixed rather than a
+    // position this pass chose.
+    const firstArm = pair.first.arm;
+    const arm =
+      verdictWord === "equivalent"
+        ? "equivalent"
+        : (verdictWord === "first") === (firstArm === "auto")
+          ? "auto"
+          : "baseline";
+    appendFileSync(out, `${JSON.stringify({ kind: "verdict", pairId: pair.pairId, verdict: arm })}\n`, "utf8");
+    graded += 1;
+    process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
+    if (graded % 10 === 0 || index === parsed.entries.length - 1) {
+      console.log(`  ${graded}/${parsed.entries.length}  $${accruedCostUsd.toFixed(4)}`);
+    }
+  }
+  console.log(`\nWrote ${out} — ${graded} verdict(s), $${accruedCostUsd.toFixed(4)}`);
+  // A pass that stopped at its ceiling covers whatever prefix the money
+  // reached, which is not a population. A pass that merely lost a few pairs to
+  // unreadable verdicts is a structural shortfall, and the calibration
+  // tolerates it up to the same floor lib/routerJudgeCalibration.ts uses --
+  // exiting non-zero there would stop a run that is still usable.
+  const coverage = parsed.entries.length === 0 ? 0 : graded / parsed.entries.length;
+  if (stoppedByCost) {
+    console.log(
+      `Stopped at the cost ceiling, so this pass covers a prefix rather than the bundle. ` +
+        "It cannot be calibrated against."
+    );
+    process.exit(1);
+  }
+  if (coverage < CALIBRATION_MIN_COVERAGE) {
+    console.log(
+      `Only ${(coverage * 100).toFixed(1)}% of the bundle carries a verdict, under the ` +
+        `${(CALIBRATION_MIN_COVERAGE * 100).toFixed(0)}% floor a calibration needs.`
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// Everything below needs the evaluation set. The two modes above do not:
+// a calibration reads two verdict files and a rejudge reads a bundle, and
+// asking either for a baseline and a seed is asking for the arguments of a
+// run that is not happening. The bundle carries the set version, the
+// purpose, the seed and the rubric its answers were produced under.
 if (!setPath) die("--set=<path to the evaluation set JSON> is required.");
 if (!baselineModelId) die("--baseline=<model id> is required and must be pre-registered.");
 if (!judgeModelId) die("--judge=<model id> is required.");
 if (!seed) {
-  die("--seed=<integer> is required: §9 records it so the run can be replayed.");
-}
-if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
-  die(`--max-cost-usd must be a positive number (got "${rawMaxCost}").`);
+  die(
+    `--seed=<integer> is required: ${"docs/ops/tomverse-chat-router-evaluation-set.md"} §9 records it so the run can be replayed.`
+  );
 }
 
 const evaluationSet = JSON.parse(readFileSync(setPath, "utf8"));
@@ -348,9 +538,16 @@ const judgeModel = getModel(judgeModelId);
 if (!judgeModel) die(`Unknown judge model "${judgeModelId}".`);
 
 const routableModelIds = AVAILABLE_MODELS.map((model) => model.id);
+
+// docs/ops/tomverse-chat-router-evaluation-set.md §5. An answer that names its own
+// model defeats the blinding, and the
+// procedure says such an item is excluded and logged rather than quietly
+// scrubbed -- a scrub changes the answer the judge grades.
+const selfIdMarkers = selfIdentificationMarkers(routableModelIds);
 const judgeIsRoutable = routableModelIds.includes(judgeModelId);
 
-// §4. The baseline the run compares against has to be the one the set
+// docs/ops/tomverse-chat-router-evaluation-set.md §4. The baseline the run compares
+// against has to be the one the set
 // pre-registered; a baseline supplied on the command line that disagrees with
 // the frozen record is the comparison being chosen at run time.
 if (evaluationSet.baseline && evaluationSet.baseline.modelId !== baselineModelId) {
@@ -368,7 +565,8 @@ if (mode === "judge-bias") {
   if (!judgeIsRoutable) {
     die(
       `"${judgeModelId}" is not a routable model, so it has no output of its own in the ` +
-        "set to prefer. §5 asks for this measurement only where the judge is one of the " +
+        "set to prefer. docs/ops/tomverse-chat-router-evaluation-set.md §5 asks for this " +
+        "measurement only where the judge is one of the " +
         "models being judged."
     );
   }
@@ -380,11 +578,15 @@ if (mode === "judge-bias") {
 }
 if (mode === "decision") {
   if (!preRegisteredN) {
-    die("--preregistered-n is required in decision mode: §3 fixes n before the run, from a measured pilot.");
+    die(
+      "--preregistered-n is required in decision mode.\n" +
+        "docs/ops/tomverse-chat-router-evaluation-set.md §3 fixes n before the run, from a measured pilot."
+    );
   }
   if (!useIndex) {
     die(
-      "--use-index is required in decision mode. §7: every look at the decision set costs a use, " +
+      "--use-index is required in decision mode.\n" +
+        "docs/ops/tomverse-chat-router-evaluation-set.md §7: every look at the decision set costs a use, " +
         "and a second run against the same frozen set reports how well the Router fits its own test set."
     );
   }
@@ -443,147 +645,6 @@ if (mode === "decision") {
   }
 }
 
-let commitSha = (() => {
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  } catch {
-    return null;
-  }
-})();
-
-const random = seededRandom(seed);
-let accruedCostUsd = 0;
-let truncatedByCost = false;
-
-// Priced through the same lib/modelPricing.ts profile the product bills from,
-// so the figure this prints is the one the run actually costs rather than a
-// list price. Micro-USD per the pricing table's own units.
-const costMicroUsd = (model, usage) => {
-  const pricing = resolveModelPricing(model, {
-    estimatedPromptTokens: usage.inputTokens ?? 0,
-  });
-  const cachedTokens = usage.cachedInputTokens ?? 0;
-  const uncachedInput = Math.max(0, (usage.inputTokens ?? 0) - cachedTokens);
-  return (
-    uncachedInput * pricing.inputUsdPerMillionTokens +
-    cachedTokens * pricing.inputUsdPerMillionTokens * pricing.cachedInputPriceMultiplier +
-    (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens
-  );
-};
-
-const answer = async (model, prompt) => {
-  const startedAt = process.hrtime.bigint();
-  const result = await generateText({
-    model: getActiveAiModel(model),
-    messages: [{ role: "user", content: prompt }],
-    maxOutputTokens: 2_048,
-  });
-  const usage = result.usage ?? {};
-  accruedCostUsd += costMicroUsd(model, usage) / 1_000_000;
-  return {
-    text: result.text ?? "",
-    latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
-    usage,
-  };
-};
-
-// §5. An answer that names its own model defeats the blinding, and the
-// procedure says such an item is excluded and logged rather than quietly
-// scrubbed -- a scrub changes the answer the judge grades.
-const selfIdMarkers = selfIdentificationMarkers(routableModelIds);
-
-// docs/ops/tomverse-chat-router-evaluation-set.md §6 lives in
-// lib/routerJudgeRubric.ts, shared with the human review sheets:
-// the model judges and the human reviewers have to grade against the same
-// words for their agreement to mean anything. The judge sees two answers and
-// no arm labels, no model ids and no routing reason.
-
-// Grade a bundle that already exists. The answers are not regenerated and the
-// display order is the one the bundle fixed, so the only thing that differs
-// from the pass this will be compared against is who graded.
-if (rejudgePath) {
-  if (!judgeModelId) die("--judge=<model id> is required.");
-  const parsed = parseAnswerBundle(readFileSync(rejudgePath, "utf8"));
-  const problems = answerBundleProblems(parsed);
-  if (problems.length > 0) {
-    die(
-      `\n${rejudgePath} cannot be judged:\n\n` +
-        problems.slice(0, 10).map((problem) => `  - ${problem}`).join("\n") +
-        (problems.length > 10 ? `\n  ... and ${problems.length - 10} more` : "") +
-        "\n\nNothing was sent and nothing was billed."
-    );
-  }
-  const judge = getModel(judgeModelId);
-  if (!judge) die(`Unknown judge model "${judgeModelId}".`);
-  const identity = { modelId: judge.id, provider: judge.provider, apiModel: judge.apiModel };
-  const answerIdentities = bundleAnswerIdentities(parsed);
-  if (answerIdentities.includes(canonicalIdentity(identity))) {
-    console.log(
-      `NOTE: ${canonicalIdentity(identity)} wrote answers in this bundle, so this pass\n` +
-        "grades its own output. That is a valid pass to run -- it is the one whose bias\n" +
-        "is in question -- but it cannot be the independent side of a comparison."
-    );
-  }
-  const out = jsonPath || `${rejudgePath}.${judge.id}.verdicts.jsonl`;
-  ensureDirectory(out);
-  const digest = bundleDigest(parsed);
-  writeFileSync(
-    out,
-    `${JSON.stringify({
-      kind: "header",
-      judge: identity,
-      bundleDigest: digest,
-      bundlePath: rejudgePath,
-      answerIdentities,
-      // Carried through from the bundle so a calibration built from two
-      // verdict files can say which set the answers came from and whether the
-      // run that produced them finished, without holding the bundle.
-      bundleMode: parsed.header.mode,
-      evaluationSetVersion: parsed.header.evaluationSetVersion,
-      evaluationSetPurpose: parsed.header.evaluationSetPurpose,
-      bundlePairs: parsed.entries.length,
-      bundlePlannedItems: parsed.header.plannedItems,
-      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
-      rejudgedAt: new Date().toISOString(),
-      commitSha,
-    })}\n`,
-    "utf8"
-  );
-  console.log(`Re-judging ${parsed.entries.length} pair(s) from ${rejudgePath} with ${judge.id}`);
-  let graded = 0;
-  for (const [index, pair] of parsed.entries.entries()) {
-    let text;
-    try {
-      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text));
-      text = judgement.text;
-    } catch (error) {
-      console.log(`\n  ${pair.pairId}: judge failed — ${String(error)}`);
-      continue;
-    }
-    const verdictWord = readVerdict(text);
-    if (verdictWord === null) {
-      console.log(`\n  ${pair.pairId}: no recognisable verdict`);
-      continue;
-    }
-    // Back to arm terms, using the order the bundle fixed rather than a
-    // position this pass chose.
-    const firstArm = pair.first.arm;
-    const arm =
-      verdictWord === "equivalent"
-        ? "equivalent"
-        : (verdictWord === "first") === (firstArm === "auto")
-          ? "auto"
-          : "baseline";
-    appendFileSync(out, `${JSON.stringify({ kind: "verdict", pairId: pair.pairId, verdict: arm })}\n`, "utf8");
-    graded += 1;
-    process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
-    if (graded % 10 === 0 || index === parsed.entries.length - 1) {
-      console.log(`  ${graded}/${parsed.entries.length}  $${accruedCostUsd.toFixed(4)}`);
-    }
-  }
-  console.log(`\nWrote ${out} — ${graded} verdict(s), $${accruedCostUsd.toFixed(4)}`);
-  process.exit(graded === parsed.entries.length ? 0 : 1);
-}
 
 const routerInputFor = (item) => {
   const reservedInputTokens = estimateRawTextTokens(item.prompt);
@@ -1169,6 +1230,50 @@ if (jsonPath) {
   ensureDirectory(jsonPath);
   writeFileSync(jsonPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   console.log(`\nWrote ${jsonPath}`);
+}
+
+// This run's own verdicts, in the format --rejudge writes, so calibrating
+// against an independent judge does not mean paying this judge a second time
+// to say what it has already said. The verdicts are the ones above -- same
+// answers, same fixed order, same rubric -- and the file is only citable
+// against the bundle whose digest it carries.
+if (bundlePath && existsSync(bundlePath)) {
+  const parsed = parseAnswerBundle(readFileSync(bundlePath, "utf8"));
+  const out = `${bundlePath}.${judgeModel.id}.verdicts.jsonl`;
+  const judged = pairs.filter((pair) => pair.outcome?.status === "judged");
+  writeFileSync(
+    out,
+    [
+      JSON.stringify({
+        kind: "header",
+        judge: {
+          modelId: judgeModel.id,
+          provider: judgeModel.provider,
+          apiModel: judgeModel.apiModel,
+        },
+        bundleDigest: bundleDigest(parsed),
+        bundlePath,
+        answerIdentities: bundleAnswerIdentities(parsed),
+        bundleMode: parsed.header.mode,
+        evaluationSetVersion: parsed.header.evaluationSetVersion,
+        evaluationSetPurpose: parsed.header.evaluationSetPurpose,
+        bundlePairs: parsed.entries.length,
+        bundlePlannedItems: parsed.header.plannedItems,
+        judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+        // Not a rejudge: these verdicts were produced by the run itself.
+        judgedDuringRun: true,
+        rejudgedAt: startedAt,
+        commitSha,
+      }),
+      ...judged.map((pair) =>
+        JSON.stringify({ kind: "verdict", pairId: pair.itemId, verdict: pair.outcome.verdict })
+      ),
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  console.log(
+    `Wrote ${out} — ${judged.length} verdict(s) over ${parsed.entries.length} bundled pair(s).`
+  );
 }
 
 // A run that produced no verdict exits non-zero, so a scheduled invocation

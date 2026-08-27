@@ -147,6 +147,22 @@ export type CalibrationResult = {
 export const DEFAULT_RESAMPLES = 10_000;
 
 /**
+ * How much of the bundle a calibration may fail to cover.
+ *
+ * A judge that returns nothing parseable on a pair leaves it out of that
+ * pass, and the comparison is over the pairs both judges graded. That is a
+ * structural shortfall rather than one selected on the answers -- the same
+ * distinction lib/routerHumanReviewSample.ts draws for a reserve -- so it is
+ * tolerated and disclosed rather than refused outright.
+ *
+ * The bound is the exclusion ceiling
+ * docs/ops/tomverse-chat-router-evaluation-set.md §9 already refuses a report
+ * for, reused rather than invented: past 5% the survivors are the pairs the
+ * judges managed to grade, and that is a population nobody chose.
+ */
+export const CALIBRATION_MIN_COVERAGE = 0.95;
+
+/**
  * Compare two passes over the same bundle.
  *
  * Callers check `calibrationProblems` first: this computes what it is given
@@ -349,10 +365,16 @@ export const calibrationArtefactProblems = (
     const pairs = record.pairs;
     if (typeof pairs !== "number" || pairs <= 0) {
         problems.push("the calibration graded no pairs");
-    } else if (typeof bundlePairs === "number" && pairs < bundlePairs) {
+    } else if (
+        typeof bundlePairs === "number" &&
+        bundlePairs > 0 &&
+        pairs < bundlePairs * CALIBRATION_MIN_COVERAGE
+    ) {
         problems.push(
-            `only ${pairs} of the bundle's ${bundlePairs} pair(s) carry both judges' verdicts, so the ` +
-                "comparison is over a subset selected by which pairs both judges could grade"
+            `only ${pairs} of the bundle's ${bundlePairs} pair(s) carry both judges' verdicts ` +
+                `(${((pairs / bundlePairs) * 100).toFixed(1)}%, under the ` +
+                `${(CALIBRATION_MIN_COVERAGE * 100).toFixed(0)}% floor), so the comparison is over ` +
+                "the pairs the judges managed to grade rather than over the bundle"
         );
     } else if (typeof bundlePairs === "number" && pairs > bundlePairs) {
         problems.push(
