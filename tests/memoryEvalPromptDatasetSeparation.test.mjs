@@ -22,7 +22,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { MEMORY_EVAL_SUCCESSOR_CASES } from "../lib/memoryEvalSuccessorFixtures.ts";
+import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
 import { buildExtractionPrompt } from "../lib/memoryExtractionPrompt.ts";
 
 /** Punctuation and case carry no meaning for a lifted phrase. */
@@ -51,7 +51,7 @@ const promptText = () => {
 test("no case utterance appears in the prompt", () => {
     const prompt = promptText();
     const leaks = [];
-    for (const testCase of MEMORY_EVAL_SUCCESSOR_CASES) {
+    for (const testCase of MEMORY_EVAL_SUCC3_CASES) {
         for (const conversation of testCase.conversations) {
             for (const message of conversation.messages) {
                 // Assistant turns are this repository's own writing and are
@@ -79,7 +79,7 @@ test("the check would catch a lifted example", () => {
     // A guard that cannot fail is not a guard. This asserts the mechanism on
     // a real utterance rather than trusting that the empty result above means
     // the comparison ran.
-    const [sample] = MEMORY_EVAL_SUCCESSOR_CASES.flatMap((testCase) =>
+    const [sample] = MEMORY_EVAL_SUCC3_CASES.flatMap((testCase) =>
         testCase.conversations
             .flatMap((conversation) => conversation.messages)
             .filter((message) => message.role === "user")

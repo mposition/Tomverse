@@ -26,6 +26,8 @@ import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.
  */
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
+
 const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
 const NETWORK_GUARD = fileURLToPath(
     new URL("./e2e/block-external-network.cjs", import.meta.url)
@@ -437,17 +439,23 @@ test("a smoke run completes without touching the network", () => {
 });
 
 test("a smoke run that passes every rule still says it proves nothing", () => {
-    // The dangerous shape now that the floor is met and the dataset is frozen:
-    // a stub agreeing with itself prints "Every §12.3 rule passed", and without
-    // the caveat beside it that reads like a decision-grade result. The freeze
-    // removed the second disclaimer this test used to lean on ("not frozen"),
-    // which makes the first one load-bearing -- so it is asserted on its own,
-    // beside the dataset line that now reads `decision, frozen`.
+    // The dangerous shape once the floor is met: a stub agreeing with itself
+    // prints "Every §12.3 rule passed", and without the caveat beside it that
+    // reads like a decision-grade result. The caveat is asserted on its own
+    // rather than leaning on the "not frozen" disclaimer beside it, because
+    // that disclaimer comes and goes with the current target's freeze state --
+    // it was absent while succ-2 was the target and is back while succ-3 is
+    // being authored. A caveat that only appears for an unfrozen dataset is
+    // exactly the wrong way round.
     const result = runHarness([]);
     assert.match(result.output, /SMOKE RUN — NOT an eval result/);
     assert.match(result.output, /No provider was called/);
-    assert.match(result.output, /\(decision, frozen\)/);
-    assert.doesNotMatch(result.output, /not frozen/);
+    assert.match(
+        result.output,
+        MEMORY_EVAL_SUCC3_DATASET_FROZEN
+            ? /\(decision, frozen\)/
+            : /\(decision, not frozen\)/
+    );
 });
 
 /* ---------------------------------------------------------------- static -- */

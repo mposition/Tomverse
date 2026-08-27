@@ -49,6 +49,8 @@ import { MEMORY_EVAL_CASES } from "@/lib/memoryExtractionEvalFixtures";
 import { ADOPTED_BATCHES } from "@/lib/memoryExtractionEvalAdopted";
 import { MEMORY_EVAL_SUCCESSOR_CASES } from "@/lib/memoryEvalSuccessorFixtures";
 import { SUCCESSOR_ADOPTED_BATCHES } from "@/lib/memoryEvalSuccessorAdopted";
+import { MEMORY_EVAL_SUCC3_CASES } from "@/lib/memoryEvalSucc3Fixtures";
+import { SUCC3_ADOPTED_BATCHES } from "@/lib/memoryEvalSucc3Adopted";
 
 /**
  * The artifact envelope version this tree writes.
@@ -78,6 +80,11 @@ export const EVAL_DATASET_COMPOSITIONS: Readonly<
         schemaVersion: 2,
         batches: SUCCESSOR_ADOPTED_BATCHES,
         cases: MEMORY_EVAL_SUCCESSOR_CASES,
+    },
+    "mem-eval-succ-3": {
+        schemaVersion: 2,
+        batches: SUCC3_ADOPTED_BATCHES,
+        cases: MEMORY_EVAL_SUCC3_CASES,
     },
 };
 

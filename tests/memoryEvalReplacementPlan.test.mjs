@@ -115,19 +115,23 @@ test("each replacement exists, is new, and sits in its original's cell", () => {
     assert.equal(REPLACEMENTS.length, 99, "there are replacements nobody planned");
 });
 
-test("provenance stays unfilled until the wiring happens", () => {
-    // The separation test reads `replacementId !== null` as "this case has
-    // left the decision set". Filling it in early would claim a migration
-    // that has not happened, and the two checks would disagree about the
-    // state of the corpus.
-    const filled = MEMORY_EVAL_REGRESSION_PROVENANCE.filter(
-        (entry) => entry.replacementId !== null
+test("provenance and the plan name the same replacement for every case", () => {
+    // Until 2026-08-27 this asserted the opposite: `replacementId` had to be
+    // null, because the separation test reads a non-null value as "this case
+    // has left the decision set" and it had not. The wiring flipped both in
+    // one change, so what is worth checking now is that the two lists did not
+    // drift while being filled from each other.
+    const planned = new Map(
+        MEMORY_EVAL_REPLACEMENT_PLAN.map((e) => [e.originalId, e.replacementId])
     );
-    assert.deepEqual(
-        filled.map((entry) => entry.originalId),
-        [],
-        "a provenance entry claims a replacement while its case is still in the decision set"
-    );
+    assert.equal(MEMORY_EVAL_REGRESSION_PROVENANCE.length, planned.size);
+    for (const entry of MEMORY_EVAL_REGRESSION_PROVENANCE) {
+        assert.equal(
+            entry.replacementId,
+            planned.get(entry.originalId),
+            `${entry.originalId}: provenance and plan disagree`
+        );
+    }
 });
 
 /* ------------------------------------------------------- the successors -- */

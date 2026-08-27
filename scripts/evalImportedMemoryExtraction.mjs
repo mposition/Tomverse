@@ -46,12 +46,16 @@ import {
 // refused it with `legacy_dataset_schema` before any provider was reached,
 // which is what fail-closed is for. But a funded pair that cannot run is a
 // trap of its own, so the harness moves rather than the gate.
+// Moved from succ-2 to succ-3 on 2026-08-27. The harness is pinned to one
+// approved target on purpose -- there is no reason to make an arbitrary past
+// dataset billable -- and reading a past one is `resolveArtifactDataset`'s
+// job, which needs no provider and cannot spend.
 import {
-    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
-    MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN as MEMORY_EVAL_DATASET_FROZEN,
-    MEMORY_EVAL_SUCCESSOR_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
-    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryEvalSuccessorFixtures.ts";
+    MEMORY_EVAL_SUCC3_CASES as MEMORY_EVAL_CASES,
+    MEMORY_EVAL_SUCC3_DATASET_FROZEN as MEMORY_EVAL_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC3_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC3_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
+} from "../lib/memoryEvalSucc3Fixtures.ts";
 // The artifact envelope version and the second digest. The harness stays
 // pinned to the approved current target -- there is no need to make an
 // arbitrary past dataset billable -- but what it writes has to say which
@@ -253,6 +257,13 @@ if (duplicates.length > 0) {
  * say nothing about the pipeline, and a smoke run that always shows failures
  * trains its reader to ignore the counters that matter most.
  *
+ * The statement satisfies `mustIncludeAny` as well as `mustInclude`, for the
+ * same reason. A correct extractor answering a gold that states a polarity
+ * writes that polarity; a stub that wrote only the conjunction misses its own
+ * gold, and on 2026-08-27 that reported 14 critical bulk-safe adoptions on
+ * `mem-eval-succ-3` — one per `mustIncludeAny` gold in a critical category,
+ * and none of them about the pipeline.
+ *
  * Evidence cites the first user message: the label map decides the role, so a
  * smoke answer cannot smuggle assistant-only evidence past the validator.
  */
@@ -260,7 +271,10 @@ const smokeAdapter = (testCase) => async () => ({
     output: {
         candidates: testCase.expected.map((expected) => ({
             kind: expected.kind,
-            statement: `The user's record: ${expected.mustInclude.join(" ")}.`,
+            statement: `The user's record: ${[
+                ...expected.mustInclude,
+                ...(expected.mustIncludeAny ?? []).slice(0, 1),
+            ].join(" ")}.`,
             confidence: 0.9,
             sensitivity:
                 expected.expectedDisposition === "sensitive_review"

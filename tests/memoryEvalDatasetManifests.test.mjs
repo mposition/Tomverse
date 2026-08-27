@@ -6,10 +6,11 @@ import {
     evalDatasetManifest,
     verifyEvalDatasetManifest,
 } from "../lib/memoryEvalDatasetManifests.ts";
-import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
-import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
+import { EVAL_DATASET_COMPOSITIONS } from "../lib/memoryEvalDatasetRegistry.ts";
 import { MEMORY_EVAL_SUCCESSOR_CASES } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
+import { MEMORY_EVAL_CASES } from "../lib/memoryExtractionEvalFixtures.ts";
+import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
 import {
     MEMORY_EVAL_CATEGORIES,
     MEMORY_EVAL_LANGUAGES,
@@ -28,18 +29,10 @@ import {
  * needs a NEW version with a NEW entry (docs/ops/memory-extraction-eval-dataset.md §7.3).
  */
 
-const COMPOSITIONS = {
-    "mem-eval-seed-11": {
-        schemaVersion: 1,
-        batches: ADOPTED_BATCHES,
-        cases: MEMORY_EVAL_CASES,
-    },
-    "mem-eval-succ-2": {
-        schemaVersion: 2,
-        batches: SUCCESSOR_ADOPTED_BATCHES,
-        cases: MEMORY_EVAL_SUCCESSOR_CASES,
-    },
-};
+// Read from the registry rather than restated: a manifest recorded for a
+// version the registry cannot supply cases for would otherwise be verified
+// against a second, hand-kept copy of the same composition.
+const COMPOSITIONS = EVAL_DATASET_COMPOSITIONS;
 
 const verify = (version, composition) =>
     verifyEvalDatasetManifest(
@@ -68,7 +61,7 @@ test("every manifest recomputes exactly from the live tree", (t) => {
                 `${manifest.batches.length} batches, contract ${result.scoringContract}`
         );
     }
-    assert.equal(MEMORY_EVAL_DATASET_MANIFESTS.length, 2);
+    assert.equal(MEMORY_EVAL_DATASET_MANIFESTS.length, 3);
 });
 
 test("the scoring contract is checked where it applies and skipped where it cannot", () => {
