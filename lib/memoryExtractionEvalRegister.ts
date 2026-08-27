@@ -337,6 +337,49 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evalBudget: null,
             evaluation: null,
         },
+        {
+            // v5 carries the five rules frozen in
+            // `.github/audits/memory-eval-kind-boundary-amendment-2026-08-27.md`
+            // (approved 2026-08-27) after run1 measured all 1,150 cases and
+            // failed: precision 0.720, recall 0.797, and 49 critical
+            // bulk-safe adoptions against a gate of zero.
+            //
+            // **No budget, deliberately.** v4's US$15 stays with v4. This
+            // file states the rule twice already and a third case does not
+            // weaken it: a budget does not travel with a version bump, and a
+            // re-run on a new prompt is exactly what it exists for. The
+            // approval on 2026-08-27 covered the wording and the case
+            // verdicts and said outright that it did not cover this.
+            //
+            // **Smoke mode only until a person records one**, which is what
+            // `decideEvalRunMode` enforces — so nothing here can spend before
+            // that entry exists.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v5",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-27",
+            notes:
+                "Carries the five rules frozen on 2026-08-27 after run1 " +
+                "(run 32972243326, mem-eval-succ-2). No budget; smoke mode " +
+                "only until a person records one. A run on this pair also " +
+                "needs mem-eval-succ-3, which is not frozen yet.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
+            // §12.5 backup candidate for v5, on the same terms as v4's.
+            extractionModelId: "gpt-5-4-mini",
+            promptVersion: "mem-extract-v5",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-27",
+            notes:
+                "Backup candidate. No budget; smoke mode only until a person " +
+                "records one.",
+            evalBudget: null,
+            evaluation: null,
+        },
     ];
 
 /** §12.3 acceptance thresholds — the register check re-verifies them. */

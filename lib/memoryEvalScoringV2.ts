@@ -52,6 +52,7 @@ import {
     type MemoryEvalLanguage,
     type SampleAdequacy,
 } from "@/lib/memoryExtractionEvalCore";
+import { normalizeEvalToken } from "@/lib/memoryEvalDatasetSchema";
 import type {
     ExpectedMemoryV2,
     MemoryEvalCaseV2,
@@ -108,11 +109,12 @@ export type CaseOutcomeV2 = {
     failure: string | null;
 };
 
-const normalize = (value: string): string =>
-    value.normalize("NFC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+/** One definition, shared with the validator that rejects duplicate tokens. */
+const normalize = normalizeEvalToken;
 
 /**
- * Exact kind equality plus every `mustInclude` token.
+ * Exact kind equality, every `mustInclude` token, and — when the gold states
+ * one — at least one `mustIncludeAny` alternative.
  *
  * Unchanged from v1 on purpose: the amendment explicitly kept exact kind
  * matching, because relaxing it would let a memory stored under the wrong
@@ -124,7 +126,19 @@ export const matchesExpectedV2 = (
 ): boolean => {
     if (candidate.kind !== expected.kind) return false;
     const statement = normalize(candidate.statement);
-    return expected.mustInclude.every((token) =>
+    if (
+        !expected.mustInclude.every((token) =>
+            statement.includes(normalize(token))
+        )
+    ) {
+        return false;
+    }
+    // Absent means unchanged: every gold written before this field keeps the
+    // score it had. Present, it is a disjunction, and its whole job is
+    // polarity — see `mustIncludeAny` in the schema for why a conjunction
+    // cannot state that.
+    if (expected.mustIncludeAny === undefined) return true;
+    return expected.mustIncludeAny.some((token) =>
         statement.includes(normalize(token))
     );
 };

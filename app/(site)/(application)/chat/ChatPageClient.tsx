@@ -506,6 +506,20 @@ type GlobalSubmitOptions = {
    * dispatch attaches the tool.
    */
   webSearchOverride?: WebSearchToggleMode;
+  /**
+   * The models this one send is for, when that is not the whole selection.
+   *
+   * The expansion offered under a finished answer is the case this exists for:
+   * the user already has the ordinary answers and asked for a deeper pass, so
+   * sending their question to the other panels again would re-run work they
+   * have, and bill for it -- the card quotes Deep Research's price, not that
+   * plus everyone else's. `promptPayload.modelIds` already contracts that a
+   * panel outside the list "was not part of this send and must not answer it".
+   *
+   * The composer's setup sheet does NOT pass this. There the user typed a new
+   * question, so every selected model answering it is the point.
+   */
+  overrideModelIds?: readonly string[];
 };
 
 export function ChatPageClient({
@@ -3660,9 +3674,23 @@ export function ChatPageClient({
       // Resolved before the preflight, not after it: the preflight prices this
       // set and hands back the admission slots for it, so it has to be asked
       // about the same models the send will name.
-      const activeModelIds = sendSelectedModels.filter(
+      // Narrowed to the caller's set when there is one, and still filtered by
+      // the paused panels and by what is actually selected -- an override may
+      // name only models this conversation holds, never add one to the send
+      // that the selection, the plan check and the model settings barrier did
+      // not already agree on.
+      const requestedModelIds = options?.overrideModelIds
+        ? sendSelectedModels.filter((modelId) =>
+            options.overrideModelIds!.includes(modelId)
+          )
+        : sendSelectedModels;
+      const activeModelIds = requestedModelIds.filter(
         (modelId) => !sendDisabledPanels.includes(modelId)
       );
+      // An override that matched nothing would otherwise send to no model at
+      // all: the preflight would price an empty set and the turn would sit
+      // unanswered. Abandon instead, leaving the answers already on screen.
+      if (!activeModelIds.length) return;
       const preflight = await runComparisonPreflight({
         comparisonId,
         conversationId: activeChatId,
@@ -4794,16 +4822,20 @@ export function ChatPageClient({
      * longer contains.
      */
     text?: string;
+    /** Carried across the selection change, so the deferred send narrows too. */
+    overrideModelIds?: readonly string[];
   } | null>(null);
 
   useEffect(() => {
     if (!pendingDeepResearchSubmitRef.current) return;
     if (!selectedModels.includes(DEEP_RESEARCH_MODEL_ID)) return;
-    const { depth, text } = pendingDeepResearchSubmitRef.current;
+    const { depth, text, overrideModelIds } =
+      pendingDeepResearchSubmitRef.current;
     pendingDeepResearchSubmitRef.current = null;
     void handleGlobalSubmitRef.current({
       deepResearchDepth: depth,
       ...(text ? { overrideText: text } : {}),
+      ...(overrideModelIds ? { overrideModelIds } : {}),
     });
   }, [selectedModels]);
 
@@ -4820,15 +4852,34 @@ export function ChatPageClient({
    * once: select the model if it is not selected, then send. The expansion is
    * not a second workflow and not a model-id swap; it is this, with the
    * question supplied instead of read from the draft.
+   *
+   * What the two do NOT share is who answers. `origin` carries that, rather
+   * than the presence of `text`: the composer happening to omit the question
+   * is not the reason its other models should answer, and reading it that way
+   * would tie a billing decision to an argument that means something else.
    */
   const startDeepResearch = ({
     depth,
     text,
+    origin,
   }: {
     depth: "quick" | "standard" | "deep";
     /** Omitted by the composer path, which sends the current draft. */
     text?: string;
+    origin: "composer" | "expansion";
   }) => {
+    /*
+      The expansion sends to Deep Research alone. The user is looking at the
+      ordinary answers and asked for a deeper pass on the same question, so
+      re-running the other panels would bill them again for work already on
+      screen -- and the card quoted Deep Research's price, not that plus every
+      other selected model's.
+
+      The composer's setup sheet passes nothing: there the question is new, and
+      every selected model answering it is what a comparison is.
+    */
+    const overrideModelIds =
+      origin === "expansion" ? [DEEP_RESEARCH_MODEL_ID] : undefined;
     setIsDeepResearchPending(true);
     trackProductEvent("deep_research_started", activeModelCount, {
       deep_research_depth: depth,
@@ -4837,10 +4888,15 @@ export function ChatPageClient({
       void handleGlobalSubmitRef.current({
         deepResearchDepth: depth,
         ...(text ? { overrideText: text } : {}),
+        ...(overrideModelIds ? { overrideModelIds } : {}),
       });
       return;
     }
-    pendingDeepResearchSubmitRef.current = { depth, ...(text ? { text } : {}) };
+    pendingDeepResearchSubmitRef.current = {
+      depth,
+      ...(text ? { text } : {}),
+      ...(overrideModelIds ? { overrideModelIds } : {}),
+    };
     if (selectedModels.length < maxSelectableModels) {
       toggleModel(DEEP_RESEARCH_MODEL_ID);
       return;
@@ -4889,7 +4945,7 @@ export function ChatPageClient({
   const confirmDeepResearchSetup = (depth: "quick" | "standard" | "deep") => {
     if (!inputValue.trim()) return;
     setIsDeepResearchSetupOpen(false);
-    startDeepResearch({ depth });
+    startDeepResearch({ depth, origin: "composer" });
   };
 
   const handleModelFinderComplete = ({
@@ -5440,6 +5496,7 @@ export function ChatPageClient({
       startDeepResearchRef.current({
         depth: DEEP_RESEARCH_DEFAULT_DEPTH,
         text: turn.text,
+        origin: "expansion",
       });
     },
     [

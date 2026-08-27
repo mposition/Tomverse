@@ -33,6 +33,8 @@ const FINGERPRINTS = {
     "mem-extract-v3": "fdba01bfe18f2cf29a656cc255aad57df7e041360d717cf6aa824e625698eec7",
     "mem-extract-v4":
         "1223dd184292c56d71672ce4af0985a2fd0d0c8a5a3caedb0853c114857a244f",
+    "mem-extract-v5":
+        "7bb6b27abce3f29dee70f4defd24d8a65175d7a17ab2b9e8d3846ebcc76de281",
 };
 
 test("the shipped version matches its recorded fingerprint", () => {
