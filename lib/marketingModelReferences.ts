@@ -30,9 +30,32 @@ export const CHATGPT_VS_CLAUDE_MODEL_IDS = [
     "claude-haiku-4-5",
 ] as const;
 
+/**
+ * The trio named inside the landing page's two product screenshots.
+ *
+ * A screenshot is a frozen artifact, so it is the surface where a retirement
+ * does the most damage and shows the least: the model's name stays legible in
+ * a PNG long after the picker stops offering it, and nothing in the build
+ * notices. That is not hypothetical here. The 2026-07-30 audit retired a
+ * walkthrough recording for exactly this class of drift, and the recording had
+ * no guard either.
+ *
+ * These ids must stay in step with `reviewModels` in
+ * `tests/e2e/support/comparison-review-fixtures.ts`, which is what the capture
+ * generator (`tests/e2e/marketing-capture.spec.ts`) actually renders.
+ */
+export const LANDING_CAPTURE_MODEL_IDS = [
+    "gpt-5-4-mini",
+    "claude-haiku-4-5",
+    "gemini-2-5-flash",
+] as const;
+
 /** Every model id a public marketing page names. */
 export const MARKETING_REFERENCED_MODEL_IDS: readonly string[] = Array.from(
-    new Set<string>([...CHATGPT_VS_CLAUDE_MODEL_IDS])
+    new Set<string>([
+        ...CHATGPT_VS_CLAUDE_MODEL_IDS,
+        ...LANDING_CAPTURE_MODEL_IDS,
+    ])
 );
 
 export type UnsellableMarketingModel = {
