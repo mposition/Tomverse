@@ -167,6 +167,8 @@ const mockChatAndDeepResearch = async (page: Page) => {
     releaseChatAnswer: () => releaseChatAnswer?.(),
     deepResearchRequests: () =>
       requests.filter((request) => request.modelId === DEEP_RESEARCH_MODEL_ID),
+    ordinaryRequests: () =>
+      requests.filter((request) => request.modelId !== DEEP_RESEARCH_MODEL_ID),
   };
 };
 
@@ -463,4 +465,72 @@ test("cancelling the cap dialog abandons the run and keeps every model", async (
   expect(chat.deepResearchRequests()).toHaveLength(0);
   expect(selectionWrites).toHaveLength(writesBefore);
   await expect(page.getByText(CHAT_ANSWER).first()).toBeAttached();
+});
+
+/**
+ * The expansion asks Deep Research, and only Deep Research.
+ *
+ * It used to send to every selected model, so the panels the user was reading
+ * answered the same question a second time -- work they already had, billed
+ * again, against a card that had quoted Deep Research's price alone. The send
+ * pipeline already contracts this: `promptPayload.modelIds` says a panel
+ * outside the list "was not part of this send and must not answer it".
+ *
+ * The composer's setup sheet keeps the old behaviour, and the case below it
+ * pins that difference -- a new question there is a question for the whole
+ * comparison.
+ */
+test("expanding asks only Deep Research, not the models already answered", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const chat = await openChat(page, { selectedModels: [CHAT_MODEL_ID] });
+
+  await sendChatMessage(page, testInfo, RESEARCH_QUESTION);
+  chat.releaseChatAnswer();
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible({ timeout: 30_000 });
+  await expect(card(page)).toBeVisible({ timeout: 15_000 });
+
+  const ordinaryBefore = chat.ordinaryRequests().length;
+  expect(ordinaryBefore).toBe(1);
+
+  await page.getByTestId("deep-research-suggestion-expand").click();
+
+  await expect
+    .poll(() => chat.deepResearchRequests().length, { timeout: 30_000 })
+    .toBe(1);
+  // The pause is for a request that must not arrive: the chat model has
+  // already answered, and the expansion is not a reason to ask it again.
+  await page.waitForTimeout(1_500);
+  expect(chat.ordinaryRequests()).toHaveLength(ordinaryBefore);
+
+  // And the answer it gave is still the one on screen.
+  await expect(page.getByText(CHAT_ANSWER).first()).toBeVisible();
+});
+
+test("the composer's own deep research still asks every selected model", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const chat = await openChat(page, { selectedModels: [CHAT_MODEL_ID] });
+  await page.goto("/chat?lang=en");
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+
+  // Straight to the setup sheet, with a question of its own -- no expansion
+  // card involved.
+  await page.getByTestId("chat-textarea").fill(RESEARCH_QUESTION);
+  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("tools-deep-research-row").click();
+  await page.getByTestId("deep-research-depth-standard").click();
+  await page.getByTestId("deep-research-confirm-start").click();
+  await expect(page.getByTestId("deep-research-confirm-start")).toHaveCount(0);
+
+  // Both answer: the question is new, so the comparison is the point.
+  await expect
+    .poll(() => chat.deepResearchRequests().length, { timeout: 30_000 })
+    .toBe(1);
+  await expect
+    .poll(() => chat.ordinaryRequests().length, { timeout: 30_000 })
+    .toBe(1);
+  chat.releaseChatAnswer();
 });
