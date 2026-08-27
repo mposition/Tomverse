@@ -75,6 +75,17 @@ const checkSet = (path) => {
   // decision set without carrying a decision set's records.
   const problems = [...evalSetProblems(set)];
 
+  // Refused here rather than in cellFill, which reaches for set.items and
+  // takes the whole check down with a stack trace that says nothing about
+  // which file or what to do with it.
+  if (!Array.isArray(set.items)) {
+    report(path, [
+      "has no items array, so it is not an evaluation set. Every .json under " +
+        `${SET_DIRECTORY} is read as one; records that are not belong elsewhere.`,
+    ]);
+    return;
+  }
+
   // Duplicate IDS are caught by evalSetProblems; duplicate TEXT is not, and it
   // is the one that matters here. The same prompt under two ids is one item
   // counted twice, which inflates a cell towards its target without adding
@@ -269,6 +280,11 @@ if (setPath) {
   checkSet(setPath);
 } else if (existsSync(SET_DIRECTORY)) {
   console.log("Evaluation sets");
+  // Every .json here is read as an evaluation set. A file that is not one
+  // reaches `cellFill` with no items and takes the whole check down with a
+  // stack trace, which says nothing about what to do; `checkSet` refuses it
+  // with a sentence instead. Non-set records belong in their own directory --
+  // see docs/ops/router-decision-preregistration/.
   const files = readdirSync(SET_DIRECTORY).filter((name) => name.endsWith(".json"));
   if (files.length === 0) {
     console.log(`  none committed under ${SET_DIRECTORY}`);

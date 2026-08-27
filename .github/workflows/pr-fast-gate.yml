@@ -325,6 +325,14 @@ jobs:
       - name: Router human review draws
         timeout-minutes: 5
         run: npm run check:router-human-review
+      # `n` is fixed before the decision run and conditional on the judge
+      # calibration. The failure this catches is the one nobody does on
+      # purpose: a borderline result, a true observation that the pilot's
+      # discordance estimate was noisy, and `n` revised in place. The file
+      # still reads as a pre-registration afterwards.
+      - name: Router decision pre-registration
+        timeout-minutes: 5
+        run: npm run check:router-decision-preregistration
       # PACKAGE-01. The shared packages are the mechanism that stops the web
       # app and the native shell from becoming two products; that only holds
       # while the shared half runs unchanged in all three environments. The

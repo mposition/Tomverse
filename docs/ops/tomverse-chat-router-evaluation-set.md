@@ -99,6 +99,32 @@ all strata, observe the discordance, then compute and pre-register the final
 `n` before collecting the rest. Sizing after seeing the full result is how a
 sample size becomes an outcome that was chosen rather than measured.
 
+### The pre-registered `n`
+
+The 2026-08-27 pilot measured 78.1% discordance over 210 pairs, which sizes a
+decision set at roughly 7,500 for ±2pp, 3,334 for ±3pp and 1,875 for ±4pp.
+mposition chose **±3pp**: ±2pp is more than this stage needs, and ±4pp leaves a
+borderline result undecidable. `n` is 223 per cell across the 15 cells —
+**3,345**, rather than 3,334, for the same precision with no cell carrying a
+remainder.
+
+It is committed at
+`docs/ops/router-decision-preregistration/v1.json` and it is
+**pending**, conditional on the judge calibration being accepted. A decision
+run against a pending registration is refused, as is one whose
+`--preregistered-n` is not the registered number, and the registration binds to
+the Router versions, the selection policy version and the decision corpus
+digest it was frozen against — a Router that decides differently is a different
+experiment wearing the same `n`.
+
+If the calibration comes back outside the acceptable range, or the Router
+changes, that registration is **voided and a new one frozen before collecting**.
+It is not edited: `npm run check:router-decision-preregistration` refuses a
+change to `n` under a version that has already been published, because a
+borderline result and a true observation that the pilot's estimate was noisy
+are exactly what would motivate one, and the file would still read as a
+pre-registration afterwards.
+
 Three ways to reduce the required `n`, to be decided at pilot time rather than
 mid-analysis:
 
@@ -251,6 +277,13 @@ npm run eval:router-quality -- --mode=decision \
   --judge=<model id> --seed=<integer> --preregistered-n=<n> --use-index=1 \
   --calibration=calibration.json --json=decision.json
 ```
+
+What each of those stages costs, fitted to the pilot that actually ran and
+checked against its own total, is in
+`docs/ops/tomverse-chat-router-calibration-cost.md`, with the
+`--max-cost-usd` guard recommended for each. A run stopped at its cost ceiling
+is refused as a calibration source, so those guards are set to catch a runaway
+rather than to cap a budget.
 
 `--mode=judge-bias` still runs and still prints its number as a diagnostic, but
 `--judge-bias=<path>` is refused outright: an artefact nobody may cite is not

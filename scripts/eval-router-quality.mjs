@@ -48,6 +48,9 @@
 //   ... --limit=50            stop after this many items
 //   ... --max-cost-usd=5      stop once this much provider cost has accrued
 //   ... --use-index=1         decision mode: which use of the decision set this is
+//   ... --preregistration=<path>
+//                            decision mode: the frozen `n` and what it is
+//                            conditional on. Refused while pending.
 //   ... --calibration=<path>  decision mode: the artefact from
 //                            --mode=judge-calibration, checked against this run
 //                            before anything is sent
@@ -74,6 +77,7 @@ import {
   calibrationArtefactProblems,
   calibrationProblems,
 } from "../lib/routerJudgeCalibration.ts";
+import { decisionRunProblems } from "../lib/routerDecisionPreRegistration.ts";
 import { dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -141,6 +145,7 @@ const verdictPaths = process.argv
   .map((argument) => argument.slice("--verdicts=".length));
 const limit = Number(argValue("limit", "0")) || 0;
 const calibrationPath = argValue("calibration", "");
+const preRegistrationPath = argValue("preregistration", "");
 const legacyBiasPath = argValue("judge-bias", "");
 const useIndex = Number(argValue("use-index", "0")) || 0;
 const preRegisteredN = Number(argValue("preregistered-n", "0")) || 0;
@@ -382,6 +387,30 @@ if (mode === "decision") {
       "--use-index is required in decision mode. §7: every look at the decision set costs a use, " +
         "and a second run against the same frozen set reports how well the Router fits its own test set."
     );
+  }
+  if (!preRegistrationPath) {
+    die(
+      "--preregistration=<path> is required in decision mode. `n` is fixed before the run and\n" +
+        "conditional on things that have to have happened; the file says which, and the run is\n" +
+        "refused until they have."
+    );
+  }
+  {
+    // Checked before anything is sent. A decision run that discovers its `n`
+    // was never activated has paid for a report nobody can cite.
+    const registration = JSON.parse(readFileSync(preRegistrationPath, "utf8"));
+    const trouble = decisionRunProblems(registration, {
+      preRegisteredN: preRegisteredN,
+      routerVersions: ROUTER_VERSIONS,
+      corpusDigest: evaluationSet.frozenDigest,
+    });
+    if (trouble.length > 0) {
+      die(
+        `\n${preRegistrationPath} does not authorise this run:\n\n` +
+          trouble.map((problem) => `  - ${problem}`).join("\n") +
+          "\n\nNothing was sent and nothing was billed."
+      );
+    }
   }
   if (judgeIsRoutable) {
     if (!judgeCalibration) {
