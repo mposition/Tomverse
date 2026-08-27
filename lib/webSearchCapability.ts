@@ -18,7 +18,34 @@
 // Chat Completions without those server tools, so their models intentionally
 // remain unsupported here.
 
-export type WebSearchSupport = "native" | "search-model" | "unsupported" | "unverified";
+import {
+  APP_MANAGED_SEARCH_LIMITS,
+  isWebSearchBackendReady,
+  type WebSearchBackend,
+  type WebSearchBackendReadiness,
+} from "@/lib/webSearchBackends";
+
+export type WebSearchSupport =
+  /** The model's own provider ships the search tool and runs it. */
+  | "native"
+  /**
+   * Tomverse runs the search: a plain function tool this application executes
+   * against a backend it holds the connection to.
+   *
+   * Its own value rather than a flavour of `native`, because every question a
+   * caller asks about it has a different answer. A native search is bounded by
+   * a parameter the provider honours, billed by the provider on the model's
+   * invoice, cited by the provider, and -- on Gemini -- mutually exclusive with
+   * function declarations. An application-managed one is bounded by a counter
+   * in this process, billed by a search vendor on a separate invoice, cited
+   * from tool results this code collected, and is itself a function
+   * declaration. Answering "is this native?" with yes would have been wrong at
+   * all four sites.
+   */
+  | "app-managed"
+  | "search-model"
+  | "unsupported"
+  | "unverified";
 
 export type WebSearchToolProvider = "openai" | "anthropic" | "google";
 
@@ -26,6 +53,17 @@ export type WebSearchCapability = {
   support: WebSearchSupport;
   /** Which native tool family this model would use, when support === "native". */
   provider?: WebSearchToolProvider;
+  /**
+   * Which backend this application runs the search against, when
+   * `support === "app-managed"`.
+   *
+   * Not the model's provider. A Gemini model searching through Brave has
+   * `provider` unset and `searchBackend: "brave"`, because nothing about the
+   * search -- its ceiling, its price, its budget bucket, its failure modes --
+   * belongs to Google. Keeping the model's provider out of this field is what
+   * stops a Brave request being priced at Google's grounding rate.
+   */
+  searchBackend?: WebSearchBackend;
   /** Anthropic's web search tool is version-pinned in its `type` string. */
   toolVersion?: string;
   /** OpenAI can force the tool via toolChoice; Anthropic/Google cannot. */
@@ -74,6 +112,20 @@ export type WebSearchCapability = {
    * the tool rather than the request, and Google has none to send.
    */
   requestEnforcedSearchToolCalls?: number;
+
+  /**
+   * The ceiling this application's own executor enforces, when
+   * `support === "app-managed"`.
+   *
+   * A separate field from `requestEnforcedSearchToolCalls` even though both
+   * are "what the request will not exceed", because they are enforced by
+   * different things and only one of them can be trusted absolutely. OpenAI's
+   * is a parameter sent to a provider that has been observed to overshoot it;
+   * this one is a counter in this process, and the sixth call never reaches
+   * the network. That is why the app-managed billable bound equals it exactly
+   * and carries no overshoot allowance: there is nothing to overshoot with.
+   */
+  requestEnforcedSearchQueries?: number;
 };
 
 /**
@@ -145,6 +197,45 @@ export const OPENAI_SEARCH_OVERSHOOT_ALLOWANCE = 1;
 export const OPENAI_MAX_BILLABLE_SEARCH_QUERIES =
   OPENAI_MAX_SEARCH_TOOL_CALLS + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE;
 
+/**
+ * The ceiling one model may reach in one turn through an application-managed
+ * backend, and the same number the executor's counter enforces.
+ *
+ * Re-exported from `APP_MANAGED_SEARCH_LIMITS` rather than written again here.
+ * Two constants holding five is two ceilings that can drift, and drift between
+ * the number the money was reserved on and the number the counter stops at is
+ * only ever visible as an overspend.
+ */
+export const APP_MANAGED_MAX_SEARCH_QUERIES =
+  APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest;
+
+/**
+ * A model that searches through Brave, run by this application.
+ *
+ * `canForceExecution` is false, and not because Brave cannot be forced -- the
+ * tool is an ordinary function declaration, so `toolChoice: "required"` would
+ * work. It is false because forcing it would mean every turn with the switch on
+ * spends a search request, including "rewrite this paragraph", and because a
+ * forced tool choice is what makes the artifact tools unregisterable
+ * (`nativeSearchBlocksArtifactTool`). The product asks for a search when the
+ * question needs one; the system prompt says so, and the counter bounds what
+ * happens if the model disagrees.
+ *
+ * `maxBillableSearchQueriesPerRequest` equals `requestEnforcedSearchQueries`
+ * exactly. Unlike OpenAI's pair there is no allowance between them: the
+ * executor refuses the sixth call before any socket is opened, so a billable
+ * sixth request is not a thing a provider can decide to do.
+ */
+const APP_MANAGED_BRAVE: WebSearchCapability = {
+  support: "app-managed",
+  searchBackend: "brave",
+  canForceExecution: false,
+  returnsCitations: true,
+  hasAdditionalCost: true,
+  requestEnforcedSearchQueries: APP_MANAGED_MAX_SEARCH_QUERIES,
+  maxBillableSearchQueriesPerRequest: APP_MANAGED_MAX_SEARCH_QUERIES,
+};
+
 const NATIVE_OPENAI: WebSearchCapability = {
   support: "native",
   provider: "openai",
@@ -171,16 +262,28 @@ const NATIVE_ANTHROPIC: WebSearchCapability = {
   maxBillableSearchQueriesPerRequest: ANTHROPIC_MAX_SEARCH_USES,
 };
 
-const NATIVE_GOOGLE: WebSearchCapability = {
+/**
+ * Google's own Search grounding, which no model in the catalogue uses.
+ *
+ * Kept, exported and covered by tests rather than deleted, because it is the
+ * record of a decision that has to stay decided. Grounding takes no cap at all
+ * -- not on the tool, not on the request -- so a Gemini turn's search cost has
+ * no worst case to reserve, and `nativeSearchIsDispatchable` refuses it. That
+ * refusal is the reason the Google models search through an application-managed
+ * backend instead.
+ *
+ * Deleting it would leave nothing to fail when somebody, reasonably, tries to
+ * switch Google back onto its native tool: they would write a fresh capability,
+ * and the fresh one would not carry this comment. `tests/webSearchDispatchability`
+ * asserts that this exact record stays undispatchable, so the attempt fails in
+ * CI rather than in an invoice.
+ */
+export const NATIVE_GOOGLE_GROUNDING: WebSearchCapability = {
   support: "native",
   provider: "google",
   canForceExecution: false,
   returnsCitations: true,
   hasAdditionalCost: true,
-  // Grounding takes no cap at all -- not on the tool, and not on the request.
-  // Unlike OpenAI's `max_tool_calls`, there is no parameter to send, so a
-  // Gemini turn's search cost has no worst case to reserve and this capability
-  // stays undispatchable rather than being reserved on a guess.
 };
 
 const SEARCH_MODEL: WebSearchCapability = {
@@ -223,14 +326,19 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   "claude-sonnet-5": NATIVE_ANTHROPIC,
   "claude-haiku-4-5": NATIVE_ANTHROPIC,
 
-  // Google -- exact model pages confirm Search grounding for both July 2026
-  // stable releases as well as the existing 3.5 Flash / 3.1 Pro entries.
-  "gemini-3-7-flash": NATIVE_GOOGLE,
-  "gemini-3-6-flash": NATIVE_GOOGLE,
-  "gemini-3-5-flash": NATIVE_GOOGLE,
-  "gemini-3-1-pro": NATIVE_GOOGLE,
+  // Google -- every active model searches through the application-managed
+  // backend, not through Google's own grounding. The exact model pages do
+  // confirm Search grounding for all of them, and that is not the question:
+  // grounding bills per query and offers no parameter to bound the count, so
+  // its worst case cannot be reserved and `NATIVE_GOOGLE_GROUNDING` above
+  // stays undispatchable. The application-managed path has a ceiling this
+  // process enforces, so it has a worst case, so it can be paid for.
+  "gemini-3-7-flash": APP_MANAGED_BRAVE,
+  "gemini-3-6-flash": APP_MANAGED_BRAVE,
+  "gemini-3-5-flash": APP_MANAGED_BRAVE,
+  "gemini-3-1-pro": APP_MANAGED_BRAVE,
   // Stable Tomverse ID; upstream apiModel is gemini-3.5-flash-lite.
-  "gemini-2-5-flash": NATIVE_GOOGLE,
+  "gemini-2-5-flash": APP_MANAGED_BRAVE,
   // Disabled in the catalog; left out entirely (falls through to unsupported
   // via the lookup fallback) since it can't be selected today anyway.
 
@@ -291,24 +399,113 @@ export const nativeSearchIsDispatchable = (
   (!capability.hasAdditionalCost ||
     (capability.maxBillableSearchQueriesPerRequest ?? 0) > 0);
 
+/** Everything the dispatchability questions below read off a capability. */
+export type DispatchableWebSearchCapability = Pick<
+  WebSearchCapability,
+  | "support"
+  | "searchBackend"
+  | "hasAdditionalCost"
+  | "maxBillableSearchQueriesPerRequest"
+  | "requestEnforcedSearchQueries"
+>;
+
 /**
- * Whether this model can search on this request, by either route.
+ * Whether the *register* declares a usable application-managed search, before
+ * anybody asks whether this deployment can reach the backend.
+ *
+ * Split from the readiness question because they fail for different reasons and
+ * only one of them is a defect. A capability with no backend, no ceiling, or a
+ * billable bound smaller than the ceiling the executor enforces is a register
+ * that contradicts itself -- there is no environment in which it becomes
+ * correct. A backend with no API key is a deployment that has not been
+ * configured yet, which is an operations fact and changes without a release.
+ *
+ * The last clause is the one worth stating out loud: the billable bound must be
+ * at least what the executor will actually run. If it were smaller, every turn
+ * that used its full allowance would settle above its own authorization, and
+ * the ceiling-breach latch would fire on a turn that did exactly what it was
+ * told.
+ */
+export const appManagedSearchIsDeclared = (
+  capability: DispatchableWebSearchCapability
+) => {
+  if (capability.support !== "app-managed") return false;
+  if (!capability.searchBackend) return false;
+  const enforced = capability.requestEnforcedSearchQueries ?? 0;
+  const billable = capability.maxBillableSearchQueriesPerRequest ?? 0;
+  return enforced > 0 && billable >= enforced;
+};
+
+/**
+ * Whether an application-managed search can run *here*.
+ *
+ * The register plus the running deployment. `readiness` is resolved on the
+ * server from the secrets and budget this process actually holds, and handed to
+ * client surfaces as data -- a client that derived it from a public environment
+ * variable would be a client that can see whether the key is set.
+ *
+ * There is no default. An absent readiness map is not ready, which is the only
+ * safe direction: a composer that promises a search the deployment cannot run
+ * produces exactly the failure the dispatchability rule was written for, one
+ * layer over.
+ */
+export const appManagedSearchIsDispatchable = (
+  capability: DispatchableWebSearchCapability,
+  readiness: WebSearchBackendReadiness
+) =>
+  appManagedSearchIsDeclared(capability) &&
+  isWebSearchBackendReady(readiness, capability.searchBackend);
+
+/**
+ * Whether this model can search on this request, by any of the three routes.
  *
  * A `search-model` searches inside its ordinary completion at no separate
  * per-query charge, so there is no ceiling for it to declare and nothing to
  * refuse -- it is dispatchable whenever it is selected.
+ *
+ * `readiness` is required rather than optional, and that is the point of the
+ * signature. An optional parameter defaulting to "assume reachable" would let
+ * any call site that forgot it quietly answer yes for a backend this
+ * deployment has no key for, and the forgetting would be invisible. Making it
+ * required turns every such site into a compile error instead.
  */
 export const webSearchIsDispatchable = (
-  capability: Pick<
-    WebSearchCapability,
-    "support" | "hasAdditionalCost" | "maxBillableSearchQueriesPerRequest"
-  >
+  capability: DispatchableWebSearchCapability,
+  readiness: WebSearchBackendReadiness
 ) =>
-  capability.support === "search-model" || nativeSearchIsDispatchable(capability);
+  capability.support === "search-model" ||
+  nativeSearchIsDispatchable(capability) ||
+  appManagedSearchIsDispatchable(capability, readiness);
 
 /** The same question, for a caller that holds a model id rather than a capability. */
-export const modelWebSearchIsDispatchable = (modelId: string) =>
-  webSearchIsDispatchable(getWebSearchCapability(modelId));
+export const modelWebSearchIsDispatchable = (
+  modelId: string,
+  readiness: WebSearchBackendReadiness
+) => webSearchIsDispatchable(getWebSearchCapability(modelId), readiness);
+
+/**
+ * The ceiling this turn's application-managed executor must enforce, if any.
+ *
+ * Read off the capability rather than off `APP_MANAGED_MAX_SEARCH_QUERIES`, for
+ * the same reason `openAiNativeSearchToolCallCeiling` reads the capability: the
+ * number the counter stops at and the number the reservation was sized on have
+ * to be one field, not two constants that happen to agree today.
+ *
+ * `undefined` for every turn that is not dispatching an application-managed
+ * search -- including a turn with web search off, which must register no tool
+ * at all.
+ */
+export const appManagedSearchQueryCeiling = (input: {
+  capability: DispatchableWebSearchCapability;
+  readiness: WebSearchBackendReadiness;
+  webSearchEnabled: boolean;
+}): number | undefined => {
+  if (!input.webSearchEnabled) return undefined;
+  if (!appManagedSearchIsDispatchable(input.capability, input.readiness)) {
+    return undefined;
+  }
+  return input.capability.requestEnforcedSearchQueries;
+};
 
 /**
  * The tool-call ceiling this turn's OpenAI request must carry, if any.

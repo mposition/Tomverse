@@ -63,6 +63,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/chat-attachment-staging-checklist.md",
         records: "docs/ops/chat-attachment-staging-verification-records",
     },
+    {
+        key: "app-managed-web-search",
+        label: "application-managed web search (Google models, Brave backend)",
+        checklist: "docs/ops/app-managed-web-search-staging-checklist.md",
+        records: "docs/ops/app-managed-web-search-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {

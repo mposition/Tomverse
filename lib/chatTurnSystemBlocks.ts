@@ -54,6 +54,10 @@ import {
   resolveWebSearchTurnState,
   type WebSearchTurnState,
 } from "@/lib/webSearchCapabilityPrompt";
+import {
+  APP_MANAGED_WEB_SEARCH_PROMPT,
+  APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS,
+} from "@/lib/appManagedWebSearchPrompt";
 import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
 
 export type ChatTurnSystemBlocksInput = {
@@ -80,6 +84,16 @@ export type ChatTurnSystemBlocksInput = {
   canPersist: boolean;
   nativeSearchEnabled: boolean;
   nativeSearchForced: boolean;
+  /**
+   * Whether this turn registers this application's own `web_search` tool.
+   *
+   * Never true at the same time as `nativeSearchEnabled`: a model's capability
+   * is one route or the other. Kept as its own flag rather than folded into the
+   * native one because they have opposite consequences for the artifact tools
+   * -- a forced native search takes them away, and an application-managed
+   * search is itself a function declaration that coexists with them.
+   */
+  appManagedSearchEnabled: boolean;
   turnAttachments: readonly TurnAttachmentDescriptor[];
   /** The user's own text for this turn -- the classifier's only text input. */
   promptText: string;
@@ -168,6 +182,7 @@ export const buildChatTurnSystemBlocks = (
   const webSearchTurnState = resolveWebSearchTurnState({
     modelId: input.modelId,
     nativeSearchEnabled: input.nativeSearchEnabled,
+    appManagedSearchEnabled: input.appManagedSearchEnabled,
   });
   const webSearchCapabilityPrompt =
     buildWebSearchCapabilitySystemPrompt(webSearchTurnState);
@@ -180,6 +195,15 @@ export const buildChatTurnSystemBlocks = (
     ...(webSearchCapabilityPrompt
       ? [{ role: "system" as const, content: webSearchCapabilityPrompt }]
       : []),
+    // The other half of the same pair. `webSearchCapabilityPrompt` is the block
+    // for a turn that *cannot* search; this is the block for a turn that
+    // searches through a tool this application executes, and the two are
+    // mutually exclusive by construction -- `resolveWebSearchTurnState` reads
+    // the same flag. A native searching turn gets neither: the provider's own
+    // tool description is the instruction there.
+    ...(input.appManagedSearchEnabled
+      ? [{ role: "system" as const, content: APP_MANAGED_WEB_SEARCH_PROMPT }]
+      : []),
   ];
 
   // Priced like any other input. The tool *definitions* are a separate cost
@@ -189,6 +213,10 @@ export const buildChatTurnSystemBlocks = (
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +
+    (input.appManagedSearchEnabled
+      ? estimateTextTokens(APP_MANAGED_WEB_SEARCH_PROMPT) +
+        APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS
+      : 0) +
     (artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0) +
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS

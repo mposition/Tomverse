@@ -288,15 +288,17 @@ reader to discover.
   its state, which is a UI question this policy does not answer.
 - **Passing the web-search filter is not proof of a search path, and the
   remaining half is a product decision.** The filter in
-  `lib/routerCandidates.ts` checks the *declared* capability — the register
-  says `native`, `search-model`, `unverified` or `unsupported`. A
-  `search-model` searches as part of ordinary completion, but a `native` model
-  only actually searches when the dispatch also sets `webSearchMode` to
-  `always`, builds its tool configuration, and reserves the search surcharge.
-  The invariant is
+  `lib/routerCandidates.ts` checks the *declared* capability together with this
+  deployment's backend readiness — the register says `native`, `app-managed`,
+  `search-model`, `unverified` or `unsupported`. A `search-model` searches as
+  part of ordinary completion, but a `native` or `app-managed` model only
+  actually searches when the dispatch also sets `webSearchMode` to `always`,
+  builds its tool configuration, and reserves the search surcharge. The
+  invariant is
 
-  > `needsCurrentInformation` → `search-model`, **or** an approved native tool
-  > configuration together with a successful search-cost reservation
+  > `needsCurrentInformation` → `search-model`, **or** an approved tool
+  > configuration — provider-native or application-managed — together with a
+  > successful search-cost reservation
 
   and its second half is an attempt-preflight fact, not a filter one: the
   filter runs before there is an attempt to configure or a cost to reserve.
@@ -309,9 +311,12 @@ reader to discover.
 
   Two of the three cases are closed:
 
-  - a turn whose primary offered a provider-native tool never falls back at
-    all, which `lib/autoFallbackGate.ts` already enforced: a search may have
-    run and been surcharged by then;
+  - a turn whose primary offered a search tool never falls back at all, which
+    `lib/autoFallbackGate.ts` already enforced: a search may have run and been
+    surcharged by then. Both routes, since 2026-08-27 — an application-managed
+    search has spent counted backend requests and taken the same surcharge, so
+    a second attempt would either re-spend both or answer without the search
+    the user paid for;
   - a turn whose primary was a `search-model` may fall back, and now refuses a
     candidate that would answer from training data instead. §10's rule that a
     fallback may not silently change what the user was allowed to get reads in
@@ -327,6 +332,24 @@ reader to discover.
   would rather have answered imperfectly, or switching search on for someone
   who set the mode to `off` and billing them the surcharge — are product
   decisions with a cost either way. Recorded rather than chosen here.
+
+- **Backend reachability is a filter input, not something the filter reads for
+  itself.** An `app-managed` capability is refused when this deployment holds
+  no credential for its backend, or when that backend's spend budget cannot be
+  read: Auto choosing a model *because* it searches, on a deployment where it
+  will not, turns an unchecked assumption into an answer built from training
+  data that the account paid a search surcharge for — the same failure
+  `web_search_unverified` exists to prevent, arrived at from the environment
+  rather than from the register. `RouterCandidateInput.searchBackendReadiness`
+  is required for that reason, and the shadow decision is given the same map so
+  its rows describe the router this deployment actually runs.
+
+  The rejection reason stays `web_search_cost_unbounded` for both causes. It is
+  a filter reason, and the filter's job is only to stop Auto choosing the model;
+  which cause it was is reported by `resolveAttemptSearchPath`'s gap
+  (`cost_unbounded` versus `backend_unavailable`), where the difference is
+  actionable — one is a provider with no parameter to send, the other is an
+  environment file.
 
 - **`ROUTE-01` has not run.** Nothing here may be described as accurate; it can
   only be described as defined.
