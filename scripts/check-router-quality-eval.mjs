@@ -23,8 +23,9 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, getModel } from "../lib/models.ts";
 import { evaluationRecordProblems } from "../lib/routerQualityEvalCore.ts";
+import { calibrationArtefactProblems } from "../lib/routerJudgeCalibration.ts";
 import {
   cellFill,
   freezeDrift,
@@ -184,7 +185,33 @@ const checkReport = (path) => {
     return;
   }
 
-  const problems = [...evaluationRecordProblems(record, { routableModelIds })];
+  // The judge identity is taken from the report rather than the catalogue: the
+  // check has to work on a report written months ago, against a catalogue that
+  // has since moved, and a calibration is of the model that actually graded.
+  const judge = getModel(String(record.judge?.identity ?? ""));
+  const problems = [
+    ...evaluationRecordProblems(record, {
+      routableModelIds,
+      checkCalibration: judge
+        ? (artefact) =>
+            calibrationArtefactProblems(artefact, {
+              judgeIdentity: {
+                modelId: judge.id,
+                provider: judge.provider,
+                apiModel: judge.apiModel,
+              },
+              judgeTemplateVersion: String(record.versions?.template ?? ""),
+              evaluationSetPurpose: String(record.evaluationSetPurpose ?? ""),
+            })
+        : undefined,
+    }),
+  ];
+  if (!judge && record.judge?.isRoutableModel === true) {
+    problems.push(
+      `its judge "${String(record.judge?.identity)}" is not in the catalogue, so the calibration ` +
+        "it cites cannot be checked against the model that graded"
+    );
+  }
 
   // A pilot or bias run is a valid artefact and an invalid citation. §7 keeps
   // them apart precisely because a pilot's numbers look exactly like a

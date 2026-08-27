@@ -132,8 +132,26 @@ substituting a successor.
   judging, and an item whose answer still identifies its model is excluded and
   logged rather than silently kept.
 - A model judging its own output is a known bias. If a model judge is used, it
-  must not be one of the routable models, or the bias has to be measured on a
-  held-out subset and reported alongside the result.
+  must not be one of the routable models, or the bias has to be measured and
+  reported alongside the result.
+- **The measurement is a calibration against an independent judge, not a
+  self-preference rate.** The earlier `--mode=judge-bias` put the judge's own
+  model in the Auto arm on held-out pairs and reported its own-answer win rate.
+  That number mixes three things it cannot separate: the two models' real
+  quality difference, the judge's preference for its own output, and style
+  interactions between them — 50% reads as "no self-preference" only if the two
+  models are equally good, which nothing established. What two passes over the
+  **same** answers can settle is how far apart two judges are, so
+  `--mode=judge-calibration` re-grades one answer bundle with an independent
+  judge and reports the paired shift with a pair-level bootstrap interval.
+- Reading that shift as self-preference still assumes the independent judge has
+  no preference of its own between the two models, which is an assumption
+  rather than a result. Human labels on a stratified sample are what ground it;
+  `docs/ops/router-human-review/README.md` is how that sample is drawn and
+  graded blind.
+- The calibration is run on the **development** set. Grading the decision set
+  would spend one of its uses (§7), and the harness refuses a calibration whose
+  answers came from anywhere else.
 
 ## 6. Rubric
 
@@ -192,7 +210,8 @@ them rather than leaving them to a write-up:
 - confidence-interval method;
 - randomisation seed;
 - point estimate and both 95% bounds;
-- judge identity and, when a model judge is used, its bias measurement;
+- judge identity and, when the judge is itself routable, the calibration
+  artefact cited for it;
 - excluded items with reasons.
 
 Absent any of these, the run is not decision-grade evidence, whatever number it
@@ -207,21 +226,35 @@ sample size becomes an outcome that was chosen rather than measured:
 
 ```
 # §3. Measure the discordance rate so `n` is computed, not guessed.
+# --bundle= keeps the answers, which is what a later pass re-grades.
 npm run eval:router-quality -- --mode=pilot \
   --set=docs/ops/router-evaluation-set/development-v0.json \
-  --baseline=<model id> --judge=<model id> --seed=<integer> --json=pilot.json
+  --baseline=<model id> --judge=<model id> --seed=<integer> \
+  --json=pilot.json --bundle=pilot.answers.jsonl
 
-# §5. Only where the judge is itself one of the routable models.
-npm run eval:router-quality -- --mode=judge-bias \
-  --set=<development set> --baseline=<other model> --judge=<routable judge> \
-  --seed=<integer> --json=judge-bias.json
+# §5, step 1. Re-grade the SAME answers with an independent judge. No answers
+# are regenerated and the display order is the one the bundle fixed, so the
+# only thing that differs between the two passes is who graded.
+npm run eval:router-quality -- --rejudge=pilot.answers.jsonl \
+  --judge=<independent judge> --json=independent.verdicts.jsonl
+
+# §5, step 2. Compare the two passes. Pure analysis -- it sends nothing.
+# The judge under test first, then the independent one.
+npm run eval:router-quality -- --mode=judge-calibration \
+  --verdicts=pilot.answers.jsonl.<judge>.verdicts.jsonl \
+  --verdicts=independent.verdicts.jsonl \
+  --seed=<integer> --json=calibration.json
 
 # The run ROUTE-01 cites.
 npm run eval:router-quality -- --mode=decision \
   --set=<frozen decision set> --baseline=<pre-registered model> \
   --judge=<model id> --seed=<integer> --preregistered-n=<n> --use-index=1 \
-  --judge-bias=judge-bias.json --json=decision.json
+  --calibration=calibration.json --json=decision.json
 ```
+
+`--mode=judge-bias` still runs and still prints its number as a diagnostic, but
+`--judge-bias=<path>` is refused outright: an artefact nobody may cite is not
+one the harness should let an operator pay for and then discover is unusable.
 
 `npm run check:router-quality-eval` validates what came out. It runs on every
 PR against the committed set files, and takes `--report=<path>` for a run.
@@ -234,7 +267,13 @@ What it refuses, and why each one would otherwise read as a pass:
 | a run truncated by `--max-cost-usd` | a partial set still produces a real-looking interval |
 | `--use-index` above 1 | §7: a reused decision set reports Router fit to its own test set |
 | a baseline pre-registered after the run started | §4, and the dates are in the record, so it is checkable |
-| a routable judge with no bias measurement | §5 |
+| a routable judge with no calibration | §5 |
+| a calibration of a different judge, compared canonically | this catalogue has an id whose API model is a different model, so an id-level match would accept a calibration of something else |
+| a calibration whose reference judge wrote answers in the bundle | it is not independent of what it is grading |
+| a calibration graded on the decision set | §7: a calibration is a look, and every look costs a use |
+| a calibration over a bundle that stopped short of its planned items | the population stops wherever the money ran out |
+| a calibration missing pairs the bundle holds | the comparison is then over the pairs both judges happened to grade |
+| a legacy `judge-bias` artefact cited as a calibration | its own-answer rate mixes quality difference with self-preference |
 | exclusions above 5% of pairs | they land on the Auto arm, so the survivors are the items Auto managed to answer |
 | a judge preferring the first answer above 65% of the time | that is a judge reading position, not quality |
 
