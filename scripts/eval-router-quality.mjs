@@ -567,6 +567,13 @@ for (const [index, item] of liveItems.entries()) {
 }
 
 let stoppedReason = truncatedByCost ? "cost-ceiling" : "completed";
+// The loop only journalled a stop record when something stopped it early, so a
+// journal that ran to the end looked exactly like one that was cut off — the
+// first real run rebuilt as "journal-ends-without-a-stop-record" despite having
+// finished. A journal has to say which of the two it is.
+if (!fromJournalPath && liveItems.length > 0) {
+  journal({ kind: "stopped", reason: stoppedReason, completedItems: pairs.length });
+}
 // How many items the run that produced these pairs set out to do. On a rebuild
 // that is the journal's number, not this invocation's: the set may hold 210
 // while the journal came from a run of 4.
