@@ -80,6 +80,7 @@
     "probe:memory-extraction": "node --conditions=react-server --import tsx scripts/probeMemoryExtractionDevelopment.mjs",
     "eval:memory-extraction": "node --conditions=react-server --import tsx scripts/evalImportedMemoryExtraction.mjs",
     "eval:router-quality": "node --conditions=react-server --import tsx scripts/eval-router-quality.mjs",
+    "eval:router-human-sheets": "node --conditions=react-server --import tsx scripts/router-human-review-sheets.mjs",
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",

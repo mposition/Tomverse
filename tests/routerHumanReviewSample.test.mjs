@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ANSWER_BUNDLE_VERSION, sha256 } from "../lib/routerAnswerBundle.ts";
+import { bundle, side } from "./routerHumanReviewFixture.mjs";
 import {
     ADJUDICATE_ON_DISAGREEMENT,
     HUMAN_PRIMARY_PER_CELL,
@@ -25,52 +25,6 @@ import {
     substitutionProblems,
     withSubstitution,
 } from "../lib/routerHumanReviewSample.ts";
-
-const CELLS = [
-    ["general_question_answering", "ko"], ["general_question_answering", "en"],
-    ["writing_and_rewriting", "ko"], ["writing_and_rewriting", "en"],
-    ["coding", "ko"], ["coding", "en"],
-    ["analysis_and_reasoning", "ko"], ["analysis_and_reasoning", "en"],
-    ["translation_cross_language", "ko-en"],
-    ["current_information", "ko"], ["current_information", "en"],
-    ["document_and_attachment", "ko"], ["document_and_attachment", "en"],
-    ["long_context_conversation", "ko"], ["long_context_conversation", "en"],
-];
-
-const side = (arm, text) => ({
-    arm,
-    modelId: arm === "auto" ? "deepseek-v4-flash" : "gpt-5-6-luna",
-    provider: arm === "auto" ? "deepseek" : "openai",
-    apiModel: arm === "auto" ? "deepseek-v4-flash" : "gpt-5.6-luna",
-    text,
-    digest: sha256(text),
-});
-
-// The frozen set holds 14 adopted items per cell, which is what makes an equal
-// draw of four represent the whole development set without weighting.
-const bundle = (perCell = 14) => ({
-    header: {
-        kind: "header",
-        bundleVersion: ANSWER_BUNDLE_VERSION,
-        mode: "pilot",
-        evaluationSetVersion: "router-eval-development-v0",
-        commitSha: "0".repeat(40),
-        seed: 20260826,
-        judgeTemplateVersion: "judge-rubric-v1",
-        createdAt: "2026-08-27T02:41:16.553Z",
-    },
-    entries: CELLS.flatMap(([stratum, cell]) =>
-        Array.from({ length: perCell }, (unused, index) => ({
-            kind: "pair",
-            pairId: `${stratum}-${cell}-${index + 1}`,
-            stratum,
-            cell,
-            prompt: `question ${stratum} ${cell} ${index + 1}`,
-            first: side("auto", `auto ${stratum} ${cell} ${index + 1}`),
-            second: side("baseline", `baseline ${stratum} ${cell} ${index + 1}`),
-        }))
-    ),
-});
 
 const draw = (seed = 20260827, source = bundle()) =>
     drawPrimarySample({ bundle: source, seed, drawnAt: "2026-08-27T06:00:00Z", drawnBy: "mposition" });
