@@ -9,6 +9,7 @@ import {
     criticalNegativePartitionInput,
     validateSuccessorDataset,
 } from "../lib/memoryEvalDatasetSchema.ts";
+import { matchesExpectedV2 } from "../lib/memoryEvalScoringV2.ts";
 import {
     LEGACY_DATASET_SCHEMA_VERSION,
     LEGACY_DIAGNOSTIC_DATASET_VERSIONS,
@@ -595,5 +596,140 @@ test("reordering the cases does not change the digest", () => {
     assert.equal(
         digest(criticalNegativePartitionInput(reversed)),
         digest(criticalNegativePartitionInput(MEMORY_EVAL_CASES))
+    );
+});
+
+/* -------------------------------------------------------------------------
+ * mustIncludeAny — the disjunction that carries polarity
+ * ---------------------------------------------------------------------- */
+
+test("mustIncludeAny is a disjunction over an unchanged conjunction", () => {
+    // The semantics the amendment fixes:
+    //   all(mustInclude) && (mustIncludeAny === undefined || any(mustIncludeAny))
+    const gold = {
+        id: "e1",
+        kind: "constraint",
+        mustInclude: ["nut"],
+        mustIncludeAny: ["does not have", "has no", "not allergic"],
+        expectedDisposition: "sensitive_review",
+    };
+    const candidate = (statement) => ({
+        kind: "constraint",
+        statement,
+        bulkSafe: false,
+        disposition: "sensitive_review",
+    });
+
+    // Each alternative on its own is enough.
+    for (const statement of [
+        "The user does not have a nut allergy.",
+        "The user has no nut allergy.",
+        "The user is not allergic to nuts.",
+    ]) {
+        assert.ok(
+            matchesExpectedV2(candidate(statement), gold),
+            `${statement} should match`
+        );
+    }
+
+    // The positive is the answer this exists to reject. "nut" alone let it
+    // through, which is why a conjunction could not express the gold.
+    assert.ok(
+        !matchesExpectedV2(candidate("The user has a nut allergy."), gold),
+        "the positive polarity must not match"
+    );
+    // The conjunction still binds: an alternative alone is not enough.
+    assert.ok(
+        !matchesExpectedV2(candidate("The user does not have a cat."), gold)
+    );
+});
+
+test("a gold without the field scores exactly as before", () => {
+    const withoutField = {
+        id: "e1",
+        kind: "identity",
+        mustInclude: ["부산"],
+        expectedDisposition: "bulk_safe",
+    };
+    const candidate = {
+        kind: "identity",
+        statement: "사용자는 부산에 거주합니다.",
+        bulkSafe: true,
+        disposition: "bulk_safe",
+    };
+    assert.ok(matchesExpectedV2(candidate, withoutField));
+    // Korean reaches polarity with the conjunction alone: "없" covers
+    // 없다/없습니다/없어요, so the field is not needed there.
+    assert.ok(
+        matchesExpectedV2(
+            {
+                ...candidate,
+                kind: "constraint",
+                statement: "사용자는 땅콩 알레르기가 없다.",
+            },
+            {
+                id: "e1",
+                kind: "constraint",
+                mustInclude: ["땅콩", "없"],
+                expectedDisposition: "sensitive_review",
+            }
+        )
+    );
+});
+
+test("the token rules reject what makes a disjunction meaningless", () => {
+    const base = {
+        id: "succ-x-1",
+        category: "durable_facts",
+        language: "en",
+        goldCompleteness: "exhaustive",
+        conversations: [],
+    };
+    const validateOne = (expectedMemory) =>
+        validateSuccessorDataset({
+            version: "mem-eval-test",
+            purpose: "development",
+            frozen: false,
+            cases: [{ ...base, expected: [expectedMemory] }],
+        }).errors.map((error) => error.code);
+
+    const ok = {
+        id: "e1",
+        kind: "identity",
+        mustInclude: ["nut"],
+        expectedDisposition: "bulk_safe",
+    };
+
+    assert.ok(!validateOne(ok).includes("expected_tokens_empty"));
+    assert.ok(
+        validateOne({ ...ok, mustIncludeAny: [] }).includes(
+            "expected_tokens_empty"
+        ),
+        "present but empty matches nothing, and reads like it matches anything"
+    );
+    assert.ok(
+        validateOne({ ...ok, mustIncludeAny: ["has no", "  "] }).includes(
+            "expected_token_blank"
+        )
+    );
+    assert.ok(
+        validateOne({ ...ok, mustIncludeAny: ["has no", "Has No"] }).includes(
+            "expected_token_duplicate"
+        ),
+        "duplicates are judged after normalisation"
+    );
+    // The realistic bare-substring hazard: a disjunction is only as strict as
+    // its weakest member, so a token inside another token decides everything.
+    assert.ok(
+        validateOne({
+            ...ok,
+            mustIncludeAny: ["no", "no nut allergy"],
+        }).includes("expected_token_contains_another")
+    );
+    // And the same rule now guards the conjunction it was written for.
+    assert.ok(
+        validateOne({ ...ok, mustInclude: [] }).includes(
+            "expected_tokens_empty"
+        )
     );
 });
