@@ -114,6 +114,40 @@ epoch가 있다는 것을 아는 것과 그 구간을 검증할 수 있는 것�
 없어지면 그 키는 목록에서 뺍니다 — 이 표가 각 키가 어느 구간을 위해 있는지를
 말하므로, 뺄 시점도 이 표가 정합니다.
 
+### `NEXTAUTH_SECRET`을 교체할 때 `PREVIOUS_KEYS`는 **따라 바꾸지 않습니다**
+
+두 환경의 `ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS`에 지금 들어 있는 것은 **그 환경의
+현재 `NEXTAUTH_SECRET`과 같은 값**입니다. epoch 1이 폴백으로 서명됐고 그 폴백이
+아직 교체된 적 없기 때문입니다. 그래서 오늘 두 변수는 같은 값을 담고 있습니다.
+
+**그러나 같은 값을 담고 있다는 것이 같은 것을 뜻한다는 의미는 아닙니다.**
+
+| | 무엇인가 | 언제 바뀌어야 하는가 |
+|---|---|---|
+| `NEXTAUTH_SECRET` | 세션 서명 비밀 | 교체 정책에 따라 |
+| `PREVIOUS_KEYS`의 그 사본 | **epoch 1을 여는 열쇠** | epoch 1 행이 사라질 때 |
+
+`ADMIN_AUDIT_INTEGRITY_KEY`가 두 환경 모두에 설정된 지금 `NEXTAUTH_SECRET`은
+**감사 항목을 더 이상 서명하지 않습니다**(`adminAuditIntegrityKeys()`가
+`ADMIN_AUDIT_INTEGRITY_KEY || NEXTAUTH_SECRET`이므로 앞이 있으면 뒤는 읽히지
+않습니다). `PREVIOUS_KEYS`의 사본은 현재 값을 비추는 거울이 아니라 **2026-07-18 ~
+08-25 구간의 화석**입니다.
+
+**`NEXTAUTH_SECRET`을 교체하면서 이 사본을 새 값으로 함께 갱신하면, 그 순간
+epoch 1 전체가 검증 불가가 됩니다** — staging 101건, production 79건, 합쳐서
+**180건**. 옛 값을 어디에서도 되찾을 수 없다면 영구적입니다.
+
+위험한 것은 무지가 아니라 **꼼꼼함**입니다. "이 비밀이 적힌 곳을 전부 찾아
+바꾼다"는 교체 절차는 이 사본을 정확히 찾아내서 정확히 틀린 일을 합니다. 그러니
+교체 절차에 이렇게 적습니다 — **`ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS`는
+`NEXTAUTH_SECRET` 교체 대상이 아니다. 값이 같아 보이는 것은 우연이고, 앞으로는
+달라지는 것이 정상이다.**
+
+교체 후 확인은 `Verify chain` 한 번입니다. 갱신 사고가 났다면 패널이 **가장
+오래된 연속 구간**을 미검증으로 보고합니다 — 등재 전 production이 보였던 바로 그
+모양(3 / 82)입니다. 흩어진 실패라면 다른 문제입니다.
+
+
 ## 지금 상태
 
 **두 환경 모두 옛 키가 등재됐고, 두 환경 모두 측정됐습니다**(2026-08-26).
@@ -356,5 +390,9 @@ actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull
 - `ADMIN_AUDIT_INTEGRITY_KEY`를 교체할 때 — 새 epoch 행을 추가하고, 변수 설정
   이후 **성공한 첫 배포**의 ID와 시각을 근거로 적습니다. 배포가 SKIPPED로 끝나면
   그 배포는 경계가 아닙니다. 컨테이너가 실제로 새 환경으로 뜬 시점이 경계입니다.
+- `NEXTAUTH_SECRET`을 교체할 때 — **`PREVIOUS_KEYS`는 건드리지 않습니다**(위
+  절). 이 문서에는 교체 사실과 시각만 적습니다. epoch 표는 바뀌지 않습니다 —
+  `NEXTAUTH_SECRET`은 더 이상 감사 항목을 서명하지 않으므로 새 epoch를 만들지
+  않습니다.
 - 환경을 새로 만들 때 — 그 환경의 표를 추가합니다. 변수 없이 띄우면 epoch 1이
   `NEXTAUTH_SECRET` 폴백으로 시작하며, 그것이 이 문서가 막으려는 상태입니다.
