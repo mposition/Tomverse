@@ -187,10 +187,21 @@ export const classifyDeepResearchTopic = (
   }
 
   const signals: DeepResearchTopicSignal[] = [];
-  // `kind: "research"` is set by the same predicate that means "the user asked
-  // for sources, citations or a search" (lib/taskProfileCore.ts), which is the
-  // strongest statement of intent this offer can read.
-  if (profile.kind === "research") signals.push("explicit_research_request");
+  // The signal, not the kind. `kind: "research"` is set by two different facts
+  // (lib/taskProfileCore.ts): the user asked for sources, citations or a search
+  // in the text (`research:vocabulary`), or the web search switch happened to be
+  // on for the turn (`research:search-requested`). Only the first is a statement
+  // of intent, and only the first belongs here.
+  //
+  // The switch is a setting, and what it says is "check the web before
+  // answering" -- not "compare a dozen sources against each other". Reading the
+  // kind instead of the signal put this card under every medium-length question
+  // an account with search on ever asked, the weather lookup below among them,
+  // and it let `kind: "research"` outrank `kind: "writing"` and so disable the
+  // writing exclusion above whenever the switch was on.
+  if (profile.signals.includes("research:vocabulary")) {
+    signals.push("explicit_research_request");
+  }
   if (profile.needsCurrentInformation) signals.push("recency");
   if (COMPARISON_WORDS.test(text)) signals.push("multi_source_comparison");
   if (VERIFICATION_WORDS.test(text)) signals.push("claim_verification");
@@ -204,7 +215,9 @@ export const classifyDeepResearchTopic = (
    * long enough to clear the floor, it is not code, not writing, and it did
    * not ask for one line -- so every other rule here passes it. Offering a
    * multi-minute research report for it would be the card's most common
-   * appearance, and its least useful one.
+   * appearance, and its least useful one. That holds with the web search
+   * switch on, which is the state such a question is usually asked in: the
+   * switch feeds `recency` and nothing more.
    *
    * The exception is a turn that asked for depth as well: "2026년 전기차
    * 보조금 정책 변화를 자세히 정리해줘" is recency *and* a request for a long
