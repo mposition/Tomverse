@@ -26,6 +26,12 @@ Date / timezone:    ____________________
 - [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
 - [ ] `npm run check:accent-tokens`
+- [ ] `npm run check:e2e-copy-selectors` — a copy-based locator that steers a
+      branch (`isVisible()`, `count()`) resolves instead of retrying, so when
+      the copy is renamed the branch is silently never taken. A brand rename
+      left one such guard in `openSidebarOnMobile`, and the mobile suite failed
+      on every commit to main for ten runs while production deploys waited on
+      that check suite.
 - [ ] `npm run check:model-pricing`
 - [ ] `npm run check:image-pricing`
 - [ ] `npm run check:image-executor-budget`

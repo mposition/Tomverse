@@ -118,11 +118,6 @@ async function settleStatusPolls(page: Page, requestCount: () => number) {
   }
 }
 
-async function dismissOnboarding(page: Page) {
-  const cta = page.getByRole("button", { name: "Start using Tomverse" });
-  if (await cta.isVisible().catch(() => false)) await cta.click();
-}
-
 const banner = (page: Page) => page.getByTestId("provider-outage-banner");
 
 async function horizontalOverflow(page: Page) {
@@ -147,7 +142,6 @@ test("limited provider health stays hidden from users", async ({ page }) => {
   await page.waitForTimeout(150);
 
   await expect(banner(page)).toHaveCount(0);
-  await dismissOnboarding(page);
   await openModelPickerCatalogue(page);
   await expect(page.locator('[title="limited"]')).toHaveCount(0);
 });
@@ -193,7 +187,6 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
 
   await page.goto("/chat");
   await expect(banner(page)).toHaveCount(0);
-  await dismissOnboarding(page);
 
   const dialog = await openModelPickerCatalogue(page);
   await expect(page.getByText("Gemini 2.5 Pro", { exact: true })).toHaveCount(0);
@@ -258,7 +251,6 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
     await expect(banner(page)).toHaveCount(0);
 
     // Hidden from the workspace, still fully disclosed where the user chooses.
-    await dismissOnboarding(page);
     const dialog = await openModelPickerCatalogue(page);
     const option = dialog.locator(
       `[data-testid="model-option"][data-model-id="${UNSELECTED_SIX[0].id}"]`

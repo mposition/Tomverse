@@ -860,6 +860,10 @@ export function ChatPageClient({
   // callback is threaded up from ChatApp today), which is disclosed in the
   // chip's own copy rather than silently claimed as a real cancel.
   const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
+  // The model the cap dialog is open for, or null. Set only when a Deep
+  // Research run needs a slot the selection has no room for.
+  const [deepResearchSwapRequest, setDeepResearchSwapRequest] =
+    useState<AiModel | null>(null);
   /**
    * The last ordinary question asked in this conversation, kept so a finished
    * answer can be offered an expansion into Deep Research
@@ -4485,11 +4489,39 @@ export function ChatPageClient({
     pendingDeepResearchSubmitRef.current = { depth, ...(text ? { text } : {}) };
     if (selectedModels.length < maxSelectableModels) {
       toggleModel(DEEP_RESEARCH_MODEL_ID);
-    } else {
-      const removeModelId = selectedModels[selectedModels.length - 1];
-      if (removeModelId) swapSelectedModel(removeModelId, DEEP_RESEARCH_MODEL_ID);
+      return;
     }
+    // At the cap, the run needs a slot that is already taken -- so the user
+    // says which one, through the same dialog the picker opens.
+    //
+    // This used to drop `selectedModels[length - 1]` and carry on. That is a
+    // write to `Conversation.selectedModels`, a column with no history table,
+    // and it takes the dropped model's panel out of the conversation with the
+    // answers already in it -- the panels are rendered straight from this
+    // list. Guessing a victim was tolerable while Deep Research was only
+    // reachable by opening the setup sheet on purpose; the expansion offered
+    // under a finished answer made it one unconfirmed press.
+    const deepResearchModel = getModel(DEEP_RESEARCH_MODEL_ID);
+    if (!deepResearchModel) {
+      pendingDeepResearchSubmitRef.current = null;
+      setIsDeepResearchPending(false);
+      return;
+    }
+    setDeepResearchSwapRequest(deepResearchModel);
   };
+
+  /**
+   * The cap dialog closed. A chosen replacement lands in `selectedModels` and
+   * the effect above sends from there, so there is nothing to do here but let
+   * it happen; a cancellation has to abandon the run, or the next selection
+   * change would fire a send the user backed out of.
+   */
+  const handleDeepResearchSwapResolved = useCallback((swapped: boolean) => {
+    setDeepResearchSwapRequest(null);
+    if (swapped) return;
+    pendingDeepResearchSubmitRef.current = null;
+    setIsDeepResearchPending(false);
+  }, []);
 
   // `startDeepResearch` closes over this render's selection and is rebuilt
   // every render; the offer's handler is memoised, so it reaches the current
@@ -5199,6 +5231,8 @@ export function ChatPageClient({
           onDownload={handleDownloadConversation}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
+          modelSwapRequest={deepResearchSwapRequest}
+          onModelSwapRequestResolved={handleDeepResearchSwapResolved}
           canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
@@ -5302,6 +5336,8 @@ export function ChatPageClient({
           onDownload={handleDownloadConversation}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
+          modelSwapRequest={deepResearchSwapRequest}
+          onModelSwapRequestResolved={handleDeepResearchSwapResolved}
           canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}

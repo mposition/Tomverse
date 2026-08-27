@@ -468,13 +468,6 @@ const chatComposerLocators = (page: Page) => {
   };
 };
 
-const dismissOnboardingIfPresent = async (page: Page) => {
-  const onboarding = page.getByRole("button", { name: "Start using Tomverse" });
-  if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.click();
-  }
-};
-
 const REGRESSION_VIEWPORTS = [
   { width: 320, height: 568 },
   { width: 360, height: 640 },
@@ -503,7 +496,6 @@ for (const viewport of REGRESSION_VIEWPORTS) {
     await prepareGuestPage(page, "en");
     await page.setViewportSize(viewport);
     await page.goto("/chat?lang=en&entry=guest-preview");
-    await dismissOnboardingIfPresent(page);
 
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
@@ -572,7 +564,6 @@ test("STG-F001: Choose AI models opens the model dialog with the consent notice 
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/chat?lang=en&entry=guest-preview");
-  await dismissOnboardingIfPresent(page);
 
   await expect(page.getByTestId("chat-consent-notice")).toBeVisible();
   await chatComposerLocators(page).modelSelect.click();
@@ -597,7 +588,6 @@ test("STG-F001: declining analytics from the chat notice hides it and persists t
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/chat?lang=en&entry=guest-preview");
-  await dismissOnboardingIfPresent(page);
 
   const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible();
@@ -628,7 +618,6 @@ test("STG-F001: accepting analytics from the chat notice hides it and persists t
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/chat?lang=en&entry=guest-preview");
-  await dismissOnboardingIfPresent(page);
 
   const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible();

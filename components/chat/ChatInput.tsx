@@ -557,6 +557,24 @@ type ChatInputProps = {
   maxGuestMessages?: number;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  /**
+   * A model something outside the composer wants selected while the selection
+   * is already at the cap -- today, a Deep Research run started from the
+   * expansion offered under a finished answer, or from the setup sheet.
+   *
+   * It opens the same "choose one to replace" dialog the picker opens, rather
+   * than letting the caller pick a victim on the user's behalf. Dropping a
+   * model rewrites `Conversation.selectedModels`, which has no history table,
+   * and takes that model's panel -- with the answers already in it -- out of
+   * the conversation. That is not something a single unconfirmed press may do.
+   */
+  modelSwapRequest?: AiModel | null;
+  /**
+   * Called once the dialog above closes, with whether a replacement was
+   * actually chosen. `false` means the user cancelled and the caller's pending
+   * work must be abandoned, not retried against a guessed selection.
+   */
+  onModelSwapRequestResolved?: (swapped: boolean) => void;
   attachments: ChatAttachment[];
   onAttachmentsChange: AttachmentsChangeHandler;
   /**
@@ -757,6 +775,8 @@ export function ChatInput({
   maxGuestMessages = 20,
   onToggleModel,
   onSwapModel,
+  modelSwapRequest = null,
+  onModelSwapRequestResolved,
   attachments,
   onAttachmentsChange,
   attachmentCapabilities = DEFAULT_ATTACHMENT_CAPABILITIES,
@@ -1498,6 +1518,8 @@ export function ChatInput({
   const replaceModelDialogRef = useRef<HTMLDivElement | null>(null);
   const replaceModelCancelRef = useRef<HTMLButtonElement | null>(null);
   const replaceModelReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  // Deliberately never assigned: see `returnFocusRef` below.
+  const externalSwapReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   // Set by ModelPickerPanel while the picker is mounted. Escape is layered:
   // the panel closes its filter sheet, then the All-models step, and only
   // returns false once there is nothing left but the dialog itself.
@@ -1508,9 +1530,20 @@ export function ChatInput({
   // Not always a button any more: the mobile header's model summary opens this
   // same picker and expects focus back when it closes.
   const lastMenuTriggerRef = useRef<HTMLElement | null>(null);
+  // An outside caller (Deep Research) asking for a model the selection has no
+  // room for opens the same dialog, derived from the prop rather than copied
+  // into state by an effect -- copying it would be a setState in an effect and
+  // would leave two sources of truth for whether the dialog is open.
+  const activeSwapCandidate = modelSwapRequest ?? replaceModelCandidate;
+  const isExternalSwapRequest = Boolean(modelSwapRequest);
   const closeReplaceModelDialog = useCallback(
-    () => setReplaceModelCandidate(null),
-    []
+    (swapped = false) => {
+      setReplaceModelCandidate(null);
+      // Only the caller that opened it is told; the picker's own swaps are
+      // not somebody else's pending work to resolve.
+      if (isExternalSwapRequest) onModelSwapRequestResolved?.(swapped);
+    },
+    [isExternalSwapRequest, onModelSwapRequestResolved]
   );
   const requestModelSwap = useCallback(
     (model: AiModel, trigger: HTMLButtonElement) => {
@@ -1521,12 +1554,16 @@ export function ChatInput({
   );
 
   useModalDialog({
-    open: Boolean(replaceModelCandidate),
+    open: Boolean(activeSwapCandidate),
     onClose: closeReplaceModelDialog,
     dialogRef: replaceModelDialogRef,
     panelRef: replaceModelDialogRef,
     initialFocusRef: replaceModelCancelRef,
-    returnFocusRef: replaceModelReturnFocusRef,
+    // Nothing in this component opened an external request, so there is no
+    // trigger here to hand focus back to.
+    returnFocusRef: isExternalSwapRequest
+      ? externalSwapReturnFocusRef
+      : replaceModelReturnFocusRef,
   });
 
   useEffect(() => {
@@ -4428,70 +4465,78 @@ export function ChatInput({
                 </>
               )}
             </div>
-            {replaceModelCandidate && (() => {
-              const candidate = replaceModelCandidate;
-              return (
-                <div
-                  className="fixed inset-0 z-[140] flex items-end justify-center bg-black/50 p-3 md:items-center"
-                  onClick={closeReplaceModelDialog}
-                >
-                  <div
-                    ref={replaceModelDialogRef}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={t("chat.swapModelTitle").replace("{model}", candidate.name)}
-                    data-testid="replace-model-dialog"
-                    className="max-h-full w-full max-w-sm overflow-y-auto overscroll-contain rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
-                    onClick={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
-                  >
-                    <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700 md:hidden" />
-                    <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
-                      {t("chat.swapModelTitle").replace("{model}", candidate.name)}
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                      {t("chat.swapModelBody")}
-                    </p>
-                    <div className="mt-3 space-y-1.5">
-                      {selectedModels.map((modelId) => {
-                        const currentModel = PUBLIC_MODELS.find((item) => item.id === modelId);
-                        return (
-                          <button
-                            key={modelId}
-                            type="button"
-                            onClick={() => {
-                              const swapped = onSwapModel(modelId, candidate.id);
-                              if (swapped) {
-                                rememberRecentModel(candidate.id);
-                              } else {
-                                dispatchAppToast(t("chat.swapModelFailed"), "error");
-                              }
-                              closeReplaceModelDialog();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-left text-sm font-semibold text-zinc-800 transition hover:border-blue-400 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-blue-950/30"
-                          >
-                            <ModelLogo model={currentModel} size="sm" />
-                            <span className="min-w-0 flex-1 truncate">{currentModel?.name || modelId}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <button
-                      ref={replaceModelCancelRef}
-                      type="button"
-                      onClick={closeReplaceModelDialog}
-                      className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-sm font-bold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
-                    >
-                      {t("auth.cancel")}
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
             </>
             </MobileModelMenuPortal>
           )}
         </div>
+
+        {/*
+          Outside the menu block on purpose. This is a full-screen modal, not
+          part of the picker: `startDeepResearch` opens it through
+          `modelSwapRequest` when a run needs a slot the selection has no room
+          for, and the picker is not open then. Rendering it inside
+          `isMenuOpen` meant the request set state that nothing drew.
+        */}
+        {activeSwapCandidate && (() => {
+          const candidate = activeSwapCandidate;
+          return (
+            <div
+              className="fixed inset-0 z-[140] flex items-end justify-center bg-black/50 p-3 md:items-center"
+              onClick={() => closeReplaceModelDialog(false)}
+            >
+              <div
+                ref={replaceModelDialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label={t("chat.swapModelTitle").replace("{model}", candidate.name)}
+                data-testid="replace-model-dialog"
+                className="max-h-full w-full max-w-sm overflow-y-auto overscroll-contain rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700 md:hidden" />
+                <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                  {t("chat.swapModelTitle").replace("{model}", candidate.name)}
+                </p>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  {t("chat.swapModelBody")}
+                </p>
+                <div className="mt-3 space-y-1.5">
+                  {selectedModels.map((modelId) => {
+                    const currentModel = PUBLIC_MODELS.find((item) => item.id === modelId);
+                    return (
+                      <button
+                        key={modelId}
+                        type="button"
+                        onClick={() => {
+                          const swapped = onSwapModel(modelId, candidate.id);
+                          if (swapped) {
+                            rememberRecentModel(candidate.id);
+                          } else {
+                            dispatchAppToast(t("chat.swapModelFailed"), "error");
+                          }
+                          closeReplaceModelDialog(swapped);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-left text-sm font-semibold text-zinc-800 transition hover:border-blue-400 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-blue-950/30"
+                      >
+                        <ModelLogo model={currentModel} size="sm" />
+                        <span className="min-w-0 flex-1 truncate">{currentModel?.name || modelId}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  ref={replaceModelCancelRef}
+                  type="button"
+                  onClick={() => closeReplaceModelDialog(false)}
+                  className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-sm font-bold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
+                >
+                  {t("auth.cancel")}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         <input
           ref={fileInputRef}
