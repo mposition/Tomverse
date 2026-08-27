@@ -22,7 +22,8 @@ it. `docs/ops/tomverse-chat-router-evaluation-set.md` §7 reserves that for a
 
 ## route01-pilot-20260827
 
-The §3 sizing run: measure the discordance rate so the decision set's `n` is
+The sizing run of `docs/ops/tomverse-chat-router-evaluation-set.md` §3: measure
+the discordance rate so the decision set's `n` is
 computed rather than guessed.
 
 | | |
@@ -59,23 +60,31 @@ Choosing after seeing a result is how a sample size becomes an outcome.
 Auto lost, and the interval is entirely below zero. It is still not a finding
 about Auto's quality, for one reason: **the judge is the baseline model.** The
 baseline arm is `gpt-5-6-luna` on all 210 pairs, so the judge graded its own
-answer every time. That is the self-preference §5 exists to measure, and
+answer every time. That is the self-preference
+`docs/ops/tomverse-chat-router-evaluation-set.md` §5 exists to measure, and
 `judge.biasMeasurement` is null. A `--mode=judge-bias` run has to come first.
 
-The run does rule out one class of confound on its own. 45 of the 210 pairs are
-ones where the Router chose the baseline model, so both answers came from
-`gpt-5-6-luna` — an in-run control:
+45 of the 210 pairs are ones where the Router chose the baseline model, so both
+answers came from `gpt-5-6-luna`. They are worth reporting separately, with
+their intervals:
 
-| | n | auto | baseline | equivalent | of decided, auto took |
-|---|---:|---:|---:|---:|---:|
-| same model both sides | 45 | 16 | 18 | 11 | 47.1% |
-| Auto routed away | 165 | 20 | 110 | 35 | 15.4% |
+| | n decided | auto share | 95% CI (Wilson) |
+|---|---:|---:|---|
+| same model both sides | 34 of 45 | 47.1% | 31.5% – 63.3% |
+| Auto routed away | 130 of 165 | 15.4% | 10.2% – 22.6% |
 
-Where both answers come from the same model the judge splits evenly, so the
-gap is not an artefact of arm labelling or answer position (52.4% preferred the
-first answer, and Auto was first 51.9% of the time). The control cannot speak
-to self-preference, because there both sides are the judge's own output — which
-is precisely the comparison the routed-away subset makes.
+**What that does and does not say.** The same-model subset is consistent with an
+even split, and with the position figures (52.4% preferred the first answer;
+Auto was first 51.9% of the time) it gives no sign of a label or position
+effect. It is not enough to rule one out: 34 decided pairs put the interval
+between 31.5% and 63.3%, which still admits a substantial effect in either
+direction.
+
+Nor is the distance between the two rows evidence about self-preference. The
+Router chose which prompts went into which subset, so they are different
+populations of question, not a treatment and a control. The contrast says the
+losses are concentrated where Auto routed away — an operational fact worth
+acting on — and nothing about why.
 
 ### Per cell
 
@@ -98,6 +107,16 @@ is precisely the comparison the routed-away subset makes.
 | writing_and_rewriting/ko | 3 | 8 | 3 | 2 |
 
 Two cells barely test routing: `current_information` sends 10 of 14 (en) and 12
-of 14 (ko) to the baseline model, so most of those pairs are the control rather
-than a comparison. `writing_and_rewriting/en` is the only cell where Auto is not
-behind.
+of 14 (ko) to the baseline model, so most of those pairs compare a model with
+itself. `writing_and_rewriting/en` is the only cell where Auto is not behind.
+
+`analysis_and_reasoning` is 1 win in 28 across both languages. That is a routing
+signal worth investigating on its own, before and regardless of anything the
+judge-bias question settles.
+
+### A correction to an earlier version of this file
+
+The first version of this record said the control showed "the gap is not an
+artefact of arm labelling or answer position". At 34 decided pairs that was
+stronger than the data supports, and it has been replaced with the interval
+above. mposition caught it.
