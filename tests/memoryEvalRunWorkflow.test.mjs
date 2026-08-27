@@ -64,7 +64,11 @@ test("a probe skips the steps that would judge it as a run", () => {
     // rules would discard it every time -- a red job saying "may not be cited"
     // about something that was never a candidate for citation. The blind
     // review sheet samples every cell and a probe reaches few of them.
-    for (const step of ["Admissibility", "Blind review sheet"]) {
+    for (const step of [
+        "Which cases failed",
+        "Admissibility",
+        "Blind review sheet",
+    ]) {
         const at = workflow.indexOf(`name: ${step}`);
         assert.ok(at > 0, `${step} step missing`);
         assert.match(
@@ -86,7 +90,11 @@ test("a failing verdict still gets diagnosed", () => {
     // 2026-08-26 measured all 1,150 cases, missed the critical bulk-safe gate
     // 49 times, and produced neither an admissibility verdict nor a sheet to
     // read the answers with.
-    for (const step of ["Admissibility", "Blind review sheet"]) {
+    for (const step of [
+        "Which cases failed",
+        "Admissibility",
+        "Blind review sheet",
+    ]) {
         const at = workflow.indexOf(`name: ${step}`);
         assert.match(
             workflow.slice(at, at + 200),
@@ -94,10 +102,12 @@ test("a failing verdict still gets diagnosed", () => {
             `${step} must survive a red live step`
         );
     }
+    const report = workflow.indexOf("name: Which cases failed");
     const admissibility = workflow.indexOf("name: Admissibility");
     const sheet = workflow.indexOf("name: Blind review sheet");
     const preserve = workflow.indexOf("name: Preserve the blind review sheet");
     for (const [name, step] of [
+        ["Which cases failed", workflow.slice(report, admissibility)],
         ["Admissibility", workflow.slice(admissibility, sheet)],
         ["Blind review sheet", workflow.slice(sheet, preserve)],
     ]) {

@@ -176,6 +176,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+      # Before the judgement, because it is what the judgement is about. The
+      # harness prints a case-by-case list only on a probe -- 1,150 cases would
+      # be a wall of text -- so without this a failing full run leaves nothing
+      # in CI naming the cases behind its numbers.
+      - name: Which cases failed
+        if: always() && inputs.limit == ''
+        env:
+          RUN_LABEL: ${{ inputs.run_label }}
+        run: |
+          artifact="artifacts/mem-eval-$RUN_LABEL.json"
+          if [ ! -f "$artifact" ]; then
+            echo "::notice::No artifact was written, so there is nothing to explain."
+            exit 0
+          fi
+          npm run report:memory-eval-failures -- --artifact="$artifact" --max-rows=all
+
       # The rules pre-registered on 2026-08-24
       # (docs/ops/memory-extraction-decision-grade-run.md §3). Failing here
       # means the run may not be cited -- its numbers are not a result either

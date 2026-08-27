@@ -105,9 +105,10 @@ live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 **`limit`은 회차를 compatibility probe로 바꿉니다** — 앞의 N건만 돌고 멈춥니다.
 배선이 맞는지 1,150번 지불하며 배우지 않기 위한 것이고, v1이 정확히 그렇게
 세 번의 dispatch를 썼습니다. probe는 결과가 아닙니다: artifact에 `probeLimit`이
-남고 `decisionGrade`는 숫자와 무관하게 false이며, admissibility 검사와 blind
-review 시트 단계는 건너뜁니다(전자는 매번 폐기 판정을 낼 뿐이고, 후자는 8개
-cell을 표집하는데 probe가 대부분에 닿지 않습니다).
+남고 `decisionGrade`는 숫자와 무관하게 false이며, 읽기 세 단계
+(`Which cases failed`·admissibility·blind review 시트)는 건너뜁니다 —
+admissibility는 매번 폐기 판정을 낼 뿐이고, 시트는 8개 cell을 표집하는데 probe가
+대부분에 닿지 않으며, 케이스별 목록은 probe라면 harness가 이미 출력합니다.
 
 `limit`을 준 채 **그 flag를 모르는 branch**를 고르면 실행 전에 멈춥니다. 옛
 harness는 모르는 flag를 조용히 버리므로 10건을 요청하고 1,150건을 청구받게
@@ -142,6 +143,47 @@ artifact를 쓰기 전에 죽었다면 그 회차에는 이미 자기 오류가 
 않습니다** — 취소는 이미 지불한 호출을 버리는 일입니다.
 
 운영자가 할 일은 secret `OPENAI_API_KEY` 등록과 dispatch 두 가지입니다.
+
+### 2.5.2 끝난 회차를 읽는 방법 — 재실행 없이
+
+**숫자 뒤에 어느 케이스가 있는지는 로그가 말해 주지 않습니다.** harness의
+케이스별 출력은 `if (probeLimit !== null)` 안에 있습니다 — 1,150건은 글의 벽이
+되기 때문입니다. 그래서 전체 실행이 실패해도 무엇이 실패했는지 로그에 없습니다.
+
+```
+npm run report:memory-eval-failures -- --artifact=<path> [--max-rows=all]
+```
+
+artifact를 읽어 cell별 분해, **critical bulk-safe 채택 전건**(문장까지),
+kind 불일치(expected → returned, 쌍별 집계), 아무것도 반환하지 않은 케이스,
+어떤 gold와도 안 맞는 후보, harness 실패를 나열합니다. 판정은 하지 않습니다 —
+`artifact.verdict`를 있는 그대로 인용하고 그 뒤에 무엇이 있는지만 말합니다.
+artifact·dataset·register 어디에도 쓰지 않습니다.
+
+- **critical 목록은 gate가 세는 함수 그대로입니다**
+  (`unadmittedCriticalBulkSafeCandidates`). 규칙을 두 번 구현해서 gate가 센 것과
+  다른 집합을 보고하면, 아무도 겪지 않은 실패를 설명하게 됩니다.
+- **tree의 dataset이 artifact의 것과 다르면 거절합니다.** 아래 분류는 전부 gold
+  label이 정하므로, 옛 artifact를 새 dataset으로 읽으면 적용된 적 없는 label에
+  대해 자신 있게 틀린 답을 냅니다. version과 digest를 둘 다 봅니다.
+- **거절만이 비정상 종료입니다.** 실패로 가득한 회차도 0으로 끝납니다 — 그것을
+  설명하는 것이 이 도구의 일입니다.
+
+decision-grade workflow는 이 보고를 `Which cases failed` 단계에서 자기 artifact에
+대해 돌립니다. **이미 끝난 회차**는 별도 workflow가 읽습니다.
+
+```
+Memory eval — inspect a preserved artifact   (run_id, artifact_name, max_rows)
+```
+
+`actions/download-artifact`로 다른 run의 artifact를 받아 위 보고와 admissibility
+검사와 blind review 시트를 돌립니다. **provider를 부르지 않고 키도 없으므로 지출이
+구조적으로 불가능하고**, 그래서 `SPEND` 확인도 예산 산술도 없습니다. 권한은
+`contents: read` + `actions: read`뿐입니다.
+
+이것이 있는 이유는 **회차를 읽으려고 회차를 만들지 않기 위해서**입니다. 기록을
+90일 보존하는 것이 바로 그 때문이고, 읽기 단계가 `if: always()`를 갖기 전에
+만들어진 회차(2026-08-26 run1)에도 소급해 닿습니다.
 
 ## 3. 사전 등록 — 제외·재실행 규칙 [확정 · 2026-08-24 @mposition]
 
