@@ -103,6 +103,12 @@ sample size becomes an outcome that was chosen rather than measured.
 
 The 2026-08-27 pilot measured 78.1% discordance over 210 pairs, which sizes a
 decision set at roughly 7,500 for ±2pp, 3,334 for ±3pp and 1,875 for ±4pp.
+
+> **That discordance is not a usable basis, and neither is the re-run's.**
+> Both pilots sent empty answers to the judge and are void — see
+> `docs/ops/router-evaluation-runs/route01-pilot-20260827-void.md`. `n` below
+> stays pending until an uncontaminated pilot has measured a discordance, and
+> is then confirmed or voided and re-frozen rather than edited.
 mposition chose **±3pp**: ±2pp is more than this stage needs, and ±4pp leaves a
 borderline result undecidable. `n` is 223 per cell across the 15 cells —
 **3,345**, rather than 3,334, for the same precision with no cell carrying a

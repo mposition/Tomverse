@@ -32,6 +32,8 @@
 
 import { createHash } from "node:crypto";
 
+import { isUsableAnswerText } from "./routerAnswerOutcome";
+
 export const ANSWER_BUNDLE_VERSION = "router-answer-bundle-v1";
 
 /** What a request actually reached, as opposed to what this repository calls it. */
@@ -116,8 +118,16 @@ const answerProblems = (side: unknown, where: string): string[] => {
     const problems: string[] = [];
     const answer = side as Partial<BundledAnswer> | null;
     if (!answer || typeof answer !== "object") return [`${where} is missing`];
-    for (const field of ["modelId", "provider", "apiModel", "text", "digest"] as const) {
+    for (const field of ["modelId", "provider", "apiModel", "digest"] as const) {
         if (!isNonEmptyString(answer[field])) problems.push(`${where} has no ${field}`);
+    }
+    // The same predicate the pilot decides with, so a bundle can never hold an
+    // answer the writer thought was fine and the reader refuses. They
+    // disagreed once: the writer took `result.text ?? ""` and the reader
+    // demanded non-empty, and 62 empty slots reached a bundle that then could
+    // not be re-judged.
+    if (!isUsableAnswerText(answer.text)) {
+        problems.push(`${where} has no text a person could read`);
     }
     if (answer.arm !== "auto" && answer.arm !== "baseline") {
         problems.push(`${where} has no arm`);
