@@ -25,6 +25,7 @@ import {
     sha256,
 } from "../lib/routerAnswerBundle.ts";
 import {
+    CALIBRATION_MIN_COVERAGE,
     DEFAULT_RESAMPLES,
     JUDGE_CALIBRATION_VERSION,
     calibrateJudges,
@@ -363,9 +364,17 @@ test("a calibration over a bundle that stopped early is refused", () => {
     assert.match(problems.join(" "), /140 of 210 planned pair\(s\), so the run that produced them stopped early/);
 });
 
-test("a comparison over only the pairs both judges could grade is refused", () => {
-    const problems = calibrationArtefactProblems(artefact({ pairs: 198 }), run());
-    assert.match(problems.join(" "), /198 of the bundle's 210 pair\(s\) carry both judges' verdicts/);
+test("a judge that could not grade a few pairs is tolerated; a big hole is not", () => {
+    // A judge returning nothing parseable is a structural shortfall, and the
+    // floor is the exclusion ceiling the procedure already refuses a report
+    // for rather than a number invented here.
+    assert.equal(CALIBRATION_MIN_COVERAGE, 0.95);
+    assert.deepEqual(calibrationArtefactProblems(artefact({ pairs: 202 }), run()), []);
+
+    const problems = calibrationArtefactProblems(artefact({ pairs: 180 }), run());
+    assert.match(problems.join(" "), /180 of the bundle's 210 pair\(s\) carry both judges' verdicts/);
+    assert.match(problems.join(" "), /85\.7%, under the 95% floor/);
+
     assert.deepEqual(calibrationArtefactProblems(artefact({ pairs: 0 }), run()).filter((p) => /graded no pairs/.test(p)).length, 1);
 });
 

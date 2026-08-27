@@ -17,6 +17,12 @@
     "preRegisteredBy": "mposition",
     "rationale": "mposition's choice. It is also the baseline, so it grades its own answer in every pair -- the baseline arm is gpt-5-6-luna on all 210. That is the self-preference docs/ops/tomverse-chat-router-evaluation-set.md §5 is about, and it is why a decision run refuses this judge without a --mode=judge-bias artefact. Recorded as a known confound rather than avoided: the pilot exists to measure discordance so §3's n can be computed, and a judge that reads Korean and English equally well matters more to that number than independence from the baseline does."
   },
+  "independentJudge": {
+    "modelId": "claude-fable-5",
+    "preRegisteredAt": "2026-08-27",
+    "preRegisteredBy": "mposition",
+    "rationale": "mposition's choice for the first independent judge in docs/ops/tomverse-chat-router-evaluation-set.md §5. It has to be independent of both arms, and anthropic/claude-fable-5 wrote neither: the baseline arm is openai/gpt-5.6-luna and the Auto arm is deepseek. Pre-registered here rather than typed at dispatch for the same reason the judge and the seed are -- the calibration compares this judge against the target, and choosing which one after seeing a shift is choosing the answer. It is the expensive half of the measurement at $10/$50 per million tokens against luna's $0.20/$1.20; docs/ops/tomverse-chat-router-calibration-cost.md costs it out."
+  },
   "seed": {
     "value": 20260826,
     "preRegisteredAt": "2026-08-26",
