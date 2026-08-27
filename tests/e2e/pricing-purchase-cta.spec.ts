@@ -267,7 +267,7 @@ const eventNames = (harness: PricingHarness) =>
 const eventsNamed = (harness: PricingHarness, name: string) =>
   harness.events.filter((event) => event.event_name === name);
 
-test.describe("pricing plan CTAs by authentication state and plan", () => {
+test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-risk" }, () => {
   test("a signed-out visitor is offered sign-in on every paid plan", async ({
     page,
   }) => {
@@ -423,7 +423,7 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
   });
 });
 
-test.describe("credit-pack purchase from the pricing page", () => {
+test.describe("credit-pack purchase from the pricing page", { tag: "@ui-risk" }, () => {
   test("a signed-in visitor opens the purchase modal without leaving the page", async ({
     page,
   }) => {
@@ -510,7 +510,7 @@ test.describe("credit-pack purchase from the pricing page", () => {
   });
 });
 
-test.describe("the sign-in round trip keeps the purchase intent", () => {
+test.describe("the sign-in round trip keeps the purchase intent", { tag: "@ui-risk" }, () => {
   test("a signed-out credit CTA carries the pack, the language and the section back", async ({
     page,
   }) => {
@@ -586,7 +586,7 @@ test.describe("the sign-in round trip keeps the purchase intent", () => {
   });
 });
 
-test.describe("expired sessions and failed checkouts", () => {
+test.describe("expired sessions and failed checkouts", { tag: "@ui-risk" }, () => {
   test("a 401 while loading packs offers re-authentication, not a loading error", async ({
     page,
   }) => {
@@ -718,7 +718,7 @@ test.describe("expired sessions and failed checkouts", () => {
   });
 });
 
-test.describe("returning from Stripe", () => {
+test.describe("returning from Stripe", { tag: "@ui-risk" }, () => {
   test("a completed purchase is acknowledged in the section it started from", async ({
     page,
   }) => {
@@ -778,7 +778,7 @@ test.describe("returning from Stripe", () => {
   });
 });
 
-test.describe("purchase funnel analytics", () => {
+test.describe("purchase funnel analytics", { tag: "@ui-risk" }, () => {
   test("the funnel is one connected sequence, with no duplicated steps", async ({
     page,
   }) => {
@@ -845,7 +845,7 @@ test.describe("purchase funnel analytics", () => {
   });
 });
 
-test.describe("purchase modal accessibility", () => {
+test.describe("purchase modal accessibility", { tag: "@ui-risk" }, () => {
   test("the modal traps focus, closes on Escape, and gives focus back", async ({
     page,
   }) => {
@@ -899,7 +899,7 @@ test.describe("purchase modal accessibility", () => {
   });
 });
 
-test.describe("pricing purchase CTAs at 320px and 200% text", () => {
+test.describe("pricing purchase CTAs at 320px and 200% text", { tag: "@ui-risk" }, () => {
   test("neither the CTAs nor the modal push the page sideways", async ({
     page,
   }) => {

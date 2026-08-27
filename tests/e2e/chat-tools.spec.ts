@@ -68,7 +68,7 @@ const asProPlan = async (page: Page) => {
   );
 };
 
-test("the + menu opens a tools sheet with web search, Deep Research, and an unchanged attach flow", async ({
+test("the + menu opens a tools sheet with web search, Deep Research, and an unchanged attach flow", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
@@ -85,7 +85,7 @@ test("the + menu opens a tools sheet with web search, Deep Research, and an unch
   await expect(page.getByTestId("tools-attach-row")).toBeVisible();
 });
 
-test("selecting a web search mode shows a removable status chip", async ({ page }) => {
+test("selecting a web search mode shows a removable status chip", { tag: "@ui-risk" }, async ({ page }) => {
   // The selection is pinned rather than inherited from the app default: this
   // test is about the state where NO selected model can search, and the
   // default model moved to gpt-5-6-luna, which has verified provider-native
@@ -137,7 +137,7 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
 });
 
-test("web search mode selection does not repeat across a new chat", async ({ page }) => {
+test("web search mode selection does not repeat across a new chat", { tag: "@ui-risk" }, async ({ page }) => {
   // Seeded with history on purpose. The mobile shell deliberately hides its
   // header "New chat" button while the open conversation is still empty
   // (components/chat/MobileChatShell.tsx), so driving this contract from the
@@ -177,7 +177,7 @@ test("web search mode selection does not repeat across a new chat", async ({ pag
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 });
 
-test("Deep Research is gated behind login for guests", async ({ page }) => {
+test("Deep Research is gated behind login for guests", { tag: "@ui-risk" }, async ({ page }) => {
   const { prepareGuestPage } = await import("./support/app-fixtures");
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
@@ -189,7 +189,7 @@ test("Deep Research is gated behind login for guests", async ({ page }) => {
   await expect(page.getByTestId("deep-research-confirm-start")).toHaveCount(0);
 });
 
-test("Deep Research setup sheet opens for an eligible Pro user and requires explicit confirm", async ({
+test("Deep Research setup sheet opens for an eligible Pro user and requires explicit confirm", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
@@ -210,7 +210,7 @@ test("Deep Research setup sheet opens for an eligible Pro user and requires expl
 });
 
 for (const width of [320, 360, 375, 390, 430]) {
-  test(`no input-row or tools-sheet control is clipped at a ${width}px viewport`, async ({
+  test(`no input-row or tools-sheet control is clipped at a ${width}px viewport`, { tag: "@ui-risk" }, async ({
     page,
   }) => {
     await mockAuthenticatedApi(page);

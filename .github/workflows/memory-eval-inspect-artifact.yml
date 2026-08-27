@@ -1,0 +1,139 @@
+name: Memory eval — inspect a preserved artifact
+#
+# Reads a run that already happened. It calls no provider, holds no provider
+# key and carries no live-mode step, so unlike the decision-grade workflow it
+# cannot spend and needs no typed confirmation.
+#
+# It exists because reading a run used to require producing one. The
+# decision-grade workflow's own reading steps only see the artifact it just
+# wrote, so answering "which cases failed in run1" meant paying for run2. The
+# records were preserved for 90 days precisely so that would not be necessary.
+#
+# It also reaches backwards. Runs made before the reading steps carried
+# `if: always()` produced no admissibility verdict and no blind review sheet
+# at all -- run1 of 2026-08-26 is one -- and this gets both from the artifact
+# they did preserve.
+#
+# What it does not do: judge, approve, or write anything back. The artifact is
+# immutable evidence and the register is a human procedure
+# (docs/ops/memory-extraction-decision-grade-run.md §3).
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "The workflow run whose artifact to read (the number in its URL)"
+        required: true
+      artifact_name:
+        description: "Artifact to download — mem-eval-run1, mem-eval-run2…"
+        required: true
+        default: mem-eval-run1
+      max_rows:
+        description: "Rows per section, or `all`. A truncated list says so."
+        required: true
+        default: all
+
+permissions:
+  contents: read
+  # Downloading another run's artifact is the only extra reach this needs, and
+  # it is read-only.
+  actions: read
+
+jobs:
+  inspect:
+    name: Inspect
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The workflow file has to exist on the default branch for GitHub to
+      # offer it at all, so it lives on `main` while the scripts it calls live
+      # on `develop`. Dispatching with the default ref therefore selects a
+      # branch that cannot run it, and `npm run` would answer with "Missing
+      # script" -- a message that says nothing about which branch to pick.
+      # Free to get wrong, unlike the decision-grade run, and for that reason
+      # more likely to be dispatched casually from the branch the UI offers
+      # first.
+      - name: The selected ref can run this
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts ?? {};
+            const missing = [
+              "report:memory-eval-failures",
+              "check:memory-eval-run",
+              "make:memory-eval-blind-review",
+            ].filter((name) => !(name in scripts));
+            if (missing.length === 0) process.exit(0);
+            console.log(
+              "::error::This branch does not carry " + missing.join(", ") +
+                ". Re-dispatch with Branch: develop, or a branch that has them."
+            );
+            process.exit(1);
+          '
+
+      - name: Download the artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+
+      # One artifact, one JSON. Naming what it found rather than assuming the
+      # file is called after the artifact: the JSON is named from the run's
+      # `run_label` and the artifact from its `name`, and nothing enforces that
+      # those agree.
+      - name: Find the record file
+        run: |
+          count="$(find artifacts -maxdepth 2 -name '*.json' | wc -l)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one .json in the artifact, found $count."
+            find artifacts -maxdepth 2 -type f
+            exit 1
+          fi
+          artifact="$(find artifacts -maxdepth 2 -name '*.json')"
+          echo "Reading $artifact"
+          echo "ARTIFACT=$artifact" >> "$GITHUB_ENV"
+
+      - name: Which cases failed
+        env:
+          MAX_ROWS: ${{ inputs.max_rows }}
+        run: |
+          npm run report:memory-eval-failures -- \
+            --artifact="$ARTIFACT" \
+            --max-rows="$MAX_ROWS"
+
+      # Both of these ran only on a fresh run until now. Neither judges the
+      # model; the first says whether the run may be cited and the second is
+      # the sheet a person reads the answers from.
+      # `env.ARTIFACT != ''` rather than a bare `always()`: if the download or
+      # the find failed there is no file, and `--artifact=` with nothing after
+      # it names neither the cause nor the remedy.
+      - name: Admissibility
+        if: always() && env.ARTIFACT != ''
+        run: npm run check:memory-eval-run -- --artifact="$ARTIFACT"
+
+      - name: Blind review sheet
+        if: always() && env.ARTIFACT != ''
+        run: |
+          npm run make:memory-eval-blind-review -- \
+            --artifact="$ARTIFACT" \
+            --per-cell=5 \
+            --out=artifacts/blind-review.md
+
+      - name: Preserve the blind review sheet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}-blind-review
+          path: artifacts/blind-review.md
+          if-no-files-found: warn
+          retention-days: 90

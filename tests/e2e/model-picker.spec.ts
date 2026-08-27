@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/chat");
 });
 
-test("opening the picker shows recommendations only, not the full catalogue", async ({ page }) => {
+test("opening the picker shows recommendations only, not the full catalogue", { tag: "@ui-risk" }, async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   await expect(dialog).toBeVisible();
@@ -37,7 +37,7 @@ test("opening the picker shows recommendations only, not the full catalogue", as
   await expectNoHorizontalOverflow(page);
 });
 
-test("every recommendation explains itself in task language with an exact cost", async ({ page }) => {
+test("every recommendation explains itself in task language with an exact cost", { tag: "@ui-risk" }, async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   const cards = dialog.getByTestId("recommended-model-option");
@@ -53,7 +53,7 @@ test("every recommendation explains itself in task language with an exact cost",
   }
 });
 
-test("All models reveals the full catalogue and its filters", async ({ page }) => {
+test("All models reveals the full catalogue and its filters", { tag: "@ui-risk" }, async ({ page }) => {
   const dialog = await openModelCatalogue(page);
 
   await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(20);
@@ -64,7 +64,7 @@ test("All models reveals the full catalogue and its filters", async ({ page }) =
   await expectNoHorizontalOverflow(page);
 });
 
-test("new models are listed and historical retirements stay hidden on desktop and mobile", async ({
+test("new models are listed and historical retirements stay hidden on desktop and mobile", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   const dialog = await openModelCatalogue(page);
@@ -104,7 +104,7 @@ test("new models are listed and historical retirements stay hidden on desktop an
   ).toContainText("Mistral Medium 3.5");
 });
 
-test("going back from All models keeps the selection intact", async ({ page }) => {
+test("going back from All models keeps the selection intact", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.reload();
   const dialog = await openModelCatalogue(page);
@@ -127,7 +127,7 @@ test("going back from All models keeps the selection intact", async ({ page }) =
   await expect(recommended).toHaveAttribute("aria-pressed", "true");
 });
 
-test("selection state stays synchronized between both screens", async ({ page }) => {
+test("selection state stays synchronized between both screens", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.reload();
   await modelMenuTrigger(page).click();
@@ -152,7 +152,7 @@ test("selection state stays synchronized between both screens", async ({ page })
   ).toHaveAttribute("aria-pressed", "true");
 });
 
-test("search jumps into the catalogue and cancelling restores the recommendations", async ({ page }) => {
+test("search jumps into the catalogue and cancelling restores the recommendations", { tag: "@ui-risk" }, async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   await expect(dialog.getByTestId("recommended-model-option").first()).toBeVisible();
@@ -172,7 +172,7 @@ test("search jumps into the catalogue and cancelling restores the recommendation
   expect(restored).toBeGreaterThanOrEqual(6);
 });
 
-test("the filter sheet reports its active count, result count, and resets", async ({ page }) => {
+test("the filter sheet reports its active count, result count, and resets", { tag: "@ui-risk" }, async ({ page }) => {
   const dialog = await openModelCatalogue(page);
   const resultCount = dialog.getByTestId("model-catalogue-result-count");
   const unfiltered = await resultCount.innerText();
@@ -207,7 +207,7 @@ test("the filter sheet reports its active count, result count, and resets", asyn
   await expect(dialog.getByTestId("model-filter-sheet-trigger")).not.toContainText("1");
 });
 
-test("Escape closes the filter sheet, then the catalogue, then the picker", async ({ page }) => {
+test("Escape closes the filter sheet, then the catalogue, then the picker", { tag: "@ui-risk" }, async ({ page }) => {
   const dialog = await openModelCatalogue(page);
 
   await dialog.getByTestId("model-filter-sheet-trigger").click();
@@ -225,7 +225,7 @@ test("Escape closes the filter sheet, then the catalogue, then the picker", asyn
   await expect(dialog).toHaveCount(0);
 });
 
-test("guests are told what a gated recommendation needs before they pick it", async ({ page }) => {
+test("guests are told what a gated recommendation needs before they pick it", { tag: "@ui-risk" }, async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   const locked = dialog.locator(
@@ -241,7 +241,7 @@ test("guests are told what a gated recommendation needs before they pick it", as
   }
 });
 
-test("completed model finder answers personalize the recommendations", async ({ page }) => {
+test("completed model finder answers personalize the recommendations", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.unroute("**/api/user/model-finder");
   await page.route("**/api/user/model-finder", (route) =>
@@ -277,7 +277,7 @@ test("completed model finder answers personalize the recommendations", async ({ 
   ).toBeVisible();
 });
 
-test("favorited models lead the recommendations", async ({ page }) => {
+test("favorited models lead the recommendations", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.evaluate(() => {
     localStorage.setItem(
@@ -298,7 +298,7 @@ test("favorited models lead the recommendations", async ({ page }) => {
   await expect(cards.nth(1)).toHaveAttribute("data-model-id", "mistral-medium-3-1");
 });
 
-test("long input explains its multiplier beside the send controls", async ({ page }) => {
+test("long input explains its multiplier beside the send controls", { tag: "@ui-risk" }, async ({ page }) => {
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");

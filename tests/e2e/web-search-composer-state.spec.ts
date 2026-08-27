@@ -100,7 +100,7 @@ test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "en");
 });
 
-test("web search off shows neither a chip nor a readiness line", async ({ page }) => {
+test("web search off shows neither a chip nor a readiness line", { tag: "@ui-risk" }, async ({ page }) => {
   await seedGuestConversation(page, [SUPPORTED], "off");
   await open(page);
 
@@ -109,7 +109,7 @@ test("web search off shows neither a chip nor a readiness line", async ({ page }
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
 });
 
-test("full support is one compact line with no 'Unsupported 0' row", async ({
+test("full support is one compact line with no 'Unsupported 0' row", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, [SUPPORTED], "always");
@@ -135,7 +135,7 @@ test("full support is one compact line with no 'Unsupported 0' row", async ({
   await expect(description).toContainText("refunded");
 });
 
-test("the composer does not grow extra rows just to say the normal state", async ({
+test("the composer does not grow extra rows just to say the normal state", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, [SUPPORTED], "off");
@@ -155,7 +155,7 @@ test("the composer does not grow extra rows just to say the normal state", async
   await expectNoHorizontalOverflow(page);
 });
 
-test("partial support is the only case that earns a visible exception", async ({
+test("partial support is the only case that earns a visible exception", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, [UNSUPPORTED[0], SUPPORTED, UNSUPPORTED[1]], "always");
@@ -175,7 +175,7 @@ test("partial support is the only case that earns a visible exception", async ({
   await expect(detail).toContainText("without a web search");
 });
 
-test("no capable model blocks with a way out instead of a silent fallback", async ({
+test("no capable model blocks with a way out instead of a silent fallback", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, UNSUPPORTED, "always");
@@ -196,9 +196,10 @@ test("no capable model blocks with a way out instead of a silent fallback", asyn
   await expect(notice).toHaveCount(0);
 });
 
-test("a conversation stored as the retired auto mode opens with the switch off", async ({
-  page,
-}) => {
+test(
+  "a conversation stored as the retired auto mode opens with the switch off",
+  { tag: "@ui-risk" },
+  async ({ page }) => {
   // "auto" meant "ask me before searching", and the switch has no position
   // that can honour that. Reading it as on would turn a request to be asked
   // into standing permission to search and to spend the surcharge, so it opens
@@ -216,9 +217,10 @@ test("a conversation stored as the retired auto mode opens with the switch off",
     "aria-checked",
     "false"
   );
-});
+  }
+);
 
-test("adding a model that cannot search updates the chip and the reservation together", async ({
+test("adding a model that cannot search updates the chip and the reservation together", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, [SUPPORTED], "always");
@@ -246,7 +248,7 @@ test("adding a model that cannot search updates the chip and the reservation tog
   );
 });
 
-test("a native model whose search cost has no ceiling is counted as unsupported", async ({
+test("a native model whose search cost has no ceiling is counted as unsupported", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, [SUPPORTED, UNBOUNDED_NATIVE], "always");
@@ -263,7 +265,7 @@ test("a native model whose search cost has no ceiling is counted as unsupported"
   await expect(detail).toContainText("without a web search");
 });
 
-test("a selection of only unbounded native models blocks rather than promising a search", async ({
+test("a selection of only unbounded native models blocks rather than promising a search", { tag: "@ui-risk" }, async ({
   page,
 }) => {
   await seedGuestConversation(page, [UNBOUNDED_NATIVE], "always");

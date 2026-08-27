@@ -85,7 +85,7 @@ const openSeeded = async (page: Page) => {
 const rail = (page: Page) => page.getByTestId("comparison-action-rail");
 const quickButton = (page: Page) => page.getByTestId("quick-comparison-button");
 
-test.describe("desktop workflow dock alignment", () => {
+test.describe("desktop workflow dock alignment", { tag: "@ui-risk" }, () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
@@ -164,7 +164,7 @@ test.describe("desktop workflow dock alignment", () => {
   });
 });
 
-test.describe("mobile comparison rail", () => {
+test.describe("mobile comparison rail", { tag: "@ui-risk" }, () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("mobile"),
@@ -279,7 +279,7 @@ test.describe("mobile comparison rail", () => {
   });
 });
 
-test.describe("comparison readiness states", () => {
+test.describe("comparison readiness states", { tag: "@ui-risk" }, () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
     // The rail asks the server what this guest may run, so these readiness
@@ -583,7 +583,7 @@ async function readRailGeometry(page: Page) {
 }
 
 for (const shell of SHELLS) {
-  test.describe(`status disclosure policy (${shell.name})`, () => {
+  test.describe(`status disclosure policy (${shell.name})`, { tag: "@ui-risk" }, () => {
     test.use({ hasTouch: true });
 
     test.beforeEach(async ({}, testInfo) => {
@@ -897,7 +897,7 @@ for (const shell of SHELLS) {
   });
 }
 
-test.describe("collapsed rail (keyboard/landscape)", () => {
+test.describe("collapsed rail (keyboard/landscape)", { tag: "@ui-risk" }, () => {
   test.use({ hasTouch: true });
 
   test.beforeEach(async ({}, testInfo) => {
@@ -944,7 +944,7 @@ test.describe("collapsed rail (keyboard/landscape)", () => {
   });
 });
 
-test.describe("the two shells agree on the policy", () => {
+test.describe("the two shells agree on the policy", { tag: "@ui-risk" }, () => {
   test.use({ hasTouch: true });
 
   test.beforeEach(async ({}, testInfo) => {
@@ -1011,7 +1011,7 @@ test.describe("the two shells agree on the policy", () => {
   });
 });
 
-test.describe("per-action descriptions", () => {
+test.describe("per-action descriptions", { tag: "@ui-risk" }, () => {
   test.use({ hasTouch: true });
 
   test.beforeEach(async ({}, testInfo) => {
@@ -1092,7 +1092,7 @@ test.describe("per-action descriptions", () => {
   });
 });
 
-test.describe("mobile rail geometry", () => {
+test.describe("mobile rail geometry", { tag: "@ui-risk" }, () => {
   test.use({ hasTouch: true });
 
   test.beforeEach(async ({}, testInfo) => {
