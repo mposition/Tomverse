@@ -222,17 +222,23 @@ test("a live probe with no key refuses before it reaches a provider", () => {
         output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
     }
     assert.equal(status, 1, "a live probe without a key must refuse");
-    // WHICH gate speaks first is the register's business, not this test's.
-    // An unfunded pair is refused for the budget before the key is looked at,
-    // and after a version bump the probe pair is unfunded by definition — a
-    // budget does not travel with a bump. Pinning one message made this test
-    // fail on `mem-extract-v5` for a refusal that was working correctly.
+    // WHICH gate speaks first is the register's business, not this test's,
+    // and it has moved twice. An unfunded pair is refused for the budget
+    // before the key is looked at, and a version bump leaves the new pair
+    // unfunded by definition — a budget does not travel with a bump. Then
+    // `mem-extract-v5` was measured and closed, and a revoked pair is refused
+    // for its status ahead of both. Each time, a test pinning one message
+    // failed for a refusal that was working correctly.
     //
-    // Both gates are pinned individually below, against `decideEvalRunMode`
-    // itself, where neither needs a subprocess or a funded pair. What this
-    // test owns is the property the subprocess can show and the unit cannot:
-    // the real entry point exits non-zero and prints no report.
-    assert.match(output, /OPENAI_API_KEY is required|has no approved eval budget/i);
+    // Each gate is pinned individually below, against `decideEvalRunMode`
+    // itself, where none of them needs a subprocess or a funded pair. What
+    // this test owns is the property the subprocess can show and the unit
+    // cannot: the real entry point exits non-zero and prints no report.
+    assert.match(
+        output,
+        /OPENAI_API_KEY is required|has no approved eval budget|in the\s+register/i,
+        output
+    );
     // The refusal came before the run: no report was printed.
     assert.doesNotMatch(output, /Extraction accuracy/);
 });
@@ -273,5 +279,16 @@ test("both gates refuse, and the budget one is checked first", () => {
             hasApiKey: false,
         }).reason,
         "no_eval_budget"
+    );
+    // A closed pair is refused ahead of both, and keeps its budget while it
+    // is. That ordering is what makes "this pair is not re-run" a gate rather
+    // than a memory — see `.github/audits/memory-eval-v5-run1-2026-08-27.md`.
+    assert.equal(
+        decideEvalRunMode({
+            ...base,
+            registerEntry: { ...funded, status: "revoked" },
+            hasApiKey: true,
+        }).reason,
+        "pair_not_runnable"
     );
 });

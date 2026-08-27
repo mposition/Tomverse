@@ -352,18 +352,44 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // with them. US$15 still covers two runs on succ-3 and not the
             // third a repeat would need, so carrying it across would have
             // looked like a decision and been an accident.
+            // **Measured and closed on 2026-08-27.** v5-run1 (run
+            // 33065481093) scored all 1,150 cases of `mem-eval-succ-3` and
+            // missed every §12.3 floor and the hard-zero gate. The run is
+            // admissible — 6/6, no harness failures — so it is a citable
+            // negative result rather than a spoiled one, and the blind review
+            // of 40 cases was completed on it.
+            //
+            // `revoked` rather than `candidate`, on the precedent the two
+            // `mem-extract-v1` entries set: this register uses it for a pair
+            // that will not be approved, whether or not it ever was. It also
+            // makes "we are not re-running this" a gate rather than a memory —
+            // `decideEvalRunMode` refuses `pair_not_runnable` before it looks
+            // at the budget or the key.
+            //
+            // The budget stays. The approval was real, US$0.5877 of it was
+            // really spent, and deleting it would erase what the money bought.
+            //
+            // No `evaluation` block: §12.1's evidence fields are an approval
+            // record (approver, approvedAt, expiresAt), and there was no
+            // approval. The evidence is the audit below.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v5",
-            status: "candidate",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-27",
             notes:
-                "Carries the five rules frozen on 2026-08-27 after run1 " +
-                "(run 32972243326, mem-eval-succ-2). Budget approved " +
-                "2026-08-27 for a decision-grade run on mem-eval-succ-3. " +
-                "That set is not frozen yet — the 초안 도구·모델·버전 row is " +
-                "blank on the eight replacement batches — so a live run is " +
-                "refused on the freeze gate, not on this budget.",
+                "Negative result, confirmed 2026-08-27. v5-run1 (run " +
+                "33065481093, mem-eval-succ-3, commit b9402f28): precision " +
+                "Wilson lower 0.8198 < 0.95, recall 0.8198 < 0.85, bulk " +
+                "eligibility 0.8041 < 0.85, critical bulk-safe adoptions 25 " +
+                "!= 0. Admissible 6/6, 0 harness failures, US$0.5877 spent. " +
+                "Two opposing structural failures — rule 2 under-applied " +
+                "(assistant-authored facts stored as the user's) and rule 1 " +
+                "over-applied (legitimate facts dropped from injection " +
+                "turns) — so it was not re-run " +
+                "(docs/ops/memory-extraction-decision-grade-run.md §6.1). " +
+                "Blind review and the gold defects it surfaced: " +
+                ".github/audits/memory-eval-v5-run1-2026-08-27.md.",
             evalBudget: {
                 approvedBy: "@mposition",
                 // The §12.4 independent re-run's worst case on succ-3 is
@@ -385,14 +411,23 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // names one pair, and v4's backup carries no budget either. A
             // backup that quietly inherited the primary's ceiling would be a
             // second funded pair nobody approved.
+            // Closed with the prompt version rather than on its own numbers:
+            // it was never funded and never run, so there is nothing to
+            // report about this pair. The same shape as `mem-extract-v1`'s
+            // backup, which is `revoked` and says so.
+            //
+            // Left as a candidate it would be a live target for a version
+            // whose primary pair has been measured and closed — one budget
+            // approval away from running a prompt nobody intends to approve.
             extractionModelId: "gpt-5-4-mini",
             promptVersion: "mem-extract-v5",
-            status: "candidate",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-27",
             notes:
-                "Backup candidate. No budget; smoke mode only until a person " +
-                "records one. Issue 1135 funds the gpt-5-6-luna pair only.",
+                "Never funded and never run. Closed 2026-08-27 with " +
+                "mem-extract-v5, whose primary pair is a confirmed negative " +
+                "result: .github/audits/memory-eval-v5-run1-2026-08-27.md.",
             evalBudget: null,
             evaluation: null,
         },
