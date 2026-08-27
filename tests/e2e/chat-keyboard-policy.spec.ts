@@ -38,7 +38,7 @@ async function prepareSingleModelChat(page: Page) {
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 }
 
-test.describe("desktop chat keyboard policy", () => {
+test.describe("desktop chat keyboard policy", { tag: "@ui-risk" }, () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
@@ -111,7 +111,7 @@ test.describe("desktop chat keyboard policy", () => {
   });
 });
 
-test.describe("mobile chat keyboard policy", () => {
+test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
   test.beforeEach(async ({}, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("mobile"),

@@ -291,7 +291,7 @@ async function enterGuestChat(
 // ===========================================================================
 // 1. The default header: no status, no reserved row
 // ===========================================================================
-test.describe("Default header (no status)", () => {
+test.describe("Default header (no status)", { tag: "@ui-risk" }, () => {
   for (const width of MOBILE_WIDTHS) {
     test(`signed-in new conversation reserves no status row at ${width}px`, async ({
       page,
@@ -380,7 +380,7 @@ test.describe("Default header (no status)", () => {
 // ===========================================================================
 // 2. Guest: the status row is real content and must survive
 // ===========================================================================
-test.describe("Guest header", () => {
+test.describe("Guest header", { tag: "@ui-risk" }, () => {
   for (const width of MOBILE_WIDTHS) {
     test(`guest usage badge stays whole and tappable at ${width}px`, async ({ page }) => {
       await enterGuestChat(page, { viewport: { width, height: 800 } });
@@ -421,7 +421,7 @@ test.describe("Guest header", () => {
 // ===========================================================================
 // 3. Lock / share / responding / error
 // ===========================================================================
-test.describe("Status states", () => {
+test.describe("Status states", { tag: "@ui-risk" }, () => {
   test("a locked conversation shows the lock badge in a real status row", async ({
     page,
   }) => {
@@ -578,7 +578,7 @@ test.describe("Status states", () => {
 // ===========================================================================
 // 4. Model configuration
 // ===========================================================================
-test.describe("Model configuration", () => {
+test.describe("Model configuration", { tag: "@ui-risk" }, () => {
   for (const models of [[MODEL_A], [MODEL_A, MODEL_B], THREE_MODELS]) {
     test(`${models.length} model(s) keep the same status-free header`, async ({ page }) => {
       await enterMobileChat(page, {
@@ -623,7 +623,7 @@ test.describe("Model configuration", () => {
 // ===========================================================================
 // 5. Long titles, locales, RTL
 // ===========================================================================
-test.describe("Long titles and locales", () => {
+test.describe("Long titles and locales", { tag: "@ui-risk" }, () => {
   const LONG_TITLES: Record<string, string> = {
     en: "Comparing long-context summarisation quality across three frontier models for a quarterly report",
     ko: "분기 보고서를 위해 세 가지 최신 모델의 장문 컨텍스트 요약 품질을 비교하는 아주 긴 제목의 대화",
@@ -698,7 +698,7 @@ test.describe("Long titles and locales", () => {
 // ===========================================================================
 // 6. Zoom, landscape, forced colors, reduced motion
 // ===========================================================================
-test.describe("Zoom and orientation", () => {
+test.describe("Zoom and orientation", { tag: "@ui-risk" }, () => {
   // 200% browser zoom halves the layout viewport in CSS pixels, which is what
   // this reproduces: a 390px-wide phone at 200% lays out as 195px.
   test("200% zoom keeps every header control operable", async ({ page }) => {
@@ -774,7 +774,7 @@ test.describe("Zoom and orientation", () => {
 // ===========================================================================
 // 7. Hydration
 // ===========================================================================
-test.describe("Hydration", () => {
+test.describe("Hydration", { tag: "@ui-risk" }, () => {
   test("no empty status strip is painted while the shell hydrates", async ({ page }) => {
     await mockAuthenticatedApi(page, { selectedModels: THREE_MODELS });
     await restoreActiveConversation(page);
@@ -832,7 +832,7 @@ test.describe("Hydration", () => {
 // ===========================================================================
 // 8. Regressions around the header
 // ===========================================================================
-test.describe("Neighbouring surfaces", () => {
+test.describe("Neighbouring surfaces", { tag: "@ui-risk" }, () => {
   test("the sidebar trigger is named for what it does, in en and ko", async ({ page }) => {
     await enterMobileChat(page, { lang: "en" });
     await expect(page.getByTestId("mobile-sidebar-open")).toHaveAccessibleName(
