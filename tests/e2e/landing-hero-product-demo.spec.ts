@@ -67,21 +67,40 @@ test.describe("landing hero product demonstration", () => {
     expect(scrollWidth).toBeLessThanOrEqual(320);
   });
 
-  test("continues the product story in the editorial comparison section", async ({
+  test("states the illustration disclosure under the demonstration", async ({
     page,
   }) => {
+    // The disclosure moved here from the retired workflow diagram, and it has
+    // to stay attached to the thing it describes: this is the page's only
+    // product demonstration now, and it is a drawing rather than a capture.
     await openLanding(page);
 
+    const disclosure = page.getByTestId("landing-workflow-disclosure");
+    await expect(disclosure).toBeVisible();
+    await expect(disclosure).toContainText(/Illustrative/i);
+  });
+
+  test("continues the product story without retelling it", async ({ page }) => {
+    // V1 followed the demonstration with a three-column model row that showed
+    // the same GPT / Claude / Gemini answers again, then a workflow diagram
+    // that showed the same four stages again. Both are gone. What follows the
+    // demonstration is what it cannot show: the review's own output, and the
+    // faster alternative to a full review.
+    await openLanding(page);
+
+    await expect(page.getByTestId("landing-loop-section")).toBeVisible();
+    await expect(page.getByTestId("landing-review-anatomy")).toBeVisible();
+    await expect(page.getByTestId("landing-quick-summary-card")).toBeVisible();
+
+    // The three model columns exist once on the page, inside the demo.
     for (const model of ["gpt", "claude", "gemini"]) {
       await expect(
+        page.getByTestId(`landing-hero-demo-model-${model}`)
+      ).toHaveCount(1);
+      await expect(
         page.getByTestId(`landing-editorial-model-${model}`)
-      ).toBeVisible();
+      ).toHaveCount(0);
     }
-
-    await expect(
-      page.getByTestId("landing-editorial-review-items").locator("span")
-    ).toHaveCount(4);
-    await expect(page.getByTestId("landing-quick-summary-card")).toBeVisible();
   });
 
   test("renders the live provider catalogue as part of the homepage story", async ({
