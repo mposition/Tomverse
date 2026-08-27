@@ -145,10 +145,12 @@ test("succ-3 declares what it is and what it replaced", () => {
     assert.equal(MEMORY_EVAL_SUCC3_DATASET_VERSION, "mem-eval-succ-3");
     assert.equal(MEMORY_EVAL_SUCC3_SUPERSEDES, MEMORY_EVAL_SUCCESSOR_DATASET_VERSION);
     assert.equal(MEMORY_EVAL_SUCC3_DATASET_PURPOSE, "decision");
-    // Held false until the operator fills the 초안 생성자 row on the eight
-    // replacement batches: `npm run check:memory-eval-freeze` refuses a
-    // `true` here while any §7.1 condition is unmet.
-    assert.equal(MEMORY_EVAL_SUCC3_DATASET_FROZEN, false);
+    // Frozen 2026-08-27, once the operator supplied the last §7.1 field.
+    // `npm run check:memory-eval-freeze` exits non-zero if this says true
+    // while any condition is unmet, so the flag and the conditions cannot
+    // drift apart — and `tests/memoryEvalFreezeGate.test.mjs` runs that check
+    // and reads this constant back, in both directions.
+    assert.equal(MEMORY_EVAL_SUCC3_DATASET_FROZEN, true);
 });
 
 /* --------------------------------------------------------- the removal -- */

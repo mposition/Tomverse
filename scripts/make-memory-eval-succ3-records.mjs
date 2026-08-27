@@ -40,6 +40,23 @@ import { MEMORY_EVAL_REGRESSION_PROVENANCE } from "@/lib/memoryEvalRegressionCor
 const REVIEWED_ON = "2026-08-27";
 const REVIEWER = "@mposition";
 
+/**
+ * The `초안 생성자` value for the eight replacement batches, as the operator
+ * supplied it on 2026-08-27.
+ *
+ * Recorded here rather than left blank because it is a transcription of what
+ * a person reported, which is the same boundary the case verdicts sit on:
+ * observations and reported values are the agent's to write down, judgements
+ * and signatures are not. An agent does not choose this string — the field
+ * names the tool, model and version a person is willing to stand behind, and
+ * it matches the value already on all 32 `mem-eval-succ-2` records.
+ *
+ * §7.1's seventh freeze condition is this row, and it was the last thing
+ * holding `MEMORY_EVAL_SUCC3_DATASET_FROZEN` at false. It was supplied on
+ * 2026-08-27 and the set was frozen the same day.
+ */
+const REPLACEMENT_DRAFTED_BY = "ai-draft:claude-code/opus/2026-08";
+
 const sourceById = new Map(SUCCESSOR_ADOPTED_BATCHES.map((b) => [b.id, b]));
 const successorById = new Map(
     [...TRANCHE_1_SUCCESSORS, ...TRANCHE_2_SUCCESSORS].map((s) => [s.id, s])
@@ -286,16 +303,14 @@ ${decisionTable("충분", "다름 (전건 검수)")}
 
 | 항목 | 값 |
 |---|---|
-| 초안 생성자 (\`ai-draft:<도구>/<모델>/<버전>\`) |  |
+| 초안 생성자 (\`ai-draft:<도구>/<모델>/<버전>\`) | \`${REPLACEMENT_DRAFTED_BY}\` |
 | 검수자 (사람 · 최초의 권위 있는 판정) | ${REVIEWER} |
 | 재작성 회차 | 1 (최초 초안) |
 
-**초안 생성자 칸은 비어 있고, 채울 수 있는 것은 운영자뿐입니다.** 이 저장소에
-남기는 산출물에 에이전트가 자기 모델 식별자를 적지 않는다는 규칙이 있어서,
-succ-2의 기록에서도 같은 이유로 사람이 적었습니다. §7.1의 일곱 조건 중
-「초안 도구·모델·버전 기록」이 이 칸 하나에 걸려 있고,
-\`npm run check:memory-eval-freeze\` 가 채워질 때까지 succ-3을 미충족으로
-보고합니다.
+초안 생성자 값은 ${REVIEWED_ON}에 운영자가 제시한 것을 옮겨 적었습니다 —
+\`mem-eval-succ-2\`의 32개 기록에 이미 적혀 있는 값과 같습니다. 이 칸은 §7.1의
+일곱 번째 동결 조건이었고, 채워지기 전까지
+\`npm run check:memory-eval-freeze\` 가 succ-3을 미충족으로 보고했습니다.
 `;
 };
 
