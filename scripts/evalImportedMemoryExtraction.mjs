@@ -52,6 +52,15 @@ import {
     MEMORY_EVAL_SUCCESSOR_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
     MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
 } from "../lib/memoryEvalSuccessorFixtures.ts";
+// The artifact envelope version and the second digest. The harness stays
+// pinned to the approved current target -- there is no need to make an
+// arbitrary past dataset billable -- but what it writes has to say which
+// version and which labelling it ran on, or a later reader has to guess.
+import { MEMORY_EVAL_ARTIFACT_SCHEMA } from "../lib/memoryEvalDatasetRegistry.ts";
+import {
+    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    scoringContractDigest as scoringContractDigestOf,
+} from "../lib/memoryEvalScoringContractDigest.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     datasetFingerprintInput,
@@ -120,6 +129,7 @@ const redactSecrets = (message) => {
 const datasetDigest = createHash("sha256")
     .update(datasetFingerprintInput(MEMORY_EVAL_CASES), "utf8")
     .digest("hex");
+const scoringContractDigest = scoringContractDigestOf(MEMORY_EVAL_CASES);
 
 const contentDigest = (content) =>
     createHash("sha256")
@@ -600,10 +610,21 @@ if (runMode.mode === "live") {
 
 const artifact = {
     manifest: {
+        // The envelope version a reader uses to tell a current artifact from
+        // one written before `scoringContractDigest` existed. An artifact at
+        // this schema that lost either digest is refused rather than read as
+        // historical: lib/memoryEvalDatasetRegistry.ts.
+        artifactSchema: MEMORY_EVAL_ARTIFACT_SCHEMA,
         modelId,
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         datasetVersion: MEMORY_EVAL_DATASET_VERSION,
         datasetDigest,
+        // The second digest, and not a duplicate of the first: the dataset
+        // digest does not cover expectedDisposition, goldCompleteness,
+        // mustIncludeAny or criticalGoldMode, so two runs can agree on it and
+        // still have been scored on different labels.
+        scoringContractDigest,
+        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
         mode: runMode.mode,
         commitSha,
         workingTreeDirty,

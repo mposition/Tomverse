@@ -10,14 +10,9 @@
  * one did.
  */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import {
-    MEMORY_EVAL_SUCCESSOR_CASES,
-    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
-} from "@/lib/memoryEvalSuccessorFixtures";
-import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
+import { resolveArtifactDataset } from "@/lib/memoryEvalDatasetRegistry";
 
 import {
     analyseArtifact,
@@ -59,15 +54,37 @@ try {
     process.exit(2);
 }
 
+/**
+ * Which dataset this artifact was scored against — a lookup, not an import.
+ *
+ * The script used to import one dataset and compare. That refuses every
+ * artifact from any other version, which after `mem-eval-succ-3` is wired
+ * means refusing run1 forever while succ-2's cases sit in the tree unread.
+ * Reading a superseded run is the whole reason those cases are preserved.
+ */
+const resolved = resolveArtifactDataset(artifact?.manifest);
+if (!resolved.ok) {
+    console.error(`Cannot read this artifact (${resolved.reason}).\n\n${resolved.detail}`);
+    process.exit(1);
+}
+
+if (resolved.scoringContract === "absent_historical") {
+    console.log(
+        `# note: this artifact predates \`scoringContractDigest\`. It is read against\n` +
+            `# ${resolved.manifest.datasetVersion}'s recorded labelling ` +
+            `(${resolved.manifest.scoringContractVersion ?? "schema 1"}).\n`
+    );
+}
+
 const analysis = analyseArtifact({
     artifact,
     casesById: new Map(
-        MEMORY_EVAL_SUCCESSOR_CASES.map((testCase) => [testCase.id, testCase])
+        resolved.composition.cases.map((testCase) => [testCase.id, testCase])
     ),
-    datasetVersion: MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
-    datasetDigest: createHash("sha256")
-        .update(datasetFingerprintInput(MEMORY_EVAL_SUCCESSOR_CASES), "utf8")
-        .digest("hex"),
+    // Already checked by the resolver, and with better messages. Passed
+    // through so the core keeps its own guard rather than trusting a caller.
+    datasetVersion: resolved.manifest.datasetVersion,
+    datasetDigest: resolved.manifest.datasetDigest,
 });
 
 console.log(renderReport(analysis, { maxRows }));
