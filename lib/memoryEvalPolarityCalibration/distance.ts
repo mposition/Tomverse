@@ -1,24 +1,35 @@
 /**
  * How far a polarity marker is from the fact it is supposed to negate.
  *
- * `.github/audits/memory-eval-gold-contract-2026-08-27.md` §②-1 fixes every
- * choice in here, and fixed them **before** the corpus was written. A distance
- * whose definition moves with the measurement is not a measurement.
+ * ## This is a diagnostic, not the scoring contract
  *
- * ## Why a distance at all
+ * `.github/audits/memory-eval-gold-contract-2026-08-27.md` §9.3 settled
+ * polarity a different way: the gold carries a `polarity` field, v6's output
+ * carries one too, and scoring compares the two fields. Nothing reads a
+ * polarity out of prose any more, so **no `K` appears in `mem-score-v3` or in
+ * `scoringContractDigest`, and no gate reads this file** (§9.4).
  *
- * Polarity leaves the token list and becomes a field, so the matcher has to
- * decide whether a statement denies the fact. Scanning the whole statement for
- * a marker is not enough: *"사용자는 인천에 살며 이사 계획이 없다"* asserts the
- * opposite of a `denies` gold about 인천 and contains 없. The marker is there;
- * it belongs to something else.
+ * What it is for now is raising disagreements for a person to look at: a
+ * candidate whose own sentence carries a marker beside the fact while its
+ * `polarity` field says `affirmed` is worth a human's attention. Nothing rests
+ * on the answer, which is why a distance with no margin is tolerable here and
+ * was not tolerable as a scoring rule.
  *
- * Proximity is the cheapest rule that separates those and stays deterministic.
- * It is not linguistics — it does not know what the marker attaches to — so
- * `K` has to be measured rather than reasoned about, on a corpus built for
- * that and nothing else (§9).
+ * ## Why it could not be the scoring rule
+ *
+ * Scanning the whole statement for a marker is not enough: *"사용자는 인천에
+ * 살며 이사 계획이 없다"* asserts the opposite of a `negated` gold about 인천
+ * and contains 없. The marker is there; it belongs to something else.
+ *
+ * Proximity was the cheapest rule that separates those and stays
+ * deterministic. Measured on the corpus built for it (§9), Korean admitted
+ * exactly one value and English admitted none — `does not have access to a
+ * printer` is 18 characters and `has two siblings and no children` is 6, so
+ * any K catching the first misreads the second. §9.2 has the measurement.
+ *
+ * The definitions below were fixed before that corpus was written and are
+ * unchanged since, apart from the two defects §9.1 records.
  */
-
 import { canon, canonNS } from "@/lib/memoryEvalPolarityCalibration/normalise";
 
 /**
@@ -159,7 +170,7 @@ export function polarityGap(input: {
 /**
  * Whether a statement carries the gold's polarity, under a given `K`.
  *
- * `affirms` is the absence of a nearby marker rather than the presence of an
+ * `affirmed` is the absence of a nearby marker rather than the presence of an
  * affirmation: languages mark negation and leave assertion unmarked, so there
  * is nothing to look for on the positive side.
  *
@@ -171,10 +182,10 @@ export function polarityMatches(input: {
     statement: string;
     factValueAll: readonly string[];
     language: "ko" | "en";
-    polarity: "affirms" | "denies";
+    polarity: "affirmed" | "negated";
     k: number;
 }): boolean {
     const gap = polarityGap(input);
     const denied = gap !== null && gap <= input.k;
-    return input.polarity === "denies" ? denied : !denied;
+    return input.polarity === "negated" ? denied : !denied;
 }

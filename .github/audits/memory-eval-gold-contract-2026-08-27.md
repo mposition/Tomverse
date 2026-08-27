@@ -1,9 +1,11 @@
 # gold 작성·채점 계약
 
-**상태: schema 의미 승인됨 (2026-08-27, @mposition). K는 calibration 후 확정.**
+**상태: 승인됨 (2026-08-27, @mposition). 결정 1·2·3·4 전부.**
 
-승인된 것은 §1·§2·§3·§8의 결정 1·3·4이고, 결정 2(polarity 근접 상수 K)는
-**별도 corpus로 측정한 뒤** 확정합니다. 그때까지 코드에 반영하지 않습니다.
+결정 2(polarity 판정 방법)는 §9의 calibration이 거리 방식의 불성립을 보인 뒤
+**A안 — 출력 schema의 필드 대 필드 비교**로 확정됐습니다 (§9.3). 거리 상수 `K`는
+계약에 **들어가지 않습니다.** 남은 것은 §5(succ-4 gold와 evidence 작성·검수)와
+§6(v6 prompt 설계)이며, 그 앞에 `mem-score-v3` 동결이 있습니다.
 
 `mem-eval-succ-4`부터 적용할 계약입니다. v5-run1이 드러낸 것은 모델 결함만이
 아니라 **gold가 정답을 담지 못한다**는 사실이었고
@@ -45,11 +47,11 @@ gold `handwritten`             모델 writing notes by hand  합성어 ↔ 구
 ```ts
 type ExpectedMemoryV3 = {
     id: string;
-    kind: string;                       // ① exact 매칭, 변경 없음
-    polarity: "affirms" | "denies";     // ② 명시 필드, 필수
-    factValueAll: readonly string[];    // ③ 정규화된 사실값 — 전부 필요 (AND)
-    factValueAny?: readonly string[];   //    표현 대안 — 하나면 충분 (OR)
-    anchor: EvidenceAnchor;             // ④ 기계 검증 가능한 provenance, 필수
+    kind: string;                        // ① exact 매칭, 변경 없음
+    polarity: "affirmed" | "negated";    // ② 명시 필드, 필수
+    factValueAll: readonly string[];     // ③ 정규화된 사실값 — 전부 필요 (AND)
+    factValueAny?: readonly string[];    //    표현 대안 — 하나면 충분 (OR)
+    evidence: EvidenceAnchor;            // ④ 기계 검증 가능한 provenance, 필수
     expectedDisposition: "bulk_safe" | "sensitive_review";
 };
 ```
@@ -58,7 +60,12 @@ type ExpectedMemoryV3 = {
 되는지 이름이 답하지 못합니다. `mustInclude`의 논리곱을 계승하므로 `All`이
 붙습니다.
 
-**`polarity`와 `anchor`는 각 `ExpectedMemory`에서 필수이고, `expected: []`인
+**값 이름은 `affirmed`/`negated`입니다** (2026-08-27 확정). `positive`/
+`negative`는 감정 극성으로 읽힙니다 — 기억 추출에서 "부정적인 사실"과 "부정된
+사실"은 전혀 다른 것이고, 필드 이름이 그 둘을 구분하지 못하면 gold 작성자와
+prompt 작성자가 서로 다른 것을 뜻하면서 같은 단어를 씁니다.
+
+**`polarity`와 `evidence`는 각 `ExpectedMemory`에서 필수이고, `expected: []`인
 negative case에는 아무것도 요구하지 않습니다.** 기대하는 기억이 없으면 그 둘을
 달 대상이 없습니다. 가짜 placeholder를 요구하면 "아무것도 뽑지 말라"는 케이스에
 뽑을 것이 있는 것처럼 보이는 필드가 생깁니다.
@@ -74,29 +81,25 @@ negative case에는 아무것도 요구하지 않습니다.** 기대하는 기�
 지금은 부정이 `mustIncludeAny` 논리합 안에 숨어 있고, 케이스마다 새로
 발명됩니다. 그것이 `한양대에 다닌 적 없` 같은 과대적합 문자열의 출처입니다.
 
-polarity가 필드가 되면 판정은 **승인된 언어별 부정 표지 목록**으로 하고, 목록은
-한 번 검수돼 digest에 들어갑니다.
+polarity가 필드가 되면, 판정은 **모델이 낸 `polarity` 필드와 gold의 `polarity`
+필드를 그대로 비교**하는 일이 됩니다 (A안 채택, 2026-08-27 — §9.3).
 
-```
-ko  않 · 없 · 아니 · 못
-en  not · n't · never · no · without
-```
+**모델 문장에서 polarity를 읽어내지 않습니다.** 처음 설계는 승인된 부정 표지
+목록과 근접 조건(`K`자 이내)으로 문장에서 polarity를 추론하는 것이었고, §9의
+calibration corpus가 그 방법이 **성립하지 않는다**는 것을 보였습니다 — 영어에는
+가능한 `K`가 존재하지 않고 한국어는 `7..7` 한 값뿐입니다 (§9.2).
 
-**전역 스캔은 안 됩니다.** `사용자는 인천에 살며 이사 계획이 없다`는 gold의
-반대를 주장하면서 `없`을 포함합니다. 그래서 **근접 조건**을 둡니다.
+그래서 polarity는 gold에서만이 아니라 **v6 출력에서도 필드**가 됩니다. 추론할
+것이 없으면 추론의 정확도도 없습니다. 계약은 §10입니다.
 
-> 부정 표지는 `factValue`의 마지막 출현으로부터 정규화 후 **K자 이내**에 있어야
-> 합니다.
+`K`와 거리 판정은 `mem-score-v3`에 **들어가지 않습니다.** 부정 표지 목록과 거리
+계산은 진단 도구로만 남습니다 (§9.4).
 
-K는 언어별 상수이며 digest에 포함됩니다. **아직 계약값이 아닙니다** —
-`ko: 12`, `en: 24`는 candidate이고, §9의 절차로 정합니다.
+### ②-1 거리를 재기 전에 고정한 것 — 채점에서 빠졌습니다 (2026-08-27)
 
-**succ-3의 출력으로 K를 고르지 않습니다.** 처음에 그렇게 제안했고, 그것은
-scoring parameter를 decision 결과에 맞추는 일입니다. B+ 계약대로 읽으면
-calibration에 쓰인 사례는 규칙을 만든 사례이므로 succ-4에 남을 근거를 잃고,
-1,150건으로 튜닝하면 그 근거를 전부 잃습니다.
-
-### ②-1 거리를 재기 전에 고정하는 것 (2026-08-27)
+> **이 절은 채점 계약이 아닙니다.** A안 채택으로 거리 판정이 `mem-score-v3`에서
+> 빠졌습니다 (§9.3). 아래 정의는 §9의 진단 도구가 지금도 쓰는 정의이며, 그
+> 측정이 어떤 조건에서 이뤄졌는지 읽을 수 있도록 남깁니다.
 
 corpus를 만들기 전에 정의가 먼저입니다. 정의가 움직이면 측정은 과녁을 잃습니다.
 
@@ -143,34 +146,37 @@ match(cand, gold) =
 이것으로 위 열 건 중 **다섯 건(숫자)이 규칙만으로 해결**됩니다. 복수형은
 substring이 흡수합니다 — gold `12 hour`는 `12 hours` 안에 있습니다.
 
-### ④ anchor — 기계가 대조할 수 있는 provenance (2026-08-27 확정)
+### ④ evidence — 기계가 대조할 수 있는 provenance (2026-08-27 확정)
 
 **자연어 설명형 anchor는 규칙 2를 재지 못합니다.** 검토자가 "사용자가 말했음"이라
 적어 두는 것은 기록이지 검증이 아닙니다.
 
 ```ts
 type EvidenceAnchor = {
-    messageRef: string;   // 대화 안에서 안정적인 메시지 참조 (label/turn index)
-    span: string;         // 그 메시지 안의 exact 부분 문자열
+    evidenceMessageIndex: number;   // 대화 안에서 안정적인 메시지 참조
+    evidenceQuote: string;          // 그 메시지 안의 exact 부분 문자열
 };
 ```
 
+이름은 v6 출력 schema와 **같습니다** (§10). gold 쪽과 출력 쪽이 다른 이름을 쓰면
+채점 코드가 둘을 옮겨 적으며 짝을 맞춰야 하고, 그 옮겨 적기가 계약의 두 번째
+사본이 됩니다.
+
+`evidenceMessageIndex`는 대화 안에서 안정적인 정수 index이며, 재현할 수 없는
+runtime id가 아닙니다 — 같은 artifact를 나중에 다시 채점해도 같은 메시지를
+가리켜야 합니다.
+
 **작성 시점 검증** — schema가 셋을 봅니다.
 
-1. `messageRef`가 그 대화에 실재할 것
+1. `evidenceMessageIndex`가 그 대화에 실재할 것
 2. 그 메시지의 role이 **반드시 `user`**일 것
-3. `span`이 그 메시지 본문에 **그대로** 있을 것
+3. `evidenceQuote`가 그 메시지 본문에 **그대로** 있을 것
 
-**채점 시점 검증** — 후보가 gold의 `messageRef`를 evidence로 대야 adoption이
-인정됩니다. **assistant 메시지를 가리키면 인정하지 않습니다.**
-
-**v6 출력 schema** — 지금 후보는 `evidence: ["m1"]`만 냅니다. span이 없으므로
-v6에서 출력 schema에 evidence span을 추가하고, 낸 span은 그 사용자 메시지 안에
-그대로 있어야 합니다. **일치하지 않으면 adoption을 인정하지 않습니다.** 근거를
-대지 못하는 추출과 근거를 지어낸 추출은 채점에서 같습니다.
+**채점 시점 검증** — §10의 계약이 그대로 적용됩니다. 근거를 대지 못하는 추출과
+근거를 지어낸 추출은 채점에서 같습니다.
 
 이것으로 **규칙 2가 prompt에서 gold로 내려옵니다.** v5-run1에서 assistant 발화를
-사용자 사실로 저장한 13건은, anchor가 채점에 들어 있었다면 gold를 맞힐 수
+사용자 사실로 저장한 13건은, evidence가 채점에 들어 있었다면 gold를 맞힐 수
 없었습니다 — 근거로 댈 사용자 메시지가 없기 때문입니다.
 
 ## 2. 한국어 어형
@@ -280,9 +286,9 @@ succ-assistant-en-307에 대안 1개 추가
 | | 결정 |
 |---|---|
 | 1. 필드 이름 | **`factValueAll` / `factValueAny`.** 배열의 AND/OR 의미를 이름이 말합니다. 기존 이름은 버립니다. |
-| 2. polarity 상수 K | **별도 calibration corpus로 확정** (§9). `ko:12`·`en:24`는 candidate. |
+| 2. polarity 판정 | **A안 — 출력 schema의 필드 대 필드 비교** (§9.3, §10). 거리 판정과 상수 `K`는 계약에서 제외. `ko:12`·`en:24` candidate는 폐기. |
 | 3. stem 목록 | **좁게 시작** (§2.1). |
-| 4. anchor | **채점에 포함**, 기계 검증 가능한 provenance로 (§1④). |
+| 4. evidence | **채점에 포함**, 기계 검증 가능한 provenance로 (§1④, §10). `evidenceMessageIndex` + `evidenceQuote`. |
 
 ## 9. polarity calibration corpus
 
@@ -375,33 +381,91 @@ children.`은 6자입니다. 앞을 잡는 K는 뒤를 반드시 오판합니다
 계산입니다. 이중부정·정정·조건문은 설계할 때 예상한 대로 어떤 K도 다루지
 못합니다 — corpus에 넣은 이유가 그것을 보이기 위해서였습니다.
 
-### 9.3 그러면 무엇으로 정하는가 — 결정 요청
+### 9.3 결정 — A안 채택 (2026-08-27, @mposition)
 
-거리는 **prose에서 polarity를 읽어내려는** 도구입니다. 세 갈래가 있습니다.
+> **A안을 채택한다. v6 Structured Output에 `polarity`와 검증 가능한 user
+> evidence reference를 필수로 추가한다. `mem-score-v3`는 polarity를 필드 대
+> 필드로 채점하며 거리 기반 판정과 `K` 상수를 포함하지 않는다. 기존 거리
+> corpus와 `assertsGold`는 미검수 진단 자료로만 보존한다.**
 
-**A. 모델 출력에 `polarity`를 필드로 요구합니다 (권고).** §1②는 gold에서
-polarity를 token에서 꺼내 필드로 만들었습니다. v6 출력 schema에도 같은 것을
-요구하면 채점은 필드 대 필드 비교가 되고 **거리는 아예 필요 없어집니다.**
-§1④가 이미 evidence reference를 출력 schema에 넣기로 했으므로 같은 변경 한
-번에 들어갑니다. 모델이 자기 문장과 어긋난 polarity를 쓰면 그것은 모델의
-오답이고 그대로 세면 됩니다.
+근거는 §9.2입니다. 거리는 **prose에서 polarity를 읽어내려는** 도구였고, 그 도구가
+영어에서 답을 못 냅니다. 추론을 더 정교하게 만드는 대신 추론할 필요를
+없앱니다 — polarity가 gold의 필드이므로 출력의 필드이기도 하면, 채점은 두 필드의
+비교입니다. §1④가 이미 evidence reference를 출력 schema에 넣기로 했으므로 같은
+변경 한 번에 들어갑니다.
 
-**B. 거리를 절 범위로 바꿉니다.** 표지가 사실값과 **같은 절**에 있는지를
-봅니다. 이 corpus의 긍정·부정·정정을 전부 맞힙니다(정정의 표지는 쉼표나
-`아니라` 건너편에 있습니다). 대신 절 분리 목록을 언어별로 새로 고정해야
-하고, 그것은 거리가 피하려던 문법입니다. 이중부정·조건문은 여전히 못 합니다.
+계약 본문은 §10입니다.
 
-**C. 거리를 유지합니다.** 한국어만 `K=7`로 성립하고 영어는 성립하지
-않습니다. 권하지 않습니다.
+**B안(절 범위)과 C안(거리 유지)은 채택하지 않습니다.** B는 언어별 절 분리 목록을
+새로 고정해야 하고 그것은 거리가 피하려던 문법이며, 이중부정·조건문은 여전히
+다루지 못합니다. C는 한국어만 성립합니다.
 
-A를 택하면 거리는 **채점에서 빠지고 진단으로만 남습니다** — 모델이 쓴 문장과
-모델이 쓴 `polarity`가 어긋나는 건을 사람 검수로 올리는 용도이며, 거기서는
-`ko=7`의 여유 0이 문제가 되지 않습니다. 아무것도 그 값에 기대지 않기
-때문입니다.
+### 9.4 거리는 진단으로만 남습니다
 
-**어느 쪽이든 이중부정·정정·조건문은 계약에서 다룹니다.** gold의 anchor span은
-평서 긍정이거나 평서 부정이어야 하고, 조건절·이중부정을 span으로 삼은 gold는
-검수에서 반려합니다. 이 규칙은 A·B·C 어느 선택과도 무관하게 필요합니다.
+`lib/memoryEvalPolarityCalibration/**`와 `npm run report:polarity-calibration`은
+지웁니다가 아니라 **강등**됩니다. 모델이 쓴 문장과 모델이 쓴 `polarity`가
+어긋나는 건을 사람 검수로 올리는 용도입니다.
 
-결정 전까지 `K`는 확정하지 않고, `mem-score-v3` 동결(실행 순서 4번)도 하지
+* **`K`는 `mem-score-v3`에도 `scoringContractDigest`에도 들어가지 않습니다.**
+* **pass/fail 판정에 쓰지 않습니다.** 어떤 게이트도 이 거리를 읽지 않습니다.
+* 보고는 `K` 하나가 아니라 **거리 histogram과 사례 목록**입니다. 단일 임계값을
+  출력하는 것 자체가 그 값이 계약이라는 인상을 만듭니다.
+* **`assertsGold` 60건은 `unreviewed diagnostic draft`입니다.** 문서와 코드
+  양쪽에 그렇게 적혀 있습니다.
+* **그 라벨을 근거로 품질·정확도 주장을 하지 않는 한** `mem-score-v3` 동결 전
+  검수는 필요 없습니다. 주장을 하려면 그때 검수합니다.
+
+§9.2의 창 계산은 그대로 유효한 관측입니다 — 그것이 A안을 고른 근거이므로,
+corpus나 표지 목록이 바뀌어 영어에 창이 생기면 그것은 **근거가 바뀐 것**이고
+보이게 실패해야 합니다. `tests/memoryEvalPolarityDistance.test.mjs`가 고정합니다.
+
+## 10. v6 출력 schema와 evidence 결속 (2026-08-27 확정)
+
+### 10.1 필수 필드
+
+후보 하나마다:
+
+| 필드 | 값 |
+|---|---|
+| `polarity` | `"affirmed"` \| `"negated"` |
+| `evidenceMessageIndex` | 대화 안에서 안정적인 message reference |
+| `evidenceQuote` | 그 메시지의 exact span |
+
+셋 다 **필수**입니다. 선택 필드로 두면 모델이 어려운 건에서 생략하고, 생략된
+건은 검사를 통과하는 것이 아니라 검사를 받지 않게 됩니다.
+
+### 10.2 채점·검증 계약
+
+1. evidence가 **실제 `user` 메시지**를 가리켜야 합니다.
+2. `evidenceQuote`가 그 메시지의 **exact span**이어야 합니다.
+3. 출력 `polarity`와 gold `polarity`를 **필드 대 필드**로 비교합니다.
+4. **assistant 메시지 · 존재하지 않는 span · role 불일치는 adoption 불인정**
+   입니다.
+5. **조건문 · 해소되지 않은 정정 · 이중부정처럼 단순 polarity로 확정할 수 없는
+   근거에서는 후보를 출력하지 않습니다.**
+6. **명확한 최종 정정절이 별도로 존재하면 그 평서절만 anchor로 사용 가능**
+   합니다.
+
+5·6이 §9.2가 어떤 K로도 못 한다고 보인 세 형태를 처리하는 방식입니다. 거리로
+읽어내려 하지 않고, **그런 근거에서는 후보를 내지 않게** 합니다. 6은 그
+예외입니다 — `전주가 아니라 정읍이다`에서 정정이 이미 해소돼 있으면 평서절
+`정읍이다`가 anchor가 됩니다.
+
+같은 제약이 gold 작성에도 걸립니다. gold의 `evidenceQuote`는 평서 긍정이거나
+평서 부정이어야 하고, 조건절·미해소 정정·이중부정을 span으로 삼은 gold는
+검수에서 반려합니다.
+
+### 10.3 Structured Outputs는 절반만 보장합니다
+
+Structured Outputs는 출력이 **JSON schema를 지킨다**는 것을 보장합니다. 모델이
+고른 `polarity`가 맞는지, `evidenceQuote`가 실재하는 사용자 발화인지는
+보장하지 않습니다 — schema는 문자열이 있는지를 보지 그 문자열이 참인지를 보지
 않습니다.
+
+**그러므로 서버와 scorer의 evidence 결속 검사가 반드시 함께 있어야 합니다.**
+schema 준수를 근거 검증으로 읽는 것이 이 계약이 막는 실패이고, v5-run1에서
+assistant 발화를 사용자 사실로 저장한 13건이 그 실패의 모습입니다.
+
+결속 검사는 **채점 시점**에 원본 대화를 다시 읽어 수행합니다. 모델이 낸 index와
+span을 그 대화의 메시지와 대조하며, 모델이 낸 어떤 값도 검사의 입력이지 근거가
+아닙니다.

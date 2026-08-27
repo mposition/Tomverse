@@ -6,6 +6,7 @@
 // sentence that exposed it, not on a threshold.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { POLARITY_CALIBRATION_CASES } from "../lib/memoryEvalPolarityCalibration/corpus.ts";
@@ -70,17 +71,17 @@ test("a distant marker is not the fact's own", () => {
       statement: "사용자는 인천에 살며 이사 계획이 없다.",
       factValueAll: ["인천"],
       language: "ko",
-      polarity: "affirms",
+      polarity: "affirmed",
       k: 7,
     }),
     true
   );
 });
 
-test("the corpus admits no K for English", () => {
-  // §9.2. This is the finding, so it is pinned: if a later edit to the corpus
-  // or the markers opens a window, that is a change to the finding and has to
-  // be seen rather than absorbed.
+test("the corpus admits no threshold for English", () => {
+  // §9.2, and the evidence §9.3's decision rests on. Pinned: if a later edit
+  // to the corpus or the markers opens a window, that is a change to the
+  // *grounds for the decision* and has to be seen rather than absorbed.
   const forShape = (language, shape) =>
     POLARITY_CALIBRATION_CASES.filter(
       (item) => item.language === language && item.shape === shape
@@ -96,6 +97,32 @@ test("the corpus admits no K for English", () => {
   assert.equal(floor("en"), 18);
   assert.equal(ceiling("en"), 5);
   assert.ok(floor("en") > ceiling("en"), "en window must stay empty");
+});
+
+test("no threshold reaches the scoring contract", () => {
+  // §9.4. The distance is a diagnostic; a K in the contract descriptor would
+  // put it back in the digest, and from there into a pass/fail. The check is
+  // on the source rather than on the digest value, because a constant added
+  // and not yet folded in would still be a constant somebody could read.
+  const source = readFileSync(
+    new URL("../lib/memoryEvalScoringContractDigest.ts", import.meta.url),
+    "utf8"
+  );
+  for (const forbidden of ["polarityGap", "polarityMatches", "POLARITY_MARKERS"]) {
+    assert.ok(
+      !source.includes(forbidden),
+      `${forbidden} must not reach the scoring contract digest`
+    );
+  }
+  assert.ok(!source.includes("memoryEvalPolarityCalibration"));
+});
+
+test("gold polarity values are affirmed and negated", () => {
+  // §1②. `positive`/`negative` reads as sentiment, and a negated fact is not
+  // a negative fact. The corpus is the only place these values exist so far,
+  // so it is where the naming is pinned.
+  const values = new Set(POLARITY_CALIBRATION_CASES.map((item) => item.goldPolarity));
+  assert.deepEqual([...values].sort(), ["affirmed", "negated"]);
 });
 
 test("every corpus case is labelled and reachable by its own fact value", () => {
