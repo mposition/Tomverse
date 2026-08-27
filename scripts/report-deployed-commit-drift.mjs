@@ -109,18 +109,41 @@ const undeployedCommits = (deployedSha, headSha) => {
 
 const fetchDeployedSha = async (url) => {
   const endpoint = new URL("/api/build-info", url).toString();
+  let response;
   try {
-    const response = await fetch(endpoint, {
+    response = await fetch(endpoint, {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(15000),
     });
-    if (!response.ok) {
-      return { sha: null, error: `HTTP ${response.status}` };
-    }
-    const body = await response.json();
-    return { sha: typeof body?.commitSha === "string" ? body.commitSha : null, error: null };
   } catch (cause) {
-    return { sha: null, error: cause?.message || String(cause) };
+    // Never reached the endpoint at all: DNS, TLS, timeout, refused.
+    return { sha: null, error: `request failed — ${cause?.message || cause}` };
+  }
+
+  const contentType = response.headers.get("content-type") || "no content-type";
+  if (!response.ok) {
+    return { sha: null, error: `HTTP ${response.status} (${contentType})` };
+  }
+
+  // The status and the content type, because they are what an operator repairs
+  // from. The first run of this check answered `Unexpected token '<', "<!DOCTYPE
+  // "... is not valid JSON` -- accurate, and it names neither the endpoint's
+  // answer nor anything to do about it. A 200 carrying HTML is something in
+  // front of the app answering instead of the app: an interstitial, a login
+  // page, a challenge. That is a different repair from a 404 and a very
+  // different one from a timeout, and the line has to say which.
+  const text = await response.text();
+  try {
+    const body = JSON.parse(text);
+    return { sha: typeof body?.commitSha === "string" ? body.commitSha : null, error: null };
+  } catch {
+    return {
+      sha: null,
+      error:
+        `HTTP ${response.status} (${contentType}) did not return JSON. ` +
+        `The first bytes were ${JSON.stringify(text.slice(0, 40))} — something in front of ` +
+        "the app is answering instead of the app.",
+    };
   }
 };
 
@@ -185,7 +208,10 @@ for (const environment of selected) {
 }
 
 if (gate && past > 0) {
-  console.error(
+  // stdout, not stderr. The first run put this summary *above* the environment
+  // it was about, because the two streams interleave in a runner log by
+  // whichever flushes first -- a verdict printed before its evidence.
+  console.log(
     `\n${past} environment${past === 1 ? "" : "s"} need${past === 1 ? "s" : ""} attention. ` +
       "Check the deployment platform: with Wait for CI a deployment waits for the commit's " +
       "check suite, and a failing suite means it never runs at all."
