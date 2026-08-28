@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
+import { evalBudgetBindingProblems } from "../lib/memoryEvalBudgetBinding.ts";
 import {
     MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     decideEvalRunMode,
@@ -118,47 +119,65 @@ test("the closed pair cannot run again, key and freeze notwithstanding", () => {
     );
 });
 
-test("nothing on the register can run live any more", () => {
-    // v4's pair was the other funded one. Stated as a list rather than a
-    // count: a pair that becomes runnable has to be argued for, and this is
-    // where the argument would fail first.
+test("only the pair whose binding is satisfied can run live", () => {
+    // Stated as a list rather than a count: a pair that becomes runnable has
+    // to be argued for, and this is where the argument would fail first.
+    //
+    // The input satisfies the 2026-08-28 budget binding, so this asks the
+    // register's own question — which entries are open and funded — rather
+    // than the binding's. Without that, every entry would refuse for the
+    // binding and the list would say nothing about the register.
     const runnable = MEMORY_EXTRACTION_EVAL_REGISTER.filter(
         (entry) =>
-            decideEvalRunMode(onSucc3({ registerEntry: entry, hasApiKey: true }))
-                .mode === "live"
+            decideEvalRunMode(
+                onSucc3({
+                    registerEntry: entry,
+                    hasApiKey: true,
+                    budgetBindingProblems: [],
+                    budgetTupleFailures: [],
+                    runShaDescendsFromApproval: true,
+                })
+            ).mode === "live"
     ).map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`);
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
+    assert.deepEqual(runnable, [
+        "gpt-5-6-luna::mem-extract-v4",
+        "gpt-5-6-luna::mem-extract-v6",
+    ]);
+});
+
+test("v4's budget cannot fund a run, because it names no instrument", () => {
+    // The other half, and the reason the list above is not the whole answer.
+    // v4's budget predates instrument binding: a ceiling with no dataset,
+    // contract or prompt digest. The harness computes that and refuses.
+    const v4 = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === "mem-extract-v4"
+    );
+    const problems = evalBudgetBindingProblems(v4.evalBudget);
+    assert.ok(problems.length > 0, "v4's budget looks bound, and is not");
+    assert.deepEqual(
+        decideEvalRunMode(
+            onSucc3({
+                registerEntry: v4,
+                hasApiKey: true,
+                budgetBindingProblems: problems,
+            })
+        ),
+        { mode: "refused", reason: "budget_not_bound" }
+    );
 });
 
 /* ------------------------------------------- the gate, end to end ------- */
 
-const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
-const NETWORK_GUARD = fileURLToPath(
-    new URL("./e2e/block-external-network.cjs", import.meta.url)
-);
-
-/** The real entry point, under a guard that throws on any non-loopback dial. */
-const runHarness = (args, env = {}) => {
-    try {
-        const stdout = execFileSync(
-            process.execPath,
-            ["--require", NETWORK_GUARD, "--import", "tsx", HARNESS, ...args],
-            {
-                cwd: REPO_ROOT,
-                encoding: "utf8",
-                env: { ...process.env, ...env },
-                stdio: ["ignore", "pipe", "pipe"],
-            }
-        );
-        return { status: 0, output: stdout };
-    } catch (error) {
-        return {
-            status: error.status ?? 1,
-            output: `${error.stdout ?? ""}${error.stderr ?? ""}`,
-        };
-    }
-};
+// This file used to drive the real harness with `--live` and a key, on the
+// reasoning that whichever pair it selected was unfunded and would refuse
+// before reaching an adapter. The 2026-08-28 budget made that false, so the
+// invocation is gone rather than guarded: a test that dispatches to a provider
+// in order to assert that it does not is the wrong shape however carefully it
+// is fenced. The smoke path is exercised end to end by
+// `tests/memoryEvalSchema3DryRun.test.mjs`, which spends nothing by
+// construction.
 
 test("both revoked v5 pairs refuse for the status exactly", () => {
     // **This assertion is not interchangeable with "some refusal happened".**
@@ -200,31 +219,30 @@ test("the harness cannot select a v5 pair at all, and calls nothing", () => {
     assert.notEqual(MEMORY_EXTRACTION_PROMPT_VERSION, LUNA_V5.promptVersion);
     assert.notEqual(MEMORY_EXTRACTION_PROMPT_VERSION, MINI_V5.promptVersion);
 
+    // Asserted without running the harness. It used to run it with a key, on
+    // the reasoning that the selected pair was unfunded and would refuse
+    // before reaching an adapter. The 2026-08-28 budget made that false for
+    // `gpt-5-6-luna::mem-extract-v6`, and a test that dispatches to a provider
+    // to prove it does not is the worst possible shape — so the premise is
+    // asserted directly instead.
     for (const entry of [LUNA_V5, MINI_V5]) {
         const label = `${entry.extractionModelId}::${entry.promptVersion}`;
-        const result = runHarness(
-            ["--live", `--model=${entry.extractionModelId}`],
-            { OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000" }
+        assert.notEqual(
+            MEMORY_EXTRACTION_PROMPT_VERSION,
+            entry.promptVersion,
+            `${label} is the shipped version again; this file's premise is gone`
         );
-        assert.equal(result.status, 1, `${label} did not refuse`);
-        assert.doesNotMatch(
-            result.output,
-            new RegExp(`${entry.extractionModelId}::${entry.promptVersion}`),
-            `the harness selected ${label}, which the tree no longer ships`
-        );
-        assert.match(
-            result.output,
-            new RegExp(
-                `${entry.extractionModelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}`
-            ),
-            `the refusal named no pair:\n${result.output}`
-        );
-        assert.doesNotMatch(
-            result.output,
-            /QA_EXTERNAL_NETWORK_BLOCKED/,
-            `${label} attempted an outbound connection`
-        );
-        // No report was printed: the refusal came before the run, not after.
-        assert.doesNotMatch(result.output, /Extraction accuracy|Aggregate/);
     }
+    // And the harness's own selection rule, read off the source rather than
+    // reimplemented: it resolves the prompt version from the tree, so no
+    // argument can make it choose a v5 entry.
+    const source = readFileSync(
+        fileURLToPath(new URL("../scripts/evalImportedMemoryExtraction.mjs", import.meta.url)),
+        "utf8"
+    );
+    assert.match(
+        source,
+        /entry\.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION/,
+        "the harness no longer selects by the shipped prompt version"
+    );
 });

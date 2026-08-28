@@ -143,16 +143,25 @@ test("the gate now admits the schema the harness scores", () => {
         datasetPurpose: target.datasetPurpose,
         datasetSchemaVersion: target.datasetSchemaVersion,
         commitKnown: true,
+        // The 2026-08-28 budget binding, satisfied so that this row reaches
+        // the gate it is about. A live decision now also requires the budget
+        // to name an instrument, that instrument to be this one, and this
+        // commit to descend from the approved implementation.
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
     });
     assert.deepEqual(decision, { mode: "live", ceilingUsd: 50 });
 });
 
-test("the budget, not the schema, is what refuses the real pair", () => {
+test("the budget binding, not the schema, is what decides the real pair", () => {
     // The register entry as the tree actually holds it. Moving the gate opened
-    // the harness and nothing else: `gpt-5-6-luna::mem-extract-v6` carries no
-    // budget, so the refusal is `no_eval_budget` — and the day a budget is
-    // recorded, that is the change that opens a run, deliberately and on its
-    // own.
+    // the harness and nothing else; the 2026-08-28 budget then funded exactly
+    // one pair, and what stands between it and a provider is the binding —
+    // the instrument the budget names, and the commit the run descends from.
+    //
+    // Asserted as the *difference* two inputs make, because that is the claim:
+    // the schema is no longer the answer, and the binding is.
     const target = harnessTarget();
     const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
@@ -160,7 +169,7 @@ test("the budget, not the schema, is what refuses the real pair", () => {
             entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
     );
     assert.ok(pair, "the shipped pair is not registered");
-    const decision = decideEvalRunMode({
+    const base = {
         live: true,
         registerEntry: pair,
         hasApiKey: true,
@@ -168,22 +177,53 @@ test("the budget, not the schema, is what refuses the real pair", () => {
         datasetPurpose: target.datasetPurpose,
         datasetSchemaVersion: target.datasetSchemaVersion,
         commitKnown: true,
+    };
+    assert.deepEqual(decideEvalRunMode(base), {
+        mode: "refused",
+        reason: "run_sha_not_descendant",
     });
-    assert.equal(decision.mode, "refused");
-    assert.equal(decision.reason, "no_eval_budget");
+    assert.deepEqual(
+        decideEvalRunMode({
+            ...base,
+            budgetTupleFailures: ["datasetDigest: approved x, this run would use y"],
+            runShaDescendsFromApproval: true,
+        }),
+        { mode: "refused", reason: "budget_tuple_mismatch" }
+    );
+    assert.deepEqual(
+        decideEvalRunMode({
+            ...base,
+            budgetBindingProblems: [],
+            budgetTupleFailures: [],
+            runShaDescendsFromApproval: true,
+        }),
+        { mode: "live", ceilingUsd: pair.evalBudget.maxUsd }
+    );
 });
 
-test("the refusal says the dataset is ahead of the gate, not behind it", () => {
-    // The message used to explain that the sample lacked `expectedDisposition`
-    // and `goldCompleteness`. Schema 3 has more of those fields, not fewer,
-    // and a reader told the opposite would go looking for a dataset defect.
-    const result = runHarness(["--live", "--model=gpt-5-6-luna"], {
-        OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
-    });
-    assert.equal(result.status, 1, "a live run must refuse");
-    assert.doesNotMatch(result.output, /QA_EXTERNAL_NETWORK_BLOCKED/);
-    // Which gate speaks is the register's business — with no budget recorded
-    // the budget gate answers first, and that is correct. What this asserts is
-    // that nothing dialled out and no report was printed.
-    assert.doesNotMatch(result.output, /Extraction accuracy|Aggregate/);
+test("no test invokes --live on the funded pair", () => {
+    // **This file must never run the harness with `--live` and a key.**
+    //
+    // It used to, safely: `gpt-5-6-luna::mem-extract-v6` had no budget, so the
+    // harness refused before reaching an adapter and the invocation proved
+    // that nothing dialled out. The 2026-08-28 budget made that premise false
+    // — the same command now passes every gate and dispatches — and a test
+    // that spends money to assert it does not is the worst possible shape.
+    //
+    // The guarantee those invocations protected is covered without them: the
+    // smoke run above exercises the whole path with the network blocked, and
+    // `tests/memoryEvalBudgetBinding.test.mjs` decides the live gate as a pure
+    // truth table. What is left here is the rule itself, asserted against this
+    // file's own source so it cannot be undone by editing the file.
+    const source = readFileSync(
+        fileURLToPath(new URL("./memoryEvalSchema3DryRun.test.mjs", import.meta.url)),
+        "utf8"
+    );
+    // The needle is assembled rather than written, so the line performing the
+    // check is not itself a match.
+    const needle = `runHarness([${JSON.stringify("--live")}`;
+    const liveInvocations = source
+        .split("\n")
+        .filter((line) => line.includes(needle));
+    assert.deepEqual(liveInvocations, []);
 });

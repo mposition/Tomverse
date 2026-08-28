@@ -26,6 +26,7 @@ import {
     MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
 } from "@/lib/memoryExtractionEvalCore";
+import type { EvalBudgetTuple } from "@/lib/memoryEvalBudgetBinding";
 
 
 export type MemoryExtractionEvalEntry = {
@@ -45,6 +46,38 @@ export type MemoryExtractionEvalEntry = {
         maxUsd: number;
         ticket: string;
         approvedAt: string;
+        /**
+         * The instrument this budget was approved against.
+         *
+         * Optional on the type and required for a live run. Budgets recorded
+         * before the 2026-08-28 re-approval carry none — they were real
+         * approvals and are kept as history — and an unbound budget cannot
+         * authorise a paid run: a ceiling attached to no dataset, contract or
+         * prompt is a ceiling on a run whose shape nobody agreed to.
+         * `evalBudgetBindingProblems()` refuses it, and
+         * `evalBudgetTupleFailures()` refuses a bound one whose values the
+         * tree no longer reproduces.
+         */
+        boundTuple?: EvalBudgetTuple;
+        /**
+         * The merge commit of the change that produced those digests.
+         *
+         * The run's own commit must be a **descendant** of this, never equal
+         * to it: a registration PR cannot contain its own merge SHA, and a
+         * later commit that still assembles the same instrument is still
+         * running the approved one.
+         */
+        approvedImplementationSha?: string;
+        /**
+         * How many runs may reach a provider under this approval.
+         *
+         * Recorded, not machine-enforced — this repository keeps no ledger of
+         * runs, so nothing here can count them. What *is* enforced is the
+         * spend ceiling above and the §12.4 procedure: the second run is a
+         * reproducibility run, not a retry, and it is not made at all if the
+         * first showed a structural failure or a clear miss.
+         */
+        maxProviderDispatchedRuns?: number;
     } | null;
     /**
      * §12.1 evidence. Required (complete) on approved entries; null while
@@ -452,16 +485,50 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             owner: "@mposition",
             registeredAt: "2026-08-28",
             notes:
-                "Registered unfunded on 2026-08-28. Implemented against " +
-                "mem-eval-succ-4 and mem-score-v3.3: required polarity, " +
-                "evidence quotes bound to the server's copy of the cited " +
-                "message, and no candidate from evidence whose polarity a " +
-                "plain reading cannot fix. Never run. The decision-grade " +
-                "budget is a separate approval and names the model, the " +
-                "dataset and contract digests, the run count and the " +
-                "per-pair ceiling: " +
+                "Funded 2026-08-28 for mem-eval-succ-5 / mem-score-v3.4. " +
+                "Implemented against schema 3: required polarity, evidence " +
+                "quotes bound to the server's copy of the cited message, and " +
+                "no candidate from evidence whose polarity a plain reading " +
+                "cannot fix. Never run. The first budget, approved against " +
+                "mem-eval-succ-4 / mem-score-v3.3, lapsed before registration " +
+                "when v3.3 was found to describe itself as scoring schema 2 " +
+                "and was excluded from decision-grade runs " +
+                "(.github/audits/memory-eval-gold-contract-2026-08-27.md, " +
+                "section 16). Nothing was spent under it. Instrument: " +
                 "docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md.",
-            evalBudget: null,
+            evalBudget: {
+                approvedBy: "@mposition",
+                // The worst case for two runs on succ-5, from
+                // `npm run report:memory-eval-cost-estimate`: every answer at
+                // the 4,096-token output ceiling across 1,150 cases, twice.
+                // Not a round number on purpose — a ceiling rounded up is a
+                // ceiling nobody computed.
+                maxUsd: 12.57,
+                ticket:
+                    ".github/audits/memory-eval-gold-contract-2026-08-27.md, section 17",
+                approvedAt: "2026-08-28",
+                // Two, and the second is the §12.4 reproducibility run rather
+                // than a retry. Recorded rather than enforced: see the field's
+                // own note.
+                maxProviderDispatchedRuns: 2,
+                // The merge commit of the v3.4 / succ-5 correction. A run's
+                // own commit must descend from it.
+                approvedImplementationSha:
+                    "34a53ddc0247661e578422300ecc58801ea73fce",
+                boundTuple: {
+                    datasetVersion: "mem-eval-succ-5",
+                    datasetDigest:
+                        "0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0",
+                    datasetManifestDigest:
+                        "215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762",
+                    scoringContractVersion: "mem-score-v3.4",
+                    scoringContractDigest:
+                        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+                    promptVersion: "mem-extract-v6",
+                    promptDigest:
+                        "c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052",
+                },
+            },
             evaluation: null,
         },
         {
@@ -474,7 +541,12 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             status: "candidate",
             owner: "@mposition",
             registeredAt: "2026-08-28",
-            notes: "Backup candidate for mem-extract-v6. Unfunded, never run.",
+            notes:
+                "Backup candidate for mem-extract-v6. Unfunded, never run. " +
+                "The 2026-08-28 re-approval funds one pair and says so: a " +
+                "budget cannot be transferred to another model, prompt " +
+                "version, dataset or contract, and unspent budget cannot be " +
+                "applied to another pair.",
             evalBudget: null,
             evaluation: null,
         },

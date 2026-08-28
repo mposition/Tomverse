@@ -454,3 +454,48 @@ fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가
 | blind review 부적절 건수 / 어긋난 건수 | | |
 | artifact 경로 | | |
 | 판정과 서명 | | |
+
+## 11. 2026-08-28 예산의 실행 조건 (재승인)
+
+`gpt-5-6-luna::mem-extract-v6` 한 pair에 대해 승인된 예산의 실행 규칙입니다.
+등록은 `lib/memoryExtractionEvalRegister.ts`, 근거는
+`.github/audits/memory-eval-gold-contract-2026-08-27.md` 17절입니다.
+
+### 11.1 실행 전 — 기계가 확인합니다
+
+harness가 provider에 닿기 전에 세 가지를 확인하고, 하나라도 어긋나면 거절합니다.
+
+| 거절 | 뜻 |
+|---|---|
+| `budget_not_bound` | 예산이 instrument에 결속돼 있지 않음(2026-08-28 이전 예산) |
+| `budget_tuple_mismatch` | dataset·contract·prompt의 version 또는 digest가 등록값과 다름 |
+| `run_sha_not_descendant` | 실행 commit이 `approvedImplementationSha`의 후손이 아니거나 git이 답하지 못함 |
+
+`HEAD === approvedImplementationSha`는 요구하지 않습니다. 등록 PR은 자기 merge
+SHA를 미리 담을 수 없고, 같은 instrument를 조립하는 이후 commit은 승인된 것을
+실행하는 것이기 때문입니다.
+
+### 11.2 실행은 2회, 그리고 2회차는 재시도가 아닙니다
+
+1. **1회차** — decision-grade 실행. `--json`으로 artifact를 남깁니다.
+2. **1회차 판정** — 구조적 실패(harness 결함, 파싱 불가)나 §12.3 기준의 명확한
+   탈락이 확인되면 **여기서 멈춥니다.** 2회차를 하지 않고 pair를 종료하거나
+   재검토합니다.
+3. **2회차** — §12.4의 재현성 확인 실행. 1회차가 성립했을 때만 합니다.
+
+### 11.3 재시도가 허용되는 유일한 경우
+
+**provider dispatch 이전에 실패했고, provider 미접촉과 비용 0이 증명된 경우**
+에만 같은 실행을 다시 시작할 수 있습니다. dispatch 이후 실패했거나 비용 발생
+여부가 불명확하면 **중단하고 provider 청구 내역과 대조**한 뒤 별도 승인을
+받습니다. 추가 실행은 언제나 별도 승인입니다.
+
+`maxProviderDispatchedRuns: 2`는 기록이며 기계가 세지 않습니다 — 이 저장소에는
+실행 원장이 없습니다. 강제되는 것은 US$12.57 지출 상한과 이 절차입니다.
+
+### 11.4 `--live`를 시험 삼아 실행하지 않습니다
+
+예산이 등록된 뒤로는 `--live`가 실제로 실행됩니다. 거절 문구나 gate 동작을
+확인할 일이 있으면 **순수 테스트로** 확인하고, harness를 부르는 경우에도
+`--live` 없이 부릅니다. 2026-08-28에 gate 문구를 확인하려고 네트워크 차단 없이
+`--live`를 실행해 5회 dispatch가 시도된 일이 있습니다(잘못된 key, 과금 0).

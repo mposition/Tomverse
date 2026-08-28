@@ -35,8 +35,16 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { analyzeExtractionChunk } from "../lib/memoryExtractionPipeline.ts";
-import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
+import {
+    MEMORY_EXTRACTION_PROMPT_VERSION,
+    extractionPromptContract,
+} from "../lib/memoryExtractionPrompt.ts";
 import { memoryEvalUnimplementedPromptRules } from "../lib/memoryEvalPromptRuleImplementations.ts";
+import {
+    evalBudgetBindingProblems,
+    evalBudgetTupleFailures,
+} from "../lib/memoryEvalBudgetBinding.ts";
+import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
 } from "../lib/memoryExtractionEvalRegister.ts";
@@ -120,6 +128,32 @@ const gitOutput = (args) => {
 const commitSha = gitOutput(["rev-parse", "HEAD"]) || "unknown";
 const workingTreeDirty = gitOutput(["status", "--porcelain"]).length > 0;
 
+/**
+ * Whether HEAD descends from the commit the budget was approved against.
+ *
+ * `undefined` when git cannot answer — no repository, a shallow clone that
+ * does not contain the approved commit — and `decideEvalRunMode()` treats that
+ * as a refusal rather than a pass. An ancestry nobody could check is an
+ * ancestry nobody has.
+ *
+ * Not an equality: a registration PR cannot contain its own merge SHA, and a
+ * later commit that still assembles the approved instrument is running it.
+ */
+const descendsFrom = (ancestor) => {
+    if (!ancestor || commitSha === "unknown") return undefined;
+    try {
+        execFileSync("git", ["merge-base", "--is-ancestor", ancestor, commitSha], {
+            stdio: "ignore",
+        });
+        return true;
+    } catch (error) {
+        // Exit 1 is a clean "no". Anything else — an unknown object in a
+        // shallow clone, git missing — is "could not tell", which refuses too
+        // but for a different reason a reader needs to see.
+        return error?.status === 1 ? false : undefined;
+    }
+};
+
 /** Provider messages may echo a key; nothing key-shaped reaches the artifact. */
 const redactSecrets = (message) => {
     const key = process.env.OPENAI_API_KEY?.trim();
@@ -139,6 +173,13 @@ const redactSecrets = (message) => {
  * `datasetFingerprintInputV3()` and hashes the descriptor alone. Computing
  * either one here would be a fourth copy of that decision.
  */
+// What the model would actually be asked, as one digest. The budget is bound
+// to it, so a prompt edited without a version bump refuses the run rather than
+// spending against an approval for different words.
+const promptContractDigest = createHash("sha256")
+    .update(extractionPromptContract(), "utf8")
+    .digest("hex");
+
 const target = harnessTarget();
 const MEMORY_EVAL_CASES = target.cases;
 const MEMORY_EVAL_DATASET_VERSION = target.datasetVersion;
@@ -179,11 +220,43 @@ if (bindingFailures.length > 0) {
     process.exit(1);
 }
 
+/**
+ * What this run would actually assemble, against what the budget approved.
+ *
+ * Seven values and an ancestry. The 2026-08-28 re-approval says the approval
+ * "loses effect immediately" if any of them differs, and a sentence cannot do
+ * that — so it is computed here, before the register is even consulted, and
+ * handed to the gate.
+ */
+const budgetBindingFor = (entry) => {
+    const budget = entry?.evalBudget;
+    if (!budget) return { problems: [], tupleFailures: [], descends: undefined };
+    const problems = evalBudgetBindingProblems(budget);
+    if (problems.length > 0) {
+        return { problems, tupleFailures: [], descends: undefined };
+    }
+    return {
+        problems,
+        tupleFailures: evalBudgetTupleFailures(budget.boundTuple, {
+            datasetVersion: target.datasetVersion,
+            datasetDigest: target.datasetDigest,
+            datasetManifestDigest: MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest,
+            scoringContractVersion: target.scoringContractVersion,
+            scoringContractDigest: target.scoringContractDigest,
+            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
+            promptDigest: promptContractDigest,
+        }),
+        descends: descendsFrom(budget.approvedImplementationSha),
+    };
+};
+
 const registerEntry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
     (entry) =>
         entry.extractionModelId === modelId &&
         entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
 );
+const budgetBinding = budgetBindingFor(registerEntry);
+
 if (!registerEntry) {
     console.error(
         `No register entry for ${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}.\n` +
@@ -214,6 +287,13 @@ const runMode = decideEvalRunMode({
     unimplementedPromptRules: memoryEvalUnimplementedPromptRules(
         MEMORY_EXTRACTION_PROMPT_VERSION
     ),
+    // The budget's own binding: is it bound to an instrument at all, is this
+    // that instrument, and does this commit descend from the approved one.
+    // Computed here because two of the three need the tree and the third needs
+    // git, and `decideEvalRunMode()` stays a pure truth table.
+    budgetBindingProblems: budgetBinding.problems,
+    budgetTupleFailures: budgetBinding.tupleFailures,
+    runShaDescendsFromApproval: budgetBinding.descends,
     requestedRunCapUsd: maxCostUsd,
 });
 
@@ -284,6 +364,32 @@ const REFUSAL_MESSAGES = {
         "against the rule id in lib/memoryEvalPromptRuleImplementations.ts --\n" +
         "the mapping is written by whoever writes the rule into the prompt, and\n" +
         "is deliberately not derived by searching the prompt for words.",
+    budget_not_bound:
+        `${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION} has a budget that is not bound ` +
+        "to an instrument:\n" +
+        budgetBinding.problems.map((problem) => `  ${problem}`).join("\n") +
+        "\n\nA ceiling with no dataset, contract or prompt digest authorises a run\n" +
+        "whose shape nobody approved. Budgets recorded before 2026-08-28 are like\n" +
+        "this and stay on the register as history; they cannot fund a run.",
+    budget_tuple_mismatch:
+        "This run would not assemble the instrument the budget was approved for:\n" +
+        budgetBinding.tupleFailures.map((line) => `  ${line}`).join("\n") +
+        "\n\nThe 2026-08-28 approval says it loses effect immediately if any of the\n" +
+        "dataset, contract or prompt version or digest differs. Re-approval names\n" +
+        "the new values; editing them here would spend against an approval that\n" +
+        "no longer exists.",
+    run_sha_not_descendant:
+        `This run's commit does not descend from the approved implementation.\n\n` +
+        `  approvedImplementationSha  ${String(registerEntry?.evalBudget?.approvedImplementationSha)}\n` +
+        `  this run                   ${commitSha}\n\n` +
+        (budgetBinding.descends === undefined
+            ? "git could not answer -- no repository, or a shallow clone that does not\n" +
+              "contain the approved commit. An ancestry nobody could check is an\n" +
+              "ancestry nobody has, so it refuses rather than passing.\n\n"
+            : "") +
+        "Equality is not required and never was: a registration PR cannot contain\n" +
+        "its own merge SHA. What is required is that this commit descends from the\n" +
+        "approved one and assembles the same three digests.",
     run_cap_above_approved_ceiling:
         `--max-cost-usd=${maxCostUsd} is above the approved ceiling for this pair ` +
         `(US$${registerEntry?.evalBudget?.maxUsd}).\n` +

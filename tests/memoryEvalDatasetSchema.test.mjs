@@ -496,6 +496,13 @@ test("the same run against the gated schema reaches the live decision", () => {
         datasetFrozen: true,
         commitKnown: true,
         datasetSchemaVersion: GATE_SCHEMA_VERSION,
+        // The 2026-08-28 budget binding, satisfied so that this row reaches
+        // the gate it is about. A live decision now also requires the budget
+        // to name an instrument, that instrument to be this one, and this
+        // commit to descend from the approved implementation.
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
     });
     assert.deepEqual(decision, { mode: "live", ceilingUsd: 20 });
 });

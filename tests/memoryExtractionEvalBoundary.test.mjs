@@ -111,9 +111,12 @@ test("every missing precondition refuses a live run", () => {
     for (const [input, reason] of cases) {
         const decision = decideEvalRunMode({
             live: true,
-            // Schema 2 unless the row is about the schema: every other row
-            // has to reach its own gate rather than stopping at this one.
+            // The gated schema unless the row is about the schema: every other
+            // row has to reach its own gate rather than stopping at this one.
             datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+            budgetBindingProblems: [],
+            budgetTupleFailures: [],
+            runShaDescendsFromApproval: true,
             ...input,
         });
         assert.equal(decision.mode, "refused", `${reason} must refuse`);
@@ -129,6 +132,12 @@ test("only every precondition together allows a live run", () => {
         datasetFrozen: true,
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        // "Every precondition" grew three on 2026-08-28: the budget names an
+        // instrument, this run assembles it, and this commit descends from the
+        // approved implementation.
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
     });
     assert.equal(decision.mode, "live");
     assert.equal(decision.ceilingUsd, 50);
@@ -142,6 +151,9 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         datasetFrozen: true,
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
         requestedRunCapUsd: 5,
     });
     assert.equal(narrowed.mode, "live");
@@ -154,6 +166,9 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         datasetFrozen: true,
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
         requestedRunCapUsd: 500,
     });
     assert.equal(widened.mode, "refused");
@@ -185,10 +200,14 @@ test("only a funded, open pair can run live, and it is named", () => {
             datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
             commitKnown: true,
             // The frozen set is schema 1, so a decision-grade run against it
-            // is refused whatever the register says. Passing schema 2 here
-            // isolates the register's own contribution, which is what this
-            // test is about.
+            // is refused whatever the register says. Passing the gated schema
+            // here isolates the register's own contribution, which is what
+            // this test is about — and the budget binding is satisfied for the
+            // same reason.
             datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+            budgetBindingProblems: [],
+            budgetTupleFailures: [],
+            runShaDescendsFromApproval: true,
         });
         if (decision.mode === "live") {
             runnable.push(label);
@@ -209,12 +228,22 @@ test("only a funded, open pair can run live, and it is named", () => {
     // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
     // the record -- the approval was real and part of it was really spent --
     // which is why "funded" and "runnable" are not the same list.
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
+    assert.deepEqual(runnable, [
+        "gpt-5-6-luna::mem-extract-v4",
+        "gpt-5-6-luna::mem-extract-v6",
+    ]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.
+    //
+    // v6's US$12.57 is the worst case for two runs on `mem-eval-succ-5`, not a
+    // round number chosen for comfort. v4's US$15 predates instrument binding
+    // and, as `tests/memoryEvalV5Budget.test.mjs` shows, that budget cannot
+    // fund a run at all — being in this list means the register would allow
+    // it, not that the binding would.
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
+        "gpt-5-6-luna::mem-extract-v6": 12.57,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
@@ -228,7 +257,11 @@ test("only a funded, open pair can run live, and it is named", () => {
     }
     // Both backups stay unfunded. A backup that inherited its primary's
     // ceiling would be a funded pair nobody approved.
-    for (const version of ["mem-extract-v4", "mem-extract-v5"]) {
+    for (const version of [
+        "mem-extract-v4",
+        "mem-extract-v5",
+        "mem-extract-v6",
+    ]) {
         const backup = MEMORY_EXTRACTION_EVAL_REGISTER.find(
             (entry) =>
                 entry.extractionModelId === "gpt-5-4-mini" &&
@@ -313,6 +346,9 @@ test("a budget opens the budget gate and nothing else", () => {
             datasetFrozen: true,
             commitKnown: true,
             datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+            budgetBindingProblems: [],
+            budgetTupleFailures: [],
+            runShaDescendsFromApproval: true,
         }).mode,
         "live"
     );
@@ -546,6 +582,13 @@ test("a development purpose waives the freeze gate and nothing else", () => {
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         datasetPurpose: "development",
+        // The 2026-08-28 budget binding, satisfied so that this row reaches
+        // the gate it is about. A live decision now also requires the budget
+        // to name an instrument, that instrument to be this one, and this
+        // commit to descend from the approved implementation.
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
     };
 
     assert.deepEqual(decideEvalRunMode(base), { mode: "live", ceilingUsd: 5 });
