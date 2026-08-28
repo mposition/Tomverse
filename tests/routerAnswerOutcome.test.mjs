@@ -14,11 +14,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    classifyEmptiness,
     displayableText,
     failureRecord,
     generatedTokens,
+    isHarnessAttributable,
     isUsableAnswerText,
+    normalizeFinishReason,
     outcomeFromReply,
 } from "../lib/routerAnswerOutcome.ts";
 import {
@@ -30,7 +31,15 @@ import {
     pairScore,
 } from "../lib/routerQualityEvalCore.ts";
 
-const identity = { arm: "auto", modelId: "deepseek-v4-flash", provider: "deepseek", apiModel: "deepseek-v4-flash", latencyMs: 12 };
+const identity = {
+    arm: "auto",
+    modelId: "deepseek-v4-flash",
+    provider: "deepseek",
+    apiModel: "deepseek-v4-flash",
+    latencyMs: 12,
+    requestedMaxOutputTokens: 384_000,
+    resolvedProductOutputCap: 384_000,
+};
 
 const pair = (outcome, overrides = {}) => ({
     itemId: "coding-en-001",
@@ -77,62 +86,111 @@ test("whitespace-only is a failure, and says it was whitespace rather than nothi
     assert.equal(outcome.metadata.rawTextLength, 5);
 });
 
-test("a failure whose raw response held text is this code's defect, not the model's", () => {
-    // The distinction mposition asked for: a provider that did return text and
-    // an adapter that lost it look identical from an empty string alone.
-    const lost = failureRecord(outcomeFromReply({ text: "    " }, identity));
-    assert.equal(lost.lostByThisCode, true);
-    assert.equal(lost.emptiness, "harness_lost_text");
-    assert.equal(lost.rawTextLength, 4);
-});
-
-test("an empty string alone does not convict the model", () => {
-    // mposition's correction. `rawTextLength === 0` says this code holds no
-    // text; it does not establish that the provider sent none, because the
-    // text could have been lost anywhere upstream. Calling that a model
-    // failure files our defects under the model's name.
-    const record = failureRecord(outcomeFromReply({ text: "" }, identity));
-    assert.equal(record.emptiness, "observed_empty_at_adapter_boundary");
-    assert.equal(record.lostByThisCode, false);
-    assert.match(record.detail, /nothing establishes whether the provider sent any/);
-});
-
-test("output tokens the provider billed for and this code cannot show are lost text", () => {
-    // The case a raw-length check cannot see: nothing arrived at
-    // `rawTextLength` at all, and the provider's own usage says it generated
-    // 2048 tokens. Ours, not the model's.
-    const record = failureRecord(
+const emptyWith = (over = {}) =>
+    failureRecord(
         outcomeFromReply(
-            { text: "", finishReason: "length", usage: { inputTokens: 80, outputTokens: 2048 } },
-            identity
+            { text: over.text ?? "", finishReason: over.finishReason ?? null, usage: over.usage ?? {}, traceId: over.traceId ?? null },
+            {
+                ...identity,
+                requestedMaxOutputTokens: over.requestedMaxOutputTokens ?? 2_048,
+                resolvedProductOutputCap: over.resolvedProductOutputCap ?? 384_000,
+            }
         )
     );
-    assert.equal(record.emptiness, "harness_lost_text");
-    assert.equal(record.lostByThisCode, true);
-    assert.equal(record.rawTextLength, 0);
+
+test("content that arrived and was normalised away is this harness's loss", () => {
+    const record = emptyWith({ text: "    " });
+    assert.equal(record.symptom, "empty_text");
+    assert.equal(record.emptinessReason, "text_normalization_loss");
+    assert.equal(record.attribution, "harness");
+    assert.equal(record.rawTextLength, 4);
 });
 
-test("only the provider's own account of itself confirms the model produced nothing", () => {
-    const confirmed = failureRecord(
-        outcomeFromReply(
-            { text: "", finishReason: "stop", usage: { inputTokens: 80, outputTokens: 0 } },
-            identity
-        )
+test("budget exhaustion needs all four conditions, and gets them", () => {
+    // The 2026-08-28 defect: 2,048 asked for against a product cap of 384,000,
+    // the provider stopped at the output limit, and the whole budget was
+    // billed. Nothing was written because nothing was left to write with.
+    const record = emptyWith({
+        finishReason: "length",
+        usage: { inputTokens: 80, outputTokens: 2_048 },
+        requestedMaxOutputTokens: 2_048,
+        resolvedProductOutputCap: 384_000,
+    });
+    assert.equal(record.emptinessReason, "output_budget_exhausted");
+    assert.equal(record.attribution, "harness");
+    assert.equal(record.normalizedFinishReason, "output_limit");
+    assert.match(record.detail, /budget was spent before any answer text was written/);
+});
+
+test("a request already asking for the product's cap is not the harness being stingy", () => {
+    // Same three symptoms, but the harness asked for everything the product
+    // asks for. Whatever cut this answer short, it was not our budget.
+    const record = emptyWith({
+        finishReason: "length",
+        usage: { outputTokens: 384_000 },
+        requestedMaxOutputTokens: 384_000,
+        resolvedProductOutputCap: 384_000,
+    });
+    assert.equal(record.emptinessReason, "undetermined");
+    assert.equal(record.attribution, "undetermined");
+});
+
+test("three of the four conditions decide nothing", () => {
+    // Finish reason alone.
+    assert.equal(
+        emptyWith({ finishReason: "length", usage: {} }).emptinessReason,
+        "undetermined"
     );
-    assert.equal(confirmed.emptiness, "provider_confirmed_empty");
-    assert.equal(confirmed.lostByThisCode, false);
-    assert.match(confirmed.detail, /produced nothing/);
+    // Tokens near the cap, but the provider did not say it stopped there.
+    assert.equal(
+        emptyWith({ finishReason: "stop", usage: { outputTokens: 2_040 } }).emptinessReason,
+        "undetermined"
+    );
+    // Stopped at the limit, but nowhere near having spent the budget -- so
+    // whatever happened, it was not this budget running out.
+    assert.equal(
+        emptyWith({ finishReason: "length", usage: { outputTokens: 12 } }).emptinessReason,
+        "undetermined"
+    );
+});
+
+test("only the provider's own account of itself convicts the model", () => {
+    const record = emptyWith({ finishReason: "stop", usage: { inputTokens: 80, outputTokens: 0 } });
+    assert.equal(record.emptinessReason, "provider_confirmed_empty");
+    assert.equal(record.attribution, "model");
 
     // Zero tokens with no finish reason is not a confirmation: the call may
     // have died before the provider decided anything.
-    const unfinished = failureRecord(
-        outcomeFromReply({ text: "", usage: { outputTokens: 0 } }, identity)
-    );
-    assert.equal(unfinished.emptiness, "observed_empty_at_adapter_boundary");
+    assert.equal(emptyWith({ usage: { outputTokens: 0 } }).emptinessReason, "undetermined");
+});
 
-    // A finish reason with no usage at all is equally not a confirmation.
-    const noUsage = failureRecord(outcomeFromReply({ text: "", finishReason: "stop" }, identity));
-    assert.equal(noUsage.emptiness, "observed_empty_at_adapter_boundary");
+test("an empty string on its own convicts nobody", () => {
+    const record = emptyWith({});
+    assert.equal(record.emptinessReason, "undetermined");
+    assert.equal(record.attribution, "undetermined");
+    assert.match(record.detail, /do not establish why/);
+});
+
+test("finish reasons are compared in one spelling", () => {
+    assert.equal(normalizeFinishReason("length"), "output_limit");
+    assert.equal(normalizeFinishReason("MAX_TOKENS"), "output_limit");
+    assert.equal(normalizeFinishReason("  max_output_tokens "), "output_limit");
+    assert.equal(normalizeFinishReason("stop"), "stop");
+    assert.equal(normalizeFinishReason(""), null);
+    assert.equal(normalizeFinishReason(null), null);
+});
+
+test("an unattributable empty carries what somebody would need to go and ask", () => {
+    const record = emptyWith({ finishReason: "content_filter", traceId: "resp_01ABC" });
+    assert.equal(record.attribution, "undetermined");
+    assert.equal(record.arm, "auto");
+    assert.equal(record.callRole, "answer");
+    assert.equal(record.provider, "deepseek");
+    assert.equal(record.apiModel, "deepseek-v4-flash");
+    assert.equal(record.finishReason, "content_filter");
+    assert.equal(record.traceId, "resp_01ABC");
+    assert.equal(record.requestedMaxOutputTokens, 2_048);
+    assert.equal(record.resolvedProductOutputCap, 384_000);
 });
 
 test("a missing output-token count survives as unknown rather than becoming zero", () => {
@@ -140,39 +198,27 @@ test("a missing output-token count survives as unknown rather than becoming zero
     assert.equal(generatedTokens({ inputTokens: 40 }), null);
     assert.equal(generatedTokens({ outputTokens: 0 }), 0);
     assert.equal(generatedTokens({ completion_tokens: 7 }), 7);
-    // Were the absence to collapse to 0, this would read as the provider
-    // confirming it generated nothing.
-    assert.equal(
-        classifyEmptiness({ ...identity, finishReason: "stop", usage: {}, rawTextLength: 0, traceId: null }),
-        "observed_empty_at_adapter_boundary"
-    );
 });
 
-test("an unattributable empty carries what somebody would need to go and ask", () => {
-    const record = failureRecord(
-        outcomeFromReply(
-            { text: "", finishReason: "content_filter", usage: {}, traceId: "resp_01ABC" },
-            identity
-        )
-    );
-    assert.equal(record.emptiness, "observed_empty_at_adapter_boundary");
-    assert.equal(record.arm, "auto");
-    assert.equal(record.provider, "deepseek");
-    assert.equal(record.apiModel, "deepseek-v4-flash");
-    assert.equal(record.finishReason, "content_filter");
-    assert.deepEqual(record.usage, {});
-    assert.equal(record.traceId, "resp_01ABC");
-});
-
-test("a provider error is not classified as an emptiness at all", () => {
+test("a provider error is a provider failure with no emptiness to explain", () => {
     const record = failureRecord({
         status: "failed",
         reason: "provider_error",
         detail: "ETIMEDOUT",
-        metadata: { ...identity, finishReason: null, usage: {}, rawTextLength: 0, traceId: null },
+        metadata: {
+            ...identity,
+            finishReason: null,
+            usage: {},
+            rawTextLength: 0,
+            traceId: null,
+            requestedMaxOutputTokens: 2_048,
+            resolvedProductOutputCap: 384_000,
+        },
     });
-    assert.equal(record.emptiness, null);
-    assert.equal(record.lostByThisCode, false);
+    assert.equal(record.emptinessReason, null);
+    assert.equal(record.symptom, null);
+    assert.equal(record.attribution, "provider");
+    assert.equal(isHarnessAttributable(record), false);
 });
 
 test("a usable reply is trimmed and kept", () => {
