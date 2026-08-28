@@ -22,7 +22,9 @@
 //   pairedCoverage >= 200/210       overall floor
 //   eachCellPairedCoverage >= 13/14 per-cell floor
 //   harnessAttributableFailureCount = 0   no empty result was ours
-//   costSoFar <= 0.50               the pilot stayed inside its own ceiling
+//   costSoFar <= the pilot's ceiling
+//   stressCost <= $18.00            the judge stage fits at the probe's p90
+//   maxPerRequestWorstCase <= $0.75 one judge call cannot breach the ceiling
 //   callLimitManifest frozen and sound    the answers were generated under
 //                                   the caps the product applies
 //
@@ -47,7 +49,16 @@ import {
   bundleCoverage,
   bundleCoverageProblems,
 } from "../lib/routerBundleCoverage.ts";
-import { callLimitManifestProblems } from "../lib/routerCallLimits.ts";
+import { callLimitManifestProblems, resolveCallLimit } from "../lib/routerCallLimits.ts";
+import {
+  FABLE_PER_REQUEST_MAX_COST_USD,
+  FABLE_STAGE_MAX_COST_USD,
+  PROBED_JUDGE_OUTPUT_TOKENS,
+  fableEntryProblems,
+  projectFableEntry,
+} from "../lib/routerFableEntry.ts";
+import { getModel } from "../lib/models.ts";
+import { resolveModelPricing } from "../lib/modelPricing.ts";
 
 const die = (message) => {
   console.error(message);
@@ -138,6 +149,36 @@ if (!failureSummary || typeof failureSummary.harnessAttributableFailureCount !==
 const manifestTrouble = callLimitManifestProblems(record.callLimitManifest);
 if (manifestTrouble.length > 0) problems.push(...manifestTrouble);
 
+// What the independent judge would cost on THIS bundle, not on the one the
+// probe measured. The input side is counted exactly -- every pair the judge
+// would read, rendered -- because it is roughly half the cost and it grows
+// with the answers. Only the output side is projected, from the probe's own
+// distribution, and the ceiling has to fit the stress case rather than the
+// expected one.
+let fableEntry = null;
+const judgeModelId = set.independentJudge?.modelId;
+if (!judgeModelId) {
+  problems.push(`${setPath} pre-registers no independentJudge, so the judge stage cannot be priced`);
+} else {
+  const judgeModel = getModel(judgeModelId);
+  if (!judgeModel) {
+    problems.push(`${setPath} pre-registers judge "${judgeModelId}", which is not in the catalogue`);
+  } else {
+    const pricing = resolveModelPricing(judgeModel);
+    fableEntry = projectFableEntry(bundle, {
+      inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+      requestedMaxOutputTokens: resolveCallLimit(judgeModel, "judge").requestedMaxOutputTokens,
+    });
+    problems.push(
+      ...fableEntryProblems(fableEntry, {
+        stageMaxCostUsd: FABLE_STAGE_MAX_COST_USD,
+        perRequestMaxCostUsd: FABLE_PER_REQUEST_MAX_COST_USD,
+      })
+    );
+  }
+}
+
 const costSoFar = typeof record.providerCostUsd === "number" ? record.providerCostUsd : null;
 if (costSoFar === null) {
   problems.push("the pilot recorded no provider cost, so its ceiling cannot be checked");
@@ -182,6 +223,20 @@ console.log(`  per cell   floor ${CELL_PAIRED_COVERAGE_FLOOR.covered}/${CELL_PAI
 for (const cell of coverage.cells) {
   const short = cell.planned > 0 && cell.covered < cell.planned;
   console.log(`    ${cell.cell.padEnd(38)} ${cell.covered}/${cell.planned}${short ? "  short" : ""}`);
+}
+
+if (fableEntry) {
+  console.log(
+    `  judge cost exact input ${fableEntry.exactInputTokens} token(s) = $${fableEntry.exactInputCostUsd.toFixed(4)}` +
+      `; expected $${fableEntry.expectedCostUsd.toFixed(2)} (${PROBED_JUDGE_OUTPUT_TOKENS.expected} out/pair),` +
+      ` stress $${fableEntry.stressCostUsd.toFixed(2)} (${PROBED_JUDGE_OUTPUT_TOKENS.stress} out/pair)` +
+      ` against a $${FABLE_STAGE_MAX_COST_USD.toFixed(2)} stage ceiling`
+  );
+  console.log(
+    `  worst request $${fableEntry.maxPerRequestWorstCaseUsd.toFixed(4)} of ` +
+      `$${FABLE_PER_REQUEST_MAX_COST_USD.toFixed(2)} allowed` +
+      ` (largest rendered input ${fableEntry.maxRenderedInputTokens} token(s))`
+  );
 }
 
 if (problems.length > 0) {

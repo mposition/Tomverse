@@ -48,7 +48,10 @@ test("the judge budget has room for the reasoning it is billed for", () => {
     // thinking in front of it, because that is billed out of the same budget
     // and a judge that exhausts it returns nothing to parse.
     assert.equal(resolveCallLimit(fable, "judge").reasoningTokenBilling, "billed_as_output");
-    assert.ok(JUDGE_MAX_OUTPUT_TOKENS >= 4_096);
+    // Measured, not picked: the 2026-08-28 probe billed at most 1,437 output
+    // tokens for a three-token verdict, so this leaves 5.7x headroom over the
+    // worst case observed.
+    assert.equal(JUDGE_MAX_OUTPUT_TOKENS, 8_192);
 });
 
 test("a manifest freezes one entry per model and role", () => {

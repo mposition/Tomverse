@@ -170,6 +170,15 @@ const preRegisteredN = Number(argValue("preregistered-n", "0")) || 0;
 const ciMethod = argValue("method", "bootstrap_percentile");
 const rawMaxCost = argValue("max-cost-usd", "");
 const maxCostUsd = rawMaxCost === "" ? null : Number(rawMaxCost);
+// A cost ceiling is tested between calls, because tokens are only known once a
+// response returns -- so one call whose worst case already breaches it does so
+// with nothing able to intervene. Checked before dispatch instead.
+const rawPerRequestMaxCost = argValue("per-request-max-cost-usd", "");
+const perRequestMaxCostUsd =
+  rawPerRequestMaxCost === "" ? null : Number(rawPerRequestMaxCost);
+// Re-calling a pair that already carries a verdict spends money to overwrite
+// an answer already paid for, so a resumed pass skips them.
+const resumeRejudge = process.argv.includes("--resume");
 
 const die = (message) => {
   console.error(message);
@@ -498,7 +507,45 @@ if (rejudgePath) {
   const out = jsonPath || `${rejudgePath}.${judge.id}.verdicts.jsonl`;
   ensureDirectory(out);
   const digest = bundleDigest(parsed);
-  writeFileSync(
+
+  // A pass stopped at its ceiling has already paid for the verdicts it wrote,
+  // and every one of them is on disk. Resuming re-reads them and skips those
+  // pairs: calling them again would spend the same money twice to arrive at an
+  // answer already held.
+  const alreadyGraded = new Set();
+  if (resumeRejudge && existsSync(out)) {
+    const lines = readFileSync(out, "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line));
+    const header = lines.find((line) => line.kind === "header");
+    // The verdicts have to be about the same answers, judged by the same
+    // model. Resuming across either would silently splice two passes into one
+    // file and call it a measurement.
+    if (!header) die(`${out} exists but carries no header, so it cannot be resumed.`);
+    if (header.bundleDigest !== digest) {
+      die(
+        `${out} was written against bundle ${header.bundleDigest}, not ${digest}.\n` +
+          "Resuming across two different sets of answers would splice two passes into one file."
+      );
+    }
+    if (header.judge?.modelId !== judge.id) {
+      die(`${out} was judged by ${header.judge?.modelId}, not ${judge.id}. It cannot be resumed.`);
+    }
+    for (const line of lines) if (line.kind === "verdict") alreadyGraded.add(line.pairId);
+    console.log(
+      `Resuming: ${alreadyGraded.size} pair(s) already carry a verdict and will not be called again.`
+    );
+  } else if (existsSync(out) && readFileSync(out, "utf8").trim() !== "") {
+    // Never silently. Overwriting a verdict file discards judgements that were
+    // paid for, and a run that meant to resume and did not would pay twice.
+    die(
+      `${out} already holds verdicts. Pass --resume to continue that pass, or name a\n` +
+        "different --json path. Overwriting it would discard judgements already paid for."
+    );
+  }
+
+  if (alreadyGraded.size === 0) writeFileSync(
     out,
     `${JSON.stringify({
       kind: "header",
@@ -520,16 +567,49 @@ if (rejudgePath) {
     })}\n`,
     "utf8"
   );
+  // Before the first call. The per-request ceiling cannot be enforced by the
+  // running total, so the largest request this bundle can produce is priced
+  // against it here and refused if it does not fit.
+  const judgeLimit = callLimit(judge, "judge");
+  if (perRequestMaxCostUsd !== null) {
+    const worstRendered = Math.max(
+      0,
+      ...parsed.entries.map((pair) =>
+        estimateRawTextTokens(judgePrompt(pair.prompt ?? "", pair.first?.text ?? "", pair.second?.text ?? ""))
+      )
+    );
+    const worstCase = perRequestWorstCaseCostUsd(judgeLimit, worstRendered);
+    if (worstCase > perRequestMaxCostUsd) {
+      die(
+        `\nOne judge request can cost $${worstCase.toFixed(4)}, over the ` +
+          `$${perRequestMaxCostUsd} per-request ceiling.\n\n` +
+          `  largest rendered judge input: ${worstRendered} token(s)\n` +
+          `  output budget:                ${judgeLimit.requestedMaxOutputTokens} token(s)\n\n` +
+          "A cost ceiling is tested between calls, so it cannot stop this one. Nothing was billed.\n"
+      );
+    }
+    console.log(
+      `Worst single judge request $${worstCase.toFixed(4)} of $${perRequestMaxCostUsd} allowed.`
+    );
+  }
+
   console.log(`Re-judging ${parsed.entries.length} pair(s) from ${rejudgePath} with ${judge.id}`);
-  let graded = 0;
+  let graded = alreadyGraded.size;
   let stoppedByCost = false;
   for (const [index, pair] of parsed.entries.entries()) {
+    // Paid for already. Calling it again buys the same verdict twice.
+    if (alreadyGraded.has(pair.pairId)) continue;
     // The ceiling applies here too, and this is the stage where it matters:
     // an independent judge can cost an order of magnitude more per call than
     // the run that produced the answers.
     if (maxCostUsd !== null && accruedCostUsd >= maxCostUsd) {
       stoppedByCost = true;
-      console.log(`\nStopped at pair ${index} — cost ceiling $${maxCostUsd} reached.`);
+      console.log(
+        `\nStopped at pair ${index} — cost ceiling $${maxCostUsd} reached.\n` +
+          `  ${graded} verdict(s) are on disk in ${out} and are not lost.\n` +
+          "  Resume with the same --json path and --resume; the pairs already graded will not\n" +
+          "  be called again."
+      );
       break;
     }
     let text;
