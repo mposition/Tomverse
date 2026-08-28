@@ -267,4 +267,61 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-ko-18:e1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b04",
+        cell: "durable_facts:ko",
+        from: 75,
+        golds: [
+            { key: "succ-durable-ko-191:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-192:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-194:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-195:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-196:e1",
+                polarity: "affirmed",
+                note:
+                    "«링크는 본문에 섞지 말고 맨 끝에 모아 주세요» — 섞지 말고 governs the mixing. The links are wanted, only placed differently. Same shape as ko-171.",
+            },
+            { key: "succ-durable-ko-197:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-198:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-199:e1",
+                polarity: "affirmed",
+                note:
+                    "The 일본어 goal. This gold is where an earlier hand-copied id put ko-199:e1 on the negated list when the reading was of ko-199:e2 (회화는 거의 못 합니다). It was left unresolved at that correction, and this is its first actual reading.",
+            },
+            {
+                key: "succ-durable-ko-19:e1",
+                polarity: "affirmed",
+                note:
+                    "안 되네요 governs 자료 정리; the memory asserts the user is writing a climate paper.",
+            },
+            { key: "succ-durable-ko-1:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-22:e1",
+                polarity: "affirmed",
+                note:
+                    "«매매 말고 전세로 가기로 결정했어요» — a correction resolved inside one clause, with 전세 on the affirmed side. Same shape as ko-124.",
+            },
+            { key: "succ-durable-ko-24:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-26:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-27:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-302:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-303:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-304:g1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-305:g1",
+                polarity: "affirmed",
+                note:
+                    "어렵습니다 is about the typing; 관절염 is asserted of the user. Same shape as ko-110.",
+            },
+            { key: "succ-durable-ko-306:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-308:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-30:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-310:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-311:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-312:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-315:g1", polarity: "affirmed" },
+        ],
+    },
 ];
