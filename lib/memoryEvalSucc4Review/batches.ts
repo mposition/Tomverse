@@ -324,4 +324,56 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-ko-315:g1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b05",
+        cell: "durable_facts:ko",
+        from: 100,
+        golds: [
+            { key: "succ-durable-ko-315:g2", polarity: "affirmed" },
+            { key: "succ-durable-ko-316:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-316:g2", polarity: "affirmed" },
+            { key: "succ-durable-ko-317:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-318:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-318:g2", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-319:g1",
+                polarity: "negated",
+                note:
+                    "«키가 작아서 위쪽 선반에 두는 물건은 저한테 안 맞습니다» — the memory denies the upper shelves as usable. Same shape as the frozen en-19:e1, narrowed to its consequence. 안 is not in POLARITY_MARKERS, so the scan called it unmarked.",
+            },
+            { key: "succ-durable-ko-31:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-320:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-321:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-322:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-324:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-325:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-327:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-328:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-329:g1", polarity: "affirmed" },
+            { key: "succ-durable-ko-32:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-33:e1",
+                polarity: "affirmed",
+                note:
+                    "«매운 걸 워낙 좋아해서 맵찔이용 메뉴는 안 알려주셔도 됩니다» — 안 알려주셔도 governs the mild menu. This is the exact counterpart of succ-assistant-ko-305's neighbour succ-assistant-ko-302 («저 매운 걸 못 먹습니다», negated): the same token 매운, opposite labels, which is the whole reason polarity is a field.",
+            },
+            { key: "succ-durable-ko-34:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-35:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-35:e2",
+                polarity: "affirmed",
+                note:
+                    "육 개월 is one of the five spellings the v5-run1 blind review found unmatchable. Under canon both the token and the quote become 6개월, so the anchor resolves — the numeral table doing the job it was written for.",
+            },
+            { key: "succ-durable-ko-36:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-36:e2",
+                polarity: "affirmed",
+                note:
+                    "새벽 세 시 is another of those five. 세 시 becomes 3시 on both sides because a counter follows.",
+            },
+            { key: "succ-durable-ko-37:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-38:e1", polarity: "affirmed" },
+        ],
+    },
 ];
