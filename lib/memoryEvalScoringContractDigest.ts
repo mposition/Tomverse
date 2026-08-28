@@ -98,7 +98,7 @@ import {
  * change regardless — this string is for people, so a manifest row can be
  * read without recomputing anything.
  */
-export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.2";
+export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.3";
 
 /**
  * The approved records that define the contract, oldest first.
@@ -135,7 +135,12 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
      * named rather than omitted so `memoryEvalScoringContractReadiness()` can
      * refuse to freeze a dataset under a contract with an unimplemented rule.
      */
-    enforcement: "scorer" | "schema" | "authoring_pending";
+    enforcement:
+        | "scorer"
+        | "schema"
+        | "gold_review"
+        | "authoring_pending"
+        | "prompt_pending";
 }[] = [
     {
         id: "token-normalisation",
@@ -253,12 +258,21 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
     },
     {
         id: "v3-unfixable-evidence-emits-nothing",
-        enforcement: "authoring_pending",
+        enforcement: "prompt_pending",
         statement:
             "No candidate is emitted from evidence whose polarity a plain reading cannot " +
             "fix — a conditional, an unresolved correction, a double negative. Where a " +
-            "correction is resolved, its plain clause may anchor. The same bar applies to " +
-            "gold authoring: a gold whose quote is one of those shapes is rejected at review.",
+            "correction is resolved, its plain clause may anchor.",
+    },
+    {
+        id: "v3-unfixable-evidence-not-a-gold",
+        enforcement: "gold_review",
+        statement:
+            "The same bar applies to gold authoring. Every gold carries one review " +
+            "judgement — affirmed, negated or unfixable — and a gold judged unfixable is " +
+            "not in a decision set. The judgement is a reviewer's, recorded per gold; it " +
+            "is never derived from keywords, and it is separate from the structural " +
+            "checks in goldEvidenceFailure(), which say nothing about polarity.",
     },
 ];
 
@@ -518,5 +532,35 @@ export function scoringContractDigest(
 export function memoryEvalScoringContractReadiness(): readonly string[] {
     return MEMORY_EVAL_SCORING_RULES.filter(
         (rule) => rule.enforcement === "authoring_pending"
+    ).map((rule) => rule.id);
+}
+
+/**
+ * Rules a model has to satisfy at run time and a sample cannot.
+ *
+ * `mem-score-v3.3` split `v3-unfixable-evidence-emits-nothing` in two, because
+ * one id was carrying two rules with different subjects. The gold-authoring
+ * half is about the sample, so a dataset can satisfy it and
+ * `v3-unfixable-evidence-not-a-gold` is enforced at review. The other half is
+ * about what a model emits, and no amount of work on a dataset makes it true
+ * or false.
+ *
+ * That distinction is why `prompt_pending` does not appear in
+ * `memoryEvalScoringContractReadiness()`.
+ * .github/audits/memory-eval-gold-contract-2026-08-27.md §11.4 blocks
+ * a dataset freeze under a contract with an unimplemented rule, and the reason
+ * it gives is that a verdict would cite a bar nobody applied. A bar on the
+ * model's output is applied, or not, by the run -- not by the freeze -- so
+ * holding the sample to it would refuse every dataset until a prompt exists,
+ * and would still not make the run apply it. What must not happen is a *run*
+ * under an unimplemented prompt rule, and that is the run-mode gate's
+ * question rather than the freeze's.
+ *
+ * Reported rather than silent: a caller that wants to know what is still
+ * unwritten asks here, and the freeze check prints it beside the conditions.
+ */
+export function memoryEvalScoringContractPromptPending(): readonly string[] {
+    return MEMORY_EVAL_SCORING_RULES.filter(
+        (rule) => rule.enforcement === "prompt_pending"
     ).map((rule) => rule.id);
 }

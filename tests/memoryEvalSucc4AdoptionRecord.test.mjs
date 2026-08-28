@@ -1,4 +1,5 @@
-// The §7.1a conditions, exercised against records that are deliberately wrong.
+// The docs/ops/memory-extraction-eval-dataset.md §7.1a conditions, exercised
+// against records that are deliberately wrong.
 //
 // A checker only ever run against the one document that happens to pass says
 // nothing about what it would do with one that does not. Conditions 4 and 5

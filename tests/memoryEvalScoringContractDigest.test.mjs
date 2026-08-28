@@ -10,11 +10,16 @@ import {
     descriptorListRow,
     descriptorSortedListRow,
     descriptorSortedTableRow,
+    memoryEvalScoringContractPromptPending,
     memoryEvalScoringContractReadiness,
     scoringContractDescriptorInput,
     scoringContractDigest,
     scoringContractDigestInput,
 } from "../lib/memoryEvalScoringContractDigest.ts";
+import {
+    goldReviewCoverage,
+    goldReviewFailures,
+} from "../lib/memoryEvalGoldReviewJudgements.ts";
 import {
     APPROVED_STEMS,
     CANON_STEP_ORDER,
@@ -613,15 +618,31 @@ test("the distance diagnostic cannot reach the digest", () => {
 });
 
 test("a contract may be frozen with a pending rule; a dataset may not", () => {
+    // v3.3 left nothing here. Until then this list held
+    // `v3-unfixable-evidence-emits-nothing`, whose statement was two rules
+    // with different subjects: one a sample can satisfy and one only a model
+    // can. Splitting them emptied the list without weakening it -- anything
+    // still `authoring_pending` refuses a dataset freeze, and the assertion
+    // below is what would catch a rule quietly reclassified to get past it.
     const pending = memoryEvalScoringContractReadiness();
-    assert.deepEqual(pending, ["v3-unfixable-evidence-emits-nothing"]);
-    // Named, so a refusal can say which rule rather than that something is
-    // wrong. §10.2 rules 5 and 6 belong to gold review and the v6 prompt.
+    assert.deepEqual(pending, []);
     for (const id of pending) {
         assert.ok(
             MEMORY_EVAL_SCORING_RULES.some(
                 (rule) => rule.id === id && rule.enforcement === "authoring_pending"
             )
+        );
+    }
+    for (const rule of MEMORY_EVAL_SCORING_RULES) {
+        assert.ok(
+            [
+                "scorer",
+                "schema",
+                "gold_review",
+                "authoring_pending",
+                "prompt_pending",
+            ].includes(rule.enforcement),
+            `${rule.id} claims an enforcement nobody defined: ${rule.enforcement}`
         );
     }
 });
@@ -770,16 +791,56 @@ test("rule: gold-evidence-covers-fact", () => {
 });
 
 test("rule: v3-unfixable-evidence-emits-nothing", () => {
-    // Stated by the contract and executed by nothing yet: it belongs to the
-    // v6 prompt and to gold review. The pin is that it is declared pending
-    // and that the pending list refuses a dataset freeze -- not a behaviour
-    // assertion, which would be a claim about code that does not exist.
+    // The model half. Still executed by nothing -- it belongs to the v6
+    // prompt -- so the pin is that it is declared, that it names the three
+    // shapes, and that it is reported as prompt-pending rather than dropped.
+    // A behaviour assertion would be a claim about code that does not exist.
     const rule = MEMORY_EVAL_SCORING_RULES.find(
         (entry) => entry.id === "v3-unfixable-evidence-emits-nothing"
     );
-    assert.equal(rule.enforcement, "authoring_pending");
-    assert.ok(memoryEvalScoringContractReadiness().includes(rule.id));
+    assert.equal(rule.enforcement, "prompt_pending");
+    assert.ok(memoryEvalScoringContractPromptPending().includes(rule.id));
+    assert.ok(!memoryEvalScoringContractReadiness().includes(rule.id));
     for (const shape of ["conditional", "unresolved correction", "double negative"]) {
         assert.ok(rule.statement.includes(shape.split(" ").at(-1)));
     }
+});
+
+test("rule: v3-unfixable-evidence-not-a-gold", () => {
+    // The authoring half, and this one does have code behind it. The pin is
+    // that a decision set holding a gold judged unfixable is refused, and that
+    // the judgement comes from a record rather than from reading the quote.
+    const rule = MEMORY_EVAL_SCORING_RULES.find(
+        (entry) => entry.id === "v3-unfixable-evidence-not-a-gold"
+    );
+    assert.equal(rule.enforcement, "gold_review");
+    assert.ok(!memoryEvalScoringContractReadiness().includes(rule.id));
+
+    const keys = ["c1:g1", "c1:g2"];
+    const polarityByKey = new Map([
+        ["c1:g1", "affirmed"],
+        ["c1:g2", "negated"],
+    ]);
+    assert.deepEqual(
+        goldReviewFailures(
+            goldReviewCoverage({ decisionSetGoldKeys: keys, polarityByKey })
+        ),
+        []
+    );
+    const refused = goldReviewFailures(
+        goldReviewCoverage({
+            decisionSetGoldKeys: keys,
+            polarityByKey,
+            register: [
+                {
+                    key: "c1:g2",
+                    shape: "conditional",
+                    reason: "the quote is a conditional",
+                    auditRef: "test",
+                },
+            ],
+        })
+    );
+    assert.equal(refused.length, 1);
+    assert.match(refused[0], /judged unfixable are in the decision set/);
 });

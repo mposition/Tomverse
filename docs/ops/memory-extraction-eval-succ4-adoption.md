@@ -13,7 +13,8 @@ batch 기록을 복제하지 않고 이 파일 하나를 씁니다.
 >
 > 채택은 사람의 판정입니다. 전환 manifest의 `movedBecause`나
 > `settledByExistingContract`가 채워져 있다는 사실은 채택이 아닙니다 — 그것은
-> 초안을 만든 주체가 남긴 provenance이고, 그것으로 채택을 갈음하면 §6.2의 역할
+> 초안을 만든 주체가 남긴 provenance이고, 그것으로 채택을 갈음하면
+> docs/ops/memory-extraction-eval-dataset.md §6.2의 역할
 > 분리가 이 dataset에서만 사라집니다.
 
 ## 1. 정체성
@@ -25,7 +26,7 @@ batch 기록을 복제하지 않고 이 파일 하나를 씁니다.
 | supersedes | `mem-eval-succ-3` |
 | 케이스 수 | 1,150 = 상속 1,047 + 교체 103 |
 | dataset digest | `0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0` |
-| scoring contract | `mem-score-v3.2` · `8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b` |
+| scoring contract | `mem-score-v3.3` · `19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777` |
 | transition manifest digest | `44bc58bad215ed572f1accd74979b19b6708453f37e474734940953edf51a325` |
 | 기록 commit | `bbbc332cd95d8809e2f54829da18e2e1b3c7346b` (#1161) |
 
@@ -84,33 +85,53 @@ gold별 `polarity`·`evidenceMessageId`·`evidenceQuote`는 하나씩 명시 검
 | `succ4-tranche-4` | `ai-draft:claude-code/claude/2026-08-28` |
 | `succ4-tranche-5` | `ai-draft:claude-code/claude/2026-08-28` |
 
-§6.5에 따라 비 OpenAI 계열입니다. 원본 corpus의 초안도 같은 계열이므로 이 dataset
+docs/ops/memory-extraction-eval-dataset.md §6.5에 따라 비 OpenAI 계열입니다. 원본 corpus의 초안도 같은 계열이므로 이 dataset
 안에서 계열이 섞이지 않습니다.
 
-## 4. 역할 분리 (§6.2)
+## 4. 역할 분리 (docs/ops/memory-extraction-eval-dataset.md §6.2)
 
 | 역할 | 주체 |
 |---|---|
 | 작성 (초안) | AI — 위 3.2 |
 | 검수 · 채택 판정 | *(사람이 기입)* |
-| adjudicator | **해당 없음** — 검수자가 한 명인 동안 발생하지 않습니다 (§6.4) |
+| adjudicator | **해당 없음** — 검수자가 한 명인 동안 발생하지 않습니다 (docs/ops/memory-extraction-eval-dataset.md §6.4) |
 
-시료를 만든 주체와 채택한 주체는 다릅니다. 이 표의 두 번째 줄이 비어 있는 동안
-그 분리는 성립하지 않으며, 검사는 그 상태를 `MISS`로 보고합니다.
+시료를 만든 주체와 채택한 주체는 다릅니다 — docs/ops/memory-extraction-eval-dataset.md §6.2.
+이 표의 두 번째 줄이 비어 있는 동안 그 분리는 성립하지 않으며, 검사는 그 상태를
+`MISS`로 보고합니다.
 
 ## 5. draft disagreement
 
+**이 수치가 무엇인지 먼저 밝힙니다.** 아직 사람이 이 초안들을 판정하지
+않았으므로(docs/ops/memory-extraction-eval-dataset.md §7.1a 순서의 5번),
+검수자와 초안의 불일치율은 존재하지 않습니다.
+아래는 그보다 좁은 것 — **계약 검사가 초안을 반려한 건수**이며, 사람에게
+도달하기 전에 걸러진 것입니다. 이것을 사람의 반려처럼 보고하면 그 수치가 재려던
+바로 그것을 부풀리게 됩니다.
+
+집계는 `lib/memoryEvalSucc4DraftRejections.ts`의 21개 행에서 계산합니다. 행마다
+어느 검사가 왜 반려했는지와 그 근거가 tranche 파일에 있는지 commit에 있는지를
+적었습니다. 재현: `npm run report:memory-eval-succ4-rejections`.
+
+| tranche | 반려 | 건수 | 비율 |
+|---|---|---|---|
+| `succ4-tranche-1` | 2 | 8 | 25.0% |
+| `succ4-tranche-2` | 3 | 25 | 12.0% |
+| `succ4-tranche-3` | 6 | 18 | 33.3% |
+| `succ4-tranche-4` | 3 | 26 | 11.5% |
+| `succ4-tranche-5` | 7 | 26 | 26.9% |
+| **합계** | **21** | **103** | **20.4%** |
+
 | 항목 | 값 |
 |---|---|
-| 판정 건수 | *(사람이 기입)* |
-| 반려 건수 | *(사람이 기입)* |
-| 비율 | *(사람이 기입)* |
-| 미결 | *(사람이 기입 — §7.1a는 0을 요구합니다)* |
+| 판정 건수 | 103 — 전건이 계약 검사를 거쳤습니다 |
+| 반려 건수 | 21 |
+| 비율 | 20.4% |
+| 미결 | 0 — 반려된 21건은 전부 다시 쓰였고 재검사를 통과했습니다 |
 
-에이전트가 스스로 반려한 초안은 여기에 적지 않습니다. 그것은 작성 과정이지 검수
-결과가 아닙니다. 참고로 그 내역은 각 tranche 파일의 `differsBy`와 commit 본문에
-남아 있습니다 — tranche 3에서 6건, tranche 5 단계에서 9건이 overlap 또는
-under-specification으로 다시 쓰였습니다.
+반려 사유는 세 가지입니다. 원본과의 overlap 초과 12건, **corpus에 남는 다른
+case와의** overlap 초과 7건, under-specification 2건. 두 번째가 나온 것은 검사를
+나중에 추가했기 때문이고, 그 검사가 이미 병합된 tranche에서도 3건을 찾아냈습니다.
 
 ## 6. 채택 판정 (사람이 기입)
 
@@ -122,8 +143,8 @@ under-specification으로 다시 쓰였습니다.
 | `succ4-tranche-4` | *(사람이 기입)* | |
 | `succ4-tranche-5` | *(사람이 기입)* | |
 
-판정 값은 `adopted` 또는 `rejected`입니다. 하나라도 `adopted`가 아니면 §7.1a의
-5번에 따라 동결이 거부됩니다.
+판정 값은 `adopted` 또는 `rejected`입니다. 하나라도 `adopted`가 아니면
+docs/ops/memory-extraction-eval-dataset.md §7.1a의 5번에 따라 동결이 거부됩니다.
 
 ## 7. 서명 (사람이 기입)
 
@@ -133,6 +154,6 @@ under-specification으로 다시 쓰였습니다.
 | 승인일 | *(사람이 기입)* |
 | 서명 | *(사람이 기입)* |
 
-서명이 채워진 뒤에야 §7.2의 세 줄 편집 — `MEMORY_EVAL_SUCC4_DATASET_FROZEN`을
+서명이 채워진 뒤에야 docs/ops/memory-extraction-eval-dataset.md §7.2의 세 줄 편집 — `MEMORY_EVAL_SUCC4_DATASET_FROZEN`을
 `true`로, `..._PURPOSE`를 `decision`으로 — 이 가능합니다. 그 전까지 상수는
 `false` · `development`이고, harness는 이 dataset으로 `--live`를 거부합니다.

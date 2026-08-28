@@ -55,10 +55,15 @@ import {
     readSucc4AdoptionRecord,
     succ4AdoptionConditions,
 } from "../lib/memoryEvalSucc4AdoptionRecord.ts";
+import {
+    goldReviewCoverage,
+    goldReviewFailures,
+} from "../lib/memoryEvalGoldReviewJudgements.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import {
     MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    memoryEvalScoringContractPromptPending,
     memoryEvalScoringContractReadiness,
 } from "../lib/memoryEvalScoringContractDigest.ts";
 import {
@@ -396,12 +401,44 @@ console.log("\n" + "-".repeat(72) + "\n");
     }
     {
         const pending = memoryEvalScoringContractReadiness();
+        const promptPending = memoryEvalScoringContractPromptPending();
         check(
             "no scoring rule left unimplemented",
             pending.length === 0
-                ? `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}: every rule has an implementation`
+                ? `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}: every rule a dataset can satisfy has an implementation` +
+                      (promptPending.length > 0
+                          ? `; awaiting a prompt: ${promptPending.join(", ")}`
+                          : "")
                 : `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} still pending: ${pending.join(", ")}`,
             pending.length === 0
+        );
+    }
+
+    /* --- v3-unfixable-evidence-not-a-gold --------------------------------- */
+    // Separate from `goldEvidenceFailure()`, which proves the anchor is a real
+    // user message and an exact span and says nothing about whether its
+    // polarity can be read at all.
+    {
+        const keys = [];
+        const polarityByKey = new Map();
+        for (const testCase of MEMORY_EVAL_SUCC4_CASES) {
+            for (const gold of testCase.expected) {
+                const key = `${testCase.id}:${gold.id}`;
+                keys.push(key);
+                polarityByKey.set(key, gold.polarity);
+            }
+        }
+        const coverage = goldReviewCoverage({
+            decisionSetGoldKeys: keys,
+            polarityByKey,
+        });
+        const failures = goldReviewFailures(coverage);
+        check(
+            "every gold judged, and none judged unfixable",
+            failures.length === 0
+                ? `${coverage.judgements.size}/${keys.length} golds judged, 0 unfixable`
+                : failures.join(" | "),
+            failures.length === 0
         );
     }
 

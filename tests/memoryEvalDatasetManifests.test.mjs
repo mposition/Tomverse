@@ -117,9 +117,17 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
     // record of its own.
     const result = verifyScoringContractManifest();
     assert.deepEqual(result.mismatches, []);
-    assert.equal(result.version, "mem-score-v3.2");
+    assert.equal(result.version, "mem-score-v3.3");
     assert.equal(
         result.entry.descriptorDigest,
+        "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777"
+    );
+    // v3.2 stays pinned for the same reason v3 does: it was frozen, and its
+    // digest is what a later claim about it is checked against.
+    assert.equal(
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find(
+            (m) => m.version === "mem-score-v3.2"
+        ).descriptorDigest,
         "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b"
     );
     // v3 stays pinned. It existed, it was frozen, and nothing was scored under
@@ -130,12 +138,13 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
             .descriptorDigest,
         "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc"
     );
-    assert.equal(result.entry.approvedOn, "2026-08-27");
-    // Frozen with one rule nothing executes yet, recorded rather than assumed
-    // empty: §10.2's rules 5 and 6 belong to the v6 prompt and to gold review.
-    assert.deepEqual(result.entry.pendingRules, [
-        "v3-unfixable-evidence-emits-nothing",
-    ]);
+    assert.equal(result.entry.approvedOn, "2026-08-28");
+    // Nothing outstanding that a dataset could satisfy. v3.3 split the one
+    // pending rule: the gold-authoring half is enforced at review, and the
+    // half about what a model emits is `prompt_pending`, which is reported by
+    // `memoryEvalScoringContractPromptPending()` rather than counted against
+    // a sample.
+    assert.deepEqual(result.entry.pendingRules, []);
     assert.deepEqual(
         [...result.entry.pendingRules],
         [...memoryEvalScoringContractReadiness()],

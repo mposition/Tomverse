@@ -4,8 +4,9 @@
  * docs/ops/memory-extraction-eval-dataset.md §7.1a. A successor's cases arrive
  * two ways -- inherited from the source dataset's adopted batches, and written
  * as replacement tranches -- and only the first half already has an adoption
- * record. Rather than copy a batch record per tranche, §7.1a allows one
- * document, and this module is what reads it.
+ * record. Rather than copy a batch record per tranche,
+ * docs/ops/memory-extraction-eval-dataset.md §7.1a allows one document,
+ * and this module is what reads it.
  *
  * ## What this module refuses to infer
  *
@@ -54,17 +55,27 @@ export type Succ4AdoptionRecord = {
 export const isUnfilled = (value: string): boolean =>
     value.trim().length === 0 || /^\*\(.*\)\*$/.test(value.trim());
 
+/**
+ * Every table row in one section.
+ *
+ * Runs to the next heading rather than stopping at the first blank line
+ * after a table. docs/ops/memory-extraction-eval-succ4-adoption.md §5 grew a
+ * second table -- the per-tranche breakdown beside the summary -- and a
+ * reader that stopped at the first one reported the summary cells as
+ * unfilled while they sat two paragraphs below.
+ */
 const rowsOf = (source: string, heading: RegExp): string[][] => {
     const section = source.split(heading)[1];
     if (section === undefined) return [];
-    const lines = section.split("\n");
     const rows: string[][] = [];
-    for (const line of lines) {
+    for (const line of section.split("\n")) {
         const trimmed = line.trim();
-        if (!trimmed.startsWith("|")) {
-            if (rows.length > 0) break;
-            continue;
-        }
+        // Any heading ends the section, `###` included. In
+        // docs/ops/memory-extraction-eval-succ4-adoption.md the §3 and §3.2
+        // tables are different questions, and a scan that ran through both
+        // would answer neither.
+        if (/^#+\s/.test(trimmed)) break;
+        if (!trimmed.startsWith("|")) continue;
         const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
         if (cells.every((cell) => /^-*$/.test(cell))) continue;
         rows.push(cells);
@@ -72,7 +83,8 @@ const rowsOf = (source: string, heading: RegExp): string[][] => {
     return rows;
 };
 
-const unbacktick = (value: string): string => value.replace(/`/g, "").trim();
+const unbacktick = (value: string): string =>
+    value.replace(/[`*]/g, "").trim();
 
 /** Reads the record. Parsing only -- nothing here decides anything. */
 export function parseSucc4AdoptionRecord(source: string): Succ4AdoptionRecord {
@@ -85,6 +97,8 @@ export function parseSucc4AdoptionRecord(source: string): Succ4AdoptionRecord {
 
     const labelled = (rows: string[][], label: string): string => {
         const row = rows.find((cells) => unbacktick(cells[0]) === label);
+        // The value column, not the row. A summary table and a breakdown table
+        // can share a section, and only one of them has the label.
         return row ? row[1] ?? "" : "";
     };
 
