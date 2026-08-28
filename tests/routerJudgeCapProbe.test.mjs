@@ -15,9 +15,12 @@ import {
     PROBE_SAMPLE_SIZE,
     PROBE_STRATA,
     probeAbortReason,
+    renderedJudgeInputTokens,
     selectProbeSample,
     summariseProbe,
 } from "../lib/routerJudgeCapProbe.ts";
+import { estimateRawTextTokens } from "../lib/chatTokenEstimate.ts";
+import { judgePrompt } from "../lib/routerJudgeRubric.ts";
 
 const answer = (text) => ({ arm: "auto", modelId: "m", provider: "p", apiModel: "a", text, digest: "d" });
 const pair = (pairId, stratum, cell, promptLength, answerLength = 40) => ({
@@ -41,6 +44,27 @@ const fullBundle = () => {
     }
     return { header: { kind: "header" }, entries };
 };
+
+test("length is measured on the whole rendered request, not the varying part", () => {
+    // mposition's correction. The judge is sent the rubric and the output
+    // schema too, and for a short pair those are most of the request -- so
+    // ordering by prompt-plus-answers ranks a different quantity from the one
+    // the judge actually reads, and prices it wrong by an undeclared constant.
+    const entry = pair("p", "coding", "en", 40, 40);
+    const rendered = renderedJudgeInputTokens(entry);
+    const varyingPartOnly =
+        estimateRawTextTokens(entry.prompt) +
+        estimateRawTextTokens(entry.first.text) +
+        estimateRawTextTokens(entry.second.text);
+    assert.equal(
+        rendered,
+        estimateRawTextTokens(judgePrompt(entry.prompt, entry.first.text, entry.second.text))
+    );
+    assert.ok(
+        rendered > varyingPartOnly,
+        "the rendered request is larger than the prompt and answers alone"
+    );
+});
 
 test("the sample covers every task kind in both languages", () => {
     const { selected, problems } = selectProbeSample(fullBundle());
@@ -100,6 +124,7 @@ const observation = (over = {}) => ({
     stratum: "coding",
     cell: "en",
     lengthEnd: "short",
+    renderedJudgeInputTokens: 1_200,
     inputTokens: 1_000,
     billedOutputTokens: 300,
     visibleOutputTokens: 3,
@@ -150,21 +175,42 @@ test("an empty verdict is caught before the parse complaint", () => {
     );
 });
 
-test("the summary reports the distribution the ceilings will be set from", () => {
+test("the summary reports the spread, because the ceiling follows the tail", () => {
     const summary = summariseProbe(
         [100, 200, 300, 400].map((tokens) => observation({ billedOutputTokens: tokens, costUsd: 0.01 })),
         null
     );
-    assert.equal(summary.billedOutputTokens.min, 100);
-    assert.equal(summary.billedOutputTokens.max, 400);
-    assert.equal(summary.billedOutputTokens.mean, 250);
-    assert.equal(summary.billedOutputTokens.p95, 400);
+    const d = summary.billedOutputTokens;
+    assert.equal(d.n, 4);
+    assert.equal(d.min, 100);
+    assert.equal(d.median, 250);
+    assert.equal(d.p90, 400);
+    assert.equal(d.max, 400);
+    assert.equal(d.mean, 250);
     assert.equal(summary.totalCostUsd.toFixed(4), "0.0400");
+    assert.equal(summary.parsedCount, 4);
+    assert.deepEqual(summary.finishReasons, { stop: 4 });
+});
+
+test("a mean hides the tail a ceiling has to survive", () => {
+    // The reason the spread is reported at all: these two have the same mean
+    // and completely different budget implications.
+    const tight = summariseProbe(
+        [300, 300, 300, 300].map((t) => observation({ billedOutputTokens: t })),
+        null
+    );
+    const skewed = summariseProbe(
+        [10, 10, 10, 1_170].map((t) => observation({ billedOutputTokens: t })),
+        null
+    );
+    assert.equal(tight.billedOutputTokens.mean, skewed.billedOutputTokens.mean);
+    assert.notEqual(tight.billedOutputTokens.max, skewed.billedOutputTokens.max);
 });
 
 test("a probe that measured nothing reports no distribution rather than zero", () => {
     const summary = summariseProbe([], { at: 0, reason: "empty_verdict" });
     assert.equal(summary.billedOutputTokens, null);
+    assert.equal(summary.renderedJudgeInputTokens, null);
     assert.equal(summary.totalCostUsd, 0);
     assert.equal(summary.aborted.reason, "empty_verdict");
 });

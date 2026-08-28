@@ -40,9 +40,13 @@ on:
         required: true
         default: "route01-pilot-20260828.answers.jsonl"
       judge_max_output_tokens:
-        description: "Output budget for the judge call. Approved: 8192"
+        description: "Output budget for the judge call. Must be exactly 8192"
         required: true
         default: "8192"
+      implementation_sha:
+        description: "Commit to check out and measure. Must be the approved implementation commit."
+        required: true
+        default: ""
       confirm:
         description: "Type SPEND to confirm this dispatch will call a paid provider"
         required: true
@@ -80,22 +84,43 @@ jobs:
       # editing this step in a commit.
       #
       #   judge cap 8192, per request $0.50, stage $0.60, total $0.60
-      - name: The ceilings are the approved ones
+      #
+      # Exactly 8192, not "at most". A lower cap would reproduce the defect this
+      # whole line of work exists to remove -- a reasoning judge given too small
+      # a budget spends it thinking and returns nothing -- and a probe that hit
+      # that would be measuring the cap it was handed rather than the judge.
+      - name: The cap is exactly the approved one
         env:
           JUDGE_CAP: ${{ inputs.judge_max_output_tokens }}
         run: |
           node -e '
             const approvedCap = 8192;
             const cap = Number(process.env.JUDGE_CAP);
-            if (!(Number.isInteger(cap) && cap > 0 && cap <= approvedCap)) {
-              console.log(`::error::judge cap ${process.env.JUDGE_CAP} is not within the approved ${approvedCap}.`);
-              console.log("::error::Nothing was run and nothing was billed.");
+            if (cap !== approvedCap) {
+              console.log(`::error::judge cap must be exactly ${approvedCap}, got "${process.env.JUDGE_CAP}".`);
+              console.log("::error::A smaller cap measures the cap, not the judge. Nothing was billed.");
               process.exit(1);
             }
-            console.log(`Judge cap ${cap} is within the approved ${approvedCap}.`);
+            console.log(`Judge cap is exactly the approved ${approvedCap}.`);
           '
 
+      # Pinned, not "whatever the branch says now". The approval is for an
+      # implementation somebody read; a workflow that checks out a moving ref
+      # can measure something else under the same approval.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.implementation_sha }}
+
+      - name: Record what is actually running
+        id: provenance
+        run: |
+          checkout_sha="$(git rev-parse HEAD)"
+          if [ "$checkout_sha" != "${{ inputs.implementation_sha }}" ]; then
+            echo "::error::checked out $checkout_sha, not the approved ${{ inputs.implementation_sha }}."
+            exit 1
+          fi
+          echo "checkout_sha=$checkout_sha" >> "$GITHUB_OUTPUT"
+          echo "Measuring commit $checkout_sha."
 
       - uses: actions/setup-node@v4
         with:
@@ -150,6 +175,11 @@ jobs:
       - name: Probe (this is the step that spends)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Into the artefact, so the measurement names the code that produced
+          # it. `workflowSha` is the ref this workflow file came from, which is
+          # not necessarily the commit it checked out and measured.
+          PROBE_WORKFLOW_SHA: ${{ github.sha }}
+          PROBE_CHECKOUT_SHA: ${{ steps.provenance.outputs.checkout_sha }}
         run: |
           npm run router:judge-cap-probe -- \
             --bundle=artifacts/${{ inputs.bundle_file }} \

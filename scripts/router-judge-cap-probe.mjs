@@ -26,6 +26,7 @@
 //     --per-request-max-cost-usd=0.50 --stage-max-cost-usd=0.60 \
 //     --json=artifacts/judge-cap-probe.json
 
+import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -180,6 +181,9 @@ for (const [index, pick] of selected.entries()) {
     stratum: pick.stratum,
     cell: pick.cell,
     lengthEnd: pick.lengthEnd,
+    // What the selection measured, and what the provider actually billed. Both,
+    // because the first is an estimate and the second is the check on it.
+    renderedJudgeInputTokens: estimateRawTextTokens(prompt),
     inputTokens: usage.inputTokens ?? estimateRawTextTokens(prompt),
     billedOutputTokens: usage.outputTokens ?? null,
     visibleOutputTokens: estimateRawTextTokens(visible),
@@ -193,7 +197,8 @@ for (const [index, pick] of selected.entries()) {
 
   console.log(
     `  ${String(index + 1).padStart(2)}/${selected.length} ${entry.pairId.padEnd(28)} ` +
-      `${pick.stratum}/${pick.cell}/${pick.lengthEnd}  in=${observation.inputTokens} ` +
+      `${pick.stratum}/${pick.cell}/${pick.lengthEnd}  renderedIn=${observation.renderedJudgeInputTokens} ` +
+      `billedIn=${observation.inputTokens} ` +
       `billedOut=${observation.billedOutputTokens ?? "none"} visible=${observation.visibleOutputTokens} ` +
       `reasoning=${observation.reasoningTokens ?? "n/r"} finish=${observation.finishReason ?? "none"} ` +
       `parsed=${observation.parseSucceeded} $${costUsd.toFixed(4)} (cum $${accruedCostUsd.toFixed(4)})`
@@ -222,18 +227,46 @@ for (const [index, pick] of selected.entries()) {
 }
 
 const summary = summariseProbe(observations, aborted);
-console.log("");
-if (summary.billedOutputTokens) {
-  const b = summary.billedOutputTokens;
+const show = (label, d) =>
+  d &&
   console.log(
-    `Billed output tokens  min ${b.min}, mean ${b.mean.toFixed(0)}, p95 ${b.p95}, max ${b.max}` +
-      ` over ${observations.length} judgement(s)`
+    `${label.padEnd(22)} min ${d.min}, median ${d.median}, p90 ${d.p90}, max ${d.max}` +
+      `  (mean ${d.mean.toFixed(0)}, n=${d.n})`
   );
-}
-console.log(`Total cost            $${summary.totalCostUsd.toFixed(4)} of $${stageMaxCostUsd.toFixed(2)} approved`);
+console.log("");
+show("Billed output tokens", summary.billedOutputTokens);
+show("Rendered input tokens", summary.renderedJudgeInputTokens);
+console.log(
+  `Finish reasons         ${Object.entries(summary.finishReasons)
+    .map(([reason, count]) => `${reason} ${count}`)
+    .join(", ") || "none"}`
+);
+console.log(`Verdicts parsed        ${summary.parsedCount}/${observations.length}`);
+console.log(`Total cost             $${summary.totalCostUsd.toFixed(4)} of $${stageMaxCostUsd.toFixed(2)} approved`);
+
+const sha256 = (value) => `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 
 const report = {
   kind: "judge-cap-probe",
+  // Said in the artefact rather than left to whoever finds it later. These
+  // answers came from a run that is void, so the measurement is about the
+  // judge's output length and about nothing else. A file that does not say so
+  // is a file somebody will eventually quote for something it cannot support.
+  purpose: "judge-cap-probe",
+  sourceRunStatus: "void",
+  usableForQualityEvidence: false,
+  usableForCalibrationEvidence: false,
+  provenanceNote:
+    "Answers come from the VOID_GENERATION_VALIDATION_MISMATCH pilot of 2026-08-28, generated " +
+    "under a 2,048-token output cap. They do not represent the longer answers the product's own " +
+    "cap will produce, so this measures the judge's output length as an initial observation only. " +
+    "Full-run cost must be recomputed from a fresh bundle and its real rendered judge inputs.",
+  // What ran, exactly. A measurement whose code cannot be identified is not a
+  // measurement anybody can repeat.
+  workflowSha: process.env.PROBE_WORKFLOW_SHA ?? null,
+  checkoutSha: process.env.PROBE_CHECKOUT_SHA ?? null,
+  sourceBundleDigest: sha256(readFileSync(bundlePath, "utf8")),
+  evaluationSetDigest: sha256(readFileSync(setPath, "utf8")),
   judgeModelId: judge.id,
   provider: judge.provider,
   apiModel: judge.apiModel,

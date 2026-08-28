@@ -30,6 +30,7 @@
 
 import { estimateRawTextTokens } from "./chatTokenEstimate";
 import type { AnswerBundle, AnswerBundleEntry } from "./routerAnswerBundle";
+import { judgePrompt } from "./routerJudgeRubric";
 
 /**
  * The five task kinds mposition named, in the set's own spelling.
@@ -56,20 +57,29 @@ export type ProbeSelection = {
     cell: string;
     /** Which end of the length range this one was picked to represent. */
     lengthEnd: "short" | "long";
-    inputTokens: number;
+    /** The whole rendered request: rubric, prompt, both answers, schema. */
+    renderedJudgeInputTokens: number;
 };
 
 /**
- * The tokens a judge call will actually read for this pair.
+ * The tokens the judge actually receives for this pair.
  *
- * The prompt is built by the caller so the probe measures the real thing, but
- * the selection needs the size before the call, and the rubric scaffold is a
- * constant across every pair -- so the varying part is what orders them.
+ * ## Not the user's prompt, and not the prompt plus the two answers
+ *
+ * mposition's correction, and the first version of this file had it wrong: it
+ * ordered pairs by prompt + answer A + answer B, which is the varying part but
+ * is not the request. The judge is sent the rubric and the output schema as
+ * well, and those are most of a short pair's request -- so "short" measured
+ * without them is a different quantity from "short" as the judge experiences
+ * it, and the cost computed from it is wrong by a constant nobody declared.
+ *
+ * So the selection renders the real prompt, with `judgePrompt`, exactly as the
+ * run does. What is measured is what is sent.
  */
-export const pairReadingTokens = (entry: AnswerBundleEntry): number =>
-    estimateRawTextTokens(entry.prompt ?? "") +
-    estimateRawTextTokens(entry.first?.text ?? "") +
-    estimateRawTextTokens(entry.second?.text ?? "");
+export const renderedJudgeInputTokens = (entry: AnswerBundleEntry): number =>
+    estimateRawTextTokens(
+        judgePrompt(entry.prompt ?? "", entry.first?.text ?? "", entry.second?.text ?? "")
+    );
 
 export type ProbeSelectionResult = {
     selected: readonly ProbeSelection[];
@@ -105,8 +115,8 @@ export const selectProbeSample = (bundle: AnswerBundle): ProbeSelectionResult =>
         for (const [cellIndex, cell] of PROBE_CELLS.entries()) {
             const candidates = usable
                 .filter((entry) => entry.stratum === stratum && entry.cell === cell)
-                .map((entry) => ({ entry, inputTokens: pairReadingTokens(entry) }))
-                .sort((a, b) => a.inputTokens - b.inputTokens || a.entry.pairId.localeCompare(b.entry.pairId));
+                .map((entry) => ({ entry, rendered: renderedJudgeInputTokens(entry) }))
+                .sort((a, b) => a.rendered - b.rendered || a.entry.pairId.localeCompare(b.entry.pairId));
             if (candidates.length === 0) {
                 problems.push(`${stratum}/${cell} holds no judgeable pair, so the probe cannot cover it`);
                 continue;
@@ -120,7 +130,7 @@ export const selectProbeSample = (bundle: AnswerBundle): ProbeSelectionResult =>
                 stratum,
                 cell,
                 lengthEnd: wantShort ? "short" : "long",
-                inputTokens: pick.inputTokens,
+                renderedJudgeInputTokens: pick.rendered,
             });
         }
     }
@@ -157,6 +167,9 @@ export type ProbeObservation = {
     stratum: string;
     cell: string;
     lengthEnd: "short" | "long";
+    /** What the selection measured: the whole rendered request. */
+    renderedJudgeInputTokens: number;
+    /** What the provider billed as input. The check on the estimate. */
     inputTokens: number;
     billedOutputTokens: number | null;
     visibleOutputTokens: number;
@@ -193,15 +206,55 @@ export const probeAbortReason = (
     return null;
 };
 
+export type TokenDistribution = {
+    n: number;
+    min: number;
+    median: number;
+    p90: number;
+    p95: number;
+    max: number;
+    mean: number;
+};
+
 export type ProbeSummary = {
     observations: readonly ProbeObservation[];
     aborted: { at: number; reason: ProbeAbortReason } | null;
     totalCostUsd: number;
-    billedOutputTokens: { min: number; max: number; mean: number; p95: number } | null;
+    billedOutputTokens: TokenDistribution | null;
+    renderedJudgeInputTokens: TokenDistribution | null;
+    finishReasons: Record<string, number>;
+    parsedCount: number;
 };
 
 const percentile = (sorted: readonly number[], p: number) =>
     sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)];
+
+const median = (sorted: readonly number[]) => {
+    if (sorted.length === 0) return 0;
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+};
+
+/**
+ * The spread, not just the middle.
+ *
+ * Ten observations, and the number this feeds is a ceiling -- so the tail
+ * matters more than the average. A mean of 300 with a max of 4,000 is a very
+ * different budget decision from a mean of 300 with a max of 350, and only one
+ * of those is visible from the mean.
+ */
+export const distributionOf = (values: readonly number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return {
+        n: sorted.length,
+        min: sorted[0],
+        median: median(sorted),
+        p90: percentile(sorted, 0.9),
+        p95: percentile(sorted, 0.95),
+        max: sorted[sorted.length - 1],
+        mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
+    };
+};
 
 export const summariseProbe = (
     observations: readonly ProbeObservation[],
@@ -209,20 +262,19 @@ export const summariseProbe = (
 ): ProbeSummary => {
     const billed = observations
         .map((o) => o.billedOutputTokens)
-        .filter((value): value is number => typeof value === "number")
-        .sort((a, b) => a - b);
+        .filter((value): value is number => typeof value === "number");
+    const rendered = observations.map((o) => o.renderedJudgeInputTokens);
     return {
         observations,
         aborted,
         totalCostUsd: observations.reduce((sum, o) => sum + o.costUsd, 0),
-        billedOutputTokens:
-            billed.length === 0
-                ? null
-                : {
-                      min: billed[0],
-                      max: billed[billed.length - 1],
-                      mean: billed.reduce((a, b) => a + b, 0) / billed.length,
-                      p95: percentile(billed, 0.95),
-                  },
+        billedOutputTokens: billed.length === 0 ? null : distributionOf(billed),
+        renderedJudgeInputTokens: rendered.length === 0 ? null : distributionOf(rendered),
+        finishReasons: observations.reduce<Record<string, number>>((counts, o) => {
+            const key = o.finishReason ?? "none";
+            counts[key] = (counts[key] ?? 0) + 1;
+            return counts;
+        }, {}),
+        parsedCount: observations.filter((o) => o.parseSucceeded).length,
     };
 };
