@@ -88,10 +88,10 @@ export const containsAll = (
 /**
  * The user message and sentence a gold's fact is in, or `null`.
  *
- * **A candidate, never the answer.** §12.11: automatic selection may propose
- * and may not decide. `assembleGold()` reads the reviewed record instead, and
- * this function is left for the drafting tool and for the drift check that
- * compares the two.
+ * **A candidate, never the answer.** Automatic selection may propose and may
+ * not decide (.github/audits/memory-eval-gold-contract-2026-08-27.md §12.11).
+ * `assembleGold()` reads the reviewed record instead, and this function is
+ * left for the drafting tool and for the drift check that compares the two.
  */
 export function proposeAnchor(
     testCase: MemoryEvalCaseV2,
@@ -149,7 +149,8 @@ export function assembleGold(
         factValueAny = "carryOver" in decision! ? decision!.carryOver : undefined;
     }
 
-    // §12.11. The proposal is a candidate; the record is the decision. A gold
+    // The proposal is a candidate; the record is the decision
+    // (.github/audits/memory-eval-gold-contract-2026-08-27.md §12.11). A gold
     // with neither is refused rather than anchored on the first message that
     // happens to carry its tokens -- which is how en-306 came to cite the user
     // quoting the assistant's premise back.

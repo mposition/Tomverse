@@ -9,8 +9,9 @@
  *     `처음 · 초보 · 기초 · 입문` for a beginner. Polarity does not touch that,
  *     so the list carries over as `factValueAny`.
  *   * on sixteen, it hides the **negation** — `인천에 살지 않 · 인천에 거주하지
- *     않 · 인천이 아니`, invented per case. That is what §1② removed. Polarity
- *     carries it now and the list goes.
+ *     않 · 인천이 아니`, invented per case. That is what
+ *     .github/audits/memory-eval-gold-contract-2026-08-27.md §1② removed.
+ *     Polarity carries it now and the list goes.
  *
  * ## Why this is written out and not derived
  *
@@ -25,9 +26,10 @@
  * Two golds needed more than the list removed. `["견과류"]` negated reads as
  * *nuts do not hold of the user*, the opposite of a user who has no allergy;
  * the allergy is what is denied. Those two get a replacement disjunction from
- * their reading (§11.3), and it is a disjunction rather than a stem because
+ * their reading, and it is a disjunction rather than a stem because
  * `알레르기 · 알러지` and `allergy · allergic` are a finite spelling choice
- * rather than a productive inflection (§12.3).
+ * rather than a productive inflection
+ * (.github/audits/memory-eval-gold-contract-2026-08-27.md §11.3, §12.3).
  *
  * The other fourteen read correctly as a bare token denied: `["인천"]` negated
  * is *does not live in Ottawa*, `["sibling"]` is *has no siblings*. Nothing

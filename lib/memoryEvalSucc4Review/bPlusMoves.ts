@@ -215,14 +215,16 @@ export const SUCC4_B_PLUS_MOVES: readonly Succ4Move[] = [
     },
 
     /* ---------------------------------------------------------------------
-     * Found while assembling, and moved by §12.2 rather than by §12.1.
+     * Found while assembling, and moved by
+     * .github/audits/memory-eval-gold-contract-2026-08-27.md §12.2 rather than §12.1.
      *
      * No rule was formed from either: the anchor proposal takes the first user
      * message carrying the tokens, and in a correction that is the user
      * quoting the assistant's premise back rather than stating the fact. The
      * reading moved each anchor to the turn that states it.
      *
-     * §12.2 is categorical about a gold whose anchor changed, and it does not
+     * .github/audits/memory-eval-gold-contract-2026-08-27.md §12.2 is
+     * categorical about a gold whose anchor changed, and it does not
      * ask when the change happened. `succ-durable-ko-301` and
      * `succ-assistant-ko-308` moved under it having formed no rule either, so
      * leaving these two would apply the same clause two ways.

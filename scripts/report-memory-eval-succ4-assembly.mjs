@@ -13,7 +13,8 @@
 // negation marker, while some other user message in the same case does, is the
 // shape that put succ-assistant-en-306 on «the checklist has a section on
 // sibling carer leave» instead of «I have no siblings». The marker scan cannot
-// decide it -- it is the rule §9.2 disqualified -- but it can point, and here
+// decide it -- .github/audits/memory-eval-gold-contract-2026-08-27.md §9.2
+// disqualified that rule -- but it can point, and here
 // it is pointing at anchors rather than at labels.
 
 import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
@@ -75,7 +76,8 @@ if (refusals.length > 0) {
 
 /* --- the record, and where the proposal has drifted from it ------------ */
 
-// §12.11. The assembled anchor must be the reviewed one, exactly. This does
+// .github/audits/memory-eval-gold-contract-2026-08-27.md §12.11. The assembled
+// anchor must be the reviewed one, exactly. This does
 // not re-derive it -- re-deriving is what the record replaced -- it checks
 // that assembly used the record and nothing else.
 const anchorByKey = new Map(SUCC4_ANCHORS.map((anchor) => [anchor.key, anchor]));

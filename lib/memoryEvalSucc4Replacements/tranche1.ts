@@ -20,7 +20,9 @@
  * token list naming the topic and leaving the predicate to be inferred.
  *
  * Every gold here has its `polarity`, `evidenceMessageId` and `evidenceQuote`
- * written out and reviewed one at a time (§12.11). None is a proposal.
+ * written out and reviewed one at a time
+ * (.github/audits/memory-eval-gold-contract-2026-08-27.md §12.11). None is a
+ * proposal.
  */
 
 import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
@@ -353,7 +355,8 @@ export const SUCC4_TRANCHE_1: readonly Succ4Replacement[] = [
         originalId: "succ-assistant-ko-308",
         movedBecause:
             "The anchor was moved off «전주가 아니라 정읍이에요», where the marker sits " +
-            "one character from the affirmed value — the shape §10.2 rule 6 admits only " +
+            "one character from the affirmed value — the shape rule 6 of " +
+            ".github/audits/memory-eval-gold-contract-2026-08-27.md §10.2 admits only " +
             "through its plain clause.",
         boundary:
             "A resolved correction: the assistant has the wrong value, the user gives " +

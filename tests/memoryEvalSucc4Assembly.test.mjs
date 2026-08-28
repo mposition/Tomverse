@@ -81,7 +81,8 @@ test("a fact no user message carries has no proposal", () => {
 });
 
 test("a gold with no reviewed anchor is refused, proposal or not", () => {
-    // §12.11. succ-durable-ko-129 has a polarity — it was read in batch 8 and
+    // .github/audits/memory-eval-gold-contract-2026-08-27.md §12.11.
+    // succ-durable-ko-129 has a polarity — it was read in batch 8 and
     // ruled negated on 2026-08-28 — and no anchor record, because it moves.
     // The heuristic finds a perfectly good candidate for it, and that is
     // exactly what may not be adopted.
