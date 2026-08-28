@@ -760,10 +760,19 @@ API_MAX_MESSAGE_BYTES_PER_USER=52428800
 API_UPLOAD_BYTES_PER_USER_PER_DAY=262144000
 ```
 
-Attachment byte reservations work together with the R2 lifecycle rule. Keep
-the temporary `attachments/` deletion rule enabled. Browser uploads are
-finalized with a server-side R2 `HeadObject` validation immediately after the
-presigned `PUT`; invalid objects are deleted during finalization.
+Attachment byte reservations bound how much a single account can upload per
+day. They are **not** a retention rule, and no time-based bucket lifecycle rule
+may cover `attachments/`: a signed-in user's files are referenced by
+`MessageAttachment` rows and are kept until the conversation or the account is
+deleted, at which point the application enqueues the object itself
+(docs/policy/user-attachment-persistence.md §7, §11). Only the guest attachment
+prefix is swept on a TTL, and that sweep is application code rather than a
+bucket rule.
+
+Verify the bucket with `npm run check:r2-lifecycle-policy`; the runbook is
+`docs/ops/r2-object-lifecycle.md`. Browser uploads are finalized with a
+server-side R2 `HeadObject` validation immediately after the presigned `PUT`;
+invalid objects are deleted during finalization.
 
 ## Guest Bot Protection
 

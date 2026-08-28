@@ -77,6 +77,55 @@ export type MessageAttachmentReference = z.infer<
 >;
 
 /* ------------------------------------------------------------------------ */
+/* Availability                                                               */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Why a stored attachment can no longer be read.
+ *
+ * One entry today, and the enumeration exists anyway: this value decides what
+ * the user is told, and a reason nobody wrote copy for would render as a card
+ * that says something is wrong without saying what.
+ *
+ * `storage_object_missing` means storage answered 404 for an object a row
+ * still names. In production that has had exactly one cause -- a time-based
+ * bucket lifecycle rule deleting an object the application never enqueued for
+ * deletion -- and the reason is deliberately named after the *observation*
+ * rather than that cause, because the next cause will look identical from
+ * here.
+ */
+export const MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS = [
+  "storage_object_missing",
+] as const;
+
+export type MessageAttachmentUnavailableReason =
+  (typeof MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS)[number];
+
+export const isMessageAttachmentUnavailableReason = (
+  value: unknown
+): value is MessageAttachmentUnavailableReason =>
+  typeof value === "string" &&
+  (MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS as readonly string[]).includes(value);
+
+/**
+ * The acknowledgement a client sends to continue a turn without a file it has
+ * been told is gone.
+ *
+ * Per attachment id, never a blanket boolean. A boolean would let one
+ * confirmation carry every future missing file in the conversation, including
+ * ones the user has not been shown yet -- and the whole point of failing
+ * closed is that the model must not answer about a document nobody knows it
+ * did not read.
+ *
+ * Acknowledging is not deleting. The `MessageAttachment` row, the message and
+ * the card all survive it; the acknowledgement scopes exactly one request.
+ */
+export const acknowledgedUnavailableAttachmentsSchema = z
+  .array(opaqueId)
+  .max(50)
+  .optional();
+
+/* ------------------------------------------------------------------------ */
 /* The shape that goes back to the browser                                    */
 /* ------------------------------------------------------------------------ */
 
@@ -96,6 +145,19 @@ export type PublicMessageAttachment = {
   mediaType: string;
   size: number;
   kind: MessageAttachmentKind;
+  /**
+   * ISO timestamp of the confirmed 404, when there has been one.
+   *
+   * Absent on an ordinary attachment rather than present-and-null, so a card
+   * that has never been checked and a card that was checked and found is the
+   * same shape -- there is nothing for a client to distinguish, and a `null`
+   * would invite it to try.
+   *
+   * This is the only new thing a client learns about storage, and it is a
+   * verdict rather than a location: no key, no bucket, no endpoint.
+   */
+  unavailableAt?: string;
+  unavailableReason?: MessageAttachmentUnavailableReason;
 };
 
 /** The Prisma `select` that produces exactly the public shape. */
@@ -106,6 +168,8 @@ export const PUBLIC_MESSAGE_ATTACHMENT_SELECT = {
   mediaType: true,
   size: true,
   kind: true,
+  unavailableAt: true,
+  unavailableReason: true,
 } as const;
 
 /**
@@ -122,6 +186,8 @@ export const toPublicMessageAttachment = (row: {
   mediaType: string;
   size: number;
   kind: string;
+  unavailableAt?: Date | string | null;
+  unavailableReason?: string | null;
 }): PublicMessageAttachment => ({
   id: row.id,
   ordinal: row.ordinal,
@@ -129,6 +195,20 @@ export const toPublicMessageAttachment = (row: {
   mediaType: row.mediaType,
   size: row.size,
   kind: row.kind === "text" ? "text" : "file",
+  ...(row.unavailableAt
+    ? {
+        unavailableAt:
+          row.unavailableAt instanceof Date
+            ? row.unavailableAt.toISOString()
+            : String(row.unavailableAt),
+      }
+    : {}),
+  // Only an enumerated reason travels. An unrecognised value in the column is
+  // reported as no reason rather than passed through, because the client turns
+  // this into a sentence and there is no sentence for a word it does not know.
+  ...(isMessageAttachmentUnavailableReason(row.unavailableReason)
+    ? { unavailableReason: row.unavailableReason }
+    : {}),
 });
 
 /* ------------------------------------------------------------------------ */
