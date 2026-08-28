@@ -17,7 +17,7 @@ import {
     memoryEvalSchema3Blockers,
     memoryEvalSchema3Readiness,
 } from "../lib/memoryEvalSchemaReadiness.ts";
-import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -50,16 +50,17 @@ test("every row cites evidence, and a converted row cites a test that exists", (
     }
 });
 
-test("no consumer is pending, and the gate is still held anyway", () => {
-    // Two facts, and keeping them apart is the point of the module. The
-    // instrument being ready is not permission to run it: moving the gate is
-    // its own reviewed change, and a paid run needs the budget approval of
-    // docs/policy/external-conversation-import-and-memory.md §12.5 after that.
+test("no consumer is pending, and the gate has been moved to match", () => {
+    // Two facts, and keeping them apart is the point of the module. The gate
+    // moved on 2026-08-28 on this report's evidence; the instrument being
+    // ready still is not permission to run it, because a paid run needs the
+    // budget approval of
+    // docs/policy/external-conversation-import-and-memory.md §12.5 as well.
     const summary = memoryEvalSchema3Readiness();
     assert.deepEqual([...memoryEvalSchema3Blockers()], []);
     assert.equal(summary.gateMayMove, true);
 
-    assert.equal(MEMORY_EVAL_DATASET_SCHEMA_VERSION, 2);
+    assert.equal(MEMORY_EVAL_DATASET_SCHEMA_VERSION, 3);
     assert.equal(harnessTarget().datasetSchemaVersion, 3);
 });
 

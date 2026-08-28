@@ -959,3 +959,61 @@ gate를 옮겨도 §12.5 예산 승인이 없으면 `no_eval_budget`으로 거�
 `npm run report:memory-eval-cost-estimate`가 이제 succ-4를 잽니다 — 평균 prompt
 2,746 토큰, §12.4 재실행 포함 2회, 최악 US$12.57. 예산 승인은 이 숫자와 pair,
 두 digest, 실행 횟수, 재시도 정책을 함께 고정한 뒤 별도로 받습니다.
+
+## 15. schema gate 전환 (2026-08-28 승인, @mposition)
+
+`report:memory-eval-schema-readiness`의 `pending: 0`을 근거로
+`MEMORY_EVAL_DATASET_SCHEMA_VERSION`을 2에서 3으로 옮겼습니다. **harness 사용만
+허용하는 승인입니다** — pair 승인도, release gate 통과도, production 활성화도
+아닙니다. `MEMORY-02`·`MEMORY-03`은 `status: pending`, `approvedBy`·`approvedAt`
+미기입 그대로입니다.
+
+### 15.1 그냥 옮겼으면 동결된 계약 digest가 움직였습니다
+
+전환 전에 확인한 사실입니다. `scoringContractDescriptorInput()`이 이 gate
+상수를 `schemaVersion` field로 읽고 있었습니다. 그래서 2 → 3으로 바꾸자
+**동결된 `mem-score-v3.3` descriptor digest가 함께 움직였습니다.**
+
+```
+19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777   (동결값)
+50615af8aa63f4482bb69e1869d9480f3abe82804ebd0515c3adaf25337f44fb   (gate=3일 때)
+```
+
+그 digest는 `mem-eval-succ-4` manifest, release gate registry와 생성된 view,
+채택 기록, instrument 증거가 모두 고정하고 있습니다. 즉 **gate 한 줄을 바꾸는
+것만으로 예산 승인 조건 5(등록된 값이 하나라도 달라지면 효력 상실)를 스스로
+위반**하게 됩니다.
+
+원인은 한 상수가 서로 다른 두 질문에 답하고 있었다는 것입니다.
+
+| 질문 | 소유 |
+|---|---|
+| live 실행이 허용되는 dataset schema | `lib/memoryExtractionEvalCore.ts` (gate) |
+| 이 계약이 채점하는 dataset schema | 계약 descriptor의 `schemaVersion` field |
+| 이 모듈이 정의하는 schema | `lib/memoryEvalDatasetSchema.ts` (2, 영구) |
+
+descriptor의 field를 `DESCRIPTOR_SCHEMA_VERSION`으로 **동결 당시 값에 고정**해
+분리했습니다. digest는 `19f4e4f9…` 그대로이고, gate는 자유롭게 움직입니다.
+
+**고정된 값은 2이고 `mem-score-v3.3`은 schema 3을 채점합니다.** 이 어긋남은
+동결된 사실이므로 그대로 둡니다 — 고치면 digest가 움직이고, 그 digest를 네 곳이
+고정하고 있습니다. 정정은 새 계약 버전 + 새 digest + manifest 재기록이며,
+gate 이동의 부수 효과로 처리할 일이 아닙니다.
+
+### 15.2 같은 혼동이 세 곳에 더 있었습니다
+
+`report:memory-eval-schema-readiness`, 그 테스트, dry-run 테스트가
+`memoryEvalDatasetSchema.ts`의 동명 상수를 읽으면서 "gate"라고 이름 붙이고
+있었습니다. 두 값이 우연히 같아서 맞는 숫자가 찍혔을 뿐입니다. 셋 다 gate를
+소유한 모듈에서 읽도록 고쳤습니다.
+
+기존 truth-table 테스트 8건은 "정상 schema"를 리터럴 `2`로 적고 있어서 gate가
+움직이자 실패했습니다. gate 상수를 따라가도록 바꿨습니다 — 다음에 gate가 움직일
+때 다시 같은 일이 생기지 않습니다.
+
+### 15.3 무엇이 열렸고 무엇이 안 열렸는가
+
+`legacy_dataset_schema`가 더 이상 답하지 않고, `no_eval_budget`이 답합니다.
+`gpt-5-6-luna::mem-extract-v6`의 예산이 기록되는 날이 실행을 여는 변경이며,
+그것은 그 자체로 별개의 검토를 받습니다. `tests/memoryEvalSchema3DryRun.test.mjs`
+가 두 사실을 각각 고정합니다.

@@ -30,8 +30,10 @@ import { fileURLToPath } from "node:url";
 
 import { resolveArtifactDataset } from "../lib/memoryEvalDatasetRegistry.ts";
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
-import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
+import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
@@ -125,17 +127,16 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
     }
 });
 
-test("a live run against the schema-3 set is still refused by the gate", () => {
-    // The block the 2026-08-28 approval asked to be held until every consumer
-    // is converted. Held here as an assertion rather than as a comment: if the
-    // gate moves, this fails and whoever moved it has to say so.
-    assert.equal(MEMORY_EVAL_DATASET_SCHEMA_VERSION, 2);
+test("the gate now admits the schema the harness scores", () => {
+    // The block was held until every consumer was converted, and moved on
+    // 2026-08-28 once the readiness report showed 0 pending. Asserted rather
+    // than left as a comment: whoever moves it again has to say so here.
+    assert.equal(MEMORY_EVAL_DATASET_SCHEMA_VERSION, 3);
     const target = harnessTarget();
     assert.equal(target.datasetSchemaVersion, 3);
 
     const decision = decideEvalRunMode({
         live: true,
-        // Everything else satisfied, so the schema is the only thing refusing.
         registerEntry: { status: "candidate", evalBudget: { maxUsd: 50 } },
         hasApiKey: true,
         datasetFrozen: target.datasetFrozen,
@@ -143,10 +144,33 @@ test("a live run against the schema-3 set is still refused by the gate", () => {
         datasetSchemaVersion: target.datasetSchemaVersion,
         commitKnown: true,
     });
-    assert.deepEqual(decision, {
-        mode: "refused",
-        reason: "legacy_dataset_schema",
+    assert.deepEqual(decision, { mode: "live", ceilingUsd: 50 });
+});
+
+test("the budget, not the schema, is what refuses the real pair", () => {
+    // The register entry as the tree actually holds it. Moving the gate opened
+    // the harness and nothing else: `gpt-5-6-luna::mem-extract-v6` carries no
+    // budget, so the refusal is `no_eval_budget` — and the day a budget is
+    // recorded, that is the change that opens a run, deliberately and on its
+    // own.
+    const target = harnessTarget();
+    const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
+    );
+    assert.ok(pair, "the shipped pair is not registered");
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: pair,
+        hasApiKey: true,
+        datasetFrozen: target.datasetFrozen,
+        datasetPurpose: target.datasetPurpose,
+        datasetSchemaVersion: target.datasetSchemaVersion,
+        commitKnown: true,
     });
+    assert.equal(decision.mode, "refused");
+    assert.equal(decision.reason, "no_eval_budget");
 });
 
 test("the refusal says the dataset is ahead of the gate, not behind it", () => {

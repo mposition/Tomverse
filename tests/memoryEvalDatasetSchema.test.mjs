@@ -104,10 +104,30 @@ test("the floor is derived from §12.2 rather than restated", () => {
     );
 });
 
-test("the run-mode gate and the schema module agree on the version", () => {
-    // Two constants because the gate stays free of the schema module's
-    // imports. They are only safe apart while something pins them together.
-    assert.equal(GATE_SCHEMA_VERSION, MEMORY_EVAL_DATASET_SCHEMA_VERSION);
+test("the two schema constants answer different questions", () => {
+    // They used to be pinned equal, on the reading that the gate and the
+    // schema module were two copies of one number. They are not: the schema
+    // module says "the schema I define", which is 2 and always will be —
+    // schema 3 is defined in `lib/memoryEvalDatasetSchemaV3.ts` — and the gate
+    // says "the schema a live run may score", which moved to 3 on 2026-08-28.
+    //
+    // Pinning them equal would now force one of the two to lie. Each is pinned
+    // to its own meaning instead, and the difference is the assertion.
+    assert.equal(
+        MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        2,
+        "this module defines schema 2; schema 3 lives in its own module"
+    );
+    assert.equal(
+        GATE_SCHEMA_VERSION,
+        3,
+        "the run-mode gate was moved to 3 on 2026-08-28 (schema-readiness report, 0 pending)"
+    );
+    assert.notEqual(
+        GATE_SCHEMA_VERSION,
+        MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        "if these agree again, check which one moved and why"
+    );
 });
 
 test("a complete decision set validates", () => {
@@ -464,7 +484,27 @@ test("a run that declares no schema at all is refused", () => {
     });
 });
 
-test("the same run against schema 2 reaches the live decision", () => {
+test("the same run against the gated schema reaches the live decision", () => {
+    // `GATE_SCHEMA_VERSION`, not this module's constant. The two were equal
+    // when this test was written and the difference did not show; since the
+    // gate moved to 3, passing the schema module's 2 here would assert that a
+    // superseded schema still runs.
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: { status: "approved", evalBudget: { maxUsd: 20 } },
+        hasApiKey: true,
+        datasetFrozen: true,
+        commitKnown: true,
+        datasetSchemaVersion: GATE_SCHEMA_VERSION,
+    });
+    assert.deepEqual(decision, { mode: "live", ceilingUsd: 20 });
+});
+
+test("a schema-2 dataset no longer reaches the live decision", () => {
+    // The other side of the move, and the reason it is a gate rather than a
+    // label: `mem-eval-succ-3` was frozen under `mem-score-v2.3`, so a run
+    // against it now would write an artifact whose contract digest matches no
+    // record. The gate refuses it before a provider is reached.
     const decision = decideEvalRunMode({
         live: true,
         registerEntry: { status: "approved", evalBudget: { maxUsd: 20 } },
@@ -473,7 +513,10 @@ test("the same run against schema 2 reaches the live decision", () => {
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     });
-    assert.deepEqual(decision, { mode: "live", ceilingUsd: 20 });
+    assert.deepEqual(decision, {
+        mode: "refused",
+        reason: "legacy_dataset_schema",
+    });
 });
 
 test("smoke mode is unaffected by the schema gate", () => {

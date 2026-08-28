@@ -62,7 +62,6 @@ import { createHash } from "node:crypto";
 import {
     MEMORY_EVAL_CATEGORIES,
     MEMORY_EVAL_CRITICAL_CATEGORIES,
-    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     MEMORY_EVAL_LANGUAGES,
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN,
@@ -357,17 +356,43 @@ export const descriptorSortedListRow = (
 ): string => `${label}${FIELD}${[...items].sort().join(ITEM)}`;
 
 /**
+ * The `schemaVersion` this descriptor records, pinned rather than read.
+ *
+ * **It used to read `MEMORY_EVAL_DATASET_SCHEMA_VERSION` from
+ * `lib/memoryExtractionEvalCore.ts`, and that constant is the run-mode gate —
+ * "which dataset schema may be run live" — not "which schema this contract
+ * describes".** The two happened to be the same number while the gate sat at
+ * 2, so the difference was invisible until the gate moved to 3 on 2026-08-28
+ * and the frozen `mem-score-v3.3` digest went with it, from
+ * `19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777` to
+ * `50615af8aa63f4482bb69e1869d9480f3abe82804ebd0515c3adaf25337f44fb` — a
+ * frozen contract silently re-fingerprinted by an unrelated change.
+ *
+ * So the field is pinned to the value it was frozen with, and the gate is free
+ * to move without touching any recorded digest.
+ *
+ * **The pinned value is 2, and `mem-score-v3.3` scores schema 3.** That is a
+ * defect in what was frozen, and it is left standing on purpose: correcting it
+ * moves the digest, and the digest is pinned by the `mem-eval-succ-4` manifest,
+ * the release-gate registry, the adoption record and the instrument evidence.
+ * Correcting it is a new contract version with a new digest and a re-recorded
+ * manifest — a deliberate decision, not a side effect of moving a gate.
+ */
+const DESCRIPTOR_SCHEMA_VERSION = 2;
+
+/**
  * The contract half of the digest input.
  *
  * Reads the live constants, so a threshold change moves every manifest that
- * pins this and the mismatch is reported rather than absorbed.
+ * pins this and the mismatch is reported rather than absorbed. The one
+ * exception is `schemaVersion` — see `DESCRIPTOR_SCHEMA_VERSION`.
  */
 export function scoringContractDescriptorInput(): string {
     return [
         `contractVersion${FIELD}${MEMORY_EVAL_SCORING_CONTRACT_VERSION}`,
         `schemaVersion${FIELD}${num(
             "schemaVersion",
-            MEMORY_EVAL_DATASET_SCHEMA_VERSION
+            DESCRIPTOR_SCHEMA_VERSION
         )}`,
         `categories${FIELD}${MEMORY_EVAL_CATEGORIES.join(ITEM)}`,
         `criticalCategories${FIELD}${MEMORY_EVAL_CRITICAL_CATEGORIES.join(ITEM)}`,

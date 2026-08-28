@@ -99,10 +99,31 @@ export const MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL: Readonly<
  * The dataset schema a live run requires.
  *
  * Stated here rather than imported from `lib/memoryEvalDatasetSchema.ts` to
- * keep the run-mode gate free of the schema module's own imports; the two are
- * pinned to each other by `tests/memoryEvalDatasetSchema.test.mjs`.
+ * keep the run-mode gate free of the schema module's own imports. That module
+ * declares a constant of the same name and they are **no longer equal**: it
+ * says "the schema this module defines", which is 2 and always will be, and
+ * this one says "the schema a live run may score", which is now 3.
+ * `tests/memoryEvalDatasetSchema.test.mjs` pins each to its own meaning.
+ *
+ * ## Moved from 2 to 3 on 2026-08-28
+ *
+ * Approved by @mposition on the evidence of
+ * `npm run report:memory-eval-schema-readiness`: every artifact consumer reads
+ * schema 3, nothing is pending, and each row names the test that would fail if
+ * its conversion were undone.
+ *
+ * **This opens the harness, not a run.** A live run still needs the §12.5
+ * budget approval on the pair, which is a separate record with its own
+ * approver and ceiling. Moving this number stops `legacy_dataset_schema` from
+ * being the refusal and leaves `no_eval_budget` as the one that answers.
+ *
+ * It also does not touch a recorded digest. The scoring contract descriptor
+ * used to read this constant, so moving it re-fingerprinted the frozen
+ * `mem-score-v3.3` contract; `DESCRIPTOR_SCHEMA_VERSION` in
+ * `lib/memoryEvalScoringContractDigest.ts` now pins that field, and
+ * `tests/memoryEvalScoringContractDigest.test.mjs` fails if the digest moves.
  */
-export const MEMORY_EVAL_DATASET_SCHEMA_VERSION = 2;
+export const MEMORY_EVAL_DATASET_SCHEMA_VERSION = 3;
 
 export const MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN = 0.95;
 export const MEMORY_EVAL_RECALL_WILSON_LOWER_MIN = 0.85;

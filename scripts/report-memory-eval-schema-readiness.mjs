@@ -13,7 +13,11 @@ import {
     memoryEvalSchema3Blockers,
     memoryEvalSchema3Readiness,
 } from "../lib/memoryEvalSchemaReadiness.ts";
-import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+// The run-mode gate, from the module that owns it. `lib/memoryEvalDatasetSchema.ts`
+// exports a constant of the same name meaning "the schema this module defines",
+// which is 2 forever; reading that one here printed the right number only while
+// the gate happened to agree with it.
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 import {
     harnessTarget,
     harnessTargetBindingFailures,

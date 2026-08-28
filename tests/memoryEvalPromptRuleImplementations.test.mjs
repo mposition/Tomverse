@@ -26,7 +26,10 @@ import {
     memoryEvalScoringContractPromptPending,
 } from "../lib/memoryEvalScoringContractDigest.ts";
 import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
-import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
+import {
+    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+    decideEvalRunMode,
+} from "../lib/memoryExtractionEvalCore.ts";
 
 test("every version claims only rules the contract actually names", () => {
     // A claim for an id the contract does not carry is a claim about nothing,
@@ -73,7 +76,7 @@ test("an unimplemented rule refuses the run before the key is spent", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
-        datasetSchemaVersion: 2,
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     };
     assert.deepEqual(decideEvalRunMode(base), { mode: "live", ceilingUsd: 5 });
     assert.deepEqual(
