@@ -570,9 +570,16 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             },
             {
                 key: "succ-durable-en-129:e1",
-                polarity: "affirmed",
+                polarity: "negated",
                 note:
-                    "«Weekends are completely spoken for» is affirmative about the weekends, where the frozen ko-129 («주말에는 아예 시간을 못 냅니다») is negated on 주말. Same underlying fact, opposite labels, because the rule reads the quote's own predication and the two users phrased it differently. That is the rule working as written -- a model shown either quote would emit the matching polarity -- but it is the first pair where one fact splits, and it is reported rather than absorbed.",
+                    "«Weekends are completely spoken for» is affirmative in form and " +
+                    "denies the availability of the weekend, which is what the canonical " +
+                    "proposition is about. Read as affirmed it would have made one fact " +
+                    "carry two labels across the arms -- the frozen ko-129 («주말에는 " +
+                    "아예 시간을 못 냅니다») is negated on 주말 -- and a score that moves " +
+                    "with the paraphrase is not measuring the extraction. Ruled " +
+                    "2026-08-28: negated, and the case moves under §12.2 because " +
+                    "[\"weekend\"] names the topic where the opposite reading is live.",
             },
             { key: "succ-durable-en-12:e1", polarity: "affirmed" },
             { key: "succ-durable-en-131:e1", polarity: "affirmed" },
@@ -746,9 +753,12 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-en-316:g1", polarity: "affirmed" },
             {
                 key: "succ-durable-en-316:g2",
-                polarity: "affirmed",
+                polarity: "negated",
                 note:
-                    "«anything that needs quiet or floor space is constrained» states the limit in the affirmative, as en-129 («Weekends are completely spoken for») does. Both are unavailability asserted rather than denied.",
+                    "«anything that needs quiet or floor space is constrained» is the " +
+                    "same shape as en-129: affirmative in form, denying the availability " +
+                    "of the space. Ruled 2026-08-28 with it, and [\"space\"] is " +
+                    "under-specified for the same reason.",
             },
         ],
     },

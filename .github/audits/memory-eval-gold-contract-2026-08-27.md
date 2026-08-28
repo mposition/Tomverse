@@ -673,3 +673,62 @@ marker 집합, `g2`는 아닙니다. 케이스 단위로 이동합니다.
 이동 케이스 중 일부는 그 자체가 기존 99건의 대체본입니다
 (`succ-durable-ko-301`은 batch-162 소속). ID가 다르므로 합집합은 그대로
 198이고, **두 번 대체되는 자리**가 있다는 사실은 provenance가 기록합니다.
+
+### 12.7 `spoken for`·`constrained` 판정 (2026-08-28 승인, @mposition)
+
+| gold | 이전 | 확정 |
+|---|---|---|
+| `succ-durable-en-129:e1` (`weekend`) | affirmed | **negated** |
+| `succ-durable-ko-129:e1` (`주말`) | negated | negated (유지) |
+| `succ-durable-en-316:g2` (`space`) | affirmed | **negated** |
+
+**`spoken for`와 `constrained`는 문법적으로 긍정형이지만 canonical proposition
+— 주말과 공간의 가용성 — 을 부정합니다.** 의미가 같은 사실의 polarity가 표현
+방식에 따라 갈리면 **paraphrase에 따라 채점이 바뀝니다.** 그것은 추출을 재는
+것이 아닙니다.
+
+제가 batch 8에서 en-129를 affirmed로 읽은 것은 §12.5의 배정 규칙을 「주 서술의
+문법적 극성」으로만 좁게 적용한 결과였고, 규칙이 명시한 *"factValueAll을
+사용자에 대해 주장하는가"* 는 문법형이 아니라 명제를 묻습니다. 배정 규칙 자체는
+바뀌지 않았습니다.
+
+**label만 뒤집어 decision set에 두지 않습니다.** 세 gold는 §12.5의
+under-specification 조항에도 걸립니다 — `["weekend"]`와 `["space"]`는 predicate가
+아니라 topic만 이름 붙이므로, 반대 polarity의 문장도 같은 token을 전부 담을 수
+있습니다. 그래서 **case 단위로 regression corpus에 이동하고**, predicate가 명확한
+사례로 교체합니다.
+
+**새 규칙이 아니라 동결된 규칙의 적용입니다.** 그래서 이동 사유는
+`gold-corrected-under-specified`이며, 규칙을 만든 케이스를 뜻하는
+`contract-under-specification`과 구분합니다.
+
+### 12.8 B+ 합집합 정정 — 99 → 101
+
+`ko-129`는 이미 목록에 있었습니다(polarity 배정 규칙으로 이동). 새로 더해지는
+것은 **`en-129`와 `en-316` 둘**뿐입니다.
+
+| | |
+|---|---|
+| 기존 corpus (succ-2 → succ-3) | 99 |
+| succ-3 → succ-4 이동 | **101** (121 판독 99 + batch 판독 2) |
+| **합집합** | **200** |
+
+| cell | 이동 |
+|---|---|
+| durable_facts:en | **55** (53 + 2) |
+| durable_facts:ko | 32 |
+| assistant_only:ko | 7 |
+| assistant_only:en | 5 |
+| injection_directives:en | 2 |
+
+succ-4 조립은 **교체 101건 + schema 3 relabelling 1,049건**입니다.
+
+`Succ4Move`에 `from` field를 넣어 두 출처를 구분합니다. 넣지 않으면 「99건이
+이동하고 13건이 남았다」가 무엇에 대해서도 검사되지 않는 문장이 됩니다 — 나중에
+이동한 케이스는 121 판독의 대상이 아니었으므로 그 산술에 섞이면 안 됩니다.
+
+**`en-316`은 case 전체가 이동하므로 `g1`(`artist`)도 함께 갑니다.** 잘못 읽힌
+것은 `g2`뿐이지만 §12.2는 case 단위입니다. 그리고 `en-316`은 그 자체가 rule-4로
+`succ-durable-en-57`을 대체하려고 쓴 케이스이므로 provenance는
+**`en-57 → en-316 → 새 replacement`**로 보존하고, 새 대체 사례는 가능하면 기존의
+두-gold 구조를 유지합니다.
