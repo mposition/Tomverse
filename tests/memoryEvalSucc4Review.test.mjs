@@ -53,19 +53,50 @@ test("the move set and the kept set are disjoint, and both are unique", () => {
     }
 });
 
-test("99 move, 13 stay, and together they are the reviewed cases", () => {
-    assert.equal(SUCC4_B_PLUS_MOVES.length, 99);
+test("101 move: 99 from the 121, 2 ruled during the batches", () => {
+    assert.equal(SUCC4_B_PLUS_MOVES.length, 101);
+    const fromJudgement = SUCC4_B_PLUS_MOVES.filter((m) => m.from === "judgement-121");
+    const fromBatch = SUCC4_B_PLUS_MOVES.filter((m) => m.from === "batch");
+    assert.equal(fromJudgement.length, 99);
+    assert.deepEqual(
+        fromBatch.map((m) => m.originalId).sort(),
+        ["succ-durable-en-129", "succ-durable-en-316"]
+    );
+    // The 121 review's own arithmetic is unchanged by the later ruling: 112
+    // distinct cases carried those golds, 99 moved and 13 stayed.
     assert.equal(SUCC4_REVIEWED_AND_KEPT.length, 13);
-    // 121 golds, 112 distinct cases: `succ-assistant-en-304` carries two of
-    // the reviewed golds, and several durable_facts cases carry two.
     const reviewedCases = new Set([
-        ...SUCC4_B_PLUS_MOVES.map((move) => move.originalId),
+        ...fromJudgement.map((move) => move.originalId),
         ...SUCC4_REVIEWED_AND_KEPT,
     ]);
     assert.equal(reviewedCases.size, 112);
 });
 
-test("the union with the existing corpus is 198, not 99 + 99", () => {
+test("a case ruled during the batches is not also in the kept list", () => {
+    // en-129 and en-316 were read under a written standard, so neither was in
+    // the 13 the 121 review kept. The disjointness test covers the general
+    // case; this one names the two the later ruling touched.
+    for (const id of ["succ-durable-en-129", "succ-durable-en-316"]) {
+        assert.ok(!SUCC4_REVIEWED_AND_KEPT.includes(id));
+    }
+});
+
+test("en-316 moves as a case, both its golds with it", () => {
+    // Only g2 was misread. §12.2 moves the case, so g1 goes too -- and the
+    // replacement should keep the two-gold shape.
+    const testCase = succ3ById.get("succ-durable-en-316");
+    assert.deepEqual(
+        testCase.expected.map((gold) => gold.id),
+        ["g1", "g2"]
+    );
+    // It is itself a replacement: en-57 -> en-316 -> a further one.
+    const row = MEMORY_EVAL_REGRESSION_PROVENANCE.find(
+        (entry) => entry.replacementId === "succ-durable-en-316"
+    );
+    assert.equal(row.originalId, "succ-durable-en-57");
+});
+
+test("the union with the existing corpus is 200, not a sum", () => {
     // The first 99 left succ-2, so they are not in succ-3 and cannot be in
     // this set. The union has no overlap -- which is what makes 198 right and
     // a sum wrong in general.
@@ -79,7 +110,7 @@ test("the union with the existing corpus is 198, not 99 + 99", () => {
             "a moving case must still be in succ-3 at this point"
         );
     }
-    assert.equal(new Set([...existing, ...moving]).size, 198);
+    assert.equal(new Set([...existing, ...moving]).size, 200);
 });
 
 test("a seat can be replaced twice, and the record says so", () => {
@@ -105,7 +136,7 @@ test("cell counts match what succ-4 has to replace", () => {
         counts[move.cell] = (counts[move.cell] ?? 0) + 1;
     }
     assert.deepEqual(counts, {
-        "durable_facts:en": 53,
+        "durable_facts:en": 55,
         "durable_facts:ko": 32,
         "assistant_only:ko": 7,
         "assistant_only:en": 5,

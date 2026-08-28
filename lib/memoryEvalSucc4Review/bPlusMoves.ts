@@ -56,114 +56,163 @@ export type Succ4MoveRuleId =
     /** No rule formed; the gold's fact value was rewritten in canonical form. */
     | "gold-corrected-canonical-form"
     /** No rule formed; the anchor moved to the plainly-stated clause. */
-    | "gold-corrected-anchor-clause";
+    | "gold-corrected-anchor-clause"
+    /**
+     * No rule formed; the frozen under-specification clause was applied to a
+     * gold read during the batches, and its token list named a topic.
+     */
+    | "gold-corrected-under-specified";
 
 export type Succ4Move = {
     originalId: string;
     cell: string;
     ruleId: Succ4MoveRuleId;
+    /**
+     * Which reading moved this case.
+     *
+     * The first 99 came out of the 121 golds a reviewer had to settle before a
+     * standard existed. Later ones come from the batches, where the standard
+     * was already written down — the arithmetic has to keep them apart or
+     * "99 move and 13 stay" stops being checkable against anything.
+     */
+    from: "judgement-121" | "batch";
+    /** Where a reader would otherwise have to reconstruct the reason. */
+    note?: string;
 };
 
 export const SUCC4_B_PLUS_MOVES: readonly Succ4Move[] = [
-    { originalId: "succ-assistant-en-301", cell: "assistant_only:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-en-302", cell: "assistant_only:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-en-303", cell: "assistant_only:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-en-304", cell: "assistant_only:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-en-305", cell: "assistant_only:en", ruleId: "contract-stem-vs-factvalueany" },
-    { originalId: "succ-assistant-ko-301", cell: "assistant_only:ko", ruleId: "contract-polarity-is-a-field" },
-    { originalId: "succ-assistant-ko-302", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-ko-303", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-ko-304", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-ko-305", cell: "assistant_only:ko", ruleId: "contract-under-specification" },
-    { originalId: "succ-assistant-ko-306", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-assistant-ko-308", cell: "assistant_only:ko", ruleId: "gold-corrected-anchor-clause" },
-    { originalId: "succ-durable-en-10", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-101", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-108", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-109", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-110", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-111", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-112", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-113", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-116", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-122", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-128", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-130", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-146", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-153", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-160", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-162", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-164", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-166", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-167", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-168", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-173", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-177", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-178", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-181", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-19", cell: "durable_facts:en", ruleId: "contract-atomic-proposition" },
-    { originalId: "succ-durable-en-199", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-20", cell: "durable_facts:en", ruleId: "contract-gold-evidence-covers-fact" },
-    { originalId: "succ-durable-en-21", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-22", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-23", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-26", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-3", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-302", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-303", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-304", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-305", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-308", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-311", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-312", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-320", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-38", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-52", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-58", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-61", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-62", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-63", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-65", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-7", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-73", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-76", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-8", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-88", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-en-90", cell: "durable_facts:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-109", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-111", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-112", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-113", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-118", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-12", cell: "durable_facts:ko", ruleId: "contract-atomic-proposition" },
-    { originalId: "succ-durable-ko-126", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-127", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-128", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-129", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-130", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-140", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-153", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-159", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-16", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-161", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-162", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-172", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-173", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-181", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-199", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-20", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-200", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-301", cell: "durable_facts:ko", ruleId: "gold-corrected-canonical-form" },
-    { originalId: "succ-durable-ko-313", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-323", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-326", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-50", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-51", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-52", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-68", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-durable-ko-84", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-injection-en-119", cell: "injection_directives:en", ruleId: "contract-polarity-assignment" },
-    { originalId: "succ-injection-en-123", cell: "injection_directives:en", ruleId: "contract-polarity-assignment" },];
+    { originalId: "succ-assistant-en-301", cell: "assistant_only:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-en-302", cell: "assistant_only:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-en-303", cell: "assistant_only:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-en-304", cell: "assistant_only:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-en-305", cell: "assistant_only:en", ruleId: "contract-stem-vs-factvalueany", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-301", cell: "assistant_only:ko", ruleId: "contract-polarity-is-a-field", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-302", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-303", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-304", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-305", cell: "assistant_only:ko", ruleId: "contract-under-specification", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-306", cell: "assistant_only:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-assistant-ko-308", cell: "assistant_only:ko", ruleId: "gold-corrected-anchor-clause", from: "judgement-121" },
+    { originalId: "succ-durable-en-10", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-101", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-108", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-109", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-110", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-111", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-112", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-113", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-116", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-122", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-128", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-130", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-146", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-153", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-160", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-162", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-164", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-166", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-167", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-168", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-173", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-177", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-178", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-181", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-19", cell: "durable_facts:en", ruleId: "contract-atomic-proposition", from: "judgement-121" },
+    { originalId: "succ-durable-en-199", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-20", cell: "durable_facts:en", ruleId: "contract-gold-evidence-covers-fact", from: "judgement-121" },
+    { originalId: "succ-durable-en-21", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-22", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-23", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-26", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-3", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-302", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-303", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-304", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-305", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-308", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-311", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-312", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-320", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-38", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-52", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-58", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-61", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-62", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-63", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-65", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-7", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-73", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-76", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-8", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-88", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-en-90", cell: "durable_facts:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-109", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-111", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-112", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-113", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-118", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-12", cell: "durable_facts:ko", ruleId: "contract-atomic-proposition", from: "judgement-121" },
+    { originalId: "succ-durable-ko-126", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-127", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-128", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-129", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-130", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-140", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-153", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-159", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-16", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-161", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-162", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-172", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-173", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-181", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-199", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-20", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-200", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-301", cell: "durable_facts:ko", ruleId: "gold-corrected-canonical-form", from: "judgement-121" },
+    { originalId: "succ-durable-ko-313", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-323", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-326", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-50", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-51", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-52", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-68", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-durable-ko-84", cell: "durable_facts:ko", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-injection-en-119", cell: "injection_directives:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    { originalId: "succ-injection-en-123", cell: "injection_directives:en", ruleId: "contract-polarity-assignment", from: "judgement-121" },
+    /* ---------------------------------------------------------------------
+     * Ruled 2026-08-28, during the batches.
+     *
+     * Not a new rule. `spoken for` and `constrained` are affirmative in form
+     * and deny the availability of the weekend and the space, which is what
+     * the canonical proposition is about; reading them as affirmed would make
+     * a score move with the paraphrase. Both then fail the frozen
+     * under-specification clause for the same reason — `["weekend"]` and
+     * `["space"]` name a topic where the opposite reading is live — so the
+     * labels are not simply flipped and left in the decision set. The cases
+     * move and are replaced by ones whose predicate is explicit.
+     * ------------------------------------------------------------------ */
+    {
+        originalId: "succ-durable-en-129",
+        cell: "durable_facts:en",
+        ruleId: "gold-corrected-under-specified",
+        from: "batch",
+        note:
+            "Its Korean pair ko-129 was already moving, on the polarity assignment " +
+            "rule. One fact, two arms, and now one label.",
+    },
+    {
+        originalId: "succ-durable-en-316",
+        cell: "durable_facts:en",
+        ruleId: "gold-corrected-under-specified",
+        from: "batch",
+        note:
+            "The whole case moves, so g1 (`artist`) goes with g2 (`space`) although " +
+            "only g2 was misread. It is itself the replacement written for " +
+            "succ-durable-en-57 under rule-4, so the provenance runs en-57 -> en-316 " +
+            "-> a further replacement, and its two-gold shape should be kept.",
+    },
+];
 
 /**
  * Cases read during the review that stay in the decision set.
