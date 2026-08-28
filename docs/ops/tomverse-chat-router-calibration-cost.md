@@ -1,15 +1,69 @@
 # What the ROUTE-01 judge calibration costs
 
 Approved before it is run, because the run makes real billed provider calls.
-Nothing here has been spent: this is the estimate mposition asked for before
-approving the spend.
+
+> **Superseded in part, 2026-08-28.** Everything below the "Method" heading was
+> costed against a harness that asked every model for 2,048 output tokens. That
+> cap is the defect that voided the 2026-08-28 pilot — the product asks
+> 128,000–384,000 for the same models and reasoning is billed out of the same
+> budget, so a reasoning model could spend the whole allowance thinking and
+> return nothing. The harness now resolves the product's own cap for answer
+> calls, which changes every figure here.
+>
+> **The observations those figures were fitted to are censored.** 60 of that
+> run's calls stopped at the 2,048 ceiling, so its usage records where answers
+> were cut off, not how long answers are. A single estimate fitted to them is
+> not admissible. See the four-value projection below; the old stage tables are
+> kept as the record of what was approved and why, not as current numbers.
+
+## The four-value projection (2026-08-28)
+
+`npm run router:cost-projection -- --set=docs/ops/router-evaluation-set/development-v0.json`
+
+Four values, because one number cannot be honest here. `observed` is a floor
+and known to be one. `expected` and `conservative` rest on assumed answer
+lengths, printed by the tool and overridable with flags. `theoretical ceiling`
+is every request filling its whole budget — not a forecast, but the number a
+ceiling has to survive.
+
+| stage | observed (floor) | expected | conservative (P95) | theoretical ceiling | worst single request |
+| --- | --- | --- | --- | --- | --- |
+| pilot | $0.2529 | $0.3950 | $1.2316 | $1,377.52 | **$6.4008** |
+| independent judge | — | $7.7595 | $19.3095 | $46.5675 | $0.2218 |
+| **total** | **$0.2529** | **$8.1545** | **$20.5411** | **$1,424.09** | **$6.4008** |
+
+### Neither approved ceiling holds
+
+Both stages fail against the ceilings approved on 2026-08-28 ($0.50 pilot,
+$4.00 judge, $4.50 total), and they fail in two different ways:
+
+- **The pilot's worst single request is $6.40, over the whole $4.50 total.** The
+  auto arm routes per item and any enabled model is reachable, so its bound is
+  the most expensive one — `claude-fable-5` at $50 per million output tokens
+  with a 128,000-token budget. A `--max-cost-usd` ceiling is tested *between*
+  calls, because tokens are only known once a response returns, so it cannot
+  stop a single call that breaches it on its own. This one has to be refused
+  before dispatch, and `scripts/eval-router-quality.mjs` now does refuse it.
+- **The judge's expected cost is $7.76, over its $4.00 ceiling.** A healthy run
+  would be truncated part-way, which buys a partial calibration at full price.
+
+### The judge figure is the weakest number here
+
+The earlier costing priced the judge pass at a **3-token verdict** — one word,
+which is what `gpt-5-6-luna` actually emitted, and the fit reproduced that
+run's total to 0.0%. But `claude-fable-5` runs at effort `high` with adaptive
+thinking and bills reasoning as output, so its verdict call is not three tokens
+and **nobody has measured what it is**. The 400-token expected figure is an
+assumption, and it is what drives $7.76. Re-run the tool with
+`--judge-output-expected=` to see the table under a different one.
+
+## Method, and what it rests on
+
 
 The procedure is `docs/ops/tomverse-chat-router-evaluation-set.md` §5. The
 short version of why a new run is needed at all: the 2026-08-27 pilot predates
 the answer bundle, so its answers were not kept, and a calibration compares two
 judges over the **same** answers. There is nothing to re-grade.
-
-## Method, and what it rests on
 
 The pilot journal records the cumulative cost after each pair and which model
 answered each arm. It records no token counts. So the per-call split is

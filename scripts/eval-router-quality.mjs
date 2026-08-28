@@ -90,11 +90,18 @@ import { ACTIVE_ESTIMATOR_VERSION, estimateRawTextTokens } from "../lib/chatToke
 import { decideRouterModel, ROUTER_VERSIONS } from "../lib/routerDecision.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import {
-  EMPTINESS_CLASSIFICATIONS,
+  EMPTINESS_REASONS,
+  FAILURE_ATTRIBUTIONS,
   failed as answerFailed,
   failureRecord,
+  isHarnessAttributable,
   outcomeFromReply,
 } from "../lib/routerAnswerOutcome.ts";
+import {
+  buildCallLimitManifest,
+  callLimitManifestProblems,
+  resolveCallLimit,
+} from "../lib/routerCallLimits.ts";
 import {
   JUDGE_TEMPLATE_VERSION,
   identifiesItself,
@@ -326,6 +333,33 @@ let commitSha = (() => {
 const random = seededRandom(seed);
 let accruedCostUsd = 0;
 let truncatedByCost = false;
+
+// Resolved once per model and role, and remembered. Two calls on the same
+// model must ask for the same budget, and reading the profile fresh each time
+// would let a mid-run change split a run into two conditions.
+const resolvedLimits = new Map();
+const callLimit = (model, callRole) => {
+  const key = `${model.id}::${callRole}`;
+  let limit = resolvedLimits.get(key);
+  if (!limit) {
+    limit = resolveCallLimit(model, callRole);
+    resolvedLimits.set(key, limit);
+  }
+  return limit;
+};
+
+/**
+ * The most one call can cost, if it fills its whole output budget.
+ *
+ * A cost ceiling can only stop a run *between* calls: the total is checked
+ * after a response comes back, because that is when the tokens are known. So a
+ * single call whose worst case already exceeds the run's ceiling can breach it
+ * with nothing to stop it. That has to be refused before dispatch rather than
+ * discovered afterwards.
+ */
+const perRequestWorstCaseCostUsd = (limit, promptTokens) =>
+  (promptTokens * limit.inputUsdPerMillionTokens) / 1_000_000 +
+  (limit.requestedMaxOutputTokens * limit.outputUsdPerMillionTokens) / 1_000_000;
 // Every arm answer that produced nothing usable, kept for the record as well
 // as the journal. The gate in front of the paid judge reads its classification
 // counts, so they have to survive into a file rather than only into a log.
@@ -357,21 +391,37 @@ const costMicroUsd = (model, usage) => {
  * `arm` is passed in because the failure journal is useless without it -- "an
  * answer was empty" says nothing; "the auto arm on deepseek-v4-flash returned
  * 0 characters with finishReason=length" says what to look at.
+ *
+ * ## The output budget is resolved, not invented
+ *
+ * This used to send `maxOutputTokens: 2_048` for every model. The product asks
+ * 128,000-384,000 for the same ones, and every model in the pre-registration
+ * bills reasoning tokens out of that same budget -- so a reasoning model given
+ * 2,048 can spend the whole allowance thinking and return no answer. That is
+ * what emptied 60 auto-arm answers on 2026-08-28.
+ *
+ * So an answer call asks for what the product asks for, and a judge call asks
+ * for a budget sized to a short structured verdict with its reasoning. The two
+ * are separate on purpose: lib/routerCallLimits.ts holds both and the run
+ * freezes what it resolved.
  */
 const answer = async (model, prompt, arm) => {
   const startedAt = process.hrtime.bigint();
+  const limit = callLimit(model, arm === "judge" ? "judge" : "answer");
   const identity = {
     arm,
     modelId: model.id,
     provider: model.provider,
     apiModel: model.apiModel,
+    requestedMaxOutputTokens: limit.requestedMaxOutputTokens,
+    resolvedProductOutputCap: limit.resolvedProductOutputCap,
   };
   let result;
   try {
     result = await generateText({
       model: getActiveAiModel(model),
       messages: [{ role: "user", content: prompt }],
-      maxOutputTokens: 2_048,
+      maxOutputTokens: limit.requestedMaxOutputTokens,
     });
   } catch (error) {
     return answerFailed("provider_error", String(error), {
@@ -398,7 +448,6 @@ const answer = async (model, prompt, arm) => {
     { ...identity, latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6 }
   );
 };
-
 
 // docs/ops/tomverse-chat-router-evaluation-set.md §6 lives in
 // lib/routerJudgeRubric.ts, shared with the human review sheets:
@@ -789,36 +838,55 @@ const excludedLog = [];
 /**
  * The generation failures, counted the way the gate asks about them.
  *
- * `harnessLostText` is the one that voids a run: those answers existed and
- * this code lost them, so the run measured the harness. `undetermined` is the
- * honest middle -- a real failure whose cause nothing here establishes -- and
- * it is reported per failure rather than only counted, because arm, provider,
- * API model, finish reason, usage and trace id are what somebody would need to
- * go and find out.
+ * `harnessAttributableFailureCount` is the one that stops a paid judge: a run
+ * carrying any of them measured this harness, so its answers are not a
+ * measurement of the models and a calibration over them is worth nothing.
+ *
+ * The undetermined ones are reported per failure rather than only counted,
+ * because arm, provider, API model, finish reason, usage and trace id are what
+ * somebody would need to go and settle the cause. The harness-attributable
+ * ones are reported the same way, and for a better reason: they are the ones
+ * somebody has to fix.
  */
 const summariseGenerationFailures = (failures) => {
-  const byClassification = {};
-  for (const classification of EMPTINESS_CLASSIFICATIONS) byClassification[classification] = 0;
+  const byReason = {};
+  for (const reason of EMPTINESS_REASONS) byReason[reason] = 0;
+  const byAttribution = {};
+  for (const attribution of FAILURE_ATTRIBUTIONS) byAttribution[attribution] = 0;
   let providerErrors = 0;
   for (const failure of failures) {
-    if (failure.emptiness === null) providerErrors += 1;
-    else byClassification[failure.emptiness] += 1;
+    if (failure.emptinessReason === null) providerErrors += 1;
+    else byReason[failure.emptinessReason] += 1;
+    byAttribution[failure.attribution] += 1;
   }
+  const detailOf = (failure) => ({
+    arm: failure.arm,
+    callRole: failure.callRole,
+    modelId: failure.modelId,
+    provider: failure.provider,
+    apiModel: failure.apiModel,
+    finishReason: failure.finishReason,
+    normalizedFinishReason: failure.normalizedFinishReason,
+    usage: failure.usage,
+    billedOutputTokens: failure.billedOutputTokens,
+    requestedMaxOutputTokens: failure.requestedMaxOutputTokens,
+    resolvedProductOutputCap: failure.resolvedProductOutputCap,
+    traceId: failure.traceId,
+    emptinessReason: failure.emptinessReason,
+    attribution: failure.attribution,
+  });
   return {
     total: failures.length,
     providerErrors,
-    byClassification,
-    harnessLostText: byClassification.harness_lost_text,
+    byReason,
+    byAttribution,
+    harnessAttributableFailureCount: byAttribution.harness,
+    // Both lists, because they are read by different people for different
+    // reasons: one is the bug report, the other is the open question.
+    harnessAttributable: failures.filter(isHarnessAttributable).map(detailOf),
     undetermined: failures
-      .filter((failure) => failure.emptiness === "observed_empty_at_adapter_boundary")
-      .map((failure) => ({
-        arm: failure.arm,
-        provider: failure.provider,
-        apiModel: failure.apiModel,
-        finishReason: failure.finishReason,
-        usage: failure.usage,
-        traceId: failure.traceId,
-      })),
+      .filter((failure) => failure.attribution === "undetermined")
+      .map(detailOf),
   };
 };
 
@@ -872,6 +940,65 @@ const recordPair = (pair, mark, excluded = null) => {
     console.log(`  ${pairs.length}/${planned.length}  $${accruedCostUsd.toFixed(4)}`);
   }
 };
+
+// Frozen before anything runs, and written into both the journal and the
+// report. Reading the pricing profile at call time is not enough on its own: a
+// table edit between two runs would silently change what the same pilot asked
+// for, and nothing downstream could tell that the question had changed.
+//
+// Every model the run can reach is resolved, not only the ones it happens to
+// route to, so the manifest describes the run's whole surface rather than the
+// path it took.
+const selectableModels = AVAILABLE_MODELS.filter((model) => model.enabled);
+const callLimitManifest = buildCallLimitManifest([
+  ...selectableModels.map((model) => ({ model, callRole: "answer" })),
+  { model: baselineModel, callRole: "answer" },
+  { model: judgeModel, callRole: "judge" },
+]);
+const manifestTrouble = callLimitManifestProblems(callLimitManifest);
+if (manifestTrouble.length > 0) {
+  die(
+    "\nThe call-limit manifest cannot be frozen:\n\n  - " +
+      manifestTrouble.join("\n  - ") +
+      "\n\nNothing was sent and nothing was billed.\n"
+  );
+}
+for (const entry of callLimitManifest.entries) {
+  resolvedLimits.set(`${entry.modelId}::${entry.callRole}`, entry);
+}
+
+// A cost ceiling is checked between calls, because that is when tokens are
+// known -- so one call whose worst case already exceeds the ceiling can breach
+// it with nothing able to stop it. Refused here rather than discovered
+// afterwards.
+//
+// The prompt side is bounded by the largest prompt the set actually holds,
+// estimated with the same estimator the product bills from.
+if (maxCostUsd !== null) {
+  const worstPromptTokens = Math.max(
+    0,
+    ...planned.map((item) => estimateRawTextTokens(item.prompt ?? ""))
+  );
+  const breaches = callLimitManifest.entries
+    .map((entry) => ({ entry, cost: perRequestWorstCaseCostUsd(entry, worstPromptTokens) }))
+    .filter(({ cost }) => cost > maxCostUsd);
+  if (breaches.length > 0) {
+    die(
+      `\nOne request can cost more than this run's whole $${maxCostUsd} ceiling:\n\n` +
+        breaches
+          .map(
+            ({ entry, cost }) =>
+              `  - ${entry.modelId}/${entry.callRole} asks for ${entry.requestedMaxOutputTokens} ` +
+              `output token(s); worst case $${cost.toFixed(4)}`
+          )
+          .join("\n") +
+        "\n\nA cost ceiling can only stop a run between calls, so it cannot stop this one.\n" +
+        "Raise the ceiling or lower the budget before dispatching. Nothing was billed.\n"
+    );
+  }
+}
+
+journal({ kind: "call-limit-manifest", manifest: callLimitManifest });
 
 bundle({
   kind: "header",
@@ -1186,32 +1313,44 @@ console.log(`Judge position ${pct(verdict.positionBias.firstRate)} preferred the
 console.log(`Routed away    ${pct(verdict.routedAwayRate)} of judged pairs used a model other than the baseline`);
 console.log(`Provider cost  $${accruedCostUsd.toFixed(4)}${truncatedByCost ? " (run truncated by --max-cost-usd)" : ""}`);
 
-// Printed even when it is all zeros, because "no answer was lost" is the
-// finding that lets the run be spent on, and a line that appears only on
-// trouble cannot be read as saying that.
+// Printed even when it is all zeros, because "nothing was attributable to this
+// harness" is the finding that lets the run be spent on, and a line that
+// appears only on trouble cannot be read as saying that.
 {
   const summary = summariseGenerationFailures(generationFailures);
+  // Worded to what was observed, not to a cause. The earlier version of this
+  // line claimed the answers "existed and this code holds none of them", which
+  // named a mechanism the data did not carry -- an answer whose budget was
+  // spent on reasoning was never written in the first place.
   console.log(
-    `Empty answers  ${summary.total} failed generation(s)` +
-      ` — ${summary.byClassification.harness_lost_text} lost by this harness,` +
-      ` ${summary.byClassification.observed_empty_at_adapter_boundary} empty at the adapter boundary,` +
-      ` ${summary.byClassification.provider_confirmed_empty} confirmed empty by the provider,` +
-      ` ${summary.providerErrors} provider error(s)`
+    `Empty answers  ${summary.total} empty-text result(s) were observed after normalization;\n` +
+      "               their causes require finish-reason and usage attribution."
   );
-  // The cause nothing here settles. Reported per failure, with what somebody
-  // would have to quote to ask the provider what it really sent.
-  for (const failure of summary.undetermined) {
+  console.log(
+    `  by reason    ${EMPTINESS_REASONS.map((reason) => `${reason} ${summary.byReason[reason]}`).join(", ")}` +
+      `, provider_error ${summary.providerErrors}`
+  );
+  console.log(
+    `  by blame     ${FAILURE_ATTRIBUTIONS.map((who) => `${who} ${summary.byAttribution[who]}`).join(", ")}`
+  );
+  const line = (label, failure) =>
     console.log(
-      `  undetermined  ${failure.arm} ${failure.provider}/${failure.apiModel}` +
-        ` finishReason=${failure.finishReason ?? "none"}` +
+      `  ${label} ${failure.arm}/${failure.callRole} ${failure.provider}/${failure.apiModel}` +
+        ` finishReason=${failure.finishReason ?? "none"}(${failure.normalizedFinishReason ?? "none"})` +
+        ` billedOutput=${failure.billedOutputTokens ?? "none"}` +
+        ` requested=${failure.requestedMaxOutputTokens ?? "none"}` +
+        ` productCap=${failure.resolvedProductOutputCap ?? "none"}` +
         ` usage=${JSON.stringify(failure.usage)} traceId=${failure.traceId ?? "none"}`
     );
-  }
-  if (summary.harnessLostText > 0) {
+  // The ones somebody has to fix, and the ones somebody has to settle. Both
+  // per failure: a count cannot be acted on.
+  for (const failure of summary.harnessAttributable) line("harness     ", failure);
+  for (const failure of summary.undetermined) line("undetermined", failure);
+  if (summary.harnessAttributableFailureCount > 0) {
     console.log(
-      `\nHARNESS DEFECT — ${summary.harnessLostText} answer(s) existed and this code holds none of\n` +
-        "them. That is a measurement of this harness, not of the models, so this run is void\n" +
-        "and nothing downstream may be paid for on the strength of it."
+      `\nHARNESS DEFECT — ${summary.harnessAttributableFailureCount} empty result(s) are attributable\n` +
+        "to this harness. That makes the run a measurement of the harness rather than of the\n" +
+        "models, so it is void and nothing downstream may be paid for on the strength of it."
     );
   }
 }
@@ -1362,6 +1501,10 @@ const record = {
   // the raw lines, because the gate asks three questions of them and a reader
   // asking a fourth has the journal.
   generationFailureSummary: summariseGenerationFailures(generationFailures),
+  // What every call was allowed to ask for, frozen before the run started. The
+  // gate reads it, and a later reader can tell whether two runs asked the same
+  // question or merely share a label.
+  callLimitManifest,
   rebuiltFromJournal: fromJournalPath || null,
   providerCostUsd: Number(accruedCostUsd.toFixed(6)),
   pairs,
