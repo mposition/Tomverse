@@ -1032,8 +1032,11 @@ export const SUCC4_TRANCHE_2: readonly Succ4Replacement[] = [
             "Long experience plus permission to leave a notation unexplained, two " +
             "affirmed golds off one user turn.",
         differsBy:
-            "Darkroom chemistry rather than knitting, and what may be left unexplained " +
-            "is a set of chemical names rather than chart symbols.",
+            "Paperhanging rather than knitting, and what may be left unexplained is a " +
+            "set of site words. The first draft was darkroom chemistry and measured " +
+            "0.58 against succ-durable-ko-143, which stays in the corpus and is " +
+            "calligraphy of twenty years with its script names left unglossed — the " +
+            "same case in a different craft.",
         settledByExistingContract: true,
         replacement: {
             id: "succ-durable-ko-421",
@@ -1045,11 +1048,11 @@ export const SUCC4_TRANCHE_2: readonly Succ4Replacement[] = [
                     id: "e1",
                     kind: "expertise",
                     polarity: "affirmed",
-                    factValueAll: ["현상"],
+                    factValueAll: ["도배"],
                     evidence: {
                         evidenceMessageId: "succ-b405-19-m1",
                         evidenceQuote:
-                            "사진 현상은 이십 년 했습니다.",
+                            "도배 일을 스무 해 넘게 했습니다.",
                     },
                     expectedDisposition: "bulk_safe",
                 },
@@ -1057,11 +1060,11 @@ export const SUCC4_TRANCHE_2: readonly Succ4Replacement[] = [
                     id: "e2",
                     kind: "explanation_depth",
                     polarity: "affirmed",
-                    factValueAll: ["약품"],
+                    factValueAll: ["초배지"],
                     evidence: {
                         evidenceMessageId: "succ-b405-19-m1",
                         evidenceQuote:
-                            "약품 이름은 그대로 쓰셔도 됩니다.",
+                            "초배지나 정배 같은 말은 풀지 않으셔도 됩니다.",
                     },
                     expectedDisposition: "bulk_safe",
                 },
@@ -1075,13 +1078,13 @@ export const SUCC4_TRANCHE_2: readonly Succ4Replacement[] = [
                             externalMessageId: "succ-b405-19-m1",
                             role: "user",
                             content:
-                                "사진 현상은 이십 년 했습니다. 약품 이름은 그대로 쓰셔도 됩니다.",
+                                "도배 일을 스무 해 넘게 했습니다. 초배지나 정배 같은 말은 풀지 않으셔도 됩니다.",
                         },
                         {
                             externalMessageId: "succ-b405-19-m2",
                             role: "assistant",
                             content:
-                                "약품명 그대로 쓰고 공정 순서만 정리하겠습니다.",
+                                "현장 용어 그대로 쓰고 순서만 정리하겠습니다.",
                         },
                     ],
                 },

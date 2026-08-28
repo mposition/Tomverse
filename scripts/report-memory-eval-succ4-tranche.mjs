@@ -17,6 +17,7 @@ import { SUCC4_TRANCHE_1 } from "../lib/memoryEvalSucc4Replacements/tranche1.ts"
 import { SUCC4_TRANCHE_2 } from "../lib/memoryEvalSucc4Replacements/tranche2.ts";
 import { SUCC4_TRANCHE_3 } from "../lib/memoryEvalSucc4Replacements/tranche3.ts";
 import { SUCC4_TRANCHE_4 } from "../lib/memoryEvalSucc4Replacements/tranche4.ts";
+import { SUCC4_TRANCHE_5 } from "../lib/memoryEvalSucc4Replacements/tranche5.ts";
 
 /**
  * Every tranche written so far, in the order they were written.
@@ -30,6 +31,7 @@ const TRANCHES = [
     { id: 2, cells: "durable_facts:ko", entries: SUCC4_TRANCHE_2 },
     { id: 3, cells: "every cell but durable_facts:en", entries: SUCC4_TRANCHE_3 },
     { id: 4, cells: "durable_facts:en, first half", entries: SUCC4_TRANCHE_4 },
+    { id: 5, cells: "durable_facts:en, second half", entries: SUCC4_TRANCHE_5 },
 ];
 const ALL = TRANCHES.flatMap((tranche) => tranche.entries);
 
@@ -68,6 +70,26 @@ const similarity = (a, b, language) => {
     const shared = [...left].filter((token) => right.has(token)).length;
     return shared / Math.max(1, Math.min(left.size, right.size));
 };
+
+/**
+ * The cases that are not moving, by cell.
+ *
+ * A replacement was only ever compared with the original it replaces, and
+ * that misses the collision that matters more: a replacement that reads like
+ * some *other* case, one still in the corpus. Those two would then measure
+ * the same thing twice, and neither the per-entry checks nor the assembler
+ * would say so. `succ-durable-en-21`'s replacement is a standing weekly slot
+ * and so is `succ-durable-en-113`'s original, which is exactly the pair this
+ * catches -- it passes only because en-113 is itself moving.
+ */
+const movingIds = new Set(SUCC4_B_PLUS_MOVES.map((m) => m.originalId));
+const stayingByCell = new Map();
+for (const testCase of MEMORY_EVAL_SUCC3_CASES) {
+    if (movingIds.has(testCase.id)) continue;
+    const cell = `${testCase.category}:${testCase.language}`;
+    if (!stayingByCell.has(cell)) stayingByCell.set(cell, []);
+    stayingByCell.get(cell).push(testCase);
+}
 
 let failures = 0;
 const say = (line) => {
@@ -139,6 +161,16 @@ for (const tranche of TRANCHES) {
     if (overlap > 0.45) {
         problems.push(`reads as the original with the nouns swapped (overlap ${overlap.toFixed(2)})`);
     }
+    let nearest = { id: null, score: 0 };
+    for (const staying of stayingByCell.get(`${built.category}:${built.language}`) ?? []) {
+        const score = similarity(built, staying, built.language);
+        if (score > nearest.score) nearest = { id: staying.id, score };
+    }
+    if (nearest.score > 0.45) {
+        problems.push(
+            `reads as ${nearest.id}, which is staying in the corpus (overlap ${nearest.score.toFixed(2)})`
+        );
+    }
     if (!entry.settledByExistingContract) {
         problems.push("was not settled by the existing contract — stop and raise it");
     }
@@ -174,6 +206,9 @@ for (const tranche of TRANCHES) {
         say(`      anchor ${gold.evidence.evidenceMessageId} «${gold.evidence.evidenceQuote}»`);
     }
     say(`   overlap with the original: ${overlap.toFixed(2)} (cap 0.45)`);
+    say(
+        `   nearest staying case: ${nearest.id ?? "none"} at ${nearest.score.toFixed(2)} (cap 0.45)`
+    );
     say(`   settled by the existing contract: ${entry.settledByExistingContract ? "yes" : "NO"}`);
     if (problems.length > 0) {
         failures += problems.length;
