@@ -38,6 +38,13 @@ import {
     MEMORY_EVAL_SUCC4_DATASET_VERSION,
 } from "@/lib/memoryEvalSucc4Dataset";
 import { MEMORY_EVAL_SUCC4_MANIFEST } from "@/lib/memoryEvalSucc4Manifest";
+import {
+    MEMORY_EVAL_SUCC5_CASES,
+    MEMORY_EVAL_SUCC5_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC5_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC5_DATASET_VERSION,
+    MEMORY_EVAL_SUCC5_MANIFEST,
+} from "@/lib/memoryEvalSucc5";
 import { MEMORY_EVAL_DATASET_MANIFESTS } from "@/lib/memoryEvalDatasetManifests";
 import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
 import { datasetFingerprintInputV3 } from "@/lib/memoryEvalDatasetSchemaV3";
@@ -81,7 +88,7 @@ export type HarnessTarget =
  * seed-11 to succ-2 to succ-3 to succ-4 — and each move was a set of import
  * renames spread across the file.
  */
-export const HARNESS_TARGET_DATASET_VERSION = MEMORY_EVAL_SUCC4_DATASET_VERSION;
+export const HARNESS_TARGET_DATASET_VERSION = MEMORY_EVAL_SUCC5_DATASET_VERSION;
 
 /** Every dataset this module can build a target for, newest last. */
 const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
@@ -108,6 +115,25 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         // already covers the labelling, and hashing it again here would pin
         // the same bytes twice — an edit would move both digests and leave a
         // reader unable to say which is the dataset and which the contract.
+        //
+        // Recorded rather than recomputed, because succ-4 is bound to
+        // `mem-score-v3.3` for good and this tree ships v3.4. Computing it
+        // would report a contract this dataset was never scored under, which
+        // is what `harnessTargetBindingFailures()` then refuses — correctly,
+        // and that refusal is why succ-4 is no longer a run target.
+        scoringContractDigest: MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest,
+        scoringContractVersion: MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion,
+    }),
+    [MEMORY_EVAL_SUCC5_DATASET_VERSION]: () => ({
+        datasetSchemaVersion: 3,
+        datasetVersion: MEMORY_EVAL_SUCC5_DATASET_VERSION,
+        datasetFrozen: MEMORY_EVAL_SUCC5_DATASET_FROZEN,
+        datasetPurpose: MEMORY_EVAL_SUCC5_DATASET_PURPOSE,
+        // succ-4's cases, by reference. The sample is what makes succ-5 a
+        // contract-only successor, so the two share the array rather than
+        // agreeing about it.
+        cases: MEMORY_EVAL_SUCC5_CASES,
+        datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC5_CASES)),
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
@@ -146,13 +172,14 @@ export type TargetManifestDigests = {
 export function targetManifestDigests(
     datasetVersion: string
 ): TargetManifestDigests | null {
-    if (datasetVersion === MEMORY_EVAL_SUCC4_MANIFEST.datasetVersion) {
-        return {
-            datasetDigest: MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest,
-            scoringContractDigest: MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest,
-            scoringContractVersion:
-                MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion,
-        };
+    for (const manifest of [MEMORY_EVAL_SUCC5_MANIFEST, MEMORY_EVAL_SUCC4_MANIFEST]) {
+        if (datasetVersion === manifest.datasetVersion) {
+            return {
+                datasetDigest: manifest.datasetDigest,
+                scoringContractDigest: manifest.scoringContractDigest,
+                scoringContractVersion: manifest.scoringContractVersion,
+            };
+        }
     }
     const manifest = MEMORY_EVAL_DATASET_MANIFESTS.find(
         (entry) => entry.datasetVersion === datasetVersion
@@ -189,6 +216,24 @@ export function harnessTargetBindingFailures(
         ];
     }
     const failures: string[] = [];
+    // A dataset bound to a superseded contract is not a run target, whatever
+    // else agrees. `mem-score-v3.3` describes itself as scoring schema 2 while
+    // scoring schema 3, and @mposition's 2026-08-28 decision keeps it as
+    // historical evidence rather than repairing it in place: a decision-grade
+    // number computed under a contract whose own description is wrong is not
+    // one an audit note can fix afterwards.
+    //
+    // Checked here rather than left to the digest comparison below, because
+    // that comparison cannot see it: an earlier contract's constants are gone
+    // from the tree, so its digest is read from the record and matches itself.
+    if (target.scoringContractVersion !== MEMORY_EVAL_SCORING_CONTRACT_VERSION) {
+        failures.push(
+            `${target.datasetVersion} is bound to ${target.scoringContractVersion}, ` +
+                `and the live contract is ${MEMORY_EVAL_SCORING_CONTRACT_VERSION}. A ` +
+                "superseded contract is evidence, not a run target — its successor " +
+                "dataset carries the same cases under the corrected contract."
+        );
+    }
     if (recorded.datasetDigest !== target.datasetDigest) {
         failures.push(
             `dataset digest: the manifest records ${recorded.datasetDigest} and the ` +

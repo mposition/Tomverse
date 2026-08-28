@@ -98,6 +98,13 @@ export const MEMORY_EVAL_SCHEMA3_CONSUMERS: readonly SchemaReadinessRow[] = [
             "tests/memoryEvalRunAdmissibility.test.mjs — admissibility reads the manifest's own fields and is schema-agnostic; a schema-3 artifact is checked by the same rules.",
     },
     {
+        consumer: "lib/memoryEvalSucc5.ts",
+        state: "converted",
+        role: "The contract-only successor: succ-4's cases under the corrected contract, with the invariants that make it one.",
+        evidence:
+            "tests/memoryEvalSucc5.test.mjs — the sample is byte-identical to succ-4's, the contract is not, and the manifest recomputes.",
+    },
+    {
         consumer: "lib/memoryEvalLegacyDataset.ts",
         state: "historical_only",
         role: "Reproduces the mem-extract-v2 diagnostics against the frozen schema-1 sample.",

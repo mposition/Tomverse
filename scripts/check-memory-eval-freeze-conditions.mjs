@@ -60,6 +60,13 @@ import {
     goldReviewFailures,
 } from "../lib/memoryEvalGoldReviewJudgements.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import {
+    MEMORY_EVAL_SUCC5_APPROVAL,
+    MEMORY_EVAL_SUCC5_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC5_DATASET_VERSION,
+    MEMORY_EVAL_SUCC5_MANIFEST,
+    verifySucc5Manifest,
+} from "../lib/memoryEvalSucc5.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import {
     MEMORY_EVAL_SCORING_CONTRACT_VERSION,
@@ -491,6 +498,99 @@ console.log("\n" + "-".repeat(72) + "\n");
             `\n${missed.length} of ${results.length} conditions unmet. ` +
                 "docs/ops/memory-extraction-eval-dataset.md §7.1a asks for all of them."
         );
+    }
+    if (frozen && missed.length > 0) {
+        console.error(
+            `\n${version} is marked frozen while a freeze condition is unmet.`
+        );
+        process.exit(1);
+    }
+}
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+/* ------------------------------- the contract-only successor, on its terms */
+
+// succ-5 does not go through `evaluate()` either, and for the opposite reason
+// to succ-4's: it shares succ-4's cases exactly, so every case-level condition
+// is already answered above and answering it twice would report one fact as
+// two. What is unanswered is whether it is still the thing it claims to be --
+// a successor that changed the contract and nothing else.
+//
+// Four conditions, and each one can fail in a way the others cannot see: the
+// sample could drift from succ-4's, the contract could fail to move at all,
+// the manifest could stop recomputing, and the human record could go missing.
+{
+    const version = MEMORY_EVAL_SUCC5_DATASET_VERSION;
+    const frozen = MEMORY_EVAL_SUCC5_DATASET_FROZEN;
+    const results = [];
+    const check = (condition, detail, ok) => results.push({ condition, detail, ok });
+
+    check(
+        "the sample is succ-4's, unchanged",
+        MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest ===
+            MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest
+            ? `${MEMORY_EVAL_SUCC5_MANIFEST.caseCount} cases, digest ${MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest}`
+            : `${MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest} vs succ-4's ${MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest}`,
+        MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest ===
+            MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest
+    );
+
+    check(
+        "the contract did move",
+        MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest ===
+            MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest
+            ? "identical to the superseded contract; this successor changes nothing"
+            : `${MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion} -> ${MEMORY_EVAL_SUCC5_MANIFEST.scoringContractVersion}`,
+        MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest !==
+            MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest
+    );
+
+    {
+        const mismatches = verifySucc5Manifest();
+        check(
+            "the manifest recomputes from the tree",
+            mismatches.length === 0
+                ? `manifest digest ${MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest}`
+                : mismatches.join("; "),
+            mismatches.length === 0
+        );
+    }
+
+    {
+        const approval = MEMORY_EVAL_SUCC5_APPROVAL;
+        const filled =
+            approval.approvedBy.startsWith("@") &&
+            /^\d{4}-\d{2}-\d{2}$/.test(approval.approvedAt) &&
+            approval.scope === "contract-only";
+        check(
+            "a human approved it as contract-only",
+            filled
+                ? `${approval.approvedBy} on ${approval.approvedAt}, scope ${approval.scope}`
+                : "the approval record is incomplete or claims a scope it did not have",
+            filled
+        );
+    }
+
+    console.log(
+        `Freeze conditions for ${version} ` +
+            `(currently ${frozen ? "frozen" : "not frozen"})`
+    );
+    console.log(
+        "A contract-only successor: succ-4's cases under the corrected\n" +
+            "contract. The case-level conditions are answered by succ-4's\n" +
+            "section above and are not repeated here.\n"
+    );
+    for (const result of results) {
+        console.log(
+            `${result.ok ? "OK  " : "MISS"}  ${result.condition}  — ${result.detail}`
+        );
+    }
+    const missed = results.filter((result) => !result.ok);
+    if (missed.length === 0) {
+        console.log(`\nAll ${results.length} conditions hold.`);
+    } else {
+        console.log(`\n${missed.length} of ${results.length} conditions unmet.`);
     }
     if (frozen && missed.length > 0) {
         console.error(

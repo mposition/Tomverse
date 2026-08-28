@@ -117,9 +117,19 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
     // record of its own.
     const result = verifyScoringContractManifest();
     assert.deepEqual(result.mismatches, []);
-    assert.equal(result.version, "mem-score-v3.3");
+    assert.equal(result.version, "mem-score-v3.4");
     assert.equal(
         result.entry.descriptorDigest,
+        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd"
+    );
+    // v3.3 stays pinned at the value it was frozen with, and that value is
+    // what makes it historical rather than current: its descriptor says it
+    // scores schema 2 while it scores schema 3. v3.4 corrects the field, and
+    // correcting it forward is why both records exist.
+    assert.equal(
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find(
+            (m) => m.version === "mem-score-v3.3"
+        ).descriptorDigest,
         "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777"
     );
     // v3.2 stays pinned for the same reason v3 does: it was frozen, and its
