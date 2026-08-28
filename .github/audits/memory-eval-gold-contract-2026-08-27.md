@@ -732,3 +732,80 @@ succ-4 조립은 **교체 101건 + schema 3 relabelling 1,049건**입니다.
 `succ-durable-en-57`을 대체하려고 쓴 케이스이므로 provenance는
 **`en-57 → en-316 → 새 replacement`**로 보존하고, 새 대체 사례는 가능하면 기존의
 두-gold 구조를 유지합니다.
+
+### 12.9 조립 중 발견 — anchor 두 건과 그 결과 (2026-08-28)
+
+schema 3 조립기를 교차 표본으로 검증하다 결함이 나왔습니다. anchor 제안은
+**사실값 토큰을 모두 담은 첫 user 메시지**를 고르는데, 정정 대화에서 그 첫
+메시지는 사용자가 **assistant의 전제를 되읊은 것**입니다.
+
+| gold | 제안된 anchor | 옳은 anchor |
+|---|---|---|
+| `succ-assistant-en-306:g1` | m1 «The onboarding checklist you drafted has a section on sibling carer leave» | m3 «I have no siblings…» |
+| `succ-assistant-en-307:g1` | m1 «Every option in that list needs a form printed…» | m3 «I don't have a printer…» |
+
+**`goldEvidenceFailure`는 둘 다 통과시켰습니다** — user 메시지이고, 실제 span이고,
+사실값 토큰이 들어 있습니다. 그것이 검사하지 않는 것은 **quote가 polarity를
+담는지**이며, 이 결함은 그 틈에 정확히 들어앉습니다. 121건 판독에서도, batch
+353건에서도 잡히지 않았습니다 — 두 gold 다 anchor를 손대지 않고 넘어갔기
+때문입니다.
+
+**§12.2에 따라 두 case를 이동시킵니다.** 규칙을 만든 것은 아니지만(§12.1의
+「형성」이 아님), §12.2는 **anchor가 달라진 gold**에 대해 무조건이고 언제
+달라졌는지 묻지 않습니다. `succ-durable-ko-301`과 `succ-assistant-ko-308`도
+규칙을 만들지 않은 채 §12.2로 이동했으므로, 이 둘을 남기면 같은 조항을 두 가지로
+적용하는 것이 됩니다.
+
+### 12.10 최종 집계
+
+| | |
+|---|---|
+| succ-3 → succ-4 이동 | **103** = 121 판독 99 + batch 2 + 조립 2 |
+| 판독 후 유지 (121건 중) | **11** |
+| 기존 corpus | 99 |
+| **합집합** | **202** |
+
+| cell | 이동 | 잔여 | 목표 | 교체 |
+|---|---|---|---|---|
+| durable_facts:ko | 32 | 168 | 200 | 32 |
+| durable_facts:en | 55 | 145 | 200 | 55 |
+| assistant_only:ko | 7 | 118 | 125 | 7 |
+| assistant_only:en | **7** | 118 | 125 | **7** |
+| injection_directives:ko | 0 | 125 | 125 | 0 |
+| injection_directives:en | 2 | 123 | 125 | 2 |
+| sensitive_secrets:ko / :en | 0 | 125 / 125 | 125 | 0 |
+
+**succ-4 조립 = 교체 103 + relabelling 1,047.**
+
+`Succ4Move.from`이 세 값을 갖습니다 — `judgement-121` · `batch` · `assembly`.
+어디서 판정됐는지를 기록하지 않으면 「99건 이동, 13건 유지」가 무엇에 대해서도
+검사되지 않는 문장이 됩니다.
+
+### 12.11 anchor는 제안이 아니라 기록입니다 (2026-08-28 승인, @mposition)
+
+§12.9의 발견을 다시 일어나지 않게 하는 계약입니다. **사실 토큰은 담지만
+polarity를 뒷받침하지 않는 anchor가 자동 채택되지 않도록** 합니다.
+
+1. **replacement gold는 `evidenceMessageId`·`evidenceQuote`·`polarity`를 각각
+   명시적으로 검수합니다.**
+2. **자동 선택은 후보 제안까지입니다.** 조립기는 토큰을 담은 첫 user 메시지를
+   최종 anchor로 확정하지 않습니다. 검수 기록이 없는 gold는 **거절**합니다 —
+   제안이 있어도 거절입니다.
+3. **조립 결과가 검수 기록과 정확히 일치하는지 fail-closed로 검사**합니다.
+   재유도하지 않습니다 — 재유도가 바로 기록이 대체한 것입니다.
+4. **`goldEvidenceFailure`는 구조 검증으로 유지**합니다. 탈락한 부정 표지
+   스캐너를 의미 판정에 되돌리지 않습니다. 스캐너는 **anchor를 지목**하는
+   진단으로만 남습니다(§9.4).
+5. **replacement와 provenance는 103건 1:1 대응**이며 기존 chain을 보존합니다
+   (`en-57 → en-316 → 새 replacement`).
+
+기록은 `lib/memoryEvalSucc4Review/anchors.ts` 355행이고, batch 시트가 보여 준
+quote 그대로입니다 — 검수자가 사실·polarity와 나란히 읽은 텍스트입니다.
+**잘못된 anchor는 재생성으로 고치지 않고** `readings.ts`의 판독이 덮습니다.
+
+`en-306`·`en-307`이 나간 뒤 **남은 gold 중 메시지 간 선택이 있는 것은 0건**
+입니다. 한 메시지 안에서 문장이 갈리는 4건은 `sentenceChoice`로 표시해 선택이
+보이게 두었습니다.
+
+자동 제안과 기록이 어긋나면 리포트가 **양쪽을 나란히 출력하되 채택하지
+않습니다.** 휴리스틱이 바뀌어도 검수된 gold가 조용히 재-anchor되지 않습니다.

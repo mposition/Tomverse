@@ -53,8 +53,8 @@ test("the move set and the kept set are disjoint, and both are unique", () => {
     }
 });
 
-test("101 move: 99 from the 121, 2 ruled during the batches", () => {
-    assert.equal(SUCC4_B_PLUS_MOVES.length, 101);
+test("103 move: 99 from the 121, 2 ruled in the batches, 2 found assembling", () => {
+    assert.equal(SUCC4_B_PLUS_MOVES.length, 103);
     const fromJudgement = SUCC4_B_PLUS_MOVES.filter((m) => m.from === "judgement-121");
     const fromBatch = SUCC4_B_PLUS_MOVES.filter((m) => m.from === "batch");
     assert.equal(fromJudgement.length, 99);
@@ -62,14 +62,20 @@ test("101 move: 99 from the 121, 2 ruled during the batches", () => {
         fromBatch.map((m) => m.originalId).sort(),
         ["succ-durable-en-129", "succ-durable-en-316"]
     );
+    assert.deepEqual(
+        SUCC4_B_PLUS_MOVES.filter((m) => m.from === "assembly")
+            .map((m) => m.originalId)
+            .sort(),
+        ["succ-assistant-en-306", "succ-assistant-en-307"]
+    );
     // The 121 review's own arithmetic is unchanged by the later ruling: 112
     // distinct cases carried those golds, 99 moved and 13 stayed.
-    assert.equal(SUCC4_REVIEWED_AND_KEPT.length, 13);
+    assert.equal(SUCC4_REVIEWED_AND_KEPT.length, 11);
     const reviewedCases = new Set([
         ...fromJudgement.map((move) => move.originalId),
         ...SUCC4_REVIEWED_AND_KEPT,
     ]);
-    assert.equal(reviewedCases.size, 112);
+    assert.equal(reviewedCases.size, 110);
 });
 
 test("a case ruled during the batches is not also in the kept list", () => {
@@ -96,7 +102,7 @@ test("en-316 moves as a case, both its golds with it", () => {
     assert.equal(row.originalId, "succ-durable-en-57");
 });
 
-test("the union with the existing corpus is 200, not a sum", () => {
+test("the union with the existing corpus is 202, not a sum", () => {
     // The first 99 left succ-2, so they are not in succ-3 and cannot be in
     // this set. The union has no overlap -- which is what makes 198 right and
     // a sum wrong in general.
@@ -110,7 +116,7 @@ test("the union with the existing corpus is 200, not a sum", () => {
             "a moving case must still be in succ-3 at this point"
         );
     }
-    assert.equal(new Set([...existing, ...moving]).size, 200);
+    assert.equal(new Set([...existing, ...moving]).size, 202);
 });
 
 test("a seat can be replaced twice, and the record says so", () => {
@@ -139,7 +145,7 @@ test("cell counts match what succ-4 has to replace", () => {
         "durable_facts:en": 55,
         "durable_facts:ko": 32,
         "assistant_only:ko": 7,
-        "assistant_only:en": 5,
+        "assistant_only:en": 7,
         "injection_directives:en": 2,
     });
 });

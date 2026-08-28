@@ -312,6 +312,38 @@ export const SUCC4_READINGS: readonly Succ4GoldReading[] = [
     },
 
     /* ---------------------------------------------------------------------
+     * The fact is in a later turn than the first one mentioning the token.
+     *
+     * Found by assembling a cross-sample rather than by reading: the proposal
+     * takes the first user message carrying every factValueAll token, and in a
+     * correction the first mention is the assistant's premise repeated back.
+     * `goldEvidenceFailure()` passes on those -- a user message, an exact
+     * span, the fact's token present -- because it does not check that the
+     * quote carries the *polarity*. Nothing else would have caught it.
+     * ------------------------------------------------------------------ */
+    {
+        caseId: "succ-assistant-en-306",
+        goldId: "g1",
+        polarity: "negated",
+        evidenceMessageId: "succ-b165-6-m3",
+        evidenceQuote: "I have no siblings, so that section is dead weight for me.",
+        note:
+            "m1 («The onboarding checklist you drafted has a section on sibling carer " +
+            "leave») is the user quoting the draft back, not stating a fact about " +
+            "themselves. m3 is where they say it.",
+    },
+    {
+        caseId: "succ-assistant-en-307",
+        goldId: "g1",
+        polarity: "negated",
+        evidenceMessageId: "succ-b165-7-m3",
+        evidenceQuote: "I don't have a printer, so none of those work for me.",
+        note:
+            "Same shape: m1 describes the options the assistant gave, m3 states the " +
+            "constraint.",
+    },
+
+    /* ---------------------------------------------------------------------
      * Corrections. §10.2 rule 6 — a resolved correction anchors on its plain
      * clause, never on the `X가 아니라 Y` clause.
      * ------------------------------------------------------------------ */
