@@ -1017,3 +1017,80 @@ gate 이동의 부수 효과로 처리할 일이 아닙니다.
 `gpt-5-6-luna::mem-extract-v6`의 예산이 기록되는 날이 실행을 여는 변경이며,
 그것은 그 자체로 별개의 검토를 받습니다. `tests/memoryEvalSchema3DryRun.test.mjs`
 가 두 사실을 각각 고정합니다.
+
+## 16. mem-score-v3.4 · mem-eval-succ-5 정정 (2026-08-28 승인, @mposition)
+
+§15.1이 발견한 것을 감사 문서로 덮어 두지 않고 앞으로 정정합니다.
+
+> 알려진 잘못된 descriptor를 감사 문서만으로 보완한 채 decision-grade 실행에
+> 쓰면 안 됩니다.
+
+### 16.1 무엇이 잘못됐는가
+
+`mem-score-v3.3`의 descriptor는 자기 `schemaVersion`을 **2**로 기록하면서
+schema 3을 채점합니다. run-mode gate 상수를 읽었기 때문이고, gate가 2에 있던
+동안에는 두 값이 같아서 드러나지 않았습니다.
+
+그 digest는 네 곳이 고정하고 있어 제자리에서 고칠 수 없습니다 — succ-4
+manifest, release gate registry(및 생성 view), 채택 기록, instrument 증거.
+
+### 16.2 결정
+
+| 항목 | 처리 |
+|---|---|
+| `mem-score-v3.3` | 수정하지 않음. 역사적 증거로 보존, **실행 대상에서 제외** |
+| `mem-eval-succ-4` | 수정하지 않음. 동결 그대로, 실행 대상에서 제외 |
+| `mem-score-v3.4` | 신규. `schemaVersion: 3`을 정직하게 기록 |
+| `mem-eval-succ-5` | 신규. succ-4의 1,150건을 그대로 승계, v3.4에 결속 |
+
+**v3.4가 v3.3과 다른 것은 그 필드 하나와 버전 문자열뿐입니다.** 규칙·임계값·
+범주·언어·표본 하한은 한 글자도 바뀌지 않았습니다. 그래서 두 digest의 차이는
+설명할 수 있는 차이입니다.
+
+```
+mem-score-v3.3  19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777
+mem-score-v3.4  a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd
+
+mem-eval-succ-5 dataset   0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0  (succ-4와 동일)
+mem-eval-succ-5 manifest  215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762
+```
+
+### 16.3 왜 재결속이 아니라 새 dataset인가
+
+succ-4의 manifest는 동결돼 있고, **동결은 의도가 아니라 바이트를 뜻해야
+합니다.** 그 `scoringContractDigest`를 고치면 이미 그것에 대해 해석된 모든
+artifact가 존재한 적 없는 결속을 기술하게 되고, 동결이 고칠 수 있는 것이
+됩니다 — 동결이 존재하는 유일한 이유가 사라집니다.
+
+### 16.4 케이스는 재검수하지 않았습니다
+
+`MEMORY_EVAL_SUCC5_APPROVAL.scope`가 `contract-only`이고, 이는 이 기록을 두
+번째 케이스 채택으로 읽지 못하게 하려는 것입니다. 1,150건의 케이스 채택은
+succ-4의 것이며 docs/ops/memory-extraction-eval-succ4-adoption.md에 있습니다.
+한 번의 사람 행위를 두 기록으로 만들지 않습니다.
+
+### 16.5 제외는 note가 아니라 gate입니다
+
+`harnessTargetBindingFailures()`가 **superseded contract에 결속된 dataset을
+거부**합니다. digest 비교로는 잡히지 않는 조건입니다 — 이전 계약의 상수는
+트리에서 사라졌으므로 그 digest는 기록에서 읽히고 자기 자신과 일치합니다.
+succ-4를 target으로 물으면 이 거부가 답하며, `tests/memoryEvalHarnessTarget.test.mjs`
+가 고정합니다.
+
+freeze 검사에 succ-5 구획 4조건이 추가됐습니다 — 표본 불변, 계약 이동, manifest
+재계산, contract-only 사람 승인. 각 조건은 다른 조건이 볼 수 없는 방식으로
+실패할 수 있습니다.
+
+### 16.6 예산 승인은 등록 전에 실효했습니다
+
+승인 대상이던 succ-4/v3.3 tuple이 더 이상 실행 대상이 아니므로, 그 예산은
+등록되지 않은 채 효력을 잃습니다. succ-5/v3.4의 전체 digest가 확정된 지금
+같은 비용 조건으로 다시 승인받아야 하며, 재승인 시 등록에는 다음을 분리해
+기록합니다.
+
+- `approvedImplementationSha` — contract·harness 정정 PR의 전체 merge SHA
+- `actualRunSha` — 실행 artifact에 기록되는 전체 SHA
+- 실행 조건 — `approvedImplementationSha`가 실행 SHA의 **조상**이고,
+  dataset·contract·prompt digest가 모두 정확히 일치
+- `HEAD === approvedImplementationSha` 같은 단순 비교는 쓰지 않습니다.
+  예산 등록 PR은 자기 자신의 merge SHA를 미리 담을 수 없습니다.

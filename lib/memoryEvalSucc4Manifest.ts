@@ -258,14 +258,21 @@ export function verifySucc4Manifest(
     if (manifest.datasetDigest !== live.datasetDigest) {
         say(`dataset digest: ${manifest.datasetDigest} -> ${live.datasetDigest}`);
     }
-    if (manifest.scoringContractVersion !== live.scoringContractVersion) {
-        say(
-            `scoring contract version: ${manifest.scoringContractVersion} -> ${live.scoringContractVersion}`
-        );
-    } else if (manifest.scoringContractDigest !== live.scoringContractDigest) {
-        say(
-            `scoring contract digest: ${manifest.scoringContractDigest} -> ${live.scoringContractDigest}`
-        );
+    // The contract half is only checkable while this manifest's contract is
+    // the live one. Once a later version ships, an earlier contract's
+    // constants are gone from the tree and its descriptor cannot be rebuilt —
+    // the recorded digest stands as the record.
+    //
+    // Reporting a version difference as drift is what the schema-1/2
+    // manifests already avoid, and succ-4 needed it the day `mem-score-v3.4`
+    // shipped: succ-4 is bound to v3.3 for good, so recomputing would have
+    // made every artifact ever scored against it unresolvable.
+    if (manifest.scoringContractVersion === live.scoringContractVersion) {
+        if (manifest.scoringContractDigest !== live.scoringContractDigest) {
+            say(
+                `scoring contract digest: ${manifest.scoringContractDigest} -> ${live.scoringContractDigest}`
+            );
+        }
     }
 
     const recorded = manifest.composition;

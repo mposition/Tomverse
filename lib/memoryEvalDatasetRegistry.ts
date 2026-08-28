@@ -68,8 +68,12 @@ import { MEMORY_EVAL_SUCC4_CASES } from "@/lib/memoryEvalSucc4Dataset";
 import {
     MEMORY_EVAL_SUCC4_MANIFEST,
     verifySucc4Manifest,
-    type Succ4DatasetManifest,
 } from "@/lib/memoryEvalSucc4Manifest";
+import {
+    MEMORY_EVAL_SUCC5_CASES,
+    MEMORY_EVAL_SUCC5_MANIFEST,
+    verifySucc5Manifest,
+} from "@/lib/memoryEvalSucc5";
 import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
 
 /**
@@ -133,10 +137,29 @@ export const EVAL_DATASET_COMPOSITIONS: Readonly<
     },
 };
 
+/**
+ * The identity every schema-3 manifest shares, whatever its composition.
+ *
+ * `mem-eval-succ-4` records a transition from its predecessor and
+ * `mem-eval-succ-5` records a contract correction; the two composition shapes
+ * have nothing in common and neither is any consumer's business. What every
+ * consumer needs is the identity, so that is what the table is typed on.
+ */
+type Schema3ManifestIdentity = {
+    datasetVersion: string;
+    schemaVersion: 3;
+    supersedes: string;
+    caseCount: number;
+    cellCounts: Readonly<Record<string, number>>;
+    datasetDigest: string;
+    scoringContractDigest: string;
+    scoringContractVersion: string;
+};
+
 type Schema3Dataset = {
-    manifest: Succ4DatasetManifest;
+    manifest: Schema3ManifestIdentity;
     cases: readonly MemoryEvalCaseV3[];
-    verify: (manifest: Succ4DatasetManifest) => readonly string[];
+    verify: () => readonly string[];
 };
 
 /**
@@ -155,9 +178,18 @@ type Schema3Dataset = {
  */
 const schema3Datasets = (): readonly Schema3Dataset[] => [
     {
+        // Superseded by succ-5 and kept resolvable. Its artifacts were scored
+        // against `mem-score-v3.3` and stay readable; dropping the row would
+        // make every one of them unresolvable, which is the failure the
+        // registry exists to prevent.
         manifest: MEMORY_EVAL_SUCC4_MANIFEST,
         cases: MEMORY_EVAL_SUCC4_CASES,
-        verify: verifySucc4Manifest,
+        verify: () => verifySucc4Manifest(MEMORY_EVAL_SUCC4_MANIFEST),
+    },
+    {
+        manifest: MEMORY_EVAL_SUCC5_MANIFEST,
+        cases: MEMORY_EVAL_SUCC5_CASES,
+        verify: () => verifySucc5Manifest(),
     },
 ];
 
@@ -494,7 +526,7 @@ function resolveSchema3(
         );
     }
 
-    const mismatches = entry.verify(manifest);
+    const mismatches = entry.verify();
     if (mismatches.length > 0) {
         return refuse(
             "dataset_drifted",

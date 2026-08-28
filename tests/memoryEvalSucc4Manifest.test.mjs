@@ -82,14 +82,27 @@ test("the source digest is succ-3's own recorded one", () => {
     );
 });
 
-test("the contract version is the one succ-4 was authored under", () => {
-    assert.equal(
-        MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion,
-        MEMORY_EVAL_SCORING_CONTRACT_VERSION
-    );
+test("the contract version is the one succ-4 was authored under, and stays it", () => {
+    // Written as an equality with the live constant, which held while v3.3
+    // was live. It is not an equality any more and must not become one again:
+    // succ-4 is bound to the contract it was frozen under, and `mem-score-v3.4`
+    // corrected a field v3.3 got wrong. Rebinding succ-4 would make every
+    // artifact already scored against it describe a binding that never existed.
+    assert.equal(MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion, "mem-score-v3.3");
     assert.equal(
         MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest,
-        succ4ScoringContractDigest()
+        "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777"
+    );
+    assert.notEqual(
+        MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion,
+        MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+        "succ-4 is superseded; if it is live again, say why"
+    );
+    // And the live helper now computes the live contract, which is exactly why
+    // the manifest may no longer be compared against it.
+    assert.notEqual(
+        succ4ScoringContractDigest(),
+        MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest
     );
 });
 

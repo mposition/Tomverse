@@ -20,6 +20,7 @@ import {
 import { MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
 import { MEMORY_EVAL_SUCC4_DATASET_FROZEN } from "../lib/memoryEvalSucc4Dataset.ts";
+import { MEMORY_EVAL_SUCC5_DATASET_FROZEN } from "../lib/memoryEvalSucc5.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 
 const SCRIPT = "scripts/check-memory-eval-freeze-conditions.mjs";
@@ -124,18 +125,34 @@ test("the check fails the build only when a dataset that claims a freeze has a g
     // conditions were met.
     //
     // Read per dataset rather than over the whole output, because there are
-    // four now and they are not in the same state: seed-11, succ-2 and succ-3
-    // are frozen and complete, and `mem-eval-succ-4` is mid-adoption. A single
+    // five now and they are not in the same state. A single
     // `stdout.includes("MISS")` would have made one dataset's progress report
     // fail the build for another dataset's freeze.
+    //
+    // The count is asserted rather than derived: a dataset whose section
+    // stopped printing would otherwise be a dataset nobody checked, and the
+    // output would look exactly as clean.
     const sections = result.stdout.split(/Freeze conditions for /).slice(1);
-    assert.equal(sections.length, 4, result.stdout);
+    assert.equal(sections.length, 5, result.stdout);
+    for (const version of [
+        "mem-eval-seed-11",
+        "mem-eval-succ-2",
+        "mem-eval-succ-3",
+        "mem-eval-succ-4",
+        "mem-eval-succ-5",
+    ]) {
+        assert.ok(
+            sections.some((section) => section.startsWith(version)),
+            `${version} printed no section`
+        );
+    }
 
     const frozenByVersion = {
         "mem-eval-seed-11": MEMORY_EVAL_DATASET_FROZEN,
         "mem-eval-succ-2": MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
         "mem-eval-succ-3": MEMORY_EVAL_SUCC3_DATASET_FROZEN,
         "mem-eval-succ-4": MEMORY_EVAL_SUCC4_DATASET_FROZEN,
+        "mem-eval-succ-5": MEMORY_EVAL_SUCC5_DATASET_FROZEN,
     };
     let shouldFail = false;
     for (const section of sections) {

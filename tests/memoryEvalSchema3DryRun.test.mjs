@@ -73,7 +73,7 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
             /QA_EXTERNAL_NETWORK_BLOCKED/,
             "the smoke path attempted an outbound connection"
         );
-        assert.match(result.output, /mem-eval-succ-4/);
+        assert.match(result.output, /mem-eval-succ-5/);
         assert.match(result.output, /SMOKE RUN/);
 
         const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));

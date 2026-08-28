@@ -19,9 +19,10 @@ import {
     targetManifestDigests,
 } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_SUCC4_MANIFEST } from "../lib/memoryEvalSucc4Manifest.ts";
+import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
 
 test("the harness target is the frozen schema-3 set", () => {
-    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-4");
+    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-5");
     const target = harnessTarget();
     assert.equal(target.datasetSchemaVersion, 3);
     assert.equal(target.datasetFrozen, true);
@@ -34,6 +35,9 @@ test("its digests are the ones the manifest froze", () => {
     // docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md
     // and in the release-gate registry, and a run that computed anything else
     // would produce an artifact no reader could resolve.
+    //
+    // The dataset digest is succ-4's, unchanged: succ-5 is a contract-only
+    // successor and the sample it scores is the same 1,150 cases.
     const target = harnessTarget();
     assert.equal(
         target.datasetDigest,
@@ -41,17 +45,39 @@ test("its digests are the ones the manifest froze", () => {
     );
     assert.equal(
         target.scoringContractDigest,
-        "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777"
+        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd"
     );
-    assert.equal(target.scoringContractVersion, "mem-score-v3.3");
+    assert.equal(target.scoringContractVersion, "mem-score-v3.4");
     assert.deepEqual([...harnessTargetBindingFailures(target)], []);
 });
 
+test("succ-4 keeps its cases and stops being a run target", () => {
+    // Both halves matter. The sample is identical, which is what makes succ-5
+    // a contract-only successor; and the binding check refuses succ-4 anyway,
+    // because it is bound to `mem-score-v3.3` — a contract that describes
+    // itself as scoring schema 2 while scoring schema 3, kept as evidence
+    // rather than repaired in place (@mposition, 2026-08-28).
+    const succ4 = harnessTarget("mem-eval-succ-4");
+    const succ5 = harnessTarget("mem-eval-succ-5");
+    assert.equal(succ4.datasetDigest, succ5.datasetDigest);
+    assert.equal(succ4.cases.length, succ5.cases.length);
+    assert.notEqual(succ4.scoringContractDigest, succ5.scoringContractDigest);
+
+    const failures = harnessTargetBindingFailures(succ4);
+    assert.equal(failures.length, 1, failures.join(" | "));
+    assert.match(failures[0], /mem-score-v3\.3.*superseded contract is evidence/s);
+});
+
 test("the manifest is where those values come from, not a second copy", () => {
-    const recorded = targetManifestDigests("mem-eval-succ-4");
-    assert.equal(recorded.datasetDigest, MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest);
+    const recorded = targetManifestDigests("mem-eval-succ-5");
+    assert.equal(recorded.datasetDigest, MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest);
     assert.equal(
         recorded.scoringContractDigest,
+        MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest
+    );
+    const superseded = targetManifestDigests("mem-eval-succ-4");
+    assert.equal(
+        superseded.scoringContractDigest,
         MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest
     );
 });

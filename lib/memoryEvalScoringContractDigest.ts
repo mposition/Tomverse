@@ -97,7 +97,7 @@ import {
  * change regardless — this string is for people, so a manifest row can be
  * read without recomputing anything.
  */
-export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.3";
+export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.4";
 
 /**
  * The approved records that define the contract, oldest first.
@@ -356,29 +356,37 @@ export const descriptorSortedListRow = (
 ): string => `${label}${FIELD}${[...items].sort().join(ITEM)}`;
 
 /**
- * The `schemaVersion` this descriptor records, pinned rather than read.
+ * The dataset schema this contract scores, pinned rather than read.
  *
- * **It used to read `MEMORY_EVAL_DATASET_SCHEMA_VERSION` from
- * `lib/memoryExtractionEvalCore.ts`, and that constant is the run-mode gate —
- * "which dataset schema may be run live" — not "which schema this contract
- * describes".** The two happened to be the same number while the gate sat at
- * 2, so the difference was invisible until the gate moved to 3 on 2026-08-28
- * and the frozen `mem-score-v3.3` digest went with it, from
+ * **Not the run-mode gate.** It used to read
+ * `MEMORY_EVAL_DATASET_SCHEMA_VERSION` from `lib/memoryExtractionEvalCore.ts`,
+ * which answers a different question — "which dataset schema may be run live"
+ * — and the two happened to be the same number while the gate sat at 2. The
+ * difference only showed when the gate moved to 3 on 2026-08-28 and the frozen
+ * `mem-score-v3.3` digest went with it, from
  * `19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777` to
- * `50615af8aa63f4482bb69e1869d9480f3abe82804ebd0515c3adaf25337f44fb` — a
- * frozen contract silently re-fingerprinted by an unrelated change.
+ * `50615af8aa63f4482bb69e1869d9480f3abe82804ebd0515c3adaf25337f44fb`: a frozen
+ * contract silently re-fingerprinted by an unrelated change.
  *
- * So the field is pinned to the value it was frozen with, and the gate is free
- * to move without touching any recorded digest.
+ * Pinning it here is what keeps the gate free to move without touching a
+ * recorded digest.
  *
- * **The pinned value is 2, and `mem-score-v3.3` scores schema 3.** That is a
- * defect in what was frozen, and it is left standing on purpose: correcting it
- * moves the digest, and the digest is pinned by the `mem-eval-succ-4` manifest,
- * the release-gate registry, the adoption record and the instrument evidence.
- * Correcting it is a new contract version with a new digest and a re-recorded
- * manifest — a deliberate decision, not a side effect of moving a gate.
+ * ## Why the value is 3, and why that needed a new version
+ *
+ * `mem-score-v3.3` was frozen with a **2** in this field while scoring schema
+ * 3, because it read the gate. The digest of that mistake is pinned by the
+ * `mem-eval-succ-4` manifest, the release-gate registry, the adoption record
+ * and the instrument evidence, so it cannot be edited in place — and a
+ * decision-grade run under a contract whose own description of itself is
+ * wrong is not something an audit note can repair (@mposition, 2026-08-28).
+ *
+ * So the correction is forward-only: v3.3 stays exactly as frozen and becomes
+ * historical evidence, and `mem-score-v3.4` records **3**, which is what this
+ * contract has always scored. Nothing else about the contract changed — same
+ * rules, same thresholds, same categories — so the digest difference between
+ * the two versions is attributable to this one field.
  */
-const DESCRIPTOR_SCHEMA_VERSION = 2;
+const DESCRIPTOR_SCHEMA_VERSION = 3;
 
 /**
  * The contract half of the digest input.

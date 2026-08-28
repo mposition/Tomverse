@@ -720,6 +720,36 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
                 "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777",
             pendingRules: [],
         },
+        {
+            /**
+             * **One field, corrected forward.**
+             *
+             * v3.3's descriptor records `schemaVersion: 2` while the contract
+             * scores schema 3. It read the run-mode gate, which answers a
+             * different question and happened to hold the same number; the
+             * difference surfaced when the gate moved to 3 on 2026-08-28 and
+             * took the frozen digest with it.
+             *
+             * The digest could not be edited in place — `mem-eval-succ-4`'s
+             * manifest, the release-gate registry, the adoption record and the
+             * instrument evidence all pin it — and running a decision-grade
+             * eval under a contract whose own self-description is wrong is not
+             * something an audit note repairs (@mposition, 2026-08-28). So
+             * v3.3 is preserved exactly as frozen, as historical evidence and
+             * not as a run target, and v3.4 records the 3 it always scored.
+             *
+             * Nothing else moved: same rules, same thresholds, same
+             * categories, same languages, same floors. The whole difference
+             * between the two digests is `schemaVersion` and the version
+             * string, which is what makes the change attributable rather than
+             * merely new.
+             */
+            version: "mem-score-v3.4",
+            approvedOn: "2026-08-28",
+            descriptorDigest:
+                "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+            pendingRules: [],
+        },
     ];
 
 /**

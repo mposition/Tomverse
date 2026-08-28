@@ -16,18 +16,42 @@ Recording the instrument now is worth doing because the thing a later number
 will be checked against has to be pinned before the number exists. A digest
 recorded afterwards can be chosen to match.
 
+## The correction, and what it moved
+
+The instrument below was first recorded as `mem-eval-succ-4` bound to
+`mem-score-v3.3`. It is now `mem-eval-succ-5` bound to `mem-score-v3.4`, and
+**the sample did not change** — the same 1,150 cases, the same dataset digest,
+not re-reviewed.
+
+`mem-score-v3.3` records `schemaVersion: 2` in its own descriptor while
+scoring schema 3. It read the run-mode gate, which answers a different question
+and held the same number until the gate moved to 3 on 2026-08-28. The digest of
+that mistake is pinned here, in the release-gate registry, in succ-4's manifest
+and in the adoption record, so it could not be edited in place; and a
+decision-grade number computed under a contract whose own description of itself
+is wrong is not something this document could repair by noting it
+(@mposition, 2026-08-28).
+
+So the correction is forward-only. v3.3 and succ-4 are preserved exactly as
+frozen and are **excluded from decision-grade runs**; v3.4 records the 3 it
+always scored; succ-5 carries succ-4's cases under it.
+`harnessTargetBindingFailures()` refuses any dataset bound to a superseded
+contract, so the exclusion is a gate rather than a note.
+
 ## The frozen dataset
 
 | | |
 |---|---|
-| datasetVersion | `mem-eval-succ-4` |
+| datasetVersion | `mem-eval-succ-5` |
 | schemaVersion | 3 |
-| supersedes | `mem-eval-succ-3` |
-| cases | 1,150 = 1,047 inherited + 103 replacements |
-| dataset digest | `0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0` |
-| transition manifest digest | `44bc58bad215ed572f1accd74979b19b6708453f37e474734940953edf51a325` |
+| supersedes | `mem-eval-succ-4` (contract descriptor correction; cases inherited whole, not re-reviewed) |
+| cases | 1,150 = 1,047 inherited + 103 replacements, via succ-4 |
+| dataset digest | `0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0` (succ-4's, unchanged) |
+| manifest digest | `215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762` |
+| transition manifest digest (succ-3 → succ-4) | `44bc58bad215ed572f1accd74979b19b6708453f37e474734940953edf51a325` |
 | source dataset digest (`mem-eval-succ-3`) | `38468da0dce31a144d61d360189b4ce9e1d55e0e914ae66a2d61bfb1e793dc3b` |
-| mergedCommitSha | `0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d` (see **Commits and CI**) |
+| cases frozen at | `0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d` (see **Commits and CI**) |
+| approved as a contract-only successor | @mposition, 2026-08-28 |
 
 Eight cells: `durable_facts` ko 200 · en 200, `assistant_only` ko 125 · en 125,
 `sensitive_secrets` ko 125 · en 125, `injection_directives` ko 125 · en 125.
@@ -41,15 +65,18 @@ sample, and neither number exists yet.
 
 | | |
 |---|---|
-| contractVersion | `mem-score-v3.3` |
-| descriptor digest | `19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777` |
+| contractVersion | `mem-score-v3.4` |
+| descriptor digest | `a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd` |
+| corrects | `mem-score-v3.3`, which recorded `schemaVersion: 2` while scoring schema 3 |
+| what else changed | nothing — the same rules, thresholds, categories, languages and floors |
 | approvedOn | 2026-08-28 |
 | pendingRules (dataset-satisfiable) | none |
 | prompt-pending | `v3-unfixable-evidence-emits-nothing` |
-| mergedCommitSha | `fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4` (see **Commits and CI**) |
 
-The previous contract stays pinned and unaltered: `mem-score-v3.2`,
-`8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b`.
+Earlier contracts stay pinned and unaltered: `mem-score-v3.2`,
+`8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b`, and
+`mem-score-v3.3`, `19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777`,
+recorded at `fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4` (see **Commits and CI**).
 
 ### One rule is enforced by the prompt, not by the contract
 
