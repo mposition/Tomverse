@@ -20,15 +20,33 @@ import {
 const SUPPORTED = "claude-haiku-4-5";
 const UNSUPPORTED = ["gpt-5-4-mini", "deepseek-v4-flash"];
 /**
- * Native, and still counted as one that cannot search.
+ * Searches, and not through its own provider.
  *
- * Gemini's Search grounding is charged per query and takes no ceiling -- not
- * on the tool and not on the request -- so no request may carry it. The
- * composer has to say so before the send: the alternative is what this whole
- * area was fixed for, a chip that promises a search and a dispatch that
- * refuses one.
+ * Gemini's Search grounding is charged per query and takes no ceiling -- not on
+ * the tool and not on the request -- so no request may carry it, and this model
+ * was counted as unable to search for exactly that reason. It now searches
+ * through a tool this application executes against a backend it holds the
+ * connection to, whose ceiling is a counter in this process.
+ *
+ * The composer must say *that*: the failure this area was fixed for cuts both
+ * ways, and a chip refusing a search the dispatch would happily run is the same
+ * defect with the sign flipped.
  */
-const UNBOUNDED_NATIVE = "gemini-2-5-flash";
+const APP_MANAGED = "gemini-2-5-flash";
+/**
+ * The Google models a *guest* conversation can actually hold.
+ *
+ * One, because plan tiers trim the rest before the composer ever sees them:
+ * `gemini-3-1-pro` is Pro and the two Flash models are Free, while this page is
+ * a guest. Asserting a larger count here would be asserting against a selection
+ * this page never has -- which is how a test passes while describing something
+ * the product does not do.
+ *
+ * The other three are covered where they can be: `tests/webSearchCapability`
+ * and `tests/webSearchComposerState` have no plan to be trimmed by, and assert
+ * all four.
+ */
+const APP_MANAGED_ALL = ["gemini-2-5-flash"];
 const TITLE = "Web search state";
 const CHAT_ID = "guest_web_search_state";
 
@@ -248,10 +266,51 @@ test("adding a model that cannot search updates the chip and the reservation tog
   );
 });
 
-test("a native model whose search cost has no ceiling is counted as unsupported", { tag: "@ui-risk" }, async ({
+test("a model that searches through the application's own backend counts as search-ready", { tag: "@ui-risk" }, async ({
   page,
 }) => {
-  await seedGuestConversation(page, [SUPPORTED, UNBOUNDED_NATIVE], "always");
+  await seedGuestConversation(page, [SUPPORTED, APP_MANAGED], "always");
+  await open(page);
+
+  // Two models, two routes -- one provider-native, one application-managed --
+  // and the chip does not distinguish them, because the user was not asked to
+  // care which vendor runs the search.
+  await expect(chip(page)).toHaveAttribute("data-tone", "neutral");
+  await expect(chip(page)).toHaveAttribute("data-supported-count", "2");
+  await expect(chip(page)).toHaveAttribute("data-unsupported-count", "0");
+  await expect(
+    page.getByTestId("web-search-exception-toggle")
+  ).toHaveCount(0);
+});
+
+test("a Google-only selection is not blocked", { tag: "@ui-risk" }, async ({
+  page,
+}) => {
+  // The contract this whole feature exists for. Every one of these models used
+  // to produce "Web search unavailable" -- on a product where they are four of
+  // the models people actually pick.
+  await seedGuestConversation(page, APP_MANAGED_ALL, "always");
+  await open(page);
+
+  await expect(chip(page)).toHaveAttribute("data-tone", "neutral");
+  await expect(chip(page)).toHaveAttribute(
+    "data-supported-count",
+    String(APP_MANAGED_ALL.length)
+  );
+  await expect(chip(page)).toHaveAttribute("data-unsupported-count", "0");
+  await expect(
+    page.getByTestId("web-search-unavailable-notice")
+  ).toHaveCount(0);
+  await expectChipLabel(page, {
+    full: "Web search on",
+    compact: "Web search",
+  });
+});
+
+test("a Google model mixed with one that cannot search shows the exception, and names the right one", { tag: "@ui-risk" }, async ({
+  page,
+}) => {
+  await seedGuestConversation(page, [APP_MANAGED, UNSUPPORTED[0]], "always");
   await open(page);
 
   await expect(chip(page)).toHaveAttribute("data-tone", "warning");
@@ -261,22 +320,6 @@ test("a native model whose search cost has no ceiling is counted as unsupported"
   await page.getByTestId("web-search-exception-toggle").click();
   const detail = page.getByTestId("web-search-exception-detail");
   await expect(detail).toBeVisible();
-  await expect(detail).toContainText("Gemini");
-  await expect(detail).toContainText("without a web search");
-});
-
-test("a selection of only unbounded native models blocks rather than promising a search", { tag: "@ui-risk" }, async ({
-  page,
-}) => {
-  await seedGuestConversation(page, [UNBOUNDED_NATIVE], "always");
-  await open(page);
-
-  await expect(chip(page)).toHaveAttribute("data-tone", "blocked");
-  await expectChipLabel(page, {
-    full: "Web search unavailable",
-    compact: "No web search",
-  });
-  await expect(
-    page.getByTestId("web-search-unavailable-notice")
-  ).toContainText("Add a search-capable model");
+  // The one that cannot search, and not the Gemini beside it.
+  await expect(detail).not.toContainText("Gemini");
 });

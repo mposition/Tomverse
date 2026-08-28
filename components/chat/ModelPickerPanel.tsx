@@ -45,6 +45,7 @@ import {
   getModelRecommendations,
   type ModelRecommendation,
 } from "@/lib/modelRecommendations";
+import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { deriveModelSelectionLimit } from "@/lib/modelSelectionLimit";
 import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
@@ -249,6 +250,10 @@ export function ModelPickerPanel({
   const isAtCapacity = selectionLimit.limitReached;
   const activeFilterCount = countActiveModelCatalogueFilters(filters);
 
+  // The recommendation rows carry the same search badge the catalogue does, so
+  // they answer from the same map.
+  const searchBackendReadiness = useWebSearchBackendReadiness();
+
   const statusesForRecommendations = useMemo(() => {
     const record: Record<string, "available" | "limited" | "unavailable"> = {};
     for (const [modelId, value] of Object.entries(modelStatuses)) {
@@ -260,6 +265,7 @@ export function ModelPickerPanel({
   const recommendations = useMemo(
     () =>
       getModelRecommendations({
+        searchBackendReadiness,
         models,
         plan: currentPlan,
         isGuestMode,
@@ -280,6 +286,7 @@ export function ModelPickerPanel({
       models,
       personalizedModelIds,
       recentModelIds,
+      searchBackendReadiness,
       selectedModelIds,
       statusesForRecommendations,
     ]

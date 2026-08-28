@@ -1,5 +1,6 @@
 import type { AiModel } from "@/lib/models";
 import { modelWebSearchIsDispatchable } from "@/lib/webSearchCapability";
+import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
 export type ModelPickerLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 export type ModelPickerCapability = "all" | "favorites" | "recommended" | "fast" | "reasoning" | "search";
@@ -437,15 +438,17 @@ export const getModelPickerDescription = (
 ) => (language === "ko" ? koreanDescriptions[model.id] || model.bestFor : model.bestFor);
 
 export const getModelPickerFeatures = (
-  model: Pick<AiModel, "id" | "provider" | "reasoning" | "inputCapabilities">
+  model: Pick<AiModel, "id" | "provider" | "reasoning" | "inputCapabilities">,
+  searchBackendReadiness: WebSearchBackendReadiness
 ): ModelPickerFeature[] => {
   const features: ModelPickerFeature[] = [];
   // "unverified" is deliberately excluded -- showing the badge would imply
   // confirmed support this model doesn't officially have yet. So is a native
-  // capability whose per-query cost no request can bound: the badge tells the
-  // user this model answers from the live web, and one that will never be
-  // allowed to attach its tool does not.
-  if (modelWebSearchIsDispatchable(model.id)) {
+  // capability whose per-query cost no request can bound, and so is an
+  // application-managed one whose backend this deployment cannot reach: the
+  // badge tells the user this model answers from the live web, and a model that
+  // will never be allowed to run a search does not.
+  if (modelWebSearchIsDispatchable(model.id, searchBackendReadiness)) {
     features.push("search");
   }
   if (model.reasoning && model.reasoning !== "none") features.push("reasoning");
@@ -463,7 +466,8 @@ export const getModelPickerUsageBand = (credits: number): Exclude<ModelPickerUsa
 
 export const modelMatchesCapability = (
   model: AiModel,
-  capability: ModelPickerCapability
+  capability: ModelPickerCapability,
+  searchBackendReadiness: WebSearchBackendReadiness
 ) => {
   if (capability === "all") return true;
   // Favorites depend on per-user runtime state, not a static model
@@ -480,7 +484,7 @@ export const modelMatchesCapability = (
     // The same answer the badge gives, from the same helper -- a filter that
     // admitted a model the badge would not mark would list rows with no reason
     // on them for being there.
-    return modelWebSearchIsDispatchable(model.id);
+    return modelWebSearchIsDispatchable(model.id, searchBackendReadiness);
   }
   const name = `${model.id} ${model.name}`.toLowerCase();
   return ["mini", "flash", "haiku", "small", "lite", "luna"].some((term) =>

@@ -457,3 +457,54 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Landing V2: the review plane.
+   ---------------------------------------------------------------------------
+
+   The landing page's visual system is "parallel columns converging on one
+   reviewed plane", and these two rules are the only parts of it that cannot be
+   expressed as Tailwind utilities on the element itself.
+
+   `landing-reveal` is the page's entire motion layer. It is CSS scroll-driven
+   animation, so there is no library, no `useEffect`, and no scroll listener --
+   AGENTS.md forbids the last of those and the project has no animation
+   dependency to add. Three properties make it safe to apply broadly:
+
+     - It is inside `@supports (animation-timeline: view())`. A browser without
+       scroll-driven animation gets no rule at all, so the element is simply
+       visible. There is no "hidden until JS runs" state to fall back from.
+     - It is inside `prefers-reduced-motion: no-preference`, so the reduced
+       motion path is likewise "no rule", not "a rule that is then cancelled".
+     - It animates `opacity` and `translateY` only. Nothing here changes an
+       element's width or its horizontal position, which is what keeps the
+       200%-text-scale reflow measurements in
+       tests/e2e/landing-content-contract.spec.ts measuring layout rather than
+       measuring an animation frame.
+
+   `animation-range` is expressed against `entry` rather than `cover` so it
+   behaves the same for a short block and a tall one: the reveal completes
+   once the element is 45% of its own height into the viewport. Against
+   `cover`, a tall block (the FAQ list, say) was still at half opacity while a
+   reader was already inside it, because `cover` measures the whole scroll
+   distance the element occupies rather than its arrival. */
+@keyframes tomverse-landing-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(1.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .landing-reveal {
+      animation: tomverse-landing-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 45%;
+    }
+  }
+}

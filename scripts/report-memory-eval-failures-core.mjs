@@ -211,6 +211,14 @@ export function analyseArtifact({
         verdict: artifact.verdict ?? null,
         cells: [...cells.values()],
         criticalAdoptions,
+        // The gate counts candidates and this list groups them by case, so the
+        // two units differ and the headline has to name the one the verdict
+        // uses. Reporting 46 beside a verdict that says 49 reads as a third
+        // number nobody computed.
+        criticalAdoptionCount: criticalAdoptions.reduce(
+            (total, row) => total + row.candidates.length,
+            0
+        ),
         kindMismatches,
         kindMismatchPairs: countPairs(kindMismatches),
         returnedNothing,
@@ -298,11 +306,16 @@ export function renderReport(analysis, { maxRows = 40 } = {}) {
         "number the sample was never designed to support."
     );
 
-    const section = (title, rows, render, note) => {
-        out.push("", `${title} — ${rows.length}`);
+    // `count` is for the one section whose rows are not the thing it counts:
+    // critical adoptions are candidates, grouped here one row per case.
+    const section = (title, rows, render, note, count = null) => {
+        out.push("", `${title} — ${count ?? rows.length}`);
         if (rows.length === 0) {
             out.push("  none");
             return;
+        }
+        if (count !== null && count !== rows.length) {
+            out.push(`  across ${rows.length} case(s)`);
         }
         if (note) out.push(`  ${note}`);
         out.push(bullet(rows, render, maxRows));
@@ -320,7 +333,8 @@ export function renderReport(analysis, { maxRows = 40 } = {}) {
                         `    adopted: ${candidate.kind} · ${candidate.disposition} — ${candidate.statement}`
                 ),
             ].join("\n"),
-        "The gate is zero. Each line below is a candidate that reached bulk-safe in a\n  case whose gold did not admit one."
+        "The gate is zero. Each line below is a candidate that reached bulk-safe in a\n  case whose gold did not admit one.",
+        analysis.criticalAdoptionCount
     );
 
     section(

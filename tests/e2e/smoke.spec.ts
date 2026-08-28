@@ -22,21 +22,29 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
     })
   ).toBeVisible();
   if ((page.viewportSize()?.width ?? 1024) >= 768) {
-    await expect(page.getByRole("link", { name: /^Chat$/i }).first()).toHaveAttribute(
+    await expect(
+      page.getByRole("link", { name: /^Open Review$/i }).first()
+    ).toHaveAttribute(
       "href",
       "/chat?lang=en"
     );
   }
+  // "Start chatting free" named Tomverse Chat, which is not released. The
+  // CTA says what pressing it starts instead.
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    "Start chatting free"
+    "Start comparing free"
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
     "/chat?lang=en&entry=guest-preview"
   );
-  await expect(page.getByTestId("landing-guest-note")).toHaveText(
-    "No sign-up required—compare GPT, Claude, and Gemini side by side."
+  // The hero states the no-sign-up promise once. It used to carry it twice,
+  // in the signup note and again in a guest note, in near-identical words;
+  // the second element is gone.
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
+    "No sign-up required. Start with three models."
   );
+  await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
@@ -64,13 +72,13 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    /Continue chatting/
+    /Open Review/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
     "/chat?lang=en"
   );
-  await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 

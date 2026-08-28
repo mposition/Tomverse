@@ -1,5 +1,5 @@
 /**
- * The seven freeze conditions of docs/ops/memory-extraction-eval-dataset.md §7.1,
+ * The freeze conditions of docs/ops/memory-extraction-eval-dataset.md §7.1,
  * checked rather than asserted.
  *
  *   npm run check:memory-eval-freeze
@@ -38,7 +38,18 @@ import {
     MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
 } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
+import {
+    MEMORY_EVAL_SUCC3_CASES,
+    MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC3_DATASET_VERSION,
+} from "../lib/memoryEvalSucc3Fixtures.ts";
+import { SUCC3_ADOPTED_BATCHES } from "../lib/memoryEvalSucc3Adopted/index.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION } from "../lib/memoryEvalDatasetSchemaV3.ts";
+import {
+    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    memoryEvalScoringContractReadiness,
+} from "../lib/memoryEvalScoringContractDigest.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     findDuplicateCases,
@@ -218,6 +229,33 @@ const schemaRefusal = legacyDatasetRefusal({
 });
 const schemaExempt = LEGACY_DIAGNOSTIC_DATASET_VERSIONS.includes(version);
 
+/* --- ⑧ no scoring rule left unimplemented --------------------------------- */
+// A contract may be frozen with a rule nothing executes yet -- `mem-score-v3`
+// was, because §10.2's rules 5 and 6 belong to the v6 prompt and to gold
+// review. A **dataset** may not: a verdict produced under a contract whose
+// rules nothing applies describes a bar that was never applied, and it would
+// be cited as though it had been.
+//
+// Scoped to datasets the live contract actually governs. seed-11, succ-2 and
+// succ-3 were frozen under earlier contracts and their records stand; asking
+// them to satisfy a rule written after they were finished would turn a
+// historical fact into a failing check.
+{
+    const governedByLiveContract =
+        schemaVersion === MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION;
+    const pending = memoryEvalScoringContractReadiness();
+    check(
+        "no scoring rule left unimplemented",
+        governedByLiveContract
+            ? pending.length === 0
+                ? `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}: every rule has an implementation`
+                : `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} still pending: ${pending.join(", ")}`
+            : `schema ${schemaVersion}: scored under an earlier contract, not ` +
+              `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}`,
+        !governedByLiveContract || pending.length === 0
+    );
+}
+
 /* ----------------------------------------------------------------- report -- */
 
 console.log(
@@ -284,5 +322,19 @@ evaluate({
     frozen: MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
     cases: MEMORY_EVAL_SUCCESSOR_CASES,
     batches: SUCCESSOR_ADOPTED_BATCHES,
+    schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+});
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+// Every frozen version is re-checked, not only the current target. A dataset
+// stops being frozen the moment it stops holding the conditions, and a
+// superseded one that quietly moved would take the artifacts scored against
+// it with it.
+evaluate({
+    version: MEMORY_EVAL_SUCC3_DATASET_VERSION,
+    frozen: MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+    cases: MEMORY_EVAL_SUCC3_CASES,
+    batches: SUCC3_ADOPTED_BATCHES,
     schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
 });

@@ -27,7 +27,7 @@ import {
   getChatEnterKeyAction,
   isComposingKeydown,
 } from "@/lib/chatKeyboardPolicy";
-import type { WebSearchMode } from "@/lib/appDefaults";
+import type { WebSearchMode, WebSearchToggleMode } from "@/lib/appDefaults";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { decideBundleStaleRecovery } from "@/lib/chatContextBundleRecovery";
 import { parseChatStreamTrailer } from "@/lib/webSearchStreamTrailer";
@@ -113,6 +113,12 @@ type ChatAppProps = {
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
+     * Web search for this send only, when the send was made by the web-search
+     * offer rather than by the composer. Absent on every ordinary send, which
+     * then reads the conversation's own mode exactly as before.
+     */
+    webSearchMode?: WebSearchToggleMode;
+    /**
      * Concurrency slot this panel was already admitted for by the aggregate
      * comparison preflight. Opaque, signed and single-use server-side; a panel
      * that has none (a retry, a single-model send) simply takes the ordinary
@@ -179,6 +185,25 @@ type ChatAppProps = {
     responseText: string,
     searchMetadata?: WebSearchExecution | null
   ) => void;
+  /**
+   * This panel's turn ended as an error, with the code it ended on.
+   *
+   * `onResponseComplete` only fires on a turn that produced an answer, so
+   * before this the shell could see a run start and never see it stop. The
+   * web-search offer needs the difference: a re-run it started that came back
+   * `WEB_SEARCH_COST_UNBOUNDED` is a refusal nothing the account can do will
+   * change, and one that came back anything else is worth a retry button
+   * (`lib/webSearchRetrySuggestion.ts`).
+   *
+   * Reported for every error status this panel writes, including the ones the
+   * user caused (cancelled is not an error and does not fire). The code only
+   * -- no message, no trace id, no provider text.
+   */
+  onTurnError?: (
+    promptId: string | null,
+    modelId: string,
+    errorCode: string
+  ) => void;
   onFollowupSent?: (modelId: string) => void;
   onBeforeSend?: (chatId: string) => Promise<boolean>;
   onRequestCloseModel?: () => void;
@@ -212,6 +237,7 @@ function ChatAppComponent({
   onContentStateChange,
   onStatusChange,
   onResponseComplete,
+  onTurnError,
   onFollowupSent,
   onBeforeSend,
   onRequestCloseModel,
@@ -306,9 +332,17 @@ function ChatAppComponent({
    */
   const onBeforeSendRef = useRef(onBeforeSend);
   const panelModelIdRef = useRef(modelId);
+  /*
+    Read through a ref for the same reason `onBeforeSend` is: `handleSendPrompt`
+    is a `useCallback` whose identity gates the send effect below, and taking a
+    dependency on a parent handler that is rebuilt every render would re-arm
+    that effect on every render of the page.
+  */
+  const onTurnErrorRef = useRef(onTurnError);
   useLayoutEffect(() => {
     onBeforeSendRef.current = onBeforeSend;
     panelModelIdRef.current = modelId;
+    onTurnErrorRef.current = onTurnError;
   });
 
   // `runtime.isLoaded` is already per (identity, conversation, model): the
@@ -821,6 +855,18 @@ function ChatAppComponent({
     admissionToken?: string | null,
     contextBundle?: string | null,
     contextLayout: "single" | "comparison" = "single",
+    /**
+     * Web search for this one request, overriding the conversation's stored
+     * mode.
+     *
+     * The web-search offer re-runs a question with search on *without*
+     * changing what the conversation is set to: the switch is a setting the
+     * user owns, and answering "yes, check this one" is not a standing
+     * instruction to search everything after it. So the override rides on the
+     * request rather than through `updateWebSearchMode`, and the next send
+     * from the composer is back on whatever the switch says.
+     */
+    webSearchModeOverride?: WebSearchToggleMode,
     /*
       Stored files this send has been told are gone and may proceed without.
 
@@ -848,8 +894,54 @@ function ChatAppComponent({
       return;
     }
 
-    const setAssistantMessage = assistantMessageWriter(runKey);
-    setChatRuntimeLastPrompt(runKey, { text, targetChatId, attachments });
+    /*
+      Wrapped rather than reported at each of the four places this turn can end
+      in an error (the request's own catch, the empty-response branch, the
+      timeout path, the verification failure). A report added to three of them
+      is a report missing from the fourth -- which is how a shell learns about
+      some failures and silently waits forever on the rest. One wrapper, one
+      place, every error status this send writes.
+
+      A deep research job's own failure is not among them: it is polled by
+      `pollDeepResearchJob`, which holds its own writer, and no offer here
+      re-runs deep research.
+
+      `cancelled` deliberately does not fire: the user stopping their own run
+      is not a failure of the run, and offering to retry it would be arguing
+      with them.
+    */
+    const writeAssistantMessage = assistantMessageWriter(runKey);
+    const setAssistantMessage: typeof writeAssistantMessage = (
+      id,
+      content,
+      status,
+      errorMeta,
+      extraFields
+    ) => {
+      if (status === "error") {
+        onTurnErrorRef.current?.(
+          analyticsPromptId,
+          modelId,
+          errorMeta?.errorCode ?? "UNKNOWN_ERROR"
+        );
+      }
+      writeAssistantMessage(id, content, status, errorMeta, extraFields);
+    };
+    /*
+      What this one request searches with. The override wins where it is given
+      and the conversation's own mode is used everywhere else, so an ordinary
+      send is identical to what it was before the override existed.
+    */
+    const effectiveWebSearchMode: WebSearchMode | undefined =
+      webSearchModeOverride ?? webSearchMode;
+    setChatRuntimeLastPrompt(runKey, {
+      text,
+      targetChatId,
+      attachments,
+      // Only when this send carried one; a composer send records nothing here
+      // and its retry reads the conversation's mode exactly as before.
+      ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
+    });
     // Marks this conversation's history as locally advanced. A history load
     // that was already in flight when this send started describes the
     // conversation as it was *before* the send, so it must not be applied
@@ -1041,7 +1133,9 @@ function ChatAppComponent({
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
             ...(admissionToken ? { admissionToken } : {}),
             ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
-            ...(webSearchMode && webSearchMode !== "off" ? { webSearchMode } : {}),
+            ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
+              ? { webSearchMode: effectiveWebSearchMode }
+              : {}),
             ...(acknowledgedUnavailableAttachmentIds.length > 0
               ? { acknowledgedUnavailableAttachmentIds }
               : {}),
@@ -1610,7 +1704,16 @@ function ChatAppComponent({
         lastPrompt.text,
         lastPrompt.targetChatId,
         retryUserMessageId,
-        lastPrompt.attachments
+        lastPrompt.attachments,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        "single",
+        // Repeats the request that was made. A turn the web-search offer sent
+        // searched without changing the conversation's switch, so retrying it
+        // through the stored mode would quietly send it with search off.
+        lastPrompt.webSearchMode
       );
     })();
   }, [handleSendPrompt, onBeforeSend]);
@@ -1646,6 +1749,7 @@ function ChatAppComponent({
           null,
           null,
           "single",
+          undefined,
           attachmentIds
         );
       })();
@@ -1665,7 +1769,13 @@ function ChatAppComponent({
         lastPrompt.text,
         lastPrompt.targetChatId,
         crypto.randomUUID(),
-        []
+        [],
+        null,
+        undefined,
+        undefined,
+        undefined,
+        "single",
+        lastPrompt.webSearchMode
       );
     })();
   }, [handleSendPrompt, onBeforeSend]);
@@ -1719,7 +1829,8 @@ function ChatAppComponent({
             : undefined,
           promptPayload.admissionToken,
           promptPayload.contextBundle,
-          promptPayload.contextLayout
+          promptPayload.contextLayout,
+          promptPayload.webSearchMode
         );
       })();
     });

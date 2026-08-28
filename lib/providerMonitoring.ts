@@ -381,6 +381,38 @@ export const errorExplanationFor = (code: string | null) => {
   return "The code was recorded from the provider request path; inspect provider logs with the matching time for additional detail.";
 };
 
+/**
+ * Wall-clock window boundaries, and a known consequence of them.
+ *
+ * Failure counters are keyed by the window a call landed in, and the dashboard
+ * reads the newest bucket row rather than summing them. So a model that failed
+ * five times inside one minute can read healthy for up to five minutes if
+ * those failures straddled a boundary: four stay in the old bucket and the
+ * read sees a bucket holding one. A model failing steadily trips again on the
+ * next window, so the effect is a delay rather than a miss. It is reproducible
+ * on demand -- the same five failures give `unavailable` inside one window and
+ * `available` split 4/1 across two -- and it is what
+ * `tests/integration/provider-failure-scope.db.test.ts` starts each scenario
+ * clear of a boundary to avoid asserting around.
+ *
+ * mposition's decision, 2026-08-27: **leave the aggregation as it is.** Summing
+ * the current window with the previous one would let an old success mask a
+ * live incident, and it would change what every existing alerting threshold
+ * means -- a threshold calibrated against one window's count is not the same
+ * threshold against two.
+ *
+ * If five minutes ever becomes unacceptable, the direction is to split the two
+ * readers rather than to change this number:
+ *
+ * - the **routing hard filter** takes the newest probe and real dispatch
+ *   failures immediately, so entering an incident is fast;
+ * - **operational alerting and recovery** keep this rolling window and its
+ *   hysteresis, so leaving an incident stays conservative and needs
+ *   consecutive successes.
+ *
+ * Shortening the probe interval or adding a dispatch-driven circuit breaker
+ * are the levers for the first. Changing what these buckets mean is not.
+ */
 const periodStart = (period: "day" | "month" | "five-minute", now = new Date()) => {
   if (period === "five-minute") {
     return new Date(

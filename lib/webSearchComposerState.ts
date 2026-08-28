@@ -7,8 +7,9 @@
 import {
   getWebSearchCapability,
   webSearchIsDispatchable,
-  type WebSearchCapability,
+  type DispatchableWebSearchCapability,
 } from "@/lib/webSearchCapability";
+import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import {
   modelEligibleForWebSearchSurcharge,
   WEB_SEARCH_SURCHARGE_CREDITS,
@@ -22,19 +23,19 @@ import {
 /**
  * Whether the composer may count this model as one that will search.
  *
- * The whole capability, not its `support` alone. `support: "native"` says the
- * provider has a tool; it does not say a request carrying it can be
- * authorized, and a model counted here is a model the chip promises will
- * search. Counting one whose search cost has no ceiling produced exactly the
- * failure this contract forbids: the composer said search-ready, the request
- * was sent, and the dispatch refused it.
+ * The whole capability plus this deployment's backend readiness, never
+ * `support` alone. `support: "native"` says the provider has a tool; it does
+ * not say a request carrying it can be authorized. `support: "app-managed"`
+ * says this application knows how to run one; it does not say this deployment
+ * holds the credential. A model counted here is a model the chip promises will
+ * search, and counting one on either of those grounds produces exactly the
+ * failure this contract forbids: the composer says search-ready, the request is
+ * sent, and the dispatch refuses it.
  */
 export const modelSupportsWebSearch = (
-  capability: Pick<
-    WebSearchCapability,
-    "support" | "hasAdditionalCost" | "maxBillableSearchQueriesPerRequest"
-  >
-) => webSearchIsDispatchable(capability);
+  capability: DispatchableWebSearchCapability,
+  readiness: WebSearchBackendReadiness
+) => webSearchIsDispatchable(capability, readiness);
 
 export type WebSearchComposerTone =
   /** Requested and every selected model can honour it. */
@@ -68,9 +69,22 @@ export type WebSearchComposerState = {
 export function deriveWebSearchComposerState({
   webSearchMode: storedMode,
   selectedModelIds,
+  backendReadiness,
 }: {
   webSearchMode: WebSearchMode;
   selectedModelIds: readonly string[];
+  /**
+   * Which application-managed search backends this deployment can reach,
+   * resolved on the server and handed down as a prop.
+   *
+   * The composer cannot work this out for itself and must not try: the only
+   * client-visible signal would be a public environment variable, which would
+   * mean shipping the fact of a credential's existence to every browser. It is
+   * required rather than optional so a caller that has not been wired to the
+   * prop fails to compile instead of quietly promising a search this deployment
+   * cannot run.
+   */
+  backendReadiness: WebSearchBackendReadiness;
 }): WebSearchComposerState {
   // Normalized here as well as at every read path, because this is what the
   // chip, the exception row and the surcharge estimate are all derived from:
@@ -83,14 +97,14 @@ export function deriveWebSearchComposerState({
 
   for (const modelId of selectedModelIds) {
     const capability = getWebSearchCapability(modelId);
-    if (modelSupportsWebSearch(capability)) {
+    if (modelSupportsWebSearch(capability, backendReadiness)) {
       supportedCount += 1;
     } else {
       unsupportedModelIds.push(modelId);
     }
     if (
       webSearchMode === "always" &&
-      modelEligibleForWebSearchSurcharge(capability)
+      modelEligibleForWebSearchSurcharge(capability, backendReadiness)
     ) {
       estimatedSurchargeCredits += WEB_SEARCH_SURCHARGE_CREDITS;
     }

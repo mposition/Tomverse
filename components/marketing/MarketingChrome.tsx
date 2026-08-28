@@ -76,17 +76,18 @@ const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = 
 
 const chrome = {
   en: {
-    app: "Chat",
-    appSignedIn: "Open Tomverse",
+    app: "Open Review",
+    appSignedIn: "Back to Review",
     menu: "Menu",
     close: "Close menu",
     topMenu: [
-      { label: "Features", href: "/#how-it-works" },
+      { label: "How it works", href: "/#how-it-works" },
       { label: "Models", href: "/models" },
       { label: "Pricing", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "Trust", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "Terms", href: "/terms" },
       { label: "Refund", href: "/refund" },
       { label: "Privacy", href: "/privacy" },
@@ -95,17 +96,18 @@ const chrome = {
     ],
   },
   ko: {
-    app: "채팅하기",
-    appSignedIn: "채팅으로 돌아가기",
+    app: "Review 열기",
+    appSignedIn: "Review로 돌아가기",
     menu: "메뉴",
     close: "메뉴 닫기",
     topMenu: [
-      { label: "기능", href: "/#how-it-works" },
+      { label: "작동 방식", href: "/#how-it-works" },
       { label: "모델", href: "/models" },
       { label: "요금", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "신뢰", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "이용약관", href: "/terms" },
       { label: "환불", href: "/refund" },
       { label: "개인정보", href: "/privacy" },
@@ -114,17 +116,18 @@ const chrome = {
     ],
   },
   zh: {
-    app: "开始聊天",
-    appSignedIn: "返回聊天",
+    app: "打开 Review",
+    appSignedIn: "返回 Review",
     menu: "菜单",
     close: "关闭菜单",
     topMenu: [
-      { label: "功能", href: "/#how-it-works" },
+      { label: "运作方式", href: "/#how-it-works" },
       { label: "模型", href: "/models" },
       { label: "价格", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "信任", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "条款", href: "/terms" },
       { label: "退款", href: "/refund" },
       { label: "隐私", href: "/privacy" },
@@ -133,17 +136,18 @@ const chrome = {
     ],
   },
   fr: {
-    app: "Discuter",
-    appSignedIn: "Revenir au chat",
+    app: "Ouvrir Review",
+    appSignedIn: "Revenir a Review",
     menu: "Menu",
     close: "Fermer le menu",
     topMenu: [
-      { label: "Fonctionnalites", href: "/#how-it-works" },
+      { label: "Fonctionnement", href: "/#how-it-works" },
       { label: "Modeles", href: "/models" },
       { label: "Tarifs", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "Confiance", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "Conditions", href: "/terms" },
       { label: "Remboursement", href: "/refund" },
       { label: "Confidentialite", href: "/privacy" },
@@ -152,17 +156,18 @@ const chrome = {
     ],
   },
   de: {
-    app: "Chatten",
-    appSignedIn: "Zum Chat zurueck",
+    app: "Review oeffnen",
+    appSignedIn: "Zurueck zu Review",
     menu: "Menu",
     close: "Menu schliessen",
     topMenu: [
-      { label: "Funktionen", href: "/#how-it-works" },
+      { label: "Funktionsweise", href: "/#how-it-works" },
       { label: "Modelle", href: "/models" },
       { label: "Preise", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "Vertrauen", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "Bedingungen", href: "/terms" },
       { label: "Ruckerstattung", href: "/refund" },
       { label: "Datenschutz", href: "/privacy" },
@@ -171,17 +176,18 @@ const chrome = {
     ],
   },
   es: {
-    app: "Chatear",
-    appSignedIn: "Volver al chat",
+    app: "Abrir Review",
+    appSignedIn: "Volver a Review",
     menu: "Menu",
     close: "Cerrar menu",
     topMenu: [
-      { label: "Funciones", href: "/#how-it-works" },
+      { label: "Como funciona", href: "/#how-it-works" },
       { label: "Modelos", href: "/models" },
       { label: "Precios", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "Confianza", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "Terminos", href: "/terms" },
       { label: "Reembolso", href: "/refund" },
       { label: "Privacidad", href: "/privacy" },
@@ -190,17 +196,18 @@ const chrome = {
     ],
   },
   pt: {
-    app: "Conversar",
-    appSignedIn: "Voltar ao chat",
+    app: "Abrir o Review",
+    appSignedIn: "Voltar ao Review",
     menu: "Menu",
     close: "Fechar menu",
     topMenu: [
-      { label: "Recursos", href: "/#how-it-works" },
+      { label: "Como funciona", href: "/#how-it-works" },
       { label: "Modelos", href: "/models" },
       { label: "Precos", href: "/pricing" },
-      { label: "FAQ", href: "/faq" },
+      { label: "Confianca", href: "/#trust" },
     ],
     footerMenu: [
+      { label: "FAQ", href: "/faq" },
       { label: "Termos", href: "/terms" },
       { label: "Reembolso", href: "/refund" },
       { label: "Privacidade", href: "/privacy" },
@@ -345,9 +352,11 @@ export function MarketingHeader({
               data-testid={
                 item.href === "/status"
                   ? "header-status-link"
-                  : item.href.startsWith("/#")
+                  : item.href === "/#how-it-works"
                     ? "header-features-link"
-                    : undefined
+                    : item.href === "/#trust"
+                      ? "header-trust-link"
+                      : undefined
               }
               className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white"
             >
@@ -421,9 +430,11 @@ export function MarketingHeader({
                 data-testid={
                   item.href === "/status"
                     ? "mobile-status-link"
-                    : item.href.startsWith("/#")
+                    : item.href === "/#how-it-works"
                       ? "mobile-features-link"
-                      : undefined
+                      : item.href === "/#trust"
+                        ? "mobile-trust-link"
+                        : undefined
                 }
                 onClick={() => setIsMenuOpen(false)}
                 className="flex items-center gap-2 rounded-xl px-3 py-3 text-base font-bold text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"

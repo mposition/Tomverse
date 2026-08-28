@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import { findApprovedEvalPair } from "../lib/memoryExtractionEvalRegister.ts";
-import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
+import {
+    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+    decideEvalRunMode,
+} from "../lib/memoryExtractionEvalCore.ts";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.ts";
 
 /**
@@ -26,6 +30,8 @@ import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.
  */
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
+
 const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
 const NETWORK_GUARD = fileURLToPath(
     new URL("./e2e/block-external-network.cjs", import.meta.url)
@@ -195,18 +201,50 @@ test("only a funded, open pair can run live, and it is named", () => {
         );
     }
 
-    // Named, not counted. A second funded pair has to be argued for.
+    // Named, not counted. `mem-extract-v5` was funded on 2026-08-27, ran, and
+    // was closed the same day: v5-run1 missed every
+    // docs/policy/external-conversation-import-and-memory.md §12.3 floor and the
+    // hard-zero gate, so both v5 pairs are `revoked` and refuse for the
+    // status ahead of the budget
+    // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
+    // the record -- the approval was real and part of it was really spent --
+    // which is why "funded" and "runnable" are not the same list.
     assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
-    const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+    // Pinned rather than range-checked: a budget that drifts upward without
+    // these lines moving is a budget nobody approved for the figure it
+    // became.
+    const ceilings = {
+        "gpt-5-6-luna::mem-extract-v4": 15,
+    };
+    for (const label of runnable) {
+        const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+            (entry) =>
+                `${entry.extractionModelId}::${entry.promptVersion}` === label
+        );
+        assert.equal(funded.status, "candidate", label);
+        assert.ok(funded.evalBudget, `${label} is runnable but unfunded`);
+        assert.equal(funded.evalBudget.maxUsd, ceilings[label], label);
+        assert.ok(funded.evalBudget.ticket, `${label} names no approval record`);
+    }
+    // Both backups stay unfunded. A backup that inherited its primary's
+    // ceiling would be a funded pair nobody approved.
+    for (const version of ["mem-extract-v4", "mem-extract-v5"]) {
+        const backup = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+            (entry) =>
+                entry.extractionModelId === "gpt-5-4-mini" &&
+                entry.promptVersion === version
+        );
+        assert.equal(backup.evalBudget, null, `${version} backup is funded`);
+    }
+    // And a funded pair that has been closed keeps its budget while refusing
+    // to run -- the two facts the `runnable` list above separates.
+    const closed = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
-            `${entry.extractionModelId}::${entry.promptVersion}` === runnable[0]
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === "mem-extract-v5"
     );
-    assert.equal(funded.status, "candidate");
-    assert.ok(funded.evalBudget, "the runnable pair is the funded one");
-    // Decision-grade, raised from the probe's US$1 on 2026-08-26. Pinned
-    // rather than range-checked: a budget that drifts upward without this
-    // line moving is a budget nobody approved for the figure it became.
-    assert.equal(funded.evalBudget.maxUsd, 15);
+    assert.equal(closed.status, "revoked");
+    assert.ok(closed.evalBudget, "the closed pair lost the budget it spent");
 
     assert.ok(
         MEMORY_EXTRACTION_EVAL_REGISTER.some(
@@ -362,28 +400,38 @@ const runHarness = (args, env = {}) => {
     }
 };
 
-test("--live with a key never reaches the network for an unfunded pair", () => {
-    // The backup pair is a candidate with no budget, so the harness stops at
-    // the budget gate. Asserting the message the run actually reaches is the
-    // point: a test that passes by describing the wrong gate is worse than
-    // one that fails.
-    //
+test("--live with a key never reaches the network for a pair that cannot run", () => {
     // **This test supplies a key on purpose, so its safety is the pair being
-    // unfunded.** Funding gpt-5-4-mini would turn it into a real
-    // decision-grade run against a 1,150-case dataset, stopped only by the
-    // network guard — and a guard is not a budget. So the premise is asserted
-    // rather than assumed: fund that pair and this fails here, loudly, before
-    // it can fail expensively.
-    const backup = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+    // unable to run.** If gpt-5-4-mini's live pair could, this would become a
+    // real decision-grade run against 1,150 cases, stopped only by the network
+    // guard -- and a guard is not a budget. So the premise is asserted rather
+    // than assumed: make that pair runnable and this fails here, loudly,
+    // before it can fail expensively.
+    //
+    // The pair is resolved the way the harness resolves it -- the model from
+    // the flag, the prompt version from the tree -- rather than named. Naming
+    // `mem-extract-v4` while the tree carried v5 is how this test came to
+    // assert one gate's message about a different entry: it passed only while
+    // both happened to be unfunded, and broke the day v5 was closed.
+    const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
             entry.extractionModelId === "gpt-5-4-mini" &&
-            entry.promptVersion === "mem-extract-v4"
+            entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
     );
-    assert.ok(backup, "the backup pair this test relies on is gone");
-    assert.equal(
-        backup.evalBudget,
-        null,
-        "gpt-5-4-mini::mem-extract-v4 is funded — this test now spends money"
+    assert.ok(pair, "the pair this test relies on is not registered");
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: pair,
+        hasApiKey: true,
+        datasetFrozen: true,
+        datasetPurpose: "decision",
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        commitKnown: true,
+    });
+    assert.notEqual(
+        decision.mode,
+        "live",
+        `gpt-5-4-mini::${MEMORY_EXTRACTION_PROMPT_VERSION} can run -- this test now spends money`
     );
 
     const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
@@ -391,7 +439,13 @@ test("--live with a key never reaches the network for an unfunded pair", () => {
         OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
     });
     assert.equal(result.status, 1, "the run must refuse");
-    assert.match(result.output, /no approved eval budget/i);
+    // Which gate speaks is the register's business and changes with it. What
+    // this test owns is that the refusal happened before anything dialled out.
+    assert.match(
+        result.output,
+        /no approved eval budget|in the\s+register/i,
+        result.output
+    );
     assert.doesNotMatch(
         result.output,
         /QA_EXTERNAL_NETWORK_BLOCKED/,
@@ -437,17 +491,23 @@ test("a smoke run completes without touching the network", () => {
 });
 
 test("a smoke run that passes every rule still says it proves nothing", () => {
-    // The dangerous shape now that the floor is met and the dataset is frozen:
-    // a stub agreeing with itself prints "Every §12.3 rule passed", and without
-    // the caveat beside it that reads like a decision-grade result. The freeze
-    // removed the second disclaimer this test used to lean on ("not frozen"),
-    // which makes the first one load-bearing -- so it is asserted on its own,
-    // beside the dataset line that now reads `decision, frozen`.
+    // The dangerous shape once the floor is met: a stub agreeing with itself
+    // prints "Every §12.3 rule passed", and without the caveat beside it that
+    // reads like a decision-grade result. The caveat is asserted on its own
+    // rather than leaning on the "not frozen" disclaimer beside it, because
+    // that disclaimer comes and goes with the current target's freeze state --
+    // it was absent while succ-2 was the target and is back while succ-3 is
+    // being authored. A caveat that only appears for an unfrozen dataset is
+    // exactly the wrong way round.
     const result = runHarness([]);
     assert.match(result.output, /SMOKE RUN — NOT an eval result/);
     assert.match(result.output, /No provider was called/);
-    assert.match(result.output, /\(decision, frozen\)/);
-    assert.doesNotMatch(result.output, /not frozen/);
+    assert.match(
+        result.output,
+        MEMORY_EVAL_SUCC3_DATASET_FROZEN
+            ? /\(decision, frozen\)/
+            : /\(decision, not frozen\)/
+    );
 });
 
 /* ---------------------------------------------------------------- static -- */

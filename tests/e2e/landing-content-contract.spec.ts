@@ -16,19 +16,40 @@ import { prepareGuestPage } from "./support/app-fixtures";
  * condition keywords, CTA destinations, and the phrases that must never come
  * back. Rewording a paragraph must not break it; deleting a section must.
  *
+ * ## Updated for landing V2
+ *
+ * V2 merged eight sections into five, because three of the eight retold the
+ * hero demonstration and two more pairs answered one question in two scroll
+ * stops. This file follows the merge rather than freezing the old shape:
+ *
+ * - `ai-review` folded into `how-it-works`. The section that owned it existed
+ *   to repeat the loop and then describe AI Review; the loop is told once now
+ *   and AI Review's output, modes, dual reviewer and boundary are all in
+ *   `how-it-works`. The assertions that lived on `landing-proof-section` are
+ *   below, on `landing-loop-section`.
+ * - `model-catalogue` folded into `trust`. Both answered "what am I getting
+ *   and can I rely on it", so the catalogue is the block at the top of the
+ *   trust section. Its own test ids (`landing-models-cta`,
+ *   `landing-status-cta`, `landing-provider-count`, `landing-provider-list`)
+ *   are all unchanged, because the block is unchanged in what it claims.
+ * - `landing-guest-note` is gone and `landing-hero-signup-note` carries the
+ *   single guest promise. V1 stated "no sign-up required" twice in the hero,
+ *   once above the CTA and once below it, in near-identical words. The
+ *   promise itself is still asserted here, and still must not be qualified.
+ * - `landing-workflow-disclosure` moved from the retired workflow diagram to
+ *   the hero demonstration, which is the illustration it now describes.
+ *
  * Two things it deliberately does NOT assert: that the hero qualifies its
  * guest-start note, and that the "How it works" steps mark file attachments
- * or AI Review as account-only. Guest access to both is being widened by a
- * separate platform change, so this page must not describe them as locked --
- * the last two tests here guard that from the other direction.
+ * or AI Review as account-only. Guest access to both is real, so this page
+ * must not describe them as locked -- the last two tests here guard that from
+ * the other direction.
  */
 
 const SECTION_IDS = [
   "how-it-works",
   "evidence",
-  "ai-review",
   "after-comparison",
-  "model-catalogue",
   "trust",
   "pricing",
 ] as const;
@@ -49,22 +70,17 @@ for (const path of ["/", "/ko"] as const) {
       await expect(page.locator(`section#${id}`)).toHaveCount(1);
     }
 
-    // Why-this-product (comparison, then evidence) has to precede the
-    // walkthrough: a visitor who has not been told what is different has no
-    // reason to watch how it works.
+    // The narrative order: what it does, how you check it, what happens next,
+    // what you are getting and can rely on, what it costs.
     const order = await page.$$eval("main section[id]", (sections) =>
       sections.map((section) => section.id)
     );
-    const positionOf = (id: string) => order.indexOf(id);
-    expect(positionOf("how-it-works")).toBeGreaterThan(-1);
-    expect(positionOf("how-it-works")).toBeLessThan(positionOf("evidence"));
-    expect(positionOf("evidence")).toBeLessThan(positionOf("ai-review"));
-    expect(positionOf("ai-review")).toBeLessThan(positionOf("after-comparison"));
-    expect(positionOf("after-comparison")).toBeLessThan(
-      positionOf("model-catalogue")
-    );
-    expect(positionOf("model-catalogue")).toBeLessThan(positionOf("trust"));
-    expect(positionOf("trust")).toBeLessThan(positionOf("pricing"));
+    expect(order).toEqual([...SECTION_IDS]);
+
+    // The retired anchors must not come back silently: a second section
+    // telling the same story is the defect V2 removed.
+    await expect(page.locator("section#ai-review")).toHaveCount(0);
+    await expect(page.locator("section#model-catalogue")).toHaveCount(0);
   });
 
   test(`${path} introduces the quick difference summary`, async ({ page }) => {
@@ -129,8 +145,14 @@ for (const path of ["/", "/ko"] as const) {
     await openLanding(page, path);
 
     await expect(page.getByTestId("landing-support-section")).toBeVisible();
-    await expect(page.getByTestId("landing-catalogue-section")).toBeVisible();
+    await expect(page.getByTestId("landing-catalogue-block")).toBeVisible();
     await expect(page.getByTestId("landing-trust-section")).toBeVisible();
+
+    // The catalogue is a block inside the trust section now, not a section of
+    // its own. It must still actually be there.
+    await expect(
+      page.locator("section#trust").getByTestId("landing-catalogue-block")
+    ).toHaveCount(1);
 
     // Recovered dead copy has to actually reach the page, CTAs included.
     await expect(page.getByTestId("landing-models-cta")).toHaveAttribute(
@@ -190,11 +212,22 @@ for (const path of ["/", "/ko"] as const) {
     expect(main).not.toContain("4 credits used");
     expect(main).not.toContain("Review confidence");
 
+    // The disclosure sits under the hero capture. It no longer claims the
+    // visual is a drawing: the page's two visuals are real screenshots of the
+    // current interface now, so "illustrative diagram, not a product
+    // recording" would be a false disclosure rather than a cautious one. What
+    // it must still do is name the demonstration data and refuse the
+    // endorsement reading.
     const disclosure = await page
       .getByTestId("landing-workflow-disclosure")
       .innerText();
     expect(disclosure).not.toMatch(/Real product UI/i);
-    expect(disclosure).toMatch(path === "/ko" ? /설명용 도식/ : /Illustrative/i);
+    expect(disclosure).toMatch(
+      path === "/ko" ? /시연용 데이터/ : /demonstration data/i
+    );
+    expect(disclosure).toMatch(
+      path === "/ko" ? /공급자 보증이 아닙니다/ : /Not a provider endorsement/i
+    );
   });
 
   test(`${path} drops the unguaranteed file-analysis outcome claims`, async ({
@@ -205,6 +238,19 @@ for (const path of ["/", "/ko"] as const) {
     const main = await page.locator("main").innerText();
     expect(main.toLowerCase()).not.toContain("source-linked");
     expect(main).not.toContain("근거와 연결된 체크리스트");
+  });
+
+  test(`${path} keeps no em dash in its customer-facing copy`, async ({
+    page,
+  }) => {
+    // The em dash and en dash were a house style the copy had drifted into:
+    // 37 of them across seven locales, several inside claims where a full
+    // stop reads plainly. Asserted on rendered text so a locale that
+    // reintroduces one fails here rather than in review.
+    await openLanding(page, path);
+
+    const main = await page.locator("main").innerText();
+    expect(main).not.toMatch(/[–—]/);
   });
 
   test(`${path} keeps the public metric disclosure and the locale support banner`, async ({
@@ -230,6 +276,7 @@ for (const path of ["/", "/ko"] as const) {
       ["landing-status-cta", "/status"],
       ["landing-safety-cta", "/safety"],
       ["landing-signup-cta", "/auth/signin?callbackUrl=%2Fchat"],
+      ["landing-secondary-cta", "#how-it-works"],
     ];
     for (const [testId, href] of expectedHrefs) {
       const link = page.getByTestId(testId);
@@ -240,12 +287,36 @@ for (const path of ["/", "/ko"] as const) {
       expect(name.length).toBeGreaterThan(0);
     }
 
-    await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
-      "href",
-      /\/chat\?lang=/
-    );
+    // Both product CTAs go to the same resolved workspace entry. The
+    // destination is decided on the server; this only checks the link the
+    // page actually rendered has not been swapped for a different surface.
+    for (const testId of ["landing-primary-cta", "landing-final-cta"]) {
+      await expect(page.getByTestId(testId)).toHaveAttribute(
+        "href",
+        /\/chat\?lang=/
+      );
+    }
   });
 }
+
+test("the hero names Tomverse Review and sends its CTA to a comparison", async ({
+  page,
+}) => {
+  // The first screen has to answer four questions: Tomverse is the brand,
+  // Tomverse Review is this product, it compares several AI answers, and the
+  // button opens that comparison rather than the unreleased Tomverse Chat.
+  await openLanding(page, "/");
+
+  const brand = await page.getByTestId("landing-brand-note").innerText();
+  expect(brand).toContain("Tomverse Review");
+  expect(brand).toContain("Tomverse");
+
+  const cta = await page.getByTestId("landing-primary-cta").innerText();
+  // "Chat" in a CTA names an unreleased product in the brand tree. Whatever
+  // the label says, it must not be that.
+  expect(cta.toLowerCase()).not.toContain("chat");
+  expect(cta.toLowerCase()).toContain("compar");
+});
 
 test("the hero keeps its guest-start and AI Review messages", async ({ page }) => {
   // Guarded from the opposite direction to everything else here: a future
@@ -256,9 +327,11 @@ test("the hero keeps its guest-start and AI Review messages", async ({ page }) =
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
     /No sign-up required/i
   );
-  await expect(page.getByTestId("landing-guest-note")).toBeVisible();
-
+  // ...and exactly once. V1 carried the same promise in two adjacent
+  // elements, which is what made the hero read as padding.
   const hero = await page.locator("section[aria-labelledby='landing-hero-title']").innerText();
+  expect(hero.match(/No sign-up required/gi) ?? []).toHaveLength(1);
+
   expect(hero).toMatch(/AI Review/);
   expect(hero).not.toMatch(/Account required/i);
   expect(hero).not.toMatch(/sign in to use/i);
@@ -268,7 +341,7 @@ test("the hero keeps its guest-start and AI Review messages", async ({ page }) =
 test("the How it works steps stay unqualified", async ({ page }) => {
   await openLanding(page, "/");
 
-  const steps = await page.getByTestId("landing-proof-section").innerText();
+  const steps = await page.getByTestId("landing-loop-section").innerText();
   expect(steps).toMatch(/send one prompt or supported file/i);
   expect(steps).toMatch(/Run AI Review/i);
   expect(steps).not.toMatch(/Account required/i);
@@ -295,8 +368,16 @@ test("/ko keeps the locale on the brand link and the Features anchor", async ({
       "href",
       "/ko#how-it-works"
     );
+    await expect(page.getByTestId("mobile-trust-link")).toHaveAttribute(
+      "href",
+      "/ko#trust"
+    );
   } else {
     await expect(desktopFeatures).toHaveAttribute("href", "/ko#how-it-works");
+    await expect(page.getByTestId("header-trust-link")).toHaveAttribute(
+      "href",
+      "/ko#trust"
+    );
   }
 
   // Destinations without a `/[locale]` route must NOT be prefixed -- doing so
@@ -305,12 +386,17 @@ test("/ko keeps the locale on the brand link and the Features anchor", async ({
   for (const [name, href] of [
     ["모델", "/models"],
     ["요금", "/pricing"],
-    ["FAQ", "/faq"],
   ] as const) {
     await expect(
       header.getByRole("link", { name, exact: true }).first()
     ).toHaveAttribute("href", href);
   }
+
+  // FAQ moved out of the top menu to keep it to four items, so the route has
+  // to keep an entry point somewhere. It is in the footer.
+  await expect(
+    page.locator("footer").getByRole("link", { name: "FAQ", exact: true })
+  ).toHaveAttribute("href", "/faq");
 });
 
 test("plan credits follow the public billing response", async ({ page }) => {
@@ -461,6 +547,7 @@ test("primary copy and CTAs survive a 200% text scale at 320px", async ({ page }
 
   for (const testId of [
     "landing-primary-cta",
+    "landing-secondary-cta",
     "landing-models-cta",
     "landing-signup-cta",
     "landing-safety-cta",

@@ -95,6 +95,14 @@ Date / timezone:    ____________________
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:router-quality-eval`
+- [ ] `npm run check:router-decision-preregistration` — `n` is still the
+      number that was frozen before the run, under the version it was
+      frozen as, and no more than one registration is active
+- [ ] `npm run check:router-human-review` — the human sample that
+      calibrates the model judges holds the shape it was drawn with:
+      four primary and two reserve per cell, no pair in both, no
+      substitution recorded against a verdict, and no diagnostic pair
+      inside the primary sixty
 - [ ] `npm run check:auto-rollout-readiness`
 - [ ] `npm run check:usage-bucket-range`
 - [ ] `npm run check:memory-extraction-eval`

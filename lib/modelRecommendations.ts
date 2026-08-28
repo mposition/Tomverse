@@ -7,6 +7,7 @@ import {
   type AiModel,
   type ModelTier,
 } from "./models.ts";
+import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import {
   getModelPickerFeatures,
   type ModelPickerFeature,
@@ -165,6 +166,15 @@ export type ModelRecommendationInput = {
   language?: ModelPickerLanguage;
   /** Image attachments are staged, so text-only models cannot be selected. */
   requiresImageInput?: boolean;
+  /**
+   * Which application-managed search backends this deployment can reach.
+   *
+   * Required, because the search badge on a recommendation row is the same
+   * claim the composer's chip makes -- that this model answers from the live
+   * web -- and a row that carries it on a deployment with no credential is a
+   * row that promises a search nothing will run.
+   */
+  searchBackendReadiness: WebSearchBackendReadiness;
 };
 
 export type ModelRecommendation = {
@@ -224,6 +234,7 @@ export const getModelRecommendations = ({
   selectedModelIds = [],
   language = "en",
   requiresImageInput = false,
+  searchBackendReadiness,
 }: ModelRecommendationInput): ModelRecommendation[] => {
   const catalogById = new Map(models.map((model) => [model.id, model]));
   const resolveStoredId = (modelId: string) =>
@@ -261,7 +272,7 @@ export const getModelRecommendations = ({
       useCase,
       source,
       credits: getModelUsageProfile(model).credits,
-      features: getModelPickerFeatures(model),
+      features: getModelPickerFeatures(model, searchBackendReadiness),
       status,
       lock: getLock(model, plan, isGuestMode),
       isSelected: selected.has(model.id),

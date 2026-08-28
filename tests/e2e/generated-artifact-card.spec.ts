@@ -1094,3 +1094,76 @@ test("a non-image format gets no preview", async ({ page }, testInfo) => {
   // And nothing was fetched for it: a spreadsheet is not downloaded twice.
   expect(requested).toEqual([]);
 });
+
+/* -------------------------------------------------------------------------- */
+/* Web search and a file in the same turn                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A search and a file in one answer, on a Google model.
+ *
+ * This combination used to be impossible, and for a reason that was true when
+ * it was written: Google's Search grounding is a built-in retrieval tool and
+ * cannot ride on a request that also carries function declarations, so
+ * `planGeneratedArtifactTool` refused the artifact tools for every searching
+ * Google turn (`native_search_conflict`). A user who asked to "look this up and
+ * put it in a spreadsheet" got one or the other.
+ *
+ * The Google models no longer search through grounding. Their `web_search` is a
+ * function declaration this application executes, so there is no built-in tool
+ * on the request for the `create_*` tools to be exclusive with, and both may be
+ * registered. What that looks like from here is one answer carrying a source
+ * list and a download card.
+ */
+test("a Google turn can search and produce a file in the same answer @ui-risk", async ({
+  page,
+}, testInfo) => {
+  await prepareGuestPage(page, "ko");
+  await mockChat(
+    page,
+    `${buildArtifactProgressChunk("xlsx")}검색해서 표로 정리했습니다.` +
+      buildChatStreamTrailerChunk({
+        searchMetadata: {
+          requested: true,
+          supported: true,
+          executed: true,
+          provider: "google",
+          executionKind: "app_managed",
+          searchBackend: "brave",
+          tool: "web_search",
+          queryCount: 2,
+          backendRequestCount: 2,
+          citations: [
+            { url: "https://example.com/model-a", title: "Model A" },
+            { url: "https://example.com/model-b", title: "Model B" },
+          ],
+        },
+        completion: { status: "normal" },
+        artifacts: [ARTIFACT],
+      })
+  );
+  await page.goto("/chat");
+
+  await sendChatMessage(page, testInfo, "최신 모델 정보를 검색해서 xlsx로 만들어줘");
+
+  // Both, in one message. Either one alone would be the old behaviour.
+  await expect(card(page)).toBeVisible();
+  await expect(inCard(page, "generated-artifact-filename")).toHaveText(
+    ARTIFACT.filename
+  );
+  const citations = page
+    .getByTestId("search-citation-list")
+    .first()
+    .getByRole("link");
+  await expect(citations).toHaveCount(2);
+  await expect(citations.first()).toHaveAttribute(
+    "href",
+    "https://example.com/model-a"
+  );
+  // And the answer is still a sentence rather than the table it wrote to the
+  // file -- the rule the artifact tools exist to enforce does not relax
+  // because a search also ran.
+  await expect(page.getByTestId("chat-message-list").first()).not.toContainText(
+    "```"
+  );
+});

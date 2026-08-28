@@ -37,6 +37,7 @@ import {
     OPERATIONAL_COST_GUARDRAIL_TRIGGERED,
     PLAN_ENTITLEMENT_EXHAUSTED,
     PROVIDER_BUDGET_EXHAUSTED,
+    SEARCH_PROVIDER_BUDGET_EXHAUSTED,
 } from "@/lib/chatCostSafetyCore";
 import {
     estimateToolInputTokenOverhead,
@@ -74,8 +75,13 @@ import {
     NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
     missingAuthorizationIsADefect,
     recordSearchQueryCeilingBreach,
+    searchBackendLatchKey,
+    settledAppManagedSearchCost,
     settledNativeSearchCost,
 } from "@/lib/webSearchNativeCostReservation";
+import { searchProviderBucketKey } from "@/lib/searchProviderBudget";
+import { getSearchProviderBudgetLimits } from "@/lib/webSearchBackendRuntime";
+import type { WebSearchBackend } from "@/lib/webSearchBackends";
 import { persistSearchQueryCeilingBreach } from "@/lib/webSearchCeilingBreachStore";
 import {
     boundedProviderIdentifier,
@@ -196,6 +202,25 @@ export type ChatBudget = {
     /** The per-query rate and enforced ceiling the reservation was sized on. */
     nativeSearchCostPerQueryMicroUsd: number;
     nativeSearchMaxQueries: number;
+    /**
+     * The application-managed search vendor's own worst case, and the rate and
+     * ceiling it was sized on. Null unless this turn registers `web_search`.
+     *
+     * Deliberately *not* folded into `nativeSearchReservedCostMicroUsd`, and
+     * deliberately absent from `getChatBudgetReservedCostMicroUsd`. That figure
+     * is what gets held against the *model provider's* budget bucket, and a
+     * Brave charge counted there would tell an operator that Google was
+     * overspending -- while the vendor whose invoice actually grew stayed
+     * invisible to the budget that exists to bound it. Two invoices, two
+     * buckets: docs/policy/credit-and-cost-limits.md.
+     */
+    searchBackend: {
+        backend: string;
+        reservedCostMicroUsd: number;
+        costPerQueryMicroUsd: number;
+        maxQueries: number;
+        pricingVersion: string;
+    } | null;
     provider: AiModel["provider"];
     /** Which entry of lib/modelPricing.ts produced the rates above. */
     pricingVersion: string;
@@ -209,7 +234,22 @@ type ReservationEntry = {
     period: string;
     periodStart: Date;
     amount: number;
-    metric: "tokens" | "cost" | "credits" | "plan-credits" | "plan-cost" | "pro-response";
+    metric:
+        | "tokens"
+        | "cost"
+        | "credits"
+        | "plan-credits"
+        | "plan-cost"
+        | "pro-response"
+        /**
+         * A hold on a search vendor's own spend budget.
+         *
+         * Its own metric rather than `cost`, because `cost` settles to the
+         * turn's model-provider spend and this settles to what the search
+         * vendor served. One entry list, two settlement figures, told apart by
+         * this field.
+         */
+        | "search-cost";
 };
 
 export type ChatUsageReservation = {
@@ -292,6 +332,7 @@ const durableReservationPayloadSchema = z
                         "plan-credits",
                         "plan-cost",
                         "pro-response",
+                        "search-cost",
                     ]),
                 })
                 .strict()
@@ -336,6 +377,22 @@ const durableReservationPayloadSchema = z
                                 reservedCostMicroUsd: z.number().int().nonnegative(),
                                 costPerQueryMicroUsd: z.number().int().nonnegative(),
                                 maxQueries: z.number().int().nonnegative(),
+                            })
+                            .strict()
+                            .optional(),
+                        // The same authorization for a search vendor this
+                        // application pays directly. Separate, because it names
+                        // a vendor and settles into a different bucket -- and
+                        // because a reservation written before this route
+                        // existed has neither, while one written after may have
+                        // exactly one of the two.
+                        searchBackendAuthorization: z
+                            .object({
+                                backend: z.string().min(1).max(40),
+                                reservedCostMicroUsd: z.number().int().nonnegative(),
+                                costPerQueryMicroUsd: z.number().int().nonnegative(),
+                                maxQueries: z.number().int().nonnegative(),
+                                pricingVersion: z.string().min(1).max(120),
                             })
                             .strict()
                             .optional(),
@@ -631,6 +688,15 @@ export const createChatBudget = (
          */
         nativeSearchEnabled?: boolean;
         /**
+         * Whether this application's own `web_search` tool is registered.
+         *
+         * Separate from `nativeSearchEnabled` because they differ in where the
+         * money goes, and identical in what they do to the input side of the
+         * turn -- both feed retrieved result text back into the prompt, so both
+         * widen the input reservation by the same overhead.
+         */
+        appManagedSearchEnabled?: boolean;
+        /**
          * The worst case that search may cost, from
          * `reserveNativeSearchCost`. The caller resolves it because refusing a
          * search that cannot be bounded is a dispatch decision, not a pricing
@@ -641,6 +707,18 @@ export const createChatBudget = (
             costPerQueryMicroUsd: number;
             maxQueries: number;
         };
+        /**
+         * The same, for a search vendor this application pays directly, from
+         * `reserveTurnSearchCost`. Carried on its own field all the way to its
+         * own budget bucket.
+         */
+        searchBackend?: {
+            backend: string;
+            reservedCostMicroUsd: number;
+            costPerQueryMicroUsd: number;
+            maxQueries: number;
+            pricingVersion: string;
+        } | null;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -686,6 +764,8 @@ export const createChatBudget = (
         toReservedInputTokens(estimatedInput, {
             toolOverheadTokens: estimateToolInputTokenOverhead({
                 nativeSearchEnabled: options?.nativeSearchEnabled === true,
+                appManagedSearchEnabled:
+                    options?.appManagedSearchEnabled === true,
             }),
         })
     );
@@ -712,6 +792,7 @@ export const createChatBudget = (
         nativeSearchCostPerQueryMicroUsd:
             options?.nativeSearch?.costPerQueryMicroUsd ?? 0,
         nativeSearchMaxQueries: options?.nativeSearch?.maxQueries ?? 0,
+        searchBackend: options?.searchBackend ?? null,
         provider: model.provider,
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,
@@ -3118,6 +3199,95 @@ export const acquireChatAccess = async (
             });
         }
 
+        // The search vendor's own budget, held in the same transaction and in
+        // its own bucket.
+        //
+        // Same transaction because a turn admitted against a model provider's
+        // budget and then refused by a search vendor's must not leave the first
+        // hold behind; and because two transactions could each see the other's
+        // spend missing. Its own bucket because the two are different invoices
+        // (docs/policy/credit-and-cost-limits.md) -- `provider:google` counts
+        // what Google is owed, and this counts what the search vendor is owed.
+        //
+        // Ordered after the provider budget deliberately: a turn that cannot
+        // afford its tokens has no search to pay for either, and refusing on
+        // the larger, more common bound first keeps the reported reason the
+        // more useful one.
+        if (budget.searchBackend && budget.searchBackend.reservedCostMicroUsd > 0) {
+            const searchKey = searchProviderBucketKey(
+                budget.searchBackend.backend
+            );
+            const searchLimits = getSearchProviderBudgetLimits(
+                budget.searchBackend.backend as WebSearchBackend
+            );
+            if (!searchLimits) {
+                // Unreachable through the dispatch surfaces, which all refuse a
+                // backend whose budget could not be read before offering it.
+                // Fail-closed anyway: a hold nobody can bound is a hold that
+                // bounds nothing, and the alternative is an unmetered vendor.
+                throw new ChatAccessError(
+                    503,
+                    SEARCH_PROVIDER_BUDGET_EXHAUSTED,
+                    "Web search is temporarily unavailable.",
+                    undefined,
+                    {
+                        scope: "search_budget_unconfigured",
+                        limitLayer: "operational_guardrail",
+                    }
+                );
+            }
+            const searchWindows = [
+                {
+                    period: "search-cost-day" as const,
+                    periodStart: providerBudgetPeriodStarts.day,
+                    limit: searchLimits.day,
+                    scope: "search_cost_day",
+                },
+                {
+                    period: "search-cost-month" as const,
+                    periodStart: providerBudgetPeriodStarts.month,
+                    limit: searchLimits.month,
+                    scope: "search_cost_month",
+                },
+            ];
+            for (const window of searchWindows) {
+                const allowed = await incrementUsage(
+                    tx,
+                    searchKey,
+                    window.period,
+                    window.periodStart,
+                    window.limit,
+                    budget.searchBackend.reservedCostMicroUsd
+                );
+                if (!allowed) {
+                    throw new ChatAccessError(
+                        503,
+                        SEARCH_PROVIDER_BUDGET_EXHAUSTED,
+                        "Web search is temporarily unavailable.",
+                        undefined,
+                        {
+                            // The vendor, not the model's provider. An operator
+                            // told "google" here would go and look at the wrong
+                            // budget.
+                            searchBackend: budget.searchBackend.backend,
+                            scope: window.scope,
+                            limitLayer: "operational_guardrail",
+                            internalRequiredCostMicroUsd:
+                                budget.searchBackend.reservedCostMicroUsd,
+                            internalLimitCostMicroUsd: window.limit,
+                        }
+                    );
+                }
+                reservationEntries.push({
+                    key: searchKey,
+                    period: window.period,
+                    periodStart: window.periodStart,
+                    amount: budget.searchBackend.reservedCostMicroUsd,
+                    metric: "search-cost",
+                });
+            }
+        }
+
         // The slot itself was claimed at the top of this transaction, before
         // anything was charged. A request that claimed nothing takes the
         // ordinary single-slot path here, unchanged.
@@ -3196,6 +3366,21 @@ export const acquireChatAccess = async (
                                   costPerQueryMicroUsd:
                                       budget.nativeSearchCostPerQueryMicroUsd,
                                   maxQueries: budget.nativeSearchMaxQueries,
+                              },
+                          }
+                        : {}),
+                    ...(budget.searchBackend &&
+                    budget.searchBackend.maxQueries > 0
+                        ? {
+                              searchBackendAuthorization: {
+                                  backend: budget.searchBackend.backend,
+                                  reservedCostMicroUsd:
+                                      budget.searchBackend.reservedCostMicroUsd,
+                                  costPerQueryMicroUsd:
+                                      budget.searchBackend.costPerQueryMicroUsd,
+                                  maxQueries: budget.searchBackend.maxQueries,
+                                  pricingVersion:
+                                      budget.searchBackend.pricingVersion,
                               },
                           }
                         : {}),
@@ -3291,6 +3476,18 @@ export const settleChatUsage = async (
         /** Native web search's own per-call provider cost (OpenAI/Anthropic/Google), from webSearchExecutionNormalizer's costMetadata. Never set for Perplexity -- its own reported response cost already covers search. */
         searchCostMicroUsd?: number;
         searchQueryCount?: number;
+        /**
+         * Backend requests an application-managed search actually had served.
+         *
+         * Successes, not attempts: the vendor bills for what it served. The
+         * counter bounds attempts so a sick backend cannot be retried without
+         * limit; this bounds money to what was bought.
+         *
+         * Absent on every turn that ran no application-managed search, which is
+         * how a turn with no hold on the search budget is told from one that
+         * held and spent nothing.
+         */
+        searchBackendRequestCount?: number;
         /**
          * Whether anybody counted this turn's searches.
          *
@@ -3665,6 +3862,67 @@ export const settleChatUsage = async (
                 queries: observedSearchQueries,
             };
         }
+        /**
+         * What this turn's application-managed searches cost, priced at what
+         * was authorized.
+         *
+         * The same three rules as the native half above, for the same reasons:
+         * the frozen rate prices it, so a price change between dispatch and
+         * settlement cannot rewrite what a turn was allowed to spend; the count
+         * is successes, because that is what the vendor bills; and a turn that
+         * ended before anybody could count -- cancelled, disconnected, failed
+         * mid-stream -- settles at the authorized ceiling rather than at zero,
+         * because a search that ran before the model wrote a word has already
+         * been bought.
+         *
+         * It is deliberately kept out of `searchCostMicroUsd` and out of
+         * `actualCost`. Those settle the *model provider's* bucket, and this is
+         * a different vendor's invoice; adding it there would report Google as
+         * having spent money that went to a search backend, and would leave the
+         * search budget settling to a figure that never included it.
+         */
+        const searchBackendAuthorization = costIntentFor(
+            canonical.attemptCostIntents,
+            multiAttempt?.billedAttempt?.attemptIndex ?? 0
+        )?.searchBackendAuthorization;
+        const observedBackendRequests = Math.max(
+            0,
+            Number.isSafeInteger(usage.searchBackendRequestCount)
+                ? usage.searchBackendRequestCount!
+                : 0
+        );
+        const backendRequestsUnobserved =
+            usage.searchQueriesObserved === false && !!searchBackendAuthorization;
+        const settledSearchBackend =
+            searchBackendAuthorization && !backendRequestsUnobserved
+                ? settledAppManagedSearchCost({
+                      succeededRequestCount: observedBackendRequests,
+                      costPerQueryMicroUsd:
+                          searchBackendAuthorization.costPerQueryMicroUsd,
+                      maxQueries: searchBackendAuthorization.maxQueries,
+                  })
+                : null;
+        const searchBackendCostMicroUsd = backendRequestsUnobserved
+            ? searchBackendAuthorization!.reservedCostMicroUsd
+            : (settledSearchBackend?.costMicroUsd ?? 0);
+        if (settledSearchBackend?.breachedCeiling) {
+            // Should be unreachable: the ceiling is a counter in this process
+            // rather than a parameter a vendor may ignore. If it fires, this
+            // application has a defect, and the safe response is the same one a
+            // provider's overshoot gets -- stop dispatching that backend until
+            // somebody has looked.
+            recordSearchQueryCeilingBreach(
+                searchBackendLatchKey(searchBackendAuthorization!.backend)
+            );
+            reported.searchCeilingBreach = {
+                provider: searchBackendLatchKey(
+                    searchBackendAuthorization!.backend
+                ),
+                observed: observedBackendRequests,
+                authorized: searchBackendAuthorization!.maxQueries,
+                costMicroUsd: settledSearchBackend.costMicroUsd,
+            };
+        }
         const costBreakdown =
             searchCostMicroUsd > 0
                 ? {
@@ -3776,7 +4034,15 @@ export const settleChatUsage = async (
             const actual =
                 providerCost !== null
                     ? providerCost
-                    : entry.metric === "tokens"
+                    : // Before the generic metrics, because a search bucket
+                      // settles to what the search vendor served and nothing
+                      // else in this list does. A search entry that fell through
+                      // to the `cost` branch would be settled to the turn's
+                      // *token* spend, which is a number from a different
+                      // invoice entirely.
+                      entry.metric === "search-cost"
+                      ? searchBackendCostMicroUsd
+                      : entry.metric === "tokens"
                     ? actualTokens
                     : entry.metric === "cost"
                       ? actualCost

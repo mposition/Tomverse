@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeWebSearchExecution } from "../lib/webSearchExecutionNormalizer.ts";
-import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
+import {
+  getWebSearchCapability,
+  NATIVE_GOOGLE_GROUNDING,
+} from "../lib/webSearchCapability.ts";
+import { ALL_WEB_SEARCH_BACKENDS_READY } from "../lib/webSearchBackends.ts";
 
 const openaiCapability = getWebSearchCapability("gpt-5-5");
 const anthropicCapability = getWebSearchCapability("claude-sonnet-5");
@@ -9,7 +13,7 @@ const anthropicCapability = getWebSearchCapability("claude-sonnet-5");
 // so nothing may dispatch it today. Kept under its own name because the
 // contract it exercises is "the register says native and the answer is still
 // no".
-const googleCapability = getWebSearchCapability("gemini-3-6-flash");
+const googleCapability = NATIVE_GOOGLE_GROUNDING;
 // The same tool the day Google ships a per-request cap. Only the ceiling
 // differs, which is the point: the normalizer's cost arithmetic is keyed on
 // the provider and is ready for it.
@@ -22,6 +26,7 @@ const unsupportedCapability = getWebSearchCapability("codestral");
 
 test("off mode never claims a search happened, even for a native-capable model", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: openaiCapability,
     searchRequested: false,
     provider: "openai",
@@ -36,6 +41,7 @@ test("off mode never claims a search happened, even for a native-capable model",
 
 test("a native model that actually executed the tool reports completed with citations", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: openaiCapability,
     searchRequested: true,
     provider: "openai",
@@ -61,6 +67,7 @@ test("a native model that actually executed the tool reports completed with cita
 
 test("a native model that chose not to search is requested+supported but not executed", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: anthropicCapability,
     searchRequested: true,
     provider: "anthropic",
@@ -76,6 +83,7 @@ test("a native model that chose not to search is requested+supported but not exe
 
 test("a tool-error part is surfaced as a failure, never a false completion", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: boundedGoogleCapability,
     searchRequested: true,
     provider: "google",
@@ -95,6 +103,7 @@ test("a native capability nothing may dispatch reports unsupported, not searched
   // and reporting them would put a "searched the web" badge on an answer that
   // was written from training data.
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: googleCapability,
     searchRequested: true,
     provider: "google",
@@ -118,6 +127,7 @@ test("a native capability nothing may dispatch reports unsupported, not searched
 
 test("Anthropic search cost is tracked internally, only when queries actually ran", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: anthropicCapability,
     searchRequested: true,
     provider: "anthropic",
@@ -133,6 +143,7 @@ test("Anthropic search cost is tracked internally, only when queries actually ra
 
 test("OpenAI search cost is tracked internally at $10 per 1,000 queries", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: openaiCapability,
     searchRequested: true,
     provider: "openai",
@@ -145,6 +156,7 @@ test("OpenAI search cost is tracked internally at $10 per 1,000 queries", () => 
 
 test("Google search cost is tracked internally at $14 per 1,000 queries", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: boundedGoogleCapability,
     searchRequested: true,
     provider: "google",
@@ -161,6 +173,7 @@ test("Google search cost is tracked internally at $14 per 1,000 queries", () => 
 
 test("Perplexity search-model executions never carry an internal per-query cost estimate", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: perplexityCapability,
     searchRequested: true,
     provider: "perplexity",
@@ -173,6 +186,7 @@ test("Perplexity search-model executions never carry an internal per-query cost 
 
 test("a native model that did not execute a search never carries a cost estimate", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: anthropicCapability,
     searchRequested: true,
     provider: "anthropic",
@@ -186,6 +200,7 @@ test("a native model that did not execute a search never carries a cost estimate
 
 test("an unsupported model that had search requested is flagged unsupported, not executed", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: unsupportedCapability,
     searchRequested: true,
     provider: "groq",
@@ -201,6 +216,7 @@ test("an unsupported model that had search requested is flagged unsupported, not
 test("an unverified model behaves the same as unsupported -- never assumed native", () => {
   const unverified = getWebSearchCapability("gpt-5-4-mini");
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: unverified,
     searchRequested: true,
     provider: "openai",
@@ -213,6 +229,7 @@ test("an unverified model behaves the same as unsupported -- never assumed nativ
 
 test("Perplexity search models always report executed, independent of webSearchMode", () => {
   const withSourcesAlwaysMode = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: perplexityCapability,
     searchRequested: true,
     provider: "perplexity",
@@ -230,6 +247,7 @@ test("Perplexity search models always report executed, independent of webSearchM
   // misreported as "training knowledge" just because the app-wide mode
   // wasn't set to "always".
   const offMode = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: perplexityCapability,
     searchRequested: false,
     provider: "perplexity",
@@ -241,6 +259,7 @@ test("Perplexity search models always report executed, independent of webSearchM
 
 test("dangerous citation URLs never survive normalization", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: openaiCapability,
     searchRequested: true,
     provider: "openai",
@@ -263,6 +282,7 @@ test("Perplexity's own top-level citations are what the source list is built fro
   // OpenAI-compatible chat adapter never turns into `source` parts. Without
   // providerCitations this list is empty while the answer still says "[1]".
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: perplexityCapability,
     searchRequested: false,
     provider: "perplexity",
@@ -285,6 +305,7 @@ test("Perplexity's own top-level citations are what the source list is built fro
 
 test("provider citations keep their numbers when source parts repeat them", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: perplexityCapability,
     searchRequested: true,
     provider: "perplexity",
@@ -309,6 +330,7 @@ test("provider citations keep their numbers when source parts repeat them", () =
 
 test("unsafe provider citation URLs are dropped without renumbering the rest", () => {
   const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: perplexityCapability,
     searchRequested: true,
     provider: "perplexity",
@@ -326,6 +348,7 @@ test("unsafe provider citation URLs are dropped without renumbering the rest", (
 
 test("providers other than Perplexity are unchanged by the new field", () => {
   const openai = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: openaiCapability,
     searchRequested: true,
     provider: "openai",
@@ -345,4 +368,169 @@ test("providers other than Perplexity are unchanged by the new field", () => {
   // invented for them.
   assert.equal(openai.citations[0].referenceNumber, undefined);
   assert.deepEqual(openai.costMetadata, { searchCostMicroUsd: 10_000 });
+});
+
+// ---------------------------------------------------------------------------
+// Application-managed search: the sources come from what this process ran.
+// ---------------------------------------------------------------------------
+
+const geminiCapability = getWebSearchCapability("gemini-3-7-flash");
+
+const snapshot = (overrides = {}) => ({
+  backend: "brave",
+  backendRequestCount: 1,
+  succeededRequestCount: 1,
+  refusedCallCount: 0,
+  executed: true,
+  sources: [],
+  maxQueries: 5,
+  ...overrides,
+});
+
+test("application-managed citations come from the executor, never from the answer text", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: snapshot({
+      sources: [
+        { url: "https://example.com/a", title: "A" },
+        { url: "https://example.com/b", title: "B" },
+      ],
+    }),
+    // A model that wrote a plausible-looking URL in its own answer. The
+    // normalizer never reads the answer, so nothing here can become a source:
+    // a URL a model wrote is a string shaped like a citation.
+    content: [
+      { type: "text", text: "See https://example.com/invented for details." },
+    ],
+  });
+  assert.equal(result.executed, true);
+  assert.equal(result.executionKind, "app_managed");
+  assert.equal(result.searchBackend, "brave");
+  assert.deepEqual(
+    result.citations.map((citation) => citation.url),
+    ["https://example.com/a", "https://example.com/b"]
+  );
+  // The vendor that returned it, not the model's provider: a list crediting
+  // Google for a Brave result would be wrong about where the evidence is from.
+  assert.equal(result.citations[0].sourceProvider, "brave");
+});
+
+test("duplicate source URLs are collapsed once, keeping the first title", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: snapshot({
+      succeededRequestCount: 2,
+      backendRequestCount: 2,
+      sources: [
+        { url: "https://example.com/a", title: "First" },
+        { url: "https://example.com/a", title: "Second" },
+      ],
+    }),
+  });
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0].title, "First");
+});
+
+test("unsafe result URLs never reach the citation list", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: snapshot({
+      sources: [
+        { url: "javascript:alert(1)", title: "no" },
+        { url: "data:text/html,<script>", title: "no" },
+        { url: "https://example.com/ok", title: "yes" },
+      ],
+    }),
+  });
+  assert.deepEqual(
+    result.citations.map((citation) => citation.url),
+    ["https://example.com/ok"]
+  );
+});
+
+test("a turn whose every backend request failed did not search, and is refunded", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: snapshot({
+      backendRequestCount: 3,
+      succeededRequestCount: 0,
+      executed: false,
+      failureCode: "backend_rate_limited",
+    }),
+  });
+  assert.equal(result.executed, false);
+  assert.equal(result.failureCode, "backend_rate_limited");
+  assert.equal(result.queryCount, 0);
+  // Attempts and successes are different numbers, and both are reported: one
+  // says the model searched a lot, the other says the backend was unwell.
+  assert.equal(result.backendRequestCount, 3);
+  assert.equal(result.costMetadata?.searchBackendCostMicroUsd, 0);
+});
+
+test("the model may register the tool and never call it, which is the refunded case", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: null,
+  });
+  assert.equal(result.supported, true);
+  assert.equal(result.executed, false);
+  // No failure code: nothing failed. The switch was on, the question did not
+  // need the web, and the eight credits go back.
+  assert.equal(result.failureCode, undefined);
+  assert.equal(result.queryCount, 0);
+});
+
+test("application-managed cost is its own key, never the model provider's", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: snapshot({
+      backendRequestCount: 3,
+      succeededRequestCount: 3,
+    }),
+  });
+  // Three Brave requests at 5,000 micro-USD, not three Google grounding queries
+  // at 14,000. And under `searchBackendCostMicroUsd`, because
+  // `searchCostMicroUsd` settles against the model provider's budget.
+  assert.equal(result.costMetadata?.searchBackendCostMicroUsd, 15_000);
+  assert.equal(result.costMetadata?.searchCostMicroUsd, undefined);
+});
+
+test("with no reachable backend the turn is unsupported, not merely unsearched", () => {
+  const result = normalizeWebSearchExecution({
+    backendReadiness: {},
+    capability: geminiCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "web_search",
+    appManagedSearch: null,
+  });
+  // "supported: true" would make the badge say the search was possible and
+  // simply did not happen, which is the wrong story on a deployment holding no
+  // credential.
+  assert.equal(result.supported, false);
+  assert.equal(result.executed, false);
 });
