@@ -411,6 +411,7 @@ test("losing one reference of several keeps the candidate on what remains", asyn
                         externalMessageId: second.id,
                         evidenceDigest: second.contentDigest,
                         role: "user" as const,
+                        evidenceQuote: "a second supporting message",
                     },
                 ],
             },
