@@ -113,7 +113,7 @@ test("every missing precondition refuses a live run", () => {
             live: true,
             // Schema 2 unless the row is about the schema: every other row
             // has to reach its own gate rather than stopping at this one.
-            datasetSchemaVersion: 2,
+            datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
             ...input,
         });
         assert.equal(decision.mode, "refused", `${reason} must refuse`);
@@ -128,7 +128,7 @@ test("only every precondition together allows a live run", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
-        datasetSchemaVersion: 2,
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     });
     assert.equal(decision.mode, "live");
     assert.equal(decision.ceilingUsd, 50);
@@ -141,7 +141,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
-        datasetSchemaVersion: 2,
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         requestedRunCapUsd: 5,
     });
     assert.equal(narrowed.mode, "live");
@@ -153,7 +153,7 @@ test("a per-run cap may narrow the approved ceiling but never widen it", () => {
         hasApiKey: true,
         datasetFrozen: true,
         commitKnown: true,
-        datasetSchemaVersion: 2,
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         requestedRunCapUsd: 500,
     });
     assert.equal(widened.mode, "refused");
@@ -188,7 +188,7 @@ test("only a funded, open pair can run live, and it is named", () => {
             // is refused whatever the register says. Passing schema 2 here
             // isolates the register's own contribution, which is what this
             // test is about.
-            datasetSchemaVersion: 2,
+            datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         });
         if (decision.mode === "live") {
             runnable.push(label);
@@ -312,7 +312,7 @@ test("a budget opens the budget gate and nothing else", () => {
             hasApiKey: true,
             datasetFrozen: true,
             commitKnown: true,
-            datasetSchemaVersion: 2,
+            datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         }).mode,
         "live"
     );
@@ -331,7 +331,7 @@ test("a budget opens the budget gate and nothing else", () => {
                 hasApiKey: true,
                 datasetFrozen: true,
                 commitKnown: true,
-                datasetSchemaVersion: 2,
+                datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
                 ...override,
             }).mode,
             "refused",
@@ -544,7 +544,7 @@ test("a development purpose waives the freeze gate and nothing else", () => {
         hasApiKey: true,
         datasetFrozen: false,
         commitKnown: true,
-        datasetSchemaVersion: 2,
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         datasetPurpose: "development",
     };
 

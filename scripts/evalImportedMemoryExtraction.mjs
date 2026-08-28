@@ -70,10 +70,11 @@ import {
     summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
 import { judgeEvalV2, scoreCaseV2 } from "../lib/memoryEvalScoringV2.ts";
-// The schema a live run is pinned to, which is not the schema this harness
-// scores. Imported under a name that says which is which: they differ on
-// purpose while the gate is held.
-import { MEMORY_EVAL_DATASET_SCHEMA_VERSION as GATE_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+// The schema a live run is pinned to, which is a different question from the
+// schema this harness scores. Imported under a name that says which is which.
+// From the core module, which owns the gate: the schema module exports the
+// same name meaning "the schema this module defines", and that is 2 forever.
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION as GATE_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 import { judgeEvalV3, scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import { createEvalLiveAdapter } from "../lib/memoryEvalLiveAdapter.ts";
 
