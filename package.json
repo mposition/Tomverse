@@ -53,6 +53,7 @@
     "report:memory-eval-succ4-batch": "node --import tsx scripts/report-memory-eval-succ4-batch.mjs",
     "report:memory-eval-succ4-assembly": "node --import tsx scripts/report-memory-eval-succ4-assembly.mjs",
     "report:memory-eval-succ4-tranche": "node --import tsx scripts/report-memory-eval-succ4-tranche.mjs",
+    "report:memory-eval-succ4-rejections": "node --import tsx scripts/report-memory-eval-succ4-rejections.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
     "draft:router-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-router-eval-candidates.mjs",

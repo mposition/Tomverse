@@ -380,8 +380,8 @@ export const MEMORY_EVAL_SUCC4_MANIFEST: Succ4DatasetManifest = {
     datasetDigest:
         "0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0",
     scoringContractDigest:
-        "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b",
-    scoringContractVersion: "mem-score-v3.2",
+        "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777",
+    scoringContractVersion: "mem-score-v3.3",
     composition: {
         kind: "successor-transition",
         sourceDatasetVersion: "mem-eval-succ-3",

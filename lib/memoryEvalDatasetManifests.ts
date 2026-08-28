@@ -688,6 +688,38 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
                 "8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b",
             pendingRules: ["v3-unfixable-evidence-emits-nothing"],
         },
+        {
+            /**
+             * One id was carrying two rules with different subjects, and
+             * `succ-4` is where that stopped being a wording problem.
+             *
+             * `v3-unfixable-evidence-emits-nothing` said both "no candidate is
+             * emitted from evidence a plain reading cannot fix" — about a
+             * model at run time — and "a gold whose quote is one of those
+             * shapes is rejected at review" — about a sample. A dataset can
+             * satisfy the second and can do nothing at all about the first, so
+             * one `pendingRules` entry blocked every schema-3 freeze on a rule
+             * half of which was never a dataset's to satisfy.
+             *
+             * v3.3 splits them. The authoring half becomes
+             * `v3-unfixable-evidence-not-a-gold` and is enforced:
+             * `lib/memoryEvalGoldReviewJudgements.ts` requires exactly one
+             * review judgement per gold and refuses a decision set holding one
+             * judged unfixable. The model half keeps the old id, keeps its
+             * meaning, and is marked `prompt_pending` — still unwritten, and
+             * no longer counted against a sample.
+             *
+             * `pendingRules` records what a *dataset* freeze is still waiting
+             * on, which is now nothing. The prompt rule is listed separately
+             * by `memoryEvalScoringContractPromptPending()` so it stays
+             * visible rather than reclassified out of sight.
+             */
+            version: "mem-score-v3.3",
+            approvedOn: "2026-08-28",
+            descriptorDigest:
+                "19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777",
+            pendingRules: [],
+        },
     ];
 
 /**

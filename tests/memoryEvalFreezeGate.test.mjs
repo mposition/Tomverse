@@ -19,6 +19,7 @@ import {
 } from "../lib/memoryExtractionEvalFixtures.ts";
 import { MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
+import { MEMORY_EVAL_SUCC4_DATASET_FROZEN } from "../lib/memoryEvalSucc4Dataset.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 
 const SCRIPT = "scripts/check-memory-eval-freeze-conditions.mjs";
@@ -123,17 +124,18 @@ test("the check fails the build only when a dataset that claims a freeze has a g
     // conditions were met.
     //
     // Read per dataset rather than over the whole output, because there are
-    // three now and they are not in the same state: seed-11 and succ-2 are
-    // frozen and complete, and `mem-eval-succ-3` is mid-authoring. A single
+    // four now and they are not in the same state: seed-11, succ-2 and succ-3
+    // are frozen and complete, and `mem-eval-succ-4` is mid-adoption. A single
     // `stdout.includes("MISS")` would have made one dataset's progress report
     // fail the build for another dataset's freeze.
     const sections = result.stdout.split(/Freeze conditions for /).slice(1);
-    assert.equal(sections.length, 3, result.stdout);
+    assert.equal(sections.length, 4, result.stdout);
 
     const frozenByVersion = {
         "mem-eval-seed-11": MEMORY_EVAL_DATASET_FROZEN,
         "mem-eval-succ-2": MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
         "mem-eval-succ-3": MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+        "mem-eval-succ-4": MEMORY_EVAL_SUCC4_DATASET_FROZEN,
     };
     let shouldFail = false;
     for (const section of sections) {
