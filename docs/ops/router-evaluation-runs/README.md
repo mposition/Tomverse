@@ -3,7 +3,10 @@
 > **Both pilot runs recorded here are void and may not be cited.**
 > The harness sent empty answers to the judge, so part of each win-rate
 > delta is "the model returned nothing" rather than "the model answered
-> worse". See `docs/ops/router-evaluation-runs/route01-pilot-20260827-void.md`
+> worse". Run 3 is `VOID_GENERATION_VALIDATION_MISMATCH`; run 2 is
+> `SUSPECT_UNVERIFIABLE`, having kept no bundle to check. Neither delta,
+> discordance nor sizing conclusion may be used. See
+> `docs/ops/router-evaluation-runs/route01-pilot-20260827-void.md`
 > for the evidence, the exclusion arithmetic and what changed.
 
 Artefacts written by `scripts/eval-router-quality.mjs`, one directory entry per
