@@ -203,4 +203,68 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-ko-166:e1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b03",
+        cell: "durable_facts:ko",
+        from: 50,
+        golds: [
+            {
+                key: "succ-durable-ko-167:e1",
+                polarity: "negated",
+                note:
+                    "«이모지는 쓰지 말아 주세요» — follows the frozen en-167:e1 («Please " +
+                    "don't use emoji»). 말아 is not in POLARITY_MARKERS, so the scan " +
+                    "called it unmarked.",
+            },
+            { key: "succ-durable-ko-168:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-169:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-16:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-170:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-171:e1",
+                polarity: "affirmed",
+                note: "나누지 말고 governs the splitting; 한 파일 is what is asked for.",
+            },
+            {
+                key: "succ-durable-ko-174:e1",
+                polarity: "affirmed",
+                note:
+                    "The user has a ten-year-old laptop; 안 돌아갑니다 is about the " +
+                    "programs. Follows the frozen en-58:e1 («My internet at home is " +
+                    "barely faster than dial-up»).",
+            },
+            { key: "succ-durable-ko-176:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-177:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-178:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-179:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-179:e2", polarity: "affirmed" },
+            { key: "succ-durable-ko-17:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-180:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-180:e2", polarity: "affirmed" },
+            { key: "succ-durable-ko-181:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-182:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-182:e2",
+                polarity: "affirmed",
+                note: "«그냥 말씀하셔도 알아들어요» — a permission, as ko-143:e2.",
+            },
+            { key: "succ-durable-ko-183:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-184:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-185:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-186:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-187:e1",
+                polarity: "negated",
+                note:
+                    "«헬스장은 끊기로 했습니다» — the wind-up shape of ko-101, ko-102, " +
+                    "ko-155 and the frozen ko-153.",
+            },
+            {
+                key: "succ-durable-ko-188:e1",
+                polarity: "negated",
+                note: "«서울로는 안 올라가기로 결정했습니다» — a decision not to.",
+            },
+            { key: "succ-durable-ko-18:e1", polarity: "affirmed" },
+        ],
+    },
 ];
