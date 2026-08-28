@@ -504,4 +504,81 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-ko-9:e1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b08",
+        cell: "durable_facts:en",
+        from: 0,
+        golds: [
+            { key: "succ-durable-en-100:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-102:e1",
+                polarity: "affirmed",
+                note:
+                    "«We decided to outsource payroll rather than keep it in house» asserts an arrangement about payroll, not its absence.",
+            },
+            {
+                key: "succ-durable-en-103:e1",
+                polarity: "negated",
+                note:
+                    "«We dropped the extended insurance» — the wind-up shape of ko-101, ko-155, ko-187 and the frozen ko-153.",
+            },
+            {
+                key: "succ-durable-en-104:e1",
+                polarity: "affirmed",
+                note:
+                    "Both predications are affirmative — the son is autistic and routine changes are hard — so §12.4's narrowing does not apply. Same as ko-104.",
+            },
+            { key: "succ-durable-en-107:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-114:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-115:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-117:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-118:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-119:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-11:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-11:e2",
+                polarity: "negated",
+                note:
+                    "«You can skip the introductions» — a need denied, as ko-6:e2 and the frozen en-38:e2.",
+            },
+            { key: "succ-durable-en-120:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-121:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-123:e1",
+                polarity: "affirmed",
+                note:
+                    "Skip governs the theory; practical is what is asked for. Same as ko-123.",
+            },
+            {
+                key: "succ-durable-en-124:e1",
+                polarity: "affirmed",
+                note:
+                    "«rather than a blog post» — a correction resolved in one clause, as ko-124.",
+            },
+            { key: "succ-durable-en-125:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-126:e1",
+                polarity: "affirmed",
+                note:
+                    "«I'm coeliac, so gluten is completely off the table» — the memory asserts the condition, and the allergen token goes with it. Follows the frozen en-108:e1 (peanut/anaphylaxis), en-199:e1 (lactose) and ko-1:e1 (갑각류), all affirmed.",
+            },
+            {
+                key: "succ-durable-en-127:e1",
+                polarity: "affirmed",
+                note:
+                    "«I react badly to fragrance» is affirmative about the fragrance; the scented products are the consequence. Same as the frozen ko-127.",
+            },
+            {
+                key: "succ-durable-en-129:e1",
+                polarity: "affirmed",
+                note:
+                    "«Weekends are completely spoken for» is affirmative about the weekends, where the frozen ko-129 («주말에는 아예 시간을 못 냅니다») is negated on 주말. Same underlying fact, opposite labels, because the rule reads the quote's own predication and the two users phrased it differently. That is the rule working as written -- a model shown either quote would emit the matching polarity -- but it is the first pair where one fact splits, and it is reported rather than absorbed.",
+            },
+            { key: "succ-durable-en-12:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-131:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-132:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-135:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-136:e1", polarity: "affirmed" },
+        ],
+    },
 ];
