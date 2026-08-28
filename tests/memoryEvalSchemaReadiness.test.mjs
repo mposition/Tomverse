@@ -53,8 +53,8 @@ test("every row cites evidence, and a converted row cites a test that exists", (
 test("no consumer is pending, and the gate is still held anyway", () => {
     // Two facts, and keeping them apart is the point of the module. The
     // instrument being ready is not permission to run it: moving the gate is
-    // its own reviewed change, and a paid run needs the §12.5 budget approval
-    // after that.
+    // its own reviewed change, and a paid run needs the budget approval of
+    // docs/policy/external-conversation-import-and-memory.md §12.5 after that.
     const summary = memoryEvalSchema3Readiness();
     assert.deepEqual([...memoryEvalSchema3Blockers()], []);
     assert.equal(summary.gateMayMove, true);

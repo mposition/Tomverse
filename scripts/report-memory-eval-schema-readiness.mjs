@@ -3,9 +3,9 @@
  *
  * Read-only, no credentials, no provider. It reports; it decides nothing.
  * Moving `MEMORY_EVAL_DATASET_SCHEMA_VERSION` is a separate reviewed change,
- * and even a clean report does not open a paid run — that needs the §12.5
- * budget approval, which names the pair, both digests, the run count and the
- * ceiling.
+ * and even a clean report does not open a paid run — that needs the budget
+ * approval of docs/policy/external-conversation-import-and-memory.md §12.5,
+ * which names the pair, both digests, the run count and the ceiling.
  */
 
 import {
@@ -66,9 +66,10 @@ if (blockers.length > 0) {
         "\nNo consumer is pending, so the gate MAY be moved — as its own reviewed\n" +
             `change, from ${MEMORY_EVAL_DATASET_SCHEMA_VERSION} to ${target.datasetSchemaVersion} in ` +
             "lib/memoryEvalDatasetSchema.ts.\n\n" +
-            "Moving it opens nothing on its own. A live run still needs the §12.5 budget\n" +
-            "approval on the pair, and this report is not that approval: it says the\n" +
-            "instrument is ready, not that anyone agreed to spend money on it."
+            "Moving it opens nothing on its own. A live run still needs the budget\n" +
+            "approval on the pair — docs/policy/external-conversation-import-and-memory.md\n" +
+            "§12.5 — and this report is not that approval: it says the instrument is\n" +
+            "ready, not that anyone agreed to spend money on it."
     );
 } else {
     console.log("\nThe gate already reads the harness target's schema.");
