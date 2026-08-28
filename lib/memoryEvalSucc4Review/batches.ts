@@ -376,4 +376,132 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-ko-38:e1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b06",
+        cell: "durable_facts:ko",
+        from: 125,
+        golds: [
+            {
+                key: "succ-durable-ko-38:e2",
+                polarity: "negated",
+                note:
+                    "«기초 설명은 빼주세요» — a need denied, as ko-16:e2 («기본기 설명은 필요 없어요») and the frozen en-38:e2. 빼주세요 is not in POLARITY_MARKERS.",
+            },
+            { key: "succ-durable-ko-39:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-39:e2",
+                polarity: "affirmed",
+                note:
+                    "«코드 이름 정도는 그냥 말씀하셔도 됩니다» — a permission granted, as ko-143:e2. It sits two golds from ko-38:e2 in this batch and takes the opposite label: that is the line, inside one cell.",
+            },
+            { key: "succ-durable-ko-3:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-40:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-41:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-42:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-43:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-44:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-45:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-46:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-48:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-49:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-4:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-53:e1",
+                polarity: "affirmed",
+                note:
+                    "«무릎이 안 좋아서 계단이나 등산은 무리예요» asserts the bad knee; 무리예요 is about the stairs. Same shape as the frozen ko-173 (허리) and ko-110 (손목).",
+            },
+            { key: "succ-durable-ko-54:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-55:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-56:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-57:e1",
+                polarity: "negated",
+                note:
+                    "«대학원은 안 가기로 했습니다» — a decision not to, as ko-188.",
+            },
+            { key: "succ-durable-ko-58:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-5:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-60:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-63:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-64:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-65:e1", polarity: "affirmed" },
+        ],
+    },
+    {
+        id: "succ4-b07",
+        cell: "durable_facts:ko",
+        from: 150,
+        golds: [
+            { key: "succ-durable-ko-66:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-67:e1",
+                polarity: "affirmed",
+                note:
+                    "넘기지 말고 governs the skipping; 질문 is what is asked for.",
+            },
+            { key: "succ-durable-ko-69:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-6:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-6:e2",
+                polarity: "negated",
+                note:
+                    "«기초 설명은 건너뛰고» — a need denied, as ko-38:e2 and ko-16:e2. 건너뛰고 is not in POLARITY_MARKERS.",
+            },
+            { key: "succ-durable-ko-70:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-71:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-73:e1",
+                polarity: "affirmed",
+                note:
+                    "알려주지 마시고 governs the method-only answer; 원리 is what is asked for.",
+            },
+            { key: "succ-durable-ko-74:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-75:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-77:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-7:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-80:e1",
+                polarity: "affirmed",
+                note:
+                    "«커피는 안 마시고 녹차만 마십니다» — 안 attaches to the coffee. The gold is about 녹차, which is asserted.",
+            },
+            { key: "succ-durable-ko-81:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-82:e1",
+                polarity: "affirmed",
+                note:
+                    "«엘리베이터 두고 계단으로 다닙니다» is affirmed on 계단, where ko-12 («계단 있는 곳은 아예 못 갑니다») is negated on the same token. Two users, opposite relations to stairs, told apart by the field.",
+            },
+            { key: "succ-durable-ko-84:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-85:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-86:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-87:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-88:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-88:e2",
+                polarity: "negated",
+                note:
+                    "«설명 안 하셔도 됩니다» — a need denied, the ko-144:e2 side of the line.",
+            },
+            { key: "succ-durable-ko-89:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-8:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-90:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-91:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-91:e2",
+                polarity: "affirmed",
+                note:
+                    "«그냥 하셔도 알아들어요» — a permission, the ko-143:e2 side.",
+            },
+            { key: "succ-durable-ko-92:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-93:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-94:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-95:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-96:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-97:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-98:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-9:e1", polarity: "affirmed" },
+        ],
+    },
 ];
