@@ -52,11 +52,22 @@ export const PROBED_JUDGE_OUTPUT_TOKENS = {
     probeSampleSize: 10,
 } as const;
 
-/** mposition's ceilings for the approved job, 2026-08-28. */
+/**
+ * mposition's ceilings for the approved job, revised 2026-08-28.
+ *
+ * The pilot's first pair -- a $2.00 stage with no per-request bound -- could
+ * not be enforced. The answer arms ask for the product's own output cap, the
+ * Router may pick any enabled model, and `claude-fable-5` at 128,000 output
+ * tokens is a $6.40 request on its own. A stage ceiling below that is a
+ * ceiling one call can breach with nothing able to intervene, so the pilot
+ * stage was raised above its own worst request rather than the answer budget
+ * being quietly lowered to fit.
+ */
 export const FABLE_STAGE_MAX_COST_USD = 18.0;
 export const FABLE_PER_REQUEST_MAX_COST_USD = 0.75;
-export const PILOT_STAGE_MAX_COST_USD = 2.0;
-export const JOB_MAX_COST_USD = 20.0;
+export const PILOT_STAGE_MAX_COST_USD = 7.0;
+export const PILOT_PER_REQUEST_MAX_COST_USD = 6.5;
+export const JOB_MAX_COST_USD = 25.0;
 
 export type JudgePricing = {
     inputUsdPerMillionTokens: number;
