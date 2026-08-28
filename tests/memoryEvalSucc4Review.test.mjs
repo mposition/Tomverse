@@ -6,6 +6,7 @@
 // against.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
@@ -15,6 +16,7 @@ import {
     SUCC4_REVIEWED_AND_KEPT,
 } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
 import {
+    SUCC4_AFFIRMED,
     SUCC4_NEGATED,
     SUCC4_READINGS,
 } from "../lib/memoryEvalSucc4Review/readings.ts";
@@ -137,5 +139,58 @@ test("the readings name real golds", () => {
             testCase.expected.some((gold) => gold.id === goldId),
             `${caseId} has no gold ${goldId}`
         );
+    }
+});
+
+test("polarity has no default: both lists are written out", () => {
+    // §12 condition 6. A fallback to `affirmed` would make a gold nobody read
+    // indistinguishable from one a person read and called affirmed, and every
+    // gold on the affirmed list got there through the absence of a negation
+    // marker -- a routing signal that decides nothing.
+    assert.equal(SUCC4_AFFIRMED.length, 74);
+    assert.equal(SUCC4_NEGATED.length, 47);
+    assert.equal(SUCC4_AFFIRMED.length + SUCC4_NEGATED.length, 121);
+
+    const both = SUCC4_AFFIRMED.filter((key) => SUCC4_NEGATED.includes(key));
+    assert.deepEqual(both, [], "a gold cannot be both");
+    assert.equal(new Set(SUCC4_AFFIRMED).size, SUCC4_AFFIRMED.length);
+    assert.equal(new Set(SUCC4_NEGATED).size, SUCC4_NEGATED.length);
+});
+
+test("no assignment rests on the marker scan alone", () => {
+    // The scan is a closed list of four Korean and five English markers, and
+    // negation is not. `lack`, `avoid`, `exclude`, `싫다`, `피하다`, `제외하다`
+    // negate without appearing in it. This test cannot check a reading; what
+    // it can check is that the lists are data a person wrote rather than a
+    // predicate a scan computes, which is why both are enumerated.
+    const source = readFileSync(
+        new URL("../lib/memoryEvalSucc4Review/readings.ts", import.meta.url),
+        "utf8"
+    );
+    // Prose may name the scan -- the record explains why it did not decide
+    // anything. What it may not do is import it.
+    const imports = source
+        .split("\n")
+        .filter((line) => line.trimStart().startsWith("import"));
+    for (const derived of ["POLARITY_MARKERS", "polarityGap", "polarityMatches"]) {
+        assert.ok(
+            !imports.some((line) => line.includes(derived)),
+            `${derived} must not decide a polarity in the reading record`
+        );
+    }
+    assert.ok(!source.includes("memoryEvalPolarityCalibration"));
+});
+
+test("every rewritten gold names why, and every reading names a polarity", () => {
+    for (const reading of SUCC4_READINGS) {
+        assert.ok(
+            reading.polarity === "affirmed" || reading.polarity === "negated",
+            `${reading.caseId}:${reading.goldId} has no polarity`
+        );
+        const rewritten =
+            reading.factValueAll || reading.factValueAny || reading.evidenceQuote;
+        if (rewritten) {
+            assert.ok(reading.note, `${reading.caseId} was rewritten with no reason`);
+        }
     }
 });

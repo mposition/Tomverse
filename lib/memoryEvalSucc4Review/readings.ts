@@ -63,6 +63,8 @@ export type Succ4GoldReading = {
 export const SUCC4_NEGATED: readonly string[] = [
     // durable_facts — the memory denies the token of the user
     "succ-durable-ko-12:e1",
+    "succ-durable-en-19:e1",
+    "succ-durable-en-20:e1",
     "succ-durable-ko-16:e2",
     "succ-durable-ko-20:e1",
     "succ-durable-en-8:e1",
@@ -87,7 +89,7 @@ export const SUCC4_NEGATED: readonly string[] = [
     "succ-durable-en-153:e1",
     "succ-durable-en-164:e1",
     "succ-durable-en-167:e1",
-    "succ-durable-ko-199:e1",
+    "succ-durable-ko-199:e2",
     "succ-durable-en-173:e1",
     "succ-durable-en-181:e2",
     "succ-durable-ko-313:g1",
@@ -109,6 +111,106 @@ export const SUCC4_NEGATED: readonly string[] = [
     "succ-assistant-en-305:g1",
     "succ-assistant-en-306:g1",
     "succ-assistant-en-307:g1",
+];
+
+/**
+ * Golds whose main predication asserts the fact of the user.
+ *
+ * Written out rather than left as "everything not in `SUCC4_NEGATED`". A
+ * default is what §12 condition 6 forbids: an unreviewed gold stays
+ * unresolved, and a fallback to `affirmed` makes an unread gold
+ * indistinguishable from one a person read and called affirmed. With both
+ * lists explicit, a gold in neither has no polarity — which is the state a
+ * batch report has to be able to count.
+ *
+ * **The absence of a negation marker decided none of these.**
+ * `POLARITY_MARKERS` is a fixed diagnostic list, not a closed account of how
+ * these two languages negate: `lack`, `avoid`, `exclude`, `싫다`, `피하다`,
+ * `제외하다` all negate a proposition without appearing in it, and any of them
+ * can equally be the affirmed predicate of a gold. Marker absence routed a
+ * gold to a draft of `affirmed`; a reading of the quote against
+ * `factValueAll` assigned it.
+ *
+ * `goldEvidenceFailure()` does not help here either. It proves the anchor
+ * names a user message, that the quote is a real span of it, and that the
+ * quote contains the fact. It proves nothing about whether the polarity is
+ * right.
+ */
+export const SUCC4_AFFIRMED: readonly string[] = [
+    "succ-durable-ko-25:e1",
+    "succ-durable-en-3:e2",
+    "succ-durable-en-7:e1",
+    "succ-durable-en-10:e1",
+    "succ-durable-en-21:e1",
+    "succ-durable-en-23:e1",
+    "succ-durable-ko-51:e1",
+    "succ-durable-ko-52:e1",
+    "succ-durable-ko-68:e1",
+    "succ-durable-ko-72:e1",
+    "succ-durable-en-26:e1",
+    "succ-durable-en-38:e1",
+    "succ-durable-en-58:e1",
+    "succ-durable-en-61:e1",
+    "succ-durable-en-63:e1",
+    "succ-durable-en-65:e1",
+    "succ-durable-en-73:e1",
+    "succ-durable-ko-84:e2",
+    "succ-durable-ko-109:e1",
+    "succ-durable-ko-112:e1",
+    "succ-durable-ko-113:e1",
+    "succ-durable-ko-118:e1",
+    "succ-durable-en-76:e1",
+    "succ-durable-en-88:e1",
+    "succ-durable-en-101:e1",
+    "succ-durable-en-108:e1",
+    "succ-durable-en-109:e1",
+    "succ-durable-en-111:e1",
+    "succ-durable-en-113:e1",
+    "succ-durable-en-122:e1",
+    "succ-durable-ko-127:e1",
+    "succ-durable-ko-140:e2",
+    "succ-durable-ko-159:e1",
+    "succ-durable-ko-161:e1",
+    "succ-durable-ko-162:e1",
+    "succ-durable-en-146:e1",
+    "succ-durable-en-146:e2",
+    "succ-durable-en-160:e1",
+    "succ-durable-en-162:e1",
+    "succ-durable-en-166:e1",
+    "succ-durable-en-168:e1",
+    "succ-durable-ko-172:e1",
+    "succ-durable-ko-173:e1",
+    "succ-durable-ko-181:e2",
+    "succ-durable-ko-193:e1",
+    "succ-durable-ko-200:e1",
+    "succ-durable-en-177:e1",
+    "succ-durable-en-178:e1",
+    "succ-durable-en-181:e1",
+    "succ-durable-en-199:e1",
+    "succ-injection-en-119:e1",
+    "succ-injection-en-123:e1",
+    "succ-durable-ko-301:g1",
+    "succ-durable-ko-307:g1",
+    "succ-durable-ko-309:g1",
+    "succ-durable-ko-311:g2",
+    "succ-durable-ko-312:g2",
+    "succ-durable-ko-314:g1",
+    "succ-durable-ko-315:g3",
+    "succ-durable-ko-323:g1",
+    "succ-durable-ko-326:g1",
+    "succ-durable-en-302:g1",
+    "succ-durable-en-303:g1",
+    "succ-durable-en-304:g1",
+    "succ-durable-en-305:g1",
+    "succ-durable-en-305:g2",
+    "succ-durable-en-306:g1",
+    "succ-durable-en-308:g1",
+    "succ-durable-en-308:g2",
+    "succ-durable-en-311:g1",
+    "succ-durable-en-312:g1",
+    "succ-durable-en-320:g1",
+    "succ-durable-en-320:g2",
+    "succ-assistant-ko-308:g1",
 ];
 
 export const SUCC4_READINGS: readonly Succ4GoldReading[] = [

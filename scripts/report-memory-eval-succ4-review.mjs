@@ -19,6 +19,7 @@ import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
 import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
 import { goldEvidenceFailure } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import {
+    SUCC4_AFFIRMED,
     SUCC4_NEGATED,
     SUCC4_READINGS,
 } from "../lib/memoryEvalSucc4Review/readings.ts";
@@ -31,6 +32,14 @@ const containsAll = (haystack, tokens, language) => {
 };
 
 const negated = new Set(SUCC4_NEGATED);
+const affirmed = new Set(SUCC4_AFFIRMED);
+
+// No fallback. §12 condition 6: an unreviewed gold stays unresolved, because a
+// default to `affirmed` makes an unread gold indistinguishable from one a
+// person read and called affirmed -- and every gold here was routed to this
+// list by the absence of a negation marker, which decides nothing.
+const assignedPolarity = (key) =>
+    negated.has(key) ? "negated" : affirmed.has(key) ? "affirmed" : null;
 const readingByKey = new Map(
     SUCC4_READINGS.map((reading) => [`${reading.caseId}:${reading.goldId}`, reading])
 );
@@ -80,11 +89,11 @@ for (const testCase of MEMORY_EVAL_SUCC3_CASES) {
         if (review.length === 0) continue;
 
         const reading = readingByKey.get(key);
-        const polarity = reading?.polarity ?? (negated.has(key) ? "negated" : "affirmed");
+        const polarity = reading?.polarity ?? assignedPolarity(key);
         const built = {
             id: gold.id,
             kind: gold.kind,
-            polarity,
+            polarity: polarity ?? "unresolved",
             factValueAll: reading?.factValueAll ?? tokens,
             factValueAny: reading?.factValueAny,
             evidence: {
@@ -101,7 +110,7 @@ for (const testCase of MEMORY_EVAL_SUCC3_CASES) {
             review,
             polarity,
             scanSays,
-            agreedWithScan: polarity === scanSays,
+            agreedWithScan: polarity !== null && polarity === scanSays,
             hasReading: Boolean(reading),
             retokenised: Boolean(reading?.factValueAll || reading?.factValueAny),
             reanchored: Boolean(reading?.evidenceMessageId || reading?.evidenceQuote),
@@ -126,7 +135,21 @@ const show = (label, table) => {
 };
 
 console.log(`succ-4 review — ${rows.length} golds needed a reading\n`);
-show("Polarity assigned", count(rows.map((r) => r.polarity)));
+show(
+    "Polarity assigned",
+    count(rows.map((r) => r.polarity ?? "UNRESOLVED — not read yet"))
+);
+
+const unresolved = rows.filter((row) => row.polarity === null);
+if (unresolved.length > 0) {
+    console.log(
+        `## ${unresolved.length} golds have no polarity\n\n` +
+            "   Not a failure of the anchor and not a default waiting to be\n" +
+            "   overridden: nobody has read them. §12 condition 6.\n"
+    );
+    for (const row of unresolved.slice(0, 20)) console.log(`   ${row.key}`);
+    console.log();
+}
 show(
     "goldEvidenceFailure",
     count(rows.map((r) => r.failure ?? "resolves"))
@@ -140,7 +163,7 @@ show(
     ])
 );
 
-const disagreed = rows.filter((r) => !r.agreedWithScan);
+const disagreed = rows.filter((r) => r.polarity !== null && !r.agreedWithScan);
 console.log(
     `## Reading vs the marker scan\n\n   ${disagreed.length} of ${rows.length} disagree ` +
         `(${rows.length - disagreed.length} agree — reporting only, not a review outcome)\n`
