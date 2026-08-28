@@ -581,4 +581,123 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-en-136:e1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b09",
+        cell: "durable_facts:en",
+        from: 25,
+        golds: [
+            { key: "succ-durable-en-137:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-138:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-139:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-139:e2", polarity: "affirmed" },
+            { key: "succ-durable-en-13:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-140:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-140:e2",
+                polarity: "affirmed",
+                note:
+                    "«During harvest I'm unavailable for anything else» asserts the harvest as the recurring context; the unavailability is its consequence. Mirrors the frozen ko-140:e2 (수확기).",
+            },
+            { key: "succ-durable-en-141:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-141:e2", polarity: "affirmed" },
+            { key: "succ-durable-en-142:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-143:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-143:e2",
+                polarity: "affirmed",
+                note:
+                    "«you can use the proper script names» — a permission granted, the exact English pair of ko-143:e2.",
+            },
+            { key: "succ-durable-en-147:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-148:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-149:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-14:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-150:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-151:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-152:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-154:e1",
+                polarity: "affirmed",
+                note:
+                    "«overpay the mortgage rather than invest» — a decision to do the thing, as ko-154.",
+            },
+            {
+                key: "succ-durable-en-155:e1",
+                polarity: "negated",
+                note:
+                    "«I wound down the side business deliberately» — the wind-up shape, and the English pair of ko-155 (부업 정리). wound down is not in POLARITY_MARKERS.",
+            },
+            { key: "succ-durable-en-157:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-158:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-159:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-15:e1", polarity: "affirmed" },
+        ],
+    },
+    {
+        id: "succ4-b10",
+        cell: "durable_facts:en",
+        from: 50,
+        golds: [
+            { key: "succ-durable-en-161:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-163:e1",
+                polarity: "affirmed",
+                note:
+                    "«Keep the jargon but put a short gloss in brackets» keeps it; the gloss is an addition, not a refusal.",
+            },
+            { key: "succ-durable-en-165:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-169:e1",
+                polarity: "affirmed",
+                note:
+                    "twelve is one of the five spellings the v5-run1 blind review found unmatchable. Under canon the token and the quote both become 12, so the anchor resolves.",
+            },
+            { key: "succ-durable-en-16:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-170:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-171:e1",
+                polarity: "affirmed",
+                note:
+                    "«rather than split across modules» — the split is what is declined; the single file is asserted. As ko-171.",
+            },
+            {
+                key: "succ-durable-en-172:e1",
+                polarity: "affirmed",
+                note:
+                    "«I get dizzy if I stand for long» asserts the condition; being on one's feet is the consequence. Mirrors the frozen ko-172.",
+            },
+            {
+                key: "succ-durable-en-174:e1",
+                polarity: "affirmed",
+                note:
+                    "«My laptop is ten years old» — the user has the laptop. Mirrors ko-174.",
+            },
+            { key: "succ-durable-en-175:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-176:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-179:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-179:e2", polarity: "affirmed" },
+            { key: "succ-durable-en-17:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-180:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-180:e2", polarity: "affirmed" },
+            { key: "succ-durable-en-183:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-184:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-185:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-186:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-en-187:e1",
+                polarity: "negated",
+                note:
+                    "«I cancelled the gym membership» — the wind-up shape, the English pair of ko-187.",
+            },
+            {
+                key: "succ-durable-en-188:e1",
+                polarity: "negated",
+                note:
+                    "«We decided against moving to the city» — a decision not to, the English pair of ko-188. against carries no listed marker.",
+            },
+            { key: "succ-durable-en-18:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-191:e1", polarity: "affirmed" },
+            { key: "succ-durable-en-192:e1", polarity: "affirmed" },
+        ],
+    },
 ];
