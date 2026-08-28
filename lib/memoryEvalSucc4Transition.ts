@@ -830,6 +830,41 @@ export const SUCC4_SUPERSESSIONS: readonly {
     auditRef: transition.auditRef,
 }));
 
+/**
+ * What a digest over this manifest hashes.
+ *
+ * Freezing `succ-4` freezes which 1,150 cases it holds. It does not, on its
+ * own, freeze *which original each replacement stands for* -- that pairing
+ * lives here, and a dataset digest would be identical whether
+ * `succ-durable-ko-403` replaced `ko-109` or `ko-111`. So the pairing gets a
+ * digest of its own, and the composition pins it.
+ *
+ * Sorted by original id, so the order the rows are written in is not part of
+ * the identity. `grounds` is sorted too: it is a set of reasons, and a manifest
+ * that listed them the other way round is the same manifest.
+ *
+ * No hashing here -- this module stays free of `node:crypto` like the rest of
+ * the eval schema.
+ */
+export function succ4TransitionFingerprintInput(
+    transitions: readonly Succ4Transition[]
+): string {
+    return [...transitions]
+        .sort((a, b) =>
+            a.originalId < b.originalId ? -1 : a.originalId > b.originalId ? 1 : 0
+        )
+        .map((transition) =>
+            [
+                `original=${transition.originalId}`,
+                `replacement=${transition.replacementId}`,
+                `from=${transition.from}`,
+                `grounds=${[...transition.grounds].sort().join("|")}`,
+                `auditRef=${transition.auditRef}`,
+            ].join("\u0000")
+        )
+        .join("\u0001");
+}
+
 /** The transition for one original, or `undefined`. */
 export function succ4TransitionFor(originalId: string): Succ4Transition | undefined {
     return SUCC4_TRANSITIONS.find(

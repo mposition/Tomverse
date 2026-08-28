@@ -353,6 +353,93 @@ export function candidateMatchesGoldV3(
     return true;
 }
 
+/* -------------------------------------------------------------------------
+ * Fingerprint
+ * ---------------------------------------------------------------------- */
+
+/**
+ * A stable fingerprint of a schema-3 sample.
+ *
+ * A separate function, not a widening of `datasetFingerprintInput()`. That one
+ * reads `mustInclude` and nothing else about a gold, and every schema-1 and
+ * schema-2 manifest recorded so far pins a digest computed that way. Widening
+ * it would move those digests, and a frozen dataset whose digest moved because
+ * the digest function changed is indistinguishable from one that was edited.
+ * So schema 1 and 2 keep the serialization they were frozen under, byte for
+ * byte, and schema 3 gets its own.
+ *
+ * ## What it covers
+ *
+ * Everything that can change a score or an anchor judgement: the case's
+ * identity and cell, `goldCompleteness` and `criticalGoldMode`, each gold's
+ * id, kind, polarity, disposition, fact values and evidence anchor, and the
+ * conversation content down to each message's `externalMessageId` -- which is
+ * in because the anchor cites it, so a renamed message is a moved anchor.
+ *
+ * `factValueAny` absent and `factValueAny: []` are serialized differently.
+ * They mean different things to `candidateMatchesGoldV3()` -- absent imposes
+ * nothing, empty is a list that nothing satisfies -- and a fingerprint that
+ * could not tell them apart would call that difference no change.
+ *
+ * ## What ordering means
+ *
+ * Cases are sorted by id and golds by id, so reordering a file is not a
+ * dataset change. Messages and conversations keep their declared order,
+ * because there the order *is* the content: an anchor in the third turn of a
+ * correction says something the same sentence in the first turn does not
+ * (.github/audits/memory-eval-gold-contract-2026-08-27.md §12.9).
+ *
+ * `hash` is not taken here. This module stays free of `node:crypto` so it can
+ * run wherever scoring does.
+ */
+export function datasetFingerprintInputV3(
+    cases: readonly MemoryEvalCaseV3[]
+): string {
+    const byId = (a: { id: string }, b: { id: string }) =>
+        a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+
+    return [...cases]
+        .sort(byId)
+        .map((testCase) =>
+            [
+                `id=${testCase.id}`,
+                `category=${testCase.category}`,
+                `language=${testCase.language}`,
+                `completeness=${testCase.goldCompleteness}`,
+                `criticalGoldMode=${testCase.criticalGoldMode ?? "-"}`,
+                [...testCase.expected]
+                    .sort(byId)
+                    .map((gold) =>
+                        [
+                            `gold=${gold.id}`,
+                            `kind=${gold.kind}`,
+                            `polarity=${gold.polarity}`,
+                            `disposition=${gold.expectedDisposition}`,
+                            `all=${gold.factValueAll.join("|")}`,
+                            gold.factValueAny === undefined
+                                ? "any=-"
+                                : `any=[${gold.factValueAny.join("|")}]`,
+                            `anchorId=${gold.evidence.evidenceMessageId}`,
+                            `anchorQuote=${gold.evidence.evidenceQuote}`,
+                        ].join("\u0000")
+                    )
+                    .join("\u0002"),
+                testCase.conversations
+                    .map((conversation) =>
+                        [
+                            `conversation=${conversation.externalConversationId}`,
+                            ...conversation.messages.map(
+                                (message) =>
+                                    `${message.externalMessageId}:${message.role}:${message.content}`
+                            ),
+                        ].join("\u0003")
+                    )
+                    .join("\u0004"),
+            ].join("\u0000")
+        )
+        .join("\u0001");
+}
+
 /** Re-exported so schema 3 does not fork values schema 2 already settled. */
 export {
     MEMORY_EVAL_EXPECTED_DISPOSITIONS,
