@@ -69,6 +69,17 @@ export type RoutingFailureLayer =
    * failure would move conversations off a model that did nothing wrong.
    */
   | "process"
+  /**
+   * Object storage did not give us something the turn needed.
+   *
+   * Separate from `provider` for the reason `process` is: a lifecycle rule
+   * that deleted a user's attachment says nothing about whether a model can
+   * answer, and filing it as `provider` put it into provider health and, via
+   * the fallback recovery, into which model conversations get moved to.
+   */
+  | "storage"
+  /** Our own code or database failed before anything was dispatched. */
+  | "application"
   | "provider"
   | "stream"
   | "none";

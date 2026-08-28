@@ -380,7 +380,7 @@ export const searchIntentPages: Record<
         { title: "Supported analysis workflows", body: "Use readable PDFs, DOCX, XLSX, PPTX, supported text files, and PNG, JPEG, or WebP images. Actual interpretation depends on the selected model and whether the document contains extractable content.", bullets: ["Summarize a report or presentation.", "Compare explanations from two or three models.", "Ask focused questions about tables, text, code, or an image."] },
         { title: "Prepare files for better results", body: "Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file." },
         { title: "Security boundaries", body: "Attachments require sign-in, are limited by type, count, and size, and are temporarily processed through private object storage. Files and extracted text are sent only to the selected model providers needed to answer the request. Do not upload content you lack permission to process." },
-        { title: "Retention and provider processing", body: "Temporary attachment objects are removed by lifecycle and maintenance controls, currently after approximately one day. Provider-side processing is governed by each provider’s terms." },
+        { title: "Retention and provider processing", body: "Files you attach while signed in are stored with the conversation and are deleted when you delete that conversation or your account. Files attached without an account are temporary and are removed automatically. Provider-side processing is governed by each provider’s terms." },
       ],
     }),
     ko: withCta("ko", {
@@ -393,7 +393,7 @@ export const searchIntentPages: Record<
         { title: "지원되는 분석 작업", body: "읽을 수 있는 PDF, DOCX, XLSX, PPTX, 지원 텍스트 파일과 PNG·JPEG·WebP 이미지를 사용할 수 있습니다. 실제 해석 범위는 선택한 모델과 문서에서 추출 가능한 내용에 따라 달라집니다.", bullets: ["보고서나 발표자료를 요약합니다.", "2~3개 모델의 설명을 비교합니다.", "표, 텍스트, 코드 또는 이미지에 대해 구체적으로 질문합니다."] },
         { title: "더 좋은 결과를 위한 준비", body: "손상되지 않은 명확한 파일과 구체적인 질문을 사용하세요. 암호화, 스캔, 손상 또는 지나치게 큰 문서는 텍스트를 추출하지 못할 수 있습니다. 중요한 숫자, 출처, 수식과 결론은 원본에서 확인해야 합니다." },
         { title: "보안 경계", body: "첨부파일은 로그인이 필요하며 형식, 개수와 크기가 제한됩니다. 비공개 객체 저장소를 통해 임시 처리되고, 답변에 필요한 선택 모델 공급자에게만 파일 또는 추출 텍스트가 전송됩니다. 처리 권한이 없는 자료는 업로드하면 안 됩니다." },
-        { title: "보관과 공급자 처리", body: "임시 첨부 객체는 현재 약 하루 뒤 수명 주기와 유지관리 정책으로 삭제됩니다. 공급자 측 처리는 각 공급자의 약관을 따릅니다." },
+        { title: "보관과 공급자 처리", body: "로그인 상태에서 첨부한 파일은 대화와 함께 보관되며, 해당 대화나 계정을 삭제할 때 삭제됩니다. 로그인하지 않고 첨부한 파일은 임시 보관이며 자동으로 삭제됩니다. 공급자 측 처리는 각 공급자의 약관을 따릅니다." },
       ],
     }),
     zh: withCta("zh", {

@@ -15,6 +15,20 @@
  * the key, so every locale gets the same coverage.
  */
 
+/**
+ * The refusal for a signed-in user's stored file whose object storage no
+ * longer holds.
+ *
+ * Named as a constant because three places have to agree on the string -- the
+ * chat route that raises it, the copy table below, and the client that decides
+ * whether to offer "attach again" or "continue without it" -- and a literal
+ * repeated three times is a literal that will one day be two.
+ */
+export const ATTACHMENT_UNAVAILABLE_CODE = "ATTACHMENT_UNAVAILABLE";
+
+/** Storage could not be read. Distinct from the above: this one is transient. */
+export const ATTACHMENT_STORAGE_UNAVAILABLE_CODE = "ATTACHMENT_STORAGE_UNAVAILABLE";
+
 /** Keys under the `chat.` namespace in `locales/*.ts`. */
 export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> = {
     // -- Shape and content --------------------------------------------------
@@ -53,6 +67,16 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     ARCHIVE_SIZE_MISMATCH: "chat.archiveSizeMismatch",
     ARCHIVE_NO_SUPPORTED_FILES: "chat.archiveNoSupportedFiles",
     ARCHIVE_PROCESSING_TIMEOUT: "chat.archiveTimeout",
+
+    // -- Availability -------------------------------------------------------
+    // A stored file whose bytes are gone. Not "try again": re-reading the same
+    // object gets the same 404, and the only way forward is a new copy of the
+    // file or an explicit decision to continue without it.
+    ATTACHMENT_UNAVAILABLE: "chat.attachmentUnavailable",
+    // Storage did not answer. The opposite advice, and the reason the two
+    // cannot share a code: this one *is* worth retrying.
+    ATTACHMENT_STORAGE_UNAVAILABLE: "chat.attachmentStorageUnavailable",
+    GUEST_ATTACHMENT_EXPIRED: "chat.guestAttachmentExpired",
 
     // -- Operational --------------------------------------------------------
     ATTACHMENTS_DISABLED_BY_ADMIN: "chat.guestAttachmentUnavailable",

@@ -61,10 +61,23 @@ test("the chat route hands the injected context block to the SDK as instructions
     `${ROUTE} must not decide the split from one source of system messages`
   );
 
-  const streamTextCalls = source.match(/await streamText\(\{[\s\S]*?\n\s*\}\);/g) ?? [];
+  // Not anchored on `await streamText(`: the primary dispatch now runs inside
+  // `beginProviderCall`, the wrapper that mints the record proving a request
+  // actually left this process (lib/chatFailureLayer.ts). The `await` moved to
+  // the wrapper, and an anchor on it silently stopped seeing the call it was
+  // written to guard -- so the anchor is the call itself.
+  const streamTextCalls = source.match(/streamText\(\{[\s\S]*?\n\s*\}\)/g) ?? [];
   assert.ok(
     streamTextCalls.length >= 2,
     "expected the primary dispatch and the fallback dispatch"
+  );
+  // Every provider dispatch sits inside the boundary. Outside it, a failure
+  // cannot be told apart from one raised while preparing the turn, and the
+  // route's outer catch records the second as the provider's.
+  assert.match(
+    source,
+    /beginProviderCall\(\s*modelConfig\.provider,/,
+    "the primary dispatch must run inside the provider-call boundary"
   );
   for (const call of streamTextCalls) {
     assert.match(
