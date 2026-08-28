@@ -463,13 +463,14 @@ fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가
 
 ### 11.1 실행 전 — 기계가 확인합니다
 
-harness가 provider에 닿기 전에 세 가지를 확인하고, 하나라도 어긋나면 거절합니다.
+harness가 provider에 닿기 전에 네 가지를 확인하고, 하나라도 어긋나면 거절합니다.
 
 | 거절 | 뜻 |
 |---|---|
 | `budget_not_bound` | 예산이 instrument에 결속돼 있지 않음(2026-08-28 이전 예산) |
 | `budget_tuple_mismatch` | dataset·contract·prompt의 version 또는 digest가 등록값과 다름 |
 | `run_sha_not_descendant` | 실행 commit이 `approvedImplementationSha`의 후손이 아니거나 git이 답하지 못함 |
+| `run_ordinal_not_approved` | `--run-ordinal`이 없거나 승인된 회차(1 또는 2)가 아님 |
 
 `HEAD === approvedImplementationSha`는 요구하지 않습니다. 등록 PR은 자기 merge
 SHA를 미리 담을 수 없고, 같은 instrument를 조립하는 이후 commit은 승인된 것을
@@ -477,11 +478,15 @@ SHA를 미리 담을 수 없고, 같은 instrument를 조립하는 이후 commit
 
 ### 11.2 실행은 2회, 그리고 2회차는 재시도가 아닙니다
 
-1. **1회차** — decision-grade 실행. `--json`으로 artifact를 남깁니다.
+1. **1회차** — decision-grade 실행. `--run-ordinal=1`과 `--json`을 줍니다.
 2. **1회차 판정** — 구조적 실패(harness 결함, 파싱 불가)나 §12.3 기준의 명확한
    탈락이 확인되면 **여기서 멈춥니다.** 2회차를 하지 않고 pair를 종료하거나
    재검토합니다.
-3. **2회차** — §12.4의 재현성 확인 실행. 1회차가 성립했을 때만 합니다.
+3. **2회차** — §12.4의 재현성 확인 실행. 1회차가 성립했고 **사용자의 명시적
+   실행 지시가 있을 때만** 합니다. `--run-ordinal=2`를 줍니다.
+
+`--run-ordinal`은 생략할 수 없습니다. 저장소에 실행 원장이 없으므로 실행이
+자기 회차를 말하고 gate가 승인과 대조하며, 3회차는 거절됩니다.
 
 ### 11.3 재시도가 허용되는 유일한 경우
 
@@ -490,8 +495,29 @@ SHA를 미리 담을 수 없고, 같은 instrument를 조립하는 이후 commit
 여부가 불명확하면 **중단하고 provider 청구 내역과 대조**한 뒤 별도 승인을
 받습니다. 추가 실행은 언제나 별도 승인입니다.
 
-`maxProviderDispatchedRuns: 2`는 기록이며 기계가 세지 않습니다 — 이 저장소에는
-실행 원장이 없습니다. 강제되는 것은 US$12.57 지출 상한과 이 절차입니다.
+`maxProviderDispatchedRuns: 2`가 실행 횟수를 세지는 않습니다. 강제되는 것은
+실행별 지출 상한, `--run-ordinal` 대조, 그리고 이 절차입니다.
+
+### 11.3a 상한은 실행별 US$6.285, 프로그램 총액은 US$12.57
+
+`accruedCostUsd`는 매 실행 0에서 시작하므로 harness가 비교하는 상한은 언제나
+**한 실행의 상한**입니다. 등록값도 그렇게 나뉘어 있습니다.
+
+| 값 | 숫자 |
+|---|---|
+| 실행별 상한 (`maxUsd`) | US$6.285 |
+| 프로그램 총상한 (`programmeMaxMicroUsd`) | 12,570,000 microUSD |
+| 승인 회차 (`maxProviderDispatchedRuns`) | 2 |
+
+- **1회차 미사용액은 2회차로 이월되지 않습니다.** 1회차가 US$3에서 끝나도
+  2회차 상한은 US$6.285 그대로입니다.
+- **1회차가 US$6.285에서 잘리면 decision-grade가 아닙니다.** artifact의
+  `decisionGrade`가 `false`가 되고, 답은 상한을 올리는 것이 아니라 새 예산
+  승인입니다.
+- artifact에는 `runOrdinal`, `runCeilingUsd`, `perRunCeilingUsd`,
+  `approvedRunCount`, `programmeMaxMicroUsd`가 함께 남습니다.
+
+근거는 `.github/audits/memory-eval-gold-contract-2026-08-27.md` 17.7절입니다.
 
 ### 11.4 `--live`를 시험 삼아 실행하지 않습니다
 

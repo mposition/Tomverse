@@ -196,6 +196,11 @@ test("the budget binding, not the schema, is what decides the real pair", () => 
             budgetBindingProblems: [],
             budgetTupleFailures: [],
             runShaDescendsFromApproval: true,
+            // Which of the two approved runs this would be. The budget names
+            // a run count, so an invocation that does not say refuses — the
+            // ceiling is per-run and nothing here can count what earlier runs
+            // spent.
+            runOrdinal: 1,
         }),
         { mode: "live", ceilingUsd: pair.evalBudget.maxUsd }
     );
