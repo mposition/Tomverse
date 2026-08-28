@@ -78,6 +78,7 @@ version the mapping does not cover.
 | contract digest | `c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052` |
 | supersedes | `mem-extract-v5` (`7bb6b27abce3f29dee70f4defd24d8a65175d7a17ab2b9e8d3846ebcc76de281`, unaltered) |
 | register status | `candidate`, `evalBudget: null`, for both `gpt-5-6-luna` and `gpt-5-4-mini` |
+| recorded at commit | `b45b4996ff967fe3ccada594d7cf7286a60ef030` |
 
 v6 exists because schema-3 scoring compares a candidate's `polarity` to the
 gold's field to field and a v5 candidate has no such field: **no v5 pair can be
@@ -133,5 +134,12 @@ build if any of the nine freeze conditions stops holding.
 |---|---|
 | `22fb4aeb1032a7b3b6f37c07873308d648b9e8f7` (freeze) | https://github.com/mposition/Tomverse/actions/runs/33154411698 |
 | `60f89598bfc7f7c5745143c07a98b3ad923d6a5b` (contract v3.3) | https://github.com/mposition/Tomverse/actions/runs/33151805896 |
+| `d493c301d5c23d79c7679a457c95d4abd0b95813` (prompt v6, PR Fast Gate) | https://github.com/mposition/Tomverse/actions/runs/33159852303 |
+| `d493c301d5c23d79c7679a457c95d4abd0b95813` (prompt v6, DB integration) | https://github.com/mposition/Tomverse/actions/runs/33159852329 |
 
-Both concluded `success`.
+All four concluded `success`.
+
+The v6 runs are cited against the head commit that was merged rather than
+against the squash commit the merge produced: the runs never saw
+`b45b4996ff967fe3ccada594d7cf7286a60ef030`, and citing a commit no run was
+computed on is exactly the thing this document exists to make checkable.
