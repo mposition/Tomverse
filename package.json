@@ -49,6 +49,7 @@
     "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
     "report:polarity-calibration": "node --import tsx scripts/report-polarity-calibration.mjs",
     "draft:memory-eval-succ4-golds": "node --import tsx scripts/draft-memory-eval-succ4-golds.mjs",
+    "report:memory-eval-succ4-review": "node --import tsx scripts/report-memory-eval-succ4-review.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
     "draft:router-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-router-eval-candidates.mjs",
