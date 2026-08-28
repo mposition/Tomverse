@@ -109,6 +109,59 @@ const SELECT = {
   unavailableAt: true,
 };
 
+/*
+  Two predictable ways this tool is run before it can work, each with its own
+  remedy and neither obvious from the stack trace it would otherwise print.
+
+  It is run from an operator's laptop against production, which is exactly the
+  situation where the checkout and the deployed schema drift apart: a Prisma
+  client generated before the availability columns existed raises a *client*
+  validation error naming a field, and a database that has not had the
+  migration applied raises a *server* error naming a column. They look alike in
+  a stack trace and the fixes are opposite -- one is `npm ci`, the other is a
+  deploy nobody should perform from here.
+
+  One cheap probe, so the answer is a sentence instead of a trace.
+*/
+try {
+  await prisma.messageAttachment.findFirst({ select: { id: true, unavailableAt: true } });
+} catch (error) {
+  const name = error instanceof Error ? error.name : "unknown";
+  const text = error instanceof Error ? error.message : "";
+  if (/Unknown field .?unavailableAt/.test(text)) {
+    console.error(
+      [
+        "This checkout's Prisma client predates the attachment availability columns.",
+        "Fix it here, in this clone:",
+        "",
+        "  git pull",
+        "  npm ci        # postinstall regenerates the Prisma client",
+        "",
+        "Nothing was read and nothing was written.",
+      ].join("\n")
+    );
+    process.exit(1);
+  }
+  const code = (error && typeof error === "object" && "code" in error && error.code) || "";
+  if (code === "P2022" || /column .*unavailableAt.* does not exist/i.test(text)) {
+    console.error(
+      [
+        "The database has no attachment availability columns, so the migration",
+        "20260828090000_message_attachment_availability has not been applied there yet.",
+        "",
+        "That is a deployment step, not something to run from here: deploy the",
+        "release that carries the migration and let its own migrate step apply it.",
+        "Never run `prisma migrate dev` against production.",
+        "",
+        "Nothing was read and nothing was written.",
+      ].join("\n")
+    );
+    process.exit(1);
+  }
+  console.error(`Could not read MessageAttachment (${name}${code ? ` ${code}` : ""}).`);
+  process.exit(1);
+}
+
 try {
   while (summary.examined < limit) {
     const page = await prisma.messageAttachment.findMany({

@@ -111,6 +111,24 @@ R2 환경변수 넷에 더해 **production `DATABASE_URL`**이 필요하다(행�
 하므로). Railway 컨테이너 안에서는 돌리지 않는다: `tsx`가 devDependency라
 production 이미지에 없을 수 있다.
 
+**먼저**: 이 clone이 최신인지 확인한다. 운영자의 작업 폴더는 대개 배포된
+schema보다 오래됐고, 그러면 Prisma client가 가용성 컬럼을 모른다.
+
+```powershell
+git pull
+npm ci        # postinstall이 Prisma client를 다시 만든다
+```
+
+그리고 **migration이 production DB에 적용돼 있어야 한다**
+(`20260828090000_message_attachment_availability`). 적용은 배포가 하는 일이며
+여기서 하지 않는다 — `prisma migrate dev`를 production에 대고 실행하지 않는다.
+읽기 전용 확인만 한다면 `npx prisma migrate status`가 `DIRECT_DATABASE_URL`
+또는 `DATABASE_URL`을 읽어 무엇이 적용됐는지 보고한다.
+
+둘 중 하나가 어긋나면 감사 도구가 Prisma stack trace 대신 어느 쪽 문제인지와
+고치는 방법을 한 문단으로 말하고 멈춘다. 아무것도 읽지 않고 아무것도 쓰지
+않는다.
+
 ```powershell
 $env:DATABASE_URL         = "<production Postgres URL>"
 $env:R2_ACCOUNT_ID        = "..."
