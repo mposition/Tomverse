@@ -44,12 +44,9 @@ $env:R2_ACCESS_KEY_ID     = "..."
 $env:R2_SECRET_ACCESS_KEY = "..."
 $env:R2_BUCKET_NAME       = "..."
 
-node scripts/check-r2-lifecycle-policy.mjs
-node scripts/check-r2-lifecycle-policy.mjs --json > lifecycle-before.json
+npm run check:r2-lifecycle-policy
+npm run check:r2-lifecycle-policy -- --json > lifecycle-before.json
 ```
-
-`npm run check:r2-lifecycle-policy -- --json`도 같은 것을 실행하지만, PowerShell
-에서 `--` 뒤 인자 전달이 npm 버전에 따라 어긋나므로 `node`로 직접 부른다.
 
 규칙을 **보기만** 할 것이라면 clone도 `npm ci`도 필요 없다: Cloudflare
 대시보드의 R2 → 버킷 → Settings → Object lifecycle rules에 prefix와 만료
@@ -121,8 +118,18 @@ $env:R2_ACCESS_KEY_ID     = "..."
 $env:R2_SECRET_ACCESS_KEY = "..."
 $env:R2_BUCKET_NAME       = "..."
 
-node --import tsx scripts/audit-message-attachment-objects.mjs --json > attachment-audit.json
-node --import tsx scripts/audit-message-attachment-objects.mjs --cursor='<이전 실행이 출력한 값>'
+npm run audit:message-attachments -- --json > attachment-audit.json
+npm run audit:message-attachments -- --cursor='<이전 실행이 출력한 값>'
+```
+
+**npm script로 부른다.** 이 스크립트는 `--conditions=react-server`가 없으면
+뜨지 않는다 — `lib/r2.ts`가 `server-only`를 import 하는 모듈을 거치고, 그
+조건 없이는 "This module cannot be imported from a Client Component module"로
+죽는다. package.json의 script가 그 플래그를 들고 있으므로, script를 부르면
+플래그를 빠뜨릴 수 없다. 직접 부를 때는 이 형태여야 한다.
+
+```powershell
+node --conditions=react-server --import tsx scripts/audit-message-attachment-objects.mjs --json > attachment-audit.json
 ```
 
 - 기본은 dry run. 아무것도 쓰지 않는다.
@@ -140,7 +147,7 @@ dry run 결과를 검토한 뒤에만 기록한다.
 **어디서**: 위와 같은 PowerShell 창(같은 환경변수). **이 명령만 DB에 쓴다.**
 
 ```powershell
-node --import tsx scripts/audit-message-attachment-objects.mjs --apply --ticket=OPS-<번호>
+npm run audit:message-attachments -- --apply --ticket=OPS-<번호>
 ```
 
 `--apply`는 **확정된 404 행에만** `unavailableAt`을 쓴다. 행도 객체도 지우지

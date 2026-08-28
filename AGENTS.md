@@ -48,9 +48,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   합니다.
 - **읽기 전용인지 쓰는지 적습니다.** 쓰는 명령은 무엇이 바뀌는지와 되돌리는
   방법을 같이 적습니다.
-- **`npm run <script> -- --flag` 대신 `node scripts/<파일>` 을 줍니다.**
-  PowerShell에서 `--` 뒤 인자 전달이 npm 버전에 따라 어긋납니다. npm script는
-  이름을 알려 주는 용도로만 언급합니다.
+- **package.json에 script가 있으면 그 script를 줍니다.** `node`로 풀어 쓰지
+  않습니다. script가 들고 있는 플래그가 곧 실행 조건이고, 풀어 쓰는 순간 그것을
+  옮겨 적는 일이 사람 손에 넘어갑니다. 2026-08-28에 실제로 그랬습니다 —
+  `audit:message-attachments`를 `node --import tsx …`로 풀어 주면서
+  `--conditions=react-server`가 빠졌고, 운영자는 `server-only`가 던진 "This
+  module cannot be imported from a Client Component module"를 받았습니다. 명령이
+  아니라 제 전사(轉寫)가 틀린 것이었습니다.
+  풀어 써야 할 이유가 있다면 **package.json에서 플래그를 그대로 복사**하고,
+  왜 풀어 쓰는지 한 줄로 적습니다.
 - **환경변수는 그 창에서만 산다는 것을 적습니다.** `$env:`는 PowerShell 창을
   닫으면 사라지므로, 이어지는 명령이 같은 창을 전제하면 그렇게 말합니다.
 - **대시보드로 끝나는 일이면 스크립트를 주지 않습니다.** Cloudflare R2의
