@@ -97,6 +97,7 @@ const decision = (
     ({
         candidate: {
             kind: "preference",
+            polarity: "affirmed" as const,
             statement,
             confidence: 0.9,
             sensitivity: overrides.candidateSensitivity ?? "standard",
@@ -106,6 +107,10 @@ const decision = (
                     externalMessageId: source.id,
                     evidenceDigest: source.contentDigest,
                     role: "user" as const,
+                    // A span of the fixture message above, because a parsed
+                    // candidate can only carry one that occurs in the message
+                    // it cites.
+                    evidenceQuote: "prefers formal Korean",
                 },
             ],
         },

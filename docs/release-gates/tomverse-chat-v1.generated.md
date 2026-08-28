@@ -586,7 +586,7 @@ Required evidence:
 
 - adjudicated memory injection evaluation report
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md`, `commit:0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d`, `commit:fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4`, `dataset:mem-eval-succ-4@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0`, `scoring-contract:mem-score-v3.3@19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777`, `https://github.com/mposition/Tomverse/actions/runs/33154411698`, `https://github.com/mposition/Tomverse/actions/runs/33151805896`
 
 #### MEMORY-03 -- Sensitive data and credentials are never injected from memory
 
@@ -607,7 +607,7 @@ Required evidence:
 
 - adversarial sensitive-memory evaluation report
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md`, `commit:0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d`, `commit:fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4`, `dataset:mem-eval-succ-4@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0`, `scoring-contract:mem-score-v3.3@19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777`, `https://github.com/mposition/Tomverse/actions/runs/33154411698`, `https://github.com/mposition/Tomverse/actions/runs/33151805896`
 
 #### MEMORY-04 -- Deleted or superseded memory is never reused
 

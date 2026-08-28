@@ -35,8 +35,8 @@ const promptText = () => {
     return `${prompt.system}\n${prompt.user}`;
 };
 
-test("the version is v5", () => {
-    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v5");
+test("the version is v6", () => {
+    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v6");
 });
 
 /* ------------------------------------------------- A. output language -- */
@@ -259,6 +259,61 @@ test("E5: a proficiency level is a fact, not an answer-style preference", () => 
     assert.match(
         text,
         /Do not infer an answer-style preference merely from a factual proficiency level/i
+    );
+});
+
+/* ------------------------------------------------------- F. polarity -- */
+
+test("F1: polarity is asked as a question about the statement, not the wording", () => {
+    // Finding F: schema 3 compares the candidate's polarity to the gold's,
+    // and the gold contract decides polarity by what the memory asserts of
+    // the user -- never by whether a negation word appears
+    // (.github/audits/memory-eval-gold-contract-2026-08-27.md §10.1). A
+    // prompt that let spelling decide would disagree with the gold side on
+    // exactly the cases the field exists for.
+    const text = promptText();
+    assert.match(text, /assert the fact of the user, or assert that it is not so of them/i);
+    assert.match(text, /"affirmed" for the first and "negated" for the second/i);
+    // And the two readings the field names are kept apart: a negative feeling
+    // held by the user is an affirmed fact about them.
+    assert.match(text, /Polarity is not sentiment/i);
+    assert.match(text, /negation word somewhere in the evidence decides nothing/i);
+});
+
+test("F2: unsettled polarity yields no candidate, and not a lower confidence", () => {
+    // The three shapes the calibration corpus showed no distance threshold
+    // could separate. The refusal is the answer, and the alternative a model
+    // reaches for -- answering anyway with less confidence -- is refused by
+    // name because confidence has no reading for an unfixed direction.
+    const text = promptText();
+    assert.match(text, /When the evidence does not settle the polarity, write no candidate/i);
+    assert.match(text, /a condition that has not happened/i);
+    assert.match(text, /a correction the exchange never resolves/i);
+    assert.match(text, /double negative/i);
+    assert.match(text, /Never answer an unsettled case with a lower confidence/i);
+});
+
+test("F3: a resolved correction is still extractable, from the clause that resolves it", () => {
+    // The exception, without which the rule above would drop every corrected
+    // fact -- and corrections are where the most reliable facts live.
+    const text = promptText();
+    assert.match(text, /A correction that IS resolved is extractable/i);
+    assert.match(text, /the clause naming Daegu is the evidence/i);
+});
+
+test("F4: a citation carries an exact quote, copied rather than composed", () => {
+    // A label says which message was read and never which span of it, so
+    // nothing can be checked against the message. The quote is what makes the
+    // citation verifiable, which only holds if it is copied verbatim.
+    const text = promptText();
+    assert.match(text, /message label together with an exact quote/i);
+    assert.match(text, /copied from that message character for character/i);
+    assert.match(text, /no paraphrase|Do not paraphrase/i);
+    // The model is told the consequence, so a long reconstructed quote is not
+    // the safer-looking answer.
+    assert.match(
+        text,
+        /quote that does not occur in the message it names discards the candidate/i
     );
 });
 

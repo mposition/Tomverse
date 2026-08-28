@@ -477,6 +477,7 @@ export type EvalRunModeDecision =
               | "no_api_key"
               | "dataset_not_frozen"
               | "legacy_dataset_schema"
+              | "prompt_rule_unimplemented"
               | "unknown_commit"
               | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
@@ -562,6 +563,24 @@ export function decideEvalRunMode(input: {
      * so nothing here can turn an unfrozen sample into a verdict.
      */
     datasetPurpose?: "decision" | "development";
+    /**
+     * Scoring rules the contract puts on the prompt and the shipped prompt
+     * does not implement, by id.
+     *
+     * A rule this list names is one the run would report on without anything
+     * having applied it. The numbers would be the contract's numbers wearing
+     * a name nothing earned — the same failure `legacy_dataset_schema` above
+     * refuses, one layer up: there the dataset cannot answer the question,
+     * here the prompt was never asked it.
+     *
+     * Passed in rather than computed here, because the contract module is
+     * eval-side and this one is reached from the register, which the runtime
+     * pair resolver imports. Computing it here would pull the scoring
+     * contract into a runtime path that has no use for it. The caller is
+     * `memoryEvalUnimplementedPromptRules()`
+     * (`lib/memoryEvalPromptRuleImplementations.ts`), which owns the mapping.
+     */
+    unimplementedPromptRules?: readonly string[];
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -582,6 +601,9 @@ export function decideEvalRunMode(input: {
     }
     if (input.datasetSchemaVersion !== MEMORY_EVAL_DATASET_SCHEMA_VERSION) {
         return { mode: "refused", reason: "legacy_dataset_schema" };
+    }
+    if ((input.unimplementedPromptRules ?? []).length > 0) {
+        return { mode: "refused", reason: "prompt_rule_unimplemented" };
     }
     if (!input.commitKnown) {
         return { mode: "refused", reason: "unknown_commit" };
