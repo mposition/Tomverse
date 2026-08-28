@@ -1,0 +1,201 @@
+name: Router eval — judge cap probe
+#
+# Ten judge calls, to measure one number the calibration budget rests on.
+#
+# ############################################################################
+# # THIS WORKFLOW SPENDS MONEY. Ten judge calls on claude-fable-5.           #
+# # Manual dispatch only, with a typed confirmation, and never on push.      #
+# ############################################################################
+#
+# docs/ops/tomverse-chat-router-calibration-cost.md priced the judge pass at a
+# three-token verdict -- one word, which is what gpt-5-6-luna emitted, and the
+# fit reproduced that run's total to 0.0%. But claude-fable-5 reasons at effort
+# `high` and bills reasoning as output, so its verdict call is not three tokens
+# and nobody has measured what it is. Every downstream figure -- the stage
+# ceiling, whether the calibration is affordable at all -- follows from it.
+#
+# mposition approved $0.60 for exactly this and refused to let 400 tokens be
+# adopted as a number simply because it was written down. The full pilot and
+# the full Fable rejudge remain unapproved.
+#
+# It judges answers that already exist rather than generating any: the bundle
+# comes from the voided 2026-08-28 pilot, downloaded from that run's artifact.
+# Those answers are not evidence of anything about the models -- that run is
+# void -- but they are real answers of realistic length, which is what makes
+# the judge's reasoning length worth measuring on them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Workflow run id whose artifact holds the answer bundle (e.g. 33130081803)"
+        required: true
+        default: "33130081803"
+      source_artifact:
+        description: "Artifact name in that run"
+        required: true
+        default: "route01-calibration-20260828"
+      bundle_file:
+        description: "Bundle file inside the artifact"
+        required: true
+        default: "route01-pilot-20260828.answers.jsonl"
+      judge_max_output_tokens:
+        description: "Output budget for the judge call. Must be exactly 8192"
+        required: true
+        default: "8192"
+      implementation_sha:
+        description: "Commit to check out and measure. Must be the approved implementation commit."
+        required: true
+        default: ""
+      confirm:
+        description: "Type SPEND to confirm this dispatch will call a paid provider"
+        required: true
+        default: ""
+
+# Deliberately not inputs: the judge and the sample size. The judge is
+# pre-registered in the set and the sample is ten by construction -- five task
+# kinds in two languages. Offering either here would put the choice back on
+# whoever dispatches.
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: router-judge-cap-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Judge cap probe
+    runs-on: ubuntu-latest
+    # Ten calls. A reasoning judge at effort high is slow, but not that slow.
+    timeout-minutes: 30
+    steps:
+      - name: Confirm the spend
+        if: inputs.confirm != 'SPEND'
+        run: |
+          echo "::error::confirm must be exactly SPEND. Nothing was run."
+          exit 1
+
+      # The approval is for specific numbers, so the numbers are checked rather
+      # than defaulted: a ceiling that exists only as a form default is a
+      # suggestion. Raising any of them needs mposition's approval, recorded by
+      # editing this step in a commit.
+      #
+      #   judge cap 8192, per request $0.50, stage $0.60, total $0.60
+      #
+      # Exactly 8192, not "at most". A lower cap would reproduce the defect this
+      # whole line of work exists to remove -- a reasoning judge given too small
+      # a budget spends it thinking and returns nothing -- and a probe that hit
+      # that would be measuring the cap it was handed rather than the judge.
+      - name: The cap is exactly the approved one
+        env:
+          JUDGE_CAP: ${{ inputs.judge_max_output_tokens }}
+        run: |
+          node -e '
+            const approvedCap = 8192;
+            const cap = Number(process.env.JUDGE_CAP);
+            if (cap !== approvedCap) {
+              console.log(`::error::judge cap must be exactly ${approvedCap}, got "${process.env.JUDGE_CAP}".`);
+              console.log("::error::A smaller cap measures the cap, not the judge. Nothing was billed.");
+              process.exit(1);
+            }
+            console.log(`Judge cap is exactly the approved ${approvedCap}.`);
+          '
+
+      # Pinned, not "whatever the branch says now". The approval is for an
+      # implementation somebody read; a workflow that checks out a moving ref
+      # can measure something else under the same approval.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.implementation_sha }}
+
+      - name: Record what is actually running
+        id: provenance
+        run: |
+          checkout_sha="$(git rev-parse HEAD)"
+          if [ "$checkout_sha" != "${{ inputs.implementation_sha }}" ]; then
+            echo "::error::checked out $checkout_sha, not the approved ${{ inputs.implementation_sha }}."
+            exit 1
+          fi
+          echo "checkout_sha=$checkout_sha" >> "$GITHUB_OUTPUT"
+          echo "Measuring commit $checkout_sha."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: The selected ref can run this
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts ?? {};
+            if (!("router:judge-cap-probe" in scripts)) {
+              console.log(
+                "::error::This branch does not carry router:judge-cap-probe. " +
+                  "Re-dispatch with Branch: develop, or a branch that has it."
+              );
+              process.exit(1);
+            }
+          '
+
+      # The answers this probe judges. Taken from the voided run rather than
+      # generated, because generating 210 answers is the expensive thing this
+      # probe exists to price and is not approved.
+      - name: Fetch the answer bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source_artifact }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+
+      - name: The bundle arrived
+        run: |
+          if [ ! -s "artifacts/${{ inputs.bundle_file }}" ]; then
+            echo "::error::artifacts/${{ inputs.bundle_file }} is missing or empty. Nothing was billed."
+            ls -R artifacts || true
+            exit 1
+          fi
+          wc -l "artifacts/${{ inputs.bundle_file }}"
+
+      - name: The judge key is present
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$(printenv ANTHROPIC_API_KEY)" ]; then
+            echo "::error::missing repository secret ANTHROPIC_API_KEY. Nothing was run and nothing was billed."
+            exit 1
+          fi
+          echo "ANTHROPIC_API_KEY is set. Checked by name; no value is printed."
+
+      - name: Probe (this is the step that spends)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Into the artefact, so the measurement names the code that produced
+          # it. `workflowSha` is the ref this workflow file came from, which is
+          # not necessarily the commit it checked out and measured.
+          PROBE_WORKFLOW_SHA: ${{ github.sha }}
+          PROBE_CHECKOUT_SHA: ${{ steps.provenance.outputs.checkout_sha }}
+        run: |
+          npm run router:judge-cap-probe -- \
+            --bundle=artifacts/${{ inputs.bundle_file }} \
+            --set=docs/ops/router-evaluation-set/development-v0.json \
+            --judge-max-output-tokens='${{ inputs.judge_max_output_tokens }}' \
+            --per-request-max-cost-usd=0.50 \
+            --stage-max-cost-usd=0.60 \
+            --json=artifacts/judge-cap-probe.json
+
+      # Before anything that can fail: a run that paid must keep its records
+      # even when the probe stopped on one of its abort conditions.
+      - name: Preserve the measurement
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-cap-probe
+          path: artifacts/judge-cap-probe.json
+          if-no-files-found: warn
+          retention-days: 90
