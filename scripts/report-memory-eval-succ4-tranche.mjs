@@ -15,6 +15,8 @@ import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
 import { SUCC4_B_PLUS_MOVES } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
 import { SUCC4_TRANCHE_1 } from "../lib/memoryEvalSucc4Replacements/tranche1.ts";
 import { SUCC4_TRANCHE_2 } from "../lib/memoryEvalSucc4Replacements/tranche2.ts";
+import { SUCC4_TRANCHE_3 } from "../lib/memoryEvalSucc4Replacements/tranche3.ts";
+import { SUCC4_TRANCHE_4 } from "../lib/memoryEvalSucc4Replacements/tranche4.ts";
 
 /**
  * Every tranche written so far, in the order they were written.
@@ -26,6 +28,8 @@ import { SUCC4_TRANCHE_2 } from "../lib/memoryEvalSucc4Replacements/tranche2.ts"
 const TRANCHES = [
     { id: 1, cells: "the eight particular cases", entries: SUCC4_TRANCHE_1 },
     { id: 2, cells: "durable_facts:ko", entries: SUCC4_TRANCHE_2 },
+    { id: 3, cells: "every cell but durable_facts:en", entries: SUCC4_TRANCHE_3 },
+    { id: 4, cells: "durable_facts:en, first half", entries: SUCC4_TRANCHE_4 },
 ];
 const ALL = TRANCHES.flatMap((tranche) => tranche.entries);
 
