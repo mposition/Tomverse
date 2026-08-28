@@ -36,6 +36,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { analyzeExtractionChunk } from "../lib/memoryExtractionPipeline.ts";
 import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
+import { memoryEvalUnimplementedPromptRules } from "../lib/memoryEvalPromptRuleImplementations.ts";
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
 } from "../lib/memoryExtractionEvalRegister.ts";
@@ -169,6 +170,14 @@ const runMode = decideEvalRunMode({
     // The frozen fixtures are schema 1. Stated rather than assumed, so that
     // the successor dataset switching this to 2 is a visible edit here.
     datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+    // Rules the scoring contract puts on the prompt that the prompt this run
+    // would send does not implement. Resolved from the shipped
+    // `promptVersion` rather than named, for the reason the network-guard
+    // test learned the hard way: a gate that names a version keeps passing
+    // after the tree moves past it.
+    unimplementedPromptRules: memoryEvalUnimplementedPromptRules(
+        MEMORY_EXTRACTION_PROMPT_VERSION
+    ),
     requestedRunCapUsd: maxCostUsd,
 });
 
@@ -215,6 +224,18 @@ const REFUSAL_MESSAGES = {
         "Reproducing the mem-extract-v2 diagnostics is a separate path --\n" +
         "lib/memoryEvalLegacyDataset.ts, which is not a live run and cannot\n" +
         "support a verdict, a freeze or a pair approval.",
+    prompt_rule_unimplemented:
+        `${MEMORY_EXTRACTION_PROMPT_VERSION} does not implement every scoring rule the ` +
+        "contract puts on the prompt:\n" +
+        memoryEvalUnimplementedPromptRules(MEMORY_EXTRACTION_PROMPT_VERSION)
+            .map((ruleId) => `  ${ruleId}`)
+            .join("\n") +
+        "\n\nThe run would report against a rule nothing applied, which is how a\n" +
+        "contract's numbers end up wearing a name nothing earned. Implement the\n" +
+        "rule in the prompt, bump the prompt version, and record the version\n" +
+        "against the rule id in lib/memoryEvalPromptRuleImplementations.ts --\n" +
+        "the mapping is written by whoever writes the rule into the prompt, and\n" +
+        "is deliberately not derived by searching the prompt for words.",
     run_cap_above_approved_ceiling:
         `--max-cost-usd=${maxCostUsd} is above the approved ceiling for this pair ` +
         `(US$${registerEntry?.evalBudget?.maxUsd}).\n` +
@@ -267,10 +288,43 @@ if (duplicates.length > 0) {
  * Evidence cites the first user message: the label map decides the role, so a
  * smoke answer cannot smuggle assistant-only evidence past the validator.
  */
+/**
+ * The label of a message this case really presents, and a real span of it.
+ *
+ * `mem-extract-v6` requires each citation to carry a quote that occurs in the
+ * message it names, checked against the server's own copy. A stub that quoted
+ * a constant would be rejected by its own parser on every case, and a smoke
+ * run reporting zero candidates everywhere looks like a run while measuring
+ * nothing. The first user message is preferred for the same reason the
+ * label-only version cited it: the label map decides the role, so a smoke
+ * answer cannot smuggle assistant-only evidence past the validator.
+ */
+const smokeCitation = (testCase) => {
+    let ordinal = 0;
+    let firstMessage = null;
+    for (const conversation of testCase.conversations) {
+        for (const message of conversation.messages) {
+            ordinal += 1;
+            const citation = {
+                messageLabel: `m${ordinal}`,
+                quote: [...message.content.normalize("NFC")]
+                    .slice(0, 40)
+                    .join(""),
+            };
+            if (firstMessage === null) firstMessage = citation;
+            if (message.role === "user") return citation;
+        }
+    }
+    return firstMessage ?? { messageLabel: "m1", quote: "" };
+};
+
 const smokeAdapter = (testCase) => async () => ({
     output: {
         candidates: testCase.expected.map((expected) => ({
             kind: expected.kind,
+            // The gold's own polarity where the schema carries one; schema 2
+            // has no such field and does not score it either.
+            polarity: expected.polarity ?? "affirmed",
             statement: `The user's record: ${[
                 ...expected.mustInclude,
                 ...(expected.mustIncludeAny ?? []).slice(0, 1),
@@ -281,7 +335,7 @@ const smokeAdapter = (testCase) => async () => ({
                     ? "sensitive"
                     : "standard",
             expiresAt: null,
-            evidence: ["m1"],
+            evidence: [smokeCitation(testCase)],
         })),
     },
 });

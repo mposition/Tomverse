@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 import {
     MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     decideEvalRunMode,
@@ -159,7 +160,7 @@ const runHarness = (args, env = {}) => {
     }
 };
 
-test("both revoked v5 pairs refuse for the status exactly, and call nothing", () => {
+test("both revoked v5 pairs refuse for the status exactly", () => {
     // **This assertion is not interchangeable with "some refusal happened".**
     // The integration tests around this one accept any refusal on purpose,
     // because which gate speaks is the register's business and has moved
@@ -181,19 +182,42 @@ test("both revoked v5 pairs refuse for the status exactly, and call nothing", ()
             "pair_not_runnable",
             label
         );
+    }
+});
 
-        // And the real entry point, with a key that would satisfy the key
-        // gate and a budget that would satisfy the budget gate on the luna
-        // pair. Nothing may reach a provider.
+test("the harness cannot select a v5 pair at all, and calls nothing", () => {
+    // The harness resolves the prompt version from the tree, so once the tree
+    // moved to v6 the v5 entries stopped being reachable through it. That is
+    // containment, not a gap — but it does mean this file can no longer read
+    // the status refusal out of the harness's output, and asserting a v5
+    // message here would be asserting one gate's words about a different
+    // entry. `mem-extract-v4` was named that way once and passed for weeks
+    // while describing the wrong pair.
+    //
+    // So the harness half asserts what is still true of it: with a key
+    // present, whichever pair the tree selects refuses before anything dials
+    // out, and the pair it selects is not a v5 one.
+    assert.notEqual(MEMORY_EXTRACTION_PROMPT_VERSION, LUNA_V5.promptVersion);
+    assert.notEqual(MEMORY_EXTRACTION_PROMPT_VERSION, MINI_V5.promptVersion);
+
+    for (const entry of [LUNA_V5, MINI_V5]) {
+        const label = `${entry.extractionModelId}::${entry.promptVersion}`;
         const result = runHarness(
             ["--live", `--model=${entry.extractionModelId}`],
             { OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000" }
         );
         assert.equal(result.status, 1, `${label} did not refuse`);
+        assert.doesNotMatch(
+            result.output,
+            new RegExp(`${entry.extractionModelId}::${entry.promptVersion}`),
+            `the harness selected ${label}, which the tree no longer ships`
+        );
         assert.match(
             result.output,
-            new RegExp(`${label}[^\\n]*revoked`),
-            `${label} refused for something other than its status:\n${result.output}`
+            new RegExp(
+                `${entry.extractionModelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}`
+            ),
+            `the refusal named no pair:\n${result.output}`
         );
         assert.doesNotMatch(
             result.output,

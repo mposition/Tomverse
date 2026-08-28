@@ -809,3 +809,79 @@ quote 그대로입니다 — 검수자가 사실·polarity와 나란히 읽은 �
 
 자동 제안과 기록이 어긋나면 리포트가 **양쪽을 나란히 출력하되 채택하지
 않습니다.** 휴리스틱이 바뀌어도 검수된 gold가 조용히 재-anchor되지 않습니다.
+
+## 13. 후속 단계 승인 (2026-08-28, @mposition)
+
+`mem-eval-succ-4` 동결 이후 다섯 건의 결정입니다. 승인자는 `@mposition`,
+승인일은 2026-08-28입니다.
+
+### 13.1 dataset 동결과 prompt 준비 상태를 분리합니다 (승인)
+
+§11.4가 "미구현 규칙 하나를 안고 동결했다"고 적은 그 규칙이 두 개였다는 것이
+succ-4 동결 시도에서 드러났습니다. `v3-unfixable-evidence-emits-nothing`은
+**모델이 무엇을 출력하지 않는가**의 규칙이고, 같은 문장에 들어 있던 gold 쪽
+규칙은 **검수자가 무엇을 gold로 쓰지 않는가**의 규칙입니다. 하나로 묶여 있는
+동안 dataset 동결은 아직 존재하지도 않는 prompt를 기다리고 있었습니다 — gold
+쪽 기준은 이미 충족돼 있는데도.
+
+`mem-score-v3.3`이 둘로 나눈 현재 enforcement를 승인합니다.
+
+| 규칙 | enforcement | dataset 동결 차단 |
+|---|---|---|
+| `v3-unfixable-evidence-emits-nothing` | `prompt_pending` | 하지 않음 |
+| `v3-unfixable-evidence-not-a-gold` | `gold_review` | 함 |
+
+**분리는 면제가 아닙니다.** prompt 규칙이 구현되기 전의 유료 실행은 run-mode
+gate가 차단해야 하며, 그 차단은 이 승인으로 완화되지 않습니다. `mem-score-v3.2`
+의 descriptor와 digest는 한 글자도 바뀌지 않았고, v3.3은 새 digest로 별도
+등록됩니다.
+
+### 13.2 `mem-extract-v6` 착수 (승인)
+
+설계·구현·무비용 검증을 승인합니다. 조건은 셋입니다.
+
+1. **기존 promptVersion을 수정하지 않고** 새 version과 새 digest를 씁니다.
+2. **조건문·미해결 정정·이중부정처럼 polarity를 확정할 수 없는 근거에서는
+   candidate를 생성하지 않습니다**(§10.2의 5·6).
+3. 유료 실행·pair 승인·release gate 통과·production 활성화는 이 승인 범위가
+   아닙니다.
+
+### 13.3 release gate registry (승인)
+
+succ-4 동결과 `mem-score-v3.3` 계약의 `evidenceRefs`를 추가하되,
+decision-grade 실행과 pair 승인이 끝날 때까지 `status: pending`을 유지하고
+`approvedBy`·`approvedAt`은 기입하지 않습니다.
+
+### 13.4 decision-grade 실행 예산 (범위 밖)
+
+정확한 model/prompt pair, dataset·scoring contract digest, 실행 횟수, 실행당
+예상 비용, pair별 총상한, 재시도 정책이 고정된 뒤 별도로 승인합니다.
+
+### 13.5 증거에는 축약형을 쓰지 않습니다
+
+registry와 감사 증거의 commit SHA는 전체 40자리, digest는 전체 길이로
+기록합니다.
+
+### 13.6 v6이 실제로 무엇을 바꿨는가 (2026-08-28 구현)
+
+승인 조건을 코드에 옮긴 결과입니다. 판정 근거를 남기려고 적습니다 — 승인
+문구와 구현이 어긋났는지는 이 표로만 확인할 수 있습니다.
+
+| 항목 | v5 | v6 |
+|---|---|---|
+| promptVersion | `mem-extract-v5` | `mem-extract-v6` |
+| contract digest | `7bb6b27abce3f29dee70f4defd24d8a65175d7a17ab2b9e8d3846ebcc76de281` | `c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052` |
+| candidate 필수 필드 | 6개 | 7개 (`polarity` 추가) |
+| citation | message label | label + exact quote |
+| quote 검증 | 없음 | 서버가 보낸 메시지 사본에 NFC exact substring |
+| 확정 불가 근거 | 규칙 없음 | candidate를 내지 않음, confidence 하향 금지 |
+
+v5의 fingerprint는 그대로 남아 있고, `tests/memoryExtractionPromptFingerprint.test.mjs`
+가 두 값을 함께 들고 있습니다. **v6이 필요한 이유는 문구가 아니라 채점입니다** —
+schema 3은 candidate의 `polarity`를 gold의 것과 필드 대 필드로 비교하는데 v5
+출력에는 그 필드가 없으므로, v5 pair는 `mem-eval-succ-4`에 대해 **채점될 수
+없습니다.**
+
+pair는 `lib/memoryExtractionEvalRegister.ts`에 `candidate` · `evalBudget: null`
+로 등록했습니다. 등록은 pair를 **알려진 것**으로 만들 뿐이며, `decideEvalRunMode`
+가 `no_eval_budget`으로 거절합니다 — §13.4가 별도로 승인될 때까지.

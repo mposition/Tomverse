@@ -431,6 +431,53 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evalBudget: null,
             evaluation: null,
         },
+        {
+            // **Registered, unfunded, and that is the whole state.** The
+            // register's own rule is that an implementation agent may add a
+            // `candidate` entry while `candidate` → `approved` stays a human
+            // procedure; §12.5's budget is a second, separate approval, and
+            // the 2026-08-28 decision that authorised building v6 said in the
+            // same breath that the decision-grade budget is not in its scope.
+            // So the pair exists — `decideEvalRunMode` can answer about it
+            // rather than failing on an unknown pair — and it refuses with
+            // `no_eval_budget` until somebody funds it.
+            //
+            // v6 exists because schema-3 scoring compares a candidate's
+            // `polarity` to the gold's and a v5 candidate has no such field,
+            // so no v5 pair can be scored against `mem-eval-succ-4` at all
+            // (.github/audits/memory-eval-gold-contract-2026-08-27.md §10.1).
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v6",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-28",
+            notes:
+                "Registered unfunded on 2026-08-28. Implemented against " +
+                "mem-eval-succ-4 and mem-score-v3.3: required polarity, " +
+                "evidence quotes bound to the server's copy of the cited " +
+                "message, and no candidate from evidence whose polarity a " +
+                "plain reading cannot fix. Never run. The decision-grade " +
+                "budget is a separate approval and names the model, the " +
+                "dataset and contract digests, the run count and the " +
+                "per-pair ceiling: " +
+                "docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
+            // §12.5 backup candidate for v6, unfunded on the same terms as
+            // v4's and v5's. A backup that inherited a primary's ceiling
+            // would be a second funded pair nobody approved -- and here
+            // neither pair is funded at all.
+            extractionModelId: "gpt-5-4-mini",
+            promptVersion: "mem-extract-v6",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-28",
+            notes: "Backup candidate for mem-extract-v6. Unfunded, never run.",
+            evalBudget: null,
+            evaluation: null,
+        },
     ];
 
 /** §12.3 acceptance thresholds — the register check re-verifies them. */
