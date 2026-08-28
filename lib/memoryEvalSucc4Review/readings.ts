@@ -90,7 +90,7 @@ export const SUCC4_NEGATED: readonly string[] = [
     "succ-durable-ko-199:e1",
     "succ-durable-en-173:e1",
     "succ-durable-en-181:e2",
-    "succ-durable-ko-313:e1",
+    "succ-durable-ko-313:g1",
     // assistant_only — the user is correcting an assumption, and the
     // correction is the memory
     "succ-assistant-ko-301:g1",

@@ -551,3 +551,125 @@ dataset digest)은 전과 똑같이 정확히 검사됩니다.
 ### 11.7 이번 단계에서 하지 않은 것
 
 succ-4 dataset 동결, pair 등록, 예산 승인. 전부 이후 단계입니다.
+
+## 12. succ-4 gold 판독 결정 (2026-08-28 승인, @mposition)
+
+121건 판독 보고에 대한 네 결정입니다. **353건 배정보다 먼저** 기록합니다 —
+기준이 사례를 따라가면 그것은 기준이 아닙니다.
+
+### 12.1 B+는 계약 규칙 형성에도 적용합니다
+
+**scorer·gold 작성 의미를 decision case에서 도출하면 평가기가 그 사례에
+맞춰진 것입니다.** 모델 prompt에 직접 노출되지 않았다는 이유로 독립성이
+회복되지는 않습니다. §11 이전의 읽기 — B+가 모델을 향한 규칙만 덮는다는 —
+는 기각됐습니다.
+
+경계는 **형성과 적용**입니다.
+
+| | |
+|---|---|
+| 규칙을 **만들거나 수정·선택**하는 데 쓰임 | **B+ 이동** |
+| **이미 동결된** 규칙으로 polarity만 배정 | 유지 가능 |
+
+### 12.2 수정된 일곱 건은 정정 후 이동합니다
+
+match target이나 evidence anchor가 달라진 gold는 decision set에 그대로 남기지
+않습니다. 수정된 gold는 regression corpus에 **수정된 형태로** 보존하고,
+provenance에 수정 사유와 규칙 ID를 적고, decision set에는 1:1 대체를 씁니다.
+
+### 12.3 stem과 `factValueAny`는 용도로 나눕니다
+
+| 상황 | 도구 |
+|---|---|
+| 같은 lexeme의 **생산적인 활용형** 차이 | 승인된 stem |
+| **유한하게 열거 가능한** 철자·표기·어휘 대안 | `factValueAny` |
+| 의미가 넓어지는 동의어 · polarity 차이 · 추상화 수준 차이 | **둘 다 아님 — gold 재작성** |
+
+`알레르기`/`알러지`는 표기 대안이므로 `factValueAny`가 맞습니다. 활용형을
+케이스마다 나열하는 것은 stem이 할 일입니다.
+
+**version bump를 피하려는 것은 선택 근거가 되지 않습니다.** §11.3에서 제가
+`allerg` 대신 `factValueAny`를 고른 이유 중 하나가 그것이었고, 그 부분은
+근거로 인정되지 않습니다. `succ-assistant-en-305`는 `allergy`/`allergic`이
+활용형이 아니라 열거 가능한 어휘 대안이므로 결과적으로 `factValueAny`가
+맞지만, 이유는 다시 씁니다.
+
+### 12.4 원인·결과가 섞이면 결과로 좁힙니다
+
+**한 gold는 하나의 atomic proposition과 하나의 polarity만 갖습니다.**
+`constraint`라면 실제 제약인 결과 쪽으로 좁힙니다.
+
+원인을 따로 두는 것은 그것이 **저장 적격이고, 앞으로 쓸모 있고, 독립된 kind와
+evidence를 가질 때**뿐입니다.
+
+**`exhaustive`는 모든 절을 저장한다는 뜻이 아닙니다.** 저장 적격인 독립
+기억을 모두 열거한다는 뜻입니다. 이 구분이 없으면 좁히기가 gold를 빠뜨리는
+것처럼 보입니다.
+
+`succ-durable-ko-12`(휠체어 → 계단)와 `succ-durable-en-19`(deaf → audio)의
+결과 쪽 좁히기는 승인됐습니다.
+
+### 12.5 121건은 형성 101 + 적용 20이 아닙니다
+
+보고서의 121건을 §12.1 경계로 다시 나눈 결과입니다. 판정은 **그 gold를 볼
+당시 규칙이 이미 동결돼 있었는가**입니다.
+
+**형성 — 이동 (99 케이스)**
+
+* **negation marker가 quote에 있던 93 케이스 전부.** polarity 배정 규칙
+  (`mem-score-v3.2`)이 쓰이기 전에 101건 gold 전부가 눈앞에 있었고, 규칙은
+  그것들을 보고 쓰였습니다. 「야간 운전은 못 합니다」의 양가성이 규칙을 쓰게
+  만들었고, `succ-durable-en-3`(oven 하나 있음)와 `succ-durable-en-110`(oven
+  없음)의 대비가 polarity를 *factValueAll이 성립하는가*로 정하게 했으며,
+  `aisle`·`penicillin`이 「표지가 있다고 negated가 아니다」를 정했습니다.
+  나머지를 "그저 적용했다"고 주장할 수 없습니다 — 규칙이 아직 동결되지
+  않은 상태에서 읽었습니다.
+* **marker가 없던 20건 중 6 케이스**:
+  * `succ-durable-en-20` — `gold-evidence-covers-fact`(v3.1)를 만든 사례.
+  * `succ-assistant-ko-301` — `한양대에 다닌 적 없`은 §1②가 이미 인용한
+    결함이며, 그 규칙을 만든 사례입니다.
+  * `succ-assistant-ko-305` — under-specification 조항의 worked example.
+  * `succ-assistant-en-305` — §12.3(stem 대 `factValueAny`)을 만든 사례.
+  * `succ-durable-ko-301`, `succ-assistant-ko-308` — 규칙 형성은 아니지만
+    §12.2에 따라 gold가 수정됐으므로 이동.
+
+**적용 — 유지 (13 케이스)**
+
+```
+succ-durable-ko-25     succ-durable-ko-72     succ-durable-ko-193
+succ-durable-ko-307    succ-durable-ko-309    succ-durable-ko-311
+succ-durable-ko-312    succ-durable-ko-314    succ-durable-ko-315
+succ-durable-en-306    succ-assistant-ko-307  succ-assistant-en-306
+succ-assistant-en-307
+```
+
+전부 `mem-score-v3.2` 동결 **뒤에** 읽혔고, 동결된 규칙으로 polarity만
+배정했으며, gold도 anchor도 바뀌지 않았습니다.
+
+`succ-assistant-en-304`는 두 목록에 걸쳐 보이지만 한 케이스입니다 — `g1`은
+marker 집합, `g2`는 아닙니다. 케이스 단위로 이동합니다.
+
+### 12.6 합집합
+
+**단순 합산이 아닙니다.** 기존 99건은 이미 succ-3에서 빠졌으므로 이번 99건과
+겹치지 않고, 합집합은 198입니다.
+
+| | |
+|---|---|
+| 기존 regression corpus (succ-2 → succ-3) | 99 |
+| 이번 이동 (succ-3 → succ-4) | 99 |
+| **합집합 (겹침 0)** | **198** |
+
+이번 99건의 cell 분포이며, 그대로 대체 케이스 수입니다.
+
+| cell | 이동 |
+|---|---|
+| durable_facts:en | 53 |
+| durable_facts:ko | 32 |
+| assistant_only:ko | 7 |
+| assistant_only:en | 5 |
+| injection_directives:en | 2 |
+
+이동 케이스 중 일부는 그 자체가 기존 99건의 대체본입니다
+(`succ-durable-ko-301`은 batch-162 소속). ID가 다르므로 합집합은 그대로
+198이고, **두 번 대체되는 자리**가 있다는 사실은 provenance가 기록합니다.
