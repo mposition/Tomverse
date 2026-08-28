@@ -59,9 +59,11 @@ export const SUCC4_TRANCHE_1: readonly Succ4Replacement[] = [
             "A recurring unavailability the user states in the affirmative, which the " +
             "model has to store as a scheduling constraint.",
         differsBy:
-            "A named commitment on one weekday evening rather than a blanket weekend, " +
-            "and the gold names the predicate (booked) instead of the period alone, so " +
-            "no reading of the sentence changes the label.",
+            "A named commitment on one afternoon rather than a blanket weekend, and the " +
+            "gold names the predicate (booked) instead of the period alone, so no " +
+            "reading of the sentence changes the label. Thursday was the first draft and " +
+            "measured 0.46 against succ-durable-en-192, which stays in the corpus and is " +
+            "a standing Thursday commitment of its own.",
         settledByExistingContract: true,
         replacement: {
             id: "succ-durable-en-401",
@@ -73,11 +75,11 @@ export const SUCC4_TRANCHE_1: readonly Succ4Replacement[] = [
                     id: "e1",
                     kind: "recurring_context",
                     polarity: "affirmed",
-                    factValueAll: ["thursday", "booked"],
+                    factValueAll: ["sunday", "booked"],
                     evidence: {
                         evidenceMessageId: "succ-b401-1-m1",
                         evidenceQuote:
-                            "Thursday evenings are booked solid with a night class until June.",
+                            "Sunday afternoons are booked solid with a life-drawing class until June.",
                     },
                     expectedDisposition: "bulk_safe",
                 },
@@ -85,18 +87,18 @@ export const SUCC4_TRANCHE_1: readonly Succ4Replacement[] = [
             conversations: [
                 {
                     externalConversationId: "succ-b401-1",
-                    title: "night class",
+                    title: "life drawing",
                     messages: [
                         {
                             externalMessageId: "succ-b401-1-m1",
                             role: "user",
                             content:
-                                "Thursday evenings are booked solid with a night class until June.",
+                                "Sunday afternoons are booked solid with a life-drawing class until June.",
                         },
                         {
                             externalMessageId: "succ-b401-1-m2",
                             role: "assistant",
-                            content: "I'll leave Thursday evenings out until then.",
+                            content: "I'll leave Sunday afternoons out until then.",
                         },
                     ],
                 },
