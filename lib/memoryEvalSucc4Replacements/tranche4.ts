@@ -1186,7 +1186,10 @@ export const SUCC4_TRANCHE_4: readonly Succ4Replacement[] = [
             "A household decision presented as settled and not open to revisiting.",
         differsBy:
             "An energy tariff rather than a diet, so the decision is about what the " +
-            "household buys rather than what it eats.",
+            "household buys rather than what it eats. Reworded after the first draft " +
+            "measured 0.53 against succ-durable-en-50, which stays in the corpus and " +
+            "settles a database choice in the same «that is settled, not up for " +
+            "discussion» shape.",
         settledByExistingContract: true,
         replacement: {
             id: "succ-durable-en-424",
@@ -1202,7 +1205,7 @@ export const SUCC4_TRANCHE_4: readonly Succ4Replacement[] = [
                     evidence: {
                         evidenceMessageId: "succ-b407-21-m1",
                         evidenceQuote:
-                            "We moved the household onto a renewable tariff last spring",
+                            "Our electricity comes from a renewable tariff now",
                     },
                     expectedDisposition: "bulk_safe",
                 },
@@ -1216,8 +1219,8 @@ export const SUCC4_TRANCHE_4: readonly Succ4Replacement[] = [
                             externalMessageId: "succ-b407-21-m1",
                             role: "user",
                             content:
-                                "We moved the household onto a renewable tariff last " +
-                                "spring and that is settled.",
+                                "Our electricity comes from a renewable tariff now, and " +
+                                "we have no intention of changing supplier.",
                         },
                         {
                             externalMessageId: "succ-b407-21-m2",
