@@ -45,9 +45,9 @@ on:
         required: true
         default: ""
       max_cost_pilot_usd:
-        description: "Ceiling for the pilot stage. Approved: 2.00"
+        description: "Ceiling for the pilot stage. Approved: 7.00"
         required: true
-        default: "2.00"
+        default: "7.00"
       max_cost_rejudge_usd:
         description: "Ceiling for the independent judge. Approved: 18.00"
         required: true
@@ -91,7 +91,13 @@ jobs:
       # than defaulted. Defaults can be typed over at dispatch; a ceiling that
       # only exists as a default is a suggestion.
       #
-      #   pilot 2.00 + independent judge 18.00 = 20.00 total
+      #   pilot 7.00 + independent judge 18.00 = 25.00 total
+      #
+      # The pilot stage sits above its own worst single request ($6.40 for a
+      # claude-fable-5 answer at the product's 128,000-token cap). A stage
+      # ceiling below that is one a single call breaches with nothing able to
+      # intervene, and lowering the answer budget to fit would measure the
+      # models under a cap the product never applies.
       #
       # Set on the judge-cap probe's measurement rather than on an assumption:
       # ten judgements on claude-fable-5 billed 45-1,437 output tokens each for
@@ -106,7 +112,7 @@ jobs:
           REJUDGE: ${{ inputs.max_cost_rejudge_usd }}
         run: |
           node -e '
-            const approved = { pilot: 2.00, rejudge: 18.00, total: 20.00 };
+            const approved = { pilot: 7.00, rejudge: 18.00, total: 25.00 };
             const pilot = Number(process.env.PILOT);
             const rejudge = Number(process.env.REJUDGE);
             const bad = [];
@@ -205,6 +211,14 @@ jobs:
           fi
           echo "All three provider keys are set. Checked by name; no value is printed."
 
+      # Before the first paid call the pilot freezes what the Router would
+      # choose for all 210 items and refuses to run if the pre-registered
+      # independent judge is among the answer authors or their fallbacks --
+      # claude-fable-5 is both the judge and an Auto candidate, and a judge
+      # grading its own answer is not a comparison of two judges. It aborts
+      # rather than re-routing: dropping the judge from the candidate set would
+      # measure a Router the product does not have, and claude-opus-4-8 is an
+      # Auto candidate too, so swapping only moves the conflict.
       - name: Pilot run (this is the first step that spends)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -218,6 +232,7 @@ jobs:
             --judge='${{ steps.preregistered.outputs.judge }}' \
             --seed='${{ steps.preregistered.outputs.seed }}' \
             --max-cost-usd='${{ inputs.max_cost_pilot_usd }}' \
+            --per-request-max-cost-usd=6.50 \
             --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
             --json=artifacts/route01-pilot-${{ inputs.run_label }}.json
 

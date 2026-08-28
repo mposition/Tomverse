@@ -103,6 +103,12 @@ import {
   resolveCallLimit,
 } from "../lib/routerCallLimits.ts";
 import {
+  PILOT_PER_REQUEST_MAX_COST_USD,
+  freezeRoutingPlan,
+  maxPlannedAnswerRequestCostUsd,
+  routingPlanProblems,
+} from "../lib/routerRoutingPlan.ts";
+import {
   JUDGE_TEMPLATE_VERSION,
   identifiesItself,
   judgePrompt,
@@ -369,6 +375,9 @@ const callLimit = (model, callRole) => {
 const perRequestWorstCaseCostUsd = (limit, promptTokens) =>
   (promptTokens * limit.inputUsdPerMillionTokens) / 1_000_000 +
   (limit.requestedMaxOutputTokens * limit.outputUsdPerMillionTokens) / 1_000_000;
+// Frozen before the first paid call and written into the record, so a reader
+// can tell what the Router was going to do rather than only what it did.
+let routingPlan = null;
 // Every arm answer that produced nothing usable, kept for the record as well
 // as the journal. The gate in front of the paid judge reads its classification
 // counts, so they have to survive into a file rather than only into a log.
@@ -1080,6 +1089,84 @@ if (maxCostUsd !== null) {
 
 journal({ kind: "call-limit-manifest", manifest: callLimitManifest });
 
+// Everything the Router would choose, decided before anything is paid for.
+//
+// The routing decision is deterministic given the item and the frozen seed, so
+// the conflict this checks for can be settled for nothing: claude-fable-5 is
+// the pre-registered independent judge AND an Auto candidate, and if the
+// Router picks it for even one item the independent judge grades its own
+// answer on that pair.
+//
+// It aborts rather than re-routing. Dropping the judge from the candidate set
+// and routing again would measure a Router the product does not have, and
+// swapping to claude-opus-4-8 only moves the conflict, because that is an Auto
+// candidate too. The conflict is between the pre-registration and the
+// catalogue, and resolving it is a decision rather than a dispatch-time
+// workaround.
+// Not on a rebuild: `--from-journal` reports what a finished run recorded and
+// sends nothing, so there is no call to guard and no plan to freeze. Routing
+// again there would also re-decide with today's catalogue and report it as the
+// plan of a run that happened under an older one.
+if (mode !== "judge-bias" && !fromJournalPath) {
+  const planEntries = planned.map((item) => {
+    const decision = decideRouterModel(routerInputFor(item));
+    return {
+      itemId: item.id,
+      outcome: decision.outcome,
+      selectedModelId: decision.outcome === "selected" ? decision.modelId : null,
+      fallbackCandidateModelIds:
+        decision.outcome === "selected" ? [...decision.fallbackCandidateModelIds] : [],
+    };
+  });
+  routingPlan = freezeRoutingPlan(planEntries, baselineModelId, (id) => {
+    const model = getModel(id);
+    return model ? { provider: model.provider, apiModel: model.apiModel } : null;
+  });
+  journal({ kind: "routing-plan", plan: routingPlan });
+
+  const independentJudgeId = evaluationSet.independentJudge?.modelId;
+  const independentJudge = independentJudgeId ? getModel(independentJudgeId) : null;
+  if (!independentJudge) {
+    die(
+      `\n${setPath} pre-registers no usable independentJudge, so whether the Router would hand it\n` +
+        "its own answers cannot be checked. Nothing was sent and nothing was billed.\n"
+    );
+  }
+  const worstPromptTokens = Math.max(
+    0,
+    ...planned.map((item) => estimateRawTextTokens(item.prompt ?? ""))
+  );
+  const planTrouble = routingPlanProblems(routingPlan, {
+    expectedItems: planned.length,
+    independentJudge: {
+      provider: independentJudge.provider,
+      apiModel: independentJudge.apiModel,
+      modelId: independentJudge.id,
+    },
+    perRequestMaxCostUsd: perRequestMaxCostUsd ?? PILOT_PER_REQUEST_MAX_COST_USD,
+    limitFor: (id) => {
+      const model = getModel(id);
+      return model ? callLimit(model, "answer") : null;
+    },
+    worstPromptTokens,
+  });
+  if (planTrouble.length > 0) {
+    die(
+      "\nThe frozen routing plan cannot be run:\n\n  - " +
+        planTrouble.join("\n  - ") +
+        "\n\nNothing was sent and nothing was billed.\n"
+    );
+  }
+  console.log(
+    `Routing plan frozen — ${routingPlan.plannedItems} item(s); the independent judge ` +
+      `(${independentJudge.id}) authors no answer; worst planned answer request ` +
+      `$${maxPlannedAnswerRequestCostUsd(routingPlan, (id) => {
+        const model = getModel(id);
+        return model ? callLimit(model, "answer") : null;
+      }, worstPromptTokens).toFixed(4)} of $${(perRequestMaxCostUsd ?? PILOT_PER_REQUEST_MAX_COST_USD).toFixed(2)} allowed.`
+  );
+}
+
 bundle({
   kind: "header",
   bundleVersion: ANSWER_BUNDLE_VERSION,
@@ -1585,6 +1672,9 @@ const record = {
   // gate reads it, and a later reader can tell whether two runs asked the same
   // question or merely share a label.
   callLimitManifest,
+  // What the Router planned, and the check that the independent judge is not
+  // among the models that would have answered.
+  routingPlan,
   rebuiltFromJournal: fromJournalPath || null,
   providerCostUsd: Number(accruedCostUsd.toFixed(6)),
   pairs,
