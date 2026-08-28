@@ -71,11 +71,12 @@ export type Succ4Move = {
      * Which reading moved this case.
      *
      * The first 99 came out of the 121 golds a reviewer had to settle before a
-     * standard existed. Later ones come from the batches, where the standard
-     * was already written down — the arithmetic has to keep them apart or
-     * "99 move and 13 stay" stops being checkable against anything.
+     * standard existed. `batch` ones were ruled while reading the remaining
+     * 353, `assembly` ones while assembling the schema-3 cases — the
+     * arithmetic has to keep them apart or "99 move and 13 stay" stops being
+     * checkable against anything.
      */
-    from: "judgement-121" | "batch";
+    from: "judgement-121" | "batch" | "assembly";
     /** Where a reader would otherwise have to reconstruct the reason. */
     note?: string;
 };
@@ -212,6 +213,39 @@ export const SUCC4_B_PLUS_MOVES: readonly Succ4Move[] = [
             "succ-durable-en-57 under rule-4, so the provenance runs en-57 -> en-316 " +
             "-> a further replacement, and its two-gold shape should be kept.",
     },
+
+    /* ---------------------------------------------------------------------
+     * Found while assembling, and moved by §12.2 rather than by §12.1.
+     *
+     * No rule was formed from either: the anchor proposal takes the first user
+     * message carrying the tokens, and in a correction that is the user
+     * quoting the assistant's premise back rather than stating the fact. The
+     * reading moved each anchor to the turn that states it.
+     *
+     * §12.2 is categorical about a gold whose anchor changed, and it does not
+     * ask when the change happened. `succ-durable-ko-301` and
+     * `succ-assistant-ko-308` moved under it having formed no rule either, so
+     * leaving these two would apply the same clause two ways.
+     * ------------------------------------------------------------------ */
+    {
+        originalId: "succ-assistant-en-306",
+        cell: "assistant_only:en",
+        ruleId: "gold-corrected-anchor-clause",
+        from: "assembly",
+        note:
+            "Anchored on «The onboarding checklist you drafted has a section on " +
+            "sibling carer leave», which is the user quoting the draft. Moved to m3, " +
+            "«I have no siblings». goldEvidenceFailure passed on the first: a user " +
+            "message, an exact span, the token present — it does not check that the " +
+            "quote carries the polarity.",
+    },
+    {
+        originalId: "succ-assistant-en-307",
+        cell: "assistant_only:en",
+        ruleId: "gold-corrected-anchor-clause",
+        from: "assembly",
+        note: "Same shape: m1 describes the options, m3 states «I don't have a printer».",
+    },
 ];
 
 /**
@@ -234,6 +268,4 @@ export const SUCC4_REVIEWED_AND_KEPT: readonly string[] = [
     "succ-durable-ko-315",
     "succ-durable-en-306",
     "succ-assistant-ko-307",
-    "succ-assistant-en-306",
-    "succ-assistant-en-307",
 ];
