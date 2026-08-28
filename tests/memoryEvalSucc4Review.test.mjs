@@ -235,3 +235,33 @@ test("batches do not re-label a gold the 121 already settled", () => {
         }
     }
 });
+
+test("every succ-3 gold now has a polarity, and exactly one", () => {
+    // The completion claim, checked rather than counted by hand. A gold in
+    // neither list has no polarity -- that is the state §12 condition 6
+    // requires an unread gold to be in -- so an empty remainder is the only
+    // thing that makes "the reading is finished" true.
+    const assigned = new Map();
+    const claim = (key, where) => {
+        assert.ok(!assigned.has(key), `${key} assigned twice: ${assigned.get(key)} and ${where}`);
+        assigned.set(key, where);
+    };
+    for (const key of SUCC4_AFFIRMED) claim(key, "readings:affirmed");
+    for (const key of SUCC4_NEGATED) claim(key, "readings:negated");
+    for (const batch of SUCC4_BATCHES) {
+        for (const gold of batch.golds) claim(gold.key, batch.id);
+    }
+
+    const unread = [];
+    let total = 0;
+    for (const testCase of MEMORY_EVAL_SUCC3_CASES) {
+        for (const gold of testCase.expected) {
+            total += 1;
+            const key = `${testCase.id}:${gold.id}`;
+            if (!assigned.has(key)) unread.push(key);
+        }
+    }
+    assert.equal(total, 474);
+    assert.deepEqual(unread, [], "these golds have no polarity");
+    assert.equal(assigned.size, 474, "an assignment names a gold that does not exist");
+});
