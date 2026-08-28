@@ -85,6 +85,11 @@ const analysis = analyseArtifact({
     // through so the core keeps its own guard rather than trusting a caller.
     datasetVersion: resolved.manifest.datasetVersion,
     datasetDigest: resolved.manifest.datasetDigest,
+    // Which scorer's rules classify the lines below. Taken from the resolved
+    // manifest rather than from the artifact's own field: the resolver has
+    // already refused an artifact whose claim disagrees with the record, so
+    // this is the checked value and the artifact's is the claim.
+    datasetSchemaVersion: resolved.manifest.schemaVersion,
 });
 
 console.log(renderReport(analysis, { maxRows }));

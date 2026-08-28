@@ -40,44 +40,41 @@ import { memoryEvalUnimplementedPromptRules } from "../lib/memoryEvalPromptRuleI
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
 } from "../lib/memoryExtractionEvalRegister.ts";
-// The successor set, not the frozen schema-1 one.
+// The target, resolved as one object rather than as five imports that must
+// move together.
 //
 // This harness read `mem-eval-seed-11` until 2026-08-26, and would have
 // scored the wrong dataset with the wrong scorer. It never could: the gate
 // refused it with `legacy_dataset_schema` before any provider was reached,
 // which is what fail-closed is for. But a funded pair that cannot run is a
 // trap of its own, so the harness moves rather than the gate.
-// Moved from succ-2 to succ-3 on 2026-08-27. The harness is pinned to one
-// approved target on purpose -- there is no reason to make an arbitrary past
-// dataset billable -- and reading a past one is `resolveArtifactDataset`'s
-// job, which needs no provider and cannot spend.
+//
+// Moved succ-2 → succ-3 on 2026-08-27 and succ-3 → succ-4 on 2026-08-28. The
+// harness is pinned to one approved target on purpose -- there is no reason
+// to make an arbitrary past dataset billable -- and reading a past one is
+// `resolveArtifactDataset`'s job, which needs no provider and cannot spend.
 import {
-    MEMORY_EVAL_SUCC3_CASES as MEMORY_EVAL_CASES,
-    MEMORY_EVAL_SUCC3_DATASET_FROZEN as MEMORY_EVAL_DATASET_FROZEN,
-    MEMORY_EVAL_SUCC3_DATASET_PURPOSE as MEMORY_EVAL_DATASET_PURPOSE,
-    MEMORY_EVAL_SUCC3_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryEvalSucc3Fixtures.ts";
+    harnessTarget,
+    harnessTargetBindingFailures,
+} from "../lib/memoryEvalHarnessTarget.ts";
 // The artifact envelope version and the second digest. The harness stays
 // pinned to the approved current target -- there is no need to make an
 // arbitrary past dataset billable -- but what it writes has to say which
 // version and which labelling it ran on, or a later reader has to guess.
 import { MEMORY_EVAL_ARTIFACT_SCHEMA } from "../lib/memoryEvalDatasetRegistry.ts";
-import {
-    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
-    scoringContractDigest as scoringContractDigestOf,
-} from "../lib/memoryEvalScoringContractDigest.ts";
+import { MEMORY_EVAL_SCORING_CONTRACT_VERSION } from "../lib/memoryEvalScoringContractDigest.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
-    datasetFingerprintInput,
     decideEvalRunMode,
     findDuplicateCases,
     summarizeFailures,
 } from "../lib/memoryExtractionEvalCore.ts";
-import {
-    judgeEvalV2 as judgeEval,
-    scoreCaseV2 as scoreCase,
-} from "../lib/memoryEvalScoringV2.ts";
-import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import { judgeEvalV2, scoreCaseV2 } from "../lib/memoryEvalScoringV2.ts";
+// The schema a live run is pinned to, which is not the schema this harness
+// scores. Imported under a name that says which is which: they differ on
+// purpose while the gate is held.
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION as GATE_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import { judgeEvalV3, scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import { createEvalLiveAdapter } from "../lib/memoryEvalLiveAdapter.ts";
 
 const argValue = (name, fallback) => {
@@ -130,11 +127,32 @@ const redactSecrets = (message) => {
         .replace(/(authorization|api[-_]?key)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]");
 };
 
-/** Ties an archived verdict to the exact sample it was computed from (§12.2). */
-const datasetDigest = createHash("sha256")
-    .update(datasetFingerprintInput(MEMORY_EVAL_CASES), "utf8")
-    .digest("hex");
-const scoringContractDigest = scoringContractDigestOf(MEMORY_EVAL_CASES);
+/**
+ * The target, and the digests that tie an archived verdict to the exact
+ * sample it was computed from (§12.2).
+ *
+ * Both digests come from the target rather than being computed here, because
+ * which function computes them is a property of the schema: schema 2
+ * fingerprints with `datasetFingerprintInput()` and hashes the contract
+ * descriptor together with a labelling pass, schema 3 fingerprints with
+ * `datasetFingerprintInputV3()` and hashes the descriptor alone. Computing
+ * either one here would be a fourth copy of that decision.
+ */
+const target = harnessTarget();
+const MEMORY_EVAL_CASES = target.cases;
+const MEMORY_EVAL_DATASET_VERSION = target.datasetVersion;
+const MEMORY_EVAL_DATASET_FROZEN = target.datasetFrozen;
+const MEMORY_EVAL_DATASET_PURPOSE = target.datasetPurpose;
+const MEMORY_EVAL_DATASET_SCHEMA_VERSION = target.datasetSchemaVersion;
+const datasetDigest = target.datasetDigest;
+const scoringContractDigest = target.scoringContractDigest;
+
+// The scorer is chosen by the target's schema and nowhere else. A harness
+// that named one directly is how a schema-3 sample would be scored by the
+// schema-2 rules -- every candidate's polarity ignored and every citation
+// unchecked, reported under the schema-3 contract's name.
+const scoreCase = MEMORY_EVAL_DATASET_SCHEMA_VERSION === 3 ? scoreCaseV3 : scoreCaseV2;
+const judgeEval = MEMORY_EVAL_DATASET_SCHEMA_VERSION === 3 ? judgeEvalV3 : judgeEvalV2;
 
 const contentDigest = (content) =>
     createHash("sha256")
@@ -142,6 +160,23 @@ const contentDigest = (content) =>
         .digest("hex");
 
 /* ------------------------------------------------------------------ gates -- */
+
+// The dataset this tree holds must be the one the manifest recorded, and the
+// contract must be the one it was recorded under. Checked before the register
+// and before any provider: a run whose sample fingerprints differently from
+// the frozen record is not the run anybody approved, and finding that out
+// afterwards means the money is already spent.
+const bindingFailures = harnessTargetBindingFailures(target);
+if (bindingFailures.length > 0) {
+    console.error(
+        `\n${MEMORY_EVAL_DATASET_VERSION} does not match its recorded manifest:\n  ` +
+            bindingFailures.join("\n  ") +
+            "\n\nThe manifest is the record. Restore the dataset, or record a new " +
+            "manifest deliberately as its own reviewed change -- an artifact from a " +
+            "run that disagreed with its manifest cannot be resolved by any reader.\n"
+    );
+    process.exit(1);
+}
 
 const registerEntry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
     (entry) =>
@@ -215,15 +250,27 @@ const REFUSAL_MESSAGES = {
         "MEMORY_EVAL_DATASET_FROZEN and bump MEMORY_EVAL_DATASET_VERSION.",
     legacy_dataset_schema:
         `Dataset ${MEMORY_EVAL_DATASET_VERSION} is schema ${MEMORY_EVAL_DATASET_SCHEMA_VERSION}, ` +
-        "and a live run requires schema 2 (§12.2, amended 2026-08-25).\n\n" +
-        "It carries neither `expectedDisposition` nor `goldCompleteness`, so\n" +
-        "bulk eligibility recall and the sensitive-review bulk-safe\n" +
-        "misclassification count cannot be computed against it. A run would\n" +
-        "still print numbers, and that is the danger: they would be the old\n" +
-        "contract's numbers under the new contract's names.\n\n" +
-        "Reproducing the mem-extract-v2 diagnostics is a separate path --\n" +
-        "lib/memoryEvalLegacyDataset.ts, which is not a live run and cannot\n" +
-        "support a verdict, a freeze or a pair approval.",
+        `and a live run is pinned to schema ${GATE_DATASET_SCHEMA_VERSION} ` +
+        "(§12.2, amended 2026-08-25).\n\n" +
+        (MEMORY_EVAL_DATASET_SCHEMA_VERSION > GATE_DATASET_SCHEMA_VERSION
+            ? "The dataset is ahead of the gate, not behind it. This tree can score\n" +
+              "schema 3 -- the scorer, the artifact envelope and the artifact readers\n" +
+              "are all converted -- and the gate is held deliberately until the last\n" +
+              "consumer is, so that a paid run cannot produce an artifact something\n" +
+              "downstream still reads under the wrong contract.\n\n" +
+              "  npm run report:memory-eval-schema-readiness\n\n" +
+              "lists every consumer and what each still needs. Moving the gate is its\n" +
+              "own reviewed change, taken when that report is clean -- and it opens\n" +
+              "nothing on its own: a live run still needs the §12.5 budget approval,\n" +
+              "which names the pair, the digests, the run count and the ceiling."
+            : "It carries neither `expectedDisposition` nor `goldCompleteness`, so\n" +
+              "bulk eligibility recall and the sensitive-review bulk-safe\n" +
+              "misclassification count cannot be computed against it. A run would\n" +
+              "still print numbers, and that is the danger: they would be the old\n" +
+              "contract's numbers under the new contract's names.\n\n" +
+              "Reproducing the mem-extract-v2 diagnostics is a separate path --\n" +
+              "lib/memoryEvalLegacyDataset.ts, which is not a live run and cannot\n" +
+              "support a verdict, a freeze or a pair approval."),
     prompt_rule_unimplemented:
         `${MEMORY_EXTRACTION_PROMPT_VERSION} does not implement every scoring rule the ` +
         "contract puts on the prompt:\n" +
@@ -299,6 +346,37 @@ if (duplicates.length > 0) {
  * label-only version cited it: the label map decides the role, so a smoke
  * answer cannot smuggle assistant-only evidence past the validator.
  */
+/**
+ * The label the prompt will have issued for one of a case's messages.
+ *
+ * Labels are assigned by position across the whole chunk, starting at one, by
+ * `toExtractionPromptInput()`. This walks the same order rather than
+ * reimplementing the rule: the two agreeing is what makes a cited label
+ * resolve at all.
+ */
+/**
+ * A gold's required tokens, whichever schema wrote it.
+ *
+ * Schema 3 renamed `mustInclude` to `factValueAll`. Read here rather than
+ * translated at the boundary: a printout that read the wrong field would show
+ * an empty token list and report every candidate as "kind matches, tokens do
+ * not" — a diagnosis about this script.
+ */
+const goldTokens = (gold) => gold.factValueAll ?? gold.mustInclude ?? [];
+
+const smokeLabelFor = (testCase, externalMessageId) => {
+    let ordinal = 0;
+    for (const conversation of testCase.conversations) {
+        for (const message of conversation.messages) {
+            ordinal += 1;
+            if (message.externalMessageId === externalMessageId) {
+                return `m${ordinal}`;
+            }
+        }
+    }
+    return "m1";
+};
+
 const smokeCitation = (testCase) => {
     let ordinal = 0;
     let firstMessage = null;
@@ -325,9 +403,17 @@ const smokeAdapter = (testCase) => async () => ({
             // The gold's own polarity where the schema carries one; schema 2
             // has no such field and does not score it either.
             polarity: expected.polarity ?? "affirmed",
+            // Schema 3 renamed the token lists. Both are read rather than one
+            // being translated into the other: a stub that answered the wrong
+            // schema's field would return a statement containing none of the
+            // gold's tokens, and every case would score as a miss for a reason
+            // that is about the stub.
             statement: `The user's record: ${[
-                ...expected.mustInclude,
-                ...(expected.mustIncludeAny ?? []).slice(0, 1),
+                ...(expected.factValueAll ?? expected.mustInclude ?? []),
+                ...(expected.factValueAny ?? expected.mustIncludeAny ?? []).slice(
+                    0,
+                    1
+                ),
             ].join(" ")}.`,
             confidence: 0.9,
             sensitivity:
@@ -335,7 +421,22 @@ const smokeAdapter = (testCase) => async () => ({
                     ? "sensitive"
                     : "standard",
             expiresAt: null,
-            evidence: [smokeCitation(testCase)],
+            // A schema-3 gold names the span it was written from, and scoring
+            // re-reads it. Citing the gold's own anchor is what a correct
+            // extractor would do, and it is the only citation guaranteed to
+            // resolve — `smokeCitation` picks the first user message, which
+            // for a multi-conversation case need not be the one the gold cites.
+            evidence: [
+                expected.evidence
+                    ? {
+                          messageLabel: smokeLabelFor(
+                              testCase,
+                              expected.evidence.evidenceMessageId
+                          ),
+                          quote: expected.evidence.evidenceQuote,
+                      }
+                    : smokeCitation(testCase),
+            ],
         })),
     },
 });
@@ -429,11 +530,21 @@ for (const testCase of MEMORY_EVAL_CASES) {
             .join(", ")}`;
     }
 
+    // Schema 3 scores two fields schema 2 does not have, so both are carried
+    // here rather than at the scorer's door. `evidence` is what the parser
+    // resolved -- the server's own message id and the quote it already checked
+    // -- never what the model typed, and the scorer re-checks it against the
+    // case's conversation anyway.
     const candidates = (analysis?.decisions ?? []).map((decision) => ({
         kind: decision.candidate.kind,
+        polarity: decision.candidate.polarity,
         statement: decision.candidate.statement,
         bulkSafe: decision.validation.bulkSafe,
         disposition: decision.validation.disposition,
+        evidence: decision.candidate.evidence.map((reference) => ({
+            evidenceMessageId: reference.externalMessageId,
+            evidenceQuote: reference.evidenceQuote,
+        })),
     }));
 
     consecutiveFailures = failure ? consecutiveFailures + 1 : 0;
@@ -597,7 +708,10 @@ if (probeLimit !== null) {
             expected.length === 0
                 ? "    expected: nothing (extracting anything is a false positive)"
                 : `    expected: ${expected
-                      .map((entry) => `${entry.kind} + [${entry.mustInclude.join(", ")}]`)
+                      .map(
+                          (entry) =>
+                              `${entry.kind}${entry.polarity ? `/${entry.polarity}` : ""} + [${goldTokens(entry).join(", ")}]`
+                      )
                       .join("; ")}`
         );
         if (record.candidates.length === 0) {
@@ -610,21 +724,34 @@ if (probeLimit !== null) {
             // that reads identically to a wrong statement in the totals.
             const kindMatches = expected.some((entry) => entry.kind === candidate.kind);
             const tokensMatch = expected.some((entry) =>
-                entry.mustInclude.every((token) =>
+                goldTokens(entry).every((token) =>
                     candidate.statement.toLowerCase().includes(token.toLowerCase())
                 )
             );
+            // Schema 3 only. A statement can carry every gold token and still
+            // claim the opposite, and it can be right and cite nothing — two
+            // failures that read identically in the totals and need different
+            // answers from a person.
+            const polarityMatches =
+                candidate.polarity === undefined ||
+                expected.some((entry) => entry.polarity === candidate.polarity);
+            const cited =
+                candidate.evidence === undefined ||
+                candidate.evidence.length > 0;
             const verdict = !candidate.bulkSafe
                 ? "not adopted"
-                : kindMatches && tokensMatch
-                  ? "MATCH"
-                  : tokensMatch
-                    ? `tokens match, kind differs (expected ${expected.map((e) => e.kind).join("/")})`
-                    : kindMatches
-                      ? "kind matches, tokens do not"
-                      : "neither";
+                : !polarityMatches
+                  ? `polarity differs (expected ${expected.map((e) => e.polarity).join("/")})`
+                  : kindMatches && tokensMatch
+                    ? "MATCH"
+                    : tokensMatch
+                      ? `tokens match, kind differs (expected ${expected.map((e) => e.kind).join("/")})`
+                      : kindMatches
+                        ? "kind matches, tokens do not"
+                        : "neither";
             console.log(
-                `    [${verdict}] ${candidate.kind} · bulk-safe ${candidate.bulkSafe} — ${candidate.statement}`
+                `    [${verdict}] ${candidate.kind}${candidate.polarity ? `/${candidate.polarity}` : ""} · ` +
+                    `bulk-safe ${candidate.bulkSafe}${cited ? "" : " · uncited"} — ${candidate.statement}`
             );
         }
     }
@@ -686,6 +813,12 @@ const artifact = {
         modelId,
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         datasetVersion: MEMORY_EVAL_DATASET_VERSION,
+        // Which schema the sample is written in, and therefore which scorer
+        // produced the numbers below. A reader can derive it from the version
+        // via the manifest, and deriving it is exactly what leaves a
+        // disagreement invisible: an artifact that names a schema its dataset
+        // is not recorded under is refused rather than resolved.
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         datasetDigest,
         // The second digest, and not a duplicate of the first: the dataset
         // digest does not cover expectedDisposition, goldCompleteness,

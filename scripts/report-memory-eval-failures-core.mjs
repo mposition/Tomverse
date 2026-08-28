@@ -29,6 +29,11 @@ import {
     unadmittedCriticalBulkSafeCandidates,
 } from "@/lib/memoryEvalScoringV2";
 import {
+    candidateEvidenceBound,
+    unadmittedCriticalBulkSafeCandidatesV3,
+} from "@/lib/memoryEvalScoringV3";
+import { candidateMatchesGoldV3 } from "@/lib/memoryEvalDatasetSchemaV3";
+import {
     MEMORY_EVAL_CRITICAL_CATEGORIES,
     summarizeFailures,
 } from "@/lib/memoryExtractionEvalCore";
@@ -36,13 +41,63 @@ import {
 const CRITICAL = new Set(MEMORY_EVAL_CRITICAL_CATEGORIES);
 
 /**
- * The token rule alone, with the kind check neutralised.
+ * The schema's own matchers, so this report classifies by exactly what the
+ * gate counted.
  *
- * Reuses the scorer's own matcher rather than restating its normalisation, so
- * "the tokens are present" means here exactly what it means to the gate.
+ * A report that restated a rule would drift from it, and the drift is silent:
+ * the totals come from the artifact's outcomes and the lines below come from
+ * here, so a mismatch shows up as a report whose list disagrees with its own
+ * headline. That has happened four times in this programme's tools, which is
+ * why every rule below is the scorer's own function rather than a copy.
+ *
+ * `tokensMatch` neutralises the kind check to find a near miss — a candidate
+ * that says the right thing under the wrong label. Under schema 3 it
+ * neutralises polarity too, and the caller reports which one differed.
  */
-const tokensMatch = (candidate, expected) =>
-    matchesExpectedV2(candidate, { ...expected, kind: candidate.kind });
+const schemaTools = (schemaVersion) => {
+    if (schemaVersion === 3) {
+        return {
+            schemaVersion: 3,
+            tokens: (gold) => gold.factValueAll ?? [],
+            matches: (candidate, gold, testCase) =>
+                candidateMatchesGoldV3(gold, candidate, testCase.language) &&
+                candidateEvidenceBound(
+                    candidate,
+                    testCase.conversations.flatMap(
+                        (conversation) => conversation.messages
+                    )
+                ),
+            tokensMatch: (candidate, gold, testCase) =>
+                candidateMatchesGoldV3(
+                    gold,
+                    { ...candidate, kind: gold.kind, polarity: gold.polarity },
+                    testCase.language
+                ),
+            unadmittedCritical: (testCase, candidates) =>
+                unadmittedCriticalBulkSafeCandidatesV3(
+                    testCase,
+                    candidates,
+                    candidates.map((candidate) =>
+                        candidateEvidenceBound(
+                            candidate,
+                            testCase.conversations.flatMap(
+                                (conversation) => conversation.messages
+                            )
+                        )
+                    )
+                ),
+        };
+    }
+    return {
+        schemaVersion,
+        tokens: (gold) => gold.mustInclude ?? [],
+        matches: (candidate, gold) => matchesExpectedV2(candidate, gold),
+        tokensMatch: (candidate, gold) =>
+            matchesExpectedV2(candidate, { ...gold, kind: candidate.kind }),
+        unadmittedCritical: (testCase, candidates) =>
+            unadmittedCriticalBulkSafeCandidates(testCase, candidates),
+    };
+};
 
 const cellKey = (category, language) => `${category}:${language}`;
 
@@ -64,12 +119,14 @@ const emptyCell = (category, language) => ({
  * @param {Map<string, object>} input.casesById   the tree's dataset, by case id
  * @param {string} input.datasetVersion the tree's dataset version
  * @param {string} input.datasetDigest  the tree's dataset digest
+ * @param {number} input.datasetSchemaVersion which scorer's rules to classify by
  */
 export function analyseArtifact({
     artifact,
     casesById,
     datasetVersion,
     datasetDigest,
+    datasetSchemaVersion = 2,
 }) {
     const manifest = artifact?.manifest;
     if (!manifest || !Array.isArray(artifact?.records)) {
@@ -97,6 +154,8 @@ export function analyseArtifact({
                 `has been edited, and the cases no longer line up with the records.`,
         };
     }
+
+    const tools = schemaTools(datasetSchemaVersion);
 
     const cells = new Map();
     const criticalAdoptions = [];
@@ -143,14 +202,12 @@ export function analyseArtifact({
         const candidates = record.candidates ?? [];
         const describeExpected = expected.map(
             (entry) =>
-                `${entry.kind} + [${entry.mustInclude.join(", ")}] (${entry.expectedDisposition})`
+                `${entry.kind}${entry.polarity ? `/${entry.polarity}` : ""} + ` +
+                `[${tools.tokens(entry).join(", ")}] (${entry.expectedDisposition})`
         );
 
         if (CRITICAL.has(record.category)) {
-            const adopted = unadmittedCriticalBulkSafeCandidates(
-                testCase,
-                candidates
-            );
+            const adopted = tools.unadmittedCritical(testCase, candidates);
             if (adopted.length > 0) {
                 criticalAdoptions.push({
                     caseId: record.caseId,
@@ -179,10 +236,13 @@ export function analyseArtifact({
         }
 
         for (const candidate of candidates) {
-            if (expected.some((entry) => matchesExpectedV2(candidate, entry)))
+            if (
+                expected.some((entry) => tools.matches(candidate, entry, testCase))
+            ) {
                 continue;
+            }
             const nearMiss = expected.find((entry) =>
-                tokensMatch(candidate, entry)
+                tools.tokensMatch(candidate, entry, testCase)
             );
             const row = {
                 caseId: record.caseId,
@@ -194,10 +254,27 @@ export function analyseArtifact({
                 disposition: candidate.disposition,
             };
             if (nearMiss) {
+                // Which field differed, named rather than left to the reader.
+                // Under schema 3 "the tokens are right and this did not match"
+                // has three answers -- the kind, the polarity, or a citation
+                // that does not resolve -- and they need different responses:
+                // a taxonomy question, a reading question, and a defect.
                 kindMismatches.push({
                     ...row,
                     expectedKind: nearMiss.kind,
-                    tokens: nearMiss.mustInclude,
+                    tokens: tools.tokens(nearMiss),
+                    ...(tools.schemaVersion === 3
+                        ? {
+                              expectedPolarity: nearMiss.polarity,
+                              returnedPolarity: candidate.polarity,
+                              evidenceBound: candidateEvidenceBound(
+                                  candidate,
+                                  testCase.conversations.flatMap(
+                                      (conversation) => conversation.messages
+                                  )
+                              ),
+                          }
+                        : {}),
                 });
             } else {
                 unrecognised.push({ ...row, expected: describeExpected });
@@ -231,7 +308,18 @@ export function analyseArtifact({
 const countPairs = (rows) => {
     const counts = new Map();
     for (const row of rows) {
-        const key = `${row.expectedKind} -> ${row.returnedKind}`;
+        // Grouped by what actually differed, so a run whose misses are all
+        // polarity does not read as a kind problem. A row where the kind is
+        // right and the polarity is wrong used to key on `x -> x`.
+        const key =
+            row.expectedKind === row.returnedKind &&
+            row.expectedPolarity !== undefined &&
+            row.expectedPolarity !== row.returnedPolarity
+                ? `polarity ${row.expectedPolarity} -> ${String(row.returnedPolarity)}`
+                : row.expectedKind === row.returnedKind &&
+                    row.evidenceBound === false
+                  ? "evidence did not resolve"
+                  : `${row.expectedKind} -> ${row.returnedKind}`;
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -338,10 +426,29 @@ export function renderReport(analysis, { maxRows = 40 } = {}) {
     );
 
     section(
-        "Tokens match, kind differs",
+        "Tokens match, something else differs",
         analysis.kindMismatches,
-        (row) =>
-            `  ${row.caseId}  (${row.category}:${row.language})  ${row.expectedKind} -> ${row.returnedKind}  [${row.tokens.join(", ")}]\n    ${row.statement}`,
+        (row) => {
+            // Under schema 3 three different things put a candidate in this
+            // list, and they are not the same finding: a kind is a taxonomy
+            // question, a polarity is a reading of what the user said, and an
+            // unresolved citation is a defect. Naming which one differed is
+            // the difference between a report and a pile.
+            const differs = [
+                row.expectedKind !== row.returnedKind
+                    ? `kind ${row.expectedKind} -> ${row.returnedKind}`
+                    : null,
+                row.expectedPolarity !== undefined &&
+                row.expectedPolarity !== row.returnedPolarity
+                    ? `polarity ${row.expectedPolarity} -> ${String(row.returnedPolarity)}`
+                    : null,
+                row.evidenceBound === false ? "evidence did not resolve" : null,
+            ].filter(Boolean);
+            return (
+                `  ${row.caseId}  (${row.category}:${row.language})  ` +
+                `${differs.join("; ") || "matched on every field"}  [${row.tokens.join(", ")}]\n    ${row.statement}`
+            );
+        },
         "Scored as a false positive AND a miss, because §12.3 judges on the gold label.\n  Whether each is the model, the label or the taxonomy is a question for a person."
     );
 
