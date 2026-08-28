@@ -21,6 +21,7 @@
 
 import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
 import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
+import { containsAll, sentencesOf } from "../lib/memoryEvalSucc4Assembly.ts";
 import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
 import { goldEvidenceFailure } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import { SUCC4_BATCHES } from "../lib/memoryEvalSucc4Review/batches.ts";
@@ -31,13 +32,6 @@ import {
 
 const wanted = process.argv[2] ?? null;
 const alreadyRead = new Set([...SUCC4_AFFIRMED, ...SUCC4_NEGATED]);
-
-const sentences = (text) =>
-    text.split(/(?<=[.!?。？！])\s+/).map((part) => part.trim()).filter(Boolean);
-const containsAll = (haystack, tokens, language) => {
-    const canonical = canonMatch(haystack, language);
-    return tokens.every((token) => canonical.includes(canonMatch(token, language)));
-};
 
 /** Every unreviewed gold of a cell, keyed from the fixtures, in key order. */
 const cellSlice = (cell) => {
@@ -56,7 +50,7 @@ const cellSlice = (cell) => {
                     containsAll(message.content, tokens, language)
             );
             const covering = carrier
-                ? sentences(carrier.content).filter((part) =>
+                ? sentencesOf(carrier.content).filter((part) =>
                       containsAll(part, tokens, language)
                   )
                 : [];
