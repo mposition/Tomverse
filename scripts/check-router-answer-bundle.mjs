@@ -21,13 +21,15 @@
 //   bundleProblems = 0              every stored answer is judgeable
 //   pairedCoverage >= 200/210       overall floor
 //   eachCellPairedCoverage >= 13/14 per-cell floor
-//   lostByThisCode = 0              no answer was lost by this harness
+//   harnessAttributableFailureCount = 0   no empty result was ours
 //   costSoFar <= 0.50               the pilot stayed inside its own ceiling
+//   callLimitManifest frozen and sound    the answers were generated under
+//                                   the caps the product applies
 //
-// `lostByThisCode` is the one that is not about coverage. An answer this code
-// lost is our defect wearing a model's name, and a calibration built on it
-// measures the harness. mposition's ruling: any of them voids the run and
-// blocks the judge.
+// The attribution count is the one that is not about coverage. An empty result
+// this harness caused is our defect wearing a model's name, and a calibration
+// built on it measures the harness. mposition's ruling: any of them voids the
+// run and blocks the judge.
 //
 // Usage:
 //   node --import tsx scripts/check-router-answer-bundle.mjs \
@@ -45,6 +47,7 @@ import {
   bundleCoverage,
   bundleCoverageProblems,
 } from "../lib/routerBundleCoverage.ts";
+import { callLimitManifestProblems } from "../lib/routerCallLimits.ts";
 
 const die = (message) => {
   console.error(message);
@@ -108,21 +111,32 @@ if (pairsAttempted !== REQUIRED_PAIRS_ATTEMPTED) {
   );
 }
 
-// Not a coverage question. An answer this code lost is this harness's defect
+// Not a coverage question. An empty result this harness caused is our defect
 // reported as a model's behaviour, and a judge graded on it measures the
 // harness. Any of them voids the run.
 const failureSummary = record.generationFailureSummary;
-if (!failureSummary || typeof failureSummary.harnessLostText !== "number") {
+if (!failureSummary || typeof failureSummary.harnessAttributableFailureCount !== "number") {
   problems.push(
-    "the pilot recorded no generation-failure summary, so whether this harness lost an " +
-      "answer cannot be established — and an unestablished zero is not a zero"
+    "the pilot recorded no generation-failure summary, so whether this harness caused an " +
+      "empty result cannot be established — and an unestablished zero is not a zero"
   );
-} else if (failureSummary.harnessLostText > 0) {
+} else if (failureSummary.harnessAttributableFailureCount > 0) {
+  const reasons = Object.entries(failureSummary.byReason ?? {})
+    .filter(([, count]) => count > 0)
+    .map(([reason, count]) => `${reason} ${count}`)
+    .join(", ");
   problems.push(
-    `this harness lost the text of ${failureSummary.harnessLostText} answer(s) that existed, ` +
-      "which makes the run a measurement of the harness rather than of the models"
+    `${failureSummary.harnessAttributableFailureCount} empty result(s) are attributable to this ` +
+      `harness (${reasons || "no reason recorded"}), which makes the run a measurement of the ` +
+      "harness rather than of the models"
   );
 }
+
+// What the run was allowed to ask for, frozen before it started. A bundle
+// whose answers were generated under a cap the product never applies is not a
+// measurement of the product, however complete its coverage.
+const manifestTrouble = callLimitManifestProblems(record.callLimitManifest);
+if (manifestTrouble.length > 0) problems.push(...manifestTrouble);
 
 const costSoFar = typeof record.providerCostUsd === "number" ? record.providerCostUsd : null;
 if (costSoFar === null) {
@@ -139,17 +153,24 @@ console.log(
   `  cost       $${costSoFar === null ? "?" : costSoFar.toFixed(4)} of $${maxCostUsd.toFixed(2)} allowed`
 );
 if (failureSummary) {
-  const byClass = failureSummary.byClassification ?? {};
   console.log(
-    `  empties    ${failureSummary.total ?? 0} failed generation(s) — ` +
-      `${byClass.harness_lost_text ?? 0} lost by this harness, ` +
-      `${byClass.observed_empty_at_adapter_boundary ?? 0} empty at the adapter boundary, ` +
-      `${byClass.provider_confirmed_empty ?? 0} confirmed empty by the provider`
+    `  empties    ${failureSummary.total ?? 0} empty-text result(s) after normalization — ` +
+      `${failureSummary.harnessAttributableFailureCount ?? "?"} attributable to this harness`
   );
-  for (const failure of failureSummary.undetermined ?? []) {
+  const byReason = Object.entries(failureSummary.byReason ?? {}).filter(([, n]) => n > 0);
+  if (byReason.length > 0) {
+    console.log(`  by reason  ${byReason.map(([r, n]) => `${r} ${n}`).join(", ")}`);
+  }
+  for (const failure of [
+    ...(failureSummary.harnessAttributable ?? []),
+    ...(failureSummary.undetermined ?? []),
+  ]) {
     console.log(
-      `    undetermined ${failure.arm} ${failure.provider}/${failure.apiModel} ` +
-        `finishReason=${failure.finishReason ?? "none"} traceId=${failure.traceId ?? "none"}`
+      `    ${failure.attribution ?? "?"} ${failure.arm}/${failure.callRole ?? "?"} ` +
+        `${failure.provider}/${failure.apiModel} ${failure.emptinessReason ?? "?"} ` +
+        `finishReason=${failure.normalizedFinishReason ?? "none"} ` +
+        `billed=${failure.billedOutputTokens ?? "none"}/${failure.requestedMaxOutputTokens ?? "none"} ` +
+        `traceId=${failure.traceId ?? "none"}`
     );
   }
 }
@@ -179,6 +200,6 @@ if (problems.length > 0) {
 
 console.log(
   `\nOK — ${bundle.entries.length} pair(s), every cell above its floor, no bundle problems,\n` +
-    "no answer lost by this harness, and the pilot finished inside its ceiling. The\n" +
-    "independent judge may be called."
+    "no empty result attributable to this harness, and the pilot finished inside its\n" +
+    "ceiling under a frozen call-limit manifest. The independent judge may be called."
 );

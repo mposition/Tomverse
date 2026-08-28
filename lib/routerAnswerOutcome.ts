@@ -72,6 +72,16 @@ export type AnswerMetadata = {
      * the question it leaves open.
      */
     traceId: string | null;
+    /** What this call asked for, from the frozen manifest. */
+    requestedMaxOutputTokens: number | null;
+    /**
+     * What the product would have asked for on this model.
+     *
+     * The condition that decides whether a budget this call ran out of was
+     * this harness's choice: a request that already asked for the product's
+     * cap did not come up short because the harness was stingy.
+     */
+    resolvedProductOutputCap: number | null;
 };
 
 export type AnswerOutcome =
@@ -122,27 +132,38 @@ export const failed = (
 /**
  * What is actually known about an empty answer, in a sentence.
  *
- * Worded to the classification rather than to the empty string, so a journal
- * line never says "the provider returned no text" about a case where nobody
- * established that.
+ * Worded to the evidence rather than to the empty string. The earlier version
+ * of this said "the provider returned no text" about cases where nobody had
+ * established that, and later "N answers existed and this code holds none of
+ * them" about answers that were never written. Both named a cause the data did
+ * not carry.
  */
 export const emptinessDetail = (metadata: AnswerMetadata): string => {
-    const generated = generatedTokens(metadata.usage);
-    switch (classifyEmptiness(metadata)) {
-        case "harness_lost_text":
-            return metadata.rawTextLength > 0
-                ? `the reply held ${metadata.rawTextLength} character(s) of whitespace and nothing else, ` +
-                      "so normalising it left this harness with no text"
-                : `the provider reports generating ${generated} output token(s) and this harness holds ` +
-                      "none of the text, so it was lost before it was read";
+    const { reason, evidence } = classifyEmptiness(metadata);
+    switch (reason) {
+        case "text_normalization_loss":
+            return (
+                `the reply held ${metadata.rawTextLength} character(s) of whitespace and nothing ` +
+                "else, so normalising it left this harness with no text"
+            );
+        case "output_budget_exhausted":
+            return (
+                `the request asked for ${evidence.requestedMaxOutputTokens} output token(s) against ` +
+                `the product's ${evidence.resolvedProductOutputCap}, and the provider stopped at the ` +
+                `output limit having billed ${evidence.billedOutputTokens}, so the budget was spent ` +
+                "before any answer text was written"
+            );
         case "provider_confirmed_empty":
-            return `the provider finished with finishReason=${metadata.finishReason} and reports ` +
-                "generating 0 output tokens, so it produced nothing";
+            return (
+                `the provider finished with finishReason=${metadata.finishReason} and reports ` +
+                "billing 0 output tokens, so it produced nothing"
+            );
         default:
             return (
-                "no text reached this harness and nothing establishes whether the provider sent any" +
-                (metadata.finishReason === null ? "; it reported no finish reason" : "") +
-                (generated === null ? "; it reported no output token count" : "")
+                "no text reached this harness after normalization, and the finish reason and usage " +
+                "do not establish why" +
+                (evidence.normalizedFinishReason === null ? "; it reported no finish reason" : "") +
+                (evidence.billedOutputTokens === null ? "; it reported no output token count" : "")
             );
     }
 };
@@ -176,40 +197,67 @@ export const outcomeFromReply = (
 };
 
 /**
- * Where an empty answer went empty.
+ * An empty answer, taken apart into three questions instead of one label.
  *
- * ## Why `rawTextLength === 0` is not "the model returned nothing"
+ * ## Why three axes rather than a longer list
  *
- * mposition's correction, and it is the reason this is three values rather
- * than a boolean. An empty string at this point in the code says only that
- * *this code* holds no text. It does not say the provider sent none: the text
- * may have been dropped anywhere upstream — in the adapter, in a stream that
- * ended early, in a response shape this code reads the wrong field of. Calling
- * that a model failure would file our own defects under the model's name, and
- * an evaluation that does so measures the harness while reporting on the
- * model.
+ * mposition's ruling. The first version of this file had one enum, and the
+ * moment reality was inspected it wanted a fourth value, then a fifth. A list
+ * that grows every time it meets a new case is a list answering several
+ * questions at once. There are three, and they are independent:
  *
- * So the classification says how far back the emptiness is actually known to
- * reach, and one of the three is an admission that we do not know:
+ *   * the **symptom** is what was observed. Here it is always the same thing:
+ *     after normalisation there was no text.
+ *   * the **reason** is the mechanism, where one is established.
+ *   * the **attribution** is whose defect it is. It does not follow from the
+ *     reason alone and must never be inferred past the evidence.
  *
- *   * `harness_lost_text` — content demonstrably existed and this code holds
- *     none of it. Either the raw text was non-empty and normalisation blanked
- *     it, or the provider billed for output tokens we cannot show. Our defect,
- *     and it voids the run.
- *   * `observed_empty_at_adapter_boundary` — blank from the adapter boundary
- *     onward, with nothing establishing whether the provider sent text. The
- *     honest default. It is a real failure the user would have seen, and its
- *     cause is open.
- *   * `provider_confirmed_empty` — the provider's own response says it
- *     produced nothing: it finished, and it reports generating zero output
- *     tokens. Only this one is the model's behaviour.
+ * `undetermined` is a first-class value in both of the last two, and it is the
+ * default. A run that cannot tell why an answer was empty says so rather than
+ * picking the likeliest story.
+ *
+ * ## What this cost before it existed
+ *
+ * The 2026-08-28 pilot returned 60 empty answers, every one on the auto arm.
+ * The harness had asked every model for 2,048 output tokens while the product
+ * asks 128,000-384,000 for the same models, and reasoning tokens are billed
+ * out of that same budget -- so a reasoning model could spend the whole
+ * allowance thinking and return no answer at all. The old enum called that
+ * `harness_lost_text`, which named the right culprit for the wrong reason: no
+ * text was lost, none was ever written.
  */
-export const EMPTINESS_CLASSIFICATIONS = [
-    "harness_lost_text",
-    "observed_empty_at_adapter_boundary",
+export const EMPTY_TEXT_SYMPTOM = "empty_text" as const;
+
+export const EMPTINESS_REASONS = [
+    /** Content arrived, and normalising it left nothing. */
+    "text_normalization_loss",
+    /** The output budget was spent before any answer text was written. */
+    "output_budget_exhausted",
+    /** The provider's own response accounts for having produced nothing. */
     "provider_confirmed_empty",
+    "undetermined",
 ] as const;
-export type EmptinessClassification = (typeof EMPTINESS_CLASSIFICATIONS)[number];
+export type EmptinessReason = (typeof EMPTINESS_REASONS)[number];
+
+export const FAILURE_ATTRIBUTIONS = ["harness", "provider", "model", "undetermined"] as const;
+export type FailureAttribution = (typeof FAILURE_ATTRIBUTIONS)[number];
+
+/**
+ * Finish reasons, in one spelling.
+ *
+ * Providers spell the same event `length`, `max_tokens`, `MAX_TOKENS`. The
+ * budget rule turns on this value, so it cannot be a substring match against
+ * whatever spelling a provider happened to send.
+ */
+export const normalizeFinishReason = (raw: string | null): string | null => {
+    if (raw === null) return null;
+    const value = raw.trim().toLowerCase();
+    if (value === "") return null;
+    if (["length", "max_tokens", "max_output_tokens", "output_limit"].includes(value)) {
+        return "output_limit";
+    }
+    return value;
+};
 
 /**
  * Output tokens the provider says it generated, or `null` when it said nothing.
@@ -228,50 +276,134 @@ export const generatedTokens = (usage: Readonly<Record<string, number>>): number
 };
 
 /**
- * How far back an empty answer's emptiness is established. Never a guess:
- * where nothing establishes it, it says so.
+ * How close to the cap counts as having reached it.
+ *
+ * A provider stops on a token boundary rather than on our arithmetic, so the
+ * billed count lands a little under the ceiling. Wide enough to allow that,
+ * narrow enough that a model which merely wrote a long answer does not
+ * qualify.
+ */
+export const BUDGET_EXHAUSTION_RATIO = 0.95;
+
+export type EmptinessClassification = {
+    symptom: typeof EMPTY_TEXT_SYMPTOM;
+    reason: EmptinessReason;
+    attribution: FailureAttribution;
+    /** Every condition the rule tested, so a reader can see which one failed. */
+    evidence: {
+        visibleTextLength: number;
+        normalizedFinishReason: string | null;
+        billedOutputTokens: number | null;
+        requestedMaxOutputTokens: number | null;
+        resolvedProductOutputCap: number | null;
+    };
+};
+
+/**
+ * Why an answer was empty, decided only where the evidence decides it.
+ *
+ * ## Budget exhaustion needs all four conditions, together
+ *
+ * mposition set the bar and it is deliberately hard to clear:
+ *
+ *   visibleTextLength === 0
+ *   normalizedFinishReason === "output_limit"
+ *   billedOutputTokens ~= requestedMaxOutputTokens
+ *   requestedMaxOutputTokens < resolvedProductOutputCap
+ *
+ * The last one is what makes it *ours*. A request that already asked for
+ * everything the product asks for did not come up short because this harness
+ * was stingy, whatever the other three say -- that would be the model or the
+ * provider, and this rule must not claim it.
+ *
+ * Tokens merely close to the cap, or a finish reason of `length` on its own,
+ * establish nothing and stay `undetermined`. Guessing here is how a harness
+ * defect gets filed under a model's name, which is the thing that voided two
+ * runs.
  */
 export const classifyEmptiness = (metadata: AnswerMetadata): EmptinessClassification => {
-    // Text arrived and normalisation is why none is left. Ours.
-    if (metadata.rawTextLength > 0) return "harness_lost_text";
-    const generated = generatedTokens(metadata.usage);
-    // The provider generated output and this code holds none of it. Also ours,
-    // and the case a raw-length check alone cannot see: the text was lost
-    // before it ever reached `rawTextLength`.
-    if (generated !== null && generated > 0) return "harness_lost_text";
+    const billedOutputTokens = generatedTokens(metadata.usage);
+    const normalizedFinishReason = normalizeFinishReason(metadata.finishReason);
+    const requested = metadata.requestedMaxOutputTokens;
+    const productCap = metadata.resolvedProductOutputCap;
+    const evidence = {
+        // Zero by construction: this is only reached for an empty answer.
+        visibleTextLength: 0,
+        normalizedFinishReason,
+        billedOutputTokens,
+        requestedMaxOutputTokens: requested,
+        resolvedProductOutputCap: productCap,
+    };
+    const decided = (
+        reason: EmptinessReason,
+        attribution: FailureAttribution
+    ): EmptinessClassification => ({
+        symptom: EMPTY_TEXT_SYMPTOM,
+        reason,
+        attribution,
+        evidence,
+    });
+
+    // Text arrived and normalising it is why none is left. No budget story can
+    // explain content we were handed and dropped.
+    if (metadata.rawTextLength > 0) return decided("text_normalization_loss", "harness");
+
+    const askedUnderTheProduct = requested !== null && productCap !== null && requested < productCap;
+    const spentTheBudget =
+        billedOutputTokens !== null &&
+        requested !== null &&
+        billedOutputTokens >= requested * BUDGET_EXHAUSTION_RATIO;
+    if (normalizedFinishReason === "output_limit" && spentTheBudget && askedUnderTheProduct) {
+        return decided("output_budget_exhausted", "harness");
+    }
+
     // The provider finished and accounts for zero output tokens. Only with
     // both does its response actually confirm it produced nothing.
-    if (generated === 0 && metadata.finishReason !== null) return "provider_confirmed_empty";
-    return "observed_empty_at_adapter_boundary";
+    if (billedOutputTokens === 0 && normalizedFinishReason !== null) {
+        return decided("provider_confirmed_empty", "model");
+    }
+
+    return decided("undetermined", "undetermined");
 };
 
 /**
  * One line for the failure journal. Everything a root cause would need.
  *
- * `lostByThisCode` is the gate's field: a run with any of them is measuring
- * this harness rather than the models, and
+ * `attribution` is the gate's field. A run carrying any harness-attributable
+ * failure measured this harness rather than the models, and
  * .github/workflows/router-eval-pilot.yml refuses to spend on the independent
- * judge when it is non-zero.
+ * judge while `harnessAttributableFailureCount` is non-zero.
  */
 export const failureRecord = (outcome: Extract<AnswerOutcome, { status: "failed" }>) => {
-    const emptiness =
+    const classification =
         outcome.reason === "empty_output" ? classifyEmptiness(outcome.metadata) : null;
     return {
         kind: "answer-failure" as const,
         arm: outcome.metadata.arm,
-        reason: outcome.reason,
+        callRole: outcome.metadata.arm === "judge" ? ("judge" as const) : ("answer" as const),
+        failure: outcome.reason,
         detail: outcome.detail,
         modelId: outcome.metadata.modelId,
         provider: outcome.metadata.provider,
         apiModel: outcome.metadata.apiModel,
         finishReason: outcome.metadata.finishReason,
+        normalizedFinishReason: normalizeFinishReason(outcome.metadata.finishReason),
         usage: outcome.metadata.usage,
+        billedOutputTokens: generatedTokens(outcome.metadata.usage),
         latencyMs: outcome.metadata.latencyMs,
         rawTextLength: outcome.metadata.rawTextLength,
+        requestedMaxOutputTokens: outcome.metadata.requestedMaxOutputTokens,
+        resolvedProductOutputCap: outcome.metadata.resolvedProductOutputCap,
         traceId: outcome.metadata.traceId,
-        emptiness,
-        // Our defect, not the model's. Never inferred from an empty string
-        // alone -- see classifyEmptiness.
-        lostByThisCode: emptiness === "harness_lost_text",
+        symptom: classification?.symptom ?? null,
+        // A provider error has no emptiness to explain, so it carries no
+        // reason and is attributed to the provider that failed the call.
+        emptinessReason: classification?.reason ?? null,
+        attribution: classification?.attribution ?? ("provider" as const),
+        evidence: classification?.evidence ?? null,
     };
 };
+
+/** Whether this failure is one this harness caused. The gate counts these. */
+export const isHarnessAttributable = (record: { attribution: FailureAttribution }): boolean =>
+    record.attribution === "harness";
