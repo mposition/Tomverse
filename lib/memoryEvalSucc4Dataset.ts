@@ -49,6 +49,34 @@ export const MEMORY_EVAL_SUCC4_DATASET_VERSION = "mem-eval-succ-4";
 export const MEMORY_EVAL_SUCC4_SUPERSEDES = "mem-eval-succ-3";
 
 /**
+ * Not frozen.
+ *
+ * docs/ops/memory-extraction-eval-dataset.md §7.2 makes freezing a three-line
+ * edit, and docs/ops/memory-extraction-eval-dataset.md §7.1 lists what has to
+ * hold first. For a successor dataset that
+ * includes a human adoption of the replacements -- which the transition
+ * manifest and the tranche report do not supply. Those are provenance and
+ * review *results*; adoption is a person deciding, and `movedBecause` or
+ * `settledByExistingContract` standing in for it would be the agent adopting
+ * its own drafts.
+ *
+ * `npm run check:memory-eval-freeze` reports what is still missing. The
+ * constant moves to `true`, and `..._PURPOSE` to `decision`, only after that
+ * check reports every condition `OK`.
+ */
+export const MEMORY_EVAL_SUCC4_DATASET_FROZEN = false;
+
+/**
+ * What a run may cite this for.
+ *
+ * `development` until the freeze. The harness refuses `--live` against a
+ * dataset that is not frozen, so this is not a promise about how it is used --
+ * it is the state the refusal reads.
+ */
+export const MEMORY_EVAL_SUCC4_DATASET_PURPOSE: "development" | "decision" =
+    "development";
+
+/**
  * The replacements, in the order the manifest lists them.
  *
  * Ordered by the manifest rather than by tranche, so the dataset does not

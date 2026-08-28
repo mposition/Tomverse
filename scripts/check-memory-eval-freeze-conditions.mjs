@@ -19,7 +19,7 @@
  * human acts recorded in the batch records and the freeze table.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 import {
@@ -44,6 +44,17 @@ import {
     MEMORY_EVAL_SUCC3_DATASET_VERSION,
 } from "../lib/memoryEvalSucc3Fixtures.ts";
 import { SUCC3_ADOPTED_BATCHES } from "../lib/memoryEvalSucc3Adopted/index.ts";
+import {
+    MEMORY_EVAL_SUCC4_CASES,
+    MEMORY_EVAL_SUCC4_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC4_DATASET_VERSION,
+    MEMORY_EVAL_SUCC4_REPLACEMENT_CASES,
+} from "../lib/memoryEvalSucc4Dataset.ts";
+import { MEMORY_EVAL_SUCC4_MANIFEST } from "../lib/memoryEvalSucc4Manifest.ts";
+import {
+    readSucc4AdoptionRecord,
+    succ4AdoptionConditions,
+} from "../lib/memoryEvalSucc4AdoptionRecord.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import {
@@ -338,3 +349,116 @@ evaluate({
     batches: SUCC3_ADOPTED_BATCHES,
     schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
 });
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+/* ------------------------------------------- the successor, on §7.1a terms */
+
+// succ-4 does not go through `evaluate()`. Its cases arrive two ways -- 1,047
+// inherited from succ-3's adopted batches and 103 written as replacement
+// tranches -- so the batch-shaped conditions would read the inherited half and
+// say nothing at all about the other. That is worse than not checking: it
+// would report "all conditions hold" while 103 cases had never been adopted by
+// anyone. docs/ops/memory-extraction-eval-dataset.md §7.1a replaces those
+// conditions with five of its own, and this runs them.
+{
+    const version = MEMORY_EVAL_SUCC4_DATASET_VERSION;
+    const frozen = MEMORY_EVAL_SUCC4_DATASET_FROZEN;
+    const results = [];
+    const check = (condition, detail, ok) => results.push({ condition, detail, ok });
+
+    /* --- the conditions succ-4 shares with every other dataset ------------ */
+    {
+        const counts = new Map();
+        for (const testCase of MEMORY_EVAL_SUCC4_CASES) {
+            const key = `${testCase.category}:${testCase.language}`;
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        const short = [...counts].filter(
+            ([key, count]) =>
+                count < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[key.split(":")[0]]
+        );
+        check(
+            "cell floors",
+            short.length === 0
+                ? `${MEMORY_EVAL_SUCC4_CASES.length} cases across ${counts.size} cells`
+                : `below floor: ${short.map(([k, n]) => `${k} ${n}`).join(", ")}`,
+            short.length === 0
+        );
+    }
+    {
+        const duplicates = findDuplicateCases(MEMORY_EVAL_SUCC4_CASES);
+        check(
+            "findDuplicateCases()",
+            duplicates.length === 0 ? "0" : `${duplicates.length}`,
+            duplicates.length === 0
+        );
+    }
+    {
+        const pending = memoryEvalScoringContractReadiness();
+        check(
+            "no scoring rule left unimplemented",
+            pending.length === 0
+                ? `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}: every rule has an implementation`
+                : `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} still pending: ${pending.join(", ")}`,
+            pending.length === 0
+        );
+    }
+
+    /* --- §7.1a's five --------------------------------------------------- */
+    const recordPath = "docs/ops/memory-extraction-eval-succ4-adoption.md";
+    if (!existsSync(recordPath)) {
+        check(
+            "unified adoption record present",
+            `${recordPath} does not exist`,
+            false
+        );
+    } else {
+        for (const condition of succ4AdoptionConditions({
+            record: readSucc4AdoptionRecord(recordPath),
+            inherited: MEMORY_EVAL_SUCC4_MANIFEST.composition.inheritedComponents,
+            sourceBatchIdsWithRecord: SUCC3_ADOPTED_BATCHES.filter((batch) =>
+                existsSync(batch.record)
+            ).map((batch) => batch.id),
+            liveTranches:
+                MEMORY_EVAL_SUCC4_MANIFEST.composition.replacementTranches,
+            replacementCount: MEMORY_EVAL_SUCC4_REPLACEMENT_CASES.length,
+        })) {
+            check(condition.condition, condition.detail, condition.ok);
+        }
+    }
+
+    // The header keeps the same shape the other three print. It is read by
+    // `tests/memoryEvalFreezeGate.test.mjs`, which pairs each section with the
+    // constant it claims, and a section whose header did not parse would be a
+    // dataset nobody checked.
+    console.log(
+        `Freeze conditions for ${version} ` +
+            `(currently ${frozen ? "frozen" : "not frozen"})`
+    );
+    console.log(
+        "docs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\n" +
+            "batch conditions are replaced by five, because 103 of these cases\n" +
+            "come from replacement tranches and not from an adopted batch.\n"
+    );
+    for (const result of results) {
+        console.log(
+            `${result.ok ? "OK  " : "MISS"}  ${result.condition}  — ${result.detail}`
+        );
+    }
+    const missed = results.filter((result) => !result.ok);
+    if (missed.length === 0) {
+        console.log(`\nAll ${results.length} conditions hold.`);
+    } else {
+        console.log(
+            `\n${missed.length} of ${results.length} conditions unmet. ` +
+                "docs/ops/memory-extraction-eval-dataset.md §7.1a asks for all of them."
+        );
+    }
+    if (frozen && missed.length > 0) {
+        console.error(
+            `\n${version} is marked frozen while a freeze condition is unmet.`
+        );
+        process.exit(1);
+    }
+}
