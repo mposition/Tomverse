@@ -14,6 +14,20 @@ import { goldEvidenceFailure } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
 import { SUCC4_B_PLUS_MOVES } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
 import { SUCC4_TRANCHE_1 } from "../lib/memoryEvalSucc4Replacements/tranche1.ts";
+import { SUCC4_TRANCHE_2 } from "../lib/memoryEvalSucc4Replacements/tranche2.ts";
+
+/**
+ * Every tranche written so far, in the order they were written.
+ *
+ * Listed rather than discovered on disk: a tranche file that exists and is
+ * not named here would go unchecked, and this report is the only thing
+ * standing between a replacement and the registry.
+ */
+const TRANCHES = [
+    { id: 1, cells: "the eight particular cases", entries: SUCC4_TRANCHE_1 },
+    { id: 2, cells: "durable_facts:ko", entries: SUCC4_TRANCHE_2 },
+];
+const ALL = TRANCHES.flatMap((tranche) => tranche.entries);
 
 const originals = new Map(MEMORY_EVAL_SUCC3_CASES.map((c) => [c.id, c]));
 const moving = new Map(SUCC4_B_PLUS_MOVES.map((m) => [m.originalId, m]));
@@ -56,9 +70,19 @@ const say = (line) => {
     console.log(line);
 };
 
-console.log(`succ-4 replacement tranche 1 — ${SUCC4_TRANCHE_1.length} cases\n`);
+console.log(
+    `succ-4 replacements — ${ALL.length} of 103, across ${TRANCHES.length} tranche(s)\n`
+);
 
-for (const entry of SUCC4_TRANCHE_1) {
+// An id reused between tranches collides as surely as one reused from succ-3,
+// and the per-entry checks cannot see across entries.
+const seenCaseIds = new Map();
+const seenConversationIds = new Map();
+const seenOriginals = new Map();
+
+for (const tranche of TRANCHES) {
+  console.log(`# tranche ${tranche.id} — ${tranche.cells}, ${tranche.entries.length} cases\n`);
+  for (const entry of tranche.entries) {
     const original = originals.get(entry.originalId);
     const move = moving.get(entry.originalId);
     const built = entry.replacement;
@@ -114,6 +138,22 @@ for (const entry of SUCC4_TRANCHE_1) {
     if (!entry.settledByExistingContract) {
         problems.push("was not settled by the existing contract — stop and raise it");
     }
+    const priorCase = seenCaseIds.get(built.id);
+    if (priorCase) problems.push(`case id ${built.id} is also used by ${priorCase}`);
+    seenCaseIds.set(built.id, entry.originalId);
+    for (const conversation of built.conversations) {
+        const conversationId = conversation.externalConversationId;
+        const priorConversation = seenConversationIds.get(conversationId);
+        if (priorConversation) {
+            problems.push(`conversation id ${conversationId} is also used by ${priorConversation}`);
+        }
+        seenConversationIds.set(conversationId, entry.originalId);
+    }
+    const priorOriginal = seenOriginals.get(entry.originalId);
+    if (priorOriginal) {
+        problems.push(`${entry.originalId} already has a replacement (${priorOriginal})`);
+    }
+    seenOriginals.set(entry.originalId, built.id);
 
     say(`## ${entry.originalId} → ${built.id}  [${built.category}:${built.language}]`);
     say(`   moved because: ${entry.movedBecause.replace(/\s+/g, " ")}`);
@@ -136,9 +176,10 @@ for (const entry of SUCC4_TRANCHE_1) {
         for (const problem of problems) say(`   PROBLEM  ${problem}`);
     }
     say("");
+  }
 }
 
-const covered = new Set(SUCC4_TRANCHE_1.map((entry) => entry.originalId));
+const covered = new Set(ALL.map((entry) => entry.originalId));
 console.log(`## Coverage\n\n   ${covered.size} originals replaced, of 103 moving`);
 console.log(`   ${moving.size - covered.size} still to write\n`);
 
