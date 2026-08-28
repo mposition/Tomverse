@@ -177,10 +177,28 @@ selected.forEach(({ record }, index) => {
         p("- *(없음)*");
     } else {
         for (const candidate of record.candidates) {
+            // polarity and the cited span are the model's own answer, not the
+            // gold, so showing them keeps the sheet blind. A reviewer cannot
+            // judge a schema-3 answer without them: a statement that reads
+            // correctly while claiming the opposite, and one that reads
+            // correctly while citing nothing the user wrote, are both wrong
+            // and neither is visible in the sentence alone.
+            const polarity = candidate.polarity
+                ? ` · ${candidate.polarity}`
+                : "";
             p(
-                `- \`${candidate.kind}\` · bulk-safe **${candidate.bulkSafe}** · ` +
+                `- \`${candidate.kind}\`${polarity} · bulk-safe **${candidate.bulkSafe}** · ` +
                     `${candidate.disposition} — ${candidate.statement}`
             );
+            for (const anchor of candidate.evidence ?? []) {
+                p(
+                    `    - 근거: \`${anchor.evidenceMessageId}\` — ` +
+                        `"${anchor.evidenceQuote}"`
+                );
+            }
+            if ((candidate.evidence ?? []).length === 0 && candidate.polarity) {
+                p("    - 근거: *(없음)*");
+            }
         }
     }
     p();

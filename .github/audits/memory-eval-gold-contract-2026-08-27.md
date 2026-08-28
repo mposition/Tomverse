@@ -885,3 +885,77 @@ schema 3은 candidate의 `polarity`를 gold의 것과 필드 대 필드로 비�
 pair는 `lib/memoryExtractionEvalRegister.ts`에 `candidate` · `evalBudget: null`
 로 등록했습니다. 등록은 pair를 **알려진 것**으로 만들 뿐이며, `decideEvalRunMode`
 가 `no_eval_budget`으로 거절합니다 — §13.4가 별도로 승인될 때까지.
+
+## 14. schema 3 harness 전환 (2026-08-28 구현)
+
+§13.2가 승인한 v6를 실제로 채점할 수 있게 만드는 무비용 작업입니다. **유료
+실행을 여는 작업이 아닙니다** — 오히려 이 변경 뒤에도 live 실행은 그대로
+막혀 있고, 막는 방식이 바뀌었을 뿐입니다.
+
+### 14.1 왜 필요했는가
+
+v6까지 오면서 `mem-eval-succ-4`(schema 3)는 동결됐는데 harness는
+`mem-eval-succ-3`(schema 2)를 schema 2 scorer로 채점하고 있었습니다. 그
+상태에서는 succ-4에 대해 어떤 숫자도 나올 수 없습니다.
+
+전환하면서 확인된 사실 하나를 기록합니다. **succ-3은 이제 자기 manifest와
+결속되지 않습니다.** 그 dataset은 `mem-score-v2.3`에서 동결됐고 트리는
+v3.3을 싣고 있어서, 지금 트리가 계산하는 계약 digest가 manifest의 값과
+다릅니다. sample 자체는 그대로이고(dataset digest 일치) 계약만 어긋납니다.
+그러므로 succ-3으로 돌린 회차는 **어떤 reader도 해석할 수 없는 artifact**를
+남기게 되며, harness가 옮겨야 했던 이유는 취향이 아니라 이것입니다.
+`harnessTargetBindingFailures()`가 이 어긋남을 실행 전에 보고합니다.
+
+### 14.2 범위
+
+| 항목 | 결과 |
+|---|---|
+| schema 3 scorer | `lib/memoryEvalScoringV3.ts` (v1·v2는 한 줄도 안 건드림) |
+| artifact serialization | envelope 3, `datasetSchemaVersion` 추가 |
+| dataset·contract digest 결속 | `lib/memoryEvalHarnessTarget.ts`, 실행 **전** 검사 |
+| failure report | schema별 matcher, 어느 field가 달랐는지 이름을 댐 |
+| blind review | candidate의 polarity와 인용 span을 보여 줌(정답지는 여전히 비공개) |
+| schema 1·2 replay | 불변 — 기존 테스트 그대로 통과 |
+| 알 수 없는 schema | `unsupported_dataset_schema`로 거절 |
+| 불일치 contract | `scoring_contract_mismatch`로 거절 |
+| `legacy_dataset_schema` | **유지** — §14.4 |
+| 무비용 경계 테스트 | `tests/memoryEvalSchema3DryRun.test.mjs` |
+
+### 14.3 scorer가 새로 판정하는 두 가지
+
+1. **polarity는 필드 대 필드로 비교**합니다. token 목록으로는 판정할 수
+   없었던 것입니다 — `그렇지 않다`와 `아니다`는 같은 사실을 부정하면서 공통
+   부분 문자열이 없습니다.
+2. **evidence는 원본 대화에 결속**됩니다. anchor가 여러 개인 candidate는
+   **하나라도 해석되면** 인정합니다. 계약 §10.1은 candidate마다 anchor 하나를
+   전제하므로 여러 개일 때의 규칙을 말하지 않는데, 이 규칙이 막으려는 실패는
+   assistant 발화에 기댄 사실이고, 사용자 발화와 assistant 발화를 함께 인용한
+   candidate는 사용자 발화에 기대고 있습니다. 전부 해석돼야 한다고 하면
+   **최소한보다 더 완전한 인용을 더 나쁘게 채점**하게 됩니다. 모든 anchor가
+   assistant·허구·인용 불가인 경우는 그대로 탈락하며, 그것이 v5-run1의 13건
+   입니다.
+
+**안전 축은 결속을 요구하지 않습니다.** sensitive gold가 bulk-safe로 새어
+나간 것은 인용이 엉망이어도 유출입니다. 결속을 요구하면 잘못 인용된 유출이
+집계에서 빠지고, 그쪽이 더 안전해 보이면서 틀린 읽기입니다.
+
+`unboundCandidates`는 **지표이지 gate가 아닙니다.** 인용되지 않은 candidate는
+이미 매칭되지 않은 candidate이므로, gate로 만들면 같은 사건을 두 번 세고
+아무도 승인하지 않은 임계값을 세우게 됩니다.
+
+### 14.4 gate는 그대로 둡니다
+
+`MEMORY_EVAL_DATASET_SCHEMA_VERSION`은 2로 유지합니다. 트리는 schema 3을
+채점할 수 있지만, gate를 옮기는 것은 **별도의 검토된 변경**입니다.
+`npm run report:memory-eval-schema-readiness`가 소비자별 상태와 각 행의 근거를
+나열하며, 현재 pending 0건입니다. **pending 0은 실행 허가가 아닙니다** —
+gate를 옮겨도 §12.5 예산 승인이 없으면 `no_eval_budget`으로 거절됩니다.
+
+`tests/memoryEvalSchema3DryRun.test.mjs`가 gate가 아직 2라는 것을 assertion으로
+고정하므로, 누군가 옮기면 테스트가 실패하고 그 사람이 사유를 적게 됩니다.
+
+### 14.5 다음 단계에 필요한 숫자
+
+`npm run report:memory-eval-cost-estimate`가 이제 succ-4를 잽니다 — 평균 prompt
+2,746 토큰, §12.4 재실행 포함 2회, 최악 US$12.57. 예산 승인은 이 숫자와 pair,
+두 digest, 실행 횟수, 재시도 정책을 함께 고정한 뒤 별도로 받습니다.
