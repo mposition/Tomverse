@@ -49,32 +49,41 @@ export const MEMORY_EVAL_SUCC4_DATASET_VERSION = "mem-eval-succ-4";
 export const MEMORY_EVAL_SUCC4_SUPERSEDES = "mem-eval-succ-3";
 
 /**
- * Not frozen.
+ * Frozen, 2026-08-28.
  *
  * docs/ops/memory-extraction-eval-dataset.md §7.2 makes freezing a three-line
- * edit, and docs/ops/memory-extraction-eval-dataset.md §7.1 lists what has to
- * hold first. For a successor dataset that
- * includes a human adoption of the replacements -- which the transition
- * manifest and the tranche report do not supply. Those are provenance and
- * review *results*; adoption is a person deciding, and `movedBecause` or
- * `settledByExistingContract` standing in for it would be the agent adopting
- * its own drafts.
+ * edit, and docs/ops/memory-extraction-eval-dataset.md §7.1 lists what
+ * has to hold first. For a successor dataset the
+ * docs/ops/memory-extraction-eval-dataset.md §7.1a terms apply
+ * instead of the batch ones, and all nine of them hold:
+ * `npm run check:memory-eval-freeze` reports them, and it now *fails the
+ * build* rather than reporting progress, because this constant claims they
+ * were met.
  *
- * `npm run check:memory-eval-freeze` reports what is still missing. The
- * constant moves to `true`, and `..._PURPOSE` to `decision`, only after that
- * check reports every condition `OK`.
+ * The two that only a person could satisfy were satisfied by one:
+ * docs/ops/memory-extraction-eval-succ4-adoption.md records @mposition
+ * adopting all five replacement tranches on 2026-08-28, having reviewed them
+ * in full. The transition manifest and the tranche report did not supply that
+ * and could not -- they are provenance and review *results*, and adoption is a
+ * person deciding.
+ *
+ * Unfreezing is not an edit to this line. Under
+ * docs/ops/memory-extraction-eval-dataset.md §7.3 a sample or a gold
+ * label changed after a result is seen needs a new `datasetVersion`, and the
+ * old verdicts stop being citable.
  */
-export const MEMORY_EVAL_SUCC4_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC4_DATASET_FROZEN = true;
 
 /**
  * What a run may cite this for.
  *
- * `development` until the freeze. The harness refuses `--live` against a
- * dataset that is not frozen, so this is not a promise about how it is used --
- * it is the state the refusal reads.
+ * `decision` since the freeze. The harness refuses `--live` against a dataset
+ * that is not frozen; this says what a run against a frozen one is allowed to
+ * be cited as, and the two move together because a frozen development sample
+ * is a state nobody asked for.
  */
 export const MEMORY_EVAL_SUCC4_DATASET_PURPOSE: "development" | "decision" =
-    "development";
+    "decision";
 
 /**
  * The replacements, in the order the manifest lists them.

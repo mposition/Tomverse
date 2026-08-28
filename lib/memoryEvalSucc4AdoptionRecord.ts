@@ -64,17 +64,33 @@ export const isUnfilled = (value: string): boolean =>
  * reader that stopped at the first one reported the summary cells as
  * unfilled while they sat two paragraphs below.
  */
-const rowsOf = (source: string, heading: RegExp): string[][] => {
-    const section = source.split(heading)[1];
-    if (section === undefined) return [];
+const rowsOf = (
+    source: string,
+    heading: RegExp,
+    /**
+     * Where the scan stops.
+     *
+     * `subsection` stops at any heading. That is what the composition table in
+     * docs/ops/memory-extraction-eval-succ4-adoption.md §3 needs: it and
+     * the drafting table one subsection below are different questions, and a
+     * scan running through both would answer neither.
+     *
+     * `section` stops only at the next `## `. That is what
+     * docs/ops/memory-extraction-eval-succ4-adoption.md §5 needs: its two
+     * figures live in subsections of their own, and a scan that stopped at the
+     * first subsection heading would find no rows and report every cell
+     * unfilled.
+     */
+    stopAt: "subsection" | "section" = "subsection"
+): string[][] => {
+    const body = source.split(heading)[1];
+    if (body === undefined) return [];
+    const ends =
+        stopAt === "section" ? /^##\s/ : /^#+\s/;
     const rows: string[][] = [];
-    for (const line of section.split("\n")) {
+    for (const line of body.split("\n")) {
         const trimmed = line.trim();
-        // Any heading ends the section, `###` included. In
-        // docs/ops/memory-extraction-eval-succ4-adoption.md the §3 and §3.2
-        // tables are different questions, and a scan that ran through both
-        // would answer neither.
-        if (/^#+\s/.test(trimmed)) break;
+        if (ends.test(trimmed)) break;
         if (!trimmed.startsWith("|")) continue;
         const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
         if (cells.every((cell) => /^-*$/.test(cell))) continue;
@@ -91,7 +107,7 @@ export function parseSucc4AdoptionRecord(source: string): Succ4AdoptionRecord {
     const composition = rowsOf(source, /## 3\. [^\n]*\n/).slice(1);
     const drafting = rowsOf(source, /### 3\.2 [^\n]*\n/).slice(1);
     const roles = rowsOf(source, /## 4\. [^\n]*\n/).slice(1);
-    const disagreementRows = rowsOf(source, /## 5\. [^\n]*\n/).slice(1);
+    const disagreementRows = rowsOf(source, /## 5\. [^\n]*\n/, "section");
     const verdictRows = rowsOf(source, /## 6\. [^\n]*\n/).slice(1);
     const signatureRows = rowsOf(source, /## 7\. [^\n]*\n/).slice(1);
 
