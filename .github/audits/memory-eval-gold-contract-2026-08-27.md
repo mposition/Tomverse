@@ -1094,3 +1094,75 @@ freeze 검사에 succ-5 구획 4조건이 추가됐습니다 — 표본 불변, 
   dataset·contract·prompt digest가 모두 정확히 일치
 - `HEAD === approvedImplementationSha` 같은 단순 비교는 쓰지 않습니다.
   예산 등록 PR은 자기 자신의 merge SHA를 미리 담을 수 없습니다.
+
+## 17. decision-grade eval 예산 재승인 (2026-08-28, @mposition)
+
+§16.6이 실효 처리한 예산을 succ-5/v3.4 tuple로 재승인받아 등록했습니다.
+
+### 17.1 변경 불가능한 실행 tuple
+
+| 항목 | 값 |
+|---|---|
+| pair | `gpt-5-6-luna::mem-extract-v6` |
+| approvedImplementationSha | `34a53ddc0247661e578422300ecc58801ea73fce` |
+| dataset | `mem-eval-succ-5` |
+| dataset digest | `0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0` |
+| dataset manifest digest | `215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762` |
+| scoring contract | `mem-score-v3.4` |
+| contract digest | `a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd` |
+| prompt | `mem-extract-v6` |
+| prompt digest | `c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052` |
+| provider-dispatched 실행 상한 | 2회 |
+| pair 총예산 상한 | US$12.57 / 12,570,000 microUSD |
+
+### 17.2 "하나라도 다르면 효력 상실"을 문장이 아니라 gate로
+
+`evalBudget.boundTuple`에 일곱 값을 기록하고, harness가 실행 직전에 트리에서
+다시 계산해 대조합니다. 하나라도 다르면 `budget_tuple_mismatch`로 거절합니다.
+`tests/memoryEvalBudgetBinding.test.mjs`가 등록값을 트리 계산값과 대조하므로,
+digest가 움직이면 유료 실행이 아니라 **CI에서** 먼저 실패합니다.
+
+예산이 instrument에 결속돼 있지 않으면 애초에 실행을 승인할 수 없습니다
+(`budget_not_bound`). 2026-08-28 이전에 승인된 예산들 — v1·v4·v5 — 이 그
+형태이며, 기록으로는 남고 실행 권한은 없습니다.
+
+### 17.3 SHA는 등식이 아니라 조상 관계
+
+등록 PR은 자기 자신의 merge SHA를 미리 담을 수 없으므로 `HEAD ===
+approvedImplementationSha`는 성립할 수 없는 조건입니다. 실행 조건은
+**`approvedImplementationSha`가 실행 commit의 조상**이고 세 digest가 정확히
+일치하는 것입니다. git이 답하지 못하면(저장소 아님, shallow clone) 통과가
+아니라 거절입니다 — 아무도 확인할 수 없는 조상 관계는 없는 것과 같습니다.
+
+### 17.4 2회차는 재시도가 아닙니다
+
+- 두 번째 실행은 §12.4의 **재현성 확인 실행**입니다.
+- 첫 실행에서 구조적 실패나 명확한 탈락이 확인되면 **두 번째를 하지 않고**
+  pair를 종료하거나 재검토합니다.
+- provider dispatch **이전** 실패이고 provider 미접촉·비용 0이 증명된 경우에만
+  같은 실행을 재시도할 수 있습니다.
+- dispatch 이후 실패 또는 비용 불명이면 **중단하고 사용액을 대조**한 뒤 별도
+  승인을 받습니다.
+
+`maxProviderDispatchedRuns: 2`는 기록이며 기계가 세지 않습니다 — 이 저장소에는
+실행 원장이 없습니다. 강제되는 것은 지출 상한과 위 절차입니다.
+
+### 17.5 이번 승인이 열지 않는 것
+
+pair 승인, release gate 통과, memory flag 및 production 활성화. 예산은 다른
+model·promptVersion·dataset·contract로 이전하거나 다른 pair에 전용할 수
+없으며, `gpt-5-4-mini::mem-extract-v6`의 `evalBudget`은 `null`입니다.
+
+### 17.6 이 슬라이스에서 일어난 사고 하나
+
+등록 gate의 거절 문구를 확인하려고 **네트워크 차단 없이 `--live`를 직접
+실행했습니다.** 예산이 방금 등록된 상태였으므로 gate가 정상 통과했고, 잘못된
+key로 5회 dispatch를 시도한 뒤 연속 실패로 중단됐습니다. 인증 실패라 과금은
+0이고 artifact도 남기지 않았지만, **승인 절차상 유료 실행은 등록 PR 병합 뒤에
+시작해야 하므로 하지 말았어야 할 실행**입니다.
+
+같은 형태의 결함이 테스트에도 있었습니다. `--live`를 부르던 두 테스트는 그
+pair가 미funded라 거절된다는 전제로 쓰였고, 예산이 생기면서 전제가 깨져 실제로
+실행 경로를 타게 됐습니다. 둘 다 순수 assertion으로 바꿨고,
+`tests/memoryEvalSchema3DryRun.test.mjs`는 **자기 소스에 `--live` 호출이 없음을
+스스로 검사**합니다.

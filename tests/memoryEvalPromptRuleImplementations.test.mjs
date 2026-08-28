@@ -77,6 +77,13 @@ test("an unimplemented rule refuses the run before the key is spent", () => {
         datasetFrozen: true,
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        // The 2026-08-28 budget binding, satisfied so that this row reaches
+        // the gate it is about. A live decision now also requires the budget
+        // to name an instrument, that instrument to be this one, and this
+        // commit to descend from the approved implementation.
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
     };
     assert.deepEqual(decideEvalRunMode(base), { mode: "live", ceilingUsd: 5 });
     assert.deepEqual(

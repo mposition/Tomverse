@@ -499,6 +499,9 @@ export type EvalRunModeDecision =
               | "dataset_not_frozen"
               | "legacy_dataset_schema"
               | "prompt_rule_unimplemented"
+              | "budget_not_bound"
+              | "budget_tuple_mismatch"
+              | "run_sha_not_descendant"
               | "unknown_commit"
               | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
@@ -602,6 +605,37 @@ export function decideEvalRunMode(input: {
      * (`lib/memoryEvalPromptRuleImplementations.ts`), which owns the mapping.
      */
     unimplementedPromptRules?: readonly string[];
+    /**
+     * Why this budget cannot authorise a paid run at all, from
+     * `evalBudgetBindingProblems()`.
+     *
+     * A budget approved before instruments were bound records a ceiling and
+     * nothing else. Those stay on the register as history and cannot fund a
+     * run: the 2026-08-28 re-approval names an immutable tuple precisely so
+     * that "which instrument was this ceiling for" has an answer.
+     */
+    budgetBindingProblems?: readonly string[];
+    /**
+     * Recorded values this run would not reproduce, from
+     * `evalBudgetTupleFailures()`.
+     *
+     * The re-approval says the approval "loses effect immediately" if any of
+     * the dataset, contract or prompt version or digest differs. This is that
+     * sentence as a gate.
+     */
+    budgetTupleFailures?: readonly string[];
+    /**
+     * Whether this run's commit descends from `approvedImplementationSha`.
+     *
+     * `undefined` when the caller could not establish it — no git, a shallow
+     * clone — and that is a refusal too, not a pass: an ancestry nobody could
+     * check is an ancestry nobody has.
+     *
+     * Not an equality with the approved SHA. A registration PR cannot contain
+     * its own merge commit, and a later commit that assembles the same
+     * instrument is running the approved one.
+     */
+    runShaDescendsFromApproval?: boolean;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -625,6 +659,18 @@ export function decideEvalRunMode(input: {
     }
     if ((input.unimplementedPromptRules ?? []).length > 0) {
         return { mode: "refused", reason: "prompt_rule_unimplemented" };
+    }
+    // The budget's own three conditions, in the order a reader would ask
+    // them: is this budget bound to anything, is this the instrument it was
+    // bound to, and does this commit descend from the one that was approved.
+    if ((input.budgetBindingProblems ?? []).length > 0) {
+        return { mode: "refused", reason: "budget_not_bound" };
+    }
+    if ((input.budgetTupleFailures ?? []).length > 0) {
+        return { mode: "refused", reason: "budget_tuple_mismatch" };
+    }
+    if (input.runShaDescendsFromApproval !== true) {
+        return { mode: "refused", reason: "run_sha_not_descendant" };
     }
     if (!input.commitKnown) {
         return { mode: "refused", reason: "unknown_commit" };
