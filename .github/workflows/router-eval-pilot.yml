@@ -45,13 +45,13 @@ on:
         required: true
         default: ""
       max_cost_pilot_usd:
-        description: "Ceiling for the pilot stage. Approved: 0.50 (estimated $0.39 — see docs/ops/tomverse-chat-router-calibration-cost.md)"
+        description: "Ceiling for the pilot stage. Approved: 2.00"
         required: true
-        default: "0.50"
+        default: "2.00"
       max_cost_rejudge_usd:
-        description: "Ceiling for the independent judge. Approved: 4.00 (estimated $3.68)"
+        description: "Ceiling for the independent judge. Approved: 18.00"
         required: true
-        default: "4.00"
+        default: "18.00"
       confirm:
         description: "Type SPEND to confirm this dispatch will call a paid provider"
         required: true
@@ -91,7 +91,11 @@ jobs:
       # than defaulted. Defaults can be typed over at dispatch; a ceiling that
       # only exists as a default is a suggestion.
       #
-      #   pilot 0.50 + independent judge 4.00 = 4.50 total
+      #   pilot 2.00 + independent judge 18.00 = 20.00 total
+      #
+      # Set on the judge-cap probe's measurement rather than on an assumption:
+      # ten judgements on claude-fable-5 billed 45-1,437 output tokens each for
+      # a three-token verdict, and input is roughly half the judge's cost.
       #
       # Raising any of them needs mposition's approval, and the way to record
       # that is to edit this step in a commit rather than to type a bigger
@@ -102,7 +106,7 @@ jobs:
           REJUDGE: ${{ inputs.max_cost_rejudge_usd }}
         run: |
           node -e '
-            const approved = { pilot: 0.50, rejudge: 4.00, total: 4.50 };
+            const approved = { pilot: 2.00, rejudge: 18.00, total: 20.00 };
             const pilot = Number(process.env.PILOT);
             const rejudge = Number(process.env.REJUDGE);
             const bad = [];
@@ -226,8 +230,14 @@ jobs:
       #   bundleProblems = 0              every stored answer is judgeable
       #   pairedCoverage >= 200/210       overall floor
       #   eachCellPairedCoverage >= 13/14 per-cell floor
-      #   lostByThisCode = 0              no answer was lost by this harness
-      #   costSoFar <= 0.50               the pilot stayed inside its ceiling
+      #   harnessAttributableFailureCount = 0   no empty result was ours
+      #   costSoFar <= the pilot ceiling
+      #   stressCost <= $18.00            the judge stage fits at the probe's p90
+      #   maxPerRequestWorstCase <= $0.75 one judge call cannot breach it
+      #
+      # The two cost conditions are recomputed from THIS bundle, not carried
+      # over: the judge's input is roughly half its cost and grows with the
+      # answers, so every pair it would read is rendered and counted exactly.
       #
       # A bundle short of the floors buys a calibration over the pairs that
       # happened to survive. A bundle whose answers this code mangled buys a
@@ -251,6 +261,13 @@ jobs:
       # regenerated and the display order is the one the bundle fixed, so the
       # only thing that differs between the two passes is who graded.
       #
+      # Every verdict is appended as it is produced, so a pass stopped at the
+      # $18 ceiling keeps what it paid for. `--resume` makes a later pass read
+      # those verdicts and skip those pairs: re-calling a pair that already
+      # carries one spends the same money twice for an answer already held.
+      # `--per-request-max-cost-usd` is checked before the first call, because
+      # a running total cannot stop a single call that breaches the ceiling.
+      #
       # The target judge's own pass is not re-run: the pilot wrote it beside
       # the bundle from the verdicts it had already paid for.
       - name: Independent judge (this is the expensive step)
@@ -264,6 +281,8 @@ jobs:
             --set=docs/ops/router-evaluation-set/development-v0.json \
             --judge='${{ steps.preregistered.outputs.independent_judge }}' \
             --max-cost-usd='${{ inputs.max_cost_rejudge_usd }}' \
+            --per-request-max-cost-usd=0.75 \
+            --resume \
             --json=artifacts/route01-independent-${{ inputs.run_label }}.verdicts.jsonl
 
       # Pure analysis of the two verdict files. It sends nothing and costs

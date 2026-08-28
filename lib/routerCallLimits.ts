@@ -53,10 +53,19 @@ export type CallRole = (typeof CALL_ROLES)[number];
  * A verdict is a handful of tokens. This is not sized for the verdict, it is
  * sized for the reasoning in front of it: every judge in the pre-registration
  * bills reasoning as output, so a budget that fits only the answer is a budget
- * the model can exhaust before writing one. Far below the product's chat cap,
- * far above what the verdict itself needs.
+ * the model can exhaust before writing one.
+ *
+ * 8,192 is measured rather than picked. The judge-cap probe of 2026-08-28 ran
+ * ten judgements on `claude-fable-5` at this budget: every one finished
+ * `stop`, every verdict parsed, none came close to exhausting it, and the
+ * largest billed 1,437 output tokens against a visible verdict of three -- so
+ * the budget is spent thinking, and this leaves 5.7x headroom over the worst
+ * case anybody has seen. mposition fixed it here on that evidence.
+ *
+ * Still far below the product's chat cap, which is what keeps a judge call
+ * from being priced like a conversation.
  */
-export const JUDGE_MAX_OUTPUT_TOKENS = 4_096;
+export const JUDGE_MAX_OUTPUT_TOKENS = 8_192;
 
 export const LIMIT_SOURCES = [
     "product_pricing_profile",
