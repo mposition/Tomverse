@@ -131,7 +131,9 @@ gates:
         refuses a pilot or judge-bias run, a run against the development set, a
         run that stopped at its cost ceiling, a second use of an already-used
         decision set, a baseline pre-registered after the run started, and a
-        routable judge with no bias measurement. The procedure the harness
+        routable judge whose cited calibration is not a calibration of that
+        judge, over development-set answers from a run that finished, against
+        an independent judge that wrote none of them. The procedure the harness
         implements is docs/ops/tomverse-chat-router-evaluation-set.md; a
         passing check means the report is citable, not that the gate is
         approved.

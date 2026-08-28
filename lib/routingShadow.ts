@@ -90,6 +90,14 @@ export type RoutingShadowInput = {
      */
     requestOutputCapTokens: number;
     models: RouterCandidateInput["models"];
+    /**
+     * Which application-managed search backends this deployment can reach.
+     *
+     * The shadow decision has to answer the same question the live one does, or
+     * the rollout data it produces describes a router this deployment does not
+     * run.
+     */
+    searchBackendReadiness: RouterCandidateInput["searchBackendReadiness"];
     sticky?: RouterStickyState | null;
     unhealthyModelIds?: readonly string[];
     regionBlockedModelIds?: readonly string[];
@@ -146,6 +154,7 @@ export function buildRoutingShadowDecision(
         models: input.models,
         plan: input.plan,
         profile: input.profile,
+        searchBackendReadiness: input.searchBackendReadiness,
         reservedInputTokens: input.reservedInputTokens,
         requestOutputCapTokens: input.requestOutputCapTokens,
         unhealthyModelIds: input.unhealthyModelIds,

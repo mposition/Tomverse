@@ -354,10 +354,25 @@ export const TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD = 400;
 
 export const estimateToolInputTokenOverhead = ({
   nativeSearchEnabled,
+  appManagedSearchEnabled = false,
 }: {
   nativeSearchEnabled: boolean;
+  /**
+   * Whether this turn registers this application's own `web_search` tool.
+   *
+   * The same overhead, for the same reason: retrieved result text is fed back
+   * into the prompt before the model answers, and the schema is carried whether
+   * or not a search runs. The route differs; what it does to the input side of
+   * the turn does not, and reserving for one but not the other would settle
+   * every Gemini searching turn thousands of tokens above its reservation.
+   *
+   * Defaulted so a caller written before this route existed keeps its exact
+   * behaviour -- the two flags are mutually exclusive, so a caller that only
+   * knows about the native one is not wrong, only incomplete.
+   */
+  appManagedSearchEnabled?: boolean;
 }) =>
-  nativeSearchEnabled
+  nativeSearchEnabled || appManagedSearchEnabled
     ? WEB_SEARCH_INPUT_TOKEN_OVERHEAD + TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD
     : 0;
 

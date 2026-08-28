@@ -15,6 +15,22 @@ export const OPERATIONAL_COST_GUARDRAIL_TRIGGERED =
     "OPERATIONAL_COST_GUARDRAIL_TRIGGERED";
 /** A provider-wide spend budget is exhausted. Affects everyone, not one user. */
 export const PROVIDER_BUDGET_EXHAUSTED = "PROVIDER_BUDGET_EXHAUSTED";
+/**
+ * A search vendor's own spend budget is exhausted.
+ *
+ * Its own code rather than `PROVIDER_BUDGET_EXHAUSTED`, because the two name
+ * different vendors on different invoices and the operator response is
+ * different: one means raise or investigate a model provider's budget, the
+ * other a search backend's. Sharing a code would also make the guardrail
+ * metrics unable to tell a search overspend from a token overspend, which is
+ * the distinction docs/policy/credit-and-cost-limits.md asks the naming to
+ * preserve.
+ *
+ * Still an operational guardrail, so it classifies alongside the others and the
+ * UI keeps talking about a temporary internal hold rather than about credits.
+ */
+export const SEARCH_PROVIDER_BUDGET_EXHAUSTED =
+    "SEARCH_PROVIDER_BUDGET_EXHAUSTED";
 /** Two requests raced for the same credits; the caller should retry. */
 export const CONCURRENT_RESERVATION_CONFLICT =
     "CONCURRENT_RESERVATION_CONFLICT";
@@ -31,6 +47,7 @@ export const CHAT_ENTITLEMENT_CODES = [
 export const CHAT_OPERATIONAL_GUARDRAIL_CODES = [
     OPERATIONAL_COST_GUARDRAIL_TRIGGERED,
     PROVIDER_BUDGET_EXHAUSTED,
+    SEARCH_PROVIDER_BUDGET_EXHAUSTED,
 ] as const;
 
 /**

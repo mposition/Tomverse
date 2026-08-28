@@ -23,8 +23,9 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, getModel } from "../lib/models.ts";
 import { evaluationRecordProblems } from "../lib/routerQualityEvalCore.ts";
+import { calibrationArtefactProblems } from "../lib/routerJudgeCalibration.ts";
 import {
   cellFill,
   freezeDrift,
@@ -73,6 +74,17 @@ const checkSet = (path) => {
   // the drafting stage impossible. What the file may not do is claim to be a
   // decision set without carrying a decision set's records.
   const problems = [...evalSetProblems(set)];
+
+  // Refused here rather than in cellFill, which reaches for set.items and
+  // takes the whole check down with a stack trace that says nothing about
+  // which file or what to do with it.
+  if (!Array.isArray(set.items)) {
+    report(path, [
+      "has no items array, so it is not an evaluation set. Every .json under " +
+        `${SET_DIRECTORY} is read as one; records that are not belong elsewhere.`,
+    ]);
+    return;
+  }
 
   // Duplicate IDS are caught by evalSetProblems; duplicate TEXT is not, and it
   // is the one that matters here. The same prompt under two ids is one item
@@ -184,7 +196,33 @@ const checkReport = (path) => {
     return;
   }
 
-  const problems = [...evaluationRecordProblems(record, { routableModelIds })];
+  // The judge identity is taken from the report rather than the catalogue: the
+  // check has to work on a report written months ago, against a catalogue that
+  // has since moved, and a calibration is of the model that actually graded.
+  const judge = getModel(String(record.judge?.identity ?? ""));
+  const problems = [
+    ...evaluationRecordProblems(record, {
+      routableModelIds,
+      checkCalibration: judge
+        ? (artefact) =>
+            calibrationArtefactProblems(artefact, {
+              judgeIdentity: {
+                modelId: judge.id,
+                provider: judge.provider,
+                apiModel: judge.apiModel,
+              },
+              judgeTemplateVersion: String(record.versions?.template ?? ""),
+              evaluationSetPurpose: String(record.evaluationSetPurpose ?? ""),
+            })
+        : undefined,
+    }),
+  ];
+  if (!judge && record.judge?.isRoutableModel === true) {
+    problems.push(
+      `its judge "${String(record.judge?.identity)}" is not in the catalogue, so the calibration ` +
+        "it cites cannot be checked against the model that graded"
+    );
+  }
 
   // A pilot or bias run is a valid artefact and an invalid citation. §7 keeps
   // them apart precisely because a pilot's numbers look exactly like a
@@ -242,6 +280,11 @@ if (setPath) {
   checkSet(setPath);
 } else if (existsSync(SET_DIRECTORY)) {
   console.log("Evaluation sets");
+  // Every .json here is read as an evaluation set. A file that is not one
+  // reaches `cellFill` with no items and takes the whole check down with a
+  // stack trace, which says nothing about what to do; `checkSet` refuses it
+  // with a sentence instead. Non-set records belong in their own directory --
+  // see docs/ops/router-decision-preregistration/.
   const files = readdirSync(SET_DIRECTORY).filter((name) => name.endsWith(".json"));
   if (files.length === 0) {
     console.log(`  none committed under ${SET_DIRECTORY}`);

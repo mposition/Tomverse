@@ -81,6 +81,7 @@
 import type { ComparisonModelStatus } from "@/lib/comparisonReadiness";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { modelWebSearchIsDispatchable } from "@/lib/webSearchCapability";
+import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import { hasExplicitSourceOrSearchIntent } from "@/lib/webSearchSuggestion";
 
 /**
@@ -416,10 +417,22 @@ const NOT_OFFERED = (
 export const anySelectedModelCanSearch = (input: {
   selectedModelIds: readonly string[];
   disabledModelIds: readonly string[];
+  /**
+   * Which application-managed search backends this deployment can reach.
+   *
+   * The card offers to re-run the question with search on, so it has to answer
+   * the same question the composer answers. Without this it would offer the
+   * re-run on a deployment holding no credential for the model's backend --
+   * a dead CTA one screen later, which is the failure this card exists to
+   * remove.
+   */
+  searchBackendReadiness: WebSearchBackendReadiness;
 }) =>
   input.selectedModelIds
     .filter((modelId) => !input.disabledModelIds.includes(modelId))
-    .some((modelId) => modelWebSearchIsDispatchable(modelId));
+    .some((modelId) =>
+      modelWebSearchIsDispatchable(modelId, input.searchBackendReadiness)
+    );
 
 /**
  * The single decision both shells read.

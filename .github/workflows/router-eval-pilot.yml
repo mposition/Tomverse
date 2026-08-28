@@ -1,7 +1,17 @@
-name: Router eval — ROUTE-01 pilot
+name: Router eval — ROUTE-01 pilot and judge calibration
 #
-# The §3 sizing run: measure the discordance rate so the decision set's `n` is
-# computed rather than guessed.
+# Two measurements in one dispatch, because the second needs the first's
+# answers and nothing else:
+#
+#   * §3's sizing run, measuring the discordance rate so the decision set's
+#     `n` is computed rather than guessed;
+#   * §5's judge calibration, re-grading those same answers with the
+#     pre-registered independent judge and reporting how far the two judges
+#     are apart, with a pair-level bootstrap interval.
+#
+# One job rather than two, so the answer bundle stays on disk between them. A
+# calibration compares two passes over the SAME answers; round-tripping the
+# bundle through an artifact would add a way for them to stop being the same.
 #
 # ############################################################################
 # # THIS WORKFLOW SPENDS MONEY. Three provider calls per item, 210 items.    #
@@ -34,16 +44,20 @@ on:
         description: "Names the artifact — e.g. 20260826"
         required: true
         default: ""
-      max_cost_usd:
-        description: "Per-run ceiling in USD. The estimate is well under 1."
+      max_cost_pilot_usd:
+        description: "Ceiling for the pilot stage. Approved: 0.50 (estimated $0.39 — see docs/ops/tomverse-chat-router-calibration-cost.md)"
         required: true
-        default: "3"
+        default: "0.50"
+      max_cost_rejudge_usd:
+        description: "Ceiling for the independent judge. Approved: 4.00 (estimated $3.68)"
+        required: true
+        default: "4.00"
       confirm:
         description: "Type SPEND to confirm this dispatch will call a paid provider"
         required: true
         default: ""
 
-# Deliberately not inputs: the baseline, the judge and the seed. They are
+# Deliberately not inputs: the baseline, the two judges and the seed. They are
 # pre-registered in the set file and scripts/eval-router-quality.mjs refuses a
 # run that disagrees with them. Offering them here would put the choice back
 # on whoever dispatches, which is the drift that pre-registration exists to
@@ -58,12 +72,13 @@ concurrency:
 
 jobs:
   run:
-    name: ROUTE-01 pilot
+    name: ROUTE-01 pilot and calibration
     runs-on: ubuntu-latest
     # Measured, not guessed. The first pilot ran 89.5 minutes against a
     # 90-minute limit and was killed before it finished 210 items -- roughly
-    # 8 seconds per provider call, three calls per item. 300 leaves room for a
-    # slower day without leaving a runaway to burn a whole runner slot.
+    # 8 seconds per provider call, three calls per item. The rejudge adds one
+    # call per pair. 300 leaves room for both and for a slower day, without
+    # leaving a runaway to burn a whole runner slot.
     timeout-minutes: 300
     steps:
       - name: Confirm the spend
@@ -71,6 +86,36 @@ jobs:
         run: |
           echo "::error::confirm must be exactly SPEND. Nothing was run."
           exit 1
+
+      # The approval is for specific numbers, so the numbers are checked rather
+      # than defaulted. Defaults can be typed over at dispatch; a ceiling that
+      # only exists as a default is a suggestion.
+      #
+      #   pilot 0.50 + independent judge 4.00 = 4.50 total
+      #
+      # Raising any of them needs mposition's approval, and the way to record
+      # that is to edit this step in a commit rather than to type a bigger
+      # number into the dispatch form.
+      - name: The ceilings are the approved ones
+        env:
+          PILOT: ${{ inputs.max_cost_pilot_usd }}
+          REJUDGE: ${{ inputs.max_cost_rejudge_usd }}
+        run: |
+          node -e '
+            const approved = { pilot: 0.50, rejudge: 4.00, total: 4.50 };
+            const pilot = Number(process.env.PILOT);
+            const rejudge = Number(process.env.REJUDGE);
+            const bad = [];
+            if (!(pilot > 0) || pilot > approved.pilot) bad.push(`pilot ceiling ${process.env.PILOT} exceeds the approved $${approved.pilot.toFixed(2)}`);
+            if (!(rejudge > 0) || rejudge > approved.rejudge) bad.push(`judge ceiling ${process.env.REJUDGE} exceeds the approved $${approved.rejudge.toFixed(2)}`);
+            if (pilot + rejudge > approved.total) bad.push(`the two together are $${(pilot + rejudge).toFixed(2)}, over the approved total $${approved.total.toFixed(2)}`);
+            if (bad.length > 0) {
+              for (const line of bad) console.log(`::error::${line}`);
+              console.log("::error::Nothing was run and nothing was billed.");
+              process.exit(1);
+            }
+            console.log(`Ceilings within approval: pilot $${pilot.toFixed(2)} + judge $${rejudge.toFixed(2)} = $${(pilot + rejudge).toFixed(2)} of $${approved.total.toFixed(2)}.`);
+          '
 
       - uses: actions/checkout@v4
 
@@ -123,6 +168,7 @@ jobs:
             const out = {
               baseline: set.baseline?.modelId,
               judge: set.judge?.modelId,
+              independent_judge: set.independentJudge?.modelId,
               seed: set.seed?.value,
             };
             for (const [key, value] of Object.entries(out)) {
@@ -135,7 +181,27 @@ jobs:
           ' >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
-      - name: Pilot run (this is the step that spends)
+      # Before the pilot spends anything. The independent judge is an Anthropic
+      # model and the pilot is not, so a missing ANTHROPIC_API_KEY would let
+      # the pilot run to completion and the calibration then grade nothing --
+      # paying for the answers and getting no measurement.
+      - name: Every key this dispatch needs is present
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          missing=""
+          for name in OPENAI_API_KEY DEEPSEEK_API_KEY ANTHROPIC_API_KEY; do
+            if [ -z "$(printenv "$name")" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing repository secret(s):$missing. Nothing was run and nothing was billed."
+            exit 1
+          fi
+          echo "All three provider keys are set. Checked by name; no value is printed."
+
+      - name: Pilot run (this is the first step that spends)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -147,8 +213,71 @@ jobs:
             --baseline='${{ steps.preregistered.outputs.baseline }}' \
             --judge='${{ steps.preregistered.outputs.judge }}' \
             --seed='${{ steps.preregistered.outputs.seed }}' \
-            --max-cost-usd='${{ inputs.max_cost_usd }}' \
+            --max-cost-usd='${{ inputs.max_cost_pilot_usd }}' \
+            --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
             --json=artifacts/route01-pilot-${{ inputs.run_label }}.json
+
+      # The hard gate mposition set in front of the expensive call. Every
+      # condition must hold; any one failing means the judge is not called and
+      # the job ends:
+      #
+      #   pilot.completed = true          the pilot ran to the end
+      #   pilot.pairsAttempted = 210      the whole set, not a truncated slice
+      #   bundleProblems = 0              every stored answer is judgeable
+      #   pairedCoverage >= 200/210       overall floor
+      #   eachCellPairedCoverage >= 13/14 per-cell floor
+      #   lostByThisCode = 0              no answer was lost by this harness
+      #   costSoFar <= 0.50               the pilot stayed inside its ceiling
+      #
+      # A bundle short of the floors buys a calibration over the pairs that
+      # happened to survive. A bundle whose answers this code mangled buys a
+      # measurement of this code. Both cost ten times the run that produced the
+      # answers, so both are refused for free, here.
+      #
+      # It runs whatever the pilot's exit code was, so a pilot that stopped
+      # early is refused here by name rather than silently followed. There is
+      # no retry: a re-run starts a new pilot, because regenerating the pairs
+      # that already completed would rewrite answers this run already paid for
+      # and graded.
+      - name: The bundle may be judged
+        run: |
+          npm run check:router-answer-bundle -- \
+            --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
+            --set=docs/ops/router-evaluation-set/development-v0.json \
+            --record=artifacts/route01-pilot-${{ inputs.run_label }}.json \
+            --max-cost-usd='${{ inputs.max_cost_pilot_usd }}'
+
+      # The same answers, graded by the independent judge. No answer is
+      # regenerated and the display order is the one the bundle fixed, so the
+      # only thing that differs between the two passes is who graded.
+      #
+      # The target judge's own pass is not re-run: the pilot wrote it beside
+      # the bundle from the verdicts it had already paid for.
+      - name: Independent judge (this is the expensive step)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          npm run eval:router-quality -- \
+            --rejudge=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
+            --set=docs/ops/router-evaluation-set/development-v0.json \
+            --judge='${{ steps.preregistered.outputs.independent_judge }}' \
+            --max-cost-usd='${{ inputs.max_cost_rejudge_usd }}' \
+            --json=artifacts/route01-independent-${{ inputs.run_label }}.verdicts.jsonl
+
+      # Pure analysis of the two verdict files. It sends nothing and costs
+      # nothing, and it prints the cross-tab and the paired shift with its
+      # interval into this log, which is readable without downloading the
+      # artifact.
+      - name: Judge calibration
+        run: |
+          npm run eval:router-quality -- \
+            --mode=judge-calibration \
+            --verdicts=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl.${{ steps.preregistered.outputs.judge }}.verdicts.jsonl \
+            --verdicts=artifacts/route01-independent-${{ inputs.run_label }}.verdicts.jsonl \
+            --seed='${{ steps.preregistered.outputs.seed }}' \
+            --json=artifacts/route01-calibration-${{ inputs.run_label }}.json
 
       # Before anything that can fail: a run that paid must not lose its
       # records because a later step exited non-zero.
@@ -156,7 +285,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: route01-pilot-${{ inputs.run_label }}
+          name: route01-calibration-${{ inputs.run_label }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 90

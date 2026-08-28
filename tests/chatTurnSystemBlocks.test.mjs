@@ -29,21 +29,54 @@ const base = {
 const build = (overrides = {}) =>
   buildChatTurnSystemBlocks({ ...base, ...overrides });
 
-test("a chat turn always carries both capability blocks", () => {
+test("a chat turn that cannot search carries all three capability blocks", () => {
   const blocks = build();
-  assert.equal(blocks.systemMessages.length, 2);
+  assert.equal(blocks.systemMessages.length, 3);
   assert.equal(blocks.systemMessages[0].role, "system");
   assert.ok(blocks.systemMessages[0].content.includes("# File generation"));
   assert.ok(blocks.systemMessages[1].content.includes("# Images"));
+  assert.ok(blocks.systemMessages[2].content.includes("# Current information"));
 });
 
-test("the priced tokens are exactly the two blocks plus the tool schema", () => {
+test("a searching turn carries two: there is no limitation to state", () => {
+  const blocks = build({ nativeSearchEnabled: true });
+  assert.equal(blocks.webSearchTurnState, "searching");
+  assert.equal(blocks.webSearchCapabilityPrompt, "");
+  assert.equal(blocks.systemMessages.length, 2);
+  // An empty system message is a message saying nothing, priced and sent.
+  assert.ok(blocks.systemMessages.every((message) => message.content.trim()));
+});
+
+test("a model that searches inside its own completion is not told it cannot", () => {
+  // Perplexity attaches no tool, so `nativeSearchEnabled` is false for it. A
+  // block built on that flag alone would hand a searching model a paragraph
+  // saying the live web is out of reach.
+  const blocks = build({ modelId: "perplexity/sonar", provider: "perplexity" });
+  assert.equal(blocks.webSearchTurnState, "searching");
+  assert.equal(blocks.webSearchCapabilityPrompt, "");
+});
+
+test("the priced tokens are exactly the blocks present plus the tool schema", () => {
   const blocks = build();
   const expected =
     estimateTextTokens(blocks.artifactPlan.systemPrompt) +
     estimateTextTokens(blocks.imageCapabilityPrompt) +
+    estimateTextTokens(blocks.webSearchCapabilityPrompt) +
     (blocks.artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0);
   assert.equal(blocks.promptTokens, expected);
+});
+
+test("the search block is priced, so the quote and the request cannot differ", () => {
+  // The whole reason this builder exists: preflight quotes what the route
+  // sends. A block added to the request and not to the count is the drift it
+  // was written to end.
+  const cannot = build();
+  const can = build({ nativeSearchEnabled: true });
+  assert.ok(cannot.promptTokens > can.promptTokens);
+  assert.equal(
+    cannot.promptTokens - can.promptTokens,
+    estimateTextTokens(cannot.webSearchCapabilityPrompt)
+  );
 });
 
 test("route and preflight get the same blocks and the same count from the same inputs", () => {

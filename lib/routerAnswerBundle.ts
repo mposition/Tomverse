@@ -32,6 +32,8 @@
 
 import { createHash } from "node:crypto";
 
+import { isUsableAnswerText } from "./routerAnswerOutcome";
+
 export const ANSWER_BUNDLE_VERSION = "router-answer-bundle-v1";
 
 /** What a request actually reached, as opposed to what this repository calls it. */
@@ -68,6 +70,24 @@ export type AnswerBundleHeader = {
     /** The run that generated the answers. */
     mode: string;
     evaluationSetVersion: string;
+    /**
+     * Which set the answers came from.
+     *
+     * Carried here so a later pass can tell a development bundle from a
+     * decision one without holding the set: calibrating a judge on the
+     * decision set would spend one of its uses
+     * (docs/ops/tomverse-chat-router-evaluation-set.md §7).
+     */
+    evaluationSetPurpose: string;
+    /**
+     * How many items the run set out to cover.
+     *
+     * Written with the header, before anything ran, so a bundle that stopped
+     * early is one whose entry count falls short of it. Nothing can be added
+     * to a header after the fact, and a run that dies at its cost ceiling is
+     * exactly the run that would not get the chance.
+     */
+    plannedItems: number;
     commitSha: string | null;
     /** The seed that fixed the display order, so a rejudge cannot reorder. */
     seed: number;
@@ -98,8 +118,16 @@ const answerProblems = (side: unknown, where: string): string[] => {
     const problems: string[] = [];
     const answer = side as Partial<BundledAnswer> | null;
     if (!answer || typeof answer !== "object") return [`${where} is missing`];
-    for (const field of ["modelId", "provider", "apiModel", "text", "digest"] as const) {
+    for (const field of ["modelId", "provider", "apiModel", "digest"] as const) {
         if (!isNonEmptyString(answer[field])) problems.push(`${where} has no ${field}`);
+    }
+    // The same predicate the pilot decides with, so a bundle can never hold an
+    // answer the writer thought was fine and the reader refuses. They
+    // disagreed once: the writer took `result.text ?? ""` and the reader
+    // demanded non-empty, and 62 empty slots reached a bundle that then could
+    // not be re-judged.
+    if (!isUsableAnswerText(answer.text)) {
+        problems.push(`${where} has no text a person could read`);
     }
     if (answer.arm !== "auto" && answer.arm !== "baseline") {
         problems.push(`${where} has no arm`);
@@ -125,8 +153,21 @@ export const answerBundleProblems = (bundle: AnswerBundle): readonly string[] =>
             `bundle version ${String(header.bundleVersion)} is not ${ANSWER_BUNDLE_VERSION}`
         );
     }
-    for (const field of ["mode", "evaluationSetVersion", "judgeTemplateVersion", "createdAt"] as const) {
+    for (const field of [
+        "mode",
+        "evaluationSetVersion",
+        "evaluationSetPurpose",
+        "judgeTemplateVersion",
+        "createdAt",
+    ] as const) {
         if (!isNonEmptyString(header[field])) problems.push(`the header has no ${field}`);
+    }
+    if (!(typeof header.plannedItems === "number" && Number.isInteger(header.plannedItems) && header.plannedItems > 0)) {
+        problems.push("the header has no plannedItems, so a bundle that stopped early cannot be told from a complete one");
+    } else if (bundle.entries.length > header.plannedItems) {
+        problems.push(
+            `the bundle holds ${bundle.entries.length} pairs against ${header.plannedItems} planned`
+        );
     }
     if (!(typeof header.seed === "number" && Number.isInteger(header.seed) && header.seed > 0)) {
         problems.push("the header has no seed, so the display order was not fixed");

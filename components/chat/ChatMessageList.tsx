@@ -5,7 +5,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
-import remarkGfm from "remark-gfm";
+import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
 import rehypeHighlight from "rehype-highlight";
 import {
   ArrowDown,
@@ -44,6 +44,7 @@ import {
   WEB_SEARCH_SURCHARGE_CREDITS,
 } from "@/lib/webSearchCredits";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
+import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 
 type ChatMessageListProps = {
@@ -279,6 +280,10 @@ export function ChatMessageList({
   onStopGenerating,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
+  // The same map the composer's chip was derived from, so the price the badge
+  // quotes beside a finished answer is the price the composer quoted before it
+  // was sent.
+  const searchBackendReadiness = useWebSearchBackendReadiness();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -588,7 +593,8 @@ export function ChatMessageList({
                       const nativeSearchSurcharged =
                         status === "executed" &&
                         modelEligibleForWebSearchSurcharge(
-                          getWebSearchCapability(modelInfo.id)
+                          getWebSearchCapability(modelInfo.id),
+                          searchBackendReadiness
                         );
                       const label =
                         status === "deep-research"
@@ -758,7 +764,7 @@ export function ChatMessageList({
                   ) : msg.role === "assistant" ? (
                     <>
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
                       rehypePlugins={[rehypeHighlight]}
                       components={{
                         /*

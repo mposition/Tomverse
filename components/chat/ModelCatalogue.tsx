@@ -15,6 +15,7 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
+import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { getModelUsageProfile } from "@/components/chat/types";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
 import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
@@ -128,6 +129,12 @@ export function ModelCatalogue({
   const touchTarget = isMobileShell || hasCoarsePointer;
   const filterSheetRef = useRef<HTMLDivElement | null>(null);
   const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The search badge and the "Web search" filter both read this, so a row the
+  // filter admits is a row the badge marks. On a deployment with no credential
+  // for a model's search backend, neither happens -- which is the point: a
+  // badge promising the live web on a model that cannot reach it is the lie
+  // this readiness map exists to prevent.
+  const searchBackendReadiness = useWebSearchBackendReadiness();
 
   const modelProviders = useMemo(
     () =>
@@ -155,7 +162,11 @@ export function ModelCatalogue({
       const matchesUsageBand =
         filters.usageBand === "all" ||
         getModelPickerUsageBand(usageProfile.credits) === filters.usageBand;
-      const matchesCapability = modelMatchesCapability(model, filters.capability);
+      const matchesCapability = modelMatchesCapability(
+        model,
+        filters.capability,
+        searchBackendReadiness
+      );
       const matchesFavorites =
         !filters.favoritesOnly || favoriteModelIds.includes(model.id);
       const matchesImageInput =
@@ -180,6 +191,7 @@ export function ModelCatalogue({
     filters,
     lang,
     models,
+    searchBackendReadiness,
     searchQuery,
   ]);
 
@@ -387,7 +399,10 @@ export function ModelCatalogue({
                         ? t("modelStatusReasons.limited")
                         : null;
                 const modelDescription = getModelPickerDescription(model, lang);
-                const modelFeatures = getModelPickerFeatures(model);
+                const modelFeatures = getModelPickerFeatures(
+                  model,
+                  searchBackendReadiness
+                );
                 // The dot used to fall back to the raw `modelStatus` enum for
                 // its accessible name, so a Korean screen-reader user heard
                 // the English word "available" on every healthy model.

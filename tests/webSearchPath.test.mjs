@@ -144,3 +144,78 @@ test("the answer carries no request content", () => {
     "kind",
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// The application-managed route. Three states worth telling apart: it ran, the
+// deployment cannot reach the backend, and the register and the builder
+// disagree.
+// ---------------------------------------------------------------------------
+
+const appManagedInput = (overrides = {}) => ({
+  support: "app-managed",
+  nativeSearchDispatchable: false,
+  appManagedSearchDispatchable: true,
+  webSearchMode: "always",
+  toolConfigBuilt: true,
+  surchargeCredits: 8,
+  ...overrides,
+});
+
+test("an application-managed attempt with a tool and a surcharge has its own path kind", () => {
+  assert.deepEqual(resolveAttemptSearchPath(appManagedInput()), {
+    kind: "app_managed_tool",
+  });
+});
+
+test("an unreachable backend is its own gap, not the unbounded-cost one", () => {
+  // `cost_unbounded` is a property of the register that no environment changes.
+  // This is a property of one deployment, fixed by an environment file, and
+  // folding them together would send an operator to read a provider's API
+  // documentation when what they needed was a variable.
+  assert.deepEqual(
+    resolveAttemptSearchPath(
+      appManagedInput({ appManagedSearchDispatchable: false })
+    ),
+    { kind: "none", gap: "backend_unavailable" }
+  );
+});
+
+test("the mode is reported before the backend", () => {
+  // With the switch off nothing was going to search anyway, and the setting the
+  // user can change is the more useful answer than a missing credential.
+  assert.deepEqual(
+    resolveAttemptSearchPath(
+      appManagedInput({
+        webSearchMode: "off",
+        appManagedSearchDispatchable: false,
+      })
+    ),
+    { kind: "none", gap: "mode_not_always" }
+  );
+});
+
+test("a dispatchable backend with no tool built is a defect, and says so", () => {
+  assert.deepEqual(
+    resolveAttemptSearchPath(appManagedInput({ toolConfigBuilt: false })),
+    { kind: "none", gap: "tool_config_unavailable" }
+  );
+});
+
+test("a tool with no surcharge behind it is an unbilled search", () => {
+  assert.deepEqual(
+    resolveAttemptSearchPath(appManagedInput({ surchargeCredits: 0 })),
+    { kind: "none", gap: "surcharge_unreserved" }
+  );
+});
+
+test("an application-managed capability never reports the native path", () => {
+  // Even with the native flag mistakenly true: the support value decides which
+  // branch runs, so a caller that passed both cannot produce a native path for
+  // a model whose search this application runs.
+  assert.deepEqual(
+    resolveAttemptSearchPath(
+      appManagedInput({ nativeSearchDispatchable: true })
+    ),
+    { kind: "app_managed_tool" }
+  );
+});

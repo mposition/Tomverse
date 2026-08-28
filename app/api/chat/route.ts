@@ -82,7 +82,17 @@ import {
     nativeSearchIsDispatchable,
     openAiNativeSearchToolCallCeiling,
 } from "@/lib/webSearchCapability";
-import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { reserveTurnSearchCost } from "@/lib/webSearchNativeCostReservation";
+import {
+    appManagedSearchIsDispatchable,
+    appManagedSearchQueryCeiling,
+} from "@/lib/webSearchCapability";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
+import {
+    APP_MANAGED_WEB_SEARCH_TOOL_NAME,
+    buildAppManagedWebSearchTool,
+} from "@/lib/appManagedWebSearchTool";
+import { APP_MANAGED_SEARCH_MAX_STEPS } from "@/lib/chatAttemptExecution";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
@@ -1247,6 +1257,10 @@ async function handleChatPost(
             signals: routerSignals?.signals,
             // What the user asked for, not what their model happens to support.
             webSearchRequested: webSearchMode === "always",
+            // Resolved from the environment, so Auto cannot choose a model
+            // *because* it searches on a deployment that holds no credential
+            // for that model's backend.
+            searchBackendReadiness: resolveWebSearchBackendReadiness(),
         };
         const autoSelection = selectAutoModel({
             requestedModelId,
@@ -1389,6 +1403,11 @@ async function handleChatPost(
         // model (see lib/webSearchCapability.ts for the support matrix).
         const webSearchCapability = getWebSearchCapability(modelConfig.id);
         const webSearchRequested = webSearchMode === "always";
+        // Which search backends this process can actually reach, resolved once
+        // and read by everything below. The composer, the picker, preflight and
+        // availability all answer from the same function, so a model offered as
+        // search-ready here is one every other surface also called search-ready.
+        const searchBackendReadiness = resolveWebSearchBackendReadiness();
         // Dispatchability, not declared support -- the same question the
         // composer, the credit estimate, preflight and availability all answer
         // with `nativeSearchIsDispatchable`. A native capability whose
@@ -1398,6 +1417,16 @@ async function handleChatPost(
         const nativeSearchEnabled =
             webSearchRequested &&
             nativeSearchIsDispatchable(webSearchCapability);
+        // The other route. Never true at the same time as the one above -- a
+        // capability is native or application-managed -- and kept as its own
+        // name because the two differ in which budget pays, which tools may
+        // coexist with them, and where the citations come from.
+        const appManagedSearchEnabled =
+            webSearchRequested &&
+            appManagedSearchIsDispatchable(
+                webSearchCapability,
+                searchBackendReadiness
+            );
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -2014,6 +2043,7 @@ async function handleChatPost(
             // the two cannot drift.
             nativeSearchForced:
                 nativeSearchEnabled && webSearchCapability.canForceExecution,
+            appManagedSearchEnabled,
             turnAttachments: turnAttachmentDescriptors,
             promptText:
                 typeof latestMessage?.content === "string"
@@ -2689,10 +2719,11 @@ async function handleChatPost(
         // a restart, has to be visible here or the refusal it earned lasts
         // only as long as the process that saw it.
         await refreshSearchQueryCeilingBreaches();
-        const nativeSearchReservation = reserveNativeSearchCost({
+        const nativeSearchReservation = reserveTurnSearchCost({
             model: modelConfig,
             capability: webSearchCapability,
             nativeSearchEnabled,
+            appManagedSearchEnabled,
         });
         if (!nativeSearchReservation.ok) {
             throw webSearchCostRefusalError(nativeSearchReservation.reason);
@@ -2704,10 +2735,13 @@ async function handleChatPost(
             {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
-                    webSearchCapability
+                    webSearchCapability,
+                    searchBackendReadiness
                 ),
                 nativeSearchEnabled,
-                nativeSearch: nativeSearchReservation,
+                appManagedSearchEnabled,
+                nativeSearch: nativeSearchReservation.native,
+                searchBackend: nativeSearchReservation.searchBackend,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -2798,6 +2832,11 @@ async function handleChatPost(
                 // fitted to the user's model would bias every other candidate.
                 requestOutputCapTokens: budget.maxOutputTokens,
                 models: routerCandidateInputs.models,
+                // The same readiness the live decision would have used. A shadow
+                // row computed against a different answer describes a router
+                // this deployment does not run, which is worse than no row.
+                searchBackendReadiness:
+                    routerCandidateInputs.searchBackendReadiness,
                 unhealthyModelIds: routerCandidateInputs.unhealthyModelIds,
                 signals: routerCandidateInputs.signals,
             };
@@ -2805,7 +2844,10 @@ async function handleChatPost(
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
-            enabledTools: nativeSearchEnabled ? ["web_search"] : [],
+            enabledTools:
+                nativeSearchEnabled || appManagedSearchEnabled
+                    ? ["web_search"]
+                    : [],
             // Comparison runs arrive with a slot already reserved for this
             // model by the aggregate preflight. Without it the three panels of
             // one comparison would each race for a slot, and a run could be
@@ -3010,6 +3052,53 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        /*
+          This turn's own search tool, and this turn's own counter.
+
+          Built here, once, and read from here everywhere below -- the same rule
+          the native configuration follows, for a sharper reason. The session
+          object *is* the ceiling: the fifth backend request is allowed and the
+          sixth is refused because this exact object says so. A second one built
+          later would start at zero, and the turn would get ten searches against
+          a reservation for five.
+
+          `searchAbortSignal` is the request's own signal, so a client that
+          disconnects mid-answer does not leave a search running for a turn
+          nobody is reading.
+        */
+        const appManagedSearchTool =
+            appManagedSearchEnabled && webSearchCapability.searchBackend
+                ? buildAppManagedWebSearchTool({
+                      backend: webSearchCapability.searchBackend,
+                      maxQueries:
+                          appManagedSearchQueryCeiling({
+                              capability: webSearchCapability,
+                              readiness: searchBackendReadiness,
+                              webSearchEnabled: true,
+                          }) ?? 0,
+                      signal: req.signal,
+                      onOutcome: (event) => {
+                          // Content-free. The query text is deliberately absent:
+                          // it is the user's question, or a paraphrase of it,
+                          // and a log line is not a place for either. What is
+                          // here is enough to see a backend degrading.
+                          console.info(
+                              JSON.stringify({
+                                  event: "app_managed_web_search",
+                                  traceId,
+                                  modelId: modelConfig.id,
+                                  backend: webSearchCapability.searchBackend,
+                                  status: event.status,
+                                  reason: event.reason ?? null,
+                                  queryLength: event.queryLength,
+                                  resultCount: event.resultCount,
+                                  durationMs: event.durationMs,
+                                  timestamp: new Date().toISOString(),
+                              })
+                          );
+                      },
+                  })
+                : null;
         // Whether this dispatch will actually be able to search, as opposed to
         // being allowed to. The Router's filter answers the second: it keeps a
         // native model for a turn that needs current information because the
@@ -3021,11 +3110,17 @@ async function handleChatPost(
             support: webSearchCapability.support,
             nativeSearchDispatchable:
                 nativeSearchIsDispatchable(webSearchCapability),
+            appManagedSearchDispatchable: appManagedSearchIsDispatchable(
+                webSearchCapability,
+                searchBackendReadiness
+            ),
             webSearchMode: webSearchMode ?? null,
-            toolConfigBuilt: webSearchToolConfig !== null,
+            toolConfigBuilt:
+                webSearchToolConfig !== null || appManagedSearchTool !== null,
             surchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
-                webSearchCapability
+                webSearchCapability,
+                searchBackendReadiness
             ),
         });
         // Recorded, not refused. A routed turn whose profile says it needs the
@@ -3140,16 +3235,45 @@ async function handleChatPost(
           registers no application tool behaves exactly as it does today.
         */
         const combinedToolConfig =
-            webSearchToolConfig || artifactToolConfig
+            webSearchToolConfig || appManagedSearchTool || artifactToolConfig
                 ? {
                       ...(webSearchToolConfig ?? {}),
                       tools: {
                           ...(webSearchToolConfig?.tools ?? {}),
+                          // This application's own search, on the same footing
+                          // as the artifact tools because it is the same kind
+                          // of thing: a function declaration this code executes.
+                          // That is why it coexists with them where Google's
+                          // grounding could not -- there is no built-in
+                          // retrieval tool on the request to be exclusive with.
+                          ...(appManagedSearchTool?.tools ?? {}),
                           ...(artifactToolConfig?.tools ?? {}),
                       },
+                      // A search tool with no tool loop is a search the model
+                      // never gets to read: the SDK stops after one step, and
+                      // the answer is written without the results. The larger of
+                      // the two step budgets wins when both features are on --
+                      // neither is a cost ceiling (the search ceiling is the
+                      // session counter, the artifact ceiling is the per-turn
+                      // artifact limit), so taking the maximum cannot raise a
+                      // spend bound.
+                      ...(appManagedSearchTool && !artifactToolConfig
+                          ? {
+                                stopWhen: stepCountIs(
+                                    APP_MANAGED_SEARCH_MAX_STEPS
+                                ),
+                            }
+                          : {}),
                       ...(artifactToolConfig
                           ? {
-                                stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS),
+                                stopWhen: stepCountIs(
+                                    appManagedSearchTool
+                                        ? Math.max(
+                                              GENERATED_ARTIFACT_MAX_STEPS,
+                                              APP_MANAGED_SEARCH_MAX_STEPS
+                                          )
+                                        : GENERATED_ARTIFACT_MAX_STEPS
+                                ),
                                 /*
                                   The two halves of "was this file begun, and
                                   did it ever run".
@@ -3516,10 +3640,20 @@ async function handleChatPost(
         const earlyCancelSearchFields = {
             searchSurchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
-                webSearchCapability
+                webSearchCapability,
+                searchBackendReadiness
             ),
             searchExecuted: false,
             searchQueriesObserved: false,
+            // What the counter saw before the turn ended, which for an
+            // application-managed search is not a guess: the requests were made
+            // by this process and counted here. `searchQueriesObserved: false`
+            // still applies -- settlement takes the authorized ceiling rather
+            // than this figure -- and this is carried so the ledger row can say
+            // what actually ran beside what was authorized.
+            searchBackendRequestCount:
+                appManagedSearchTool?.session.snapshot()
+                    .succeededRequestCount ?? 0,
         };
         const settleSafely = (
             outcome: "completed" | "cancelled" | "failed" | "empty",
@@ -4031,6 +4165,7 @@ async function handleChatPost(
                 // account for.
                 toolsOffered: Boolean(combinedToolConfig),
                 nativeSearchEnabled,
+                appManagedSearchEnabled,
                 // Always false here: a deep-research turn returns from the
                 // submit-then-poll branch above and never reaches a stream.
                 // Stated anyway, because a gate that lists its exclusions is
@@ -4079,6 +4214,12 @@ async function handleChatPost(
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 webSearchMode: webSearchMode ?? null,
+                // The same map the primary resolved. A fallback that resolved
+                // its own could disagree with the primary only by reading a
+                // changed environment mid-request, which is not a thing that
+                // should be able to change what this turn was offered.
+                searchBackendReadiness,
+                searchAbortSignal: req.signal,
                 traceId,
                 attemptIndex: dispatched.attemptIndex + 1,
                 // `docs/policy/tomverse-chat-routing.md` §10, in the
@@ -4506,13 +4647,26 @@ async function handleChatPost(
                         // point at. Every other provider is unaffected.
                         const perplexitySearchCitations =
                             (await takePerplexityCapture())?.search?.citations;
+                        // What this turn's own executor counted and collected.
+                        // Read once, here, so the citations, the executed flag,
+                        // the surcharge refund and the settled backend cost all
+                        // come from one snapshot and cannot describe different
+                        // turns.
+                        const appManagedSearchSnapshot =
+                            appManagedSearchTool?.session.snapshot() ?? null;
                         const webSearchExecution = normalizeWebSearchExecution({
                             capability: webSearchCapability,
                             searchRequested: webSearchRequested,
                             provider: dispatched.provider,
-                            toolName: webSearchCapability.provider
-                                ? WEB_SEARCH_TOOL_NAMES[webSearchCapability.provider]
-                                : undefined,
+                            backendReadiness: searchBackendReadiness,
+                            appManagedSearch: appManagedSearchSnapshot,
+                            toolName: appManagedSearchTool
+                                ? APP_MANAGED_WEB_SEARCH_TOOL_NAME
+                                : webSearchCapability.provider
+                                  ? WEB_SEARCH_TOOL_NAMES[
+                                        webSearchCapability.provider
+                                    ]
+                                  : undefined,
                             content:
                                 contentResult.status === "fulfilled"
                                     ? contentResult.value
@@ -4566,12 +4720,24 @@ async function handleChatPost(
                         const searchSettlementFields = {
                             searchSurchargeCredits: getWebSearchSurchargeCredits(
                                 webSearchMode ?? "off",
-                                webSearchCapability
+                                webSearchCapability,
+                                searchBackendReadiness
                             ),
                             searchExecuted: webSearchExecution.executed,
                             searchCostMicroUsd:
                                 webSearchExecution.costMetadata?.searchCostMicroUsd,
                             searchQueryCount: webSearchExecution.queryCount,
+                            // Successes, not attempts: the vendor bills for what
+                            // it served. Absent when no application-managed
+                            // search ran, which is how a turn that held nothing
+                            // on the search budget is told from one that held
+                            // and spent nothing.
+                            ...(appManagedSearchSnapshot
+                                ? {
+                                      searchBackendRequestCount:
+                                          appManagedSearchSnapshot.succeededRequestCount,
+                                  }
+                                : {}),
                             // The normalizer read the finished response, so an
                             // absent count here means the search really did not
                             // run -- not that nobody looked.

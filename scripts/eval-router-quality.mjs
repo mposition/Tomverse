@@ -15,12 +15,25 @@
 //   --mode=pilot        200-ish items from the development set. Measures the
 //                       discordance rate so §3's `n` can be computed instead
 //                       of guessed. Emits no decision evidence, ever.
-//   --mode=judge-bias   §5. Measures a routable judge's preference for its own
-//                       output on held-out pairs, so the bias is a number
-//                       beside the result rather than a caveat under it.
+//   --mode=judge-bias   Superseded. Its own-answer preference rate mixes the
+//                       two models' quality difference with the judge's
+//                       preference for its own output, and 50% reads as "no
+//                       self-preference" only if the models are equally good.
+//                       Kept runnable because the number is still a diagnostic;
+//                       it is no longer citable, and --judge-bias=<path> is
+//                       refused outright.
+//   --mode=judge-calibration
+//                       docs/ops/tomverse-chat-router-evaluation-set.md §5, in
+//                       the shape that can be defended: two judges over the
+//                       SAME answers, reported as a paired shift with a
+//                       pair-level bootstrap interval. Pure analysis of two
+//                       verdict files -- it sends nothing.
 //   --mode=decision     The run ROUTE-01 cites. Requires a frozen decision
 //                       set, a pre-registered `n`, and -- when the judge is
-//                       routable -- a bias artefact from the mode above.
+//                       routable -- a calibration artefact that names this
+//                       judge, grades development-set answers from a run that
+//                       finished, and carries both judges' verdicts on every
+//                       pair. Checked before anything is sent.
 //
 // Splitting them is the point. "Run it and see, then decide how big it should
 // have been" is how a sample size becomes an outcome that was chosen rather
@@ -35,7 +48,12 @@
 //   ... --limit=50            stop after this many items
 //   ... --max-cost-usd=5      stop once this much provider cost has accrued
 //   ... --use-index=1         decision mode: which use of the decision set this is
-//   ... --judge-bias=<path>   decision mode: the artefact from --mode=judge-bias
+//   ... --preregistration=<path>
+//                            decision mode: the frozen `n` and what it is
+//                            conditional on. Refused while pending.
+//   ... --calibration=<path>  decision mode: the artefact from
+//                            --mode=judge-calibration, checked against this run
+//                            before anything is sent
 //
 // Requires provider keys for every model it touches.
 //
@@ -55,9 +73,12 @@ import {
   sha256,
 } from "../lib/routerAnswerBundle.ts";
 import {
+  CALIBRATION_MIN_COVERAGE,
   calibrateJudges,
+  calibrationArtefactProblems,
   calibrationProblems,
 } from "../lib/routerJudgeCalibration.ts";
+import { decisionRunProblems } from "../lib/routerDecisionPreRegistration.ts";
 import { dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -69,9 +90,26 @@ import { ACTIVE_ESTIMATOR_VERSION, estimateRawTextTokens } from "../lib/chatToke
 import { decideRouterModel, ROUTER_VERSIONS } from "../lib/routerDecision.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import {
+  EMPTINESS_CLASSIFICATIONS,
+  failed as answerFailed,
+  failureRecord,
+  outcomeFromReply,
+} from "../lib/routerAnswerOutcome.ts";
+import {
+  JUDGE_TEMPLATE_VERSION,
+  identifiesItself,
+  judgePrompt,
+  readVerdict,
+  selfIdentificationMarkers,
+} from "../lib/routerJudgeRubric.ts";
+import {
   PAIRED_EVALUATION_UNIT,
   ROUTER_QUALITY_EVAL_VERSION,
   computeWinRateDelta,
+  decidePairFromAnswers,
+  outcomeScore,
+  pairAccounting,
+  pairAccountingProblems,
   evaluateRouterQualityRun,
   evaluationRecordProblems,
   requiredSampleSize,
@@ -117,7 +155,9 @@ const verdictPaths = process.argv
   .filter((argument) => argument.startsWith("--verdicts="))
   .map((argument) => argument.slice("--verdicts=".length));
 const limit = Number(argValue("limit", "0")) || 0;
-const judgeBiasPath = argValue("judge-bias", "");
+const calibrationPath = argValue("calibration", "");
+const preRegistrationPath = argValue("preregistration", "");
+const legacyBiasPath = argValue("judge-bias", "");
 const useIndex = Number(argValue("use-index", "0")) || 0;
 const preRegisteredN = Number(argValue("preregistered-n", "0")) || 0;
 const ciMethod = argValue("method", "bootstrap_percentile");
@@ -135,6 +175,16 @@ const ensureDirectory = (path) => {
     mkdirSync(directory, { recursive: true });
   }
 };
+
+if (legacyBiasPath) {
+  die(
+    "--judge-bias=<path> is no longer accepted. Its own-answer preference rate mixes the two\n" +
+      "models' quality difference with the judge's preference for its own output, so it cannot\n" +
+      "settle docs/ops/tomverse-chat-router-evaluation-set.md §5. Run\n" +
+      "--mode=judge-calibration against an independent judge and pass that artefact with\n" +
+      "--calibration=<path>."
+  );
+}
 
 if (!["pilot", "decision", "judge-bias", "judge-calibration"].includes(mode)) {
   die(`--mode must be pilot, decision, judge-bias or judge-calibration (got "${mode}").`);
@@ -162,13 +212,32 @@ if (mode === "judge-calibration") {
       identity: header.judge,
       bundleDigest: header.bundleDigest,
       answerIdentities: header.answerIdentities ?? [],
+      bundleMode: header.bundleMode ?? null,
+      evaluationSetVersion: header.evaluationSetVersion ?? null,
+      evaluationSetPurpose: header.evaluationSetPurpose ?? null,
+      bundlePairs: header.bundlePairs ?? null,
+      bundlePlannedItems: header.bundlePlannedItems ?? null,
+      judgeTemplateVersion: header.judgeTemplateVersion ?? null,
       verdicts: lines
         .filter((line) => line.kind === "verdict")
         .map((line) => ({ pairId: line.pairId, verdict: line.verdict })),
     };
   };
   const [target, reference] = verdictPaths.map(readPass);
-  const problems = calibrationProblems(target, reference, target.answerIdentities);
+  const problems = [
+    ...calibrationProblems(target, reference, target.answerIdentities),
+    // The digest proves both passes graded the same answers; it says nothing
+    // about the provenance the two files claim for them. A disagreement here
+    // is a hand-edited header, and the artefact would otherwise take the
+    // target's version of it without saying so.
+    ...["bundleMode", "evaluationSetVersion", "evaluationSetPurpose", "bundlePairs", "bundlePlannedItems"]
+      .filter((field) => target[field] !== reference[field])
+      .map(
+        (field) =>
+          `the two passes disagree about ${field}: ${JSON.stringify(target[field])} against ` +
+          `${JSON.stringify(reference[field])}, over a bundle they agree on`
+      ),
+  ];
   if (problems.length > 0) {
     die(
       "\nThese two passes cannot be compared:\n\n" +
@@ -203,24 +272,286 @@ if (mode === "judge-calibration") {
       "  and not a result -- human labels on a stratified sample are what settle it."
   );
   if (jsonPath) {
+    // The numbers alone cannot be checked against the run that later cites
+    // them, so the file carries what the check needs: whose bias this is
+    // about, which answers were graded, whether the run producing them
+    // finished, and which set they came from.
+    const artefact = {
+      ...result,
+      targetIdentity: target.identity,
+      referenceIdentity: reference.identity,
+      answerIdentities: target.answerIdentities,
+      bundleDigest: target.bundleDigest,
+      bundlePairs: target.bundlePairs,
+      bundlePlannedItems: target.bundlePlannedItems,
+      bundleMode: target.bundleMode,
+      evaluationSetVersion: target.evaluationSetVersion,
+      evaluationSetPurpose: target.evaluationSetPurpose,
+      judgeTemplateVersion: target.judgeTemplateVersion,
+      producedAt: new Date().toISOString(),
+      targetPath: target.path,
+      referencePath: reference.path,
+    };
+    const artefactTrouble = calibrationArtefactProblems(artefact, {
+      judgeIdentity: target.identity,
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+    });
     ensureDirectory(jsonPath);
-    writeFileSync(
-      jsonPath,
-      `${JSON.stringify({ ...result, targetPath: target.path, referencePath: reference.path }, null, 2)}\n`,
-      "utf8"
-    );
+    writeFileSync(jsonPath, `${JSON.stringify(artefact, null, 2)}\n`, "utf8");
     console.log(`\nWrote ${jsonPath}`);
+    if (artefactTrouble.length > 0) {
+      // Written either way -- the numbers are still the numbers -- but a
+      // decision run will refuse it, and the operator finds that out now
+      // rather than after paying for the decision run.
+      console.log(
+        "\nThis artefact will NOT be accepted by a decision run:\n" +
+          artefactTrouble.map((problem) => `  - ${problem}`).join("\n")
+      );
+    }
   }
   process.exit(0);
 }
+if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
+  die(`--max-cost-usd must be a positive number (got "${rawMaxCost}").`);
+}
+
+let commitSha = (() => {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+})();
+
+const random = seededRandom(seed);
+let accruedCostUsd = 0;
+let truncatedByCost = false;
+// Every arm answer that produced nothing usable, kept for the record as well
+// as the journal. The gate in front of the paid judge reads its classification
+// counts, so they have to survive into a file rather than only into a log.
+const generationFailures = [];
+
+// Priced through the same lib/modelPricing.ts profile the product bills from,
+// so the figure this prints is the one the run actually costs rather than a
+// list price. Micro-USD per the pricing table's own units.
+const costMicroUsd = (model, usage) => {
+  const pricing = resolveModelPricing(model, {
+    estimatedPromptTokens: usage.inputTokens ?? 0,
+  });
+  const cachedTokens = usage.cachedInputTokens ?? 0;
+  const uncachedInput = Math.max(0, (usage.inputTokens ?? 0) - cachedTokens);
+  return (
+    uncachedInput * pricing.inputUsdPerMillionTokens +
+    cachedTokens * pricing.inputUsdPerMillionTokens * pricing.cachedInputPriceMultiplier +
+    (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens
+  );
+};
+
+/**
+ * One provider call, as an outcome rather than a string.
+ *
+ * A failed call is billed the same as a successful one where the provider got
+ * far enough to charge, so the cost is accrued on both paths: a total that
+ * counted only the answers it kept would understate what the run spent.
+ *
+ * `arm` is passed in because the failure journal is useless without it -- "an
+ * answer was empty" says nothing; "the auto arm on deepseek-v4-flash returned
+ * 0 characters with finishReason=length" says what to look at.
+ */
+const answer = async (model, prompt, arm) => {
+  const startedAt = process.hrtime.bigint();
+  const identity = {
+    arm,
+    modelId: model.id,
+    provider: model.provider,
+    apiModel: model.apiModel,
+  };
+  let result;
+  try {
+    result = await generateText({
+      model: getActiveAiModel(model),
+      messages: [{ role: "user", content: prompt }],
+      maxOutputTokens: 2_048,
+    });
+  } catch (error) {
+    return answerFailed("provider_error", String(error), {
+      ...identity,
+      finishReason: null,
+      usage: {},
+      latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+      rawTextLength: 0,
+      traceId: null,
+    });
+  }
+  const usage = result.usage ?? {};
+  accruedCostUsd += costMicroUsd(model, usage) / 1_000_000;
+  return outcomeFromReply(
+    {
+      text: result.text,
+      finishReason: result.finishReason ?? null,
+      usage,
+      // The provider's own handle on this response. An emptiness this run
+      // cannot classify is reported with it, because it is what somebody would
+      // have to quote to ask the provider what it actually sent.
+      traceId: result.response?.id ?? null,
+    },
+    { ...identity, latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6 }
+  );
+};
+
+
+// docs/ops/tomverse-chat-router-evaluation-set.md §6 lives in
+// lib/routerJudgeRubric.ts, shared with the human review sheets:
+// the model judges and the human reviewers have to grade against the same
+// words for their agreement to mean anything. The judge sees two answers and
+// no arm labels, no model ids and no routing reason.
+
+// Grade a bundle that already exists. The answers are not regenerated and the
+// display order is the one the bundle fixed, so the only thing that differs
+// from the pass this will be compared against is who graded.
+if (rejudgePath) {
+  if (!judgeModelId) die("--judge=<model id> is required.");
+  // --set is optional here and the bundle does not need it. When it is given,
+  // it is checked: the two judges a calibration compares are pre-registered,
+  // and picking either one at dispatch time is the drift pre-registration
+  // exists to stop.
+  if (setPath) {
+    const registered = JSON.parse(readFileSync(setPath, "utf8"));
+    const allowed = [registered.judge?.modelId, registered.independentJudge?.modelId].filter(Boolean);
+    if (!allowed.includes(judgeModelId)) {
+      die(
+        `--judge=${judgeModelId}, but ${setPath} pre-registers ${allowed.join(" and ") || "no judge"}.\n` +
+          "Either re-grade with a pre-registered judge, or pre-register the one you want first."
+      );
+    }
+  }
+  const parsed = parseAnswerBundle(readFileSync(rejudgePath, "utf8"));
+  const problems = answerBundleProblems(parsed);
+  if (problems.length > 0) {
+    die(
+      `\n${rejudgePath} cannot be judged:\n\n` +
+        problems.slice(0, 10).map((problem) => `  - ${problem}`).join("\n") +
+        (problems.length > 10 ? `\n  ... and ${problems.length - 10} more` : "") +
+        "\n\nNothing was sent and nothing was billed."
+    );
+  }
+  const judge = getModel(judgeModelId);
+  if (!judge) die(`Unknown judge model "${judgeModelId}".`);
+  const identity = { modelId: judge.id, provider: judge.provider, apiModel: judge.apiModel };
+  const answerIdentities = bundleAnswerIdentities(parsed);
+  if (answerIdentities.includes(canonicalIdentity(identity))) {
+    console.log(
+      `NOTE: ${canonicalIdentity(identity)} wrote answers in this bundle, so this pass\n` +
+        "grades its own output. That is a valid pass to run -- it is the one whose bias\n" +
+        "is in question -- but it cannot be the independent side of a comparison."
+    );
+  }
+  const out = jsonPath || `${rejudgePath}.${judge.id}.verdicts.jsonl`;
+  ensureDirectory(out);
+  const digest = bundleDigest(parsed);
+  writeFileSync(
+    out,
+    `${JSON.stringify({
+      kind: "header",
+      judge: identity,
+      bundleDigest: digest,
+      bundlePath: rejudgePath,
+      answerIdentities,
+      // Carried through from the bundle so a calibration built from two
+      // verdict files can say which set the answers came from and whether the
+      // run that produced them finished, without holding the bundle.
+      bundleMode: parsed.header.mode,
+      evaluationSetVersion: parsed.header.evaluationSetVersion,
+      evaluationSetPurpose: parsed.header.evaluationSetPurpose,
+      bundlePairs: parsed.entries.length,
+      bundlePlannedItems: parsed.header.plannedItems,
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+      rejudgedAt: new Date().toISOString(),
+      commitSha,
+    })}\n`,
+    "utf8"
+  );
+  console.log(`Re-judging ${parsed.entries.length} pair(s) from ${rejudgePath} with ${judge.id}`);
+  let graded = 0;
+  let stoppedByCost = false;
+  for (const [index, pair] of parsed.entries.entries()) {
+    // The ceiling applies here too, and this is the stage where it matters:
+    // an independent judge can cost an order of magnitude more per call than
+    // the run that produced the answers.
+    if (maxCostUsd !== null && accruedCostUsd >= maxCostUsd) {
+      stoppedByCost = true;
+      console.log(`\nStopped at pair ${index} — cost ceiling $${maxCostUsd} reached.`);
+      break;
+    }
+    let text;
+    try {
+      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text), "judge");
+      if (judgement.status === "failed") {
+        console.log(`\n  ${pair.pairId}: judge failed — ${judgement.reason}: ${judgement.detail}`);
+        continue;
+      }
+      text = judgement.text;
+    } catch (error) {
+      console.log(`\n  ${pair.pairId}: judge failed — ${String(error)}`);
+      continue;
+    }
+    const verdictWord = readVerdict(text);
+    if (verdictWord === null) {
+      console.log(`\n  ${pair.pairId}: no recognisable verdict`);
+      continue;
+    }
+    // Back to arm terms, using the order the bundle fixed rather than a
+    // position this pass chose.
+    const firstArm = pair.first.arm;
+    const arm =
+      verdictWord === "equivalent"
+        ? "equivalent"
+        : (verdictWord === "first") === (firstArm === "auto")
+          ? "auto"
+          : "baseline";
+    appendFileSync(out, `${JSON.stringify({ kind: "verdict", pairId: pair.pairId, verdict: arm })}\n`, "utf8");
+    graded += 1;
+    process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
+    if (graded % 10 === 0 || index === parsed.entries.length - 1) {
+      console.log(`  ${graded}/${parsed.entries.length}  $${accruedCostUsd.toFixed(4)}`);
+    }
+  }
+  console.log(`\nWrote ${out} — ${graded} verdict(s), $${accruedCostUsd.toFixed(4)}`);
+  // A pass that stopped at its ceiling covers whatever prefix the money
+  // reached, which is not a population. A pass that merely lost a few pairs to
+  // unreadable verdicts is a structural shortfall, and the calibration
+  // tolerates it up to the same floor lib/routerJudgeCalibration.ts uses --
+  // exiting non-zero there would stop a run that is still usable.
+  const coverage = parsed.entries.length === 0 ? 0 : graded / parsed.entries.length;
+  if (stoppedByCost) {
+    console.log(
+      `Stopped at the cost ceiling, so this pass covers a prefix rather than the bundle. ` +
+        "It cannot be calibrated against."
+    );
+    process.exit(1);
+  }
+  if (coverage < CALIBRATION_MIN_COVERAGE) {
+    console.log(
+      `Only ${(coverage * 100).toFixed(1)}% of the bundle carries a verdict, under the ` +
+        `${(CALIBRATION_MIN_COVERAGE * 100).toFixed(0)}% floor a calibration needs.`
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// Everything below needs the evaluation set. The two modes above do not:
+// a calibration reads two verdict files and a rejudge reads a bundle, and
+// asking either for a baseline and a seed is asking for the arguments of a
+// run that is not happening. The bundle carries the set version, the
+// purpose, the seed and the rubric its answers were produced under.
 if (!setPath) die("--set=<path to the evaluation set JSON> is required.");
 if (!baselineModelId) die("--baseline=<model id> is required and must be pre-registered.");
 if (!judgeModelId) die("--judge=<model id> is required.");
 if (!seed) {
-  die("--seed=<integer> is required: §9 records it so the run can be replayed.");
-}
-if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
-  die(`--max-cost-usd must be a positive number (got "${rawMaxCost}").`);
+  die(
+    `--seed=<integer> is required: ${"docs/ops/tomverse-chat-router-evaluation-set.md"} §9 records it so the run can be replayed.`
+  );
 }
 
 const evaluationSet = JSON.parse(readFileSync(setPath, "utf8"));
@@ -261,9 +592,16 @@ const judgeModel = getModel(judgeModelId);
 if (!judgeModel) die(`Unknown judge model "${judgeModelId}".`);
 
 const routableModelIds = AVAILABLE_MODELS.map((model) => model.id);
+
+// docs/ops/tomverse-chat-router-evaluation-set.md §5. An answer that names its own
+// model defeats the blinding, and the
+// procedure says such an item is excluded and logged rather than quietly
+// scrubbed -- a scrub changes the answer the judge grades.
+const selfIdMarkers = selfIdentificationMarkers(routableModelIds);
 const judgeIsRoutable = routableModelIds.includes(judgeModelId);
 
-// §4. The baseline the run compares against has to be the one the set
+// docs/ops/tomverse-chat-router-evaluation-set.md §4. The baseline the run compares
+// against has to be the one the set
 // pre-registered; a baseline supplied on the command line that disagrees with
 // the frozen record is the comparison being chosen at run time.
 if (evaluationSet.baseline && evaluationSet.baseline.modelId !== baselineModelId) {
@@ -273,15 +611,16 @@ if (evaluationSet.baseline && evaluationSet.baseline.modelId !== baselineModelId
   );
 }
 
-let judgeBias = null;
-if (judgeBiasPath) {
-  judgeBias = JSON.parse(readFileSync(judgeBiasPath, "utf8"));
+let judgeCalibration = null;
+if (calibrationPath) {
+  judgeCalibration = JSON.parse(readFileSync(calibrationPath, "utf8"));
 }
 if (mode === "judge-bias") {
   if (!judgeIsRoutable) {
     die(
       `"${judgeModelId}" is not a routable model, so it has no output of its own in the ` +
-        "set to prefer. §5 asks for this measurement only where the judge is one of the " +
+        "set to prefer. docs/ops/tomverse-chat-router-evaluation-set.md §5 asks for this " +
+        "measurement only where the judge is one of the " +
         "models being judged."
     );
   }
@@ -293,196 +632,73 @@ if (mode === "judge-bias") {
 }
 if (mode === "decision") {
   if (!preRegisteredN) {
-    die("--preregistered-n is required in decision mode: §3 fixes n before the run, from a measured pilot.");
+    die(
+      "--preregistered-n is required in decision mode.\n" +
+        "docs/ops/tomverse-chat-router-evaluation-set.md §3 fixes n before the run, from a measured pilot."
+    );
   }
   if (!useIndex) {
     die(
-      "--use-index is required in decision mode. §7: every look at the decision set costs a use, " +
+      "--use-index is required in decision mode.\n" +
+        "docs/ops/tomverse-chat-router-evaluation-set.md §7: every look at the decision set costs a use, " +
         "and a second run against the same frozen set reports how well the Router fits its own test set."
     );
   }
-  if (judgeIsRoutable && !judgeBias) {
+  if (!preRegistrationPath) {
     die(
-      `The judge "${judgeModelId}" is itself routable, so §5 requires a bias measurement. ` +
-        "Run --mode=judge-bias first and pass its artefact with --judge-bias=<path>."
+      "--preregistration=<path> is required in decision mode. `n` is fixed before the run and\n" +
+        "conditional on things that have to have happened; the file says which, and the run is\n" +
+        "refused until they have."
     );
   }
-}
-
-let commitSha = (() => {
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  } catch {
-    return null;
+  {
+    // Checked before anything is sent. A decision run that discovers its `n`
+    // was never activated has paid for a report nobody can cite.
+    const registration = JSON.parse(readFileSync(preRegistrationPath, "utf8"));
+    const trouble = decisionRunProblems(registration, {
+      preRegisteredN: preRegisteredN,
+      routerVersions: ROUTER_VERSIONS,
+      corpusDigest: evaluationSet.frozenDigest,
+    });
+    if (trouble.length > 0) {
+      die(
+        `\n${preRegistrationPath} does not authorise this run:\n\n` +
+          trouble.map((problem) => `  - ${problem}`).join("\n") +
+          "\n\nNothing was sent and nothing was billed."
+      );
+    }
   }
-})();
-
-const random = seededRandom(seed);
-let accruedCostUsd = 0;
-let truncatedByCost = false;
-
-// Priced through the same lib/modelPricing.ts profile the product bills from,
-// so the figure this prints is the one the run actually costs rather than a
-// list price. Micro-USD per the pricing table's own units.
-const costMicroUsd = (model, usage) => {
-  const pricing = resolveModelPricing(model, {
-    estimatedPromptTokens: usage.inputTokens ?? 0,
-  });
-  const cachedTokens = usage.cachedInputTokens ?? 0;
-  const uncachedInput = Math.max(0, (usage.inputTokens ?? 0) - cachedTokens);
-  return (
-    uncachedInput * pricing.inputUsdPerMillionTokens +
-    cachedTokens * pricing.inputUsdPerMillionTokens * pricing.cachedInputPriceMultiplier +
-    (usage.outputTokens ?? 0) * pricing.outputUsdPerMillionTokens
-  );
-};
-
-const answer = async (model, prompt) => {
-  const startedAt = process.hrtime.bigint();
-  const result = await generateText({
-    model: getActiveAiModel(model),
-    messages: [{ role: "user", content: prompt }],
-    maxOutputTokens: 2_048,
-  });
-  const usage = result.usage ?? {};
-  accruedCostUsd += costMicroUsd(model, usage) / 1_000_000;
-  return {
-    text: result.text ?? "",
-    latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
-    usage,
-  };
-};
-
-// §5. An answer that names its own model defeats the blinding, and the
-// procedure says such an item is excluded and logged rather than quietly
-// scrubbed -- a scrub changes the answer the judge grades.
-const SELF_IDENTIFICATION = [
-  ...routableModelIds,
-  "openai",
-  "anthropic",
-  "deepseek",
-  "gemini",
-  "claude",
-  "gpt-",
-  "as an ai language model",
-  "저는 ai 언어 모델",
-];
-
-const identifiesItself = (text) => {
-  const lowered = text.toLowerCase();
-  return SELF_IDENTIFICATION.some((marker) => lowered.includes(marker.toLowerCase()));
-};
-
-// §6, verbatim in its tie-break order. The judge sees two answers and no arm
-// labels, no model ids and no routing reason.
-const JUDGE_TEMPLATE_VERSION = "judge-rubric-v1";
-const judgePrompt = (question, first, second) =>
-  [
-    "You are grading two answers to the same question. Decide which better serves the person who asked.",
-    "",
-    "Apply these criteria in order, and stop at the first one that separates them:",
-    "1. Correctness. A factual or logical error outweighs everything below.",
-    "2. Instruction compliance. Format, length, language and explicit constraints. Answering in the wrong language is a failure, not a style difference.",
-    "3. Usefulness. Does it resolve the request, or only describe it.",
-    "4. Grounding. Sourced claims beat confident unsourced ones.",
-    "5. Concision. Only as a tie-break. Length is not quality.",
-    "",
-    'Reply with exactly one word: "FIRST", "SECOND", or "EQUIVALENT".',
-    'If the two answers serve the person equally well, reply "EQUIVALENT". This is a real verdict, not a way to avoid deciding, and a forced preference between equal answers makes the measurement worse.',
-    "",
-    `QUESTION:\n${question}`,
-    "",
-    `ANSWER A:\n${first}`,
-    "",
-    `ANSWER B:\n${second}`,
-  ].join("\n");
-
-const readVerdict = (text) => {
-  const upper = (text ?? "").toUpperCase();
-  if (upper.includes("EQUIVALENT")) return "equivalent";
-  if (upper.includes("FIRST")) return "first";
-  if (upper.includes("SECOND")) return "second";
-  return null;
-};
-
-// Grade a bundle that already exists. The answers are not regenerated and the
-// display order is the one the bundle fixed, so the only thing that differs
-// from the pass this will be compared against is who graded.
-if (rejudgePath) {
-  if (!judgeModelId) die("--judge=<model id> is required.");
-  const parsed = parseAnswerBundle(readFileSync(rejudgePath, "utf8"));
-  const problems = answerBundleProblems(parsed);
-  if (problems.length > 0) {
-    die(
-      `\n${rejudgePath} cannot be judged:\n\n` +
-        problems.slice(0, 10).map((problem) => `  - ${problem}`).join("\n") +
-        (problems.length > 10 ? `\n  ... and ${problems.length - 10} more` : "") +
-        "\n\nNothing was sent and nothing was billed."
-    );
-  }
-  const judge = getModel(judgeModelId);
-  if (!judge) die(`Unknown judge model "${judgeModelId}".`);
-  const identity = { modelId: judge.id, provider: judge.provider, apiModel: judge.apiModel };
-  const answerIdentities = bundleAnswerIdentities(parsed);
-  if (answerIdentities.includes(canonicalIdentity(identity))) {
-    console.log(
-      `NOTE: ${canonicalIdentity(identity)} wrote answers in this bundle, so this pass\n` +
-        "grades its own output. That is a valid pass to run -- it is the one whose bias\n" +
-        "is in question -- but it cannot be the independent side of a comparison."
-    );
-  }
-  const out = jsonPath || `${rejudgePath}.${judge.id}.verdicts.jsonl`;
-  ensureDirectory(out);
-  const digest = bundleDigest(parsed);
-  writeFileSync(
-    out,
-    `${JSON.stringify({
-      kind: "header",
-      judge: identity,
-      bundleDigest: digest,
-      bundlePath: rejudgePath,
-      answerIdentities,
+  if (judgeIsRoutable) {
+    if (!judgeCalibration) {
+      die(
+        `The judge "${judgeModelId}" is itself routable, so ` +
+          "docs/ops/tomverse-chat-router-evaluation-set.md §5 requires a calibration against an\n" +
+          "independent judge. Run --mode=judge-calibration and pass its artefact with\n" +
+          "--calibration=<path>."
+      );
+    }
+    // Checked here, before anything is sent, rather than at report time: a
+    // decision run that discovers its calibration is the wrong one after
+    // paying for the run has paid for a report nobody can cite.
+    const trouble = calibrationArtefactProblems(judgeCalibration, {
+      judgeIdentity: {
+        modelId: judgeModel.id,
+        provider: judgeModel.provider,
+        apiModel: judgeModel.apiModel,
+      },
       judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
-      rejudgedAt: new Date().toISOString(),
-      commitSha,
-    })}\n`,
-    "utf8"
-  );
-  console.log(`Re-judging ${parsed.entries.length} pair(s) from ${rejudgePath} with ${judge.id}`);
-  let graded = 0;
-  for (const [index, pair] of parsed.entries.entries()) {
-    let text;
-    try {
-      const judgement = await answer(judge, judgePrompt(pair.prompt, pair.first.text, pair.second.text));
-      text = judgement.text;
-    } catch (error) {
-      console.log(`\n  ${pair.pairId}: judge failed — ${String(error)}`);
-      continue;
-    }
-    const verdictWord = readVerdict(text);
-    if (verdictWord === null) {
-      console.log(`\n  ${pair.pairId}: no recognisable verdict`);
-      continue;
-    }
-    // Back to arm terms, using the order the bundle fixed rather than a
-    // position this pass chose.
-    const firstArm = pair.first.arm;
-    const arm =
-      verdictWord === "equivalent"
-        ? "equivalent"
-        : (verdictWord === "first") === (firstArm === "auto")
-          ? "auto"
-          : "baseline";
-    appendFileSync(out, `${JSON.stringify({ kind: "verdict", pairId: pair.pairId, verdict: arm })}\n`, "utf8");
-    graded += 1;
-    process.stdout.write(arm === "auto" ? "+" : arm === "baseline" ? "-" : ".");
-    if (graded % 10 === 0 || index === parsed.entries.length - 1) {
-      console.log(`  ${graded}/${parsed.entries.length}  $${accruedCostUsd.toFixed(4)}`);
+      evaluationSetPurpose: evaluationSet.purpose,
+    });
+    if (trouble.length > 0) {
+      die(
+        `\n${calibrationPath} cannot be cited by this run:\n\n` +
+          trouble.map((problem) => `  - ${problem}`).join("\n") +
+          "\n\nNothing was sent and nothing was billed."
+      );
     }
   }
-  console.log(`\nWrote ${out} — ${graded} verdict(s), $${accruedCostUsd.toFixed(4)}`);
-  process.exit(graded === parsed.entries.length ? 0 : 1);
 }
+
 
 const routerInputFor = (item) => {
   const reservedInputTokens = estimateRawTextTokens(item.prompt);
@@ -570,6 +786,42 @@ console.log("");
 const pairs = [];
 const excludedLog = [];
 
+/**
+ * The generation failures, counted the way the gate asks about them.
+ *
+ * `harnessLostText` is the one that voids a run: those answers existed and
+ * this code lost them, so the run measured the harness. `undetermined` is the
+ * honest middle -- a real failure whose cause nothing here establishes -- and
+ * it is reported per failure rather than only counted, because arm, provider,
+ * API model, finish reason, usage and trace id are what somebody would need to
+ * go and find out.
+ */
+const summariseGenerationFailures = (failures) => {
+  const byClassification = {};
+  for (const classification of EMPTINESS_CLASSIFICATIONS) byClassification[classification] = 0;
+  let providerErrors = 0;
+  for (const failure of failures) {
+    if (failure.emptiness === null) providerErrors += 1;
+    else byClassification[failure.emptiness] += 1;
+  }
+  return {
+    total: failures.length,
+    providerErrors,
+    byClassification,
+    harnessLostText: byClassification.harness_lost_text,
+    undetermined: failures
+      .filter((failure) => failure.emptiness === "observed_empty_at_adapter_boundary")
+      .map((failure) => ({
+        arm: failure.arm,
+        provider: failure.provider,
+        apiModel: failure.apiModel,
+        finishReason: failure.finishReason,
+        usage: failure.usage,
+        traceId: failure.traceId,
+      })),
+  };
+};
+
 // The run's own start, taken before the first request rather than after the
 // last. `evaluationRecordProblems` refuses a baseline pre-registered after the
 // run began, and a `startedAt` stamped at the end weakens exactly that check.
@@ -626,6 +878,12 @@ bundle({
   bundleVersion: ANSWER_BUNDLE_VERSION,
   mode,
   evaluationSetVersion: evaluationSet.version,
+  // Written before anything runs, so a bundle that stopped at its cost
+  // ceiling is one whose entry count falls short of what it planned. A header
+  // cannot be amended afterwards, and the run that dies early is exactly the
+  // one that never gets to amend it.
+  evaluationSetPurpose: evaluationSet.purpose,
+  plannedItems: planned.length,
   commitSha,
   seed,
   judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
@@ -717,22 +975,37 @@ for (const [index, item] of liveItems.entries()) {
     continue;
   }
 
-  let autoAnswer;
-  let baselineAnswer;
-  try {
-    autoAnswer = await answer(autoModel, item.prompt);
-  } catch (error) {
-    exclude("auto_arm_failed", String(error));
-    continue;
+  // Both arms are asked before either outcome is inspected. Skipping the
+  // second call once the first came back empty would make the failure journal
+  // silent about an arm nobody asked, and "the baseline was not called" is not
+  // the same finding as "the baseline answered".
+  const autoAnswer = await answer(autoModel, item.prompt, "auto");
+  const baselineAnswer = await answer(baselineModel, item.prompt, "baseline");
+
+  for (const outcome of [autoAnswer, baselineAnswer]) {
+    if (outcome.status !== "failed") continue;
+    const failure = failureRecord(outcome);
+    generationFailures.push(failure);
+    journal(failure);
   }
-  try {
-    baselineAnswer = await answer(baselineModel, item.prompt);
-  } catch (error) {
-    exclude("baseline_arm_failed", String(error));
+
+  // mposition's ruling. An empty answer is a real failure for the person who
+  // asked, so it is recorded as that arm losing rather than dropped -- dropping
+  // it would delete an arm's worst turns from the comparison and flatter
+  // whichever arm fails less gracefully. No judge is called: there is nothing
+  // to compare an answer against nothing.
+  // The judge below is reachable only through `action: "judge"`, which
+  // lib/routerQualityEvalCore.ts returns only when both arms produced text.
+  const pairDecision = decidePairFromAnswers(autoAnswer, baselineAnswer);
+  if (pairDecision.action === "exclude") {
+    exclude(pairDecision.reason, pairDecision.detail);
     continue;
   }
 
-  if (identifiesItself(autoAnswer.text) || identifiesItself(baselineAnswer.text)) {
+  if (
+    identifiesItself(autoAnswer.text, selfIdMarkers) ||
+    identifiesItself(baselineAnswer.text, selfIdMarkers)
+  ) {
     exclude("self_identified");
     continue;
   }
@@ -766,8 +1039,8 @@ for (const [index, item] of liveItems.entries()) {
 
   let verdict;
   try {
-    const judgement = await answer(judgeModel, judgePrompt(item.prompt, first, second));
-    verdict = readVerdict(judgement.text);
+    const judgement = await answer(judgeModel, judgePrompt(item.prompt, first, second), "judge");
+    verdict = judgement.status === "ok" ? readVerdict(judgement.text) : null;
   } catch (error) {
     exclude("judge_failed", String(error));
     continue;
@@ -866,12 +1139,41 @@ for (const pair of pairs) {
 const pct = (value) => (Number.isNaN(value) ? "n/a" : `${(value * 100).toFixed(1)}%`);
 const pp = (value) => (Number.isNaN(value) ? "n/a" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}pp`);
 
+// Two estimates of two different things, reported together because either one
+// alone is misleading. The quality delta answers "when both arms answered,
+// which answer was better"; the end-to-end delta answers "which arm served the
+// person", and counts an arm that produced nothing as losing that pair.
+const accounting = pairAccounting(pairs);
+const accountingTrouble = pairAccountingProblems(accounting);
+if (accountingTrouble.length > 0) {
+  die(`\nThe pair accounting does not add up:\n\n  - ${accountingTrouble.join("\n  - ")}\n`);
+}
+const endToEndDelta = computeWinRateDelta(pairs, {
+  method: ciMethod,
+  seed,
+  score: outcomeScore,
+});
+
 console.log(`Outcome        ${verdict.outcome.toUpperCase()}`);
 for (const reason of verdict.reasons) console.log(`  - ${reason}`);
 console.log("");
+console.log(
+  `Pairs          ${accounting.total} = ${accounting.judgeable} judgeable + ` +
+    `${accounting.singleArmFailure} single-arm failure + ${accounting.doubleArmFailure} double-arm failure + ` +
+    `${accounting.otherExclusions} other`
+);
+console.log("");
 console.log(`Judged pairs   ${verdict.delta.n}  (auto ${verdict.delta.wins} / baseline ${verdict.delta.losses} / equivalent ${verdict.delta.ties})`);
 console.log(`Discordance    ${pct(verdict.delta.discordanceRate)}`);
-console.log(`Win-rate delta ${pp(verdict.delta.pointEstimatePp)}  95% CI [${pp(verdict.delta.ci95LowerPp)}, ${pp(verdict.delta.ci95UpperPp)}]  (${verdict.delta.method}, seed ${seed})`);
+console.log(
+  `semanticQualityDelta   ${pp(verdict.delta.pointEstimatePp)}  95% CI [${pp(verdict.delta.ci95LowerPp)}, ${pp(verdict.delta.ci95UpperPp)}]` +
+    `  over ${verdict.delta.n} pair(s) both arms answered`
+);
+console.log(
+  `endToEndOutcomeDelta   ${pp(endToEndDelta.pointEstimatePp)}  95% CI [${pp(endToEndDelta.ci95LowerPp)}, ${pp(endToEndDelta.ci95UpperPp)}]` +
+    `  over ${endToEndDelta.n} pair(s), an arm that produced nothing losing`
+);
+console.log(`               (${verdict.delta.method}, seed ${seed})`);
 const exclusionBreakdown = Object.entries(verdict.exclusions.byReason)
   .filter(([, count]) => count > 0)
   .map(([reason, count]) => `${reason} ${count}`)
@@ -883,6 +1185,36 @@ console.log(
 console.log(`Judge position ${pct(verdict.positionBias.firstRate)} preferred the first answer (auto was first ${pct(verdict.positionBias.autoFirstRate)} of the time)`);
 console.log(`Routed away    ${pct(verdict.routedAwayRate)} of judged pairs used a model other than the baseline`);
 console.log(`Provider cost  $${accruedCostUsd.toFixed(4)}${truncatedByCost ? " (run truncated by --max-cost-usd)" : ""}`);
+
+// Printed even when it is all zeros, because "no answer was lost" is the
+// finding that lets the run be spent on, and a line that appears only on
+// trouble cannot be read as saying that.
+{
+  const summary = summariseGenerationFailures(generationFailures);
+  console.log(
+    `Empty answers  ${summary.total} failed generation(s)` +
+      ` — ${summary.byClassification.harness_lost_text} lost by this harness,` +
+      ` ${summary.byClassification.observed_empty_at_adapter_boundary} empty at the adapter boundary,` +
+      ` ${summary.byClassification.provider_confirmed_empty} confirmed empty by the provider,` +
+      ` ${summary.providerErrors} provider error(s)`
+  );
+  // The cause nothing here settles. Reported per failure, with what somebody
+  // would have to quote to ask the provider what it really sent.
+  for (const failure of summary.undetermined) {
+    console.log(
+      `  undetermined  ${failure.arm} ${failure.provider}/${failure.apiModel}` +
+        ` finishReason=${failure.finishReason ?? "none"}` +
+        ` usage=${JSON.stringify(failure.usage)} traceId=${failure.traceId ?? "none"}`
+    );
+  }
+  if (summary.harnessLostText > 0) {
+    console.log(
+      `\nHARNESS DEFECT — ${summary.harnessLostText} answer(s) existed and this code holds none of\n` +
+        "them. That is a measurement of this harness, not of the models, so this run is void\n" +
+        "and nothing downstream may be paid for on the strength of it."
+    );
+  }
+}
 
 if (mode === "pilot") {
   const measured = verdict.delta.discordanceRate;
@@ -979,6 +1311,13 @@ const record = {
   sampleSize: verdict.delta.n,
   discordantPairs: verdict.delta.discordantPairs,
   pointEstimatePp: verdict.delta.pointEstimatePp,
+  // Both estimates in the record, not only the one in the headline. A reader
+  // who sees a quality delta over 179 pairs and a total of 210 has to be able
+  // to find out where the other 31 went, and what they did to the number that
+  // describes what the person received.
+  pairAccounting: accounting,
+  semanticQualityDelta: verdict.delta,
+  endToEndOutcomeDelta: endToEndDelta,
   ci95LowerPp: verdict.delta.ci95LowerPp,
   ci95UpperPp: verdict.delta.ci95UpperPp,
   outcome: verdict.outcome,
@@ -1009,7 +1348,7 @@ const record = {
             evaluationSetVersion: evaluationSet.version,
             seed,
           }
-        : judgeBias,
+        : judgeCalibration,
   },
   exclusions: excludedLog,
   truncatedByCost,
@@ -1019,6 +1358,10 @@ const record = {
   plannedItems,
   completedItems: pairs.length,
   stoppedReason,
+  // What the gate in front of the paid judge reads. Summary counts rather than
+  // the raw lines, because the gate asks three questions of them and a reader
+  // asking a fourth has the journal.
+  generationFailureSummary: summariseGenerationFailures(generationFailures),
   rebuiltFromJournal: fromJournalPath || null,
   providerCostUsd: Number(accruedCostUsd.toFixed(6)),
   pairs,
@@ -1036,7 +1379,19 @@ if (record.completedItems < record.plannedItems) {
   );
 }
 
-const recordProblems = evaluationRecordProblems(record, { routableModelIds });
+const recordProblems = evaluationRecordProblems(record, {
+  routableModelIds,
+  checkCalibration: (artefact) =>
+    calibrationArtefactProblems(artefact, {
+      judgeIdentity: {
+        modelId: judgeModel.id,
+        provider: judgeModel.provider,
+        apiModel: judgeModel.apiModel,
+      },
+      judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+      evaluationSetPurpose: evaluationSet.purpose,
+    }),
+});
 if (recordProblems.length > 0) {
   console.log("");
   console.log("This report is NOT decision-grade evidence:");
@@ -1047,6 +1402,50 @@ if (jsonPath) {
   ensureDirectory(jsonPath);
   writeFileSync(jsonPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   console.log(`\nWrote ${jsonPath}`);
+}
+
+// This run's own verdicts, in the format --rejudge writes, so calibrating
+// against an independent judge does not mean paying this judge a second time
+// to say what it has already said. The verdicts are the ones above -- same
+// answers, same fixed order, same rubric -- and the file is only citable
+// against the bundle whose digest it carries.
+if (bundlePath && existsSync(bundlePath)) {
+  const parsed = parseAnswerBundle(readFileSync(bundlePath, "utf8"));
+  const out = `${bundlePath}.${judgeModel.id}.verdicts.jsonl`;
+  const judged = pairs.filter((pair) => pair.outcome?.status === "judged");
+  writeFileSync(
+    out,
+    [
+      JSON.stringify({
+        kind: "header",
+        judge: {
+          modelId: judgeModel.id,
+          provider: judgeModel.provider,
+          apiModel: judgeModel.apiModel,
+        },
+        bundleDigest: bundleDigest(parsed),
+        bundlePath,
+        answerIdentities: bundleAnswerIdentities(parsed),
+        bundleMode: parsed.header.mode,
+        evaluationSetVersion: parsed.header.evaluationSetVersion,
+        evaluationSetPurpose: parsed.header.evaluationSetPurpose,
+        bundlePairs: parsed.entries.length,
+        bundlePlannedItems: parsed.header.plannedItems,
+        judgeTemplateVersion: JUDGE_TEMPLATE_VERSION,
+        // Not a rejudge: these verdicts were produced by the run itself.
+        judgedDuringRun: true,
+        rejudgedAt: startedAt,
+        commitSha,
+      }),
+      ...judged.map((pair) =>
+        JSON.stringify({ kind: "verdict", pairId: pair.itemId, verdict: pair.outcome.verdict })
+      ),
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  console.log(
+    `Wrote ${out} — ${judged.length} verdict(s) over ${parsed.entries.length} bundled pair(s).`
+  );
 }
 
 // A run that produced no verdict exits non-zero, so a scheduled invocation
