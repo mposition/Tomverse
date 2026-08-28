@@ -216,6 +216,10 @@ run(
     // and the tombstone ordering every deletion path depends on -- including
     // the one that must NOT fire when a single model's answers are cleared.
     "tests/integration/message-attachments.db.test.ts",
+    // The availability columns the expand migration added, and the rule that
+    // makes them safe: only a confirmed 404 writes a verdict, so a rotated key
+    // or a bucket outage cannot record an account as having lost its files.
+    "tests/integration/message-attachment-availability.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the

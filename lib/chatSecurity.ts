@@ -4693,6 +4693,7 @@ export const validateChatPayload = (body: unknown) => {
         webSearchMode?: unknown;
         admissionToken?: unknown;
         contextBundle?: unknown;
+        acknowledgedUnavailableAttachmentIds?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -4812,6 +4813,37 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
 
+    /*
+      The files this turn has been told are gone, and may proceed without.
+
+      A list of ids rather than a flag, and shape-checked here rather than
+      believed: a blanket "continue anyway" boolean would let one confirmation
+      carry every attachment the conversation might later find missing,
+      including ones the user has never been shown. The ids are resolved
+      against the caller's own rows where the attachments are read; an id that
+      names nothing simply acknowledges nothing.
+    */
+    if (payload.acknowledgedUnavailableAttachmentIds !== undefined) {
+        const ids = payload.acknowledgedUnavailableAttachmentIds;
+        if (
+            !Array.isArray(ids) ||
+            ids.length > 50 ||
+            ids.some(
+                (id) =>
+                    typeof id !== "string" ||
+                    id.length < 1 ||
+                    id.length > 64 ||
+                    !/^[A-Za-z0-9_-]+$/.test(id)
+            )
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_ATTACHMENT_ACKNOWLEDGEMENT",
+                "Invalid attachment acknowledgement."
+            );
+        }
+    }
+
     let totalCharacters = 0;
     for (const message of payload.messages) {
         if (!message || typeof message !== "object") {
@@ -4872,6 +4904,7 @@ export const validateChatPayload = (body: unknown) => {
         webSearchMode?: WebSearchMode;
         admissionToken?: string;
         contextBundle?: string;
+        acknowledgedUnavailableAttachmentIds?: string[];
     };
 };
 

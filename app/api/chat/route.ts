@@ -3,6 +3,7 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
     buildAttachmentPromptText,
     inertFilename,
+    unavailableAttachmentMarker,
     type ExtractedAttachment,
 } from "@/lib/attachmentContextPrompt";
 import {
@@ -236,10 +237,24 @@ import {
     MessageAttachmentResolveError,
     accountAttachmentPrefix,
     discardUnboundUpload,
+    markMessageAttachmentUnavailable,
     registerFinalizedUpload,
     resolveMessageAttachmentReferences,
     type ResolvedAttachment,
 } from "@/lib/messageAttachmentStorage";
+import {
+    ChatLocalFailure,
+    ProviderCallRecord,
+    beginProviderCall,
+    isChatLocalFailure,
+    isProviderRequestFailure,
+    localDiagnosticCode,
+} from "@/lib/chatFailureLayer";
+import {
+    classifyStorageError,
+    isStorageError,
+    storageErrorStatus,
+} from "@/lib/storageObjectErrors";
 import {
     getGuestAttachmentSecret,
     guestAttachmentPrefix,
@@ -284,6 +299,10 @@ import {
     safeErrorMessage,
     safeErrorMetadata,
 } from "@/lib/providerErrorClassification";
+import {
+    ATTACHMENT_STORAGE_UNAVAILABLE_CODE,
+    ATTACHMENT_UNAVAILABLE_CODE,
+} from "@/lib/chatAttachmentErrorCopy";
 
 const MAX_ATTACHMENTS = 5;
 // Every request resends the full conversation history (including past
@@ -381,8 +400,12 @@ const tracedJsonError = (
     details?: Record<string, unknown>,
     grantContext?: {
         phase?: string;
+        /** One of CHAT_FAILURE_LAYERS. Absent means "not recorded". */
+        failureLayer?: string | null;
+        storageStatus?: number | null;
         provider?: string | null;
         modelId?: string | null;
+        retryable?: boolean | null;
         error?: unknown;
     }
 ) => {
@@ -967,6 +990,21 @@ async function handleChatPost(
     let dispatchModelIdForLog: string | undefined;
     let dispatchProviderForLog: AiModel["provider"] | undefined;
     /**
+     * Proof that a request actually left this process for a provider.
+     *
+     * `dispatchProviderForLog` above says which provider this turn *would*
+     * use, and it is set as soon as the model resolves -- hundreds of lines
+     * before anything is sent. The outer catch used to read it as if it meant
+     * a call had happened, so a storage 404 raised while building the prompt
+     * was recorded as that provider's failure, counted against its health, and
+     * made every model in the conversation fail with no way to clear it.
+     *
+     * This is null until `beginProviderCall` constructs the record, and only
+     * that wrapper can. A non-null value here is a structural fact, not a flag
+     * somebody remembered to set (lib/chatFailureLayer.ts).
+     */
+    let providerCall: ProviderCallRecord | null = null;
+    /**
      * Who this turn was for, hoisted for the catch.
      *
      * `access` is resolved inside the try and a refusal thrown after it has to
@@ -993,7 +1031,23 @@ async function handleChatPost(
             webSearchMode,
             admissionToken,
             contextBundle,
+            acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        /*
+          Files this request has been told are gone and may proceed without.
+
+          A set of ids, not a flag: the refusal below names exactly which
+          attachments are missing, and only those ids can be acknowledged. An
+          id that names nothing acknowledges nothing, so a client cannot widen
+          its own permission by inventing one.
+
+          Acknowledging never deletes anything. The MessageAttachment row, the
+          message and the card all survive it -- the set scopes exactly this
+          request (docs/policy/user-attachment-persistence.md section 11).
+        */
+        const acknowledgedUnavailable = new Set(
+            acknowledgedUnavailableAttachmentIds || []
+        );
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         // Auto's inputs, gathered before the model is resolved because the
         // model is what Auto decides. The plan is carried forward to the
@@ -2045,6 +2099,27 @@ async function handleChatPost(
             estimatedInputTokens += turnSystemBlocks.promptTokens;
             inputEstimate.addTokens(turnSystemBlocks.promptTokens);
         }
+        /*
+          Attachments this turn could not read because storage no longer holds
+          them.
+
+          Collected across every message rather than thrown on the first one,
+          for a reason that is about the person and not the code: a
+          conversation that lost two files to the same lifecycle rule would
+          otherwise refuse once, be acknowledged once, and refuse again -- one
+          round trip per lost file, each looking like a new fault. One refusal
+          names all of them.
+
+          The list is drained after the loop and before anything is priced,
+          reserved or dispatched, so a missing file costs no credits and
+          reaches no provider.
+        */
+        const unavailableAttachments: Array<{
+            attachmentId: string;
+            name: string;
+            scope: "current_turn" | "past_turn";
+        }> = [];
+
         for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
@@ -2492,6 +2567,32 @@ async function handleChatPost(
                     throw new Error("Attachment access denied.");
                 }
 
+                const attachmentScope: "current_turn" | "past_turn" =
+                    isLatestMessage ? "current_turn" : "past_turn";
+                /*
+                  A verdict already reached, honoured without asking again.
+
+                  A previous turn confirmed a 404 for this object and wrote it
+                  on the row. Storage keys are written once and never rewritten,
+                  so a second HEAD can only re-learn the same answer -- and
+                  re-learning it would cost a round trip on every message of
+                  every turn for the rest of the conversation's life.
+                */
+                if (resolved?.attachmentId && resolved.unavailableAt) {
+                    if (acknowledgedUnavailable.has(resolved.attachmentId)) {
+                        textAttachments.push(
+                            unavailableAttachmentMarker(attachment.name)
+                        );
+                    } else {
+                        unavailableAttachments.push({
+                            attachmentId: resolved.attachmentId,
+                            name: attachment.name,
+                            scope: attachmentScope,
+                        });
+                    }
+                    continue;
+                }
+
                 let attachmentBuffer: Buffer;
                 try {
                     attachmentBuffer = await readR2Object(attachment.objectKey, {
@@ -2516,7 +2617,92 @@ async function handleChatPost(
                             "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
                         );
                     }
-                    throw error;
+                    /*
+                      A signed-in account's file, and storage said something
+                      about it.
+
+                      Everything below turns on one distinction: did storage
+                      *confirm* the object is gone, or did it merely fail to
+                      answer? A 404 is a fact about the object. A 403 from a
+                      rotated key, a 500 from the bucket and a socket timeout
+                      are facts about the connection, and treating them as the
+                      first would write permanent data loss into the database
+                      during a five-minute outage.
+
+                      Whichever it is, it is a *storage* failure, and the
+                      typed error is what stops it travelling up to the
+                      handler's outermost catch and being filed there as the
+                      provider's -- which is how a lifecycle-deleted JPEG once
+                      made two unrelated providers look like they were down.
+                    */
+                    if (!isStorageError(error)) throw error;
+                    const failureKind = classifyStorageError(error);
+                    const storageStatus = storageErrorStatus(error);
+                    logRequestError(
+                        "attachment_object_read_failed",
+                        traceId,
+                        error,
+                        requestedModelId,
+                        {
+                            // No key, no bucket, no filename, no SDK payload:
+                            // an id, a layer and a status are what an operator
+                            // needs and all they get
+                            // (docs/policy/user-attachment-persistence.md §5).
+                            phase: "attachment_read",
+                            failureLayer: "storage",
+                            storageFailureKind: failureKind,
+                            storageStatus,
+                            attachmentScope,
+                            ...(resolved?.attachmentId
+                                ? { attachmentId: resolved.attachmentId }
+                                : {}),
+                        }
+                    );
+                    if (failureKind !== "missing") {
+                        throw new ChatLocalFailure(
+                            "storage",
+                            "attachment_read",
+                            localDiagnosticCode(
+                                "storage",
+                                failureKind.toUpperCase(),
+                                storageStatus
+                            ),
+                            { cause: error, storageStatus }
+                        );
+                    }
+                    if (!resolved?.attachmentId) {
+                        // A finalised upload that has not been bound yet: there
+                        // is no row to mark and nothing to acknowledge, and the
+                        // file is by definition on the turn being composed. Ask
+                        // for it again.
+                        throw new ChatAccessError(
+                            410,
+                            ATTACHMENT_UNAVAILABLE_CODE,
+                            "This file is no longer available. Attach it again to continue.",
+                            undefined,
+                            {
+                                attachmentScope: "current_turn",
+                                attachmentName: attachment.name,
+                            }
+                        );
+                    }
+                    await markMessageAttachmentUnavailable({
+                        attachmentId: resolved.attachmentId,
+                        userId: session?.user?.id ?? "",
+                        error,
+                    });
+                    if (acknowledgedUnavailable.has(resolved.attachmentId)) {
+                        textAttachments.push(
+                            unavailableAttachmentMarker(attachment.name)
+                        );
+                        continue;
+                    }
+                    unavailableAttachments.push({
+                        attachmentId: resolved.attachmentId,
+                        name: attachment.name,
+                        scope: attachmentScope,
+                    });
+                    continue;
                 }
 
                 const attachmentBytes = attachmentBuffer.byteLength;
@@ -2675,6 +2861,54 @@ async function handleChatPost(
                     ...fileParts,
                 ],
             });
+        }
+        /*
+          Fail closed on files that are gone and have not been acknowledged.
+
+          Placed here deliberately: everything below this line costs something.
+          The next statements price the turn, reserve credits and dispatch to a
+          provider, and none of that may happen because a file the user cannot
+          see is missing. Refusing here means a lost attachment costs zero
+          credits, issues zero provider requests and moves no health counter --
+          which is the difference between a recoverable product error and an
+          incident that looks like an outage.
+
+          The refusal names every missing file and its own id, so the client
+          can offer "attach it again" for a file on this turn and "continue
+          without it" for one from the conversation's past. Nothing is deleted
+          and nothing is hidden: the rows, the messages and the cards stay
+          exactly as they are (docs/policy/user-attachment-persistence.md §11).
+        */
+        if (unavailableAttachments.length > 0) {
+            const currentTurn = unavailableAttachments.filter(
+                (item) => item.scope === "current_turn"
+            );
+            throw new ChatAccessError(
+                410,
+                ATTACHMENT_UNAVAILABLE_CODE,
+                currentTurn.length > 0
+                    ? "A file on this message is no longer available. Attach it again to continue."
+                    : "A file from earlier in this conversation is no longer available. Attach it again, or continue without it.",
+                undefined,
+                {
+                    // Ids and display names only. No object key, no bucket, no
+                    // signed URL -- the client needs to name the card and offer
+                    // an action, and nothing here would help it do more.
+                    unavailableAttachmentIds: unavailableAttachments.map(
+                        (item) => item.attachmentId
+                    ),
+                    unavailableAttachmentNames: unavailableAttachments.map(
+                        (item) => item.name
+                    ),
+                    attachmentScope:
+                        currentTurn.length > 0 ? "current_turn" : "past_turn",
+                    // Only a past file may be continued without. A file the
+                    // person is attaching right now has an obvious better
+                    // remedy, and offering "continue without it" there invites
+                    // them to send a question about a document they just lost.
+                    canContinueWithout: currentTurn.length > 0 ? "false" : "true",
+                }
+            );
         }
         // What the search half of this turn may cost, before anything is sent.
         //
@@ -3318,19 +3552,30 @@ async function handleChatPost(
             plannerVersion: "none",
             adapterVersion: "vercel-ai-sdk-streamText-v1",
         });
-        const result = await streamText({
-            model: activeModel,
-            messages: sdkMessages,
-            ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
-            maxOutputTokens: requestMaxOutputTokens,
-            maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
-            headers:
-                modelConfig.provider === "perplexity"
-                    ? perplexityUsageHeaders(traceId)
-                    : undefined,
-            ...generationSettings,
-            ...(combinedToolConfig ?? {}),
-        });
+        // The provider boundary. Everything above it is ours; everything from
+        // here on may legitimately be the provider's fault, and the record this
+        // mints is what says so to the failure path below.
+        const result = await beginProviderCall(
+            modelConfig.provider,
+            modelConfig.id,
+            (record) => {
+                providerCall = record;
+            },
+            () =>
+                streamText({
+                    model: activeModel,
+                    messages: sdkMessages,
+                    ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
+                    maxOutputTokens: requestMaxOutputTokens,
+                    maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
+                    headers:
+                        modelConfig.provider === "perplexity"
+                            ? perplexityUsageHeaders(traceId)
+                            : undefined,
+                    ...generationSettings,
+                    ...(combinedToolConfig ?? {}),
+                })
+        );
         // The fallback drill's deliberate failure, if this request asked for
         // one and may have one (lib/routingFaultInjection.ts: not production,
         // a configured secret, and this request's own header). Off in every
@@ -4933,25 +5178,55 @@ async function handleChatPost(
                         error,
                         dispatched.modelId
                     );
-                    try {
-                        await recordProviderFailure(
-                            dispatched.provider,
-                            diagnosticCode,
+                    /*
+                      An open provider stream is not proof that everything that
+                      fails during it is the provider's.
+
+                      A tool running inside the stream writes generated files to
+                      object storage, and a bucket failure there arrives here
+                      looking exactly like a mid-stream provider fault. Rooted
+                      as `AI_STREAM_FAILED` it would count against the provider
+                      -- the same misattribution the outer catch was fixed for,
+                      one layer down. The typed error is what tells them apart.
+                    */
+                    const streamFailureIsLocal =
+                        isStorageError(error) || isChatLocalFailure(error);
+                    if (streamFailureIsLocal) {
+                        logRequestError(
+                            "chat_local_failure",
+                            traceId,
+                            error,
+                            dispatched.modelId,
                             {
-                                modelId: dispatched.modelId,
+                                failureLayer: isStorageError(error)
+                                    ? "storage"
+                                    : "application",
                                 phase: "stream",
-                                traceId,
-                                errorName: errorMetadata.name,
-                                errorCode: errorMetadata.code,
-                                httpStatus: errorMetadata.statusCode,
-                                retryable: errorMetadata.isRetryable,
+                                storageStatus: storageErrorStatus(error),
                             }
                         );
-                        await recordModelFailure(
-                            dispatched.modelId,
-                            dispatched.provider,
-                            diagnosticCode
-                        );
+                    }
+                    try {
+                        if (!streamFailureIsLocal) {
+                            await recordProviderFailure(
+                                dispatched.provider,
+                                diagnosticCode,
+                                {
+                                    modelId: dispatched.modelId,
+                                    phase: "stream",
+                                    traceId,
+                                    errorName: errorMetadata.name,
+                                    errorCode: errorMetadata.code,
+                                    httpStatus: errorMetadata.statusCode,
+                                    retryable: errorMetadata.isRetryable,
+                                }
+                            );
+                            await recordModelFailure(
+                                dispatched.modelId,
+                                dispatched.provider,
+                                diagnosticCode
+                            );
+                        }
                     } catch (recordError) {
                         logRequestError(
                             "provider_failure_record_failed",
@@ -5046,6 +5321,41 @@ async function handleChatPost(
         leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
         return response;
     } catch (error: unknown) {
+        /*
+          The last catch, and the one that used to get this wrong.
+
+          Three questions, in this order, and only the third may touch provider
+          health:
+
+            1. Was this raised on our side of the provider boundary? A
+               `ChatLocalFailure` says so by its type. Storage, database and
+               application faults answer here and go no further -- a 404 from a
+               bucket is not evidence about a model.
+            2. Did a provider call actually start? `providerCall` is null until
+               `beginProviderCall` constructs the record, so this is a fact
+               about what ran rather than about which fields happen to be set.
+            3. Only then: record the failure the way this route always has.
+
+          `dispatchProviderForLog` is deliberately no longer consulted for the
+          decision. It names the provider this turn *would have* used and is
+          set the moment the model resolves, which is why reading it as
+          "a provider was called" turned every pre-dispatch fault into that
+          provider's outage.
+        */
+        const localFailure = isChatLocalFailure(error)
+            ? error
+            : isStorageError(error)
+              ? new ChatLocalFailure(
+                    "storage",
+                    "attachment_read",
+                    localDiagnosticCode(
+                        "storage",
+                        classifyStorageError(error).toUpperCase(),
+                        storageErrorStatus(error)
+                    ),
+                    { cause: error, storageStatus: storageErrorStatus(error) }
+                )
+              : null;
         stopLeaseHeartbeat?.();
         const orphanedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
         if (orphanedLease) {
@@ -5064,7 +5374,20 @@ async function handleChatPost(
         if (dispatchRecord) {
             await completeInstrumentedDispatch(dispatchRecord, {
                 outcome: "failed_pre_token",
-                failureLayer: "provider",
+                // `provider` only when a provider was actually called. A turn
+                // that failed reading an attachment out of object storage was
+                // filed here as a provider failure, and
+                // docs/policy/tomverse-chat-routing.md §8's recovery reads
+                // this column to decide which model to move conversations to
+                // -- so a bucket's 404 was moving traffic off a model that had
+                // done nothing.
+                failureLayer: localFailure
+                    ? localFailure.layer === "storage"
+                        ? "storage"
+                        : "application"
+                    : providerCall
+                      ? "provider"
+                      : "application",
                 errorClass: "request_failed",
                 settlementOutcome: "failed",
             });
@@ -5146,6 +5469,33 @@ async function handleChatPost(
                     routeClass: "chat",
                     errorCode: error.code,
                     httpStatus: error.status,
+                    /*
+                      An attachment refusal is a storage fact, and the evidence
+                      row has to say so.
+
+                      This is the row a person reads after reporting the trace.
+                      Left without a layer it reads as an unclassified chat
+                      failure beside a provider and a model id, which is how
+                      `AI_REQUEST_FAILED.NotFound` was read as two providers
+                      being down. `retryable: false` for the same reason: the
+                      object is gone, and re-sending the identical request
+                      re-reads the identical 404.
+                    */
+                    ...(error.code === ATTACHMENT_UNAVAILABLE_CODE
+                        ? {
+                              phase: "attachment_read",
+                              failureLayer: "storage",
+                              storageStatus: 404,
+                              retryable: false,
+                          }
+                        : error.code === "GUEST_ATTACHMENT_EXPIRED"
+                          ? {
+                                phase: "attachment_read",
+                                failureLayer: "storage",
+                                storageStatus: 404,
+                                retryable: false,
+                            }
+                          : {}),
                 });
                 if (grant.errorReportToken) {
                     accessError.headers.set(
@@ -5157,42 +5507,115 @@ async function handleChatPost(
             return accessError;
         }
 
+        if (localFailure) {
+            logRequestError(
+                "chat_local_failure",
+                traceId,
+                localFailure.cause ?? localFailure,
+                dispatchModelIdForLog,
+                {
+                    failureLayer: localFailure.layer,
+                    phase: localFailure.phase,
+                    diagnosticCode: localFailure.diagnosticCode,
+                    storageStatus: localFailure.storageStatus,
+                }
+            );
+            return tracedJsonError(
+                localFailure.layer === "storage"
+                    ? "첨부파일 저장소를 읽지 못했습니다. 잠시 후 다시 시도해 주세요."
+                    : "요청을 처리하지 못했습니다.",
+                localFailure.layer === "storage"
+                    ? ATTACHMENT_STORAGE_UNAVAILABLE_CODE
+                    : "CHAT_APPLICATION_ERROR",
+                localFailure.layer === "storage" ? 503 : 500,
+                traceId,
+                undefined,
+                {
+                    phase: localFailure.phase,
+                    failureLayer: localFailure.layer,
+                    storageStatus: localFailure.storageStatus,
+                    // Named, but never as the subject: an operator reading the
+                    // evidence row has to be able to see which model the turn
+                    // was for without the row claiming that model failed.
+                    provider: dispatchProviderForLog,
+                    modelId: dispatchModelIdForLog,
+                    error: localFailure.cause ?? localFailure,
+                    retryable: localFailure.layer === "storage" ? null : false,
+                }
+            );
+        }
+
+        const providerError = isProviderRequestFailure(error) ? error.reason : error;
         logRequestError(
             "ai_request_failed",
             traceId,
-            error,
+            providerError,
             dispatchModelIdForLog
         );
-        try {
-            const errorMetadata = safeErrorMetadata(error);
-            const diagnosticCode =
-                error instanceof ChatAccessError
-                    ? error.code
-                    : providerDiagnosticCode("AI_REQUEST_FAILED", error);
-            await recordProviderFailure(
-                dispatchProviderForLog,
-                diagnosticCode,
-                {
-                    modelId: dispatchModelIdForLog,
-                    phase: "request",
+        if (providerCall) {
+            try {
+                const errorMetadata = safeErrorMetadata(providerError);
+                const diagnosticCode =
+                    providerError instanceof ChatAccessError
+                        ? providerError.code
+                        : providerDiagnosticCode("AI_REQUEST_FAILED", providerError);
+                await recordProviderFailure(
+                    dispatchProviderForLog,
+                    diagnosticCode,
+                    {
+                        modelId: dispatchModelIdForLog,
+                        phase: "request",
+                        traceId,
+                        errorName: errorMetadata.name,
+                        errorCode: errorMetadata.code,
+                        httpStatus: errorMetadata.statusCode,
+                        retryable: errorMetadata.isRetryable,
+                    }
+                );
+                await recordModelFailure(
+                    dispatchModelIdForLog,
+                    dispatchProviderForLog,
+                    diagnosticCode
+                );
+            } catch (recordError) {
+                logRequestError(
+                    "provider_failure_record_failed",
                     traceId,
-                    errorName: errorMetadata.name,
-                    errorCode: errorMetadata.code,
-                    httpStatus: errorMetadata.statusCode,
-                    retryable: errorMetadata.isRetryable,
-                }
-            );
-            await recordModelFailure(
-                dispatchModelIdForLog,
-                dispatchProviderForLog,
-                diagnosticCode
-            );
-        } catch (recordError) {
+                    recordError,
+                    dispatchModelIdForLog
+                );
+            }
+        } else {
+            /*
+              Nothing was dispatched, so nothing about a provider was learned.
+
+              This is the branch that catches a fault nobody wrapped -- a bug
+              in preparation, a library that throws a plain Error. It is
+              recorded as application-layer rather than left to the provider
+              path, because "we do not know what this was" and "the provider is
+              down" are different claims and only one of them is true here.
+            */
             logRequestError(
-                "provider_failure_record_failed",
+                "chat_unclassified_local_failure",
                 traceId,
-                recordError,
-                dispatchModelIdForLog
+                providerError,
+                dispatchModelIdForLog,
+                { failureLayer: "application", phase: "request" }
+            );
+            return tracedJsonError(
+                "요청을 처리하지 못했습니다.",
+                "CHAT_APPLICATION_ERROR",
+                500,
+                traceId,
+                undefined,
+                {
+                    phase: "request",
+                    failureLayer: "application",
+                    provider: dispatchProviderForLog,
+                    modelId: dispatchModelIdForLog,
+                    error: providerError,
+                    retryable: false,
+                }
             );
         }
 
@@ -5204,9 +5627,10 @@ async function handleChatPost(
             undefined,
             {
                 phase: "request",
+                failureLayer: "provider_request",
                 provider: dispatchProviderForLog,
                 modelId: dispatchModelIdForLog,
-                error,
+                error: providerError,
             }
         );
     }

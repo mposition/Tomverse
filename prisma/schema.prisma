@@ -594,11 +594,39 @@ model MessageAttachment {
   /// request that accepted it.
   uploadId String?
 
+  /// When storage confirmed, with a 404, that this object is gone.
+  ///
+  /// Nullable, and set only from a confirmed 404 -- never from a read that
+  /// merely failed. A 403 from a rotated key and a 500 from the bucket both
+  /// mean "we do not know", and writing those here would turn a five-minute
+  /// credentials outage into a permanent record that an account's files were
+  /// lost (docs/policy/user-attachment-persistence.md section 11).
+  ///
+  /// The row itself is never deleted because of this. The card stays, the
+  /// message stays, the name and size stay: what the user sent is part of the
+  /// conversation whether or not the bytes survived, and hiding the card would
+  /// leave them asking a model about a file neither side can name.
+  unavailableAt DateTime?
+
+  /// Why, from MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS in
+  /// lib/messageAttachmentCore.ts. Free text is not accepted: this column is
+  /// read to decide what the user is told, and a reason nobody enumerated has
+  /// no copy for it.
+  unavailableReason String?
+
+  /// The last time availability was *checked*, whatever the answer.
+  ///
+  /// Separate from `unavailableAt` because "we looked and it was there" and
+  /// "we have not looked since Tuesday" are different facts, and the audit
+  /// tool needs the second one to know what it has covered.
+  availabilityCheckedAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
+  @@index([unavailableAt])
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -1660,6 +1688,19 @@ model TraceErrorEvidence {
   /// the error builders.
   classificationSource String   @default("server")
   httpStatus           Int?
+  /// Which layer raised this failure: one of CHAT_FAILURE_LAYERS in
+  /// lib/chatFailureLayer.ts. Nullable for rows written before the column
+  /// existed; a NULL means "not recorded", never "provider".
+  ///
+  /// Without it a storage 404 and a provider 404 are the same row, which is
+  /// exactly the confusion that made an operator read `AI_REQUEST_FAILED.
+  /// NotFound` as two providers being down.
+  failureLayer         String?
+  /// The status object storage answered with, when the failure was a storage
+  /// one. Kept beside `httpStatus` rather than replacing it: the response the
+  /// user got (410) and the answer the bucket gave (404) are different
+  /// numbers and an operator needs both.
+  storageStatus        Int?
   provider             String?
   modelId              String?
   retryable            Boolean?

@@ -15,6 +15,7 @@ import {
   Copy,
   File as FileIcon,
   FileText,
+  FileWarning,
   Image as ImageIcon,
   Presentation,
   RotateCcw,
@@ -49,6 +50,16 @@ type ChatMessageListProps = {
   messages: Message[];
   onRetryLast?: () => void;
   onRetryWithoutAttachments?: () => void;
+  /**
+   * Re-sends the last prompt with a set of already-missing stored files
+   * acknowledged.
+   *
+   * Distinct from `onRetryWithoutAttachments`, which drops this turn's own
+   * attachments. This one keeps every reference and only tells the server that
+   * these specific files may be skipped for one request; nothing is deleted
+   * and no stored message changes.
+   */
+  onContinueWithoutUnavailableAttachments?: (attachmentIds: string[]) => void;
   onRequestCloseModel?: () => void;
   hasMultipleActiveModels?: boolean;
   currentModelId?: string | null;
@@ -268,6 +279,7 @@ export function ChatMessageList({
   messages,
   onRetryLast,
   onRetryWithoutAttachments,
+  onContinueWithoutUnavailableAttachments,
   onRequestCloseModel,
   hasMultipleActiveModels = false,
   currentModelId,
@@ -676,16 +688,48 @@ export function ChatMessageList({
                     <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
                         (() => {
-                          const showImagePreview = hasImagePreview(attachment);
+                          /*
+                            A file whose bytes object storage no longer holds.
+
+                            The card stays. The name stays, the type stays, the
+                            message stays -- what the person sent is part of
+                            this conversation whether or not the bytes survived,
+                            and a card that quietly vanished would leave them
+                            asking about a document neither side can name
+                            (docs/policy/user-attachment-persistence.md §11).
+
+                            What changes is that it stops pretending: no
+                            thumbnail, a stated reason, and an accessible name
+                            that carries the state rather than only the colour.
+                          */
+                          const isUnavailable = Boolean(attachment.unavailableAt);
+                          const showImagePreview =
+                            !isUnavailable && hasImagePreview(attachment);
                           return (
                         <div
                           key={attachment.id}
+                          data-testid={
+                            isUnavailable
+                              ? "chat-attachment-card-unavailable"
+                              : "chat-attachment-card"
+                          }
+                          data-attachment-unavailable={
+                            isUnavailable ? "true" : undefined
+                          }
                           className={
                             showImagePreview
                               ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
-                              : "flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border border-white/15 bg-white/10 py-2 pl-2 pr-3 shadow-sm backdrop-blur"
+                              : `flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border py-2 pl-2 pr-3 shadow-sm backdrop-blur ${
+                                  isUnavailable
+                                    ? "border-dashed border-amber-200/60 bg-white/5"
+                                    : "border-white/15 bg-white/10"
+                                }`
                           }
-                          title={attachment.name}
+                          title={
+                            isUnavailable
+                              ? `${attachment.name} — ${t("chat.attachmentUnavailableBadge")}`
+                              : attachment.name
+                          }
                         >
                           {showImagePreview ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -696,15 +740,34 @@ export function ChatMessageList({
                             />
                           ) : (
                             <>
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/15 text-white ring-1 ring-white/10">
-                                {getAttachmentIcon(attachment)}
+                              <span
+                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-white/10 ${
+                                  isUnavailable
+                                    ? "bg-white/10 text-amber-100"
+                                    : "bg-white/15 text-white"
+                                }`}
+                                aria-hidden="true"
+                              >
+                                {isUnavailable ? (
+                                  <FileWarning className="h-5 w-5" />
+                                ) : (
+                                  getAttachmentIcon(attachment)
+                                )}
                               </span>
                               <span className="flex min-w-0 flex-col text-left">
                                 <span className="truncate text-sm font-semibold text-white">
                                   {attachment.name}
                                 </span>
-                                <span className="text-[11px] font-semibold text-blue-100/80">
-                                  {getAttachmentLabel(attachment)}
+                                <span
+                                  className={
+                                    isUnavailable
+                                      ? "truncate text-[11px] font-semibold text-amber-100"
+                                      : "text-[11px] font-semibold text-blue-100/80"
+                                  }
+                                >
+                                  {isUnavailable
+                                    ? t("chat.attachmentUnavailableBadge")
+                                    : getAttachmentLabel(attachment)}
                                 </span>
                               </span>
                             </>
@@ -1066,6 +1129,32 @@ export function ChatMessageList({
                               {t("chat.retryWithoutFiles")}
                             </button>
                           )}
+                          {/*
+                            Offered only when the server said it could be: a
+                            file being attached right now has a better remedy
+                            (attach it again), and offering to proceed there
+                            would invite a question about a document the person
+                            has just lost. The ids are the server's own, sent
+                            straight back as the acknowledgement.
+                          */}
+                          {msg.errorCode === "ATTACHMENT_UNAVAILABLE" &&
+                            msg.canContinueWithoutUnavailableAttachments &&
+                            (msg.unavailableAttachmentIds?.length ?? 0) > 0 &&
+                            onContinueWithoutUnavailableAttachments && (
+                              <button
+                                type="button"
+                                data-testid="continue-without-unavailable-attachments"
+                                onClick={() =>
+                                  onContinueWithoutUnavailableAttachments(
+                                    msg.unavailableAttachmentIds ?? []
+                                  )
+                                }
+                                className={secondaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {t("chat.attachmentContinueWithout")}
+                              </button>
+                            )}
                           <FeedbackButton
                             currentModelId={currentModelId}
                             currentPlan={currentPlan}

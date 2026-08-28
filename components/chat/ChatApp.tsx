@@ -820,7 +820,18 @@ function ChatAppComponent({
     deepResearchDepth?: "quick" | "standard" | "deep",
     admissionToken?: string | null,
     contextBundle?: string | null,
-    contextLayout: "single" | "comparison" = "single"
+    contextLayout: "single" | "comparison" = "single",
+    /*
+      Stored files this send has been told are gone and may proceed without.
+
+      Empty on every ordinary send. It is only ever populated by the "continue
+      without it" action, which can pass back exactly the ids the server named
+      in its refusal -- so the acknowledgement is a reply to a specific
+      refusal rather than a standing permission. Nothing is deleted either
+      way: the message and its attachment cards stay as they are
+      (docs/policy/user-attachment-persistence.md section 11).
+    */
+    acknowledgedUnavailableAttachmentIds: string[] = []
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1031,6 +1042,9 @@ function ChatAppComponent({
             ...(admissionToken ? { admissionToken } : {}),
             ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
             ...(webSearchMode && webSearchMode !== "off" ? { webSearchMode } : {}),
+            ...(acknowledgedUnavailableAttachmentIds.length > 0
+              ? { acknowledgedUnavailableAttachmentIds }
+              : {}),
           }),
           signal: controller.signal,
         });
@@ -1529,7 +1543,28 @@ function ChatAppComponent({
                 ? ERROR_CLASSIFICATION_SOURCE.server
                 : ERROR_CLASSIFICATION_SOURCE.client
             ),
-          }
+          },
+          /*
+            The recovery this refusal offers, carried on the message itself.
+
+            Held here rather than in a component-level "last error" so that a
+            comparison with three panels shows the offer on the panel that was
+            actually refused, and so re-rendering cannot move it. Absent for
+            every other error code.
+          */
+          errorCode === "ATTACHMENT_UNAVAILABLE"
+            ? {
+                unavailableAttachmentIds: Array.isArray(
+                  details?.unavailableAttachmentIds
+                )
+                  ? (details.unavailableAttachmentIds as unknown[]).filter(
+                      (id): id is string => typeof id === "string"
+                    )
+                  : [],
+                canContinueWithoutUnavailableAttachments:
+                  details?.canContinueWithout === "true",
+              }
+            : undefined
         );
       }	
     } finally {
@@ -1579,6 +1614,44 @@ function ChatAppComponent({
       );
     })();
   }, [handleSendPrompt, onBeforeSend]);
+
+  /**
+   * Re-sends the last prompt, acknowledging files the server said are gone.
+   *
+   * Deliberately *not* `handleRetryWithoutAttachments` below. That one drops
+   * this turn's own attachments and is the answer to "the file could not be
+   * parsed"; this one keeps every attachment reference exactly as it is and
+   * tells the server that a specific set of already-missing files may be
+   * skipped for this request. The stored messages, the attachment rows and
+   * the cards are untouched either way -- what changes is one request.
+   */
+  const handleContinueWithoutUnavailableAttachments = useCallback(
+    (attachmentIds: string[]) => {
+      const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
+      if (!lastPrompt || isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+      if (attachmentIds.length === 0) return;
+
+      void (async () => {
+        const settingsReady =
+          (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+        if (!settingsReady) return;
+
+        void handleSendPrompt(
+          lastPrompt.text,
+          lastPrompt.targetChatId,
+          crypto.randomUUID(),
+          lastPrompt.attachments,
+          null,
+          undefined,
+          null,
+          null,
+          "single",
+          attachmentIds
+        );
+      })();
+    },
+    [handleSendPrompt, onBeforeSend]
+  );
 
   const handleRetryWithoutAttachments = useCallback(() => {
     const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
@@ -1714,6 +1787,9 @@ function ChatAppComponent({
         messages={useCenteredWelcome ? messages.filter(isTranscriptMessage) : messages}
         onRetryLast={handleRetryLast}
         onRetryWithoutAttachments={handleRetryWithoutAttachments}
+        onContinueWithoutUnavailableAttachments={
+          handleContinueWithoutUnavailableAttachments
+        }
         onRequestCloseModel={onRequestCloseModel}
         hasMultipleActiveModels={hasMultipleActiveModels}
         currentModelId={modelId}
