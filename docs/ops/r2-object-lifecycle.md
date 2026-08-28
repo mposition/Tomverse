@@ -33,11 +33,28 @@ production release `16d98af8`에서 로그인 사용자의 첨부 객체가 업�
 
 ## 3. 현재 상태 읽기 (read-only)
 
+**어디서**: 로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 `npm ci`가
+끝나 있어야 한다. production 서버에 들어갈 필요는 없다 — R2는 인터넷 API이고,
+필요한 것은 버킷 설정을 읽을 권한이 있는 토큰뿐이다. 환경변수는 그 PowerShell
+창에서만 유효하다.
+
+```powershell
+$env:R2_ACCOUNT_ID        = "..."
+$env:R2_ACCESS_KEY_ID     = "..."
+$env:R2_SECRET_ACCESS_KEY = "..."
+$env:R2_BUCKET_NAME       = "..."
+
+node scripts/check-r2-lifecycle-policy.mjs
+node scripts/check-r2-lifecycle-policy.mjs --json > lifecycle-before.json
 ```
-export R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_BUCKET_NAME=...
-npm run check:r2-lifecycle-policy
-npm run check:r2-lifecycle-policy -- --json > lifecycle-before.json
-```
+
+`npm run check:r2-lifecycle-policy -- --json`도 같은 것을 실행하지만, PowerShell
+에서 `--` 뒤 인자 전달이 npm 버전에 따라 어긋나므로 `node`로 직접 부른다.
+
+규칙을 **보기만** 할 것이라면 clone도 `npm ci`도 필요 없다: Cloudflare
+대시보드의 R2 → 버킷 → Settings → Object lifecycle rules에 prefix와 만료
+일수가 그대로 나온다. 이 스크립트는 그 화면을 판정으로 바꾸고 기록 파일을
+남기기 위한 것이다.
 
 - S3 호출 **한 번**(`GetBucketLifecycleConfiguration`)이고 아무것도 쓰지 않는다.
 - 종료 코드: `0` 문제 없음 · `2` 보호 prefix를 덮는 활성 삭제 규칙 있음 ·
@@ -92,9 +109,20 @@ npm run check:r2-lifecycle-policy -- --json > lifecycle-before.json
 
 ## 5. 전수 감사
 
-```
-npm run audit:message-attachments -- --json > attachment-audit.json
-npm run audit:message-attachments -- --cursor='<이전 실행이 출력한 값>'
+**어디서**: 로컬 PC의 PowerShell, Tomverse clone 폴더 안 — 3절과 같은 곳이다.
+R2 환경변수 넷에 더해 **production `DATABASE_URL`**이 필요하다(행을 읽어야
+하므로). Railway 컨테이너 안에서는 돌리지 않는다: `tsx`가 devDependency라
+production 이미지에 없을 수 있다.
+
+```powershell
+$env:DATABASE_URL         = "<production Postgres URL>"
+$env:R2_ACCOUNT_ID        = "..."
+$env:R2_ACCESS_KEY_ID     = "..."
+$env:R2_SECRET_ACCESS_KEY = "..."
+$env:R2_BUCKET_NAME       = "..."
+
+node --import tsx scripts/audit-message-attachment-objects.mjs --json > attachment-audit.json
+node --import tsx scripts/audit-message-attachment-objects.mjs --cursor='<이전 실행이 출력한 값>'
 ```
 
 - 기본은 dry run. 아무것도 쓰지 않는다.
@@ -109,8 +137,10 @@ npm run audit:message-attachments -- --cursor='<이전 실행이 출력한 값>'
 
 dry run 결과를 검토한 뒤에만 기록한다.
 
-```
-npm run audit:message-attachments -- --apply --ticket=OPS-<번호>
+**어디서**: 위와 같은 PowerShell 창(같은 환경변수). **이 명령만 DB에 쓴다.**
+
+```powershell
+node --import tsx scripts/audit-message-attachment-objects.mjs --apply --ticket=OPS-<번호>
 ```
 
 `--apply`는 **확정된 404 행에만** `unavailableAt`을 쓴다. 행도 객체도 지우지
