@@ -15,6 +15,7 @@ import {
     SUCC4_B_PLUS_MOVES,
     SUCC4_REVIEWED_AND_KEPT,
 } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
+import { SUCC4_BATCHES } from "../lib/memoryEvalSucc4Review/batches.ts";
 import {
     SUCC4_AFFIRMED,
     SUCC4_NEGATED,
@@ -191,6 +192,46 @@ test("every rewritten gold names why, and every reading names a polarity", () =>
             reading.factValueAll || reading.factValueAny || reading.evidenceQuote;
         if (rewritten) {
             assert.ok(reading.note, `${reading.caseId} was rewritten with no reason`);
+        }
+    }
+});
+
+test("batch keys are generated, and cover their slice exactly", () => {
+    // An identifier is not a judgement. Two earlier slips were a hand-copied
+    // gold id, so both sides of this comparison are built from the fixtures.
+    const read = new Set([...SUCC4_AFFIRMED, ...SUCC4_NEGATED]);
+    for (const batch of SUCC4_BATCHES) {
+        const [category, language] = batch.cell.split(":");
+        const slice = MEMORY_EVAL_SUCC3_CASES.filter(
+            (testCase) =>
+                testCase.category === category && testCase.language === language
+        )
+            .flatMap((testCase) =>
+                testCase.expected.map((gold) => `${testCase.id}:${gold.id}`)
+            )
+            .filter((key) => !read.has(key))
+            .sort();
+        const expected = slice.slice(batch.from, batch.from + batch.golds.length);
+        const keys = batch.golds.map((gold) => gold.key);
+        assert.deepEqual(keys, expected, `${batch.id} does not cover its slice`);
+        assert.equal(new Set(keys).size, keys.length, `${batch.id} has a duplicate`);
+        for (const gold of batch.golds) {
+            assert.ok(
+                gold.polarity === "affirmed" || gold.polarity === "negated",
+                `${gold.key} has no polarity`
+            );
+        }
+    }
+});
+
+test("batches do not re-label a gold the 121 already settled", () => {
+    const read = new Set([...SUCC4_AFFIRMED, ...SUCC4_NEGATED]);
+    const seen = new Set();
+    for (const batch of SUCC4_BATCHES) {
+        for (const gold of batch.golds) {
+            assert.ok(!read.has(gold.key), `${gold.key} was already settled`);
+            assert.ok(!seen.has(gold.key), `${gold.key} appears in two batches`);
+            seen.add(gold.key);
         }
     }
 });
