@@ -19,9 +19,10 @@
  *
  * Moving `MEMORY_EVAL_DATASET_SCHEMA_VERSION` is its own reviewed change,
  * taken when this report is clean. It opens nothing by itself: a live run
- * still needs the §12.5 budget approval, which names the pair, both digests,
- * the run count and the ceiling. This module makes the first of those two
- * steps checkable and says nothing about the second.
+ * still needs the budget approval of
+ * docs/policy/external-conversation-import-and-memory.md §12.5, which names
+ * the pair, both digests, the run count and the ceiling. This module makes the
+ * first of those two steps checkable and says nothing about the second.
  */
 
 export type SchemaReadinessState =
@@ -85,7 +86,7 @@ export const MEMORY_EVAL_SCHEMA3_CONSUMERS: readonly SchemaReadinessRow[] = [
     {
         consumer: "scripts/make-memory-eval-blind-review.mjs",
         state: "converted",
-        role: "Builds the §12.4 blind qualitative review sheet from an artifact.",
+        role: "Builds the blind qualitative review sheet from an artifact (docs/policy/external-conversation-import-and-memory.md §12.4).",
         evidence:
             "tests/memoryEvalBlindReview.test.mjs — the sheet shows each candidate's polarity and cited span, and still shows no gold.",
     },
