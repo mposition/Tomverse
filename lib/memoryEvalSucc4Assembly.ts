@@ -40,6 +40,7 @@ import {
 } from "@/lib/memoryEvalSucc4Review/readings";
 import { SUCC4_BATCHES } from "@/lib/memoryEvalSucc4Review/batches";
 import { SUCC4_FACT_VALUE_ANY } from "@/lib/memoryEvalSucc4Review/factValueAny";
+import { SUCC4_ANCHORS } from "@/lib/memoryEvalSucc4Review/anchors";
 
 export const goldKey = (caseId: string, goldId: string) => `${caseId}:${goldId}`;
 
@@ -58,6 +59,7 @@ const readingByKey = new Map(
 const factValueAnyByKey = new Map(
     SUCC4_FACT_VALUE_ANY.map((decision) => [decision.key, decision])
 );
+const anchorByKey = new Map(SUCC4_ANCHORS.map((anchor) => [anchor.key, anchor]));
 
 /* ------------------------------------------------------- anchor proposal -- */
 
@@ -83,7 +85,14 @@ export const containsAll = (
     return tokens.every((token) => canonical.includes(canonMatch(token, language)));
 };
 
-/** The user message and sentence a gold's fact is in, or `null`. */
+/**
+ * The user message and sentence a gold's fact is in, or `null`.
+ *
+ * **A candidate, never the answer.** §12.11: automatic selection may propose
+ * and may not decide. `assembleGold()` reads the reviewed record instead, and
+ * this function is left for the drafting tool and for the drift check that
+ * compares the two.
+ */
 export function proposeAnchor(
     testCase: MemoryEvalCaseV2,
     tokens: readonly string[]
@@ -140,15 +149,30 @@ export function assembleGold(
         factValueAny = "carryOver" in decision! ? decision!.carryOver : undefined;
     }
 
+    // §12.11. The proposal is a candidate; the record is the decision. A gold
+    // with neither is refused rather than anchored on the first message that
+    // happens to carry its tokens -- which is how en-306 came to cite the user
+    // quoting the assistant's premise back.
+    const recorded = anchorByKey.get(key);
     const evidence =
         reading?.evidenceMessageId && reading?.evidenceQuote
             ? {
                   evidenceMessageId: reading.evidenceMessageId,
                   evidenceQuote: reading.evidenceQuote,
               }
-            : proposeAnchor(testCase, factValueAll);
+            : recorded
+              ? {
+                    evidenceMessageId: recorded.evidenceMessageId,
+                    evidenceQuote: recorded.evidenceQuote,
+                }
+              : null;
     if (!evidence) {
-        refuse(key, "no user message carries every factValueAll token");
+        refuse(
+            key,
+            "no reviewed anchor. Automatic selection proposes a candidate and does " +
+                "not decide, so a gold with no record in readings.ts or anchors.ts " +
+                "cannot be assembled"
+        );
     }
 
     const built: ExpectedMemoryV3 = {

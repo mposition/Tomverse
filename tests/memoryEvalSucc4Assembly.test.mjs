@@ -13,11 +13,14 @@ import {
     Succ4AssemblyError,
     assembleCase,
     assembleCases,
+    containsAll as containsAllTokens,
     proposeAnchor,
 } from "../lib/memoryEvalSucc4Assembly.ts";
+import { SUCC4_READINGS } from "../lib/memoryEvalSucc4Review/readings.ts";
 import { goldEvidenceFailure } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import { SUCC4_B_PLUS_MOVES } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
 import { SUCC4_FACT_VALUE_ANY } from "../lib/memoryEvalSucc4Review/factValueAny.ts";
+import { SUCC4_ANCHORS } from "../lib/memoryEvalSucc4Review/anchors.ts";
 
 const byId = new Map(MEMORY_EVAL_SUCC3_CASES.map((c) => [c.id, c]));
 const moving = new Set(SUCC4_B_PLUS_MOVES.map((move) => move.originalId));
@@ -72,9 +75,81 @@ test("mustIncludeAny with no recorded decision is refused", () => {
     );
 });
 
-test("a fact no user message carries is refused", () => {
+test("a fact no user message carries has no proposal", () => {
     const probe = caseWith({ mustInclude: ["부산"] });
     assert.equal(proposeAnchor(probe, ["부산"]), null);
+});
+
+test("a gold with no reviewed anchor is refused, proposal or not", () => {
+    // §12.11. succ-durable-ko-129 has a polarity — it was read in batch 8 and
+    // ruled negated on 2026-08-28 — and no anchor record, because it moves.
+    // The heuristic finds a perfectly good candidate for it, and that is
+    // exactly what may not be adopted.
+    const probe = byId.get("succ-durable-ko-129");
+    assert.ok(proposeAnchor(probe, ["주말"]), "the proposal does find one");
+    assert.throws(
+        () => assembleCase(probe),
+        (error) =>
+            error instanceof Succ4AssemblyError && /no reviewed anchor/.test(error.message)
+    );
+});
+
+test("every assembled anchor is the reviewed one, byte for byte", () => {
+    // The record is the decision; assembly may not improve on it. Checked
+    // without re-deriving, because re-deriving is what the record replaced.
+    const anchorByKey = new Map(SUCC4_ANCHORS.map((a) => [a.key, a]));
+    const readingByKey = new Map(
+        SUCC4_READINGS.filter((r) => r.evidenceMessageId).map((r) => [
+            `${r.caseId}:${r.goldId}`,
+            r,
+        ])
+    );
+    const { cases } = assembleCases(staying);
+    for (const testCase of cases) {
+        for (const gold of testCase.expected) {
+            const key = `${testCase.id}:${gold.id}`;
+            const record = readingByKey.get(key) ?? anchorByKey.get(key);
+            assert.ok(record, `${key} assembled with no record`);
+            assert.equal(gold.evidence.evidenceMessageId, record.evidenceMessageId, key);
+            assert.equal(gold.evidence.evidenceQuote, record.evidenceQuote, key);
+        }
+    }
+});
+
+test("no staying gold is left with a choice of message", () => {
+    // The en-306 class, drained. Every staying gold has exactly one user
+    // message carrying its fact values, so the anchor was not a choice; the
+    // four where a message holds two covering sentences carry sentenceChoice.
+    let choices = 0;
+    for (const testCase of staying) {
+        const users = testCase.conversations
+            .flatMap((c) => c.messages)
+            .filter((m) => m.role === "user");
+        for (const gold of testCase.expected) {
+            const carriers = users.filter((m) =>
+                containsAllTokens(m.content, gold.mustInclude, testCase.language)
+            );
+            if (carriers.length > 1) choices += 1;
+        }
+    }
+    assert.equal(choices, 0);
+    assert.equal(SUCC4_ANCHORS.filter((a) => a.sentenceChoice).length, 4);
+});
+
+test("the anchor record covers the staying golds exactly", () => {
+    const stayingKeys = new Set(
+        staying.flatMap((c) => c.expected.map((g) => `${c.id}:${g.id}`))
+    );
+    const overridden = new Set(
+        SUCC4_READINGS.filter((r) => r.evidenceMessageId).map((r) => `${r.caseId}:${r.goldId}`)
+    );
+    const recorded = SUCC4_ANCHORS.map((a) => a.key);
+    assert.equal(new Set(recorded).size, recorded.length, "a key twice");
+    for (const key of recorded) {
+        assert.ok(stayingKeys.has(key), `${key} is not a staying gold`);
+        assert.ok(!overridden.has(key), `${key} is overridden by a reading`);
+    }
+    assert.equal(recorded.length + [...stayingKeys].filter((k) => overridden.has(k)).length, 355);
 });
 
 test("assembleCases collects refusals and assembles nothing", () => {

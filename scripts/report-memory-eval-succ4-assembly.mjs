@@ -17,7 +17,14 @@
 // it is pointing at anchors rather than at labels.
 
 import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
-import { assembleCases, containsAll } from "../lib/memoryEvalSucc4Assembly.ts";
+import {
+    assembleCases,
+    containsAll,
+    goldKey,
+    proposeAnchor,
+} from "../lib/memoryEvalSucc4Assembly.ts";
+import { SUCC4_ANCHORS } from "../lib/memoryEvalSucc4Review/anchors.ts";
+import { SUCC4_READINGS } from "../lib/memoryEvalSucc4Review/readings.ts";
 import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
 import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
 import { SUCC4_B_PLUS_MOVES } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
@@ -64,6 +71,56 @@ if (refusals.length > 0) {
             "to not produce.\n"
     );
     process.exit(1);
+}
+
+/* --- the record, and where the proposal has drifted from it ------------ */
+
+// §12.11. The assembled anchor must be the reviewed one, exactly. This does
+// not re-derive it -- re-deriving is what the record replaced -- it checks
+// that assembly used the record and nothing else.
+const anchorByKey = new Map(SUCC4_ANCHORS.map((anchor) => [anchor.key, anchor]));
+const readingByKey = new Map(
+    SUCC4_READINGS.filter((reading) => reading.evidenceMessageId).map((reading) => [
+        goldKey(reading.caseId, reading.goldId),
+        reading,
+    ])
+);
+const mismatched = [];
+const drifted = [];
+for (const testCase of cases) {
+    for (const gold of testCase.expected) {
+        const key = goldKey(testCase.id, gold.id);
+        const record = readingByKey.get(key) ?? anchorByKey.get(key);
+        if (!record) {
+            mismatched.push({ key, why: "assembled with no reviewed anchor" });
+            continue;
+        }
+        if (
+            gold.evidence.evidenceMessageId !== record.evidenceMessageId ||
+            gold.evidence.evidenceQuote !== record.evidenceQuote
+        ) {
+            mismatched.push({ key, why: "assembled anchor differs from the record" });
+            continue;
+        }
+        // Not adopted, only reported: if the heuristic would now choose
+        // differently, the record is what stands and somebody should know the
+        // two have parted.
+        const proposal = proposeAnchor(testCase, gold.factValueAll);
+        if (
+            proposal &&
+            (proposal.evidenceMessageId !== record.evidenceMessageId ||
+                proposal.evidenceQuote !== record.evidenceQuote)
+        ) {
+            drifted.push({ key, record, proposal });
+        }
+    }
+}
+
+if (mismatched.length > 0) {
+    console.log("## Assembled anchor does not match the reviewed record\n");
+    for (const row of mismatched) console.log(`   ${row.key}  ${row.why}`);
+    console.log();
+    process.exitCode = 1;
 }
 
 /* --- what the assembler cannot check ---------------------------------- */
@@ -123,6 +180,18 @@ console.log(
     `\n   ${golds} golds — ${negated} negated, ${golds - negated} affirmed, ` +
         `${withAny} with factValueAny\n`
 );
+
+console.log("## The automatic proposal against the record\n");
+if (drifted.length === 0) {
+    console.log("   they agree on all " + cases.reduce((n, c) => n + c.expected.length, 0) + " golds\n");
+} else {
+    for (const row of drifted) {
+        console.log(`   ${row.key}`);
+        console.log(`      record   ${row.record.evidenceMessageId} «${row.record.evidenceQuote}»`);
+        console.log(`      proposal ${row.proposal.evidenceMessageId} «${row.proposal.evidenceQuote}»`);
+    }
+    console.log("\n   The record stands. Reported so a heuristic change cannot re-anchor\n   a reviewed gold in silence.\n");
+}
 
 console.log("## A negated gold anchored on a quote with no negation in it\n");
 if (suspect.length === 0) {
