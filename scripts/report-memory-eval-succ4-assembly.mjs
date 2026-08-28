@@ -28,12 +28,17 @@ import { SUCC4_ANCHORS } from "../lib/memoryEvalSucc4Review/anchors.ts";
 import { SUCC4_READINGS } from "../lib/memoryEvalSucc4Review/readings.ts";
 import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
 import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
-import { SUCC4_B_PLUS_MOVES } from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
+import { SUCC4_SUPERSEDED_CASE_IDS } from "../lib/memoryEvalSucc4Transition.ts";
 
 const sampleOnly = process.argv.includes("--sample");
 
-const moving = new Set(SUCC4_B_PLUS_MOVES.map((move) => move.originalId));
-const staying = MEMORY_EVAL_SUCC3_CASES.filter((testCase) => !moving.has(testCase.id));
+// The exclusion comes from the transition manifest, not from the move list it
+// was built from. Two readers of the move list would be two chances to
+// disagree about which 103 cases leave, and the manifest exists so there is
+// only ever one answer to that.
+const staying = MEMORY_EVAL_SUCC3_CASES.filter(
+    (testCase) => !SUCC4_SUPERSEDED_CASE_IDS.has(testCase.id)
+);
 
 // One of each thing that can vary, so a change to the assembler shows up
 // against a case that exercises it rather than against the average.
