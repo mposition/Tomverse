@@ -27,7 +27,7 @@ recorded afterwards can be chosen to match.
 | dataset digest | `0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0` |
 | transition manifest digest | `44bc58bad215ed572f1accd74979b19b6708453f37e474734940953edf51a325` |
 | source dataset digest (`mem-eval-succ-3`) | `38468da0dce31a144d61d360189b4ce9e1d55e0e914ae66a2d61bfb1e793dc3b` |
-| frozen at commit | `0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d` |
+| mergedCommitSha | `0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d` (see **Commits and CI**) |
 
 Eight cells: `durable_facts` ko 200 · en 200, `assistant_only` ko 125 · en 125,
 `sensitive_secrets` ko 125 · en 125, `injection_directives` ko 125 · en 125.
@@ -46,7 +46,7 @@ sample, and neither number exists yet.
 | approvedOn | 2026-08-28 |
 | pendingRules (dataset-satisfiable) | none |
 | prompt-pending | `v3-unfixable-evidence-emits-nothing` |
-| recorded at commit | `fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4` |
+| mergedCommitSha | `fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4` (see **Commits and CI**) |
 
 The previous contract stays pinned and unaltered: `mem-score-v3.2`,
 `8d6dfef8537cf910a40d175e0bb315bdfaa4e47fa5e89ea3c4bfbc032d9b6e1b`.
@@ -78,6 +78,7 @@ version the mapping does not cover.
 | contract digest | `c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052` |
 | supersedes | `mem-extract-v5` (`7bb6b27abce3f29dee70f4defd24d8a65175d7a17ab2b9e8d3846ebcc76de281`, unaltered) |
 | register status | `candidate`, `evalBudget: null`, for both `gpt-5-6-luna` and `gpt-5-4-mini` |
+| mergedCommitSha | `b45b4996ff967fe3ccada594d7cf7286a60ef030` (see **Commits and CI**) |
 
 v6 exists because schema-3 scoring compares a candidate's `polarity` to the
 gold's field to field and a v5 candidate has no such field: **no v5 pair can be
@@ -127,11 +128,75 @@ The digests are recomputed and compared on every unit-test run by
 `tests/memoryEvalSucc4Manifest.test.mjs`; `check:memory-eval-freeze` fails the
 build if any of the nine freeze conditions stops holding.
 
-## CI
+## Commits and CI
 
-| commit | run |
-|---|---|
-| `22fb4aeb1032a7b3b6f37c07873308d648b9e8f7` (freeze) | https://github.com/mposition/Tomverse/actions/runs/33154411698 |
-| `60f89598bfc7f7c5745143c07a98b3ad923d6a5b` (contract v3.3) | https://github.com/mposition/Tomverse/actions/runs/33151805896 |
+**Two commits, not one.** A pull request's checks run on its head; what lands
+on `develop` is a different commit object with a different SHA. Recording one
+"commit" for both invites the reader to believe a run was computed on a commit
+it never saw. So each recorded artefact carries four fields:
 
-Both concluded `success`.
+* **testedHeadSha** — the commit CI actually ran on.
+* **mergedCommitSha** — the commit that is on `develop`.
+* **treeEquivalence** — whether the two commits have the same tree, which is
+  what decides whether the first one's run is evidence about the second one's
+  content.
+* **ciRun** — the run, cited against `testedHeadSha`.
+
+| artefact | testedHeadSha | mergedCommitSha | treeEquivalence |
+|---|---|---|---|
+| dataset freeze `mem-eval-succ-4` | `22fb4aeb1032a7b3b6f37c07873308d648b9e8f7` | `0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d` | same tree `2a2fa4e8edd00c7f54c969534fd7b1371b34fced` |
+| scoring contract `mem-score-v3.3` | `60f89598bfc7f7c5745143c07a98b3ad923d6a5b` | `fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4` | **different** — `851a1d7136d8f2d8b2e414fc9ad5015b8f5c11fe` vs `54de53e56f2a9da84d28ca521bdf587b8a50976a` |
+| prompt `mem-extract-v6` | `d493c301d5c23d79c7679a457c95d4abd0b95813` | `b45b4996ff967fe3ccada594d7cf7286a60ef030` | same tree `e8578d41459949a7ff79ddceb8d0274b98f0627e` |
+
+| artefact | ciRun (on testedHeadSha) | conclusion |
+|---|---|---|
+| dataset freeze | PR Fast Gate https://github.com/mposition/Tomverse/actions/runs/33154411698 | `success` |
+| scoring contract | PR Fast Gate https://github.com/mposition/Tomverse/actions/runs/33151805896 | `success` |
+| prompt v6 | PR Fast Gate https://github.com/mposition/Tomverse/actions/runs/33159852303 | `success` |
+| prompt v6 | Credit Finance DB Integration https://github.com/mposition/Tomverse/actions/runs/33159852329 | `success` |
+
+### Where the trees are the same
+
+The freeze and the prompt were squash-merged onto a `develop` that had not
+moved, so `mergedCommitSha` names a different commit object with byte-identical
+content. The run on `testedHeadSha` is therefore evidence about the merged
+tree as well: same tree, same checks, different commit metadata.
+
+### Where the tree is not the same, and what that costs
+
+`mem-score-v3.3` was brought in as a merge commit, and its base had advanced,
+so `fc57ccf4…` carries content `60f89598…` never held. **Its PR run is not
+evidence about the merged tree as a whole.** The difference is ten files, all
+of them the base branch moving underneath: the router routing plan and its
+Fable entry with their tests, the router eval script, workflow and answer-bundle
+check, the message-attachment audit script, `docs/ops/r2-object-lifecycle.md`
+and `AGENTS.md`. None of them is a memory-eval file — the difference contains
+nothing under `lib/memoryEval*`, `tests/memoryEval*` or the memory ops
+documents — so the run is still evidence about the contract's own content,
+which is what this document cites it for. It is not a licence to read that run
+as green for everything in `fc57ccf4…`.
+
+What is green on the merged tree comes from the push runs `develop` makes on
+each merge, which are a narrower set of workflows than a PR gets (PR Fast Gate
+does not run on push):
+
+| mergedCommitSha | push runs | conclusion |
+|---|---|---|
+| `0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d` | 33155347723, 33155347730 | `success` |
+| `fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4` | 33152970434, 33152970498 | `success` |
+| `b45b4996ff967fe3ccada594d7cf7286a60ef030` | 33160719890, 33160719746 | in progress at the time of writing |
+
+### Reproducing the tree comparison
+
+Read-only, no credentials. In a clone of this repository, on any shell that
+has `git`:
+
+```
+git fetch origin d493c301d5c23d79c7679a457c95d4abd0b95813 develop
+git rev-parse d493c301d5c23d79c7679a457c95d4abd0b95813^{tree}
+git rev-parse b45b4996ff967fe3ccada594d7cf7286a60ef030^{tree}
+git diff --name-only 60f89598bfc7f7c5745143c07a98b3ad923d6a5b fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4
+```
+
+The first two print the same tree SHA. The last prints the ten files above,
+and is the check to repeat rather than the list to trust.
