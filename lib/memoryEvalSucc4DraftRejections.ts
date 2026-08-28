@@ -1,23 +1,26 @@
 /**
  * The replacement drafts that were rejected before adoption, as data.
  *
- * docs/ops/memory-extraction-eval-dataset.md §7.1a asks the unified record for
- * a draft-disagreement numerator, denominator and rate. Deriving those by
+ * docs/ops/memory-extraction-eval-dataset.md §7.1a asks the unified
+ * record for a draft-disagreement numerator, denominator and rate. Deriving
+ * those by
  * reading prose across five commit messages is not reproducible, so the
  * rejections are written out here and the record's numbers are computed from
  * this list.
  *
  * ## What this is not
  *
- * It is not a reviewer's disagreement rate. No person has judged these drafts
- * yet -- that is step 5 of the §7.1a order, and until it happens a
- * reviewer-vs-draft figure does not exist to report. What this counts is
- * narrower and stated as such in the record: drafts the **contract checks**
- * rejected during authoring, before anything reached a reviewer.
+ * It is not a reviewer's disagreement rate. What this counts is drafts the
+ * **contract checks** rejected during authoring, before anything reached a
+ * reviewer. The reviewer's own figure is a different number and a much
+ * smaller one: @mposition adopted all five tranches on 2026-08-28 having
+ * rejected none, so reviewer-vs-draft disagreement is 0 of 103.
  *
- * Reporting it as though a person had rejected them would inflate a number
- * whose whole purpose is to say how often the drafter and the reviewer
- * disagreed.
+ * The record keeps them in separate tables for that reason. Reporting these
+ * 21 as though a person had rejected them would inflate the number whose
+ * whole purpose is to say how often the drafter and the reviewer disagreed --
+ * and the answer to that is zero, because the drafts a reviewer saw were the
+ * rewrites.
  *
  * ## Where each row comes from
  *

@@ -91,20 +91,61 @@ test("conditions 1 to 3 hold on the drafted record", () => {
     assert.equal(byName(results, "digest matches the tree").ok, true);
 });
 
-test("conditions 4 and 5 do not hold until a person fills them", () => {
-    // This is the state the record is committed in, and it is the point of the
-    // clause: an agent can make 1 to 3 true and cannot make these true.
+test("the record as adopted satisfies all five", () => {
     const results = run(readSucc4AdoptionRecord(RECORD));
-    assert.equal(byName(results, "reviewer, disagreement and verdicts").ok, false);
-    assert.equal(byName(results, "recorded and adopted").ok, false);
-});
-
-test("all five hold once the judgement cells are filled", () => {
-    const results = run(filled());
     assert.deepEqual(
         results.filter((result) => !result.ok),
         []
     );
+});
+
+test("the record carries the operator's judgement, not a placeholder", () => {
+    const record = readSucc4AdoptionRecord(RECORD);
+    assert.equal(record.reviewer, "@mposition");
+    assert.equal(record.signature.reviewer, "@mposition");
+    assert.equal(record.signature.approvedAt, "2026-08-28");
+    assert.equal(record.signature.signature, "@mposition");
+    for (const tranche of record.tranches) {
+        assert.equal(record.verdicts[tranche.trancheId], "adopted");
+    }
+});
+
+test("blanking any judgement cell puts conditions 4 and 5 back", () => {
+    // The clause's point is that an agent can make 1 to 3 true and cannot make
+    // these true. Now that a person has filled them, the way to keep saying so
+    // is to show the conditions come back the moment a cell is emptied.
+    const record = readSucc4AdoptionRecord(RECORD);
+    const blanked = {
+        ...record,
+        reviewer: "*(사람이 기입)*",
+        verdicts: Object.fromEntries(
+            Object.keys(record.verdicts).map((id) => [id, "*(사람이 기입)*"])
+        ),
+        signature: {
+            reviewer: "*(사람이 기입)*",
+            approvedAt: "*(사람이 기입)*",
+            signature: "*(사람이 기입)*",
+        },
+    };
+    const results = run(blanked);
+    assert.equal(byName(results, "reviewer, disagreement and verdicts").ok, false);
+    assert.equal(byName(results, "recorded and adopted").ok, false);
+    // And 1 to 3 are untouched by that, which is the split the clause draws.
+    assert.equal(byName(results, "inherited cases covered").ok, true);
+    assert.equal(byName(results, "exactly the replacements").ok, true);
+    assert.equal(byName(results, "digest matches the tree").ok, true);
+});
+
+test("the two disagreement figures are read from their own subsections", () => {
+    // docs/ops/memory-extraction-eval-succ4-adoption.md §5 splits in two:
+    // the reviewer's figure, 0 of 103, and the contract checks', 21 of 103. A
+    // reader that stopped at the first subsection heading found no rows and
+    // called every cell unfilled.
+    const record = readSucc4AdoptionRecord(RECORD);
+    assert.match(record.disagreement.judged, /103/);
+    assert.equal(record.disagreement.rejected, "0");
+    assert.equal(record.disagreement.rate, "0%");
+    assert.equal(record.disagreement.unresolved, "0");
 });
 
 test("a placeholder is not a filled cell", () => {
@@ -220,7 +261,29 @@ test("an empty record fails every condition it can", () => {
     assert.equal(byName(results, "recorded and adopted").ok, false);
 });
 
-test("succ-4 is not frozen and does not claim to be a decision set", () => {
-    assert.equal(MEMORY_EVAL_SUCC4_DATASET_FROZEN, false);
-    assert.equal(MEMORY_EVAL_SUCC4_DATASET_PURPOSE, "development");
+test("succ-4 is frozen, and the two constants moved together", () => {
+    // docs/ops/memory-extraction-eval-dataset.md §7.2 is one act, not two. A
+    // frozen dataset still marked `development` would refuse to be cited by
+    // one reader and accept it from another.
+    assert.equal(MEMORY_EVAL_SUCC4_DATASET_FROZEN, true);
+    assert.equal(MEMORY_EVAL_SUCC4_DATASET_PURPOSE, "decision");
+});
+
+test("the freeze rests on an adoption the record actually carries", () => {
+    // The constant claims the conditions were met, so the check is a gate now
+    // rather than a progress report. This is the half of it a test can hold:
+    // the record's judgement cells are filled, so blanking one would fail the
+    // build rather than lowering a count.
+    const record = readSucc4AdoptionRecord(RECORD);
+    assert.equal(MEMORY_EVAL_SUCC4_DATASET_FROZEN, true);
+    assert.ok(!isUnfilled(record.reviewer));
+    assert.ok(!isUnfilled(record.signature.signature));
+    assert.ok(!isUnfilled(record.signature.approvedAt));
+    for (const tranche of record.tranches) {
+        assert.equal(record.verdicts[tranche.trancheId], "adopted");
+    }
+    assert.deepEqual(
+        run(record).filter((result) => !result.ok),
+        []
+    );
 });

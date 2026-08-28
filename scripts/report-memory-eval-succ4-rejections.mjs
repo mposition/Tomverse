@@ -3,7 +3,8 @@
 //
 //   npm run report:memory-eval-succ4-rejections
 //
-// The record's §5 numbers are computed from `SUCC4_DRAFT_REJECTIONS`, not
+// The docs/ops/memory-extraction-eval-succ4-adoption.md §5 numbers are
+// computed from `SUCC4_DRAFT_REJECTIONS`, not
 // read out of five commit messages, so this is how a reader reproduces them.
 // It is not a reviewer's disagreement rate -- no person has judged these
 // drafts yet -- and the record says so where it quotes the figure.

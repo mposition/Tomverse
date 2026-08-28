@@ -3,13 +3,15 @@
 docs/ops/memory-extraction-eval-dataset.md §7.1a. 승계 dataset은 tranche마다
 batch 기록을 복제하지 않고 이 파일 하나를 씁니다.
 
-> **이 문서는 에이전트가 채운 초안입니다.** 아래에서 **관측 칸** — 버전, digest,
-> 건수, cell 분포, 초안 도구 — 은 실행 결과에서 그대로 옮긴 것이고 지어낸 값이
-> 없습니다. 각 줄에 재현 방법을 적었습니다. **판정 칸** — 검수자, draft
-> disagreement, tranche별 `adopted`, 승인일, 서명 — 은 **비어 있으며 사람이
-> 채웁니다.** AGENTS.md 「기록을 채우는 경계는 관측과 판정입니다」와 §7.1a의 4·5번
-> 조건에 따른 것이고, 채워지기 전에는 `npm run check:memory-eval-freeze`가 succ-4에
-> 대해 `MISS`를 보고합니다.
+> **관측 칸은 에이전트가 채웠고, 판정 칸은 운영자의 결정을 전사한 것입니다.**
+>
+> 버전·digest·건수·cell 분포·초안 도구·draft disagreement 수치는 실행 결과에서
+> 그대로 옮겼고 지어낸 값이 없습니다. 각 줄에 재현 방법을 적었습니다.
+>
+> 4·6·7장의 검수자·tranche 판정·서명은 **2026-08-28 대화에서 운영자(@mposition)가
+> 말한 결정을 전사**한 것입니다. AGENTS.md 「기록을 채우는 경계는 관측과
+> 판정입니다」에 따라 판정은 사람의 것이고, 에이전트는 그것을 옮겨 적었습니다.
+> 운영자가 각 줄을 확인한 뒤 commit 합니다.
 >
 > 채택은 사람의 판정입니다. 전환 manifest의 `movedBecause`나
 > `settledByExistingContract`가 채워져 있다는 사실은 채택이 아닙니다 — 그것은
@@ -93,21 +95,38 @@ docs/ops/memory-extraction-eval-dataset.md §6.5에 따라 비 OpenAI 계열입�
 | 역할 | 주체 |
 |---|---|
 | 작성 (초안) | AI — 위 3.2 |
-| 검수 · 채택 판정 | *(사람이 기입)* |
+| 검수 · 채택 판정 | @mposition |
 | adjudicator | **해당 없음** — 검수자가 한 명인 동안 발생하지 않습니다 (docs/ops/memory-extraction-eval-dataset.md §6.4) |
 
-시료를 만든 주체와 채택한 주체는 다릅니다 — docs/ops/memory-extraction-eval-dataset.md §6.2.
-이 표의 두 번째 줄이 비어 있는 동안 그 분리는 성립하지 않으며, 검사는 그 상태를
-`MISS`로 보고합니다.
+시료를 만든 주체(AI)와 채택한 주체(사람)는 다릅니다
+(docs/ops/memory-extraction-eval-dataset.md §6.2). 한 사람이 데이터셋
+책임자와 검수자를 겸하는 것은 검수자가 한 명인 동안 허용되는 구조이고
+(docs/ops/memory-extraction-eval-dataset.md §6.4), 릴리스 게이트 registry가
+`approvalPolicy.soleApproverAllowed`로 남긴 축과 같습니다. 그때도 남는 분리는
+**증거를 만든 주체와 승인한 주체가 다르다**는 것이며, 여기서는 초안이 AI이고
+채택이 사람입니다.
 
 ## 5. draft disagreement
 
-**이 수치가 무엇인지 먼저 밝힙니다.** 아직 사람이 이 초안들을 판정하지
-않았으므로(docs/ops/memory-extraction-eval-dataset.md §7.1a 순서의 5번),
-검수자와 초안의 불일치율은 존재하지 않습니다.
-아래는 그보다 좁은 것 — **계약 검사가 초안을 반려한 건수**이며, 사람에게
-도달하기 전에 걸러진 것입니다. 이것을 사람의 반려처럼 보고하면 그 수치가 재려던
-바로 그것을 부풀리게 됩니다.
+두 개의 다른 수치가 있고, 각자 이름으로 적습니다. 하나로 합치면 어느 쪽에
+대해서도 틀립니다.
+
+### 5.1 검수자와 초안의 불일치 (이 절의 본래 항목)
+
+| 항목 | 값 |
+|---|---|
+| 판정 건수 | 103 — 5개 tranche 전건 |
+| 반려 건수 | 0 |
+| 비율 | 0% |
+| 미결 | 0 |
+
+@mposition이 2026-08-28에 다섯 tranche를 전건 검토하고 전부 `adopted`로
+판정했습니다(6장). 반려가 없으므로 0%입니다.
+
+### 5.2 계약 검사가 반려한 초안 (별개 측정)
+
+사람에게 도달하기 **전에** 걸러진 것입니다. 위 0%와 같은 것을 재지 않으므로
+합치지 않습니다.
 
 집계는 `lib/memoryEvalSucc4DraftRejections.ts`의 21개 행에서 계산합니다. 행마다
 어느 검사가 왜 반려했는지와 그 근거가 tranche 파일에 있는지 commit에 있는지를
@@ -122,26 +141,22 @@ docs/ops/memory-extraction-eval-dataset.md §6.5에 따라 비 OpenAI 계열입�
 | `succ4-tranche-5` | 7 | 26 | 26.9% |
 | **합계** | **21** | **103** | **20.4%** |
 
-| 항목 | 값 |
-|---|---|
-| 판정 건수 | 103 — 전건이 계약 검사를 거쳤습니다 |
-| 반려 건수 | 21 |
-| 비율 | 20.4% |
-| 미결 | 0 — 반려된 21건은 전부 다시 쓰였고 재검사를 통과했습니다 |
-
 반려 사유는 세 가지입니다. 원본과의 overlap 초과 12건, **corpus에 남는 다른
 case와의** overlap 초과 7건, under-specification 2건. 두 번째가 나온 것은 검사를
 나중에 추가했기 때문이고, 그 검사가 이미 병합된 tranche에서도 3건을 찾아냈습니다.
+
+반려된 21건은 전부 다시 쓰였고 재검사를 통과했으므로 미결은 0입니다. 검수자가
+본 것은 그 재작성본입니다.
 
 ## 6. 채택 판정 (사람이 기입)
 
 | tranche | 판정 | 근거 |
 |---|---|---|
-| `succ4-tranche-1` | *(사람이 기입)* | |
-| `succ4-tranche-2` | *(사람이 기입)* | |
-| `succ4-tranche-3` | *(사람이 기입)* | |
-| `succ4-tranche-4` | *(사람이 기입)* | |
-| `succ4-tranche-5` | *(사람이 기입)* | |
+| `succ4-tranche-1` | adopted | 전건 검토 (@mposition, 2026-08-28) |
+| `succ4-tranche-2` | adopted | 전건 검토 (@mposition, 2026-08-28) |
+| `succ4-tranche-3` | adopted | 전건 검토 (@mposition, 2026-08-28) |
+| `succ4-tranche-4` | adopted | 전건 검토 (@mposition, 2026-08-28) |
+| `succ4-tranche-5` | adopted | 전건 검토 (@mposition, 2026-08-28) |
 
 판정 값은 `adopted` 또는 `rejected`입니다. 하나라도 `adopted`가 아니면
 docs/ops/memory-extraction-eval-dataset.md §7.1a의 5번에 따라 동결이 거부됩니다.
@@ -150,9 +165,9 @@ docs/ops/memory-extraction-eval-dataset.md §7.1a의 5번에 따라 동결이 �
 
 | 항목 | 값 |
 |---|---|
-| 검토자 | *(사람이 기입)* |
-| 승인일 | *(사람이 기입)* |
-| 서명 | *(사람이 기입)* |
+| 검토자 | @mposition |
+| 승인일 | 2026-08-28 |
+| 서명 | @mposition |
 
 서명이 채워진 뒤에야 docs/ops/memory-extraction-eval-dataset.md §7.2의 세 줄 편집 — `MEMORY_EVAL_SUCC4_DATASET_FROZEN`을
 `true`로, `..._PURPOSE`를 `decision`으로 — 이 가능합니다. 그 전까지 상수는
