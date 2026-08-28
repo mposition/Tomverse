@@ -103,11 +103,12 @@ import {
   resolveCallLimit,
 } from "../lib/routerCallLimits.ts";
 import {
-  PILOT_PER_REQUEST_MAX_COST_USD,
+  executableCallManifest,
   freezeRoutingPlan,
   maxPlannedAnswerRequestCostUsd,
   routingPlanProblems,
 } from "../lib/routerRoutingPlan.ts";
+import { PILOT_PER_REQUEST_MAX_COST_USD } from "../lib/routerFableEntry.ts";
 import {
   JUDGE_TEMPLATE_VERSION,
   identifiesItself,
@@ -838,6 +839,27 @@ if (mode === "decision") {
 }
 
 
+/**
+ * The output cap the Router is asked to route for.
+ *
+ * Not the selected model's cap, and not a constant. The product resolves this
+ * *before* the Router runs, from the model the user asked for -- the Router's
+ * window arithmetic then decides which candidates have room for an answer that
+ * size. In this protocol the baseline is the model the user asked for, so its
+ * product cap is the honest input.
+ *
+ * It used to be a hardcoded 2,048. That made the harness route as though it
+ * were asking for a 2,048-token answer and then ask for the product's cap --
+ * two different questions in one run, and the routing half was the one the
+ * product never asks. Fixing it is a repair, not a change of what is measured.
+ *
+ * The answer call is separate and stays separate:
+ * `resolveCallLimit(selectedAutoModel, "answer")` is what the auto arm
+ * actually requests, so the Router can route for Luna's 128,000 and DeepSeek
+ * can then answer under its own 384,000 -- which is what the product does.
+ */
+const routerRequestOutputCapTokens = resolveModelPricing(baselineModel).maxOutputTokens;
+
 const routerInputFor = (item) => {
   const reservedInputTokens = estimateRawTextTokens(item.prompt);
   return {
@@ -851,7 +873,7 @@ const routerInputFor = (item) => {
     // out and would grade a Router that never had the candidates.
     plan: "Pro",
     reservedInputTokens,
-    requestOutputCapTokens: 2_048,
+    requestOutputCapTokens: routerRequestOutputCapTokens,
   };
 };
 
@@ -1056,36 +1078,12 @@ for (const entry of callLimitManifest.entries) {
   resolvedLimits.set(`${entry.modelId}::${entry.callRole}`, entry);
 }
 
-// A cost ceiling is checked between calls, because that is when tokens are
-// known -- so one call whose worst case already exceeds the ceiling can breach
-// it with nothing able to stop it. Refused here rather than discovered
-// afterwards.
-//
-// The prompt side is bounded by the largest prompt the set actually holds,
-// estimated with the same estimator the product bills from.
-if (maxCostUsd !== null) {
-  const worstPromptTokens = Math.max(
-    0,
-    ...planned.map((item) => estimateRawTextTokens(item.prompt ?? ""))
-  );
-  const breaches = callLimitManifest.entries
-    .map((entry) => ({ entry, cost: perRequestWorstCaseCostUsd(entry, worstPromptTokens) }))
-    .filter(({ cost }) => cost > maxCostUsd);
-  if (breaches.length > 0) {
-    die(
-      `\nOne request can cost more than this run's whole $${maxCostUsd} ceiling:\n\n` +
-        breaches
-          .map(
-            ({ entry, cost }) =>
-              `  - ${entry.modelId}/${entry.callRole} asks for ${entry.requestedMaxOutputTokens} ` +
-              `output token(s); worst case $${cost.toFixed(4)}`
-          )
-          .join("\n") +
-        "\n\nA cost ceiling can only stop a run between calls, so it cannot stop this one.\n" +
-        "Raise the ceiling or lower the budget before dispatching. Nothing was billed.\n"
-    );
-  }
-}
+// The per-request bound is NOT applied here, over every model the catalogue
+// offers. That was the first version and it was wrong: it priced a
+// claude-fable-5 answer at $6.40 and refused a $2.00 pilot, for a model the
+// Router never selects and this harness would never call. A cost bound
+// belongs on the executable call manifest -- the models this run will send a
+// prompt to -- which is what the frozen routing plan below carries.
 
 journal({ kind: "call-limit-manifest", manifest: callLimitManifest });
 
@@ -1114,14 +1112,23 @@ if (mode !== "judge-bias" && !fromJournalPath) {
       itemId: item.id,
       outcome: decision.outcome,
       selectedModelId: decision.outcome === "selected" ? decision.modelId : null,
-      fallbackCandidateModelIds:
+      // The rest of the Router's ranking. This harness never calls them --
+      // a failed answer is recorded and the pair excluded, never retried down
+      // the ranking -- so they are recorded for audit and are not answer
+      // authors. lib/routerRoutingPlan.ts holds that scoping in one constant.
+      rankedAlternatesNonExecutable:
         decision.outcome === "selected" ? [...decision.fallbackCandidateModelIds] : [],
     };
   });
-  routingPlan = freezeRoutingPlan(planEntries, baselineModelId, (id) => {
-    const model = getModel(id);
-    return model ? { provider: model.provider, apiModel: model.apiModel } : null;
-  });
+  routingPlan = freezeRoutingPlan(
+    planEntries,
+    baselineModelId,
+    (id) => {
+      const model = getModel(id);
+      return model ? { provider: model.provider, apiModel: model.apiModel } : null;
+    },
+    selectableModels.map((model) => model.id)
+  );
   journal({ kind: "routing-plan", plan: routingPlan });
 
   const independentJudgeId = evaluationSet.independentJudge?.modelId;
@@ -1157,13 +1164,23 @@ if (mode !== "judge-bias" && !fromJournalPath) {
         "\n\nNothing was sent and nothing was billed.\n"
     );
   }
+  const limitOf = (id) => {
+    const model = getModel(id);
+    return model ? callLimit(model, "answer") : null;
+  };
   console.log(
-    `Routing plan frozen — ${routingPlan.plannedItems} item(s); the independent judge ` +
-      `(${independentJudge.id}) authors no answer; worst planned answer request ` +
-      `$${maxPlannedAnswerRequestCostUsd(routingPlan, (id) => {
-        const model = getModel(id);
-        return model ? callLimit(model, "answer") : null;
-      }, worstPromptTokens).toFixed(4)} of $${(perRequestMaxCostUsd ?? PILOT_PER_REQUEST_MAX_COST_USD).toFixed(2)} allowed.`
+    `Routing plan frozen — ${routingPlan.plannedItems} item(s), routed for a ` +
+      `${routerRequestOutputCapTokens}-token answer (${baselineModelId}'s product cap).`
+  );
+  console.log(
+    `  the independent judge (${independentJudge.id}) authors no answer this run will make`
+  );
+  for (const row of executableCallManifest(routingPlan)) {
+    console.log(`  will call  ${row.modelId.padEnd(24)} ${row.calls} time(s)  (${row.identity})`);
+  }
+  console.log(
+    `  worst planned answer request $${maxPlannedAnswerRequestCostUsd(routingPlan, limitOf, worstPromptTokens).toFixed(4)}` +
+      ` of $${(perRequestMaxCostUsd ?? PILOT_PER_REQUEST_MAX_COST_USD).toFixed(2)} allowed`
   );
 }
 

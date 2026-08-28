@@ -53,21 +53,29 @@ export const PROBED_JUDGE_OUTPUT_TOKENS = {
 } as const;
 
 /**
- * mposition's ceilings for the approved job, revised 2026-08-28.
+ * mposition's ceilings for the approved job, 2026-08-28.
  *
- * The pilot's first pair -- a $2.00 stage with no per-request bound -- could
- * not be enforced. The answer arms ask for the product's own output cap, the
- * Router may pick any enabled model, and `claude-fable-5` at 128,000 output
- * tokens is a $6.40 request on its own. A stage ceiling below that is a
- * ceiling one call can breach with nothing able to intervene, so the pilot
- * stage was raised above its own worst request rather than the answer budget
- * being quietly lowered to fit.
+ * The pilot stage briefly went to $7.00 on a wrong reading of its own worst
+ * request. That figure came from pricing every enabled model the Router could
+ * *rank*, including a $6.40 `claude-fable-5` answer -- but this harness calls
+ * only the model it selected, so a model that is merely ranked costs nothing.
+ * Priced over the calls the run will actually make, the worst request is a
+ * DeepSeek or Luna answer, and $2.00 holds.
+ *
+ * The lesson is in lib/routerRoutingPlan.ts rather than in a bigger number: a
+ * cost bound belongs on the executable call manifest, not on the catalogue.
  */
 export const FABLE_STAGE_MAX_COST_USD = 18.0;
 export const FABLE_PER_REQUEST_MAX_COST_USD = 0.75;
-export const PILOT_STAGE_MAX_COST_USD = 7.0;
-export const PILOT_PER_REQUEST_MAX_COST_USD = 6.5;
-export const JOB_MAX_COST_USD = 25.0;
+export const PILOT_STAGE_MAX_COST_USD = 2.0;
+/**
+ * One planned answer request.
+ *
+ * Below the stage ceiling on purpose: a stage that one call can exhaust is a
+ * stage ceiling in name only.
+ */
+export const PILOT_PER_REQUEST_MAX_COST_USD = 1.0;
+export const JOB_MAX_COST_USD = 20.0;
 
 export type JudgePricing = {
     inputUsdPerMillionTokens: number;

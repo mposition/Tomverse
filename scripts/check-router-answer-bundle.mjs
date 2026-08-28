@@ -42,7 +42,12 @@
 
 import { readFileSync } from "node:fs";
 
-import { answerBundleProblems, parseAnswerBundle } from "../lib/routerAnswerBundle.ts";
+import {
+  answerBundleProblems,
+  bundleAnswerIdentities,
+  canonicalIdentity,
+  parseAnswerBundle,
+} from "../lib/routerAnswerBundle.ts";
 import {
   CELL_PAIRED_COVERAGE_FLOOR,
   PAIRED_COVERAGE_FLOOR,
@@ -176,6 +181,23 @@ if (!judgeModelId) {
         perRequestMaxCostUsd: FABLE_PER_REQUEST_MAX_COST_USD,
       })
     );
+
+    // The second check, on what was actually written rather than on what was
+    // planned. The routing plan is frozen before the pilot spends; this reads
+    // the answers it produced. Both have to hold: a plan can be right and a
+    // run still write an answer from the judge, and a judge that grades its
+    // own answer is not the independent side of anything.
+    const judgeIdentity = canonicalIdentity({
+      provider: judgeModel.provider,
+      apiModel: judgeModel.apiModel,
+      modelId: judgeModel.id,
+    });
+    if (bundleAnswerIdentities(bundle).includes(judgeIdentity)) {
+      problems.push(
+        `${judgeIdentity} wrote answers in this bundle and is the pre-registered independent judge ` +
+          `(${judgeModel.id}), so it would grade its own work`
+      );
+    }
   }
 }
 

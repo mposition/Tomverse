@@ -47,11 +47,11 @@ const bundleOf = (count, answerLength) => ({
 });
 
 test("mposition's approved ceilings", () => {
-    assert.equal(PILOT_STAGE_MAX_COST_USD, 7.0);
-    assert.equal(PILOT_PER_REQUEST_MAX_COST_USD, 6.5);
+    assert.equal(PILOT_STAGE_MAX_COST_USD, 2.0);
+    assert.equal(PILOT_PER_REQUEST_MAX_COST_USD, 1.0);
     assert.equal(FABLE_STAGE_MAX_COST_USD, 18.0);
     assert.equal(FABLE_PER_REQUEST_MAX_COST_USD, 0.75);
-    assert.equal(JOB_MAX_COST_USD, 25.0);
+    assert.equal(JOB_MAX_COST_USD, 20.0);
     assert.equal(PILOT_STAGE_MAX_COST_USD + FABLE_STAGE_MAX_COST_USD, JOB_MAX_COST_USD);
     // A stage ceiling has to sit above the worst single request it can
     // produce, or it is a ceiling one call breaches with nothing to stop it.
