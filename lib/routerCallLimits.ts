@@ -94,13 +94,28 @@ export type ResolvedCallLimit = {
  * known, the same way the product bounds it — `providerMaxOutputTokens` never
  * raises a request, only lowers it.
  */
-export const resolveCallLimit = (model: AiModel, callRole: CallRole): ResolvedCallLimit => {
+export const resolveCallLimit = (
+    model: AiModel,
+    callRole: CallRole,
+    options?: {
+        /**
+         * A judge budget other than the standing one.
+         *
+         * For the judge-cap probe, which exists to find out what the standing
+         * one should be. It cannot raise an answer call's budget: an answer is
+         * measured under the product's cap or it is not the product being
+         * measured.
+         */
+        judgeMaxOutputTokens?: number;
+    }
+): ResolvedCallLimit => {
     const pricing = resolveModelPricing(model);
     const ceiling = pricing.providerMaxOutputTokens;
     const productCap =
         ceiling === null ? pricing.maxOutputTokens : Math.min(pricing.maxOutputTokens, ceiling);
 
-    const requested = callRole === "judge" ? Math.min(JUDGE_MAX_OUTPUT_TOKENS, productCap) : productCap;
+    const judgeBudget = options?.judgeMaxOutputTokens ?? JUDGE_MAX_OUTPUT_TOKENS;
+    const requested = callRole === "judge" ? Math.min(judgeBudget, productCap) : productCap;
     const limitSource: LimitSource =
         callRole === "judge"
             ? "judge_structured_verdict"
