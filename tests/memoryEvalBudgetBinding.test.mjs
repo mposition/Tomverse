@@ -22,7 +22,10 @@ import {
     isFullCommitSha,
 } from "../lib/memoryEvalBudgetBinding.ts";
 import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
-import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
+import {
+    MEMORY_EXTRACTION_EVAL_REGISTER,
+    findEvalRegisterProblems,
+} from "../lib/memoryExtractionEvalRegister.ts";
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
 import {
@@ -83,13 +86,53 @@ test("the ceiling, the run count and the implementation SHA are recorded", () =>
     const budget = fundedPair().evalBudget;
     assert.equal(budget.approvedBy, "@mposition");
     assert.equal(budget.approvedAt, "2026-08-28");
-    assert.equal(budget.maxUsd, 12.57);
     assert.equal(budget.maxProviderDispatchedRuns, 2);
     assert.equal(
         budget.approvedImplementationSha,
         "34a53ddc0247661e578422300ecc58801ea73fce"
     );
     assert.ok(isFullCommitSha(budget.approvedImplementationSha));
+});
+
+test("maxUsd is the per-run ceiling and the programme total is separate", () => {
+    // The correction of 2026-08-28. `maxUsd` reached the harness as
+    // `ceilingUsd` and was compared against `accruedCostUsd`, which starts at
+    // zero on every invocation — so recording the US$12.57 programme figure
+    // here authorised it *twice*, US$25.14 across the two approved runs. The
+    // two numbers are now separate fields, and this is the pair of assertions
+    // that keeps them from collapsing back into one.
+    const budget = fundedPair().evalBudget;
+    assert.equal(budget.maxUsd, 6.285);
+    assert.equal(budget.programmeMaxMicroUsd, 12_570_000);
+    assert.equal(
+        budget.maxUsd * 1_000_000 * budget.maxProviderDispatchedRuns,
+        budget.programmeMaxMicroUsd,
+        "the per-run ceiling times the approved runs is not the programme total"
+    );
+    // Stated as its own assertion because it is the mistake, not a corollary:
+    // the programme figure must not be what one run may spend.
+    assert.notEqual(budget.maxUsd, budget.programmeMaxMicroUsd / 1_000_000);
+});
+
+test("a per-run ceiling that would overspend the programme is a register problem", () => {
+    // The check that makes the two fields agree, exercised on the shape it
+    // exists to catch: the programme figure written into `maxUsd` again.
+    const budget = fundedPair().evalBudget;
+    const problems = findEvalRegisterProblems([
+        {
+            ...fundedPair(),
+            evalBudget: { ...budget, maxUsd: 12.57 },
+        },
+    ]);
+    assert.ok(
+        problems.some((line) => line.includes("above the")),
+        problems.join(" | ")
+    );
+    // And the registered shape has none.
+    assert.deepEqual(
+        [...findEvalRegisterProblems(MEMORY_EXTRACTION_EVAL_REGISTER)],
+        []
+    );
 });
 
 test("exactly one v6 pair is funded, and it is the approved one", () => {
@@ -242,6 +285,62 @@ test("a caller that says nothing about the binding is refused", () => {
     assert.deepEqual(decision, {
         mode: "refused",
         reason: "run_sha_not_descendant",
+    });
+});
+
+test("a run beyond the approved count refuses, and an unstated one too", () => {
+    // The approval covers a fixed number of provider-dispatched runs and
+    // nothing in the tree can count them, so the invocation says which run it
+    // is. A budget that names no run count leaves the gate inert — every
+    // budget recorded before 2026-08-28 is that shape — which is why the
+    // entry here carries one.
+    const twoRuns = (runOrdinal) =>
+        liveInput({
+            registerEntry: {
+                status: "candidate",
+                evalBudget: { maxUsd: 20, maxProviderDispatchedRuns: 2 },
+            },
+            runOrdinal,
+        });
+
+    for (const ordinal of [1, 2]) {
+        assert.deepEqual(
+            decideEvalRunMode(twoRuns(ordinal)),
+            { mode: "live", ceilingUsd: 20 },
+            `run ${ordinal}`
+        );
+    }
+    for (const ordinal of [undefined, 0, 3, -1, 1.5, Number.NaN]) {
+        assert.deepEqual(
+            decideEvalRunMode(twoRuns(ordinal)),
+            { mode: "refused", reason: "run_ordinal_not_approved" },
+            String(ordinal)
+        );
+    }
+    // Absent is a refusal rather than a default of 1. A default would make
+    // every unstated run the first one, which is the accounting this gate
+    // exists to prevent.
+    assert.equal(
+        decideEvalRunMode(twoRuns(undefined)).reason,
+        "run_ordinal_not_approved"
+    );
+    // The instrument is checked first: a third run of the wrong instrument is
+    // wrong for the instrument, whichever run it claims to be.
+    assert.equal(
+        decideEvalRunMode({
+            ...twoRuns(3),
+            budgetTupleFailures: ["datasetDigest: ..."],
+        }).reason,
+        "budget_tuple_mismatch"
+    );
+});
+
+test("a budget that names no run count leaves the ordinal unasked", () => {
+    // Every budget from before 2026-08-28. They cannot fund a run for other
+    // reasons, and this gate is not one of them.
+    assert.deepEqual(decideEvalRunMode(liveInput({ runOrdinal: undefined })), {
+        mode: "live",
+        ceilingUsd: 20,
     });
 });
 

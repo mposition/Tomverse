@@ -136,6 +136,7 @@ test("only the pair whose binding is satisfied can run live", () => {
                     budgetBindingProblems: [],
                     budgetTupleFailures: [],
                     runShaDescendsFromApproval: true,
+                    runOrdinal: 1,
                 })
             ).mode === "live"
     ).map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`);

@@ -9,6 +9,7 @@
  *   ... --model=gpt-5-6-luna                             pair under evaluation
  *   ... --json=artifacts/mem-eval.json                   preserve the artifact
  *   ... --max-cost-usd=5                                 hard stop on spend
+ *   ... --run-ordinal=1                                  which approved run this is
  *   ... --limit=10                                       compatibility probe, not a run
  *
  * What this does NOT do, on purpose:
@@ -115,6 +116,28 @@ const rawMaxCost = argValue("max-cost-usd", "");
 const maxCostUsd = rawMaxCost === "" ? null : Number(rawMaxCost);
 if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
     console.error(`--max-cost-usd must be a positive number (got "${rawMaxCost}").`);
+    process.exit(1);
+}
+
+/**
+ * Which of the approved runs this invocation is, counting from 1.
+ *
+ * The budget approves a number of provider-dispatched runs and this
+ * repository keeps no ledger of them: `accruedCostUsd` starts at zero every
+ * time, and nothing here can read what a previous invocation spent. So the
+ * operator states the ordinal and the gate holds it against the approval,
+ * which turns the explicit instruction to run into the ledger it already was
+ * procedurally -- and makes a run past the approved count refuse rather than
+ * depend on somebody remembering how many have happened.
+ *
+ * Required for `--live` when the budget names a run count. Not defaulted to
+ * 1: a default would make every unstated run the first one, which is the
+ * failure this exists to prevent.
+ */
+const rawRunOrdinal = argValue("run-ordinal", "");
+const runOrdinal = rawRunOrdinal === "" ? undefined : Number(rawRunOrdinal);
+if (runOrdinal !== undefined && !(Number.isInteger(runOrdinal) && runOrdinal > 0)) {
+    console.error(`--run-ordinal must be a positive integer (got "${rawRunOrdinal}").`);
     process.exit(1);
 }
 
@@ -294,6 +317,8 @@ const runMode = decideEvalRunMode({
     budgetBindingProblems: budgetBinding.problems,
     budgetTupleFailures: budgetBinding.tupleFailures,
     runShaDescendsFromApproval: budgetBinding.descends,
+    // Stated on the command line, because nothing in the tree can count runs.
+    runOrdinal,
     requestedRunCapUsd: maxCostUsd,
 });
 
@@ -390,6 +415,18 @@ const REFUSAL_MESSAGES = {
         "Equality is not required and never was: a registration PR cannot contain\n" +
         "its own merge SHA. What is required is that this commit descends from the\n" +
         "approved one and assembles the same three digests.",
+    run_ordinal_not_approved:
+        `--run-ordinal=${rawRunOrdinal || "(absent)"} is not one of the runs this budget ` +
+        `approves (1..${String(registerEntry?.evalBudget?.maxProviderDispatchedRuns)}).\n\n` +
+        "The approval covers a fixed number of provider-dispatched runs and this\n" +
+        "repository keeps no ledger of them -- every invocation starts its spend\n" +
+        "at zero. So the invocation says which run it is and this gate holds it\n" +
+        "against the approval.\n\n" +
+        "The second run is the §12.4 reproducibility run, started only on an\n" +
+        "explicit instruction after the first has been reviewed; unused budget\n" +
+        "from the first does not carry into it. A run beyond the approved count\n" +
+        "needs a new budget approval, recorded on the register, not a larger\n" +
+        "number here.",
     run_cap_above_approved_ceiling:
         `--max-cost-usd=${maxCostUsd} is above the approved ceiling for this pair ` +
         `(US$${registerEntry?.evalBudget?.maxUsd}).\n` +
@@ -890,14 +927,31 @@ if (abortedOnFailures) {
 }
 if (costStopped) {
     console.log(
-        `\nTRUNCATED — stopped at the --max-cost-usd=${maxCostUsd} ceiling after ` +
-            `${outcomes.length}/${MEMORY_EVAL_CASES.length} cases. The missing cases were planned, not absent.`
+        `\nTRUNCATED — stopped at the US$${runMode.ceilingUsd} ceiling after ` +
+            `${outcomes.length}/${MEMORY_EVAL_CASES.length} cases. The missing cases were planned, not absent.\n` +
+            "This run is not decision-grade whatever its numbers say: the cases it\n" +
+            "scored are the ones the money reached, not a sample anybody chose. The\n" +
+            "answer is a fresh budget approval, not a larger ceiling here."
     );
 }
 if (runMode.mode === "live") {
     line("\naccrued cost (USD, estimate)", accruedCostUsd.toFixed(4));
     if (registerEntry.evalBudget) {
-        line("approved ceiling (USD)", registerEntry.evalBudget.maxUsd);
+        line("approved ceiling, this run (USD)", registerEntry.evalBudget.maxUsd);
+        const { programmeMaxMicroUsd, maxProviderDispatchedRuns } =
+            registerEntry.evalBudget;
+        if (programmeMaxMicroUsd !== undefined) {
+            line(
+                "approved programme total (USD)",
+                (programmeMaxMicroUsd / 1_000_000).toFixed(6)
+            );
+        }
+        if (maxProviderDispatchedRuns !== undefined) {
+            line(
+                "run",
+                `${String(runOrdinal)} of ${maxProviderDispatchedRuns} approved`
+            );
+        }
     }
     if (pricingFailures > 0) {
         line("calls whose price did not resolve", pricingFailures);
@@ -950,17 +1004,43 @@ const artifact = {
         // let an unbounded run be read as a bounded one.
         pricingFailures: runMode.mode === "live" ? pricingFailures : 0,
         spendCeilingReliable: runMode.mode !== "live" || pricingFailures === 0,
-        // Decision-grade needs all three: a live run, a sample at the §12.2
-        // floor, and a frozen dataset. Any one missing and the artifact says so.
+        // Decision-grade needs all of: a live run, a sample at the §12.2
+        // floor, a frozen dataset, the whole sample rather than a probe, and
+        // a run that was not cut short at its spend ceiling. Any one missing
+        // and the artifact says so.
+        //
+        // The last of those was added with the per-run ceiling on 2026-08-28.
+        // A run truncated at the ceiling scored some prefix of the sample and
+        // stopped, and `adequacy.decisionGrade` reads the case count it did
+        // score -- so a truncation that still cleared the §12.2 floor would
+        // have produced a decision-grade verdict over a sample chosen by
+        // where the money ran out. The approval's answer to a truncated run
+        // is not a larger ceiling but a fresh approval, so the artifact must
+        // not present one as citable.
         decisionGrade:
             verdict.adequacy.decisionGrade &&
             runMode.mode === "live" &&
             MEMORY_EVAL_DATASET_FROZEN &&
-            probeLimit === null,
+            probeLimit === null &&
+            !costStopped,
         datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
         datasetPurpose: MEMORY_EVAL_DATASET_PURPOSE,
         abortedOnConsecutiveFailures: abortedOnFailures,
         runCeilingUsd: runMode.mode === "live" ? runMode.ceilingUsd : null,
+        // Which approved run this was, and the two figures that make the
+        // per-run number readable. `runCeilingUsd` above is what this
+        // invocation was allowed to spend after any --max-cost-usd narrowing;
+        // `perRunCeilingUsd` is what the approval allows a run, and
+        // `programmeMaxMicroUsd` is what it allows in total. Recorded
+        // together because a reader holding one artifact cannot otherwise
+        // tell a per-run ceiling from a programme one -- which is the
+        // confusion this pass was correcting.
+        runOrdinal: runMode.mode === "live" ? (runOrdinal ?? null) : null,
+        perRunCeilingUsd: registerEntry.evalBudget?.maxUsd ?? null,
+        approvedRunCount:
+            registerEntry.evalBudget?.maxProviderDispatchedRuns ?? null,
+        programmeMaxMicroUsd:
+            registerEntry.evalBudget?.programmeMaxMicroUsd ?? null,
     },
     verdict: {
         pass: verdict.pass,

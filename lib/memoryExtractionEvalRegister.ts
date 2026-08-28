@@ -43,7 +43,34 @@ export type MemoryExtractionEvalEntry = {
      */
     evalBudget: {
         approvedBy: string;
+        /**
+         * The ceiling for ONE harness invocation.
+         *
+         * Named for what the code does with it: `decideEvalRunMode()` returns
+         * it as `ceilingUsd`, and `accruedCostUsd` starts at zero on every
+         * invocation. It has never been a programme total, and recording a
+         * programme total here would have authorised that figure once per run
+         * — two runs of a two-run approval spending twice what was approved.
+         *
+         * The programme total is `programmeMaxMicroUsd`, and dividing it by
+         * the approved run count is what makes the two agree.
+         */
         maxUsd: number;
+        /**
+         * The total this pair may spend across every approved run, in
+         * microUSD so the figure is exact.
+         *
+         * Recorded rather than enforced, for the same reason
+         * `maxProviderDispatchedRuns` is: this repository keeps no ledger of
+         * runs, so nothing here can add up what previous invocations spent.
+         * What is enforced per invocation is `maxUsd`, and what makes the two
+         * consistent is that `maxUsd × maxProviderDispatchedRuns` may not
+         * exceed this — checked by `findEvalRegisterProblems()`.
+         *
+         * Unused budget from one run does not carry into the next: the per-run
+         * ceiling is the per-run ceiling, and raising it needs an approval.
+         */
+        programmeMaxMicroUsd?: number;
         ticket: string;
         approvedAt: string;
         /**
@@ -71,11 +98,18 @@ export type MemoryExtractionEvalEntry = {
         /**
          * How many runs may reach a provider under this approval.
          *
-         * Recorded, not machine-enforced — this repository keeps no ledger of
-         * runs, so nothing here can count them. What *is* enforced is the
-         * spend ceiling above and the §12.4 procedure: the second run is a
-         * reproducibility run, not a retry, and it is not made at all if the
-         * first showed a structural failure or a clear miss.
+         * Half-enforced, and the half matters. Nothing here can *count* runs:
+         * this repository keeps no ledger of them and `accruedCostUsd` starts
+         * at zero on every invocation. What is enforced is that a live run
+         * states which of the approved runs it is (`--run-ordinal`) and that
+         * the number is one this approval covers — so a third run of a
+         * two-run approval refuses, and the operator's explicit instruction to
+         * run is the ledger it already was procedurally.
+         *
+         * The §12.4 procedure is the rest of it and stays a human matter: the
+         * second run is a reproducibility run rather than a retry, it starts
+         * only after the first has been reviewed, and it is not made at all if
+         * the first showed a structural failure or a clear miss.
          */
         maxProviderDispatchedRuns?: number;
     } | null;
@@ -495,15 +529,29 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "and was excluded from decision-grade runs " +
                 "(.github/audits/memory-eval-gold-contract-2026-08-27.md, " +
                 "section 16). Nothing was spent under it. Instrument: " +
-                "docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md.",
+                "docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md. " +
+                "Ceilings: US$6.285 per run, US$12.57 across the two approved " +
+                "runs. Unused budget from the first run does not carry into " +
+                "the second; a first run truncated at its ceiling is not " +
+                "decision-grade and the ceiling is not raised without a new " +
+                "approval. The second run is the section 12.4 reproducibility " +
+                "run and starts only on an explicit instruction after the " +
+                "first has been reviewed.",
             evalBudget: {
                 approvedBy: "@mposition",
-                // The worst case for two runs on succ-5, from
-                // `npm run report:memory-eval-cost-estimate`: every answer at
-                // the 4,096-token output ceiling across 1,150 cases, twice.
-                // Not a round number on purpose — a ceiling rounded up is a
-                // ceiling nobody computed.
-                maxUsd: 12.57,
+                // Per invocation, which is what the harness enforces: half of
+                // the approved programme total, because the approval is for
+                // two runs. US$12.57 was the programme figure and putting it
+                // here would have allowed it twice — `accruedCostUsd` starts
+                // at zero on every invocation.
+                //
+                // The programme figure is the worst case for two runs on
+                // succ-5, from `npm run report:memory-eval-cost-estimate`:
+                // every answer at the 4,096-token output ceiling across 1,150
+                // cases, twice. Not a round number on purpose — a ceiling
+                // rounded up is a ceiling nobody computed.
+                maxUsd: 6.285,
+                programmeMaxMicroUsd: 12_570_000,
                 ticket:
                     ".github/audits/memory-eval-gold-contract-2026-08-27.md, section 17",
                 approvedAt: "2026-08-28",
@@ -620,12 +668,42 @@ export function findEvalRegisterProblems(
                 }
             }
             if (!Number.isFinite(maxUsd) || maxUsd <= 0) {
-                // The harness reads this as the spend ceiling. Zero would stop
-                // every live run at the first case, and a negative number is a
-                // ceiling nobody chose.
+                // The harness reads this as the spend ceiling for ONE
+                // invocation. Zero would stop every live run at the first
+                // case, and a negative number is a ceiling nobody chose.
                 problems.push(
                     `${label}: eval budget maxUsd must be a positive number (got ${maxUsd})`
                 );
+            }
+            // The two ceilings have to agree, and the direction that matters is
+            // one way round: a per-run ceiling that, spent to the limit on
+            // every approved run, exceeds the programme total is an approval
+            // the register would let a runner overspend by simply running
+            // again. `accruedCostUsd` restarts at zero on every invocation, so
+            // nothing downstream would notice.
+            const { programmeMaxMicroUsd, maxProviderDispatchedRuns } =
+                entry.evalBudget;
+            if (programmeMaxMicroUsd !== undefined) {
+                if (
+                    !Number.isInteger(programmeMaxMicroUsd) ||
+                    programmeMaxMicroUsd <= 0
+                ) {
+                    problems.push(
+                        `${label}: programmeMaxMicroUsd must be a positive whole ` +
+                            `number of microUSD (got ${programmeMaxMicroUsd})`
+                    );
+                } else if (maxProviderDispatchedRuns !== undefined) {
+                    const worstCase = Math.round(
+                        maxUsd * 1_000_000 * maxProviderDispatchedRuns
+                    );
+                    if (worstCase > programmeMaxMicroUsd) {
+                        problems.push(
+                            `${label}: ${maxProviderDispatchedRuns} run(s) at ` +
+                                `US$${maxUsd} is ${worstCase} microUSD, above the ` +
+                                `approved programme total of ${programmeMaxMicroUsd}`
+                        );
+                    }
+                }
             }
         }
         if (entry.status !== "approved") continue;

@@ -1113,7 +1113,8 @@ freeze 검사에 succ-5 구획 4조건이 추가됐습니다 — 표본 불변, 
 | prompt | `mem-extract-v6` |
 | prompt digest | `c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052` |
 | provider-dispatched 실행 상한 | 2회 |
-| pair 총예산 상한 | US$12.57 / 12,570,000 microUSD |
+| pair 총예산 상한(프로그램) | US$12.57 / 12,570,000 microUSD |
+| 실행별 상한 | US$6.285 / 6,285,000 microUSD |
 
 ### 17.2 "하나라도 다르면 효력 상실"을 문장이 아니라 gate로
 
@@ -1144,8 +1145,52 @@ approvedImplementationSha`는 성립할 수 없는 조건입니다. 실행 조�
 - dispatch 이후 실패 또는 비용 불명이면 **중단하고 사용액을 대조**한 뒤 별도
   승인을 받습니다.
 
-`maxProviderDispatchedRuns: 2`는 기록이며 기계가 세지 않습니다 — 이 저장소에는
-실행 원장이 없습니다. 강제되는 것은 지출 상한과 위 절차입니다.
+`maxProviderDispatchedRuns: 2`가 실행 횟수를 세지는 않습니다 — 이 저장소에는
+실행 원장이 없고 `accruedCostUsd`는 매 실행 0에서 시작합니다. 대신 실행이
+**자기가 몇 회차인지 말하고**(`--run-ordinal`) gate가 그 숫자를 승인과
+대조하므로, 2회 승인에서 3회차는 `run_ordinal_not_approved`로 거절됩니다.
+회차를 말하지 않는 실행도 거절입니다 — 기본값 1을 두면 말하지 않은 모든 실행이
+1회차가 되고, 그것이 이 gate가 막으려는 회계입니다. 사용자의 명시적 실행 지시가
+절차상 원장 역할을 합니다.
+
+### 17.7 실행별 상한과 프로그램 총상한을 분리했습니다 (2026-08-28)
+
+등록 PR 검토에서 발견된 의미 불일치입니다. `evalBudget.maxUsd`는 코드에서
+`decideEvalRunMode()`가 `ceilingUsd`로 돌려주고 harness가 `accruedCostUsd`와
+비교하는 값, 즉 **한 실행의 상한**입니다. 여기에 프로그램 총액 US$12.57을
+적으면 두 차례 실행에서 각각 US$12.57까지, 합계 최대 US$25.14가 허용됩니다 —
+승인액의 두 배입니다.
+
+수정은 필드를 둘로 나눈 것입니다.
+
+| 필드 | 값 | 성격 |
+|---|---|---|
+| `maxUsd` | 6.285 | 실행별 상한, harness가 강제 |
+| `programmeMaxMicroUsd` | 12,570,000 | 프로그램 총상한, 기록 |
+| `maxProviderDispatchedRuns` | 2 | 회차 상한, `--run-ordinal`로 강제 |
+
+`findEvalRegisterProblems()`가 `maxUsd × maxProviderDispatchedRuns ≤
+programmeMaxMicroUsd`를 검사하므로, 다시 총액을 `maxUsd`에 적으면 register
+검사에서 실패합니다.
+
+함께 확정한 운영 조건입니다.
+
+- **1회차 미사용액은 2회차로 이월되지 않습니다.** 실행별 상한은 실행별
+  상한이고, 올리려면 별도 승인이 필요합니다.
+- **1회차가 US$6.285에서 잘리면 decision-grade가 아닙니다.** artifact의
+  `decisionGrade`가 `costStopped`일 때 `false`가 되도록 바꿨습니다 — 잘린
+  실행이 채점한 케이스는 돈이 닿은 앞부분이지 누가 고른 표본이 아니며,
+  §12.3 floor를 넘겼다는 이유로 인용 가능한 판정이 되어서는 안 됩니다.
+- **2회차는 1회차를 검토한 뒤 명시적 실행 지시가 있을 때만 시작**하고, 세 번째
+  실행은 금지이며 새 예산 승인을 요구합니다.
+
+artifact는 `runOrdinal`, `runCeilingUsd`(이 실행이 실제로 허용된 상한),
+`perRunCeilingUsd`, `approvedRunCount`, `programmeMaxMicroUsd`를 함께 남깁니다.
+artifact 하나만 든 독자가 실행별 상한과 프로그램 상한을 구분하지 못하는 것이
+이번 불일치의 원인이었기 때문입니다.
+
+이 정정은 승인 총액과 tuple을 바꾸지 않으므로 새 예산 승인이 필요하지 않으며,
+등록 PR 안에서 처리했습니다(@mposition, 2026-08-28).
 
 ### 17.5 이번 승인이 열지 않는 것
 

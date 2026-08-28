@@ -208,6 +208,10 @@ test("only a funded, open pair can run live, and it is named", () => {
             budgetBindingProblems: [],
             budgetTupleFailures: [],
             runShaDescendsFromApproval: true,
+            // Likewise the run ordinal: a budget that names a run count wants
+            // one, and leaving it out would make every funded entry refuse
+            // for the ordinal rather than tell us anything about the register.
+            runOrdinal: 1,
         });
         if (decision.mode === "live") {
             runnable.push(label);
@@ -236,14 +240,16 @@ test("only a funded, open pair can run live, and it is named", () => {
     // these lines moving is a budget nobody approved for the figure it
     // became.
     //
-    // v6's US$12.57 is the worst case for two runs on `mem-eval-succ-5`, not a
-    // round number chosen for comfort. v4's US$15 predates instrument binding
-    // and, as `tests/memoryEvalV5Budget.test.mjs` shows, that budget cannot
-    // fund a run at all — being in this list means the register would allow
-    // it, not that the binding would.
+    // v6's US$6.285 is *per run*: half of the US$12.57 worst case for two runs
+    // on `mem-eval-succ-5`, because `maxUsd` is what one invocation may spend
+    // and `accruedCostUsd` starts at zero every time. Recording the programme
+    // figure here would have authorised it once per run. v4's US$15 predates
+    // instrument binding and, as `tests/memoryEvalV5Budget.test.mjs` shows,
+    // that budget cannot fund a run at all — being in this list means the
+    // register would allow it, not that the binding would.
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
-        "gpt-5-6-luna::mem-extract-v6": 12.57,
+        "gpt-5-6-luna::mem-extract-v6": 6.285,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(

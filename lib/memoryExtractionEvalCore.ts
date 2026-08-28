@@ -502,6 +502,7 @@ export type EvalRunModeDecision =
               | "budget_not_bound"
               | "budget_tuple_mismatch"
               | "run_sha_not_descendant"
+              | "run_ordinal_not_approved"
               | "unknown_commit"
               | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
@@ -526,7 +527,26 @@ export function decideEvalRunMode(input: {
     live: boolean;
     registerEntry:
         | {
-              evalBudget: { maxUsd: number } | null;
+              evalBudget:
+                  | {
+                        /**
+                         * The ceiling for *one* invocation, not for the
+                         * programme. `accruedCostUsd` starts at zero every
+                         * time the harness runs, so this number is what a
+                         * single run may spend; the programme total lives on
+                         * the register as `programmeMaxMicroUsd` and is
+                         * enforced by the run count below plus the operator's
+                         * explicit instruction to run.
+                         */
+                        maxUsd: number;
+                        /**
+                         * How many provider-dispatched runs the approval
+                         * covers, if it says. `runOrdinal` is checked against
+                         * it below.
+                         */
+                        maxProviderDispatchedRuns?: number;
+                    }
+                  | null;
               /**
                * Checked as well as the budget, because a revoked entry keeps
                * its budget: the approval was real and the money was really
@@ -636,6 +656,20 @@ export function decideEvalRunMode(input: {
      * instrument is running the approved one.
      */
     runShaDescendsFromApproval?: boolean;
+    /**
+     * Which of the approved runs this invocation is, counting from 1.
+     *
+     * The approval allows a fixed number of provider-dispatched runs and this
+     * repository keeps no ledger of them, so the operator states it and the
+     * gate checks it against the approval. That makes the explicit instruction
+     * to run the ledger — which is what it already was procedurally — and
+     * makes a third run refuse rather than depend on somebody remembering.
+     *
+     * Required for a live run when the budget names a run count: absent, the
+     * invocation cannot say which run it is, and "some run" is not a run
+     * anybody approved.
+     */
+    runOrdinal?: number;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
@@ -677,6 +711,22 @@ export function decideEvalRunMode(input: {
     }
     // A per-run cap may only narrow the approved programme ceiling. Letting a
     // command-line flag widen it would make the approval meaningless.
+    // Which approved run this is. Checked after the binding, because an
+    // invocation of the wrong instrument is wrong whichever run it claims to
+    // be, and before the cap, because a fourth run's cap is not interesting.
+    const approvedRuns = budget.maxProviderDispatchedRuns;
+    if (approvedRuns !== undefined) {
+        const ordinal = input.runOrdinal;
+        if (
+            ordinal === undefined ||
+            !Number.isInteger(ordinal) ||
+            ordinal < 1 ||
+            ordinal > approvedRuns
+        ) {
+            return { mode: "refused", reason: "run_ordinal_not_approved" };
+        }
+    }
+
     const requested = input.requestedRunCapUsd;
     if (requested != null && requested > budget.maxUsd) {
         return { mode: "refused", reason: "run_cap_above_approved_ceiling" };
