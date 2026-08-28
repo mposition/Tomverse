@@ -45,13 +45,13 @@ on:
         required: true
         default: ""
       max_cost_pilot_usd:
-        description: "Ceiling for the pilot stage. Estimated $0.39 — see docs/ops/tomverse-chat-router-calibration-cost.md"
+        description: "Ceiling for the pilot stage. Approved: 0.50 (estimated $0.39 — see docs/ops/tomverse-chat-router-calibration-cost.md)"
         required: true
-        default: "2"
+        default: "0.50"
       max_cost_rejudge_usd:
-        description: "Ceiling for the independent judge. Estimated $3.68, arithmetic ceiling $9.53"
+        description: "Ceiling for the independent judge. Approved: 4.00 (estimated $3.68)"
         required: true
-        default: "12"
+        default: "4.00"
       confirm:
         description: "Type SPEND to confirm this dispatch will call a paid provider"
         required: true
@@ -86,6 +86,36 @@ jobs:
         run: |
           echo "::error::confirm must be exactly SPEND. Nothing was run."
           exit 1
+
+      # The approval is for specific numbers, so the numbers are checked rather
+      # than defaulted. Defaults can be typed over at dispatch; a ceiling that
+      # only exists as a default is a suggestion.
+      #
+      #   pilot 0.50 + independent judge 4.00 = 4.50 total
+      #
+      # Raising any of them needs mposition's approval, and the way to record
+      # that is to edit this step in a commit rather than to type a bigger
+      # number into the dispatch form.
+      - name: The ceilings are the approved ones
+        env:
+          PILOT: ${{ inputs.max_cost_pilot_usd }}
+          REJUDGE: ${{ inputs.max_cost_rejudge_usd }}
+        run: |
+          node -e '
+            const approved = { pilot: 0.50, rejudge: 4.00, total: 4.50 };
+            const pilot = Number(process.env.PILOT);
+            const rejudge = Number(process.env.REJUDGE);
+            const bad = [];
+            if (!(pilot > 0) || pilot > approved.pilot) bad.push(`pilot ceiling ${process.env.PILOT} exceeds the approved $${approved.pilot.toFixed(2)}`);
+            if (!(rejudge > 0) || rejudge > approved.rejudge) bad.push(`judge ceiling ${process.env.REJUDGE} exceeds the approved $${approved.rejudge.toFixed(2)}`);
+            if (pilot + rejudge > approved.total) bad.push(`the two together are $${(pilot + rejudge).toFixed(2)}, over the approved total $${approved.total.toFixed(2)}`);
+            if (bad.length > 0) {
+              for (const line of bad) console.log(`::error::${line}`);
+              console.log("::error::Nothing was run and nothing was billed.");
+              process.exit(1);
+            }
+            console.log(`Ceilings within approval: pilot $${pilot.toFixed(2)} + judge $${rejudge.toFixed(2)} = $${(pilot + rejudge).toFixed(2)} of $${approved.total.toFixed(2)}.`);
+          '
 
       - uses: actions/checkout@v4
 
@@ -187,19 +217,35 @@ jobs:
             --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
             --json=artifacts/route01-pilot-${{ inputs.run_label }}.json
 
-      # The gate mposition set, in front of the expensive call: 200 of 210
-      # overall, 13 of 14 in every cell, and no bundle problems at all. A
-      # bundle short of those is a calibration over the pairs that happened to
-      # survive, and the judge that would grade it costs ten times the run that
-      # produced the answers.
+      # The hard gate mposition set in front of the expensive call. Every
+      # condition must hold; any one failing means the judge is not called and
+      # the job ends:
+      #
+      #   pilot.completed = true          the pilot ran to the end
+      #   pilot.pairsAttempted = 210      the whole set, not a truncated slice
+      #   bundleProblems = 0              every stored answer is judgeable
+      #   pairedCoverage >= 200/210       overall floor
+      #   eachCellPairedCoverage >= 13/14 per-cell floor
+      #   lostByThisCode = 0              no answer was lost by this harness
+      #   costSoFar <= 0.50               the pilot stayed inside its ceiling
+      #
+      # A bundle short of the floors buys a calibration over the pairs that
+      # happened to survive. A bundle whose answers this code mangled buys a
+      # measurement of this code. Both cost ten times the run that produced the
+      # answers, so both are refused for free, here.
       #
       # It runs whatever the pilot's exit code was, so a pilot that stopped
-      # early is refused here by name rather than silently followed.
+      # early is refused here by name rather than silently followed. There is
+      # no retry: a re-run starts a new pilot, because regenerating the pairs
+      # that already completed would rewrite answers this run already paid for
+      # and graded.
       - name: The bundle may be judged
         run: |
           npm run check:router-answer-bundle -- \
             --bundle=artifacts/route01-pilot-${{ inputs.run_label }}.answers.jsonl \
-            --set=docs/ops/router-evaluation-set/development-v0.json
+            --set=docs/ops/router-evaluation-set/development-v0.json \
+            --record=artifacts/route01-pilot-${{ inputs.run_label }}.json \
+            --max-cost-usd='${{ inputs.max_cost_pilot_usd }}'
 
       # The same answers, graded by the independent judge. No answer is
       # regenerated and the display order is the one the bundle fixed, so the

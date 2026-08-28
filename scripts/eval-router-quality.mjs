@@ -90,6 +90,7 @@ import { ACTIVE_ESTIMATOR_VERSION, estimateRawTextTokens } from "../lib/chatToke
 import { decideRouterModel, ROUTER_VERSIONS } from "../lib/routerDecision.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import {
+  EMPTINESS_CLASSIFICATIONS,
   failed as answerFailed,
   failureRecord,
   outcomeFromReply,
@@ -325,6 +326,10 @@ let commitSha = (() => {
 const random = seededRandom(seed);
 let accruedCostUsd = 0;
 let truncatedByCost = false;
+// Every arm answer that produced nothing usable, kept for the record as well
+// as the journal. The gate in front of the paid judge reads its classification
+// counts, so they have to survive into a file rather than only into a log.
+const generationFailures = [];
 
 // Priced through the same lib/modelPricing.ts profile the product bills from,
 // so the figure this prints is the one the run actually costs rather than a
@@ -375,12 +380,21 @@ const answer = async (model, prompt, arm) => {
       usage: {},
       latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
       rawTextLength: 0,
+      traceId: null,
     });
   }
   const usage = result.usage ?? {};
   accruedCostUsd += costMicroUsd(model, usage) / 1_000_000;
   return outcomeFromReply(
-    { text: result.text, finishReason: result.finishReason ?? null, usage },
+    {
+      text: result.text,
+      finishReason: result.finishReason ?? null,
+      usage,
+      // The provider's own handle on this response. An emptiness this run
+      // cannot classify is reported with it, because it is what somebody would
+      // have to quote to ask the provider what it actually sent.
+      traceId: result.response?.id ?? null,
+    },
     { ...identity, latencyMs: Number(process.hrtime.bigint() - startedAt) / 1e6 }
   );
 };
@@ -772,6 +786,42 @@ console.log("");
 const pairs = [];
 const excludedLog = [];
 
+/**
+ * The generation failures, counted the way the gate asks about them.
+ *
+ * `harnessLostText` is the one that voids a run: those answers existed and
+ * this code lost them, so the run measured the harness. `undetermined` is the
+ * honest middle -- a real failure whose cause nothing here establishes -- and
+ * it is reported per failure rather than only counted, because arm, provider,
+ * API model, finish reason, usage and trace id are what somebody would need to
+ * go and find out.
+ */
+const summariseGenerationFailures = (failures) => {
+  const byClassification = {};
+  for (const classification of EMPTINESS_CLASSIFICATIONS) byClassification[classification] = 0;
+  let providerErrors = 0;
+  for (const failure of failures) {
+    if (failure.emptiness === null) providerErrors += 1;
+    else byClassification[failure.emptiness] += 1;
+  }
+  return {
+    total: failures.length,
+    providerErrors,
+    byClassification,
+    harnessLostText: byClassification.harness_lost_text,
+    undetermined: failures
+      .filter((failure) => failure.emptiness === "observed_empty_at_adapter_boundary")
+      .map((failure) => ({
+        arm: failure.arm,
+        provider: failure.provider,
+        apiModel: failure.apiModel,
+        finishReason: failure.finishReason,
+        usage: failure.usage,
+        traceId: failure.traceId,
+      })),
+  };
+};
+
 // The run's own start, taken before the first request rather than after the
 // last. `evaluationRecordProblems` refuses a baseline pre-registered after the
 // run began, and a `startedAt` stamped at the end weakens exactly that check.
@@ -933,7 +983,10 @@ for (const [index, item] of liveItems.entries()) {
   const baselineAnswer = await answer(baselineModel, item.prompt, "baseline");
 
   for (const outcome of [autoAnswer, baselineAnswer]) {
-    if (outcome.status === "failed") journal(failureRecord(outcome));
+    if (outcome.status !== "failed") continue;
+    const failure = failureRecord(outcome);
+    generationFailures.push(failure);
+    journal(failure);
   }
 
   // mposition's ruling. An empty answer is a real failure for the person who
@@ -1133,6 +1186,36 @@ console.log(`Judge position ${pct(verdict.positionBias.firstRate)} preferred the
 console.log(`Routed away    ${pct(verdict.routedAwayRate)} of judged pairs used a model other than the baseline`);
 console.log(`Provider cost  $${accruedCostUsd.toFixed(4)}${truncatedByCost ? " (run truncated by --max-cost-usd)" : ""}`);
 
+// Printed even when it is all zeros, because "no answer was lost" is the
+// finding that lets the run be spent on, and a line that appears only on
+// trouble cannot be read as saying that.
+{
+  const summary = summariseGenerationFailures(generationFailures);
+  console.log(
+    `Empty answers  ${summary.total} failed generation(s)` +
+      ` — ${summary.byClassification.harness_lost_text} lost by this harness,` +
+      ` ${summary.byClassification.observed_empty_at_adapter_boundary} empty at the adapter boundary,` +
+      ` ${summary.byClassification.provider_confirmed_empty} confirmed empty by the provider,` +
+      ` ${summary.providerErrors} provider error(s)`
+  );
+  // The cause nothing here settles. Reported per failure, with what somebody
+  // would have to quote to ask the provider what it really sent.
+  for (const failure of summary.undetermined) {
+    console.log(
+      `  undetermined  ${failure.arm} ${failure.provider}/${failure.apiModel}` +
+        ` finishReason=${failure.finishReason ?? "none"}` +
+        ` usage=${JSON.stringify(failure.usage)} traceId=${failure.traceId ?? "none"}`
+    );
+  }
+  if (summary.harnessLostText > 0) {
+    console.log(
+      `\nHARNESS DEFECT — ${summary.harnessLostText} answer(s) existed and this code holds none of\n` +
+        "them. That is a measurement of this harness, not of the models, so this run is void\n" +
+        "and nothing downstream may be paid for on the strength of it."
+    );
+  }
+}
+
 if (mode === "pilot") {
   const measured = verdict.delta.discordanceRate;
   console.log("");
@@ -1275,6 +1358,10 @@ const record = {
   plannedItems,
   completedItems: pairs.length,
   stoppedReason,
+  // What the gate in front of the paid judge reads. Summary counts rather than
+  // the raw lines, because the gate asks three questions of them and a reader
+  // asking a fourth has the journal.
+  generationFailureSummary: summariseGenerationFailures(generationFailures),
   rebuiltFromJournal: fromJournalPath || null,
   providerCostUsd: Number(accruedCostUsd.toFixed(6)),
   pairs,

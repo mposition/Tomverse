@@ -43,11 +43,11 @@ export type AnswerFailureReason = (typeof ANSWER_FAILURE_REASONS)[number];
 /**
  * What the call did, kept whether it succeeded or not.
  *
- * `rawTextLength` and `finishReason` are here for one specific case: a
- * provider that did return text this code failed to read is an instrumentation
- * defect, not a model failure, and the two are indistinguishable from an empty
- * string alone. A failure whose raw response was non-empty is a bug in the
- * adapter and has to be readable as such afterwards.
+ * `rawTextLength`, `finishReason` and `usage` are here so an empty answer can
+ * be classified afterwards. A provider that did return text this code failed
+ * to read is an instrumentation defect rather than a model failure, and the
+ * two are indistinguishable from an empty string alone. See
+ * `classifyEmptiness`.
  */
 export type AnswerMetadata = {
     /**
@@ -62,8 +62,16 @@ export type AnswerMetadata = {
     finishReason: string | null;
     usage: Readonly<Record<string, number>>;
     latencyMs: number;
-    /** Length of the text before trimming. Non-zero on a failure means this code lost it. */
+    /** Length of the text before trimming, as this code received it. */
     rawTextLength: number;
+    /**
+     * The provider's own id for the response, when it sent one.
+     *
+     * The handle for asking the provider what it actually returned. An
+     * emptiness this run cannot classify is reported with it, because that is
+     * the question it leaves open.
+     */
+    traceId: string | null;
 };
 
 export type AnswerOutcome =
@@ -112,14 +120,47 @@ export const failed = (
 ): AnswerOutcome => ({ status: "failed", reason, detail, metadata });
 
 /**
+ * What is actually known about an empty answer, in a sentence.
+ *
+ * Worded to the classification rather than to the empty string, so a journal
+ * line never says "the provider returned no text" about a case where nobody
+ * established that.
+ */
+export const emptinessDetail = (metadata: AnswerMetadata): string => {
+    const generated = generatedTokens(metadata.usage);
+    switch (classifyEmptiness(metadata)) {
+        case "harness_lost_text":
+            return metadata.rawTextLength > 0
+                ? `the reply held ${metadata.rawTextLength} character(s) of whitespace and nothing else, ` +
+                      "so normalising it left this harness with no text"
+                : `the provider reports generating ${generated} output token(s) and this harness holds ` +
+                      "none of the text, so it was lost before it was read";
+        case "provider_confirmed_empty":
+            return `the provider finished with finishReason=${metadata.finishReason} and reports ` +
+                "generating 0 output tokens, so it produced nothing";
+        default:
+            return (
+                "no text reached this harness and nothing establishes whether the provider sent any" +
+                (metadata.finishReason === null ? "; it reported no finish reason" : "") +
+                (generated === null ? "; it reported no output token count" : "")
+            );
+    }
+};
+
+/**
  * Turn a provider reply into an outcome.
  *
  * Called with whatever the SDK returned; the emptiness decision lives here so
  * no caller has to remember to make it.
  */
 export const outcomeFromReply = (
-    reply: { text?: string | null; finishReason?: string | null; usage?: Record<string, number> },
-    metadata: Omit<AnswerMetadata, "finishReason" | "usage" | "rawTextLength">
+    reply: {
+        text?: string | null;
+        finishReason?: string | null;
+        usage?: Record<string, number>;
+        traceId?: string | null;
+    },
+    metadata: Omit<AnswerMetadata, "finishReason" | "usage" | "rawTextLength" | "traceId">
 ): AnswerOutcome => {
     const raw = typeof reply.text === "string" ? reply.text : "";
     const full: AnswerMetadata = {
@@ -127,33 +168,110 @@ export const outcomeFromReply = (
         finishReason: reply.finishReason ?? null,
         usage: reply.usage ?? {},
         rawTextLength: raw.length,
+        traceId: reply.traceId ?? null,
     };
     const text = displayableText(raw);
-    if (text === null) {
-        return failed(
-            "empty_output",
-            raw.length === 0
-                ? "the provider returned no text"
-                : `the provider returned ${raw.length} character(s) of whitespace and nothing else`,
-            full
-        );
-    }
+    if (text === null) return failed("empty_output", emptinessDetail(full), full);
     return ok(text, full);
 };
 
-/** One line for the failure journal. Everything a root cause would need. */
-export const failureRecord = (outcome: Extract<AnswerOutcome, { status: "failed" }>) => ({
-    kind: "answer-failure" as const,
-    arm: outcome.metadata.arm,
-    reason: outcome.reason,
-    detail: outcome.detail,
-    modelId: outcome.metadata.modelId,
-    provider: outcome.metadata.provider,
-    apiModel: outcome.metadata.apiModel,
-    finishReason: outcome.metadata.finishReason,
-    usage: outcome.metadata.usage,
-    latencyMs: outcome.metadata.latencyMs,
-    rawTextLength: outcome.metadata.rawTextLength,
-    // The one that separates a model failure from a defect in this code.
-    lostByThisCode: outcome.reason === "empty_output" && outcome.metadata.rawTextLength > 0,
-});
+/**
+ * Where an empty answer went empty.
+ *
+ * ## Why `rawTextLength === 0` is not "the model returned nothing"
+ *
+ * mposition's correction, and it is the reason this is three values rather
+ * than a boolean. An empty string at this point in the code says only that
+ * *this code* holds no text. It does not say the provider sent none: the text
+ * may have been dropped anywhere upstream — in the adapter, in a stream that
+ * ended early, in a response shape this code reads the wrong field of. Calling
+ * that a model failure would file our own defects under the model's name, and
+ * an evaluation that does so measures the harness while reporting on the
+ * model.
+ *
+ * So the classification says how far back the emptiness is actually known to
+ * reach, and one of the three is an admission that we do not know:
+ *
+ *   * `harness_lost_text` — content demonstrably existed and this code holds
+ *     none of it. Either the raw text was non-empty and normalisation blanked
+ *     it, or the provider billed for output tokens we cannot show. Our defect,
+ *     and it voids the run.
+ *   * `observed_empty_at_adapter_boundary` — blank from the adapter boundary
+ *     onward, with nothing establishing whether the provider sent text. The
+ *     honest default. It is a real failure the user would have seen, and its
+ *     cause is open.
+ *   * `provider_confirmed_empty` — the provider's own response says it
+ *     produced nothing: it finished, and it reports generating zero output
+ *     tokens. Only this one is the model's behaviour.
+ */
+export const EMPTINESS_CLASSIFICATIONS = [
+    "harness_lost_text",
+    "observed_empty_at_adapter_boundary",
+    "provider_confirmed_empty",
+] as const;
+export type EmptinessClassification = (typeof EMPTINESS_CLASSIFICATIONS)[number];
+
+/**
+ * Output tokens the provider says it generated, or `null` when it said nothing.
+ *
+ * The distinction matters more than the number: a provider that reports no
+ * usage at all cannot confirm anything, so the absence has to survive as
+ * `null` rather than collapse to 0 and be read as "it generated nothing".
+ * Spellings differ across SDKs and none of them is canonical here.
+ */
+export const generatedTokens = (usage: Readonly<Record<string, number>>): number | null => {
+    for (const key of ["outputTokens", "completionTokens", "output_tokens", "completion_tokens"]) {
+        const value = usage[key];
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+    return null;
+};
+
+/**
+ * How far back an empty answer's emptiness is established. Never a guess:
+ * where nothing establishes it, it says so.
+ */
+export const classifyEmptiness = (metadata: AnswerMetadata): EmptinessClassification => {
+    // Text arrived and normalisation is why none is left. Ours.
+    if (metadata.rawTextLength > 0) return "harness_lost_text";
+    const generated = generatedTokens(metadata.usage);
+    // The provider generated output and this code holds none of it. Also ours,
+    // and the case a raw-length check alone cannot see: the text was lost
+    // before it ever reached `rawTextLength`.
+    if (generated !== null && generated > 0) return "harness_lost_text";
+    // The provider finished and accounts for zero output tokens. Only with
+    // both does its response actually confirm it produced nothing.
+    if (generated === 0 && metadata.finishReason !== null) return "provider_confirmed_empty";
+    return "observed_empty_at_adapter_boundary";
+};
+
+/**
+ * One line for the failure journal. Everything a root cause would need.
+ *
+ * `lostByThisCode` is the gate's field: a run with any of them is measuring
+ * this harness rather than the models, and
+ * .github/workflows/router-eval-pilot.yml refuses to spend on the independent
+ * judge when it is non-zero.
+ */
+export const failureRecord = (outcome: Extract<AnswerOutcome, { status: "failed" }>) => {
+    const emptiness =
+        outcome.reason === "empty_output" ? classifyEmptiness(outcome.metadata) : null;
+    return {
+        kind: "answer-failure" as const,
+        arm: outcome.metadata.arm,
+        reason: outcome.reason,
+        detail: outcome.detail,
+        modelId: outcome.metadata.modelId,
+        provider: outcome.metadata.provider,
+        apiModel: outcome.metadata.apiModel,
+        finishReason: outcome.metadata.finishReason,
+        usage: outcome.metadata.usage,
+        latencyMs: outcome.metadata.latencyMs,
+        rawTextLength: outcome.metadata.rawTextLength,
+        traceId: outcome.metadata.traceId,
+        emptiness,
+        // Our defect, not the model's. Never inferred from an empty string
+        // alone -- see classifyEmptiness.
+        lostByThisCode: emptiness === "harness_lost_text",
+    };
+};
