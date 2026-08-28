@@ -130,4 +130,77 @@ export const SUCC4_BATCHES: readonly Succ4Batch[] = [
             { key: "succ-durable-ko-138:e1", polarity: "affirmed" },
         ],
     },
+    {
+        id: "succ4-b02",
+        cell: "durable_facts:ko",
+        from: 25,
+        golds: [
+            { key: "succ-durable-ko-139:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-139:e2", polarity: "affirmed" },
+            { key: "succ-durable-ko-13:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-140:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-141:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-142:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-143:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-143:e2",
+                polarity: "affirmed",
+                note:
+                    "«서체 이름은 그냥 쓰셔도 됩니다» is a permission granted, not a need " +
+                    "denied. Follows the frozen reading of succ-durable-en-146:e2 («water " +
+                    "safety terminology is fine as-is»), which is affirmed.",
+            },
+            { key: "succ-durable-ko-144:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-144:e2",
+                polarity: "negated",
+                note:
+                    "Same quote as e1 and the opposite label, because they are different " +
+                    "predications: 정비 is the user's field (affirmed), and «부품 이름은 " +
+                    "설명 안 하셔도 됩니다» denies the need to explain 부품. Follows the " +
+                    "frozen readings of en-38:e2, en-88:e2 and en-181:e2, all «no need to " +
+                    "explain X» and all negated. The pair with ko-143:e2 is the line: a " +
+                    "permission granted is affirmed, a need denied is negated.",
+            },
+            { key: "succ-durable-ko-146:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-146:e2",
+                polarity: "affirmed",
+                note: "«그대로 쓰셔도 됩니다» — a permission, as ko-143:e2.",
+            },
+            { key: "succ-durable-ko-147:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-148:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-149:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-14:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-150:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-151:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-152:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-154:e1",
+                polarity: "affirmed",
+                note:
+                    "«투자보다 대출 상환을 먼저 하기로 정했습니다» — a decision whose " +
+                    "object is doing the thing, unlike ko-155. 상환 holds of the user.",
+            },
+            {
+                key: "succ-durable-ko-155:e1",
+                polarity: "negated",
+                note:
+                    "«부업은 다 정리하기로 했습니다» — a decision to wind them up, so the " +
+                    "user will not have 부업. Same shape as ko-101, ko-102 and the frozen " +
+                    "ko-153.",
+            },
+            { key: "succ-durable-ko-160:e1", polarity: "affirmed" },
+            {
+                key: "succ-durable-ko-164:e1",
+                polarity: "negated",
+                note:
+                    "«유머는 넣지 말고 진지하게만 답해 주세요». Follows the frozen reading " +
+                    "of en-164:e1 («No jokes, please»). The scan called it unmarked: 말고 " +
+                    "is not in POLARITY_MARKERS either.",
+            },
+            { key: "succ-durable-ko-165:e1", polarity: "affirmed" },
+            { key: "succ-durable-ko-166:e1", polarity: "affirmed" },
+        ],
+    },
 ];
