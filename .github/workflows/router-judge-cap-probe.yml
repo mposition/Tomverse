@@ -193,7 +193,7 @@ jobs:
       # even when the probe stopped on one of its abort conditions.
       - name: Preserve the measurement
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: judge-cap-probe
           path: artifacts/judge-cap-probe.json

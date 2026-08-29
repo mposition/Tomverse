@@ -154,7 +154,7 @@ jobs:
       # later step exited non-zero.
       - name: Preserve the artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mem-eval-${{ inputs.run_label }}
           path: artifacts/
@@ -188,7 +188,7 @@ jobs:
 
       - name: Preserve the blind review sheet
         if: always() && inputs.limit == ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mem-eval-${{ inputs.run_label }}-blind-review
           path: artifacts/blind-review-${{ inputs.run_label }}.md
