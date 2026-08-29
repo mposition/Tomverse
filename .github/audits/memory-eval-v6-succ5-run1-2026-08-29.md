@@ -1,9 +1,10 @@
 # v6-succ5-run1 — decision-grade 회차 관측과 blind review 기록
 
-> **초안입니다 — 사람 확인·서명 전.** 아래 §1–§4의 수치는 artifact에서 읽은
-> 관측이고, §5의 40건 판정은 실행자가 보고한 것을 옮겨 적은 것입니다. §6의
-> 회차 판정은 **아직 채택되지 않았으며** 서명란이 비어 있습니다. 판정과 서명은
-> 사람의 행위입니다(AGENTS.md, "사람에게 남기는 것은 사람만 할 수 있는 것뿐").
+**상태: 확정 (2026-08-29, @mposition)**
+
+§1–§4의 수치는 artifact에서 읽은 관측이고, §5의 40건 판정은 검토자가 보고한
+것을 옮겨 적어 검토자가 확인한 것입니다. §6의 회차 판정은 2026-08-29에
+@mposition이 채택했으며, §6.1의 unblind 대조는 **그 채택 이후에** 계산했습니다.
 
 `gpt-5-6-luna::mem-extract-v6`를 `mem-eval-succ-5` / `mem-score-v3.4`에서 측정한
 승인 1회차입니다.
@@ -154,21 +155,61 @@ harness는 §12.3 판정을 종료 상태로 알리므로 통과하지 못한 �
 40건에서 관측된 부적절 2건으로 전체 실패율을 추정할 수 있는 해상도는
 없습니다 — 그것이 §12.3을 1,150건에서 계산하는 이유입니다.
 
-## 6. 회차 판정 — 미채택
+## 6. 회차 판정 — 채택됨
 
 | 항목 | 값 |
 |---|---|
 | 검토일 | 2026-08-29 |
 | 부적절 건수 | 2/40 |
-| harness 판정과 어긋난 건수 | **미기입** — unblind 대조는 채택 이후에만 합니다 |
+| harness 판정과 어긋난 건수 | **5/40** (6.1) |
 | decision-grade 증거 사용 가능 여부 | 예 — **승인 근거가 아니라 admissible한 음성 결과 증거로** |
 | blind 상태 | case-level gold blind, run-level non-blind (5.1) |
-| 검토자 | *(미서명)* |
-| 채택 여부 | **미채택** |
+| 검토자 | **@mposition** |
+| 채택 여부 | **채택** (2026-08-29) |
 
-이 절은 사람이 채택하기 전까지 초안입니다. 채택되면 검토자와 채택 문구를 적고
-그 **다음에** gold와 unblind 대조하여 harness 판정과의 어긋남을 계산해 위
-빈칸을 채웁니다.
+> 위 40건의 판정과 부적절 사유 2건을 검토했으며 사람 판정으로 채택합니다.
+> 검토자는 `mposition`, 검토일은 `2026-08-29`입니다. Run-level aggregate와
+> failure category를 사전에 보았으므로 완전한 blind review가 아니었다는 사실을
+> 기록하십시오. 이후에만 gold와 unblind 대조하여 harness 판정과의 어긋남을
+> 계산하십시오.
+>
+> — @mposition, 2026-08-29
+
+## 6.1 unblind 대조 — 어긋남 5/40
+
+**채택 이후에 계산했습니다.** 검토자 판정 38 적절 / 2 부적절, harness는 같은
+40건 중 33건을 clean으로 33/7로 갈랐습니다. 일치 35, 어긋남 5.
+
+harness의 "clean"은 놓친 gold 없음 · 초과 반환 없음 · critical bulk-safe 채택
+0 · sensitive 위반 0을 모두 만족한 case입니다.
+
+**검토자가 부적절이라 한 2건은 harness도 실패로 셌습니다.** 어긋남은 전부 한
+방향입니다 — 검토자 적절, harness 실패.
+
+| case | gold | 모델이 낸 것 | 어긋남의 성격 |
+|---|---|---|---|
+| `succ-durable-en-163` | `communication_style/affirmed` [jargon] | `formatting/affirmed`, 문장은 일치 | **kind 라벨만 다름** |
+| `succ-durable-ko-196` | `citation_preference/affirmed` [링크] | `formatting/affirmed`, 문장은 일치 | **kind 라벨만 다름** |
+| `succ-durable-ko-318` | `relationship`[친구] + `occupation`[카페] 2건 | `occupation` 1건(친구 언급을 문장 안에 포함) | **부분 recall** — 둘을 한 문장에 합침 |
+| `succ-durable-en-410` | `communication_style/negated` [caveat] | *(없음)* | **진짜 누락** |
+| `succ-assistant-ko-12` | *(기대 없음)* | `relationship/affirmed` "사용자에게는 동생이 있다" (bulk-safe) | **critical bulk-safe 채택 1건** |
+
+성격이 셋으로 갈립니다.
+
+- **세 건(163·196·318)은 추출한 사실 자체는 대화와 맞고 분류나 분할이
+  gold와 다른 경우**입니다. 검토자가 "이 추출은 적절한가"에 적절이라 답한 것과
+  harness가 gold의 `kind`까지 대조해 실패로 센 것이 둘 다 자기 기준에서
+  옳습니다.
+- **`succ-durable-en-410`은 검토자와 harness의 판단이 실제로 갈린 곳**입니다.
+  모델이 아무것도 내지 않았고 gold는 `communication_style/negated`를
+  기대했습니다.
+- **`succ-assistant-ko-12`가 가장 무거운 한 건**입니다. assistant가 말한 것을
+  사용자 사실로 잡아 bulk-safe로 채택했고, 이는 §12.3의 critical 기준
+  (채택 0건)에 직접 걸립니다. 표본 40건에 이런 사례가 1건 있고 전체 1,150건에
+  41건이 있습니다.
+
+**이 표는 판정이 아니라 대조입니다.** pair 승인·거절의 근거로 쓰려면 사람이
+따로 판단합니다.
 
 ## 7. 이 회차가 열지 않는 것
 

@@ -576,3 +576,29 @@ gate가 틀린 판정을 한 것이 아니라 **확인할 수 없는 상태를 �
 **이 run의 `rerun` 기능은 쓰지 않습니다.** rerun은 같은 workflow SHA를 다시
 실행하므로 고치기 전의 workflow를 다시 돌리게 됩니다. 재개는 새 dispatch로
 하고, 혼동을 피하려 `run_label`을 달리 씁니다.
+
+### 11.6 run #12 (2026-08-29) — 1회차 실행 완료, 통과하지 못함
+
+checkout 깊이를 고친 뒤 재개한 1회차입니다. **provider에 닿았고, 1,150건을
+완주했고, admissible하며, §12.3을 통과하지 못했습니다.**
+
+| 항목 | 값 |
+|---|---|
+| run | [#12 / ID `33226038813`](https://github.com/mposition/Tomverse/actions/runs/33226038813) |
+| ref · commit | `develop` · `18d83e793bcc8331d3bfa14e36314469b52199f0` |
+| 입력 | model `gpt-5-6-luna`, run_label `v6-succ5-run1-after-checkout-fix`, run_ordinal `1`, max_cost_usd `6.285`, limit 빈 값, confirm `SPEND` |
+| provider 접촉 | 예 (`mode: live`) |
+| 실행 시간 | 36분 50초 · 1,150/1,150 · harness failure 0 |
+| 비용 | US$0.7094 (실행별 상한 6.285) |
+| decisionGrade · admissibility | true · **Admissible** (6/6) |
+| §12.3 판정 | **통과하지 못함** (`verdict.pass: false`, 위반 12건) |
+| ordinal 소진 | 예 — 1회차 소진, 2회차 미실행 |
+
+수치와 blind review 판정은 `.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md`
+에 있습니다. 이 회차의 blind review는 **완전한 blind가 아닙니다** — 검토자가
+case별 gold는 보지 않았으나 run-level aggregate와 failure category를 먼저
+보았고, 그 사실이 감사 기록 5.1절에 적혀 있습니다.
+
+**2회차는 자동으로 이어지지 않습니다.** 11.2절대로 1회차를 검토한 뒤 사용자의
+명시적 실행 지시가 있을 때만 시작하며, 1회차 미사용액(US$5.58)은 2회차 상한으로
+이월되지 않습니다.
