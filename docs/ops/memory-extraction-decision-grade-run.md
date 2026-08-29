@@ -539,3 +539,40 @@ SHA를 미리 담을 수 없고, 같은 instrument를 조립하는 이후 commit
 확인할 일이 있으면 **순수 테스트로** 확인하고, harness를 부르는 경우에도
 `--live` 없이 부릅니다. 2026-08-28에 gate 문구를 확인하려고 네트워크 차단 없이
 `--live`를 실행해 5회 dispatch가 시도된 일이 있습니다(잘못된 key, 과금 0).
+
+### 11.5 run #11 (2026-08-29) — provider에 닿지 못한 1회차
+
+승인된 1회차의 첫 dispatch가 **provider 이전에 거절**됐습니다. 회차는
+소진되지 않았습니다.
+
+| 항목 | 값 |
+|---|---|
+| run | [#11 / ID `33224205060`](https://github.com/mposition/Tomverse/actions/runs/33224205060) |
+| ref · commit | `develop` · `20eb27d7a0134f53d9de3829fe616d54149f4058` |
+| 입력 | model `gpt-5-6-luna`, run_label `v6-succ5-run1`, run_ordinal `1`, max_cost_usd `6.285`, limit 빈 값, confirm `SPEND` |
+| 결과 | `pre_dispatch_refusal` — `run_sha_not_descendant` |
+| provider 접촉 | 없음 |
+| 비용 | US$0 |
+| artifact | 없음 (blind review sheet도 없음) |
+| ordinal 소진 | 아니오 |
+
+**원인은 checkout 깊이였고 조상 관계가 아니었습니다.** harness가 출력한 것은
+"git could not answer" 갈래로, `descendsFrom()`이 `false`가 아니라 `undefined`를
+돌려줬다는 뜻입니다. `actions/checkout`은 지시가 없으면 commit 하나만 가져오고,
+그 clone에는 `approvedImplementationSha`가 없어 `git merge-base --is-ancestor`가
+깨끗한 "아니오" 대신 unknown object로 죽습니다. 전체 clone에서 확인한 실제
+관계는 참입니다 — `34a53ddc…`는 `20eb27d7…`의 조상입니다.
+
+gate가 틀린 판정을 한 것이 아니라 **확인할 수 없는 상태를 통과시키지 않은
+것**이고, 그것이 fail-closed의 의도입니다. 고친 것은 workflow 쪽이며
+(`fetch-depth: 0`), tuple·register·상한·`approvedImplementationSha`는
+건드리지 않았습니다.
+
+**증거로 남기는 시간 값**: live 단계는 00:40:56 → 00:40:57, **1초**입니다.
+1,150건 dispatch가 일어날 수 없는 길이이고, 거절은 AI SDK의 동적 import 이전
+`decideEvalRunMode()`에서 났습니다(`tests/memoryExtractionEvalBoundary.test.mjs`가
+그 경계를 네트워크 차단 상태로 고정합니다).
+
+**이 run의 `rerun` 기능은 쓰지 않습니다.** rerun은 같은 workflow SHA를 다시
+실행하므로 고치기 전의 workflow를 다시 돌리게 됩니다. 재개는 새 dispatch로
+하고, 혼동을 피하려 `run_label`을 달리 씁니다.

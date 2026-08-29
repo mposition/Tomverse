@@ -107,7 +107,25 @@ jobs:
           echo "::error::confirm must be exactly SPEND. Nothing was run."
           exit 1
 
+      # Full history, and the depth is load-bearing rather than a default
+      # nobody thought about.
+      #
+      # The budget gate asks whether this run's commit descends from
+      # `approvedImplementationSha`, and answers `undefined` -- which refuses
+      # -- when git cannot tell. `actions/checkout` fetches a single commit
+      # unless told otherwise, and a one-commit clone does not contain the
+      # approved commit to compare against, so `git merge-base --is-ancestor`
+      # fails on an unknown object rather than returning a clean no. Run 11 on
+      # 2026-08-29 refused exactly there: the ancestry was true, and the
+      # checkout could not show it.
+      #
+      # Not a numeric depth. How far back the approved commit sits grows with
+      # every merge, so any number is a date at which this silently starts
+      # refusing again -- and it would refuse in the same shape, with the same
+      # message, after `npm ci` has already run.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
