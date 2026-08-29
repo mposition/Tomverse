@@ -38,25 +38,44 @@ on:
         description: "Names the artifact — run1, run2 (the independent re-run), rerun1…"
         required: true
         default: run1
+      run_ordinal:
+        # Which of the approved runs this dispatch is.
+        #
+        # The harness requires it and refuses with `run_ordinal_not_approved`
+        # without it: nothing in the tree can count runs -- `accruedCostUsd`
+        # starts at zero every time -- so the dispatch states its ordinal and
+        # the gate holds it against the approval. There is no default, and a
+        # default would be the bug: it would make every unstated dispatch the
+        # first run.
+        #
+        # A choice rather than a string, so the two approved values are the
+        # only two the form offers. A third run is a new budget approval on
+        # the register, not a larger number typed here.
+        description: "Which approved run this is. 1 = the decision-grade run, 2 = the reproducibility re-run."
+        required: true
+        type: choice
+        options:
+          - "1"
+          - "2"
       max_cost_usd:
-        # 7, and the number is bounded from both sides.
+        # 6.285, which is the approved PER-RUN ceiling and not a headroom
+        # figure chosen here.
         #
-        # Below: one run's worst case on mem-eval-succ-1 is US$5.99, if every
-        # one of the 1,150 answers hits the 4,096-token cap
-        # (`npm run report:memory-eval-cost-estimate`). The old default of 6
-        # predates this dataset and left 1.7% of headroom — and a default that
-        # stops a run short does not save money, because a truncated run is
-        # not decision-grade and the whole spend is lost rather than part of
-        # it.
+        # The 2026-08-28 approval funds `gpt-5-6-luna::mem-extract-v6` for two
+        # runs on `mem-eval-succ-5`, with a programme total of US$12.57 --
+        # every one of the 1,150 answers at the 4,096-token cap, twice
+        # (`npm run report:memory-eval-cost-estimate`). Half of that is one
+        # run's worst case, and it is what the register records as
+        # `evalBudget.maxUsd`.
         #
-        # Above: this is a PER-RUN ceiling and the harness keeps no cumulative
-        # ledger, so §12.4's two independent runs can spend it twice. Two at 7
-        # is 14, inside the approved US$15; two at 12 would be 24, outside it.
-        # The approved ceiling bounds the programme, this bounds one dispatch,
-        # and nothing but arithmetic connects them.
+        # This is a PER-RUN ceiling and the harness keeps no cumulative
+        # ledger, so raising it here does not buy headroom -- it spends the
+        # second run's budget in the first. A run truncated at the ceiling is
+        # not decision-grade either, so the whole spend is lost rather than
+        # part of it; the answer to a truncation is a fresh approval.
         description: "Per-run ceiling in USD. May only narrow the approved budget."
         required: true
-        default: "7"
+        default: "6.285"
       limit:
         description: "Compatibility probe: run only the first N cases. Empty means a full run."
         required: false
@@ -162,6 +181,7 @@ jobs:
             --model='${{ inputs.model }}' \
             --json=artifacts/mem-eval-${{ inputs.run_label }}.json \
             --max-cost-usd='${{ inputs.max_cost_usd }}' \
+            --run-ordinal='${{ inputs.run_ordinal }}' \
             ${LIMIT:+--limit="$LIMIT"}
 
       # Before the admissibility check, and before anything that can fail:

@@ -150,6 +150,60 @@ test("the limit reaches the command through the environment", () => {
     assert.match(step, /LIMIT:/);
 });
 
+test("the dispatch has to say which approved run it is", () => {
+    // The harness refuses a live run that does not state its ordinal
+    // (`run_ordinal_not_approved`), because nothing in the tree can count
+    // runs: `accruedCostUsd` starts at zero on every invocation. So the
+    // workflow is where the operator says it, and a workflow that declares
+    // the input but never passes it would refuse every dispatch after paying
+    // for `npm ci` -- which is exactly the state this test was written for.
+    const inputs = workflow.slice(
+        workflow.indexOf("    inputs:"),
+        workflow.indexOf("\npermissions:")
+    );
+    const at = inputs.indexOf("      run_ordinal:");
+    assert.ok(at > 0, "run_ordinal is not a dispatch input");
+    const declaration = inputs.slice(at, inputs.indexOf("      max_cost_usd:"));
+    assert.match(declaration, /required: true/);
+    // No default, and the absence is the point: a default would make every
+    // dispatch that did not think about it the first run.
+    assert.ok(
+        !/^\s*default:/m.test(declaration),
+        "a default ordinal would make every unstated dispatch run 1"
+    );
+    // A choice, so the form offers the two approved values and nothing else.
+    // A third run is a new budget approval, not a number typed into a box.
+    assert.match(declaration, /type: choice/);
+    assert.deepEqual(
+        [...declaration.matchAll(/^\s+- "(\d+)"$/gm)].map((m) => m[1]),
+        ["1", "2"],
+        "the offered ordinals are not exactly the two the budget approves"
+    );
+
+    // And it actually reaches the harness. Declared-but-unpassed is the
+    // failure mode: the form would look right and every run would refuse.
+    const live = workflow.indexOf("name: Live run (this is the step that spends)");
+    const command = workflow.slice(live, workflow.indexOf("name: Preserve the artifact"));
+    assert.match(command, /--run-ordinal='\$\{\{ inputs\.run_ordinal \}\}'/);
+});
+
+test("the per-run ceiling defaults to the approved per-run figure", () => {
+    // US$6.285, not the US$12.57 programme total. The harness compares this
+    // against `accruedCostUsd`, which starts at zero every invocation, so a
+    // default carrying the programme figure would authorise it once per run.
+    // Pinned rather than range-checked: a default that drifts upward without
+    // this line moving is a ceiling nobody approved.
+    const inputs = workflow.slice(
+        workflow.indexOf("      max_cost_usd:"),
+        workflow.indexOf("      limit:")
+    );
+    assert.match(inputs, /default: "6\.285"/);
+    assert.ok(
+        !inputs.includes('default: "12.57"'),
+        "the programme total is not a per-run ceiling"
+    );
+});
+
 test("the free refusals run before the paid ones", () => {
     const preconditions = workflow.indexOf("name: Preconditions");
     const live = workflow.indexOf("name: Live run (this is the step that spends)");

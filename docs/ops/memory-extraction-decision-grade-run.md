@@ -98,9 +98,23 @@ live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 - artifact를 플랫폼이 보존하고, **그 run URL이 곧 §12.1의 `artifactRef`**입니다.
   로컬 실행은 이 불변 참조를 따로 만들어야 합니다.
 
-입력은 다섯입니다 — `model`, `run_label`(`run1`·`run2`…), `max_cost_usd`,
-`limit`, 그리고 `confirm`에 **`SPEND`를 그대로 입력**해야 합니다. 유료 provider를
-부르는 dispatch이므로 오타나 실수로 눌리지 않게 한 겹 둡니다.
+입력은 여섯입니다 — `model`, `run_label`(`run1`·`run2`…), `run_ordinal`,
+`max_cost_usd`, `limit`, 그리고 `confirm`에 **`SPEND`를 그대로 입력**해야
+합니다. 유료 provider를 부르는 dispatch이므로 오타나 실수로 눌리지 않게 한 겹
+둡니다.
+
+**`run_ordinal`에는 기본값이 없습니다.** harness가 회차를 요구하고
+(`run_ordinal_not_approved`), 저장소에는 실행 원장이 없으므로 dispatch가 자기
+회차를 말합니다. 기본값을 두면 생각 없이 누른 모든 dispatch가 1회차가 되는데,
+그것이 이 입력이 막으려는 회계입니다. 선택지는 승인된 `1`과 `2`뿐이고, 세 번째
+실행은 여기 숫자를 늘리는 것이 아니라 register에 새 예산 승인을 기록하는
+일입니다.
+
+`max_cost_usd` 기본값 `6.285`는 **실행별** 상한입니다. 프로그램 총액
+US$12.57을 여기 넣으면 회차마다 그 금액이 허용됩니다 — harness가 비교하는
+`accruedCostUsd`는 매 실행 0에서 시작하기 때문입니다. 올려도 여유가 생기지
+않고 2회차 예산을 1회차에서 쓰는 것이며, 상한에서 잘린 회차는 decision-grade가
+아니라 지출 전체가 버려집니다.
 
 **`limit`은 회차를 compatibility probe로 바꿉니다** — 앞의 N건만 돌고 멈춥니다.
 배선이 맞는지 1,150번 지불하며 배우지 않기 위한 것이고, v1이 정확히 그렇게
