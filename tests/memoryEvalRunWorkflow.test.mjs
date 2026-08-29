@@ -187,6 +187,31 @@ test("the dispatch has to say which approved run it is", () => {
     assert.match(command, /--run-ordinal='\$\{\{ inputs\.run_ordinal \}\}'/);
 });
 
+test("the checkout can answer the ancestry the budget gate asks about", () => {
+    // `actions/checkout` fetches one commit unless told otherwise, and the
+    // budget gate asks whether this run's commit descends from
+    // `approvedImplementationSha`. A one-commit clone does not contain that
+    // commit, so `git merge-base --is-ancestor` fails on an unknown object
+    // rather than answering no, the harness reads that as "could not tell",
+    // and it refuses -- correctly, on a true ancestry it could not see.
+    //
+    // Run 11 on 2026-08-29 was that: provider untouched, US$0 spent, no
+    // artifact, and forty seconds of `npm ci` to learn it.
+    const at = workflow.indexOf("uses: actions/checkout@v4");
+    assert.ok(at > 0, "the workflow does not check anything out");
+    const step = workflow.slice(at, workflow.indexOf("uses: actions/setup-node@v4"));
+    assert.match(
+        step,
+        /fetch-depth: 0/,
+        "a shallow checkout cannot show the approved commit to compare against"
+    );
+    // Full history, not a number. How far back the approved commit sits grows
+    // with every merge, so any depth is a date at which this starts refusing
+    // again — in the same shape, after the same wasted install.
+    const depths = [...step.matchAll(/fetch-depth: (\S+)/g)].map((m) => m[1]);
+    assert.deepEqual(depths, ["0"], "a numeric depth expires without saying so");
+});
+
 test("the per-run ceiling defaults to the approved per-run figure", () => {
     // US$6.285, not the US$12.57 programme total. The harness compares this
     // against `accruedCostUsd`, which starts at zero every invocation, so a

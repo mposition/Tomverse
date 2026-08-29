@@ -1192,6 +1192,32 @@ artifact 하나만 든 독자가 실행별 상한과 프로그램 상한을 구�
 이 정정은 승인 총액과 tuple을 바꾸지 않으므로 새 예산 승인이 필요하지 않으며,
 등록 PR 안에서 처리했습니다(@mposition, 2026-08-28).
 
+### 17.8 1회차 첫 dispatch는 provider 이전에 거절됐습니다 (run #11, 2026-08-29)
+
+승인된 1회차를 실행했으나 provider에 닿지 못했습니다. **비용 US$0, artifact
+없음, 회차 미소진**이며, 자세한 관측은
+`docs/ops/memory-extraction-decision-grade-run.md` 11.5절에 있습니다.
+
+거절은 `run_sha_not_descendant`였고, 원인은 조상 관계가 아니라 **확인 수단의
+부재**였습니다. `actions/checkout`이 기본으로 commit 하나만 가져오므로 그
+clone에는 `approvedImplementationSha`가 존재하지 않고, `git merge-base
+--is-ancestor`가 unknown object로 죽어 `descendsFrom()`이 `undefined`를
+돌려줍니다. 실제 관계는 참입니다 — `34a53ddc…`는 `20eb27d7…`의 조상입니다.
+
+**이것은 gate의 오작동이 아닙니다.** 17.3절이 정한 조건은 조상 관계가 참인
+것이고, 확인할 수 없는 상태를 참으로 취급하지 않는 것이 그 조건의 절반입니다.
+`undefined`를 통과시켰다면 shallow clone에서 실행하는 모든 회차가 조상 확인
+없이 지나갔을 것이고, 그때는 이 field가 아무것도 묶지 않습니다.
+
+고친 것은 workflow(`fetch-depth: 0`)와 그것을 강제하는 정적 테스트뿐이며,
+**tuple 일곱 값·register·상한·`approvedImplementationSha`는 변경하지
+않았습니다.** 따라서 재-dispatch는 새 회차가 아니라 닿지 않은 1회차의 재개이고,
+별도 예산 승인 없이 진행합니다(@mposition, 2026-08-29).
+
+숫자형 depth를 쓰지 않은 이유는 그것이 만료되기 때문입니다. 승인 commit이
+얼마나 뒤에 놓이는지는 병합이 쌓일수록 커지므로, 어떤 숫자든 조용히 같은
+모양으로 다시 거절하기 시작하는 날짜가 됩니다 — `npm ci`를 다 돌린 뒤에.
+
 ### 17.5 이번 승인이 열지 않는 것
 
 pair 승인, release gate 통과, memory flag 및 production 활성화. 예산은 다른
