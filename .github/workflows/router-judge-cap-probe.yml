@@ -146,7 +146,7 @@ jobs:
       # generated, because generating 210 answers is the expensive thing this
       # probe exists to price and is not approved.
       - name: Fetch the answer bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.source_artifact }}
           run-id: ${{ inputs.source_run_id }}
