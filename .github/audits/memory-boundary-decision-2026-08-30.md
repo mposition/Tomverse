@@ -196,9 +196,18 @@ gold가 바뀌는 5건은 `.github/audits/memory-eval-gold-contract-2026-08-27.m
 `mem-extract-v6`의 `MEMORY_EXTRACTION_POLARITY_RULE` 옆에 놓일 **경계 규칙**
 초안입니다. 아직 구현하지 않았고 `mem-extract-v7`을 만들지도 않았습니다.
 
-첫 초안의 첫 문장은 `corrects something they said` 전체를 `Produce no candidate
-at all`로 묶어 **너무 넓었습니다** — 그대로면 `en-92`처럼 정정이 낳은 새 사실까지
-버립니다. 억제의 범위를 둘로 나눴습니다.
+초안은 세 번에 걸쳐 좁혀졌고, 세 번 모두 **억제가 너무 넓다**는 같은 결함이었습니다.
+
+1. 첫 초안이 `corrects something they said` 전체를 `Produce no candidate at
+   all`로 묶어 `en-92`처럼 정정이 낳은 새 사실까지 버렸습니다. 억제 범위를
+   철회와 정정으로 나눴습니다.
+2. 정정 문단의 예시가 `"I'm not an office worker" corrects a guess and
+   establishes nothing to store`였는데, 이것은 **부정형 정정 전체를 배제하는
+   것으로 읽혀** `en-27`과 충돌합니다. 판정 기준은 부정형인지가 아니라
+   **독립적으로 재사용 가능한 사실을 더했는지**입니다.
+3. 가정 문단의 `neither is the present-tense explanation that resolves it`이
+   현재형 진술 전체로 일반화될 수 있었습니다. 조건을 **가정을 닫기만 하고
+   독립적 효용이 없을 때**로 명시했습니다.
 
 ```
 BOUNDARY: some things a user says are not memories.
@@ -210,17 +219,20 @@ that remembered" leaves no memory that they no longer live there: the request
 removes the subject, it does not replace it with its negation.
 
 A correction removes the discarded proposition. When the user clearly supplies
-a durable replacement fact, that replacement may be extracted; otherwise the
-correction yields no candidate. "I'm not an office worker" corrects a guess and
-establishes nothing to store. "I typed forty, it's thirty" establishes an age.
+a durable replacement fact, that replacement may be extracted. A correction that
+only rejects a guess and adds no independently reusable fact yields no
+candidate. A durable replacement may be affirmative or negated: "Voice typing
+wrote that I have three children; I have none" establishes a negated
+relationship fact.
 
 A privacy preference may be extracted only if the statement does not repeat,
 infer, or narrow the location or value the user withheld.
 
-A hypothetical is not a memory, and neither is the present-tense explanation
-that resolves it. "If I quit and studied abroad…" followed by "I was just
-imagining it, I'm still at my job" leaves nothing to store: the second sentence
-exists to close the first.
+A hypothetical is not a memory. A present-tense statement yields no candidate
+when it only closes the hypothetical and does not independently establish a
+durable, future-useful fact. "If I quit and studied abroad…" followed by "I was
+just imagining it, I'm still at my job" leaves nothing to store: the second
+sentence exists to close the first.
 
 When a user writes on someone else's behalf or asks about someone else, the
 relationship that surfaces is part of the question, not a fact about the user.
@@ -237,8 +249,9 @@ the user, and it is sensitive.
 |---|---|---|
 | `ko-3`·`en-3`·`ko-23`a 철회 | 1문단 | 후보 없음 — 부정형 변환 금지 |
 | `ko-23`b·`en-311` 비공개 선호 | 1문단 후반 + 3문단 | 추출 허용, 감춘 값 반복 금지 |
-| `ko-19`·`ko-316` 정정(대체 없음) | 2문단 | 후보 없음 |
-| `en-92`·`en-27` 정정(대체 있음) | 2문단 | 추출 허용 |
+| `ko-19`·`ko-316` 정정 — 추측을 거부만 함 | 2문단 | 후보 없음 |
+| `en-92` 정정 — 긍정형 대체 사실 | 2문단 | 추출 허용 |
+| `en-27` 정정 — **부정형** 대체 사실 | 2문단 | 추출 허용 |
 | `ko-15`·`ko-53` 가정 | 4문단 | 후보 없음 |
 | D 계열 10건 | 5문단 | 후보 없음 |
 | `en-10` 단순 자기 진술 | (해당 없음) | 어느 억제에도 걸리지 않으므로 추출 |
@@ -246,12 +259,23 @@ the user, and it is sensitive.
 `en-10`이 어느 문단에도 걸리지 않는 것이 의도입니다 — 경계 규칙은 **억제
 목록**이고, 억제되지 않는 자기 진술은 원래의 추출 규칙이 다룹니다.
 
-### 5.2 남은 확인
+`ko-19`와 `en-27`이 갈리는 자리가 이 문안이 제대로 서 있는지를 보는 곳입니다.
+둘 다 사용자가 **부정형**으로 말했고, 갈리는 것은 polarity가 아니라 **독립적으로
+재사용 가능한 사실을 더했는가**입니다 — "저 사무직 아닌데요"는 추측을 거부할 뿐
+사용자가 무엇인지 말하지 않고, "자녀가 없다"는 그 자체로 나중에 다시 쓸 수 있는
+사실입니다.
 
-문안은 확정 가능하지만, `mem-extract-v7` 구현은 **§4의 B+ 이동과 새
-datasetVersion 작성이 함께 계획된 뒤**에 하는 편이 안전합니다. prompt만 먼저
-올리면 평가할 dataset이 없고, 이동 대상 10건이 decision set에 남은 채로 새
-prompt를 재면 그 회차는 자기가 만든 규칙 위에서 측정한 것이 됩니다.
+### 5.2 구현 순서
+
+문안은 위 세 번의 좁힘을 거쳐 **구현 입력으로 확정 가능한 상태**입니다
+(@mposition, 2026-08-30). 다만 `mem-extract-v7` 구현은 **§4의 B+ 이동과 새
+datasetVersion 작성이 함께 계획된 뒤**에 합니다. prompt만 먼저 올리면 평가할
+dataset이 없고, 이동 대상 10건이 decision set에 남은 채로 새 prompt를 재면 그
+회차는 **자기가 만든 규칙 위에서 측정한 것**이 됩니다.
+
+순서는 이렇습니다 — 새 datasetVersion 계획·작성(이동 10건 격리, gold 수정 5건
+1:1 대체) → `mem-extract-v7` 구현 → 예산 승인 → 유료 실행. 뒤의 둘은 이 문서의
+승인 범위 밖입니다.
 
 ## 6. 이 문서가 바꾸지 않은 것
 
