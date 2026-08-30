@@ -106,7 +106,15 @@ test("no non-Anthropic provider receives a cache marker on any path", () => {
   }
 });
 
-test("the primary and its fallback take the same caching policy", () => {
+test("the fallback attempt carries no marker in the first launch scope", () => {
+  // This assertion used to require the fallback to match the primary, on the
+  // argument that two attempts of one turn should differ only by model. The
+  // argument was about manifest legibility and never about whether the
+  // fallback has a prefix to read back -- and it does not: reading its own
+  // entry needs the same conversation to fail over to the same model twice
+  // inside five minutes, which nothing measures. So the fallback is held out
+  // of the launch scope, and the manifests differ by a marker the table
+  // explains rather than by an accident (lib/anthropicPromptCaching.ts).
   const sonnet = model("claude-sonnet-5");
   const primary = getModelGenerationSettings(sonnet, {
     promptCachePath: "chat_turn",
@@ -114,16 +122,17 @@ test("the primary and its fallback take the same caching policy", () => {
   const fallback = getModelGenerationSettings(sonnet, {
     promptCachePath: "chat_fallback_turn",
   });
-  assert.deepEqual(
-    anthropicNamespace(fallback).cacheControl,
-    anthropicNamespace(primary).cacheControl,
-    "a fallback that cached differently would put a difference into the two attempts' effective-request hashes that has nothing to do with the model"
-  );
+  assert.deepEqual(anthropicNamespace(primary).cacheControl, {
+    type: "ephemeral",
+    ttl: "5m",
+  });
+  assert.equal(anthropicNamespace(fallback)?.cacheControl, undefined);
 });
 
 test("one-shot paths carry no marker and say why", () => {
   for (const path of [
     "conversation_title",
+    "comparison_review_verify_item",
     "provider_probe",
     "provider_verification",
     "memory_extraction",
