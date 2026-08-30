@@ -127,6 +127,13 @@ test("only the pair whose binding is satisfied can run live", () => {
     // register's own question — which entries are open and funded — rather
     // than the binding's. Without that, every entry would refuse for the
     // binding and the list would say nothing about the register.
+    //
+    // One name, and v6 is no longer on it. `gpt-5-6-luna::mem-extract-v6` was
+    // funded on 2026-08-28, ran on 2026-08-29 and was revoked the same day
+    // for missing every §12.3 floor
+    // (.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md §7), so the
+    // register now leaves exactly one entry open and funded — and that one
+    // cannot fund a run either, for the reason the next test gives.
     const runnable = MEMORY_EXTRACTION_EVAL_REGISTER.filter(
         (entry) =>
             decideEvalRunMode(
@@ -140,10 +147,7 @@ test("only the pair whose binding is satisfied can run live", () => {
                 })
             ).mode === "live"
     ).map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`);
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        "gpt-5-6-luna::mem-extract-v6",
-    ]);
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
 });
 
 test("v4's budget cannot fund a run, because it names no instrument", () => {

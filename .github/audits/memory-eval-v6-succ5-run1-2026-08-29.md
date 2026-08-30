@@ -7,7 +7,8 @@
 @mposition이 채택했으며, §6.1의 unblind 대조는 **그 채택 이후에** 계산했습니다.
 
 `gpt-5-6-luna::mem-extract-v6`를 `mem-eval-succ-5` / `mem-score-v3.4`에서 측정한
-승인 1회차입니다.
+승인 1회차입니다. **통과하지 못했고, admissible하며, 음성 결과로 인용
+가능합니다.** pair는 승인 후보에서 종료하고 2회차는 승인하지 않습니다(§7).
 
 | 항목 | 값 |
 |---|---|
@@ -191,28 +192,106 @@ harness의 "clean"은 놓친 gold 없음 · 초과 반환 없음 · critical bul
 | `succ-durable-en-163` | `communication_style/affirmed` [jargon] | `formatting/affirmed`, 문장은 일치 | **kind 라벨만 다름** |
 | `succ-durable-ko-196` | `citation_preference/affirmed` [링크] | `formatting/affirmed`, 문장은 일치 | **kind 라벨만 다름** |
 | `succ-durable-ko-318` | `relationship`[친구] + `occupation`[카페] 2건 | `occupation` 1건(친구 언급을 문장 안에 포함) | **부분 recall** — 둘을 한 문장에 합침 |
-| `succ-durable-en-410` | `communication_style/negated` [caveat] | *(없음)* | **진짜 누락** |
-| `succ-assistant-ko-12` | *(기대 없음)* | `relationship/affirmed` "사용자에게는 동생이 있다" (bulk-safe) | **critical bulk-safe 채택 1건** |
+| `succ-durable-en-410` | `communication_style/negated` [caveat] | *(없음)* | **gold 결함 후보** — 사람 판정과 gold가 갈림 |
+| `succ-assistant-ko-12` | *(기대 없음)* | `relationship/affirmed` "사용자에게는 동생이 있다" (bulk-safe) | **critical bulk-safe 채택 1건**, third-party 경계 |
 
 성격이 셋으로 갈립니다.
 
 - **세 건(163·196·318)은 추출한 사실 자체는 대화와 맞고 분류나 분할이
   gold와 다른 경우**입니다. 검토자가 "이 추출은 적절한가"에 적절이라 답한 것과
   harness가 gold의 `kind`까지 대조해 실패로 센 것이 둘 다 자기 기준에서
-  옳습니다.
-- **`succ-durable-en-410`은 검토자와 harness의 판단이 실제로 갈린 곳**입니다.
-  모델이 아무것도 내지 않았고 gold는 `communication_style/negated`를
-  기대했습니다.
-- **`succ-assistant-ko-12`가 가장 무거운 한 건**입니다. assistant가 말한 것을
-  사용자 사실로 잡아 bulk-safe로 채택했고, 이는 §12.3의 critical 기준
-  (채택 0건)에 직접 걸립니다. 표본 40건에 이런 사례가 1건 있고 전체 1,150건에
-  41건이 있습니다.
+  옳습니다. **scoring taxonomy 불일치 후보**입니다.
+- **`succ-durable-en-410`은 사람 판정과 gold가 실질적으로 갈린 자리**입니다.
+  gold는 `Skip the caveats.`에서 `communication_style/negated`를 기대하고
+  모델은 아무것도 내지 않았는데, 검토자는 그 판단을 적절하다고 보았습니다.
+  모델 오류로 확정하지 않고 **gold 결함 후보로 분리**합니다.
+- **`succ-assistant-ko-12`가 가장 무거운 한 건**이며, 그 무거움의 성격을
+  정확히 적어야 합니다.
+
+### 6.1.1 `succ-assistant-ko-12`는 assistant 발화 전이 결함이 아닙니다
+
+이 기록의 초안은 이 건을 "assistant가 말한 것을 사용자 사실로 잡았다"고
+적었습니다. **틀렸습니다.** 대화는 이렇습니다.
+
+```
+[user]      동생 대신 물어봐요. 동생이 지금 임신 7개월인데 먹으면 안 되는 게 뭐가 있나요?
+[assistant] 일반적인 주의 목록은 있지만 담당 의사 확인이 우선입니다.
+```
+
+"동생"은 **사용자가 직접 쓴 것**이고, 모델도 그 user 메시지를 evidence로
+인용했습니다. cell 이름이 `assistant_only`라는 것만 보고 대화를 열지 않은 채
+분류한 것이 원인입니다.
+
+정확한 기록은 이렇습니다(@mposition, 2026-08-29).
+
+> 사용자 작성의 제3자 의료 문맥에서 `relationship`을 추출했으나, frozen gold는
+> assistant-only critical cell에서 기대 없음으로 판정한다. 사람 검토자는 이
+> 추출을 적절하다고 보았으므로, 이는 명백한 assistant→user 전이 결함이 아니라
+> third-party context와 relationship 추출 경계에 관한 gold/정책 불일치
+> 후보이다.
+
+**critical metric상 실패라는 사실은 그대로입니다** — `criticalBulkSafeAdoptions`
+1건으로 계상되고 §12.3의 채택 0건 기준에 걸립니다. 바뀌는 것은 원인 분류이며,
+이 건을 Rule 2(assistant 발화 전이)의 사례로 세지 않습니다.
+
+전체 1,150건의 critical 채택 41건이 어느 원인에 속하는지는 **이 기록이 답하지
+않습니다.** 40건 표본의 1건을 보고 41건의 성격을 말할 수 없고, 그것이 §7이
+진단을 별도 슬라이스로 미루는 이유입니다.
 
 **이 표는 판정이 아니라 대조입니다.** pair 승인·거절의 근거로 쓰려면 사람이
 따로 판단합니다.
 
-## 7. 이 회차가 열지 않는 것
+## 7. 승인 결정 — run1 종료, 2회차 미승인 (2026-08-29, @mposition)
+
+> **승인 결정 — mem-extract-v6 run1 종료**
+>
+> `gpt-5-6-luna::mem-extract-v6`의 run1은 admissible한 decision-grade 음성
+> 결과로 확정합니다. Precision·recall·bulk eligibility가 기준에 큰 폭으로
+> 미달하고 critical bulk-safe adoption이 41건 발생했으므로 §12.4와 §6.1에
+> 따라 2회차 재현성 실행을 승인하지 않습니다.
+>
+> 해당 Luna pair는 재실행할 수 없도록 `revoked`로 종료하되, 승인 예산·실제
+> 지출 US$0.7094·artifact·감사 기록은 역사적 증거로 보존합니다. 미사용
+> 예산은 다른 pair나 후속 버전으로 이전하지 않습니다.
+>
+> `gpt-5-4-mini::mem-extract-v6`는 평가하거나 승인하지 않으며
+> `evalBudget: null`을 유지합니다. MEMORY-02·03, release gate, evaluation
+> 승인 필드 및 production flag는 변경하지 않습니다.
+>
+> 다음 작업은 유료 실행이 아니라 provider-free 진단입니다. 41개 critical
+> adoption, kind/polarity 불일치, 미반환 및 gold 미인정 반환을 분류하되,
+> prompt 결함·scoring taxonomy 불일치·gold 결함·실제 모델 오류를 구분합니다.
+> 진단이 끝나기 전에는 succ-5 gold나 v6 prompt를 수정하지 않습니다. 수정이
+> 필요하면 동결본을 변경하지 않고 새 datasetVersion 또는 promptVersion으로
+> 진행합니다.
+>
+> — @mposition, 2026-08-29
+
+### 7.1 왜 2회차를 하지 않는가
+
+§12.4의 재현성 실행은 **1회차가 성립했을 때** 같은 숫자가 다시 나오는지를
+묻습니다. 이번 회차는 세 기준 모두에서 임계값과의 차이가 크고
+(precision 하한 0.6826 대 0.95, recall 0.7212 대 0.85, bulk eligibility
+0.7163 대 0.85), critical bulk-safe 채택은 0건 기준에서 41건입니다. 재현성
+확인이 답할 질문이 남아 있지 않습니다.
+
+### 7.2 예산은 기록으로 남고 권한으로는 남지 않습니다
+
+승인 US$12.57 중 US$0.7094를 썼습니다. 미사용액은 **이전되지 않습니다** —
+다른 pair로도, v7 같은 후속 prompt로도. 예산은 instrument tuple에 결속돼
+있고 그 tuple의 prompt는 `mem-extract-v6`입니다.
+
+`revoked` 상태는 `decideEvalRunMode()`에서 예산·키·동결보다 **먼저** 판정하므로,
+예산이 행에 남아 있어도 이 pair는 다시 실행되지 않습니다.
+
+## 8. 이 기록이 열지 않는 것
 
 pair 승인, release gate 상태 변경, MEMORY-02·03, `evaluation` 승인 필드,
-memory flag 및 production 활성화. 2회차(§12.4 재현성 실행)는 시작하지
-않았습니다 — 이 회차를 검토한 뒤 별도 실행 지시가 있을 때만 합니다.
+memory flag 및 production 활성화. 2회차는 시작하지 않았고 승인되지도
+않았습니다.
+
+**원인 진단과 후속 버전 설계는 이 기록에 없습니다.** 41건의 critical 채택을
+prompt 결함·scoring taxonomy 불일치·gold 결함·실제 모델 오류로 가르는 일은
+별도 슬라이스이며, 그 전까지 `mem-eval-succ-5` gold와 `mem-extract-v6` prompt는
+**동결 상태 그대로**입니다. 수정이 필요하다고 판명되면 동결본을 고치지 않고
+새 `datasetVersion` 또는 `promptVersion`으로 진행합니다.

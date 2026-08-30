@@ -232,24 +232,17 @@ test("only a funded, open pair can run live, and it is named", () => {
     // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
     // the record -- the approval was real and part of it was really spent --
     // which is why "funded" and "runnable" are not the same list.
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        "gpt-5-6-luna::mem-extract-v6",
-    ]);
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.
     //
-    // v6's US$6.285 is *per run*: half of the US$12.57 worst case for two runs
-    // on `mem-eval-succ-5`, because `maxUsd` is what one invocation may spend
-    // and `accruedCostUsd` starts at zero every time. Recording the programme
-    // figure here would have authorised it once per run. v4's US$15 predates
-    // instrument binding and, as `tests/memoryEvalV5Budget.test.mjs` shows,
-    // that budget cannot fund a run at all — being in this list means the
-    // register would allow it, not that the binding would.
+    // v4's US$15 predates instrument binding and, as
+    // `tests/memoryEvalV5Budget.test.mjs` shows, that budget cannot fund a run
+    // at all — being in this list means the register would allow it, not that
+    // the binding would.
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
-        "gpt-5-6-luna::mem-extract-v6": 6.285,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
@@ -261,6 +254,22 @@ test("only a funded, open pair can run live, and it is named", () => {
         assert.equal(funded.evalBudget.maxUsd, ceilings[label], label);
         assert.ok(funded.evalBudget.ticket, `${label} names no approval record`);
     }
+    // v6 is funded and closed, which is the shape this list cannot show. It
+    // ran on 2026-08-29, missed every §12.3 floor and was revoked the same
+    // day; the budget stays because US$0.7094 of it was really spent
+    // (.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md §7). So it is
+    // funded, refuses for the status, and its ceiling is asserted here rather
+    // than in the runnable map above.
+    const closedV6 = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === "mem-extract-v6"
+    );
+    assert.equal(closedV6.status, "revoked");
+    assert.equal(closedV6.evalBudget.maxUsd, 6.285);
+    assert.equal(closedV6.evalBudget.programmeMaxMicroUsd, 12_570_000);
+    assert.equal(closedV6.evaluation, null);
+
     // Both backups stay unfunded. A backup that inherited its primary's
     // ceiling would be a funded pair nobody approved.
     for (const version of [
