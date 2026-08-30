@@ -20,6 +20,13 @@
  * approved ones (`registerDrift` below).
  */
 
+import {
+    findThresholdSet,
+    thresholdShortfalls,
+    type AiReviewApprovalArmMetrics,
+    type AiReviewApprovalMetrics,
+} from "@/lib/aiReviewQualityThresholds";
+
 export const AI_REVIEW_EVAL_REGISTER_MIN_INDEPENDENT_RUNS = 2;
 
 export type AiReviewEvalEntry = {
@@ -57,15 +64,30 @@ export type AiReviewEvalEntry = {
         datasetDigest: string;
         languages: readonly string[];
         sampleCounts: Readonly<Record<string, number>>;
-        metrics: {
-            contradictionRecallWilsonLower: number;
-            contradictionPrecisionWilsonLower: number;
-            omissionRecallWilsonLower: number;
-            omissionPrecisionWilsonLower: number;
-            falseConsensusRateWilsonUpper: number;
-            exactQuoteMatchRateWilsonLower: number;
-        };
+        /**
+         * Which threshold set the approval was granted under.
+         *
+         * Named rather than implied, so lowering a bar later cannot silently
+         * re-bless an approval that was granted against the old one.
+         */
+        thresholdVersion: string;
+        metrics: AiReviewApprovalMetrics;
+        /**
+         * Per-arm numbers, recorded because the aggregate is exactly what
+         * hides a collapsed arm. The language gap rule and the task-type
+         * shortfall rule are computed from these and cannot be checked
+         * without them.
+         */
+        byLanguage: readonly AiReviewApprovalArmMetrics[];
+        byTaskType: readonly AiReviewApprovalArmMetrics[];
         zeroToleranceViolations: number;
+        /**
+         * How many of the five zero-tolerance rules a person actually judged.
+         * A run screens three by term list; an approval that examined only
+         * those has not examined the other two, and the count says so rather
+         * than letting a total of zero imply all five came back clean.
+         */
+        zeroToleranceRulesHumanJudged: number;
         /** The blind human review that produced the human-judged verdicts. */
         blindReviewRef: string;
         approver: string;
@@ -174,13 +196,45 @@ export const approvedEntryProblems = (
                 "rules cannot have been evaluated"
         );
     }
-    if (evaluation.zeroToleranceViolations !== 0) {
-        problems.push(
-            `${evaluation.zeroToleranceViolations} zero-tolerance violation(s) recorded`
-        );
-    }
     if (!evaluation.approver) problems.push("no approver");
     if (!evaluation.expiresAt) problems.push("no re-evaluation deadline");
+
+    // Every zero-tolerance rule has to have been looked at by a person, not
+    // just screened. The blind sheet asks about all five; an approval that
+    // records fewer has a total of zero standing for rules nobody examined.
+    if (evaluation.zeroToleranceRulesHumanJudged < 5) {
+        problems.push(
+            `${evaluation.zeroToleranceRulesHumanJudged} of 5 zero-tolerance rules were ` +
+                `judged by a person; a screened rule is not an examined one`
+        );
+    }
+
+    // The numbers themselves. Until this existed, an approval that named an
+    // artifact, a commit and two ordinals was accepted whatever it measured --
+    // "the metrics are present" is not "the metrics are sufficient".
+    const thresholds = findThresholdSet(evaluation.thresholdVersion);
+    if (!thresholds) {
+        problems.push(
+            `threshold set "${evaluation.thresholdVersion}" does not exist`
+        );
+    } else if (!thresholds.approvedBy) {
+        // An unapproved set is a proposal. An approval may not rest on one,
+        // which is why no pair can be approved today.
+        problems.push(
+            `threshold set "${thresholds.version}" is a proposal and has no approver; ` +
+                `a quality approval cannot rest on an unapproved bar`
+        );
+    } else {
+        problems.push(
+            ...thresholdShortfalls({
+                thresholds,
+                aggregate: evaluation.metrics,
+                byLanguage: evaluation.byLanguage,
+                byTaskType: evaluation.byTaskType,
+                zeroToleranceViolations: evaluation.zeroToleranceViolations,
+            })
+        );
+    }
     return problems;
 };
 
@@ -228,4 +282,69 @@ export const registerDrift = (
         inSync:
             servedButNotApproved.length === 0 && approvedButNotServed.length === 0,
     };
+};
+
+// ---------------------------------------------------------------------------
+// Promotion evidence
+// ---------------------------------------------------------------------------
+
+/**
+ * The evidence M5 promotion rests on that no evaluation run can supply.
+ *
+ * This block exists because the readiness report used to hard-code `false` for
+ * the production half of the checklist. That was honest about today and
+ * useless tomorrow: no amount of accumulated evidence could ever have moved
+ * those items, so the report could never say YES no matter what happened. The
+ * fields below are where that evidence lands, and every one of them is written
+ * by a person.
+ *
+ * `null` throughout is the current, correct state.
+ */
+export type AiReviewObservationPolicy = {
+    approvedBy: string;
+    approvedAt: string;
+    /** How long production reliability must hold before promotion. */
+    minObservationDays: number;
+    /** How many recorded runs the trend must rest on. */
+    minRecordedRuns: number;
+    /** Minimum completion rate over the observation window. */
+    minCompletionRate: number;
+    /** Minimum comparison→review conversion. */
+    minComparisonToReviewRate: number;
+    /** Minimum first→second review conversion. */
+    minRepeatUseRate: number;
+    rationale: string;
+};
+
+export type AiReviewRollbackDrill = {
+    performedBy: string;
+    performedAt: string;
+    /** What was actually exercised, not what the runbook says. */
+    scenarios: readonly string[];
+    recordRef: string;
+};
+
+export type AiReviewPromotionSignature = {
+    signedBy: string;
+    signedAt: string;
+    /** The reviewer pair the signature covers. */
+    reviewerModelId: string;
+    promptVersion: string;
+    notes: string;
+};
+
+export type AiReviewM5Promotion = {
+    observationPolicy: AiReviewObservationPolicy | null;
+    rollbackDrill: AiReviewRollbackDrill | null;
+    promotionSignature: AiReviewPromotionSignature | null;
+};
+
+export const AI_REVIEW_M5_PROMOTION: AiReviewM5Promotion = {
+    // Not "we forgot": the thresholds a production observation is judged
+    // against have to be set after somebody has seen the baseline, and there
+    // is no baseline yet.
+    observationPolicy: null,
+    // Writing docs/ops/ai-review-rollback.md is not performing the drill.
+    rollbackDrill: null,
+    promotionSignature: null,
 };

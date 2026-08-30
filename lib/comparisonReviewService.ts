@@ -264,6 +264,12 @@ export const runComparisonReview = async (
       reviewerModelId: candidate.id,
       reviewerProvider: candidate.provider,
     };
+    // Declared out here so the failure path can report them. They used to be
+    // scoped to the try block, and the catch wrote `retryCount: 0` -- so an
+    // attempt that retried and still failed, the case where a retry count
+    // matters most, recorded no retries at all.
+    let retryCount = 0;
+    let reservedCredits = 0;
     let leaseId: string | null = null;
     let reservation: ChatUsageReservation | null = null;
     let providerUsageTraceId: string | null = null;
@@ -309,6 +315,7 @@ export const runComparisonReview = async (
           },
         };
       }
+      reservedCredits = budget.usageCredits;
       const grant = await acquireChatAccess(subject.access, budget, {
         traceId,
         source: "comparison_review",
@@ -335,9 +342,6 @@ export const runComparisonReview = async (
           }
         | undefined;
       let generationError: unknown;
-      // Counted, not just retried: a reviewer that needs a second attempt on
-      // most runs is degrading, and a success rate alone cannot show it.
-      let retryCount = 0;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           generated = await generateText({
@@ -425,28 +429,41 @@ export const runComparisonReview = async (
           inputTokens: generated.usage.inputTokens ?? 0,
           outputTokens: generated.usage.outputTokens ?? 0,
           reservedCredits: budget.usageCredits,
+          // What settlement actually charged, not just that it ran. Without
+          // the figure, a reservation of 8 that settled at 3 and one that
+          // settled at 8 are the same row, and reconciliation is exactly that
+          // comparison.
+          settledCredits: settlement?.settledCredits ?? null,
           settlementStatus: settlement?.status ?? null,
           retryCount,
         },
       };
     } catch (error) {
+      let failedSettlementStatus: string | null = null;
+      let refundSettledCredits: number | null = null;
       if (reservation) {
         if (candidate.provider === "perplexity" && providerUsageTraceId) {
           providerUsageSnapshot = await consumePerplexityUsage(
             providerUsageTraceId
           );
         }
-        await settleChatUsage(
+        // The refund's own outcome, recorded. A refund that failed leaves a
+        // reservation holding credits nobody will release, and the only way to
+        // see that in aggregate is to have written down what happened here.
+        const refund = await settleChatUsage(
           reservation,
           { inputTokens: 0, outputTokens: 0, outcome: "failed" },
           { providerUsageSnapshot }
-        ).catch((settlementError) =>
+        ).catch((settlementError) => {
           console.error("Comparison review refund failed:", {
             traceId,
             candidate: candidate.id,
             settlementError,
-          })
-        );
+          });
+          return null;
+        });
+        failedSettlementStatus = refund?.status ?? null;
+        refundSettledCredits = refund?.settledCredits ?? null;
       }
       // Health evidence, but only for failures that are evidence of anything.
       //
@@ -498,7 +515,14 @@ export const runComparisonReview = async (
           durationMs: Date.now() - attemptStartedAt,
           errorCode: metadata.code ?? "COMPARISON_REVIEW_FAILED",
           errorCategory: metadata.name ?? null,
-          retryCount: 0,
+          reservedCredits,
+          // Refunded, so nothing was charged. 0 rather than null: settlement
+          // ran and its answer was "none", which is a different fact from
+          // "settlement did not report".
+          settledCredits:
+            failedSettlementStatus === null ? null : refundSettledCredits,
+          settlementStatus: failedSettlementStatus,
+          retryCount,
         },
       };
     } finally {

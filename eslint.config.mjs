@@ -76,6 +76,11 @@ const eslintConfig = defineConfig([
     "playwright-report-admin/**",
     "test-results-admin/**",
     "next-env.d.ts",
+    // Vite output for the Capacitor shell (apps/mobile). Gitignored, but a
+    // local build leaves it in the tree, and linting a minified bundle
+    // produces hundreds of warnings -- enough to fail `npm run check`, which
+    // runs with --max-warnings=0.
+    "apps/*/dist/**",
   ]),
   {
     // The one rule PACKAGE-01 is measured on. `npm run check:shared-packages`

@@ -19,7 +19,7 @@ import {
 
 const reset = () =>
   prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "ComparisonReviewRun" RESTART IDENTITY CASCADE`
+    `TRUNCATE TABLE "ComparisonReviewRunAttempt", "ComparisonReviewRun" RESTART IDENTITY CASCADE`
   );
 
 beforeEach(reset);
@@ -66,6 +66,30 @@ const baseInput = (overrides: Record<string, unknown> = {}) => ({
     reservedCredits: 4,
     settlementStatus: "settled",
   },
+  attempts: [
+    {
+      ordinal: 1,
+      slot: "primary" as const,
+      ...emptyAttemptRecord(),
+      reviewerModelId: "mistral-medium-3-1",
+      reviewerProvider: "mistral",
+      status: "completed" as const,
+      reservedCredits: 4,
+      settledCredits: 4,
+      settlementStatus: "settled",
+    },
+    {
+      ordinal: 2,
+      slot: "secondary" as const,
+      ...emptyAttemptRecord(),
+      reviewerModelId: "claude-sonnet-5",
+      reviewerProvider: "anthropic",
+      status: "completed" as const,
+      reservedCredits: 4,
+      settledCredits: 3,
+      settlementStatus: "settled",
+    },
+  ],
   groundingTotalQuotes: 9,
   groundingMatchedQuotes: 8,
   sourceGroundingLevel: "high",
@@ -88,6 +112,100 @@ test("a completed dual run round-trips with its derived fields", async () => {
   assert.equal(row.sourceGroundingLevel, "high");
 });
 
+test("every attempt is stored, including one a fallback stepped over", async () => {
+  // The defect this is written against: the run row's primary slot held
+  // whoever answered, so a failed first reviewer disappeared entirely and its
+  // failure rate came out better than production was.
+  await recordComparisonReviewRun(
+    baseInput({
+      outcome: "completed_primary_only",
+      attempts: [
+        {
+          ordinal: 1,
+          slot: "primary" as const,
+          ...emptyAttemptRecord(),
+          reviewerModelId: "mistral-medium-3-1",
+          reviewerProvider: "mistral",
+          status: "failed" as const,
+          errorCode: "PROVIDER_TIMEOUT",
+          retryCount: 1,
+          reservedCredits: 4,
+          settledCredits: 0,
+          settlementStatus: "refunded",
+        },
+        {
+          ordinal: 2,
+          slot: "primary" as const,
+          ...emptyAttemptRecord(),
+          reviewerModelId: "claude-sonnet-5",
+          reviewerProvider: "anthropic",
+          status: "completed" as const,
+          reservedCredits: 4,
+          settledCredits: 4,
+          settlementStatus: "settled",
+        },
+      ],
+      primary: {
+        ...emptyAttemptRecord(),
+        reviewerModelId: "claude-sonnet-5",
+        reviewerProvider: "anthropic",
+        status: "completed" as const,
+      },
+      secondary: emptyAttemptRecord(),
+    })
+  );
+
+  const attempts = await prisma.comparisonReviewRunAttempt.findMany({
+    orderBy: { ordinal: "asc" },
+  });
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0].reviewerModelId, "mistral-medium-3-1");
+  assert.equal(attempts[0].status, "failed");
+  assert.equal(attempts[0].retryCount, 1);
+  assert.equal(attempts[0].settledCredits, 0);
+  assert.equal(attempts[1].reviewerModelId, "claude-sonnet-5");
+  assert.equal(attempts[1].settledCredits, 4);
+
+  // And the run row still names the reviewer that produced the result.
+  const row = await prisma.comparisonReviewRun.findFirstOrThrow();
+  assert.equal(row.primaryModelId, "claude-sonnet-5");
+});
+
+test("the reserved and settled figures are both stored, so a mismatch is computable", async () => {
+  // Traced through the run's own traceId rather than a reservation id: credit
+  // reservations already carry that trace, and a second join key would be a
+  // second identifier to scrub on a table that reaches the person only
+  // through its run.
+  await recordComparisonReviewRun(
+    baseInput({
+      attempts: [
+        {
+          ordinal: 1,
+          slot: "primary" as const,
+          ...emptyAttemptRecord(),
+          reviewerModelId: "mistral-medium-3-1",
+          reviewerProvider: "mistral",
+          status: "completed" as const,
+          reservedCredits: 4,
+          settledCredits: 9,
+          settlementStatus: "settled",
+        },
+      ],
+    })
+  );
+  const attempt = await prisma.comparisonReviewRunAttempt.findFirstOrThrow();
+  assert.equal(attempt.reservedCredits, 4);
+  assert.equal(attempt.settledCredits, 9);
+});
+
+test("attempts cascade away with their run", async () => {
+  await recordComparisonReviewRun(baseInput());
+  assert.equal(await prisma.comparisonReviewRunAttempt.count(), 2);
+  const run = await prisma.comparisonReviewRun.findFirstOrThrow();
+  await prisma.comparisonReviewRun.delete({ where: { id: run.id } });
+  assert.equal(await prisma.comparisonReviewRunAttempt.count(), 0);
+});
+
 test("a guest run is recorded with no user and no conversation", async () => {
   await recordComparisonReviewRun(
     baseInput({
@@ -96,6 +214,7 @@ test("a guest run is recorded with no user and no conversation", async () => {
       userId: null,
       conversationId: null,
       outcome: "completed_primary_only",
+      attempts: [],
       secondary: emptyAttemptRecord(),
     })
   );
@@ -112,6 +231,7 @@ test("a refusal before any provider call is distinguishable from a failure", asy
   await recordComparisonReviewRun(
     baseInput({
       outcome: "refused_before_provider",
+      attempts: [],
       errorCode: "COMPARISON_REVIEWER_UNAVAILABLE",
       dualReviewAvailable: false,
       primary: emptyAttemptRecord(),

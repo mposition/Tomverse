@@ -5,6 +5,7 @@ import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import {
     buildComparisonReviewRunRecord,
     emptyAttemptRecord,
+    type ComparisonReviewAttemptEntry,
     type ComparisonReviewAttemptRecord,
     type ComparisonReviewRunInput,
     type ComparisonReviewRunOutcome,
@@ -59,6 +60,7 @@ export const recordComparisonReviewRun = async (
         crossProvider: record.crossProvider,
         primary: record.primary,
         secondary: record.secondary,
+        attempts: record.attempts,
         groundingTotalQuotes: record.groundingTotalQuotes,
         groundingMatchedQuotes: record.groundingMatchedQuotes,
         sourceGroundingLevel: record.sourceGroundingLevel,
@@ -112,6 +114,27 @@ export const recordComparisonReviewRun = async (
                 groundingTotalQuotes: record.groundingTotalQuotes,
                 groundingMatchedQuotes: record.groundingMatchedQuotes,
                 sourceGroundingLevel: record.sourceGroundingLevel,
+                // Written with the run, in one statement, so a run can never
+                // exist with its attempts missing -- which would read as a run
+                // that dispatched nothing.
+                attempts: {
+                    create: record.attempts.map((attempt) => ({
+                        ordinal: attempt.ordinal,
+                        slot: attempt.slot,
+                        reviewerModelId: attempt.reviewerModelId ?? "unknown",
+                        reviewerProvider: attempt.reviewerProvider ?? "unknown",
+                        status: attempt.status,
+                        durationMs: attempt.durationMs,
+                        errorCode: attempt.errorCode,
+                        errorCategory: attempt.errorCategory,
+                        inputTokens: attempt.inputTokens,
+                        outputTokens: attempt.outputTokens,
+                        reservedCredits: attempt.reservedCredits,
+                        settledCredits: attempt.settledCredits,
+                        settlementStatus: attempt.settlementStatus,
+                        retryCount: attempt.retryCount,
+                    })),
+                },
             },
         });
     } catch (error) {
@@ -152,6 +175,15 @@ export class ComparisonReviewRunRecorder {
     private readonly startedAt = new Date();
     private primary: ComparisonReviewAttemptRecord = emptyAttemptRecord();
     private secondary: ComparisonReviewAttemptRecord = emptyAttemptRecord();
+    /**
+     * Every attempt, appended and never overwritten.
+     *
+     * The slots above are overwritten by design -- they hold the reviewer that
+     * produced each result. This list is what stops that from losing the
+     * failures a fallback stepped over, which is where reviewer failure rates
+     * used to go missing.
+     */
+    private readonly attempts: ComparisonReviewAttemptEntry[] = [];
     private dualAvailable = false;
     private grounding = { total: 0, matched: 0, level: null as string | null };
     private written = false;
@@ -175,7 +207,29 @@ export class ComparisonReviewRunRecorder {
         this.dualAvailable = available;
     }
 
+    /**
+     * Records one attempt, and makes it the slot's result only if it produced
+     * one. A failed candidate is kept in the attempt list and does not become
+     * "the primary reviewer" -- the run's primary is whoever answered.
+     */
     noteAttempt(slot: "primary" | "secondary", attempt: ComparisonReviewAttemptRecord) {
+        this.attempts.push({
+            ...attempt,
+            ordinal: this.attempts.length + 1,
+            slot,
+        });
+        if (attempt.status !== "completed") {
+            // Keep the last attempt visible in the slot when nothing in that
+            // slot ever succeeded, so a wholly failed run still names who was
+            // asked; a later success overwrites it.
+            if (slot === "primary" && this.primary.status !== "completed") {
+                this.primary = attempt;
+            }
+            if (slot === "secondary" && this.secondary.status !== "completed") {
+                this.secondary = attempt;
+            }
+            return;
+        }
         if (slot === "primary") this.primary = attempt;
         else this.secondary = attempt;
     }
@@ -210,6 +264,7 @@ export class ComparisonReviewRunRecorder {
             dualReviewAvailable: this.dualAvailable,
             primary: this.primary,
             secondary: this.secondary,
+            attempts: this.attempts,
             groundingTotalQuotes: this.grounding.total,
             groundingMatchedQuotes: this.grounding.matched,
             sourceGroundingLevel: this.grounding.level,

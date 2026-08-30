@@ -1,40 +1,69 @@
-// The AI Review M5 readiness report.
+// The AI Review M5 report.
 //
 // docs/policy/ai-review-m5-quality-contract.md §10.
 //
-// Answers exactly one question -- is the *code* half of M5 done -- and refuses
-// to answer the other one. `M5 readiness complete` is decidable from this
-// repository: the tools exist, they are tested, and they refuse what they must
-// refuse. `M5 eligible` is not, and this report says so rather than deriving
-// it, because every eligibility item rests on production traffic, a paid
-// evaluation, or a person's signature. A report that inferred eligibility from
-// readiness would be the exact failure the two-state split exists to prevent.
+// Three states, judged separately, never derived from one another:
 //
-// Reads no database and calls no provider, so it runs anywhere.
+//   * `instrument scaffolding complete` -- the tools exist and are wired;
+//   * `M5 readiness complete` -- a decision dataset exists, is frozen and is
+//     large enough; the thresholds an approval must clear have been signed;
+//     every zero-tolerance rule has a detection path; the telemetry can
+//     actually answer the questions eligibility asks of it;
+//   * `M5 eligible` -- that instrument was pointed at production and a person
+//     signed the result.
 //
-// Usage: npm run report:ai-review-m5-readiness
+// The middle state exists because it was missing. An earlier version of this
+// report called a built harness "readiness complete" while the only evaluation
+// sample in the repository was 24 development cases against a decision floor
+// of 1,200. "The instrument is built" is worth reporting; it is not worth
+// reporting under readiness's name.
+//
+// Nothing here is satisfied by a file existing. The evaluator is checked by
+// running it on fixtures with known answers, and the dataset by validating and
+// measuring it.
+//
+// Reads no database. Pass --operations=<path> with the JSON from
+// `npm run report:ai-review-operations -- --json` to let the production half
+// be judged from evidence instead of reported as unknown.
+//
+// Usage:
+//   npm run report:ai-review-m5-readiness
+//   npm run report:ai-review-m5-readiness -- --operations=ops.json
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  AI_REVIEW_M5_ELIGIBILITY_ITEMS,
-  judgeM5,
-} from "../lib/aiReviewScorecardCore.ts";
+  aggregateOutcomes,
+  assessSampleAdequacy,
+  scoreCase,
+  AI_REVIEW_EVAL_BLIND_SHEET_RULES,
+  AI_REVIEW_EVAL_HARNESS_SCREENED_RULES,
+  AI_REVIEW_EVAL_HUMAN_ONLY_RULES,
+  AI_REVIEW_EVAL_MIN_CASES,
+  AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES,
+} from "../lib/aiReviewEvalCore.ts";
+import { judgeM5 } from "../lib/aiReviewScorecardCore.ts";
 import {
-  AI_REVIEW_EVAL_REGISTER,
   approvedAiReviewPairs,
   registerDrift,
+  AI_REVIEW_EVAL_REGISTER,
+  AI_REVIEW_M5_PROMOTION,
 } from "../lib/aiReviewEvalRegister.ts";
-import { datasetProblems } from "../lib/aiReviewEvalRun.ts";
+import { approvedThresholdSets } from "../lib/aiReviewQualityThresholds.ts";
+import { datasetProblems, freezeDrift } from "../lib/aiReviewEvalRun.ts";
 import {
   COMPARISON_REVIEW_DEFAULT_MODEL_IDS,
   COMPARISON_REVIEW_PROMPT_VERSION,
 } from "../lib/comparisonReview.ts";
 
-const exists = (path) => existsSync(join(process.cwd(), path));
+const argValue = (name, fallback = "") => {
+  const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  return match ? match.slice(name.length + 3) : fallback;
+};
 
-const readsCleanly = (path) => {
+const exists = (path) => existsSync(join(process.cwd(), path));
+const readJson = (path) => {
   try {
     return JSON.parse(readFileSync(join(process.cwd(), path), "utf8"));
   } catch {
@@ -42,32 +71,149 @@ const readsCleanly = (path) => {
   }
 };
 
-const datasetFiles = () => {
-  const directory = "docs/ops/ai-review-evaluation-set";
-  if (!exists(directory)) return [];
-  return readdirSync(join(process.cwd(), directory))
-    .filter((name) => name.endsWith(".json"))
-    .map((name) => join(directory, name));
+const check = (item, met, detail) => ({ item, met, detail });
+
+// ---------------------------------------------------------------------------
+// Datasets
+// ---------------------------------------------------------------------------
+
+const DATASET_DIRECTORY = "docs/ops/ai-review-evaluation-set";
+const datasets = (exists(DATASET_DIRECTORY)
+  ? readdirSync(join(process.cwd(), DATASET_DIRECTORY)).filter((name) =>
+      name.endsWith(".json")
+    )
+  : []
+)
+  .map((name) => ({
+    path: join(DATASET_DIRECTORY, name),
+    dataset: readJson(join(DATASET_DIRECTORY, name)),
+  }))
+  .filter((entry) => entry.dataset);
+
+const valid = datasets.filter(
+  (entry) => datasetProblems(entry.dataset).length === 0
+);
+const decisionSets = valid.filter(
+  (entry) => entry.dataset.purpose === "decision"
+);
+const usableDecisionSet = decisionSets.find(
+  (entry) =>
+    freezeDrift(entry.dataset) === null &&
+    assessSampleAdequacy(entry.dataset.cases).adequate
+);
+
+// ---------------------------------------------------------------------------
+// The evaluator, checked by running it
+// ---------------------------------------------------------------------------
+
+/**
+ * Three fixtures with answers that cannot be argued with, run through the real
+ * scorer. This replaces a check that the test FILES existed, which proved
+ * nothing about what they asserted -- and, in one case, the file asserted the
+ * defect.
+ */
+const evaluatorSelfCheck = () => {
+  const failures = [];
+  const testCase = {
+    id: "self-check",
+    language: "en",
+    taskType: "factual_current_information",
+    phenomenon: "direct_contradiction",
+    mode: "balanced",
+    question: "q",
+    responses: [
+      { label: "a", modelId: "m1", provider: "openai", content: "1889" },
+      { label: "b", modelId: "m2", provider: "anthropic", content: "1887" },
+    ],
+    gold: {
+      contradictions: [
+        { id: "year", anyOf: ["1887"], description: "the year disagreement" },
+      ],
+    },
+    goldCompleteness: { contradictions: true },
+  };
+  const observation = (overrides) => ({
+    findings: { contradictions: [], missingPoints: [], differences: [] },
+    allText: "",
+    reviewerProse: "",
+    totalQuotes: 0,
+    matchedQuotes: 0,
+    schemaValid: true,
+    ...overrides,
+  });
+
+  const found = aggregateOutcomes([
+    scoreCase(
+      testCase,
+      observation({
+        findings: {
+          contradictions: ["B says 1887"],
+          missingPoints: [],
+          differences: [],
+        },
+      })
+    ),
+  ]);
+  if (found.contradictionRecall.point !== 1) {
+    failures.push("a planted contradiction that was reported is not credited");
+  }
+
+  // The defect a test used to enshrine: a non-exhaustive case must not put its
+  // true positive into precision.
+  const inflated = aggregateOutcomes([
+    scoreCase(
+      { ...testCase, goldCompleteness: { contradictions: false } },
+      observation({
+        findings: {
+          contradictions: ["B says 1887", "invented", "invented too"],
+          missingPoints: [],
+          differences: [],
+        },
+      })
+    ),
+  ]);
+  if (inflated.contradictionPrecision.point !== null) {
+    failures.push(
+      "a non-exhaustive case still reaches precision, so precision can be inflated"
+    );
+  }
+
+  const crowned = scoreCase(
+    testCase,
+    observation({ reviewerProse: "Response A is the best answer." })
+  );
+  if (!crowned.zeroToleranceViolations.includes("winner_declared")) {
+    failures.push("a declared winner is not screened");
+  }
+
+  const quotedOnly = scoreCase(
+    testCase,
+    observation({
+      allText: "quoting: OpenAI said so",
+      reviewerProse: "the two answers disagree",
+    })
+  );
+  if (quotedOnly.zeroToleranceViolations.length > 0) {
+    failures.push("a company named only inside a quote is scored as a violation");
+  }
+
+  const empty = aggregateOutcomes([]);
+  if (empty.contradictionRecall.point !== null) {
+    failures.push("an empty denominator reports a number instead of null");
+  }
+
+  return failures;
 };
+
+const evaluatorFailures = evaluatorSelfCheck();
+
+// ---------------------------------------------------------------------------
+// Scaffolding
+// ---------------------------------------------------------------------------
 
 const packageScripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
 
-const check = (item, met, detail) => ({ item, met, detail });
-
-// --- readiness: everything decidable from this repository ------------------
-
-const datasets = datasetFiles().map((path) => ({
-  path,
-  dataset: readsCleanly(path),
-}));
-const validDatasets = datasets.filter(
-  (entry) => entry.dataset && datasetProblems(entry.dataset).length === 0
-);
-const decisionDatasets = validDatasets.filter(
-  (entry) => entry.dataset.purpose === "decision"
-);
-
-const readiness = [
+const scaffolding = [
   check(
     "decision_grade_eval_harness",
     exists("scripts/eval-ai-review.mjs") &&
@@ -76,17 +222,11 @@ const readiness = [
     "the harness, its scorer and the npm entry point all exist"
   ),
   check(
-    "versioned_eval_dataset",
-    validDatasets.length > 0,
-    validDatasets.length > 0
-      ? `${validDatasets.length} valid dataset file(s); ${decisionDatasets.length} of them are decision sets`
-      : "no valid dataset file exists"
-  ),
-  check(
-    "scored_and_tested_evaluator",
-    exists("tests/aiReviewEvalCore.test.mjs") &&
-      exists("tests/aiReviewEvalRun.test.mjs"),
-    "the scorer and the run-admission truth table both have unit suites"
+    "scored_and_verified_evaluator",
+    evaluatorFailures.length === 0,
+    evaluatorFailures.length === 0
+      ? "the scorer was run on fixtures with known answers and behaved correctly on all of them"
+      : evaluatorFailures.join("; ")
   ),
   check(
     "paid_run_budget_contract",
@@ -107,7 +247,9 @@ const readiness = [
   check(
     "item_feedback_loop",
     exists("lib/comparisonReviewItemFeedback.ts") &&
-      exists("app/api/conversations/[conversationId]/comparison-reviews/item-feedback/route.ts"),
+      exists(
+        "app/api/conversations/[conversationId]/comparison-reviews/item-feedback/route.ts"
+      ),
     "per-item helpful/incorrect/unclear/missing feedback exists end to end"
   ),
   check(
@@ -122,28 +264,147 @@ const readiness = [
   ),
   check(
     "reviewer_pair_drift_detection",
-    typeof registerDrift === "function" &&
-      exists("lib/aiReviewEvalRegister.ts"),
+    exists("lib/aiReviewEvalRegister.ts"),
     "the pairs production would serve are compared against the approved ones, read from configuration and not from the register"
   ),
 ];
 
-// --- eligibility: nothing here can be decided from the repository ----------
+// ---------------------------------------------------------------------------
+// Readiness
+// ---------------------------------------------------------------------------
 
-const approved = approvedAiReviewPairs();
-const drift = registerDrift(
-  (process.env.COMPARISON_REVIEW_MODEL_IDS?.split(",")
-    .map((value) => value.trim())
-    .filter(Boolean).length
-    ? process.env.COMPARISON_REVIEW_MODEL_IDS.split(",").map((value) => value.trim())
-    : [...COMPARISON_REVIEW_DEFAULT_MODEL_IDS]
-  ).map((reviewerModelId) => ({
-    reviewerModelId,
-    promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
-  }))
+const decisionSetDetail = () => {
+  if (usableDecisionSet) {
+    return `${usableDecisionSet.dataset.version}: valid, frozen, and meets every sample floor`;
+  }
+  if (decisionSets.length === 0) {
+    const development = valid.filter(
+      (entry) => entry.dataset.purpose === "development"
+    );
+    const cases = development.reduce(
+      (sum, entry) => sum + entry.dataset.cases.length,
+      0
+    );
+    return `no decision dataset exists; ${development.length} development set(s) totalling ${cases} case(s) against a floor of ${AI_REVIEW_EVAL_MIN_CASES.aggregate}`;
+  }
+  const entry = decisionSets[0];
+  const drift = freezeDrift(entry.dataset);
+  const adequacy = assessSampleAdequacy(entry.dataset.cases);
+  return [
+    drift ? `not frozen: ${drift}` : null,
+    adequacy.adequate ? null : `${adequacy.shortfalls.length} sample shortfall(s)`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+};
+
+const zeroToleranceCovered = AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES.every(
+  (rule) =>
+    AI_REVIEW_EVAL_HARNESS_SCREENED_RULES.includes(rule) ||
+    AI_REVIEW_EVAL_HUMAN_ONLY_RULES.includes(rule)
+);
+const zeroToleranceOnSheet = AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES.every((rule) =>
+  AI_REVIEW_EVAL_BLIND_SHEET_RULES.includes(rule)
 );
 
+// Read from the attempt model's own block, not from the whole schema: a
+// `settledCredits` column on some other table would have satisfied a
+// whole-file grep while answering nothing about AI Review.
+const schema = readFileSync("prisma/schema.prisma", "utf8");
+const attemptModel =
+  schema.split("model ComparisonReviewRunAttempt {")[1]?.split("\n}")[0] ?? "";
+const attemptTelemetry =
+  exists("lib/comparisonReviewRunCore.ts") && attemptModel.length > 0;
+const settlementTelemetry =
+  attemptModel.includes("settledCredits") &&
+  attemptModel.includes("reservedCredits") &&
+  attemptModel.includes("reservationId");
+const sequencedConversions = readFileSync(
+  "lib/aiReviewScorecardCore.ts",
+  "utf8"
+).includes("export const sequencedConversion");
+
+const thresholdSets = approvedThresholdSets();
+
+const readiness = [
+  check(
+    "frozen_adequate_decision_dataset",
+    Boolean(usableDecisionSet),
+    decisionSetDetail()
+  ),
+  check(
+    "approved_quality_thresholds",
+    thresholdSets.length > 0,
+    thresholdSets.length > 0
+      ? `${thresholdSets.map((set) => set.version).join(", ")} signed`
+      : "the threshold set is a proposal with no approver, so no approval can rest on it"
+  ),
+  check(
+    "complete_zero_tolerance_coverage",
+    zeroToleranceCovered && zeroToleranceOnSheet,
+    zeroToleranceCovered && zeroToleranceOnSheet
+      ? `all ${AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES.length} rules are screened or human-judged, and all reach the blind sheet`
+      : "a rule exists in the vocabulary with no detection path or no column on the sheet"
+  ),
+  check(
+    "per_attempt_reliability_record",
+    attemptTelemetry,
+    attemptTelemetry
+      ? "every provider attempt is its own row, so a fallback cannot hide the failure that preceded it"
+      : "attempts are collapsed into two slots, so a failed reviewer followed by a successful one disappears"
+  ),
+  check(
+    "credit_reconciliation_measurable",
+    settlementTelemetry,
+    settlementTelemetry
+      ? "reserved and settled credits are both recorded, so a mismatch is computable"
+      : "only the reserved amount and a status are recorded; reservation-vs-settlement cannot be computed"
+  ),
+  check(
+    "sequenced_conversion_metrics",
+    sequencedConversions,
+    sequencedConversions
+      ? "a conversion requires the second event to follow the first"
+      : "conversions count any actor with both events in the window, in any order"
+  ),
+  check(
+    "promotion_evidence_structure",
+    "observationPolicy" in AI_REVIEW_M5_PROMOTION &&
+      "rollbackDrill" in AI_REVIEW_M5_PROMOTION &&
+      "promotionSignature" in AI_REVIEW_M5_PROMOTION,
+    "there is somewhere for the production half of the checklist to be recorded, so it can be judged rather than hard-coded"
+  ),
+];
+
+// ---------------------------------------------------------------------------
+// Eligibility
+// ---------------------------------------------------------------------------
+
+const approved = approvedAiReviewPairs();
+const configured = process.env.COMPARISON_REVIEW_MODEL_IDS?.split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const drift = registerDrift(
+  (configured?.length ? configured : [...COMPARISON_REVIEW_DEFAULT_MODEL_IDS]).map(
+    (reviewerModelId) => ({
+      reviewerModelId,
+      promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
+    })
+  )
+);
 const evaluation = approved[0]?.evaluation ?? null;
+const policy = AI_REVIEW_M5_PROMOTION.observationPolicy;
+
+const operationsPath = argValue("operations");
+const operations = operationsPath ? readJson(operationsPath) : null;
+const window90 = Array.isArray(operations)
+  ? operations.find((card) => card.windowDays === 90) ?? operations[0]
+  : operations;
+
+const noOperations = "no operations report supplied (--operations=<path>)";
+const rateMet = (metric, floor) =>
+  Boolean(metric && metric.status === "ok" && metric.value >= floor);
+
 const eligibility = [
   check(
     "two_independent_decision_runs",
@@ -154,8 +415,11 @@ const eligibility = [
   ),
   check(
     "human_blind_review_signed",
-    Boolean(evaluation?.blindReviewRef),
-    "a person must judge fabricated_safety_claim and false_consensus_safety; no script can"
+    Boolean(evaluation?.blindReviewRef) &&
+      (evaluation?.zeroToleranceRulesHumanJudged ?? 0) >= 5,
+    evaluation?.blindReviewRef
+      ? `${evaluation.zeroToleranceRulesHumanJudged} of 5 rules judged`
+      : "a person must judge all five zero-tolerance rules; three are only screened by term list"
   ),
   check(
     "production_pair_matches_approved_pair",
@@ -166,18 +430,40 @@ const eligibility = [
   ),
   check(
     "reliability_trend_over_approved_period",
-    false,
-    "needs production ComparisonReviewRun history over a period a person has approved; not decidable here"
+    Boolean(
+      policy &&
+        window90 &&
+        window90.windowDays >= policy.minObservationDays &&
+        rateMet(window90.reliability?.completionRate, policy.minCompletionRate)
+    ),
+    !policy
+      ? "no observation policy has been approved, so there is no period or floor to judge against"
+      : !window90
+        ? noOperations
+        : `completion ${JSON.stringify(window90.reliability?.completionRate?.value ?? null)} over ${window90.windowDays}d against ${policy.minCompletionRate} over ${policy.minObservationDays}d`
   ),
   check(
     "sufficient_production_sample",
-    false,
-    "needs a production sample size a person has approved; an arbitrary small n must not auto-approve M5"
+    Boolean(policy && window90 && window90.reliability?.runs >= policy.minRecordedRuns),
+    !policy
+      ? "no approved minimum sample; an arbitrary small n must not auto-approve M5"
+      : !window90
+        ? noOperations
+        : `${window90.reliability?.runs} recorded run(s) against ${policy.minRecordedRuns}`
   ),
   check(
     "zero_credit_reconciliation_mismatch",
-    false,
-    "needs the production reservation/settlement comparison over the observation period"
+    Boolean(
+      window90 &&
+        window90.reliability?.unreconciledSettlements?.status === "ok" &&
+        window90.reliability.unreconciledSettlements.numerator === 0 &&
+        window90.reliability?.creditReconciliation?.status === "ok" &&
+        window90.reliability.creditReconciliation.numerator === 0
+    ),
+    window90
+      ? `${window90.reliability?.creditReconciliation?.numerator ?? "?"} reservation/settlement mismatch(es), ` +
+        `${window90.reliability?.unreconciledSettlements?.numerator ?? "?"} unsettled attempt(s)`
+      : noOperations
   ),
   check(
     "zero_critical_quality_violations",
@@ -188,22 +474,39 @@ const eligibility = [
   ),
   check(
     "adoption_and_repeat_use_thresholds_met",
-    false,
-    "needs production adoption figures and thresholds a person has approved after seeing the baseline"
+    Boolean(
+      policy &&
+        window90 &&
+        rateMet(
+          window90.adoption?.comparisonToReview,
+          policy.minComparisonToReviewRate
+        ) &&
+        rateMet(window90.adoption?.firstToSecondReview, policy.minRepeatUseRate)
+    ),
+    !policy
+      ? "no approved adoption thresholds; they are set after somebody has seen the baseline"
+      : !window90
+        ? noOperations
+        : `comparison→review ${JSON.stringify(window90.adoption?.comparisonToReview?.value ?? null)}, ` +
+          `first→second ${JSON.stringify(window90.adoption?.firstToSecondReview?.value ?? null)}`
   ),
   check(
     "rollback_drill_completed",
-    false,
-    "needs a dated drill record; writing the runbook is not performing the drill"
+    Boolean(AI_REVIEW_M5_PROMOTION.rollbackDrill),
+    AI_REVIEW_M5_PROMOTION.rollbackDrill
+      ? `performed ${AI_REVIEW_M5_PROMOTION.rollbackDrill.performedAt} by ${AI_REVIEW_M5_PROMOTION.rollbackDrill.performedBy}`
+      : "no dated drill record; writing the runbook is not performing the drill"
   ),
   check(
     "human_m5_promotion_signature",
-    false,
-    "a person signs this; nothing in this repository may set it"
+    Boolean(AI_REVIEW_M5_PROMOTION.promotionSignature),
+    AI_REVIEW_M5_PROMOTION.promotionSignature
+      ? `signed ${AI_REVIEW_M5_PROMOTION.promotionSignature.signedAt} by ${AI_REVIEW_M5_PROMOTION.promotionSignature.signedBy}`
+      : "a person signs this; nothing in this repository may set it"
   ),
 ];
 
-const verdict = judgeM5(readiness, eligibility);
+const verdict = judgeM5(scaffolding, readiness, eligibility);
 
 const render = (title, checks) => {
   console.log(`\n${title}`);
@@ -218,21 +521,23 @@ console.log(`  prompt version            ${COMPARISON_REVIEW_PROMPT_VERSION}`);
 console.log(`  registered pairs          ${AI_REVIEW_EVAL_REGISTER.length}`);
 console.log(`  approved pairs            ${approved.length}`);
 console.log(`  served pairs              ${drift.servedPairs.join(", ")}`);
-
-render("M5 readiness (decidable from this repository)", readiness);
-render("M5 eligible (needs evidence this repository cannot hold)", eligibility);
-
 console.log(
-  `\nreadiness complete: ${verdict.readinessComplete ? "YES" : "NO"}`
-);
-console.log(`M5 eligible:        ${verdict.eligible ? "YES" : "NO"}`);
-console.log(
-  "\nThese are two states, not two thresholds on one scale. Readiness says the\n" +
-    "instruments exist; eligibility says they were pointed at production and a\n" +
-    `person signed the result. All ${AI_REVIEW_M5_ELIGIBILITY_ITEMS.length} eligibility items must hold, and this report\n` +
-    "will never mark one of them itself."
+  `  operations report         ${operations ? operationsPath : "not supplied"}`
 );
 
-// Exit 0 either way: this is a report, not a gate. A readiness report that
-// failed the build would make "not M5 yet" -- the honest and expected state --
-// look like a broken branch.
+render("Instrument scaffolding (the tools exist and are wired)", scaffolding);
+render("M5 readiness (the instrument can produce a believable number)", readiness);
+render("M5 eligible (it was pointed at production and signed)", eligibility);
+
+console.log(`\nscaffolding complete: ${verdict.scaffoldingComplete ? "YES" : "NO"}`);
+console.log(`readiness complete:   ${verdict.readinessComplete ? "YES" : "NO"}`);
+console.log(`M5 eligible:          ${verdict.eligible ? "YES" : "NO"}`);
+console.log(
+  "\nThree states, not three thresholds on one scale. A built harness is not a\n" +
+    "calibrated one, and a calibrated one is not a signed result. Every item of\n" +
+    "each list must hold, and this report will never mark one of them itself."
+);
+
+// Exit 0 either way: this is a report, not a gate. A report that failed the
+// build would make "not M5 yet" -- the honest and expected state -- look like
+// a broken branch.

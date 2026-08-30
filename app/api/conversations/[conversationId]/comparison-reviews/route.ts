@@ -355,6 +355,10 @@ export async function POST(
             status: "not_attempted",
           },
           secondary: emptyAttemptRecord(),
+          // A cache hit dispatched nothing, so it has no attempts. An empty
+          // list is the honest record; a synthesised one would put a
+          // reviewer into failure-rate denominators that never ran.
+          attempts: [],
           groundingTotalQuotes:
             result.data.primary.result.groundingStats.totalCitations,
           groundingMatchedQuotes:
