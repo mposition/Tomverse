@@ -340,6 +340,18 @@ jobs:
         timeout-minutes: 10
         run: npm run verify:package-build-matrix
 
+      # The locally bundled app is a release requirement in two documents
+      # (delivery plan section 2, mobile authentication policy "Deliberately
+      # excluded"), and until now nothing measured it. A `server.url` added to
+      # a Capacitor config for a debugging session builds, runs and looks
+      # right; what it changes is the origin every request comes from, which
+      # is the one thing the bearer-token boundary is defined against. The
+      # check reads the config as text so a URL arriving through an
+      # environment variable is a finding rather than an empty string.
+      - name: Capacitor shell stays a local bundle
+        timeout-minutes: 5
+        run: npm run check:capacitor-local-bundle
+
       # PLANNER-03. Memory, imported content and uploaded documents already
       # reach the prompt, and the defences that keep them data -- fences,
       # rules stated first, inerting -- had nothing measuring them. This runs

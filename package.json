@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "engines": {
     "node": "22.x"
@@ -140,6 +141,8 @@
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
     "check:shared-packages": "node scripts/check-shared-packages.mjs",
+    "check:capacitor-local-bundle": "node scripts/check-capacitor-local-bundle.mjs",
+    "build:mobile-shell": "npm run build --workspace @tomverse/mobile",
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",

@@ -88,3 +88,7 @@ promotion-metadata-snapshot-*.json
 # bytes, the manifest carries their digests, and a fixture in the tree is one
 # that drifts from the code it was built to exercise.
 .tmp/
+
+# Vite build output for the Capacitor shell spike. `cap sync` copies it into
+# the native projects; it is a build artefact, not source.
+/apps/*/dist/
