@@ -379,6 +379,10 @@ const perRequestWorstCaseCostUsd = (limit, promptTokens) =>
 // Frozen before the first paid call and written into the record, so a reader
 // can tell what the Router was going to do rather than only what it did.
 let routingPlan = null;
+// Set when a provider refuses for a reason that will refuse every later call
+// too -- an exhausted account balance. The run stops rather than spending its
+// remaining items on a wall.
+let budgetExhausted = null;
 // Every arm answer that produced nothing usable, kept for the record as well
 // as the journal. The gate in front of the paid judge reads its classification
 // counts, so they have to survive into a file rather than only into a log.
@@ -1298,6 +1302,18 @@ for (const [index, item] of liveItems.entries()) {
     const failure = failureRecord(outcome);
     generationFailures.push(failure);
     journal(failure);
+    // A balance that has run out does not come back mid-run. Continuing turns
+    // one failed item into every remaining item, which is how three pairs at
+    // the end of the 2026-08-28c pilot took long_context_conversation/ko from
+    // 14 to 11 and voided a run that had otherwise measured cleanly.
+    if (failure.haltsRun) budgetExhausted = failure;
+  }
+  if (budgetExhausted) {
+    exclude(
+      `${budgetExhausted.arm}_arm_failed`,
+      `${budgetExhausted.providerErrorReason}: ${budgetExhausted.detail}`
+    );
+    break;
   }
 
   // mposition's ruling. An empty answer is a real failure for the person who
@@ -1376,7 +1392,11 @@ for (const [index, item] of liveItems.entries()) {
   );
 }
 
-let stoppedReason = truncatedByCost ? "cost-ceiling" : "completed";
+let stoppedReason = budgetExhausted
+  ? "provider-budget-exhausted"
+  : truncatedByCost
+    ? "cost-ceiling"
+    : "completed";
 // The loop only journalled a stop record when something stopped it early, so a
 // journal that ran to the end looked exactly like one that was cut off — the
 // first real run rebuilt as "journal-ends-without-a-stop-record" despite having
@@ -1530,6 +1550,16 @@ console.log(`Provider cost  $${accruedCostUsd.toFixed(4)}${truncatedByCost ? " (
   // per failure: a count cannot be acted on.
   for (const failure of summary.harnessAttributable) line("harness     ", failure);
   for (const failure of summary.undetermined) line("undetermined", failure);
+  if (budgetExhausted) {
+    console.log(
+      `\nPROVIDER BUDGET EXHAUSTED — ${budgetExhausted.provider} refused at pair ` +
+        `${pairs.length}/${planned.length} (${budgetExhausted.providerErrorReason}).\n` +
+        "  The run stopped there rather than spending its remaining items on a wall: the balance\n" +
+        "  does not come back mid-run, so every later call would have failed the same way.\n" +
+        "  This is an operational failure, not the provider's and not the models' — it is fixed by\n" +
+        "  topping the account up, and the run has to start again from the beginning."
+    );
+  }
   if (summary.harnessAttributableFailureCount > 0) {
     console.log(
       `\nHARNESS DEFECT — ${summary.harnessAttributableFailureCount} empty result(s) are attributable\n` +

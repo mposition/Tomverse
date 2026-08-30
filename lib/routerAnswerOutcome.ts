@@ -239,8 +239,80 @@ export const EMPTINESS_REASONS = [
 ] as const;
 export type EmptinessReason = (typeof EMPTINESS_REASONS)[number];
 
-export const FAILURE_ATTRIBUTIONS = ["harness", "provider", "model", "undetermined"] as const;
+export const FAILURE_ATTRIBUTIONS = [
+    "harness",
+    "provider",
+    "model",
+    /**
+     * Ours, but not the code's: an account, a key, a quota, a budget.
+     *
+     * The 2026-08-28c pilot lost its last three answers to DeepSeek's
+     * `Insufficient Balance`. Filing that under `provider` says the provider
+     * failed, and it did not -- it refused correctly, in 0.6 seconds, because
+     * the account behind the key had run out. The failure is real and it is
+     * ours, and it is fixed by topping up rather than by changing any code, so
+     * it is neither a harness defect nor the provider's fault.
+     */
+    "operational_configuration",
+    "undetermined",
+] as const;
 export type FailureAttribution = (typeof FAILURE_ATTRIBUTIONS)[number];
+
+/**
+ * Why a call failed outright, where the error says something specific.
+ *
+ * Only balance exhaustion is named so far, and named because it behaves
+ * unlike every other provider error: it is not transient, the next call will
+ * fail the same way, and a run that keeps going burns its remaining items
+ * against a wall. Everything else stays `provider_call_failed` -- an error
+ * this code cannot read is not an error it should classify.
+ */
+export const PROVIDER_ERROR_REASONS = [
+    "provider_account_balance_exhausted",
+    "provider_call_failed",
+] as const;
+export type ProviderErrorReason = (typeof PROVIDER_ERROR_REASONS)[number];
+
+/**
+ * Matched on the provider's own wording.
+ *
+ * Deliberately narrow. A broad match would classify an unrelated failure as a
+ * budget problem and halt a healthy run, which is worse than the miss: the
+ * cost of not recognising the message is one wasted pilot, and the cost of
+ * recognising it wrongly is every pilot.
+ */
+const BALANCE_EXHAUSTED_PATTERNS = [
+    /insufficient\s+balance/i,
+    /insufficient[_\s]funds/i,
+    /quota\s+exceeded/i,
+    /billing[_\s]hard[_\s]limit/i,
+    /exceeded\s+your\s+current\s+quota/i,
+];
+
+export type ProviderErrorClassification = {
+    reason: ProviderErrorReason;
+    attribution: FailureAttribution;
+    /**
+     * Whether the run must stop rather than move to the next pair.
+     *
+     * A balance that has run out does not come back mid-run, so continuing
+     * converts one failed item into every remaining item -- which is exactly
+     * how three pairs at the end of a run took a cell under its floor and
+     * voided a $0.58 pilot.
+     */
+    haltsRun: boolean;
+};
+
+export const classifyProviderError = (detail: string): ProviderErrorClassification => {
+    if (BALANCE_EXHAUSTED_PATTERNS.some((pattern) => pattern.test(detail))) {
+        return {
+            reason: "provider_account_balance_exhausted",
+            attribution: "operational_configuration",
+            haltsRun: true,
+        };
+    }
+    return { reason: "provider_call_failed", attribution: "provider", haltsRun: false };
+};
 
 /**
  * Finish reasons, in one spelling.
@@ -377,6 +449,8 @@ export const classifyEmptiness = (metadata: AnswerMetadata): EmptinessClassifica
 export const failureRecord = (outcome: Extract<AnswerOutcome, { status: "failed" }>) => {
     const classification =
         outcome.reason === "empty_output" ? classifyEmptiness(outcome.metadata) : null;
+    const providerError =
+        outcome.reason === "provider_error" ? classifyProviderError(outcome.detail) : null;
     return {
         kind: "answer-failure" as const,
         arm: outcome.metadata.arm,
@@ -397,9 +471,13 @@ export const failureRecord = (outcome: Extract<AnswerOutcome, { status: "failed"
         traceId: outcome.metadata.traceId,
         symptom: classification?.symptom ?? null,
         // A provider error has no emptiness to explain, so it carries no
-        // reason and is attributed to the provider that failed the call.
+        // emptiness reason. Its own reason and attribution come from what the
+        // provider said: a refusal for an empty account is not the provider
+        // failing, and is not fixed by anything in this repository.
         emptinessReason: classification?.reason ?? null,
-        attribution: classification?.attribution ?? ("provider" as const),
+        providerErrorReason: providerError?.reason ?? null,
+        attribution: classification?.attribution ?? providerError?.attribution ?? "provider",
+        haltsRun: providerError?.haltsRun ?? false,
         evidence: classification?.evidence ?? null,
     };
 };

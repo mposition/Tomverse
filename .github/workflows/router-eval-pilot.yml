@@ -220,6 +220,57 @@ jobs:
       # prompt to. It aborts rather than re-routing -- dropping the judge from
       # the candidate set would measure a Router the product does not have, and
       # claude-opus-4-8 is an Auto candidate too, so swapping only moves it.
+      # The 2026-08-28c pilot ran 2h44m, measured cleanly, and was then refused
+      # by the gate because its last three answers hit DeepSeek's `Insufficient
+      # Balance` -- three pairs at the end of the run took one cell from 14 to
+      # 11, under its 13/14 floor. Nothing about that was detectable before
+      # dispatch, and it cost $0.58 and three hours to find out.
+      #
+      # So the balance is read first. The pilot may spend up to its stage
+      # ceiling, so anything less than that available is a run planned to fail
+      # part-way.
+      - name: DeepSeek can pay for this run
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          REQUIRED_USD: ${{ inputs.max_cost_pilot_usd }}
+        run: |
+          set -euo pipefail
+          response="$(curl -sS --fail-with-body -m 30 \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+            https://api.deepseek.com/user/balance)" || {
+              echo "::error::could not read the DeepSeek balance. Nothing was run and nothing was billed."
+              exit 1
+            }
+          BALANCE_JSON="$response" node -e '
+            const body = JSON.parse(process.env.BALANCE_JSON);
+            const required = Number(process.env.REQUIRED_USD);
+            const usd = (body.balance_infos ?? []).find((row) => row.currency === "USD");
+            if (!usd) {
+              console.log("::error::the DeepSeek balance response carries no USD row.");
+              process.exit(1);
+            }
+            const total = Number(usd.total_balance);
+            if (!Number.isFinite(total)) {
+              console.log(`::error::unreadable DeepSeek total_balance "${usd.total_balance}".`);
+              process.exit(1);
+            }
+            // is_available is the provider saying the account may call at all;
+            // the number says whether it can pay for THIS run. Both.
+            if (body.is_available !== true) {
+              console.log("::error::DeepSeek reports the account is not available for calls.");
+              process.exit(1);
+            }
+            if (total < required) {
+              console.log(
+                `::error::DeepSeek has $${total.toFixed(2)} available, under this pilot ceiling of ` +
+                  `$${required.toFixed(2)}. A run that cannot pay for its own ceiling is a run planned ` +
+                  "to stop part-way. Nothing was run and nothing was billed."
+              );
+              process.exit(1);
+            }
+            console.log(`DeepSeek has $${total.toFixed(2)} available against a $${required.toFixed(2)} pilot ceiling.`);
+          '
+
       - name: Pilot run (this is the first step that spends)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
