@@ -78,7 +78,10 @@ import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
-import { ANTHROPIC_PROMPT_CACHE_TTL } from "@/lib/anthropicPromptCaching";
+import {
+    ANTHROPIC_PROMPT_CACHE_TTL,
+    type AnthropicPromptCachePath,
+} from "@/lib/anthropicPromptCaching";
 import {
     getWebSearchCapability,
     nativeSearchIsDispatchable,
@@ -1476,12 +1479,28 @@ async function handleChatPost(
         // capability is native or application-managed -- and kept as its own
         // name because the two differ in which budget pays, which tools may
         // coexist with them, and where the citations come from.
+        // Which caching path this turn is, decided once here and read by both
+        // the budget and the request builder below.
+        //
+        // A turn that attaches a provider-native server tool is a different
+        // path, not the same path with a flag: Anthropic writes the cache again
+        // on every iteration of the agentic loop a server tool runs, and only
+        // does so because our marker is present. `lib/anthropicPromptCaching.ts`
+        // holds the reasoning and the fact that the search variant is off.
+        //
+        // Computed here rather than at either call site because the two are
+        // hundreds of lines apart, and two independent readings of
+        // `nativeSearchEnabled` is exactly the drift that would put a marker on
+        // a turn whose budget did not authorise it.
         const appManagedSearchEnabled =
             webSearchRequested &&
             appManagedSearchIsDispatchable(
                 webSearchCapability,
                 searchBackendReadiness
             );
+        const promptCachePath: AnthropicPromptCachePath = nativeSearchEnabled
+            ? "chat_turn_native_search"
+            : "chat_turn";
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -2977,14 +2996,13 @@ async function handleChatPost(
                 appManagedSearchEnabled,
                 nativeSearch: nativeSearchReservation.native,
                 searchBackend: nativeSearchReservation.searchBackend,
-                // The same path `getModelGenerationSettings` is given below,
-                // so the premium the provider budget authorises and the marker
-                // the request actually sends are decided from one value. Named
-                // twice rather than threaded through a shared object because
-                // the budget is built long before the generation settings are,
-                // and `tests/anthropicPromptCaching.test.mjs` asserts the two
-                // literals agree.
-                promptCachePath: "chat_turn",
+                // The same value `getModelGenerationSettings` is given below.
+                // One variable rather than two literals: the budget is built
+                // hundreds of lines before the generation settings, and two
+                // independent readings of `nativeSearchEnabled` would be the
+                // drift that puts a marker on a turn whose budget did not
+                // authorise it.
+                promptCachePath,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -3558,12 +3576,10 @@ async function handleChatPost(
                 capability: webSearchCapability,
                 nativeSearchEnabled,
             }),
-            // Anthropic automatic prompt caching, on the one path where the
-            // prefix genuinely repeats: turn N+1 resends turns 1..N unchanged.
-            // A no-op for every other provider -- see
-            // lib/anthropicPromptCaching.ts for why the gate is the registry's
-            // provider identity and not "uses the Anthropic SDK".
-            promptCachePath: "chat_turn",
+            // The same value the budget above was given -- see there. A no-op
+            // for every provider but Anthropic, and a no-op on a searching turn
+            // whatever the provider: see lib/anthropicPromptCaching.ts.
+            promptCachePath,
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the

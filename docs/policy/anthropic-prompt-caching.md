@@ -30,6 +30,7 @@ Anthropic이 Tomverse의 direct API 트래픽에서 prompt cache hit rate가 낮
 | 경로 | 캐시 | 근거 |
 |---|---|---|
 | `chat_turn` | **O** | turn N+1이 turn 1..N을 그대로 재전송 |
+| `chat_turn_native_search` | X | server tool의 agentic loop가 반복마다 캐시를 다시 씀 — §2.3 |
 | `chat_fallback_turn` | X | 1차 범위 제외 — §2.2 |
 | `comparison_review` | X | 1차 범위 제외 — §2.2 |
 | `comparison_review_verify_item` | X | 항목 1건당 1회, 그 항목으로 만든 prompt |
@@ -79,6 +80,40 @@ Anthropic이 Tomverse의 direct API 트래픽에서 prompt cache hit rate가 낮
 
 `tests/anthropicPromptCachingWiring.test.mjs`가 `caches: true`인 경로에 셋 중
 하나라도 없으면 실패합니다. gap이 조용히 다시 열릴 수 없습니다.
+
+## 2.3 native web search turn은 예약이 안전하지 않습니다
+
+`chat_turn_native_search`가 꺼진 이유는 **prefix 논거가 아니라 예약 안전성
+논거**입니다. prefix는 다른 chat turn과 똑같이 반복됩니다.
+
+Anthropic 공식 문서(`Tool use with prompt caching` → *Server tool results are
+cached automatically*):
+
+> "When your request has prompt caching enabled and Claude uses a server tool
+> such as web search, web fetch, or code execution, **the API automatically
+> places a cache breakpoint on the server tool result before running the next
+> iteration of the agentic loop.**"
+>
+> "**This behavior only applies when your request already has at least one
+> `cache_control` marker.** Requests without prompt caching do not receive the
+> automatic breakpoint."
+
+두 번째 문장이 핵심입니다. **marker가 그 write를 허용하는 게 아니라
+발생시킵니다.** marker가 없으면 자동 breakpoint 자체가 없습니다.
+
+그리고 그 write는 **loop 반복마다 하나씩**, **검색 결과가 더해져 커진 prefix
+전체**에 대해 일어납니다. 이 앱의 예약은 `0.25 × 추정 입력 토큰` —
+**prompt를 한 번 쓰는 것의 상한**이지, **계속 커지는 prompt를 N번 쓰는 것의
+상한이 아닙니다.** 검색 상한이 5회면 write가 최대 6번까지 날 수 있고, 각각이
+직전보다 큽니다.
+
+`ephemeral_5m_input_tokens`로 보고되므로 우리가 1시간 TTL을 지정했더라도 5분
+write로 잡힙니다(같은 문서).
+
+**다시 켜는 조건은 §2.1과 다릅니다.** prefix 반복은 이미 성립하므로, 필요한
+것은 **강제된 검색 질의 상한에서 한 turn이 만들 수 있는 write 토큰의 증명된
+천장**입니다. 그 천장이 나오면 예약 산식을
+`0.25 × 입력 × (1 + maxQueries)` 같은 형태로 고치고 함께 켭니다.
 
 ## 2.1 다시 켜는 조건
 
@@ -152,6 +187,20 @@ TTL 결정이 걸린 값은 **prefix를 공유하는 연속 요청 사이의 sta
 5분으로* 캐시가 얼마나 잡히고 있는가입니다. read/write 비율이 낮다는 것은
 "entry가 읽히기 전에 만료된다"의 **후보 설명 중 하나**일 뿐이고, 다른 설명
 (prefix가 매번 달라짐, 최소 길이 미달, workspace 분리)과 구분되지 않습니다.
+
+### 5분 캐시의 경제성 판정 기준
+
+- **read/write 비율 손익분기는 `0.25 / 0.9 ≈ 0.278`**입니다. 토큰 하나를 한 번
+  쓰고 R번 읽으면 캐시가 `1.25 + 0.1R`, 캐시 없이 `1 + R`이므로
+  `1.25 + 0.1R = 1 + R` → `R = 0.25/0.9`. **0.25가 아닙니다** — 0.25는 read가
+  공짜일 때만 맞고, read는 0.1배를 냅니다. 상수는
+  `CACHE_5M_BREAK_EVEN_READ_RATIO`에 나눗셈 그대로 둡니다.
+- **판정은 `listPriceSavingUsd > 0`으로 합니다.** 비율은 모델과 무관하게 토큰을
+  똑같이 세므로, 비싼 모델과 싼 모델이 섞인 기간은 임계값을 넘고도 손해일 수
+  있습니다. 비율은 **왜 그런지**를 보는 진단값이고, 절감액이 **그래서 이득인지**
+  를 답하는 값입니다.
+- 즉 기준은 두 개이며 순서가 있습니다: `listPriceSavingUsd > 0`이 판정,
+  `read/write > 0.278`이 그 판정을 설명하는 보조 지표.
 
 ### 답할 수 있는 설계 두 가지
 
