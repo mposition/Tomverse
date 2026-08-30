@@ -1,0 +1,508 @@
+# 음성 입력 (Voice Input)
+
+## 상태
+
+- 문서 종류: 승인 대기 중인 설계·결정 문서
+- 구현 상태: MVP 구현 완료, **production 비활성**
+- production 활성화: **차단됨** — §6과 §14의 미결정 사항이 남아 있습니다
+- 마지막 검토: 2026-08-30
+
+이 문서는 감사 보고서가 아니라 계약입니다. 코드 주석의 `docs/policy/voice-input.md §N`
+인용은 전부 이 문서의 절 번호를 가리킵니다.
+
+---
+
+## 1. 이 기능이 하는 일과, 절대 하지 않는 일
+
+사용자가 채팅 입력창의 마이크를 눌러 말하면, 서버가 그 음성을 텍스트로 바꿔
+**입력창에 넣어 줍니다.** 그게 전부입니다.
+
+**변환된 텍스트는 자동으로 전송되지 않습니다.** 이것이 이 기능의 첫 번째
+불변식이고, 나머지 설계가 그 주위에 배치돼 있습니다.
+
+- `lib/voiceRecorderMachine.ts`의 effect 어휘에는 전송이 없습니다. 새 effect를
+  추가하려면 `tests/voiceRecorderMachine.test.mjs`의 목록을 **의도적으로**
+  고쳐야 합니다.
+- `components/chat/useVoiceRecorder.ts`에는 submit callback도, send handler
+  ref도, event dispatch도 없습니다.
+- `tests/e2e/voice-input-composer.spec.ts`가 실제로 녹음한 뒤 `/api/chat`
+  요청이 **0건**임을 확인합니다.
+
+이유는 단순합니다. 음성 인식은 틀립니다. 틀린 문장이 사용자가 읽기 전에
+전송되면 그 결과는 되돌릴 수 없습니다 — 모델 응답이 이미 생성되고 크레딧이
+이미 차감됩니다. 사용자가 읽고 고칠 기회는 이 기능의 편의 사항이 아니라
+안전장치입니다.
+
+**이번 범위가 아닌 것**: native 앱, 답변 음성 재생(TTS), 실시간 양방향 voice
+mode, 자동 전송.
+
+---
+
+## 2. 두 개의 스위치
+
+| | rollout flag | kill switch |
+|---|---|---|
+| 위치 | `AppSetting["feature.voiceInputEnabled"]` | 환경변수 `VOICE_INPUT_KILL_SWITCH` |
+| 기본값 | 없음 = off | 없음 = 켜짐 허용 |
+| 켜는 방법 | §14 활성화 절차의 DB write | — |
+| 끄는 방법 | 같은 row를 `"false"`로 | **아무 값이나 넣으면 즉시 off** |
+| DB 필요 | 예 | **아니오** |
+| 우선순위 | 낮음 | **항상 이김** |
+
+판정은 `lib/voiceInputAccess.ts` 한 곳입니다. flag는 `"true"` 문자열만
+활성화하고(누락·NULL·빈 문자열·`"1"`·`"TRUE"`는 전부 off), kill switch는
+비어 있지 않은 **아무 값이나** off로 읽습니다.
+
+그 비대칭이 요점입니다. 새벽 3시에 `VOICE_INPUT_KILL_SWITCH=y`라고 친 운영자는
+자기가 무엇을 의도했는지 말한 것이고, "그건 제가 받는 네 가지 철자가 아니니
+계속 서비스하겠습니다"라고 답하는 스위치는 아무도 원하지 않는 방향으로 실패한
+스위치입니다.
+
+kill switch가 DB를 읽지 않는 것도 의도입니다. 장애의 원인이 DB일 때도
+동작해야 하고, 환경변수 배포는 코드 배포보다 빠릅니다.
+
+**admin console에 토글이 없습니다.** `lib/appSettings.ts`에는
+`setVoiceInputEnabled`가 존재하지 않으며, 이 부재는
+`tests/appSettingWriters.test.mjs`에 근거와 함께 등록돼 있습니다. 이유는
+§14입니다.
+
+---
+
+## 3. 하나의 boolean
+
+UI가 보는 것은 `voiceInputEnabled` 하나이고, 서버가 세 가지 사실을 folding해
+만듭니다 — rollout flag, kill switch, 로그인 여부(§4).
+
+`components/chat/ReviewWorkspaceShell.tsx`가 요청마다 resolve하고
+`ChatPageClient` → 두 shell → `ChatInput`으로 내려갑니다.
+
+- **client가 flag를 다시 유도하지 않습니다.** Client Component의
+  `process.env`는 build-time 치환이므로, client 쪽 사본은 운영자가 kill switch를
+  당긴 뒤에도 계속 마이크를 그릴 것입니다.
+- **false면 마이크를 아예 렌더링하지 않습니다** — 비활성화된 것이 아니라
+  없습니다. 보이지만 거부하는 컨트롤은 이 배포가 의도적으로 켜지 않은 기능을
+  광고하는 일입니다.
+
+---
+
+## 4. 익명 사용자는 제외합니다 — 그 근거
+
+**MVP는 로그인 사용자 전용입니다.** 게스트는 마이크를 볼 수 없고, endpoint는
+401 `VOICE_AUTHENTICATION_REQUIRED`로 거절합니다.
+
+이 결정은 "게스트는 익명이니까"가 아닙니다. 게스트는 이미 파일을 첨부할 수
+있고, 기존 abuse protection을 실제로 조사했습니다.
+
+- signed guest cookie(`access.subjectKey`)가 주체를 식별합니다.
+- Turnstile이 업로드를 gate합니다(`ensureGuestVerified`).
+- 분당 3회·일 12회·일 25 MB 예산이 저장소 사용량을 제한합니다.
+
+이 셋은 전부 **저장소**를 제한하며, 저장소는 이 제품이 이미 가격을 아는
+비용입니다. transcription은 저장소가 아니라 **제3자에 대한 초당 과금 호출**이고,
+오디오 1초가 사용자에게 얼마인지는 이 저장소에 정해진 답이 없습니다(§6).
+게스트에게는 그것을 인출할 크레딧 계정도 플랜도 없으므로, 게스트를 허용한다는
+것은 **cookie 하나를 근거로 값이 정해지지 않은 provider 호출을 제공한다**는
+뜻입니다.
+
+§6이 정해지면 게스트 허용은 `lib/voiceInputAccess.ts`의 정책 변경 한 곳이지,
+composer와 route에 흩어진 수정이 아닙니다.
+
+**플랜은 gate가 아닙니다.** 로그인한 모든 플랜(Free 포함)이 쓸 수 있습니다.
+음성 입력은 타이핑을 대체하는 것이지 더 좋은 답을 사는 것이 아니고, 접근성
+편의를 tier로 막는 것은 별개의 제품 결정입니다. `voiceInputRefusal()`이 `tier`를
+받으면서 **의도적으로 읽지 않는** 것은 이 결정을 서명에 남기기 위해서입니다.
+
+---
+
+## 5. 서버가 강제하는 제한
+
+### 5.1 언제나 강제되는 것
+
+| 항목 | 값 | 강제 위치 |
+|---|---|---|
+| 최대 업로드 | 8 MB | `Content-Length` **와** 실제 도착 바이트 양쪽 |
+| 최소 크기 | 2 KB | 실제 도착 바이트 |
+| 허용 컨테이너 | `audio/webm`, `audio/mp4`, `audio/wav` | 선언 + **바이트 sniff** |
+| transcript 최대 | 4,000자 | 잘라내지 않고 **거절** |
+
+`Content-Length`는 주장이지 사실이 아니므로 양쪽을 봅니다. 선언한 media type과
+실제 바이트가 어긋나면 `VOICE_CLIP_TYPE_MISMATCH`입니다 — 첨부 정책의 "이름이
+정하고 MIME은 힌트" 규칙과 같은 방향입니다.
+
+형식 표는 `lib/voiceInputFormats.ts` **하나**입니다. recorder의 선호 순서,
+서버 allowlist, 컨테이너 sniff, provider 전달이 전부 여기서 파생됩니다. 첨부
+형식 목록이 넷으로 갈라져 있던 사고를 반복하지 않기 위해서입니다.
+
+`audio/ogg`가 없는 이유: Firefox는 기꺼이 녹음하지만 transcription provider가
+받지 않습니다(OpenAI speech-to-text 문서, 2026-08-30 확인: `mp3`, `mp4`,
+`mpeg`, `mpga`, `m4a`, `wav`, `webm`). 받아 놓고 변환하지 못하는 것은 거절을
+**사용자가 조치할 수 있는 시점(녹음 전)에서 이미 말해 버린 뒤로** 옮기는
+일입니다.
+
+### 5.2 길이 제한 — 무엇이 hard이고 무엇이 best-effort인지
+
+**제한: 클립당 120초**(거절 임계값은 recorder의 반올림 여유로 121초).
+
+길이는 provider 호출 **전에** 컨테이너에서 읽습니다(`lib/voiceClipDuration.ts`).
+이것이 실제로 무엇을 보장하는지는 **측정해서** 정했습니다. Chromium 1194의 실제
+`MediaRecorder` 출력 기준:
+
+- `audio/webm`은 `Segment > Info > TimecodeScale`과 `Duration`을 씁니다.
+  2.5초 녹음이 2400.6(× 1 ms)을 선언했습니다.
+- `audio/mp4`는 fragmented이고 `mvhd`가 채워집니다. 3.0초 녹음이
+  timescale 1000에 duration 2960을 선언했습니다.
+
+두 경우 모두 provider 호출 전 거절이 가능합니다.
+
+**관측하지 않은 것: Safari.** production에서 MP4를 녹음하는 유일한 엔진이고 이
+컨테이너에서 실행할 수 없습니다. fragmented MP4는 `mvhd.duration = 0`을 쓰고
+길이를 fragment에 맡길 자격이 있으므로, `unknown`은 실제로 발생 가능한 결과이며
+**거절이 아니라 부재로 처리합니다.** 길이를 읽지 못한 클립을 전부 거절하는
+편이 깔끔했겠지만, 그것은 **어떤 엔진의 동작에 대한 추측을 근거로 그 엔진 전체에서
+기능을 못 쓰게 만드는 일**입니다. 확인은
+`docs/ops/voice-input-staging-checklist.md` D-3입니다.
+
+길이를 읽지 못해도 다음 셋이 남습니다: 8 MB 상한, §7의 일일 초 예산(모르는
+길이는 **클립당 최대치로 예약**), provider가 스스로 보고한 duration으로의 정산.
+
+### 5.3 클라이언트도 같은 제한을 갖습니다
+
+브라우저는 120초에서 recorder를 멈추고, 2 KB 미만 클립을 업로드 전에
+거절합니다. 이것은 **선점(pre-emption)이지 강제(enforcement)가 아닙니다** —
+서버가 독립적으로 같은 것을 검사합니다. 게스트 첨부 정책의 "client의 사본은
+거절을 앞당길 뿐 정의하지 않는다"와 같은 규칙입니다.
+
+recorder의 비트레이트는 32 kbps로 **고정**합니다. 브라우저에 맡기면 128 kbps로
+녹음하는 기기가 옆 기기보다 예산을 네 배 빨리 씁니다.
+
+---
+
+## 6. 가격 — **미결정. production 활성화 차단 사유.**
+
+**이 기능은 현재 크레딧을 차감하지 않습니다.** entitlement 층이 아예 없습니다.
+
+이것은 "무료 정책"이 아니라 **정해지지 않았다는 사실의 정직한 구현**입니다.
+AGENTS.md의 "가격·보존·제3자 전송에 관한 결정이 부족하면 추측하지 말고 별도
+결정 문서에 미결정 사항을 명시하세요"에 따라, 여기에 무엇이 정해지지 않았는지
+적습니다.
+
+### 6.1 정해지지 않은 것
+
+1. **오디오 1초의 사용자 가격.** 크레딧으로 환산할지, 무료 편의 기능으로 둘지,
+   플랜에 초 할당량을 둘지. 셋은 서로 다른 결정이고 어느 것도 다른 것에서
+   유도되지 않습니다.
+2. **실패 시 처리.** transcript가 비어 돌아온 경우(=provider는 과금했고
+   사용자는 아무것도 못 받음) 크레딧을 받을지, 환급할지, 애초에 받지 않을지.
+3. **provider 원가의 검증.** `lib/modelPricing.ts`의
+   `PENDING_VERIFIED_PRICE_REGISTER`는 **텍스트 모델**의 계층이고, 이미지 정책이
+   그렇듯 audio는 **세 번째 계층**입니다. audio 초당 단가를 어느 register에
+   담을지, 담당자·검증 티켓·기한을 누가 갖는지가 정해지지 않았습니다.
+4. **provider 예산.** `CHAT_PROVIDER_*_COST_*`는 채팅 provider 예산이고 audio는
+   그 안에 들어가지 않습니다. audio 전용 provider 예산을 둘지, 둔다면
+   `/api/ready`가 production에서 그 부재를 실패로 볼지.
+
+### 6.2 정해질 때까지 지켜지는 것
+
+- entitlement 층을 **만들지 않습니다.** 절반만 구현된 과금은 없느니만
+  못합니다.
+- §7의 operational guardrail만 존재하며, 이름·오류 코드·bucket·환경변수를
+  크레딧 층과 **절대 섞지 않습니다**.
+- rollout flag는 off로 남고, admin console에 토글이 없습니다(§14).
+
+---
+
+## 7. Operational guardrail — entitlement가 아닙니다
+
+`lib/voiceInputGuardrails.ts`(순수) + `lib/voiceInputBudget.ts`(DB).
+
+AGENTS.md의 "Credit entitlement vs operational guardrail"이 요구하는 분리를
+지킵니다. 어휘 전체가 별개입니다.
+
+| | 이 층 | 절대 쓰지 않는 것 |
+|---|---|---|
+| 환경변수 | `VOICE_INPUT_*` | `CHAT_*` |
+| bucket period | `voice-seconds-day` | `cost-*`, `op-cost-*` |
+| 오류 코드 | `VOICE_OPERATIONAL_LIMIT_REACHED` | `OPERATIONAL_COST_GUARDRAIL_TRIGGERED`, 크레딧 코드 |
+
+### 7.1 두 개의 다른 층
+
+- **요청 횟수**는 평범한 abuse protection이고 다른 endpoint와 같은
+  `consumeApiRateLimit`(scope `voice-transcription`)을 씁니다.
+- **초 예산**이 실제로 지출을 제한하는 것입니다. provider가 초당 과금하므로,
+  횟수만으로는 상한이 "클립당 최대치 × 횟수"가 되어 아무도 의도하지 않은
+  큰 수가 됩니다.
+
+기본값: 일 40회, 분 6회, **일 20분**. 환경변수 override는 상한(§`VOICE_GUARDRAIL_CEILING`)
+**아래로만** 갈 수 있고, 넘으면 clamp 후 보고합니다. `0`이나 음수는 무시합니다 —
+0은 모든 요청을 예산 메시지로 거절해서 장애처럼 읽히고, **끄는 것은 kill
+switch의 일이며 그쪽은 그렇다고 말합니다.**
+
+`lib/chatCostGuardrails.ts`가 override의 **하한**을 강제하는 것과 방향이
+반대인 이유: 그쪽의 유도값은 사용자의 entitlement라 낮추면 지불한 것을 빼앗는
+일이고, 이쪽은 entitlement가 없으므로 잘못될 수 있는 방향은 청구서가 커지는
+쪽뿐입니다.
+
+### 7.2 예약 후 정산
+
+provider가 답하기 전에는 몇 초인지 모릅니다. 나중에만 기록하면 동시에 연
+요청 수만큼 예산을 넘길 수 있으므로, 채팅 경로와 같은 모양을 씁니다.
+
+- **예약 기준**: 컨테이너가 선언한 길이(올림), 선언하지 않았으면 **클립당
+  최대치**. 길이를 말하지 않는 클립은 허용된 만큼 길다고 가정해야 합니다 —
+  fail-closed이고, 채팅 예약의 `conservative_default`와 같은 논리입니다.
+- **정산**: provider가 보고한 duration으로 내립니다. 실패한 호출은 **0으로
+  정산**합니다 — provider가 거절한 클립에 과금하지 않았는데 예약을 남겨 두면
+  우리 장애에 사용자의 하루 예산을 쓰는 일입니다.
+- 정산은 예약보다 **더 쓰지 않습니다**(0에서 floor). provider가 불가능하게 긴
+  duration을 보고해도 남의 예산을 건드릴 수 없습니다.
+
+---
+
+## 8. 상태 머신
+
+`lib/voiceRecorderMachine.ts`는 **순수 reducer**입니다. `MediaRecorder`도
+`fetch`도 timer도 React도 없고, `components/chat/useVoiceRecorder.ts`가 그것들을
+소유하는 adapter입니다.
+
+이 분리는 장식이 아닙니다. 실제로 이 기능을 깨뜨리는 순서들 — 취소 후에 도착한
+blob, 포기한 뒤에 도착한 권한 응답, 같은 tick에 겹친 제한과 정지 — 은 실제
+recorder를 돌려서 안정적으로 재현할 수 없고, 전부 reducer에 대한 단위
+테스트입니다.
+
+### 8.1 상태
+
+`idle` → `permission_pending` → `recording` → `stopping` → `transcribing` →
+`idle`, 그리고 어디서든 `error`.
+
+effect는 데이터로 이름만 붙이고 hook이 수행합니다:
+`request_microphone`, `start_capture`, `stop_capture`, `discard_capture`,
+`release_microphone`, `upload_clip`. **submit은 없습니다**(§1).
+
+### 8.2 session 계수
+
+`MediaRecorder`는 `stop()`이 즉시 반환하고 마지막 `dataavailable`이 나중에
+옵니다. 취소하고 곧바로 다시 녹음한 사용자는 서로 다른 recorder 둘의 callback을
+동시에 갖고 있고, 오래된 쪽도 자기 바이트를 전달할 자격이 있습니다.
+
+모든 late event는 `sessionId`를 갖고, 현재 상태의 것과 다르면 **버립니다.**
+이것이 없으면 취소한 녹음의 오디오가 그것을 대체한 녹음의 composer에
+들어갑니다 — 흐름의 버그가 아니라, **사용자가 명시적으로 버린 것을 제품이
+전사하는 일**입니다.
+
+hook에는 두 번째 방어가 있습니다: reducer의 session 검사가 *상태*를 지키고,
+`discardedRef` 검사가 *draft*를 지킵니다.
+
+### 8.3 UI
+
+composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지킵니다.
+
+- **버튼**은 actions row에, 다른 44px 컨트롤들과 함께.
+- **상태**(경과 시간, 취소, 오류)는 textarea **위의 자기 row**에.
+
+상태를 버튼 옆에 두면 actions row에서 자라고 wrap하다가 320px composer에서 Send를
+밖으로 밀어냅니다. 상태 row는 rest 상태에서 `null`을 반환하므로 평소에는 높이를
+차지하지 않습니다.
+
+- **정지와 취소는 다른 컨트롤입니다.** 정지는 "이걸 쓴다", 취소는 "버린다"이고,
+  누르는 시간에 따라 둘 다 되는 하나의 컨트롤은 이 흐름에서 실수가 복구
+  불가능해지는 유일한 지점이 됩니다.
+- **취소는 `transcribing` 중에도 가능합니다.** 마음이 바뀐 사용자는 기다림을
+  멈출 자격이 있고, 뒤에 도착하는 transcript는 §8.2가 버립니다.
+- **transcript는 draft에 append합니다**, 대체하지 않습니다. 절반 타이핑하고
+  나머지를 말하는 것은 정상적인 사용법이고, 대체는 이 마이크를 undo 없이 작업을
+  조용히 파괴할 수 있는 composer 유일의 컨트롤로 만듭니다.
+- 제한 도달은 녹음을 **정지**시킬 뿐 **버리지 않습니다.** 120초 제한을 지키려고
+  120초의 발화를 버리는 것은 제한이 그것에 도달한 사람을 벌하는 일입니다.
+- 색: 녹음 중 `red`(status 색, guarded hue 아님), 나머지 zinc/blue. **accent
+  role token을 새로 만들지 않았습니다** — 이 기능에 필요 없는 색 결정이고
+  맞춰야 할 네 번째 대상이 늘 뿐입니다.
+
+---
+
+## 9. 활성화·비활성화 방법
+
+### 켜기 (staging)
+
+```sql
+INSERT INTO "AppSetting" ("key", "value")
+VALUES ('feature.voiceInputEnabled', 'true')
+ON CONFLICT ("key") DO UPDATE SET "value" = 'true';
+```
+
+그리고 `VOICE_TRANSCRIPTION_API_KEY`(또는 `OPENAI_API_KEY`)가 있어야 합니다.
+`VOICE_INPUT_KILL_SWITCH`는 **없거나 비어 있어야** 합니다.
+
+### 즉시 끄기 (production kill switch)
+
+```
+VOICE_INPUT_KILL_SWITCH=1
+```
+
+배포하면 끝입니다. DB를 읽지 않고, stored flag가 무엇이든 이깁니다. 되돌리려면
+변수를 지웁니다.
+
+### 되돌리기 (rollout flag)
+
+```sql
+UPDATE "AppSetting" SET "value" = 'false' WHERE "key" = 'feature.voiceInputEnabled';
+```
+
+row를 지워도 같습니다(누락 = off).
+
+---
+
+## 10. STT provider port
+
+`lib/voiceTranscriptionPortCore.ts`(framework-free) +
+`lib/voiceTranscriptionPort.ts`(`server-only` binding). `lib/emailProviderPort*.ts`와
+같은 모양이고 같은 이유입니다.
+
+- **method는 `transcribe` 하나**입니다. 모델 목록, 사용량 조회, streaming,
+  번역, 화자 분리, 음성 합성은 전부 의도적으로 없습니다. 그것들은 어떤
+  provider가 가진 능력이지 이 제품이 요구하기로 한 것이 아니고, port가 그것들을
+  키우면 provider를 교체할 때 아무도 부르지 않는 기능을 다시 구현해야 합니다.
+  `VOICE_TRANSCRIPTION_PORT_SURFACE`가 이름을 고정하고
+  `tests/voiceInputPrivacy.test.mjs`가 강제합니다.
+- **UI component가 provider를 직접 부르지 않습니다.** hook이 아는 것은
+  endpoint URL 하나입니다.
+- **key는 `VOICE_TRANSCRIPTION_API_KEY`가 우선**이고 없으면 `OPENAI_API_KEY`로
+  fallback합니다. 전용 변수가 먼저인 이유는 "채팅에 답하는 계정"과 "음성을
+  전사하는 계정"이 같은 결정이 아니기 때문입니다(§11.3). 어느 쪽이 쓰였는지는
+  구조화 로그의 `keySource`에 남습니다.
+- 기본 모델은 `gpt-4o-mini-transcribe`이고 `VOICE_TRANSCRIPTION_MODEL`로
+  바꿉니다. §6이 열려 있는 동안의 올바른 기본값은 **꺼 두는 비용이 가장 적은
+  것**입니다.
+
+---
+
+## 11. 보존과 제3자 전송
+
+### 11.1 원본 음성은 저장하지 않습니다
+
+한 요청이 지속되는 동안 메모리에만 존재하고, 그 뒤에는 없습니다. **나중에
+sweeper가 지우는 것이 아니라 애초에 어디에도 쓰지 않습니다.**
+
+- 업로드 준비 단계 없음, object key 없음, row 없음, `GET` 없음.
+- `tests/voiceInputPrivacy.test.mjs`가 voice module 전체를 훑어
+  `writeR2Object`·`prisma.message`·`writeFileSync` 류의 호출이 없음을
+  확인합니다. 예외는 `lib/voiceInputBudget.ts` 하나이고, 그것이 쓰는 것은
+  hash된 사용자 키에 달린 **초 카운터**입니다.
+- **취소한 녹음은 어디로도 전송되지 않습니다.** hook은 버려진 session에 대해
+  Blob을 조립조차 하지 않습니다.
+
+### 11.2 로그에 남지 않는 것
+
+오디오, transcript, transcript의 길이, transcript의 앞부분, API key, provider
+응답 본문.
+
+요청당 구조화 이벤트 하나가 남고 필드는 **outcome, mediaType, durationSource,
+durationSeconds, reservedSeconds, providerFailure, providerStatus, keySource**
+뿐입니다 — 전부 이 코드가 고른 코드이거나 컨테이너에서 측정한 숫자입니다.
+필드가 하나라도 늘면 `tests/voiceInputPrivacy.test.mjs`가 실패합니다.
+
+provider 실패는 **코드와 HTTP status로만** 보고합니다. 일부 provider는 오류
+본문에 요청을 되비추고, 그 요청은 오디오입니다. `fetch`가 throw한 error도
+검사하지도 로깅하지도 않습니다 — 일부 runtime에서 message에 요청이 들어 있습니다.
+
+### 11.3 어디로 가는가
+
+오디오는 transcription provider(현재 **OpenAI**)로 갑니다. 그쪽 약관에 따라 다른
+국가에서 처리될 수 있습니다.
+
+**미결정**: OpenAI 계정의 audio 데이터 보존 설정, zero-data-retention 적용
+여부, 별도 계정/조직/DPA 분리 여부. `VOICE_TRANSCRIPTION_API_KEY`를 별도로 둔
+것은 그 결정이 내려질 때 **코드 변경 없이** 반영할 수 있게 하기 위해서이고,
+결정 자체는 아직 없습니다. 이것도 §14의 차단 사유입니다.
+
+### 11.4 사용자에게 말하는 곳
+
+두 곳입니다.
+
+1. **녹음하는 그 자리** — 상태 row의 `chat.voicePrivacyNote`. 데이터에 대한
+   약속은 데이터가 만들어지는 지점에 있어야 한다는, 게스트 첨부와 같은 규칙.
+2. **개인정보 처리방침** — `privacyPolicy.voiceInput`, 7개 locale 전부. "외부 AI
+   제공업체" 절 안의 한 문장이 아니라 **자기 절**입니다: 여기서 중요한 약속은
+   *녹음*이 어떻게 되는가이고, 그것은 전송이 아니라 보존에 관한 진술입니다.
+
+---
+
+## 12. 언어
+
+한국어와 영어가 우선 지원 대상입니다.
+
+**언어를 고정하지 않습니다.** provider에 `language`를 보내지 않고 자동 감지에
+맡깁니다. 고정하면 문장 중간에 언어를 바꾸는 사용자에게 **맞는 언어를 감지하는
+대신 틀린 언어로 전사**하게 됩니다.
+
+transcript는 **말한 대로** 돌려줍니다. 필터·교정·대문자화·구두점 추가·번역·
+moderation을 하지 않습니다(`lib/voiceTranscript.ts`). 이 텍스트는 사용자가 읽고
+보내는 편집 가능한 draft이므로, 조용히 개선하면 **인식기가 틀렸다는 사실을
+사용자가 알아챌 수 없게** 됩니다.
+
+공백 정규화, 무음 결과 거절, 과도한 길이 **거절**(잘라내기 아님)만 합니다.
+잘린 transcript는 잘렸다는 표시 없이 문장 중간에서 끝나고, 사용자는 그것이
+자기가 한 말이라고 믿고 보냅니다.
+
+---
+
+## 13. 오류 문구
+
+`lib/voiceInputErrorCopy.ts`가 refusal code → locale key를 매핑합니다.
+`lib/chatAttachmentErrorCopy.ts`와 같은 모양이고, 그 파일이 기록한 사고 때문에
+존재합니다: 모든 실패가 한 문장("문제가 발생했습니다, 다시 시도해 주세요")을
+내는 흐름은 그것을 보는 사람 대부분에게 틀린 조언을 합니다.
+
+마이크 차단, 녹음 불가 브라우저, 빈 녹음, 인식된 말 없음, 일일 한도, provider
+장애는 **고치는 방법이 여섯 가지로 다르고**, 그중 "다시 시도"가 맞는 것은
+하나뿐입니다.
+
+서버는 코드만 보내고 문장은 client가 locale로 옮깁니다. 서버가 영어 문장을
+쓰면 그 문장만 7개 locale 중 어디에도 번역되지 않습니다.
+
+---
+
+## 14. production 활성화를 막는 것
+
+**아래가 전부 해결되기 전에는 production에서 켜지 않습니다.** admin console에
+토글이 없는 이유가 이것입니다 — 토글은 이 절차의 마지막 단계를 앞의 세 단계
+없이 제공하는 일입니다.
+
+| # | 미결정 사항 | 필요한 것 |
+|---|---|---|
+| B-1 | 오디오 1초의 사용자 가격 (§6.1-1) | 제품·finance 결정. 크레딧/무료/할당량 중 하나 |
+| B-2 | 실패 시 과금 처리 (§6.1-2) | 같은 결정의 일부 |
+| B-3 | provider 원가 검증 계층 (§6.1-3) | audio register의 소유자·티켓·기한 |
+| B-4 | audio provider 예산 (§6.1-4) | 둘지 여부, `/api/ready`가 강제할지 |
+| B-5 | provider 데이터 보존 (§11.3) | OpenAI 계정 설정 확인, 별도 계정/DPA 여부 |
+| B-6 | 실기기 검증 (§15) | `docs/ops/voice-input-staging-checklist.md` 서명 |
+
+B-1~B-4는 **§6이 열려 있다는 하나의 사실**의 네 얼굴입니다. B-5는 별개이고
+법무 성격입니다. B-6은 사람만 할 수 있습니다.
+
+---
+
+## 15. 사람만 할 수 있는 검증
+
+AGENTS.md의 "사람에게 남기는 것은 사람만 할 수 있는 것뿐입니다"에 따라, 이
+컨테이너에서 만들 수 있는 것은 전부 만들었습니다.
+
+- 실제 `MediaRecorder` 시료 3개를 **생성했습니다**
+  (`tests/fixtures/voice/`, `scripts/make-voice-fixtures.mjs`).
+- 컨테이너 파싱·길이 계산·거절 경로는 전부 자동 테스트입니다.
+- E2E는 합성 `MediaStream`으로 **실제 브라우저 recorder**를 돌립니다.
+
+남는 것은 넷 중 두 가지에 해당합니다 — **실기기·실제 OS**와 **이 컨테이너가
+만들 수 없는 시료**. 목록과 판정 기준은
+`docs/ops/voice-input-staging-checklist.md`에 있고, **관측하지 않은 결과를
+통과로 기록하지 않습니다.**
+
+---
+
+## 16. 바꾸기 전에
+
+- §1(자동 전송 없음), §4(로그인 전용), §11.1(원본 미보존)을 완화하는 변경은
+  **릴리스 차단 사유**입니다.
+- 형식을 추가하려면 `lib/voiceInputFormats.ts`의 행 하나입니다. 다른 어디에도
+  형식별 분기를 만들지 않습니다.
+- guardrail 어휘를 크레딧·채팅 층과 섞지 않습니다(§7).
+- §6이 정해지면 이 문서를 먼저 고치고, 그 다음에 코드를 고칩니다.
