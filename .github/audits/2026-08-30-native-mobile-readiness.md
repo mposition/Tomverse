@@ -1,6 +1,8 @@
 # iOS·Android Native 앱 준비도 스파이크 (2026-08-30)
 
-- 대상: `mposition/Tomverse` `develop` @ `96f012b`
+- 대상: `mposition/Tomverse` `develop`
+- 조사 기준 커밋: `96f012b`. 작업 중 원격이 앞서 나가 `be5aebe`를 병합했고,
+  **§2의 수치와 §11의 검증은 병합 후 트리에서 전부 다시 측정·재실행했습니다.**
 - 목적: 스토어 출시 앱 구현이 아니라, **Capacitor 로컬 번들 Native 앱으로 전환할 준비가 어디까지 되어 있는지**를 코드와 실행 증거로 확인하고 작업량을 산정하는 것
 - 근거 문서: `docs/policy/tomverse-chat-delivery-plan.md`, `docs/policy/shared-packages.md`,
   `docs/policy/tomverse-chat-mobile-authentication.md`, `docs/policy/chat-concurrency-and-identity.md`,
@@ -22,7 +24,8 @@
 딥링크)은 스키마에 행 하나 없이 전부 M0이고, **화면을 그리는 코드**(`chat-ui`,
 `api-client`)도 존재하지 않습니다. 그 사이에서 오늘 확인된 가장 구체적인 사실은
 `lib/requestOrigin.ts`가 Capacitor의 두 origin 중 어느 것도 받지 않아 **Native의 모든
-비-GET 요청이 라우트에 닿기 전에 421로 거절된다**는 것입니다(§3.1).
+비-GET 요청이 라우트에 닿기 전에 403 `INVALID_REQUEST_ORIGIN`으로 거절된다**는
+것입니다(§3.1).
 
 ---
 
@@ -33,20 +36,20 @@
 
 | # | 영역 | 성숙도 | 근거 |
 |---|---|---|---|
-| 1 | 서버 chat 오케스트레이션·스트리밍 | **M3** | `app/api/chat/route.ts` 5,213줄, keepalive·idle timeout·취소·정산 전 경로 존재 |
+| 1 | 서버 chat 오케스트레이션·스트리밍 | **M3** | `app/api/chat/route.ts` 5,909줄, keepalive·idle timeout·취소·정산 전 경로 존재 |
 | 2 | 동시 실행·admission·rate limit | **M3** | `lib/chatConcurrencyCore.ts`·`chatAdmissionCore.ts`, all-or-nothing preflight |
 | 3 | 크레딧 예약·정산·guardrail | **M3** | `docs/policy/credit-and-cost-limits.md` 계약이 코드로 강제됨 |
 | 4 | 계정 데이터 내보내기 | **M3** | `lib/accountDataExport*.ts`, 단발성 티켓·step-up·감사 |
 | 5 | 인앱 계정 삭제 | **M3** | `app/api/user/account/route.ts` DELETE + `AuthButton.tsx` 확인 문구 |
-| 6 | data-domain registry | **M2** | 55 도메인 등록, **2개가 `unverified`** (§3.4) |
+| 6 | data-domain registry | **M2** | 58 도메인 등록, **2개가 `unverified`** (§3.4) |
 | 7 | 공유 package (`chat-core`·`ui-tokens`) | **M3** | PACKAGE-01 approved. 단 범위는 이 두 개까지 |
-| 8 | 모바일 웹 레이아웃 (`MobileChatShell`) | **M3** | 1,579줄, 3개 UI 계약이 회귀를 고정 |
+| 8 | 모바일 웹 레이아웃 (`MobileChatShell`) | **M3** | 1,752줄, 3개 UI 계약이 회귀를 고정 |
 | 9 | OAuth2 + PKCE 클라이언트 | **M2** | `lib/oauthLink.ts`가 이미 자체 PKCE 구현 — **재사용 가능** |
 | 10 | 이메일 OTP·매직링크 | **M3**(웹) / **M0**(bearer 교환) | `lib/emailLogin.ts`는 쿠키만 발급 |
 | 11 | `chat-ui` package | **M0** | 트리에 없음 |
 | 12 | `api-client` package | **M0** | 트리에 없음 |
 | 13 | `apps/mobile` 셸 | **M1→M2** | 이번 스파이크로 최소 scaffold 생성(§11) |
-| 14 | mobile bearer token lifecycle | **M0** | Prisma 113개 model 중 refresh/device 관련 **0개** |
+| 14 | mobile bearer token lifecycle | **M0** | Prisma 116개 model 중 refresh/device 관련 **0개** |
 | 15 | refresh 회전·재사용 탐지·token family | **M0** | 코드·스키마 어디에도 없음 |
 | 16 | 기기 목록·기기별 해제 | **M0** | `sessionRevocationCore.ts`는 계정 전체 revocation만 |
 | 17 | explicit CORS allowlist | **M0** | `Access-Control-Allow-Origin` 문자열이 저장소에 **0건** |
@@ -59,8 +62,8 @@
 | 24 | Google Drive 첨부 | **M3**(웹) / **M0**(Native) | GIS 토큰 클라이언트가 WebView origin을 등록할 수 없음(§3.3) |
 | 25 | PWA (manifest·SW) | **M0** | manifest·service worker 모두 없음 |
 | 26 | 개인정보 표시·스토어 메타데이터 | **M0** | 산출물 없음 |
-| 27 | Sentry 기기·토큰 노출 방어 | **M3** | 브라우저 SDK 미초기화, `sendDefaultPii: false` (§4.4) |
-| 28 | Native CI | **M0** | 워크플로 20개 중 native 빌드 0개 |
+| 27 | Sentry 기기·토큰 노출 방어 | **M3** | 브라우저 SDK 미초기화, `sendDefaultPii: false` (§4.2) |
+| 28 | Native CI | **M0** | 워크플로에 native 빌드 job 0개 |
 
 **M4 이상은 하나도 없습니다.** 실기기에서 확인된 항목이 아직 존재하지 않기 때문입니다.
 
@@ -70,7 +73,7 @@
 
 ### 2.1 그대로 재사용 (서버)
 
-API 186개 라우트와 그 뒤의 정책 계층 전부입니다. Native는 **전송 방식만 다른 같은 서버**를
+API 189개 라우트와 그 뒤의 정책 계층 전부입니다. Native는 **전송 방식만 다른 같은 서버**를
 쓰며, 라우팅·크레딧·moderation·첨부 검증을 다시 만들지 않습니다. 이것이 이 스파이크에서
 가장 큰 자산입니다.
 
@@ -78,15 +81,15 @@ API 186개 라우트와 그 뒤의 정책 계층 전부입니다. Native는 **�
 
 `lib/chat*.ts`·`lib/comparison*.ts` 중 **`@/` alias도, framework import도, 브라우저/Node
 전역도, `process.env`도 쓰지 않는** 모듈을 실제로 세었습니다. 그중 클라이언트가 실제로
-import하는 것만 추리면 다음 8개(합 **763줄**)이고, 이것이 `chat-core` 다음 seed입니다.
+import하는 것만 추리면 다음 8개(합 **804줄**)이고, 이것이 `chat-core` 다음 seed입니다.
 
 | 모듈 | 줄 | client | server |
 |---|---:|---:|---:|
-| `lib/comparisonReadiness.ts` | 212 | 3 | 1 |
-| `lib/chatCostSafetyCore.ts` | 130 | 2 | 6 |
+| `lib/comparisonReadiness.ts` | 212 | 3 | 2 |
+| `lib/chatCostSafetyCore.ts` | 147 | 2 | 6 |
 | `lib/chatModelSummary.ts` | 110 | 1 | 0 |
 | `lib/chatRuntimeStatus.ts` | 107 | 3 | 0 |
-| `lib/chatAttachmentErrorCopy.ts` | 68 | 1 | 0 |
+| `lib/chatAttachmentErrorCopy.ts` | 92 | 1 | 1 |
 | `lib/chatCreditAllocation.ts` | 56 | 2 | 5 |
 | `lib/chatKeyboardPolicy.ts` | 44 | 3 | 0 |
 | `lib/comparisonReviewCost.ts` | 36 | 1 | 0 |
@@ -107,7 +110,7 @@ import하는 것만 추리면 다음 8개(합 **763줄**)이고, 이것이 `chat
 | `lib/chatContentState.ts` | 214 | storage (`localStorage` → Capacitor Preferences) |
 | `lib/chatStreamConsumer.ts` | 185 | text decoder |
 | `lib/chatIdentityNamespace.ts` | 121 | storage |
-| `lib/chatStreamRuntime.ts` | 485 | storage + `AbortController` (단 `components/chat/types` 의존) |
+| `lib/chatStreamRuntime.ts` | 500 | storage + `AbortController` (단 `components/chat/types` 의존) |
 
 `chatStreamRuntime.ts`가 `@/components/chat/types`를 import한다는 점이 중요합니다 — 즉
 **메시지 타입 자체가 먼저 package로 가야** 스트림 런타임이 갈 수 있습니다. 이것이
@@ -115,15 +118,15 @@ import하는 것만 추리면 다음 8개(합 **763줄**)이고, 이것이 `chat
 
 ### 2.4 옮기면 안 되는 것
 
-- `components/chat/ChatInput.tsx` (4,591줄), `ChatPageClient.tsx` (6,161줄),
-  `ChatApp.tsx` (1,802줄). 계획서 §4가 "전체 composer와 IME/view 동작을 한 번에 core로
+- `components/chat/ChatInput.tsx` (4,601줄), `ChatPageClient.tsx` (6,820줄),
+  `ChatApp.tsx` (약 1,800줄). 계획서 §4가 "전체 composer와 IME/view 동작을 한 번에 core로
   옮기지 말라"고 명시합니다. 이번 스파이크에서도 복제하지 않았습니다.
 - `lib/chatAdmissionCore.ts`(`Buffer`·`crypto`), `lib/chatConcurrencyCore.ts`(`process.env`).
   둘 다 서버 판정이며, 클라이언트가 알면 안 되는 값을 다룹니다.
 
 ### 2.5 UI 재사용 범위
 
-`components/chat`는 57개 파일·25,065줄이고 그중 `next/*`를 import하는 것은 **10개뿐**입니다.
+`components/chat`는 60개 파일·26,414줄이고 그중 `next/*`를 import하는 것은 **10개뿐**입니다.
 `MobileChatShell.tsx` 자체는 `next/*`를 **직접 쓰지 않습니다.** 즉 `chat-ui` 추출의 장애물은
 프레임워크 결합이 아니라 **`@/` alias를 통한 앱 루트 의존**이고, 이는 기계적이지만 넓은
 작업입니다(모든 import 경로가 바뀝니다).
@@ -167,8 +170,10 @@ Capacitor 8.5.0이 실제로 만드는 origin은 패키지 선언에서 직접 �
 - `Sec-Fetch-Site` 대체 경로도 안 됩니다. WebView에서 API 호출은 cross-site이므로
   `same-origin`이 아닙니다.
 
-**결론: 오늘 Native 셸을 만들면 `POST /api/chat`도, 첨부 준비용 `PUT /api/chat`도 421
-"Misdirected Request"를 받습니다.** 이것은 CORS를 추가하기 *전에* 풀어야 하는 별개
+**결론: 오늘 Native 셸을 만들면 `POST /api/chat`도, 첨부 준비용 `PUT /api/chat`도
+`proxy.ts`의 `blockedMutationOriginResponse()`에서 403 `INVALID_REQUEST_ORIGIN`을
+받습니다.** (호스트 allowlist 위반의 421 `Misdirected Request`와는 다른 검사입니다 —
+Native는 `Host: tomverse.app`로 보내므로 호스트 검사는 통과하고 origin 검사에서 걸립니다.) 이것은 CORS를 추가하기 *전에* 풀어야 하는 별개
 문제입니다 — CORS는 브라우저가 응답을 읽게 해 주는 것이고, 이쪽은 서버가 요청을 아예
 받지 않는 것입니다.
 
@@ -202,13 +207,17 @@ JavaScript origin**을 요구하는데 `capacitor://localhost`는 Google Cloud C
 
 ### 3.4 PRIVACY-01/02는 코드가 아니라 결정 2건에 막혀 있다
 
-`npm run check:data-domain-registry` 실행 결과:
+`npm run check:data-domain-registry` 실행 결과(병합 후):
 
 ```
-OK docs/policy/tomverse-chat-data-domain-registry.yaml: 55 data domains, all user-linked models registered.
-   Deletion action: 40 delete, 8 anonymise, 2 unverified, 5 retain.
+OK docs/policy/tomverse-chat-data-domain-registry.yaml: 58 data domains, all user-linked models registered.
+   Deletion action: 42 delete, 9 anonymise, 2 unverified, 5 retain.
    2 domain(s) have an unverified deletion path and 2 an unverified export state
 ```
+
+도메인 수는 병합으로 55에서 58로 늘었지만 **`unverified`는 여전히 정확히 2건**입니다 —
+새 테이블이 조용히 빠져나가지 못한다는 registry의 약속이 실제로 지켜지고 있다는 뜻이고,
+동시에 이 2건이 새 작업이 아니라 **오래 남아 있는 결정 공백**이라는 뜻입니다.
 
 두 도메인은 `FeedbackLifecycleEvent`와 `RefundRequestTimelineEvent`이고, registry의 note가
 무엇이 미결인지 이름을 댑니다 — 전자는 `userReply` 스냅샷과 운영자 `actorUserId`의 처리,
@@ -280,7 +289,7 @@ AGENTS.md "검증 범위는 되돌릴 수 없는 것에 비례합니다"의 기�
   필요합니다. 이메일 OTP/매직링크가 동등물로 인정되는지는 심사 판단 영역이며, 이 저장소가
   단독으로 답할 수 없습니다 — 그래서 `AUTH-01`이 blocking입니다.
 - **5.1.1(v)**: 계정 생성을 지원하면 **앱 안에서 계정 삭제를 제공해야** 합니다. 서버 경로는
-  이미 있습니다(§1-5). Native에서 그 화면에 도달할 수 있는지가 남은 일입니다.
+  이미 있습니다(§1의 5번). Native에서 그 화면에 도달할 수 있는지가 남은 일입니다.
 - **2.5.2**: 앱은 번들 안에서 자족해야 하고, 기능을 도입·변경하는 코드를 내려받아 실행하면
   안 됩니다. **이것이 `server.url` 금지의 심사 측 근거**이고, 이번에 게이트를
   만들었습니다(§11).
@@ -308,17 +317,17 @@ revoke입니다. `AUTH-02` 증거에서 build binding을 하드 경계로 제시
 | 작업 | 크기 | 비고 |
 |---|---|---|
 | `apps/mobile` 로컬 번들 scaffold | **S** | *이번에 완료* (§11) |
-| `chat-core` 무-포트 seed 8모듈(763줄) | **S** | import 경로 변경이 대부분 |
+| `chat-core` 무-포트 seed 8모듈(804줄) | **S** | import 경로 변경이 대부분 |
 | storage / timer / transport 포트 설계 | **M** | 토큰용과 상태용을 분리하는 것이 핵심 |
 | 메시지 타입 + 스트림 런타임 이관 | **L** | `chatStreamRuntime`이 `components/chat/types`에 묶임 |
 | `api-client` (cookie/bearer 이중 transport) | **M** | 라우트 계약은 이미 안정 |
-| `chat-ui` 추출 (message list·renderer·composer shell) | **XL** | `ChatInput` 4,591줄이 실질 경계 |
+| `chat-ui` 추출 (message list·renderer·composer shell) | **XL** | `ChatInput` 4,601줄이 실질 경계 |
 | bearer 발급·회전·family·재사용 탐지 (서버) | **L** | 스키마 신설 + 트랜잭션 계약 |
 | 기기 목록·기기 해제 UI + API | **M** | 위 스키마에 종속 |
 | 이메일 OTP → bearer 교환 | **M** | `emailLogin.ts` 재사용, 쿠키 발급부만 분기 |
 | system-browser OAuth + PKCE (Native) | **M** | `lib/oauthLink.ts` PKCE 로직 재사용 |
 | Sign in with Apple (서버+클라) | **L** | private relay 신원, 삭제 시 token revoke 포함 |
-| CORS allowlist + hostile-origin 테스트 | **M** | 421 분기(§3.1)까지 포함하면 M 상단 |
+| CORS allowlist + hostile-origin 테스트 | **M** | mutation-origin 403 분기(§3.1)까지 포함하면 M 상단 |
 | Universal Link / App Link + 탈취 테스트 | **M** | 파일 배포는 S, 실기기 검증이 나머지 |
 | 게스트 subject를 헤더로 이동 | **M** | 동시 실행 계약을 깨지 않아야 함 |
 | 백그라운드·포그라운드 스트림 복구 | **L** | 오늘 관련 처리 0건 |
@@ -327,7 +336,7 @@ revoke입니다. `AUTH-02` 증거에서 build binding을 하드 경계로 제시
 | 계정 삭제·내보내기 Native 도달 경로 | **S** | 서버는 이미 있음 |
 | PRIVACY `unverified` 2건 해소 | **S**(작업) | 크기는 작고 **결정 대기**가 실제 비용 |
 | 스토어 심사 자격증명 lifecycle + synthetic login | **L** | 상태 기계·롤링 연장·알림 |
-| 개인정보 표시·스토어 메타데이터 | **M** | 4.5.1 문항이 55개 도메인과 대조돼야 함 |
+| 개인정보 표시·스토어 메타데이터 | **M** | Apple·Play의 데이터 항목이 registry 58개 도메인과 대조돼야 함 |
 | Native CI (Android 빌드) | **M** | iOS는 macOS runner 필요 |
 | 실기기 보안 회귀 세트 | **L** | AUTH-01·04가 요구하는 증거 |
 
@@ -363,7 +372,7 @@ flowchart TD
 3. mutation-origin 분기 + CORS allowlist — 별도 계층입니다.
 4. AASA·`assetlinks.json` 배포 + 엔타이틀먼트 — 파일 배포일 뿐입니다.
 5. PRIVACY `unverified` 2건 결정 — 문서 작업입니다.
-6. 개인정보 표시 초안 — registry 55개 도메인에서 유도합니다.
+6. 개인정보 표시 초안 — registry 58개 도메인에서 유도합니다.
 
 **반드시 뒤에 와야 하는 것:** `chat-ui`는 포트 설계 뒤, 기기 해제 UI는 스키마 뒤,
 Apple 로그인은 bearer 발급 뒤, 실기기 회귀는 전부 뒤.
@@ -481,11 +490,17 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 | 10 | clean device에서 신규 Free 계정 → 답변 1건 → 히스토리 저장 | 양쪽 | 예 | STORE-01 |
 | 11 | 심사 자격증명으로 제출 빌드 로그인 | 제출 빌드 | 예 | STORE-02 |
 | 12 | 파일 선택기 MIME 보고 (특히 Android 제조사별) | 양쪽 | 아니오 | — |
-| 13 | 백그라운드 30초 후 복귀 시 스트림 상태 | 양쪽 | 아니오 | UI-02 |
+| 13 | 백그라운드 30초 후 복귀 시 스트림 상태 | 양쪽 | 예 | UI-02 |
 | 14 | 저사양 기기 첫 화면 표시 시간 | Android | 아니오 | — |
 
-**1~11이 차단이고 12~14는 아닙니다.** 기준은 "틀렸을 때 되돌릴 수 없는가"입니다. 12~14는
-고쳐서 배포하면 끝나고, 1~11은 토큰 유출·계정 탈취·삭제 실패라 회수되지 않습니다.
+**1~11과 13이 차단이고 12·14는 아닙니다.**
+
+1~11은 "틀렸을 때 되돌릴 수 없는가" 기준으로 차단입니다 — 토큰 유출·계정 탈취·삭제 실패는
+회수되지 않습니다. **13은 그 기준으로는 차단이 아닙니다**: 잃어버린 스트림의 피해는 잘못된
+과금이고, AGENTS.md가 그것을 명시적으로 "되돌릴 수 있음"에 넣습니다(환급됩니다). 그런데도
+차단인 이유는 **UI-02가 blocking gate이고 그 증거 항목이 "native-shell E2E report"이기
+때문**입니다. 게이트가 요구하면 위험 판단과 무관하게 차단이며, 이 둘을 섞지 않는 것이
+중요합니다 — "중요해 보인다"가 아니라 "게이트가 이름을 댔다"가 근거입니다.
 
 에이전트가 미리 만들어 건네야 하는 것: 시료 파일 세트와 정답지 manifest, 딥링크 테스트용
 두 번째 앱의 최소 매니페스트, hostile-origin 페이지, `pm get-app-links` 실행 스크립트,
@@ -501,7 +516,7 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 |---|---|---|
 | 공유 package 순수성 | `npm run check:shared-packages` | `forbidden_nextjs_imports_in_shared_packages = 0`, 2 package |
 | Vite 빌드 매트릭스 | `npm run verify:package-build-matrix` | 통과 (번들 실행·CSS 값 확인 포함) |
-| Next.js 프로덕션 빌드 | `npm run build` | 성공 |
+| Next.js 프로덕션 빌드 | `npm run build` | 성공 (병합 후 재실행 포함) |
 | Next.js 타입체크 | `npm run typecheck` | 성공 |
 | ESLint 전체 | `npm run lint` | 0 error / 0 warning |
 | **Capacitor 원격 server.url 부재** | `npm run check:capacitor-local-bundle` | `remote_server_config_findings = 0` |
@@ -511,13 +526,13 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 | **셸 실행 (Chromium)** | `vite preview` + Playwright Chromium | light·dark **각 7/7 통과, 페이지 오류 0** |
 | 셸 번들 정적 검사 | 수동 grep | env 변수·API host·토큰 **0건** |
 | 비밀 정적 검사 | 변경 파일 대상 패턴 스캔 | 0건 |
-| PUSH-01 | `npm run check:push-scope` | 통과 (1,156 파일, 45 의존성) |
-| data-domain registry | `npm run check:data-domain-registry` | 55 도메인, `unverified` 2건 (§3.4) |
-| 릴리스 게이트 registry | `npm run verify:tomverse-chat-release-gates` | 40 gates, draft |
+| PUSH-01 | `npm run check:push-scope` | 통과 (1,264 파일, 47 의존성 — Capacitor 4개 추가 후에도) |
+| data-domain registry | `npm run check:data-domain-registry` | 58 도메인, `unverified` 2건 (§3.4) |
+| 릴리스 게이트 registry | `npm run verify:tomverse-chat-release-gates` | 40 gates, 40 blocking, draft |
 | 릴리스 게이트 뷰 | `npm run check:tomverse-chat-release-gate-view` | 일치 |
-| 게이트 커버리지 | `npm run check:release-gate-coverage` | **42** CI 강제 (새 검사 포함) |
+| 게이트 커버리지 | `npm run check:release-gate-coverage` | **45** CI 강제 (새 검사 포함) |
 | 문서 참조·정책 인용·인코딩·accent·릴리스 기록·staging 기록·UI tier·구제품명 | 각 `npm run check:*` | 전부 통과 |
-| 공유 package 단위 테스트 | `tests/sharedPackages.test.mjs` (저장소 러너 플래그) | 22 pass / 0 fail / 1 skip |
+| 공유 package 단위 테스트 | `tests/sharedPackages.test.mjs` (저장소 러너 플래그) | 23 tests: 22 pass / 0 fail / 1 skip |
 | 전체 단위 테스트 | `npm run test:unit` | §11.4 참조 |
 
 셸 실행 결과 원문:
@@ -594,11 +609,11 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 
 ### 11.4 전체 단위 테스트
 
-`npm run test:unit` — **exit 0.**
+`npm run test:unit` — **exit 0** (병합 후 트리에서 재실행).
 
 ```
-server lane:  tests 5995   pass 5994   fail 0   skipped 1
-client lane:  tests 22     pass 22     fail 0   skipped 0
+server lane:  tests 6892   pass 6891   fail 0   skipped 1
+client lane:  tests 33     pass 33     fail 0   skipped 0
 ```
 
 이 저장소의 워크스페이스에 `apps/*`를 추가하고 root `tsconfig`/`eslint`/`.gitignore`를
@@ -638,7 +653,7 @@ tsconfig의 `jsx: "react-jsx"`로 TSX를 처리하므로 fast refresh를 위해�
 
 | 영역 | 성격 | 대응 |
 |---|---|---|
-| `ChatInput.tsx` | Voice가 소유. `chat-ui` 추출(N7)이 같은 파일을 크게 움직임 | **N7은 Voice MVP 이후에 시작합니다.** 4,591줄 파일에서 두 작업이 만나면 충돌이 아니라 재작업입니다 |
+| `ChatInput.tsx` | Voice가 소유. `chat-ui` 추출(N7)이 같은 파일을 크게 움직임 | **N7은 Voice MVP 이후에 시작합니다.** 4,600줄 파일에서 두 작업이 만나면 충돌이 아니라 재작업입니다 |
 | 모바일 composer UI 계약 | Voice 버튼이 textarea 행을 침범하면 안 됨 | 계약이 이미 이를 금지하고 회귀 테스트가 고정합니다. Native가 새 제약을 더하지 않습니다 |
 | `locales/*.ts` | Voice가 문구 추가 | Native는 v1 단계에서 새 제품 문구를 만들지 않습니다 |
 | 마이크 권한 | **Voice가 이 앱 최초의 `getUserMedia` 도입** | Native 관점에서 이것은 **선물입니다**(아래) |
@@ -656,7 +671,7 @@ tsconfig의 `jsx: "react-jsx"`로 TSX를 처리하므로 fast refresh를 위해�
    **즉 Voice가 §3.1의 origin 결정을 검증 가능한 요구사항으로 바꿔 줍니다** — 추상적인
    "origin이 다르다"가 "마이크가 안 켜진다"라는 관측으로 바뀝니다.
 3. **긴 작업의 백그라운드 처리.** 음성 캡처는 백그라운드 전환에 민감하고, 그 처리 코드가
-   §1-21(오늘 M0)의 첫 사례가 됩니다. 스트리밍 복구가 같은 패턴을 씁니다.
+   §1의 21번(오늘 M0)의 첫 사례가 됩니다. 스트리밍 복구가 같은 패턴을 씁니다.
 
 **결론: Voice Input을 먼저 끝내고, 그 권한·secure context 경험을 Native N1에 입력으로
 씁니다.** 반대 순서로 하면 Native가 권한 모델을 먼저 만들고 Voice가 그것을 다시 고칩니다.

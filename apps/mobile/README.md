@@ -9,7 +9,7 @@ request to the API, no conversation, no composer.
 
 ## Why it stops there
 
-`docs/policy/tomverse-chat-delivery-plan.md` §4 names four packages —
+`docs/policy/tomverse-chat-delivery-plan.md §4` names four packages —
 `chat-core`, `chat-ui`, `api-client`, `ui-tokens` — and `apps/mobile` as the
 Vite + Capacitor shell built on top of them. Two of the four exist. `chat-ui`
 and `api-client` do not.
@@ -17,7 +17,7 @@ and `api-client` do not.
 So a chat screen here could only be a copy of `components/chat/*`, and a copy is
 precisely the failure the packages exist to prevent: "two implementations of the
 same chat drifting apart until fixing a streaming bug means fixing it twice"
-(`docs/policy/shared-packages.md` §1). The same reasoning rules out an
+(`docs/policy/shared-packages.md §1`). The same reasoning rules out an
 authenticated screen — the mobile bearer path in
 `docs/policy/tomverse-chat-mobile-authentication.md` is a decision, not yet an
 implementation, and a shell that authenticated some other way would be a second
@@ -80,8 +80,10 @@ Capacitor's own configuration reference gives the defaults this config keeps:
 | iOS | `server.iosScheme` | `capacitor` | `capacitor://localhost` |
 | Android | `server.androidScheme` | `https` | `https://localhost` |
 
-`lib/requestOrigin.ts` accepts neither. Every non-`GET` request from this shell
-would be rejected by the mutation-origin check in `proxy.ts` before reaching a
-route. That is a real gap, recorded in
+`lib/requestOrigin.ts` accepts neither: the first fails on protocol, the second
+on the host allowlist, which excludes `localhost`. So every non-`GET` request
+from this shell would be answered `403 INVALID_REQUEST_ORIGIN` by the
+mutation-origin check in `proxy.ts` before reaching a route. That is a real gap,
+recorded in
 `.github/audits/2026-08-30-native-mobile-readiness.md` rather than patched here —
 widening the check is an authentication-boundary decision, not a spike.
