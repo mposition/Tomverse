@@ -104,6 +104,15 @@ encryption key: an Ed25519 key parses as a public key and then cannot encrypt
 at all, and the workflow refuses it by trying a real encryption before it draws
 anything.
 
+### Dispatch against the branch that carries the code
+
+A copy of the workflow lives on the default branch, because GitHub lists a
+`workflow_dispatch` workflow only if it is there. That copy is a listing, not
+an implementation: the default branch does not carry the draw scripts, and it
+is also what the dispatch form preselects. Select the branch the
+implementation is on. A dispatch against the default branch refuses in its
+first step and says so.
+
 ### First dispatch: the digest
 
 `bundleDigest` starts `null`. The first dispatch is expected to fail: the

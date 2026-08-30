@@ -93,6 +93,30 @@ jobs:
           node-version: 22
           cache: npm
 
+      # A copy of this file lives on the default branch, because GitHub lists
+      # a workflow_dispatch workflow only if it is there. The default branch
+      # is also what the dispatch form preselects, and it does not carry the
+      # draw implementation -- so the obvious dispatch runs against a ref that
+      # cannot draw. It would fail anyway, several minutes later, on a bare
+      # "Missing script". Said here instead, before anything is installed.
+      - name: This ref can draw
+        run: |
+          set -euo pipefail
+          missing=""
+          for script in check:router-review-source check:router-review-sheets eval:router-human-sheets; do
+            node -e '
+              const scripts = require("./package.json").scripts ?? {};
+              process.exit(scripts[process.argv[1]] ? 0 : 1);
+            ' "$script" || missing="$missing $script"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::${GITHUB_REF} does not carry the draw implementation:$missing"
+            echo "::error::This workflow is copied to the default branch only so GitHub will offer it."
+            echo "::error::Re-dispatch it against the branch the implementation is on. Nothing was drawn."
+            exit 1
+          fi
+          echo "The draw scripts are present on ${GITHUB_REF}."
+
       - run: npm ci
 
       # Only the pinned artifact, and only the one file from it.
