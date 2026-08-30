@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AVAILABLE_MODELS, getModelBillingProfile } from "../lib/models.ts";
 import {
   FALLBACK_PRICING,
+  MODEL_PRICING,
   findUnpricedModels,
   getModelPricingProfile,
   getNativeSearchCostMicroUsdPerQuery,
@@ -670,6 +671,70 @@ test("a scheduled revision takes effect on its own instant and not before", () =
     revision.effectiveFrom.endsWith("Z"),
     "price boundaries are UTC instants, matching every other boundary in this system"
   );
+});
+
+test("a revision separates when it was read from when it takes effect", () => {
+  // Two dates that are routinely different, and were collapsed into one until
+  // the Sonnet 5 entry made the difference visible: Anthropic announced the
+  // cancellation on 2026-08-10 and this registry bills it from
+  // 2026-08-11T00:00:00Z.
+  //
+  // A provider publishes a *date*, not an instant, so a boundary has to be
+  // chosen from the reading. The rule is the first instant of the following
+  // UTC day, because that is the only choice that never prices a request by a
+  // decision that had not been published when the request ran -- backdating to
+  // the announcement day's own midnight would do exactly that for every
+  // request earlier in that day.
+  const revision = getModelPricingProfile("claude-sonnet-5").priceSchedule[0];
+  assert.equal(revision.verifiedAt, "2026-08-10", "the announcement date");
+  assert.equal(
+    revision.effectiveFrom,
+    "2026-08-11T00:00:00.000Z",
+    "the billing boundary, one UTC day later"
+  );
+  assert.ok(
+    Date.parse(`${revision.verifiedAt}T00:00:00.000Z`) <
+      Date.parse(revision.effectiveFrom),
+    "a boundary may never precede the reading that justifies it"
+  );
+  // The priceSource names the announcement rather than the boundary, so a
+  // reader chasing the provenance lands on the date the page actually carries.
+  assert.match(revision.priceSource, /2026_08_10/);
+
+  // And here the choice costs nothing: the rates are identical either side, so
+  // all the boundary decides is which pricingVersion a turn on the
+  // announcement day is filed under.
+  const announcementDay = resolveModelPricing(model("claude-sonnet-5"), {
+    at: Date.parse("2026-08-10T12:00:00.000Z"),
+  });
+  const dayAfter = resolveModelPricing(model("claude-sonnet-5"), {
+    at: Date.parse("2026-08-11T12:00:00.000Z"),
+  });
+  assert.equal(
+    announcementDay.inputUsdPerMillionTokens,
+    dayAfter.inputUsdPerMillionTokens
+  );
+  assert.notEqual(announcementDay.pricingVersion, dayAfter.pricingVersion);
+});
+
+test("every scheduled revision records the reading behind it", () => {
+  // Provenance is not optional in practice, only in the type: a revision with
+  // no `verifiedAt` is one nobody can trace to a published page. The type
+  // allows it for a provider that publishes an explicit instant; no entry in
+  // this registry has one yet.
+  for (const profile of MODEL_PRICING) {
+    for (const revision of profile.priceSchedule ?? []) {
+      assert.ok(
+        revision.verifiedAt,
+        `${profile.modelId} revision ${revision.pricingVersion} records no verifiedAt`
+      );
+      assert.ok(
+        Date.parse(`${revision.verifiedAt}T00:00:00.000Z`) <=
+          Date.parse(revision.effectiveFrom),
+        `${profile.modelId} revision ${revision.pricingVersion} takes effect before it was read`
+      );
+    }
+  }
 });
 
 test("an explicit DB price override wins over a scheduled revision", () => {

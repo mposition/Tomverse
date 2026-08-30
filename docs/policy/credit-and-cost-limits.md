@@ -559,7 +559,7 @@ cacheWrite`)이므로 두 캐시 수치를 **빼야** 하고, 캐시 marker를 �
   `effectiveDate`가 `effectiveFrom`의 UTC 날짜와 일치.
 
 **Claude Sonnet 5.** launch 시 US$2/US$10은 2026-08-31까지의 introductory
-가격이고 2026-09-01부터 US$3/US$15로 오른다고 예고됐습니다. **2026-08-11에
+가격이고 2026-09-01부터 US$3/US$15로 오른다고 예고됐습니다. **2026-08-10에
 Anthropic이 그 인상을 취소했습니다** — 공식 pricing 페이지의
 `claude-sonnet-5-introductory-pricing` 각주: "is now the standard price. The
 previously scheduled increase to $3/$15 per million input/output tokens on
@@ -571,8 +571,23 @@ September 1, 2026 will not occur."
 부풀린 요율은 돈이 있던 요청을 거절합니다. 대신 취소 사실을
 `anthropic-claude-sonnet-5-standard-2026-08-11` 항목으로 적었습니다. 요율은
 이전과 같고 **기간(term)이 달라졌으며**, 그것이 이 registry가 기록하는
-것입니다. 2026-08-11 이전 요청은 계속
+것입니다. 2026-08-11T00:00:00Z 이전 요청은 계속
 `anthropic-claude-sonnet-5-intro-2026-08-04`로 재현됩니다.
+
+**날짜가 둘이고, 다른 것은 의도입니다.** 발표는 **2026-08-10**,
+이 registry의 청구 경계는 **2026-08-11T00:00:00Z**입니다.
+`ScheduledModelPrice.verifiedAt`이 전자(공급자 페이지에서 읽은 날),
+`effectiveFrom`이 후자(청구가 갈리는 instant)를 기록합니다.
+
+공급자는 **날짜를 발표하지 instant를 발표하지 않으므로**, 경계는 그 읽음에서
+골라야 합니다. 규칙은 **발표 다음 UTC 일의 첫 instant**입니다 — 요청이 실행된
+시점에 아직 공개되지 않았던 결정으로 그 요청을 청구하지 않는 유일한 선택이기
+때문입니다. 발표일 자정으로 소급하면 그날 이른 시각의 모든 요청이 그렇게
+됩니다. 검증기가 `verifiedAt > effectiveFrom`을 거부합니다.
+
+이번 건에서는 이 선택이 **돈을 전혀 움직이지 않습니다**(양쪽 요율이 동일).
+정하는 것은 2026-08-10의 turn이 어느 `pricingVersion`으로 기록되는가뿐입니다.
+다음 개정은 그렇지 않을 것이므로 규칙을 적어 둡니다.
 
 ### 알 수 없는 모델과 CI
 
