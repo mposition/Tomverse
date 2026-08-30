@@ -28,6 +28,7 @@ const singletonEvents = new Set([
   "signup_completed",
   "return_day_1",
   "return_day_7",
+  "return_day_30",
 ]);
 
 export async function POST(req: Request) {

@@ -55,6 +55,18 @@ export type AttemptPriceSnapshot = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
+    /**
+     * The rate cache-*write* tokens were priced at, or null where the model
+     * has no verified one.
+     *
+     * On the snapshot rather than derived at read time, for the same reason
+     * every other rate here is: re-deriving it later would price a stored
+     * attempt at whatever the registry says today, and price changes are not
+     * retroactive.
+     */
+    cacheWriteUsdPerMillionTokens?: number | null;
+    /** The cache TTL the request asked for, where it asked for one. */
+    promptCacheTtl?: string | null;
     pricingVersion?: string | null;
 };
 
@@ -64,6 +76,15 @@ export type AttemptUsage = {
     price: AttemptPriceSnapshot;
     inputTokens: number;
     cachedInputTokens: number;
+    /**
+     * Input tokens written into the prompt cache on this attempt.
+     *
+     * Optional, and absent means zero rather than unknown: every path that
+     * reports usage now reports this, and an attempt reconstructed from a
+     * reservation (crash sweep, pre-token failure) genuinely wrote nothing
+     * because it never got a response back to write one.
+     */
+    cacheWriteInputTokens?: number;
     outputTokens: number;
     reasoningTokens?: number;
     /** False when the numbers are the estimator's rather than the provider's. */
@@ -128,10 +149,12 @@ const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: Pr
     const tokenCost = calculateProviderUsageCost({
         inputTokens: attempt.inputTokens,
         cachedInputTokens: attempt.cachedInputTokens,
+        cacheWriteInputTokens: attempt.cacheWriteInputTokens,
         outputTokens: attempt.outputTokens,
         inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: attempt.price.cacheWriteUsdPerMillionTokens,
     });
     const reported = attempt.providerReportedCostMicroUsd;
     const base =

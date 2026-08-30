@@ -24,6 +24,12 @@ import {
   latestComparableConversationTurn,
   requestedComparableConversationTurn,
 } from "@/lib/comparisonReviewTurn";
+import { emptyAttemptRecord } from "@/lib/comparisonReviewRunCore";
+import {
+  comparisonReviewItems,
+  type ComparisonReviewItemSource,
+} from "@/lib/comparisonReviewItemFeedback";
+import { recordComparisonReviewRun } from "@/lib/comparisonReviewRunTelemetry";
 import {
   releaseComparisonReviewQuota,
   reserveFreeComparisonReview,
@@ -127,6 +133,30 @@ const responseMapForStoredReview = (
   });
   return mapped.every(Boolean) ? mapped : null;
 };
+
+/**
+ * The per-claim identifiers the feedback control needs.
+ *
+ * Derived here rather than stored (lib/comparisonReviewItemFeedback.ts) and
+ * sent with the review rather than recomputed in the browser: the derivation
+ * hashes with node:crypto, and a second implementation in the client would be
+ * a second place for the two to stop agreeing.
+ */
+const reviewItemIds = (result: {
+  primary: { result: ComparisonReviewItemSource };
+  secondary: { result: ComparisonReviewItemSource } | null;
+}) =>
+  [
+    ...comparisonReviewItems(result.primary.result, "primary"),
+    ...(result.secondary
+      ? comparisonReviewItems(result.secondary.result, "secondary")
+      : []),
+  ].map((item) => ({
+    id: item.id,
+    reviewer: item.reviewer,
+    section: item.section,
+    ordinal: item.ordinal,
+  }));
 
 export async function GET(
   request: Request,
@@ -298,10 +328,52 @@ export async function POST(
         turn.responses
       );
       if (result.success && responseMap) {
+        // A cache hit is a distinct outcome, not an absence of one. Left
+        // unrecorded it would deflate the completion rate (a user got their
+        // review) and inflate the provider-failure rate's denominator with
+        // runs that never called anybody.
+        const now = new Date();
+        await recordComparisonReviewRun({
+          traceId,
+          subjectKind: "account",
+          subjectKey: `user:${session.user.id}`,
+          userId: session.user.id,
+          conversationId,
+          reviewMode: payload.reviewMode,
+          language: "",
+          responseCount: turn.responses.length,
+          promptVersion: cached.promptVersion,
+          outcome: "cached",
+          errorCode: null,
+          startedAt: now,
+          completedAt: now,
+          dualReviewRequested: true,
+          dualReviewAvailable: Boolean(result.data.secondary),
+          primary: {
+            ...emptyAttemptRecord(),
+            reviewerModelId: cached.reviewerModelId,
+            status: "not_attempted",
+          },
+          secondary: emptyAttemptRecord(),
+          groundingTotalQuotes:
+            result.data.primary.result.groundingStats.totalCitations,
+          groundingMatchedQuotes:
+            result.data.primary.result.groundingStats.verifiedCitations,
+          sourceGroundingLevel:
+            result.data.primary.result.groundingStats.totalCitations > 0
+              ? result.data.primary.result.confidence
+              : null,
+        }).catch((error) =>
+          console.error("Cached comparison review telemetry failed:", {
+            traceId,
+            error,
+          })
+        );
         return Response.json(
           {
             id: cached.id,
             result: result.data,
+            reviewItems: reviewItemIds(result.data),
             responseMap,
             reviewerModelId: cached.reviewerModelId,
             usageCredits: 0,
@@ -350,7 +422,14 @@ export async function POST(
           includeSynthesis: payload.includeSynthesis,
           language: userSettings?.language || "en",
         },
-        { traceId }
+        {
+          traceId,
+          telemetry: {
+            subjectKind: "account",
+            conversationId,
+            userId: session.user.id,
+          },
+        }
       );
     } catch (error) {
       if (error instanceof ComparisonReviewerUnavailableError) {
@@ -405,6 +484,7 @@ export async function POST(
       {
         id: stored.id,
         result: run.result,
+        reviewItems: reviewItemIds(run.result),
         responseMap: run.responseMap,
         reviewerModelId: run.reviewerModelId,
         usageCredits: run.usageCredits,

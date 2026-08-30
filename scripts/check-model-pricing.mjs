@@ -19,7 +19,9 @@ import {
   MODEL_PRICING,
   PENDING_VERIFIED_PRICE_MODEL_IDS,
   PENDING_VERIFIED_PRICE_REGISTER,
+  PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
 } from "../lib/modelPricing.ts";
+import { ANTHROPIC_MIN_CACHEABLE_PREFIX_TOKENS } from "../lib/anthropicPromptCaching.ts";
 import {
   auditProcessingTierMentions,
   PROCESSING_TIER_REQUEST_ALLOWLIST,
@@ -148,6 +150,70 @@ if (PENDING_VERIFIED_PRICE_REGISTER.length > 0) {
         `settles=${entry.settlementSource}`
     );
   }
+}
+
+/**
+ * Every declared cache-write rate must be its own tier's input rate times the
+ * published 5-minute multiplier.
+ *
+ * A gate rather than a test because a cache-write rate is now *billed*
+ * (`CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED`), and a transcription slip
+ * here is a wrong charge on every cache-creating turn -- silently, because the
+ * number is plausible either way. The multiplier checks the rates; it does not
+ * compute them. Each figure is still read off Anthropic's published table, so a
+ * change Anthropic makes to the multiplier itself shows up here as a
+ * disagreement rather than being absorbed.
+ *
+ * Also enforces the other half of the caching contract: every model this
+ * application actually caches for must carry a rate. A cached model with no
+ * rate bills its writes at nothing, which is the undercount the whole change
+ * exists to remove.
+ */
+const cacheWriteProblems = [];
+for (const profile of MODEL_PRICING) {
+  for (const [index, tier] of profile.tiers.entries()) {
+    const rate = tier.cacheWriteUsdPerMillionTokens;
+    if (rate === undefined) continue;
+    const expected =
+      tier.inputUsdPerMillionTokens * PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER;
+    // Luna's published rate is 2x its input rate, not 1.25x -- OpenAI prices
+    // its cache writes on its own schedule. The multiplier check applies to
+    // the models this application caches for, which is Anthropic today; any
+    // other provider's rate is recorded and is not asserted against
+    // Anthropic's table.
+    if (profile.provider !== "anthropic") continue;
+    if (Math.abs(rate - expected) > 1e-9) {
+      cacheWriteProblems.push(
+        `${profile.modelId} tier ${index}: cache-write rate ${rate} is not ` +
+          `${PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER}x its input rate ` +
+          `${tier.inputUsdPerMillionTokens} (expected ${expected}).`
+      );
+    }
+  }
+}
+for (const modelId of Object.keys(ANTHROPIC_MIN_CACHEABLE_PREFIX_TOKENS)) {
+  const profile = MODEL_PRICING.find((entry) => entry.modelId === modelId);
+  if (!profile) continue;
+  for (const [index, tier] of profile.tiers.entries()) {
+    if (tier.cacheWriteUsdPerMillionTokens === undefined) {
+      cacheWriteProblems.push(
+        `${modelId} tier ${index}: this application caches for it and it ` +
+          `carries no verified cache-write rate, so its writes would bill at ` +
+          `nothing. See docs/policy/anthropic-prompt-caching.md section 4.`
+      );
+    }
+  }
+}
+if (cacheWriteProblems.length > 0) {
+  console.error(
+    `\n${cacheWriteProblems.length} cache-write pricing problem(s):`
+  );
+  for (const problem of cacheWriteProblems) console.error(`  - ${problem}`);
+  console.error(
+    "\nSee docs/policy/anthropic-prompt-caching.md section 4 and\n" +
+      "docs/policy/credit-and-cost-limits.md, the cache-write section."
+  );
+  process.exit(1);
 }
 
 const registerProblems = findPendingPriceRegisterProblems({

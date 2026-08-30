@@ -291,6 +291,11 @@ export async function runProviderProbe(
   try {
     const result = await generate({
       model: getActiveAiModel(model),
+      // No `promptCachePath`. The probe is excluded from prompt caching on
+      // purpose: its prompt is far below every model's minimum cacheable
+      // prefix so nothing would cache, and adding a parameter to this request
+      // has broken the probe twice -- both times the rejection was recorded as
+      // provider health. See lib/anthropicPromptCaching.ts.
       ...getModelGenerationSettings(model),
       system: PROBE_SYSTEM_PROMPT,
       prompt: PROBE_PROMPT,

@@ -191,7 +191,10 @@ export async function POST(
         system: verificationPrompt.system,
         prompt: verificationPrompt.prompt,
         output: Output.object({ schema: verificationCheckSchema }),
-        ...getModelGenerationSettings(model, { temperature: 0.1 }),
+        ...getModelGenerationSettings(model, {
+            temperature: 0.1,
+            promptCachePath: "comparison_review",
+        }),
         maxOutputTokens: budget.maxOutputTokens,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(30_000),

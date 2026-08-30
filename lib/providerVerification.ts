@@ -261,6 +261,8 @@ export async function runProviderVerification(
   try {
     const result = await generate({
       model: getActiveAiModel(model),
+      // No `promptCachePath`: a one-shot credential check over a fixed
+      // two-line prompt, well under any model's minimum cacheable prefix.
       ...getModelGenerationSettings(model),
       system: VERIFICATION_SYSTEM_PROMPT,
       prompt: VERIFICATION_PROMPT,

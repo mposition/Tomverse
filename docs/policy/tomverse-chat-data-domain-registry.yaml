@@ -378,6 +378,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: conversationContinuationBridge
+    prismaModel: ConversationContinuationBridge
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: memoryItem
     prismaModel: MemoryItem
     userLinkageRole: subject
@@ -679,6 +689,60 @@ domains:
           Accepted. modelIds, enabledTools, the token and cost estimates and the
           limit thresholds remain. They describe a refused request, not a
           person, and the row exists to answer "why was this blocked".
+    inUnifiedExport: excluded
+
+  - domain: comparisonReviewItemFeedback
+    prismaModel: ComparisonReviewItemFeedback
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: comparisonReviewRun
+    prismaModel: ComparisonReviewRun
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: ttl
+    ttlDays: 90
+    implementationStatus: implemented
+    anonymisationFields:
+      - userId
+      - subjectKey
+      - traceId
+      - conversationId
+    anonymisationReplacements:
+      subjectKey: "deleted-account"
+      traceId: "deleted-account"
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-30"
+      joinRisksConsidered:
+        - >-
+          Closed. userId is nullable and carries no relation, deliberately: a
+          guest run has no user at all, and a cascade would delete the
+          operational history the reliability trend is computed from.
+          anonymiseAccountData clears it at deletion and the 90-day TTL is the
+          backstop.
+        - >-
+          Closed. subjectKey and traceId both re-join the row to the chat logs
+          and are NOT NULL, so each takes the shared "deleted-account"
+          placeholder.
+        - >-
+          Closed. conversationId would re-join the row to a conversation that
+          cascades away with the account; other logs recorded the same id, so
+          the join is what has to go rather than the row.
+        - >-
+          Accepted. The reviewer model ids, providers, outcome, durations,
+          token counts, credit amounts and quote counts remain. None of them is
+          content: the table has no column a question, an answer, a review
+          sentence, a quote or a filename could be written into, which is what
+          docs/policy/ai-review-m5-quality-contract.md §7 requires and
+          tests/comparisonReviewRunCore.test.mjs enforces.
     inUnifiedExport: excluded
 
   - domain: chatCreditReservation

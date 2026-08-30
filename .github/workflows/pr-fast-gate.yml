@@ -173,6 +173,23 @@ jobs:
         timeout-minutes: 5
         run: npm run check:release-records
 
+      # The AI Review evaluation dataset and the reviewer-pair register.
+      #
+      # A dataset with a malformed case, an unstated `goldCompleteness`, or a
+      # prompt_injection case carrying no marker produces numbers rather than
+      # an error -- the wrong numbers, computed over the wrong denominators.
+      # And an `approved` register entry whose evidence is incomplete is the
+      # one thing in this feature that could turn "we measured it" into a
+      # claim nobody can follow, so the check refuses it here rather than at
+      # the moment somebody quotes it.
+      #
+      # It passes today with nothing approved and no decision dataset. That is
+      # the honest state, not a failure: the check exists to catch a broken
+      # dataset or an unsupported approval, not to demand either.
+      - name: AI Review evaluation dataset and register
+        timeout-minutes: 5
+        run: npm run check:ai-review-eval
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.
