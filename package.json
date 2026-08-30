@@ -134,6 +134,7 @@
     "report:memory-eval-batches": "node --import tsx scripts/report-memory-eval-batches.mjs",
     "report:memory-eval-cost-estimate": "node --conditions=react-server --import tsx scripts/report-memory-eval-cost-estimate.mjs",
     "report:memory-eval-failures": "node --conditions=react-server --import tsx scripts/report-memory-eval-failures.mjs",
+    "report:memory-eval-failure-diagnosis": "node --import tsx scripts/report-memory-eval-failure-diagnosis.mjs",
     "report:memory-eval-near-duplicates": "node --import tsx scripts/report-memory-eval-near-duplicates.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
     "check:unconsumed-response-bodies": "node scripts/check-unconsumed-response-bodies.mjs",
