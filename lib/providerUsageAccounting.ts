@@ -17,10 +17,19 @@ export type ProviderUsageRecordInput = {
   modelId: string;
   inputTokens: number;
   cachedInputTokens: number;
+  /**
+   * Input tokens written into the prompt cache, priced at the write rate.
+   *
+   * Optional so every existing caller keeps compiling and keeps meaning what
+   * it meant: a path that reports no write count wrote nothing, because until
+   * Anthropic prompt caching no request could produce one.
+   */
+  cacheWriteInputTokens?: number;
   outputTokens: number;
   estimatedCostMicroUsd: number;
   uncachedInputCostMicroUsd: number;
   cachedInputCostMicroUsd: number;
+  cacheWriteInputCostMicroUsd?: number;
   outputCostMicroUsd: number;
   date?: Date;
   /** Defaults to "internal" (non-billed internal calls, e.g. conversation
@@ -37,10 +46,12 @@ export async function recordInternalProviderUsage({
   modelId,
   inputTokens,
   cachedInputTokens,
+  cacheWriteInputTokens = 0,
   outputTokens,
   estimatedCostMicroUsd,
   uncachedInputCostMicroUsd,
   cachedInputCostMicroUsd,
+  cacheWriteInputCostMicroUsd = 0,
   outputCostMicroUsd,
   date,
   source = "internal",
@@ -65,9 +76,17 @@ export async function recordInternalProviderUsage({
     safeInputTokens,
     Math.max(0, Math.min(2_000_000_000, Math.round(cachedInputTokens)))
   );
+  // Bounded by the input tokens the reads have not already claimed, matching
+  // `calculateProviderUsageCost`. The two clamps have to agree or the rollup's
+  // token split stops summing to its own `inputTokens`.
+  const safeCacheWriteInputTokens = Math.min(
+    safeInputTokens - safeCachedInputTokens,
+    Math.max(0, Math.min(2_000_000_000, Math.round(cacheWriteInputTokens)))
+  );
   const safeCost = Math.max(0, Math.min(2_000_000_000, Math.round(estimatedCostMicroUsd)));
   const safeUncachedInputCost = Math.max(0, Math.min(2_000_000_000, Math.round(uncachedInputCostMicroUsd)));
   const safeCachedInputCost = Math.max(0, Math.min(2_000_000_000, Math.round(cachedInputCostMicroUsd)));
+  const safeCacheWriteInputCost = Math.max(0, Math.min(2_000_000_000, Math.round(cacheWriteInputCostMicroUsd)));
   const safeOutputCost = Math.max(0, Math.min(2_000_000_000, Math.round(outputCostMicroUsd)));
 
   await (client ?? prisma).providerDailyUsage.upsert({
@@ -87,10 +106,12 @@ export async function recordInternalProviderUsage({
       requestCount: 1,
       inputTokens: safeInputTokens,
       cachedInputTokens: safeCachedInputTokens,
+      cacheWriteInputTokens: safeCacheWriteInputTokens,
       outputTokens: safeOutputTokens,
       estimatedCostMicroUsd: safeCost,
       uncachedInputCostMicroUsd: safeUncachedInputCost,
       cachedInputCostMicroUsd: safeCachedInputCost,
+      cacheWriteInputCostMicroUsd: safeCacheWriteInputCost,
       outputCostMicroUsd: safeOutputCost,
       syncedAt: new Date(),
     },
@@ -98,10 +119,12 @@ export async function recordInternalProviderUsage({
       requestCount: { increment: 1 },
       inputTokens: { increment: safeInputTokens },
       cachedInputTokens: { increment: safeCachedInputTokens },
+      cacheWriteInputTokens: { increment: safeCacheWriteInputTokens },
       outputTokens: { increment: safeOutputTokens },
       estimatedCostMicroUsd: { increment: safeCost },
       uncachedInputCostMicroUsd: { increment: safeUncachedInputCost },
       cachedInputCostMicroUsd: { increment: safeCachedInputCost },
+      cacheWriteInputCostMicroUsd: { increment: safeCacheWriteInputCost },
       outputCostMicroUsd: { increment: safeOutputCost },
       syncedAt: new Date(),
     },
@@ -122,6 +145,7 @@ export async function getInternalProviderUsageSummary({
       requestCount: true,
       inputTokens: true,
       cachedInputTokens: true,
+      cacheWriteInputTokens: true,
       outputTokens: true,
       estimatedCostMicroUsd: true,
     },
@@ -130,6 +154,7 @@ export async function getInternalProviderUsageSummary({
     requestCount: aggregate._sum.requestCount || 0,
     inputTokens: aggregate._sum.inputTokens || 0,
     cachedInputTokens: aggregate._sum.cachedInputTokens || 0,
+    cacheWriteInputTokens: aggregate._sum.cacheWriteInputTokens || 0,
     outputTokens: aggregate._sum.outputTokens || 0,
     estimatedCostMicroUsd: aggregate._sum.estimatedCostMicroUsd || 0,
   };

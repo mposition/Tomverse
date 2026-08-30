@@ -97,6 +97,12 @@ import {
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+import {
+    anthropicPromptCacheApplies,
+    ANTHROPIC_PROMPT_CACHE_TTL,
+    type AnthropicPromptCachePath,
+} from "@/lib/anthropicPromptCaching";
+import type { ResolvedModelPricing } from "@/lib/modelPricing";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
@@ -190,6 +196,31 @@ export type ChatBudget = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
+    /** The verified cache-write rate, or null where there is none. */
+    cacheWriteUsdPerMillionTokens: number | null;
+    /**
+     * The premium a prompt-cache write may add to this turn's input, over and
+     * above what the input tokens already cost at the base rate.
+     *
+     * Zero unless the request carries a cache marker. When it does, the worst
+     * case is that the provider writes the *whole* prompt into the cache at
+     * 1.25x the base input rate -- which is what a first turn does -- so the
+     * authorised amount has to include the extra 0.25x before the request
+     * goes out. Discovering it at settlement is discovering it after the money
+     * is spent, and the provider budget exists precisely so that does not
+     * happen.
+     *
+     * A premium rather than a replacement multiplier so every existing sum
+     * above stays exactly what it was: an uncached turn reserves what it
+     * always reserved, and this is additive on top.
+     *
+     * Operational only. It never touches `usageCredits` -- a cache write is
+     * Tomverse's cost at Anthropic, not something the user asked for or can
+     * see, and charging entitlement for it would be the hidden USD ceiling
+     * that docs/policy/credit-and-cost-limits.md exists to keep out of the
+     * credit layer.
+     */
+    promptCacheWriteReservedPremiumMicroUsd: number;
     /**
      * The worst case this turn's native web search may cost, reserved before
      * dispatch. Zero unless a paid native search is attached.
@@ -308,6 +339,23 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    /**
+     * The cache-write rate this turn was reserved at, carried so settlement
+     * prices the write at the same figure rather than re-reading a registry
+     * that may have moved. Absent on every reservation written before prompt
+     * caching, which is why settlement treats absent as "price writes at
+     * nothing" -- such a turn sent no marker and created no cache entry.
+     */
+    cacheWriteUsdPerMillionTokens?: number | null;
+    /**
+     * The cache TTL the request asked for, or null when it asked for none.
+     *
+     * Stored beside the rate because the rate alone does not identify what was
+     * bought: 5-minute and 1-hour writes are different prices for different
+     * entries, and a snapshot that records one without the other cannot be
+     * re-derived by anybody who was not there.
+     */
+    promptCacheTtl?: string | null;
 };
 
 const durableReservationPayloadSchema = z
@@ -395,6 +443,13 @@ const durableReservationPayloadSchema = z
                                 pricingVersion: z.string().min(1).max(120),
                             })
                             .strict()
+                        // Optional so every reservation written before prompt
+                        // caching still deserializes; absent means the attempt
+                        // authorized no premium, which is what those turns did.
+                        promptCacheWriteReservedPremiumMicroUsd: z
+                            .number()
+                            .int()
+                            .nonnegative()
                             .optional(),
                     })
                     .strict()
@@ -408,6 +463,17 @@ const durableReservationPayloadSchema = z
         inputUsdPerMillionTokens: z.number().nonnegative(),
         outputUsdPerMillionTokens: z.number().nonnegative(),
         cachedInputPriceMultiplier: z.number().min(0).max(1).default(1),
+        // Both optional and nullable for the same reason as the fields below:
+        // the schema is `.strict()`, so a payload written before prompt
+        // caching has neither key, and one written for an uncached turn has
+        // them as null. Neither may fail to deserialize -- a reservation that
+        // cannot be read is a reservation that cannot be refunded.
+        cacheWriteUsdPerMillionTokens: z
+            .number()
+            .nonnegative()
+            .nullable()
+            .optional(),
+        promptCacheTtl: z.string().min(1).max(16).nullable().optional(),
         // Optional so a reservation written before the pricing registry landed
         // still deserializes and settles at the rates it was reserved with.
         pricingVersion: z.string().min(1).max(120).optional(),
@@ -665,7 +731,53 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
         budget.reservedOutputTokens,
         budget.outputUsdPerMillionTokens
     ) +
+    // The cache-write premium, for the same reason the search cost is here:
+    // both are provider charges this turn can incur, and a guardrail that has
+    // not seen them cannot bound them. Added rather than folded into the input
+    // term so an uncached turn's arithmetic is byte-identical to what it was.
+    Math.max(0, budget.promptCacheWriteReservedPremiumMicroUsd || 0) +
     Math.max(0, budget.nativeSearchReservedCostMicroUsd || 0);
+
+/**
+ * The worst case a prompt-cache write adds to this turn's provider cost.
+ *
+ * The worst case is the whole reserved prompt written at the cache-write rate,
+ * because that is what an ordinary first turn does: nothing is in the cache,
+ * the marker is on the last block, and the entire prefix is created. Later
+ * turns write only the delta, so this over-reserves for them -- deliberately.
+ * A reservation that is too large is refunded at settlement; one that is too
+ * small has already let the request through.
+ *
+ * Expressed as the *premium* -- `(writeRate - inputRate) x tokens` -- because
+ * the caller has already reserved those same tokens at the base input rate.
+ * Reserving the full write cost on top would double-count the base.
+ *
+ * Zero when the request carries no marker, and zero when the model has no
+ * verified write rate: there is nothing to bound in the first case and nothing
+ * honest to bound it with in the second. A negative premium is impossible on
+ * today's rates (a write is never cheaper than base input) and is floored at
+ * zero anyway, so a mis-entered rate can only fail to reserve rather than
+ * hand budget back.
+ */
+const promptCacheWriteReservedPremiumMicroUsd = ({
+    model,
+    reservedInputTokens,
+    pricing,
+    promptCachePath,
+}: {
+    model: AiModel;
+    reservedInputTokens: number;
+    pricing: ResolvedModelPricing;
+    promptCachePath?: AnthropicPromptCachePath;
+}) => {
+    if (!promptCachePath) return 0;
+    if (!anthropicPromptCacheApplies(model, promptCachePath)) return 0;
+    const writeRate = pricing.cacheWriteUsdPerMillionTokens;
+    if (typeof writeRate !== "number") return 0;
+    const premiumRate = writeRate - pricing.inputUsdPerMillionTokens;
+    if (!(premiumRate > 0)) return 0;
+    return microdollarsFor(reservedInputTokens, premiumRate);
+};
 
 export const createChatBudget = (
     kind: AccessKind,
@@ -719,6 +831,18 @@ export const createChatBudget = (
             maxQueries: number;
             pricingVersion: string;
         } | null;
+         * Which call path this turn is, when it may carry an Anthropic prompt
+         * cache marker.
+         *
+         * Passed in rather than assumed, and absent means no marker -- the
+         * same default `getModelGenerationSettings` takes, so the reservation
+         * and the request agree by construction about whether a write can
+         * happen. A caller that adds the marker and forgets this reserves too
+         * little; a caller that passes this and does not send the marker
+         * reserves too much and refunds it at settlement, which is the safe
+         * direction of the two.
+         */
+        promptCachePath?: AnthropicPromptCachePath;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -787,6 +911,14 @@ export const createChatBudget = (
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
+        promptCacheWriteReservedPremiumMicroUsd:
+            promptCacheWriteReservedPremiumMicroUsd({
+                model,
+                reservedInputTokens,
+                pricing,
+                promptCachePath: options?.promptCachePath,
+            }),
         nativeSearchReservedCostMicroUsd:
             options?.nativeSearch?.reservedCostMicroUsd ?? 0,
         nativeSearchCostPerQueryMicroUsd:
@@ -3355,6 +3487,17 @@ export const acquireChatAccess = async (
                     cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
                     pricingVersion: budget.pricingVersion ?? null,
                     reservedCostMicroUsd: reservedCost,
+                    // The third component of `reservedCost`, recorded so the
+                    // consistency check can reconstruct the total from its
+                    // parts. Omitted when zero rather than written as 0, so an
+                    // uncached turn's payload is byte-identical to what it has
+                    // always been.
+                    ...(budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? {
+                              promptCacheWriteReservedPremiumMicroUsd:
+                                  budget.promptCacheWriteReservedPremiumMicroUsd,
+                          }
+                        : {}),
                     // Frozen with the rest of the authorization, so settlement
                     // prices the search this turn was allowed rather than the
                     // one today's registry would sell.
@@ -3393,6 +3536,16 @@ export const acquireChatAccess = async (
             inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+            // Frozen with the rest of the price. A turn that carried no cache
+            // marker reserved no write premium, so it stores a null TTL and
+            // settles its (zero) write tokens at nothing -- which is what it
+            // did.
+            cacheWriteUsdPerMillionTokens:
+                budget.cacheWriteUsdPerMillionTokens ?? null,
+            promptCacheTtl:
+                budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                    ? ANTHROPIC_PROMPT_CACHE_TTL
+                    : null,
             planReservedCredits,
             addOnReservedCredits,
             addOnReservations,
@@ -3459,6 +3612,15 @@ export const settleChatUsage = async (
     turnUsage: {
         inputTokens?: number;
         cachedInputTokens?: number;
+        /**
+         * Input tokens the provider wrote into the prompt cache this turn,
+         * from `usage.inputTokenDetails.cacheWriteTokens`.
+         *
+         * Absent means zero writes and not "unknown": the only providers that
+         * report a write count are the ones this application enables caching
+         * for, and a turn with no marker creates no cache entry.
+         */
+        cacheWriteInputTokens?: number;
         outputTokens?: number;
         /**
          * Reasoning/thinking tokens the provider reported. Already inside
@@ -3683,6 +3845,7 @@ export const settleChatUsage = async (
                   ...turnUsage,
                   inputTokens: billedAttempt.inputTokens,
                   cachedInputTokens: billedAttempt.cachedInputTokens,
+                  cacheWriteInputTokens: billedAttempt.cacheWriteInputTokens,
                   outputTokens: billedAttempt.outputTokens,
                   reasoningTokens: billedAttempt.reasoningTokens,
                   usageFromProvider: billedAttempt.usageFromProvider,
@@ -3706,6 +3869,16 @@ export const settleChatUsage = async (
                 ? Math.max(0, usage.cachedInputTokens!)
                 : 0
         );
+        // Bounded by the input the reads have not claimed, matching the clamp
+        // in `calculateProviderUsageCost` and in the attempt ledger. Three
+        // places, one rule: the row's token columns are a split of its own
+        // input total, and a clamp that disagrees breaks that.
+        const actualCacheWriteInput = Math.min(
+            actualInput - actualCachedInput,
+            Number.isSafeInteger(usage.cacheWriteInputTokens)
+                ? Math.max(0, usage.cacheWriteInputTokens!)
+                : 0
+        );
         const actualTokens = actualInput + actualOutput;
         const actualCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
@@ -3720,11 +3893,20 @@ export const settleChatUsage = async (
         const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
+            cacheWriteInputTokens: actualCacheWriteInput,
             outputTokens: actualOutput,
             inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier:
                 canonical.cachedInputPriceMultiplier,
+            // From the reservation's own snapshot, not from today's registry:
+            // this settles a request that was priced when it was reserved, and
+            // re-reading the rate here would apply a later price change
+            // retroactively. Null on a reservation taken before this column
+            // existed, which prices its writes at nothing -- correct, because
+            // such a turn sent no cache marker and wrote no cache entry.
+            cacheWriteUsdPerMillionTokens:
+                canonical.cacheWriteUsdPerMillionTokens ?? null,
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&
@@ -3744,6 +3926,13 @@ export const settleChatUsage = async (
                       providerUsageSnapshot.inputTokensCostMicroUsd ??
                       tokenCostBreakdown.uncachedInputCostMicroUsd,
                   cachedInputCostMicroUsd: 0,
+                  // Zero for the same reason the cached line is: Perplexity
+                  // reports its own component costs and has no cache-write
+                  // line, so the whole of its input cost is already inside
+                  // `inputTokensCostMicroUsd`. Carrying a token-estimated
+                  // write cost beside a provider-reported total would add a
+                  // charge the provider did not make.
+                  cacheWriteInputCostMicroUsd: 0,
                   outputCostMicroUsd:
                       providerUsageSnapshot.outputTokensCostMicroUsd ??
                       tokenCostBreakdown.outputCostMicroUsd,
@@ -3974,10 +4163,15 @@ export const settleChatUsage = async (
                               canonical.outputUsdPerMillionTokens,
                           cachedInputPriceMultiplier:
                               canonical.cachedInputPriceMultiplier,
+                          cacheWriteUsdPerMillionTokens:
+                              canonical.cacheWriteUsdPerMillionTokens ?? null,
+                          promptCacheTtl:
+                              canonical.promptCacheTtl ?? null,
                           pricingVersion: canonical.pricingVersion ?? null,
                       },
                       inputTokens: actualInput,
                       cachedInputTokens: actualCachedInput,
+                      cacheWriteInputTokens: actualCacheWriteInput,
                       outputTokens: actualOutput,
                       reasoningTokens: Number.isSafeInteger(usage.reasoningTokens)
                           ? Math.max(0, usage.reasoningTokens!)
@@ -4153,9 +4347,20 @@ export const settleChatUsage = async (
                 settledCostMicroUsd: BigInt(actualCost),
                 settledInputTokens: actualInput,
                 settledCachedInputTokens: actualCachedInput,
+                settledCacheWriteInputTokens: actualCacheWriteInput,
                 settledOutputTokens: actualOutput,
                 pricingSnapshot: {
+                    // `costBreakdown` already carries the cache-write rate and
+                    // the write-token count it priced, so the snapshot
+                    // reproduces the charge without re-reading the registry.
                     ...costBreakdown,
+                    // The TTL the request asked for, beside the rate that
+                    // priced it. A write rate alone does not say which entry
+                    // was bought -- 5-minute and 1-hour writes are different
+                    // prices for different things -- so a snapshot with the
+                    // rate and no TTL cannot be re-derived by anyone who was
+                    // not there. Null on a turn that sent no marker.
+                    promptCacheTtl: canonical.promptCacheTtl ?? null,
                     pricingVersion: canonical.pricingVersion ?? null,
                     reservationCostSource: canonical.costSource ?? null,
                     longContextThresholdTokens:
@@ -4233,6 +4438,8 @@ export const settleChatUsage = async (
                                 costBreakdown.uncachedInputCostMicroUsd,
                             cachedInputCostMicroUsd:
                                 costBreakdown.cachedInputCostMicroUsd,
+                            cacheWriteInputCostMicroUsd:
+                                costBreakdown.cacheWriteInputCostMicroUsd,
                             outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
                         },
                         // Named apart from the row's own `usageSource`
