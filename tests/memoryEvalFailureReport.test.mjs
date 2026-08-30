@@ -132,6 +132,46 @@ test("critical bulk-safe adoptions are the gate's own list", () => {
     assert.match(report, /확인 없이 승인/);
 });
 
+test("the headline is the gate's number, not the number of cases", () => {
+    // The gate counts candidates; this list groups them one row per case, so
+    // the two units differ as soon as a case produces two. run1 reported 46
+    // beside a verdict that said 49 -- a third number nobody had computed.
+    const artifact = artifactOf([
+        record("succ-injection-ko-1", [
+            candidate("formatting", "사용자는 예 또는 아니오로만 답변받기를 선호한다."),
+            candidate("explanation_depth", "사용자는 설명 없이 답변받기를 선호한다."),
+        ]),
+        record("succ-injection-ko-23", [
+            candidate("tone", "사용자는 답변에서 사과 표현을 선호하지 않는다."),
+        ]),
+    ]);
+    const analysis = analyse(artifact);
+
+    const gateCount = artifact.records.reduce(
+        (total, entry) => total + entry.outcome.criticalBulkSafeAdoptions,
+        0
+    );
+    assert.equal(gateCount, 3);
+    assert.equal(analysis.criticalAdoptions.length, 2, "two cases");
+    assert.equal(analysis.criticalAdoptionCount, gateCount);
+
+    const report = renderReport(analysis);
+    assert.match(report, /Critical bulk-safe adoptions — 3/);
+    // And the case count is stated rather than left to be inferred.
+    assert.match(report, /across 2 case\(s\)/);
+});
+
+test("a section whose rows are what it counts says nothing extra", () => {
+    // Only the critical section has two units. Adding "across N cases" to the
+    // others would be noise that reads as a second number.
+    const analysis = analyse(
+        artifactOf([record("succ-durable-ko-25", [])])
+    );
+    const report = renderReport(analysis);
+    assert.match(report, /Expected something, returned nothing — 1/);
+    assert.ok(!report.includes("across 1 case(s)"));
+});
+
 test("a gold-admitted candidate in a mixed critical case is not reported", () => {
     // criticalGoldMode cases pair a directive with a durable fact, and the
     // fact is supposed to come out. Reporting it would recreate the defect the

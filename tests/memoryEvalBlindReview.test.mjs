@@ -65,8 +65,15 @@ const artifact = (overrides = {}) => {
             // digest was already computed from the successor set — a manifest
             // that named one dataset and hashed another, which is exactly the
             // mismatch the digest guard exists to catch.
+            //
+            // Corrected a second time on 2026-08-27. The version was left at
+            // "mem-eval-succ-1" when only the digest was being checked, so a
+            // fixture naming a dataset that no longer exists still passed.
+            // Resolution is now by version *and* digest, and succ-1 has no
+            // manifest — it was superseded before anything decision-grade ran
+            // against it — so the fixture has to say which sample it is.
             promptVersion: "mem-extract-v4",
-            datasetVersion: "mem-eval-succ-1",
+            datasetVersion: "mem-eval-succ-2",
             datasetDigest: digest,
             mode: "live",
             commitSha: "0".repeat(40),

@@ -9,6 +9,8 @@ import {
   getModelPricingProfile,
   getNativeSearchCostMicroUsdPerQuery,
   PENDING_VERIFIED_PRICE_MODEL_IDS,
+  PROMPT_CACHE_READ_PRICE_MULTIPLIER,
+  PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
   resolveModelPricing,
 } from "../lib/modelPricing.ts";
 import { calculateProviderUsageCost } from "../lib/providerUsageCost.ts";
@@ -526,31 +528,207 @@ test("GLM-5.2's cached-input rate resolves to the published US$0.26, not a round
   assert.equal(pricing.cachedInputPricingVerified, true);
 });
 
-test("Claude Sonnet 5's introductory price is replaced when it expires", () => {
-  // The profile carries Anthropic's introductory rate (US$2 / US$10), which is
-  // what is billed until 2026-08-31. From 2026-09-01 the standard US$3 / US$15
-  // applies, and a stored price that quietly outlives its term understates cost
-  // on every request -- exactly what an explicit profile exists to prevent.
-  //
-  // This is deliberately a date-triggered failure. There is no webhook for a
-  // price change and nothing else in the system notices one, so the reminder
-  // has to be the build. Fix it by moving the rates, not by moving the date.
-  const pricing = resolveModelPricing(model("claude-sonnet-5"));
-  const introductoryPeriodEnds = Date.parse("2026-09-01T00:00:00.000Z");
-  const stillIntroductory = Date.now() < introductoryPeriodEnds;
+// --------------------------------------------------------------------------
+// Claude Sonnet 5's price, and the 2026-09-01 boundary that turned out not to
+// be one.
+//
+// This block replaces a date-triggered failure that was set to fire on
+// 2026-09-01 demanding the rates move to US$3 / US$15. That demand was correct
+// when it was written -- the launch announcement put the US$2 / US$10 rate on
+// an end date of 2026-08-31 -- and it stopped being correct on 2026-08-11,
+// when Anthropic cancelled the increase. Their pricing page's
+// `claude-sonnet-5-introductory-pricing` note now reads: "is now the standard
+// price. The previously scheduled increase to $3/$15 per million input/output
+// tokens on September 1, 2026 will not occur."
+//
+// So the tests below pin the *opposite* of what the old one did: the rate does
+// not move across that boundary. Moving them to US$3 / US$15 would overstate
+// every Sonnet 5 request by 50%, and overstating is not the safe direction --
+// provider budgets and the operational cost guardrails are spent against these
+// numbers, so an inflated rate refuses requests that had the money for them.
+//
+// The date-triggered *mechanism* was not the mistake and is not being removed:
+// nothing in this system notices a price change on its own. What replaced it is
+// `priceSchedule` in lib/modelPricing.ts, which lets a dated revision be
+// written down before it takes effect instead of guarded by a build that breaks
+// on a calendar day.
+// --------------------------------------------------------------------------
 
-  if (stillIntroductory) {
-    assert.equal(pricing.inputUsdPerMillionTokens, 2);
-    assert.equal(pricing.outputUsdPerMillionTokens, 10);
-    return;
+const SONNET_5_STANDARD = { input: 2, output: 10, cachedMultiplier: 0.1 };
+
+test("Claude Sonnet 5 is priced at the standard US$2 / US$10 today", () => {
+  const pricing = resolveModelPricing(model("claude-sonnet-5"));
+  assert.equal(pricing.inputUsdPerMillionTokens, SONNET_5_STANDARD.input);
+  assert.equal(pricing.outputUsdPerMillionTokens, SONNET_5_STANDARD.output);
+  assert.equal(
+    pricing.cachedInputPriceMultiplier,
+    SONNET_5_STANDARD.cachedMultiplier
+  );
+  assert.equal(
+    pricing.pricingVersion,
+    "anthropic-claude-sonnet-5-standard-2026-08-11",
+    "the price in force is the 2026-08-11 revision that made the introductory rate standard"
+  );
+  assert.equal(pricing.effectiveDate, "2026-08-11");
+});
+
+test("Claude Sonnet 5's rates are unchanged across the 2026-09-01 boundary", () => {
+  // The two instants either side of the cancelled increase, to the
+  // millisecond. Both must price identically: the increase will not occur, and
+  // a registry that stepped up here would be billing a price Anthropic
+  // withdrew.
+  const lastMomentOfAugust = Date.parse("2026-08-31T23:59:59.999Z");
+  const firstMomentOfSeptember = Date.parse("2026-09-01T00:00:00.000Z");
+
+  const before = resolveModelPricing(model("claude-sonnet-5"), {
+    at: lastMomentOfAugust,
+  });
+  const after = resolveModelPricing(model("claude-sonnet-5"), {
+    at: firstMomentOfSeptember,
+  });
+
+  for (const [label, pricing] of [
+    ["2026-08-31T23:59:59.999Z", before],
+    ["2026-09-01T00:00:00.000Z", after],
+  ]) {
+    assert.equal(
+      pricing.inputUsdPerMillionTokens,
+      SONNET_5_STANDARD.input,
+      `Sonnet 5 input rate at ${label}`
+    );
+    assert.equal(
+      pricing.outputUsdPerMillionTokens,
+      SONNET_5_STANDARD.output,
+      `Sonnet 5 output rate at ${label}`
+    );
   }
+  assert.equal(
+    before.pricingVersion,
+    after.pricingVersion,
+    "no price decision takes effect at the 2026-09-01 boundary, so the version must not change across it"
+  );
+});
+
+test("a Sonnet 5 request dated before 2026-08-11 reproduces at the introductory version", () => {
+  // Historical reproduction: re-pricing a stored reservation means asking the
+  // registry what it said *then*. The rates are the same either side, and the
+  // version is not -- which is the point. A settlement taken while the rate was
+  // provisional and one taken after it was permanent are two different
+  // decisions, and a ledger that files them under one version cannot tell them
+  // apart afterwards.
+  const beforeCancellation = resolveModelPricing(model("claude-sonnet-5"), {
+    at: Date.parse("2026-08-10T23:59:59.999Z"),
+  });
+  const atCancellation = resolveModelPricing(model("claude-sonnet-5"), {
+    at: Date.parse("2026-08-11T00:00:00.000Z"),
+  });
 
   assert.equal(
-    pricing.inputUsdPerMillionTokens,
-    3,
-    "Claude Sonnet 5's introductory pricing ended on 2026-08-31. Move the " +
-      "profile in lib/modelPricing.ts to the standard US$3 / US$15 with a " +
-      "cached-read multiplier of 0.1, and give it a new pricingVersion."
+    beforeCancellation.pricingVersion,
+    "anthropic-claude-sonnet-5-intro-2026-08-04"
   );
-  assert.equal(pricing.outputUsdPerMillionTokens, 15);
+  assert.equal(beforeCancellation.effectiveDate, "2026-08-04");
+  assert.equal(
+    atCancellation.pricingVersion,
+    "anthropic-claude-sonnet-5-standard-2026-08-11"
+  );
+
+  // Same money, either side. The cancellation changed the term, not the number.
+  assert.equal(
+    beforeCancellation.inputUsdPerMillionTokens,
+    atCancellation.inputUsdPerMillionTokens
+  );
+  assert.equal(
+    beforeCancellation.outputUsdPerMillionTokens,
+    atCancellation.outputUsdPerMillionTokens
+  );
+});
+
+test("a scheduled revision takes effect on its own instant and not before", () => {
+  // The mechanism itself, exercised on a synthetic profile so the assertion is
+  // about the boundary rule rather than about any model's real rates.
+  const profile = getModelPricingProfile("claude-sonnet-5");
+  assert.ok(profile.priceSchedule?.length, "Sonnet 5 carries a price schedule");
+  const revision = profile.priceSchedule[0];
+  const instant = Date.parse(revision.effectiveFrom);
+
+  const justBefore = resolveModelPricing(model("claude-sonnet-5"), {
+    at: instant - 1,
+  });
+  const exactlyAt = resolveModelPricing(model("claude-sonnet-5"), {
+    at: instant,
+  });
+
+  assert.equal(justBefore.pricingVersion, profile.pricingVersion);
+  assert.equal(exactlyAt.pricingVersion, revision.pricingVersion);
+  assert.equal(
+    revision.effectiveDate,
+    revision.effectiveFrom.slice(0, 10),
+    "the snapshot date must be the instant's own UTC date"
+  );
+  assert.ok(
+    revision.effectiveFrom.endsWith("Z"),
+    "price boundaries are UTC instants, matching every other boundary in this system"
+  );
+});
+
+test("an explicit DB price override wins over a scheduled revision", () => {
+  // The NULL-inherits contract (docs/policy/credit-and-cost-limits.md, the
+  // 2026-08-02 section) is not weakened by the schedule: a registry row that
+  // carries numbers is an administrator's decision, and a dated revision must
+  // not override it. The flip side is that an override flattens the tiers, and
+  // it flattens the schedule for the same reason -- a column cannot express
+  // either.
+  const base = model("claude-sonnet-5");
+  const overridden = resolveModelPricing(
+    {
+      ...base,
+      inputUsdPerMillionTokens: 7,
+      outputUsdPerMillionTokens: 21,
+      cachedInputPriceMultiplier: 0.5,
+    },
+    { at: Date.parse("2026-12-01T00:00:00.000Z") }
+  );
+
+  assert.equal(overridden.inputUsdPerMillionTokens, 7);
+  assert.equal(overridden.outputUsdPerMillionTokens, 21);
+  assert.equal(overridden.cachedInputPriceMultiplier, 0.5);
+  assert.equal(overridden.costSource, "model_registry_override");
+
+  // Inheriting rows are untouched by the override and still take the revision.
+  const inherited = resolveModelPricing(base, {
+    at: Date.parse("2026-12-01T00:00:00.000Z"),
+  });
+  assert.equal(inherited.costSource, "registry");
+  assert.equal(inherited.inputUsdPerMillionTokens, SONNET_5_STANDARD.input);
+});
+
+test("every Anthropic cache-write rate is 1.25x its own input rate", () => {
+  // The published 5-minute cache-write multiplier, checked against the rates
+  // rather than used to compute them: each number here was read off Anthropic's
+  // price table, and this is what catches a transcription slip.
+  for (const modelId of [
+    "claude-opus-4-8",
+    "claude-fable-5",
+    "claude-sonnet-5",
+    "claude-haiku-4-5",
+  ]) {
+    const pricing = resolveModelPricing(model(modelId));
+    assert.equal(
+      typeof pricing.cacheWriteUsdPerMillionTokens,
+      "number",
+      `${modelId} must carry a verified cache-write rate now that it caches`
+    );
+    const expected =
+      pricing.inputUsdPerMillionTokens * PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER;
+    assert.ok(
+      Math.abs(pricing.cacheWriteUsdPerMillionTokens - expected) < 1e-9,
+      `${modelId} cache-write rate ${pricing.cacheWriteUsdPerMillionTokens} is not 1.25x its input rate ${pricing.inputUsdPerMillionTokens}`
+    );
+    assert.equal(
+      pricing.cachedInputPriceMultiplier,
+      PROMPT_CACHE_READ_PRICE_MULTIPLIER,
+      `${modelId} cache-read multiplier`
+    );
+  }
 });

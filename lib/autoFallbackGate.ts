@@ -48,7 +48,14 @@ export type FallbackScopeRefusal =
   | "guest"
   /** A tool was offered; its results are state a second attempt cannot inherit. */
   | "tools_offered"
-  /** Provider-native web search: executed, surcharged, and not repeatable for free. */
+  /**
+   * A web search ran: executed, surcharged, and not repeatable for free.
+   *
+   * Both routes. An application-managed search has spent backend requests
+   * against this turn's counted allowance and taken the eight-credit surcharge
+   * exactly as a native one has, so a second attempt would either re-spend both
+   * or answer without the search the user paid for. Neither is a fallback.
+   */
   | "web_search"
   /** A deep research job is submitted and polled, not streamed. */
   | "deep_research"
@@ -66,6 +73,16 @@ export type FallbackScopeInput = {
   isGuest: boolean;
   toolsOffered: boolean;
   nativeSearchEnabled: boolean;
+  /**
+   * Whether this turn registered this application's own `web_search` tool.
+   *
+   * Its own field rather than folded into `nativeSearchEnabled`, because the
+   * two are read apart everywhere else and a caller setting the wrong one would
+   * be making a claim about which provider ran the search. Both produce the
+   * same refusal here, which is the point: the reason a searching turn cannot
+   * fall back is about the search having happened, not about who ran it.
+   */
+  appManagedSearchEnabled?: boolean;
   deepResearch: boolean;
   hasAttachments: boolean;
   candidateCount: number;
@@ -86,7 +103,9 @@ export const autoFallbackScope = (input: FallbackScopeInput): FallbackScope => {
   if (!input.routed) return { allowed: false, reason: "not_routed" };
   if (input.isGuest) return { allowed: false, reason: "guest" };
   if (input.deepResearch) return { allowed: false, reason: "deep_research" };
-  if (input.nativeSearchEnabled) return { allowed: false, reason: "web_search" };
+  if (input.nativeSearchEnabled || input.appManagedSearchEnabled === true) {
+    return { allowed: false, reason: "web_search" };
+  }
   if (input.toolsOffered) return { allowed: false, reason: "tools_offered" };
   if (input.hasAttachments) return { allowed: false, reason: "attachments" };
   if (input.candidateCount <= 0) return { allowed: false, reason: "no_candidate" };

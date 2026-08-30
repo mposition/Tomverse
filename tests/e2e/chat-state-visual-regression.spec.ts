@@ -409,8 +409,10 @@ test.describe("Partial failure state", () => {
         // mobile shows one active tab, the rest present in the DOM but not
         // visible -- see the Success state test for the same distinction).
         await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
-        // ...and exactly one failure, visually distinct (role=alert, red
-        // card) -- counted regardless of which tab is active on mobile.
+        // ...and exactly one failure, visually distinct (role=alert, an
+        // alert icon and a red card edge on an otherwise neutral surface --
+        // see UI-ERR-001 in ChatMessageList.tsx) -- counted regardless of
+        // which tab is active on mobile.
         const errorCards = page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]');
         await expect(errorCards).toHaveCount(1);
         if (viewport.width >= 768) {

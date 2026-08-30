@@ -342,7 +342,10 @@ export const runComparisonReview = async (
             system: reviewPrompt.system,
             prompt: reviewPrompt.prompt,
             output: Output.object({ schema: comparisonReviewResultSchema }),
-            ...getModelGenerationSettings(candidate, { temperature: 0.1 }),
+            ...getModelGenerationSettings(candidate, {
+                temperature: 0.1,
+                promptCachePath: "comparison_review",
+            }),
             maxOutputTokens: outputBudget.outputTokens,
             maxRetries: 1,
             abortSignal: AbortSignal.timeout(45_000),

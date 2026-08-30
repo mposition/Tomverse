@@ -126,5 +126,10 @@ ALTER TABLE "ProductAnalyticsEvent"
   'image_intent_suggestion_dismissed',
   'deep_research_suggestion_shown',
   'deep_research_suggestion_accepted',
-  'deep_research_suggestion_dismissed'
+  'deep_research_suggestion_dismissed',
+  'web_search_suggestion_impression',
+  'web_search_suggestion_accept',
+  'web_search_suggestion_dismiss',
+  'web_search_retry_success',
+  'web_search_retry_error'
 ));

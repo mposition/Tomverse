@@ -98,9 +98,23 @@ live adapter가 첫 케이스에서 죽습니다 — `lib/activeAiModel.ts`가
 - artifact를 플랫폼이 보존하고, **그 run URL이 곧 §12.1의 `artifactRef`**입니다.
   로컬 실행은 이 불변 참조를 따로 만들어야 합니다.
 
-입력은 다섯입니다 — `model`, `run_label`(`run1`·`run2`…), `max_cost_usd`,
-`limit`, 그리고 `confirm`에 **`SPEND`를 그대로 입력**해야 합니다. 유료 provider를
-부르는 dispatch이므로 오타나 실수로 눌리지 않게 한 겹 둡니다.
+입력은 여섯입니다 — `model`, `run_label`(`run1`·`run2`…), `run_ordinal`,
+`max_cost_usd`, `limit`, 그리고 `confirm`에 **`SPEND`를 그대로 입력**해야
+합니다. 유료 provider를 부르는 dispatch이므로 오타나 실수로 눌리지 않게 한 겹
+둡니다.
+
+**`run_ordinal`에는 기본값이 없습니다.** harness가 회차를 요구하고
+(`run_ordinal_not_approved`), 저장소에는 실행 원장이 없으므로 dispatch가 자기
+회차를 말합니다. 기본값을 두면 생각 없이 누른 모든 dispatch가 1회차가 되는데,
+그것이 이 입력이 막으려는 회계입니다. 선택지는 승인된 `1`과 `2`뿐이고, 세 번째
+실행은 여기 숫자를 늘리는 것이 아니라 register에 새 예산 승인을 기록하는
+일입니다.
+
+`max_cost_usd` 기본값 `6.285`는 **실행별** 상한입니다. 프로그램 총액
+US$12.57을 여기 넣으면 회차마다 그 금액이 허용됩니다 — harness가 비교하는
+`accruedCostUsd`는 매 실행 0에서 시작하기 때문입니다. 올려도 여유가 생기지
+않고 2회차 예산을 1회차에서 쓰는 것이며, 상한에서 잘린 회차는 decision-grade가
+아니라 지출 전체가 버려집니다.
 
 **`limit`은 회차를 compatibility probe로 바꿉니다** — 앞의 N건만 돌고 멈춥니다.
 배선이 맞는지 1,150번 지불하며 배우지 않기 위한 것이고, v1이 정확히 그렇게
@@ -294,6 +308,36 @@ npm run make:memory-eval-blind-review -- \
 검토가 끝난 뒤에 harness 판정과 대조합니다. 어긋난 건수는 시트 맨 아래에
 적습니다. **읽어 보니 아닌 것이 있으면 그 사실이 §12.3의 숫자보다 앞섭니다.**
 
+### 5.1 판정과 무관하게 수행합니다 (2026-08-27)
+
+**probe가 아닌 모든 실행에서 검토를 수행합니다. 숫자가 실패했다는 것은 생략
+사유가 아닙니다.**
+
+시트를 *만드는 것*은 workflow가 `if: always()`로 이미 보장합니다(§4). 여기서
+정하는 것은 그 시트를 *읽는 것* — 사람이 40건을 판정하고 unblind 대조를 기록하는
+행위 — 도 판정과 무관하다는 것입니다. 둘은 다른 일이고, 앞의 것이 자동이라고
+뒤의 것이 따라오지 않습니다.
+
+근거는 이 자리의 목적 그대로입니다. 검토는 **숫자가 재지 못한 것**을 보는
+자리인데, 실패한 회차야말로 숫자가 무엇을 놓쳤는지 가장 알 필요가 있는
+회차입니다. 실패했으니 정성 검토를 건너뛰면, 숫자가 포착하지 못한 결함을 다음
+버전에서 다시 발견하게 됩니다 — 그 사이의 설계는 그 결함을 모른 채 이루어집니다.
+
+`mem-extract-v5` / `mem-eval-succ-3`의 v5-run1이 이 조항을 만들었습니다.
+§12.3 세 기준과 hard-zero gate를 모두 놓쳤지만 admissible이었고, 실패 목록만
+읽어서는 **모델이 맞힌 케이스의 답이 실제로 좋았는지**를 알 수 없었습니다.
+
+### 5.2 검토자가 blind가 아닐 때는 그 사실을 적습니다
+
+시트가 정답 라벨과 판정을 감추는 것은 검토자가 그것을 모른 채 읽게 하기
+위해서입니다. 검토자가 이미 알고 있다면 — gold를 직접 작성했거나, harness
+출력을 먼저 읽었거나 — 시트가 감추는 것과 무관하게 blind가 아닙니다.
+
+그 경우 **검토를 하지 않는 것이 아니라, 어느 케이스에서 blind가 아닌지 기록에
+적습니다.** 판정은 여전히 유효하고 여전히 유용하며, 다만 "이 판정은 정답을 모른
+채 내려졌다"는 주장만 성립하지 않습니다. 지어낸 blind는 없는 blind보다
+나쁩니다 — 뒤의 것은 한계를 알고 읽히지만 앞의 것은 그렇지 않습니다.
+
 ## 6. 독립 재실행 (2회차)
 
 ```
@@ -311,6 +355,25 @@ manifest 세 값을 1회차와 대조합니다. 다르면 두 회차는 같은 �
 요구는 이 정책에 없습니다**(그 조항은 `docs/policy/default-model-luna-migration.md`
 §4.5.1의 것이고, 대상이 다릅니다). 다만 provider 쪽 시간대 편차를 배제하려면
 간격을 두는 편이 낫고, 그렇게 하기로 정했다면 §3의 사전 등록에 적습니다.
+
+### 6.1 명확히 탈락한 pair는 재실행하지 않습니다 (2026-08-27)
+
+**재실행은 승인 가능성이 있는 pair의 재현성을 확인하는 절차입니다.** 이미
+탈락한 pair를 다시 탈락시켜 보이기 위한 의무가 아닙니다.
+
+구분 기준은 "실패했는가"가 아니라 **"다시 돌리면 달라질 수 있는가"** 입니다.
+경계선에서 미끄러진 회차는 재현성이 실제 질문이고 재실행이 답합니다. 구조적
+실패가 확인된 회차 — 서로 반대 방향의 결함이 동시에 잡혔거나, gold를 전부
+고쳐도 hard-zero gate가 남는 경우 — 는 재실행이 답할 질문이 없습니다.
+
+그런 회차를 재실행하면 **정확한 baseline 숫자 하나를 위해 decision set을 한 번
+더 소비**하게 됩니다. 그 표본은 다음 pair가 써야 할 것이고, 이미 답이 나온
+질문에 쓰기에는 비쌉니다.
+
+v5-run1이 이 조항을 만들었습니다: 규칙 2 미적용(assistant 발화를 사용자 사실로
+저장)과 규칙 1 과적용(injection 턴에서 정당한 사실까지 폐기)이 한 회차에서
+동시에 잡혔고, gold 결함 6건을 모두 고쳐도 critical bulk-safe adoption이 25에서
+19로 줄 뿐 0이 되지 않습니다. 재실행은 하지 않았습니다.
 
 ## 7. §12.3 판정
 
@@ -405,3 +468,150 @@ fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가
 | blind review 부적절 건수 / 어긋난 건수 | | |
 | artifact 경로 | | |
 | 판정과 서명 | | |
+
+## 11. 2026-08-28 예산의 실행 조건 (재승인)
+
+`gpt-5-6-luna::mem-extract-v6` 한 pair에 대해 승인된 예산의 실행 규칙입니다.
+등록은 `lib/memoryExtractionEvalRegister.ts`, 근거는
+`.github/audits/memory-eval-gold-contract-2026-08-27.md` 17절입니다.
+
+### 11.1 실행 전 — 기계가 확인합니다
+
+harness가 provider에 닿기 전에 네 가지를 확인하고, 하나라도 어긋나면 거절합니다.
+
+| 거절 | 뜻 |
+|---|---|
+| `budget_not_bound` | 예산이 instrument에 결속돼 있지 않음(2026-08-28 이전 예산) |
+| `budget_tuple_mismatch` | dataset·contract·prompt의 version 또는 digest가 등록값과 다름 |
+| `run_sha_not_descendant` | 실행 commit이 `approvedImplementationSha`의 후손이 아니거나 git이 답하지 못함 |
+| `run_ordinal_not_approved` | `--run-ordinal`이 없거나 승인된 회차(1 또는 2)가 아님 |
+
+`HEAD === approvedImplementationSha`는 요구하지 않습니다. 등록 PR은 자기 merge
+SHA를 미리 담을 수 없고, 같은 instrument를 조립하는 이후 commit은 승인된 것을
+실행하는 것이기 때문입니다.
+
+### 11.2 실행은 2회, 그리고 2회차는 재시도가 아닙니다
+
+1. **1회차** — decision-grade 실행. `--run-ordinal=1`과 `--json`을 줍니다.
+2. **1회차 판정** — 구조적 실패(harness 결함, 파싱 불가)나 §12.3 기준의 명확한
+   탈락이 확인되면 **여기서 멈춥니다.** 2회차를 하지 않고 pair를 종료하거나
+   재검토합니다.
+3. **2회차** — §12.4의 재현성 확인 실행. 1회차가 성립했고 **사용자의 명시적
+   실행 지시가 있을 때만** 합니다. `--run-ordinal=2`를 줍니다.
+
+`--run-ordinal`은 생략할 수 없습니다. 저장소에 실행 원장이 없으므로 실행이
+자기 회차를 말하고 gate가 승인과 대조하며, 3회차는 거절됩니다.
+
+### 11.3 재시도가 허용되는 유일한 경우
+
+**provider dispatch 이전에 실패했고, provider 미접촉과 비용 0이 증명된 경우**
+에만 같은 실행을 다시 시작할 수 있습니다. dispatch 이후 실패했거나 비용 발생
+여부가 불명확하면 **중단하고 provider 청구 내역과 대조**한 뒤 별도 승인을
+받습니다. 추가 실행은 언제나 별도 승인입니다.
+
+`maxProviderDispatchedRuns: 2`가 실행 횟수를 세지는 않습니다. 강제되는 것은
+실행별 지출 상한, `--run-ordinal` 대조, 그리고 이 절차입니다.
+
+### 11.3a 상한은 실행별 US$6.285, 프로그램 총액은 US$12.57
+
+`accruedCostUsd`는 매 실행 0에서 시작하므로 harness가 비교하는 상한은 언제나
+**한 실행의 상한**입니다. 등록값도 그렇게 나뉘어 있습니다.
+
+| 값 | 숫자 |
+|---|---|
+| 실행별 상한 (`maxUsd`) | US$6.285 |
+| 프로그램 총상한 (`programmeMaxMicroUsd`) | 12,570,000 microUSD |
+| 승인 회차 (`maxProviderDispatchedRuns`) | 2 |
+
+- **1회차 미사용액은 2회차로 이월되지 않습니다.** 1회차가 US$3에서 끝나도
+  2회차 상한은 US$6.285 그대로입니다.
+- **1회차가 US$6.285에서 잘리면 decision-grade가 아닙니다.** artifact의
+  `decisionGrade`가 `false`가 되고, 답은 상한을 올리는 것이 아니라 새 예산
+  승인입니다.
+- artifact에는 `runOrdinal`, `runCeilingUsd`, `perRunCeilingUsd`,
+  `approvedRunCount`, `programmeMaxMicroUsd`가 함께 남습니다.
+
+근거는 `.github/audits/memory-eval-gold-contract-2026-08-27.md` 17.7절입니다.
+
+### 11.4 `--live`를 시험 삼아 실행하지 않습니다
+
+예산이 등록된 뒤로는 `--live`가 실제로 실행됩니다. 거절 문구나 gate 동작을
+확인할 일이 있으면 **순수 테스트로** 확인하고, harness를 부르는 경우에도
+`--live` 없이 부릅니다. 2026-08-28에 gate 문구를 확인하려고 네트워크 차단 없이
+`--live`를 실행해 5회 dispatch가 시도된 일이 있습니다(잘못된 key, 과금 0).
+
+### 11.5 run #11 (2026-08-29) — provider에 닿지 못한 1회차
+
+승인된 1회차의 첫 dispatch가 **provider 이전에 거절**됐습니다. 회차는
+소진되지 않았습니다.
+
+| 항목 | 값 |
+|---|---|
+| run | [#11 / ID `33224205060`](https://github.com/mposition/Tomverse/actions/runs/33224205060) |
+| ref · commit | `develop` · `20eb27d7a0134f53d9de3829fe616d54149f4058` |
+| 입력 | model `gpt-5-6-luna`, run_label `v6-succ5-run1`, run_ordinal `1`, max_cost_usd `6.285`, limit 빈 값, confirm `SPEND` |
+| 결과 | `pre_dispatch_refusal` — `run_sha_not_descendant` |
+| provider 접촉 | 없음 |
+| 비용 | US$0 |
+| artifact | 없음 (blind review sheet도 없음) |
+| ordinal 소진 | 아니오 |
+
+**원인은 checkout 깊이였고 조상 관계가 아니었습니다.** harness가 출력한 것은
+"git could not answer" 갈래로, `descendsFrom()`이 `false`가 아니라 `undefined`를
+돌려줬다는 뜻입니다. `actions/checkout`은 지시가 없으면 commit 하나만 가져오고,
+그 clone에는 `approvedImplementationSha`가 없어 `git merge-base --is-ancestor`가
+깨끗한 "아니오" 대신 unknown object로 죽습니다. 전체 clone에서 확인한 실제
+관계는 참입니다 — `34a53ddc…`는 `20eb27d7…`의 조상입니다.
+
+gate가 틀린 판정을 한 것이 아니라 **확인할 수 없는 상태를 통과시키지 않은
+것**이고, 그것이 fail-closed의 의도입니다. 고친 것은 workflow 쪽이며
+(`fetch-depth: 0`), tuple·register·상한·`approvedImplementationSha`는
+건드리지 않았습니다.
+
+**증거로 남기는 시간 값**: live 단계는 00:40:56 → 00:40:57, **1초**입니다.
+1,150건 dispatch가 일어날 수 없는 길이이고, 거절은 AI SDK의 동적 import 이전
+`decideEvalRunMode()`에서 났습니다(`tests/memoryExtractionEvalBoundary.test.mjs`가
+그 경계를 네트워크 차단 상태로 고정합니다).
+
+**이 run의 `rerun` 기능은 쓰지 않습니다.** rerun은 같은 workflow SHA를 다시
+실행하므로 고치기 전의 workflow를 다시 돌리게 됩니다. 재개는 새 dispatch로
+하고, 혼동을 피하려 `run_label`을 달리 씁니다.
+
+### 11.6 run #12 (2026-08-29) — 1회차 실행 완료, 통과하지 못함
+
+checkout 깊이를 고친 뒤 재개한 1회차입니다. **provider에 닿았고, 1,150건을
+완주했고, admissible하며, §12.3을 통과하지 못했습니다.**
+
+| 항목 | 값 |
+|---|---|
+| run | [#12 / ID `33226038813`](https://github.com/mposition/Tomverse/actions/runs/33226038813) |
+| ref · commit | `develop` · `18d83e793bcc8331d3bfa14e36314469b52199f0` |
+| 입력 | model `gpt-5-6-luna`, run_label `v6-succ5-run1-after-checkout-fix`, run_ordinal `1`, max_cost_usd `6.285`, limit 빈 값, confirm `SPEND` |
+| provider 접촉 | 예 (`mode: live`) |
+| 실행 시간 | 36분 50초 · 1,150/1,150 · harness failure 0 |
+| 비용 | US$0.7094 (실행별 상한 6.285) |
+| decisionGrade · admissibility | true · **Admissible** (6/6) |
+| §12.3 판정 | **통과하지 못함** (`verdict.pass: false`, 위반 12건) |
+| ordinal 소진 | 예 — 1회차 소진, 2회차 미실행 |
+
+수치와 blind review 판정은 `.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md`
+에 있습니다. 이 회차의 blind review는 **완전한 blind가 아닙니다** — 검토자가
+case별 gold는 보지 않았으나 run-level aggregate와 failure category를 먼저
+보았고, 그 사실이 감사 기록 5.1절에 적혀 있습니다.
+
+**2회차는 승인되지 않았고 pair는 종료했습니다**(2026-08-29, @mposition). 세
+기준 모두 임계값과의 차이가 커서 재현성 확인이 답할 질문이 없고, critical
+bulk-safe 채택은 0건 기준에서 41건입니다. `gpt-5-6-luna::mem-extract-v6`는
+register에서 `revoked`이며, 예산·지출·artifact·감사 기록은 역사적 증거로
+남습니다. 미사용액 US$5.58은 다른 pair로도 후속 prompt version으로도
+**이전되지 않습니다.**
+
+`gpt-5-4-mini::mem-extract-v6`는 평가하지 않았고 `evalBudget: null`을
+유지합니다.
+
+**다음 작업은 유료 실행이 아니라 provider-free 진단입니다** — 41건의 critical
+채택, kind/polarity 불일치, 미반환, gold 미인정 반환을 prompt 결함 · scoring
+taxonomy 불일치 · gold 결함 · 실제 모델 오류로 가릅니다. 진단 전에는
+`mem-eval-succ-5` gold도 `mem-extract-v6` prompt도 고치지 않으며, 수정이
+필요하면 동결본을 바꾸지 않고 새 `datasetVersion` 또는 `promptVersion`으로
+갑니다.

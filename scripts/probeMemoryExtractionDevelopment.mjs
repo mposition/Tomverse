@@ -197,10 +197,41 @@ const liveAdapter = createEvalLiveAdapter({
  * report a sensitive-review misclassification for every health case, which
  * says nothing about the pipeline and trains the reader to ignore the number.
  */
+/**
+ * The label of a message this case really presents, and a real span of it.
+ *
+ * `mem-extract-v6` requires each citation to carry a quote that occurs in the
+ * message it names, checked against the server's own copy. A stub that quoted
+ * a constant would be rejected by its own parser on every case, and a smoke
+ * run reporting zero candidates everywhere looks like a run while measuring
+ * nothing. The first user message is preferred for the same reason the
+ * label-only version cited it: the label map decides the role, so a smoke
+ * answer cannot smuggle assistant-only evidence past the validator.
+ */
+const smokeCitation = (testCase) => {
+    let ordinal = 0;
+    let firstMessage = null;
+    for (const conversation of testCase.conversations) {
+        for (const message of conversation.messages) {
+            ordinal += 1;
+            const citation = {
+                messageLabel: `m${ordinal}`,
+                quote: [...message.content.normalize("NFC")]
+                    .slice(0, 40)
+                    .join(""),
+            };
+            if (firstMessage === null) firstMessage = citation;
+            if (message.role === "user") return citation;
+        }
+    }
+    return firstMessage ?? { messageLabel: "m1", quote: "" };
+};
+
 const smokeAdapter = (testCase) => async () => ({
     output: {
         candidates: testCase.expected.map((expected) => ({
             kind: expected.kind,
+            polarity: expected.polarity ?? "affirmed",
             statement: `The user's record: ${expected.mustInclude.join(" ")}.`,
             confidence: 0.9,
             sensitivity:
@@ -208,7 +239,7 @@ const smokeAdapter = (testCase) => async () => ({
                     ? "sensitive"
                     : "standard",
             expiresAt: null,
-            evidence: ["m1"],
+            evidence: [smokeCitation(testCase)],
         })),
     },
 });

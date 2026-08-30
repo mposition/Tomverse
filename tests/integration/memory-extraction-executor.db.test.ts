@@ -161,9 +161,14 @@ const ANSWER = {
     candidates: [
         {
             kind: "verbosity",
+            polarity: "affirmed",
             statement: "사용자는 간결한 답변을 선호한다",
             confidence: 0.9,
-            evidence: ["m1"],
+            // `mem-extract-v6` shape: the label plus a span that occurs in the
+            // message it names. The parser checks the quote against the
+            // server's copy, so a fixture quoting anything else parses to no
+            // candidates at all and the test would measure an empty run.
+            evidence: [{ messageLabel: "m1", quote: "간결한 답변" }],
         },
     ],
 };

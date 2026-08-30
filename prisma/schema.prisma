@@ -595,11 +595,39 @@ model MessageAttachment {
   /// request that accepted it.
   uploadId String?
 
+  /// When storage confirmed, with a 404, that this object is gone.
+  ///
+  /// Nullable, and set only from a confirmed 404 -- never from a read that
+  /// merely failed. A 403 from a rotated key and a 500 from the bucket both
+  /// mean "we do not know", and writing those here would turn a five-minute
+  /// credentials outage into a permanent record that an account's files were
+  /// lost (docs/policy/user-attachment-persistence.md section 11).
+  ///
+  /// The row itself is never deleted because of this. The card stays, the
+  /// message stays, the name and size stay: what the user sent is part of the
+  /// conversation whether or not the bytes survived, and hiding the card would
+  /// leave them asking a model about a file neither side can name.
+  unavailableAt DateTime?
+
+  /// Why, from MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS in
+  /// lib/messageAttachmentCore.ts. Free text is not accepted: this column is
+  /// read to decide what the user is told, and a reason nobody enumerated has
+  /// no copy for it.
+  unavailableReason String?
+
+  /// The last time availability was *checked*, whatever the answer.
+  ///
+  /// Separate from `unavailableAt` because "we looked and it was there" and
+  /// "we have not looked since Tuesday" are different facts, and the audit
+  /// tool needs the second one to know what it has covered.
+  availabilityCheckedAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
+  @@index([unavailableAt])
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -1207,38 +1235,45 @@ model CreditDebtEntry {
 }
 
 model ChatCreditReservation {
-  id                       String    @id
-  userId                   String?
-  user                     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  subjectKey               String
-  traceId                  String
-  source                   String
-  provider                 String
-  modelId                  String
-  status                   String    @default("reserved")
-  outcome                  String?
-  idempotencyKey           String    @unique
-  providerRequestId        String?
-  providerResponseId       String?
-  providerRequestLinkedAt  DateTime?
-  reservationPayload       Json
-  reservedCredits          Int
-  reservedCostMicroUsd     BigInt
-  planReservedCredits      Int
-  addOnReservedCredits     Int
-  settledCredits           Int       @default(0)
-  settledCostMicroUsd      BigInt    @default(0)
-  settledInputTokens       Int       @default(0)
-  settledCachedInputTokens Int       @default(0)
-  settledOutputTokens      Int       @default(0)
-  pricingSnapshot          Json?
-  providerUsageSnapshot    Json?
-  expiresAt                DateTime
-  settledAt                DateTime?
-  reconciledAt             DateTime?
-  lastError                String?
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  id                           String    @id
+  userId                       String?
+  user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  subjectKey                   String
+  traceId                      String
+  source                       String
+  provider                     String
+  modelId                      String
+  status                       String    @default("reserved")
+  outcome                      String?
+  idempotencyKey               String    @unique
+  providerRequestId            String?
+  providerResponseId           String?
+  providerRequestLinkedAt      DateTime?
+  reservationPayload           Json
+  reservedCredits              Int
+  reservedCostMicroUsd         BigInt
+  planReservedCredits          Int
+  addOnReservedCredits         Int
+  settledCredits               Int       @default(0)
+  settledCostMicroUsd          BigInt    @default(0)
+  settledInputTokens           Int       @default(0)
+  settledCachedInputTokens     Int       @default(0)
+  /// Input tokens written into the prompt cache, at 1.25x the base input rate
+  /// for the 5-minute TTL this application requests. Its own column beside the
+  /// read count because the two move opposite ways -- a read is a discount and
+  /// a write is a premium -- and summing them would price one at the other's
+  /// rate. 0 on every row written before prompt caching existed, which is what
+  /// those turns actually did.
+  settledCacheWriteInputTokens Int       @default(0)
+  settledOutputTokens          Int       @default(0)
+  pricingSnapshot              Json?
+  providerUsageSnapshot        Json?
+  expiresAt                    DateTime
+  settledAt                    DateTime?
+  reconciledAt                 DateTime?
+  lastError                    String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
 
   /// Which attempt the user's charge was computed from, once one was.
   ///
@@ -1293,23 +1328,26 @@ model ChatAttemptUsage {
 
   /// NULL only on a crash-reconciled row: nobody observed the call, and 0
   /// would be a claim that it used nothing.
-  inputTokens       Int?
-  cachedInputTokens Int?
-  outputTokens      Int?
-  reasoningTokens   Int?
-  costMicroUsd      BigInt   @default(0)
+  inputTokens           Int?
+  cachedInputTokens     Int?
+  /// Input tokens this attempt wrote into the prompt cache. NULL under the
+  /// same rule as its siblings: nobody observed the call.
+  cacheWriteInputTokens Int?
+  outputTokens          Int?
+  reasoningTokens       Int?
+  costMicroUsd          BigInt   @default(0)
   /// How the token counts were arrived at: provider_usage_metadata,
   /// provider_response_cost, fallback_estimator, crash_reconciliation.
-  usageSource       String   @default("provider_usage_metadata")
+  usageSource           String   @default("provider_usage_metadata")
   /// How the cost was: token_estimate, provider_response, or
   /// reserved_upper_bound — an upper bound, not a measurement.
-  costSource        String   @default("token_estimate")
+  costSource            String   @default("token_estimate")
   /// The rates this attempt was priced at, and where the figure came from.
-  pricingSnapshot   Json?
+  pricingSnapshot       Json?
   /// The ProviderDailyUsage day this row's cost was rolled up on, at midnight
   /// UTC. Stored rather than inferred from createdAt: a correction has to
   /// reach the same rollup row, and the two clocks disagree across midnight.
-  rollupDate        DateTime
+  rollupDate            DateTime
 
   createdAt DateTime @default(now())
 
@@ -1340,12 +1378,13 @@ model ChatAttemptUsageAdjustment {
   /// Only `late_provider_actual` today.
   kind          String
 
-  observedInputTokens       Int?
-  observedCachedInputTokens Int?
-  observedOutputTokens      Int?
-  observedCostMicroUsd      BigInt
+  observedInputTokens           Int?
+  observedCachedInputTokens     Int?
+  observedCacheWriteInputTokens Int?
+  observedOutputTokens          Int?
+  observedCostMicroUsd          BigInt
   /// Signed: observed minus what the base row already claimed.
-  costDeltaMicroUsd         BigInt
+  costDeltaMicroUsd             BigInt
 
   /// Identifies the observation, so the same one twice is one adjustment.
   observationId     String
@@ -1767,6 +1806,19 @@ model TraceErrorEvidence {
   /// the error builders.
   classificationSource String   @default("server")
   httpStatus           Int?
+  /// Which layer raised this failure: one of CHAT_FAILURE_LAYERS in
+  /// lib/chatFailureLayer.ts. Nullable for rows written before the column
+  /// existed; a NULL means "not recorded", never "provider".
+  ///
+  /// Without it a storage 404 and a provider 404 are the same row, which is
+  /// exactly the confusion that made an operator read `AI_REQUEST_FAILED.
+  /// NotFound` as two providers being down.
+  failureLayer         String?
+  /// The status object storage answered with, when the failure was a storage
+  /// one. Kept beside `httpStatus` rather than replacing it: the response the
+  /// user got (410) and the answer the bucket gave (404) are different
+  /// numbers and an operator needs both.
+  storageStatus        Int?
   provider             String?
   modelId              String?
   retryable            Boolean?
@@ -2360,10 +2412,12 @@ model ProviderDailyUsage {
   requestCount                 Int       @default(0)
   inputTokens                  Int       @default(0)
   cachedInputTokens            Int       @default(0)
+  cacheWriteInputTokens        Int       @default(0)
   outputTokens                 Int       @default(0)
   estimatedCostMicroUsd        Int       @default(0)
   uncachedInputCostMicroUsd    Int       @default(0)
   cachedInputCostMicroUsd      Int       @default(0)
+  cacheWriteInputCostMicroUsd  Int       @default(0)
   outputCostMicroUsd           Int       @default(0)
   providerReportedCostMicroUsd Int?
   providerReportedUsageJson    Json?

@@ -227,7 +227,10 @@ export async function POST(request: Request) {
               system: summaryPrompt.system,
               prompt: summaryPrompt.prompt,
               output: Output.object({ schema: quickComparisonSummaryResultSchema }),
-              ...getModelGenerationSettings(candidate, { temperature: 0.1 }),
+              ...getModelGenerationSettings(candidate, {
+                temperature: 0.1,
+                promptCachePath: "compare_summary",
+              }),
               maxOutputTokens: budget.maxOutputTokens,
               maxRetries: 1,
               abortSignal: AbortSignal.timeout(35_000),

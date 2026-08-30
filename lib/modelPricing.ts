@@ -66,31 +66,122 @@ export type ModelPriceTier = {
     cachedInputPriceMultiplier: number;
     /**
      * The provider's published price for *writing* an entry into the prompt
-     * cache, recorded for audit and deliberately **not billed**.
+     * cache -- billed, where a write count exists to bill.
      *
-     * Cache reads and cache writes are separate lines on the provider's price
-     * list, and only the read has a token count anywhere in this application:
-     * `cachedInputTokens` (lib/providerUsageCost.ts) is the read count, and no
-     * provider usage adapter reports cache-*write* tokens at all. Deriving a
-     * write count from what is measured would be inventing a number, so the
-     * rate is written down here -- so the gap is visible and so a future
-     * adapter has the verified figure to hand -- and `resolveModelPricing`
-     * ignores it. See `CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`.
+     * This was audit-only until Anthropic prompt caching was turned on
+     * (docs/policy/anthropic-prompt-caching.md). The reason it could not be
+     * billed was not a pricing question: cache reads and cache writes are
+     * separate lines on every provider's list, and only the read had a token
+     * count anywhere in this application. No adapter reported writes, and
+     * deriving a write count from a read count would have been inventing a
+     * number.
+     *
+     * The Anthropic adapter now reports one --
+     * `usage.inputTokenDetails.cacheWriteTokens`, from the API's own
+     * `cache_creation_input_tokens` -- so for a model with this rate the write
+     * is priced from a measurement rather than an estimate. See
+     * `CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED`.
      *
      * `undefined` means the provider publishes no separate cache-write price
-     * for this model, or none has been verified. It never means zero.
+     * for this model, or none has been verified. It never means zero, and it
+     * never means free: `lib/providerUsageCost.ts` refuses to price writes at
+     * an absent rate and reports the tokens it could not price, so an
+     * unverified rate shows up as a stated gap rather than as a discount.
      */
     cacheWriteUsdPerMillionTokens?: number;
 };
 
 /**
- * Restates, in one place a test can assert against, that the cache-write rates
- * recorded above are audit data rather than a billing input. If a provider
- * usage adapter ever starts reporting cache-write tokens, this is the flag to
- * flip -- together with a new `pricingVersion`, because the same model would
- * then cost a different internal figure for the same request.
+ * Restates, in one place a test can assert against, the rule that replaced
+ * `CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`: a cache write is billed when,
+ * and only when, both halves exist -- a verified rate on the tier *and* a
+ * write-token count from the provider.
+ *
+ * Both halves, because either alone is a fabrication. A rate with no count
+ * would have to guess how much of the prompt was written; a count with no rate
+ * would have to guess what the write cost. The old flag said "never bill",
+ * which was the right answer while no adapter reported a count at all and the
+ * wrong one the moment the Anthropic adapter did -- a turn that writes its
+ * whole prompt to cache costs 1.25x its input, and recording 1.0x is a silent
+ * 25% undercount on exactly the requests this feature creates.
+ *
+ * A model with no verified rate is unchanged by this: its writes still cost
+ * nothing in the ledger, but `providerUsageCost` now says so out loud through
+ * `unpricedCacheWriteTokens` instead of the fact being implicit in a constant.
  */
-export const CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED = true;
+export const CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED = true;
+
+/**
+ * The 5-minute cache-write premium, as a multiple of the base input rate.
+ *
+ * Held here as the *check* on the published per-model rates rather than as the
+ * thing that computes them: every rate in this file is read off Anthropic's
+ * price table, and `npm run check:model-pricing` asserts each declared write
+ * rate equals its tier's input rate times this. Deriving the rate instead
+ * would make the registry state a multiplier Anthropic could change without
+ * anybody noticing, which is the failure mode the whole file is built against.
+ *
+ * The 1-hour TTL's 2x premium is deliberately absent. Nothing in this
+ * application requests a 1-hour cache
+ * (`lib/anthropicPromptCaching.ts`), so a constant for it would be a rate with
+ * no request path -- and the first thing a reader would do with it is use it.
+ */
+export const PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER = 1.25;
+
+/** Cache reads cost this multiple of the base input rate, on every provider
+ * whose discount is verified here. Stated for the same reason as the write
+ * multiplier: it checks the per-model `cachedInputPriceMultiplier` values
+ * rather than replacing them. */
+export const PROMPT_CACHE_READ_PRICE_MULTIPLIER = 0.1;
+
+/**
+ * One dated revision of a model's rates.
+ *
+ * A price change is a *fact with a date*, and until this existed the registry
+ * could only hold the price that is true today. That left two bad options for
+ * a change announced in advance: write the future number now (and bill it
+ * before it takes effect) or write nothing (and bill the old number after it
+ * stops being true). Both were reachable, and the second is what
+ * `tests/modelPricing.test.mjs` had to guard against with a date-triggered
+ * failure -- a build that breaks on a calendar day, because nothing else in
+ * the system notices a price change.
+ *
+ * A schedule entry is neither. It is inert until `effectiveFrom`, and from
+ * that instant it is what `resolveModelPricing` returns -- with its own
+ * `pricingVersion`, so a reservation taken before the change and one taken
+ * after are distinguishable in the ledger for ever.
+ *
+ * Never retroactive: an entry only ever describes requests at or after its
+ * own instant. Stored reservation and settlement snapshots are not re-priced
+ * by adding one, because they already carry the rates and the
+ * `pricingVersion` they were taken at.
+ */
+export type ScheduledModelPrice = {
+    /**
+     * The UTC instant the rates below start applying, RFC 3339 with an
+     * explicit `Z`.
+     *
+     * An instant rather than a date because a boundary needs a side: a request
+     * at exactly this moment is priced by this entry, and one a millisecond
+     * earlier by whatever came before. UTC because every other time boundary
+     * in this system is UTC -- `ChatUsageBucket` periods, `ProviderDailyUsage`
+     * days (`rollupDayOf`), and the provider usage and cost APIs this
+     * reconciles against. A local-time price boundary would put a settlement
+     * and its rollup on opposite sides of a change.
+     */
+    effectiveFrom: string;
+    /** Ordered ascending by `maxPromptTokens`; the last entry has `null`. */
+    tiers: readonly ModelPriceTier[];
+    priceSource: string;
+    pricingVersion: string;
+    /**
+     * `effectiveFrom`'s own UTC calendar date, `YYYY-MM-DD`. Redundant by
+     * construction and validated to be so, because this is the field that
+     * lands in the snapshot and a snapshot whose date disagrees with the
+     * instant that selected it is worse than either alone.
+     */
+    effectiveDate: string;
+};
 
 export type ModelPricingProfile = {
     modelId: string;
@@ -149,6 +240,15 @@ export type ModelPricingProfile = {
     pricingVersion: string;
     /** ISO date the price took effect for this application. */
     effectiveDate: string;
+    /**
+     * Later revisions of `tiers`, each with the instant it starts applying.
+     *
+     * Ascending by `effectiveFrom`, and every entry is strictly after the
+     * profile's own `effectiveDate`. The fields above stay the *original*
+     * entry rather than being rewritten in place, so a request dated before
+     * the first revision still resolves to the version it was billed at.
+     */
+    priceSchedule?: readonly ScheduledModelPrice[];
 };
 
 type ModelCostClass = "standard" | "advanced" | "premium";
@@ -943,17 +1043,12 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         provider: "anthropic",
         apiModelId: "claude-sonnet-5",
         ...DIRECT_STANDARD,
-        // Introductory pricing, and deliberately so: this is what Anthropic
-        // bills today, and the standard rate would overstate every Sonnet 5
-        // request by 50% until it starts. Overstating is not the free choice it
-        // looks like here -- provider budgets and the cost guardrails are spent
-        // against these numbers, so an inflated one refuses real requests.
-        //
-        // It reverts to 3 / 15 / 0.30 on 2026-09-01. A price that expires
-        // silently is the failure this file exists to prevent, so
-        // `tests/modelPricing.test.mjs` fails from that date until the rates
-        // here are moved. Do not "fix" that test by relaxing the date.
-        tiers: flatTier(2, 10, 0.1),
+        // The rates below are Sonnet 5's *introductory* pricing, kept as the
+        // profile's original entry so a request dated before 2026-08-11 still
+        // resolves to the version it was billed at. What applies now is the
+        // schedule entry underneath, and the two carry the same numbers -- see
+        // there for why that is the whole point rather than a redundancy.
+        tiers: flatTier(2, 10, 0.1, 2.5),
         reasoningTokenBilling: "billed_as_output",
         maxOutputTokens: 128_000,
         reservationOutputTokens: 2_048,
@@ -962,13 +1057,51 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         priceSource: "anthropic_claude_sonnet_5_introductory_price_to_2026_08_31",
         pricingVersion: "anthropic-claude-sonnet-5-intro-2026-08-04",
         effectiveDate: "2026-08-04",
+        // 2026-08-11: Anthropic made the introductory rate the standard one.
+        //
+        // The launch announcement put US$2 / US$10 on an end date of
+        // 2026-08-31 with US$3 / US$15 from 2026-09-01, and this file was
+        // written against that -- with a date-triggered test failure so the
+        // change could not be missed. On 2026-08-11 Anthropic cancelled it:
+        // the pricing page's `claude-sonnet-5-introductory-pricing` note now
+        // reads "is now the standard price. The previously scheduled increase
+        // to $3/$15 per million input/output tokens on September 1, 2026 will
+        // not occur."
+        //
+        // So this entry carries the *same* rates as the profile above. That
+        // reads like a no-op and is not one: what changed on 2026-08-11 is the
+        // term, not the number, and the term is the thing this registry
+        // records. Writing it down as a dated revision is what lets a
+        // settlement say which decision priced it -- `...-intro-2026-08-04`
+        // for a turn taken while the rate was provisional,
+        // `...-standard-2026-08-11` for one taken after it was permanent --
+        // and is what stops the next reader re-deriving the cancelled increase
+        // from a `priceSource` that still says "introductory_price_to
+        // _2026_08_31".
+        //
+        // Deliberately *not* a US$3 / US$15 entry dated 2026-09-01. Scheduling
+        // a price Anthropic has said will not happen would overstate every
+        // Sonnet 5 request by 50% from that date, and overstating is not the
+        // safe direction here: provider budgets and the operational cost
+        // guardrails are spent against these numbers, so an inflated rate
+        // refuses requests that had the money for them.
+        priceSchedule: [
+            {
+                effectiveFrom: "2026-08-11T00:00:00.000Z",
+                tiers: flatTier(2, 10, 0.1, 2.5),
+                priceSource:
+                    "anthropic_claude_sonnet_5_standard_api_list_price_confirmed_2026_08_11",
+                pricingVersion: "anthropic-claude-sonnet-5-standard-2026-08-11",
+                effectiveDate: "2026-08-11",
+            },
+        ],
     },
     {
         modelId: "claude-haiku-4-5",
         provider: "anthropic",
         apiModelId: "claude-haiku-4-5-20251001",
         ...DIRECT_STANDARD,
-        tiers: flatTier(1, 5, 0.1),
+        tiers: flatTier(1, 5, 0.1, 1.25),
         reasoningTokenBilling: "billed_as_output",
         maxOutputTokens: 64_000,
         reservationOutputTokens: 1_024,
@@ -1228,19 +1361,72 @@ const pricingById = new Map(
 if (pricingById.size !== MODEL_PRICING.length) {
     throw new Error("Model pricing registry contains duplicate model IDs.");
 }
+const assertUsableTiers = (label: string, tiers: readonly ModelPriceTier[]) => {
+    if (tiers.length === 0) {
+        throw new Error(`${label} declares no price tier.`);
+    }
+    if (tiers[tiers.length - 1].maxPromptTokens !== null) {
+        throw new Error(`${label} has no unbounded final price tier.`);
+    }
+};
+
+/**
+ * Read at module load so a malformed schedule is a boot failure rather than a
+ * request that quietly falls back to the wrong price. Every check here is
+ * about a property no test can observe from outside: an entry that never
+ * takes effect because it is out of order, or one whose `effectiveDate`
+ * disagrees with the instant that selects it and would land in the snapshot
+ * saying so.
+ */
 for (const profile of MODEL_PRICING) {
-    if (profile.tiers.length === 0) {
-        throw new Error(`Model "${profile.modelId}" declares no price tier.`);
-    }
-    if (profile.tiers[profile.tiers.length - 1].maxPromptTokens !== null) {
-        throw new Error(
-            `Model "${profile.modelId}" has no unbounded final price tier.`
-        );
-    }
+    assertUsableTiers(`Model "${profile.modelId}"`, profile.tiers);
     if (profile.reservationOutputTokens > profile.maxOutputTokens) {
         throw new Error(
             `Model "${profile.modelId}" reserves more output than it allows.`
         );
+    }
+    let previousInstant = Date.parse(`${profile.effectiveDate}T00:00:00.000Z`);
+    if (!Number.isFinite(previousInstant)) {
+        throw new Error(
+            `Model "${profile.modelId}" has an unparseable effectiveDate.`
+        );
+    }
+    const versions = new Set([profile.pricingVersion]);
+    for (const [index, revision] of (profile.priceSchedule ?? []).entries()) {
+        const label = `Model "${profile.modelId}" price revision ${index}`;
+        assertUsableTiers(label, revision.tiers);
+        const instant = Date.parse(revision.effectiveFrom);
+        if (!Number.isFinite(instant)) {
+            throw new Error(`${label} has an unparseable effectiveFrom.`);
+        }
+        if (!revision.effectiveFrom.endsWith("Z")) {
+            throw new Error(
+                `${label} must state effectiveFrom as a UTC instant ending in "Z".`
+            );
+        }
+        if (instant <= previousInstant) {
+            throw new Error(
+                `${label} is not strictly after the revision before it; a ` +
+                    `revision that does not move forward can never take effect.`
+            );
+        }
+        if (revision.effectiveDate !== revision.effectiveFrom.slice(0, 10)) {
+            throw new Error(
+                `${label} has an effectiveDate that disagrees with its ` +
+                    `effectiveFrom, so the snapshot would record a date the ` +
+                    `price did not start on.`
+            );
+        }
+        // A revision that reuses the version before it makes two different
+        // decisions indistinguishable in every stored snapshot, which is the
+        // one thing `pricingVersion` exists to prevent.
+        if (versions.has(revision.pricingVersion)) {
+            throw new Error(
+                `${label} reuses pricingVersion "${revision.pricingVersion}".`
+            );
+        }
+        versions.add(revision.pricingVersion);
+        previousInstant = instant;
     }
 }
 
@@ -1264,6 +1450,18 @@ export type ResolvedModelPricing = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
+    /**
+     * What one million cache-*write* tokens cost, or null where this
+     * application has no verified rate for the model.
+     *
+     * Null is not zero and is not "no cache writes happen": it means nobody
+     * read the number off the provider's price list, so pricing a write with
+     * it would be inventing a figure. `lib/providerUsageCost.ts` refuses to
+     * bill writes at a null rate and reports the tokens it could not price,
+     * which is how the gap stays visible instead of becoming a silent
+     * undercount.
+     */
+    cacheWriteUsdPerMillionTokens: number | null;
     maxOutputTokens: number;
     /**
      * The provider's absolute settable ceiling, where verified. Null when it
@@ -1298,6 +1496,39 @@ const boundedMultiplier = (value: string | undefined, fallback: number) => {
     return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1
         ? parsed
         : fallback;
+};
+
+/**
+ * The revision in force at `at`, or null when the profile's own entry is.
+ *
+ * Last-wins over a schedule validated to be ascending, so the boundary has a
+ * side: a request at exactly `effectiveFrom` is priced by that revision, one a
+ * millisecond earlier by what came before. Inclusive-at-the-instant matches
+ * how every other UTC boundary in this system is read -- a bucket period
+ * starts at its own timestamp -- and leaves no moment that belongs to neither
+ * price.
+ *
+ * An unparseable or absent `at` falls back to now rather than to the oldest
+ * entry: a caller that could not say when is asking about today, and answering
+ * with a superseded price would be the silent wrong number this whole
+ * mechanism exists to avoid.
+ */
+const selectPriceRevision = (
+    profile: ModelPricingProfile,
+    at?: Date | number
+): ScheduledModelPrice | null => {
+    if (!profile.priceSchedule?.length) return null;
+    const raw = at instanceof Date ? at.getTime() : at;
+    const instant = Number.isFinite(raw) ? (raw as number) : Date.now();
+    let selected: ScheduledModelPrice | null = null;
+    for (const revision of profile.priceSchedule) {
+        if (Date.parse(revision.effectiveFrom) <= instant) {
+            selected = revision;
+        } else {
+            break;
+        }
+    }
+    return selected;
 };
 
 const selectTier = (
@@ -1338,11 +1569,28 @@ type PricedModel = Pick<
  */
 export const resolveModelPricing = (
     model: PricedModel,
-    options?: { estimatedPromptTokens?: number }
+    options?: {
+        estimatedPromptTokens?: number;
+        /**
+         * The instant to price for. Defaults to now.
+         *
+         * Passed rather than read from the clock inside so two things can be
+         * true at once: a live request prices at the rates in force when it is
+         * dispatched, and a report or a reconciliation can re-derive what a
+         * past request was priced at by naming its own date. It never rewrites
+         * a stored snapshot -- those already carry their rates and their
+         * `pricingVersion`; this only answers what the registry said at a
+         * moment.
+         */
+        at?: Date | number;
+    }
 ): ResolvedModelPricing => {
     const profile = pricingById.get(model.id);
+    const revision = profile
+        ? selectPriceRevision(profile, options?.at)
+        : null;
     const fallback = FALLBACK_PRICING[getModelCostClass(model.usageClass)];
-    const tiers = profile?.tiers ?? fallback.tiers;
+    const tiers = revision?.tiers ?? profile?.tiers ?? fallback.tiers;
     const { tier, index } = selectTier(
         tiers,
         options?.estimatedPromptTokens ?? 0
@@ -1430,6 +1678,14 @@ export const resolveModelPricing = (
         inputUsdPerMillionTokens,
         outputUsdPerMillionTokens,
         cachedInputPriceMultiplier,
+        // Deliberately *not* env- or DB-overridable, unlike the three rates
+        // above. There is no admin control for a cache-write rate and adding
+        // one through the back door would let an override move a price nobody
+        // can see in the console. A model whose input rate is overridden keeps
+        // whatever verified write rate the registry holds, and the resolved
+        // pair is checked for consistency by `npm run check:model-pricing`.
+        cacheWriteUsdPerMillionTokens:
+            tier.cacheWriteUsdPerMillionTokens ?? null,
         maxOutputTokens,
         providerMaxOutputTokens: profile?.providerMaxOutputTokens ?? null,
         reservationOutputTokens,
@@ -1442,9 +1698,22 @@ export const resolveModelPricing = (
             getNativeSearchCostMicroUsdPerQuery(model.provider),
         longContextThresholdTokens,
         costSource,
-        priceSource: profile?.priceSource ?? fallback.priceSource,
-        pricingVersion: profile?.pricingVersion ?? fallback.pricingVersion,
-        effectiveDate: profile?.effectiveDate ?? fallback.effectiveDate,
+        // The revision in force wins over the profile's original entry, and
+        // both lose to no profile at all. Reading these three off the same
+        // `revision ?? profile ?? fallback` chain as `tiers` above is what
+        // keeps a snapshot's rates and its `pricingVersion` describing one
+        // decision: taking the rates from a revision and the version from the
+        // profile would file a settlement under a price it was not charged.
+        priceSource:
+            revision?.priceSource ?? profile?.priceSource ?? fallback.priceSource,
+        pricingVersion:
+            revision?.pricingVersion ??
+            profile?.pricingVersion ??
+            fallback.pricingVersion,
+        effectiveDate:
+            revision?.effectiveDate ??
+            profile?.effectiveDate ??
+            fallback.effectiveDate,
         cachedInputPricingVerified:
             profile?.cachedInputPricingVerified ??
             fallback.cachedInputPricingVerified,

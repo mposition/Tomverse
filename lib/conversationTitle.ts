@@ -190,6 +190,9 @@ export async function generateConversationTitle(
         model: getActiveAiModel(model),
         system: TITLE_SYSTEM_PROMPT,
         prompt,
+        // No `promptCachePath`: one request per conversation over that
+        // conversation's own text, so there is no second request with this
+        // prefix to read anything back -- see lib/anthropicPromptCaching.ts.
         ...getModelGenerationSettings(model, { temperature: 0.2 }),
         maxOutputTokens: 32,
         maxRetries: 1,

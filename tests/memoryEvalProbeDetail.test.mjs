@@ -23,7 +23,10 @@ const run = (args) =>
 test("a probe prints each case's expectation and what came back", () => {
     const output = run(["--limit=3"]);
     assert.match(output, /What the model returned, case by case/);
-    assert.match(output, /expected: \w+ \+ \[/);
+    // `kind` under schema 2, `kind/polarity` under schema 3. Both are
+    // accepted because this file is about the probe printing detail at all,
+    // and the target has moved schema three times.
+    assert.match(output, /expected: \w+(\/\w+)? \+ \[/);
     assert.match(output, /\[MATCH\]/);
     // The statements themselves, because a reader deciding whether a label or
     // a model is wrong cannot do it from a verdict word.
@@ -41,4 +44,13 @@ test("the kind-versus-tokens distinction is stated, not implied", () => {
     const output = run(["--limit=3"]);
     assert.match(output, /kind differs|kind matches, tokens do not|MATCH/);
     assert.match(output, /counts as\s*\n?a false positive/);
+});
+
+test("a schema-3 probe shows the polarity it was scored on", () => {
+    // The field that decides a match under schema 3. A printout that showed
+    // only the kind and the tokens would render a flipped-polarity miss as
+    // "kind matches, tokens do not" -- a diagnosis that sends the reader to
+    // the taxonomy for a problem that is about what the user actually said.
+    const output = run(["--limit=3"]);
+    assert.match(output, /expected: \w+\/(affirmed|negated) \+ \[/);
 });

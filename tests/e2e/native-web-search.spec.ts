@@ -174,12 +174,12 @@ test.describe("native web search (webSearchMode: always)", () => {
   test("each dispatchable provider gets its own native tool, one that cannot be bounded is marked unsupported, and the model list is unchanged", async ({
     page,
   }, testInfo) => {
-    // Three native providers, two of which a request may actually carry.
-    // OpenAI's ceiling rides on the request (`max_tool_calls`) and
-    // Anthropic's on the tool (`maxUses`); Google's grounding takes neither,
-    // so its per-query cost has no worst case to reserve and no tool is
-    // attached. That panel answers without a search and says so -- what it
-    // must never do is claim one.
+    // Three models on three different search routes, and all three may search.
+    // OpenAI's ceiling rides on the request (`max_tool_calls`), Anthropic's on
+    // the tool (`maxUses`), and Google's on a counter in this process -- its
+    // grounding takes neither, so its search is a function tool this
+    // application executes against a backend instead. The panels differ in
+    // whether they *did* search, which is what the badges have to keep apart.
     const models = ["gpt-5-6-sol", "claude-sonnet-5", "gemini-3-6-flash"];
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page);
@@ -237,16 +237,23 @@ test.describe("native web search (webSearchMode: always)", () => {
           status: 200,
           contentType: "text/plain; charset=utf-8",
           headers: { "X-Request-ID": "qa-trace-google" },
-          // What the server now reports for a native capability nothing may
-          // dispatch: the search was asked for and this model could not run
-          // one. Not `supported: true, executed: false`, which would read as
-          // "it could have and chose not to".
-          body: withSearchMetadata("Falling back to a general answer.", {
+          // What the server reports for an application-managed search that
+          // ran: the execution kind and the backend that served it, and
+          // citations whose provenance is a request this process made -- not
+          // a URL read out of the model's own answer.
+          body: withSearchMetadata("The Brave-backed answer is 43.", {
             requested: true,
-            supported: false,
-            executed: false,
+            supported: true,
+            executed: true,
             provider: "google",
-            citations: [],
+            executionKind: "app_managed",
+            searchBackend: "brave",
+            tool: "web_search",
+            queryCount: 2,
+            backendRequestCount: 2,
+            citations: [
+              { url: "https://example.com/brave-source", title: "Brave source" },
+            ],
           }),
         });
         return;
@@ -268,7 +275,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     // Each panel's search failing/declining must not block the others.
     await expect(page.getByText("The latest figure is 42.")).toBeVisible();
     await expect(page.getByText("I can answer this without searching.")).toBeVisible();
-    await expect(page.getByText("Falling back to a general answer.")).toBeVisible();
+    await expect(page.getByText("The Brave-backed answer is 43.")).toBeVisible();
 
     await expect(assistantBadge(page, "gpt-5-6-sol")).toHaveAttribute(
       "data-search-status",
@@ -280,8 +287,20 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
     await expect(assistantBadge(page, "gemini-3-6-flash")).toHaveAttribute(
       "data-search-status",
-      "unsupported"
+      "executed"
     );
+    // The application-managed panel's own source list, rendered from what the
+    // server collected rather than from anything in the answer text.
+    const geminiCitation = page
+      .locator('[data-testid="chat-message"][data-model-id="gemini-3-6-flash"]')
+      .last()
+      .getByTestId("search-citation-list")
+      .getByRole("link");
+    await expect(geminiCitation).toHaveAttribute(
+      "href",
+      "https://example.com/brave-source"
+    );
+    await expect(geminiCitation).toHaveAttribute("rel", "noopener noreferrer");
 
     // Citations only render for the panel that actually executed a search,
     // as a real, safe external link.
@@ -361,11 +380,17 @@ test.describe("native web search (webSearchMode: always)", () => {
   test("mixed supported/unsupported selection shows a compact partial-support chip and an unsupported badge", async ({
     page,
   }, testInfo) => {
-    // The app's real guest default trio, so this also covers the guest code
-    // path. Luna and Haiku both have a native search a request can bound;
-    // Gemini 3.5 Flash-Lite's grounding takes no per-request ceiling, so
-    // nothing may dispatch it and it is the panel that cannot search.
-    const models = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-2-5-flash"];
+    // Luna and Haiku both have a native search a request can bound. The third
+    // panel is the one nothing may dispatch -- `gpt-5-4-mini` is `unverified`
+    // in the capability register, which is refused for the same reason an
+    // unbounded one is: nobody confirmed it, and offering it would turn an
+    // unchecked assumption into an answer the account paid a surcharge for.
+    //
+    // It used to be Gemini 3.5 Flash-Lite. That model now searches through the
+    // application-managed backend, so it is no longer an example of a panel
+    // that cannot -- and leaving it here would have made this test pass while
+    // asserting the opposite of what the product does.
+    const models = ["gpt-5-6-luna", "claude-haiku-4-5", "gpt-5-4-mini"];
     const CHAT_ID = "guest_native_search_mixed";
     await prepareGuestPage(page, "en");
     await page.addInitScript(
@@ -402,7 +427,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       // Gemini cannot search on this turn at all; the other two can, and one
       // of them decided it did not need to. Three different answers to
       // "did this panel search", which is what the badges have to keep apart.
-      const supported = modelId !== "gemini-2-5-flash";
+      const supported = modelId !== "gpt-5-4-mini";
       const executed = modelId === "gpt-5-6-luna";
       await route.fulfill({
         status: 200,
@@ -414,12 +439,7 @@ test.describe("native web search (webSearchMode: always)", () => {
             requested: true,
             supported,
             executed,
-            provider:
-              modelId === "gpt-5-6-luna"
-                ? "openai"
-                : modelId === "claude-haiku-4-5"
-                  ? "anthropic"
-                  : "google",
+            provider: modelId === "claude-haiku-4-5" ? "anthropic" : "openai",
             citations: [],
           }
         ),
@@ -441,8 +461,11 @@ test.describe("native web search (webSearchMode: always)", () => {
     await page.getByTestId("web-search-exception-toggle").click();
     const detail = page.getByTestId("web-search-exception-detail");
     await expect(detail).toBeVisible();
-    await expect(detail).toContainText("Gemini");
     await expect(detail).toContainText("without a web search");
+    // The panel that cannot search, and not a Gemini beside it -- naming the
+    // wrong model here is the same defect as promising a search that will not
+    // run, told from the other end.
+    await expect(detail).not.toContainText("Gemini");
 
     await sendChatMessage(page, testInfo, "Any current news?");
 
@@ -459,10 +482,97 @@ test.describe("native web search (webSearchMode: always)", () => {
       "data-search-status",
       "requested-not-executed"
     );
-    await expect(assistantBadge(page, "gemini-2-5-flash")).toHaveAttribute(
+    await expect(assistantBadge(page, "gpt-5-4-mini")).toHaveAttribute(
       "data-search-status",
       "unsupported"
     );
+  });
+
+  test("a Google-only turn that did not need the web is refunded and says so", async ({
+    page,
+  }, testInfo) => {
+    // The refunded case, on the application-managed route: the switch was on,
+    // the question did not need the web, no backend request was made, and the
+    // eight credits go back. Distinguished from a failure by carrying no
+    // failure code -- nothing failed.
+    const models = ["gemini-2-5-flash"];
+    const CHAT_ID = "guest_app_managed_refund";
+    await prepareGuestPage(page, "en");
+    await page.addInitScript(
+      ({ chatId, models }) => {
+        window.localStorage.setItem(
+          "guest_conversations",
+          JSON.stringify([
+            {
+              id: chatId,
+              title: "App-managed refund",
+              selectedModels: models,
+              disabledPanels: [],
+              webSearchMode: "always",
+              createdAt: new Date().toISOString(),
+            },
+          ])
+        );
+        for (const modelId of models) {
+          window.localStorage.setItem(
+            `guest_messages_${chatId}_${modelId}`,
+            JSON.stringify([
+              { id: "u0", role: "user", content: "Hello", status: "normal" },
+              { id: "a0", role: "assistant", content: "Hi there.", status: "normal" },
+            ])
+          );
+        }
+      },
+      { chatId: CHAT_ID, models }
+    );
+
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        headers: { "X-Request-ID": "qa-trace-app-managed-refund" },
+        body: withSearchMetadata("Here is the polite version.", {
+          requested: true,
+          supported: true,
+          executed: false,
+          provider: "google",
+          executionKind: "app_managed",
+          searchBackend: "brave",
+          tool: "web_search",
+          queryCount: 0,
+          backendRequestCount: 0,
+          citations: [],
+        }),
+      });
+    });
+
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page, { title: "App-managed refund" });
+    await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
+
+    // Not blocked before the send: this is a searching-capable selection.
+    const chip = page.getByTestId("web-search-mode-chip");
+    await expect(chip).toHaveAttribute("data-tone", "neutral");
+    await expect(chip).toHaveAttribute("data-supported-count", "1");
+
+    await sendChatMessage(page, testInfo, "Rewrite this politely.");
+
+    await expect(page.getByText("Here is the polite version.")).toBeVisible();
+    await expect(assistantBadge(page, "gemini-2-5-flash")).toHaveAttribute(
+      "data-search-status",
+      "requested-not-executed"
+    );
+    // No source list on an answer that has no sources.
+    await expect(
+      page
+        .locator('[data-testid="chat-message"][data-model-id="gemini-2-5-flash"]')
+        .last()
+        .getByTestId("search-citation-list")
+    ).toHaveCount(0);
   });
 
   /**

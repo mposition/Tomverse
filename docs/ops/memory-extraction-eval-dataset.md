@@ -423,6 +423,54 @@ adjudicator는 양쪽과 다른 사람이어야 하고, 확정 근거를 케이�
 - near-duplicate 보고서 제출과 그에 대한 사람의 다양성 판정 (§6.5)
 - 초안 도구·모델·버전, 검수자, 판정 근거, draft disagreement 비율 기록 완비
 
+### 7.1a 승계 dataset의 통합 채택 기록 (2026-08-28 승인)
+
+`mem-eval-succ-4`처럼 **앞선 dataset을 승계하는** 버전은 §7.1의 batch 조건을
+그대로 만족시킬 수 없습니다. 케이스가 두 갈래로 들어오기 때문입니다.
+
+| 갈래 | 출처 | §7.1의 batch 기록 |
+|---|---|---|
+| 상속분 | 원 dataset의 adopted batch | 원 기록이 그대로 덮습니다 |
+| 교체분 | replacement tranche | 없습니다 |
+
+교체분에 **batch 기록을 tranche마다 하나씩 복제하지 않습니다.** 그 문서들은
+케이스 본문도 gold도 담지 않으면서 전환 manifest와 어긋날 수 있는 또 하나의
+사본이 됩니다. 대신 승계 dataset은 **통합 채택 기록 한 개**를 씁니다.
+
+**다만 통합 기록이 사람의 채택을 대신하지는 않습니다.** 전환 manifest와 tranche
+report는 provenance와 검수 *결과*이고, 채택은 사람이 내리는 판정입니다.
+`movedBecause`나 `settledByExistingContract`가 채워져 있다는 사실을 채택으로
+간주하면, 초안을 만든 주체가 자기 초안을 채택한 것이 됩니다 — §6.2가 막으려는
+바로 그 구조입니다.
+
+통합 기록은 `docs/ops/memory-extraction-eval-succ4-adoption.md`처럼 dataset당 한
+파일이며 아래를 **모두** 담습니다. 케이스 본문과 gold는 담지 않고 digest와
+report를 참조합니다.
+
+- dataset · scoring contract · transition manifest digest
+- 승계 원본의 dataset digest와 그 adopted batch 참조
+- replacement tranche별 ID · component digest · 건수 · cell
+- 교체분 전건 검수 완료 증거
+- tranche별 초안 도구 · 모델 · 버전
+- 작성자와 검수자, 그리고 둘의 분리 (§6.2)
+- draft disagreement 건수와 비율
+- 미결 0건
+- tranche별 또는 전체 `adopted` 판정
+- 검토자 · 승인일 · 서명
+
+`npm run check:memory-eval-freeze`가 승계 dataset에 대해 다섯 가지를 fail-closed로
+확인합니다.
+
+1. 상속분이 원 dataset의 기존 채택 기록으로 **전부** 덮일 것
+2. 나머지가 통합 기록의 tranche 목록과 **정확히** 일치할 것 (건수도 ID도)
+3. 각 tranche digest가 live tree와 일치할 것
+4. 초안 출처 · 검수자 · disagreement · 채택 판정이 **모두** 기입돼 있을 것
+5. 미채택이거나 기록이 없는 tranche가 **하나라도** 있으면 동결을 거부할 것
+
+4번과 5번이 이 조항의 요점입니다. 에이전트는 1·2·3번이 참이 되도록 만들 수 있고
+수치와 digest를 초안으로 채울 수 있지만, 4번의 검수자·판정과 5번의 `adopted`는
+사람이 기입하기 전까지 비어 있으며 그동안 검사는 `MISS`를 보고합니다.
+
 ### 7.2 동결 방법
 
 0. `npm run check:memory-eval-freeze`가 §7.1의 일곱 조건을 **전부 `OK`로**

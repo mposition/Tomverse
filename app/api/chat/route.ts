@@ -3,6 +3,7 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
     buildAttachmentPromptText,
     inertFilename,
+    unavailableAttachmentMarker,
     type ExtractedAttachment,
 } from "@/lib/attachmentContextPrompt";
 import {
@@ -77,12 +78,23 @@ import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
+import { ANTHROPIC_PROMPT_CACHE_TTL } from "@/lib/anthropicPromptCaching";
 import {
     getWebSearchCapability,
     nativeSearchIsDispatchable,
     openAiNativeSearchToolCallCeiling,
 } from "@/lib/webSearchCapability";
-import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { reserveTurnSearchCost } from "@/lib/webSearchNativeCostReservation";
+import {
+    appManagedSearchIsDispatchable,
+    appManagedSearchQueryCeiling,
+} from "@/lib/webSearchCapability";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
+import {
+    APP_MANAGED_WEB_SEARCH_TOOL_NAME,
+    buildAppManagedWebSearchTool,
+} from "@/lib/appManagedWebSearchTool";
+import { APP_MANAGED_SEARCH_MAX_STEPS } from "@/lib/chatAttemptExecution";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
@@ -236,10 +248,24 @@ import {
     MessageAttachmentResolveError,
     accountAttachmentPrefix,
     discardUnboundUpload,
+    markMessageAttachmentUnavailable,
     registerFinalizedUpload,
     resolveMessageAttachmentReferences,
     type ResolvedAttachment,
 } from "@/lib/messageAttachmentStorage";
+import {
+    ChatLocalFailure,
+    ProviderCallRecord,
+    beginProviderCall,
+    isChatLocalFailure,
+    isProviderRequestFailure,
+    localDiagnosticCode,
+} from "@/lib/chatFailureLayer";
+import {
+    classifyStorageError,
+    isStorageError,
+    storageErrorStatus,
+} from "@/lib/storageObjectErrors";
 import {
     getGuestAttachmentSecret,
     guestAttachmentPrefix,
@@ -284,6 +310,10 @@ import {
     safeErrorMessage,
     safeErrorMetadata,
 } from "@/lib/providerErrorClassification";
+import {
+    ATTACHMENT_STORAGE_UNAVAILABLE_CODE,
+    ATTACHMENT_UNAVAILABLE_CODE,
+} from "@/lib/chatAttachmentErrorCopy";
 
 const MAX_ATTACHMENTS = 5;
 // Every request resends the full conversation history (including past
@@ -381,8 +411,12 @@ const tracedJsonError = (
     details?: Record<string, unknown>,
     grantContext?: {
         phase?: string;
+        /** One of CHAT_FAILURE_LAYERS. Absent means "not recorded". */
+        failureLayer?: string | null;
+        storageStatus?: number | null;
         provider?: string | null;
         modelId?: string | null;
+        retryable?: boolean | null;
         error?: unknown;
     }
 ) => {
@@ -967,6 +1001,21 @@ async function handleChatPost(
     let dispatchModelIdForLog: string | undefined;
     let dispatchProviderForLog: AiModel["provider"] | undefined;
     /**
+     * Proof that a request actually left this process for a provider.
+     *
+     * `dispatchProviderForLog` above says which provider this turn *would*
+     * use, and it is set as soon as the model resolves -- hundreds of lines
+     * before anything is sent. The outer catch used to read it as if it meant
+     * a call had happened, so a storage 404 raised while building the prompt
+     * was recorded as that provider's failure, counted against its health, and
+     * made every model in the conversation fail with no way to clear it.
+     *
+     * This is null until `beginProviderCall` constructs the record, and only
+     * that wrapper can. A non-null value here is a structural fact, not a flag
+     * somebody remembered to set (lib/chatFailureLayer.ts).
+     */
+    let providerCall: ProviderCallRecord | null = null;
+    /**
      * Who this turn was for, hoisted for the catch.
      *
      * `access` is resolved inside the try and a refusal thrown after it has to
@@ -993,7 +1042,23 @@ async function handleChatPost(
             webSearchMode,
             admissionToken,
             contextBundle,
+            acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        /*
+          Files this request has been told are gone and may proceed without.
+
+          A set of ids, not a flag: the refusal below names exactly which
+          attachments are missing, and only those ids can be acknowledged. An
+          id that names nothing acknowledges nothing, so a client cannot widen
+          its own permission by inventing one.
+
+          Acknowledging never deletes anything. The MessageAttachment row, the
+          message and the card all survive it -- the set scopes exactly this
+          request (docs/policy/user-attachment-persistence.md section 11).
+        */
+        const acknowledgedUnavailable = new Set(
+            acknowledgedUnavailableAttachmentIds || []
+        );
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         // Auto's inputs, gathered before the model is resolved because the
         // model is what Auto decides. The plan is carried forward to the
@@ -1247,6 +1312,10 @@ async function handleChatPost(
             signals: routerSignals?.signals,
             // What the user asked for, not what their model happens to support.
             webSearchRequested: webSearchMode === "always",
+            // Resolved from the environment, so Auto cannot choose a model
+            // *because* it searches on a deployment that holds no credential
+            // for that model's backend.
+            searchBackendReadiness: resolveWebSearchBackendReadiness(),
         };
         const autoSelection = selectAutoModel({
             requestedModelId,
@@ -1389,6 +1458,11 @@ async function handleChatPost(
         // model (see lib/webSearchCapability.ts for the support matrix).
         const webSearchCapability = getWebSearchCapability(modelConfig.id);
         const webSearchRequested = webSearchMode === "always";
+        // Which search backends this process can actually reach, resolved once
+        // and read by everything below. The composer, the picker, preflight and
+        // availability all answer from the same function, so a model offered as
+        // search-ready here is one every other surface also called search-ready.
+        const searchBackendReadiness = resolveWebSearchBackendReadiness();
         // Dispatchability, not declared support -- the same question the
         // composer, the credit estimate, preflight and availability all answer
         // with `nativeSearchIsDispatchable`. A native capability whose
@@ -1398,6 +1472,16 @@ async function handleChatPost(
         const nativeSearchEnabled =
             webSearchRequested &&
             nativeSearchIsDispatchable(webSearchCapability);
+        // The other route. Never true at the same time as the one above -- a
+        // capability is native or application-managed -- and kept as its own
+        // name because the two differ in which budget pays, which tools may
+        // coexist with them, and where the citations come from.
+        const appManagedSearchEnabled =
+            webSearchRequested &&
+            appManagedSearchIsDispatchable(
+                webSearchCapability,
+                searchBackendReadiness
+            );
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -2014,6 +2098,7 @@ async function handleChatPost(
             // the two cannot drift.
             nativeSearchForced:
                 nativeSearchEnabled && webSearchCapability.canForceExecution,
+            appManagedSearchEnabled,
             turnAttachments: turnAttachmentDescriptors,
             promptText:
                 typeof latestMessage?.content === "string"
@@ -2045,6 +2130,27 @@ async function handleChatPost(
             estimatedInputTokens += turnSystemBlocks.promptTokens;
             inputEstimate.addTokens(turnSystemBlocks.promptTokens);
         }
+        /*
+          Attachments this turn could not read because storage no longer holds
+          them.
+
+          Collected across every message rather than thrown on the first one,
+          for a reason that is about the person and not the code: a
+          conversation that lost two files to the same lifecycle rule would
+          otherwise refuse once, be acknowledged once, and refuse again -- one
+          round trip per lost file, each looking like a new fault. One refusal
+          names all of them.
+
+          The list is drained after the loop and before anything is priced,
+          reserved or dispatched, so a missing file costs no credits and
+          reaches no provider.
+        */
+        const unavailableAttachments: Array<{
+            attachmentId: string;
+            name: string;
+            scope: "current_turn" | "past_turn";
+        }> = [];
+
         for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
@@ -2492,6 +2598,32 @@ async function handleChatPost(
                     throw new Error("Attachment access denied.");
                 }
 
+                const attachmentScope: "current_turn" | "past_turn" =
+                    isLatestMessage ? "current_turn" : "past_turn";
+                /*
+                  A verdict already reached, honoured without asking again.
+
+                  A previous turn confirmed a 404 for this object and wrote it
+                  on the row. Storage keys are written once and never rewritten,
+                  so a second HEAD can only re-learn the same answer -- and
+                  re-learning it would cost a round trip on every message of
+                  every turn for the rest of the conversation's life.
+                */
+                if (resolved?.attachmentId && resolved.unavailableAt) {
+                    if (acknowledgedUnavailable.has(resolved.attachmentId)) {
+                        textAttachments.push(
+                            unavailableAttachmentMarker(attachment.name)
+                        );
+                    } else {
+                        unavailableAttachments.push({
+                            attachmentId: resolved.attachmentId,
+                            name: attachment.name,
+                            scope: attachmentScope,
+                        });
+                    }
+                    continue;
+                }
+
                 let attachmentBuffer: Buffer;
                 try {
                     attachmentBuffer = await readR2Object(attachment.objectKey, {
@@ -2516,7 +2648,92 @@ async function handleChatPost(
                             "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
                         );
                     }
-                    throw error;
+                    /*
+                      A signed-in account's file, and storage said something
+                      about it.
+
+                      Everything below turns on one distinction: did storage
+                      *confirm* the object is gone, or did it merely fail to
+                      answer? A 404 is a fact about the object. A 403 from a
+                      rotated key, a 500 from the bucket and a socket timeout
+                      are facts about the connection, and treating them as the
+                      first would write permanent data loss into the database
+                      during a five-minute outage.
+
+                      Whichever it is, it is a *storage* failure, and the
+                      typed error is what stops it travelling up to the
+                      handler's outermost catch and being filed there as the
+                      provider's -- which is how a lifecycle-deleted JPEG once
+                      made two unrelated providers look like they were down.
+                    */
+                    if (!isStorageError(error)) throw error;
+                    const failureKind = classifyStorageError(error);
+                    const storageStatus = storageErrorStatus(error);
+                    logRequestError(
+                        "attachment_object_read_failed",
+                        traceId,
+                        error,
+                        requestedModelId,
+                        {
+                            // No key, no bucket, no filename, no SDK payload:
+                            // an id, a layer and a status are what an operator
+                            // needs and all they get
+                            // (docs/policy/user-attachment-persistence.md §5).
+                            phase: "attachment_read",
+                            failureLayer: "storage",
+                            storageFailureKind: failureKind,
+                            storageStatus,
+                            attachmentScope,
+                            ...(resolved?.attachmentId
+                                ? { attachmentId: resolved.attachmentId }
+                                : {}),
+                        }
+                    );
+                    if (failureKind !== "missing") {
+                        throw new ChatLocalFailure(
+                            "storage",
+                            "attachment_read",
+                            localDiagnosticCode(
+                                "storage",
+                                failureKind.toUpperCase(),
+                                storageStatus
+                            ),
+                            { cause: error, storageStatus }
+                        );
+                    }
+                    if (!resolved?.attachmentId) {
+                        // A finalised upload that has not been bound yet: there
+                        // is no row to mark and nothing to acknowledge, and the
+                        // file is by definition on the turn being composed. Ask
+                        // for it again.
+                        throw new ChatAccessError(
+                            410,
+                            ATTACHMENT_UNAVAILABLE_CODE,
+                            "This file is no longer available. Attach it again to continue.",
+                            undefined,
+                            {
+                                attachmentScope: "current_turn",
+                                attachmentName: attachment.name,
+                            }
+                        );
+                    }
+                    await markMessageAttachmentUnavailable({
+                        attachmentId: resolved.attachmentId,
+                        userId: session?.user?.id ?? "",
+                        error,
+                    });
+                    if (acknowledgedUnavailable.has(resolved.attachmentId)) {
+                        textAttachments.push(
+                            unavailableAttachmentMarker(attachment.name)
+                        );
+                        continue;
+                    }
+                    unavailableAttachments.push({
+                        attachmentId: resolved.attachmentId,
+                        name: attachment.name,
+                        scope: attachmentScope,
+                    });
+                    continue;
                 }
 
                 const attachmentBytes = attachmentBuffer.byteLength;
@@ -2676,6 +2893,54 @@ async function handleChatPost(
                 ],
             });
         }
+        /*
+          Fail closed on files that are gone and have not been acknowledged.
+
+          Placed here deliberately: everything below this line costs something.
+          The next statements price the turn, reserve credits and dispatch to a
+          provider, and none of that may happen because a file the user cannot
+          see is missing. Refusing here means a lost attachment costs zero
+          credits, issues zero provider requests and moves no health counter --
+          which is the difference between a recoverable product error and an
+          incident that looks like an outage.
+
+          The refusal names every missing file and its own id, so the client
+          can offer "attach it again" for a file on this turn and "continue
+          without it" for one from the conversation's past. Nothing is deleted
+          and nothing is hidden: the rows, the messages and the cards stay
+          exactly as they are (docs/policy/user-attachment-persistence.md §11).
+        */
+        if (unavailableAttachments.length > 0) {
+            const currentTurn = unavailableAttachments.filter(
+                (item) => item.scope === "current_turn"
+            );
+            throw new ChatAccessError(
+                410,
+                ATTACHMENT_UNAVAILABLE_CODE,
+                currentTurn.length > 0
+                    ? "A file on this message is no longer available. Attach it again to continue."
+                    : "A file from earlier in this conversation is no longer available. Attach it again, or continue without it.",
+                undefined,
+                {
+                    // Ids and display names only. No object key, no bucket, no
+                    // signed URL -- the client needs to name the card and offer
+                    // an action, and nothing here would help it do more.
+                    unavailableAttachmentIds: unavailableAttachments.map(
+                        (item) => item.attachmentId
+                    ),
+                    unavailableAttachmentNames: unavailableAttachments.map(
+                        (item) => item.name
+                    ),
+                    attachmentScope:
+                        currentTurn.length > 0 ? "current_turn" : "past_turn",
+                    // Only a past file may be continued without. A file the
+                    // person is attaching right now has an obvious better
+                    // remedy, and offering "continue without it" there invites
+                    // them to send a question about a document they just lost.
+                    canContinueWithout: currentTurn.length > 0 ? "false" : "true",
+                }
+            );
+        }
         // What the search half of this turn may cost, before anything is sent.
         //
         // A native search is billed per query on top of tokens, and nothing
@@ -2689,10 +2954,11 @@ async function handleChatPost(
         // a restart, has to be visible here or the refusal it earned lasts
         // only as long as the process that saw it.
         await refreshSearchQueryCeilingBreaches();
-        const nativeSearchReservation = reserveNativeSearchCost({
+        const nativeSearchReservation = reserveTurnSearchCost({
             model: modelConfig,
             capability: webSearchCapability,
             nativeSearchEnabled,
+            appManagedSearchEnabled,
         });
         if (!nativeSearchReservation.ok) {
             throw webSearchCostRefusalError(nativeSearchReservation.reason);
@@ -2704,10 +2970,21 @@ async function handleChatPost(
             {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
-                    webSearchCapability
+                    webSearchCapability,
+                    searchBackendReadiness
                 ),
                 nativeSearchEnabled,
-                nativeSearch: nativeSearchReservation,
+                appManagedSearchEnabled,
+                nativeSearch: nativeSearchReservation.native,
+                searchBackend: nativeSearchReservation.searchBackend,
+                // The same path `getModelGenerationSettings` is given below,
+                // so the premium the provider budget authorises and the marker
+                // the request actually sends are decided from one value. Named
+                // twice rather than threaded through a shared object because
+                // the budget is built long before the generation settings are,
+                // and `tests/anthropicPromptCaching.test.mjs` asserts the two
+                // literals agree.
+                promptCachePath: "chat_turn",
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -2798,6 +3075,11 @@ async function handleChatPost(
                 // fitted to the user's model would bias every other candidate.
                 requestOutputCapTokens: budget.maxOutputTokens,
                 models: routerCandidateInputs.models,
+                // The same readiness the live decision would have used. A shadow
+                // row computed against a different answer describes a router
+                // this deployment does not run, which is worse than no row.
+                searchBackendReadiness:
+                    routerCandidateInputs.searchBackendReadiness,
                 unhealthyModelIds: routerCandidateInputs.unhealthyModelIds,
                 signals: routerCandidateInputs.signals,
             };
@@ -2805,7 +3087,10 @@ async function handleChatPost(
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
-            enabledTools: nativeSearchEnabled ? ["web_search"] : [],
+            enabledTools:
+                nativeSearchEnabled || appManagedSearchEnabled
+                    ? ["web_search"]
+                    : [],
             // Comparison runs arrive with a slot already reserved for this
             // model by the aggregate preflight. Without it the three panels of
             // one comparison would each race for a slot, and a run could be
@@ -3010,6 +3295,53 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        /*
+          This turn's own search tool, and this turn's own counter.
+
+          Built here, once, and read from here everywhere below -- the same rule
+          the native configuration follows, for a sharper reason. The session
+          object *is* the ceiling: the fifth backend request is allowed and the
+          sixth is refused because this exact object says so. A second one built
+          later would start at zero, and the turn would get ten searches against
+          a reservation for five.
+
+          `searchAbortSignal` is the request's own signal, so a client that
+          disconnects mid-answer does not leave a search running for a turn
+          nobody is reading.
+        */
+        const appManagedSearchTool =
+            appManagedSearchEnabled && webSearchCapability.searchBackend
+                ? buildAppManagedWebSearchTool({
+                      backend: webSearchCapability.searchBackend,
+                      maxQueries:
+                          appManagedSearchQueryCeiling({
+                              capability: webSearchCapability,
+                              readiness: searchBackendReadiness,
+                              webSearchEnabled: true,
+                          }) ?? 0,
+                      signal: req.signal,
+                      onOutcome: (event) => {
+                          // Content-free. The query text is deliberately absent:
+                          // it is the user's question, or a paraphrase of it,
+                          // and a log line is not a place for either. What is
+                          // here is enough to see a backend degrading.
+                          console.info(
+                              JSON.stringify({
+                                  event: "app_managed_web_search",
+                                  traceId,
+                                  modelId: modelConfig.id,
+                                  backend: webSearchCapability.searchBackend,
+                                  status: event.status,
+                                  reason: event.reason ?? null,
+                                  queryLength: event.queryLength,
+                                  resultCount: event.resultCount,
+                                  durationMs: event.durationMs,
+                                  timestamp: new Date().toISOString(),
+                              })
+                          );
+                      },
+                  })
+                : null;
         // Whether this dispatch will actually be able to search, as opposed to
         // being allowed to. The Router's filter answers the second: it keeps a
         // native model for a turn that needs current information because the
@@ -3021,11 +3353,17 @@ async function handleChatPost(
             support: webSearchCapability.support,
             nativeSearchDispatchable:
                 nativeSearchIsDispatchable(webSearchCapability),
+            appManagedSearchDispatchable: appManagedSearchIsDispatchable(
+                webSearchCapability,
+                searchBackendReadiness
+            ),
             webSearchMode: webSearchMode ?? null,
-            toolConfigBuilt: webSearchToolConfig !== null,
+            toolConfigBuilt:
+                webSearchToolConfig !== null || appManagedSearchTool !== null,
             surchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
-                webSearchCapability
+                webSearchCapability,
+                searchBackendReadiness
             ),
         });
         // Recorded, not refused. A routed turn whose profile says it needs the
@@ -3140,16 +3478,45 @@ async function handleChatPost(
           registers no application tool behaves exactly as it does today.
         */
         const combinedToolConfig =
-            webSearchToolConfig || artifactToolConfig
+            webSearchToolConfig || appManagedSearchTool || artifactToolConfig
                 ? {
                       ...(webSearchToolConfig ?? {}),
                       tools: {
                           ...(webSearchToolConfig?.tools ?? {}),
+                          // This application's own search, on the same footing
+                          // as the artifact tools because it is the same kind
+                          // of thing: a function declaration this code executes.
+                          // That is why it coexists with them where Google's
+                          // grounding could not -- there is no built-in
+                          // retrieval tool on the request to be exclusive with.
+                          ...(appManagedSearchTool?.tools ?? {}),
                           ...(artifactToolConfig?.tools ?? {}),
                       },
+                      // A search tool with no tool loop is a search the model
+                      // never gets to read: the SDK stops after one step, and
+                      // the answer is written without the results. The larger of
+                      // the two step budgets wins when both features are on --
+                      // neither is a cost ceiling (the search ceiling is the
+                      // session counter, the artifact ceiling is the per-turn
+                      // artifact limit), so taking the maximum cannot raise a
+                      // spend bound.
+                      ...(appManagedSearchTool && !artifactToolConfig
+                          ? {
+                                stopWhen: stepCountIs(
+                                    APP_MANAGED_SEARCH_MAX_STEPS
+                                ),
+                            }
+                          : {}),
                       ...(artifactToolConfig
                           ? {
-                                stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS),
+                                stopWhen: stepCountIs(
+                                    appManagedSearchTool
+                                        ? Math.max(
+                                              GENERATED_ARTIFACT_MAX_STEPS,
+                                              APP_MANAGED_SEARCH_MAX_STEPS
+                                          )
+                                        : GENERATED_ARTIFACT_MAX_STEPS
+                                ),
                                 /*
                                   The two halves of "was this file begun, and
                                   did it ever run".
@@ -3195,6 +3562,12 @@ async function handleChatPost(
                 capability: webSearchCapability,
                 nativeSearchEnabled,
             }),
+            // Anthropic automatic prompt caching, on the one path where the
+            // prefix genuinely repeats: turn N+1 resends turns 1..N unchanged.
+            // A no-op for every other provider -- see
+            // lib/anthropicPromptCaching.ts for why the gate is the registry's
+            // provider identity and not "uses the Anthropic SDK".
+            promptCachePath: "chat_turn",
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -3318,19 +3691,30 @@ async function handleChatPost(
             plannerVersion: "none",
             adapterVersion: "vercel-ai-sdk-streamText-v1",
         });
-        const result = await streamText({
-            model: activeModel,
-            messages: sdkMessages,
-            ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
-            maxOutputTokens: requestMaxOutputTokens,
-            maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
-            headers:
-                modelConfig.provider === "perplexity"
-                    ? perplexityUsageHeaders(traceId)
-                    : undefined,
-            ...generationSettings,
-            ...(combinedToolConfig ?? {}),
-        });
+        // The provider boundary. Everything above it is ours; everything from
+        // here on may legitimately be the provider's fault, and the record this
+        // mints is what says so to the failure path below.
+        const result = await beginProviderCall(
+            modelConfig.provider,
+            modelConfig.id,
+            (record) => {
+                providerCall = record;
+            },
+            () =>
+                streamText({
+                    model: activeModel,
+                    messages: sdkMessages,
+                    ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
+                    maxOutputTokens: requestMaxOutputTokens,
+                    maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
+                    headers:
+                        modelConfig.provider === "perplexity"
+                            ? perplexityUsageHeaders(traceId)
+                            : undefined,
+                    ...generationSettings,
+                    ...(combinedToolConfig ?? {}),
+                })
+        );
         // The fallback drill's deliberate failure, if this request asked for
         // one and may have one (lib/routingFaultInjection.ts: not production,
         // a configured secret, and this request's own header). Off in every
@@ -3391,6 +3775,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                // Per attempt for the same reason as everything above it: a
+                // fallback caches on its own model at its own write rate, and
+                // its writes must not be priced at the primary's.
+                cacheWriteUsdPerMillionTokens:
+                    budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: budget.pricingVersion ?? null,
             } satisfies AttemptPriceSnapshot,
         };
@@ -3516,16 +3909,27 @@ async function handleChatPost(
         const earlyCancelSearchFields = {
             searchSurchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
-                webSearchCapability
+                webSearchCapability,
+                searchBackendReadiness
             ),
             searchExecuted: false,
             searchQueriesObserved: false,
+            // What the counter saw before the turn ended, which for an
+            // application-managed search is not a guess: the requests were made
+            // by this process and counted here. `searchQueriesObserved: false`
+            // still applies -- settlement takes the authorized ceiling rather
+            // than this figure -- and this is carried so the ledger row can say
+            // what actually ran beside what was authorized.
+            searchBackendRequestCount:
+                appManagedSearchTool?.session.snapshot()
+                    .succeededRequestCount ?? 0,
         };
         const settleSafely = (
             outcome: "completed" | "cancelled" | "failed" | "empty",
             usage?: {
                 inputTokens?: number;
                 cachedInputTokens?: number;
+                cacheWriteInputTokens?: number;
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
@@ -3575,6 +3979,7 @@ async function handleChatPost(
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
                         cachedInputTokens: usage?.cachedInputTokens,
+                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
@@ -3602,6 +4007,8 @@ async function handleChatPost(
                                       inputTokens: settledInputTokens,
                                       cachedInputTokens:
                                           usage?.cachedInputTokens ?? 0,
+                                      cacheWriteInputTokens:
+                                          usage?.cacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -4031,6 +4438,7 @@ async function handleChatPost(
                 // account for.
                 toolsOffered: Boolean(combinedToolConfig),
                 nativeSearchEnabled,
+                appManagedSearchEnabled,
                 // Always false here: a deep-research turn returns from the
                 // submit-then-poll branch above and never reaches a stream.
                 // Stated anyway, because a gate that lists its exclusions is
@@ -4079,6 +4487,12 @@ async function handleChatPost(
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 webSearchMode: webSearchMode ?? null,
+                // The same map the primary resolved. A fallback that resolved
+                // its own could disagree with the primary only by reading a
+                // changed environment mid-request, which is not a thing that
+                // should be able to change what this turn was offered.
+                searchBackendReadiness,
+                searchAbortSignal: req.signal,
                 traceId,
                 attemptIndex: dispatched.attemptIndex + 1,
                 // `docs/policy/tomverse-chat-routing.md` §10, in the
@@ -4134,6 +4548,17 @@ async function handleChatPost(
                     cachedInputPriceMultiplier:
                         plan.budget.cachedInputPriceMultiplier,
                     pricingVersion: plan.budget.pricingVersion ?? null,
+                    // Part of `reservedMicroUsd` above, so the payload's own
+                    // consistency check can reconstruct that total from its
+                    // components. Omitted when zero, which keeps an uncached
+                    // fallback's payload exactly what it has always been.
+                    ...(plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? {
+                              promptCacheWriteReservedPremiumMicroUsd:
+                                  plan.budget
+                                      .promptCacheWriteReservedPremiumMicroUsd,
+                          }
+                        : {}),
                 },
             }).catch((budgetError: unknown) => {
                 logRequestError(
@@ -4374,6 +4799,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: plan.budget.cachedInputPriceMultiplier,
+                // The fallback's own write rate and TTL, not the primary's.
+                // Caches are model-scoped, so these two attempts wrote into
+                // different entries at whatever each model's rate is.
+                cacheWriteUsdPerMillionTokens:
+                    plan.budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
             };
             // The next attempt captures under its own key, so the memo from
@@ -4506,13 +4940,26 @@ async function handleChatPost(
                         // point at. Every other provider is unaffected.
                         const perplexitySearchCitations =
                             (await takePerplexityCapture())?.search?.citations;
+                        // What this turn's own executor counted and collected.
+                        // Read once, here, so the citations, the executed flag,
+                        // the surcharge refund and the settled backend cost all
+                        // come from one snapshot and cannot describe different
+                        // turns.
+                        const appManagedSearchSnapshot =
+                            appManagedSearchTool?.session.snapshot() ?? null;
                         const webSearchExecution = normalizeWebSearchExecution({
                             capability: webSearchCapability,
                             searchRequested: webSearchRequested,
                             provider: dispatched.provider,
-                            toolName: webSearchCapability.provider
-                                ? WEB_SEARCH_TOOL_NAMES[webSearchCapability.provider]
-                                : undefined,
+                            backendReadiness: searchBackendReadiness,
+                            appManagedSearch: appManagedSearchSnapshot,
+                            toolName: appManagedSearchTool
+                                ? APP_MANAGED_WEB_SEARCH_TOOL_NAME
+                                : webSearchCapability.provider
+                                  ? WEB_SEARCH_TOOL_NAMES[
+                                        webSearchCapability.provider
+                                    ]
+                                  : undefined,
                             content:
                                 contentResult.status === "fulfilled"
                                     ? contentResult.value
@@ -4566,12 +5013,24 @@ async function handleChatPost(
                         const searchSettlementFields = {
                             searchSurchargeCredits: getWebSearchSurchargeCredits(
                                 webSearchMode ?? "off",
-                                webSearchCapability
+                                webSearchCapability,
+                                searchBackendReadiness
                             ),
                             searchExecuted: webSearchExecution.executed,
                             searchCostMicroUsd:
                                 webSearchExecution.costMetadata?.searchCostMicroUsd,
                             searchQueryCount: webSearchExecution.queryCount,
+                            // Successes, not attempts: the vendor bills for what
+                            // it served. Absent when no application-managed
+                            // search ran, which is how a turn that held nothing
+                            // on the search budget is told from one that held
+                            // and spent nothing.
+                            ...(appManagedSearchSnapshot
+                                ? {
+                                      searchBackendRequestCount:
+                                          appManagedSearchSnapshot.succeededRequestCount,
+                                  }
+                                : {}),
                             // The normalizer read the finished response, so an
                             // absent count here means the search really did not
                             // run -- not that nobody looked.
@@ -4586,6 +5045,18 @@ async function handleChatPost(
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
+                                    // `usage.inputTokens` is the *total* --
+                                    // the SDK builds it as noCache + cacheRead
+                                    // + cacheWrite, unlike the Anthropic API's
+                                    // own `input_tokens`, which is the
+                                    // uncached remainder. So the write count
+                                    // is carved out of that total rather than
+                                    // added to it; settlement prices it at
+                                    // 1.25x instead of the 1.0x it was
+                                    // silently getting as part of the
+                                    // "uncached" remainder.
+                                    cacheWriteInputTokens:
+                                        usage.inputTokenDetails.cacheWriteTokens,
                                     outputTokens: usage.outputTokens,
                                     reasoningTokens:
                                         usage.outputTokenDetails
@@ -4933,25 +5404,55 @@ async function handleChatPost(
                         error,
                         dispatched.modelId
                     );
-                    try {
-                        await recordProviderFailure(
-                            dispatched.provider,
-                            diagnosticCode,
+                    /*
+                      An open provider stream is not proof that everything that
+                      fails during it is the provider's.
+
+                      A tool running inside the stream writes generated files to
+                      object storage, and a bucket failure there arrives here
+                      looking exactly like a mid-stream provider fault. Rooted
+                      as `AI_STREAM_FAILED` it would count against the provider
+                      -- the same misattribution the outer catch was fixed for,
+                      one layer down. The typed error is what tells them apart.
+                    */
+                    const streamFailureIsLocal =
+                        isStorageError(error) || isChatLocalFailure(error);
+                    if (streamFailureIsLocal) {
+                        logRequestError(
+                            "chat_local_failure",
+                            traceId,
+                            error,
+                            dispatched.modelId,
                             {
-                                modelId: dispatched.modelId,
+                                failureLayer: isStorageError(error)
+                                    ? "storage"
+                                    : "application",
                                 phase: "stream",
-                                traceId,
-                                errorName: errorMetadata.name,
-                                errorCode: errorMetadata.code,
-                                httpStatus: errorMetadata.statusCode,
-                                retryable: errorMetadata.isRetryable,
+                                storageStatus: storageErrorStatus(error),
                             }
                         );
-                        await recordModelFailure(
-                            dispatched.modelId,
-                            dispatched.provider,
-                            diagnosticCode
-                        );
+                    }
+                    try {
+                        if (!streamFailureIsLocal) {
+                            await recordProviderFailure(
+                                dispatched.provider,
+                                diagnosticCode,
+                                {
+                                    modelId: dispatched.modelId,
+                                    phase: "stream",
+                                    traceId,
+                                    errorName: errorMetadata.name,
+                                    errorCode: errorMetadata.code,
+                                    httpStatus: errorMetadata.statusCode,
+                                    retryable: errorMetadata.isRetryable,
+                                }
+                            );
+                            await recordModelFailure(
+                                dispatched.modelId,
+                                dispatched.provider,
+                                diagnosticCode
+                            );
+                        }
                     } catch (recordError) {
                         logRequestError(
                             "provider_failure_record_failed",
@@ -5046,6 +5547,41 @@ async function handleChatPost(
         leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
         return response;
     } catch (error: unknown) {
+        /*
+          The last catch, and the one that used to get this wrong.
+
+          Three questions, in this order, and only the third may touch provider
+          health:
+
+            1. Was this raised on our side of the provider boundary? A
+               `ChatLocalFailure` says so by its type. Storage, database and
+               application faults answer here and go no further -- a 404 from a
+               bucket is not evidence about a model.
+            2. Did a provider call actually start? `providerCall` is null until
+               `beginProviderCall` constructs the record, so this is a fact
+               about what ran rather than about which fields happen to be set.
+            3. Only then: record the failure the way this route always has.
+
+          `dispatchProviderForLog` is deliberately no longer consulted for the
+          decision. It names the provider this turn *would have* used and is
+          set the moment the model resolves, which is why reading it as
+          "a provider was called" turned every pre-dispatch fault into that
+          provider's outage.
+        */
+        const localFailure = isChatLocalFailure(error)
+            ? error
+            : isStorageError(error)
+              ? new ChatLocalFailure(
+                    "storage",
+                    "attachment_read",
+                    localDiagnosticCode(
+                        "storage",
+                        classifyStorageError(error).toUpperCase(),
+                        storageErrorStatus(error)
+                    ),
+                    { cause: error, storageStatus: storageErrorStatus(error) }
+                )
+              : null;
         stopLeaseHeartbeat?.();
         const orphanedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
         if (orphanedLease) {
@@ -5064,7 +5600,20 @@ async function handleChatPost(
         if (dispatchRecord) {
             await completeInstrumentedDispatch(dispatchRecord, {
                 outcome: "failed_pre_token",
-                failureLayer: "provider",
+                // `provider` only when a provider was actually called. A turn
+                // that failed reading an attachment out of object storage was
+                // filed here as a provider failure, and
+                // docs/policy/tomverse-chat-routing.md §8's recovery reads
+                // this column to decide which model to move conversations to
+                // -- so a bucket's 404 was moving traffic off a model that had
+                // done nothing.
+                failureLayer: localFailure
+                    ? localFailure.layer === "storage"
+                        ? "storage"
+                        : "application"
+                    : providerCall
+                      ? "provider"
+                      : "application",
                 errorClass: "request_failed",
                 settlementOutcome: "failed",
             });
@@ -5146,6 +5695,33 @@ async function handleChatPost(
                     routeClass: "chat",
                     errorCode: error.code,
                     httpStatus: error.status,
+                    /*
+                      An attachment refusal is a storage fact, and the evidence
+                      row has to say so.
+
+                      This is the row a person reads after reporting the trace.
+                      Left without a layer it reads as an unclassified chat
+                      failure beside a provider and a model id, which is how
+                      `AI_REQUEST_FAILED.NotFound` was read as two providers
+                      being down. `retryable: false` for the same reason: the
+                      object is gone, and re-sending the identical request
+                      re-reads the identical 404.
+                    */
+                    ...(error.code === ATTACHMENT_UNAVAILABLE_CODE
+                        ? {
+                              phase: "attachment_read",
+                              failureLayer: "storage",
+                              storageStatus: 404,
+                              retryable: false,
+                          }
+                        : error.code === "GUEST_ATTACHMENT_EXPIRED"
+                          ? {
+                                phase: "attachment_read",
+                                failureLayer: "storage",
+                                storageStatus: 404,
+                                retryable: false,
+                            }
+                          : {}),
                 });
                 if (grant.errorReportToken) {
                     accessError.headers.set(
@@ -5157,42 +5733,115 @@ async function handleChatPost(
             return accessError;
         }
 
+        if (localFailure) {
+            logRequestError(
+                "chat_local_failure",
+                traceId,
+                localFailure.cause ?? localFailure,
+                dispatchModelIdForLog,
+                {
+                    failureLayer: localFailure.layer,
+                    phase: localFailure.phase,
+                    diagnosticCode: localFailure.diagnosticCode,
+                    storageStatus: localFailure.storageStatus,
+                }
+            );
+            return tracedJsonError(
+                localFailure.layer === "storage"
+                    ? "첨부파일 저장소를 읽지 못했습니다. 잠시 후 다시 시도해 주세요."
+                    : "요청을 처리하지 못했습니다.",
+                localFailure.layer === "storage"
+                    ? ATTACHMENT_STORAGE_UNAVAILABLE_CODE
+                    : "CHAT_APPLICATION_ERROR",
+                localFailure.layer === "storage" ? 503 : 500,
+                traceId,
+                undefined,
+                {
+                    phase: localFailure.phase,
+                    failureLayer: localFailure.layer,
+                    storageStatus: localFailure.storageStatus,
+                    // Named, but never as the subject: an operator reading the
+                    // evidence row has to be able to see which model the turn
+                    // was for without the row claiming that model failed.
+                    provider: dispatchProviderForLog,
+                    modelId: dispatchModelIdForLog,
+                    error: localFailure.cause ?? localFailure,
+                    retryable: localFailure.layer === "storage" ? null : false,
+                }
+            );
+        }
+
+        const providerError = isProviderRequestFailure(error) ? error.reason : error;
         logRequestError(
             "ai_request_failed",
             traceId,
-            error,
+            providerError,
             dispatchModelIdForLog
         );
-        try {
-            const errorMetadata = safeErrorMetadata(error);
-            const diagnosticCode =
-                error instanceof ChatAccessError
-                    ? error.code
-                    : providerDiagnosticCode("AI_REQUEST_FAILED", error);
-            await recordProviderFailure(
-                dispatchProviderForLog,
-                diagnosticCode,
-                {
-                    modelId: dispatchModelIdForLog,
-                    phase: "request",
+        if (providerCall) {
+            try {
+                const errorMetadata = safeErrorMetadata(providerError);
+                const diagnosticCode =
+                    providerError instanceof ChatAccessError
+                        ? providerError.code
+                        : providerDiagnosticCode("AI_REQUEST_FAILED", providerError);
+                await recordProviderFailure(
+                    dispatchProviderForLog,
+                    diagnosticCode,
+                    {
+                        modelId: dispatchModelIdForLog,
+                        phase: "request",
+                        traceId,
+                        errorName: errorMetadata.name,
+                        errorCode: errorMetadata.code,
+                        httpStatus: errorMetadata.statusCode,
+                        retryable: errorMetadata.isRetryable,
+                    }
+                );
+                await recordModelFailure(
+                    dispatchModelIdForLog,
+                    dispatchProviderForLog,
+                    diagnosticCode
+                );
+            } catch (recordError) {
+                logRequestError(
+                    "provider_failure_record_failed",
                     traceId,
-                    errorName: errorMetadata.name,
-                    errorCode: errorMetadata.code,
-                    httpStatus: errorMetadata.statusCode,
-                    retryable: errorMetadata.isRetryable,
-                }
-            );
-            await recordModelFailure(
-                dispatchModelIdForLog,
-                dispatchProviderForLog,
-                diagnosticCode
-            );
-        } catch (recordError) {
+                    recordError,
+                    dispatchModelIdForLog
+                );
+            }
+        } else {
+            /*
+              Nothing was dispatched, so nothing about a provider was learned.
+
+              This is the branch that catches a fault nobody wrapped -- a bug
+              in preparation, a library that throws a plain Error. It is
+              recorded as application-layer rather than left to the provider
+              path, because "we do not know what this was" and "the provider is
+              down" are different claims and only one of them is true here.
+            */
             logRequestError(
-                "provider_failure_record_failed",
+                "chat_unclassified_local_failure",
                 traceId,
-                recordError,
-                dispatchModelIdForLog
+                providerError,
+                dispatchModelIdForLog,
+                { failureLayer: "application", phase: "request" }
+            );
+            return tracedJsonError(
+                "요청을 처리하지 못했습니다.",
+                "CHAT_APPLICATION_ERROR",
+                500,
+                traceId,
+                undefined,
+                {
+                    phase: "request",
+                    failureLayer: "application",
+                    provider: dispatchProviderForLog,
+                    modelId: dispatchModelIdForLog,
+                    error: providerError,
+                    retryable: false,
+                }
             );
         }
 
@@ -5204,9 +5853,10 @@ async function handleChatPost(
             undefined,
             {
                 phase: "request",
+                failureLayer: "provider_request",
                 provider: dispatchProviderForLog,
                 modelId: dispatchModelIdForLog,
-                error,
+                error: providerError,
             }
         );
     }

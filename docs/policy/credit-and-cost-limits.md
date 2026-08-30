@@ -483,19 +483,96 @@ registry가 **가정한** tier가 남고 요청이 **실제로 처리된** tier�
 따로 제공하되(기본은 읽기 한 번, `--invoke`는 명시적 opt-in과 예상 비용 표시
 필요), 출력 자체가 "이것은 가격 근거가 아니다"라고 적습니다.
 
-### cache write 가격은 기록하되 과금하지 않습니다
+### cache write 가격은 측정된 곳에서 과금합니다 (2026-08-30 개정)
 
-`ModelPriceTier.cacheWriteUsdPerMillionTokens`는 감사용 기록이며 **과금에
-쓰이지 않습니다**(`CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`). cache read와
-cache write는 공급자 가격표에서 별개 항목인데, 이 앱이 세는 것은 read뿐입니다 —
-`cachedInputTokens`(`lib/providerUsageCost.ts`)가 read 수이고, **cache write
-토큰을 보고하는 provider usage adapter는 하나도 없습니다.** 측정한 값에서 write
-수를 유도하는 것은 숫자를 지어내는 일이므로, 요율은 gap이 보이도록 적어만 두고
-`resolveModelPricing`은 무시합니다.
+**이전 계약**(`CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`)은
+`ModelPriceTier.cacheWriteUsdPerMillionTokens`를 감사용 기록으로만 두고 과금에
+쓰지 않았습니다. 그때는 맞았습니다 — **cache write 토큰을 보고하는 provider
+usage adapter가 하나도 없었고**, read 수에서 write 수를 유도하는 것은 숫자를
+지어내는 일이었습니다.
 
-- `gpt-5-6-luna`: 단문 US$0.25, 장문 US$0.50 (입력 요율과 같은 x2)
+Anthropic prompt caching을 켜면서 그 전제가 깨졌습니다. AI SDK가
+`usage.inputTokenDetails.cacheWriteTokens`(API의
+`cache_creation_input_tokens`)를 보고합니다. 새 계약은
+
+```
+CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED = true
+```
+
+이고, **양쪽이 다 있을 때만 과금합니다** — tier의 검증된 요율 **그리고**
+provider가 보고한 write 토큰 수. 한쪽만으로는 어느 쪽도 지어내기입니다.
+
+- 요율이 없는 모델의 write는 비용 0으로 계산되되
+  `unpricedCacheWriteTokens`로 **보고**됩니다. 알려진 토큰 수만큼 과소 기록된
+  비용과 완전한 비용은 다른 것입니다.
+- `cacheWriteUsdPerMillionTokens`는 **env·DB override 대상이 아닙니다.** 관리자
+  콘솔에 이 요율 컨트롤이 없으므로, override 경로는 아무도 볼 수 없는 가격을
+  움직이는 뒷문이 됩니다.
+- 5분 write는 base input의 1.25배입니다
+  (`PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER`). 이 상수는 요율을 **계산하지
+  않고 검사합니다** — 모든 요율은 Anthropic 가격표에서 읽어 적고,
+  `npm run check:model-pricing`이 각 요율이 자기 tier의 입력 요율 × 1.25인지
+  대조합니다.
+- **1시간 캐시(2배)는 쓰지 않습니다.** 요청 경로가 없으므로 상수도 두지
+  않습니다: docs/policy/anthropic-prompt-caching.md §3.
+
+기록된 요율:
+
+- `claude-opus-4-8`(Opus 5) US$6.25 · `claude-fable-5` US$12.50 ·
+  `claude-sonnet-5` US$2.50 · `claude-haiku-4-5` US$1.25 — 전부 과금됩니다.
+- `gpt-5-6-luna`: 단문 US$0.25, 장문 US$0.50 (입력 요율과 같은 x2). 요율은
+  해석되지만 **OpenAI usage adapter가 write 수를 보고하지 않으므로 write 수가
+  항상 0이고 비용도 0입니다** — 요율이 없어서가 아니라 측정이 없어서입니다. 이
+  구분이 "양쪽이 다 있을 때만"의 요점입니다: adapter가 생기면 아무도 flag를
+  뒤집지 않아도 0이 아니게 됩니다.
 - `gpt-5-4-mini`: **기록하지 않습니다.** 확인된 값이 없으며, 아무도 확인하지
   않은 값을 기록하는 것은 없는 것보다 나쁩니다.
+
+이중 계산 함정과 예약 계약은 docs/policy/anthropic-prompt-caching.md §4–§5에
+있습니다. 요약: AI SDK의 `usage.inputTokens`는 **총합**(`noCache + cacheRead +
+cacheWrite`)이므로 두 캐시 수치를 **빼야** 하고, 캐시 marker를 다는 요청은
+0.25배 premium을 provider budget에 **미리** 예약하되 `usageCredits`에는 절대
+닿지 않습니다.
+
+### 가격은 effective date로 선택합니다 (2026-08-30)
+
+`ModelPricingProfile.priceSchedule`은 예고된 가격 변경을 **효력 발생 전에 적어
+둘 수 있게** 합니다. 이전에는 registry가 "오늘 참인 가격" 하나만 담을 수 있어서,
+예고된 변경에 대해 나쁜 선택지가 둘뿐이었습니다 — 미래 숫자를 지금 써서 효력
+전부터 청구하거나, 아무것도 안 써서 효력 후에 옛 숫자로 청구하거나.
+
+- 각 항목은 `effectiveFrom`(RFC 3339 **UTC** instant, `Z` 필수)·`tiers`·
+  `priceSource`·**새 `pricingVersion`**·`effectiveDate`를 갖습니다.
+- 경계는 **포함**입니다: `at === effectiveFrom`이면 새 가격, 1밀리초 전이면 이전
+  가격. 어느 쪽에도 속하지 않는 순간이 없습니다.
+- UTC인 이유는 이 시스템의 다른 모든 경계가 UTC이기 때문입니다 —
+  `ChatUsageBucket` period, `ProviderDailyUsage` day(`rollupDayOf`), 그리고
+  대조 대상인 provider usage·cost API. local time 경계는 정산과 rollup을 변경의
+  반대편에 놓습니다.
+- **소급 적용은 여전히 금지입니다.** 항목은 자기 instant 이후 요청만 설명하고,
+  저장된 snapshot은 이미 자기 요율과 `pricingVersion`을 갖고 있으므로 항목을
+  추가해도 다시 계산되지 않습니다.
+- **override 우선순위는 그대로입니다**: DB/admin override > env override >
+  schedule이 고른 tier > class fallback. override가 있는 행은 tier가 평탄해지고
+  schedule도 함께 평탄해집니다 — 컬럼이 둘 다 표현하지 못합니다.
+- module load 시 검사합니다: 오름차순, 중복 `pricingVersion` 금지,
+  `effectiveDate`가 `effectiveFrom`의 UTC 날짜와 일치.
+
+**Claude Sonnet 5.** launch 시 US$2/US$10은 2026-08-31까지의 introductory
+가격이고 2026-09-01부터 US$3/US$15로 오른다고 예고됐습니다. **2026-08-11에
+Anthropic이 그 인상을 취소했습니다** — 공식 pricing 페이지의
+`claude-sonnet-5-introductory-pricing` 각주: "is now the standard price. The
+previously scheduled increase to $3/$15 per million input/output tokens on
+September 1, 2026 will not occur."
+
+그래서 registry는 US$3/US$15를 **예약하지 않습니다.** 예약했다면 2026-09-01부터
+모든 Sonnet 5 요청을 50% 과대 계상했을 것이고, 과대 계상은 안전한 방향이
+아닙니다 — provider budget과 operational guardrail이 이 숫자로 소진되므로
+부풀린 요율은 돈이 있던 요청을 거절합니다. 대신 취소 사실을
+`anthropic-claude-sonnet-5-standard-2026-08-11` 항목으로 적었습니다. 요율은
+이전과 같고 **기간(term)이 달라졌으며**, 그것이 이 registry가 기록하는
+것입니다. 2026-08-11 이전 요청은 계속
+`anthropic-claude-sonnet-5-intro-2026-08-04`로 재현됩니다.
 
 ### 알 수 없는 모델과 CI
 
@@ -593,14 +670,19 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 - 입력 토큰 추정은 `lib/chatTokenEstimate.ts` 하나로 통일했습니다. CJK 문자는
   1.5토큰/자, 나머지는 4바이트/토큰입니다. 이전에는 표면마다 복사본이 있었고
   한국어 대화를 크게 과소 추정했습니다.
-- native web search가 켜지면 검색 결과가 프롬프트로 되돌아오므로 입력에
+- web search가 켜지면 검색 결과가 프롬프트로 되돌아오므로 입력에
   `WEB_SEARCH_INPUT_TOKEN_OVERHEAD`(6,000) + tool 정의(400)를 더해 예약합니다.
   **크레딧에는 반영하지 않습니다** — 사용자 과금은 대화 길이 기준입니다.
+  provider-native 검색과 application-managed 검색 모두 같은 overhead를 씁니다.
+  경로는 달라도 입력 쪽에서 하는 일은 같기 때문이고, 한쪽만 예약하면 모든
+  Gemini 검색 turn이 예약보다 수천 토큰 위에서 정산됩니다.
 - **native web search의 질의당 비용은 요청이 상한을 강제할 때만 예약할 수
   있습니다.** 상한을 보내는 방법은 provider마다 다릅니다 — Anthropic은 tool의
   `maxUses`, OpenAI는 Responses 요청의 `max_tool_calls`
   (`providerOptions.openai.maxToolCalls`)입니다. Google의 Search grounding은
   tool에도 요청에도 상한 parameter가 없어서 **fail-closed로 남습니다.**
+  Google 모델은 그래서 grounding 대신 아래의 application-managed 경로로
+  검색합니다.
 - **OpenAI에서는 요청이 강제하는 상한과 청구되는 상한이 같은 수가
   아닙니다.** 원래는 한 필드였고 근거는 "요청이 강제하는 상한이면 예산을
   그 위에 올려도 된다"였는데, 2026-08-26에 그 근거가 반증됐습니다 — Luna
@@ -632,22 +714,140 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
   공유분(`durableBreaches`)은 통째로 교체되므로 운영자가 행을 지우면 한 주기
   안에 모든 인스턴스가 재개합니다.
 - **provider capability와 operational dispatchability는 다릅니다.**
-  `nativeSearchIsDispatchable()`(`lib/webSearchCapability.ts`)이 유일한
-  판정이고, composer · credit estimate · model picker · router candidate ·
+  `webSearchIsDispatchable(capability, readiness)`(`lib/webSearchCapability.ts`)이
+  유일한 판정이고, composer · credit estimate · model picker · router candidate ·
   `/api/chat` · `/api/chat/preflight` · `/api/chat/availability`가 모두 이것을
-  묻습니다. **예약이 거절할 검색을 어떤 표면도 먼저 제안하지 않는다**는 것이
+  묻습니다. native 전용 질문은 `nativeSearchIsDispatchable()`로 남습니다. **예약이 거절할 검색을 어떤 표면도 먼저 제안하지 않는다**는 것이
   규칙입니다 — 반대로 하면 UI가 네 번 허용한 기능이 dispatch에서만 503을
   냅니다(2026-08-25 `gpt-5-6-luna` · `WEB_SEARCH_COST_UNBOUNDED`).
 - **세 route는 같은 검색 비용을 예약합니다.** `/api/chat/preflight`와
-  `/api/chat/availability`도 `reserveNativeSearchCost()`를 부르고 결과를
-  `createChatBudget({ nativeSearch })`에 넘깁니다. 사전 확인이 실제 요청보다
-  적은 provider 비용을 계산하면 그것은 확인이 아닙니다.
+  `/api/chat/availability`도 `reserveTurnSearchCost()`를 부르고 결과를
+  `createChatBudget({ nativeSearch, searchBackend })`에 넘깁니다. 사전 확인이
+  실제 요청보다 적은 provider 비용을 계산하면 그것은 확인이 아닙니다. 한
+  함수가 두 vendor 몫을 함께 돌려주므로 한쪽만 예약하고 다른 쪽을 잊을 수
+  없습니다.
 - 출력 예약은 모델별 p90입니다. premium 4,096, reasoning 모델 6,144
   (`maxOutputTokens` 8,192 유지).
 - 정산은 provider usage metadata를 우선 사용하고, 없을 때만 fallback
   estimator를 씁니다. 어느 쪽을 썼는지 `pricingSnapshot.usageSource`에
   남습니다. reasoning token은 `outputTokens`에 이미 포함되므로 별도 과금하지
   않고 관측용으로만 기록합니다.
+
+### Application-managed web search (2026-08-27)
+
+Google Gemini의 Search grounding은 질의마다 과금되면서 **요청당 검색 횟수를
+강제하는 parameter가 없습니다.** 그래서 위 규칙에 따라 fail-closed였고, 활성
+Google 모델 넷이 전부 "웹 검색 불가"로 제공되고 있었습니다. 관측 평균으로
+예약하거나 system prompt로 "최대 5회"를 요청하는 것은 **강제 가능한 상한이
+아니므로** 답이 아닙니다 — 중요하지 않을 때만 맞고 중요할 때 틀리는 예약입니다.
+
+그래서 검색을 provider의 것에서 **이 애플리케이션의 것**으로 옮겼습니다. 모델은
+평범한 function tool(`web_search`)을 호출하고, 실행은 이 프로세스가 하며,
+상한은 이 프로세스의 counter입니다. **여섯 번째 호출은 socket을 열지 않습니다**
+(`lib/appManagedWebSearchCore.ts`). 설득할 수 없는 유일한 종류의 상한입니다.
+
+#### 승인된 값
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 모델당 turn당 최대 backend 요청 | 5 | `APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest` |
+| 요청당 결과 수 | 5 | 같은 표 |
+| Brave 단가 | US$5.00 / 1,000 requests = 5,000 µUSD | Brave Search API "Data for AI" 가격표, 2026-08-27 확인 |
+| turn당 검색 최악 비용 | 25,000 µUSD (US$0.025) | 5 × 5,000, 올림 |
+| 사용자 surcharge | 8 크레딧 (변경 없음) | `WEB_SEARCH_SURCHARGE_CREDITS` |
+
+가격은 `lib/webSearchBackendPricing.ts`가 유일한 출처이고 `pricingVersion` ·
+`priceSource` · `effectiveDate`를 함께 들고 있습니다. **무료 할당량은 내부 비용
+계산에서 무시합니다** — 무료분을 먼저 쓰는 추정은 할당량이 끝나는 날 갑자기
+뛰고, 예산은 최악값을 묶으려고 존재합니다. Google grounding의 무료 quota를
+무시하는 것과 같은 이유입니다.
+
+**14,000 µUSD를 여기에 재사용하지 않습니다.** 그것은 Google이 자기 grounding에
+매기는 값이고, Brave의 HTTP 요청 가격과는 아무 관계가 없습니다. 재사용하면 모든
+Gemini turn을 2.8배로 과대 계상하고, 어떤 invoice와도 맞지 않는 숫자를 감사
+기록에 남깁니다.
+
+#### capability는 네 가지 사실을 구분합니다
+
+`WebSearchSupport`에 `app-managed`를 추가했고, `native`로 위장하지
+않았습니다. 호출자가 묻는 모든 질문의 답이 다르기 때문입니다 — 어느 예산이
+지불하는지, citation이 어디서 오는지, artifact tool과 공존할 수 있는지, fallback이
+무엇을 물려받을 수 있는지.
+
+- **provider-native search** — `support: "native"`, `provider`
+- **search-specialized model** — `support: "search-model"` (Perplexity)
+- **Tomverse-managed search** — `support: "app-managed"`, `searchBackend`
+- **선언된 capability** — register(컴파일 시점, 모든 배포에서 동일)
+- **runtime backend readiness** — `resolveWebSearchBackendReadiness()`(배포별)
+- **실제 turn의 execution** — `AppManagedSearchSnapshot`
+
+`nativeSearchIsDispatchable()`에는 app-managed를 넣지 않았습니다. 대신
+`appManagedSearchIsDispatchable(capability, readiness)`와, 둘을 합치는
+`webSearchIsDispatchable(capability, readiness)`가 있습니다. **`readiness`는
+optional이 아니라 required입니다** — "있다고 가정"하는 기본값은 credential 없는
+배포에서 8크레딧을 받고 dispatch에서만 거절하는, 이 규칙이 막으려는 실패를 한
+층 위에서 재현합니다.
+
+readiness는 서버가 풀고 client에는 backend별 boolean 하나로만 건넵니다
+(`WebSearchBackendReadinessProvider`). key의 존재 여부를 말하는 public 환경변수는
+key의 존재 여부를 말하는 public 환경변수입니다.
+
+#### 예산은 별개 층입니다
+
+`provider:google`은 Google이 받을 돈을 셉니다. Brave 요청은 다른 invoice이므로
+**`search-provider:brave`** 라는 자기 bucket에 들어갑니다.
+
+- 환경변수: `SEARCH_PROVIDER_BRAVE_COST_MICROUSD_PER_DAY` · `_PER_MONTH`
+- bucket period: `search-cost-day` · `search-cost-month`
+- 오류 코드: `SEARCH_PROVIDER_BUDGET_EXHAUSTED`
+  (`PROVIDER_BUDGET_EXHAUSTED`와 별개 — 운영자가 볼 예산이 다릅니다)
+- reservation entry metric: `search-cost`
+
+**floor는 유도값입니다.** chat provider floor(계정 하나의 plan guardrail, 월
+US$500 수준)를 재사용하면 검색이 정당하게 쓸 수 있는 금액의 열 배가 넘는 값이
+되어 bound 노릇을 못 합니다. image 예산이 자기 가격표에서 floor를 유도한 것과
+같은 방식으로, 검색을 실제로 배급하는 것 — 검색 turn의 크레딧 가격 — 에서
+유도합니다.
+
+```
+Max 월 크레딧 10,000 ÷ 검색 turn당 8크레딧 = 1,250 turn
+1,250 × 25,000 µUSD × 1.25(headroom) = 39,062,500 µUSD ≈ US$39.06
+```
+
+일 floor와 월 floor는 같습니다. Max 플랜에는 일일 크레딧 한도가 없어서
+(`dailyMessageLimit: 0`) 한 계정이 월 grant 전부를 하루에 쓸 수 있고, 그보다
+낮은 일 floor는 정당한 트래픽을 거절합니다. image 예산 floor가 같은 모양인 것도
+같은 이유입니다.
+
+production에는 기본값이 없습니다. credential이 있는데 예산을 읽을 수 없거나,
+활성 모델이 요구하는 backend의 credential이 없으면 `/api/ready`가 실패합니다
+(`lib/searchProviderBudgetReadiness.ts`). **환경변수를 먼저 배포하고 코드를
+나중에** — provider 예산과 같은 순서입니다. 개발·테스트는 development default를
+쓰고, credential이 없으면 readiness는 통과하되 검색을 아무 데서도 제안하지
+않습니다. `WEB_SEARCH_FAKE_BACKEND=1`은 결정적 fake adapter를 켜며
+**production에서는 요청되기만 해도 readiness 실패**입니다.
+
+#### 정산
+
+- **예약**: 요청 전에 25,000 µUSD (5 × 5,000). rate와 ceiling과
+  `pricingVersion`은 reservation에 동결됩니다.
+- **정산**: 실제로 **응답을 받은** backend 요청 수 × 5,000. vendor는 서비스한
+  요청에 청구하고, 429는 서비스된 요청이 아닙니다.
+- **counter는 시도를 셉니다** — 그래야 아픈 backend를 무한 재시도할 수
+  없습니다. **돈은 성공을 셉니다.** 두 숫자는 다르고 둘 다 기록합니다.
+- 미사용분은 settlement에서 해제됩니다(metric `search-cost`).
+- 사용자 크레딧: 검색 0회면 8크레딧 전액 환불, 1~5회면 기존 flat 8크레딧.
+  **질의 수로 사용자에게 추가 과금하지 않습니다.**
+- 가격 변경은 소급되지 않습니다. 동결된 rate가 정산을 매깁니다.
+
+#### fallback
+
+검색한 turn은 fallback하지 않습니다(`autoFallbackScope` → `web_search`).
+application-managed 검색도 같습니다 — backend 요청을 이미 썼고 surcharge를 이미
+받았으므로, 두 번째 시도는 둘 다 다시 쓰거나 사용자가 지불한 검색 없이
+답하게 됩니다. 그럼에도 plan은 attempt마다 **자기 tool과 자기 counter와 자기
+예약**을 만듭니다(`ATTEMPT_BOUND_FIELDS`에 `appManagedSearch` 포함): 물려받은
+counter는 이미 쓴 allowance를 물려받거나, 지불하지 않은 allowance를 쓰게 합니다.
 
 ## 5. 시간대와 reset
 

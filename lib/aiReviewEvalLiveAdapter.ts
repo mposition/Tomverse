@@ -95,7 +95,13 @@ export function createAiReviewEvalAdapter(
                 system: prompt.system,
                 prompt: prompt.prompt,
                 output: Output.object({ schema: comparisonReviewResultSchema }),
-                ...getModelGenerationSettings(model, { temperature: 0.1 }),
+                // The same generation settings the product uses, prompt cache
+                // path included: an eval that reviews under different settings
+                // than production measures a configuration nobody ships.
+                ...getModelGenerationSettings(model, {
+                    temperature: 0.1,
+                    promptCachePath: "comparison_review",
+                }),
                 maxOutputTokens: input.maxOutputTokens,
                 maxRetries: 1,
                 abortSignal: AbortSignal.timeout(60_000),

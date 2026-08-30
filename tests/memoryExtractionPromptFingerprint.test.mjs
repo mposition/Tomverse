@@ -25,7 +25,11 @@ import {
     MEMORY_EXTRACTION_OUTPUT_SCHEMA,
     MEMORY_EXTRACTION_TRANSPORT,
 } from "../lib/memoryExtractionPrompt.ts";
-import { MEMORY_KINDS, MEMORY_SENSITIVITIES } from "../lib/memoryValidatorCore.ts";
+import {
+    MEMORY_KINDS,
+    MEMORY_POLARITIES,
+    MEMORY_SENSITIVITIES,
+} from "../lib/memoryValidatorCore.ts";
 
 const FINGERPRINTS = {
     "mem-extract-v2":
@@ -33,6 +37,10 @@ const FINGERPRINTS = {
     "mem-extract-v3": "fdba01bfe18f2cf29a656cc255aad57df7e041360d717cf6aa824e625698eec7",
     "mem-extract-v4":
         "1223dd184292c56d71672ce4af0985a2fd0d0c8a5a3caedb0853c114857a244f",
+    "mem-extract-v5":
+        "7bb6b27abce3f29dee70f4defd24d8a65175d7a17ab2b9e8d3846ebcc76de281",
+    "mem-extract-v6":
+        "c85389d8360a997fe80e4d8905304c223f67f67b1676fa2df483daf902b05052",
 };
 
 test("the shipped version matches its recorded fingerprint", () => {
@@ -99,4 +107,28 @@ test("the kind enum is the validator's list, not a copy", () => {
     const candidate =
         MEMORY_EXTRACTION_OUTPUT_SCHEMA.properties.candidates.items.properties;
     assert.deepEqual([...candidate.kind.enum], [...MEMORY_KINDS]);
+});
+
+test("polarity is required and enumerated, never a free string", () => {
+    // The field schema-3 scoring compares. A free string would let the model
+    // answer "positive", which is neither value and means something else
+    // again -- and the parser would drop the candidate for a reason the
+    // provider could have refused up front.
+    const items = MEMORY_EXTRACTION_OUTPUT_SCHEMA.properties.candidates.items;
+    assert.ok(items.required.includes("polarity"));
+    assert.deepEqual([...items.properties.polarity.enum], [...MEMORY_POLARITIES]);
+});
+
+test("a citation carries the quote as well as the label", () => {
+    // v6's other required field. A bare-string item would leave the quote
+    // something a model could omit by answering v5's shape, and an omitted
+    // quote is not checked rather than checked and passed.
+    const evidence =
+        MEMORY_EXTRACTION_OUTPUT_SCHEMA.properties.candidates.items.properties
+            .evidence;
+    assert.equal(evidence.items.type, "object");
+    assert.deepEqual([...evidence.items.required].sort(), [
+        "messageLabel",
+        "quote",
+    ]);
 });

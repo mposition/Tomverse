@@ -98,9 +98,12 @@ function GuideSection({ section }: { section: WorkspaceGuideSection }) {
 export function ChatWorkspaceGuide() {
   const { lang } = useLanguage();
   const copy = chatWorkspaceGuideContent[lang];
-  // Shared with the landing walkthrough so the stage wording and its
-  // "illustration, not a recording" disclosure exist once.
-  const { stages: workflowStages, workflowDisclosure } = getLandingCopy(lang).proof;
+  // Shared with the landing hero demonstration so the stage wording and its
+  // "illustration, not a recording" disclosure exist once. They moved from
+  // `proof` to `preview` when the landing page retired its separate workflow
+  // diagram: `preview` is what renders them there now.
+  const { stages: workflowStages, disclosure: workflowDisclosure } =
+    getLandingCopy(lang).preview;
 
   useEffect(() => {
     trackProductEventOnce(

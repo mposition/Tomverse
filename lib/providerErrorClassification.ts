@@ -26,7 +26,22 @@ export const safeErrorMetadata = (error: unknown): SafeErrorMetadata => {
         status?: unknown;
         statusCode?: unknown;
         isRetryable?: unknown;
+        // AWS SDK v3 puts the HTTP status here and nowhere else. Reading it
+        // does not make an S3 error a provider error -- the failure layer
+        // decides that (lib/chatFailureLayer.ts) -- but a status of `undefined`
+        // on a 404 is how a storage failure reached classifyProviderFailure
+        // with nothing to classify on and fell through to "count it against
+        // the provider".
+        $metadata?: { httpStatusCode?: unknown };
     };
+    const httpStatus =
+        typeof candidate.statusCode === "number"
+            ? candidate.statusCode
+            : typeof candidate.status === "number"
+              ? candidate.status
+              : typeof candidate.$metadata?.httpStatusCode === "number"
+                ? candidate.$metadata.httpStatusCode
+                : undefined;
     return {
         name:
             typeof candidate.name === "string"
@@ -37,12 +52,7 @@ export const safeErrorMetadata = (error: unknown): SafeErrorMetadata => {
             /^[A-Za-z0-9_.-]{1,80}$/.test(candidate.code)
                 ? candidate.code
                 : undefined,
-        statusCode:
-            typeof candidate.statusCode === "number"
-                ? candidate.statusCode
-                : typeof candidate.status === "number"
-                  ? candidate.status
-                  : undefined,
+        statusCode: httpStatus,
         isRetryable:
             typeof candidate.isRetryable === "boolean"
                 ? candidate.isRetryable
@@ -139,6 +149,20 @@ export const PROVIDER_CALL_DIAGNOSTIC_ROOTS = [
 ] as const;
 
 const providerCallRoots = new Set<string>(PROVIDER_CALL_DIAGNOSTIC_ROOTS);
+
+/**
+ * Whether a diagnostic code names a failure that happened after a request left
+ * this process for a provider.
+ *
+ * Exported so a caller can ask *before* recording rather than relying on
+ * `recordProviderFailure` to file the code and then classify it away. The
+ * difference matters for `ProviderErrorEvent`: a locally rejected request is
+ * still written to that table for the diagnostic trail, and a storage 404 has
+ * no business being in a table of provider errors at all.
+ */
+export const isProviderCallDiagnosticCode = (
+    code: string | null | undefined
+): boolean => providerCallRoots.has((code || "").split(".")[0] || "");
 
 /** Which health counters a single failure is legitimate evidence for. */
 export type ProviderFailureScope = "provider" | "model" | "none";

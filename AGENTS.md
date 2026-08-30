@@ -21,6 +21,51 @@ This version has breaking changes — APIs, conventions, and file structure may 
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+# 실행할 명령을 줄 때는 실행 위치를 먼저 적습니다
+
+**사용자 환경은 Windows + PowerShell입니다.** 명령 블록을 주기 전에, 그 블록
+바로 위에 **어디서 실행하는지** 한 줄로 적습니다. 셸 문법으로 암시하지
+않습니다 — `$env:`가 PowerShell을 뜻한다는 것은 힌트이지 안내가 아니고,
+사용자가 "이거 어디서 실행하나요"를 다시 묻게 되면 그 블록은 실패한 것입니다.
+
+한 줄에 담는 것은 넷입니다.
+
+1. **어느 기계** — 로컬 PC / Railway 서비스 shell / 이 컨테이너(제가 직접 실행)
+   / Cloudflare·Stripe 같은 웹 대시보드.
+2. **어느 셸** — PowerShell인지 bash인지. 사용자에게 주는 것은 기본이
+   PowerShell입니다.
+3. **어느 디렉터리** — 저장소 clone 안이라면 그렇게 적습니다.
+4. **먼저 있어야 하는 것** — Node 22, `npm ci`, 어떤 환경변수, 어떤 권한의
+   토큰인지.
+
+예: `로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 npm ci가 끝나
+있어야 하고, R2 환경변수 4개가 필요합니다.`
+
+## 함께 지키는 것
+
+- **production 자격증명이 필요한지 아닌지를 밝힙니다.** 필요 없으면 "이건
+  자격증명 없이 됩니다"라고 적습니다. 사용자가 그걸 모르면 안 해도 될 준비를
+  합니다.
+- **읽기 전용인지 쓰는지 적습니다.** 쓰는 명령은 무엇이 바뀌는지와 되돌리는
+  방법을 같이 적습니다.
+- **package.json에 script가 있으면 그 script를 줍니다.** `node`로 풀어 쓰지
+  않습니다. script가 들고 있는 플래그가 곧 실행 조건이고, 풀어 쓰는 순간 그것을
+  옮겨 적는 일이 사람 손에 넘어갑니다. 2026-08-28에 실제로 그랬습니다 —
+  `audit:message-attachments`를 `node --import tsx …`로 풀어 주면서
+  `--conditions=react-server`가 빠졌고, 운영자는 `server-only`가 던진 "This
+  module cannot be imported from a Client Component module"를 받았습니다. 명령이
+  아니라 제 전사(轉寫)가 틀린 것이었습니다.
+  풀어 써야 할 이유가 있다면 **package.json에서 플래그를 그대로 복사**하고,
+  왜 풀어 쓰는지 한 줄로 적습니다.
+- **환경변수는 그 창에서만 산다는 것을 적습니다.** `$env:`는 PowerShell 창을
+  닫으면 사라지므로, 이어지는 명령이 같은 창을 전제하면 그렇게 말합니다.
+- **대시보드로 끝나는 일이면 스크립트를 주지 않습니다.** Cloudflare R2의
+  lifecycle 규칙처럼 화면에서 두 번 클릭할 일에 clone과 `npm ci`를 요구하지
+  않습니다. 스크립트는 판정을 자동화하거나 기록을 남길 때 함께 제시합니다.
+- **비밀값을 대화에 붙여 달라고 하지 않습니다.** 출력에 자격증명·버킷 이름·
+  object key가 없도록 스크립트를 만들고, "결과는 그대로 붙여도 안전합니다"를
+  근거와 함께 적습니다.
+
 # Accent colour roles
 
 UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 역할로** 지정합니다.
@@ -342,8 +387,24 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   fail-closed로 막습니다.
 - **`GET /v1/models`는 가격 출처가 아닙니다.** 계정별 모델 가시성만 확인합니다
   (`npm run check:openai-model-access`).
-- cache write 가격은 감사용으로 기록만 하고 과금하지 않습니다 — cache write
-  토큰을 보고하는 usage adapter가 없습니다.
+- **cache write 가격은 측정된 곳에서 과금합니다**(2026-08-30 개정,
+  `CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED`). 이전 계약
+  (`..._IS_RECORDED_NOT_BILLED`)은 write 토큰을 보고하는 adapter가 하나도 없을
+  때 맞았고, Anthropic prompt caching이 그 전제를 깼습니다. 과금 조건은
+  **양쪽**입니다 — tier의 검증된 요율 **그리고** provider가 보고한 write 토큰
+  수. 요율이 없는 write는 비용 0이되 `unpricedCacheWriteTokens`로 보고합니다.
+- **Anthropic first-party 요청에만 5분 prompt caching을 겁니다.** 판정은
+  `lib/anthropicPromptCaching.ts`의 경로 표 하나이고, MiniMax는 같은
+  `createAnthropic()` SDK를 쓰지만 provider가 다르므로 제외입니다. AI SDK의
+  `usage.inputTokens`는 **총합**(`noCache + cacheRead + cacheWrite`)이라 두 캐시
+  수치를 **빼야** 합니다. 캐시 요청은 0.25배 write premium을 provider budget에
+  미리 예약하되 `usageCredits`에는 닿지 않습니다: docs/policy/anthropic-prompt-caching.md.
+- **가격 변경은 `priceSchedule`로 효력일 전에 적어 둡니다**(2026-08-30).
+  `effectiveFrom`은 UTC instant이고 경계는 포함이며, 각 항목은 새
+  `pricingVersion`을 갖습니다. override 우선순위와 소급 금지는 그대로입니다.
+  **Claude Sonnet 5의 2026-09-01 US$3/US$15 인상은 2026-08-11에 취소됐으므로
+  예약하지 않습니다** — 공식 pricing 페이지의
+  `claude-sonnet-5-introductory-pricing` 각주.
 - 가격이 아직 검증되지 않은 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에
   담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
   90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과

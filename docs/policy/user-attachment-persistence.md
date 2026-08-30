@@ -87,8 +87,8 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 | Drive 가져오기 | `PUT /api/chat` `{action:"google-drive-import", ...}` | `{ uploadId, name, mediaType, size, kind }` — **key 없음** |
 | 초안에서 제거 | `DELETE /api/chat` `{ uploadId }` | 204, 또는 이미 전송된 파일이면 `{ kept: true }` |
 | 메시지 pre-save | `POST /api/conversations/{id}/messages` `{ messages:[{ id, content, attachmentUploadIds }] }` | `{ success, created, attachments:[{messageId, id, ordinal, name, mediaType, size, kind}] }` |
-| 대화 조회 | `GET /api/conversations/{id}` | 각 메시지에 `attachments: [{id, attachmentId, ordinal, name, mediaType, size, kind}]` — 없으면 **키 자체가 없다** |
-| 채팅 | `POST /api/chat` | 각 첨부는 `{attachmentId}` 또는 `{uploadId}` |
+| 대화 조회 | `GET /api/conversations/{id}` | 각 메시지에 `attachments: [{id, attachmentId, ordinal, name, mediaType, size, kind}]`, 누락된 파일에는 `unavailableAt`·`unavailableReason`(§11) — 없으면 **키 자체가 없다** |
+| 채팅 | `POST /api/chat` | 각 첨부는 `{attachmentId}` 또는 `{uploadId}`. 선택적으로 `acknowledgedUnavailableAttachmentIds`(§11.4) |
 
 - **`content`는 비어 있을 수 있다.** pre-save schema는
   `content.length > 0 || attachmentUploadIds.length > 0`을 요구한다. 첨부만 있는
@@ -108,7 +108,8 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 서명 URL은 **어떤 경로로도** 클라이언트에 가지 않는다.
 
 - 근거는 select이지 필터가 아니다. `PUBLIC_MESSAGE_ATTACHMENT_SELECT`는
-  6개 필드(id, ordinal, name, mediaType, size, kind)만 이름 대며,
+  8개 필드(id, ordinal, name, mediaType, size, kind, unavailableAt,
+  unavailableReason)만 이름 대며 — 뒤의 둘은 §11의 *판정*이고 위치가 아니다 —
   `include: { attachments: true }`는 쓰지 않는다 — include는 `objectKey`까지
   보낸다.
 - 타입 `PublicMessageAttachment`에 `objectKey`가 **없으므로** spread가 생겨도
@@ -158,6 +159,9 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
   다시 실리고, 서버가 다시 해석한다.
 - **"파일 없이 재시도"는 그 재시도에서만 참조를 뺀다.** 원본
   `MessageAttachment`는 손대지 않는다 — 저장된 turn은 자신이 보내진 그대로다.
+  §11.4의 "파일 없이 계속하기"도 같은 규칙이며, 다른 점은 참조를 빼는 것이
+  아니라 **서버에 특정 id를 승인해 보내고 prompt에 "읽지 못했다"는 표식이
+  들어간다**는 것이다.
 - **composer의 제거 버튼은 초안을 편집하는 것이다.** 이미 결속된 첨부는
   `discardUnboundUpload()`가 `kept: true`로 보고하고 객체를 지우지 않는다.
 
@@ -176,3 +180,130 @@ TTL sweep, `/api/chat/guest-attachment`의 `{ key }` 삭제 계약이 모두 그
   오래된 초안이 조용히 깨진다. 계정 삭제가 이 객체들을 수거하므로 영구 누수는
   아니지만, 활성 계정의 미사용 업로드는 현재 남는다 — 알려진 한계로 적어 둔다.
 - 공유 대화 스냅샷과 대화 TXT 내보내기에는 첨부가 포함되지 않는다.
+
+## 11. 객체가 사라졌을 때 — 가용성 계약
+
+개정일: 2026-08-28. §7의 수명주기가 **애플리케이션의 삭제 경로만** 다뤘기
+때문에 생긴 공백을 메운다.
+
+### 11.1 무엇이 일어났는가
+
+production release `16d98af8`, 대화 `cmtaqxy0g000202mncs315nym`. 로그인
+사용자의 JPEG 첨부 2개 중 첫 번째의 R2 객체가 사라졌다. `MessageAttachment`
+행은 남아 있었고, `MessageAttachmentCleanup` tombstone은 **없었으며**,
+`MessageAttachmentUpload.boundAt`은 정상이었다. 즉 §7의 삭제 경로 중 어느
+것도 이 객체를 지우지 않았다. 객체는 생성 약 26시간 뒤에 사라졌고 22시간 된
+두 번째 객체는 남아 있었다 — **시간 기반 bucket lifecycle 규칙**의 서명이다.
+
+증상은 저장소 오류로 나타나지 않았다. 이후 모든 turn이 그 파일을 다시 읽었고,
+`HeadObject`가 `NotFound`를 던졌고, 그 오류가 route 최상위 catch까지 올라갔다.
+그 시점에는 `dispatchProviderForLog`가 이미 설정돼 있었으므로 route는
+`AI_REQUEST_FAILED.NotFound`를 만들어 **provider health에 기록**했다.
+
+- trace `a4af8faf` — openai / gpt-5-4-mini
+- trace `b0b63db3` — anthropic / claude-sonnet-5
+
+서로 다른 두 provider가 자기와 무관한 장애로 기록됐고, 사용자는 "어떤 모델로
+바꿔도 안 된다"를 경험했다. 네트워크 이쪽에서 난 오류였으니 당연했다.
+
+**교훈은 좁고 기계적이다: 오류의 계층은 발생 지점에서 정해야 하며, catch 지점
+에서 추론할 수 없다.** stack이 최상위 catch까지 풀리고 나면 scope에 남은 것은
+"모든 경우에 scope에 있던 것"뿐이고, provider 이름이 scope에 있다는 사실은
+provider가 호출됐다는 증거가 아니다.
+
+### 11.2 보존 계약 (이것이 기준이다)
+
+- **로그인 사용자의 입력 첨부파일은 대화 또는 계정이 삭제될 때까지 유지한다.**
+  §7의 세 경로(대화 삭제, 대화 일괄 삭제, 계정 삭제)가 삭제의 전부다.
+- **게스트 첨부파일만 임시 보존·TTL을 따른다.** 그 sweep은 애플리케이션 코드
+  (`listExpiredR2Objects`)이지 bucket 규칙이 아니다.
+- **DB가 참조하는 객체 prefix에 시간 기반 삭제 규칙을 두지 않는다.** 보호
+  대상은 `attachments/`, `message-artifacts/`, `images/`,
+  `assistant-knowledge/`이며 `scripts/check-r2-lifecycle-policy-core.mjs`의
+  `PROTECTED_OBJECT_PREFIXES`가 목록이다. `npm run check:r2-lifecycle-policy`가
+  live bucket을 읽어 fail-closed로 판정하고, `tests/r2LifecyclePolicy.test.mjs`
+  가 빈 prefix·상위 prefix 탐지를 고정한다.
+- 사용자에게 보이는 보존 문구는 이 계약과 **한 문장으로** 일치해야 한다.
+  `locales/*.ts`의 `dataRetentionDescription`·`attachmentRetentionNotice`,
+  개인정보 문구, `components/marketing/searchIntentContent.ts`가 대상이며
+  `tests/messageAttachmentAvailability.test.mjs`가 "약 하루" 계열 문구의
+  재등장을 막는다.
+
+### 11.3 누락은 확정된 404로만 기록한다
+
+`MessageAttachment`에 nullable 컬럼 셋을 추가했다(expand migration
+`20260828090000_message_attachment_availability`).
+
+| 컬럼 | 뜻 |
+|---|---|
+| `unavailableAt` | 저장소가 **404로 확정**한 시각 |
+| `unavailableReason` | `MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS`의 값 |
+| `availabilityCheckedAt` | 답이 무엇이든 **확인한** 시각 |
+
+- **403·5xx·timeout은 기록하지 않는다.** 셋 다 "모른다"는 뜻이고, 그것을
+  404로 적으면 5분짜리 자격증명 장애가 "이 계정은 파일을 전부 잃었다"는 영구
+  기록이 된다. 판정은 `classifyStorageError()`(`lib/storageObjectErrors.ts`)
+  하나가 한다.
+- **먼저 쓴 값이 이긴다.** `unavailableAt`은 NULL인 행에만 쓰므로 timestamp는
+  *발견 시점*을 계속 말한다. 재확인은 `availabilityCheckedAt`이 받는다.
+- **행도 메시지도 지우지 않는다.** 카드·파일명·크기가 남는 것이 요점이다.
+  어떤 파일을 잃었는지 볼 수 없는 사람은 그 파일을 다시 첨부할 수 없다.
+- **객체가 "돌아와도" 컬럼을 되돌리지 않는다.** key는 한 번 쓰이고 다시 쓰이지
+  않으므로, 돌아온 객체는 사람이 볼 사실이지 코드가 조용히 뒤집을 값이 아니다.
+
+### 11.4 요청은 fail-closed다
+
+- 누락이 확인되면 `ATTACHMENT_UNAVAILABLE` / **410**으로 거절한다. 응답은
+  attachment id, 표시용 파일명, trace id, scope(`current_turn` ·`past_turn`),
+  `canContinueWithout`만 싣는다. objectKey·bucket·endpoint·서명 URL은 어떤
+  경로로도 나가지 않는다(§5).
+- 거절은 **가격 산정·크레딧 예약·provider 호출보다 앞**에서 일어난다. 누락된
+  파일은 크레딧 0, provider 요청 0, health 변화 0이어야 한다.
+- **한 번의 거절이 누락된 파일 전부를 이름 댄다.** 파일마다 왕복하면 같은
+  lifecycle 규칙이 지운 두 파일이 서로 다른 두 사고처럼 보인다.
+- **조용히 빼고 모델을 부르지 않는다.** 사용자가 명시적으로 `acknowledged
+  UnavailableAttachmentIds`에 그 id를 담아 보낸 요청에서만 제외하며, 그때도
+  prompt에 `unavailableAttachmentMarker()`가 만든 "이 파일은 읽지 못했고 내용을
+  모른다" 블록을 넣는다. 승인은 **id 단위**이며 boolean이 아니다 — boolean은
+  아직 보여 준 적 없는 파일까지 한 번에 승인한다.
+- 승인은 삭제가 아니다. 행·메시지·카드는 그대로다(§8과 같은 규칙).
+- 저장소가 답하지 못한 경우는 `ATTACHMENT_STORAGE_UNAVAILABLE` / **503**이며
+  재시도가 옳은 조언이다. 두 코드는 조언이 반대이므로 절대 합치지 않는다.
+- 게스트의 `GUEST_ATTACHMENT_EXPIRED` 계약은 그대로다(§9).
+
+### 11.5 계층이 있는 오류
+
+`lib/chatFailureLayer.ts`가 `validation` · `storage` · `application` ·
+`provider_request` · `provider_stream`을 정의하고, 뒤의 둘만 provider health
+증거다.
+
+- 준비 단계의 실패는 `ChatLocalFailure`로 **타입이 말한다.** 진단 코드 root는
+  `CHAT_STORAGE_FAILED` 등이며 `PROVIDER_CALL_DIAGNOSTIC_ROOTS`에 절대 넣지
+  않는다 — 그래서 `classifyProviderFailure()`가 `LOCAL_REJECTION`/scope `none`
+  으로 판정한다.
+- provider 호출은 `beginProviderCall()` 안에서만 일어나고, 그 wrapper만
+  `ProviderCallRecord`를 만들 수 있다. **boolean이 아니라 객체인 이유**는
+  boolean은 세팅을 잊을 수 있고 그 부재가 false와 구별되지 않기 때문이다.
+  최상위 catch는 "이 record가 있는가"라는 구조적 질문만 한다.
+- `RoutingAttempt.failureLayer`에 `storage`·`application`을 추가했다
+  (`20260828093000_routing_attempt_local_failure_layers`). 둘 다 fallback
+  대상이 아니다 — 다른 모델도 같은 파일을 읽지 못한다.
+- `TraceErrorEvidence`에 `failureLayer`·`storageStatus`를 추가했다. 신고된
+  trace를 읽는 사람이 provider 404와 storage 404를 구분할 수 있어야 한다.
+
+### 11.6 감사와 복구
+
+- `npm run audit:message-attachments`가 read-only로 전수 조사한다. keyset
+  cursor로 재개 가능하고, 동시성은 낮으며, 결과를 `available` ·`missing` ·
+  `temporarily_unreachable` ·`metadata_mismatch`로 나눈다. 보고 행은 allowlist
+  (`auditRow`)이며 objectKey·파일명·본문·이메일을 담지 않는다.
+- `--apply`는 **확정된 404 행에만** `unavailableAt`을 쓴다. 행도 객체도
+  지우지 않으며 티켓 인자를 요구한다.
+- **사라진 bytes는 복구할 수 없다.** lifecycle 규칙을 고치는 것은 앞으로의
+  손실만 막고 이미 사라진 것을 되돌리지 않는다. 특정 파일의 복구 경로는 사용자
+  가 다시 첨부하는 것뿐이며, 운영 문서에도 그렇게 적는다
+  (`docs/ops/r2-object-lifecycle.md`).
+- **오염된 provider health는 소급 조작하지 않는다.** 감사 이벤트를 지우거나
+  aggregate bucket을 직접 수정하지 않고, 기존의 검증된 recovery 절차
+  (`/api/admin/provider-health/verify` → `/recover`)로만 해제하며, 실제 live
+  verification이 성공한 뒤에만 해제한다.

@@ -42,7 +42,9 @@ import {
     nativeSearchIsDispatchable,
 } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
-import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { reserveTurnSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { appManagedSearchIsDispatchable } from "@/lib/webSearchCapability";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
@@ -331,6 +333,10 @@ export async function POST(request: Request) {
         // a restart, has to be visible here or the refusal it earned lasts
         // only as long as the process that saw it.
         await refreshSearchQueryCeilingBreaches();
+        // Resolved once for the whole quote, from the same function the chat
+        // route reads. A quote that answered "search-capable" differently from
+        // the dispatch would admit a comparison the dispatch then refuses.
+        const searchBackendReadiness = resolveWebSearchBackendReadiness();
         const budgets = models.map((model) => {
             // Per model, because history is filtered per model: a comparison
             // turn charges each model for the branch it can actually see.
@@ -360,6 +366,18 @@ export async function POST(request: Request) {
             const modelNativeSearchEnabled =
                 payload.webSearchMode === "always" &&
                 nativeSearchIsDispatchable(modelSearchCapability);
+            // The other route, derived from the same readiness map the chat
+            // route resolves. Priced here for the same reason the native one
+            // is: this turn carries a tool schema and feeds retrieved text back
+            // into the prompt, and a quote that missed it would admit a
+            // comparison against a smaller input reservation than the requests
+            // it admits then send.
+            const modelAppManagedSearchEnabled =
+                payload.webSearchMode === "always" &&
+                appManagedSearchIsDispatchable(
+                    modelSearchCapability,
+                    searchBackendReadiness
+                );
             const turnSystemBlocks = buildChatTurnSystemBlocks({
                 modelId: model.id,
                 provider: model.provider,
@@ -370,6 +388,7 @@ export async function POST(request: Request) {
                 nativeSearchForced:
                     modelNativeSearchEnabled &&
                     modelSearchCapability.canForceExecution,
+                appManagedSearchEnabled: modelAppManagedSearchEnabled,
                 turnAttachments: payload.attachments.map((attachment, index) => ({
                     handle: `att_${index + 1}`,
                     name: "",
@@ -407,10 +426,11 @@ export async function POST(request: Request) {
             // than the requests it admits then spend -- and the guardrail this
             // route exists to check ahead of time was checked against the
             // wrong number.
-            const nativeSearchReservation = reserveNativeSearchCost({
+            const nativeSearchReservation = reserveTurnSearchCost({
                 model,
                 capability: modelSearchCapability,
                 nativeSearchEnabled: modelNativeSearchEnabled,
+                appManagedSearchEnabled: modelAppManagedSearchEnabled,
             });
             if (!nativeSearchReservation.ok) {
                 // The same refusal the chat route raises, for the same reason
@@ -427,10 +447,13 @@ export async function POST(request: Request) {
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         payload.webSearchMode ?? "off",
-                        modelSearchCapability
+                        modelSearchCapability,
+                        searchBackendReadiness
                     ),
                     nativeSearchEnabled: modelNativeSearchEnabled,
-                    nativeSearch: nativeSearchReservation,
+                    appManagedSearchEnabled: modelAppManagedSearchEnabled,
+                    nativeSearch: nativeSearchReservation.native,
+                    searchBackend: nativeSearchReservation.searchBackend,
                 }
             );
         });

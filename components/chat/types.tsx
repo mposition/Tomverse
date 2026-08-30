@@ -36,6 +36,22 @@ export type ChatAttachment = {
    */
   objectKey?: string;
   /**
+   * When object storage confirmed, with a 404, that this file's bytes are
+   * gone.
+   *
+   * Read from the conversation payload, so it survives a reload -- which is
+   * the point: a card that only knew it was broken during the failing turn
+   * would look ordinary again the next time the conversation was opened, and
+   * the person would attach nothing and ask about a file nobody has.
+   *
+   * A verdict, never a location. The server sends this and a reason; it never
+   * sends a key, a bucket or a URL
+   * (docs/policy/user-attachment-persistence.md section 5).
+   */
+  unavailableAt?: string;
+  /** One of MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS. */
+  unavailableReason?: string;
+  /**
    * What the server made of an archive: how many entries it will read and how
    * many it left out.
    *
@@ -74,6 +90,24 @@ export type Message = {
   modelId?: string;
   errorCode?: string;
   errorHadAttachments?: boolean;
+  /**
+   * The stored attachments this turn could not read, from an
+   * ATTACHMENT_UNAVAILABLE refusal.
+   *
+   * Ids only, and only the ones the server named. They are what the "continue
+   * without it" action sends back as its acknowledgement, which is why a
+   * client cannot widen its own permission here: an id the server did not
+   * name acknowledges nothing.
+   */
+  unavailableAttachmentIds?: string[];
+  /**
+   * Whether continuing without those files is offered.
+   *
+   * False for a file on the message being sent right now -- there the better
+   * remedy is obvious and offering to proceed would invite a question about a
+   * document that was just lost. True only for files from earlier turns.
+   */
+  canContinueWithoutUnavailableAttachments?: boolean;
   /**
    * Live-memory error report context for this message's own error: its trace,
    * where that trace came from, and (when the server issued one) the signed
