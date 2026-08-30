@@ -189,7 +189,10 @@ B+ 계약(`.github/audits/memory-eval-gold-contract-2026-08-27.md` 12.1)은
 이동이 실행될 때 succ-5는 동결본이므로 **새 datasetVersion**을 작성하고, 이동한
 사례는 regression corpus에 보존하며 provenance에 규칙 ID와 이동 사유를 적습니다.
 gold가 바뀌는 5건은 `.github/audits/memory-eval-gold-contract-2026-08-27.md`
-12.2대로 **수정된 형태로** 보존하고 decision set에는 1:1 대체를 씁니다.
+12.2대로 **수정된 형태로** 보존합니다.
+
+**decision set에는 10건 전부에 대해 1:1 대체를 씁니다** — 5건이 아닙니다.
+빠지는 자리와 대체 계획은 §5.2에 있습니다.
 
 ## 5. v7 문안 초안 (승인 전)
 
@@ -273,9 +276,39 @@ datasetVersion 작성이 함께 계획된 뒤**에 합니다. prompt만 먼저 �
 dataset이 없고, 이동 대상 10건이 decision set에 남은 채로 새 prompt를 재면 그
 회차는 **자기가 만든 규칙 위에서 측정한 것**이 됩니다.
 
-순서는 이렇습니다 — 새 datasetVersion 계획·작성(이동 10건 격리, gold 수정 5건
-1:1 대체) → `mem-extract-v7` 구현 → 예산 승인 → 유료 실행. 뒤의 둘은 이 문서의
-승인 범위 밖입니다.
+**대체는 10건 전부입니다, gold 수정 5건이 아니라.** B+로 decision set에서
+빠지는 것은 10건이고, 그만큼을 새로 쓰지 않으면 cell floor와 총 1,150건이
+깨집니다. 빠지는 자리는 한 category에 몰려 있습니다.
+
+| cell | 현재 | 빠짐 | 대체 없이 두면 | §12.2 하한 |
+|---|---:|---:|---:|---:|
+| `assistant_only:ko` | 125 | **6** | 119 | 125 |
+| `assistant_only:en` | 125 | **4** | 121 | 125 |
+
+> 새 datasetVersion 계획·작성 — B+ 원본 10건을 regression corpus로 격리하고,
+> 동일 cell에 신규 decision case 10건을 1:1로 작성·검수·동결합니다. 이 중 gold
+> 결함 5건은 승인된 수정 label로 regression에 보존하고, 나머지 5건은 기존
+> label을 유지합니다. 전건에 provenance와 `replacementId`를 기록합니다.
+
+즉 regression에 보존되는 형태가 둘로 나뉩니다 — `ko-23`b·`en-311`·`en-92`·
+`en-10`·`en-27`은 §1.1이 승인한 **수정된 label**로, `ko-3`·`ko-19`·`ko-15`·
+`ko-53`·`ko-12`·`ko-23`a는 **기존 label 그대로**입니다. 앞의 다섯은 gold가
+틀렸던 사례이고 뒤의 여섯은 gold가 맞았는데 규칙 형성에 쓰인 사례이므로,
+같은 이유로 이동하지만 보존 형태가 같지 않습니다.
+
+### 5.3 전체 순서
+
+1. **원본 10건 격리 + 신규 대체 10건 작성** — 같은 cell에 1:1
+   (`assistant_only:ko` 6, `assistant_only:en` 4).
+2. **cell floor · provenance · decision/regression 격리 검사.**
+3. **사람 검수 및 새 datasetVersion 동결.**
+4. **`mem-extract-v7` 구현 · digest 고정.**
+5. **새 pair 등록 — 처음에는 예산 없음.**
+6. **별도 예산 승인 후 유료 실행.**
+
+**5번과 6번은 이 문서의 승인 범위 밖입니다.** pair 승인, 예산, release gate,
+flag 활성화 어느 것도 여기서 승인되지 않았습니다 — 승인된 것은 문안과 이
+순서뿐입니다.
 
 ## 6. 이 문서가 바꾸지 않은 것
 
