@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   AnthropicUsageParseError,
   anthropicUsageReportUrl,
+  attributionScope,
+  BASE_GROUP_BY,
   cacheEfficiencyMetrics,
+  FAST_MODE_BETA_HEADER,
   CACHE_READ_MULTIPLIER,
   CACHE_WRITE_MULTIPLIER,
   completedUtcDayRange,
@@ -35,7 +40,7 @@ const usageResult = (overrides = {}) => ({
   },
   cache_read_input_tokens: 0,
   context_window: "0-200k",
-  inference_geo: null,
+  inference_geo: "global",
   model: "claude-sonnet-5",
   output_tokens: 0,
   server_tool_use: { web_search_requests: 0 },
@@ -248,25 +253,113 @@ test("explicit --from/--to is validated and bounded", () => {
   assert.match(resolveReportRange({ days: 2.5, now }).error, /whole number/);
 });
 
-test("the request URL asks for every dimension the pricing depends on", () => {
-  const url = anthropicUsageReportUrl({
+const reportUrl = (overrides = {}) =>
+  anthropicUsageReportUrl({
     baseUrl: "https://api.anthropic.com/v1/organizations/usage_report/messages",
     startingAt: new Date("2026-08-23T00:00:00.000Z"),
     endingAt: new Date("2026-08-30T00:00:00.000Z"),
     limit: 7,
+    ...overrides,
   });
+
+test("the request URL asks for every dimension the pricing depends on", () => {
+  const url = reportUrl();
   assert.equal(url.searchParams.get("bucket_width"), "1d");
   assert.equal(url.searchParams.get("limit"), "7");
+  assert.equal(url.searchParams.get("starting_at"), "2026-08-23T00:00:00.000Z");
+  // A dimension not in `group_by[]` comes back as null, so a report that
+  // priced rows without asking for service_tier would rate a batch row at
+  // standard without ever seeing that it was batch. `inference_geo` is on this
+  // list for the same reason and costs 1.1x when it is `us`.
   assert.deepEqual(url.searchParams.getAll("group_by[]"), [
     "model",
     "service_tier",
     "context_window",
+    "inference_geo",
   ]);
-  assert.equal(url.searchParams.get("starting_at"), "2026-08-23T00:00:00.000Z");
-  // A dimension not in `group_by[]` comes back as null, so a report that
-  // priced rows without asking for service_tier would rate a batch row at
-  // standard without ever seeing that it was batch.
-  assert.ok(url.searchParams.getAll("group_by[]").includes("service_tier"));
+  assert.deepEqual(url.searchParams.getAll("group_by[]"), [...BASE_GROUP_BY]);
+});
+
+test("speed is grouped only on request, and never without its beta", () => {
+  // Both halves are one decision: the `speed` group-by is gated on the
+  // fast-mode beta, and asking for the dimension without the header is not
+  // loudly refused -- so a default that grouped by speed would silently return
+  // a dimension nobody could rely on.
+  assert.equal(
+    reportUrl().searchParams.getAll("group_by[]").includes("speed"),
+    false,
+    "speed must be opt-in"
+  );
+  assert.equal(
+    reportUrl({ groupBySpeed: true })
+      .searchParams.getAll("group_by[]")
+      .includes("speed"),
+    true
+  );
+  assert.equal(FAST_MODE_BETA_HEADER, "fast-mode-2026-02-01");
+
+  // The runner sends the header exactly when it asks for the dimension.
+  const runner = readFileSync(
+    join(import.meta.dirname, "..", "scripts/report-anthropic-cache-efficiency.mjs"),
+    "utf8"
+  );
+  assert.match(
+    runner,
+    /betas: groupBySpeed \? \[FAST_MODE_BETA_HEADER\] : \[\]/,
+    "the beta header must be sent exactly when the speed dimension is requested"
+  );
+  assert.match(runner, /"anthropic-beta"/);
+});
+
+test("workspace and API key filters reach the request when given", () => {
+  const url = reportUrl({
+    workspaceIds: ["wrkspc_1", "wrkspc_2"],
+    apiKeyIds: ["apikey_1"],
+  });
+  assert.deepEqual(url.searchParams.getAll("workspace_ids[]"), [
+    "wrkspc_1",
+    "wrkspc_2",
+  ]);
+  assert.deepEqual(url.searchParams.getAll("api_key_ids[]"), ["apikey_1"]);
+  // Absent by default, so an unfiltered run sends no filter rather than an
+  // empty one the API might read differently.
+  assert.deepEqual(reportUrl().searchParams.getAll("workspace_ids[]"), []);
+});
+
+test("an unfiltered run reports itself as organization-wide", () => {
+  // The most likely way this report gets quoted wrongly: an org-wide number
+  // read as Tomverse's. The scope is declared, never inferred -- an
+  // organization with one workspace and one with three look identical in a
+  // response that was not grouped by workspace.
+  const wide = attributionScope({});
+  assert.equal(wide.filtered, false);
+  assert.match(wide.label, /entire Anthropic organization/);
+  assert.match(wide.caveat, /ORGANIZATION-WIDE/);
+  assert.match(wide.caveat, /not Tomverse/);
+  assert.match(wide.caveat, /--workspace-id|--api-key-id/);
+
+  const narrow = attributionScope({ workspaceIds: ["wrkspc_1"] });
+  assert.equal(narrow.filtered, true);
+  assert.match(narrow.label, /1 workspace/);
+  assert.doesNotMatch(narrow.caveat, /ORGANIZATION-WIDE/);
+});
+
+test("the report says it cannot decide the 1-hour TTL question", () => {
+  // The claim that was there before -- that this report is the thing that will
+  // answer the TTL question -- was wrong: a daily total cannot distinguish
+  // evenly spread traffic from two bursts twelve hours apart.
+  const runner = readFileSync(
+    join(import.meta.dirname, "..", "scripts/report-anthropic-cache-efficiency.mjs"),
+    "utf8"
+  );
+  assert.match(runner, /NOT decidable from this report/);
+  assert.match(runner, /start-to-start gap/);
+  assert.match(runner, /anthropic-prompt-caching\.md section 3\.1/);
+  assert.doesNotMatch(
+    runner,
+    /report .{0,40}will answer (it|the TTL)/i,
+    "the report must not claim it answers the TTL question"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -279,7 +372,10 @@ const row = (overrides = {}) => ({
   model: "claude-sonnet-5",
   serviceTier: "standard",
   contextWindow: "0-200k",
-  inferenceGeo: null,
+  // "global" rather than null: `BASE_GROUP_BY` always asks for the dimension,
+  // so a real response carries a value. A null here means the response did not
+  // answer, which is its own unpriced reason -- see the test below.
+  inferenceGeo: "global",
   speed: null,
   uncachedInputTokens: 0,
   cacheCreation5mTokens: 0,
@@ -362,33 +458,67 @@ test("an empty period reports null rates rather than a misleading zero", () => {
   assert.equal(summary.overall.metrics.listPriceSavingShare, null);
 });
 
-test("batch, fast mode and US-only rows are reported unpriced, with their tokens intact", () => {
+test("batch, fast mode, US-only and ungrouped-geo rows are reported unpriced, with their tokens intact", () => {
   const rows = [
     row({ serviceTier: "batch", uncachedInputTokens: 10_000 }),
     row({ speed: "fast", uncachedInputTokens: 20_000 }),
     row({ inferenceGeo: "us", uncachedInputTokens: 30_000 }),
+    row({ inferenceGeo: null, uncachedInputTokens: 25_000 }),
+    row({ inferenceGeo: "some_new_geo", uncachedInputTokens: 5_000 }),
     row({ model: "claude-something-unreleased", uncachedInputTokens: 40_000 }),
   ];
   for (const [index, reason] of [
     UNPRICED_REASONS.SERVICE_TIER,
     UNPRICED_REASONS.SPEED,
     UNPRICED_REASONS.INFERENCE_GEO,
+    UNPRICED_REASONS.INFERENCE_GEO_UNKNOWN,
+    UNPRICED_REASONS.INFERENCE_GEO,
     UNPRICED_REASONS.UNKNOWN_MODEL,
   ].entries()) {
     const priced = priceUsageRow(rows[index], resolveFixedPrice);
-    assert.equal(priced.priced, false);
-    assert.equal(priced.reason, reason);
+    assert.equal(priced.priced, false, `row ${index} must be unpriced`);
+    assert.equal(priced.reason, reason, `row ${index} reason`);
   }
 
   const summary = summariseUsageRows(rows, resolveFixedPrice);
   // Tokens counted -- they are real traffic.
-  assert.equal(summary.overall.totals.uncachedInputTokens, 100_000);
+  assert.equal(summary.overall.totals.uncachedInputTokens, 130_000);
   // Cost excluded -- their rates are not in this registry, and estimating them
   // would put an unverified number into a savings figure somebody will quote.
   assert.equal(summary.overall.totals.actualInputCostUsd, 0);
-  assert.equal(summary.overall.totals.unpricedRowCount, 4);
+  assert.equal(summary.overall.totals.unpricedRowCount, 6);
   assert.equal(summary.overall.totals.pricedRowCount, 0);
-  assert.equal(summary.unpriced.length, 4);
+});
+
+test("a not_available geo is priced rather than refused", () => {
+  // `not_available` means the model predates the `inference_geo` parameter, so
+  // it *cannot* have run US-only and always billed at standard rates. Refusing
+  // it would drop every pre-4.6 model out of the totals for honestly reporting
+  // that the dimension does not apply to it -- which would understate the
+  // traffic this report exists to describe.
+  const priced = priceUsageRow(
+    row({ inferenceGeo: "not_available", uncachedInputTokens: 1_000_000 }),
+    resolveFixedPrice
+  );
+  assert.equal(priced.priced, true);
+  assert.equal(priced.uncachedCostUsd, 2);
+});
+
+test("global and not_available price identically; us and null do not price at all", () => {
+  const priceable = ["global", "not_available"].map(
+    (geo) =>
+      priceUsageRow(row({ inferenceGeo: geo, uncachedInputTokens: 500_000 }), resolveFixedPrice)
+        .uncachedCostUsd
+  );
+  assert.deepEqual(priceable, [1, 1]);
+  for (const geo of ["us", null]) {
+    assert.equal(
+      priceUsageRow(row({ inferenceGeo: geo, uncachedInputTokens: 500_000 }), resolveFixedPrice)
+        .priced,
+      false,
+      `inference_geo=${geo} must not be priced at the standard rate`
+    );
+  }
 });
 
 test("a range crossing a price change prices each day at that day's rate", () => {

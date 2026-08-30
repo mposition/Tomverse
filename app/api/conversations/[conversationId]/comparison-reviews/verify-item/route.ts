@@ -193,7 +193,10 @@ export async function POST(
         output: Output.object({ schema: verificationCheckSchema }),
         ...getModelGenerationSettings(model, {
             temperature: 0.1,
-            promptCachePath: "comparison_review",
+            // Its own path, not the full review's. The two are different
+            // requests over different prompts, and one policy decision must
+            // not silently cover both -- lib/anthropicPromptCaching.ts.
+            promptCachePath: "comparison_review_verify_item",
         }),
         maxOutputTokens: budget.maxOutputTokens,
         maxRetries: 1,

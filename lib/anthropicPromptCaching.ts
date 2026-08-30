@@ -35,6 +35,43 @@ import type { AiModel } from "@/lib/models";
  * That is why this is a table of named paths rather than a boolean. Each entry
  * says whether the path repeats a prefix and why, so adding a call site is a
  * decision somebody wrote down rather than a default that got inherited.
+ *
+ * ## Launch scope: `chat_turn` only
+ *
+ * Four paths that were `true` when this table was written are now `false`, and
+ * the reason is not that their prefixes turned out to be worse. It is that a
+ * caching path has three parts and they were only wired on two paths:
+ *
+ *   1. `createChatBudget(..., { promptCachePath })` -- so the provider budget
+ *      authorises the 1.25x write premium before dispatch;
+ *   2. `getModelGenerationSettings(..., { promptCachePath })` -- so the
+ *      request actually carries the marker;
+ *   3. `settleChatUsage(..., { cacheWriteInputTokens })` -- so the write is
+ *      billed at 1.25x instead of disappearing into the uncached remainder.
+ *
+ * `comparison_review`, `comparison_review_verify_item` and `compare_summary`
+ * had (2) and neither (1) nor (3): they would have sent a cache marker against
+ * a budget that never authorised it, and then settled the resulting writes at
+ * the plain input rate. Both halves are silent -- an under-authorised turn
+ * still dispatches, and an under-billed one still settles -- so nothing would
+ * have reported it.
+ *
+ * Turning them off is the fix rather than wiring the other two parts, because
+ * the prefix argument each of them rested on has not been demonstrated either
+ * (see each entry). Two unproven things at once is not a launch.
+ *
+ * `tests/anthropicPromptCachingWiring.test.mjs` now fails if any `caches: true`
+ * path is missing any of the three, so the gap cannot reopen silently.
+ *
+ * ## Re-enabling a path
+ *
+ * A `false` here becomes `true` only with the evidence named in
+ * docs/policy/anthropic-prompt-caching.md section 2.1: a byte-identical
+ * rendered prefix across two real dispatches on the same Anthropic model,
+ * measured on a path that actually reaches the provider. A re-run answered
+ * from the `ComparisonReview` input-hash cache is not evidence -- the request
+ * that would have read the prompt cache is precisely the one that never
+ * happens.
  */
 export type AnthropicPromptCachePath =
     /** A chat turn. The conversation prefix is resent every turn. */
@@ -43,6 +80,17 @@ export type AnthropicPromptCachePath =
     | "chat_fallback_turn"
     /** AI Review over a comparison's answers. */
     | "comparison_review"
+    /**
+     * Re-checking one item of an existing review.
+     *
+     * Its own path rather than a reuse of `comparison_review`, because the two
+     * are different requests: this one is a single item and its own prompt, and
+     * sharing a path would make one policy decision cover two prefixes nobody
+     * compared. A shared path also hides a coverage gap -- the wiring test
+     * below checks each path's call sites, and a path used from two routes
+     * passes as soon as one of them is wired.
+     */
+    | "comparison_review_verify_item"
     /** The one-shot summary of a comparison. */
     | "compare_summary"
     /** Naming a conversation from its opening turns. */
@@ -72,29 +120,49 @@ export const ANTHROPIC_PROMPT_CACHE_PATHS: Readonly<
             "breakpoint moves forward over a prefix that is already cached.",
     },
     chat_fallback_turn: {
-        caches: true,
+        caches: false,
         rationale:
-            "Same conversation, same messages, second model. Caches are " +
-            "model-scoped so the fallback cannot read the primary's entry, but " +
-            "it can read its own from an earlier turn that fell back the same " +
-            "way -- and a retry of this turn reads what this one writes. " +
-            "Treating the fallback differently from the primary would also " +
-            "make the two attempts' request manifests differ in a way that has " +
-            "nothing to do with the model, which is the one thing a manifest " +
-            "exists to rule out.",
+            "Held out of the first launch scope. The earlier rationale was that " +
+            "a fallback reads its own entry from an earlier turn that fell back " +
+            "the same way -- which requires the same conversation to fail over " +
+            "to the same model twice inside five minutes, and nothing measures " +
+            "how often that happens. Automatic fallback is rare by design, so " +
+            "the likely shape is a write per fallback and no read at all: a " +
+            "1.25x surcharge on the turns a user is already waiting longer for. " +
+            "Re-enabling needs the fallback re-dispatch rate from routing " +
+            "telemetry, not an argument from symmetry with the primary.",
     },
     comparison_review: {
-        caches: true,
+        caches: false,
         rationale:
-            "A review prompt is a fixed rubric plus the answers under review, " +
-            "and one comparison is reviewed more than once -- re-runs and " +
-            "per-item verification resend the same rubric and the same answers.",
+            "Held out of the first launch scope, and the claim it rested on was " +
+            "wrong. 'One comparison is reviewed more than once' describes a " +
+            "re-run, and a re-run does not reach the provider: the stored " +
+            "`ComparisonReview` row is keyed on an input hash and answered from " +
+            "the database, so the second request that would have read the cache " +
+            "is the one that never happens. Re-enabling needs the evidence in " +
+            "docs/policy/anthropic-prompt-caching.md section 2.1.",
+    },
+    comparison_review_verify_item: {
+        caches: false,
+        rationale:
+            "A single item of an existing review, re-checked on demand. One " +
+            "request per item per user action, over a prompt built from that " +
+            "item -- so there is no second request with this prefix, whatever " +
+            "the full review does. Named separately from `comparison_review` " +
+            "precisely so a decision about that path cannot silently become a " +
+            "decision about this one.",
     },
     compare_summary: {
-        caches: true,
+        caches: false,
         rationale:
-            "Shares the comparison's answers with the review path above and is " +
-            "commonly asked for right after it, inside the 5-minute window.",
+            "Held out of the first launch scope. It shares the comparison's " +
+            "answers with the review path, but 'shares content with another " +
+            "request' is not the same as 'repeats a prefix': caching is a " +
+            "byte-prefix match over tools, then system, then messages, and the " +
+            "summary's system prompt and instructions differ from the review's " +
+            "from the first token. Nothing has compared the two rendered " +
+            "prefixes, and until something has, this is a guess.",
     },
     conversation_title: {
         caches: false,
@@ -137,11 +205,20 @@ export const ANTHROPIC_PROMPT_CACHE_PATHS: Readonly<
  * base input to write against the 5-minute entry's 1.25x, so it pays only when
  * requests sharing a prefix start more than five minutes apart -- and a read
  * refreshes the timer at no cost, so continuous traffic keeps a 5-minute entry
- * alive indefinitely and the doubled write buys nothing. Whether Tomverse's
- * traffic has those gaps is a question about production data this repository
- * does not hold; `npm run report:anthropic-cache-efficiency` is the thing that
- * will answer it. Until it has, the cheaper write is the one that cannot be
- * wrong by much.
+ * alive indefinitely and the doubled write buys nothing.
+ *
+ * Whether Tomverse's traffic has those gaps is a question about production
+ * data this repository does not hold, and -- importantly -- one the seven-day
+ * report cannot answer either. That report aggregates per day and per model,
+ * and the quantity the TTL decision turns on is the *start-to-start gap
+ * between consecutive requests that share a prefix*. A daily total cannot
+ * distinguish traffic evenly spread across a day from the same traffic in two
+ * bursts twelve hours apart; both produce the same row.
+ *
+ * What could answer it is in docs/policy/anthropic-prompt-caching.md section 3.1:
+ * a privacy-safe prefix-digest histogram of re-call intervals, or a 5m/1h
+ * canary split. Until one of them has run, the cheaper write is the one that
+ * cannot be wrong by much.
  *
  * Sent explicitly rather than left to the provider's default so the value is
  * in the request bytes -- and therefore in the manifest's effective-request

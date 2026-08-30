@@ -23,7 +23,10 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import {
     AnthropicUsageParseError,
     anthropicUsageReportUrl,
+    attributionScope,
+    BASE_GROUP_BY,
     cacheEfficiencyMetrics,
+    FAST_MODE_BETA_HEADER,
     formatShare,
     formatTokens,
     formatUsd,
@@ -53,7 +56,19 @@ const argValue = (name) => {
     return hit ? hit.slice(prefix.length) : undefined;
 };
 
+/** Repeatable: `--workspace-id=a --workspace-id=b`. */
+const argValues = (name) => {
+    const prefix = `--${name}=`;
+    return process.argv
+        .filter((arg) => arg.startsWith(prefix))
+        .map((arg) => arg.slice(prefix.length).trim())
+        .filter(Boolean);
+};
+
 const json = process.argv.includes("--json");
+// Opt-in, because the `speed` group-by requires a beta header and an ordinary
+// run should not depend on a beta's availability.
+const groupBySpeed = process.argv.includes("--speed");
 
 const fail = (message) => {
     if (json) {
@@ -108,13 +123,20 @@ const readBoundedJson = async (response) => {
     }
 };
 
-const adminFetch = async (url, adminKey) => {
+const adminFetch = async (url, adminKey, { betas = [] } = {}) => {
     const response = await fetch(url, {
         cache: "no-store",
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: {
             Accept: "application/json",
             "anthropic-version": "2023-06-01",
+            // The beta header travels with the request that needs the beta
+            // dimension, never as a standing default: a group-by that asks for
+            // `speed` without it is not loudly refused, so the two have to be
+            // one decision rather than two settings that can drift apart.
+            ...(betas.length > 0
+                ? { "anthropic-beta": betas.join(",") }
+                : {}),
             "x-api-key": adminKey,
             // Anthropic asks integrations to identify themselves so usage
             // patterns are attributable. No account identifier in it.
@@ -190,6 +212,11 @@ const main = async () => {
         );
     }
 
+    const scope = attributionScope({
+        workspaceIds: argValues("workspace-id"),
+        apiKeyIds: argValues("api-key-id"),
+    });
+
     const daysArg = argValue("days");
     const range = resolveReportRange({
         from: argValue("from"),
@@ -217,8 +244,12 @@ const main = async () => {
                     endingAt: range.endingAt,
                     limit: range.days,
                     page,
+                    groupBySpeed,
+                    workspaceIds: scope.workspaceIds,
+                    apiKeyIds: scope.apiKeyIds,
                 }),
-                adminKey
+                adminKey,
+                { betas: groupBySpeed ? [FAST_MODE_BETA_HEADER] : [] }
             );
             const parsed = parseAnthropicUsagePage(payload);
             rows.push(...parsed.rows);
@@ -310,10 +341,22 @@ const main = async () => {
         source: {
             usageEndpoint: "GET /v1/organizations/usage_report/messages",
             costEndpoint: "GET /v1/organizations/cost_report",
-            groupedBy: ["model", "service_tier", "context_window"],
+            groupedBy: [...BASE_GROUP_BY, ...(groupBySpeed ? ["speed"] : [])],
+            betas: groupBySpeed ? [FAST_MODE_BETA_HEADER] : [],
+            speedMeasured: groupBySpeed,
             pageCount,
             bucketCount,
             rowCount: rows.length,
+        },
+        // What these numbers are about. First-class in the output rather than
+        // a footnote: an organization-wide figure read as Tomverse's is the
+        // most likely way this report gets quoted wrongly.
+        attribution: {
+            scope: scope.label,
+            filtered: scope.filtered,
+            workspaceIds: scope.workspaceIds,
+            apiKeyIds: scope.apiKeyIds,
+            caveat: scope.caveat,
         },
         definitions: {
             cacheReadShare:
@@ -328,6 +371,8 @@ const main = async () => {
                 "uncachedCounterfactualInputCostUsd - actualInputCostUsd (input tokens only; output is unaffected by caching)",
             requestCount:
                 "not reported: the messages usage report returns token counts and web-search requests, and no per-bucket request count. Deriving one from tokens would be a fabricated figure.",
+            ttlDecision:
+                "NOT decidable from this report. The 1-hour TTL question turns on the start-to-start gap between consecutive requests that share a prefix, and this report aggregates per day and per model -- traffic spread evenly across a day and the same traffic in two bursts twelve hours apart produce identical rows. A low read/write ratio here is one candidate explanation among several (prefix varying per request, prompts under the model minimum, workspace-split traffic) and does not single out expiry. See docs/policy/anthropic-prompt-caching.md section 3.1 for the two designs that can answer it: a keyed prefix-digest histogram of re-call intervals, or a 5m/1h canary split on separate API keys.",
         },
         overall: summary.overall,
         byModel: summary.byModel,
@@ -349,6 +394,19 @@ const main = async () => {
     lines.push(
         `  ${rows.length} usage row(s) across ${bucketCount} bucket(s), ${pageCount} page(s)`
     );
+    lines.push(`  grouped by: ${report.source.groupedBy.join(", ")}`);
+    lines.push(
+        `  speed:      ${
+            groupBySpeed
+                ? `measured (beta ${FAST_MODE_BETA_HEADER})`
+                : "not measured -- pass --speed to group by it (sends the fast-mode beta header)"
+        }`
+    );
+    lines.push("");
+    // Before the numbers, not after. A reader who stops at the first table
+    // must have seen what the table is about.
+    lines.push(`SCOPE: ${scope.label}`);
+    lines.push(`  ${scope.caveat}`);
     lines.push("");
 
     const renderMetrics = (label, totals, metrics) => {
@@ -401,8 +459,10 @@ const main = async () => {
                     : entry.reason === UNPRICED_REASONS.SPEED
                       ? `speed=${entry.speed}`
                       : entry.reason === UNPRICED_REASONS.INFERENCE_GEO
-                        ? `inference_geo=${entry.inferenceGeo}`
-                        : "no pricing profile for this model id";
+                        ? `inference_geo=${entry.inferenceGeo} (1.1x on every token category; no verified rate here)`
+                        : entry.reason === UNPRICED_REASONS.INFERENCE_GEO_UNKNOWN
+                          ? "inference_geo was grouped but not reported, so the multiplier is unknown"
+                          : "no pricing profile for this model id";
             lines.push(
                 `  ${entry.model}: ${entry.reason} (${detail}) -- ${formatTokens(
                     cacheEfficiencyMetrics(entry).inputTokens
@@ -431,6 +491,20 @@ const main = async () => {
     lines.push("");
     lines.push(
         "Request count is not reported by the Usage API and is not derived here."
+    );
+    lines.push("");
+    lines.push("This report does NOT decide the 1-hour TTL question.");
+    lines.push(
+        "  It aggregates per day and per model; the TTL turns on the start-to-start gap"
+    );
+    lines.push(
+        "  between consecutive requests sharing a prefix, which a daily total cannot show."
+    );
+    lines.push(
+        "  docs/policy/anthropic-prompt-caching.md section 3.1 names the two designs that can:"
+    );
+    lines.push(
+        "  a keyed prefix-digest interval histogram, or a 5m/1h canary on separate API keys."
     );
 
     process.stdout.write(`${lines.join("\n")}\n`);
