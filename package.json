@@ -62,6 +62,8 @@
     "check:router-human-review": "node --import tsx scripts/check-router-human-review.mjs",
     "check:router-decision-preregistration": "node --import tsx scripts/check-router-decision-preregistration.mjs",
     "check:router-answer-bundle": "node --import tsx scripts/check-router-answer-bundle.mjs",
+    "check:router-review-source": "node --import tsx scripts/check-router-review-source.mjs",
+    "check:router-review-sheets": "node --conditions=react-server --import tsx scripts/check-router-review-sheets.mjs",
     "router:cost-projection": "node --conditions=react-server --import tsx scripts/router-cost-projection.mjs",
     "router:judge-cap-probe": "node --conditions=react-server --import tsx scripts/router-judge-cap-probe.mjs",
     "check:auto-rollout-readiness": "node --conditions=react-server --import tsx scripts/check-auto-rollout-readiness.mjs",
