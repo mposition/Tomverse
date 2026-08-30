@@ -154,3 +154,73 @@ Only the third is the model's behaviour. The middle one is a real failure the
 user would have seen with its cause unsettled, and it is reported per failure
 with arm, provider, API model, finish reason, usage and trace id rather than
 filed under a cause nobody established.
+
+## Run 6 — 2026-08-28 07:12 UTC — measured, but refused by the gate
+
+Run [33150563141](https://github.com/mposition/Tomverse/actions/runs/33150563141),
+commit `950f23ad`, 2h44m, $0.5849 of a $2.00 ceiling, 210 of 210 attempted.
+
+**The harness defect is fixed.** Empty answers went from 60 to 3, and
+`harnessAttributableFailureCount` from 60 to **0**. The exclusion rate went from
+27.6% to **1.4%**, inside the 5% ceiling. The two estimates now agree —
+`semanticQualityDelta` −47.83pp [−57.97, −37.20] against
+`endToEndOutcomeDelta` −48.57pp [−58.57, −38.10] — which is what three
+generation failures out of 210 should look like.
+
+It was refused by the gate on one cell:
+
+```
+long_context_conversation/ko  11/14  short      (floor 13/14)
+every other cell              14/14
+overall                       207/210            (floor 200/210)
+```
+
+### The three failures were the end of the run, not a defect of that cell
+
+Read from the artefact rather than inferred:
+
+| pair | model | error | latency | usage |
+| --- | --- | --- | --- | --- |
+| `long-ko-013` | `deepseek-v4-flash` | `Insufficient Balance` | ~0.6s | none |
+| `long-ko-014` | `deepseek-v4-flash` | `Insufficient Balance` | ~0.6s | none |
+| `long-ko-015` | `deepseek-v4-flash` | `Insufficient Balance` | ~0.6s | none |
+
+All three are consecutive and they are the **last three items in execution
+order**. The DeepSeek account ran out of balance late in the run; the cell they
+fell in is where the run happened to be, not what caused them. Nothing about
+`long_context_conversation/ko` is implicated, and a re-run should fill it.
+
+This corrects the first reading of this run, which called them likely-transient
+provider faults. A refusal in 0.6 seconds with no usage, three times in a row,
+at the end of a run, is not a transient fault.
+
+### The attribution was wrong, and is fixed
+
+They were recorded as `attribution: provider`. The provider did not fail — it
+refused correctly, because the account behind the key had run out. That is:
+
+```
+failure     = provider_error
+reason      = provider_account_balance_exhausted
+attribution = operational_configuration
+```
+
+`operational_configuration` is a fourth attribution for exactly this: ours, but
+not the code's, and fixed by topping up rather than by changing anything in
+this repository.
+
+Two things follow, and both are now enforced. The run **halts** on this error
+rather than continuing — a balance does not come back mid-run, so every later
+call fails the same way and one failed item becomes every remaining item. And
+the workflow reads DeepSeek's available balance before the first paid call,
+refusing to start when it is under the pilot's own ceiling.
+
+### What this run may and may not be used for
+
+* **May** be cited as an operational observation: the harness fix works, and
+  the end-to-end shape of a clean run.
+* **May not** be used as a calibration source, and did not reach the
+  independent judge. The Fable stage was never called and nothing was billed
+  for it.
+* `n` stays pending. This pilot's 81.6% discordance would size ±3pp at ~3,485,
+  but a run that did not clear its own coverage gate does not set `n`.

@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    classifyProviderError,
     displayableText,
     failureRecord,
     generatedTokens,
@@ -200,6 +201,63 @@ test("a missing output-token count survives as unknown rather than becoming zero
     assert.equal(generatedTokens({ completion_tokens: 7 }), 7);
 });
 
+test("an exhausted account is ours to fix, and is not the provider failing", () => {
+    // The 2026-08-28c pilot lost its last three answers to DeepSeek's
+    // `Insufficient Balance`. Filing that under `provider` says the provider
+    // failed, and it did not -- it refused correctly, in 0.6 seconds, because
+    // the account behind the key had run out.
+    const record = failureRecord({
+        status: "failed",
+        reason: "provider_error",
+        detail: "AI_APICallError: Insufficient Balance",
+        metadata: {
+            ...identity,
+            finishReason: null,
+            usage: {},
+            rawTextLength: 0,
+            traceId: null,
+            requestedMaxOutputTokens: 384_000,
+            resolvedProductOutputCap: 384_000,
+        },
+    });
+    assert.equal(record.providerErrorReason, "provider_account_balance_exhausted");
+    assert.equal(record.attribution, "operational_configuration");
+    assert.equal(isHarnessAttributable(record), false);
+    // And it stops the run: the balance does not come back mid-run, so every
+    // later call fails the same way.
+    assert.equal(record.haltsRun, true);
+});
+
+test("balance exhaustion is matched narrowly, because a false match halts a healthy run", () => {
+    for (const detail of [
+        "Insufficient Balance",
+        "insufficient balance",
+        "Error: insufficient_funds for this account",
+        "You exceeded your current quota, please check your plan",
+        "billing_hard_limit_reached",
+    ]) {
+        assert.equal(
+            classifyProviderError(detail).reason,
+            "provider_account_balance_exhausted",
+            detail
+        );
+    }
+    // The cost of missing the message is one wasted pilot; the cost of
+    // matching it wrongly is every pilot.
+    for (const detail of [
+        "ETIMEDOUT",
+        "503 Service Unavailable",
+        "rate limit exceeded, please retry",
+        "The model produced an invalid response",
+        "balance sheet analysis failed to parse",
+    ]) {
+        const classified = classifyProviderError(detail);
+        assert.equal(classified.reason, "provider_call_failed", detail);
+        assert.equal(classified.attribution, "provider");
+        assert.equal(classified.haltsRun, false);
+    }
+});
+
 test("a provider error is a provider failure with no emptiness to explain", () => {
     const record = failureRecord({
         status: "failed",
@@ -217,7 +275,9 @@ test("a provider error is a provider failure with no emptiness to explain", () =
     });
     assert.equal(record.emptinessReason, null);
     assert.equal(record.symptom, null);
+    assert.equal(record.providerErrorReason, "provider_call_failed");
     assert.equal(record.attribution, "provider");
+    assert.equal(record.haltsRun, false);
     assert.equal(isHarnessAttributable(record), false);
 });
 
