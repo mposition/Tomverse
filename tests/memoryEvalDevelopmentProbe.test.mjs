@@ -8,6 +8,10 @@ import {
 } from "../lib/memoryEvalDevelopmentProbeSet.ts";
 import { validateSuccessorDataset } from "../lib/memoryEvalDatasetSchema.ts";
 import { scoreCaseV2, judgeEvalV2 } from "../lib/memoryEvalScoringV2.ts";
+import {
+    MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+    decideEvalRunMode,
+} from "../lib/memoryExtractionEvalCore.ts";
 
 /**
  * The probe set has one job: make every metric move.
@@ -218,7 +222,73 @@ test("a live probe with no key refuses before it reaches a provider", () => {
         output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
     }
     assert.equal(status, 1, "a live probe without a key must refuse");
-    assert.match(output, /OPENAI_API_KEY is required/i);
+    // WHICH gate speaks first is the register's business, not this test's,
+    // and it has moved twice. An unfunded pair is refused for the budget
+    // before the key is looked at, and a version bump leaves the new pair
+    // unfunded by definition — a budget does not travel with a bump. Then
+    // `mem-extract-v5` was measured and closed, and a revoked pair is refused
+    // for its status ahead of both. Each time, a test pinning one message
+    // failed for a refusal that was working correctly.
+    //
+    // Each gate is pinned individually below, against `decideEvalRunMode`
+    // itself, where none of them needs a subprocess or a funded pair. What
+    // this test owns is the property the subprocess can show and the unit
+    // cannot: the real entry point exits non-zero and prints no report.
+    assert.match(
+        output,
+        /OPENAI_API_KEY is required|has no approved eval budget|in the\s+register/i,
+        output
+    );
     // The refusal came before the run: no report was printed.
     assert.doesNotMatch(output, /Extraction accuracy/);
+});
+
+test("both gates refuse, and the budget one is checked first", () => {
+    // Deterministic and free: no subprocess, no key, no funded pair. This is
+    // what keeps the key gate covered while every probe pair is unfunded,
+    // which is the state a version bump leaves behind.
+    const base = {
+        live: true,
+        datasetFrozen: true,
+        commitKnown: true,
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+    };
+    const funded = { evalBudget: { maxUsd: 1 }, status: "candidate" };
+
+    assert.equal(
+        decideEvalRunMode({ ...base, registerEntry: funded, hasApiKey: false })
+            .reason,
+        "no_api_key",
+        "a funded pair with no key is refused for the key"
+    );
+    assert.equal(
+        decideEvalRunMode({
+            ...base,
+            registerEntry: { evalBudget: null, status: "candidate" },
+            hasApiKey: true,
+        }).reason,
+        "no_eval_budget",
+        "an unfunded pair is refused for the budget even with a key"
+    );
+    // And the order: no budget and no key refuses for the budget, which is
+    // why the subprocess test above cannot pin the key message today.
+    assert.equal(
+        decideEvalRunMode({
+            ...base,
+            registerEntry: { evalBudget: null, status: "candidate" },
+            hasApiKey: false,
+        }).reason,
+        "no_eval_budget"
+    );
+    // A closed pair is refused ahead of both, and keeps its budget while it
+    // is. That ordering is what makes "this pair is not re-run" a gate rather
+    // than a memory — see `.github/audits/memory-eval-v5-run1-2026-08-27.md`.
+    assert.equal(
+        decideEvalRunMode({
+            ...base,
+            registerEntry: { ...funded, status: "revoked" },
+            hasApiKey: true,
+        }).reason,
+        "pair_not_runnable"
+    );
 });

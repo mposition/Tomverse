@@ -145,7 +145,7 @@ export type ArtifactToolPlanInput = {
 };
 
 /**
- * Whether the artifact tool can coexist with this turn's native web search.
+ * Whether the artifact tool can coexist with this turn's web search.
  *
  * Two distinct incompatibilities, and neither is a matter of taste:
  *
@@ -155,15 +155,35 @@ export type ArtifactToolPlanInput = {
  *     quietly stop meaning always. The search wins: the user asked for it
  *     explicitly, and the file request has an unambiguous alternative (turn
  *     search off, or ask again).
- *   * Google's Search grounding is not a function declaration; on the Gemini
- *     API it is exclusive with them, and a request carrying both is rejected
- *     by the provider rather than degraded. Sending it would turn a file
- *     request into a 400.
+ *   * Google's Search *grounding* is not a function declaration; on the Gemini
+ *     API a built-in retrieval tool of that kind is exclusive with function
+ *     declarations, and a request carrying both is rejected by the provider
+ *     rather than degraded. Sending it would turn a file request into a 400.
  *
  * Anthropic's `web_search_20250305` has neither problem and keeps both.
+ *
+ * ## Why the Google rule is not "provider is Google"
+ *
+ * It reads that way, and for a while it was that way, and that was wrong in a
+ * way that only mattered once the Google models started searching. The
+ * exclusivity belongs to *grounding*, not to Gemini: a Gemini request carrying
+ * ordinary function declarations is entirely ordinary, and Gemini 3 runs
+ * built-in tools and custom functions together besides. What this application
+ * sends a Google model now is `web_search`, a function declaration of its own
+ * (`lib/appManagedWebSearchTool.ts`), and `buildWebSearchToolConfig` refuses to
+ * emit grounding at all -- so there is no exclusivity to respect and blocking
+ * the artifact tools would be refusing a file for a reason that no longer
+ * exists on the request.
+ *
+ * The guard therefore keys on `nativeSearchEnabled`, which is false for the
+ * application-managed route, and stays fail-closed for the case it was written
+ * for: if anybody re-enables grounding, `nativeSearchEnabled` goes true for a
+ * Google model again and this refuses again, without the rule having to be
+ * remembered.
  */
 export const nativeSearchBlocksArtifactTool = (input: {
   provider: string;
+  /** A provider-native search tool is attached. Never true for app-managed. */
   nativeSearchEnabled: boolean;
   nativeSearchForced: boolean;
 }): boolean => {

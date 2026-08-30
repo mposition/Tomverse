@@ -117,6 +117,7 @@ const chatBudget = ({
   nativeSearchReservedCostMicroUsd: 0,
   nativeSearchCostPerQueryMicroUsd: 0,
   nativeSearchMaxQueries: 0,
+  searchBackend: null,
   provider,
   pricingVersion: "test-fixture-pricing",
   costSource: "registry",

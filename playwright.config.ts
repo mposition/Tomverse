@@ -107,6 +107,14 @@ export default defineConfig({
       // company: `isE2EAssistantKnowledgeEnabled()` additionally requires
       // loopback and both short-circuits above.
       E2E_ASSISTANT_KNOWLEDGE_ENABLED: "true",
+      // The deterministic search backend. Without it this server holds no
+      // credential, `resolveWebSearchBackendReadiness()` reports nothing
+      // reachable, and every Google model renders as unable to search -- which
+      // is correct behaviour and makes the search specs assert against a
+      // deployment nobody ships. Refused outright in production
+      // (`webSearchFakeBackendEnabled`), and `/api/ready` fails if it is even
+      // set there, so this cannot leak past the harness.
+      WEB_SEARCH_FAKE_BACKEND: "1",
       NEXTAUTH_URL: baseURL,
       NEXTAUTH_SECRET: e2eNextAuthSecret,
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: e2eTurnstileSiteKey,

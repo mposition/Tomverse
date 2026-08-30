@@ -17,6 +17,10 @@ import {
     MEMORY_EVAL_DATASET_FROZEN,
     MEMORY_EVAL_DATASET_VERSION,
 } from "../lib/memoryExtractionEvalFixtures.ts";
+import { MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN } from "../lib/memoryEvalSuccessorFixtures.ts";
+import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
+import { MEMORY_EVAL_SUCC4_DATASET_FROZEN } from "../lib/memoryEvalSucc4Dataset.ts";
+import { MEMORY_EVAL_SUCC5_DATASET_FROZEN } from "../lib/memoryEvalSucc5.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 
 const SCRIPT = "scripts/check-memory-eval-freeze-conditions.mjs";
@@ -112,24 +116,65 @@ test("a successor batch does not block this dataset's freeze, and an ordinary on
     }
 });
 
-test("the check fails the build only when the constant claims a freeze", () => {
+test("the check fails the build only when a dataset that claims a freeze has a gap", () => {
     const result = run();
-    const missed = result.stdout.includes("MISS");
-    // The asymmetry is the design: while the dataset is being authored the
+    // The asymmetry is the design: while a dataset is being authored the
     // script is a progress report, and a non-zero exit on a half-finished
     // dataset would take it out of CI on the day it starts being useful. It
-    // turns into a gate the moment MEMORY_EVAL_DATASET_FROZEN says the
+    // turns into a gate the moment that dataset's frozen constant says the
     // conditions were met.
-    assert.equal(
-        result.status,
-        MEMORY_EVAL_DATASET_FROZEN && missed ? 1 : 0,
-        result.stdout
-    );
-    if (MEMORY_EVAL_DATASET_FROZEN) {
-        assert.equal(
-            missed,
-            false,
-            "the shipped dataset is frozen, so every freeze condition must hold"
+    //
+    // Read per dataset rather than over the whole output, because there are
+    // five now and they are not in the same state. A single
+    // `stdout.includes("MISS")` would have made one dataset's progress report
+    // fail the build for another dataset's freeze.
+    //
+    // The count is asserted rather than derived: a dataset whose section
+    // stopped printing would otherwise be a dataset nobody checked, and the
+    // output would look exactly as clean.
+    const sections = result.stdout.split(/Freeze conditions for /).slice(1);
+    assert.equal(sections.length, 5, result.stdout);
+    for (const version of [
+        "mem-eval-seed-11",
+        "mem-eval-succ-2",
+        "mem-eval-succ-3",
+        "mem-eval-succ-4",
+        "mem-eval-succ-5",
+    ]) {
+        assert.ok(
+            sections.some((section) => section.startsWith(version)),
+            `${version} printed no section`
         );
     }
+
+    const frozenByVersion = {
+        "mem-eval-seed-11": MEMORY_EVAL_DATASET_FROZEN,
+        "mem-eval-succ-2": MEMORY_EVAL_SUCCESSOR_DATASET_FROZEN,
+        "mem-eval-succ-3": MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+        "mem-eval-succ-4": MEMORY_EVAL_SUCC4_DATASET_FROZEN,
+        "mem-eval-succ-5": MEMORY_EVAL_SUCC5_DATASET_FROZEN,
+    };
+    let shouldFail = false;
+    for (const section of sections) {
+        const version = section.split(/\s/)[0];
+        const frozen = frozenByVersion[version];
+        assert.notEqual(frozen, undefined, `unrecognised dataset ${version}`);
+        // The script says which state it read; a section whose header
+        // disagreed with the constant would mean the two had drifted.
+        assert.match(
+            section,
+            frozen ? /\(currently frozen\)/ : /\(currently not frozen\)/,
+            version
+        );
+        const missed = section.includes("MISS");
+        if (frozen) {
+            assert.equal(
+                missed,
+                false,
+                `${version} is frozen, so every freeze condition must hold`
+            );
+        }
+        if (frozen && missed) shouldFail = true;
+    }
+    assert.equal(result.status, shouldFail ? 1 : 0, result.stdout);
 });

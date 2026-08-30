@@ -116,6 +116,7 @@ const chatBudget = (overrides: Partial<ChatBudget> = {}): ChatBudget => ({
   nativeSearchReservedCostMicroUsd: 0,
   nativeSearchCostPerQueryMicroUsd: 0,
   nativeSearchMaxQueries: 0,
+  searchBackend: null,
   provider: "openai",
   pricingVersion: "attempt-usage-test",
   costSource: "attempt-usage-test",
@@ -2099,6 +2100,7 @@ const searchBudget = (
     provider: "anthropic",
     nativeSearchCostPerQueryMicroUsd: rate,
     nativeSearchMaxQueries: max,
+    searchBackend: null,
     nativeSearchReservedCostMicroUsd: Math.ceil(rate * max),
     ...overrides,
   });

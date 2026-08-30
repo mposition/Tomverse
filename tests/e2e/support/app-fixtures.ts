@@ -556,6 +556,17 @@ export type QaConversationMessage = {
     mediaType: string;
     size: number;
     kind: "file" | "text";
+    /**
+     * docs/policy/user-attachment-persistence.md §11's availability verdict,
+     * as a *stored* fact.
+     *
+     * Seeded rather than only produced by a failing send, because the point of
+     * the column is that the state survives a reload: a card that only knew it
+     * was broken during the failing turn would look ordinary again the next
+     * time the conversation was opened.
+     */
+    unavailableAt?: string;
+    unavailableReason?: string;
   }>;
 };
 

@@ -139,6 +139,7 @@ const budgetFor = (modelId: string, credits = 1): ChatBudget => ({
     nativeSearchReservedCostMicroUsd: 0,
     nativeSearchCostPerQueryMicroUsd: 0,
     nativeSearchMaxQueries: 0,
+    searchBackend: null,
     provider: "openai",
     pricingVersion: "test-fixture-pricing",
     costSource: "registry",

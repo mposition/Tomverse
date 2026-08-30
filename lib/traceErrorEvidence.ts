@@ -106,6 +106,16 @@ export type ChatErrorReportGrantInput = {
   errorCode: string;
   httpStatus: number;
   phase?: string;
+  /**
+   * One of CHAT_FAILURE_LAYERS (lib/chatFailureLayer.ts).
+   *
+   * The field that keeps an evidence row honest about its subject. Without it
+   * a storage 404 and a provider 404 are the same row, and the trace a user
+   * reports reads as an outage at whichever provider happened to be named.
+   */
+  failureLayer?: string | null;
+  /** What object storage answered, when the failure was a storage one. */
+  storageStatus?: number | null;
   provider?: string | null;
   modelId?: string | null;
   retryable?: boolean | null;
@@ -155,6 +165,13 @@ const scheduleEvidenceWrite = (
         release: releaseSha(),
         routeClass: input.routeClass,
         phase: input.phase || null,
+        failureLayer: input.failureLayer || null,
+        storageStatus:
+          Number.isSafeInteger(input.storageStatus) &&
+          input.storageStatus! >= 100 &&
+          input.storageStatus! <= 599
+            ? input.storageStatus
+            : null,
         errorCode: input.errorCode,
         classificationSource: ERROR_CLASSIFICATION_SOURCE.server,
         httpStatus: input.httpStatus,

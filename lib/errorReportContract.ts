@@ -107,6 +107,14 @@ const RECORDABLE_ERROR_CODES = new Set([
   "AI_REQUEST_FAILED",
   "DEEP_RESEARCH_JOB_FAILED",
   "AI_EMPTY_RESPONSE",
+  // Storage- and application-layer chat failures. Recorded despite riding on
+  // a 4xx/5xx that the default rule would either skip (410) or accept only by
+  // accident (503): these are the rows that tell an operator the failure was
+  // ours and not a provider's, and the whole point of the trace a user reports
+  // is that it says which.
+  "ATTACHMENT_UNAVAILABLE",
+  "ATTACHMENT_STORAGE_UNAVAILABLE",
+  "CHAT_APPLICATION_ERROR",
 ]);
 
 /**

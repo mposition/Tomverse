@@ -209,6 +209,7 @@ export function decideRouterModel(
     models: input.models,
     plan: input.plan,
     profile,
+    searchBackendReadiness: input.searchBackendReadiness,
     reservedInputTokens: input.reservedInputTokens,
     requestOutputCapTokens: input.requestOutputCapTokens,
     attachmentTokensFor: input.attachmentTokensFor,

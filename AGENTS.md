@@ -21,6 +21,51 @@ This version has breaking changes — APIs, conventions, and file structure may 
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+# 실행할 명령을 줄 때는 실행 위치를 먼저 적습니다
+
+**사용자 환경은 Windows + PowerShell입니다.** 명령 블록을 주기 전에, 그 블록
+바로 위에 **어디서 실행하는지** 한 줄로 적습니다. 셸 문법으로 암시하지
+않습니다 — `$env:`가 PowerShell을 뜻한다는 것은 힌트이지 안내가 아니고,
+사용자가 "이거 어디서 실행하나요"를 다시 묻게 되면 그 블록은 실패한 것입니다.
+
+한 줄에 담는 것은 넷입니다.
+
+1. **어느 기계** — 로컬 PC / Railway 서비스 shell / 이 컨테이너(제가 직접 실행)
+   / Cloudflare·Stripe 같은 웹 대시보드.
+2. **어느 셸** — PowerShell인지 bash인지. 사용자에게 주는 것은 기본이
+   PowerShell입니다.
+3. **어느 디렉터리** — 저장소 clone 안이라면 그렇게 적습니다.
+4. **먼저 있어야 하는 것** — Node 22, `npm ci`, 어떤 환경변수, 어떤 권한의
+   토큰인지.
+
+예: `로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 npm ci가 끝나
+있어야 하고, R2 환경변수 4개가 필요합니다.`
+
+## 함께 지키는 것
+
+- **production 자격증명이 필요한지 아닌지를 밝힙니다.** 필요 없으면 "이건
+  자격증명 없이 됩니다"라고 적습니다. 사용자가 그걸 모르면 안 해도 될 준비를
+  합니다.
+- **읽기 전용인지 쓰는지 적습니다.** 쓰는 명령은 무엇이 바뀌는지와 되돌리는
+  방법을 같이 적습니다.
+- **package.json에 script가 있으면 그 script를 줍니다.** `node`로 풀어 쓰지
+  않습니다. script가 들고 있는 플래그가 곧 실행 조건이고, 풀어 쓰는 순간 그것을
+  옮겨 적는 일이 사람 손에 넘어갑니다. 2026-08-28에 실제로 그랬습니다 —
+  `audit:message-attachments`를 `node --import tsx …`로 풀어 주면서
+  `--conditions=react-server`가 빠졌고, 운영자는 `server-only`가 던진 "This
+  module cannot be imported from a Client Component module"를 받았습니다. 명령이
+  아니라 제 전사(轉寫)가 틀린 것이었습니다.
+  풀어 써야 할 이유가 있다면 **package.json에서 플래그를 그대로 복사**하고,
+  왜 풀어 쓰는지 한 줄로 적습니다.
+- **환경변수는 그 창에서만 산다는 것을 적습니다.** `$env:`는 PowerShell 창을
+  닫으면 사라지므로, 이어지는 명령이 같은 창을 전제하면 그렇게 말합니다.
+- **대시보드로 끝나는 일이면 스크립트를 주지 않습니다.** Cloudflare R2의
+  lifecycle 규칙처럼 화면에서 두 번 클릭할 일에 clone과 `npm ci`를 요구하지
+  않습니다. 스크립트는 판정을 자동화하거나 기록을 남길 때 함께 제시합니다.
+- **비밀값을 대화에 붙여 달라고 하지 않습니다.** 출력에 자격증명·버킷 이름·
+  object key가 없도록 스크립트를 만들고, "결과는 그대로 붙여도 안전합니다"를
+  근거와 함께 적습니다.
+
 # Accent colour roles
 
 UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 역할로** 지정합니다.

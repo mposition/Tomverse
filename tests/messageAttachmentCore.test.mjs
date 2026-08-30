@@ -108,6 +108,9 @@ test("the public shape is an allowlist that cannot carry a storage key", () => {
     uploadId: "upl_1",
   };
   const publicShape = toPublicMessageAttachment(row);
+  // The availability fields are absent, not null: a row that has never been
+  // checked and one that was checked and found are the same thing to a client
+  // (tests/messageAttachmentAvailability.test.mjs covers the missing case).
   assert.deepEqual(Object.keys(publicShape).sort(), [
     "id",
     "kind",
@@ -125,7 +128,18 @@ test("the public shape is an allowlist that cannot carry a storage key", () => {
 test("the Prisma select and the public shape name the same fields", () => {
   assert.deepEqual(
     Object.keys(PUBLIC_MESSAGE_ATTACHMENT_SELECT).sort(),
-    ["id", "kind", "mediaType", "name", "ordinal", "size"]
+    [
+      "id",
+      "kind",
+      "mediaType",
+      "name",
+      "ordinal",
+      "size",
+      // The availability verdict, added so a card that lost its bytes still
+      // says so after a reload. A verdict, never a location.
+      "unavailableAt",
+      "unavailableReason",
+    ]
   );
   assert.equal(
     Object.values(PUBLIC_MESSAGE_ATTACHMENT_SELECT).every(
