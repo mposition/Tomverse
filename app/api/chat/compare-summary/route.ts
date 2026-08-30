@@ -210,7 +210,10 @@ export async function POST(request: Request) {
               output: unknown;
               usage: {
                 inputTokens?: number;
-                inputTokenDetails: { cacheReadTokens?: number };
+                inputTokenDetails: {
+                  cacheReadTokens?: number;
+                  cacheWriteTokens?: number;
+                };
                 outputTokens?: number;
               };
               response: {
@@ -275,6 +278,8 @@ export async function POST(request: Request) {
           {
             inputTokens: generated.usage.inputTokens,
             cachedInputTokens: generated.usage.inputTokenDetails.cacheReadTokens,
+            cacheWriteInputTokens:
+              generated.usage.inputTokenDetails.cacheWriteTokens,
             outputTokens: generated.usage.outputTokens,
             outcome: "completed",
           },

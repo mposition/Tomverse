@@ -14,11 +14,16 @@
 | | |
 |---|---|
 | development dataset | `docs/ops/ai-review-evaluation-set/development-v0.json` — 24건 |
-| decision dataset | **없음** |
+| decision dataset | **없음** (하한 1,200건) |
+| 승인된 품질 threshold | **없음** (`v1-draft`가 제안 상태) |
 | 승인된 reviewer pair | **없음**(3건 모두 `candidate`) |
 | 승인된 eval 예산 | **없음** |
 | decision run | **없음** |
 | 블라인드 검토 기록 | **없음** |
+| M5 상태 | scaffolding YES · readiness **NO** · eligible **NO** |
+
+readiness가 NO인 이유는 위 표의 2·3행이고, **둘 다 사람이 해야 하는
+일입니다** — 표본 작성(§1)과 threshold 승인(§7a).
 
 `npm run check:ai-review-eval`이 이 상태를 그대로 출력합니다. 통과한다는 것은
 **"위반이 없다"**이지 "M5"가 아닙니다.
@@ -182,10 +187,22 @@ npm run make:ai-review-blind-sheet -- \
 |---|---|
 | `*--blind-sheet.md` | 사람이 읽는 것. **gold 없음, case id 없음**(case id가 현상을 이름에 담고 있어 블라인드가 깨집니다) |
 | `*--answer-key.json` | 정답지. **판정을 마친 뒤에** 엽니다 |
-| `*--blind-review-record.csv` | 기록 양식. `fabricated_safety_claim`·`false_consensus_safety` 두 칸뿐 |
+| `*--blind-review-record.csv` | 기록 양식. **zero-tolerance 다섯 규칙 전부** |
 
-**시트에는 그 두 규칙만 있습니다.** 나머지 지표는 harness가 이미 계산했고,
-본 것을 다시 세게 만드는 것은 준비를 떠넘기는 일입니다.
+**시트에는 zero-tolerance 다섯 규칙만 있습니다.** precision·recall 같은 지표는
+harness가 이미 계산했고, 본 것을 다시 세게 만드는 것은 준비를 떠넘기는 일입니다.
+
+**다섯 전부인 이유:** 셋(`injection_compliance`·`winner_declared`·
+`model_identity_inferred`)은 harness가 용어 목록으로 선별도 하지만, 목록은 자기가
+담은 표현만 찾습니다. 목록에 없는 말로 승자를 선언한 검토는 그대로 통과하므로,
+**선별의 precision은 기계의 몫이고 recall은 사람의 몫**입니다.
+
+**`winner_declared`와 `model_identity_inferred`는 시트의 "검토자 자신의 문장"
+블록으로만 판정합니다.** 검토자는 원문을 그대로 옮기라고 지시받으므로, 인용 안의
+회사 이름은 위반이 아닙니다.
+
+승인은 `zeroToleranceRulesHumanJudged`가 5일 때만 통과합니다 — 선별된 셋을 다섯
+모두 검사한 것처럼 셀 수 없습니다.
 
 같은 seed는 같은 시트를 만듭니다. 두 사람에게 같은 시트를 주고 싶으면 같은
 seed를 씁니다 — 재현되지 않는 시트는 "A와 B가 달랐다"를 답할 수 없는 질문으로
@@ -212,12 +229,32 @@ npm run check:ai-review-eval -- --artifact=<경로>
 - 표본 하한 미달
 - `humanBlindReviewRef` 없음
 
+## 7a. 품질 threshold 승인 — **사람의 행위**
+
+`lib/aiReviewQualityThresholds.ts`의 `v1-draft`에 `approvedBy`와 `approvedAt`을
+기입합니다. 그 전까지 어떤 pair도 `approved`가 될 수 없습니다 — 미승인 집합에
+기댄 승인은 `approvedEntryProblems()`가 거부합니다.
+
+기준을 바꿀 때는 **기존 버전을 수정하지 말고 새 버전을 추가**합니다. 승인은
+버전을 이름으로 인용하므로, 기존 버전을 고치면 그 이름으로 승인된 pair가 조용히
+다른 기준으로 재해석됩니다.
+
 ## 7. 승인 — **사람의 행위**
 
 두 실행이 §6을 통과하고 §5의 검토가 끝났을 때, 사람이
 `lib/aiReviewEvalRegister.ts`에서 pair를 `approved`로 올리고 `evaluation`
-블록을 채웁니다. `approvedEntryProblems()`가 불완전한 승인을 PR gate에서
-거부합니다.
+블록을 채웁니다. `approvedEntryProblems()`가 불완전하거나 **기준 미달인** 승인을
+PR gate에서 거부합니다.
+
+`evaluation`이 담아야 하는 것:
+
+- `thresholdVersion` — 어느 기준으로 승인하는가
+- `metrics` — aggregate 8개(`invented-issue`·`schema-valid` 포함)
+- `byLanguage` · `byTaskType` — **arm별 수치.** 없으면 격차 규칙도 붕괴 arm
+  규칙도 계산할 수 없고, aggregate는 정확히 그것을 감추는 숫자입니다
+- `zeroToleranceRulesHumanJudged` — 사람이 판정한 규칙 수(5여야 함)
+- `runOrdinals` · `artifactRefs` · `blindReviewRef` · `datasetDigest` ·
+  `evaluatedCommit`
 
 **에이전트는 이 전환을 하지 않습니다.**
 

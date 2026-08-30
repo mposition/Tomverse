@@ -113,6 +113,19 @@ export const readReliabilityScorecard = async (
             secondarySettlementStatus: true,
             subjectKind: true,
             createdAt: true,
+            // Reviewer health, the retry rate and reconciliation are all
+            // computed from these rather than from the two slots above.
+            attempts: {
+                select: {
+                    reviewerModelId: true,
+                    reviewerProvider: true,
+                    status: true,
+                    retryCount: true,
+                    reservedCredits: true,
+                    settledCredits: true,
+                    settlementStatus: true,
+                },
+            },
         },
     })) as ScorecardRunRow[];
     return summariseReliability(rows, windowDays);

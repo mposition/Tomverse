@@ -1,0 +1,393 @@
+name: Router eval — human review sheets
+#
+# Draws the ROUTE-01 primary human sample and writes the blind sheets.
+#
+# It makes no provider calls and costs nothing. What it does carry is a
+# different risk: the model judges have ALREADY graded these answers and
+# disagree by +40.48pp (docs/ops/router-evaluation-runs/route01-pilot-20260830a.md),
+# so a draw taken now is a draw somebody could steer. The two levers are the
+# bundle and the seed, and neither is an input here:
+#
+#   * the bundle is pinned by run, artifact, filename and content digest in
+#     docs/ops/router-human-review/primary-60-preregistration.json;
+#   * the seed is derived from that digest, so nobody picks it.
+#
+# A dispatch says who reviews. It says nothing about what they review.
+#
+# ############################################################################
+# # OUTPUTS ARE NOT INTERCHANGEABLE. GitHub Actions artifacts have no        #
+# # per-file access control: anyone who can read one artifact on this run    #
+# # can read them all. So the sheets are uploaded as SEPARATE artifacts and  #
+# # the operator hands each reviewer only their own. A reviewer given        #
+# # repository Actions access could otherwise read the key, the other        #
+# # sheet, and the source bundle.                                           #
+# #                                                                          #
+# # Assign reviewers who do NOT have Actions access to this repository, or   #
+# # download and distribute the sheets yourself.                             #
+# ############################################################################
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewer_a:
+        description: "Pseudonymous id for the first reviewer (e.g. R-01). Never a real name."
+        required: true
+        default: ""
+      reviewer_b:
+        description: "Pseudonymous id for the second reviewer (e.g. R-02). Never a real name."
+        required: true
+        default: ""
+      drawn_by:
+        description: "Who is running the draw — recorded in the manifest"
+        required: true
+        default: ""
+
+# Deliberately not inputs: the source run, the artifact, the bundle file, the
+# digest and the seed. All five are read from the pre-registration, because a
+# draw whose inputs can be retyped after the judges' verdicts are known is a
+# draw with a thumb on it.
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: router-human-review-sheets
+  cancel-in-progress: false
+
+jobs:
+  draw:
+    name: Draw the primary sample
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Reviewer ids are pseudonyms, and they are two different people
+        env:
+          A: ${{ inputs.reviewer_a }}
+          B: ${{ inputs.reviewer_b }}
+        run: |
+          node -e '
+            const a = (process.env.A ?? "").trim();
+            const b = (process.env.B ?? "").trim();
+            const bad = [];
+            if (a === b) bad.push("the two reviewer ids are the same, so the reviews would not be independent");
+            // A pseudonym keeps the labels out of the record; the mapping to
+            // people is kept by the operator, not in this repository.
+            for (const [name, id] of [["reviewer_a", a], ["reviewer_b", b]]) {
+              if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,23}$/.test(id)) {
+                bad.push(`${name} "${id}" is not a pseudonymous id (letters, digits, - and _, 2-24 chars)`);
+              }
+              if (/@|\s/.test(id)) bad.push(`${name} looks like a real identifier rather than a pseudonym`);
+            }
+            if (bad.length > 0) {
+              for (const line of bad) console.log(`::error::${line}`);
+              process.exit(1);
+            }
+            console.log(`Reviewers ${a} and ${b}.`);
+          '
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # A copy of this file lives on the default branch, because GitHub lists
+      # a workflow_dispatch workflow only if it is there. The default branch
+      # is also what the dispatch form preselects, and it does not carry the
+      # draw implementation -- so the obvious dispatch runs against a ref that
+      # cannot draw. It would fail anyway, several minutes later, on a bare
+      # "Missing script". Said here instead, before anything is installed.
+      - name: This ref can draw
+        run: |
+          set -euo pipefail
+          missing=""
+          for script in check:router-review-source check:router-review-sheets eval:router-human-sheets; do
+            node -e '
+              const scripts = require("./package.json").scripts ?? {};
+              process.exit(scripts[process.argv[1]] ? 0 : 1);
+            ' "$script" || missing="$missing $script"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::${GITHUB_REF} does not carry the draw implementation:$missing"
+            echo "::error::This workflow is copied to the default branch only so GitHub will offer it."
+            echo "::error::Re-dispatch it against the branch the implementation is on. Nothing was drawn."
+            exit 1
+          fi
+          echo "The draw scripts are present on ${GITHUB_REF}."
+
+      - run: npm ci
+
+      # Only the pinned artifact, and only the one file from it.
+      - name: Fetch the pinned bundle
+        id: source
+        run: |
+          set -euo pipefail
+          node -e '
+            const frozen = require("./docs/ops/router-human-review/primary-60-preregistration.json");
+            for (const [key, value] of Object.entries({
+              run_id: frozen.sourceRunId,
+              artifact: frozen.sourceArtifact,
+              file: frozen.bundleFile,
+            })) {
+              if (!value) { console.log(`::error::the pre-registration freezes no ${key}`); process.exit(1); }
+              console.log(`${key}=${value}`);
+            }
+          ' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: source
+
+      # Digest, shape and adjudicator, before anything is drawn. A null frozen
+      # digest refuses here and prints the observed one to be committed.
+      - name: This is the frozen bundle
+        run: |
+          npm run check:router-review-source -- \
+            --bundle=source/${{ steps.source.outputs.file }} \
+            --preregistration=docs/ops/router-human-review/primary-60-preregistration.json
+
+      # After the digest gate and before anything is drawn: the digest-only
+      # dispatch has to be able to reach its refusal without a recipient key
+      # existing yet, and no plaintext key may exist before this passes.
+      #
+      # The key maps every item back to its pair, so it undoes the blinding
+      # for anyone holding it. It is encrypted to a key the OPERATOR holds.
+      #
+      # Not a repository secret, and the reason is recoverability rather than
+      # secrecy: a passphrase that exists only as a GitHub secret cannot be
+      # read back by a person, so the key it protects is one nobody can open.
+      # Public-key encryption puts the private half with the operator, outside
+      # this repository and outside Actions.
+      - name: The recipient key is present and usable
+        run: |
+          set -euo pipefail
+          recipient=docs/ops/router-human-review/key-recipient.pub.pem
+          if [ ! -s "$recipient" ]; then
+            echo "::error::$recipient is missing. The draw writes a key mapping items to pairs, which is"
+            echo "::error::encrypted to the operator's public key. Generate a keypair, keep the private half"
+            echo "::error::outside this repository, and commit the public half. Nothing was drawn."
+            exit 1
+          fi
+          if ! openssl pkey -pubin -in "$recipient" -noout 2>/dev/null; then
+            echo "::error::$recipient is not a readable public key. Nothing was drawn."
+            exit 1
+          fi
+          # Readable is not the same as usable. An Ed25519 public key parses
+          # here and then cannot encrypt at all -- it is a signing key. Trying
+          # a real encryption is the only check that distinguishes them, so it
+          # is done on a throwaway value before any draw exists.
+          openssl rand -out trial.bin 32
+          if ! openssl pkeyutl -encrypt -pubin -inkey "$recipient" \
+              -in trial.bin -out /dev/null 2>trial.err; then
+            sed 's/^/::error::/' trial.err
+            echo "::error::$recipient parses but cannot encrypt. It must be an encryption key --"
+            echo "::error::RSA, not an Ed25519 signing key. Generate one with:"
+            echo "::error::  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out private.pem"
+            echo "::error::  openssl pkey -in private.pem -pubout -out $recipient"
+            echo "::error::Keep private.pem outside this repository. Nothing was drawn."
+            rm -f trial.bin trial.err
+            exit 1
+          fi
+          rm -f trial.bin trial.err
+          echo "Recipient public key, and it encrypts:"
+          openssl pkey -pubin -in "$recipient" -noout -text | head -2
+
+      # Encrypted here, decrypted by the operator on their own machine, before
+      # the canonical draw exists. It proves the private half actually opens
+      # what this workflow seals -- a key that cannot be recovered is found out
+      # now rather than after the only draw is sealed with it.
+      - name: Recovery probe
+        run: |
+          set -euo pipefail
+          mkdir -p out-probe
+          printf 'router-human-review recovery probe %s\n' "${{ github.run_id }}" > probe.txt
+          sha256sum probe.txt | tee out-probe/probe.sha256
+          openssl rand -out probe.key 32
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+            -in probe.txt -out out-probe/probe.txt.enc -pass file:probe.key
+          openssl pkeyutl -encrypt -pubin \
+            -inkey docs/ops/router-human-review/key-recipient.pub.pem \
+            -in probe.key -out out-probe/probe.key.enc
+          rm -f probe.key probe.txt
+          echo "Probe sealed. Decrypt it with the private half before the canonical draw."
+
+      # Into a temporary directory, because the generator writes the manifest,
+      # both sheets and the key side by side -- and those three have three
+      # different audiences. They are separated explicitly below.
+      - name: Draw the sample
+        id: draw
+        env:
+          A: ${{ inputs.reviewer_a }}
+          B: ${{ inputs.reviewer_b }}
+        run: |
+          set -euo pipefail
+          seed="$(npm run --silent check:router-review-source -- \
+            --bundle=source/${{ steps.source.outputs.file }} \
+            --preregistration=docs/ops/router-human-review/primary-60-preregistration.json \
+            --print-seed)"
+          echo "Seed $seed, derived from the bundle digest."
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          mkdir -p draw
+          npm run --silent eval:router-human-sheets -- \
+            --bundle=source/${{ steps.source.outputs.file }} \
+            --seed="$seed" \
+            --by='${{ inputs.drawn_by }}' \
+            --reviewers="$A,$B" \
+            --out=draw
+
+      # Every condition that has to hold before a sheet reaches a person. The
+      # generator refuses a non-blind sheet before writing; this re-reads what
+      # was actually written, because the files on disk are what get handed
+      # out. It runs before the key is encrypted, because resolving an item
+      # back to its pair is the only way to check the two sheets cover one
+      # population in different orders -- the sheets deliberately carry no
+      # pair id.
+      - name: This package may be handed out
+        run: |
+          npm run check:router-review-sheets -- \
+            --draw=draw \
+            --preregistration=docs/ops/router-human-review/primary-60-preregistration.json \
+            --reviewers='${{ inputs.reviewer_a }},${{ inputs.reviewer_b }}'
+
+      # Hybrid encryption: a random symmetric key seals the file, and the
+      # operator's public key seals that key. Nothing here can open it again,
+      # which is the point.
+      #
+      # The plaintext is then removed from the runner's working directory. That
+      # is housekeeping on an ephemeral VM, not a secure-erase guarantee: the
+      # actual control is that the runner is destroyed and the plaintext is
+      # never uploaded anywhere.
+      - name: Encrypt the key to the operator, and remove the plaintext copy
+        run: |
+          set -euo pipefail
+          mkdir -p out-key
+          openssl rand -out session.key 32
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+            -in draw/key.json -out out-key/key.json.enc -pass file:session.key
+          openssl pkeyutl -encrypt -pubin \
+            -inkey docs/ops/router-human-review/key-recipient.pub.pem \
+            -in session.key -out out-key/key.json.session.enc
+          # Named key.json, two-space separated: this is the exact line
+          # `sha256sum -c` expects once the operator has decrypted the
+          # file back to that name.
+          printf '%s  key.json\n' "$(sha256sum draw/key.json | cut -d' ' -f1)" \
+            > out-key/key.json.sha256
+          rm -f session.key draw/key.json
+          if [ -f draw/key.json ]; then
+            echo "::error::the plaintext key is still present. Nothing will be uploaded."
+            exit 1
+          fi
+          echo "Key sealed to the operator's public key; the plaintext copy is gone from the runner."
+
+      - name: Separate the outputs
+        env:
+          A: ${{ inputs.reviewer_a }}
+          B: ${{ inputs.reviewer_b }}
+          DRAW_SEED: ${{ steps.draw.outputs.seed }}
+        run: |
+          set -euo pipefail
+          mkdir -p out-manifest "out-sheet-$A" "out-sheet-$B"
+          cp draw/manifest.json out-manifest/
+          # Which commit's pins produced this draw. The ref selected at
+          # dispatch chooses the pre-registration file, so it is a lever on the
+          # draw even though nothing about it is typed in as an input. Recorded
+          # beside the manifest so a later reader can check the draw against
+          # the exact bundle, digest and seed it was taken under, rather than
+          # against whatever those files say today.
+          node -e '
+            const fs = require("fs");
+            const frozen = require("./docs/ops/router-human-review/primary-60-preregistration.json");
+            fs.writeFileSync("out-manifest/draw-provenance.json", JSON.stringify({
+              commit: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              runId: process.env.GITHUB_RUN_ID,
+              sourceRunId: frozen.sourceRunId,
+              sourceArtifact: frozen.sourceArtifact,
+              bundleFile: frozen.bundleFile,
+              bundleDigest: frozen.bundleDigest,
+              seed: Number(process.env.DRAW_SEED),
+              adjudicatorId: frozen.adjudicatorId,
+            }, null, 2) + "\n");
+          '
+          cat out-manifest/draw-provenance.json
+          cp "draw/sheet-$A.md" "draw/sheet-$A.json" "out-sheet-$A/"
+          cp "draw/sheet-$B.md" "draw/sheet-$B.json" "out-sheet-$B/"
+          # The source bundle is not re-uploaded: it already exists on its own
+          # run, and a second copy is a second thing to control access to.
+          rm -rf source draw
+          find out-manifest out-key "out-sheet-$A" "out-sheet-$B" -type f | sort
+
+      - name: Manifest (committable)
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-review-manifest
+          path: out-manifest/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Sheet for reviewer A
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-review-sheet-${{ inputs.reviewer_a }}
+          path: out-sheet-${{ inputs.reviewer_a }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Sheet for reviewer B
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-review-sheet-${{ inputs.reviewer_b }}
+          path: out-sheet-${{ inputs.reviewer_b }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Encrypted key
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-review-key-encrypted
+          path: out-key/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload the recovery probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-review-recovery-probe
+          path: out-probe/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: How to hand these out
+        run: |
+          cat <<'NOTE'
+          Four artifacts, three audiences.
+
+            human-review-manifest              the draw. Commit it.
+            human-review-sheet-<A>             give to reviewer A only.
+            human-review-sheet-<B>             give to reviewer B only.
+            human-review-key-encrypted         operators only. Decrypt with the
+                                               private half of the recipient key:
+              openssl pkeyutl -decrypt -inkey <private.pem> \
+                -in key.json.session.enc -out session.key
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+                -in key.json.enc -out key.json -pass file:session.key
+              sha256sum -c key.json.sha256   # matches what was sealed
+            human-review-recovery-probe        decrypt this the same way BEFORE
+                                               trusting the sealed key
+
+          GitHub Actions artifacts have NO per-file access control. A reviewer
+          with Actions access to this repository can read every artifact on
+          this run, including the other reviewer's sheet and the encrypted key.
+          Download the sheets and distribute them yourself, or assign reviewers
+          who have no Actions access here.
+
+          The adjudicator's sheet is NOT drawn here. It is built after a
+          disagreement exists, over the disagreeing pairs only.
+          NOTE

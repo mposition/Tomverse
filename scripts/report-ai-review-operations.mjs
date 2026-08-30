@@ -72,6 +72,7 @@ for (const windowDays of windows) {
   line("cached", pct(card.reliability.cachedRate));
   line("attempts that retried", pct(card.reliability.retryRate));
   line("unreconciled settlements", pct(card.reliability.unreconciledSettlements));
+  line("settled above reservation", pct(card.reliability.creditReconciliation));
   line(
     "duration p50 / p95 (ms)",
     `${card.reliability.p50DurationMs ?? "n/a"} / ${card.reliability.p95DurationMs ?? "n/a"}`
@@ -115,14 +116,19 @@ for (const windowDays of windows) {
   line("review → save or share", pct(card.adoption.reviewToSaveOrShare));
   line("review → item web check", pct(card.adoption.reviewToItemWebCheck));
   line("first → second review", pct(card.adoption.firstToSecondReview));
-  line("D1 return", pct(card.adoption.returnDay1));
-  line("D7 return", pct(card.adoption.returnDay7));
-  line("D30 return", pct(card.adoption.returnDay30));
+  line("D1 after first review", pct(card.adoption.reviewAnchoredReturnDay1));
+  line("D7 after first review", pct(card.adoption.reviewAnchoredReturnDay7));
+  line("D30 after first review", pct(card.adoption.reviewAnchoredReturnDay30));
+  line("D7 by account age", pct(card.adoption.accountAgeReturnDay7));
   line("D7, comparison-only cohort", pct(card.adoption.cohortReturnDay7.comparisonOnly));
   line("D7, AI Review cohort", pct(card.adoption.cohortReturnDay7.aiReview));
   console.log(
     "  note the two cohorts self-selected. A difference between them is a\n" +
-      "       difference in who used the feature as much as in what it did for them."
+      "       difference in who used the feature as much as in what it did for them.\n" +
+      "       Conversions are ordered (the second event follows the first), which is\n" +
+      "       the strongest claim these events support: they carry no conversation id.\n" +
+      "       'by account age' is anchored on the account, not the review, and is not\n" +
+      "       review retention."
   );
 }
 
