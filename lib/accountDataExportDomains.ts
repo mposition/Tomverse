@@ -212,6 +212,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The conversations the user imported, with their titles, source timestamps and counts. Integrity digests are withheld as internals, and the snapshot lock password is withheld because a copy of it is an offline attack on the one secret this table holds. A conversation the owner has locked is reduced to existence metadata -- that it exists, that it is locked, and when it arrived -- because an export is a document that leaves the account, where a title outlives the lock (policy §13.2).",
   },
   {
+    domain: "conversationContinuationBridge",
+    publicName: "continued_conversations",
+    prismaModel: "ConversationContinuationBridge",
+    state: "included_filtered",
+    withheldReason:
+      "Which Tomverse conversation was started from which imported one, the provider it came from, when the original was imported, how much of it the model was given as context, and whether the original has since been deleted. Withheld: the snapshot digest and its version, which identify a snapshot rather than describe it and are integrity internals like every other digest here, and the creation idempotency key, which is a protocol artefact of one click.",
+  },
+  {
     domain: "externalMessage",
     publicName: "imported_messages",
     prismaModel: "ExternalMessage",

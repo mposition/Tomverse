@@ -1225,6 +1225,39 @@ export const en = {
     // service" is deliberately distinct from auth.guestImportSectionTitle
     // ("Import this browser's guest conversations") — two different features
     // that must never share a name (policy §21).
+    continuation: {
+        ctaTitle: "Continue in Tomverse",
+        ctaDescription: "Start a new Tomverse conversation from this imported chat. The original stays here, read-only.",
+        ctaAction: "Continue in Tomverse",
+        disclosureNewConversation: "A new Tomverse conversation is created.",
+        disclosureSourceReadOnly: "The imported original stays read-only and is never changed.",
+        disclosureNotOurAnswer: "The imported replies were written by another AI service, not by Tomverse.",
+        disclosureAttachments: "Attachments and images were not imported, and long messages may be shortened.",
+        disclosurePartialContext: "Only a recent part of the imported conversation is given to the model as context.",
+        confirm: "Create the conversation",
+        cancel: "Cancel",
+        creating: "Creating…",
+        createFailed: "The conversation could not be created. Try again.",
+        unavailable: "Continuing an imported conversation is not available right now.",
+        openConversation: "Open the continued conversation",
+        sourceSectionTitle: "Imported conversation · read-only",
+        sourceSectionSubtitle: "From {provider}, imported {date}",
+        externalAnswerBadge: "External reply",
+        divider: "Continued in Tomverse from here",
+        seedSummary: "{used} of {total} imported messages are given to the model as context.",
+        seedNone: "No imported message is given to the model as context.",
+        seedTruncated: "{count} of them are shortened.",
+        sourceDeleted: "The imported original was deleted. The Tomverse messages below are unaffected.",
+        sourceLocked: "The imported original is locked. Unlock it from the imports screen to read it here.",
+        shareDisabled: "A conversation continued from an imported chat cannot be shared publicly yet.",
+        composerPlaceholder: "Continue the conversation",
+        send: "Send",
+        sending: "Sending…",
+        sendFailed: "The message could not be sent. Try again.",
+        notFound: "This conversation could not be found.",
+        backToImports: "Back to imports",
+    },
+
     externalImport: {
         dataTabTitle: "Import from another AI service",
         dataTabDescription:

@@ -70,6 +70,14 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/app-managed-web-search-staging-verification-records",
     },
     {
+        key: "external-conversation-continuation",
+        label: "continuing an imported conversation in Tomverse",
+        checklist:
+            "docs/ops/external-conversation-continuation-staging-checklist.md",
+        records:
+            "docs/ops/external-conversation-continuation-staging-verification-records",
+    },
+    {
         key: "deep-research",
         label: "deep research expansion offer and the model swap at the cap",
         checklist: "docs/ops/deep-research-staging-checklist.md",

@@ -106,6 +106,7 @@ import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
+import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
 import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
@@ -233,6 +234,7 @@ import {
 } from "@/lib/billingEntitlements";
 import {
     getOperationalFeatureFlags,
+    isExternalContinuationEnabledCached,
     isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -2082,6 +2084,49 @@ async function handleChatPost(
         const imageGenerationFlagEnabled = isDeepResearchTurn
             ? false
             : await isImageGenerationEnabledCached();
+        /*
+          The imported excerpt this turn carries, if this conversation was
+          started from one
+          (docs/policy/external-conversation-continuation.md §5).
+
+          Four gates, and every one of them answers `null` rather than an
+          error, because a turn that cannot read the source is an ordinary turn
+          with no seed -- the user's own messages are already in `messages` and
+          the answer must not be refused for want of context they did not ask
+          for:
+
+            * the rollout flag, read first so a rollback stops the injection
+              without touching anything else on this path;
+            * a bridge on this conversation, scoped by `userId` in the `where`;
+            * a source that still exists (a deleted one leaves the bridge's
+              foreign key NULL);
+            * an `external_conversation` unlock grant on *this request* when the
+              snapshot is locked -- the snapshot's own lock, never the
+              conversation's.
+
+          Skipped entirely on deep research, which carries no system blocks at
+          all and would price one it never sends.
+        */
+        let continuationSeedPrompt = "";
+        if (!isDeepResearchTurn && session?.user?.id && conversationId) {
+            try {
+                if (await isExternalContinuationEnabledCached()) {
+                    const seed = await loadContinuationTurnSeed({
+                        userId: session.user.id,
+                        conversationId,
+                        request: req,
+                    });
+                    continuationSeedPrompt = seed?.prompt.text ?? "";
+                }
+            } catch (error) {
+                // Fail open on the *answer* and closed on the *seed*: a
+                // database hiccup while reading imported context must not cost
+                // the user their turn, and the turn it produces is simply one
+                // without the excerpt. Logged so a seed that stops being
+                // carried is visible rather than silent.
+                logRequestError("chat_continuation_seed_failed", traceId, error);
+            }
+        }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             modelId: modelConfig.id,
             provider: modelConfig.provider,
@@ -2107,6 +2152,7 @@ async function handleChatPost(
             planAllowsImageGeneration: Boolean(
                 accountPlan && planAllowsImageGeneration(accountPlan.tier)
             ),
+            continuationSeedPrompt,
         });
         const artifactToolPlan = turnSystemBlocks.artifactPlan;
         // Policy: docs/policy/external-conversation-import-and-memory.md.

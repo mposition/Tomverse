@@ -378,6 +378,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: conversationContinuationBridge
+    prismaModel: ConversationContinuationBridge
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: memoryItem
     prismaModel: MemoryItem
     userLinkageRole: subject

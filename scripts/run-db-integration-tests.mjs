@@ -325,6 +325,11 @@ run(
     // The provider set is written in TypeScript and in SQL, and only a
     // real database can say the two still agree.
     "tests/integration/external-import-provider-canon.db.test.ts",
+    // Continuing an imported conversation: the two foreign keys behave
+    // differently on delete, and that difference is the whole feature. Only a
+    // database can show that removing the source leaves the conversation and
+    // its messages standing while the bridge becomes a tombstone.
+    "tests/integration/external-conversation-continuation.db.test.ts",
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
