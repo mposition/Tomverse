@@ -73,6 +73,11 @@ const prismaStub = {
   imageAssetCleanup: { deleteMany: async () => ({ count: 28 }) },
   assistantKnowledgeCleanup: { deleteMany: async () => ({ count: 29 }) },
   tokenEstimateShadowSample: { deleteMany: async () => ({ count: 30 }) },
+  // Added with the `comparison_review_runs` step (the AI Review M5 slice).
+  // Without it the step reaches `deleteMany` on `undefined`, which is a
+  // failed step rather than a crash — so the run still finishes and the two
+  // tests that read `failedSteps` are the ones that notice.
+  comparisonReviewRun: { deleteMany: async () => ({ count: 31 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },

@@ -45,6 +45,16 @@ export const UNPRICED_REASONS = {
     SERVICE_TIER: "service_tier_not_standard",
     SPEED: "speed_not_standard",
     INFERENCE_GEO: "inference_geo_not_global",
+    /**
+     * The response did not report a geo even though the request grouped by it.
+     *
+     * Its own reason rather than folded into the one above, because the two
+     * need different responses: `us` means "priced elsewhere, at a multiplier
+     * this registry does not carry", and this means "the report cannot see the
+     * dimension at all", which is a question about the request or the API
+     * rather than about the traffic.
+     */
+    INFERENCE_GEO_UNKNOWN: "inference_geo_not_reported",
     UNKNOWN_MODEL: "model_not_in_pricing_registry",
 };
 
@@ -150,13 +160,46 @@ export const resolveReportRange = ({ from, to, days, now = new Date() }) => {
     };
 };
 
-/** Build the request URL for one page of the messages usage report. */
+/**
+ * The beta header the `speed` dimension requires.
+ *
+ * Both the `speeds[]` filter and the `speed` group-by are gated on it, and a
+ * request that asks for the dimension without the header does not fail loudly
+ * -- so grouping by `speed` and sending the header are one decision, taken
+ * together in `anthropicUsageReportUrl`.
+ */
+export const FAST_MODE_BETA_HEADER = "fast-mode-2026-02-01";
+
+/** The dimensions asked for on every run, in a fixed order. */
+export const BASE_GROUP_BY = [
+    "model",
+    "service_tier",
+    "context_window",
+    // Grouped from the start rather than on request. `inference_geo: "us"`
+    // carries a 1.1x multiplier on every token category, and a report that did
+    // not ask for the dimension gets `null` back for it -- which
+    // `priceUsageRow` would read as "no modifier" and price at standard. The
+    // cheapest way to be wrong about a US-only row is to not ask.
+    "inference_geo",
+];
+
+/**
+ * Build the request URL for one page of the messages usage report.
+ *
+ * `speed` is opt-in because its group-by needs a beta header, and asking for a
+ * beta dimension on every run makes an ordinary report depend on a beta whose
+ * availability is not this script's to assume. `scope` is opt-in because
+ * filtering is a claim about attribution -- see `attributionScope`.
+ */
 export const anthropicUsageReportUrl = ({
     baseUrl,
     startingAt,
     endingAt,
     limit,
     page,
+    groupBySpeed = false,
+    workspaceIds = [],
+    apiKeyIds = [],
 }) => {
     const url = new URL(baseUrl);
     url.searchParams.set("starting_at", startingAt.toISOString());
@@ -167,12 +210,46 @@ export const anthropicUsageReportUrl = ({
     // `null` for anything not in `group_by[]` -- so a report that priced rows
     // without asking for `service_tier` would be pricing rows it could not see
     // the tier of, and would quietly rate a batch row at standard.
-    for (const dimension of ["model", "service_tier", "context_window"]) {
+    for (const dimension of BASE_GROUP_BY) {
         url.searchParams.append("group_by[]", dimension);
     }
+    if (groupBySpeed) url.searchParams.append("group_by[]", "speed");
+    // Narrowing filters, when the operator supplied them. Repeated rather than
+    // comma-joined: the API documents these as array parameters.
+    for (const id of workspaceIds) url.searchParams.append("workspace_ids[]", id);
+    for (const id of apiKeyIds) url.searchParams.append("api_key_ids[]", id);
     url.searchParams.set("limit", String(limit));
     if (page) url.searchParams.set("page", page);
     return url;
+};
+
+/**
+ * What this run's numbers are actually *about*.
+ *
+ * The Usage API answers for the whole organisation. If Tomverse shares its
+ * Anthropic organisation with anything else -- another product, a staging key,
+ * somebody's console playground -- an unfiltered run reports that traffic too,
+ * and a cache hit rate computed over it is not Tomverse's hit rate.
+ *
+ * There is no way for this script to detect that from the outside: an
+ * organisation with one workspace and an organisation with three look identical
+ * in a response that was not grouped by workspace. So the scope is *declared*
+ * rather than inferred, and the honest default is the wide one. A run with no
+ * filter says so in its own output instead of letting the reader assume.
+ */
+export const attributionScope = ({ workspaceIds = [], apiKeyIds = [] }) => {
+    const filtered = workspaceIds.length > 0 || apiKeyIds.length > 0;
+    return {
+        filtered,
+        workspaceIds,
+        apiKeyIds,
+        label: filtered
+            ? `filtered to ${workspaceIds.length} workspace(s) and ${apiKeyIds.length} API key(s)`
+            : "the entire Anthropic organization",
+        caveat: filtered
+            ? "Scoped by the workspace and API key filters given on the command line. Anything Tomverse sends outside them is not counted."
+            : "ORGANIZATION-WIDE: no workspace or API key filter was given, so every Anthropic request this organization made is counted -- including any product, staging key or console usage that is not Tomverse. Pass --workspace-id or --api-key-id to attribute these numbers to Tomverse.",
+    };
 };
 
 /**
@@ -353,13 +430,31 @@ export const priceUsageRow = (row, resolvePrice) => {
     if (row.speed !== null && row.speed !== "standard") {
         return { priced: false, reason: UNPRICED_REASONS.SPEED };
     }
-    if (row.inferenceGeo !== null && row.inferenceGeo !== "global") {
-        // `not_available` is included here on purpose. It means the model
-        // predates the parameter and therefore always ran at standard global
-        // pricing -- but this report is not grouping by `inference_geo`, so a
-        // non-null value here can only come from a caller that asked for it,
-        // and treating any of them as global would be a guess about a 1.1x
-        // multiplier.
+    // `inference_geo`, handled by value rather than by "is it global".
+    //
+    //   global         -- standard pricing. Priced.
+    //   not_available  -- the model predates the parameter, so it *cannot* have
+    //                     run US-only and always billed at standard rates.
+    //                     Priced, and priced correctly: refusing it would drop
+    //                     every pre-4.6 model out of the totals for carrying an
+    //                     honest "this dimension does not apply to me".
+    //   us             -- 1.1x on every token category, including cache reads
+    //                     and writes. Not priced here: the multiplier is real
+    //                     and applying it would put a rate into the savings
+    //                     figure that no registry entry verifies.
+    //   null           -- the dimension was not grouped. Since `BASE_GROUP_BY`
+    //                     always asks for it, a null means the response did not
+    //                     answer, which is not the same as "global" and must
+    //                     not be read as it.
+    if (row.inferenceGeo === "us") {
+        return { priced: false, reason: UNPRICED_REASONS.INFERENCE_GEO };
+    }
+    if (row.inferenceGeo === null) {
+        return { priced: false, reason: UNPRICED_REASONS.INFERENCE_GEO_UNKNOWN };
+    }
+    if (row.inferenceGeo !== "global" && row.inferenceGeo !== "not_available") {
+        // A value the API added after this was written. Refused rather than
+        // assumed: an unknown geo is an unknown multiplier.
         return { priced: false, reason: UNPRICED_REASONS.INFERENCE_GEO };
     }
     const price = row.model ? resolvePrice(row.model, row.day) : null;

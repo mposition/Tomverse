@@ -402,9 +402,12 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
 - **가격 변경은 `priceSchedule`로 효력일 전에 적어 둡니다**(2026-08-30).
   `effectiveFrom`은 UTC instant이고 경계는 포함이며, 각 항목은 새
   `pricingVersion`을 갖습니다. override 우선순위와 소급 금지는 그대로입니다.
-  **Claude Sonnet 5의 2026-09-01 US$3/US$15 인상은 2026-08-11에 취소됐으므로
+  **Claude Sonnet 5의 2026-09-01 US$3/US$15 인상은 2026-08-10에 취소됐으므로
   예약하지 않습니다** — 공식 pricing 페이지의
-  `claude-sonnet-5-introductory-pricing` 각주.
+  `claude-sonnet-5-introductory-pricing` 각주. **`verifiedAt`(읽은 날)과
+  `effectiveFrom`(청구 경계)은 별개 field이고**, 공급자가 날짜만 발표하면
+  경계는 그 **다음 UTC 일의 첫 instant**로 잡습니다 — 실행 시점에 공개되지
+  않았던 결정으로 소급 청구하지 않기 위해서입니다.
 - 가격이 아직 검증되지 않은 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에
   담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
   90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과
