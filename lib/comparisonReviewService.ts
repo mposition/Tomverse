@@ -36,6 +36,7 @@ import {
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
+  comparisonReviewRunOutcome,
   emptyAttemptRecord,
   type ComparisonReviewAttemptRecord,
 } from "@/lib/comparisonReviewRunCore";
@@ -501,8 +502,18 @@ export const runComparisonReview = async (
   };
 
   let primaryAttempt: ReviewAttempt | null = null;
+  // Whether ANY attempt actually sent something. A run where every candidate
+  // refused locally -- out of credits, over a limit, longer than the context
+  // window -- says nothing about reviewer health and must not be counted as a
+  // provider failure. `failed` and `refused_before_provider` are different
+  // outcomes precisely so this case is visible as itself
+  // (docs/policy/ai-review-m5-quality-contract.md §7).
+  let reachedProvider = false;
   for (const candidate of candidates) {
     const outcome = await attemptReview(candidate);
+    if (outcome.record.status === "completed" || outcome.record.status === "failed") {
+      reachedProvider = true;
+    }
     // The record is the LAST candidate tried, not the first: when a reviewer
     // is skipped and the next one succeeds, the run's story is the one that
     // ran. Each skipped candidate is still visible in its own structured log
@@ -512,7 +523,14 @@ export const runComparisonReview = async (
     if (primaryAttempt) break;
   }
   if (!primaryAttempt) {
-    await recorder?.finish("failed", "COMPARISON_REVIEW_FAILED");
+    await recorder?.finish(
+      comparisonReviewRunOutcome({
+        primaryCompleted: false,
+        secondaryCompleted: false,
+        reachedProvider,
+      }),
+      "COMPARISON_REVIEW_FAILED"
+    );
     throw new ComparisonReviewFailedError();
   }
 
@@ -555,7 +573,11 @@ export const runComparisonReview = async (
         : null,
   });
   await recorder?.finish(
-    secondaryAttempt ? "completed_dual" : "completed_primary_only"
+    comparisonReviewRunOutcome({
+      primaryCompleted: true,
+      secondaryCompleted: Boolean(secondaryAttempt),
+      reachedProvider: true,
+    })
   );
 
   return {

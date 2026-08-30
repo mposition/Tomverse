@@ -205,6 +205,30 @@ export const contentFreeViolations = (
     return violations;
 };
 
+/**
+ * The outcome of a run, from what its two attempts did.
+ *
+ * Pure and here rather than inline in the service, because the distinction it
+ * makes is a contract and not a detail: a run where every candidate refused
+ * locally -- out of credits, over a limit, longer than the context window --
+ * never sent anything, so it says nothing about reviewer health and must not
+ * land in a provider-failure rate. `failed` and `refused_before_provider` are
+ * different outcomes precisely so that case is visible as itself.
+ */
+export const comparisonReviewRunOutcome = (input: {
+    primaryCompleted: boolean;
+    secondaryCompleted: boolean;
+    /** True once any attempt actually dispatched to a provider. */
+    reachedProvider: boolean;
+}): ComparisonReviewRunOutcome => {
+    if (input.primaryCompleted) {
+        return input.secondaryCompleted
+            ? "completed_dual"
+            : "completed_primary_only";
+    }
+    return input.reachedProvider ? "failed" : "refused_before_provider";
+};
+
 /** Whether a run reached a provider at all, for the failure-rate denominator. */
 export const reachedProvider = (record: ComparisonReviewRunRecord) =>
     record.primary.status === "completed" ||

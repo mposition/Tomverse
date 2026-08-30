@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   COMPARISON_REVIEW_RUN_OUTCOMES,
   buildComparisonReviewRunRecord,
+  comparisonReviewRunOutcome,
   contentFreeViolations,
   emptyAttemptRecord,
   reachedProvider,
@@ -145,4 +146,46 @@ test("the outcome vocabulary keeps a refusal separate from a failure and a cache
     "refused_before_provider",
     "cached",
   ]);
+});
+
+test("a run where every candidate refused locally is not a provider failure", () => {
+  // The distinction the outcome vocabulary exists for: nothing was sent, so
+  // nothing here is evidence about a reviewer model.
+  assert.equal(
+    comparisonReviewRunOutcome({
+      primaryCompleted: false,
+      secondaryCompleted: false,
+      reachedProvider: false,
+    }),
+    "refused_before_provider"
+  );
+  assert.equal(
+    comparisonReviewRunOutcome({
+      primaryCompleted: false,
+      secondaryCompleted: false,
+      reachedProvider: true,
+    }),
+    "failed"
+  );
+});
+
+test("a completed primary decides dual vs primary-only, whatever the secondary attempted", () => {
+  assert.equal(
+    comparisonReviewRunOutcome({
+      primaryCompleted: true,
+      secondaryCompleted: true,
+      reachedProvider: true,
+    }),
+    "completed_dual"
+  );
+  // A secondary that was attempted and failed is still primary-only: the user
+  // got one review, and the dual-completion rate is where the loss shows.
+  assert.equal(
+    comparisonReviewRunOutcome({
+      primaryCompleted: true,
+      secondaryCompleted: false,
+      reachedProvider: true,
+    }),
+    "completed_primary_only"
+  );
 });
