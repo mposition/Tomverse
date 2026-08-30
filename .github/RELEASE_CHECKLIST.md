@@ -78,6 +78,13 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset
+      is structurally sound (a case with an unstated `goldCompleteness` or a
+      `prompt_injection` case with no marker produces numbers over the wrong
+      denominators rather than an error) and that no reviewer pair is marked
+      `approved` without the evidence
+      `docs/policy/ai-review-m5-quality-contract.md` §3 requires. Passing with
+      nothing approved is the expected state, not a gap
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
 - [ ] `npm run check:unconsumed-response-bodies` — the other half of that
@@ -102,6 +109,14 @@ Date / timezone:    ____________________
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:router-quality-eval`
+- [ ] `npm run check:router-decision-preregistration` — `n` is still the
+      number that was frozen before the run, under the version it was
+      frozen as, and no more than one registration is active
+- [ ] `npm run check:router-human-review` — the human sample that
+      calibrates the model judges holds the shape it was drawn with:
+      four primary and two reserve per cell, no pair in both, no
+      substitution recorded against a verdict, and no diagnostic pair
+      inside the primary sixty
 - [ ] `npm run check:auto-rollout-readiness`
 - [ ] `npm run check:usage-bucket-range`
 - [ ] `npm run check:memory-extraction-eval`

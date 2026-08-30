@@ -30,7 +30,8 @@ gaps are scheduled rather than discovered during Router implementation.
 | Price basis | `inputUsdPerMillionTokens`, `outputUsdPerMillionTokens`, `cachedInputPriceMultiplier` | DB, **nullable** |
 | Plan entitlement and credit cost | `minimumPlan`, `usageClass`, `creditWeight` | DB |
 | Operational status | `enabled`, `status`, `publiclyListed`, `catalogDeleted`, `operationalReason`, `replacementModelId` | DB |
-| Provider-native web search | `lib/webSearchCapability.ts` | code, per catalog model id |
+| Web search capability | `lib/webSearchCapability.ts` | code, per catalog model id |
+| Search backend reachability | `lib/webSearchBackendRuntime.ts` | environment, per deployment |
 | Provider health | `ProviderHealthState`, `ProviderProbeResult`, `ProviderErrorEvent` | DB |
 | Model lifecycle vs the provider's own catalogue | `ProviderModelCatalogEntry` | DB |
 | Prompt token estimate | `lib/chatTokenEstimate.ts` | code, **model-agnostic** |
@@ -43,6 +44,29 @@ reused rather than re-derived:
 because two models from one provider differ; anything not confirmed against
 provider documentation is `unverified` rather than assumed supported. Router
 capability filtering should read this module, not re-infer support.
+
+It carries three routes, not one, and they are deliberately separate values of
+`support` rather than shades of "native" (2026-08-27):
+
+| `support` | Who runs the search | Who is billed | Ceiling comes from |
+| --- | --- | --- | --- |
+| `native` | the model's own provider | that provider | a request parameter the provider honours |
+| `app-managed` | this application, through `searchBackend` | a search vendor, separately | a counter in this process |
+| `search-model` | inside ordinary completion | already in the response cost | not applicable |
+
+The register is compiled in and identical everywhere. **Whether an
+`app-managed` capability can search *here* is a second fact**, resolved from
+this deployment's credentials and search budget by
+`resolveWebSearchBackendReadiness()`, and every surface -- composer, picker,
+credit estimate, Router candidate filter, preflight, availability, dispatch --
+must be given that same map. `webSearchIsDispatchable(capability, readiness)`
+takes it as a required argument for exactly that reason: a default of "assume
+reachable" would let a surface offer a search this deployment cannot run.
+
+A Router candidate rejected on either ground reports `web_search_cost_unbounded`.
+The two causes are told apart downstream by `resolveAttemptSearchPath`, whose
+`cost_unbounded` and `backend_unavailable` gaps are fixed in different places --
+one by a provider shipping a parameter, the other by an environment variable.
 
 **Provider health already separates its evidence streams.**
 `ProviderHealthState` keeps real-user-traffic, synthetic-probe and

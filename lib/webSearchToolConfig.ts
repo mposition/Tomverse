@@ -3,7 +3,6 @@ import "server-only";
 import type { ToolSet } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { google } from "@ai-sdk/google";
 import {
   ANTHROPIC_MAX_SEARCH_USES,
   type WebSearchCapability,
@@ -63,14 +62,24 @@ export const buildWebSearchToolConfig = (
         // Claude decides per-turn whether the question needs a search.
       };
     case "google":
-      return {
-        tools: { google_search: google.tools.googleSearch({}) },
-        // Google's grounding tool is not forceable either, and unlike OpenAI's
-        // it takes no per-request call ceiling, so `nativeSearchIsDispatchable`
-        // keeps callers from ever asking for this configuration today. Kept
-        // whole so the day a ceiling exists is a capability change and not a
-        // rewrite.
-      };
+      // Deliberately unbuildable.
+      //
+      // `google.tools.googleSearch({})` takes no ceiling, on the tool or on the
+      // request, so a request carrying it has no worst-case cost to reserve.
+      // The Google models now search through the application-managed tool
+      // instead (`lib/appManagedWebSearchTool.ts`), which has one, and
+      // `nativeSearchIsDispatchable` already refuses this capability before any
+      // caller gets here.
+      //
+      // Returning null rather than leaving the old builder in place, because
+      // the two are not equivalent. A builder that *can* produce Google's
+      // grounding is one `nativeSearchEnabled` computed slightly differently
+      // away from sending it -- and sending it would both spend money nobody
+      // authorized and, on Gemini, make the request mutually exclusive with the
+      // function declarations that are now how this product searches. There is
+      // no configuration of this application in which grounding is the right
+      // answer, so there is no code path that emits it.
+      return null;
     default:
       return null;
   }

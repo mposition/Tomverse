@@ -8,6 +8,36 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { BoundedBufferError } from "@/lib/boundedBuffer";
+import {
+  classifyStorageError,
+  storageErrorStatus,
+  toStorageError,
+  type StorageOperation,
+} from "@/lib/storageObjectErrors";
+
+/**
+ * Every S3 call in this file goes through here.
+ *
+ * Not for retries and not for logging -- for *typing*. The AWS SDK throws
+ * `NotFound`, `AccessDenied` and a socket reset as three objects that differ
+ * only in a string, and a caller that catches `error` cannot tell "the bytes
+ * are gone" from "the credentials rotated" without repeating the same duck
+ * typing at every call site. One of those two answers is something we tell a
+ * user about their own file, and getting it wrong during a credentials outage
+ * would mark an account's whole history as lost.
+ *
+ * The original error stays on `cause`; the key never leaves this module.
+ */
+const r2Call = async <T>(
+  operation: StorageOperation,
+  send: () => Promise<T>
+): Promise<T> => {
+  try {
+    return await send();
+  } catch (error) {
+    throw toStorageError(operation, error);
+  }
+};
 
 const getR2Config = () => {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -93,8 +123,8 @@ export async function readR2Object(
   options: { maxBytes: number; expectedContentType: string }
 ) {
   const { client, bucket } = getR2Client();
-  const head = await client.send(
-    new HeadObjectCommand({ Bucket: bucket, Key: key })
+  const head = await r2Call("head", () =>
+    client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
   );
   const actualSize = head.ContentLength;
   const contentTypeMatches =
@@ -111,13 +141,15 @@ export async function readR2Object(
   }
 
   const abortController = new AbortController();
-  const response = await client.send(
-    new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      IfMatch: head.ETag,
-    }),
-    { abortSignal: abortController.signal }
+  const response = await r2Call("get", () =>
+    client.send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        IfMatch: head.ETag,
+      }),
+      { abortSignal: abortController.signal }
+    )
   );
 
   if (!response.Body) {
@@ -159,8 +191,8 @@ export async function validateR2ObjectMetadata(
   }
 ) {
   const { client, bucket } = getR2Client();
-  const head = await client.send(
-    new HeadObjectCommand({ Bucket: bucket, Key: key })
+  const head = await r2Call("head", () =>
+    client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
   );
   const actualSize = head.ContentLength;
   const contentType = normalizeContentType(head.ContentType);
@@ -227,9 +259,10 @@ export async function readOwnR2ObjectBytes(
 ) {
   const { client, bucket } = getR2Client();
   const abortController = new AbortController();
-  const response = await client.send(
-    new GetObjectCommand({ Bucket: bucket, Key: key }),
-    { abortSignal: abortController.signal }
+  const response = await r2Call("get", () =>
+    client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
+      abortSignal: abortController.signal,
+    })
   );
   if (!response.Body) throw new Error("R2 object has no body.");
 
@@ -257,22 +290,72 @@ export async function writeR2Object(
   contentType: string
 ) {
   const { client, bucket } = getR2Client();
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-      Metadata: {
-        "upload-size": String(body.byteLength),
-      },
-    })
+  await r2Call("put", () =>
+    client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        Metadata: {
+          "upload-size": String(body.byteLength),
+        },
+      })
+    )
   );
 }
 
 export async function deleteR2Object(key: string) {
   const { client, bucket } = getR2Client();
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  await r2Call("delete", () =>
+    client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+  );
+}
+
+/**
+ * Does this object exist? -- asked without reading it and without deleting
+ * anything, and answered in three states rather than two.
+ *
+ * `measureR2Object` above returns null for every failure, which is the right
+ * answer for a routing probe deciding whether it knows enough to act and the
+ * wrong one for anything that records a verdict: "storage said 404" and
+ * "storage did not answer" are the same null there, and treating the second as
+ * the first is how a five-minute credentials outage would be written into the
+ * database as permanent data loss.
+ *
+ * Used by the read-only attachment audit and by the chat route's confirmation
+ * step before an attachment row is marked unavailable.
+ */
+export async function probeR2Object(key: string): Promise<{
+  state: "present" | "missing" | "unreachable";
+  size: number | null;
+  contentType: string | null;
+  lastModified: Date | null;
+  storageStatus: number | null;
+}> {
+  const { client, bucket } = getR2Client();
+  try {
+    const head = await client.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key })
+    );
+    const size = head.ContentLength;
+    return {
+      state: "present",
+      size: Number.isSafeInteger(size) ? size! : null,
+      contentType: normalizeContentType(head.ContentType) || null,
+      lastModified: head.LastModified ?? null,
+      storageStatus: 200,
+    };
+  } catch (error) {
+    const kind = classifyStorageError(error);
+    return {
+      state: kind === "missing" ? "missing" : "unreachable",
+      size: null,
+      contentType: null,
+      lastModified: null,
+      storageStatus: storageErrorStatus(error),
+    };
+  }
 }
 
 /**
@@ -293,13 +376,15 @@ export async function listExpiredR2Objects(
   let continuationToken: string | undefined;
 
   do {
-    const page = await client.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: prefix,
-        MaxKeys: Math.min(1_000, maxKeys - expired.length),
-        ContinuationToken: continuationToken,
-      })
+    const page = await r2Call("list", () =>
+      client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          MaxKeys: Math.min(1_000, maxKeys - expired.length),
+          ContinuationToken: continuationToken,
+        })
+      )
     );
     for (const object of page.Contents || []) {
       if (!object.Key || !object.LastModified) continue;

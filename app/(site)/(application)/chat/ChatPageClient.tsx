@@ -44,6 +44,17 @@ import {
   type DeepResearchAvailability,
   type DeepResearchSuggestionTurn,
 } from "@/lib/deepResearchSuggestion";
+import {
+  anySelectedModelCanSearch,
+  webSearchTopicKey,
+  type WebSearchAvailability,
+  type WebSearchSuggestionState,
+  type WebSearchSuggestionTurn,
+  type WebSearchTopicSignal,
+} from "@/lib/webSearchRetrySuggestion";
+import { resolveWebSearchSuggestionCopy } from "@/components/chat/webSearchSuggestionCopy";
+import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
+import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -69,6 +80,7 @@ import {
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
+  type WebSearchToggleMode,
 } from "@/lib/appDefaults";
 import {
   DEFAULT_CONVERSATION_MEMORY_MODE,
@@ -167,6 +179,11 @@ import {
 import { GuestImportModal } from "@/components/chat/GuestImportModal";
 import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
+import { WebSearchBackendReadinessProvider } from "@/components/chat/WebSearchBackendReadinessProvider";
+import {
+  NO_WEB_SEARCH_BACKENDS,
+  type WebSearchBackendReadiness,
+} from "@/lib/webSearchBackends";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -482,6 +499,32 @@ function ChatShellSkeleton({ label }: { label: string }) {
 type GlobalSubmitOptions = {
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
+  /**
+   * Web search for this send only, leaving the conversation's own switch
+   * exactly where the user left it.
+   *
+   * The web-search offer under a finished answer uses it: answering "yes,
+   * check this one" is consent for one question, not a standing instruction to
+   * search everything after it, and `Conversation.webSearchMode` is a stored
+   * setting the user owns. It rides the request instead -- through the
+   * preflight so the surcharge is priced, and through the payload so the
+   * dispatch attaches the tool.
+   */
+  webSearchOverride?: WebSearchToggleMode;
+  /**
+   * The models this one send is for, when that is not the whole selection.
+   *
+   * The expansion offered under a finished answer is the case this exists for:
+   * the user already has the ordinary answers and asked for a deeper pass, so
+   * sending their question to the other panels again would re-run work they
+   * have, and bill for it -- the card quotes Deep Research's price, not that
+   * plus everyone else's. `promptPayload.modelIds` already contracts that a
+   * panel outside the list "was not part of this send and must not answer it".
+   *
+   * The composer's setup sheet does NOT pass this. There the user typed a new
+   * question, so every selected model answering it is the point.
+   */
+  overrideModelIds?: readonly string[];
 };
 
 export function ChatPageClient({
@@ -490,6 +533,7 @@ export function ChatPageClient({
   guestDefaultModelId,
   imageGenerationEnabled = false,
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
+  webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
@@ -501,6 +545,18 @@ export function ChatPageClient({
    * from admission the moment a deployment changed the variable.
    */
   imageGroupMaxModels?: number;
+  /**
+   * Which application-managed search backends the running server can reach,
+   * resolved in the shell for the same reason `imageGroupMaxModels` is: the
+   * only client-visible alternative would be a public environment variable,
+   * and a public variable saying whether an API key is set is a public
+   * variable saying whether an API key is set.
+   *
+   * Defaulted to "none reachable" so a caller that has not been wired to it
+   * offers no search rather than promising one -- the conservative direction,
+   * and the same default the context itself carries.
+   */
+  webSearchBackendReadiness?: WebSearchBackendReadiness;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -645,6 +701,11 @@ export function ChatPageClient({
     modelIds: string[];
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
+    /**
+     * Web search for this send only, when the web-search offer made it. Absent
+     * on every composer send, which then reads the conversation's own mode.
+     */
+    webSearchMode?: WebSearchToggleMode;
     admissionToken?: string | null;
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
@@ -910,6 +971,119 @@ export function ChatPageClient({
    * second click (or a re-render) cannot start a second run.
    */
   const [isDeepResearchExpanding, setIsDeepResearchExpanding] = useState(false);
+  /* ------------------------------------------------------------------- */
+  /* The web-search offer (lib/webSearchRetrySuggestion.ts)               */
+  /* ------------------------------------------------------------------- */
+  /**
+   * The last question asked in this conversation, kept so an answer that could
+   * not be current can be offered a re-run with web search on.
+   *
+   * Deliberately a *second* record beside `deepResearchSuggestionTurn` rather
+   * than one shared one, because the two offers do not want the same turns:
+   * this one is recorded for every ordinary send including the ones that had
+   * search switched on (so the card can refuse them by name rather than by
+   * having never heard of them), while the Deep Research record is skipped
+   * entirely for a send that was already deep research.
+   *
+   * `searchExecuted` starts false and is corrected by `handleResponseComplete`
+   * from the stream trailer's own metadata. False here therefore means "not
+   * yet known to have searched", which is the safe direction: the offer is
+   * withheld only on evidence that a search really ran, never on the switch
+   * having been on.
+   */
+  const [webSearchSuggestionTurn, setWebSearchSuggestionTurn] =
+    useState<WebSearchSuggestionTurn | null>(null);
+  /**
+   * Questions this conversation has settled, as `conversationId::topicKey`.
+   *
+   * Acceptance and dismissal both land here, for the same reason they do in
+   * the Deep Research offer: both are an answer, and asking again after either
+   * is the app not listening. Component state rather than storage -- the rule
+   * is "at least for this conversation", and a durable record of what somebody
+   * declined is more than this feature needs to know about them.
+   */
+  const [webSearchResolvedTopics, setWebSearchResolvedTopics] = useState<
+    readonly string[]
+  >([]);
+  /** Questions this page has shown the card for, as `conversationId::topicKey::promptId`. */
+  const [webSearchOfferedTopics, setWebSearchOfferedTopics] = useState<
+    readonly string[]
+  >([]);
+  /**
+   * Questions whose re-run failed, as `conversationId::topicKey`, each with
+   * the reason the card has to distinguish.
+   *
+   * `blocked` is only ever reached from an observed refusal. There is no
+   * workspace or administrator policy over web search in this deployment and
+   * no endpoint that answers "would a search be allowed" without running one,
+   * so the honest way to know is to have been refused: the server's own
+   * `WEB_SEARCH_COST_UNBOUNDED` says the search cannot be authorized at all,
+   * and anything else is a failure worth a retry button. Guessing it in
+   * advance would mean either a probe on every offered question or a claim the
+   * product cannot support.
+   */
+  const [webSearchFailedTopics, setWebSearchFailedTopics] = useState<
+    readonly { key: string; reason: "error" | "blocked" }[]
+  >([]);
+  /**
+   * Held from the press on the offer until the send has been accepted or
+   * refused, so the card's buttons are disabled for exactly that window and a
+   * second click (or a re-render) cannot start a second run.
+   */
+  const [isWebSearchRetrying, setIsWebSearchRetrying] = useState(false);
+  /**
+   * The same guard, readable synchronously.
+   *
+   * The state above is what disables the buttons; this is what makes the
+   * handler refuse a second entry that arrives between the press and the
+   * re-render. A disabled button is a rendering, and two clicks in the same
+   * frame both see the old one.
+   */
+  const isWebSearchRetryingRef = useRef(false);
+  /**
+   * The send id the accepted offer produced, or null if it never got one.
+   *
+   * Cleared by the handler before it submits and written where a send is
+   * accepted, so reading it straight after the await answers exactly one
+   * question: did this press reach a payload at all? A send refused before
+   * that point (preflight, credits, the model-settings barrier) leaves it
+   * null, which is how the handler knows to show the retry state instead of
+   * waiting forever for a completion that is not coming.
+   *
+   * Deliberately *not* cleared when the run finishes. It did that once, and
+   * the result was that a fast refusal -- the server answering
+   * `WEB_SEARCH_COST_UNBOUNDED` before the submit's promise settled -- looked
+   * to the handler exactly like a send that had never happened, so the precise
+   * `blocked` state the error path had just recorded was overwritten with a
+   * generic `error` and the card offered a retry that could only be refused
+   * again. The outcome record below is what tracks the run; this only records
+   * that there was one.
+   */
+  const webSearchRetryPromptIdRef = useRef<string | null>(null);
+  /**
+   * Which models have reported back on the re-run, and what they reported.
+   *
+   * Three outcomes rather than a boolean, because "no model searched" and "no
+   * model said whether it searched" are different facts. A turn reports
+   * `WebSearchExecution` in its stream trailer; a turn that carries no trailer
+   * at all -- an older server on a rolling deploy, a path that does not append
+   * one -- has told us nothing, and reporting that as a failed search would
+   * put an error card over an answer that may be perfectly good. So `searched`
+   * and `refused` are recorded separately and silence is neither.
+   */
+  const webSearchRetryOutcomeRef = useRef<{
+    promptId: string;
+    conversationId: string;
+    text: string;
+    expected: number;
+    reported: Set<string>;
+    /** At least one model really ran a search. */
+    searched: boolean;
+    /** At least one model said, in so many words, that it did not. */
+    refused: boolean;
+    /** The server refused the search itself; see `WEB_SEARCH_COST_UNBOUNDED`. */
+    blocked: boolean;
+  } | null>(null);
   // The latest committed selection, readable synchronously by the send
   // barrier (state values close over stale renders inside async handlers).
   // Written by the central mutation below and kept aligned with React state
@@ -1156,9 +1330,16 @@ export function ChatPageClient({
         models: activeModels,
         estimatedInputTokens,
         webSearchMode,
+        backendReadiness: webSearchBackendReadiness,
       }).totalEstimatedCredits;
     },
-    [AVAILABLE_MODELS, effectiveDisabledPanels, selectedModels, webSearchMode]
+    [
+      AVAILABLE_MODELS,
+      effectiveDisabledPanels,
+      selectedModels,
+      webSearchMode,
+      webSearchBackendReadiness,
+    ]
   );
 
   const isInitialSelectedRef = useRef(false);
@@ -1570,11 +1751,23 @@ export function ChatPageClient({
       prompt,
       promptAttachments,
       modelIds: requestedModelIds,
+      webSearchMode: requestedWebSearchMode,
     }: {
       comparisonId: string;
       conversationId: string;
       prompt: string;
       promptAttachments: ChatAttachment[];
+      /**
+       * What this send searches with, when it is not what the conversation is
+       * set to.
+       *
+       * The preflight is where a searching turn's surcharge is priced and its
+       * admission reserved, so a re-run that will carry `always` has to be
+       * priced as `always` here. Passing the screen's stored mode instead
+       * would reserve for a turn nobody is about to send, and the dispatch
+       * would then meet a reservation that is short by the surcharge.
+       */
+      webSearchMode?: WebSearchToggleMode;
       /**
        * The set this send is actually for, when the caller already knows it.
        *
@@ -1614,7 +1807,7 @@ export function ChatPageClient({
             mediaType: attachment.mediaType,
             size: attachment.size,
           })),
-          webSearchMode,
+          webSearchMode: requestedWebSearchMode ?? webSearchMode,
         });
         const requestPreflight = () =>
           fetch("/api/chat/preflight", {
@@ -3506,15 +3699,32 @@ export function ChatPageClient({
       // Resolved before the preflight, not after it: the preflight prices this
       // set and hands back the admission slots for it, so it has to be asked
       // about the same models the send will name.
-      const activeModelIds = sendSelectedModels.filter(
+      // Narrowed to the caller's set when there is one, and still filtered by
+      // the paused panels and by what is actually selected -- an override may
+      // name only models this conversation holds, never add one to the send
+      // that the selection, the plan check and the model settings barrier did
+      // not already agree on.
+      const requestedModelIds = options?.overrideModelIds
+        ? sendSelectedModels.filter((modelId) =>
+            options.overrideModelIds!.includes(modelId)
+          )
+        : sendSelectedModels;
+      const activeModelIds = requestedModelIds.filter(
         (modelId) => !sendDisabledPanels.includes(modelId)
       );
+      // An override that matched nothing would otherwise send to no model at
+      // all: the preflight would price an empty set and the turn would sit
+      // unanswered. Abandon instead, leaving the answers already on screen.
+      if (!activeModelIds.length) return;
       const preflight = await runComparisonPreflight({
         comparisonId,
         conversationId: activeChatId,
         prompt: trimmed,
         promptAttachments,
         modelIds: activeModelIds,
+        ...(options?.webSearchOverride
+          ? { webSearchMode: options.webSearchOverride }
+          : {}),
       });
       if (!preflight.allowed) return;
       // The comparison preflight prices the whole set and hands back one
@@ -3662,6 +3872,57 @@ export function ChatPageClient({
               webSearchRequested: isWebSearchEnabled(webSearchMode),
             }
       );
+      /*
+        The question the web-search offer may be made about, recorded at the
+        same accepted-send point.
+
+        Recorded for *every* send with text, unlike the Deep Research record
+        above: `deriveWebSearchSuggestion` needs to see a turn that already had
+        search on so it can refuse it by name (`already_requested`), and a turn
+        it has never heard of is indistinguishable from no turn at all.
+      */
+      const sendWebSearchRequested =
+        options?.webSearchOverride === "always" ||
+        isWebSearchEnabled(webSearchMode);
+      setWebSearchSuggestionTurn(
+        trimmed
+          ? {
+              conversationId: activeChatId,
+              promptId: comparisonId,
+              text: trimmed,
+              attachments: savedAttachments.map((attachment) => ({
+                name: attachment.name,
+                mediaType: attachment.mediaType,
+              })),
+              webSearchRequested: sendWebSearchRequested,
+              // Corrected by handleResponseComplete from the stream trailer.
+              // Never assumed from the switch: a provider that was asked and
+              // chose not to search produces a turn that really did not
+              // search, and the offer must be able to say so.
+              searchExecuted: false,
+            }
+          : null
+      );
+      if (options?.webSearchOverride === "always" && trimmed) {
+        /*
+          This send *is* the offer's re-run. Claimed here rather than in the
+          handler because here is where a send stops being a request and
+          becomes one the panels will answer -- everything before this line can
+          still be refused, and a claim made before it would leave the handler
+          waiting for completions that never arrive.
+        */
+        webSearchRetryPromptIdRef.current = comparisonId;
+        webSearchRetryOutcomeRef.current = {
+          promptId: comparisonId,
+          conversationId: activeChatId,
+          text: trimmed,
+          expected: activeModelIds.length,
+          reported: new Set<string>(),
+          searched: false,
+          refused: false,
+          blocked: false,
+        };
+      }
       setCachedCompareSummaryChatId(null);
       if (pendingScreenModels) setSelectedModels(pendingScreenModels);
       if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
@@ -3676,6 +3937,9 @@ export function ChatPageClient({
         // send and must not answer it.
         modelIds: activeModelIds,
         attachments: savedAttachments,
+        ...(options?.webSearchOverride
+          ? { webSearchMode: options.webSearchOverride }
+          : {}),
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -3836,6 +4100,84 @@ export function ChatPageClient({
     [isGuestMode]
   );
 
+  /* ------------------------------------------------------------------- */
+  /* The web-search offer's bookkeeping                                    */
+  /* ------------------------------------------------------------------- */
+  /*
+    Keyed by conversation as well as question, like the Deep Research offer's:
+    the same question asked in a different chat is a different question, and
+    every rule here is only ever "at least in this conversation".
+  */
+  const webSearchTopicEntry = (conversationId: string, text: string) =>
+    `${conversationId}::${webSearchTopicKey(text)}`;
+  const markWebSearchFailure = useCallback(
+    (conversationId: string, text: string, reason: "error" | "blocked") => {
+      const key = webSearchTopicEntry(conversationId, text);
+      setWebSearchFailedTopics((current) => [
+        ...current.filter((entry) => entry.key !== key),
+        { key, reason },
+      ]);
+    },
+    []
+  );
+  const clearWebSearchFailure = useCallback(
+    (conversationId: string, text: string) => {
+      const key = webSearchTopicEntry(conversationId, text);
+      setWebSearchFailedTopics((current) =>
+        current.some((entry) => entry.key === key)
+          ? current.filter((entry) => entry.key !== key)
+          : current
+      );
+    },
+    []
+  );
+  /*
+    Both acceptance and dismissal close the question, so both write here.
+  */
+  const resolveWebSearchTopic = useCallback(
+    (conversationId: string, text: string) => {
+      const key = webSearchTopicEntry(conversationId, text);
+      setWebSearchResolvedTopics((current) =>
+        current.includes(key) ? current : [...current, key]
+      );
+    },
+    []
+  );
+  /**
+   * A panel's turn ended in an error.
+   *
+   * Only two things are done with it, and both are about a re-run this page
+   * started. `WEB_SEARCH_COST_UNBOUNDED` is the server saying the search
+   * itself cannot be authorized -- not a transient failure and not something a
+   * retry or an account setting changes -- so it is remembered as `blocked`
+   * and the card drops its retry button rather than offering a press that will
+   * be refused again. Anything else is a failure worth retrying.
+   *
+   * An errored panel also counts as having reported: without that, a comparison
+   * where one model failed and the others answered without searching would
+   * never reach its expected count and the offer would wait for a completion
+   * that is not coming.
+   */
+  const handleTurnError = useCallback(
+    (promptId: string | null, modelId: string, errorCode: string) => {
+      const retry = webSearchRetryOutcomeRef.current;
+      if (!retry || promptId !== retry.promptId) return;
+      if (errorCode === WEB_SEARCH_COST_UNBOUNDED) retry.blocked = true;
+      retry.reported.add(modelId);
+      if (retry.reported.size < retry.expected || retry.searched) return;
+      webSearchRetryOutcomeRef.current = null;
+      markWebSearchFailure(
+        retry.conversationId,
+        retry.text,
+        retry.blocked ? "blocked" : "error"
+      );
+      trackProductEvent("web_search_retry_error", activeModelCount, {
+        web_search_suggestion_state: retry.blocked ? "blocked" : "error",
+      });
+    },
+    [activeModelCount, markWebSearchFailure]
+  );
+
   const handleResponseComplete = useCallback(
     (
       promptId: string | null,
@@ -3862,6 +4204,69 @@ export function ChatPageClient({
       if (modelId === "perplexity/sonar-deep-research") {
         setIsDeepResearchPending(false);
         trackProductEvent("deep_research_completed", activeModelCount, {});
+      }
+      /*
+        The web-search offer's two facts about a finished turn.
+
+        First: whether *this* question really searched. The offer must not
+        appear over an answer that already has sources under it, and the switch
+        being on is not evidence -- a native-capable provider can be asked and
+        decline, which is exactly the turn that still needs the offer. So the
+        record is corrected from the trailer's own `executed`, and only
+        upwards: three panels report separately and one that searched is enough
+        to make the question answered from the web.
+      */
+      if (searchMetadata?.executed && promptId) {
+        setWebSearchSuggestionTurn((current) =>
+          current && current.promptId === promptId && !current.searchExecuted
+            ? { ...current, searchExecuted: true }
+            : current
+        );
+      }
+      /*
+        Second: how a re-run this page started turned out. Accumulated across
+        the panels rather than decided by the first to report, because "no
+        model searched" is only knowable once they all have -- and reported
+        once, on the transition, so a fourth report cannot re-fire it.
+      */
+      const retry = webSearchRetryOutcomeRef.current;
+      if (retry && promptId === retry.promptId) {
+        retry.reported.add(modelId);
+        if (searchMetadata?.executed) retry.searched = true;
+        // Present and false: the model was asked and declined. Absent: it said
+        // nothing, and silence is not a refusal.
+        else if (searchMetadata && searchMetadata.executed === false) {
+          retry.refused = true;
+        }
+        if (retry.reported.size >= retry.expected) {
+          webSearchRetryOutcomeRef.current = null;
+          if (retry.searched) {
+            clearWebSearchFailure(retry.conversationId, retry.text);
+            trackProductEvent("web_search_retry_success", activeModelCount, {});
+          } else if (retry.refused || retry.blocked) {
+            /*
+              Every panel finished and at least one said it did not search. The
+              answer on screen is real, so nothing is thrown away -- but the
+              question the offer was made about is still unanswered from the
+              web, and saying nothing here would leave the card gone and the
+              promise unkept.
+            */
+            markWebSearchFailure(
+              retry.conversationId,
+              retry.text,
+              retry.blocked ? "blocked" : "error"
+            );
+            trackProductEvent("web_search_retry_error", activeModelCount, {
+              web_search_suggestion_state: retry.blocked ? "blocked" : "error",
+            });
+          }
+          /*
+            Otherwise nothing is claimed either way. The re-run finished, the
+            turn now carries `webSearchRequested`, and the offer stops on that
+            alone -- no error card, and no `retry_success` event asserting a
+            search this page never saw evidence of.
+          */
+        }
       }
       // Only counts/enums ever reach analytics here -- never the prompt or
       // any citation text, per the privacy requirement for native search.
@@ -3938,7 +4343,9 @@ export function ChatPageClient({
     },
     [
       activeModelCount,
+      clearWebSearchFailure,
       isGuestMode,
+      markWebSearchFailure,
       maybeShowGuestSaveCompareCard,
       maybeShowValueUpgradePrompt,
       refreshGuestUsage,
@@ -4440,16 +4847,20 @@ export function ChatPageClient({
      * longer contains.
      */
     text?: string;
+    /** Carried across the selection change, so the deferred send narrows too. */
+    overrideModelIds?: readonly string[];
   } | null>(null);
 
   useEffect(() => {
     if (!pendingDeepResearchSubmitRef.current) return;
     if (!selectedModels.includes(DEEP_RESEARCH_MODEL_ID)) return;
-    const { depth, text } = pendingDeepResearchSubmitRef.current;
+    const { depth, text, overrideModelIds } =
+      pendingDeepResearchSubmitRef.current;
     pendingDeepResearchSubmitRef.current = null;
     void handleGlobalSubmitRef.current({
       deepResearchDepth: depth,
       ...(text ? { overrideText: text } : {}),
+      ...(overrideModelIds ? { overrideModelIds } : {}),
     });
   }, [selectedModels]);
 
@@ -4466,15 +4877,34 @@ export function ChatPageClient({
    * once: select the model if it is not selected, then send. The expansion is
    * not a second workflow and not a model-id swap; it is this, with the
    * question supplied instead of read from the draft.
+   *
+   * What the two do NOT share is who answers. `origin` carries that, rather
+   * than the presence of `text`: the composer happening to omit the question
+   * is not the reason its other models should answer, and reading it that way
+   * would tie a billing decision to an argument that means something else.
    */
   const startDeepResearch = ({
     depth,
     text,
+    origin,
   }: {
     depth: "quick" | "standard" | "deep";
     /** Omitted by the composer path, which sends the current draft. */
     text?: string;
+    origin: "composer" | "expansion";
   }) => {
+    /*
+      The expansion sends to Deep Research alone. The user is looking at the
+      ordinary answers and asked for a deeper pass on the same question, so
+      re-running the other panels would bill them again for work already on
+      screen -- and the card quoted Deep Research's price, not that plus every
+      other selected model's.
+
+      The composer's setup sheet passes nothing: there the question is new, and
+      every selected model answering it is what a comparison is.
+    */
+    const overrideModelIds =
+      origin === "expansion" ? [DEEP_RESEARCH_MODEL_ID] : undefined;
     setIsDeepResearchPending(true);
     trackProductEvent("deep_research_started", activeModelCount, {
       deep_research_depth: depth,
@@ -4483,10 +4913,15 @@ export function ChatPageClient({
       void handleGlobalSubmitRef.current({
         deepResearchDepth: depth,
         ...(text ? { overrideText: text } : {}),
+        ...(overrideModelIds ? { overrideModelIds } : {}),
       });
       return;
     }
-    pendingDeepResearchSubmitRef.current = { depth, ...(text ? { text } : {}) };
+    pendingDeepResearchSubmitRef.current = {
+      depth,
+      ...(text ? { text } : {}),
+      ...(overrideModelIds ? { overrideModelIds } : {}),
+    };
     if (selectedModels.length < maxSelectableModels) {
       toggleModel(DEEP_RESEARCH_MODEL_ID);
       return;
@@ -4535,7 +4970,7 @@ export function ChatPageClient({
   const confirmDeepResearchSetup = (depth: "quick" | "standard" | "deep") => {
     if (!inputValue.trim()) return;
     setIsDeepResearchSetupOpen(false);
-    startDeepResearch({ depth });
+    startDeepResearch({ depth, origin: "composer" });
   };
 
   const handleModelFinderComplete = ({
@@ -5086,6 +5521,7 @@ export function ChatPageClient({
       startDeepResearchRef.current({
         depth: DEEP_RESEARCH_DEFAULT_DEPTH,
         text: turn.text,
+        origin: "expansion",
       });
     },
     [
@@ -5114,6 +5550,203 @@ export function ChatPageClient({
     t,
     estimatedCredits: deepResearchSuggestionCredits,
   });
+
+  /* ------------------------------------------------------------------- */
+  /* The web-search offer                                                 */
+  /* ------------------------------------------------------------------- */
+  /*
+    Whether a search could run for this question at all -- through
+    `anySelectedModelCanSearch`, which reads `modelWebSearchIsDispatchable`,
+    which is the same function the composer chip, the credit estimate,
+    preflight and dispatch read. Never off `support`: a native tool whose
+    worst-case cost cannot be bounded is not a search this product may promise,
+    and promising it anyway is exactly the failure that helper exists to end.
+
+    `blocked` is only ever reached from a refusal that actually happened. See
+    `webSearchFailedTopics` for why it is not guessed in advance.
+  */
+  const webSearchFailedEntry = currentChatId && webSearchSuggestionTurn
+    ? webSearchFailedTopics.find(
+        (entry) =>
+          entry.key ===
+          `${currentChatId}::${webSearchTopicKey(webSearchSuggestionTurn.text)}`
+      )
+    : undefined;
+  const webSearchAvailability: WebSearchAvailability =
+    anySelectedModelCanSearch({
+      selectedModelIds: selectedModels,
+      disabledModelIds: effectiveDisabledPanels,
+      searchBackendReadiness: webSearchBackendReadiness,
+    })
+      ? "available"
+      : "unsupported";
+  /*
+    What a searching re-run would reserve, from the composer's own derivation
+    rather than a second piece of arithmetic. Asked with the mode the re-run
+    would carry ("always") rather than the conversation's -- the switch is off,
+    which is the whole reason the card is there, and asking with "off" would
+    quote zero.
+  */
+  const webSearchSuggestionSurcharge = deriveWebSearchComposerState({
+    webSearchMode: "always",
+    selectedModelIds: selectedModels.filter(
+      (modelId) => !effectiveDisabledPanels.includes(modelId)
+    ),
+    backendReadiness: webSearchBackendReadiness,
+  }).estimatedSurchargeCredits;
+  const webSearchResolvedTopicKeys = useMemo(
+    () =>
+      currentChatId
+        ? webSearchResolvedTopics
+            .filter((entry) => entry.startsWith(`${currentChatId}::`))
+            .map((entry) => entry.slice(currentChatId.length + 2))
+        : [],
+    [currentChatId, webSearchResolvedTopics]
+  );
+  const webSearchOfferedTopicEntries = useMemo(() => {
+    if (!currentChatId) return [];
+    const prefix = `${currentChatId}::`;
+    return webSearchOfferedTopics
+      .filter((entry) => entry.startsWith(prefix))
+      .map((entry) => {
+        const rest = entry.slice(prefix.length);
+        const separator = rest.lastIndexOf("::");
+        return {
+          topicKey: rest.slice(0, separator),
+          promptId: rest.slice(separator + 2),
+        };
+      });
+  }, [currentChatId, webSearchOfferedTopics]);
+  const handleWebSearchSuggestionShown = useCallback(
+    ({
+      topicKey,
+      promptId,
+      state,
+      reason,
+    }: {
+      topicKey: string;
+      promptId: string;
+      state: WebSearchSuggestionState;
+      reason: WebSearchTopicSignal | null;
+    }) => {
+      const conversationId = currentChatIdRef.current;
+      if (!conversationId) return;
+      const entry = `${conversationId}::${topicKey}::${promptId}`;
+      setWebSearchOfferedTopics((current) =>
+        current.includes(entry) ? current : [...current, entry]
+      );
+      trackProductEvent("web_search_suggestion_impression", activeModelCount, {
+        web_search_suggestion_state: state,
+        ...(reason ? { web_search_suggestion_reason: reason } : {}),
+      });
+    },
+    [activeModelCount]
+  );
+  /**
+   * The offer was taken: re-run this question with web search on.
+   *
+   * It runs `handleGlobalSubmit` -- the send path every other question runs --
+   * with two options rather than a workflow of its own, for the same reason
+   * the Deep Research expansion does: preflight, admission, context and
+   * persistence are hard to get right once and impossible to keep right twice.
+   * The composer is untouched, so a draft the user is part way through typing
+   * stays theirs, and the conversation's own switch stays where they left it.
+   */
+  const handleWebSearchSuggestionConfirm = useCallback(
+    async (turn: {
+      conversationId: string;
+      text: string;
+      state: WebSearchSuggestionState;
+      reason: WebSearchTopicSignal | null;
+    }) => {
+      // The guard the contract asks for is here rather than in the card: a
+      // disabled button is a rendering, and a second press that arrives
+      // between the press and the re-render must still find the door shut.
+      if (isWebSearchRetryingRef.current) return;
+      isWebSearchRetryingRef.current = true;
+      setIsWebSearchRetrying(true);
+      webSearchRetryPromptIdRef.current = null;
+      webSearchRetryOutcomeRef.current = null;
+      // A retry starts from no failure: the previous one is what is being
+      // retried, and leaving it in place would keep the error state on screen
+      // over a run that is going fine.
+      clearWebSearchFailure(turn.conversationId, turn.text);
+      trackProductEvent("web_search_suggestion_accept", activeModelCount, {
+        web_search_suggestion_state: turn.state,
+        ...(turn.reason ? { web_search_suggestion_reason: turn.reason } : {}),
+      });
+      try {
+        await handleGlobalSubmitRef.current({
+          overrideText: turn.text,
+          webSearchOverride: "always",
+        });
+      } finally {
+        isWebSearchRetryingRef.current = false;
+        setIsWebSearchRetrying(false);
+      }
+      /*
+        The send never reached a payload -- refused by the preflight, by
+        credits, or by the model-settings barrier, each of which has already
+        told the user why. The offer still has to stop claiming a run is
+        happening, so the question goes back on screen as retryable rather than
+        disappearing into a toast.
+      */
+      if (!webSearchRetryPromptIdRef.current) {
+        markWebSearchFailure(turn.conversationId, turn.text, "error");
+        trackProductEvent("web_search_retry_error", activeModelCount, {
+          web_search_suggestion_state: "error",
+        });
+      }
+    },
+    [activeModelCount, clearWebSearchFailure, markWebSearchFailure]
+  );
+  /*
+    The card's strings, per state.
+
+    A function rather than one resolved object, because the state is decided in
+    the shell (it needs the panel status map) while `t` lives here. Passing the
+    resolver keeps every string in `locales/*.ts` and keeps the shells from
+    growing a dictionary lookup of their own -- and it is the same shape the
+    Deep Research card's copy takes, one argument later.
+
+    Plain, not memoised: a handful of dictionary reads, and a `useMemo` over a
+    value derived from the language context is the shape the React Compiler
+    refuses to optimise around.
+  */
+  const webSearchSuggestionCopyFor = (state: WebSearchSuggestionState) =>
+    resolveWebSearchSuggestionCopy({
+      t,
+      state,
+      surchargeCredits: webSearchSuggestionSurcharge,
+    });
+  const handleWebSearchSuggestionDismiss = useCallback(
+    (turn: {
+      conversationId: string;
+      text: string;
+      state: WebSearchSuggestionState;
+      reason: WebSearchTopicSignal | null;
+    }) => {
+      /*
+        Declining is not a message. Nothing is written to the transcript,
+        nothing is sent, and -- the part that matters most here -- the
+        conversation's web-search switch is not touched. The card asked about
+        one question and got an answer about one question.
+
+        The failure entry is cleared as well as the topic resolved, because the
+        error state is checked *before* the resolved rule (otherwise a failed
+        run could never be put away) and would otherwise keep the card on
+        screen after the user had closed it.
+      */
+      clearWebSearchFailure(turn.conversationId, turn.text);
+      resolveWebSearchTopic(turn.conversationId, turn.text);
+      setWebSearchSuggestionTurn(null);
+      trackProductEvent("web_search_suggestion_dismiss", activeModelCount, {
+        web_search_suggestion_state: turn.state,
+        ...(turn.reason ? { web_search_suggestion_reason: turn.reason } : {}),
+      });
+    },
+    [activeModelCount, clearWebSearchFailure, resolveWebSearchTopic]
+  );
 
   const activeImageConversation = conversations.find(
     (conversation) =>
@@ -5166,7 +5799,11 @@ export function ChatPageClient({
   ) : null;
 
   return (
-    <>
+    // Every surface that decides whether a model searches reads this: the
+    // composer's chip and credit estimate, the picker's badge and "Web search"
+    // filter, and the per-message badge. One provider rather than a prop through
+    // five intermediate components that do not use it.
+    <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
@@ -5283,6 +5920,16 @@ export function ChatPageClient({
           isDeepResearchExpanding={isDeepResearchExpanding}
           onDeepResearchSuggestionExpand={handleDeepResearchSuggestionExpand}
           onDeepResearchSuggestionDismiss={handleDeepResearchSuggestionDismiss}
+          webSearchSuggestionTurn={webSearchSuggestionTurn}
+          webSearchAvailability={webSearchAvailability}
+          webSearchRetryFailure={webSearchFailedEntry?.reason ?? null}
+          webSearchResolvedTopicKeys={webSearchResolvedTopicKeys}
+          webSearchOfferedTopics={webSearchOfferedTopicEntries}
+          isWebSearchRetrying={isWebSearchRetrying}
+          onWebSearchSuggestionShown={handleWebSearchSuggestionShown}
+          webSearchSuggestionCopyFor={webSearchSuggestionCopyFor}
+          onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
+          onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
@@ -5297,6 +5944,7 @@ export function ChatPageClient({
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
+          onTurnError={handleTurnError}
           onFollowupSent={handleModelFollowupSent}
           onContextBundleStale={handleContextBundleStale}
         />
@@ -5388,6 +6036,16 @@ export function ChatPageClient({
           isDeepResearchExpanding={isDeepResearchExpanding}
           onDeepResearchSuggestionExpand={handleDeepResearchSuggestionExpand}
           onDeepResearchSuggestionDismiss={handleDeepResearchSuggestionDismiss}
+          webSearchSuggestionTurn={webSearchSuggestionTurn}
+          webSearchAvailability={webSearchAvailability}
+          webSearchRetryFailure={webSearchFailedEntry?.reason ?? null}
+          webSearchResolvedTopicKeys={webSearchResolvedTopicKeys}
+          webSearchOfferedTopics={webSearchOfferedTopicEntries}
+          isWebSearchRetrying={isWebSearchRetrying}
+          onWebSearchSuggestionShown={handleWebSearchSuggestionShown}
+          webSearchSuggestionCopyFor={webSearchSuggestionCopyFor}
+          onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
+          onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}
@@ -5402,6 +6060,7 @@ export function ChatPageClient({
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
+          onTurnError={handleTurnError}
           onFollowupSent={handleModelFollowupSent}
           onContextBundleStale={handleContextBundleStale}
         />
@@ -6156,6 +6815,6 @@ export function ChatPageClient({
         </form>
       </div>
     )}
-    </>
+    </WebSearchBackendReadinessProvider>
   );
 }

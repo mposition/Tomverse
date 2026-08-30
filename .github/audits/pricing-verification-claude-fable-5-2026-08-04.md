@@ -44,6 +44,12 @@ provider API를 호출하지도 않았습니다.
 과금하지 않습니다**(`CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`) — cache
 write 토큰을 보고하는 usage adapter가 없기 때문입니다.
 
+> **2026-08-30 후속:** 이 문단은 작성 시점(2026-08-04)의 사실이며 감사 기록으로
+> 보존합니다. Anthropic prompt caching을 켜면서 AI SDK가
+> `usage.inputTokenDetails.cacheWriteTokens`를 보고하기 시작했고, 계약이
+> `CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED`로 바뀌었습니다. 위 두 요율은
+> 이제 **실제로 과금됩니다**: docs/policy/anthropic-prompt-caching.md §4.
+
 | 모델 | 5분 write | 1시간 write | 기록한 값 |
 |---|---|---|---|
 | Claude Fable 5 | `$12.50 / MTok` | `$20 / MTok` | `12.5` |

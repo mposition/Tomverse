@@ -1,5 +1,6 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
 import type { ChatAbortCause } from "@/lib/chatStreamLiveness";
+import type { WebSearchToggleMode } from "@/lib/appDefaults";
 
 /**
  * Where a comparison panel's transcript and its in-flight request actually
@@ -100,6 +101,20 @@ export type ChatRuntimeLastPrompt = {
   text: string;
   targetChatId: string;
   attachments: ChatAttachment[];
+  /**
+   * The one-shot web-search mode this send carried, when it carried one.
+   *
+   * Recorded so the panel's own "retry" repeats the request that was made
+   * rather than a differently-configured one. A send from the web-search offer
+   * searches without changing the conversation's stored switch, so without
+   * this the retry button silently sends the same question with search off --
+   * and the user, who pressed retry on a searching answer, would have no way
+   * to tell why the second attempt came back without sources.
+   *
+   * Absent on every composer send, which reads the conversation's mode as
+   * before.
+   */
+  webSearchMode?: WebSearchToggleMode;
 };
 
 const EMPTY_MESSAGES = Object.freeze([]) as unknown as Message[];

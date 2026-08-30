@@ -36,6 +36,7 @@ import {
     type SourceDeletionDisposition,
     type SourceDeletionImpact,
 } from "@/lib/memorySourceDeletion";
+import { markContinuationSourcesDeleted } from "@/lib/externalContinuationService";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -675,6 +676,13 @@ export async function deleteExternalConversationSnapshot(
             [row.id],
             dispositions
         );
+        // Before the delete for the same reason the classification above is:
+        // `ON DELETE SET NULL` clears the foreign key, and afterwards nothing
+        // records which bridges pointed here. The continuation itself is
+        // untouched -- its conversation and every message the user wrote in it
+        // survive; what changes is that the screen can now say the original was
+        // deleted (docs/policy/external-conversation-continuation.md).
+        await markContinuationSourcesDeleted(tx, userId, [row.id]);
         await tx.externalConversation.delete({ where: { id: row.id } });
         await tx.externalImport.updateMany({
             where: { id: row.importId },
@@ -1430,6 +1438,10 @@ export async function deleteExternalImport(
             doomedConversationIds,
             dispositions
         );
+        // Same ordering rule as the single-snapshot path, and the same
+        // guarantee: deleting a whole import never deletes a conversation the
+        // user continued in Tomverse.
+        await markContinuationSourcesDeleted(tx, userId, doomedConversationIds);
         await tx.externalImport.delete({ where: { id: row.id } });
         return { outcome: "deleted" as const, memory: memoryImpact };
     });

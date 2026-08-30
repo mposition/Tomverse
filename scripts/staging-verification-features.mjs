@@ -63,6 +63,26 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/chat-attachment-staging-checklist.md",
         records: "docs/ops/chat-attachment-staging-verification-records",
     },
+    {
+        key: "app-managed-web-search",
+        label: "application-managed web search (Google models, Brave backend)",
+        checklist: "docs/ops/app-managed-web-search-staging-checklist.md",
+        records: "docs/ops/app-managed-web-search-staging-verification-records",
+    },
+    {
+        key: "external-conversation-continuation",
+        label: "continuing an imported conversation in Tomverse",
+        checklist:
+            "docs/ops/external-conversation-continuation-staging-checklist.md",
+        records:
+            "docs/ops/external-conversation-continuation-staging-verification-records",
+    },
+    {
+        key: "deep-research",
+        label: "deep research expansion offer and the model swap at the cap",
+        checklist: "docs/ops/deep-research-staging-checklist.md",
+        records: "docs/ops/deep-research-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {

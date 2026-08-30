@@ -10,9 +10,9 @@ import {
   restoreActiveConversation,
 } from "./support/chat-state-fixtures";
 import {
-  getWebSearchCapability,
   modelWebSearchIsDispatchable,
 } from "@/lib/webSearchCapability";
+import { ALL_WEB_SEARCH_BACKENDS_READY } from "@/lib/webSearchBackends";
 
 // ---------------------------------------------------------------------------
 // How much of a phone screen the *answers* actually get.
@@ -42,16 +42,19 @@ test.beforeEach(async ({}, testInfo) => {
 });
 
 // Two models that can dispatch a search and one that cannot -- the partial
-// state the chip exists to make legible. `gpt-5-6-luna` replaced
-// `gpt-5-4-mini` here on 2026-08-26: mini is UNVERIFIED, so once Google's
-// grounding stopped counting (it is native but takes no per-request ceiling,
-// so its cost has no worst case to reserve) the fixture had one supported
-// model out of three and the chip correctly read 1/3. Luna carries OpenAI's
-// native search, which #1015 made dispatchable by bounding it with
-// `max_tool_calls`, and it sits in the same Guest/standard tier mini did.
+// state the chip exists to make legible.
+//
+// The fixture has now moved twice under the same capability table, which is
+// why the assertion below states it in the fixture's own terms rather than
+// trusting the model ids. On 2026-08-26 `gpt-5-4-mini` was swapped out for
+// `gpt-5-6-luna` because mini is UNVERIFIED and Gemini had stopped counting,
+// leaving one supported model out of three. On 2026-08-27 the swap reversed:
+// Gemini searches through the application-managed backend now, so it is
+// supported, and mini comes back as the one model that cannot search. Both are
+// Guest/standard tier, so the tiering of the fixture is unchanged.
 const MODEL_A = "gpt-5-6-luna";
-const MODEL_B = "claude-sonnet-5";
-const MODEL_C = "gemini-3-6-flash";
+const MODEL_B = "gemini-3-6-flash";
+const MODEL_C = "gpt-5-4-mini";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 
 /** The answer canvas must keep at least this share of the mobile shell. */
@@ -279,7 +282,11 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
     // as a chip defect: on 2026-08-26 it surfaced as "expected 2/3, got 1/3"
     // three tests deep, and the chip was right both times.
     const dispatchable = THREE_MODELS.filter((modelId) =>
-      modelWebSearchIsDispatchable(modelId)
+      // Every backend reachable, because this assertion is about the capability
+      // register rather than about one deployment's credentials -- the running
+      // server under test sets `WEB_SEARCH_FAKE_BACKEND`, so its own readiness
+      // map is full and the fixture has to describe the same population.
+      modelWebSearchIsDispatchable(modelId, ALL_WEB_SEARCH_BACKENDS_READY)
     );
     expect(
       dispatchable.length,
@@ -329,7 +336,11 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
     await toggle.click();
     const detail = page.getByTestId("web-search-exception-detail");
     await expect(detail).toBeVisible();
-    await expect(detail).toContainText("Gemini 3.6 Flash");
+    // The one model in the fixture that cannot search, named. Gemini is in
+    // this selection and must *not* appear here: naming a model that will
+    // search as one that will not is the same defect as the reverse.
+    await expect(detail).toContainText("GPT-5.4 mini");
+    await expect(detail).not.toContainText("Gemini");
     // The detail belongs below the chip that opened it, not above the textarea.
     const detailBox = await detail.boundingBox();
     const toggleBox = await toggle.boundingBox();
@@ -340,17 +351,22 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
   test("a fully blocked search keeps its full-width notice, not just an icon", async ({
     page,
   }) => {
-    // Both of these lack verified native search, so "always" with only these
-    // two is the all-unsupported state. Not gemini-2-5-flash: it carried no
-    // verified support when this was written and now carries Google's, which
-    // turned the fixture into the one-of-two case the test above already
-    // covers -- the chip correctly read "warning" and this read it as a defect.
+    // Neither of these can dispatch a search, so "always" with only these two
+    // is the all-unsupported state. Not a Gemini: they searched through no
+    // route at all when this was written and now search through the
+    // application-managed backend, which would turn the fixture into the
+    // one-of-two case the test above already covers -- the chip would correctly
+    // read "warning" and this would read it as a defect.
     const blockedPair = ["gpt-5-4-mini", "deepseek-v4-flash"] as const;
     for (const modelId of blockedPair) {
+      // The dispatchability question, not `support !== "native"`. That older
+      // check would pass for an `app-managed` model, which is not native and
+      // does search -- so it would have stopped guarding the fixture on the day
+      // a third route existed.
       expect(
-        getWebSearchCapability(modelId).support,
-        `fixture error: ${modelId} now supports web search, so this is no longer the fully blocked state`
-      ).not.toBe("native");
+        modelWebSearchIsDispatchable(modelId, ALL_WEB_SEARCH_BACKENDS_READY),
+        `fixture error: ${modelId} can now search, so this is no longer the fully blocked state`
+      ).toBe(false);
     }
     await enterMobileComparison(page, {
       models: [...blockedPair],

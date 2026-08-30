@@ -29,10 +29,12 @@ import {
   turnAttachmentHandle,
   type MessageAttachmentKind,
   type MessageAttachmentReference,
+  type MessageAttachmentUnavailableReason,
   type TurnAttachmentDescriptor,
 } from "@/lib/messageAttachmentCore";
 import { prisma } from "@/lib/prisma";
 import { deleteR2Object } from "@/lib/r2";
+import { classifyStorageError } from "@/lib/storageObjectErrors";
 
 /**
  * The storage prefix for one account's uploads.
@@ -314,6 +316,16 @@ export type ResolvedAttachment = {
   kind: MessageAttachmentKind;
   /** Server-only. Never returned to a client by any route. */
   objectKey: string;
+  /**
+   * Set when a previous turn already confirmed a 404 for this object.
+   *
+   * Carried through resolution so a request that would read a known-missing
+   * file can be refused before it touches storage at all: the answer is
+   * already recorded, a second HEAD would only re-learn it, and the refusal
+   * has to happen before anything reserves credits either way.
+   */
+  unavailableAt: Date | null;
+  unavailableReason: MessageAttachmentUnavailableReason | null;
 };
 
 export class MessageAttachmentResolveError extends Error {
@@ -386,6 +398,8 @@ export const resolveMessageAttachmentReferences = async (input: {
             size: true,
             kind: true,
             objectKey: true,
+            unavailableAt: true,
+            unavailableReason: true,
           },
         })
       : Promise.resolve([]),
@@ -431,6 +445,10 @@ export const resolveMessageAttachmentReferences = async (input: {
         "An attachment in this request is stored outside this account."
       );
     }
+    const marked = row as {
+      unavailableAt?: Date | null;
+      unavailableReason?: string | null;
+    };
     return {
       attachmentId: reference.attachmentId ? row.id : null,
       uploadId: reference.uploadId
@@ -441,6 +459,10 @@ export const resolveMessageAttachmentReferences = async (input: {
       size: row.size,
       kind: row.kind === "text" ? "text" : "file",
       objectKey: row.objectKey,
+      unavailableAt: marked.unavailableAt ?? null,
+      unavailableReason: isUnavailableReason(marked.unavailableReason)
+        ? marked.unavailableReason
+        : null,
     };
   });
 };
@@ -461,6 +483,108 @@ export const describeTurnAttachments = (
     mediaType: attachment.mediaType,
     byteSize: attachment.size,
   }));
+
+/* ------------------------------------------------------------------------ */
+/* Availability                                                               */
+/* ------------------------------------------------------------------------ */
+
+const isUnavailableReason = (
+  value: unknown
+): value is MessageAttachmentUnavailableReason =>
+  value === "storage_object_missing";
+
+/**
+ * Records that storage answered 404 for an object a row still names.
+ *
+ * Three rules hold this together, and each of them is a thing that has to be
+ * true for the record to mean anything:
+ *
+ * 1. **Only a confirmed 404 is written.** `classifyStorageError` has to say
+ *    `missing`; a 403 from a rotated key, a 500 from the bucket and a socket
+ *    timeout all mean "we do not know", and writing them here would turn a
+ *    short outage into a permanent claim that an account lost its files.
+ * 2. **The row is never deleted, and neither is the message.** What the user
+ *    sent is part of the conversation whether or not the bytes survived.
+ * 3. **First write wins.** `unavailableAt` is set only where it is still NULL,
+ *    so the timestamp keeps saying when this was *discovered* rather than when
+ *    it was last re-confirmed. `availabilityCheckedAt` carries the second fact.
+ *
+ * Best-effort and never thrown from: this runs while a user is being told
+ * their file is gone, and failing to write the observation must not change
+ * what they are told.
+ */
+export const markMessageAttachmentUnavailable = async (input: {
+  attachmentId: string;
+  userId: string;
+  error?: unknown;
+  reason?: MessageAttachmentUnavailableReason;
+  now?: Date;
+}): Promise<boolean> => {
+  const reason = input.reason ?? "storage_object_missing";
+  if (input.error !== undefined && classifyStorageError(input.error) !== "missing") {
+    return false;
+  }
+  const now = input.now ?? new Date();
+  try {
+    const result = await prisma.messageAttachment.updateMany({
+      where: { id: input.attachmentId, userId: input.userId, unavailableAt: null },
+      data: { unavailableAt: now, unavailableReason: reason, availabilityCheckedAt: now },
+    });
+    if (result.count === 0) {
+      // Already marked, or not this account's row. Either way the check itself
+      // happened, and recording that is what lets the audit tool tell "looked
+      // and found gone" from "never looked".
+      await prisma.messageAttachment.updateMany({
+        where: { id: input.attachmentId, userId: input.userId },
+        data: { availabilityCheckedAt: now },
+      });
+      return false;
+    }
+    console.warn(
+      JSON.stringify({
+        event: "attachment_object_missing",
+        attachmentId: input.attachmentId,
+        reason,
+        storageStatus: 404,
+        timestamp: now.toISOString(),
+      })
+    );
+    return true;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "attachment_availability_write_failed",
+        attachmentId: input.attachmentId,
+        reason: error instanceof Error ? error.name : "unknown",
+        timestamp: now.toISOString(),
+      })
+    );
+    return false;
+  }
+};
+
+/**
+ * Records that an object was found present.
+ *
+ * Deliberately does *not* clear `unavailableAt`. A key is written once and
+ * never rewritten, so an object that came back is not the same object coming
+ * back -- it is a fact that needs a person to look at it, not a column this
+ * function should quietly reverse.
+ */
+export const recordMessageAttachmentSeen = async (input: {
+  attachmentId: string;
+  userId: string;
+  now?: Date;
+}): Promise<void> => {
+  try {
+    await prisma.messageAttachment.updateMany({
+      where: { id: input.attachmentId, userId: input.userId },
+      data: { availabilityCheckedAt: input.now ?? new Date() },
+    });
+  } catch {
+    // An observation nobody could store is not worth failing a served turn.
+  }
+};
 
 /* ------------------------------------------------------------------------ */
 /* Deleting                                                                   */

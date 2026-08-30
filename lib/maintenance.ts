@@ -42,6 +42,7 @@ const STALE_COST_ADJUSTMENT_AFTER_MS = 45 * 60 * 1000;
  */
 const STALE_ATTEMPT_BACKLOG_AFTER_MS = 60 * 60 * 1000;
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { purgeExpiredComparisonReviewRuns } from "@/lib/comparisonReviewRunTelemetry";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
@@ -753,6 +754,13 @@ export async function cleanupExpiredData() {
     purgeExpiredChatLimitDecisions(now)
   );
 
+  // The same 90 days, for the same reason: the AI Review operational record is
+  // a reliability instrument, not a billing record. Long enough to compute a
+  // 90-day trend, short enough that the table cannot grow without bound.
+  const comparisonReviewRuns = await step("comparison_review_runs", () =>
+    purgeExpiredComparisonReviewRuns(now)
+  );
+
   const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
     prisma.billingPromotionRedemption.updateMany({
       where: {
@@ -924,6 +932,7 @@ export async function cleanupExpiredData() {
     autoFixCases,
     productAnalyticsEvents: productAnalyticsEvents?.count ?? null,
     limitDecisions: limitDecisions?.deleted ?? null,
+    comparisonReviewRuns: comparisonReviewRuns?.deleted ?? null,
     promotionRiskIdentifiers: promotionRiskIdentifiers?.count ?? null,
     notificationDeliveries: notificationDeliveries?.count ?? null,
     shareSnapshots: shareSnapshots === null ? null : Number(shareSnapshots),

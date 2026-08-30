@@ -80,8 +80,37 @@ export type ExpectedMemoryV2 = {
     id: string;
     kind: string;
     mustInclude: readonly string[];
+    /**
+     * A disjunction, for the one thing a conjunction cannot express: polarity.
+     *
+     * `mustInclude` is an AND of substrings, which pins a fact but not whether
+     * the statement asserts or denies it. "nut" matches "The user has a nut
+     * allergy" and "The user does not have a nut allergy" alike, and for a
+     * health gold those are opposite answers.
+     *
+     * Korean carries the negation in a stem — "없" covers 없다/없습니다/없어요 —
+     * so a conjunction reaches it. English spreads it across "does not have",
+     * "has no", "is not allergic": alternatives, not a conjunction. Pinning one
+     * of them scores every other correct phrasing as a miss, which is how this
+     * dataset has already lost two golds ("짧게" for "짧", "굵게" for "굵").
+     *
+     * Semantics: `all(mustInclude) && (mustIncludeAny === undefined ||
+     * any(mustIncludeAny))`. Absent means unchanged, so every gold written
+     * before this field keeps its exact score.
+     */
+    mustIncludeAny?: readonly string[];
     expectedDisposition: MemoryEvalExpectedDisposition;
 };
+
+/**
+ * The one normalisation gold tokens and statements are compared under.
+ *
+ * Exported because the scorer matches with it and this module rejects
+ * duplicates under it; two definitions would let a token pair that validates
+ * here fail to behave that way there.
+ */
+export const normalizeEvalToken = (value: string): string =>
+    value.normalize("NFC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
 
 export type MemoryEvalCaseV2 = {
     id: string;
@@ -167,7 +196,11 @@ export type DatasetValidationErrorCode =
     | "critical_case_has_expected"
     | "critical_gold_mode_unknown"
     | "critical_gold_mode_on_noncritical"
-    | "critical_gold_mode_requires_exhaustive";
+    | "critical_gold_mode_requires_exhaustive"
+    | "expected_tokens_empty"
+    | "expected_token_blank"
+    | "expected_token_duplicate"
+    | "expected_token_contains_another";
 
 export type DatasetValidationError = {
     code: DatasetValidationErrorCode;
@@ -330,6 +363,69 @@ export function validateSuccessorDataset(input: {
                     detail: `kind ${JSON.stringify(memory.kind)}`,
                 });
             }
+            // Both token lists, under one rule. `mustInclude` had no
+            // validation and today passes all four checks, so applying them
+            // to it costs nothing and closes the same hazard on the field
+            // that already exists.
+            for (const field of ["mustInclude", "mustIncludeAny"] as const) {
+                const raw = memory[field];
+                if (raw === undefined && field === "mustIncludeAny") continue;
+                const tokens = Array.isArray(raw) ? (raw as unknown[]) : [];
+                if (tokens.length === 0) {
+                    // An empty conjunction matches every statement of the
+                    // kind; an empty disjunction matches none. Neither is a
+                    // gold, and both read like one.
+                    errors.push({
+                        code: "expected_tokens_empty",
+                        caseId,
+                        detail: `${field} on expected memory ${JSON.stringify(memory.id)} is empty`,
+                    });
+                    continue;
+                }
+                const seen = new Set<string>();
+                const normalized: string[] = [];
+                for (const token of tokens) {
+                    const text =
+                        typeof token === "string"
+                            ? normalizeEvalToken(token)
+                            : "";
+                    if (text === "") {
+                        errors.push({
+                            code: "expected_token_blank",
+                            caseId,
+                            detail: `${field} carries ${JSON.stringify(token)}`,
+                        });
+                        continue;
+                    }
+                    if (seen.has(text)) {
+                        // After normalisation, so "Nut" and "nut " are one.
+                        errors.push({
+                            code: "expected_token_duplicate",
+                            caseId,
+                            detail: `${field} repeats ${JSON.stringify(text)}`,
+                        });
+                        continue;
+                    }
+                    seen.add(text);
+                    normalized.push(text);
+                }
+                for (const token of normalized) {
+                    const wider = normalized.find(
+                        (other) => other !== token && other.includes(token)
+                    );
+                    if (wider === undefined) continue;
+                    // The realistic shape of the bare-substring hazard:
+                    // ["no", "no nut allergy"] reads as two alternatives and
+                    // behaves as one, the loosest. A disjunction is only as
+                    // strict as its weakest member.
+                    errors.push({
+                        code: "expected_token_contains_another",
+                        caseId,
+                        detail: `${field}: ${JSON.stringify(token)} is inside ${JSON.stringify(wider)}, so the wider one never decides anything`,
+                    });
+                }
+            }
+
             const disposition = memory.expectedDisposition;
             if (disposition === undefined || disposition === null) {
                 errors.push({

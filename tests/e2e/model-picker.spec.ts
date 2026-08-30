@@ -188,13 +188,28 @@ test("the filter sheet reports its active count, result count, and resets", { ta
   await expect(dialog.getByTestId("model-filter-sheet-trigger")).toContainText("1");
   await expect(resultCount).not.toHaveText(unfiltered);
   await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(0);
-  // "Web search" is a capability, not a provider: since 911ded5 the native
-  // web-search models (GPT-5.5, Claude, Gemini Pro/Flash) qualify alongside the
-  // Perplexity search models, so the filter is checked against a model that
-  // does support it and one that does not.
+  // "Web search" is a capability, not a provider, and not one route either:
+  // provider-native models (GPT, Claude), the Perplexity search models, and
+  // the Google models -- which search through a tool this application executes
+  // -- all qualify. The filter is checked against models on every route that
+  // does support it and models that do not.
   await expect(
     dialog.locator('[data-testid="model-option"][data-model-id="perplexity/sonar"]')
   ).toHaveCount(1);
+  // Every active Google model. They were absent from this filter for as long as
+  // their search had no enforceable cost ceiling, which is the gap the
+  // application-managed route closed.
+  for (const modelId of [
+    "gemini-3-7-flash",
+    "gemini-3-6-flash",
+    "gemini-3-1-pro",
+    "gemini-2-5-flash",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`),
+      `${modelId} should be listed under the web search filter`
+    ).toHaveCount(1);
+  }
   await expect(
     dialog.locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')
   ).toHaveCount(0);

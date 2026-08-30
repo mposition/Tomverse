@@ -175,11 +175,15 @@ const answeringAdapter = (statement: string) => () => async () => ({
         candidates: [
             {
                 kind: "preference",
+                polarity: "affirmed",
                 statement,
                 confidence: 0.9,
                 sensitivity: "standard",
                 expiresAt: null,
-                evidence: ["m1"],
+                // The quote is a span of MESSAGE_BODY: `mem-extract-v6`
+                // citations carry one, and the parser checks it against the
+                // server's own copy of the cited message.
+                evidence: [{ messageLabel: "m1", quote: "formal Korean" }],
             },
         ],
     }),

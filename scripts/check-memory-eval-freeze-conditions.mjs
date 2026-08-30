@@ -1,5 +1,5 @@
 /**
- * The seven freeze conditions of docs/ops/memory-extraction-eval-dataset.md §7.1,
+ * The freeze conditions of docs/ops/memory-extraction-eval-dataset.md §7.1,
  * checked rather than asserted.
  *
  *   npm run check:memory-eval-freeze
@@ -19,7 +19,7 @@
  * human acts recorded in the batch records and the freeze table.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { ADOPTED_BATCHES } from "../lib/memoryExtractionEvalAdopted/index.ts";
 import { CANDIDATE_BATCHES } from "../lib/memoryExtractionEvalCandidates/index.ts";
 import {
@@ -38,7 +38,41 @@ import {
     MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
 } from "../lib/memoryEvalSuccessorFixtures.ts";
 import { SUCCESSOR_ADOPTED_BATCHES } from "../lib/memoryEvalSuccessorAdopted/index.ts";
+import {
+    MEMORY_EVAL_SUCC3_CASES,
+    MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC3_DATASET_VERSION,
+} from "../lib/memoryEvalSucc3Fixtures.ts";
+import { SUCC3_ADOPTED_BATCHES } from "../lib/memoryEvalSucc3Adopted/index.ts";
+import {
+    MEMORY_EVAL_SUCC4_CASES,
+    MEMORY_EVAL_SUCC4_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC4_DATASET_VERSION,
+    MEMORY_EVAL_SUCC4_REPLACEMENT_CASES,
+} from "../lib/memoryEvalSucc4Dataset.ts";
+import { MEMORY_EVAL_SUCC4_MANIFEST } from "../lib/memoryEvalSucc4Manifest.ts";
+import {
+    readSucc4AdoptionRecord,
+    succ4AdoptionConditions,
+} from "../lib/memoryEvalSucc4AdoptionRecord.ts";
+import {
+    goldReviewCoverage,
+    goldReviewFailures,
+} from "../lib/memoryEvalGoldReviewJudgements.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryEvalDatasetSchema.ts";
+import {
+    MEMORY_EVAL_SUCC5_APPROVAL,
+    MEMORY_EVAL_SUCC5_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC5_DATASET_VERSION,
+    MEMORY_EVAL_SUCC5_MANIFEST,
+    verifySucc5Manifest,
+} from "../lib/memoryEvalSucc5.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION } from "../lib/memoryEvalDatasetSchemaV3.ts";
+import {
+    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    memoryEvalScoringContractPromptPending,
+    memoryEvalScoringContractReadiness,
+} from "../lib/memoryEvalScoringContractDigest.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
     findDuplicateCases,
@@ -218,6 +252,33 @@ const schemaRefusal = legacyDatasetRefusal({
 });
 const schemaExempt = LEGACY_DIAGNOSTIC_DATASET_VERSIONS.includes(version);
 
+/* --- ⑧ no scoring rule left unimplemented --------------------------------- */
+// A contract may be frozen with a rule nothing executes yet -- `mem-score-v3`
+// was, because §10.2's rules 5 and 6 belong to the v6 prompt and to gold
+// review. A **dataset** may not: a verdict produced under a contract whose
+// rules nothing applies describes a bar that was never applied, and it would
+// be cited as though it had been.
+//
+// Scoped to datasets the live contract actually governs. seed-11, succ-2 and
+// succ-3 were frozen under earlier contracts and their records stand; asking
+// them to satisfy a rule written after they were finished would turn a
+// historical fact into a failing check.
+{
+    const governedByLiveContract =
+        schemaVersion === MEMORY_EVAL_DATASET_SCHEMA_V3_VERSION;
+    const pending = memoryEvalScoringContractReadiness();
+    check(
+        "no scoring rule left unimplemented",
+        governedByLiveContract
+            ? pending.length === 0
+                ? `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}: every rule has an implementation`
+                : `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} still pending: ${pending.join(", ")}`
+            : `schema ${schemaVersion}: scored under an earlier contract, not ` +
+              `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}`,
+        !governedByLiveContract || pending.length === 0
+    );
+}
+
 /* ----------------------------------------------------------------- report -- */
 
 console.log(
@@ -286,3 +347,255 @@ evaluate({
     batches: SUCCESSOR_ADOPTED_BATCHES,
     schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
 });
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+// Every frozen version is re-checked, not only the current target. A dataset
+// stops being frozen the moment it stops holding the conditions, and a
+// superseded one that quietly moved would take the artifacts scored against
+// it with it.
+evaluate({
+    version: MEMORY_EVAL_SUCC3_DATASET_VERSION,
+    frozen: MEMORY_EVAL_SUCC3_DATASET_FROZEN,
+    cases: MEMORY_EVAL_SUCC3_CASES,
+    batches: SUCC3_ADOPTED_BATCHES,
+    schemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+});
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+/* ------------------------------------------- the successor, on §7.1a terms */
+
+// succ-4 does not go through `evaluate()`. Its cases arrive two ways -- 1,047
+// inherited from succ-3's adopted batches and 103 written as replacement
+// tranches -- so the batch-shaped conditions would read the inherited half and
+// say nothing at all about the other. That is worse than not checking: it
+// would report "all conditions hold" while 103 cases had never been adopted by
+// anyone. docs/ops/memory-extraction-eval-dataset.md §7.1a replaces those
+// conditions with five of its own, and this runs them.
+{
+    const version = MEMORY_EVAL_SUCC4_DATASET_VERSION;
+    const frozen = MEMORY_EVAL_SUCC4_DATASET_FROZEN;
+    const results = [];
+    const check = (condition, detail, ok) => results.push({ condition, detail, ok });
+
+    /* --- the conditions succ-4 shares with every other dataset ------------ */
+    {
+        const counts = new Map();
+        for (const testCase of MEMORY_EVAL_SUCC4_CASES) {
+            const key = `${testCase.category}:${testCase.language}`;
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        const short = [...counts].filter(
+            ([key, count]) =>
+                count < MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM[key.split(":")[0]]
+        );
+        check(
+            "cell floors",
+            short.length === 0
+                ? `${MEMORY_EVAL_SUCC4_CASES.length} cases across ${counts.size} cells`
+                : `below floor: ${short.map(([k, n]) => `${k} ${n}`).join(", ")}`,
+            short.length === 0
+        );
+    }
+    {
+        const duplicates = findDuplicateCases(MEMORY_EVAL_SUCC4_CASES);
+        check(
+            "findDuplicateCases()",
+            duplicates.length === 0 ? "0" : `${duplicates.length}`,
+            duplicates.length === 0
+        );
+    }
+    {
+        const pending = memoryEvalScoringContractReadiness();
+        const promptPending = memoryEvalScoringContractPromptPending();
+        check(
+            "no scoring rule left unimplemented",
+            pending.length === 0
+                ? `${MEMORY_EVAL_SCORING_CONTRACT_VERSION}: every rule a dataset can satisfy has an implementation` +
+                      (promptPending.length > 0
+                          ? `; awaiting a prompt: ${promptPending.join(", ")}`
+                          : "")
+                : `${MEMORY_EVAL_SCORING_CONTRACT_VERSION} still pending: ${pending.join(", ")}`,
+            pending.length === 0
+        );
+    }
+
+    /* --- v3-unfixable-evidence-not-a-gold --------------------------------- */
+    // Separate from `goldEvidenceFailure()`, which proves the anchor is a real
+    // user message and an exact span and says nothing about whether its
+    // polarity can be read at all.
+    {
+        const keys = [];
+        const polarityByKey = new Map();
+        for (const testCase of MEMORY_EVAL_SUCC4_CASES) {
+            for (const gold of testCase.expected) {
+                const key = `${testCase.id}:${gold.id}`;
+                keys.push(key);
+                polarityByKey.set(key, gold.polarity);
+            }
+        }
+        const coverage = goldReviewCoverage({
+            decisionSetGoldKeys: keys,
+            polarityByKey,
+        });
+        const failures = goldReviewFailures(coverage);
+        check(
+            "every gold judged, and none judged unfixable",
+            failures.length === 0
+                ? `${coverage.judgements.size}/${keys.length} golds judged, 0 unfixable`
+                : failures.join(" | "),
+            failures.length === 0
+        );
+    }
+
+    /* --- §7.1a's five --------------------------------------------------- */
+    const recordPath = "docs/ops/memory-extraction-eval-succ4-adoption.md";
+    if (!existsSync(recordPath)) {
+        check(
+            "unified adoption record present",
+            `${recordPath} does not exist`,
+            false
+        );
+    } else {
+        for (const condition of succ4AdoptionConditions({
+            record: readSucc4AdoptionRecord(recordPath),
+            inherited: MEMORY_EVAL_SUCC4_MANIFEST.composition.inheritedComponents,
+            sourceBatchIdsWithRecord: SUCC3_ADOPTED_BATCHES.filter((batch) =>
+                existsSync(batch.record)
+            ).map((batch) => batch.id),
+            liveTranches:
+                MEMORY_EVAL_SUCC4_MANIFEST.composition.replacementTranches,
+            replacementCount: MEMORY_EVAL_SUCC4_REPLACEMENT_CASES.length,
+        })) {
+            check(condition.condition, condition.detail, condition.ok);
+        }
+    }
+
+    // The header keeps the same shape the other three print. It is read by
+    // `tests/memoryEvalFreezeGate.test.mjs`, which pairs each section with the
+    // constant it claims, and a section whose header did not parse would be a
+    // dataset nobody checked.
+    console.log(
+        `Freeze conditions for ${version} ` +
+            `(currently ${frozen ? "frozen" : "not frozen"})`
+    );
+    console.log(
+        "docs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\n" +
+            "batch conditions are replaced by five, because 103 of these cases\n" +
+            "come from replacement tranches and not from an adopted batch.\n"
+    );
+    for (const result of results) {
+        console.log(
+            `${result.ok ? "OK  " : "MISS"}  ${result.condition}  — ${result.detail}`
+        );
+    }
+    const missed = results.filter((result) => !result.ok);
+    if (missed.length === 0) {
+        console.log(`\nAll ${results.length} conditions hold.`);
+    } else {
+        console.log(
+            `\n${missed.length} of ${results.length} conditions unmet. ` +
+                "docs/ops/memory-extraction-eval-dataset.md §7.1a asks for all of them."
+        );
+    }
+    if (frozen && missed.length > 0) {
+        console.error(
+            `\n${version} is marked frozen while a freeze condition is unmet.`
+        );
+        process.exit(1);
+    }
+}
+
+console.log("\n" + "-".repeat(72) + "\n");
+
+/* ------------------------------- the contract-only successor, on its terms */
+
+// succ-5 does not go through `evaluate()` either, and for the opposite reason
+// to succ-4's: it shares succ-4's cases exactly, so every case-level condition
+// is already answered above and answering it twice would report one fact as
+// two. What is unanswered is whether it is still the thing it claims to be --
+// a successor that changed the contract and nothing else.
+//
+// Four conditions, and each one can fail in a way the others cannot see: the
+// sample could drift from succ-4's, the contract could fail to move at all,
+// the manifest could stop recomputing, and the human record could go missing.
+{
+    const version = MEMORY_EVAL_SUCC5_DATASET_VERSION;
+    const frozen = MEMORY_EVAL_SUCC5_DATASET_FROZEN;
+    const results = [];
+    const check = (condition, detail, ok) => results.push({ condition, detail, ok });
+
+    check(
+        "the sample is succ-4's, unchanged",
+        MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest ===
+            MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest
+            ? `${MEMORY_EVAL_SUCC5_MANIFEST.caseCount} cases, digest ${MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest}`
+            : `${MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest} vs succ-4's ${MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest}`,
+        MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest ===
+            MEMORY_EVAL_SUCC4_MANIFEST.datasetDigest
+    );
+
+    check(
+        "the contract did move",
+        MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest ===
+            MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest
+            ? "identical to the superseded contract; this successor changes nothing"
+            : `${MEMORY_EVAL_SUCC4_MANIFEST.scoringContractVersion} -> ${MEMORY_EVAL_SUCC5_MANIFEST.scoringContractVersion}`,
+        MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest !==
+            MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest
+    );
+
+    {
+        const mismatches = verifySucc5Manifest();
+        check(
+            "the manifest recomputes from the tree",
+            mismatches.length === 0
+                ? `manifest digest ${MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest}`
+                : mismatches.join("; "),
+            mismatches.length === 0
+        );
+    }
+
+    {
+        const approval = MEMORY_EVAL_SUCC5_APPROVAL;
+        const filled =
+            approval.approvedBy.startsWith("@") &&
+            /^\d{4}-\d{2}-\d{2}$/.test(approval.approvedAt) &&
+            approval.scope === "contract-only";
+        check(
+            "a human approved it as contract-only",
+            filled
+                ? `${approval.approvedBy} on ${approval.approvedAt}, scope ${approval.scope}`
+                : "the approval record is incomplete or claims a scope it did not have",
+            filled
+        );
+    }
+
+    console.log(
+        `Freeze conditions for ${version} ` +
+            `(currently ${frozen ? "frozen" : "not frozen"})`
+    );
+    console.log(
+        "A contract-only successor: succ-4's cases under the corrected\n" +
+            "contract. The case-level conditions are answered by succ-4's\n" +
+            "section above and are not repeated here.\n"
+    );
+    for (const result of results) {
+        console.log(
+            `${result.ok ? "OK  " : "MISS"}  ${result.condition}  — ${result.detail}`
+        );
+    }
+    const missed = results.filter((result) => !result.ok);
+    if (missed.length === 0) {
+        console.log(`\nAll ${results.length} conditions hold.`);
+    } else {
+        console.log(`\n${missed.length} of ${results.length} conditions unmet.`);
+    }
+    if (frozen && missed.length > 0) {
+        console.error(
+            `\n${version} is marked frozen while a freeze condition is unmet.`
+        );
+        process.exit(1);
+    }
+}

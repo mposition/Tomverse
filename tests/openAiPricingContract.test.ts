@@ -4,12 +4,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED,
+  CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED,
   MODEL_LIST_ENDPOINT_IS_NOT_A_PRICE_SOURCE,
   MODEL_PRICING,
   RESPONSE_PROCESSING_TIER_IS_NOT_RECORDED,
   resolveModelPricing,
 } from "@/lib/modelPricing";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { PROCESSING_TIER_REQUEST_ALLOWLIST } from "../scripts/check-processing-tier-core.mjs";
 import { getModel } from "@/lib/models";
 
@@ -82,22 +83,36 @@ test("Luna prices its short and long context tiers separately", () => {
   );
 });
 
-test("Luna's cache-write rates are recorded on both tiers and never billed", () => {
+test("Luna's cache-write rates are recorded on both tiers and cost nothing without a write count", () => {
   const expected = PUBLISHED["gpt-5-6-luna"];
   const [short, long] = profileFor("gpt-5-6-luna").tiers;
 
   assert.equal(usd(short.cacheWriteUsdPerMillionTokens!), expected.short.cacheWrite);
   assert.equal(usd(long.cacheWriteUsdPerMillionTokens!), expected.long.cacheWrite);
 
-  // Recorded, not billed: no usage source counts cache-*write* tokens, so
-  // resolveModelPricing must not expose the rate as a billing input.
-  assert.equal(CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED, true);
+  // The rate is now resolved rather than withheld -- Anthropic prompt caching
+  // gave this application its first cache-write token count, so the resolver
+  // carries the rate for every model that publishes one.
+  assert.equal(CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED, true);
   const resolved = resolveModelPricing(inherited("gpt-5-6-luna"));
-  assert.equal(
-    "cacheWriteUsdPerMillionTokens" in resolved,
-    false,
-    "a resolved price must not carry a cache-write rate until a usage adapter reports cache-write tokens"
-  );
+  assert.equal(usd(resolved.cacheWriteUsdPerMillionTokens!), expected.short.cacheWrite);
+
+  // Carrying the rate is not the same as charging for it. No OpenAI usage
+  // adapter reports cache-*write* tokens, so Luna's write count is zero on
+  // every turn and the cost is zero for want of a measurement -- not because
+  // the rate is missing. That distinction is the whole point of billing on
+  // both halves: if an adapter ever starts reporting the count, this stops
+  // being zero without anybody having to remember to flip a flag.
+  const priced = calculateProviderUsageCost({
+    inputTokens: 10_000,
+    outputTokens: 0,
+    inputUsdPerMillionTokens: resolved.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: resolved.outputUsdPerMillionTokens,
+    cacheWriteUsdPerMillionTokens: resolved.cacheWriteUsdPerMillionTokens,
+  });
+  assert.equal(priced.cacheWriteInputTokens, 0);
+  assert.equal(priced.cacheWriteInputCostMicroUsd, 0);
+  assert.equal(priced.unpricedCacheWriteTokens, 0);
 });
 
 test("GPT-5.4 mini is flat-priced, with no invented cache-write rate", () => {

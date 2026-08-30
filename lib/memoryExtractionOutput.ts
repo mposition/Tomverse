@@ -1,6 +1,10 @@
 /**
- * Strict parsing and normalization of `mem-extract-v1` output (Release B,
- * policy §8.2, §8.4, §12.2).
+ * Strict parsing and normalization of extraction output (Release B).
+ * docs/policy/external-conversation-import-and-memory.md §8.2, §8.4, §12.2.
+ *
+ * Written against the shipped `promptVersion` rather than against any one of
+ * them: a version bump that changes the answer's shape changes this module
+ * with it.
  *
  * Pure. The model's answer is untrusted input like any other: it arrives as
  * an unknown, and everything that leaves here has been checked field by
@@ -22,7 +26,9 @@ import {
 } from "@/lib/memoryExtractionPrompt";
 import {
     MEMORY_KINDS,
+    MEMORY_POLARITIES,
     MEMORY_STATEMENT_MAX_CODE_POINTS,
+    type MemoryPolarity,
 } from "@/lib/memoryValidatorCore";
 
 /** Why one candidate was dropped before it ever reached the validator. */
@@ -33,6 +39,7 @@ export type ExtractionParseProblem =
     | "candidate_limit_exceeded"
     | "unknown_field"
     | "kind_unknown"
+    | "polarity_invalid"
     | "statement_invalid"
     | "statement_too_long"
     | "confidence_invalid"
@@ -40,20 +47,31 @@ export type ExtractionParseProblem =
     | "expires_at_invalid"
     | "evidence_missing"
     | "evidence_limit_exceeded"
-    | "evidence_label_unknown";
+    | "evidence_entry_invalid"
+    | "evidence_label_unknown"
+    | "evidence_quote_not_found";
 
 export type ParsedExtractionCandidate = {
     kind: string;
+    /** Asserted or denied. Required from `mem-extract-v6` on. */
+    polarity: MemoryPolarity;
     statement: string;
     confidence: number;
     sensitivity: "standard" | "sensitive";
     expiresAt: string | null;
-    /** Deduplicated, in citation order. */
+    /** Deduplicated by (message, quote), in citation order. */
     evidence: Array<{
         externalMessageId: string;
         /** The digest the SERVER holds — never a value the model supplied. */
         evidenceDigest: string;
         role: "user" | "assistant";
+        /**
+         * The span the model cited, verified to occur in the server's copy of
+         * that message. NFC-normalized, because that is the form the check
+         * compared — storing the raw bytes would leave a quote that passed a
+         * check nothing downstream can repeat.
+         */
+        evidenceQuote: string;
     }>;
 };
 
@@ -65,6 +83,7 @@ export type ExtractionParseResult = {
 
 const CANDIDATE_FIELDS = new Set([
     "kind",
+    "polarity",
     "statement",
     "confidence",
     "sensitivity",
@@ -74,6 +93,22 @@ const CANDIDATE_FIELDS = new Set([
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
+
+const EVIDENCE_FIELDS = new Set(["messageLabel", "quote"]);
+
+/**
+ * Why one citation failed, kept apart from the others.
+ *
+ * All three drop the candidate, so the distinction buys nothing at runtime —
+ * it is for whoever reads the problem list. "The label was never issued", "the
+ * entry was the wrong shape" and "the quote is not in that message" point at
+ * three different defects, and collapsing them into one reason would leave a
+ * run reporting that evidence failed without saying how.
+ */
+type EvidenceProblem =
+    | "evidence_entry_invalid"
+    | "evidence_label_unknown"
+    | "evidence_quote_not_found";
 
 /** Code points, not UTF-16 units: an emoji is one character to a reader. */
 const countCodePoints = (value: string): number => [...value].length;
@@ -98,6 +133,22 @@ export function normalizeExtractedStatement(value: string): string {
             ? collapsed.slice(1, -1).trim()
             : collapsed;
     return unquoted;
+}
+
+/**
+ * Whether a cited quote really occurs in the message the server sent.
+ *
+ * Exact substring after NFC normalization and nothing else — no trimming of
+ * punctuation, no case folding, no whitespace collapsing. Each of those would
+ * accept a span the message does not contain, and the whole point of the
+ * quote is that it can be found again by whoever reads the memory later
+ * (.github/audits/memory-eval-gold-contract-2026-08-27.md §10.2). Normalizing
+ * both sides is not a loosening: the same characters can reach us in two
+ * encodings, and NFC is the form the rest of this module already speaks.
+ */
+export function evidenceQuoteOccursIn(content: string, quote: string): boolean {
+    if (quote.length === 0) return false;
+    return content.normalize("NFC").includes(quote.normalize("NFC"));
 }
 
 /**
@@ -146,6 +197,17 @@ export function parseExtractionOutput(
             !(MEMORY_KINDS as readonly string[]).includes(entry.kind)
         ) {
             problems.push("kind_unknown");
+            continue;
+        }
+        // Required, and never defaulted. Assuming `affirmed` for a missing
+        // field would turn "the model did not say" into "the model said the
+        // fact holds", which is the one direction that writes a memory
+        // asserting something nobody asserted.
+        if (
+            typeof entry.polarity !== "string" ||
+            !(MEMORY_POLARITIES as readonly string[]).includes(entry.polarity)
+        ) {
+            problems.push("polarity_invalid");
             continue;
         }
         if (typeof entry.statement !== "string") {
@@ -202,26 +264,55 @@ export function parseExtractionOutput(
         }
         const evidence: ParsedExtractionCandidate["evidence"] = [];
         const seen = new Set<string>();
-        let badLabel = false;
-        for (const label of entry.evidence) {
+        let evidenceProblem: EvidenceProblem | null = null;
+        for (const cited of entry.evidence) {
+            if (!isPlainObject(cited)) {
+                evidenceProblem = "evidence_entry_invalid";
+                break;
+            }
+            const unknownEvidenceField = Object.keys(cited).find(
+                (key) => !EVIDENCE_FIELDS.has(key)
+            );
+            if (
+                unknownEvidenceField ||
+                typeof cited.messageLabel !== "string" ||
+                typeof cited.quote !== "string"
+            ) {
+                evidenceProblem = "evidence_entry_invalid";
+                break;
+            }
             // The only citations that survive are labels this chunk actually
             // issued. An invented identifier resolves to nothing, so it can
             // never become a reference to a message the model was not shown.
-            const source = typeof label === "string" ? labels.get(label) : undefined;
+            const source = labels.get(cited.messageLabel);
             if (!source) {
-                badLabel = true;
+                evidenceProblem = "evidence_label_unknown";
                 break;
             }
-            if (seen.has(source.externalMessageId)) continue;
-            seen.add(source.externalMessageId);
+            // Checked against the server's own copy of the message. A quote
+            // the model composed is not evidence for the statement it
+            // supports, and it is the model's own answer that would otherwise
+            // be standing in for the source.
+            if (!evidenceQuoteOccursIn(source.content, cited.quote)) {
+                evidenceProblem = "evidence_quote_not_found";
+                break;
+            }
+            const evidenceQuote = cited.quote.normalize("NFC");
+            // By (message, quote): two spans of one message are two pieces of
+            // evidence, and deduplicating by message alone would have thrown
+            // the second away.
+            const key = `${source.externalMessageId}\u0000${evidenceQuote}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
             evidence.push({
                 externalMessageId: source.externalMessageId,
                 evidenceDigest: source.contentDigest,
                 role: source.role,
+                evidenceQuote,
             });
         }
-        if (badLabel) {
-            problems.push("evidence_label_unknown");
+        if (evidenceProblem) {
+            problems.push(evidenceProblem);
             continue;
         }
         if (evidence.length === 0) {
@@ -231,6 +322,7 @@ export function parseExtractionOutput(
 
         candidates.push({
             kind: entry.kind,
+            polarity: entry.polarity as MemoryPolarity,
             statement,
             confidence: entry.confidence,
             sensitivity:

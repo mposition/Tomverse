@@ -130,6 +130,33 @@ export type ExtractedAttachment = {
 };
 
 /**
+ * The block that stands in for a file this turn could not read.
+ *
+ * There are exactly two honest things to do when a stored attachment's bytes
+ * are gone: refuse the turn, or tell the model plainly that the file was not
+ * read. Silently dropping it is the third option and it is the one that does
+ * damage -- the user asks "what does the contract say about termination" and
+ * the model, holding no contract and told nothing about one, answers anyway.
+ *
+ * So this marker is only ever produced after the person has been shown the
+ * refusal and has explicitly chosen to continue without the file. It names the
+ * file (the person knows which one they lost) and says, in the imperative the
+ * rest of the fenced context uses, that its contents are unknown.
+ */
+export function unavailableAttachmentMarker(name: string): ExtractedAttachment {
+    return {
+        name,
+        kind: "unavailable file",
+        text: [
+            "This file is no longer available and was NOT read.",
+            "Its contents are unknown to you.",
+            "Do not describe, summarise, quote, or infer anything about it.",
+            "If answering requires this file, say that it is unavailable and ask for it to be attached again.",
+        ].join("\n"),
+    };
+}
+
+/**
  * Builds the user turn: the person's own message first, then each document
  * inside its own fence, with the rules stated once in between.
  *

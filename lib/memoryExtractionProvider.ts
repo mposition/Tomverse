@@ -84,6 +84,12 @@ export function createExtractionProviderAdapter(input: {
                 // aiming at it. Ignored by providers that do not have it; the
                 // schema is written to satisfy it either way.
                 openai: { strictJsonSchema: true },
+                // No Anthropic `cacheControl` here, deliberately: extraction
+                // runs once per conversation over that conversation's own
+                // transcript, so a second run is a different prefix and a
+                // marker would buy a 1.25x write nothing reads back. Recorded
+                // as `memory_extraction` in
+                // lib/anthropicPromptCaching.ts.
             },
         });
 
