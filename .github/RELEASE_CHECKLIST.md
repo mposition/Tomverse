@@ -71,6 +71,13 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset
+      is structurally sound (a case with an unstated `goldCompleteness` or a
+      `prompt_injection` case with no marker produces numbers over the wrong
+      denominators rather than an error) and that no reviewer pair is marked
+      `approved` without the evidence
+      `docs/policy/ai-review-m5-quality-contract.md` §3 requires. Passing with
+      nothing approved is the expected state, not a gap
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
 - [ ] `npm run check:unconsumed-response-bodies` — the other half of that
