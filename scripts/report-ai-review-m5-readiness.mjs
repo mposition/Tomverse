@@ -315,10 +315,16 @@ const attemptModel =
   schema.split("model ComparisonReviewRunAttempt {")[1]?.split("\n}")[0] ?? "";
 const attemptTelemetry =
   exists("lib/comparisonReviewRunCore.ts") && attemptModel.length > 0;
+// The attempt row deliberately carries no `reservationId`: the data-domain
+// registry refuses a row that names a subject it does not hold, and tracing
+// back to the reservation goes through the run's own traceId instead
+// (docs/ops/ai-review-metric-dictionary.md section 7). What this item needs is
+// the two figures plus the status that says whether settlement ran at all --
+// a NULL settledCredits is not a zero.
 const settlementTelemetry =
   attemptModel.includes("settledCredits") &&
   attemptModel.includes("reservedCredits") &&
-  attemptModel.includes("reservationId");
+  attemptModel.includes("settlementStatus");
 const sequencedConversions = readFileSync(
   "lib/aiReviewScorecardCore.ts",
   "utf8"

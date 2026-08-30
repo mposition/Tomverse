@@ -1,6 +1,13 @@
 # Router evaluation runs
 
-> **Both pilot runs recorded here are void and may not be cited.**
+> **Pilot `20260830a` cleared every gate** — 210/210 judged, 0 empty answers,
+> every cell 14/14, and the first run to reach the independent judge. Its
+> record is `docs/ops/router-evaluation-runs/route01-pilot-20260830a.md`. It
+> does **not** set `n`: the two judges disagree by +40.48pp, and the judge is
+> chosen against human labels under
+> `docs/ops/router-judge-selection-rule.md`.
+>
+> **The two earlier pilot runs are void and may not be cited.**
 > The harness sent empty answers to the judge, so part of each win-rate
 > delta is "the model returned nothing" rather than "the model answered
 > worse". Run 3 is `VOID_GENERATION_VALIDATION_MISMATCH`; run 2 is
