@@ -206,6 +206,42 @@ test.describe("admin read surfaces", () => {
     );
   });
 
+  test("analytics' AI Review tab reports insufficient_evidence rather than zero", async ({
+    page,
+  }) => {
+    await page.goto("/admin/analytics?tab=ai-review");
+
+    await expect(page.getByTestId("admin-ai-review-scorecard")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "M5 scorecard" })
+    ).toBeVisible();
+
+    // The seeded database has no AI Review runs, and that is the state this
+    // test is for: a scorecard whose sample is below the floor must say so.
+    // A "0.0%" here would read as a measured failure of the feature, which is
+    // the single thing docs/policy/ai-review-m5-quality-contract.md §8.3
+    // forbids.
+    await expect(page.getByText("insufficient_evidence").first()).toBeVisible();
+    await expect(page.getByText("0.0%")).toHaveCount(0);
+
+    // No reviewer pair is approved, so the register half says exactly that
+    // rather than presenting an unmeasured zero as a clean bill.
+    await expect(
+      page.getByText("No approved reviewer pair")
+    ).toBeVisible();
+    await expect(
+      page.getByText("Not measured — no approved pair")
+    ).toBeVisible();
+    await expect(
+      page.getByText("The served reviewer pairs do not match the approved ones.")
+    ).toBeVisible();
+
+    // The product funnel belongs to another tab and is not fetched here.
+    await expect(
+      page.getByRole("heading", { name: "Go-live funnel and activation" })
+    ).toHaveCount(0);
+  });
+
   test("users lists seeded accounts with their plan and risk state", async ({
     page,
   }) => {

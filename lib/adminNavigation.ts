@@ -107,6 +107,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "memory",
       "import",
       "external import",
+      "ai review",
+      "cross review",
+      "comparison review",
+      "reviewer",
     ],
     tabs: [
       {
@@ -118,6 +122,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "imports",
         label: "Imports & memory",
         description: "External conversation import and memory metrics",
+      },
+      {
+        id: "ai-review",
+        label: "AI Review",
+        description: "Reliability, adoption, and reviewer-pair evidence",
       },
     ],
   },
