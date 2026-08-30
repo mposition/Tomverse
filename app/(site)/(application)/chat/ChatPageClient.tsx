@@ -489,11 +489,21 @@ export function ChatPageClient({
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
   imageGenerationEnabled = false,
+  voiceInputEnabled = false,
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  /**
+   * The voice input opt-in flag AND its kill switch AND the signed-in
+   * requirement, already folded into one boolean on the server
+   * (docs/policy/voice-input.md §3). Resolved there rather than here for the
+   * reason `imageGroupMaxModels` is: a Client Component cannot read the
+   * process environment, so a local copy would keep offering a microphone
+   * after an operator pulled the kill switch.
+   */
+  voiceInputEnabled?: boolean;
   /**
    * How many models one image comparison may fan out to, read from the running
    * server in page.tsx. Passed rather than resolved here: `process.env` in a
@@ -5294,6 +5304,7 @@ export function ChatPageClient({
           availableCredits={comparisonAvailableCredits}
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
+          voiceInputEnabled={voiceInputEnabled}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -5399,6 +5410,7 @@ export function ChatPageClient({
           availableCredits={comparisonAvailableCredits}
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
+          voiceInputEnabled={voiceInputEnabled}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}

@@ -20,7 +20,13 @@
 import { cookies } from "next/headers";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
-import { getPublicAppSettings, isImageGenerationEnabled } from "@/lib/appSettings";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import {
+  getPublicAppSettings,
+  isImageGenerationEnabled,
+  isVoiceInputEnabled,
+} from "@/lib/appSettings";
 import {
   imageGroupMaxModels,
   resolveImageGroupMaxModels,
@@ -43,9 +49,27 @@ export async function ReviewWorkspaceShell() {
   // Default-off opt-in (lib/imageGenerationAccess.ts): a read failure keeps
   // the entry points hidden, exactly like a missing flag row.
   let imageGenerationEnabled = false;
+  /*
+    Voice input's one boolean (docs/policy/voice-input.md §3).
+
+    Three facts folded here and nowhere else: the rollout flag, the kill switch
+    (`isVoiceInputEnabled` consults it without a database round trip, so it
+    still answers when the database is the thing that is unwell), and the
+    signed-in requirement docs/policy/voice-input.md §4 records.
+
+    Resolved on the server for the same reason `imageGroupMaxModels` is: a
+    Client Component cannot read the process environment, so a client-side copy
+    of the kill switch would keep rendering a microphone after an operator
+    pulled it. A read failure leaves it false, exactly like a missing flag row.
+  */
+  let voiceInputEnabled = false;
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
     imageGenerationEnabled = await isImageGenerationEnabled();
+    if (await isVoiceInputEnabled()) {
+      const session = await getServerSession(authOptions);
+      voiceInputEnabled = Boolean(session?.user?.id);
+    }
   } catch (error) {
     // A settings read failure must not change what the guest sees: the
     // compiled-in default resolves to the same brand trio, so the count and
@@ -74,6 +98,14 @@ export async function ReviewWorkspaceShell() {
       imageGenerationEnabled =
         jar.get("__tomverse_e2e_image_generation")?.value === "1";
     }
+    // Same shape, same guard. With the database disabled the voice flag can
+    // never read true and there is no session to sign in to, so a spec opts in
+    // per-context. The cookie stands in for *both* facts the shell folds
+    // together above, which is why the composer specs can drive the microphone
+    // without an account.
+    if (!voiceInputEnabled) {
+      voiceInputEnabled = jar.get("__tomverse_e2e_voice_input")?.value === "1";
+    }
     // The limit comes from an environment variable read at boot, and the e2e
     // suite runs one server for every test, so a spec cannot restart it to
     // exercise both sides of the limit. The override goes through the same
@@ -93,6 +125,7 @@ export async function ReviewWorkspaceShell() {
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
+        voiceInputEnabled={voiceInputEnabled}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This

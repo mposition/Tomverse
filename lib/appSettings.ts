@@ -34,6 +34,11 @@ import {
   imageGenerationEnabledFromValue,
 } from "@/lib/imageGenerationAccess";
 import {
+  VOICE_INPUT_FLAG_KEY,
+  voiceInputAvailable,
+  voiceInputKillSwitchEngaged,
+} from "@/lib/voiceInputAccess";
+import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
@@ -303,6 +308,47 @@ export async function setExternalImportEnabled(enabled: boolean) {
       value: enabled ? "true" : "false",
     },
   });
+}
+
+/**
+ * Voice input's rollout flag (docs/policy/voice-input.md §9).
+ *
+ * The same default-off opt-in shape as image generation and external import,
+ * with one deliberate difference: there is **no** `setVoiceInputEnabled`.
+ *
+ * That absence is a decision, not an omission, and it is registered as one in
+ * `tests/appSettingWriters.test.mjs`. Turning voice input on commits this
+ * product to paying a per-second provider bill whose user-facing price is not
+ * settled (docs/policy/voice-input.md §6), so enabling it is the activation
+ * procedure in docs/policy/voice-input.md §14 — the pricing decision, the
+ * retention confirmation, the device verification — and a checkbox in the
+ * admin console would be that procedure's last step offered without its
+ * first three.
+ *
+ * Turning it *off* is always easy, because stopping always should be: that is
+ * `VOICE_INPUT_KILL_SWITCH`, which needs no database at all.
+ */
+export async function isVoiceInputEnabled(): Promise<boolean> {
+  if (voiceInputKillSwitchEngaged(process.env)) return false;
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: VOICE_INPUT_FLAG_KEY },
+    select: { value: true },
+  });
+  return voiceInputAvailable({ storedFlagValue: row?.value, env: process.env });
+}
+
+export class VoiceInputDisabledError extends Error {
+  constructor() {
+    super("Voice input is not enabled.");
+    this.name = "VoiceInputDisabledError";
+  }
+}
+
+export async function assertVoiceInputEnabled() {
+  if (!(await isVoiceInputEnabled())) {
+    throw new VoiceInputDisabledError();
+  }
 }
 
 export class ExternalImportDisabledError extends Error {

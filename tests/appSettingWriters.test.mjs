@@ -104,6 +104,18 @@ const READ_ONLY_KEYS = {
       "with no consumer would be a switch that does nothing, which teaches an " +
       "operator that switches do nothing.",
   },
+  VOICE_INPUT_FLAG_KEY: {
+    reason:
+      "docs/policy/voice-input.md §14: enabling voice input starts paying a " +
+      "per-second provider bill whose user-facing price " +
+      "docs/policy/voice-input.md §6 has not decided, " +
+      "so it is the activation procedure -- the pricing decision, the " +
+      "retention confirmation, the on-device verification -- and a toggle " +
+      "would offer that procedure's last step without its first three. " +
+      "Stopping is the opposite direction and needs no row at all: " +
+      "VOICE_INPUT_KILL_SWITCH is an environment variable, so it also works " +
+      "when the database is the thing that is unwell.",
+  },
 };
 
 const source = readFileSync(SOURCE, "utf8");

@@ -355,6 +355,34 @@ export const zh = {
         guestAttachmentUnreadable: "无法处理此文件。",
         guestAttachmentFailed: "无法处理此文件，请重试。",
         guestAttachmentUnavailable: "文件添加功能暂时不可用。",
+        // -- Voice input (docs/policy/voice-input.md §13) ------------------
+        voiceStart: "语音输入",
+        voiceStop: "停止录音并转为文字",
+        voiceCancel: "取消",
+        voiceRecording: "录音中 {time}",
+        voiceRequestingPermission: "正在等待麦克风权限…",
+        voiceTranscribing: "正在把语音转成文字…",
+        voiceLimitReached: "已达到最长录音时长，正在转为文字…",
+        voiceDismissError: "关闭提示",
+        voicePrivacyNote:
+            "音频仅为转写发送给语音识别服务商。Tomverse 不保存录音，转写结果会填入输入框，发送前可自行确认和修改。",
+        voiceErrorUnsupportedBrowser:
+            "此浏览器无法录音。请使用最新版 Chrome、Edge、Safari 或 Firefox。",
+        voiceErrorPermissionDenied:
+            "麦克风权限已被阻止。请在浏览器设置中允许本站使用麦克风后重试。",
+        voiceErrorDeviceUnavailable:
+            "没有可用的麦克风。请确认麦克风已连接且未被其他应用占用。",
+        voiceErrorClipEmpty: "没有录到声音。请按住按钮稍久一些再说话。",
+        voiceErrorClipTooLarge: "录音文件过大，无法发送。",
+        voiceErrorClipTooLong: "录音超过了允许的时长。",
+        voiceErrorClipUnreadable: "无法读取录音文件。",
+        voiceErrorTranscriptEmpty: "没有识别到语音。请到安静的环境再试一次。",
+        voiceErrorUnavailable: "当前无法使用语音输入。",
+        voiceErrorSignInRequired: "请登录后使用语音输入。",
+        voiceErrorLimitReached: "已达到今天的语音输入上限，请明天再试。",
+        voiceErrorProviderUnavailable: "语音识别服务暂时不可用，请稍后再试。",
+        voiceErrorNetwork: "录音发送失败。请检查网络连接后重试。",
+        voiceErrorTranscriptionFailed: "语音转文字失败，请重试。",
         guestAttachmentTemporary: "访客文件是临时的：仅为本次对话短暂保存，不会被保存、共享或导出。",
         guestGoogleDriveSignIn: "登录后可连接 Google Drive",
         // Guest AI Review: one real run per month, on the same pipeline.
@@ -1952,6 +1980,8 @@ export const zh = {
         purpose: "信息用于身份验证、生成 AI 回复、存储和恢复对话、导出和分享、处理附件、服务安全、防止滥用以及事件响应。",
         providersTitle: "外部 AI 提供商",
         providers: "提示词、必要的对话上下文、模型选择信息和附件会发送给所选 AI 提供商以生成回复。提供商可能根据其自身条款和隐私政策处理或保留数据，处理国家也可能不同。",
+        voiceInputTitle: "语音输入",
+        voiceInput: "如果您使用输入框中的麦克风，录音会发送给语音识别服务商（目前为 OpenAI），仅用于转成文字，并可能依据该服务商自己的条款在其他国家处理。Tomverse 不保存音频：录音只在该次请求处理期间存在于内存中，不会写入数据库、文件存储、日志或错误追踪；您取消的录音不会发送到任何地方。转写结果会填入输入框，您可以在发送前阅读、修改或删除。发送前它只是您设备上的草稿，Tomverse 不保存任何内容；发送后它就是一条普通消息，适用本政策的其余条款。语音输入仅在登录后可用。",
         attachmentsTitle: "附件",
         attachments: "附件可能会临时存储在加密对象存储中，用于发送给模型和提取文档内容。当前临时附件会根据生命周期策略在约一天后删除。",
         externalImportTitle: "从其他 AI 服务导入的对话",

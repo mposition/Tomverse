@@ -141,6 +141,8 @@ type MobileChatShellProps = {
   aiReviewAccess: AiReviewAccess;
   /** What this caller may do with file attachments. */
   attachmentCapabilities: ChatAttachmentCapabilities;
+  /** Passed straight through to the composer; see ChatInput's own prop. */
+  voiceInputEnabled?: boolean;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -273,6 +275,7 @@ export function MobileChatShell({
   isGuestMode,
   aiReviewAccess,
   attachmentCapabilities,
+  voiceInputEnabled = false,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -1442,6 +1445,7 @@ export function MobileChatShell({
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
+            voiceInputEnabled={voiceInputEnabled}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}
             guestPreviewMode={guestPreviewMode}

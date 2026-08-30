@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Bot, Database, FileUp, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
     MarketingFooter,
@@ -12,6 +12,11 @@ const sections = [
     ["collectedTitle", "collected", UserRound],
     ["purposeTitle", "purpose", Database],
     ["providersTitle", "providers", Send],
+    // Its own section rather than a sentence inside "External AI providers":
+    // the promise that matters here is what happens to the *recording*, and
+    // that is a retention statement, not a transfer one
+    // (docs/policy/voice-input.md §11.4).
+    ["voiceInputTitle", "voiceInput", Mic],
     ["attachmentsTitle", "attachments", FileUp],
     ["externalImportTitle", "externalImport", FileUp],
     ["memoryTitle", "memory", Database],
