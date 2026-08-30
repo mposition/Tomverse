@@ -197,6 +197,7 @@ jobs:
       # both sheets and the key side by side -- and those three have three
       # different audiences. They are separated explicitly below.
       - name: Draw the sample
+        id: draw
         env:
           A: ${{ inputs.reviewer_a }}
           B: ${{ inputs.reviewer_b }}
@@ -207,6 +208,7 @@ jobs:
             --preregistration=docs/ops/router-human-review/primary-60-preregistration.json \
             --print-seed)"
           echo "Seed $seed, derived from the bundle digest."
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
           mkdir -p draw
           npm run --silent eval:router-human-sheets -- \
             --bundle=source/${{ steps.source.outputs.file }} \
@@ -263,10 +265,33 @@ jobs:
         env:
           A: ${{ inputs.reviewer_a }}
           B: ${{ inputs.reviewer_b }}
+          DRAW_SEED: ${{ steps.draw.outputs.seed }}
         run: |
           set -euo pipefail
           mkdir -p out-manifest "out-sheet-$A" "out-sheet-$B"
           cp draw/manifest.json out-manifest/
+          # Which commit's pins produced this draw. The ref selected at
+          # dispatch chooses the pre-registration file, so it is a lever on the
+          # draw even though nothing about it is typed in as an input. Recorded
+          # beside the manifest so a later reader can check the draw against
+          # the exact bundle, digest and seed it was taken under, rather than
+          # against whatever those files say today.
+          node -e '
+            const fs = require("fs");
+            const frozen = require("./docs/ops/router-human-review/primary-60-preregistration.json");
+            fs.writeFileSync("out-manifest/draw-provenance.json", JSON.stringify({
+              commit: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              runId: process.env.GITHUB_RUN_ID,
+              sourceRunId: frozen.sourceRunId,
+              sourceArtifact: frozen.sourceArtifact,
+              bundleFile: frozen.bundleFile,
+              bundleDigest: frozen.bundleDigest,
+              seed: Number(process.env.DRAW_SEED),
+              adjudicatorId: frozen.adjudicatorId,
+            }, null, 2) + "\n");
+          '
+          cat out-manifest/draw-provenance.json
           cp "draw/sheet-$A.md" "draw/sheet-$A.json" "out-sheet-$A/"
           cp "draw/sheet-$B.md" "draw/sheet-$B.json" "out-sheet-$B/"
           # The source bundle is not re-uploaded: it already exists on its own

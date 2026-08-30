@@ -153,6 +153,14 @@ One subdirectory per draw, holding the `manifest.json` (primary) or
 `diagnostic-draw.json` (supplement) and, once the review is done,
 `settled.json` and `human-verdicts.json`.
 
+A workflow draw also produces `draw-provenance.json`: the commit and ref it
+ran from, and the bundle, digest and seed as that commit pinned them. Commit it
+with the manifest. The ref chosen at dispatch selects the pre-registration
+file, so it is a lever on the draw even though nothing about it is typed in as
+an input, and this is what lets a later reader check the draw against the pins
+it was actually taken under rather than against whatever those files say
+today.
+
 `key.json` and the filled-in sheets do **not** belong here. The key says which
 item was which pair and which side was which arm; committing it beside a sheet
 is the one step between this and an unblinded review.
