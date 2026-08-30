@@ -289,6 +289,44 @@ export type AttemptCostIntent = {
         costPerQueryMicroUsd: number;
         maxQueries: number;
     };
+    /**
+     * The prompt-cache write premium this attempt was authorized to spend, if
+     * any (docs/policy/anthropic-prompt-caching.md section 5).
+     *
+     * A third component of `reservedCostMicroUsd`, beside tokens and search,
+     * and it has to be recorded here for the same reason the search
+     * authorization is: the consistency check below reconstructs the total
+     * from its parts, and a component it cannot see makes every cached turn's
+     * authorization look corrupt. That is not hypothetical -- it is what
+     * happened when the premium was added to the reservation and not to this
+     * type, and the check refused to settle any cached turn at all.
+     *
+     * Optional, and absent means zero: every reservation written before prompt
+     * caching authorized no premium, and a required field would make them
+     * unreadable -- a reservation that cannot be deserialized is one that
+     * cannot be refunded.
+     */
+    promptCacheWriteReservedPremiumMicroUsd?: number;
+    /**
+     * The application-managed search this attempt was authorized to run, if any.
+     *
+     * A second field rather than a variant of the one above, because the two
+     * settle into different buckets and only this one names a vendor. An
+     * attempt has at most one of them: a model's capability is native or
+     * application-managed, never both.
+     *
+     * Frozen for the same reason, and one step further: `pricingVersion` is
+     * stored so a settled turn can say which price list it was authorized
+     * against, which is what makes a search price change non-retroactive rather
+     * than merely intended to be.
+     */
+    searchBackendAuthorization?: {
+        backend: string;
+        reservedCostMicroUsd: number;
+        costPerQueryMicroUsd: number;
+        maxQueries: number;
+        pricingVersion: string;
+    };
 };
 
 /**
@@ -358,12 +396,16 @@ export const attemptCostIntentProblems = (input: {
                 Math.ceil(
                     intent.reservedOutputTokens * intent.outputUsdPerMillionTokens
                 );
+            const cachePremium = Math.max(
+                0,
+                intent.promptCacheWriteReservedPremiumMicroUsd ?? 0
+            );
             if (
                 intent.reservedCostMicroUsd !==
-                tokens + search.reservedCostMicroUsd
+                tokens + search.reservedCostMicroUsd + cachePremium
             ) {
                 problems.push(
-                    `attempt ${intent.attemptIndex} reserved ${intent.reservedCostMicroUsd}, which is not ${tokens} of tokens plus ${search.reservedCostMicroUsd} of search`
+                    `attempt ${intent.attemptIndex} reserved ${intent.reservedCostMicroUsd}, which is not ${tokens} of tokens plus ${search.reservedCostMicroUsd} of search plus ${cachePremium} of prompt-cache write premium`
                 );
             }
         }

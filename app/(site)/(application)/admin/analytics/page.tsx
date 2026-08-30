@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { AdminAiReviewScorecardPanel } from "@/components/admin/AdminAiReviewScorecardPanel";
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
 import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevocationPanel";
 import { AdminPackageImportPanel } from "@/components/admin/AdminPackageImportPanel";
@@ -11,6 +12,10 @@ import { getAssistantPackageImportMetrics } from "@/lib/assistantPackageImportMe
 import { getAdminUserStats } from "@/lib/adminUsers";
 import { prisma } from "@/lib/prisma";
 import { getProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
+import {
+  AI_REVIEW_SCORECARD_WINDOWS,
+  readAiReviewScorecard,
+} from "@/lib/aiReviewScorecard";
 
 const TABS = adminNavItemTabs("analytics");
 
@@ -62,6 +67,25 @@ export default async function AdminAnalyticsPage({
           write on this tab, and it only ever restricts.
         */}
         <AdminMemoryRevocationPanel />
+      </div>
+    );
+  }
+
+  if (tab.id === "ai-review") {
+    // Read here rather than fetched by the panel: three windows over two
+    // tables, and the tab is already a server component. Nothing on this tab
+    // writes -- the reviewer-pair register is changed by a person in commit
+    // history, and a screen that edited its own subject would erase the audit
+    // trail the register exists for.
+    const scorecards = await Promise.all(
+      AI_REVIEW_SCORECARD_WINDOWS.map((windowDays) =>
+        readAiReviewScorecard(windowDays)
+      )
+    );
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AdminAiReviewScorecardPanel scorecards={scorecards} />
       </div>
     );
   }

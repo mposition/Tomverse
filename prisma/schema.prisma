@@ -79,10 +79,12 @@ model User {
   modelOverrides                       ModelOverride[]
   conversations                        Conversation[]
   comparisonReviews                    ComparisonReview[]
+  comparisonReviewItemFeedback         ComparisonReviewItemFeedback[]
   productAnalyticsEvents               ProductAnalyticsEvent[]
   privacyRequests                      PrivacyRequest[]
   planChangeRequests                   PlanChangeRequest[]
   externalImports                      ExternalImport[]
+  continuationBridges                  ConversationContinuationBridge[]
   memoryItems                          MemoryItem[]
   memoryExtractionRuns                 MemoryExtractionRun[]
   routingRuns                          RoutingRun[]
@@ -359,6 +361,7 @@ model Conversation {
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
+  continuationBridge    ConversationContinuationBridge?
   user                  User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime               @default(now())
@@ -594,11 +597,39 @@ model MessageAttachment {
   /// request that accepted it.
   uploadId String?
 
+  /// When storage confirmed, with a 404, that this object is gone.
+  ///
+  /// Nullable, and set only from a confirmed 404 -- never from a read that
+  /// merely failed. A 403 from a rotated key and a 500 from the bucket both
+  /// mean "we do not know", and writing those here would turn a five-minute
+  /// credentials outage into a permanent record that an account's files were
+  /// lost (docs/policy/user-attachment-persistence.md section 11).
+  ///
+  /// The row itself is never deleted because of this. The card stays, the
+  /// message stays, the name and size stay: what the user sent is part of the
+  /// conversation whether or not the bytes survived, and hiding the card would
+  /// leave them asking a model about a file neither side can name.
+  unavailableAt DateTime?
+
+  /// Why, from MESSAGE_ATTACHMENT_UNAVAILABLE_REASONS in
+  /// lib/messageAttachmentCore.ts. Free text is not accepted: this column is
+  /// read to decide what the user is told, and a reason nobody enumerated has
+  /// no copy for it.
+  unavailableReason String?
+
+  /// The last time availability was *checked*, whatever the answer.
+  ///
+  /// Separate from `unavailableAt` because "we looked and it was there" and
+  /// "we have not looked since Tuesday" are different facts, and the audit
+  /// tool needs the second one to know what it has covered.
+  availabilityCheckedAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
+  @@index([unavailableAt])
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -669,9 +700,115 @@ model ComparisonReview {
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
+  itemFeedback ComparisonReviewItemFeedback[]
+
   @@unique([userId, inputHash])
   @@index([conversationId, createdAt])
   @@index([conversationId, isStale])
+}
+
+/// One account's verdict on one claim inside one AI Review.
+///
+/// The item is identified by a DERIVED id (lib/comparisonReviewItemFeedback.ts)
+/// rather than a stored one: adding an id field to every claim would
+/// invalidate every cached ComparisonReview, whose result JSON is validated on
+/// read.
+///
+/// Guests cannot reach this table. A guest AI Review is never persisted, so
+/// there is no review row for a verdict to point at, and inventing one would
+/// mean storing a guest's review to hold their opinion of it.
+model ComparisonReviewItemFeedback {
+  id                 String           @id @default(cuid())
+  comparisonReviewId String
+  comparisonReview   ComparisonReview @relation(fields: [comparisonReviewId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// section:ordinal:digest, derived from the review's own result.
+  reviewItemId       String
+  /// One of COMPARISON_REVIEW_ITEM_SECTIONS.
+  section            String
+  /// One of COMPARISON_REVIEW_ITEM_VERDICTS. No free text: a verdict is a
+  /// closed enum, and anything a user wants to say in prose belongs in the
+  /// existing Feedback flow, which is built to handle it.
+  verdict            String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  /// The idempotency key: one verdict per person per item, changed by
+  /// updating and withdrawn by deleting.
+  @@unique([comparisonReviewId, userId, reviewItemId])
+  @@index([userId, createdAt])
+  @@index([verdict, createdAt])
+}
+
+/// Content-free operational record of one AI Review run, written by the server
+/// on the path that actually calls a reviewer model.
+///
+/// Separate from ComparisonReview on purpose: that table holds the *result*,
+/// for signed-in users, and only when a review succeeded. Reliability is
+/// mostly about the other cases -- guest runs, failures, refusals and cache
+/// hits -- and none of them produce a ComparisonReview row.
+///
+/// No column can hold a question, an answer, a review sentence, a quote or a
+/// filename: every field is an identifier, a closed enum, a count or a
+/// timestamp (docs/policy/ai-review-m5-quality-contract.md §7).
+model ComparisonReviewRun {
+  id                        String   @id @default(cuid())
+  traceId                   String
+  /// "guest" or "account".
+  subjectKind               String
+  /// The caller's own subject key, as ChatLimitDecisionEvent records it.
+  /// Anonymised on account deletion under the same registry rule.
+  subjectKey                String
+  userId                    String?
+  conversationId            String?
+  reviewMode                String
+  language                  String
+  responseCount             Int
+  promptVersion             String
+  /// One of COMPARISON_REVIEW_RUN_OUTCOMES in lib/comparisonReviewRunCore.ts.
+  outcome                   String
+  errorCode                 String?
+  startedAt                 DateTime
+  completedAt               DateTime
+  durationMs                Int
+  dualReviewRequested       Boolean  @default(false)
+  dualReviewAvailable       Boolean  @default(false)
+  dualReviewCompleted       Boolean  @default(false)
+  /// Null when there was no second attempt to compare providers with.
+  crossProvider             Boolean?
+  primaryModelId            String?
+  primaryProvider           String?
+  primaryStatus             String
+  primaryDurationMs         Int?
+  primaryErrorCode          String?
+  primaryErrorCategory      String?
+  primaryInputTokens        Int      @default(0)
+  primaryOutputTokens       Int      @default(0)
+  primaryReservedCredits    Int      @default(0)
+  primarySettlementStatus   String?
+  primaryRetryCount         Int      @default(0)
+  secondaryModelId          String?
+  secondaryProvider         String?
+  secondaryStatus           String
+  secondaryDurationMs       Int?
+  secondaryErrorCode        String?
+  secondaryErrorCategory    String?
+  secondaryInputTokens      Int      @default(0)
+  secondaryOutputTokens     Int      @default(0)
+  secondaryReservedCredits  Int      @default(0)
+  secondarySettlementStatus String?
+  secondaryRetryCount       Int      @default(0)
+  groundingTotalQuotes      Int      @default(0)
+  groundingMatchedQuotes    Int      @default(0)
+  sourceGroundingLevel      String?
+  createdAt                 DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([outcome, createdAt])
+  @@index([userId, createdAt])
+  @@index([subjectKey, createdAt])
+  @@index([traceId])
 }
 
 model ProductAnalyticsEvent {
@@ -1100,38 +1237,45 @@ model CreditDebtEntry {
 }
 
 model ChatCreditReservation {
-  id                       String    @id
-  userId                   String?
-  user                     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  subjectKey               String
-  traceId                  String
-  source                   String
-  provider                 String
-  modelId                  String
-  status                   String    @default("reserved")
-  outcome                  String?
-  idempotencyKey           String    @unique
-  providerRequestId        String?
-  providerResponseId       String?
-  providerRequestLinkedAt  DateTime?
-  reservationPayload       Json
-  reservedCredits          Int
-  reservedCostMicroUsd     BigInt
-  planReservedCredits      Int
-  addOnReservedCredits     Int
-  settledCredits           Int       @default(0)
-  settledCostMicroUsd      BigInt    @default(0)
-  settledInputTokens       Int       @default(0)
-  settledCachedInputTokens Int       @default(0)
-  settledOutputTokens      Int       @default(0)
-  pricingSnapshot          Json?
-  providerUsageSnapshot    Json?
-  expiresAt                DateTime
-  settledAt                DateTime?
-  reconciledAt             DateTime?
-  lastError                String?
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  id                           String    @id
+  userId                       String?
+  user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  subjectKey                   String
+  traceId                      String
+  source                       String
+  provider                     String
+  modelId                      String
+  status                       String    @default("reserved")
+  outcome                      String?
+  idempotencyKey               String    @unique
+  providerRequestId            String?
+  providerResponseId           String?
+  providerRequestLinkedAt      DateTime?
+  reservationPayload           Json
+  reservedCredits              Int
+  reservedCostMicroUsd         BigInt
+  planReservedCredits          Int
+  addOnReservedCredits         Int
+  settledCredits               Int       @default(0)
+  settledCostMicroUsd          BigInt    @default(0)
+  settledInputTokens           Int       @default(0)
+  settledCachedInputTokens     Int       @default(0)
+  /// Input tokens written into the prompt cache, at 1.25x the base input rate
+  /// for the 5-minute TTL this application requests. Its own column beside the
+  /// read count because the two move opposite ways -- a read is a discount and
+  /// a write is a premium -- and summing them would price one at the other's
+  /// rate. 0 on every row written before prompt caching existed, which is what
+  /// those turns actually did.
+  settledCacheWriteInputTokens Int       @default(0)
+  settledOutputTokens          Int       @default(0)
+  pricingSnapshot              Json?
+  providerUsageSnapshot        Json?
+  expiresAt                    DateTime
+  settledAt                    DateTime?
+  reconciledAt                 DateTime?
+  lastError                    String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
 
   /// Which attempt the user's charge was computed from, once one was.
   ///
@@ -1186,23 +1330,26 @@ model ChatAttemptUsage {
 
   /// NULL only on a crash-reconciled row: nobody observed the call, and 0
   /// would be a claim that it used nothing.
-  inputTokens       Int?
-  cachedInputTokens Int?
-  outputTokens      Int?
-  reasoningTokens   Int?
-  costMicroUsd      BigInt   @default(0)
+  inputTokens           Int?
+  cachedInputTokens     Int?
+  /// Input tokens this attempt wrote into the prompt cache. NULL under the
+  /// same rule as its siblings: nobody observed the call.
+  cacheWriteInputTokens Int?
+  outputTokens          Int?
+  reasoningTokens       Int?
+  costMicroUsd          BigInt   @default(0)
   /// How the token counts were arrived at: provider_usage_metadata,
   /// provider_response_cost, fallback_estimator, crash_reconciliation.
-  usageSource       String   @default("provider_usage_metadata")
+  usageSource           String   @default("provider_usage_metadata")
   /// How the cost was: token_estimate, provider_response, or
   /// reserved_upper_bound — an upper bound, not a measurement.
-  costSource        String   @default("token_estimate")
+  costSource            String   @default("token_estimate")
   /// The rates this attempt was priced at, and where the figure came from.
-  pricingSnapshot   Json?
+  pricingSnapshot       Json?
   /// The ProviderDailyUsage day this row's cost was rolled up on, at midnight
   /// UTC. Stored rather than inferred from createdAt: a correction has to
   /// reach the same rollup row, and the two clocks disagree across midnight.
-  rollupDate        DateTime
+  rollupDate            DateTime
 
   createdAt DateTime @default(now())
 
@@ -1233,12 +1380,13 @@ model ChatAttemptUsageAdjustment {
   /// Only `late_provider_actual` today.
   kind          String
 
-  observedInputTokens       Int?
-  observedCachedInputTokens Int?
-  observedOutputTokens      Int?
-  observedCostMicroUsd      BigInt
+  observedInputTokens           Int?
+  observedCachedInputTokens     Int?
+  observedCacheWriteInputTokens Int?
+  observedOutputTokens          Int?
+  observedCostMicroUsd          BigInt
   /// Signed: observed minus what the base row already claimed.
-  costDeltaMicroUsd         BigInt
+  costDeltaMicroUsd             BigInt
 
   /// Identifies the observation, so the same one twice is one adjustment.
   observationId     String
@@ -1660,6 +1808,19 @@ model TraceErrorEvidence {
   /// the error builders.
   classificationSource String   @default("server")
   httpStatus           Int?
+  /// Which layer raised this failure: one of CHAT_FAILURE_LAYERS in
+  /// lib/chatFailureLayer.ts. Nullable for rows written before the column
+  /// existed; a NULL means "not recorded", never "provider".
+  ///
+  /// Without it a storage 404 and a provider 404 are the same row, which is
+  /// exactly the confusion that made an operator read `AI_REQUEST_FAILED.
+  /// NotFound` as two providers being down.
+  failureLayer         String?
+  /// The status object storage answered with, when the failure was a storage
+  /// one. Kept beside `httpStatus` rather than replacing it: the response the
+  /// user got (410) and the answer the bucket gave (404) are different
+  /// numbers and an operator needs both.
+  storageStatus        Int?
   provider             String?
   modelId              String?
   retryable            Boolean?
@@ -2253,10 +2414,12 @@ model ProviderDailyUsage {
   requestCount                 Int       @default(0)
   inputTokens                  Int       @default(0)
   cachedInputTokens            Int       @default(0)
+  cacheWriteInputTokens        Int       @default(0)
   outputTokens                 Int       @default(0)
   estimatedCostMicroUsd        Int       @default(0)
   uncachedInputCostMicroUsd    Int       @default(0)
   cachedInputCostMicroUsd      Int       @default(0)
+  cacheWriteInputCostMicroUsd  Int       @default(0)
   outputCostMicroUsd           Int       @default(0)
   providerReportedCostMicroUsd Int?
   providerReportedUsageJson    Json?
@@ -2561,7 +2724,8 @@ model ExternalConversation {
   /// the memories it is the last reachable evidence for (§7.1).
   password String?
 
-  messages ExternalMessage[]
+  messages            ExternalMessage[]
+  continuationBridges ConversationContinuationBridge[]
 
   @@unique([userId, conversationDigest])
   @@index([userId, externalStableId])
@@ -4601,4 +4765,92 @@ model ProviderWebhookEvent {
   @@unique([provider, providerEventId])
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])
+}
+
+/// The one row that says a Tomverse Conversation was started from an imported
+/// external conversation.
+///
+/// Policy: docs/policy/external-conversation-continuation.md.
+///
+/// ## What it is not
+///
+/// It is not a copy of the source. No external message text, no title and no
+/// provider conversation id lives here: the transcript stays in
+/// ExternalMessage, which is immutable, and this row only records *which*
+/// snapshot the user chose and what was seeded from it. Copying the title
+/// alone would put the source's own words back into a table the deletion of
+/// that source does not reach.
+///
+/// It is also not a lineage pointer. `sourceConversationDigest` names one
+/// immutable snapshot
+/// (docs/policy/external-conversation-import-and-memory.md §4.2), and the
+/// bridge never
+/// follows a newer snapshot of the same lineage -- the user chose the version
+/// they were reading.
+///
+/// ## Why the two deletes differ
+///
+/// `conversationId` cascades: a Tomverse conversation that is deleted takes
+/// its bridge with it, because the bridge is a fact about that conversation.
+///
+/// `externalConversationId` is `SetNull`: deleting the source must never take
+/// the user's own new messages with it. The FK going NULL is what makes
+/// `sourceDeletedAt` necessary -- a NULL alone reads exactly like a bridge
+/// whose source was never set, and the screen owes the owner the difference
+/// between "there is no original" and "the original was deleted".
+model ConversationContinuationBridge {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One bridge per conversation. A second bridge on the same conversation
+  /// would make "which source is this continuing" a question with two answers.
+  conversationId String       @unique
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  externalConversationId String?
+  externalConversation   ExternalConversation? @relation(fields: [externalConversationId], references: [id], onDelete: SetNull)
+
+  /// Provenance kept after the source is gone. Allowlist CHECK lives in the
+  /// migration; the application copy is lib/externalImportProviders.ts.
+  provider String
+
+  /// When the source snapshot was imported -- non-sensitive provenance the
+  /// screen states, and the only source timestamp kept here.
+  sourceImportedAt DateTime
+
+  /// Which immutable snapshot this bridge points at
+  /// (docs/policy/external-conversation-import-and-memory.md §4.1, §4.2). Server
+  /// computed, never rendered and never logged: it identifies a snapshot, it
+  /// is not an access credential and it is not shown to anyone.
+  sourceConversationDigest String
+  sourceDigestVersion      Int
+
+  /// What the seed was built from, for the screen's truncation disclosure and
+  /// for a later seed-version migration. Counts only -- never content.
+  sourceMessageCount        Int
+  seedFromOrdinal           Int
+  seedToOrdinal             Int
+  seedMessageCount          Int
+  seedTruncatedMessageCount Int
+  seedOmittedMessageCount   Int
+  contextSeedVersion        String
+
+  /// Set by the source deletion paths in the same transaction that removes the
+  /// source, before the cascade takes the rows the classification needs.
+  sourceDeletedAt DateTime?
+
+  /// Request-scoped idempotency
+  /// (docs/policy/external-conversation-continuation.md §5). One click that is
+  /// retried by the
+  /// browser or by a flaky network resolves to the same conversation; a second
+  /// deliberate fork carries a new key and is a new conversation.
+  idempotencyKey String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([externalConversationId])
 }

@@ -5,15 +5,19 @@ import {
   applyDurableSearchQueryCeilingBreaches,
   missingAuthorizationIsADefect,
   recordSearchQueryCeilingBreach,
+  reserveAppManagedSearchCost,
   reserveNativeSearchCost,
+  reserveTurnSearchCost,
   resetSearchQueryCeilingBreaches,
   searchQueryCeilingBreached,
+  settledAppManagedSearchCost,
   settledNativeSearchCost,
 } from "../lib/webSearchNativeCostReservation.ts";
 import {
   getWebSearchCapability,
   nativeSearchIsDispatchable,
   openAiNativeSearchToolCallCeiling,
+  NATIVE_GOOGLE_GROUNDING,
   OPENAI_MAX_SEARCH_TOOL_CALLS,
   OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   WEB_SEARCH_CAPABILITIES,
@@ -48,26 +52,127 @@ test("Anthropic reserves its enforced ceiling, because the request sends it", ()
 test("a paid search the request cannot bound is refused, not estimated", () => {
   // The tempting move is to reserve a typical query count. That is a
   // reservation which is right when it does not matter and wrong when it does.
-  // Google's Search grounding takes no cap on the tool and none on the
-  // request, so it is still the shape this refusal exists for.
-  for (const id of ["gemini-3-1-pro", "gemini-3-6-flash", "gemini-2-5-flash"]) {
+  // Google's Search grounding takes no cap on the tool and none on the request,
+  // so it is still the shape this refusal exists for -- which is exactly why no
+  // catalogue model uses it any more. The record is asserted directly, because
+  // asserting it through a model id would stop testing the rule the day the
+  // last model moved off grounding, which is the day this landed.
+  const model = modelFor("gemini-3-1-pro");
+  assert.equal(NATIVE_GOOGLE_GROUNDING.hasAdditionalCost, true);
+  const reserved = reserveNativeSearchCost({
+    model,
+    capability: NATIVE_GOOGLE_GROUNDING,
+    nativeSearchEnabled: true,
+  });
+  assert.equal(reserved.ok, false);
+  assert.equal(
+    reserved.ok === false && reserved.reason,
+    "unbounded_search_queries"
+  );
+  assert.equal(
+    nativeSearchIsDispatchable(NATIVE_GOOGLE_GROUNDING),
+    false,
+    "nothing may offer a search the reservation would refuse"
+  );
+});
+
+test("an application-managed search reserves five Brave requests at the Brave rate", () => {
+  for (const id of [
+    "gemini-3-7-flash",
+    "gemini-3-6-flash",
+    "gemini-3-1-pro",
+    "gemini-2-5-flash",
+  ]) {
     const model = modelFor(id);
     if (!model) continue;
     const capability = getWebSearchCapability(model.id);
-    assert.equal(capability.hasAdditionalCost, true, id);
-    const reserved = reserveNativeSearchCost({
-      model,
+    const reserved = reserveAppManagedSearchCost({
       capability,
-      nativeSearchEnabled: true,
+      appManagedSearchEnabled: true,
     });
-    assert.equal(reserved.ok, false, id);
-    assert.equal(reserved.ok === false && reserved.reason, "unbounded_search_queries");
-    assert.equal(
-      nativeSearchIsDispatchable(capability),
-      false,
-      `${id}: nothing may offer a search the reservation would refuse`
+    assert.equal(reserved.ok, true, id);
+    assert.equal(reserved.maxQueries, 5, id);
+    // The Brave rate, never Google's grounding rate. 14,000 here would
+    // overstate every Gemini turn by 2.8x and would put a figure in the audit
+    // trail no invoice will match.
+    assert.equal(reserved.costPerQueryMicroUsd, 5_000, id);
+    assert.equal(reserved.reservedCostMicroUsd, 25_000, id);
+    assert.notEqual(
+      reserved.costPerQueryMicroUsd,
+      getNativeSearchCostMicroUsdPerQuery("google"),
+      `${id}: the search vendor's rate is not the model provider's`
     );
   }
+});
+
+test("the turn reservation keeps the two vendors on separate scopes", () => {
+  const model = modelFor("gemini-3-7-flash");
+  const capability = getWebSearchCapability(model.id);
+  const reserved = reserveTurnSearchCost({
+    model,
+    capability,
+    nativeSearchEnabled: false,
+    appManagedSearchEnabled: true,
+  });
+  assert.equal(reserved.ok, true);
+  // Nothing is owed to Google for the search: the token half of the turn is
+  // priced elsewhere, and this half is a different invoice.
+  assert.deepEqual(reserved.ok && reserved.native, {
+    reservedCostMicroUsd: 0,
+    costPerQueryMicroUsd: 0,
+    maxQueries: 0,
+  });
+  assert.equal(reserved.ok && reserved.searchBackend?.backend, "brave");
+  assert.equal(
+    reserved.ok && reserved.searchBackend?.reservedCostMicroUsd,
+    25_000
+  );
+  // Frozen, so settlement prices what was authorized rather than what today's
+  // price list would sell.
+  assert.ok(reserved.ok && reserved.searchBackend?.pricingVersion);
+});
+
+test("a turn with search off reserves nothing at either vendor", () => {
+  const model = modelFor("gemini-3-7-flash");
+  const reserved = reserveTurnSearchCost({
+    model,
+    capability: getWebSearchCapability(model.id),
+    nativeSearchEnabled: false,
+    appManagedSearchEnabled: false,
+  });
+  assert.equal(reserved.ok, true);
+  assert.equal(reserved.ok && reserved.searchBackend, null);
+});
+
+test("settlement prices successes, and refunds the rest of the ceiling", () => {
+  // Attempts bound the ceiling; successes bound the money. A turn that tried
+  // five times and was served twice is bounded at five and billed for two.
+  for (const [succeeded, expected] of [
+    [0, 0],
+    [1, 5_000],
+    [2, 10_000],
+    [5, 25_000],
+  ]) {
+    const settled = settledAppManagedSearchCost({
+      succeededRequestCount: succeeded,
+      costPerQueryMicroUsd: 5_000,
+      maxQueries: 5,
+    });
+    assert.equal(settled.costMicroUsd, expected, `${succeeded} requests`);
+    assert.equal(settled.breachedCeiling, false);
+  }
+  // Unreachable in practice -- the counter refuses the sixth call in this
+  // process -- and still latched, because "unreachable" means "unless this
+  // application has a bug" and the bug's symptom would otherwise be silent
+  // overspend.
+  assert.equal(
+    settledAppManagedSearchCost({
+      succeededRequestCount: 6,
+      costPerQueryMicroUsd: 5_000,
+      maxQueries: 5,
+    }).breachedCeiling,
+    true
+  );
 });
 
 test("every enabled OpenAI native-search model reserves its billable bound", () => {
@@ -166,6 +271,29 @@ test("no capability in the register declares a ceiling its provider cannot send"
   const providersThatCanEnforceACeiling = new Set(["openai", "anthropic"]);
   for (const [modelId, capability] of Object.entries(WEB_SEARCH_CAPABILITIES)) {
     if (capability.maxBillableSearchQueriesPerRequest === undefined) continue;
+    if (capability.support === "app-managed") {
+      // A third way to enforce one, and the strongest: not a parameter a
+      // provider is asked to honour, but a counter in this process that refuses
+      // the sixth call before a socket is opened. It has to declare a backend
+      // and an executor ceiling at least as large as nothing, and the billable
+      // bound may not exceed what the executor will actually run -- otherwise
+      // every turn using its full allowance would settle above its own
+      // authorization and latch the breach.
+      assert.ok(
+        capability.searchBackend,
+        `${modelId}: an application-managed ceiling needs a backend to enforce it against`
+      );
+      assert.ok(
+        (capability.requestEnforcedSearchQueries ?? 0) > 0,
+        `${modelId}: no executor ceiling declared`
+      );
+      assert.equal(
+        capability.maxBillableSearchQueriesPerRequest,
+        capability.requestEnforcedSearchQueries,
+        `${modelId}: the billable bound and the enforced ceiling must be one number`
+      );
+      continue;
+    }
     assert.ok(
       providersThatCanEnforceACeiling.has(capability.provider ?? ""),
       `${modelId}: ${capability.provider} has no way to impose this ceiling`

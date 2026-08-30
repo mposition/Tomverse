@@ -28,6 +28,7 @@ import {
     findApprovedEvalPair,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 
 // --- revocation semantics (§12.1, lib/memoryAccess.ts) ---
 
@@ -169,7 +170,11 @@ const approvedEntry = (overrides = {}) => ({
         artifactRef: "artifacts/mem-extract-v1",
         evaluatedCommit: "a".repeat(40),
         datasetVersion: "v1",
-        datasetSchemaVersion: 2,
+        // The schema an approved entry must declare, which is whatever the
+        // gate requires now. Written as 2 until 2026-08-28, when the gate
+        // moved to 3 and this fixture started describing an approval §12.3
+        // would refuse.
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         languages: ["ko", "en"],
         sampleCounts: Object.fromEntries(
             ["1", "2", "3", "4"].flatMap((category) =>

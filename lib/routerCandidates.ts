@@ -42,6 +42,7 @@ import {
     getWebSearchCapability,
     webSearchIsDispatchable,
 } from "@/lib/webSearchCapability";
+import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import type { TaskProfile } from "@/lib/taskProfileCore";
 
 /**
@@ -86,6 +87,17 @@ export type CandidateRejection = (typeof CANDIDATE_REJECTIONS)[number];
 
 export type RouterCandidateInput = {
     models: readonly AiModel[];
+    /**
+     * Which application-managed search backends this deployment can reach.
+     *
+     * Required, and resolved by the caller from the same function every other
+     * surface reads. Auto choosing a model *because* it can search, on a
+     * deployment that holds no credential for that model's backend, is the same
+     * failure as choosing an unverified one: an unchecked assumption turned into
+     * an answer built from training data that the account paid a search
+     * surcharge for.
+     */
+    searchBackendReadiness: WebSearchBackendReadiness;
     plan: ModelTier | "Guest";
     profile: TaskProfile;
     /** Input tokens the request will really send, tool overhead included. */
@@ -202,7 +214,20 @@ export function filterRouterCandidates(
             // model for a turn that needs the web picks a model that will
             // answer from training data. Same failure the two rejections above
             // exist to prevent, arrived at by cost rather than by capability.
-            if (!webSearchIsDispatchable(capability)) {
+            if (
+                !webSearchIsDispatchable(
+                    capability,
+                    input.searchBackendReadiness
+                )
+            ) {
+                // Two causes, one rejection. `web_search_cost_unbounded` is
+                // still the right name for the register-level case it was
+                // written for -- a native tool whose per-query cost no request
+                // can bound -- and an application-managed capability with no
+                // reachable backend lands here too. They are told apart in
+                // `resolveAttemptSearchPath`, which reports the dispatch gap;
+                // this filter's job is only to stop Auto choosing the model,
+                // and it stops it for both.
                 reject(model.id, "web_search_cost_unbounded");
                 continue;
             }

@@ -26,6 +26,10 @@ import {
   externalImportEnabledFromValue,
 } from "@/lib/externalImportAccess";
 import {
+  EXTERNAL_CONTINUATION_FLAG_KEY,
+  externalContinuationEnabledFromValue,
+} from "@/lib/externalContinuationAccess";
+import {
   ASSISTANT_PACKAGE_IMPORT_FLAG_KEY,
   assistantPackageImportEnabledFromValue,
 } from "@/lib/assistantPackageImportAccess";
@@ -361,6 +365,84 @@ export class ExternalImportDisabledError extends Error {
 export async function assertExternalImportEnabled() {
   if (!(await isExternalImportEnabled())) {
     throw new ExternalImportDisabledError();
+  }
+}
+
+/**
+ * `feature.externalConversationContinuationEnabled`
+ * (docs/policy/external-conversation-continuation.md §7).
+ *
+ * Read by the two gated capabilities only — creating a bridge and seeding a
+ * turn from one. Opening an existing bridged conversation and sending
+ * ordinary messages in it never consults this: a rollback must not take away
+ * messages the user already wrote
+ * (docs/policy/external-conversation-continuation.md §7,
+ * docs/policy/external-conversation-import-and-memory.md §15).
+ *
+ * Independent of `externalConversationImportEnabled` and of both memory
+ * flags. Import is already on in production, so sharing its flag would have
+ * released this to every importing account at once; memory is separate in the
+ * other direction, because continuation is specified to work with memory off.
+ */
+export async function isExternalContinuationEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EXTERNAL_CONTINUATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return externalContinuationEnabledFromValue(row?.value);
+}
+
+/**
+ * The same answer, from the shared snapshot.
+ *
+ * `/api/chat` reads this on every authenticated turn that names a
+ * conversation, to decide whether to look for a continuation bridge at all. A
+ * per-turn row read would put a database round trip on the hottest path in the
+ * application for a value that changes when an operator flips a toggle — the
+ * reasoning `isImageGenerationEnabledCached` already wrote down.
+ *
+ * Its own snapshot key, and its own interpretation: reusing `enabledFromValue`
+ * would read a missing row as enabled, which is the exact direction a
+ * fail-closed rollout flag exists to refuse.
+ */
+export async function isExternalContinuationEnabledCached(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const { value } = await readPublicSnapshot(
+    "external-continuation-flag",
+    isExternalContinuationEnabled
+  );
+  return value;
+}
+
+// The admin write path, the same shape as setExternalImportEnabled: "true" and
+// "false" are the only stored values and a missing row equals "false", so
+// disabling never needs a delete.
+export async function setExternalContinuationEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: EXTERNAL_CONTINUATION_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: {
+      key: EXTERNAL_CONTINUATION_FLAG_KEY,
+      value: enabled ? "true" : "false",
+    },
+  });
+  // Without this an operator who turns continuation off keeps having imported
+  // excerpts injected for the rest of the TTL -- which is the half of the
+  // rollback that has to be immediate.
+  invalidatePublicSnapshot("external-continuation-flag");
+}
+
+export class ExternalContinuationDisabledError extends Error {
+  constructor() {
+    super("Continuing an imported conversation is not enabled.");
+    this.name = "ExternalContinuationDisabledError";
+  }
+}
+
+export async function assertExternalContinuationEnabled() {
+  if (!(await isExternalContinuationEnabled())) {
+    throw new ExternalContinuationDisabledError();
   }
 }
 

@@ -173,6 +173,23 @@ jobs:
         timeout-minutes: 5
         run: npm run check:release-records
 
+      # The AI Review evaluation dataset and the reviewer-pair register.
+      #
+      # A dataset with a malformed case, an unstated `goldCompleteness`, or a
+      # prompt_injection case carrying no marker produces numbers rather than
+      # an error -- the wrong numbers, computed over the wrong denominators.
+      # And an `approved` register entry whose evidence is incomplete is the
+      # one thing in this feature that could turn "we measured it" into a
+      # claim nobody can follow, so the check refuses it here rather than at
+      # the moment somebody quotes it.
+      #
+      # It passes today with nothing approved and no decision dataset. That is
+      # the honest state, not a failure: the check exists to catch a broken
+      # dataset or an unsupported approval, not to demand either.
+      - name: AI Review evaluation dataset and register
+        timeout-minutes: 5
+        run: npm run check:ai-review-eval
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.
@@ -317,6 +334,22 @@ jobs:
       - name: Router quality evaluation evidence
         timeout-minutes: 5
         run: npm run check:router-quality-eval
+      # The human review sample calibrates the model judges, so its shape has
+      # to survive contact with a text editor. A cell quietly short of four, a
+      # reserve that is also a primary, a diagnostic pair that has wandered
+      # into the sixty, or a substitution recorded against a verdict all leave
+      # a file that still looks like a draw. This reads the committed ones.
+      - name: Router human review draws
+        timeout-minutes: 5
+        run: npm run check:router-human-review
+      # `n` is fixed before the decision run and conditional on the judge
+      # calibration. The failure this catches is the one nobody does on
+      # purpose: a borderline result, a true observation that the pilot's
+      # discordance estimate was noisy, and `n` revised in place. The file
+      # still reads as a pre-registration afterwards.
+      - name: Router decision pre-registration
+        timeout-minutes: 5
+        run: npm run check:router-decision-preregistration
       # PACKAGE-01. The shared packages are the mechanism that stops the web
       # app and the native shell from becoming two products; that only holds
       # while the shared half runs unchanged in all three environments. The
@@ -339,6 +372,18 @@ jobs:
       - name: Package build matrix (Vite)
         timeout-minutes: 10
         run: npm run verify:package-build-matrix
+
+      # The locally bundled app is a release requirement in two documents
+      # (delivery plan section 2, mobile authentication policy "Deliberately
+      # excluded"), and until now nothing measured it. A `server.url` added to
+      # a Capacitor config for a debugging session builds, runs and looks
+      # right; what it changes is the origin every request comes from, which
+      # is the one thing the bearer-token boundary is defined against. The
+      # check reads the config as text so a URL arriving through an
+      # environment variable is a finding rather than an empty string.
+      - name: Capacitor shell stays a local bundle
+        timeout-minutes: 5
+        run: npm run check:capacitor-local-bundle
 
       # PLANNER-03. Memory, imported content and uploaded documents already
       # reach the prompt, and the defences that keep them data -- fences,

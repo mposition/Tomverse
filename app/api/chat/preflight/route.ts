@@ -33,7 +33,11 @@ import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
-import { isImageGenerationEnabledCached } from "@/lib/appSettings";
+import {
+    isExternalContinuationEnabledCached,
+    isImageGenerationEnabledCached,
+} from "@/lib/appSettings";
+import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
@@ -42,7 +46,9 @@ import {
     nativeSearchIsDispatchable,
 } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
-import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { reserveTurnSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { appManagedSearchIsDispatchable } from "@/lib/webSearchCapability";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
@@ -326,11 +332,49 @@ export async function POST(request: Request) {
             access.plan && planAllowsImageGeneration(access.plan)
         );
 
+        /*
+          The imported excerpt, priced here for exactly the reason the two
+          capability blocks are: this route quotes the credits and the chat
+          route sends the prompt, and a block counted on one side only is a
+          quote that does not describe the request
+          (docs/policy/external-conversation-continuation.md §5).
+
+          A comparison of a bridged conversation is not a shape the product
+          offers today -- a continuation is `productKey = "chat"` and this route
+          takes two or three models -- so in practice this resolves to the empty
+          string. It is wired anyway, because "the two routes price the same
+          blocks" is the contract `buildChatTurnSystemBlocks` exists to keep,
+          and an exception that is true today is how the drift it was written
+          for came back.
+        */
+        let continuationSeedPrompt = "";
+        if (session?.user?.id && payload.conversationId !== "private-chat") {
+            try {
+                if (await isExternalContinuationEnabledCached()) {
+                    const seed = await loadContinuationTurnSeed({
+                        userId: session.user.id,
+                        conversationId: payload.conversationId,
+                        request,
+                    });
+                    continuationSeedPrompt = seed?.prompt.text ?? "";
+                }
+            } catch {
+                // Quote without it rather than refuse the preparation. The
+                // chat route's own read fails the same way and sends the same
+                // prompt, so the two stay in agreement.
+                continuationSeedPrompt = "";
+            }
+        }
+
         // Bring the shared ceiling latch up to date before anything is
         // priced. A breach recorded by another instance, or by this one before
         // a restart, has to be visible here or the refusal it earned lasts
         // only as long as the process that saw it.
         await refreshSearchQueryCeilingBreaches();
+        // Resolved once for the whole quote, from the same function the chat
+        // route reads. A quote that answered "search-capable" differently from
+        // the dispatch would admit a comparison the dispatch then refuses.
+        const searchBackendReadiness = resolveWebSearchBackendReadiness();
         const budgets = models.map((model) => {
             // Per model, because history is filtered per model: a comparison
             // turn charges each model for the branch it can actually see.
@@ -360,6 +404,18 @@ export async function POST(request: Request) {
             const modelNativeSearchEnabled =
                 payload.webSearchMode === "always" &&
                 nativeSearchIsDispatchable(modelSearchCapability);
+            // The other route, derived from the same readiness map the chat
+            // route resolves. Priced here for the same reason the native one
+            // is: this turn carries a tool schema and feeds retrieved text back
+            // into the prompt, and a quote that missed it would admit a
+            // comparison against a smaller input reservation than the requests
+            // it admits then send.
+            const modelAppManagedSearchEnabled =
+                payload.webSearchMode === "always" &&
+                appManagedSearchIsDispatchable(
+                    modelSearchCapability,
+                    searchBackendReadiness
+                );
             const turnSystemBlocks = buildChatTurnSystemBlocks({
                 modelId: model.id,
                 provider: model.provider,
@@ -370,6 +426,7 @@ export async function POST(request: Request) {
                 nativeSearchForced:
                     modelNativeSearchEnabled &&
                     modelSearchCapability.canForceExecution,
+                appManagedSearchEnabled: modelAppManagedSearchEnabled,
                 turnAttachments: payload.attachments.map((attachment, index) => ({
                     handle: `att_${index + 1}`,
                     name: "",
@@ -379,6 +436,7 @@ export async function POST(request: Request) {
                 promptText: payload.prompt,
                 imageGenerationFlagEnabled,
                 planAllowsImageGeneration: planAllowsImages,
+                continuationSeedPrompt,
             });
             estimate.addTokens(turnSystemBlocks.promptTokens);
             for (const message of history) {
@@ -407,10 +465,11 @@ export async function POST(request: Request) {
             // than the requests it admits then spend -- and the guardrail this
             // route exists to check ahead of time was checked against the
             // wrong number.
-            const nativeSearchReservation = reserveNativeSearchCost({
+            const nativeSearchReservation = reserveTurnSearchCost({
                 model,
                 capability: modelSearchCapability,
                 nativeSearchEnabled: modelNativeSearchEnabled,
+                appManagedSearchEnabled: modelAppManagedSearchEnabled,
             });
             if (!nativeSearchReservation.ok) {
                 // The same refusal the chat route raises, for the same reason
@@ -427,10 +486,13 @@ export async function POST(request: Request) {
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         payload.webSearchMode ?? "off",
-                        modelSearchCapability
+                        modelSearchCapability,
+                        searchBackendReadiness
                     ),
                     nativeSearchEnabled: modelNativeSearchEnabled,
-                    nativeSearch: nativeSearchReservation,
+                    appManagedSearchEnabled: modelAppManagedSearchEnabled,
+                    nativeSearch: nativeSearchReservation.native,
+                    searchBackend: nativeSearchReservation.searchBackend,
                 }
             );
         });

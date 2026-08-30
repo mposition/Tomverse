@@ -37,6 +37,7 @@ import {
     OPERATIONAL_COST_GUARDRAIL_TRIGGERED,
     PLAN_ENTITLEMENT_EXHAUSTED,
     PROVIDER_BUDGET_EXHAUSTED,
+    SEARCH_PROVIDER_BUDGET_EXHAUSTED,
 } from "@/lib/chatCostSafetyCore";
 import {
     estimateToolInputTokenOverhead,
@@ -74,8 +75,13 @@ import {
     NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
     missingAuthorizationIsADefect,
     recordSearchQueryCeilingBreach,
+    searchBackendLatchKey,
+    settledAppManagedSearchCost,
     settledNativeSearchCost,
 } from "@/lib/webSearchNativeCostReservation";
+import { searchProviderBucketKey } from "@/lib/searchProviderBudget";
+import { getSearchProviderBudgetLimits } from "@/lib/webSearchBackendRuntime";
+import type { WebSearchBackend } from "@/lib/webSearchBackends";
 import { persistSearchQueryCeilingBreach } from "@/lib/webSearchCeilingBreachStore";
 import {
     boundedProviderIdentifier,
@@ -91,6 +97,12 @@ import {
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+import {
+    anthropicPromptCacheApplies,
+    ANTHROPIC_PROMPT_CACHE_TTL,
+    type AnthropicPromptCachePath,
+} from "@/lib/anthropicPromptCaching";
+import type { ResolvedModelPricing } from "@/lib/modelPricing";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
@@ -184,6 +196,31 @@ export type ChatBudget = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
+    /** The verified cache-write rate, or null where there is none. */
+    cacheWriteUsdPerMillionTokens: number | null;
+    /**
+     * The premium a prompt-cache write may add to this turn's input, over and
+     * above what the input tokens already cost at the base rate.
+     *
+     * Zero unless the request carries a cache marker. When it does, the worst
+     * case is that the provider writes the *whole* prompt into the cache at
+     * 1.25x the base input rate -- which is what a first turn does -- so the
+     * authorised amount has to include the extra 0.25x before the request
+     * goes out. Discovering it at settlement is discovering it after the money
+     * is spent, and the provider budget exists precisely so that does not
+     * happen.
+     *
+     * A premium rather than a replacement multiplier so every existing sum
+     * above stays exactly what it was: an uncached turn reserves what it
+     * always reserved, and this is additive on top.
+     *
+     * Operational only. It never touches `usageCredits` -- a cache write is
+     * Tomverse's cost at Anthropic, not something the user asked for or can
+     * see, and charging entitlement for it would be the hidden USD ceiling
+     * that docs/policy/credit-and-cost-limits.md exists to keep out of the
+     * credit layer.
+     */
+    promptCacheWriteReservedPremiumMicroUsd: number;
     /**
      * The worst case this turn's native web search may cost, reserved before
      * dispatch. Zero unless a paid native search is attached.
@@ -196,6 +233,25 @@ export type ChatBudget = {
     /** The per-query rate and enforced ceiling the reservation was sized on. */
     nativeSearchCostPerQueryMicroUsd: number;
     nativeSearchMaxQueries: number;
+    /**
+     * The application-managed search vendor's own worst case, and the rate and
+     * ceiling it was sized on. Null unless this turn registers `web_search`.
+     *
+     * Deliberately *not* folded into `nativeSearchReservedCostMicroUsd`, and
+     * deliberately absent from `getChatBudgetReservedCostMicroUsd`. That figure
+     * is what gets held against the *model provider's* budget bucket, and a
+     * Brave charge counted there would tell an operator that Google was
+     * overspending -- while the vendor whose invoice actually grew stayed
+     * invisible to the budget that exists to bound it. Two invoices, two
+     * buckets: docs/policy/credit-and-cost-limits.md.
+     */
+    searchBackend: {
+        backend: string;
+        reservedCostMicroUsd: number;
+        costPerQueryMicroUsd: number;
+        maxQueries: number;
+        pricingVersion: string;
+    } | null;
     provider: AiModel["provider"];
     /** Which entry of lib/modelPricing.ts produced the rates above. */
     pricingVersion: string;
@@ -209,7 +265,22 @@ type ReservationEntry = {
     period: string;
     periodStart: Date;
     amount: number;
-    metric: "tokens" | "cost" | "credits" | "plan-credits" | "plan-cost" | "pro-response";
+    metric:
+        | "tokens"
+        | "cost"
+        | "credits"
+        | "plan-credits"
+        | "plan-cost"
+        | "pro-response"
+        /**
+         * A hold on a search vendor's own spend budget.
+         *
+         * Its own metric rather than `cost`, because `cost` settles to the
+         * turn's model-provider spend and this settles to what the search
+         * vendor served. One entry list, two settlement figures, told apart by
+         * this field.
+         */
+        | "search-cost";
 };
 
 export type ChatUsageReservation = {
@@ -268,6 +339,23 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    /**
+     * The cache-write rate this turn was reserved at, carried so settlement
+     * prices the write at the same figure rather than re-reading a registry
+     * that may have moved. Absent on every reservation written before prompt
+     * caching, which is why settlement treats absent as "price writes at
+     * nothing" -- such a turn sent no marker and created no cache entry.
+     */
+    cacheWriteUsdPerMillionTokens?: number | null;
+    /**
+     * The cache TTL the request asked for, or null when it asked for none.
+     *
+     * Stored beside the rate because the rate alone does not identify what was
+     * bought: 5-minute and 1-hour writes are different prices for different
+     * entries, and a snapshot that records one without the other cannot be
+     * re-derived by anybody who was not there.
+     */
+    promptCacheTtl?: string | null;
 };
 
 const durableReservationPayloadSchema = z
@@ -292,6 +380,7 @@ const durableReservationPayloadSchema = z
                         "plan-credits",
                         "plan-cost",
                         "pro-response",
+                        "search-cost",
                     ]),
                 })
                 .strict()
@@ -339,6 +428,30 @@ const durableReservationPayloadSchema = z
                             })
                             .strict()
                             .optional(),
+                        // Optional so every reservation written before prompt
+                        // caching still deserializes; absent means the attempt
+                        // authorized no premium, which is what those turns did.
+                        promptCacheWriteReservedPremiumMicroUsd: z
+                            .number()
+                            .int()
+                            .nonnegative()
+                            .optional(),
+                        // The same authorization for a search vendor this
+                        // application pays directly. Separate, because it names
+                        // a vendor and settles into a different bucket -- and
+                        // because a reservation written before this route
+                        // existed has neither, while one written after may have
+                        // exactly one of the two.
+                        searchBackendAuthorization: z
+                            .object({
+                                backend: z.string().min(1).max(40),
+                                reservedCostMicroUsd: z.number().int().nonnegative(),
+                                costPerQueryMicroUsd: z.number().int().nonnegative(),
+                                maxQueries: z.number().int().nonnegative(),
+                                pricingVersion: z.string().min(1).max(120),
+                            })
+                            .strict()
+                            .optional(),
                     })
                     .strict()
             )
@@ -351,6 +464,17 @@ const durableReservationPayloadSchema = z
         inputUsdPerMillionTokens: z.number().nonnegative(),
         outputUsdPerMillionTokens: z.number().nonnegative(),
         cachedInputPriceMultiplier: z.number().min(0).max(1).default(1),
+        // Both optional and nullable for the same reason as the fields below:
+        // the schema is `.strict()`, so a payload written before prompt
+        // caching has neither key, and one written for an uncached turn has
+        // them as null. Neither may fail to deserialize -- a reservation that
+        // cannot be read is a reservation that cannot be refunded.
+        cacheWriteUsdPerMillionTokens: z
+            .number()
+            .nonnegative()
+            .nullable()
+            .optional(),
+        promptCacheTtl: z.string().min(1).max(16).nullable().optional(),
         // Optional so a reservation written before the pricing registry landed
         // still deserializes and settles at the rates it was reserved with.
         pricingVersion: z.string().min(1).max(120).optional(),
@@ -608,7 +732,53 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
         budget.reservedOutputTokens,
         budget.outputUsdPerMillionTokens
     ) +
+    // The cache-write premium, for the same reason the search cost is here:
+    // both are provider charges this turn can incur, and a guardrail that has
+    // not seen them cannot bound them. Added rather than folded into the input
+    // term so an uncached turn's arithmetic is byte-identical to what it was.
+    Math.max(0, budget.promptCacheWriteReservedPremiumMicroUsd || 0) +
     Math.max(0, budget.nativeSearchReservedCostMicroUsd || 0);
+
+/**
+ * The worst case a prompt-cache write adds to this turn's provider cost.
+ *
+ * The worst case is the whole reserved prompt written at the cache-write rate,
+ * because that is what an ordinary first turn does: nothing is in the cache,
+ * the marker is on the last block, and the entire prefix is created. Later
+ * turns write only the delta, so this over-reserves for them -- deliberately.
+ * A reservation that is too large is refunded at settlement; one that is too
+ * small has already let the request through.
+ *
+ * Expressed as the *premium* -- `(writeRate - inputRate) x tokens` -- because
+ * the caller has already reserved those same tokens at the base input rate.
+ * Reserving the full write cost on top would double-count the base.
+ *
+ * Zero when the request carries no marker, and zero when the model has no
+ * verified write rate: there is nothing to bound in the first case and nothing
+ * honest to bound it with in the second. A negative premium is impossible on
+ * today's rates (a write is never cheaper than base input) and is floored at
+ * zero anyway, so a mis-entered rate can only fail to reserve rather than
+ * hand budget back.
+ */
+const promptCacheWriteReservedPremiumMicroUsd = ({
+    model,
+    reservedInputTokens,
+    pricing,
+    promptCachePath,
+}: {
+    model: AiModel;
+    reservedInputTokens: number;
+    pricing: ResolvedModelPricing;
+    promptCachePath?: AnthropicPromptCachePath;
+}) => {
+    if (!promptCachePath) return 0;
+    if (!anthropicPromptCacheApplies(model, promptCachePath)) return 0;
+    const writeRate = pricing.cacheWriteUsdPerMillionTokens;
+    if (typeof writeRate !== "number") return 0;
+    const premiumRate = writeRate - pricing.inputUsdPerMillionTokens;
+    if (!(premiumRate > 0)) return 0;
+    return microdollarsFor(reservedInputTokens, premiumRate);
+};
 
 export const createChatBudget = (
     kind: AccessKind,
@@ -631,6 +801,15 @@ export const createChatBudget = (
          */
         nativeSearchEnabled?: boolean;
         /**
+         * Whether this application's own `web_search` tool is registered.
+         *
+         * Separate from `nativeSearchEnabled` because they differ in where the
+         * money goes, and identical in what they do to the input side of the
+         * turn -- both feed retrieved result text back into the prompt, so both
+         * widen the input reservation by the same overhead.
+         */
+        appManagedSearchEnabled?: boolean;
+        /**
          * The worst case that search may cost, from
          * `reserveNativeSearchCost`. The caller resolves it because refusing a
          * search that cannot be bounded is a dispatch decision, not a pricing
@@ -641,6 +820,31 @@ export const createChatBudget = (
             costPerQueryMicroUsd: number;
             maxQueries: number;
         };
+        /**
+         * Which call path this turn is, when it may carry an Anthropic prompt
+         * cache marker.
+         *
+         * Passed in rather than assumed, and absent means no marker -- the
+         * same default `getModelGenerationSettings` takes, so the reservation
+         * and the request agree by construction about whether a write can
+         * happen. A caller that adds the marker and forgets this reserves too
+         * little; a caller that passes this and does not send the marker
+         * reserves too much and refunds it at settlement, which is the safe
+         * direction of the two.
+         */
+        promptCachePath?: AnthropicPromptCachePath;
+        /**
+         * The same, for a search vendor this application pays directly, from
+         * `reserveTurnSearchCost`. Carried on its own field all the way to its
+         * own budget bucket.
+         */
+        searchBackend?: {
+            backend: string;
+            reservedCostMicroUsd: number;
+            costPerQueryMicroUsd: number;
+            maxQueries: number;
+            pricingVersion: string;
+        } | null;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -686,6 +890,8 @@ export const createChatBudget = (
         toReservedInputTokens(estimatedInput, {
             toolOverheadTokens: estimateToolInputTokenOverhead({
                 nativeSearchEnabled: options?.nativeSearchEnabled === true,
+                appManagedSearchEnabled:
+                    options?.appManagedSearchEnabled === true,
             }),
         })
     );
@@ -707,11 +913,20 @@ export const createChatBudget = (
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
+        promptCacheWriteReservedPremiumMicroUsd:
+            promptCacheWriteReservedPremiumMicroUsd({
+                model,
+                reservedInputTokens,
+                pricing,
+                promptCachePath: options?.promptCachePath,
+            }),
         nativeSearchReservedCostMicroUsd:
             options?.nativeSearch?.reservedCostMicroUsd ?? 0,
         nativeSearchCostPerQueryMicroUsd:
             options?.nativeSearch?.costPerQueryMicroUsd ?? 0,
         nativeSearchMaxQueries: options?.nativeSearch?.maxQueries ?? 0,
+        searchBackend: options?.searchBackend ?? null,
         provider: model.provider,
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,
@@ -3118,6 +3333,95 @@ export const acquireChatAccess = async (
             });
         }
 
+        // The search vendor's own budget, held in the same transaction and in
+        // its own bucket.
+        //
+        // Same transaction because a turn admitted against a model provider's
+        // budget and then refused by a search vendor's must not leave the first
+        // hold behind; and because two transactions could each see the other's
+        // spend missing. Its own bucket because the two are different invoices
+        // (docs/policy/credit-and-cost-limits.md) -- `provider:google` counts
+        // what Google is owed, and this counts what the search vendor is owed.
+        //
+        // Ordered after the provider budget deliberately: a turn that cannot
+        // afford its tokens has no search to pay for either, and refusing on
+        // the larger, more common bound first keeps the reported reason the
+        // more useful one.
+        if (budget.searchBackend && budget.searchBackend.reservedCostMicroUsd > 0) {
+            const searchKey = searchProviderBucketKey(
+                budget.searchBackend.backend
+            );
+            const searchLimits = getSearchProviderBudgetLimits(
+                budget.searchBackend.backend as WebSearchBackend
+            );
+            if (!searchLimits) {
+                // Unreachable through the dispatch surfaces, which all refuse a
+                // backend whose budget could not be read before offering it.
+                // Fail-closed anyway: a hold nobody can bound is a hold that
+                // bounds nothing, and the alternative is an unmetered vendor.
+                throw new ChatAccessError(
+                    503,
+                    SEARCH_PROVIDER_BUDGET_EXHAUSTED,
+                    "Web search is temporarily unavailable.",
+                    undefined,
+                    {
+                        scope: "search_budget_unconfigured",
+                        limitLayer: "operational_guardrail",
+                    }
+                );
+            }
+            const searchWindows = [
+                {
+                    period: "search-cost-day" as const,
+                    periodStart: providerBudgetPeriodStarts.day,
+                    limit: searchLimits.day,
+                    scope: "search_cost_day",
+                },
+                {
+                    period: "search-cost-month" as const,
+                    periodStart: providerBudgetPeriodStarts.month,
+                    limit: searchLimits.month,
+                    scope: "search_cost_month",
+                },
+            ];
+            for (const window of searchWindows) {
+                const allowed = await incrementUsage(
+                    tx,
+                    searchKey,
+                    window.period,
+                    window.periodStart,
+                    window.limit,
+                    budget.searchBackend.reservedCostMicroUsd
+                );
+                if (!allowed) {
+                    throw new ChatAccessError(
+                        503,
+                        SEARCH_PROVIDER_BUDGET_EXHAUSTED,
+                        "Web search is temporarily unavailable.",
+                        undefined,
+                        {
+                            // The vendor, not the model's provider. An operator
+                            // told "google" here would go and look at the wrong
+                            // budget.
+                            searchBackend: budget.searchBackend.backend,
+                            scope: window.scope,
+                            limitLayer: "operational_guardrail",
+                            internalRequiredCostMicroUsd:
+                                budget.searchBackend.reservedCostMicroUsd,
+                            internalLimitCostMicroUsd: window.limit,
+                        }
+                    );
+                }
+                reservationEntries.push({
+                    key: searchKey,
+                    period: window.period,
+                    periodStart: window.periodStart,
+                    amount: budget.searchBackend.reservedCostMicroUsd,
+                    metric: "search-cost",
+                });
+            }
+        }
+
         // The slot itself was claimed at the top of this transaction, before
         // anything was charged. A request that claimed nothing takes the
         // ordinary single-slot path here, unchanged.
@@ -3185,6 +3489,17 @@ export const acquireChatAccess = async (
                     cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
                     pricingVersion: budget.pricingVersion ?? null,
                     reservedCostMicroUsd: reservedCost,
+                    // The third component of `reservedCost`, recorded so the
+                    // consistency check can reconstruct the total from its
+                    // parts. Omitted when zero rather than written as 0, so an
+                    // uncached turn's payload is byte-identical to what it has
+                    // always been.
+                    ...(budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? {
+                              promptCacheWriteReservedPremiumMicroUsd:
+                                  budget.promptCacheWriteReservedPremiumMicroUsd,
+                          }
+                        : {}),
                     // Frozen with the rest of the authorization, so settlement
                     // prices the search this turn was allowed rather than the
                     // one today's registry would sell.
@@ -3199,6 +3514,21 @@ export const acquireChatAccess = async (
                               },
                           }
                         : {}),
+                    ...(budget.searchBackend &&
+                    budget.searchBackend.maxQueries > 0
+                        ? {
+                              searchBackendAuthorization: {
+                                  backend: budget.searchBackend.backend,
+                                  reservedCostMicroUsd:
+                                      budget.searchBackend.reservedCostMicroUsd,
+                                  costPerQueryMicroUsd:
+                                      budget.searchBackend.costPerQueryMicroUsd,
+                                  maxQueries: budget.searchBackend.maxQueries,
+                                  pricingVersion:
+                                      budget.searchBackend.pricingVersion,
+                              },
+                          }
+                        : {}),
                 },
             ],
             usageCredits: budget.usageCredits,
@@ -3208,6 +3538,16 @@ export const acquireChatAccess = async (
             inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+            // Frozen with the rest of the price. A turn that carried no cache
+            // marker reserved no write premium, so it stores a null TTL and
+            // settles its (zero) write tokens at nothing -- which is what it
+            // did.
+            cacheWriteUsdPerMillionTokens:
+                budget.cacheWriteUsdPerMillionTokens ?? null,
+            promptCacheTtl:
+                budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                    ? ANTHROPIC_PROMPT_CACHE_TTL
+                    : null,
             planReservedCredits,
             addOnReservedCredits,
             addOnReservations,
@@ -3274,6 +3614,15 @@ export const settleChatUsage = async (
     turnUsage: {
         inputTokens?: number;
         cachedInputTokens?: number;
+        /**
+         * Input tokens the provider wrote into the prompt cache this turn,
+         * from `usage.inputTokenDetails.cacheWriteTokens`.
+         *
+         * Absent means zero writes and not "unknown": the only providers that
+         * report a write count are the ones this application enables caching
+         * for, and a turn with no marker creates no cache entry.
+         */
+        cacheWriteInputTokens?: number;
         outputTokens?: number;
         /**
          * Reasoning/thinking tokens the provider reported. Already inside
@@ -3291,6 +3640,18 @@ export const settleChatUsage = async (
         /** Native web search's own per-call provider cost (OpenAI/Anthropic/Google), from webSearchExecutionNormalizer's costMetadata. Never set for Perplexity -- its own reported response cost already covers search. */
         searchCostMicroUsd?: number;
         searchQueryCount?: number;
+        /**
+         * Backend requests an application-managed search actually had served.
+         *
+         * Successes, not attempts: the vendor bills for what it served. The
+         * counter bounds attempts so a sick backend cannot be retried without
+         * limit; this bounds money to what was bought.
+         *
+         * Absent on every turn that ran no application-managed search, which is
+         * how a turn with no hold on the search budget is told from one that
+         * held and spent nothing.
+         */
+        searchBackendRequestCount?: number;
         /**
          * Whether anybody counted this turn's searches.
          *
@@ -3486,6 +3847,7 @@ export const settleChatUsage = async (
                   ...turnUsage,
                   inputTokens: billedAttempt.inputTokens,
                   cachedInputTokens: billedAttempt.cachedInputTokens,
+                  cacheWriteInputTokens: billedAttempt.cacheWriteInputTokens,
                   outputTokens: billedAttempt.outputTokens,
                   reasoningTokens: billedAttempt.reasoningTokens,
                   usageFromProvider: billedAttempt.usageFromProvider,
@@ -3509,6 +3871,16 @@ export const settleChatUsage = async (
                 ? Math.max(0, usage.cachedInputTokens!)
                 : 0
         );
+        // Bounded by the input the reads have not claimed, matching the clamp
+        // in `calculateProviderUsageCost` and in the attempt ledger. Three
+        // places, one rule: the row's token columns are a split of its own
+        // input total, and a clamp that disagrees breaks that.
+        const actualCacheWriteInput = Math.min(
+            actualInput - actualCachedInput,
+            Number.isSafeInteger(usage.cacheWriteInputTokens)
+                ? Math.max(0, usage.cacheWriteInputTokens!)
+                : 0
+        );
         const actualTokens = actualInput + actualOutput;
         const actualCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
@@ -3523,11 +3895,20 @@ export const settleChatUsage = async (
         const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
+            cacheWriteInputTokens: actualCacheWriteInput,
             outputTokens: actualOutput,
             inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier:
                 canonical.cachedInputPriceMultiplier,
+            // From the reservation's own snapshot, not from today's registry:
+            // this settles a request that was priced when it was reserved, and
+            // re-reading the rate here would apply a later price change
+            // retroactively. Null on a reservation taken before this column
+            // existed, which prices its writes at nothing -- correct, because
+            // such a turn sent no cache marker and wrote no cache entry.
+            cacheWriteUsdPerMillionTokens:
+                canonical.cacheWriteUsdPerMillionTokens ?? null,
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&
@@ -3547,6 +3928,13 @@ export const settleChatUsage = async (
                       providerUsageSnapshot.inputTokensCostMicroUsd ??
                       tokenCostBreakdown.uncachedInputCostMicroUsd,
                   cachedInputCostMicroUsd: 0,
+                  // Zero for the same reason the cached line is: Perplexity
+                  // reports its own component costs and has no cache-write
+                  // line, so the whole of its input cost is already inside
+                  // `inputTokensCostMicroUsd`. Carrying a token-estimated
+                  // write cost beside a provider-reported total would add a
+                  // charge the provider did not make.
+                  cacheWriteInputCostMicroUsd: 0,
                   outputCostMicroUsd:
                       providerUsageSnapshot.outputTokensCostMicroUsd ??
                       tokenCostBreakdown.outputCostMicroUsd,
@@ -3665,6 +4053,67 @@ export const settleChatUsage = async (
                 queries: observedSearchQueries,
             };
         }
+        /**
+         * What this turn's application-managed searches cost, priced at what
+         * was authorized.
+         *
+         * The same three rules as the native half above, for the same reasons:
+         * the frozen rate prices it, so a price change between dispatch and
+         * settlement cannot rewrite what a turn was allowed to spend; the count
+         * is successes, because that is what the vendor bills; and a turn that
+         * ended before anybody could count -- cancelled, disconnected, failed
+         * mid-stream -- settles at the authorized ceiling rather than at zero,
+         * because a search that ran before the model wrote a word has already
+         * been bought.
+         *
+         * It is deliberately kept out of `searchCostMicroUsd` and out of
+         * `actualCost`. Those settle the *model provider's* bucket, and this is
+         * a different vendor's invoice; adding it there would report Google as
+         * having spent money that went to a search backend, and would leave the
+         * search budget settling to a figure that never included it.
+         */
+        const searchBackendAuthorization = costIntentFor(
+            canonical.attemptCostIntents,
+            multiAttempt?.billedAttempt?.attemptIndex ?? 0
+        )?.searchBackendAuthorization;
+        const observedBackendRequests = Math.max(
+            0,
+            Number.isSafeInteger(usage.searchBackendRequestCount)
+                ? usage.searchBackendRequestCount!
+                : 0
+        );
+        const backendRequestsUnobserved =
+            usage.searchQueriesObserved === false && !!searchBackendAuthorization;
+        const settledSearchBackend =
+            searchBackendAuthorization && !backendRequestsUnobserved
+                ? settledAppManagedSearchCost({
+                      succeededRequestCount: observedBackendRequests,
+                      costPerQueryMicroUsd:
+                          searchBackendAuthorization.costPerQueryMicroUsd,
+                      maxQueries: searchBackendAuthorization.maxQueries,
+                  })
+                : null;
+        const searchBackendCostMicroUsd = backendRequestsUnobserved
+            ? searchBackendAuthorization!.reservedCostMicroUsd
+            : (settledSearchBackend?.costMicroUsd ?? 0);
+        if (settledSearchBackend?.breachedCeiling) {
+            // Should be unreachable: the ceiling is a counter in this process
+            // rather than a parameter a vendor may ignore. If it fires, this
+            // application has a defect, and the safe response is the same one a
+            // provider's overshoot gets -- stop dispatching that backend until
+            // somebody has looked.
+            recordSearchQueryCeilingBreach(
+                searchBackendLatchKey(searchBackendAuthorization!.backend)
+            );
+            reported.searchCeilingBreach = {
+                provider: searchBackendLatchKey(
+                    searchBackendAuthorization!.backend
+                ),
+                observed: observedBackendRequests,
+                authorized: searchBackendAuthorization!.maxQueries,
+                costMicroUsd: settledSearchBackend.costMicroUsd,
+            };
+        }
         const costBreakdown =
             searchCostMicroUsd > 0
                 ? {
@@ -3716,10 +4165,15 @@ export const settleChatUsage = async (
                               canonical.outputUsdPerMillionTokens,
                           cachedInputPriceMultiplier:
                               canonical.cachedInputPriceMultiplier,
+                          cacheWriteUsdPerMillionTokens:
+                              canonical.cacheWriteUsdPerMillionTokens ?? null,
+                          promptCacheTtl:
+                              canonical.promptCacheTtl ?? null,
                           pricingVersion: canonical.pricingVersion ?? null,
                       },
                       inputTokens: actualInput,
                       cachedInputTokens: actualCachedInput,
+                      cacheWriteInputTokens: actualCacheWriteInput,
                       outputTokens: actualOutput,
                       reasoningTokens: Number.isSafeInteger(usage.reasoningTokens)
                           ? Math.max(0, usage.reasoningTokens!)
@@ -3776,7 +4230,15 @@ export const settleChatUsage = async (
             const actual =
                 providerCost !== null
                     ? providerCost
-                    : entry.metric === "tokens"
+                    : // Before the generic metrics, because a search bucket
+                      // settles to what the search vendor served and nothing
+                      // else in this list does. A search entry that fell through
+                      // to the `cost` branch would be settled to the turn's
+                      // *token* spend, which is a number from a different
+                      // invoice entirely.
+                      entry.metric === "search-cost"
+                      ? searchBackendCostMicroUsd
+                      : entry.metric === "tokens"
                     ? actualTokens
                     : entry.metric === "cost"
                       ? actualCost
@@ -3887,9 +4349,20 @@ export const settleChatUsage = async (
                 settledCostMicroUsd: BigInt(actualCost),
                 settledInputTokens: actualInput,
                 settledCachedInputTokens: actualCachedInput,
+                settledCacheWriteInputTokens: actualCacheWriteInput,
                 settledOutputTokens: actualOutput,
                 pricingSnapshot: {
+                    // `costBreakdown` already carries the cache-write rate and
+                    // the write-token count it priced, so the snapshot
+                    // reproduces the charge without re-reading the registry.
                     ...costBreakdown,
+                    // The TTL the request asked for, beside the rate that
+                    // priced it. A write rate alone does not say which entry
+                    // was bought -- 5-minute and 1-hour writes are different
+                    // prices for different things -- so a snapshot with the
+                    // rate and no TTL cannot be re-derived by anyone who was
+                    // not there. Null on a turn that sent no marker.
+                    promptCacheTtl: canonical.promptCacheTtl ?? null,
                     pricingVersion: canonical.pricingVersion ?? null,
                     reservationCostSource: canonical.costSource ?? null,
                     longContextThresholdTokens:
@@ -3967,6 +4440,8 @@ export const settleChatUsage = async (
                                 costBreakdown.uncachedInputCostMicroUsd,
                             cachedInputCostMicroUsd:
                                 costBreakdown.cachedInputCostMicroUsd,
+                            cacheWriteInputCostMicroUsd:
+                                costBreakdown.cacheWriteInputCostMicroUsd,
                             outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
                         },
                         // Named apart from the row's own `usageSource`
@@ -4693,6 +5168,7 @@ export const validateChatPayload = (body: unknown) => {
         webSearchMode?: unknown;
         admissionToken?: unknown;
         contextBundle?: unknown;
+        acknowledgedUnavailableAttachmentIds?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -4812,6 +5288,37 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
 
+    /*
+      The files this turn has been told are gone, and may proceed without.
+
+      A list of ids rather than a flag, and shape-checked here rather than
+      believed: a blanket "continue anyway" boolean would let one confirmation
+      carry every attachment the conversation might later find missing,
+      including ones the user has never been shown. The ids are resolved
+      against the caller's own rows where the attachments are read; an id that
+      names nothing simply acknowledges nothing.
+    */
+    if (payload.acknowledgedUnavailableAttachmentIds !== undefined) {
+        const ids = payload.acknowledgedUnavailableAttachmentIds;
+        if (
+            !Array.isArray(ids) ||
+            ids.length > 50 ||
+            ids.some(
+                (id) =>
+                    typeof id !== "string" ||
+                    id.length < 1 ||
+                    id.length > 64 ||
+                    !/^[A-Za-z0-9_-]+$/.test(id)
+            )
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_ATTACHMENT_ACKNOWLEDGEMENT",
+                "Invalid attachment acknowledgement."
+            );
+        }
+    }
+
     let totalCharacters = 0;
     for (const message of payload.messages) {
         if (!message || typeof message !== "object") {
@@ -4872,6 +5379,7 @@ export const validateChatPayload = (body: unknown) => {
         webSearchMode?: WebSearchMode;
         admissionToken?: string;
         contextBundle?: string;
+        acknowledgedUnavailableAttachmentIds?: string[];
     };
 };
 

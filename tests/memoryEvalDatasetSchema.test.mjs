@@ -9,6 +9,7 @@ import {
     criticalNegativePartitionInput,
     validateSuccessorDataset,
 } from "../lib/memoryEvalDatasetSchema.ts";
+import { matchesExpectedV2 } from "../lib/memoryEvalScoringV2.ts";
 import {
     LEGACY_DATASET_SCHEMA_VERSION,
     LEGACY_DIAGNOSTIC_DATASET_VERSIONS,
@@ -103,10 +104,30 @@ test("the floor is derived from §12.2 rather than restated", () => {
     );
 });
 
-test("the run-mode gate and the schema module agree on the version", () => {
-    // Two constants because the gate stays free of the schema module's
-    // imports. They are only safe apart while something pins them together.
-    assert.equal(GATE_SCHEMA_VERSION, MEMORY_EVAL_DATASET_SCHEMA_VERSION);
+test("the two schema constants answer different questions", () => {
+    // They used to be pinned equal, on the reading that the gate and the
+    // schema module were two copies of one number. They are not: the schema
+    // module says "the schema I define", which is 2 and always will be —
+    // schema 3 is defined in `lib/memoryEvalDatasetSchemaV3.ts` — and the gate
+    // says "the schema a live run may score", which moved to 3 on 2026-08-28.
+    //
+    // Pinning them equal would now force one of the two to lie. Each is pinned
+    // to its own meaning instead, and the difference is the assertion.
+    assert.equal(
+        MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        2,
+        "this module defines schema 2; schema 3 lives in its own module"
+    );
+    assert.equal(
+        GATE_SCHEMA_VERSION,
+        3,
+        "the run-mode gate was moved to 3 on 2026-08-28 (schema-readiness report, 0 pending)"
+    );
+    assert.notEqual(
+        GATE_SCHEMA_VERSION,
+        MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+        "if these agree again, check which one moved and why"
+    );
 });
 
 test("a complete decision set validates", () => {
@@ -463,7 +484,34 @@ test("a run that declares no schema at all is refused", () => {
     });
 });
 
-test("the same run against schema 2 reaches the live decision", () => {
+test("the same run against the gated schema reaches the live decision", () => {
+    // `GATE_SCHEMA_VERSION`, not this module's constant. The two were equal
+    // when this test was written and the difference did not show; since the
+    // gate moved to 3, passing the schema module's 2 here would assert that a
+    // superseded schema still runs.
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: { status: "approved", evalBudget: { maxUsd: 20 } },
+        hasApiKey: true,
+        datasetFrozen: true,
+        commitKnown: true,
+        datasetSchemaVersion: GATE_SCHEMA_VERSION,
+        // The 2026-08-28 budget binding, satisfied so that this row reaches
+        // the gate it is about. A live decision now also requires the budget
+        // to name an instrument, that instrument to be this one, and this
+        // commit to descend from the approved implementation.
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+        runShaDescendsFromApproval: true,
+    });
+    assert.deepEqual(decision, { mode: "live", ceilingUsd: 20 });
+});
+
+test("a schema-2 dataset no longer reaches the live decision", () => {
+    // The other side of the move, and the reason it is a gate rather than a
+    // label: `mem-eval-succ-3` was frozen under `mem-score-v2.3`, so a run
+    // against it now would write an artifact whose contract digest matches no
+    // record. The gate refuses it before a provider is reached.
     const decision = decideEvalRunMode({
         live: true,
         registerEntry: { status: "approved", evalBudget: { maxUsd: 20 } },
@@ -472,7 +520,10 @@ test("the same run against schema 2 reaches the live decision", () => {
         commitKnown: true,
         datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
     });
-    assert.deepEqual(decision, { mode: "live", ceilingUsd: 20 });
+    assert.deepEqual(decision, {
+        mode: "refused",
+        reason: "legacy_dataset_schema",
+    });
 });
 
 test("smoke mode is unaffected by the schema gate", () => {
@@ -595,5 +646,140 @@ test("reordering the cases does not change the digest", () => {
     assert.equal(
         digest(criticalNegativePartitionInput(reversed)),
         digest(criticalNegativePartitionInput(MEMORY_EVAL_CASES))
+    );
+});
+
+/* -------------------------------------------------------------------------
+ * mustIncludeAny — the disjunction that carries polarity
+ * ---------------------------------------------------------------------- */
+
+test("mustIncludeAny is a disjunction over an unchanged conjunction", () => {
+    // The semantics the amendment fixes:
+    //   all(mustInclude) && (mustIncludeAny === undefined || any(mustIncludeAny))
+    const gold = {
+        id: "e1",
+        kind: "constraint",
+        mustInclude: ["nut"],
+        mustIncludeAny: ["does not have", "has no", "not allergic"],
+        expectedDisposition: "sensitive_review",
+    };
+    const candidate = (statement) => ({
+        kind: "constraint",
+        statement,
+        bulkSafe: false,
+        disposition: "sensitive_review",
+    });
+
+    // Each alternative on its own is enough.
+    for (const statement of [
+        "The user does not have a nut allergy.",
+        "The user has no nut allergy.",
+        "The user is not allergic to nuts.",
+    ]) {
+        assert.ok(
+            matchesExpectedV2(candidate(statement), gold),
+            `${statement} should match`
+        );
+    }
+
+    // The positive is the answer this exists to reject. "nut" alone let it
+    // through, which is why a conjunction could not express the gold.
+    assert.ok(
+        !matchesExpectedV2(candidate("The user has a nut allergy."), gold),
+        "the positive polarity must not match"
+    );
+    // The conjunction still binds: an alternative alone is not enough.
+    assert.ok(
+        !matchesExpectedV2(candidate("The user does not have a cat."), gold)
+    );
+});
+
+test("a gold without the field scores exactly as before", () => {
+    const withoutField = {
+        id: "e1",
+        kind: "identity",
+        mustInclude: ["부산"],
+        expectedDisposition: "bulk_safe",
+    };
+    const candidate = {
+        kind: "identity",
+        statement: "사용자는 부산에 거주합니다.",
+        bulkSafe: true,
+        disposition: "bulk_safe",
+    };
+    assert.ok(matchesExpectedV2(candidate, withoutField));
+    // Korean reaches polarity with the conjunction alone: "없" covers
+    // 없다/없습니다/없어요, so the field is not needed there.
+    assert.ok(
+        matchesExpectedV2(
+            {
+                ...candidate,
+                kind: "constraint",
+                statement: "사용자는 땅콩 알레르기가 없다.",
+            },
+            {
+                id: "e1",
+                kind: "constraint",
+                mustInclude: ["땅콩", "없"],
+                expectedDisposition: "sensitive_review",
+            }
+        )
+    );
+});
+
+test("the token rules reject what makes a disjunction meaningless", () => {
+    const base = {
+        id: "succ-x-1",
+        category: "durable_facts",
+        language: "en",
+        goldCompleteness: "exhaustive",
+        conversations: [],
+    };
+    const validateOne = (expectedMemory) =>
+        validateSuccessorDataset({
+            version: "mem-eval-test",
+            purpose: "development",
+            frozen: false,
+            cases: [{ ...base, expected: [expectedMemory] }],
+        }).errors.map((error) => error.code);
+
+    const ok = {
+        id: "e1",
+        kind: "identity",
+        mustInclude: ["nut"],
+        expectedDisposition: "bulk_safe",
+    };
+
+    assert.ok(!validateOne(ok).includes("expected_tokens_empty"));
+    assert.ok(
+        validateOne({ ...ok, mustIncludeAny: [] }).includes(
+            "expected_tokens_empty"
+        ),
+        "present but empty matches nothing, and reads like it matches anything"
+    );
+    assert.ok(
+        validateOne({ ...ok, mustIncludeAny: ["has no", "  "] }).includes(
+            "expected_token_blank"
+        )
+    );
+    assert.ok(
+        validateOne({ ...ok, mustIncludeAny: ["has no", "Has No"] }).includes(
+            "expected_token_duplicate"
+        ),
+        "duplicates are judged after normalisation"
+    );
+    // The realistic bare-substring hazard: a disjunction is only as strict as
+    // its weakest member, so a token inside another token decides everything.
+    assert.ok(
+        validateOne({
+            ...ok,
+            mustIncludeAny: ["no", "no nut allergy"],
+        }).includes("expected_token_contains_another")
+    );
+    // And the same rule now guards the conjunction it was written for.
+    assert.ok(
+        validateOne({ ...ok, mustInclude: [] }).includes(
+            "expected_tokens_empty"
+        )
     );
 });

@@ -131,7 +131,9 @@ gates:
         refuses a pilot or judge-bias run, a run against the development set, a
         run that stopped at its cost ceiling, a second use of an already-used
         decision set, a baseline pre-registered after the run started, and a
-        routable judge with no bias measurement. The procedure the harness
+        routable judge whose cited calibration is not a calibration of that
+        judge, over development-set answers from a run that finished, against
+        an independent judge that wrote none of them. The procedure the harness
         implements is docs/ops/tomverse-chat-router-evaluation-set.md; a
         passing check means the report is citable, not that the gate is
         approved.
@@ -533,7 +535,22 @@ gates:
     status: pending
     approvedBy: []
     approvedAt: null
-    evidenceRefs: []
+    evidenceRefs:
+      # The instrument this gate's evaluation will be computed with, not a
+      # result. Recorded 2026-08-28 by @mposition; status stays pending until a
+      # decision-grade run and a model/prompt pair approval are complete.
+      - "docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md"
+      - "commit:0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d"
+      - "commit:fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4"
+      - "dataset:mem-eval-succ-5@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0"
+      - "scoring-contract:mem-score-v3.4@a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd"
+      # Superseded and kept: the run target moved to succ-5/v3.4 when v3.3 was
+      # found to describe itself as scoring schema 2 while scoring schema 3.
+      # The sample is byte-identical, so the dataset digest is unchanged.
+      - "superseded-dataset:mem-eval-succ-4@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0"
+      - "superseded-scoring-contract:mem-score-v3.3@19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777"
+      - "https://github.com/mposition/Tomverse/actions/runs/33154411698"
+      - "https://github.com/mposition/Tomverse/actions/runs/33151805896"
     category: memory
     title: Irrelevant memory injection remains below the safety threshold
     blocking: true
@@ -551,7 +568,22 @@ gates:
     status: pending
     approvedBy: []
     approvedAt: null
-    evidenceRefs: []
+    evidenceRefs:
+      # The instrument this gate's evaluation will be computed with, not a
+      # result. Recorded 2026-08-28 by @mposition; status stays pending until a
+      # decision-grade run and a model/prompt pair approval are complete.
+      - "docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md"
+      - "commit:0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d"
+      - "commit:fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4"
+      - "dataset:mem-eval-succ-5@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0"
+      - "scoring-contract:mem-score-v3.4@a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd"
+      # Superseded and kept: the run target moved to succ-5/v3.4 when v3.3 was
+      # found to describe itself as scoring schema 2 while scoring schema 3.
+      # The sample is byte-identical, so the dataset digest is unchanged.
+      - "superseded-dataset:mem-eval-succ-4@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0"
+      - "superseded-scoring-contract:mem-score-v3.3@19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777"
+      - "https://github.com/mposition/Tomverse/actions/runs/33154411698"
+      - "https://github.com/mposition/Tomverse/actions/runs/33151805896"
     category: memory
     title: Sensitive data and credentials are never injected from memory
     blocking: true

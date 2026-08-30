@@ -123,6 +123,95 @@ test("only fixed identifiers are reported, never anything from the text", () => 
   for (const signal of decision.signals) assert.ok(allowed.has(signal), signal);
 });
 
+/* ----------------------------------- the web search switch is not intent */
+
+/**
+ * Every rule above, asked again with the web search switch on.
+ *
+ * This is the axis production always supplies and this file used to leave out.
+ * `ChatPageClient` records `webSearchRequested` on every turn, so the offer was
+ * never decided by the input these tests were passing, and a turn that reads as
+ * a lookup here reached a person as a card. The switch says "check the web
+ * before answering", which is a setting; it is not someone asking for a dozen
+ * sources to be compared, and on its own it must move nothing.
+ */
+const SWITCH_INVARIANT_CASES = [
+  ["오늘 서울 날씨가 어떤지 알려줘", false],
+  ["이 문단을 자연스럽게 다듬어줘", false],
+  ["위에 붙여 넣은 내용을 요약해줘", false],
+  ["국내 이차전지 시장 규모를 한 줄로 요약해줘", false],
+  ["시장 동향", false],
+  [RESEARCH_QUESTION, true],
+  ["국내 이차전지 시장 규모와 점유율 현황을 정리해줘", true],
+  ["최근 반도체 공급망 상황을 자세히 설명해줘", true],
+  ["최근 시장 자료를 조사해서 분석 보고서를 작성해줘", true],
+];
+
+test("the web search switch changes no offer, in either position", () => {
+  for (const [text, expected] of SWITCH_INVARIANT_CASES) {
+    for (const webSearchRequested of [false, true]) {
+      const decision = classifyDeepResearchTopic({ text, webSearchRequested });
+      assert.equal(
+        decision.suggested,
+        expected,
+        `${text} / webSearchRequested=${webSearchRequested}`
+      );
+    }
+  }
+});
+
+test("a lookup asked with the switch on is still a lookup", () => {
+  const decision = classifyDeepResearchTopic({
+    text: "오늘 서울 날씨가 어떤지 알려줘",
+    webSearchRequested: true,
+  });
+  assert.equal(decision.suggested, false);
+  assert.deepEqual([...decision.signals], ["recency"]);
+  assert.equal(decision.refusal, "no_depth_signal");
+});
+
+test("a request for sources is read from the text, and the switch is not one", () => {
+  for (const webSearchRequested of [false, true]) {
+    const decision = classifyDeepResearchTopic({
+      text: RESEARCH_QUESTION,
+      webSearchRequested,
+    });
+    assert.ok(
+      decision.signals.includes("explicit_research_request"),
+      String(webSearchRequested)
+    );
+  }
+  const switchOnly = classifyDeepResearchTopic({
+    text: "오늘 서울 날씨가 어떤지 알려줘",
+    webSearchRequested: true,
+  });
+  assert.ok(!switchOnly.signals.includes("explicit_research_request"));
+});
+
+test("the switch does not turn a rewrite into a research question", () => {
+  // The refusal reads `no_depth_signal` rather than `writing_or_translation`,
+  // because with the switch on `kind: "research"` outranks `kind: "writing"` in
+  // lib/taskProfileCore.ts and the writing exclusion never sees this turn. No
+  // card under a rewrite is the requirement, and refusing on `writing:vocabulary`
+  // to recover the label would cost the case below -- a research question that
+  // happens to name its output format.
+  const decision = classifyDeepResearchTopic({
+    text: "이 문단을 자연스럽게 다듬어줘",
+    webSearchRequested: true,
+  });
+  assert.equal(decision.suggested, false);
+  assert.equal(decision.refusal, "no_depth_signal");
+});
+
+test("naming a report as the output format does not disqualify research", () => {
+  const decision = classifyDeepResearchTopic({
+    text: "최근 시장 자료를 조사해서 분석 보고서를 작성해줘",
+    webSearchRequested: true,
+  });
+  assert.equal(decision.suggested, true);
+  assert.ok(decision.signals.includes("domain_depth"));
+});
+
 /* ------------------------------------------------------------- the offer */
 
 const TURN = {
@@ -310,6 +399,27 @@ test("a refused offer carries no question with it", () => {
   assert.equal(decision.text, null);
   assert.equal(decision.topicKey, null);
   assert.deepEqual([...decision.signals], []);
+});
+
+test("requirement 3: the switch travels with the turn, and a lookup is refused", () => {
+  // The production shape: `ChatPageClient` records the switch on the turn, so
+  // the offer has to be refused here, at the decision both shells call, and not
+  // only in the classifier called without it.
+  const decision = suggestion({
+    turn: {
+      ...TURN,
+      text: "오늘 서울 날씨가 어떤지 알려줘",
+      webSearchRequested: true,
+    },
+  });
+  assert.equal(decision.offered, false);
+  assert.equal(decision.refusal, "topic_not_suitable");
+});
+
+test("a research question asked with the switch on is still offered", () => {
+  const decision = suggestion({ turn: { ...TURN, webSearchRequested: true } });
+  assert.equal(decision.offered, true);
+  assert.equal(decision.refusal, null);
 });
 
 test("the expansion runs at the depth the setup sheet opens on", () => {

@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
-import { PUBLIC_MESSAGE_ATTACHMENT_SELECT } from "@/lib/messageAttachmentCore";
+import {
+  PUBLIC_MESSAGE_ATTACHMENT_SELECT,
+  toPublicMessageAttachment,
+} from "@/lib/messageAttachmentCore";
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
@@ -324,7 +327,12 @@ export async function GET(
       ...(attachments.length
         ? {
             attachments: attachments.map((attachment) => ({
-              ...attachment,
+              // Field by field through the shared narrowing rather than a
+              // spread of the row. The select is already an allowlist, but the
+              // row now carries an availability verdict whose absent-vs-null
+              // distinction is part of the contract, and a spread would send
+              // `unavailableAt: null` on every ordinary card.
+              ...toPublicMessageAttachment(attachment),
               attachmentId: attachment.id,
             })),
           }

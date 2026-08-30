@@ -99,6 +99,38 @@ all strata, observe the discordance, then compute and pre-register the final
 `n` before collecting the rest. Sizing after seeing the full result is how a
 sample size becomes an outcome that was chosen rather than measured.
 
+### The pre-registered `n`
+
+The 2026-08-27 pilot measured 78.1% discordance over 210 pairs, which sizes a
+decision set at roughly 7,500 for ±2pp, 3,334 for ±3pp and 1,875 for ±4pp.
+
+> **That discordance is not a usable basis, and neither is the re-run's.**
+> Both pilots sent empty answers to the judge and are void — see
+> `docs/ops/router-evaluation-runs/route01-pilot-20260827-void.md`. `n` below
+> stays pending until an uncontaminated pilot has measured a discordance, and
+> is then confirmed or voided and re-frozen rather than edited.
+mposition chose **±3pp**: ±2pp is more than this stage needs, and ±4pp leaves a
+borderline result undecidable. `n` is 223 per cell across the 15 cells —
+**3,345**, rather than 3,334, for the same precision with no cell carrying a
+remainder.
+
+It is committed at
+`docs/ops/router-decision-preregistration/v1.json` and it is
+**pending**, conditional on the judge calibration being accepted. A decision
+run against a pending registration is refused, as is one whose
+`--preregistered-n` is not the registered number, and the registration binds to
+the Router versions, the selection policy version and the decision corpus
+digest it was frozen against — a Router that decides differently is a different
+experiment wearing the same `n`.
+
+If the calibration comes back outside the acceptable range, or the Router
+changes, that registration is **voided and a new one frozen before collecting**.
+It is not edited: `npm run check:router-decision-preregistration` refuses a
+change to `n` under a version that has already been published, because a
+borderline result and a true observation that the pilot's estimate was noisy
+are exactly what would motivate one, and the file would still read as a
+pre-registration afterwards.
+
 Three ways to reduce the required `n`, to be decided at pilot time rather than
 mid-analysis:
 
@@ -132,8 +164,26 @@ substituting a successor.
   judging, and an item whose answer still identifies its model is excluded and
   logged rather than silently kept.
 - A model judging its own output is a known bias. If a model judge is used, it
-  must not be one of the routable models, or the bias has to be measured on a
-  held-out subset and reported alongside the result.
+  must not be one of the routable models, or the bias has to be measured and
+  reported alongside the result.
+- **The measurement is a calibration against an independent judge, not a
+  self-preference rate.** The earlier `--mode=judge-bias` put the judge's own
+  model in the Auto arm on held-out pairs and reported its own-answer win rate.
+  That number mixes three things it cannot separate: the two models' real
+  quality difference, the judge's preference for its own output, and style
+  interactions between them — 50% reads as "no self-preference" only if the two
+  models are equally good, which nothing established. What two passes over the
+  **same** answers can settle is how far apart two judges are, so
+  `--mode=judge-calibration` re-grades one answer bundle with an independent
+  judge and reports the paired shift with a pair-level bootstrap interval.
+- Reading that shift as self-preference still assumes the independent judge has
+  no preference of its own between the two models, which is an assumption
+  rather than a result. Human labels on a stratified sample are what ground it;
+  `docs/ops/router-human-review/README.md` is how that sample is drawn and
+  graded blind.
+- The calibration is run on the **development** set. Grading the decision set
+  would spend one of its uses (§7), and the harness refuses a calibration whose
+  answers came from anywhere else.
 
 ## 6. Rubric
 
@@ -192,7 +242,8 @@ them rather than leaving them to a write-up:
 - confidence-interval method;
 - randomisation seed;
 - point estimate and both 95% bounds;
-- judge identity and, when a model judge is used, its bias measurement;
+- judge identity and, when the judge is itself routable, the calibration
+  artefact cited for it;
 - excluded items with reasons.
 
 Absent any of these, the run is not decision-grade evidence, whatever number it
@@ -207,21 +258,42 @@ sample size becomes an outcome that was chosen rather than measured:
 
 ```
 # §3. Measure the discordance rate so `n` is computed, not guessed.
+# --bundle= keeps the answers, which is what a later pass re-grades.
 npm run eval:router-quality -- --mode=pilot \
   --set=docs/ops/router-evaluation-set/development-v0.json \
-  --baseline=<model id> --judge=<model id> --seed=<integer> --json=pilot.json
+  --baseline=<model id> --judge=<model id> --seed=<integer> \
+  --json=pilot.json --bundle=pilot.answers.jsonl
 
-# §5. Only where the judge is itself one of the routable models.
-npm run eval:router-quality -- --mode=judge-bias \
-  --set=<development set> --baseline=<other model> --judge=<routable judge> \
-  --seed=<integer> --json=judge-bias.json
+# §5, step 1. Re-grade the SAME answers with an independent judge. No answers
+# are regenerated and the display order is the one the bundle fixed, so the
+# only thing that differs between the two passes is who graded.
+npm run eval:router-quality -- --rejudge=pilot.answers.jsonl \
+  --judge=<independent judge> --json=independent.verdicts.jsonl
+
+# §5, step 2. Compare the two passes. Pure analysis -- it sends nothing.
+# The judge under test first, then the independent one.
+npm run eval:router-quality -- --mode=judge-calibration \
+  --verdicts=pilot.answers.jsonl.<judge>.verdicts.jsonl \
+  --verdicts=independent.verdicts.jsonl \
+  --seed=<integer> --json=calibration.json
 
 # The run ROUTE-01 cites.
 npm run eval:router-quality -- --mode=decision \
   --set=<frozen decision set> --baseline=<pre-registered model> \
   --judge=<model id> --seed=<integer> --preregistered-n=<n> --use-index=1 \
-  --judge-bias=judge-bias.json --json=decision.json
+  --calibration=calibration.json --json=decision.json
 ```
+
+What each of those stages costs, fitted to the pilot that actually ran and
+checked against its own total, is in
+`docs/ops/tomverse-chat-router-calibration-cost.md`, with the
+`--max-cost-usd` guard recommended for each. A run stopped at its cost ceiling
+is refused as a calibration source, so those guards are set to catch a runaway
+rather than to cap a budget.
+
+`--mode=judge-bias` still runs and still prints its number as a diagnostic, but
+`--judge-bias=<path>` is refused outright: an artefact nobody may cite is not
+one the harness should let an operator pay for and then discover is unusable.
 
 `npm run check:router-quality-eval` validates what came out. It runs on every
 PR against the committed set files, and takes `--report=<path>` for a run.
@@ -234,7 +306,13 @@ What it refuses, and why each one would otherwise read as a pass:
 | a run truncated by `--max-cost-usd` | a partial set still produces a real-looking interval |
 | `--use-index` above 1 | §7: a reused decision set reports Router fit to its own test set |
 | a baseline pre-registered after the run started | §4, and the dates are in the record, so it is checkable |
-| a routable judge with no bias measurement | §5 |
+| a routable judge with no calibration | §5 |
+| a calibration of a different judge, compared canonically | this catalogue has an id whose API model is a different model, so an id-level match would accept a calibration of something else |
+| a calibration whose reference judge wrote answers in the bundle | it is not independent of what it is grading |
+| a calibration graded on the decision set | §7: a calibration is a look, and every look costs a use |
+| a calibration over a bundle that stopped short of its planned items | the population stops wherever the money ran out |
+| a calibration missing pairs the bundle holds | the comparison is then over the pairs both judges happened to grade |
+| a legacy `judge-bias` artefact cited as a calibration | its own-answer rate mixes quality difference with self-preference |
 | exclusions above 5% of pairs | they land on the Auto arm, so the survivors are the items Auto managed to answer |
 | a judge preferring the first answer above 65% of the time | that is a judge reading position, not quality |
 

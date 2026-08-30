@@ -108,8 +108,11 @@ test("font-black is reserved for headline-sized customer text", () => {
     // then down nineteen more when UX-010 gave ConfirmDialog its focus trap.
     "app/(site)/(application)/chat/ChatPageClient.tsx:357",
     // Same "Tomverse Review" brand span; it moved down four lines when the
-    // superseded walkthrough embed above it was replaced by a stage diagram.
-    "components/marketing/ChatWorkspaceGuide.tsx:190",
+    // superseded walkthrough embed above it was replaced by a stage diagram,
+    // then down three more when the landing redesign moved the shared stage
+    // copy from `proof` to `preview` and the destructure above grew a comment
+    // explaining where it went.
+    "components/marketing/ChatWorkspaceGuide.tsx:193",
   ]);
 
   const violations = [];

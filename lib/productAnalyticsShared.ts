@@ -15,6 +15,22 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "comparison_review_started",
   "comparison_review_completed",
   "comparison_review_failed",
+  // The evidence chain past the review itself.
+  //
+  // `comparison_review_item_verified` fires when the user asks for the
+  // separate per-item web check -- the step that turns "the reviewer says
+  // these two answers disagree" into "and here is what the live web says
+  // about it". `comparison_review_item_feedback` is the user's own verdict on
+  // one review item.
+  //
+  // Content-free by schema: the first carries the check's own closed status,
+  // the second a closed verdict enum. Neither carries the item's text, the
+  // quote it cites, the question, or an identifier that could be joined back
+  // to any of them -- the review item id is per-review and deliberately
+  // absent, because a set of them beside a timestamp narrows a small
+  // population toward one conversation.
+  "comparison_review_item_verified",
+  "comparison_review_item_feedback",
   "followup_sent",
   "file_attached",
   "conversation_saved",
@@ -33,6 +49,11 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "promotion_pass_activated",
   "return_day_1",
   "return_day_7",
+  // Day 30 completes the retention series the AI Review value question is
+  // asked in. Emitted by the same one-shot lifecycle check as the other two,
+  // so a user who was away on the exact day is counted by nothing -- which is
+  // why the scorecard reports these as a floor rather than a rate.
+  "return_day_30",
   "subscription_cancelled",
   "model_finder_viewed",
   "model_finder_started",
@@ -58,6 +79,16 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "model_picker_max_reached",
   "model_picker_abandoned",
   "web_search_mode_selected",
+  // The composer's retired mid-draft nudge -- offered before a send, in the
+  // days when web search had an "auto" mode to be nudged into. It went with
+  // that mode (lib/webSearchSuggestion.ts), and the names stay here because
+  // `ProductAnalyticsEvent` rows written under them still exist and the check
+  // constraint is what makes them readable. Nothing emits them.
+  //
+  // Not to be confused with `web_search_suggestion_impression` and its four
+  // siblings at the end of this list, which belong to the offer made *after* a
+  // finished answer (lib/webSearchRetrySuggestion.ts). Different moment,
+  // different decision, deliberately different names.
   "web_search_suggestion_shown",
   "web_search_suggestion_accepted",
   "web_search_suggestion_declined",
@@ -184,6 +215,26 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "deep_research_suggestion_shown",
   "deep_research_suggestion_accepted",
   "deep_research_suggestion_dismissed",
+  // The web-search offer under an answer that could not be current
+  // (lib/webSearchRetrySuggestion.ts). Five rather than three: unlike the two
+  // trios above, this offer's primary action *runs a request*, so "was the
+  // offer taken" and "did taking it work" are different questions and one
+  // number cannot answer both. A retry that always failed and a retry nobody
+  // pressed look identical from the acceptance rate alone.
+  //
+  // Content-free by schema, like the trios above. The properties are two
+  // closed enums -- why the offer was made (`web_search_suggestion_reason`,
+  // the strongest signal the classifier returned) and what the card was
+  // allowed to say (`web_search_suggestion_state`) -- plus the existing
+  // `cta_location` for which shell it was pressed in. Never the question,
+  // never the full signal set: a set of signals beside a timestamp narrows a
+  // small population toward one question, and `analyticsPropertiesSchema` is
+  // strict, so there is no key it could travel in by accident.
+  "web_search_suggestion_impression",
+  "web_search_suggestion_accept",
+  "web_search_suggestion_dismiss",
+  "web_search_retry_success",
+  "web_search_retry_error",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -363,6 +414,17 @@ export const analyticsPropertiesSchema = z
     help_article_id: z.enum(["chat_workspace"]).optional(),
     web_search_mode: z.enum(["off", "auto", "always"]).optional(),
     deep_research_depth: z.enum(["quick", "standard", "deep"]).optional(),
+    // The web-search offer (lib/webSearchRetrySuggestion.ts). Why it was made
+    // and what it was allowed to say: the strongest signal the classifier
+    // returned, not the set -- a set of fixed identifiers beside a timestamp
+    // is closer to an identifier than a single one is, and neither is worth
+    // the resolution here. Never the question itself.
+    web_search_suggestion_reason: z
+      .enum(["explicit_search_request", "recency", "live_lookup"])
+      .optional(),
+    web_search_suggestion_state: z
+      .enum(["enable", "unsupported", "blocked", "error"])
+      .optional(),
     search_provider: z
       .enum(["openai", "anthropic", "google", "perplexity"])
       .optional(),
@@ -434,6 +496,30 @@ export const analyticsPropertiesSchema = z
     // What the package turned out to be, as the parser read it -- not as the
     // package claimed. The claim is display-only and never reaches analytics.
     package_import_source: z.enum(["agent-skill", "tomverse-native"]).optional(),
+    // The per-item web check's own answer, as the verification endpoint
+    // classified it. The summary sentence it wrote is NOT sent: it is model
+    // prose about the user's question.
+    review_item_verification: z
+      .enum(["supported", "unsupported", "inconclusive"])
+      .optional(),
+    // The user's verdict on one review item. A closed enum and nothing else --
+    // no free-text "tell us more" reaches analytics, and the item it is about
+    // is identified only inside the account's own feedback row.
+    review_item_feedback: z
+      .enum(["helpful", "incorrect", "unclear", "missing_point", "withdrawn"])
+      .optional(),
+    // Which list the item came from, so "incorrect" on a contradiction can be
+    // told apart from "incorrect" on an omission. A closed enum mirroring the
+    // review result's own sections.
+    review_item_section: z
+      .enum([
+        "consensus",
+        "contradictions",
+        "differences",
+        "missingPoints",
+        "verificationNeeded",
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((properties, context) => {

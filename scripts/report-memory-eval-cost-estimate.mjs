@@ -36,10 +36,11 @@
 // are byte-identical between the two sets, so the figure barely moved; the
 // label did, and a number labelled with the wrong dataset is a number nobody
 // should approve a budget from.
-import {
-    MEMORY_EVAL_SUCCESSOR_CASES as MEMORY_EVAL_CASES,
-    MEMORY_EVAL_SUCCESSOR_DATASET_VERSION as MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryEvalSuccessorFixtures.ts";
+// Read from the harness's own target rather than pinned here. An estimate is
+// what a §12.5 budget is approved from, so it has to be an estimate of the
+// sample that would actually be run -- and this file has already been the
+// place where the two drifted apart once.
+import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import {
@@ -50,6 +51,10 @@ import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import { MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS } from "../lib/memoryExtractionWorker.ts";
 import { getModel } from "../lib/models.ts";
+
+const evalTarget = harnessTarget();
+const MEMORY_EVAL_CASES = evalTarget.cases;
+const MEMORY_EVAL_DATASET_VERSION = evalTarget.datasetVersion;
 
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));

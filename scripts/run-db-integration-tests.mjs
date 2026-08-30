@@ -216,6 +216,10 @@ run(
     // and the tombstone ordering every deletion path depends on -- including
     // the one that must NOT fire when a single model's answers are cleared.
     "tests/integration/message-attachments.db.test.ts",
+    // The availability columns the expand migration added, and the rule that
+    // makes them safe: only a confirmed 404 writes a verdict, so a rotated key
+    // or a bucket outage cannot record an account as having lost its files.
+    "tests/integration/message-attachment-availability.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
@@ -309,6 +313,14 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // AI Review's operational record: that a run round-trips content-free,
+    // that a guest run lands at all (it produces no ComparisonReview row), and
+    // that the 90-day purge reaches only what it should.
+    "tests/integration/comparison-review-run-telemetry.db.test.ts",
+    // The per-item feedback contract: the unique index really is the
+    // idempotency key, a verdict is scoped to one person, and both cascades
+    // are the deletion path the data-domain registry claims.
+    "tests/integration/comparison-review-item-feedback.db.test.ts",
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",
@@ -321,6 +333,11 @@ run(
     // The provider set is written in TypeScript and in SQL, and only a
     // real database can say the two still agree.
     "tests/integration/external-import-provider-canon.db.test.ts",
+    // Continuing an imported conversation: the two foreign keys behave
+    // differently on delete, and that difference is the whole feature. Only a
+    // database can show that removing the source leaves the conversation and
+    // its messages standing while the bridge becomes a tombstone.
+    "tests/integration/external-conversation-continuation.db.test.ts",
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",

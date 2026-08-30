@@ -365,6 +365,11 @@ test("the public select returns no storage key and no owner", async () => {
     "name",
     "ordinal",
     "size",
+    // The availability verdict, which travels; the location still does not.
+    // tests/integration/message-attachment-availability.db.test.ts covers what
+    // it says once a row has actually been marked.
+    "unavailableAt",
+    "unavailableReason",
   ]);
 });
 

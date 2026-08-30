@@ -40,7 +40,9 @@ import {
     nativeSearchIsDispatchable,
 } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
-import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { reserveTurnSearchCost } from "@/lib/webSearchNativeCostReservation";
+import { appManagedSearchIsDispatchable } from "@/lib/webSearchCapability";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
 import {
     recordWebSearchCostRefusal,
@@ -164,6 +166,11 @@ export async function POST(request: Request) {
         // a restart, has to be visible here or the refusal it earned lasts
         // only as long as the process that saw it.
         await refreshSearchQueryCeilingBreaches();
+        // The same answer the composer was given and the dispatch will give.
+        // This probe exists to say "can I send this right now", and reading
+        // backend readiness from anywhere else would let it say yes to a
+        // request the dispatch refuses.
+        const searchBackendReadiness = resolveWebSearchBackendReadiness();
         const budgets = models.map((model) => {
             const capability = getWebSearchCapability(model.id);
             const attachmentTokens = estimatePreflightAttachmentTokens(
@@ -178,14 +185,21 @@ export async function POST(request: Request) {
             const nativeSearchEnabled =
                 webSearchMode === "always" &&
                 nativeSearchIsDispatchable(capability);
+            const appManagedSearchEnabled =
+                webSearchMode === "always" &&
+                appManagedSearchIsDispatchable(
+                    capability,
+                    searchBackendReadiness
+                );
             // The per-query half of a searching turn's provider cost, which
             // this probe used to leave out entirely -- so it could report a
             // request runnable against a provider budget that the chat route
             // then measured the same request against and refused.
-            const nativeSearchReservation = reserveNativeSearchCost({
+            const nativeSearchReservation = reserveTurnSearchCost({
                 model,
                 capability,
                 nativeSearchEnabled,
+                appManagedSearchEnabled,
             });
             if (!nativeSearchReservation.ok) {
                 // The honest answer to "can I send this": no, with the reason
@@ -210,10 +224,13 @@ export async function POST(request: Request) {
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         webSearchMode,
-                        capability
+                        capability,
+                        searchBackendReadiness
                     ),
                     nativeSearchEnabled,
-                    nativeSearch: nativeSearchReservation,
+                    appManagedSearchEnabled,
+                    nativeSearch: nativeSearchReservation.native,
+                    searchBackend: nativeSearchReservation.searchBackend,
                 }
             );
         });

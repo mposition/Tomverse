@@ -128,6 +128,7 @@ import {
 import { normalizeComposerImageIntentInput } from "@/lib/imageIntentInput";
 import { ImageIntentHandoffChip } from "@/components/chat/ImageIntentHandoffChip";
 import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
+import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
@@ -1074,10 +1075,18 @@ export function ChatInput({
   const activeSelectedModelObjects = activeSelectedModels
     .map((modelId) => AVAILABLE_MODELS.find((item) => item.id === modelId))
     .filter((model): model is AiModel => Boolean(model));
+  // One answer for the chip, the counts and the surcharge: which application-
+  // managed search backends this deployment can actually reach. Resolved on the
+  // server and delivered through the provider, because the composer has no way
+  // to know it and must not guess -- a chip that says "search-ready" on a
+  // deployment with no credential charges eight credits for a search that
+  // cannot run.
+  const searchBackendReadiness = useWebSearchBackendReadiness();
   const requestCreditEstimate = estimateRequestCredits({
     models: activeSelectedModelObjects,
     estimatedInputTokens,
     webSearchMode,
+    backendReadiness: searchBackendReadiness,
   });
   const selectedBaseCredits = requestCreditEstimate.baseCredits;
   const estimatedRequestCredits = requestCreditEstimate.totalEstimatedCredits;
@@ -1088,6 +1097,7 @@ export function ChatInput({
   const webSearchState = deriveWebSearchComposerState({
     webSearchMode,
     selectedModelIds: activeSelectedModels,
+    backendReadiness: searchBackendReadiness,
   });
   const webSearchChipLabel = webSearchState.allUnsupported
     ? t("chat.webSearchChipUnavailable")

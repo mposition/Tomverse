@@ -14,6 +14,15 @@ import {
 import { deriveWebSearchComposerState } from "../lib/webSearchComposerState.ts";
 import { estimateRequestCredits } from "../lib/webSearchCredits.ts";
 import { getModel, PUBLIC_MODELS } from "../lib/models.ts";
+import {
+  searchProviderBucketKey,
+  searchProviderBudgetEnvName,
+} from "../lib/searchProviderBudget.ts";
+import { PROVIDER_BUCKET_PREFIX } from "../lib/chatProviderHolds.ts";
+import {
+  classifyChatLimitCode,
+  SEARCH_PROVIDER_BUDGET_EXHAUSTED,
+} from "../lib/chatCostSafetyCore.ts";
 
 // Provider capability and operational dispatchability are two different facts,
 // and the incident that produced this file is what happens when one surface
@@ -250,15 +259,62 @@ test("every route that budgets a turn also reserves that turn's search cost", ()
     "app/api/chat/availability/route.ts",
   ]) {
     const text = source(path);
+    // Both vendors, in one call. Three routes price the same request, and a
+    // route that reserved only one half quoted a searching turn against a
+    // budget smaller than the one it spends against -- which is the defect this
+    // check was written for. `reserveTurnSearchCost` returns the pair, so a
+    // route cannot reserve one and forget the other.
     assert.ok(
-      text.includes("reserveNativeSearchCost("),
-      `${path}: must reserve the native search cost before budgeting`
+      text.includes("reserveTurnSearchCost("),
+      `${path}: must reserve this turn's search cost before budgeting`
     );
     assert.ok(
-      /nativeSearch:\s*nativeSearchReservation/.test(text),
-      `${path}: must carry the reservation into createChatBudget`
+      /nativeSearch:\s*nativeSearchReservation\.native/.test(text),
+      `${path}: must carry the provider-native half into createChatBudget`
+    );
+    assert.ok(
+      /searchBackend:\s*nativeSearchReservation\.searchBackend/.test(text),
+      `${path}: must carry the search vendor's half into createChatBudget`
     );
   }
+});
+
+test("the search vendor's spend never lands in the model provider's bucket", () => {
+  // Two invoices, two buckets (docs/policy/credit-and-cost-limits.md). A Brave
+  // charge counted under `provider:google` would tell an operator Google was
+  // overspending while the vendor whose invoice actually grew stayed invisible
+  // to the budget that exists to bound it.
+  assert.equal(searchProviderBucketKey("brave"), "search-provider:brave");
+  assert.ok(
+    !searchProviderBucketKey("brave").startsWith(PROVIDER_BUCKET_PREFIX),
+    "a search bucket must not be readable as a provider bucket"
+  );
+  // And the reverse: the provider-bucket prefix must not swallow the search
+  // one, or settlement would hand a search entry a model provider's cost.
+  assert.ok(!PROVIDER_BUCKET_PREFIX.startsWith("search-"));
+});
+
+test("the search backend budget is named apart from the chat provider budget", () => {
+  // Names, error codes and metrics stay separate: an operator told
+  // "PROVIDER_BUDGET_EXHAUSTED" would go and look at the wrong budget.
+  assert.equal(
+    searchProviderBudgetEnvName("brave", "day"),
+    "SEARCH_PROVIDER_BRAVE_COST_MICROUSD_PER_DAY"
+  );
+  assert.equal(
+    searchProviderBudgetEnvName("brave", "month"),
+    "SEARCH_PROVIDER_BRAVE_COST_MICROUSD_PER_MONTH"
+  );
+  assert.notEqual(
+    SEARCH_PROVIDER_BUDGET_EXHAUSTED,
+    "PROVIDER_BUDGET_EXHAUSTED"
+  );
+  // Still an operational guardrail, so the UI keeps talking about a temporary
+  // internal hold rather than about the user's credits.
+  assert.equal(
+    classifyChatLimitCode(SEARCH_PROVIDER_BUDGET_EXHAUSTED),
+    "operational_guardrail"
+  );
 });
 
 test("nothing native is priced without either a ceiling or a way to refuse it", () => {

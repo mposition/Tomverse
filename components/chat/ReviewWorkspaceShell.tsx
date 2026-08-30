@@ -31,6 +31,7 @@ import {
   imageGroupMaxModels,
   resolveImageGroupMaxModels,
 } from "@/lib/imageGroupLimits";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
 
@@ -86,6 +87,14 @@ export async function ReviewWorkspaceShell() {
   // prop exists to prevent.
   let maxImageModels = imageGroupMaxModels();
 
+  // Which application-managed search backends this process can reach, resolved
+  // here for the same reason the image limit is: the client cannot answer it.
+  // The only client-side signal would be a public environment variable, and a
+  // public variable that says whether a search API key is set is a public
+  // variable that says whether a search API key is set. What crosses is one
+  // boolean per backend -- never the key, never its name, never the budget.
+  const webSearchBackendReadiness = resolveWebSearchBackendReadiness();
+
   // Playwright override, mirroring the __tomverse_e2e_auth pattern in the
   // application layout: with the database disabled the opt-in flag can never
   // read true, so a test opts in per-context with a cookie. Only honoured in
@@ -131,6 +140,7 @@ export async function ReviewWorkspaceShell() {
         // keep offering yesterday's limit after a deployment changed it. This
         // page is `force-dynamic`, so the value is the running process's.
         imageGroupMaxModels={maxImageModels}
+        webSearchBackendReadiness={webSearchBackendReadiness}
       />
     </GuestVerificationProvider>
   );
