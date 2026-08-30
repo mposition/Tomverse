@@ -154,14 +154,18 @@ test("the gate now admits the schema the harness scores", () => {
     assert.deepEqual(decision, { mode: "live", ceilingUsd: 50 });
 });
 
-test("the budget binding, not the schema, is what decides the real pair", () => {
-    // The register entry as the tree actually holds it. Moving the gate opened
-    // the harness and nothing else; the 2026-08-28 budget then funded exactly
-    // one pair, and what stands between it and a provider is the binding —
-    // the instrument the budget names, and the commit the run descends from.
+test("the shipped pair is closed, and the status answers before the budget", () => {
+    // The register entry as the tree actually holds it. It was funded on
+    // 2026-08-28, ran once on 2026-08-29, missed every floor of
+    // docs/policy/external-conversation-import-and-memory.md §12.3 and was
+    // revoked the same day
+    // (.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md §7).
     //
-    // Asserted as the *difference* two inputs make, because that is the claim:
-    // the schema is no longer the answer, and the binding is.
+    // The budget stays on the row — the approval was real and US$0.7094 was
+    // really spent — so "funded" and "runnable" are different questions, and
+    // the status is the one that answers first. Asserted with every other
+    // reason removed rather than absent: a full binding, a key, a frozen
+    // dataset and the right ordinal, and it still refuses.
     const target = harnessTarget();
     const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
@@ -169,9 +173,57 @@ test("the budget binding, not the schema, is what decides the real pair", () => 
             entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
     );
     assert.ok(pair, "the shipped pair is not registered");
+    assert.equal(pair.status, "revoked");
+    assert.ok(pair.evalBudget, "the spent budget was dropped rather than kept");
+
     const base = {
         live: true,
         registerEntry: pair,
+        hasApiKey: true,
+        datasetFrozen: target.datasetFrozen,
+        datasetPurpose: target.datasetPurpose,
+        datasetSchemaVersion: target.datasetSchemaVersion,
+        commitKnown: true,
+    };
+    assert.deepEqual(
+        decideEvalRunMode({
+            ...base,
+            budgetBindingProblems: [],
+            budgetTupleFailures: [],
+            runShaDescendsFromApproval: true,
+            runOrdinal: 1,
+        }),
+        { mode: "refused", reason: "pair_not_runnable" }
+    );
+    // And ordinal 2 — the reproducibility run that was not approved — is
+    // refused for the status too, not for the ordinal.
+    assert.equal(
+        decideEvalRunMode({
+            ...base,
+            budgetBindingProblems: [],
+            budgetTupleFailures: [],
+            runShaDescendsFromApproval: true,
+            runOrdinal: 2,
+        }).reason,
+        "pair_not_runnable"
+    );
+});
+
+test("the binding still decides a pair the register leaves open", () => {
+    // The claim the schema-3 transition was about, kept alive against a
+    // synthetic open entry now that the real one is closed: past the schema
+    // gate, what stands between a funded pair and a provider is the binding —
+    // the instrument the budget names, and the commit the run descends from.
+    //
+    // Asserted as the *difference* three inputs make, because that is the
+    // claim: the schema is no longer the answer, and the binding is.
+    const target = harnessTarget();
+    const base = {
+        live: true,
+        registerEntry: {
+            status: "candidate",
+            evalBudget: { maxUsd: 6.285, maxProviderDispatchedRuns: 2 },
+        },
         hasApiKey: true,
         datasetFrozen: target.datasetFrozen,
         datasetPurpose: target.datasetPurpose,
@@ -196,13 +248,13 @@ test("the budget binding, not the schema, is what decides the real pair", () => 
             budgetBindingProblems: [],
             budgetTupleFailures: [],
             runShaDescendsFromApproval: true,
-            // Which of the two approved runs this would be. The budget names
-            // a run count, so an invocation that does not say refuses — the
+            // Which of the two approved runs this would be. A budget that
+            // names a run count refuses an invocation that does not say — the
             // ceiling is per-run and nothing here can count what earlier runs
             // spent.
             runOrdinal: 1,
         }),
-        { mode: "live", ceilingUsd: pair.evalBudget.maxUsd }
+        { mode: "live", ceilingUsd: 6.285 }
     );
 });
 

@@ -599,6 +599,19 @@ checkout 깊이를 고친 뒤 재개한 1회차입니다. **provider에 닿았�
 case별 gold는 보지 않았으나 run-level aggregate와 failure category를 먼저
 보았고, 그 사실이 감사 기록 5.1절에 적혀 있습니다.
 
-**2회차는 자동으로 이어지지 않습니다.** 11.2절대로 1회차를 검토한 뒤 사용자의
-명시적 실행 지시가 있을 때만 시작하며, 1회차 미사용액(US$5.58)은 2회차 상한으로
-이월되지 않습니다.
+**2회차는 승인되지 않았고 pair는 종료했습니다**(2026-08-29, @mposition). 세
+기준 모두 임계값과의 차이가 커서 재현성 확인이 답할 질문이 없고, critical
+bulk-safe 채택은 0건 기준에서 41건입니다. `gpt-5-6-luna::mem-extract-v6`는
+register에서 `revoked`이며, 예산·지출·artifact·감사 기록은 역사적 증거로
+남습니다. 미사용액 US$5.58은 다른 pair로도 후속 prompt version으로도
+**이전되지 않습니다.**
+
+`gpt-5-4-mini::mem-extract-v6`는 평가하지 않았고 `evalBudget: null`을
+유지합니다.
+
+**다음 작업은 유료 실행이 아니라 provider-free 진단입니다** — 41건의 critical
+채택, kind/polarity 불일치, 미반환, gold 미인정 반환을 prompt 결함 · scoring
+taxonomy 불일치 · gold 결함 · 실제 모델 오류로 가릅니다. 진단 전에는
+`mem-eval-succ-5` gold도 `mem-extract-v6` prompt도 고치지 않으며, 수정이
+필요하면 동결본을 바꾸지 않고 새 `datasetVersion` 또는 `promptVersion`으로
+갑니다.
