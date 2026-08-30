@@ -57,7 +57,15 @@ npm --workspace @tomverse/mobile exec cap add ios      # macOS + Xcode only
 npm run build:mobile-shell && npm --workspace @tomverse/mobile run cap:sync
 ```
 
-Neither has been generated or built in this repository. Verified requirements,
+Neither has been generated or built in this repository, and neither can be
+finished yet: `appId` here is the spike's identifier. The deep-link association
+files depend on the final one — `assetlinks.json` carries the final
+`applicationId` plus the SHA-256 fingerprint of the signing certificate, and
+`apple-app-site-association` carries `TEAMID.BUNDLEID`. A placeholder in either
+is worse than an absent file, because a failed verification is cached rather
+than retried.
+
+Verified requirements,
 read from the Capacitor 8.5.0 packages themselves:
 
 | | Value | Source |
