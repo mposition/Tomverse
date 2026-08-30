@@ -531,6 +531,21 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  comparisonReviewItemFeedback: (userId) =>
+    prisma.comparisonReviewItemFeedback.findMany({
+      where: { userId },
+      select: {
+        comparisonReviewId: true,
+        reviewItemId: true,
+        section: true,
+        verdict: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   // Behavioural data about the user, so theirs. `properties` is deliberately
   // absent: it is a free-form Json bag whose keys are not enumerated anywhere,
   // and passing an unreviewed field bag through is the one thing an allowlist

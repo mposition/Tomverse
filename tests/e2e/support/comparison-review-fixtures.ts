@@ -1,5 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 import { openRecentConversation } from "./app-fixtures";
+import {
+  comparisonReviewItems,
+  type ComparisonReviewItemSource,
+} from "@/lib/comparisonReviewItemFeedback";
 
 /**
  * Fixtures for the AI comparison review dialog, shared by the behavioural
@@ -91,12 +95,7 @@ export async function mockComparisonReview(
         });
         return;
       }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          id: "review-1",
-          result: {
+      const result = {
             primary: {
               reviewerModelId: "mistral-medium-3-1",
               result: {
@@ -206,7 +205,33 @@ export async function mockComparisonReview(
                   sharedVerifiedQuoteCount: 1,
                 }
               : null,
-          },
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "review-1",
+          result,
+          // Derived by the same function the route uses, so the fixture cannot
+          // drift from the real ids: a hard-coded digest here would keep
+          // passing after the derivation changed.
+          reviewItems: [
+            ...comparisonReviewItems(
+              result.primary.result as ComparisonReviewItemSource,
+              "primary"
+            ),
+            ...(result.secondary
+              ? comparisonReviewItems(
+                  result.secondary.result as ComparisonReviewItemSource,
+                  "secondary"
+                )
+              : []),
+          ].map((item) => ({
+            id: item.id,
+            reviewer: item.reviewer,
+            section: item.section,
+            ordinal: item.ordinal,
+          })),
           responseMap: [
             {
               responseId: "A",

@@ -309,6 +309,14 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // AI Review's operational record: that a run round-trips content-free,
+    // that a guest run lands at all (it produces no ComparisonReview row), and
+    // that the 90-day purge reaches only what it should.
+    "tests/integration/comparison-review-run-telemetry.db.test.ts",
+    // The per-item feedback contract: the unique index really is the
+    // idempotency key, a verdict is scoped to one person, and both cascades
+    // are the deletion path the data-domain registry claims.
+    "tests/integration/comparison-review-item-feedback.db.test.ts",
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",

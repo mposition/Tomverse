@@ -15,6 +15,22 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "comparison_review_started",
   "comparison_review_completed",
   "comparison_review_failed",
+  // The evidence chain past the review itself.
+  //
+  // `comparison_review_item_verified` fires when the user asks for the
+  // separate per-item web check -- the step that turns "the reviewer says
+  // these two answers disagree" into "and here is what the live web says
+  // about it". `comparison_review_item_feedback` is the user's own verdict on
+  // one review item.
+  //
+  // Content-free by schema: the first carries the check's own closed status,
+  // the second a closed verdict enum. Neither carries the item's text, the
+  // quote it cites, the question, or an identifier that could be joined back
+  // to any of them -- the review item id is per-review and deliberately
+  // absent, because a set of them beside a timestamp narrows a small
+  // population toward one conversation.
+  "comparison_review_item_verified",
+  "comparison_review_item_feedback",
   "followup_sent",
   "file_attached",
   "conversation_saved",
@@ -33,6 +49,11 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "promotion_pass_activated",
   "return_day_1",
   "return_day_7",
+  // Day 30 completes the retention series the AI Review value question is
+  // asked in. Emitted by the same one-shot lifecycle check as the other two,
+  // so a user who was away on the exact day is counted by nothing -- which is
+  // why the scorecard reports these as a floor rather than a rate.
+  "return_day_30",
   "subscription_cancelled",
   "model_finder_viewed",
   "model_finder_started",
@@ -434,6 +455,30 @@ export const analyticsPropertiesSchema = z
     // What the package turned out to be, as the parser read it -- not as the
     // package claimed. The claim is display-only and never reaches analytics.
     package_import_source: z.enum(["agent-skill", "tomverse-native"]).optional(),
+    // The per-item web check's own answer, as the verification endpoint
+    // classified it. The summary sentence it wrote is NOT sent: it is model
+    // prose about the user's question.
+    review_item_verification: z
+      .enum(["supported", "unsupported", "inconclusive"])
+      .optional(),
+    // The user's verdict on one review item. A closed enum and nothing else --
+    // no free-text "tell us more" reaches analytics, and the item it is about
+    // is identified only inside the account's own feedback row.
+    review_item_feedback: z
+      .enum(["helpful", "incorrect", "unclear", "missing_point", "withdrawn"])
+      .optional(),
+    // Which list the item came from, so "incorrect" on a contradiction can be
+    // told apart from "incorrect" on an omission. A closed enum mirroring the
+    // review result's own sections.
+    review_item_section: z
+      .enum([
+        "consensus",
+        "contradictions",
+        "differences",
+        "missingPoints",
+        "verificationNeeded",
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((properties, context) => {

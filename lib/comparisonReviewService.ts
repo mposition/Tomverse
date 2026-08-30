@@ -6,6 +6,7 @@ import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   accessibleComparisonReviewers,
   buildComparisonReviewPrompt,
+  COMPARISON_REVIEW_PROMPT_VERSION,
   computeReviewAgreement,
   comparisonReviewResultSchema,
   estimateComparisonReviewTokens,
@@ -34,6 +35,11 @@ import {
 } from "@/lib/perplexityUsageCapture";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
+import {
+  emptyAttemptRecord,
+  type ComparisonReviewAttemptRecord,
+} from "@/lib/comparisonReviewRunCore";
+import { ComparisonReviewRunRecorder } from "@/lib/comparisonReviewRunTelemetry";
 import {
   recordModelFailure,
   recordModelSuccess,
@@ -184,13 +190,54 @@ type ReviewAttempt = {
 export const runComparisonReview = async (
   subject: ComparisonReviewSubject,
   input: ComparisonReviewInput,
-  options: { traceId: string; candidates?: AiModel[] }
+  options: {
+    traceId: string;
+    candidates?: AiModel[];
+    /**
+     * What the operational record needs that the review itself does not.
+     *
+     * Passed by the caller rather than derived here because only the caller
+     * knows whether this is a guest or an account run and which conversation
+     * it belongs to -- and because the service must keep working when it is
+     * absent, which is what makes a telemetry outage cost nothing but
+     * telemetry.
+     */
+    telemetry?: {
+      subjectKind: "guest" | "account";
+      conversationId: string | null;
+      userId: string | null;
+    };
+  }
 ): Promise<ComparisonReviewRun> => {
   const { traceId } = options;
   const candidates =
     options.candidates ??
     (await resolveComparisonReviewers(subject, input.responses));
-  if (!candidates.length) throw new ComparisonReviewerUnavailableError();
+  const recorder = options.telemetry
+    ? new ComparisonReviewRunRecorder({
+        traceId,
+        subjectKind: options.telemetry.subjectKind,
+        subjectKey: subject.access.subjectKey,
+        userId: options.telemetry.userId,
+        conversationId: options.telemetry.conversationId,
+        reviewMode: input.reviewMode,
+        language: input.language || "en",
+        responseCount: input.responses.length,
+        promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
+      })
+    : null;
+
+  if (!candidates.length) {
+    // A refusal, not a failure: nothing was sent, so nothing here is evidence
+    // about a reviewer model's health, and it must not land in a
+    // provider-failure rate.
+    await recorder?.finish(
+      "refused_before_provider",
+      "COMPARISON_REVIEWER_UNAVAILABLE"
+    );
+    throw new ComparisonReviewerUnavailableError();
+  }
+  recorder?.noteDualAvailable(candidates.length > 1);
 
   const reviewPrompt = buildComparisonReviewPrompt({
     question: input.question,
@@ -206,7 +253,16 @@ export const runComparisonReview = async (
 
   const attemptReview = async (
     candidate: AiModel
-  ): Promise<ReviewAttempt | null> => {
+  ): Promise<{
+    attempt: ReviewAttempt | null;
+    record: ComparisonReviewAttemptRecord;
+  }> => {
+    const attemptStartedAt = Date.now();
+    const record: ComparisonReviewAttemptRecord = {
+      ...emptyAttemptRecord(),
+      reviewerModelId: candidate.id,
+      reviewerProvider: candidate.provider,
+    };
     let leaseId: string | null = null;
     let reservation: ChatUsageReservation | null = null;
     let providerUsageTraceId: string | null = null;
@@ -242,7 +298,15 @@ export const runComparisonReview = async (
             contextWindowTokens: outputBudget.limitTokens,
           })
         );
-        return null;
+        return {
+          attempt: null,
+          record: {
+            ...record,
+            status: "refused",
+            errorCode: "COMPARISON_REVIEW_CANDIDATE_OVER_CONTEXT",
+            durationMs: Date.now() - attemptStartedAt,
+          },
+        };
       }
       const grant = await acquireChatAccess(subject.access, budget, {
         traceId,
@@ -267,6 +331,9 @@ export const runComparisonReview = async (
           }
         | undefined;
       let generationError: unknown;
+      // Counted, not just retried: a reviewer that needs a second attempt on
+      // most runs is degrading, and a success rate alone cannot show it.
+      let retryCount = 0;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           generated = await generateText({
@@ -286,6 +353,7 @@ export const runComparisonReview = async (
           break;
         } catch (error) {
           generationError = error;
+          retryCount += 1;
         }
       }
       if (!generated) throw generationError || new Error("No review output.");
@@ -313,7 +381,12 @@ export const runComparisonReview = async (
 
       const successfulReservation = reservation;
       reservation = null;
-      await settleChatUsage(
+      // The settlement's own status ("settled" or "refunded") is what makes
+      // reservation/settlement reconciliation checkable from the operational
+      // record. Nothing about the credit transaction itself changes here: the
+      // call, its arguments and its lock order are exactly as they were, and
+      // the result is only read.
+      const settlement = await settleChatUsage(
         successfulReservation,
         {
           inputTokens: generated.usage.inputTokens,
@@ -322,18 +395,31 @@ export const runComparisonReview = async (
           outcome: "completed",
         },
         { providerUsageSnapshot }
-      ).catch((settlementError) =>
+      ).catch((settlementError) => {
         console.error("Comparison review settlement failed:", {
           traceId,
           candidate: candidate.id,
           settlementError,
-        })
-      );
+        });
+        return null;
+      });
       await Promise.all([
         recordProviderSuccess(candidate.provider),
         recordModelSuccess(candidate.id),
       ]);
-      return { candidate, result, usageCredits: budget.usageCredits };
+      return {
+        attempt: { candidate, result, usageCredits: budget.usageCredits },
+        record: {
+          ...record,
+          status: "completed",
+          durationMs: Date.now() - attemptStartedAt,
+          inputTokens: generated.usage.inputTokens ?? 0,
+          outputTokens: generated.usage.outputTokens ?? 0,
+          reservedCredits: budget.usageCredits,
+          settlementStatus: settlement?.status ?? null,
+          retryCount,
+        },
+      };
     } catch (error) {
       if (reservation) {
         if (candidate.provider === "perplexity" && providerUsageTraceId) {
@@ -391,7 +477,21 @@ export const runComparisonReview = async (
         reviewerModelId: candidate.id,
         ...safeErrorMetadata(error),
       });
-      return null;
+      const metadata = safeErrorMetadata(error);
+      return {
+        attempt: null,
+        record: {
+          ...record,
+          // The same distinction the health counters just made: a local
+          // refusal never reached a provider, so it is `refused` and stays out
+          // of the reviewer-failure rate.
+          status: isLocalRefusal ? "refused" : "failed",
+          durationMs: Date.now() - attemptStartedAt,
+          errorCode: metadata.code ?? "COMPARISON_REVIEW_FAILED",
+          errorCategory: metadata.name ?? null,
+          retryCount: 0,
+        },
+      };
     } finally {
       if (providerUsageTraceId) {
         discardPerplexityUsage(providerUsageTraceId);
@@ -402,15 +502,26 @@ export const runComparisonReview = async (
 
   let primaryAttempt: ReviewAttempt | null = null;
   for (const candidate of candidates) {
-    primaryAttempt = await attemptReview(candidate);
+    const outcome = await attemptReview(candidate);
+    // The record is the LAST candidate tried, not the first: when a reviewer
+    // is skipped and the next one succeeds, the run's story is the one that
+    // ran. Each skipped candidate is still visible in its own structured log
+    // line and in the provider health counters.
+    recorder?.noteAttempt("primary", outcome.record);
+    primaryAttempt = outcome.attempt;
     if (primaryAttempt) break;
   }
-  if (!primaryAttempt) throw new ComparisonReviewFailedError();
+  if (!primaryAttempt) {
+    await recorder?.finish("failed", "COMPARISON_REVIEW_FAILED");
+    throw new ComparisonReviewFailedError();
+  }
 
   let secondaryAttempt: ReviewAttempt | null = null;
   for (const candidate of candidates) {
     if (candidate.id === primaryAttempt.candidate.id) continue;
-    secondaryAttempt = await attemptReview(candidate);
+    const outcome = await attemptReview(candidate);
+    recorder?.noteAttempt("secondary", outcome.record);
+    secondaryAttempt = outcome.attempt;
     if (secondaryAttempt) break;
   }
 
@@ -429,6 +540,23 @@ export const runComparisonReview = async (
       ? computeReviewAgreement(primaryAttempt.result, secondaryAttempt.result)
       : null,
   };
+
+  // Grounding is recorded from the PRIMARY reviewer's own stats, which is the
+  // result the dialog opens on. It is an exact-quote match rate and nothing
+  // more: it says the reviewer's quotes exist in the answers they were
+  // attributed to, never that the review's conclusions are correct
+  // (lib/sourceGrounding.ts).
+  recorder?.noteGrounding({
+    totalCitations: primaryAttempt.result.groundingStats.totalCitations,
+    verifiedCitations: primaryAttempt.result.groundingStats.verifiedCitations,
+    level:
+      primaryAttempt.result.groundingStats.totalCitations > 0
+        ? primaryAttempt.result.confidence
+        : null,
+  });
+  await recorder?.finish(
+    secondaryAttempt ? "completed_dual" : "completed_primary_only"
+  );
 
   return {
     result: dualResult,

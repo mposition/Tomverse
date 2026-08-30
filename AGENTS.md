@@ -932,6 +932,57 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
 - marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
 
+# AI Review (교차검토) 품질과 M5
+
+AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
+그리고 **AI Review를 설명하는 제품 문구**를 건드리기 전에 읽습니다.
+
+- `docs/policy/ai-review-m5-quality-contract.md`
+- `docs/ui-contracts/ai-review-evidence-chain.md`
+
+절대 조건:
+
+- **`M5 readiness complete`와 `M5 eligible`은 한 척도의 두 눈금이 아니라 서로
+  다른 두 상태입니다.** 앞은 저장소만으로 판정하고(도구가 있고 테스트되고 막아야
+  할 것을 막는가), 뒤는 production 관측·유료 평가·사람의 서명을 요구합니다.
+  `judgeM5()`가 두 목록을 각각 받고 각각 전부 충족을 요구하며, **readiness에서
+  eligibility를 유도하지 않습니다.** 실제 운영 데이터 없이 M5라고 선언하지
+  않습니다.
+- **source grounding은 사실 정확도가 아닙니다.** `exactQuoteMatchRate`는
+  reviewer의 인용문이 그 인용문이 귀속된 답변에 실제로 있는지만 말합니다.
+  `lib/sourceGrounding.ts`가 저장된 `confidence`를 이 이름으로 번역하는 유일한
+  경계이고, 그 위로는 "출처 일치도"만 씁니다.
+- **두 reviewer가 있다는 사실과 두 reviewer가 합의했다는 사실은 다릅니다.**
+  `computeReviewAgreement()`가 재는 것은 출처 일치도 등급이 같은가와 정확히 같은
+  문구를 몇 개 인용했는가뿐입니다. 이를 "결론에 동의했다"로 표시하면 계약
+  위반입니다.
+- **"서로 다른 provider"라고 말하지 않습니다.** 두 번째 reviewer는 모델 id가
+  다른 다음 후보로 고르므로 같은 provider의 두 모델이 뽑히는 구성이 가능합니다.
+  실제로 그랬는지는 `ComparisonReviewRun.crossProvider`가 매 실행 기록합니다.
+- **client analytics를 서버 신뢰성 지표로 쓰지 않습니다.** reliability는
+  `ComparisonReviewRun`(서버가 모델을 부르는 경로에서 씀), adoption은
+  `ProductAnalyticsEvent`(동의 필요)이고 둘을 한 점수로 접지 않습니다. 두
+  계측기의 차이는 `telemetryCoverage()`가 비교로만 보고합니다.
+- **`ComparisonReviewRun`에 사용자 콘텐츠를 넣지 않습니다.** 질문·답변·검토
+  문장·인용문·파일명이 들어갈 수 있는 컬럼이 없어야 하며,
+  `contentFreeViolations()`와 두 테스트가 이를 강제합니다.
+- **표본이 부족하면 `insufficient_evidence`입니다.** 0점도 M5도 아닙니다. 모든
+  scorecard 지표가 자기 분모와 제외 조건을 갖고 다닙니다.
+- **유료 평가는 fail-closed입니다.** `--live` 없이는 아무것도 호출하지 않고,
+  `--live`가 있어도 사람이 승인한 `evalBudget`·동결된 decision set·깨끗한 named
+  commit·미사용 run ordinal이 모두 필요합니다. `evalBudget`과 register의
+  `approved` 전환은 **사람이 씁니다.**
+- **평가 dataset을 만든 에이전트가 사람 승인까지 대신하지 않습니다.**
+  `fabricated_safety_claim`과 `false_consensus_safety`는 사람만 판정하며,
+  harness는 그 둘에 대해 0을 지어내지 않고 블라인드 검토 기록이 없는 artifact를
+  증거에서 제외합니다.
+- **캐시된 `ComparisonReview`를 읽을 수 없게 만들지 않습니다.** 저장된 result는
+  읽을 때 스키마로 검증되므로, claim에 필드를 추가하면 사용자가 이미 크레딧을
+  치른 결과가 사라지고 다시 과금됩니다. 항목 id를 저장하지 않고 파생하는 이유가
+  이것입니다.
+- scorecard와 보고서는 **자기가 평가하는 register·flag·release gate를 수정하지
+  않습니다.**
+
 ## Mobile chat composer invariant
 
 Before changing `ChatInput.tsx`, `MobileChatShell.tsx`, composer styles, tool chips, or mobile bottom-dock layout, read:
