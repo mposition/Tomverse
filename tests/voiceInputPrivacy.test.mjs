@@ -8,6 +8,7 @@ import {
   transcribeWithOpenAi,
 } from "../lib/voiceTranscriptionPortCore.ts";
 import { OpenAiVoiceTranscriptionProvider } from "../lib/voiceTranscriptionPort.ts";
+import { PROVIDER_API_KEY_ENV_NAMES } from "../lib/modelRegistryShared.ts";
 
 /**
  * The promise the whole feature is arranged around: docs/policy/voice-input.md
@@ -337,10 +338,15 @@ test("credentials, rate limits and refusals are classified apart", async () => {
 });
 
 test("a missing key is reported rather than thrown", async () => {
-  const previousDedicated = process.env.VOICE_TRANSCRIPTION_API_KEY;
-  const previousShared = process.env.OPENAI_API_KEY;
-  delete process.env.VOICE_TRANSCRIPTION_API_KEY;
-  delete process.env.OPENAI_API_KEY;
+  // Every name the shared resolver accepts for OpenAI, not just the canonical
+  // one: clearing only `OPENAI_API_KEY` would leave an alias standing and this
+  // test would pass for the wrong reason on a machine that has one set.
+  const cleared = new Map(
+    ["VOICE_TRANSCRIPTION_API_KEY", ...PROVIDER_API_KEY_ENV_NAMES.openai].map(
+      (name) => [name, process.env[name]]
+    )
+  );
+  for (const name of cleared.keys()) delete process.env[name];
   try {
     const result = await new OpenAiVoiceTranscriptionProvider().transcribe({
       audio: new Uint8Array([1]),
@@ -355,7 +361,8 @@ test("a missing key is reported rather than thrown", async () => {
       notConfigured: true,
     });
   } finally {
-    if (previousDedicated) process.env.VOICE_TRANSCRIPTION_API_KEY = previousDedicated;
-    if (previousShared) process.env.OPENAI_API_KEY = previousShared;
+    for (const [name, value] of cleared) {
+      if (value !== undefined) process.env[name] = value;
+    }
   }
 });

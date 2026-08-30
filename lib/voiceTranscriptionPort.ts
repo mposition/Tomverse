@@ -1,5 +1,6 @@
 import "server-only";
 
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
   DEFAULT_VOICE_TRANSCRIPTION_MODEL,
   transcribeWithOpenAi,
@@ -23,23 +24,29 @@ import {
  *
  * ## The key
  *
- * `VOICE_TRANSCRIPTION_API_KEY`, falling back to `OPENAI_API_KEY`.
+ * `VOICE_TRANSCRIPTION_API_KEY`, falling back to the shared OpenAI key.
  *
- * Its own variable first, because "the account that answers chat" and "the
- * account that transcribes audio" are not the same decision: a deployment that
- * wants voice audio going to a separate account, a separate organisation or a
- * separate data-processing agreement can have that without touching chat
- * (docs/policy/voice-input.md §11.3). The fallback exists so that a staging
+ * The same shape as `OPENAI_IMAGE_API_KEY` in `lib/imageProviderAdapter.ts`,
+ * and for the same reason: "the account that answers chat" and "the account
+ * that transcribes audio" are not the same decision, so a deployment that
+ * wants voice audio going to a separate account, organisation or
+ * data-processing agreement can have that without touching chat
+ * (docs/policy/voice-input.md §11.3). The fallback exists so a staging
  * environment already holding a chat key does not need a second one to try the
- * feature — but production is expected to set the dedicated variable, and
- * whether it did is recorded rather than assumed.
+ * feature.
+ *
+ * The fallback goes through `resolveProviderApiKey` rather than naming
+ * `OPENAI_API_KEY` here. A second inline list of provider key names is exactly
+ * how three modules came to disagree about Google's, and
+ * `tests/providerApiKeyNames.test.mjs` refuses one.
  */
 export class OpenAiVoiceTranscriptionProvider implements VoiceTranscriptionPort {
   async transcribe(
     request: VoiceTranscriptionRequest
   ): Promise<VoiceTranscriptionResult> {
     const apiKey =
-      process.env.VOICE_TRANSCRIPTION_API_KEY || process.env.OPENAI_API_KEY;
+      process.env.VOICE_TRANSCRIPTION_API_KEY?.trim() ||
+      resolveProviderApiKey("openai");
     if (!apiKey) {
       // No status, because no request was made. Reported rather than thrown:
       // the caller decides how loudly to say so, and a missing key is an
@@ -77,7 +84,7 @@ export const voiceTranscriptionKeySource = ():
   | "dedicated"
   | "shared_openai"
   | "missing" => {
-  if (process.env.VOICE_TRANSCRIPTION_API_KEY) return "dedicated";
-  if (process.env.OPENAI_API_KEY) return "shared_openai";
+  if (process.env.VOICE_TRANSCRIPTION_API_KEY?.trim()) return "dedicated";
+  if (resolveProviderApiKey("openai")) return "shared_openai";
   return "missing";
 };
