@@ -129,28 +129,28 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
     file: "scripts/report-anthropic-cache-efficiency-core.mjs",
     sendsATier: false,
     reason:
-      "Reads `service_tier` off the Usage API's *report* and uses it to decide which rows this registry can price. It builds no provider request at all -- the only URL it constructs is a read of GET /v1/organizations/usage_report/messages, where `group_by[]=service_tier` is what makes the field come back rather than null. A report that priced rows without asking for the tier would rate a batch row at Standard without ever seeing that it was batch, which is the opposite of what this check protects.",
+      "Reads `service_tier`, `inference_geo` and `speed` off the Usage API's *report* and uses them to decide which rows this registry can price. It builds no Messages API request at all -- the only URL it constructs is a read of GET /v1/organizations/usage_report/messages, where `group_by[]` is what makes each field come back rather than null. A report that priced rows without asking for the tier would rate a batch row at Standard without ever seeing that it was batch; the same argument put `inference_geo` in the base group-by, since `us` costs 1.1x on every token category. `speed` is opt-in there because its group-by needs a beta header.",
     mentions: [
       "* price: `service_tier` must be `standard`, and `speed` must be `standard` or",
-      'SERVICE_TIER: "service_tier_not_standard",',
+      "SERVICE_TIER: \"service_tier_not_standard\",",
+      "INFERENCE_GEO: \"inference_geo_not_global\",",
+      "INFERENCE_GEO_UNKNOWN: \"inference_geo_not_reported\",",
+      "\"service_tier\",",
+      "// Grouped from the start rather than on request. `inference_geo: \"us\"`",
+      "\"inference_geo\",",
       "// without asking for `service_tier` would be pricing rows it could not see",
-      'for (const dimension of ["model", "service_tier", "context_window"]) {',
       "serviceTier:",
       "typeof result.service_tier === \"string\"",
       "? result.service_tier",
-      'if (row.serviceTier !== null && row.serviceTier !== "standard") {',
-      "serviceTier: row.serviceTier,",
-      // `inference_geo`, same shape: read off the report, never sent. The
-      // report deliberately does NOT group by it, so a non-null value can only
-      // reach here from a caller that asked for it -- and any value other than
-      // `global` makes the row unpriced rather than being assumed away, because
-      // `us` carries a 1.1x multiplier on every token category.
-      'INFERENCE_GEO: "inference_geo_not_global",',
       "inferenceGeo:",
-      'typeof result.inference_geo === "string"',
+      "typeof result.inference_geo === \"string\"",
       "? result.inference_geo",
-      'if (row.inferenceGeo !== null && row.inferenceGeo !== "global") {',
-      "// pricing -- but this report is not grouping by `inference_geo`, so a",
+      "if (row.serviceTier !== null && row.serviceTier !== \"standard\") {",
+      "// `inference_geo`, handled by value rather than by \"is it global\".",
+      "if (row.inferenceGeo === \"us\") {",
+      "if (row.inferenceGeo === null) {",
+      "if (row.inferenceGeo !== \"global\" && row.inferenceGeo !== \"not_available\") {",
+      "serviceTier: row.serviceTier,",
       "inferenceGeo: row.inferenceGeo,",
     ],
   },
@@ -158,11 +158,11 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
     file: "scripts/report-anthropic-cache-efficiency.mjs",
     sendsATier: false,
     reason:
-      "The runner for the module above. It names the grouping dimensions it asked the Usage API for, and renders the tier of a row it refused to price. Both are read-side; neither reaches a Messages API request, which this script never makes.",
+      "The runner for the module above. It names the grouping dimensions it asked the Usage API for, sends the fast-mode beta header exactly when it groups by `speed`, and renders the tier or geo of a row it refused to price. All read-side; none of it reaches a Messages API request, which this script never makes.",
     mentions: [
-      'groupedBy: ["model", "service_tier", "context_window"],',
       "? `service_tier=${entry.serviceTier}`",
-      "? `inference_geo=${entry.inferenceGeo}`",
+      "? `inference_geo=${entry.inferenceGeo} (1.1x on every token category; no verified rate here)`",
+      "? \"inference_geo was grouped but not reported, so the multiplier is unknown\"",
     ],
   },
   {

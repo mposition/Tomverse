@@ -181,6 +181,33 @@ export type ScheduledModelPrice = {
      * instant that selected it is worse than either alone.
      */
     effectiveDate: string;
+    /**
+     * The UTC date this application read the change off the provider, as
+     * `YYYY-MM-DD`.
+     *
+     * A separate field from `effectiveFrom` because they answer different
+     * questions and routinely differ. `verifiedAt` is provenance -- when did
+     * somebody see this on the price page -- and `effectiveFrom` is the
+     * boundary this registry bills on. A provider announces a change on a
+     * *date*, not at a published instant, so the two cannot be the same value
+     * without inventing a time of day for the announcement.
+     *
+     * Collapsing them was how the Sonnet 5 entry came to look wrong: it
+     * carried 2026-08-11 while the announcement was 2026-08-10, and with one
+     * field there was nowhere to say that the second is the reading and the
+     * first is the boundary chosen from it.
+     *
+     * The boundary rule, applied when only a date is known: take the first
+     * instant of the UTC day *after* the announcement. That is the
+     * conservative direction under this file's non-retroactivity rule -- it
+     * never files a request under a decision that had not been published when
+     * the request ran, which taking the announcement day's own midnight would
+     * do for every request earlier in that day.
+     *
+     * Optional: an entry whose provider published an explicit effective
+     * instant has nothing to reconcile.
+     */
+    verifiedAt?: string;
 };
 
 export type ModelPricingProfile = {
@@ -1057,7 +1084,8 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         priceSource: "anthropic_claude_sonnet_5_introductory_price_to_2026_08_31",
         pricingVersion: "anthropic-claude-sonnet-5-intro-2026-08-04",
         effectiveDate: "2026-08-04",
-        // 2026-08-11: Anthropic made the introductory rate the standard one.
+        // Anthropic made the introductory rate the standard one: announced
+        // 2026-08-10, billed here from 2026-08-11T00:00:00Z.
         //
         // The launch announcement put US$2 / US$10 on an end date of
         // 2026-08-31 with US$3 / US$15 from 2026-09-01, and this file was
@@ -1069,15 +1097,28 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         // not occur."
         //
         // So this entry carries the *same* rates as the profile above. That
-        // reads like a no-op and is not one: what changed on 2026-08-11 is the
-        // term, not the number, and the term is the thing this registry
-        // records. Writing it down as a dated revision is what lets a
-        // settlement say which decision priced it -- `...-intro-2026-08-04`
-        // for a turn taken while the rate was provisional,
-        // `...-standard-2026-08-11` for one taken after it was permanent --
-        // and is what stops the next reader re-deriving the cancelled increase
-        // from a `priceSource` that still says "introductory_price_to
-        // _2026_08_31".
+        // reads like a no-op and is not one: what changed is the term, not the
+        // number, and the term is the thing this registry records. Writing it
+        // down as a dated revision is what lets a settlement say which
+        // decision priced it -- `...-intro-2026-08-04` for a turn taken while
+        // the rate was provisional, `...-standard-2026-08-11` for one taken
+        // after it was permanent -- and is what stops the next reader
+        // re-deriving the cancelled increase from a `priceSource` that still
+        // says "introductory_price_to_2026_08_31".
+        //
+        // Two dates, and they are not the same date on purpose. The
+        // announcement is 2026-08-10; the boundary is 2026-08-11T00:00:00Z.
+        // Anthropic published a date and not an instant, so `verifiedAt`
+        // records the reading and `effectiveFrom` records the boundary chosen
+        // from it -- the first instant of the following UTC day, which is the
+        // only choice that never prices a request by a decision that had not
+        // been published when it ran. Backdating to 2026-08-10T00:00:00Z would
+        // do exactly that for every request earlier in the announcement day.
+        //
+        // Here the choice moves no money at all: the rates are identical
+        // either side, so all it decides is which `pricingVersion` a turn on
+        // 2026-08-10 is filed under. It is written down because the next
+        // revision will not be so forgiving.
         //
         // Deliberately *not* a US$3 / US$15 entry dated 2026-09-01. Scheduling
         // a price Anthropic has said will not happen would overstate every
@@ -1090,9 +1131,11 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
                 effectiveFrom: "2026-08-11T00:00:00.000Z",
                 tiers: flatTier(2, 10, 0.1, 2.5),
                 priceSource:
-                    "anthropic_claude_sonnet_5_standard_api_list_price_confirmed_2026_08_11",
+                    "anthropic_claude_sonnet_5_standard_api_list_price_announced_2026_08_10",
                 pricingVersion: "anthropic-claude-sonnet-5-standard-2026-08-11",
                 effectiveDate: "2026-08-11",
+                // The announcement, not the boundary. See above.
+                verifiedAt: "2026-08-10",
             },
         ],
     },
@@ -1416,6 +1459,21 @@ for (const profile of MODEL_PRICING) {
                     `effectiveFrom, so the snapshot would record a date the ` +
                     `price did not start on.`
             );
+        }
+        if (revision.verifiedAt !== undefined) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(revision.verifiedAt)) {
+                throw new Error(`${label} has a malformed verifiedAt.`);
+            }
+            // A boundary before the reading would be this registry billing a
+            // change it had not yet seen -- the retroactive application the
+            // whole mechanism exists to prevent, arriving through provenance
+            // instead of through rates.
+            if (Date.parse(`${revision.verifiedAt}T00:00:00.000Z`) > instant) {
+                throw new Error(
+                    `${label} takes effect before the date it was verified on, ` +
+                        `so it would price requests by a change nobody had read yet.`
+                );
+            }
         }
         // A revision that reuses the version before it makes two different
         // decisions indistinguishable in every stored snapshot, which is the
