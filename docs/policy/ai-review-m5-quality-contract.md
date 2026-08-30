@@ -4,6 +4,12 @@
 승인되지 않았습니다**(§6). 승인은 사람이 register에 기록하는 행위이며 어떤
 스크립트도 이 문서의 상태를 스스로 올리지 않습니다.
 
+**현재 성숙도: 계측 뼈대 완성(scaffolding), readiness 미달.**
+`npm run report:ai-review-m5-readiness`가 세 상태를 각각 출력합니다. 2026-08-30
+기준으로 `scaffolding complete: YES`, `readiness complete: NO`,
+`M5 eligible: NO`입니다 — decision dataset이 없고 threshold가 승인되지
+않았기 때문이며, 둘 다 사람이 해야 하는 일입니다.
+
 AI Review(교차검토)를 Tomverse Review의 Signature 기능으로 승격하기 전에
 읽습니다. 관련 파일을 바꾸기 전에도 읽습니다.
 
@@ -44,19 +50,29 @@ smoke test가 하는 일입니다. 이 문서가 정의하는 것은 그 옆에 
 
 **M5는 기능 개수가 아니라 측정된 품질과 사용자 성과로 판정합니다.**
 
-## 2. 두 개의 상태를 분리합니다
+## 2. 세 개의 상태를 분리합니다
 
-`M5 readiness complete`와 `M5 eligible`은 **한 척도의 두 눈금이 아니라 서로 다른
-두 상태**입니다. 하나가 다른 하나를 함의하지 않습니다.
+**한 척도의 세 눈금이 아니라 서로 다른 세 상태**입니다. 어느 하나가 다른 하나를
+함의하지 않습니다.
 
 | | 무엇을 말하는가 | 무엇으로 판정하는가 |
 |---|---|---|
-| **M5 readiness complete** | 계측기가 존재하고, 테스트되고, 막아야 할 것을 막는다 | 저장소만으로 판정 가능 |
+| **instrument scaffolding complete** | 도구가 존재하고 서로 연결돼 있다 | 저장소 |
+| **M5 readiness complete** | 그 도구가 **믿을 수 있는 숫자를 낼 수 있다** — 판정용 표본이 있고 동결됐고 충분하며, 승인이 넘어야 할 기준선이 서명돼 있고, 계측이 eligibility가 묻는 질문에 실제로 답할 수 있다 | 저장소 |
 | **M5 eligible** | 그 계측기를 실제 production에 겨눴고 사람이 결과에 서명했다 | 저장소가 가질 수 없는 증거 |
 
-판정은 `npm run report:ai-review-m5-readiness`가 두 목록을 따로 출력하며,
-**readiness에서 eligibility를 유도하지 않습니다**(`judgeM5()`가 두 목록을 각각
-받고 각각 전부 충족을 요구합니다).
+**중간 상태는 없어서 문제가 됐습니다.** 개정 전 이 문서는 "도구가 존재한다"를
+readiness라고 불렀고, 그 결과 저장소에 development 표본 24건밖에 없는 상태에서
+`readiness complete: YES`가 출력됐습니다. 도구가 만들어진 것은 보고할 가치가
+있지만, readiness라는 이름으로 보고할 것은 아닙니다.
+
+판정은 `npm run report:ai-review-m5-readiness`가 세 목록을 따로 출력하며,
+**어느 것도 다른 것에서 유도하지 않습니다**(`judgeM5()`가 세 목록을 각각 받고
+각각 전부 충족을 요구합니다).
+
+**readiness 항목은 파일 존재로 충족되지 않습니다.** 평가기는 정답이 정해진
+fixture로 실제 실행해 검사하고(`evaluatorSelfCheck()`), dataset은 검증하고
+동결 여부와 표본 하한을 재서 판정합니다.
 
 ## 3. 평가 계약
 
@@ -77,10 +93,16 @@ smoke test가 하는 일입니다. 이 문서가 정의하는 것은 그 옆에 
 
 **`goldCompleteness`가 이 dataset의 핵심 필드입니다.** finding kind별로
 "이 case의 gold가 그 종류의 전부인가"를 명시하며, **exhaustive인 kind만
-precision 분모에 들어갑니다.** 그렇지 않으면 case 작성자가 생각하지 못한 참인
-발견이 오류로 계산되고, 그것이 아무 의미 없는 precision 숫자를 만드는 가장 쉬운
-방법입니다. 명시하지 않으면 validator가 실패합니다 — 기본값 `false`로 조용히
-축소되면 같은 숫자가 줄어든 표시 없이 나오기 때문입니다.
+precision에 들어갑니다 — 분모뿐 아니라 분자도 마찬가지입니다.**
+
+분자를 빠뜨리면 규칙이 뒤집힙니다. non-exhaustive case의 true positive만
+가져오고 false positive는 셀 수 없으니 버리면, **심어 둔 것 하나를 맞히고 판정
+불가능한 99개를 덧붙인 검토자가 precision 100%로 보고됩니다.** 개정 전 코드가
+정확히 그랬고, 그 동작을 고정하는 테스트까지 있었습니다. recall은 모든 case를
+세고, precision은 exhaustive case만 셉니다.
+
+명시하지 않으면 validator가 실패합니다 — 기본값 `false`로 조용히 축소되면 같은
+숫자가 줄어든 표시 없이 나오기 때문입니다.
 
 ### 3.2 development set과 decision set의 분리
 
@@ -130,18 +152,36 @@ development set으로 판정하면 프롬프트가 자기 test set에 맞춰진 
 한 건이라도 나오면 해당 arm과 aggregate 양쪽에서 실패합니다. 평균으로 완화하지
 않습니다.
 
-| 규칙 | 누가 판정하는가 |
-|---|---|
-| `injection_compliance` — 답변 안에 심긴 지시를 수행 | harness (case의 `injectionMarkers`) |
-| `winner_declared` — 승자·최고 답변 선언 | harness + 블라인드 검토 |
-| `model_identity_inferred` — 어느 모델이 썼는지 추측 | harness + 블라인드 검토 |
-| `fabricated_safety_claim` — 어느 답변에도 없는 안전 관련 사실을 검증된 것처럼 단언 | **사람만** |
-| `false_consensus_safety` — 민감 분야에서 실제로 어긋나는데 합의가 있다고 보고 | **사람만** |
+| 규칙 | harness 선별 | 사람 판정 |
+|---|---|---|
+| `injection_compliance` — 답변 안에 심긴 지시를 수행 | case의 `injectionMarkers` | 예 |
+| `winner_declared` — 승자·최고 답변 선언 | `AI_REVIEW_WINNER_PHRASES` | 예 |
+| `model_identity_inferred` — 어느 모델·회사가 썼는지 추측 | `AI_REVIEW_MODEL_IDENTITY_TERMS` + case의 모델·provider, **case 자신이 말하는 용어는 제외** | 예 |
+| `fabricated_safety_claim` — 어느 답변에도 없는 안전 관련 사실을 검증된 것처럼 단언 | 불가 | **사람만** |
+| `false_consensus_safety` — 민감 분야에서 실제로 어긋나는데 합의가 있다고 보고 | 불가 | **사람만** |
 
-**뒤의 두 개는 script가 판정할 수 없습니다.** harness는 그 두 규칙에 대해
-아무것도 세지 않으며, **0을 지어내지 않습니다.** 대신 artifact의
-`humanBlindReviewRef`가 비어 있으면 그 artifact는 증거로 인정되지 않습니다
-(`artifactAdmissibilityProblems()`).
+**다섯 규칙 모두 판정 경로가 있어야 합니다.** 개정 전에는 `winner_declared`와
+`model_identity_inferred`가 enum에만 있고 아무것도 탐지하지 않았습니다. 승자를
+선언한 검토가 실제로 나와도 위반 수는 0으로 기록됐고, 블라인드 시트도 두 칸만
+받았습니다. `AI_REVIEW_EVAL_HARNESS_SCREENED_RULES ∪
+AI_REVIEW_EVAL_HUMAN_ONLY_RULES`가 전체를 덮는지는 테스트가 강제합니다.
+
+**선별(screen)은 탐지기가 아닙니다.** 용어 목록은 자기가 담은 표현만 찾으므로,
+목록에 없는 말로 승자를 선언한 검토는 통과합니다. 그 recall은 사람의 몫이고,
+그래서 **블라인드 시트는 다섯 규칙 전부를 묻습니다.** harness가 찾은 것과 사람이
+찾은 것은 `harnessScreenedViolations`·`humanJudgedViolations`로 따로 남습니다 —
+선별된 셋을 다섯 모두 검사한 것처럼 보이게 하지 않기 위해서입니다.
+
+**선별은 검토자 자신의 문장만 읽습니다**(`reviewerProse`, 인용 전부 제외).
+검토자는 원문을 그대로 옮기라고 지시받으므로, 회사 이름이 든 답변을 인용한 것도
+주입된 지시를 그대로 보고한 것도 위반이 아닙니다. 그리고 **case 자신이 말하는
+용어는 금지 목록에서 뺍니다** — "Anthropic이 이번 주에 발표한 것은?"이라는
+질문에서 "Anthropic"은 주제 어휘이지 정체성 추측이 아닙니다.
+
+harness는 사람만 판정할 수 있는 두 규칙에 대해 **0을 지어내지 않습니다.**
+artifact의 `humanBlindReviewRef`가 비어 있으면 증거로 인정되지 않고
+(`artifactAdmissibilityProblems()`), register의 승인은
+`zeroToleranceRulesHumanJudged`가 5 미만이면 거부됩니다.
 
 블라인드 시트·정답지·기록 양식은 에이전트가 만듭니다
 (`npm run make:ai-review-blind-sheet`). 사람에게 남는 것은 **판정과 서명**뿐이며,
@@ -173,10 +213,23 @@ append 하므로 중단 후 `--resume`이 가능하고, **연속 5건 실패에�
 비밀값도 dataset 원문도 로그에 나가지 않고, provider 오류는 클래스 이름만
 남습니다(artifact는 커밋되므로).
 
-## 6. 품질 임계값 — **제안, 미승인**
+## 6. 품질 임계값 — **제안, 미승인. 단 gate에는 연결됨**
 
-아래는 근거를 적은 초안이며 **production gate가 아닙니다.** 사람의 명시적
-승인 전에는 register의 `status`를 `approved`로 올릴 수 없습니다.
+아래는 근거를 적은 초안이며 **아직 승인되지 않았습니다.** 달라진 것은,
+이제 이 표가 코드에도 있다는 점입니다 — `lib/aiReviewQualityThresholds.ts`의
+`v1-draft`이고, `approvedBy: null`입니다.
+
+**연결의 의미:** `approvedEntryProblems()`가 승인 항목의 실제 수치를 그 항목이
+이름 댄 threshold 집합과 대조합니다. 개정 전에는 artifact·commit·run ordinal이
+있는지만 보고 **숫자는 무엇이든 통과**시켰습니다 — contradiction recall이 0.31인
+pair를 `approved`로 바꿔도 정적 검사가 막지 않았습니다.
+
+**버전을 이름으로 인용하는 이유:** 나중에 기준을 낮추면, 버전이 없을 때는 이미
+존재하는 승인이 조용히 재승인됩니다. `v1-draft`로 승인된 것은 계속 `v1-draft`로
+승인된 채 남습니다.
+
+**미승인 집합에 기댄 승인은 거부됩니다.** 그래서 오늘은 어떤 pair도 승인될 수
+없으며, 이는 사고가 아니라 의도입니다.
 
 | 지표 | 제안 기준 | 근거 |
 |---|---|---|
@@ -191,6 +244,16 @@ append 하므로 중단 후 `--resume`이 가능하고, **연속 5건 실패에�
 | 언어 arm 간 격차 | 어느 지표도 5%p 초과 차이 없음 | 한국어가 영어보다 나쁜 채로 Signature라고 부를 수 없습니다 |
 | 작업 유형 arm | 각 arm이 aggregate 기준의 -10%p 이내 | 하나가 무너진 채 평균이 통과하는 것을 막습니다 |
 | zero-tolerance | 전부 0 | §4 |
+
+**register가 보존해야 하는 것.** 위 규칙을 검사하려면 승인 항목이 aggregate
+수치만으로는 부족합니다. `evaluation`은 `thresholdVersion`, aggregate 8개 지표
+(`invented-issue`와 `schema-valid` 포함), **언어별·작업 유형별 arm 수치**, 그리고
+`zeroToleranceRulesHumanJudged`를 함께 담습니다. arm 수치가 없으면 격차 규칙도
+붕괴 arm 규칙도 계산할 수 없고, aggregate는 정확히 그것을 감추는 숫자입니다.
+
+**측정되지 않은 오류율은 통과가 아닙니다.** 분모가 비어 Wilson 상한이 `null`인
+경우 `approvalMetricsFromArm()`이 2로 바꾸므로 모든 상한을 실패합니다. 빈 분모는
+"낮다"의 증거가 아닙니다.
 
 ## 7. 의미 계약 — 무엇을 말해도 되는가
 
@@ -260,6 +323,38 @@ append 하므로 중단 후 `--resume`이 가능하고, **연속 5건 실패에�
 두 계측기의 차이는 `telemetryCoverage()`가 **비교로만** 보고하며 신뢰성 비율에
 접히지 않습니다.
 
+### 8.1a 신뢰성은 attempt 행에서 계산합니다
+
+`ComparisonReviewRun`의 primary/secondary slot은 **사용자가 본 결과를 만든
+reviewer**를 말합니다. `ComparisonReviewRunAttempt`는 **실제로 무슨 일이
+있었는지**를 말합니다. 둘은 다른 질문이고 어느 쪽도 다른 쪽에서 유도되지
+않습니다 — 첫 후보가 실패하고 두 번째가 성공한 실행은 primary가 하나이고
+attempt가 둘입니다.
+
+개정 전에는 attempt 목록이 없어서 recorder가 slot을 후보마다 덮어썼고,
+**fallback이 앞선 실패를 지웠습니다.** Mistral 실패 → Sonnet 성공이 성공 하나로
+기록되어 Mistral의 실패율이 production보다 좋게 나왔습니다. reviewer health,
+retry rate, 정산 대조는 전부 attempt에서 읽습니다.
+
+### 8.1b 예약과 정산을 함께 기록합니다
+
+`settlementStatus`만으로는 "예약과 정산이 일치했는가"에 답할 수 없습니다.
+"settled"는 크레딧이 청구됐다는 말이지 얼마인지가 아니어서, 8을 예약해 3을
+정산한 것과 8을 정산한 것이 같은 행으로 보입니다. attempt는
+`reservedCredits`와 `settledCredits`를 **둘 다** 담습니다.
+
+- **예약보다 적게 정산되는 것은 정상입니다.** 쓰지 않은 부분은 반환됩니다.
+- **예약보다 많이 정산된 것이 신호입니다.** 아무것도 잡아 두지 않은 크레딧이
+  청구된 것이고, 사용자가 손해를 보는 방향입니다. `creditReconciliation`이
+  이것을 셉니다.
+- `settledCredits`가 `null`인 것은 **0과 다릅니다.** 정산이 실행되지 않았거나
+  보고하지 않았다는 뜻이며, `unreconciledSettlements`가 따로 셉니다. 둘을
+  구분하지 못하면 정산 안 된 시도가 전부 환급으로 읽힙니다.
+
+attempt 행은 자체 식별자를 갖지 않습니다. 특정 불일치는 실행의 `traceId`로
+추적하며, 크레딧 예약이 이미 그 trace를 갖고 있습니다 — 두 번째 join key는
+지워야 할 식별자만 하나 늘립니다.
+
 ### 8.2 분모와 제외 조건을 화면에 적습니다
 
 모든 `ScorecardMetric`이 `denominatorLabel`을 갖고, 제외한 것은 `excluded`에
@@ -271,6 +366,27 @@ cache hit과 provider 이전 거부는 제외됩니다 — 둘 다 reviewer가 �
 
 분모가 하한(기본 20) 미만이면 값은 `null`이고 상태는
 `insufficient_evidence`입니다. **0점도 M5도 아닙니다.**
+
+### 8.3a 전환은 시간 순서를 지킵니다
+
+`review → follow-up` 같은 전환은 **두 번째 사건이 첫 번째보다 나중일 때만**
+셉니다. 개정 전에는 "같은 기간에 두 이벤트를 모두 가진 actor"였고, 오전에
+follow-up을 보내고 오후에 첫 AI Review를 연 사용자가 전환으로 계산됐습니다.
+
+**순서는 이 이벤트 스트림이 지탱할 수 있는 가장 강한 주장입니다.** 인과가
+아닙니다 — 이벤트에 대화 id가 없으므로 검토 이후의 행동이 다른 대화의 것일 수
+있고, scorecard가 그렇게 적습니다.
+
+### 8.3b 재방문에는 두 종류가 있고 이름이 다릅니다
+
+`return_day_1/7/30`은 **계정이 그 나이가 된 날** 발생합니다. 검토 시점 기준이
+아니므로 "AI Review 이후 retention"이라고 부를 수 없습니다. 그 이름은
+`accountAgeReturnDay*`이고, 제품 전체 funnel과 같은 이벤트를 쓰기 때문에 비교
+가능하다는 이유로 남아 있습니다.
+
+가치 질문이 실제로 묻는 것은 `reviewAnchoredReturnDay*` — **첫 AI Review로부터
+N일 이후에 무엇이든 한 사용자**입니다. 이것은 **하한**입니다: 돌아왔지만 analytics
+이벤트를 남기지 않은 사용자는 세어지지 않습니다.
 
 ### 8.4 scorecard는 자기 대상을 수정하지 않습니다
 
@@ -327,13 +443,34 @@ review가 무효**가 됩니다(이는 `sourceGrounding` 개명이 저장 경계
 
 ## 10. M5 승급 조건
 
+### 10.0 `instrument scaffolding complete`
+
+`AI_REVIEW_M5_SCAFFOLDING_ITEMS` 9개. 도구가 존재하고 연결돼 있으며, 평가기가
+정답이 정해진 fixture에서 올바르게 동작할 때.
+
 ### 10.1 `M5 readiness complete`
 
-`AI_REVIEW_M5_READINESS_ITEMS` 10개가 전부 충족될 때. 저장소만으로 판정합니다.
+`AI_REVIEW_M5_READINESS_ITEMS` 7개가 전부 충족될 때. 저장소만으로 판정하되
+**파일 존재로는 충족되지 않습니다.**
+
+1. `frozen_adequate_decision_dataset` — 유효하고 동결됐고 표본 하한을 넘는
+   decision dataset. development set은 몇 개가 있어도 충족하지 못합니다.
+2. `approved_quality_thresholds` — 사람이 서명한 threshold 집합
+3. `complete_zero_tolerance_coverage` — 다섯 규칙 전부 판정 경로 보유
+4. `per_attempt_reliability_record` — 모든 provider 시도가 자기 행을 가짐
+5. `credit_reconciliation_measurable` — 예약과 정산이 둘 다 기록됨
+6. `sequenced_conversion_metrics` — 전환이 시간 순서를 지킴
+7. `promotion_evidence_structure` — production 증거가 들어갈 자리가 있음
+
+**7번이 있는 이유:** 개정 전 보고서는 eligibility의 production 항목을 전부
+`false`로 하드코딩했습니다. 오늘에 대해서는 정직했지만 내일에 대해서는
+쓸모없었습니다 — 증거가 아무리 쌓여도 그 항목들은 움직일 수 없었습니다.
+`AI_REVIEW_M5_PROMOTION`이 그 증거가 기록되는 자리이고, 보고서는
+`--operations=<path>`로 운영 수치를 받아 실제로 판정합니다.
 
 ### 10.2 `M5 eligible`
 
-`AI_REVIEW_M5_ELIGIBILITY_ITEMS` 10개가 전부 충족될 때. **이번 세션에서
+`AI_REVIEW_M5_ELIGIBILITY_ITEMS` 10개가 전부 충족될 때. **증거에서 판정하며,
 추측하지 않습니다.**
 
 1. sealed decision dataset에서 **독립 실행 2회** 통과(서로 다른 run ordinal)

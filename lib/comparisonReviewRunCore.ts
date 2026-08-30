@@ -66,6 +66,16 @@ export type ComparisonReviewAttemptRecord = {
     outputTokens: number;
     /** Credits the reservation held before the call. */
     reservedCredits: number;
+    /**
+     * What settlement actually charged.
+     *
+     * Null means settlement did not run or did not report, which is NOT the
+     * same as 0. `settlementStatus` alone cannot answer "did the reservation
+     * and the settlement agree": "settled" says credits were taken, not how
+     * many, so a reservation of 8 settling at 3 and one settling at 8 read
+     * identically -- and reconciliation is exactly that comparison.
+     */
+    settledCredits: number | null;
     /** What settlement did with them: settled, refunded, or unknown. */
     settlementStatus: string | null;
     retryCount: number;
@@ -81,9 +91,65 @@ export const emptyAttemptRecord = (): ComparisonReviewAttemptRecord => ({
     inputTokens: 0,
     outputTokens: 0,
     reservedCredits: 0,
+    settledCredits: null,
     settlementStatus: null,
     retryCount: 0,
 });
+
+/**
+ * One attempt as it is stored: the record plus where it sat in the run.
+ *
+ * A run keeps ALL of these, not two. The run row's primary/secondary slots say
+ * which reviewer produced the result the user saw; this list says what
+ * actually happened. A run where the first candidate failed and the second
+ * succeeded has one primary and two attempts, and collapsing the two questions
+ * is what let a fallback hide the failure that preceded it.
+ */
+export type ComparisonReviewAttemptEntry = ComparisonReviewAttemptRecord & {
+    /** 1-based order tried, across the whole run. */
+    ordinal: number;
+    slot: "primary" | "secondary";
+};
+
+/**
+ * Attempts that actually dispatched, which is the only population a reviewer
+ * failure rate may be computed over. A local refusal sent nothing and says
+ * nothing about the model.
+ */
+export const dispatchedAttempts = (
+    attempts: readonly ComparisonReviewAttemptEntry[]
+) =>
+    attempts.filter(
+        (attempt) => attempt.status === "completed" || attempt.status === "failed"
+    );
+
+/**
+ * Attempts whose settlement disagrees with what they reserved.
+ *
+ * A completed attempt that reserved credits and settled a different number is
+ * the reconciliation question, stated. An attempt with no settled figure at
+ * all is counted separately (`settledCredits === null`), because "we do not
+ * know" and "they disagree" call for different investigations.
+ */
+export const settlementMismatches = (
+    attempts: readonly ComparisonReviewAttemptEntry[]
+) => {
+    const completed = attempts.filter((attempt) => attempt.status === "completed");
+    return {
+        completed: completed.length,
+        unreported: completed.filter((attempt) => attempt.settledCredits === null)
+            .length,
+        // Settling BELOW the reservation is normal -- the unused part is
+        // released. Settling ABOVE it is not: it means more was charged than
+        // was ever held, which is the direction that costs a user credits
+        // nothing reserved for them.
+        overSettled: completed.filter(
+            (attempt) =>
+                attempt.settledCredits !== null &&
+                attempt.settledCredits > attempt.reservedCredits
+        ).length,
+    };
+};
 
 export type ComparisonReviewRunRecord = {
     traceId: string;
@@ -122,8 +188,11 @@ export type ComparisonReviewRunRecord = {
      * checkable rather than assumed.
      */
     crossProvider: boolean | null;
+    /** The reviewer that produced the primary result, not the first tried. */
     primary: ComparisonReviewAttemptRecord;
     secondary: ComparisonReviewAttemptRecord;
+    /** Every attempt, in the order they were tried. */
+    attempts: readonly ComparisonReviewAttemptEntry[];
     groundingTotalQuotes: number;
     groundingMatchedQuotes: number;
     /** The stored bucket, or null when nothing was quoted. */

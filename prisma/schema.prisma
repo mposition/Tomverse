@@ -362,10 +362,10 @@ model Conversation {
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
   continuationBridge    ConversationContinuationBridge?
-  user                  User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project               ConversationProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
   password              String?
   importedGuestKey      String?
 
@@ -804,11 +804,60 @@ model ComparisonReviewRun {
   sourceGroundingLevel      String?
   createdAt                 DateTime @default(now())
 
+  attempts ComparisonReviewRunAttempt[]
+
   @@index([createdAt])
   @@index([outcome, createdAt])
   @@index([userId, createdAt])
   @@index([subjectKey, createdAt])
   @@index([traceId])
+}
+
+/// One provider attempt inside one AI Review run.
+///
+/// The run row's primary/secondary columns say WHICH REVIEWER PRODUCED THE
+/// RESULT the user saw. This table says WHAT ACTUALLY HAPPENED. They are
+/// different questions and neither derives the other: a run where the first
+/// candidate failed and the second succeeded has one primary (the second) and
+/// two attempts (a failure and a success).
+///
+/// Without this table the failure disappeared. The recorder overwrote its
+/// primary slot with each candidate tried, so a fallback reported the
+/// successful reviewer and nothing else -- and reviewer failure rates, the
+/// numbers an M5 judgement reads, came out better than production was.
+///
+/// Content-free on the same terms as its parent: identifiers, closed enums,
+/// counts and timestamps only.
+model ComparisonReviewRunAttempt {
+  id               String              @id @default(cuid())
+  runId            String
+  run              ComparisonReviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// 1-based order the candidate was tried in, across the whole run.
+  ordinal          Int
+  /// Which result this attempt was trying to produce: "primary" or "secondary".
+  slot             String
+  reviewerModelId  String
+  reviewerProvider String
+  /// One of COMPARISON_REVIEW_ATTEMPT_STATUSES.
+  status           String
+  durationMs       Int?
+  errorCode        String?
+  errorCategory    String?
+  inputTokens      Int                 @default(0)
+  outputTokens     Int                 @default(0)
+  reservedCredits  Int                 @default(0)
+  /// What settlement actually charged. NULL when settlement did not run or
+  /// did not report -- which is not the same as 0, and the difference is the
+  /// whole point of recording it.
+  settledCredits   Int?
+  settlementStatus String?
+  retryCount       Int                 @default(0)
+  createdAt        DateTime            @default(now())
+
+  @@unique([runId, ordinal])
+  @@index([reviewerModelId, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
 }
 
 model ProductAnalyticsEvent {

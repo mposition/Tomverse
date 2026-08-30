@@ -5,6 +5,8 @@ import {
   COMPARISON_REVIEW_RUN_OUTCOMES,
   buildComparisonReviewRunRecord,
   comparisonReviewRunOutcome,
+  dispatchedAttempts,
+  settlementMismatches,
   contentFreeViolations,
   emptyAttemptRecord,
   reachedProvider,
@@ -41,6 +43,7 @@ const input = (overrides = {}) => ({
     reviewerProvider: "anthropic",
     status: "completed",
   },
+  attempts: [],
   groundingTotalQuotes: 8,
   groundingMatchedQuotes: 7,
   sourceGroundingLevel: "high",
@@ -188,4 +191,82 @@ test("a completed primary decides dual vs primary-only, whatever the secondary a
     }),
     "completed_primary_only"
   );
+});
+
+
+const entry = (overrides = {}) => ({
+  ...emptyAttemptRecord(),
+  ordinal: 1,
+  slot: "primary",
+  reviewerModelId: "mistral-medium-3-1",
+  reviewerProvider: "mistral",
+  status: "completed",
+  reservedCredits: 4,
+  settledCredits: 4,
+  ...overrides,
+});
+
+test("only attempts that dispatched count toward a reviewer's failure rate", () => {
+  const attempts = [
+    entry({ ordinal: 1, status: "failed" }),
+    entry({ ordinal: 2, status: "completed" }),
+    entry({ ordinal: 3, status: "refused" }),
+    entry({ ordinal: 4, status: "not_attempted" }),
+  ];
+  assert.deepEqual(
+    dispatchedAttempts(attempts).map((item) => item.ordinal),
+    [1, 2]
+  );
+});
+
+test("settling above the reservation is the mismatch; settling below it is not", () => {
+  const summary = settlementMismatches([
+    entry({ ordinal: 1, reservedCredits: 8, settledCredits: 3 }),
+    entry({ ordinal: 2, reservedCredits: 4, settledCredits: 9 }),
+    entry({ ordinal: 3, reservedCredits: 4, settledCredits: null }),
+    // A failed attempt is not a settlement question at all.
+    entry({ ordinal: 4, status: "failed", settledCredits: null }),
+  ]);
+  assert.equal(summary.completed, 3);
+  assert.equal(summary.overSettled, 1);
+  assert.equal(summary.unreported, 1);
+});
+
+test("a fallback keeps the failure and still names the reviewer that answered", () => {
+  // The two questions the run row and the attempt list answer separately.
+  const record = buildComparisonReviewRunRecord(
+    input({
+      outcome: "completed_primary_only",
+      attempts: [
+        entry({ ordinal: 1, status: "failed", settledCredits: 0 }),
+        entry({
+          ordinal: 2,
+          reviewerModelId: "claude-sonnet-5",
+          reviewerProvider: "anthropic",
+        }),
+      ],
+      primary: {
+        ...emptyAttemptRecord(),
+        reviewerModelId: "claude-sonnet-5",
+        reviewerProvider: "anthropic",
+        status: "completed",
+      },
+      secondary: emptyAttemptRecord(),
+    })
+  );
+  assert.equal(record.primary.reviewerModelId, "claude-sonnet-5");
+  assert.equal(record.attempts.length, 2);
+  assert.equal(record.attempts[0].reviewerModelId, "mistral-medium-3-1");
+  assert.equal(record.attempts[0].status, "failed");
+});
+
+test("no user content can reach an attempt row either", () => {
+  const forbidden = [
+    "경부고속도로는 언제 전 구간이 개통되었나요",
+    "The Eiffel Tower was completed in 1889",
+  ];
+  const record = buildComparisonReviewRunRecord(
+    input({ attempts: [entry(), entry({ ordinal: 2 })] })
+  );
+  assert.deepEqual(contentFreeViolations(record, forbidden), []);
 });

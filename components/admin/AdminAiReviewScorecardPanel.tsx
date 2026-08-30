@@ -190,7 +190,12 @@ export function AdminAiReviewScorecardPanel({
             <Rate
               label="Unreconciled settlements"
               metric={card.reliability.unreconciledSettlements}
-              detail="Not proof of a lost credit; the number that would move if reservations stopped settling"
+              detail="Completed attempts with no settled figure at all"
+            />
+            <Rate
+              label="Settled above reservation"
+              metric={card.reliability.creditReconciliation}
+              detail="Charged more than was held. Settling below a reservation is normal; above it is not."
             />
             <Count
               label="Duration p50 / p95"
@@ -275,9 +280,23 @@ export function AdminAiReviewScorecardPanel({
               metric={card.adoption.firstToSecondReview}
               detail="Counted from completions: starting twice is not returning to a result"
             />
-            <Rate label="D1 return" metric={card.adoption.returnDay1} />
-            <Rate label="D7 return" metric={card.adoption.returnDay7} />
-            <Rate label="D30 return" metric={card.adoption.returnDay30} />
+            <Rate
+              label="D1 after first review"
+              metric={card.adoption.reviewAnchoredReturnDay1}
+            />
+            <Rate
+              label="D7 after first review"
+              metric={card.adoption.reviewAnchoredReturnDay7}
+            />
+            <Rate
+              label="D30 after first review"
+              metric={card.adoption.reviewAnchoredReturnDay30}
+            />
+            <Rate
+              label="D7 by account age"
+              metric={card.adoption.accountAgeReturnDay7}
+              detail="Comparable with the product-wide funnel, which uses the same events. Not review retention."
+            />
             <Rate
               label="D7 · comparison-only cohort"
               metric={card.adoption.cohortReturnDay7.comparisonOnly}
@@ -290,8 +309,11 @@ export function AdminAiReviewScorecardPanel({
           <p className="mt-2 text-xs leading-5 text-zinc-600">
             The two cohorts self-selected. A difference between them is a
             difference in who used the feature as much as in what it did for
-            them. Return events fire only if the user opened the app on that
-            exact day, so these are a floor rather than a rate.
+            them. Every conversion above is ordered -- the second event must
+            follow the first -- which is the strongest claim these events
+            support: they carry no conversation id, so a later action may
+            belong to another thread. The review-anchored returns are a floor:
+            a user who came back and generated no event is not counted.
           </p>
         </div>
       ))}
