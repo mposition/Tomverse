@@ -1230,6 +1230,39 @@ export const ko = {
     // 외부 대화 Import (Release A). "다른 AI 서비스에서 가져오기"는 Data 탭의
     // "이 브라우저의 게스트 대화 가져오기"(auth.guestImportSectionTitle)와
     // 다른 기능이므로 명칭을 공유하지 않습니다 (policy §21).
+    continuation: {
+        ctaTitle: "Tomverse에서 이어가기",
+        ctaDescription: "가져온 이 대화로 새 Tomverse 대화를 시작합니다. 원본은 읽기 전용으로 그대로 남습니다.",
+        ctaAction: "Tomverse에서 이어가기",
+        disclosureNewConversation: "새 Tomverse 대화가 만들어집니다.",
+        disclosureSourceReadOnly: "가져온 원본은 읽기 전용으로 유지되며 바뀌지 않습니다.",
+        disclosureNotOurAnswer: "가져온 답변은 다른 AI 서비스가 쓴 것이며 Tomverse가 생성한 답변이 아닙니다.",
+        disclosureAttachments: "첨부파일과 이미지는 가져오지 않았고, 긴 메시지는 잘려 있을 수 있습니다.",
+        disclosurePartialContext: "가져온 대화 중 최근 일부만 AI context로 사용됩니다.",
+        confirm: "대화 만들기",
+        cancel: "취소",
+        creating: "만드는 중…",
+        createFailed: "대화를 만들지 못했습니다. 다시 시도해 주세요.",
+        unavailable: "가져온 대화 이어가기는 지금 사용할 수 없습니다.",
+        openConversation: "이어진 대화 열기",
+        sourceSectionTitle: "외부 대화 · 읽기 전용",
+        sourceSectionSubtitle: "{provider}에서 {date}에 가져옴",
+        externalAnswerBadge: "외부 답변",
+        divider: "여기부터 Tomverse에서 이어진 대화",
+        seedSummary: "가져온 메시지 {total}개 중 {used}개가 AI context로 사용됩니다.",
+        seedNone: "AI context로 사용되는 가져온 메시지가 없습니다.",
+        seedTruncated: "그중 {count}개는 잘려 있습니다.",
+        sourceDeleted: "가져온 원본이 삭제되었습니다. 아래 Tomverse 메시지는 그대로 유지됩니다.",
+        sourceLocked: "가져온 원본이 잠겨 있습니다. 가져오기 화면에서 잠금을 풀어야 여기서 볼 수 있습니다.",
+        shareDisabled: "가져온 대화에서 이어진 대화는 아직 공개 공유할 수 없습니다.",
+        composerPlaceholder: "대화를 이어서 입력하세요",
+        send: "보내기",
+        sending: "보내는 중…",
+        sendFailed: "메시지를 보내지 못했습니다. 다시 시도해 주세요.",
+        notFound: "대화를 찾을 수 없습니다.",
+        backToImports: "가져오기 목록으로",
+    },
+
     externalImport: {
         dataTabTitle: "다른 AI 서비스에서 가져오기",
         dataTabDescription:

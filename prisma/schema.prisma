@@ -84,6 +84,7 @@ model User {
   privacyRequests                      PrivacyRequest[]
   planChangeRequests                   PlanChangeRequest[]
   externalImports                      ExternalImport[]
+  continuationBridges                  ConversationContinuationBridge[]
   memoryItems                          MemoryItem[]
   memoryExtractionRuns                 MemoryExtractionRun[]
   routingRuns                          RoutingRun[]
@@ -360,6 +361,7 @@ model Conversation {
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
+  continuationBridge    ConversationContinuationBridge?
   user                  User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime               @default(now())
@@ -2722,7 +2724,8 @@ model ExternalConversation {
   /// the memories it is the last reachable evidence for (§7.1).
   password String?
 
-  messages ExternalMessage[]
+  messages            ExternalMessage[]
+  continuationBridges ConversationContinuationBridge[]
 
   @@unique([userId, conversationDigest])
   @@index([userId, externalStableId])
@@ -4762,4 +4765,92 @@ model ProviderWebhookEvent {
   @@unique([provider, providerEventId])
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])
+}
+
+/// The one row that says a Tomverse Conversation was started from an imported
+/// external conversation.
+///
+/// Policy: docs/policy/external-conversation-continuation.md.
+///
+/// ## What it is not
+///
+/// It is not a copy of the source. No external message text, no title and no
+/// provider conversation id lives here: the transcript stays in
+/// ExternalMessage, which is immutable, and this row only records *which*
+/// snapshot the user chose and what was seeded from it. Copying the title
+/// alone would put the source's own words back into a table the deletion of
+/// that source does not reach.
+///
+/// It is also not a lineage pointer. `sourceConversationDigest` names one
+/// immutable snapshot
+/// (docs/policy/external-conversation-import-and-memory.md §4.2), and the
+/// bridge never
+/// follows a newer snapshot of the same lineage -- the user chose the version
+/// they were reading.
+///
+/// ## Why the two deletes differ
+///
+/// `conversationId` cascades: a Tomverse conversation that is deleted takes
+/// its bridge with it, because the bridge is a fact about that conversation.
+///
+/// `externalConversationId` is `SetNull`: deleting the source must never take
+/// the user's own new messages with it. The FK going NULL is what makes
+/// `sourceDeletedAt` necessary -- a NULL alone reads exactly like a bridge
+/// whose source was never set, and the screen owes the owner the difference
+/// between "there is no original" and "the original was deleted".
+model ConversationContinuationBridge {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One bridge per conversation. A second bridge on the same conversation
+  /// would make "which source is this continuing" a question with two answers.
+  conversationId String       @unique
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  externalConversationId String?
+  externalConversation   ExternalConversation? @relation(fields: [externalConversationId], references: [id], onDelete: SetNull)
+
+  /// Provenance kept after the source is gone. Allowlist CHECK lives in the
+  /// migration; the application copy is lib/externalImportProviders.ts.
+  provider String
+
+  /// When the source snapshot was imported -- non-sensitive provenance the
+  /// screen states, and the only source timestamp kept here.
+  sourceImportedAt DateTime
+
+  /// Which immutable snapshot this bridge points at
+  /// (docs/policy/external-conversation-import-and-memory.md §4.1, §4.2). Server
+  /// computed, never rendered and never logged: it identifies a snapshot, it
+  /// is not an access credential and it is not shown to anyone.
+  sourceConversationDigest String
+  sourceDigestVersion      Int
+
+  /// What the seed was built from, for the screen's truncation disclosure and
+  /// for a later seed-version migration. Counts only -- never content.
+  sourceMessageCount        Int
+  seedFromOrdinal           Int
+  seedToOrdinal             Int
+  seedMessageCount          Int
+  seedTruncatedMessageCount Int
+  seedOmittedMessageCount   Int
+  contextSeedVersion        String
+
+  /// Set by the source deletion paths in the same transaction that removes the
+  /// source, before the cascade takes the rows the classification needs.
+  sourceDeletedAt DateTime?
+
+  /// Request-scoped idempotency
+  /// (docs/policy/external-conversation-continuation.md §5). One click that is
+  /// retried by the
+  /// browser or by a flaky network resolves to the same conversation; a second
+  /// deliberate fork carries a new key and is a new conversation.
+  idempotencyKey String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([externalConversationId])
 }

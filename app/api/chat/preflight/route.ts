@@ -33,7 +33,11 @@ import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
-import { isImageGenerationEnabledCached } from "@/lib/appSettings";
+import {
+    isExternalContinuationEnabledCached,
+    isImageGenerationEnabledCached,
+} from "@/lib/appSettings";
+import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
@@ -328,6 +332,40 @@ export async function POST(request: Request) {
             access.plan && planAllowsImageGeneration(access.plan)
         );
 
+        /*
+          The imported excerpt, priced here for exactly the reason the two
+          capability blocks are: this route quotes the credits and the chat
+          route sends the prompt, and a block counted on one side only is a
+          quote that does not describe the request
+          (docs/policy/external-conversation-continuation.md §5).
+
+          A comparison of a bridged conversation is not a shape the product
+          offers today -- a continuation is `productKey = "chat"` and this route
+          takes two or three models -- so in practice this resolves to the empty
+          string. It is wired anyway, because "the two routes price the same
+          blocks" is the contract `buildChatTurnSystemBlocks` exists to keep,
+          and an exception that is true today is how the drift it was written
+          for came back.
+        */
+        let continuationSeedPrompt = "";
+        if (session?.user?.id && payload.conversationId !== "private-chat") {
+            try {
+                if (await isExternalContinuationEnabledCached()) {
+                    const seed = await loadContinuationTurnSeed({
+                        userId: session.user.id,
+                        conversationId: payload.conversationId,
+                        request,
+                    });
+                    continuationSeedPrompt = seed?.prompt.text ?? "";
+                }
+            } catch {
+                // Quote without it rather than refuse the preparation. The
+                // chat route's own read fails the same way and sends the same
+                // prompt, so the two stay in agreement.
+                continuationSeedPrompt = "";
+            }
+        }
+
         // Bring the shared ceiling latch up to date before anything is
         // priced. A breach recorded by another instance, or by this one before
         // a restart, has to be visible here or the refusal it earned lasts
@@ -398,6 +436,7 @@ export async function POST(request: Request) {
                 promptText: payload.prompt,
                 imageGenerationFlagEnabled,
                 planAllowsImageGeneration: planAllowsImages,
+                continuationSeedPrompt,
             });
             estimate.addTokens(turnSystemBlocks.promptTokens);
             for (const message of history) {

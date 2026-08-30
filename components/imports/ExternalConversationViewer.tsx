@@ -9,6 +9,7 @@ import {
     SnapshotLockPanel,
     SnapshotUnlockGate,
 } from "@/components/imports/ConversationLockControls";
+import { ContinueInTomverseCard } from "@/components/imports/ContinueInTomverseCard";
 import {
     SourceDeletionNotice,
     type SourceDeletionImpactView,
@@ -361,6 +362,18 @@ export function ExternalConversationViewer({
                             {t("externalImport.loadMore")}
                         </button>
                     )}
+
+                    {/* The one entry point to "Tomverse에서 이어가기"
+                        (docs/policy/external-conversation-continuation.md §8).
+                        Below the transcript rather than above it: the choice
+                        this offers is about the conversation the owner has just
+                        read, and it must never be reachable before the messages
+                        the disclosure refers to. Reaching here at all means the
+                        snapshot loaded, so the lock gate has already been
+                        satisfied. */}
+                    <ContinueInTomverseCard
+                        externalConversationId={conversationId}
+                    />
 
                     <SnapshotLockPanel
                         conversationId={conversationId}

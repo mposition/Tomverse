@@ -32,7 +32,8 @@ import { createHash } from "node:crypto";
 export type PublicSnapshotKey =
   | "app-settings"
   | "model-catalog"
-  | "image-generation-flag";
+  | "image-generation-flag"
+  | "external-continuation-flag";
 
 const TTL_MS: Record<PublicSnapshotKey, number> = {
   // Short enough that an operational flag flip (chat disabled during an
@@ -46,6 +47,14 @@ const TTL_MS: Record<PublicSnapshotKey, number> = {
   // TTL, and the admin toggle invalidates it, so an operator who turns image
   // generation off does not keep being announced.
   "image-generation-flag": 10_000,
+  // Read once per authenticated chat turn that names a conversation, to decide
+  // whether to look for a continuation bridge at all
+  // (docs/policy/external-conversation-continuation.md §7). Its own key for the
+  // same two reasons the image flag has one: `app-settings` is served to
+  // anyone who asks, and this is default-off rollout state. Same TTL, and the
+  // admin toggle invalidates it, so turning continuation off stops the
+  // injection now rather than in ten seconds' time.
+  "external-continuation-flag": 10_000,
 };
 
 type Snapshot<T> = {
