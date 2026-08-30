@@ -499,23 +499,32 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evaluation: null,
         },
         {
-            // **Registered, unfunded, and that is the whole state.** The
-            // register's own rule is that an implementation agent may add a
-            // `candidate` entry while `candidate` → `approved` stays a human
-            // procedure; §12.5's budget is a second, separate approval, and
-            // the 2026-08-28 decision that authorised building v6 said in the
-            // same breath that the decision-grade budget is not in its scope.
-            // So the pair exists — `decideEvalRunMode` can answer about it
-            // rather than failing on an unknown pair — and it refuses with
-            // `no_eval_budget` until somebody funds it.
+            // **Measured, closed, and the budget stays on the record.**
             //
-            // v6 exists because schema-3 scoring compares a candidate's
+            // run1 (2026-08-29) reached a provider, scored all 1,150 cases and
+            // missed every §12.3 floor by a wide margin — precision Wilson
+            // lower 0.6826 against 0.95, recall 0.7212 against 0.85, bulk
+            // eligibility 0.7163 against 0.85 — with 41 critical-category
+            // bulk-safe adoptions against a gate of zero. The reviewer
+            // declined the §12.4 reproducibility run on the ground that a
+            // second run has no question left to answer at that distance, and
+            // closed the pair
+            // (.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md §7).
+            //
+            // `revoked` rather than an emptied budget, because the approval
+            // was real and US$0.7094 of it was really spent. The status gate
+            // sits ahead of the budget in `decideEvalRunMode()`, so the row
+            // keeps its history without keeping permission to run: unused
+            // budget transfers to no other pair and to no later prompt
+            // version, and the tuple it is bound to names `mem-extract-v6`.
+            //
+            // v6 existed because schema-3 scoring compares a candidate's
             // `polarity` to the gold's and a v5 candidate has no such field,
-            // so no v5 pair can be scored against `mem-eval-succ-4` at all
+            // so no v5 pair could be scored against `mem-eval-succ-4` at all
             // (.github/audits/memory-eval-gold-contract-2026-08-27.md §10.1).
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v6",
-            status: "candidate",
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-28",
             notes:
@@ -534,9 +543,13 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "runs. Unused budget from the first run does not carry into " +
                 "the second; a first run truncated at its ceiling is not " +
                 "decision-grade and the ceiling is not raised without a new " +
-                "approval. The second run is the section 12.4 reproducibility " +
-                "run and starts only on an explicit instruction after the " +
-                "first has been reviewed.",
+                "approval. Run 1 ran on 2026-08-29 " +
+                "(https://github.com/mposition/Tomverse/actions/runs/33226038813), " +
+                "1,150/1,150 cases in 36m50s for US$0.7094, admissible 6/6, " +
+                "and did not pass section 12.3. Closed the same day: the " +
+                "reproducibility run was not approved and the pair is revoked. " +
+                "Negative result, citable as evidence: " +
+                ".github/audits/memory-eval-v6-succ5-run1-2026-08-29.md.",
             evalBudget: {
                 approvedBy: "@mposition",
                 // Per invocation, which is what the harness enforces: half of

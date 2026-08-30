@@ -101,6 +101,20 @@ export type ChatTurnSystemBlocksInput = {
   imageGenerationFlagEnabled: boolean;
   /** `planAllowsImageGeneration(tier)` for this caller. */
   planAllowsImageGeneration: boolean;
+  /**
+   * The imported-conversation excerpt this turn carries, already rendered and
+   * already made inert by `lib/externalContinuationSeedPrompt.ts`. Empty
+   * string on every turn that has none, which is all of them outside a bridged
+   * conversation (docs/policy/external-conversation-continuation.md §5).
+   *
+   * It arrives here rather than being built here for the reason the memory
+   * block is built elsewhere too: this module is pure and the seed needs a
+   * database read. What it gains by passing *through* here is the one thing
+   * that matters -- it is counted in `promptTokens`, so the number the
+   * preparation step quotes and the number the send is priced at are the same
+   * number by construction rather than by review.
+   */
+  continuationSeedPrompt?: string;
 };
 
 export type ChatTurnSystemBlocks = {
@@ -204,6 +218,14 @@ export const buildChatTurnSystemBlocks = (
     ...(input.appManagedSearchEnabled
       ? [{ role: "system" as const, content: APP_MANAGED_WEB_SEARCH_PROMPT }]
       : []),
+    // Last among the system blocks, and still above the conversation history
+    // -- which is where the import policy's §9.1 order puts untrusted imported
+    // material: below the safety policy and the capability blocks, above the
+    // turns it is context for. Its own rules are stated inside it, before the
+    // fenced region they govern.
+    ...(input.continuationSeedPrompt
+      ? [{ role: "system" as const, content: input.continuationSeedPrompt }]
+      : []),
   ];
 
   // Priced like any other input. The tool *definitions* are a separate cost
@@ -220,7 +242,8 @@ export const buildChatTurnSystemBlocks = (
     (artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0) +
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
-      : 0);
+      : 0) +
+    estimateTextTokens(input.continuationSeedPrompt ?? "");
 
   return {
     artifactPlan,

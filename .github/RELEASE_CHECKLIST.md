@@ -53,6 +53,13 @@ Date / timezone:    ____________________
       (`forbidden_nextjs_imports_in_shared_packages`) and proves every
       workspace package still type-checks with no DOM, no Node types and no
       app alias
+- [ ] `npm run check:capacitor-local-bundle` — scans every `capacitor.config.*`
+      for `server.url`, `server.cleartext` and `server.allowNavigation`. All
+      three are documented by Capacitor as not for production, and a remote
+      `server.url` is refused by the delivery plan (§2) and the mobile
+      authentication policy ("Deliberately excluded") because it changes the
+      origin the bearer-token boundary is defined against. Read as text, so a
+      URL supplied through an environment variable is still a finding
 - [ ] `npm run check:push-scope` — reports PUSH-01's metric
       (`unapproved_push_infrastructure_components_in_v1`). The gate is met by an
       absence, so this is the artefact that states it; approving a use case is
@@ -71,6 +78,13 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset
+      is structurally sound (a case with an unstated `goldCompleteness` or a
+      `prompt_injection` case with no marker produces numbers over the wrong
+      denominators rather than an error) and that no reviewer pair is marked
+      `approved` without the evidence
+      `docs/policy/ai-review-m5-quality-contract.md` §3 requires. Passing with
+      nothing approved is the expected state, not a gap
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
 - [ ] `npm run check:unconsumed-response-bodies` — the other half of that

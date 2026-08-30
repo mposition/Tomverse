@@ -70,6 +70,16 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included",
   },
   { domain: "feedback", publicName: "feedback", prismaModel: "Feedback", state: "included" },
+  // The user's own verdicts on individual AI Review claims. Wholly theirs: a
+  // closed verdict, the section it was about, and when. The derived item id is
+  // included because without it a row says "you marked something unclear" and
+  // names nothing.
+  {
+    domain: "comparisonReviewItemFeedback",
+    publicName: "ai_review_item_feedback",
+    prismaModel: "ComparisonReviewItemFeedback",
+    state: "included",
+  },
   // Registered on 2026-08-27 having escaped the sweep entirely: both carry
   // actorUserId but no User relation. "unverified" is the honest state -- what
   // the export should do with a child row of an anonymised parent has not been
@@ -212,6 +222,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The conversations the user imported, with their titles, source timestamps and counts. Integrity digests are withheld as internals, and the snapshot lock password is withheld because a copy of it is an offline attack on the one secret this table holds. A conversation the owner has locked is reduced to existence metadata -- that it exists, that it is locked, and when it arrived -- because an export is a document that leaves the account, where a title outlives the lock (policy §13.2).",
   },
   {
+    domain: "conversationContinuationBridge",
+    publicName: "continued_conversations",
+    prismaModel: "ConversationContinuationBridge",
+    state: "included_filtered",
+    withheldReason:
+      "Which Tomverse conversation was started from which imported one, the provider it came from, when the original was imported, how much of it the model was given as context, and whether the original has since been deleted. Withheld: the snapshot digest and its version, which identify a snapshot rather than describe it and are integrity internals like every other digest here, and the creation idempotency key, which is a protocol artefact of one click.",
+  },
+  {
     domain: "externalMessage",
     publicName: "imported_messages",
     prismaModel: "ExternalMessage",
@@ -278,6 +296,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "Internal enforcement telemetry: limit thresholds and cost estimates, with no content the user wrote. Anonymised on account deletion and purged on its own 90-day retention.",
+  },
+  {
+    domain: "comparisonReviewRun",
+    publicName: "ai_review_runs",
+    prismaModel: "ComparisonReviewRun",
+    state: "excluded",
+    exclusionReason:
+      "Internal reliability telemetry for AI Review: outcome, reviewer model ids, durations, token counts and quote counts, with no content the user wrote and no field one could be written into. The review the user actually saw is exported through the conversation itself. Anonymised on account deletion and purged on its own 90-day retention.",
   },
   // Records where the linked user is the operator who acted, not the person
   // the row is about. The subject is referenced by an untyped targetType and

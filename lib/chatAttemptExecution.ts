@@ -337,6 +337,10 @@ export const planAttemptExecution = (
                 appManagedSearchEnabled,
                 nativeSearch: nativeSearchReservation.native,
                 searchBackend: nativeSearchReservation.searchBackend,
+                // Matches the path this plan's `generationSettings` uses
+                // below, so a fallback's provider budget authorises the cache
+                // write its own request may make.
+                promptCachePath: "chat_fallback_turn",
             }
         );
     } catch (error) {
@@ -394,6 +398,12 @@ export const planAttemptExecution = (
                     capability,
                     nativeSearchEnabled,
                 }),
+                // The same policy the primary gets. A fallback that cached
+                // differently would put a difference into the two attempts'
+                // effective-request hashes that has nothing to do with the
+                // model being different, which is the one thing a per-attempt
+                // manifest exists to make legible.
+                promptCachePath: "chat_fallback_turn",
             }),
             searchSurchargeCredits,
             usageCaptureKey: attemptUsageCaptureKey(

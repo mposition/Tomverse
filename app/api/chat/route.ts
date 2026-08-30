@@ -78,6 +78,7 @@ import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
+import { ANTHROPIC_PROMPT_CACHE_TTL } from "@/lib/anthropicPromptCaching";
 import {
     getWebSearchCapability,
     nativeSearchIsDispatchable,
@@ -106,6 +107,7 @@ import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
+import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
 import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
@@ -233,6 +235,7 @@ import {
 } from "@/lib/billingEntitlements";
 import {
     getOperationalFeatureFlags,
+    isExternalContinuationEnabledCached,
     isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -2082,6 +2085,49 @@ async function handleChatPost(
         const imageGenerationFlagEnabled = isDeepResearchTurn
             ? false
             : await isImageGenerationEnabledCached();
+        /*
+          The imported excerpt this turn carries, if this conversation was
+          started from one
+          (docs/policy/external-conversation-continuation.md §5).
+
+          Four gates, and every one of them answers `null` rather than an
+          error, because a turn that cannot read the source is an ordinary turn
+          with no seed -- the user's own messages are already in `messages` and
+          the answer must not be refused for want of context they did not ask
+          for:
+
+            * the rollout flag, read first so a rollback stops the injection
+              without touching anything else on this path;
+            * a bridge on this conversation, scoped by `userId` in the `where`;
+            * a source that still exists (a deleted one leaves the bridge's
+              foreign key NULL);
+            * an `external_conversation` unlock grant on *this request* when the
+              snapshot is locked -- the snapshot's own lock, never the
+              conversation's.
+
+          Skipped entirely on deep research, which carries no system blocks at
+          all and would price one it never sends.
+        */
+        let continuationSeedPrompt = "";
+        if (!isDeepResearchTurn && session?.user?.id && conversationId) {
+            try {
+                if (await isExternalContinuationEnabledCached()) {
+                    const seed = await loadContinuationTurnSeed({
+                        userId: session.user.id,
+                        conversationId,
+                        request: req,
+                    });
+                    continuationSeedPrompt = seed?.prompt.text ?? "";
+                }
+            } catch (error) {
+                // Fail open on the *answer* and closed on the *seed*: a
+                // database hiccup while reading imported context must not cost
+                // the user their turn, and the turn it produces is simply one
+                // without the excerpt. Logged so a seed that stops being
+                // carried is visible rather than silent.
+                logRequestError("chat_continuation_seed_failed", traceId, error);
+            }
+        }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             modelId: modelConfig.id,
             provider: modelConfig.provider,
@@ -2107,6 +2153,7 @@ async function handleChatPost(
             planAllowsImageGeneration: Boolean(
                 accountPlan && planAllowsImageGeneration(accountPlan.tier)
             ),
+            continuationSeedPrompt,
         });
         const artifactToolPlan = turnSystemBlocks.artifactPlan;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -2976,6 +3023,14 @@ async function handleChatPost(
                 appManagedSearchEnabled,
                 nativeSearch: nativeSearchReservation.native,
                 searchBackend: nativeSearchReservation.searchBackend,
+                // The same path `getModelGenerationSettings` is given below,
+                // so the premium the provider budget authorises and the marker
+                // the request actually sends are decided from one value. Named
+                // twice rather than threaded through a shared object because
+                // the budget is built long before the generation settings are,
+                // and `tests/anthropicPromptCaching.test.mjs` asserts the two
+                // literals agree.
+                promptCachePath: "chat_turn",
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -3553,6 +3608,12 @@ async function handleChatPost(
                 capability: webSearchCapability,
                 nativeSearchEnabled,
             }),
+            // Anthropic automatic prompt caching, on the one path where the
+            // prefix genuinely repeats: turn N+1 resends turns 1..N unchanged.
+            // A no-op for every other provider -- see
+            // lib/anthropicPromptCaching.ts for why the gate is the registry's
+            // provider identity and not "uses the Anthropic SDK".
+            promptCachePath: "chat_turn",
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -3760,6 +3821,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                // Per attempt for the same reason as everything above it: a
+                // fallback caches on its own model at its own write rate, and
+                // its writes must not be priced at the primary's.
+                cacheWriteUsdPerMillionTokens:
+                    budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: budget.pricingVersion ?? null,
             } satisfies AttemptPriceSnapshot,
         };
@@ -3905,6 +3975,7 @@ async function handleChatPost(
             usage?: {
                 inputTokens?: number;
                 cachedInputTokens?: number;
+                cacheWriteInputTokens?: number;
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
@@ -3954,6 +4025,7 @@ async function handleChatPost(
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
                         cachedInputTokens: usage?.cachedInputTokens,
+                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
@@ -3981,6 +4053,8 @@ async function handleChatPost(
                                       inputTokens: settledInputTokens,
                                       cachedInputTokens:
                                           usage?.cachedInputTokens ?? 0,
+                                      cacheWriteInputTokens:
+                                          usage?.cacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -4520,6 +4594,17 @@ async function handleChatPost(
                     cachedInputPriceMultiplier:
                         plan.budget.cachedInputPriceMultiplier,
                     pricingVersion: plan.budget.pricingVersion ?? null,
+                    // Part of `reservedMicroUsd` above, so the payload's own
+                    // consistency check can reconstruct that total from its
+                    // components. Omitted when zero, which keeps an uncached
+                    // fallback's payload exactly what it has always been.
+                    ...(plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? {
+                              promptCacheWriteReservedPremiumMicroUsd:
+                                  plan.budget
+                                      .promptCacheWriteReservedPremiumMicroUsd,
+                          }
+                        : {}),
                 },
             }).catch((budgetError: unknown) => {
                 logRequestError(
@@ -4760,6 +4845,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: plan.budget.cachedInputPriceMultiplier,
+                // The fallback's own write rate and TTL, not the primary's.
+                // Caches are model-scoped, so these two attempts wrote into
+                // different entries at whatever each model's rate is.
+                cacheWriteUsdPerMillionTokens:
+                    plan.budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
             };
             // The next attempt captures under its own key, so the memo from
@@ -4997,6 +5091,18 @@ async function handleChatPost(
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
+                                    // `usage.inputTokens` is the *total* --
+                                    // the SDK builds it as noCache + cacheRead
+                                    // + cacheWrite, unlike the Anthropic API's
+                                    // own `input_tokens`, which is the
+                                    // uncached remainder. So the write count
+                                    // is carved out of that total rather than
+                                    // added to it; settlement prices it at
+                                    // 1.25x instead of the 1.0x it was
+                                    // silently getting as part of the
+                                    // "uncached" remainder.
+                                    cacheWriteInputTokens:
+                                        usage.inputTokenDetails.cacheWriteTokens,
                                     outputTokens: usage.outputTokens,
                                     reasoningTokens:
                                         usage.outputTokenDetails

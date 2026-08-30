@@ -62,6 +62,22 @@ export const ACCOUNT_ANONYMISATIONS: AccountAnonymisation[] = [
     },
   },
   {
+    prismaModel: "ComparisonReviewRun",
+    table: "ComparisonReviewRun",
+    userColumn: "userId",
+    columns: {
+      // Same shape and the same reasons as ChatLimitDecisionEvent above: no
+      // relation, so nothing clears these today, and the reliability history
+      // the row exists for stays intact once it stops naming anyone.
+      userId: { kind: "null" },
+      subjectKey: { kind: "literal", value: ANONYMISED_SUBJECT },
+      traceId: { kind: "literal", value: ANONYMISED_SUBJECT },
+      // The conversation cascades away with the account. The id is what other
+      // logs recorded, so it is the join that has to go rather than the row.
+      conversationId: { kind: "null" },
+    },
+  },
+  {
     prismaModel: "ChatCreditReservation",
     table: "ChatCreditReservation",
     userColumn: "userId",

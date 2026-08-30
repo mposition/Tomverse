@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "engines": {
     "node": "22.x"
@@ -96,6 +97,11 @@
     "probe:memory-extraction": "node --conditions=react-server --import tsx scripts/probeMemoryExtractionDevelopment.mjs",
     "eval:memory-extraction": "node --conditions=react-server --import tsx scripts/evalImportedMemoryExtraction.mjs",
     "eval:router-quality": "node --conditions=react-server --import tsx scripts/eval-router-quality.mjs",
+    "eval:ai-review": "node --conditions=react-server --import tsx scripts/eval-ai-review.mjs",
+    "check:ai-review-eval": "node --conditions=react-server --import tsx scripts/check-ai-review-eval-dataset.mjs",
+    "make:ai-review-blind-sheet": "node --conditions=react-server --import tsx scripts/make-ai-review-eval-blind-sheet.mjs",
+    "report:ai-review-m5-readiness": "node --conditions=react-server --import tsx scripts/report-ai-review-m5-readiness.mjs",
+    "report:ai-review-operations": "node --conditions=react-server --import tsx scripts/report-ai-review-operations.mjs",
     "eval:router-human-sheets": "node --conditions=react-server --import tsx scripts/router-human-review-sheets.mjs",
     "eval:router-human-collect": "node --conditions=react-server --import tsx scripts/router-human-review-collect.mjs",
     "eval:router-human-diagnostic": "node --conditions=react-server --import tsx scripts/router-human-review-diagnostic.mjs",
@@ -127,6 +133,7 @@
     "report:email-domains": "node --conditions=react-server --import tsx scripts/report-email-sending-domains.mjs",
     "report:assistant-knowledge-invariants": "node --conditions=react-server --import tsx scripts/report-assistant-knowledge-invariants.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
+    "report:anthropic-cache-efficiency": "node --conditions=react-server --import tsx scripts/report-anthropic-cache-efficiency.mjs",
     "diagnose:admin-audit-entry": "node --conditions=react-server --import tsx scripts/diagnose-admin-audit-entry.mjs",
     "make:memory-eval-blind-review": "node --import tsx scripts/make-memory-eval-blind-review.mjs",
     "make:router-eval-review-sheet": "node --import tsx scripts/make-router-eval-review-sheet.mjs",
@@ -136,6 +143,7 @@
     "report:memory-eval-batches": "node --import tsx scripts/report-memory-eval-batches.mjs",
     "report:memory-eval-cost-estimate": "node --conditions=react-server --import tsx scripts/report-memory-eval-cost-estimate.mjs",
     "report:memory-eval-failures": "node --conditions=react-server --import tsx scripts/report-memory-eval-failures.mjs",
+    "report:memory-eval-failure-diagnosis": "node --import tsx scripts/report-memory-eval-failure-diagnosis.mjs",
     "report:memory-eval-near-duplicates": "node --import tsx scripts/report-memory-eval-near-duplicates.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
     "check:unconsumed-response-bodies": "node scripts/check-unconsumed-response-bodies.mjs",
@@ -161,6 +169,8 @@
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
     "check:shared-packages": "node scripts/check-shared-packages.mjs",
+    "check:capacitor-local-bundle": "node scripts/check-capacitor-local-bundle.mjs",
+    "build:mobile-shell": "npm run build --workspace @tomverse/mobile",
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",

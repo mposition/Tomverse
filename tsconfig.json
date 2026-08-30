@@ -37,5 +37,9 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // apps/mobile compiles against its own tsconfig (a DOM lib, vite/client
+  // types, no `@/*` alias reaching into this app). Leaving it in this project
+  // would type-check the Capacitor shell with the Next.js app's settings, which
+  // is the coupling apps/mobile exists to stay out of.
+  "exclude": ["node_modules", "apps"]
 }

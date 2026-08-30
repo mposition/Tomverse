@@ -1,0 +1,96 @@
+/*
+ * The whole point of the stylesheet in this spike: load the shared token
+ * package with no Tailwind build around it.
+ *
+ * app/globals.css imports the same file (docs/policy/shared-packages.md §3,
+ * "the app must import each exported stylesheet"). If the tokens ever grew a
+ * Tailwind at-rule or a `var()` with no local definition, the Next.js build
+ * would still succeed and this bundle would render the fallback colours --
+ * which is the divergence the package exists to prevent.
+ */
+@import "@tomverse/ui-tokens/tokens.css";
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    /* Capacitor renders under the status bar and home indicator by default. */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+        env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.shell {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+}
+
+.shell h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+}
+
+.shell p.lede {
+    margin: 0 0 24px;
+    opacity: 0.7;
+}
+
+.brand-bar {
+    height: 6px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+    background: linear-gradient(
+        90deg,
+        var(--tomverse-accent-start),
+        var(--tomverse-accent-mid),
+        var(--tomverse-accent-end)
+    );
+}
+
+.check {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 0;
+    border-top: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+.check-mark {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.check-mark[data-state="pass"] {
+    background: #059669;
+}
+
+.check-mark[data-state="fail"] {
+    background: #dc2626;
+}
+
+.check-title {
+    font-weight: 600;
+}
+
+.check-detail {
+    opacity: 0.7;
+    font-size: 13px;
+}
+
+.check-detail code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

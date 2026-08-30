@@ -1,0 +1,24 @@
+{
+  "name": "@tomverse/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Locally bundled Capacitor shell spike. Readiness screen only -- no authentication, no product surface, no remote server.url.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --project tsconfig.json",
+    "cap:sync": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  }
+}

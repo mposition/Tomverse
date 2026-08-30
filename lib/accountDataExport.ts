@@ -403,6 +403,40 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // Which Tomverse conversation continues which imported one
+  // (docs/policy/external-conversation-continuation.md §3).
+  //
+  // Written out field by field like every fetcher here, and two columns are
+  // deliberately absent. `sourceConversationDigest` and its version identify a
+  // snapshot rather than describe it -- the same class of integrity internal
+  // withheld from the import rows above -- and `idempotencyKey` is a protocol
+  // artefact of one click, meaningless to the person reading the file.
+  //
+  // `externalConversationId` is emitted so the file joins to the imported
+  // conversation rows; a NULL there is the record that the original was
+  // deleted, which is why `sourceDeletedAt` goes with it.
+  conversationContinuationBridge: (userId) =>
+    prisma.conversationContinuationBridge.findMany({
+      where: { userId },
+      select: {
+        conversationId: true,
+        externalConversationId: true,
+        provider: true,
+        sourceImportedAt: true,
+        sourceMessageCount: true,
+        seedFromOrdinal: true,
+        seedToOrdinal: true,
+        seedMessageCount: true,
+        seedTruncatedMessageCount: true,
+        seedOmittedMessageCount: true,
+        contextSeedVersion: true,
+        sourceDeletedAt: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   privacyRequest: (userId) =>
     prisma.privacyRequest.findMany({
       where: { userId },
@@ -526,6 +560,21 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         usageCredits: true,
         isStale: true,
         createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  comparisonReviewItemFeedback: (userId) =>
+    prisma.comparisonReviewItemFeedback.findMany({
+      where: { userId },
+      select: {
+        comparisonReviewId: true,
+        reviewItemId: true,
+        section: true,
+        verdict: true,
+        createdAt: true,
+        updatedAt: true,
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,

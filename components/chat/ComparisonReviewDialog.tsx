@@ -19,6 +19,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   toSourceGrounding,
@@ -118,6 +119,19 @@ type ComparisonReview = {
   originalUsageCredits?: number;
   cached: boolean;
   disclaimer: string;
+  /**
+   * Per-claim identifiers for the feedback control, derived on the server
+   * (lib/comparisonReviewItemFeedback.ts) and never recomputed here: the
+   * derivation hashes, and a second implementation in the browser would be a
+   * second place for the two to stop agreeing. Absent on a guest review,
+   * which is not stored and therefore has nothing to attach a verdict to.
+   */
+  reviewItems?: Array<{
+    id: string;
+    reviewer: "primary" | "secondary";
+    section: string;
+    ordinal: number;
+  }>;
   guest?: boolean;
   persisted?: boolean;
   webVerificationAvailable?: boolean;
@@ -231,6 +245,7 @@ function GroundedReviewList({
   verifiedLabel,
   unverifiedLabel,
   tone = "default",
+  renderFeedback,
 }: {
   title: string;
   items: GroundedClaim[];
@@ -240,6 +255,7 @@ function GroundedReviewList({
   verifiedLabel: string;
   unverifiedLabel: string;
   tone?: "default" | "warning";
+  renderFeedback?: (ordinal: number) => ReactNode;
 }) {
   return (
     <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70">
@@ -271,6 +287,7 @@ function GroundedReviewList({
                     unverifiedLabel={unverifiedLabel}
                   />
                 ))}
+                {renderFeedback?.(index)}
               </div>
             </li>
           ))}
@@ -279,6 +296,148 @@ function GroundedReviewList({
         <p className="mt-2 text-sm text-zinc-500">{emptyLabel}</p>
       )}
     </section>
+  );
+}
+
+const ITEM_FEEDBACK_VERDICTS = [
+  { id: "helpful", label: "chat.aiReviewItemFeedbackHelpful" },
+  { id: "incorrect", label: "chat.aiReviewItemFeedbackIncorrect" },
+  { id: "unclear", label: "chat.aiReviewItemFeedbackUnclear" },
+  { id: "missing_point", label: "chat.aiReviewItemFeedbackMissingPoint" },
+] as const;
+
+type ItemFeedbackVerdict = (typeof ITEM_FEEDBACK_VERDICTS)[number]["id"];
+
+const ITEM_FEEDBACK_SECTIONS = [
+  "consensus",
+  "contradictions",
+  "differences",
+  "missingPoints",
+  "verificationNeeded",
+] as const;
+
+/**
+ * The section an item id names, narrowed to the closed enum the analytics
+ * property accepts. An id whose section is not one of these sends nothing
+ * rather than widening the property to a free string -- the enum is what keeps
+ * the event content-free.
+ */
+const sectionOf = (itemId: string) => {
+  const section = itemId.split(":")[1];
+  return ITEM_FEEDBACK_SECTIONS.find((value) => value === section);
+};
+
+/**
+ * The user's verdict on one claim.
+ *
+ * A row of four small toggles, not a thumbs pair: "incorrect", "unclear" and
+ * "missing an important point" are three different reports, and collapsing
+ * them into one thumbs-down would throw away the only part that says where to
+ * look.
+ *
+ * Selecting the current verdict again withdraws it. A feedback control the
+ * user cannot undo is one people stop using, and the endpoint's DELETE is
+ * idempotent so a withdrawal that races a stale click still ends where the
+ * user asked.
+ *
+ * Guests see the row disabled with the reason stated up front rather than
+ * hidden -- the requirement is a real one (a guest review is never stored, so
+ * there is no review for a verdict to point at) and hiding it would read as
+ * the feature being missing.
+ */
+function ReviewItemFeedback({
+  conversationId,
+  reviewId,
+  itemId,
+  guest,
+}: {
+  conversationId?: string | null;
+  reviewId?: string;
+  itemId?: string;
+  guest: boolean;
+}) {
+  const { t } = useLanguage();
+  const [verdict, setVerdict] = useState<ItemFeedbackVerdict | null>(null);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+
+  const submit = useCallback(
+    async (next: ItemFeedbackVerdict) => {
+      if (guest || !conversationId || !reviewId || !itemId) return;
+      const withdrawing = verdict === next;
+      const previous = verdict;
+      setVerdict(withdrawing ? null : next);
+      setStatus("saving");
+      try {
+        const response = await fetch(
+          `/api/conversations/${conversationId}/comparison-reviews/item-feedback`,
+          {
+            method: withdrawing ? "DELETE" : "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+              withdrawing
+                ? { reviewId, reviewItemId: itemId }
+                : { reviewId, reviewItemId: itemId, verdict: next }
+            ),
+          }
+        );
+        // Consumed on every path, not just the one whose value is parsed:
+        // an unconsumed body under `private, no-store` did not reach
+        // `requestfinished` (lib/discardResponseBody.ts). Nothing here reads
+        // the answer -- the verdict is already on screen.
+        await discardResponseBody(response);
+        if (!response.ok) throw new Error("failed");
+        setStatus("saved");
+        // The verdict travels; the claim's text, its quotes and the question
+        // do not. The item id is per-review and deliberately not sent either.
+        trackProductEvent("comparison_review_item_feedback", 0, {
+          review_item_feedback: withdrawing ? "withdrawn" : next,
+          review_item_section: sectionOf(itemId),
+        });
+      } catch {
+        setVerdict(previous);
+        setStatus("failed");
+      }
+    },
+    [conversationId, guest, itemId, reviewId, verdict]
+  );
+
+  if (!itemId && !guest) return null;
+
+  return (
+    <div className="mt-2" data-testid="ai-review-item-feedback">
+      <div
+        role="group"
+        aria-label={t("chat.aiReviewItemFeedbackLabel")}
+        className="flex flex-wrap items-center gap-1.5"
+      >
+        {ITEM_FEEDBACK_VERDICTS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            disabled={guest || status === "saving"}
+            aria-pressed={verdict === option.id}
+            onClick={() => void submit(option.id)}
+            data-testid={`ai-review-item-feedback-${option.id}`}
+            className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-60 ${
+              verdict === option.id
+                ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-200"
+                : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            }`}
+          >
+            {t(option.label)}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        {guest
+          ? t("chat.aiReviewItemFeedbackGuest")
+          : status === "failed"
+            ? t("chat.aiReviewItemFeedbackFailed")
+            : status === "saved"
+              ? t("chat.aiReviewItemFeedbackSaved")
+              : t("chat.aiReviewItemFeedbackScope")}
+      </p>
+    </div>
   );
 }
 
@@ -332,6 +491,14 @@ export function VerifyItemButton({
         throw new Error("error" in data && data.error ? data.error : failedLabel);
       }
       setState({ phase: "done", result: data });
+      // The step past the review itself: the user asked the live web about one
+      // claim. Without this event the scorecard cannot tell an AI Review that
+      // was read from one that was acted on. The check's own closed status
+      // travels; its summary sentence does not -- that is model prose about
+      // the user's question.
+      trackProductEvent("comparison_review_item_verified", 0, {
+        review_item_verification: data.status,
+      });
     } catch (error) {
       setState({
         phase: "error",
@@ -415,6 +582,22 @@ export function ComparisonReviewDialog({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
+
+  /**
+   * `reviewer:section:ordinal` -> the server-derived item id.
+   *
+   * A map rather than a search so a list with a hundred claims does not scan
+   * the array once per row, and keyed by the reviewer slot because the two
+   * reviewers' claims are separate things to have an opinion about even where
+   * they wrote the same sentence.
+   */
+  const reviewItemIds = useMemo(() => {
+    const lookup = new Map<string, string>();
+    for (const item of review?.reviewItems ?? []) {
+      lookup.set(`${item.reviewer}:${item.section}:${item.ordinal}`, item.id);
+    }
+    return lookup;
+  }, [review]);
 
   const isGuestReview = Boolean(guestSource);
 
@@ -825,6 +1008,16 @@ export function ComparisonReviewDialog({
                       responseLabel={t("chat.aiReviewResponse")}
                       verifiedLabel={t("chat.aiReviewQuoteVerified")}
                       unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                      renderFeedback={(ordinal) => (
+                        <ReviewItemFeedback
+                          conversationId={conversationId}
+                          reviewId={review.id}
+                          itemId={reviewItemIds.get(
+                            `${activeReviewer}:consensus:${ordinal}`
+                          )}
+                          guest={isGuestReview}
+                        />
+                      )}
                     />
                     <GroundedReviewList
                       title={t("chat.aiReviewContradictions")}
@@ -835,6 +1028,16 @@ export function ComparisonReviewDialog({
                       verifiedLabel={t("chat.aiReviewQuoteVerified")}
                       unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
                       tone="warning"
+                      renderFeedback={(ordinal) => (
+                        <ReviewItemFeedback
+                          conversationId={conversationId}
+                          reviewId={review.id}
+                          itemId={reviewItemIds.get(
+                            `${activeReviewer}:contradictions:${ordinal}`
+                          )}
+                          guest={isGuestReview}
+                        />
+                      )}
                     />
                   </div>
 
@@ -880,6 +1083,16 @@ export function ComparisonReviewDialog({
                                 </div>
                               ))}
                             </div>
+                            <div className="px-3 pb-3">
+                              <ReviewItemFeedback
+                                conversationId={conversationId}
+                                reviewId={review.id}
+                                itemId={reviewItemIds.get(
+                                  `${activeReviewer}:differences:${index}`
+                                )}
+                                guest={isGuestReview}
+                              />
+                            </div>
                           </article>
                         ))}
                       </div>
@@ -893,6 +1106,16 @@ export function ComparisonReviewDialog({
                       title={t("chat.aiReviewMissingPoints")}
                       items={activeResult.missingPoints}
                       emptyLabel={t("chat.aiReviewNoneFound")}
+                      renderExtra={(_item, index) => (
+                        <ReviewItemFeedback
+                          conversationId={conversationId}
+                          reviewId={review.id}
+                          itemId={reviewItemIds.get(
+                            `${activeReviewer}:missingPoints:${index}`
+                          )}
+                          guest={isGuestReview}
+                        />
+                      )}
                     />
                     <ReviewList
                       title={t("chat.aiReviewVerificationNeeded")}
