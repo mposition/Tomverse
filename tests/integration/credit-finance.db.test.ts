@@ -112,6 +112,8 @@ const chatBudget = ({
   inputUsdPerMillionTokens: inputRate,
   outputUsdPerMillionTokens: outputRate,
   cachedInputPriceMultiplier,
+  cacheWriteUsdPerMillionTokens: null,
+  promptCacheWriteReservedPremiumMicroUsd: 0,
   nativeSearchReservedCostMicroUsd: 0,
   nativeSearchCostPerQueryMicroUsd: 0,
   nativeSearchMaxQueries: 0,
@@ -365,6 +367,15 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
     cachedInputPriceMultiplier: 0.1,
     uncachedInputCostMicroUsd: 10,
     cachedInputCostMicroUsd: 202,
+    // Cache writes are their own line in the snapshot, and zero on a turn that
+    // sent no cache marker. Zero here is a measurement -- this request created
+    // no cache entry -- while the null rate says this model has no verified
+    // cache-write price at all. See docs/policy/anthropic-prompt-caching.md §6.
+    cacheWriteInputTokens: 0,
+    cacheWriteUsdPerMillionTokens: null,
+    cacheWriteInputCostMicroUsd: 0,
+    unpricedCacheWriteTokens: 0,
+    promptCacheTtl: null,
     outputCostMicroUsd: 180,
     totalCostMicroUsd: 392,
     // The settlement snapshot is the audit record for a charge, so it also
@@ -448,6 +459,15 @@ test("settles Perplexity from the provider-reported cost and keeps the token est
     cachedInputPriceMultiplier: 1,
     uncachedInputCostMicroUsd: 2_222,
     cachedInputCostMicroUsd: 0,
+    // Cache writes are their own line in the snapshot, and zero on a turn that
+    // sent no cache marker. Zero here is a measurement -- this request created
+    // no cache entry -- while the null rate says this model has no verified
+    // cache-write price at all. See docs/policy/anthropic-prompt-caching.md §6.
+    cacheWriteInputTokens: 0,
+    cacheWriteUsdPerMillionTokens: null,
+    cacheWriteInputCostMicroUsd: 0,
+    unpricedCacheWriteTokens: 0,
+    promptCacheTtl: null,
     outputCostMicroUsd: 3_333,
     tokenEstimatedTotalCostMicroUsd: 4_500,
     totalCostMicroUsd: 7_777,
@@ -504,6 +524,15 @@ test("adds native web search cost on top of the token cost and keeps both separa
     cachedInputPriceMultiplier: 1,
     uncachedInputCostMicroUsd: 4_000,
     cachedInputCostMicroUsd: 0,
+    // Cache writes are their own line in the snapshot, and zero on a turn that
+    // sent no cache marker. Zero here is a measurement -- this request created
+    // no cache entry -- while the null rate says this model has no verified
+    // cache-write price at all. See docs/policy/anthropic-prompt-caching.md §6.
+    cacheWriteInputTokens: 0,
+    cacheWriteUsdPerMillionTokens: null,
+    cacheWriteInputCostMicroUsd: 0,
+    unpricedCacheWriteTokens: 0,
+    promptCacheTtl: null,
     outputCostMicroUsd: 4_000,
     tokenCostMicroUsd: 8_000,
     searchCostMicroUsd: 25_000,
@@ -558,6 +587,15 @@ test("charges no search cost when the provider ran no native web search", async 
     cachedInputPriceMultiplier: 1,
     uncachedInputCostMicroUsd: 4_000,
     cachedInputCostMicroUsd: 0,
+    // Cache writes are their own line in the snapshot, and zero on a turn that
+    // sent no cache marker. Zero here is a measurement -- this request created
+    // no cache entry -- while the null rate says this model has no verified
+    // cache-write price at all. See docs/policy/anthropic-prompt-caching.md §6.
+    cacheWriteInputTokens: 0,
+    cacheWriteUsdPerMillionTokens: null,
+    cacheWriteInputCostMicroUsd: 0,
+    unpricedCacheWriteTokens: 0,
+    promptCacheTtl: null,
     outputCostMicroUsd: 4_000,
     totalCostMicroUsd: 8_000,
     pricingVersion: "test-fixture-pricing",

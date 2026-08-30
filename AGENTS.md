@@ -342,8 +342,24 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   fail-closed로 막습니다.
 - **`GET /v1/models`는 가격 출처가 아닙니다.** 계정별 모델 가시성만 확인합니다
   (`npm run check:openai-model-access`).
-- cache write 가격은 감사용으로 기록만 하고 과금하지 않습니다 — cache write
-  토큰을 보고하는 usage adapter가 없습니다.
+- **cache write 가격은 측정된 곳에서 과금합니다**(2026-08-30 개정,
+  `CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED`). 이전 계약
+  (`..._IS_RECORDED_NOT_BILLED`)은 write 토큰을 보고하는 adapter가 하나도 없을
+  때 맞았고, Anthropic prompt caching이 그 전제를 깼습니다. 과금 조건은
+  **양쪽**입니다 — tier의 검증된 요율 **그리고** provider가 보고한 write 토큰
+  수. 요율이 없는 write는 비용 0이되 `unpricedCacheWriteTokens`로 보고합니다.
+- **Anthropic first-party 요청에만 5분 prompt caching을 겁니다.** 판정은
+  `lib/anthropicPromptCaching.ts`의 경로 표 하나이고, MiniMax는 같은
+  `createAnthropic()` SDK를 쓰지만 provider가 다르므로 제외입니다. AI SDK의
+  `usage.inputTokens`는 **총합**(`noCache + cacheRead + cacheWrite`)이라 두 캐시
+  수치를 **빼야** 합니다. 캐시 요청은 0.25배 write premium을 provider budget에
+  미리 예약하되 `usageCredits`에는 닿지 않습니다: docs/policy/anthropic-prompt-caching.md.
+- **가격 변경은 `priceSchedule`로 효력일 전에 적어 둡니다**(2026-08-30).
+  `effectiveFrom`은 UTC instant이고 경계는 포함이며, 각 항목은 새
+  `pricingVersion`을 갖습니다. override 우선순위와 소급 금지는 그대로입니다.
+  **Claude Sonnet 5의 2026-09-01 US$3/US$15 인상은 2026-08-11에 취소됐으므로
+  예약하지 않습니다** — 공식 pricing 페이지의
+  `claude-sonnet-5-introductory-pricing` 각주.
 - 가격이 아직 검증되지 않은 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에
   담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
   90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과

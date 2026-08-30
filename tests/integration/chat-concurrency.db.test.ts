@@ -93,6 +93,8 @@ const guestBudget = (modelId: string, credits = 1): ChatBudget => ({
     inputUsdPerMillionTokens: 0,
     outputUsdPerMillionTokens: 0,
     cachedInputPriceMultiplier: 1,
+    cacheWriteUsdPerMillionTokens: null,
+    promptCacheWriteReservedPremiumMicroUsd: 0,
     nativeSearchReservedCostMicroUsd: 0,
     nativeSearchCostPerQueryMicroUsd: 0,
     nativeSearchMaxQueries: 0,

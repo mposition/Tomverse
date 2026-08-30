@@ -1100,38 +1100,45 @@ model CreditDebtEntry {
 }
 
 model ChatCreditReservation {
-  id                       String    @id
-  userId                   String?
-  user                     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  subjectKey               String
-  traceId                  String
-  source                   String
-  provider                 String
-  modelId                  String
-  status                   String    @default("reserved")
-  outcome                  String?
-  idempotencyKey           String    @unique
-  providerRequestId        String?
-  providerResponseId       String?
-  providerRequestLinkedAt  DateTime?
-  reservationPayload       Json
-  reservedCredits          Int
-  reservedCostMicroUsd     BigInt
-  planReservedCredits      Int
-  addOnReservedCredits     Int
-  settledCredits           Int       @default(0)
-  settledCostMicroUsd      BigInt    @default(0)
-  settledInputTokens       Int       @default(0)
-  settledCachedInputTokens Int       @default(0)
-  settledOutputTokens      Int       @default(0)
-  pricingSnapshot          Json?
-  providerUsageSnapshot    Json?
-  expiresAt                DateTime
-  settledAt                DateTime?
-  reconciledAt             DateTime?
-  lastError                String?
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  id                           String    @id
+  userId                       String?
+  user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  subjectKey                   String
+  traceId                      String
+  source                       String
+  provider                     String
+  modelId                      String
+  status                       String    @default("reserved")
+  outcome                      String?
+  idempotencyKey               String    @unique
+  providerRequestId            String?
+  providerResponseId           String?
+  providerRequestLinkedAt      DateTime?
+  reservationPayload           Json
+  reservedCredits              Int
+  reservedCostMicroUsd         BigInt
+  planReservedCredits          Int
+  addOnReservedCredits         Int
+  settledCredits               Int       @default(0)
+  settledCostMicroUsd          BigInt    @default(0)
+  settledInputTokens           Int       @default(0)
+  settledCachedInputTokens     Int       @default(0)
+  /// Input tokens written into the prompt cache, at 1.25x the base input rate
+  /// for the 5-minute TTL this application requests. Its own column beside the
+  /// read count because the two move opposite ways -- a read is a discount and
+  /// a write is a premium -- and summing them would price one at the other's
+  /// rate. 0 on every row written before prompt caching existed, which is what
+  /// those turns actually did.
+  settledCacheWriteInputTokens Int       @default(0)
+  settledOutputTokens          Int       @default(0)
+  pricingSnapshot              Json?
+  providerUsageSnapshot        Json?
+  expiresAt                    DateTime
+  settledAt                    DateTime?
+  reconciledAt                 DateTime?
+  lastError                    String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
 
   /// Which attempt the user's charge was computed from, once one was.
   ///
@@ -1186,23 +1193,26 @@ model ChatAttemptUsage {
 
   /// NULL only on a crash-reconciled row: nobody observed the call, and 0
   /// would be a claim that it used nothing.
-  inputTokens       Int?
-  cachedInputTokens Int?
-  outputTokens      Int?
-  reasoningTokens   Int?
-  costMicroUsd      BigInt   @default(0)
+  inputTokens           Int?
+  cachedInputTokens     Int?
+  /// Input tokens this attempt wrote into the prompt cache. NULL under the
+  /// same rule as its siblings: nobody observed the call.
+  cacheWriteInputTokens Int?
+  outputTokens          Int?
+  reasoningTokens       Int?
+  costMicroUsd          BigInt   @default(0)
   /// How the token counts were arrived at: provider_usage_metadata,
   /// provider_response_cost, fallback_estimator, crash_reconciliation.
-  usageSource       String   @default("provider_usage_metadata")
+  usageSource           String   @default("provider_usage_metadata")
   /// How the cost was: token_estimate, provider_response, or
   /// reserved_upper_bound — an upper bound, not a measurement.
-  costSource        String   @default("token_estimate")
+  costSource            String   @default("token_estimate")
   /// The rates this attempt was priced at, and where the figure came from.
-  pricingSnapshot   Json?
+  pricingSnapshot       Json?
   /// The ProviderDailyUsage day this row's cost was rolled up on, at midnight
   /// UTC. Stored rather than inferred from createdAt: a correction has to
   /// reach the same rollup row, and the two clocks disagree across midnight.
-  rollupDate        DateTime
+  rollupDate            DateTime
 
   createdAt DateTime @default(now())
 
@@ -1233,12 +1243,13 @@ model ChatAttemptUsageAdjustment {
   /// Only `late_provider_actual` today.
   kind          String
 
-  observedInputTokens       Int?
-  observedCachedInputTokens Int?
-  observedOutputTokens      Int?
-  observedCostMicroUsd      BigInt
+  observedInputTokens           Int?
+  observedCachedInputTokens     Int?
+  observedCacheWriteInputTokens Int?
+  observedOutputTokens          Int?
+  observedCostMicroUsd          BigInt
   /// Signed: observed minus what the base row already claimed.
-  costDeltaMicroUsd         BigInt
+  costDeltaMicroUsd             BigInt
 
   /// Identifies the observation, so the same one twice is one adjustment.
   observationId     String
@@ -2253,10 +2264,12 @@ model ProviderDailyUsage {
   requestCount                 Int       @default(0)
   inputTokens                  Int       @default(0)
   cachedInputTokens            Int       @default(0)
+  cacheWriteInputTokens        Int       @default(0)
   outputTokens                 Int       @default(0)
   estimatedCostMicroUsd        Int       @default(0)
   uncachedInputCostMicroUsd    Int       @default(0)
   cachedInputCostMicroUsd      Int       @default(0)
+  cacheWriteInputCostMicroUsd  Int       @default(0)
   outputCostMicroUsd           Int       @default(0)
   providerReportedCostMicroUsd Int?
   providerReportedUsageJson    Json?

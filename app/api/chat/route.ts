@@ -77,6 +77,7 @@ import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
+import { ANTHROPIC_PROMPT_CACHE_TTL } from "@/lib/anthropicPromptCaching";
 import {
     getWebSearchCapability,
     nativeSearchIsDispatchable,
@@ -2708,6 +2709,14 @@ async function handleChatPost(
                 ),
                 nativeSearchEnabled,
                 nativeSearch: nativeSearchReservation,
+                // The same path `getModelGenerationSettings` is given below,
+                // so the premium the provider budget authorises and the marker
+                // the request actually sends are decided from one value. Named
+                // twice rather than threaded through a shared object because
+                // the budget is built long before the generation settings are,
+                // and `tests/anthropicPromptCaching.test.mjs` asserts the two
+                // literals agree.
+                promptCachePath: "chat_turn",
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -3195,6 +3204,12 @@ async function handleChatPost(
                 capability: webSearchCapability,
                 nativeSearchEnabled,
             }),
+            // Anthropic automatic prompt caching, on the one path where the
+            // prefix genuinely repeats: turn N+1 resends turns 1..N unchanged.
+            // A no-op for every other provider -- see
+            // lib/anthropicPromptCaching.ts for why the gate is the registry's
+            // provider identity and not "uses the Anthropic SDK".
+            promptCachePath: "chat_turn",
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -3391,6 +3406,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                // Per attempt for the same reason as everything above it: a
+                // fallback caches on its own model at its own write rate, and
+                // its writes must not be priced at the primary's.
+                cacheWriteUsdPerMillionTokens:
+                    budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: budget.pricingVersion ?? null,
             } satisfies AttemptPriceSnapshot,
         };
@@ -3526,6 +3550,7 @@ async function handleChatPost(
             usage?: {
                 inputTokens?: number;
                 cachedInputTokens?: number;
+                cacheWriteInputTokens?: number;
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
@@ -3575,6 +3600,7 @@ async function handleChatPost(
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
                         cachedInputTokens: usage?.cachedInputTokens,
+                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
@@ -3602,6 +3628,8 @@ async function handleChatPost(
                                       inputTokens: settledInputTokens,
                                       cachedInputTokens:
                                           usage?.cachedInputTokens ?? 0,
+                                      cacheWriteInputTokens:
+                                          usage?.cacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -4134,6 +4162,17 @@ async function handleChatPost(
                     cachedInputPriceMultiplier:
                         plan.budget.cachedInputPriceMultiplier,
                     pricingVersion: plan.budget.pricingVersion ?? null,
+                    // Part of `reservedMicroUsd` above, so the payload's own
+                    // consistency check can reconstruct that total from its
+                    // components. Omitted when zero, which keeps an uncached
+                    // fallback's payload exactly what it has always been.
+                    ...(plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? {
+                              promptCacheWriteReservedPremiumMicroUsd:
+                                  plan.budget
+                                      .promptCacheWriteReservedPremiumMicroUsd,
+                          }
+                        : {}),
                 },
             }).catch((budgetError: unknown) => {
                 logRequestError(
@@ -4374,6 +4413,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: plan.budget.cachedInputPriceMultiplier,
+                // The fallback's own write rate and TTL, not the primary's.
+                // Caches are model-scoped, so these two attempts wrote into
+                // different entries at whatever each model's rate is.
+                cacheWriteUsdPerMillionTokens:
+                    plan.budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
             };
             // The next attempt captures under its own key, so the memo from
@@ -4586,6 +4634,18 @@ async function handleChatPost(
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
+                                    // `usage.inputTokens` is the *total* --
+                                    // the SDK builds it as noCache + cacheRead
+                                    // + cacheWrite, unlike the Anthropic API's
+                                    // own `input_tokens`, which is the
+                                    // uncached remainder. So the write count
+                                    // is carved out of that total rather than
+                                    // added to it; settlement prices it at
+                                    // 1.25x instead of the 1.0x it was
+                                    // silently getting as part of the
+                                    // "uncached" remainder.
+                                    cacheWriteInputTokens:
+                                        usage.inputTokenDetails.cacheWriteTokens,
                                     outputTokens: usage.outputTokens,
                                     reasoningTokens:
                                         usage.outputTokenDetails

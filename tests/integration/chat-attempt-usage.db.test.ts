@@ -111,6 +111,8 @@ const chatBudget = (overrides: Partial<ChatBudget> = {}): ChatBudget => ({
   inputUsdPerMillionTokens: 100,
   outputUsdPerMillionTokens: 100,
   cachedInputPriceMultiplier: 1,
+  cacheWriteUsdPerMillionTokens: null,
+  promptCacheWriteReservedPremiumMicroUsd: 0,
   nativeSearchReservedCostMicroUsd: 0,
   nativeSearchCostPerQueryMicroUsd: 0,
   nativeSearchMaxQueries: 0,
