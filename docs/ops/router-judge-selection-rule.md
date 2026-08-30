@@ -44,6 +44,31 @@ Luna and Fable are measured against the same human labels, on the same pairs:
    says `baseline`. Not "disagreed"; reversed.
 4. **A pair-level bootstrap 95% CI for each**, on the same seed the run used.
 
+## The thresholds, as numbers
+
+"Tie" and "far" decide the outcome, so they are numbers, frozen in
+`lib/routerJudgeSelection.ts` before any human label is read and covered by
+`tests/routerJudgeSelection.test.mjs`.
+
+```
+D_j = |judge baseline margin - human baseline margin|
+dD  = D_Luna - D_Fable                      pair-level bootstrap, run's own seed
+
+separated          the 95% interval on dD excludes zero
+tolerance T        10pp   -- the primary sample's own resolution
+reversal rail      10%    -- auto<->baseline inversions against the humans
+```
+
+`dD` negative throughout means Luna is closer; positive throughout means Fable
+is. Where the interval contains zero the two are **not** separated, and the
+answer is a larger human sample — not the better point estimate and not the
+better exact agreement. A rule that falls through to a second criterion
+whenever the first is inconclusive is a rule that always decides.
+
+`T` is applied to the judge that would be adopted. If the closer judge is
+beyond `T`, so is the other, so "both are far" is the same check rather than a
+second one.
+
 ## How the judge is picked
 
 **Primary criterion: the smaller `|margin shift|` against the humans.** ROUTE-01
@@ -79,6 +104,18 @@ So adopting a judge under this rule licenses computing `n` and running the
 decision set. It does not license treating the adopted judge as unbiased. Any
 report that turns on a margin near −2pp has to say that its judge was selected
 at ±10pp resolution.
+
+## There is no `accepted` outcome
+
+The rule returns `preferred` or `undecided`, and nothing else. 60 pairs resolve
+to roughly ±10pp, so no result from them can certify that a judge's residual
+bias is under ROUTE-01's −2pp decision boundary. `preferred` says one judge is
+measurably closer to people than the other, at an instrument coarser than the
+decision it feeds.
+
+`activatesSampleSize` is therefore false for every outcome the rule can return.
+Whether a ±10pp instrument may stand behind a −2pp decision is a judgement for
+a person, recorded as its own decision — not a consequence of this comparison.
 
 ## After a judge is adopted
 

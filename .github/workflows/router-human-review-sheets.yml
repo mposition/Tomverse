@@ -95,20 +95,6 @@ jobs:
 
       - run: npm ci
 
-      # The key is encrypted before it is stored anywhere. Checked first, by
-      # name, so a missing secret refuses the run rather than being discovered
-      # after a plaintext key exists on disk.
-      - name: The key can be encrypted
-        env:
-          HUMAN_REVIEW_KEY_PASSPHRASE: ${{ secrets.HUMAN_REVIEW_KEY_PASSPHRASE }}
-        run: |
-          if [ -z "$(printenv HUMAN_REVIEW_KEY_PASSPHRASE)" ]; then
-            echo "::error::missing repository secret HUMAN_REVIEW_KEY_PASSPHRASE. The draw writes a key"
-            echo "::error::mapping items to pairs, which must never be stored in the clear. Nothing was drawn."
-            exit 1
-          fi
-          echo "HUMAN_REVIEW_KEY_PASSPHRASE is set. Checked by name; no value is printed."
-
       # Only the pinned artifact, and only the one file from it.
       - name: Fetch the pinned bundle
         id: source
@@ -141,6 +127,71 @@ jobs:
           npm run check:router-review-source -- \
             --bundle=source/${{ steps.source.outputs.file }} \
             --preregistration=docs/ops/router-human-review/primary-60-preregistration.json
+
+      # After the digest gate and before anything is drawn: the digest-only
+      # dispatch has to be able to reach its refusal without a recipient key
+      # existing yet, and no plaintext key may exist before this passes.
+      #
+      # The key maps every item back to its pair, so it undoes the blinding
+      # for anyone holding it. It is encrypted to a key the OPERATOR holds.
+      #
+      # Not a repository secret, and the reason is recoverability rather than
+      # secrecy: a passphrase that exists only as a GitHub secret cannot be
+      # read back by a person, so the key it protects is one nobody can open.
+      # Public-key encryption puts the private half with the operator, outside
+      # this repository and outside Actions.
+      - name: The recipient key is present and usable
+        run: |
+          set -euo pipefail
+          recipient=docs/ops/router-human-review/key-recipient.pub.pem
+          if [ ! -s "$recipient" ]; then
+            echo "::error::$recipient is missing. The draw writes a key mapping items to pairs, which is"
+            echo "::error::encrypted to the operator's public key. Generate a keypair, keep the private half"
+            echo "::error::outside this repository, and commit the public half. Nothing was drawn."
+            exit 1
+          fi
+          if ! openssl pkey -pubin -in "$recipient" -noout 2>/dev/null; then
+            echo "::error::$recipient is not a readable public key. Nothing was drawn."
+            exit 1
+          fi
+          # Readable is not the same as usable. An Ed25519 public key parses
+          # here and then cannot encrypt at all -- it is a signing key. Trying
+          # a real encryption is the only check that distinguishes them, so it
+          # is done on a throwaway value before any draw exists.
+          openssl rand -out trial.bin 32
+          if ! openssl pkeyutl -encrypt -pubin -inkey "$recipient" \
+              -in trial.bin -out /dev/null 2>trial.err; then
+            sed 's/^/::error::/' trial.err
+            echo "::error::$recipient parses but cannot encrypt. It must be an encryption key --"
+            echo "::error::RSA, not an Ed25519 signing key. Generate one with:"
+            echo "::error::  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out private.pem"
+            echo "::error::  openssl pkey -in private.pem -pubout -out $recipient"
+            echo "::error::Keep private.pem outside this repository. Nothing was drawn."
+            rm -f trial.bin trial.err
+            exit 1
+          fi
+          rm -f trial.bin trial.err
+          echo "Recipient public key, and it encrypts:"
+          openssl pkey -pubin -in "$recipient" -noout -text | head -2
+
+      # Encrypted here, decrypted by the operator on their own machine, before
+      # the canonical draw exists. It proves the private half actually opens
+      # what this workflow seals -- a key that cannot be recovered is found out
+      # now rather than after the only draw is sealed with it.
+      - name: Recovery probe
+        run: |
+          set -euo pipefail
+          mkdir -p out-probe
+          printf 'router-human-review recovery probe %s\n' "${{ github.run_id }}" > probe.txt
+          sha256sum probe.txt | tee out-probe/probe.sha256
+          openssl rand -out probe.key 32
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+            -in probe.txt -out out-probe/probe.txt.enc -pass file:probe.key
+          openssl pkeyutl -encrypt -pubin \
+            -inkey docs/ops/router-human-review/key-recipient.pub.pem \
+            -in probe.key -out out-probe/probe.key.enc
+          rm -f probe.key probe.txt
+          echo "Probe sealed. Decrypt it with the private half before the canonical draw."
 
       # Into a temporary directory, because the generator writes the manifest,
       # both sheets and the key side by side -- and those three have three
@@ -178,23 +229,35 @@ jobs:
             --preregistration=docs/ops/router-human-review/primary-60-preregistration.json \
             --reviewers='${{ inputs.reviewer_a }},${{ inputs.reviewer_b }}'
 
-      # Encrypted before it is stored, then the plaintext is gone. A key
-      # mapping items back to pairs undoes the blinding for anyone holding it.
-      - name: Encrypt the key and remove the plaintext
-        env:
-          HUMAN_REVIEW_KEY_PASSPHRASE: ${{ secrets.HUMAN_REVIEW_KEY_PASSPHRASE }}
+      # Hybrid encryption: a random symmetric key seals the file, and the
+      # operator's public key seals that key. Nothing here can open it again,
+      # which is the point.
+      #
+      # The plaintext is then removed from the runner's working directory. That
+      # is housekeeping on an ephemeral VM, not a secure-erase guarantee: the
+      # actual control is that the runner is destroyed and the plaintext is
+      # never uploaded anywhere.
+      - name: Encrypt the key to the operator, and remove the plaintext copy
         run: |
           set -euo pipefail
           mkdir -p out-key
+          openssl rand -out session.key 32
           openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
-            -in draw/key.json -out out-key/key.json.enc \
-            -pass env:HUMAN_REVIEW_KEY_PASSPHRASE
-          shred -u draw/key.json 2>/dev/null || rm -f draw/key.json
+            -in draw/key.json -out out-key/key.json.enc -pass file:session.key
+          openssl pkeyutl -encrypt -pubin \
+            -inkey docs/ops/router-human-review/key-recipient.pub.pem \
+            -in session.key -out out-key/key.json.session.enc
+          # Named key.json, two-space separated: this is the exact line
+          # `sha256sum -c` expects once the operator has decrypted the
+          # file back to that name.
+          printf '%s  key.json\n' "$(sha256sum draw/key.json | cut -d' ' -f1)" \
+            > out-key/key.json.sha256
+          rm -f session.key draw/key.json
           if [ -f draw/key.json ]; then
-            echo "::error::the plaintext key is still on disk. Nothing will be uploaded."
+            echo "::error::the plaintext key is still present. Nothing will be uploaded."
             exit 1
           fi
-          echo "Key encrypted; plaintext removed."
+          echo "Key sealed to the operator's public key; the plaintext copy is gone from the runner."
 
       - name: Separate the outputs
         env:
@@ -243,6 +306,15 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Upload the recovery probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-review-recovery-probe
+          path: out-probe/
+          if-no-files-found: warn
+          retention-days: 90
+
       - name: How to hand these out
         run: |
           cat <<'NOTE'
@@ -251,9 +323,15 @@ jobs:
             human-review-manifest              the draw. Commit it.
             human-review-sheet-<A>             give to reviewer A only.
             human-review-sheet-<B>             give to reviewer B only.
-            human-review-key-encrypted         operators only. Decrypt with:
+            human-review-key-encrypted         operators only. Decrypt with the
+                                               private half of the recipient key:
+              openssl pkeyutl -decrypt -inkey <private.pem> \
+                -in key.json.session.enc -out session.key
               openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
-                -in key.json.enc -out key.json -pass env:HUMAN_REVIEW_KEY_PASSPHRASE
+                -in key.json.enc -out key.json -pass file:session.key
+              sha256sum -c key.json.sha256   # matches what was sealed
+            human-review-recovery-probe        decrypt this the same way BEFORE
+                                               trusting the sealed key
 
           GitHub Actions artifacts have NO per-file access control. A reviewer
           with Actions access to this repository can read every artifact on
