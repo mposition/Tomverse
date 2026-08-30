@@ -10,6 +10,7 @@ import {
 } from "@/lib/messageAttachmentCore";
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
+import { conversationSurface } from "@/lib/continuationRoutes";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -212,6 +213,10 @@ export async function GET(
         password: true,
         assistantProfileVersionId: true,
         assistantProfileRemovedAt: true,
+        // Existence only (docs/policy/external-conversation-continuation.md
+        // §8.2). A deep link into the workspace has to be able to correct
+        // itself, and the row is the only thing that knows.
+        continuationBridge: { select: { id: true } },
       },
     });
 
@@ -378,6 +383,12 @@ export async function GET(
     );
     return NextResponse.json({
       ...conversation,
+        // Spread above would emit the relation object itself; this replaces it
+        // with the one fact the client is owed.
+        continuationBridge: undefined,
+        surface: conversationSurface({
+          hasContinuationBridge: conversation.continuationBridge !== null,
+        }),
         messages,
         kind:
           conversation.kind === "image" ? ("image" as const) : ("chat" as const),

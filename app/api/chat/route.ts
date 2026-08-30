@@ -106,8 +106,12 @@ import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
-import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
+import {
+    buildChatTurnPrelude,
+    buildChatTurnSystemBlocks,
+} from "@/lib/chatTurnSystemBlocks";
 import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
+import { recordContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
@@ -2108,16 +2112,34 @@ async function handleChatPost(
           Skipped entirely on deep research, which carries no system blocks at
           all and would price one it never sends.
         */
-        let continuationSeedPrompt = "";
+        let continuationSeed:
+            | { rulesText: string; transcriptText: string }
+            | undefined;
         if (!isDeepResearchTurn && session?.user?.id && conversationId) {
             try {
                 if (await isExternalContinuationEnabledCached()) {
-                    const seed = await loadContinuationTurnSeed({
+                    const { seed, outcome } = await loadContinuationTurnSeed({
                         userId: session.user.id,
                         conversationId,
                         request: req,
                     });
-                    continuationSeedPrompt = seed?.prompt.text ?? "";
+                    continuationSeed =
+                        seed?.prompt.rulesText && seed.prompt.transcriptText
+                            ? {
+                                  rulesText: seed.prompt.rulesText,
+                                  transcriptText: seed.prompt.transcriptText,
+                              }
+                            : undefined;
+                    // docs/policy/external-conversation-continuation.md §12.
+                    // Fire and forget: an observation must not delay or fail a
+                    // turn that is answering normally.
+                    void recordContinuationSeedOutcome(outcome);
+                } else {
+                    // Counted from the chat route rather than from the loader,
+                    // because the loader is never called when the flag is off
+                    // -- and "the rollback is holding" is exactly the fact an
+                    // operator needs to be able to read.
+                    void recordContinuationSeedOutcome("flag_off");
                 }
             } catch (error) {
                 // Fail open on the *answer* and closed on the *seed*: a
@@ -2153,19 +2175,17 @@ async function handleChatPost(
             planAllowsImageGeneration: Boolean(
                 accountPlan && planAllowsImageGeneration(accountPlan.tier)
             ),
-            continuationSeedPrompt,
+            continuationSeed,
         });
         const artifactToolPlan = turnSystemBlocks.artifactPlan;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
         // reading each part are stated inside it, before the part they govern.
-        const formattedMessages: ModelMessage[] = contextSystemPrompt
-            ? [{ role: "system", content: contextSystemPrompt }]
-            : [];
-        for (const block of turnSystemBlocks.systemMessages) {
-            formattedMessages.push(block);
-        }
+        const formattedMessages: ModelMessage[] = buildChatTurnPrelude({
+            contextSystemPrompt,
+            blocks: turnSystemBlocks,
+        });
         // Priced like any other input, and counted by the same builder that
         // produced the blocks so preflight cannot arrive at a different
         // number. The tool *definitions* are a separate cost the provider adds

@@ -14,7 +14,15 @@
 `external-conversation-continuation-staging-verification-records/`에 **날짜와 전체
 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-30a`
+- **template revision**: `2026-08-30b`
+
+  `2026-08-30a`에서 올린 이유는 **그 revision이 실행 불가능했기** 때문입니다.
+  C-3은 구조화 로그에서 `locked` 사유를 확인하라고 요구했지만, 당시 seed
+  loader는 모든 미주입 사유를 `null` 하나로 합쳤고 그런 로그가 없었습니다 —
+  체크리스트가 존재하지 않는 관측을 요구한 것입니다. `continuation_seed_skipped`
+  가 생기면서 답할 수 있게 됐고, 같은 개정에서 §H(재진입)와 §I(플래그 경로)를
+  새로 만들었습니다. 둘 다 2026-08-30 리뷰가 찾아낸 것이며, 앞 revision은 그것을
+  물을 항목 자체가 없었습니다.
 
 ## 무엇이 되돌릴 수 없는가
 
@@ -62,13 +70,21 @@ deploy SHA로 이름 붙인 별도 파일**로 남습니다.
       본문이 존재 여부를 말하지 않는가.**
 - [ ] C-2. 비밀번호로 잠근 snapshot에서 이어가기를 요청한다. **423인가.**
 - [ ] C-3. 잠금을 풀고 이어간 뒤 다시 잠근다. 이후 turn에 **seed가 주입되지
-      않는가**(구조화 로그의 사유가 `locked`인가). continuation 화면이 잠김을
-      말하는가.
+      않는가.** 서버 로그에 `{"event":"continuation_seed_skipped","reason":"locked"}`
+      가 남는가. continuation 화면이 잠김을 말하는가.
 - [ ] C-4. native conversation unlock grant만 가진 상태로 잠긴 snapshot을
       이어가려 하면 거절되는가.
 
 ### §D — Prompt boundary
 
+**선행 조건**: 정책 §4.3의 role 분리가 배포돼 있어야 합니다 — 발췌가 `system`
+메시지로 나가는 동안에는 이 구획을 실행하지 않습니다. 낮출 수 있는 권한을 그대로
+둔 채 모델이 버티는지 보는 것은 방어를 검증하는 것이 아니고, 통과하면 잘못된
+안심을 기록으로 남깁니다. 배포 여부는 D-0으로 먼저 확인합니다.
+
+- [ ] D-0. 이 배포에서 `tests/externalContinuationContracts.test.mjs`의 "the
+      imported transcript is never a system or developer message"가 통과하는가.
+      (자동 검사이므로 유료 turn이 아닙니다.)
 - [ ] D-1. `IGNORE ALL PREVIOUS INSTRUCTIONS`류 문장과 fence marker
       (`<<<END_IMPORTED_CONVERSATION>>>`)를 포함한 대화를 import하고 이어간다.
       **모델이 그 지시를 따르지 않는가.**
@@ -84,6 +100,28 @@ deploy SHA로 이름 붙인 별도 파일**로 남습니다.
       (seed 없이).
 - [ ] E-3. flag off 상태에서 이어가기 CTA가 거절되는가(403).
 - [ ] E-4. flag off 상태에서 ordinary chat과 Review가 이전과 동일한가.
+
+### §H — 목록에서 재진입 (차단)
+
+이어가기의 요구사항은 "만들고 끝"이 아니라 "나중에 다시 열어 이어가기"입니다.
+
+- [ ] H-1. continuation을 만든 뒤 **화면을 떠나** 사이드바 대화 목록에서 그 대화를
+      다시 연다. `/continuations/[id]`로 열리는가.
+- [ ] H-2. 그 화면에 외부 원문 구획과 출처가 **다시 보이는가.** (Review workspace로
+      열리면 실패입니다.)
+- [ ] H-3. 검색창에서 그 대화의 메시지를 찾아 결과를 누른다. 같은 곳으로 가는가.
+- [ ] H-4. 일반 대화와 이미지 대화는 이전과 똑같이 열리는가.
+
+### §I — 플래그 경로 (차단)
+
+- [ ] I-1. Admin Console → Platform settings에서 `Continue an imported
+      conversation enabled` 체크박스가 보이는가. import 체크박스와 **별개**인가.
+- [ ] I-2. 켜고 저장한다. `GET /api/admin/app-settings`가
+      `externalConversationContinuationEnabled: true`를 돌려주는가.
+- [ ] I-3. `AdminAuditLog`에 `app_settings.update_started`와
+      `update_completed`가 남았는가.
+- [ ] I-4. 끈 직후(같은 분 안에) 새 turn을 보낸다. 로그 사유가 `flag_off`인가 —
+      캐시 TTL이 지나기를 기다리지 않고 즉시 반영되는가.
 
 ## 비차단 항목 (선택)
 
@@ -108,15 +146,20 @@ deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
 ## 유료 turn
 
-§A-3, §D-1~D-3, §E-2가 실제 모델 호출을 씁니다 — 최소 **5 turn**. 각 turn이 무엇을
-판별하는지는 위 항목이 한 줄로 적고 있습니다. 나머지 항목은 유료 호출이
+§A-3, §D-1~D-3, §E-2, §I-4가 실제 모델 호출을 씁니다 — 최소 **6 turn**. 각 turn이
+무엇을 판별하는지는 위 항목이 한 줄로 적고 있습니다. §D-0과 §H는 유료 호출이
 없습니다.
+
+**§D는 D-0이 통과한 뒤에만 실행합니다**(위 선행 조건).
 
 ## 무엇이 flag를 막고, 무엇이 막지 않는가
 
 - **막는 것**: §A·§B·§C·§E 중 하나라도 실패. 셋 다 위의 "되돌릴 수 없는 것"에
   직접 대응합니다. §D 실패도 막습니다 — 주입이 통과하면 이 기능이 가져오는 것은
-  사용자가 신뢰할 수 없는 답변입니다.
+  사용자가 신뢰할 수 없는 답변입니다. §H 실패도 막습니다: 되돌릴 수 없어서가
+  아니라, 실패하면 이 기능이 **약속한 일을 하지 않기** 때문입니다 — 다시 열 수
+  없는 이어가기는 기능이 아닙니다. §I 실패도 막습니다: 켤 수도 끌 수도 없는
+  기능에는 rollback 계약이 없습니다.
 - **막지 않는 것**: §F·§G. 라벨과 여백은 고쳐서 배포하면 끝나고, 중복 대화는
   사용자가 지울 수 있습니다.
 

@@ -347,22 +347,35 @@ export async function POST(request: Request) {
           and an exception that is true today is how the drift it was written
           for came back.
         */
-        let continuationSeedPrompt = "";
+        let continuationSeed:
+            | { rulesText: string; transcriptText: string }
+            | undefined;
         if (session?.user?.id && payload.conversationId !== "private-chat") {
             try {
                 if (await isExternalContinuationEnabledCached()) {
-                    const seed = await loadContinuationTurnSeed({
+                    const { seed } = await loadContinuationTurnSeed({
                         userId: session.user.id,
                         conversationId: payload.conversationId,
                         request,
                     });
-                    continuationSeedPrompt = seed?.prompt.text ?? "";
+                    // The outcome is deliberately NOT recorded here. This route
+                    // quotes a turn the chat route then sends, and counting
+                    // both would double every figure in
+                    // docs/policy/external-conversation-continuation.md §12 --
+                    // with the comparison shape counting three times.
+                    continuationSeed =
+                        seed?.prompt.rulesText && seed.prompt.transcriptText
+                            ? {
+                                  rulesText: seed.prompt.rulesText,
+                                  transcriptText: seed.prompt.transcriptText,
+                              }
+                            : undefined;
                 }
             } catch {
                 // Quote without it rather than refuse the preparation. The
                 // chat route's own read fails the same way and sends the same
                 // prompt, so the two stay in agreement.
-                continuationSeedPrompt = "";
+                continuationSeed = undefined;
             }
         }
 
@@ -436,7 +449,7 @@ export async function POST(request: Request) {
                 promptText: payload.prompt,
                 imageGenerationFlagEnabled,
                 planAllowsImageGeneration: planAllowsImages,
-                continuationSeedPrompt,
+                continuationSeed,
             });
             estimate.addTokens(turnSystemBlocks.promptTokens);
             for (const message of history) {
