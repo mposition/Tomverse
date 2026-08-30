@@ -23,8 +23,10 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import {
     AnthropicUsageParseError,
     anthropicUsageReportUrl,
+    anthropicCostReportUrl,
     attributionScope,
     BASE_GROUP_BY,
+    CACHE_5M_BREAK_EVEN_READ_RATIO,
     cacheEfficiencyMetrics,
     FAST_MODE_BETA_HEADER,
     formatShare,
@@ -32,6 +34,7 @@ import {
     formatUsd,
     parseAnthropicUsagePage,
     resolveReportRange,
+    sumCostReport,
     summariseUsageRows,
     UNPRICED_REASONS,
 } from "./report-anthropic-cache-efficiency-core.mjs";
@@ -270,54 +273,57 @@ const main = async () => {
     // above. A failure here is not a failure of the report: the cache metrics
     // come entirely from the usage side, so the billed column is reported as
     // unavailable and everything else stands.
-    let billed = { available: false, reason: null, costUsd: null };
+    // The billed total, read separately and never reconciled with the estimate
+    // above. A failure here is not a failure of the report: the cache metrics
+    // come entirely from the usage side, so the billed column is reported as
+    // unavailable and everything else stands.
+    //
+    // `scope.cost` decides what this can honestly be compared against. The two
+    // APIs narrow differently -- the usage report takes workspace *and* API-key
+    // filters, the cost report takes neither and offers only workspace
+    // grouping -- so a filtered usage figure beside an unfiltered bill is two
+    // populations on one screen.
+    let billed = {
+        available: false,
+        reason: null,
+        costUsd: null,
+        comparable: scope.cost.comparable,
+        mode: scope.cost.mode,
+        note: scope.cost.note,
+    };
     try {
-        const url = new URL(COST_URL);
-        url.searchParams.set("starting_at", range.startingAt.toISOString());
-        url.searchParams.set("ending_at", range.endingAt.toISOString());
-        url.searchParams.set("bucket_width", "1d");
-        url.searchParams.set("limit", String(range.days));
-        const payload = await adminFetch(url, adminKey);
-        if (!payload || !Array.isArray(payload.data)) {
-            throw new Error("Cost API response did not contain a data array.");
-        }
-        let cents = 0;
-        for (const bucket of payload.data) {
-            for (const result of bucket?.results ?? []) {
-                const currency =
-                    typeof result?.currency === "string"
-                        ? result.currency.toUpperCase()
-                        : null;
-                // Fail-closed on currency, matching lib/providerUsageSyncCore.ts.
-                // A non-USD amount summed into a USD total is a wrong number
-                // that looks like a right one.
-                if (currency !== "USD") {
-                    throw new Error(
-                        "Cost API returned an unsupported or missing currency."
-                    );
-                }
-                if (
-                    typeof result.amount !== "string" ||
-                    !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(result.amount.trim())
-                ) {
-                    throw new Error(
-                        "Cost API returned an invalid decimal-cent amount."
-                    );
-                }
-                cents += Number(result.amount);
-            }
-        }
-        if (!Number.isFinite(cents)) {
-            throw new Error("Cost API total is outside the numeric range.");
-        }
-        // Costs are reported in cents, per the Cost API's own documentation.
-        billed = { available: true, reason: null, costUsd: cents / 100 };
-        if (payload.has_more === true) {
+        const payload = await adminFetch(
+            anthropicCostReportUrl({
+                baseUrl: COST_URL,
+                startingAt: range.startingAt,
+                endingAt: range.endingAt,
+                limit: range.days,
+                groupByWorkspace: scope.cost.groupByWorkspace,
+            }),
+            adminKey
+        );
+        const summed = sumCostReport(payload, {
+            workspaceIds: scope.cost.workspaceIds,
+        });
+        billed = {
+            ...billed,
+            available: true,
+            costUsd: summed.costUsd,
+            matchedResults: summed.matchedResults,
+            skippedResults: summed.skippedResults,
+            reason: summed.hasMore
+                ? "The Cost API reported more pages; this total covers the first page only."
+                : null,
+        };
+        // A workspace filter that matched nothing is a filter that is probably
+        // wrong -- a mistyped id sums to zero and looks like a quiet month.
+        if (scope.cost.workspaceIds.length > 0 && summed.matchedResults === 0) {
             billed.reason =
-                "The Cost API reported more pages; this total covers the first page only.";
+                "No cost rows matched the named workspace(s). Check the ids: a filter that matches nothing sums to zero and reads like an unused period.";
         }
     } catch (error) {
         billed = {
+            ...billed,
             available: false,
             reason:
                 error instanceof Error
@@ -362,7 +368,7 @@ const main = async () => {
             cacheReadShare:
                 "cache_read_input_tokens / (uncached_input_tokens + cache_read_input_tokens + cache_creation tokens)",
             cacheReadToWriteRatio:
-                "cache_read_input_tokens / (ephemeral_5m_input_tokens + ephemeral_1h_input_tokens)",
+                "cache_read_input_tokens / (ephemeral_5m_input_tokens + ephemeral_1h_input_tokens). Break-even for the 5-minute TTL is 0.25/0.9 = 0.2778 reads per written token, from 1.25 + 0.1R = 1 + R -- not 0.25, which would be right only if reads were free. This ratio weights every token equally regardless of which model wrote it, so it diagnoses rather than decides; listPriceSavingUsd is the figure that answers whether caching paid.",
             actualInputCostUsd:
                 "uncached x 1.00 + cache_read x 0.10 + 5m writes x 1.25 + 1h writes x 2.00, each times the model's base input rate for that UTC day",
             uncachedCounterfactualInputCostUsd:
@@ -377,6 +383,9 @@ const main = async () => {
         overall: summary.overall,
         byModel: summary.byModel,
         unpriced: summary.unpriced,
+        // `comparable`/`mode`/`note` travel with the figure rather than beside
+        // it, so a consumer that reads `billed.costUsd` cannot miss that it may
+        // describe a different population from the usage totals.
         billed,
     };
 
@@ -427,7 +436,12 @@ const main = async () => {
             `    read/write ratio    ${
                 metrics.cacheReadToWriteRatio === null
                     ? "n/a"
-                    : metrics.cacheReadToWriteRatio.toFixed(2)
+                    : `${metrics.cacheReadToWriteRatio.toFixed(3)} (5m break-even ${CACHE_5M_BREAK_EVEN_READ_RATIO.toFixed(3)}${
+                          metrics.cacheReadToWriteRatio >=
+                          CACHE_5M_BREAK_EVEN_READ_RATIO
+                              ? ""
+                              : " -- BELOW"
+                      })`
             }`
         );
         lines.push(
@@ -485,6 +499,9 @@ const main = async () => {
             : `  Cost API actual billed total:                            unavailable (${billed.reason})`
     );
     if (billed.available && billed.reason) lines.push(`  note: ${billed.reason}`);
+    // Which population the bill describes, always -- not only when it differs.
+    // A reader who has to infer that from the flags above will not.
+    lines.push(`  ${billed.comparable ? "scope" : "SCOPE MISMATCH"}: ${billed.note}`);
     lines.push(
         "  These are not the same measurement. The estimate is tokens x published rates; the billed total carries any contract discount, credit or tax. A difference is not a defect."
     );

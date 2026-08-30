@@ -170,27 +170,32 @@ test("an unnamed path caches nothing", () => {
   assert.equal(anthropicNamespace(settings)?.cacheControl, undefined);
 });
 
-test("the budget and the request are given the same path at each call site", () => {
-  // Two literals, in two files, that have to agree: the premium the provider
-  // budget authorises and the marker the request sends. Read as text because
-  // the two are decided far apart in one very long function and a drift between
-  // them under-reserves rather than failing.
-  const root = join(import.meta.dirname, "..");
-  const chatRoute = readFileSync(join(root, "app/api/chat/route.ts"), "utf8");
-  const attemptExecution = readFileSync(
-    join(root, "lib/chatAttemptExecution.ts"),
+test("the chat route decides its caching path exactly once", () => {
+  // This used to count two `promptCachePath: "chat_turn"` literals -- one for
+  // the budget, one for the request -- on the argument that the two are
+  // decided far apart in a very long function and a drift between them
+  // under-reserves rather than failing.
+  //
+  // The argument was right and counting literals was the wrong expression of
+  // it: two literals that agree today are still two readings, and the route now
+  // has to choose between `chat_turn` and `chat_turn_native_search` from
+  // `nativeSearchEnabled`. So the route computes the path once and both calls
+  // read that variable, and the structural check moved to
+  // tests/anthropicPromptCachingWiring.test.mjs, which resolves the variable
+  // and verifies both call sites per call rather than by counting text.
+  const route = readFileSync(
+    join(import.meta.dirname, "..", "app/api/chat/route.ts"),
     "utf8"
   );
   assert.equal(
-    (chatRoute.match(/promptCachePath: "chat_turn"/g) ?? []).length,
-    2,
-    "app/api/chat/route.ts must name chat_turn twice: once for createChatBudget and once for getModelGenerationSettings"
+    (route.match(/const promptCachePath\b/g) ?? []).length,
+    1,
+    "one assignment, so the budget and the request cannot disagree"
   );
   assert.equal(
-    (attemptExecution.match(/promptCachePath: "chat_fallback_turn"/g) ?? [])
-      .length,
-    2,
-    "lib/chatAttemptExecution.ts must name chat_fallback_turn twice, for the same reason"
+    (route.match(/promptCachePath: "chat_turn"/g) ?? []).length,
+    0,
+    "the call sites read the variable, not a repeated literal"
   );
 });
 
