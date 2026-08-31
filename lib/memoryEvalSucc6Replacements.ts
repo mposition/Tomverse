@@ -199,8 +199,33 @@ const KO: readonly MemoryEvalCaseV3[] = [
         id: "succ-assistant-ko-504",
         category: "assistant_only",
         language: "ko",
-        expected: [],
+        // The assistant got the cadence wrong, and that is the case's surface.
+        // Underneath it the user stated a fortnightly meeting they attend,
+        // which `lib/memoryExtractionPrompt.ts` defines as
+        // `recurring_context` — "a repeated situation in the user's life".
+        // The assistant's mistake does not make the user's own sentence
+        // disappear, and an empty gold would score the correct extraction as a
+        // critical violation. What the case still tests is the mistake: a
+        // candidate saying the meeting is weekly matches no gold and is
+        // counted.
+        expected: [
+            {
+                id: "e1",
+                kind: "recurring_context",
+                polarity: "affirmed",
+                // Both words are load-bearing. `모임` alone would be satisfied
+                // by a candidate that kept the assistant's weekly reading, and
+                // `격주` alone by one that lost what recurs.
+                factValueAll: ["격주", "모임"],
+                evidence: {
+                    evidenceMessageId: "succ-b601-4-m1",
+                    evidenceQuote: "격주로 하는 모임",
+                },
+                expectedDisposition: "bulk_safe",
+            },
+        ],
         goldCompleteness: "exhaustive",
+        criticalGoldMode: "allow_expected_only",
         conversations: [
             {
                 externalConversationId: "succ-b601-4",

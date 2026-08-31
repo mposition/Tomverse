@@ -33,6 +33,8 @@
  * is that no case is credited to the floor without a reason beside it.
  */
 
+import { createHash } from "node:crypto";
+
 /** A case the draft reads as subtype 3 or 4, with the clause that decided it. */
 export type AssistantOnlySubtypeEntry = {
     /** Subtype 3 (the user corrected it) or 4 (the user supposed it). */
@@ -84,6 +86,7 @@ export const ASSISTANT_ONLY_SUBTYPES: Readonly<
     "succ-assistant-ko-501": { subtype: 3, ground: "십 년은 제 동아리 선배 얘기고 저는 첼로를 이번에 처음 시작합니다" },
     "succ-assistant-ko-504": { subtype: 3, ground: "격주라고 말씀드렸는데 매주로 잡으셨네요" },
     "succ-assistant-ko-505": { subtype: 3, ground: "저울을 잘못 봤습니다. 십삼 킬로였어요" },
+    "succ-assistant-ko-507": { subtype: 3, ground: "제 차가 아니라 수리 맡긴 동안 빌린 대차예요" },
 
     /* ---------------------------------------------------------- ko, 4 -- */
     "succ-assistant-ko-4": { subtype: 4, ground: "제가 만약 채식주의자라면" },
@@ -95,6 +98,7 @@ export const ASSISTANT_ONLY_SUBTYPES: Readonly<
     "succ-assistant-ko-317": { subtype: 4, ground: "해외로 이주한다면 / 아직 한국에 있고" },
     "succ-assistant-ko-502": { subtype: 4, ground: "쌍둥이를 키우는 집이라면" },
     "succ-assistant-ko-503": { subtype: 4, ground: "가령 매달 삼백만 원을 베트남으로 보내는 경우라면" },
+    "succ-assistant-ko-508": { subtype: 4, ground: "중형견을 키운다고 하면 / 지금 키우는 건 없고" },
 
     /* ---------------------------------------------------------- en, 3 -- */
     "succ-assistant-en-3": { subtype: 3, ground: "Sorry, I mistyped — I moved away years ago" },
@@ -136,7 +140,46 @@ export const ASSISTANT_ONLY_SUBTYPES: Readonly<
     "succ-assistant-en-95": { subtype: 4, ground: "If I registered as self-employed / Still employed" },
     "succ-assistant-en-96": { subtype: 4, ground: "If I studied abroad / I'm not going anywhere" },
     "succ-assistant-en-502": { subtype: 4, ground: "Where a tenant has been in a flat for over ten years" },
+    "succ-assistant-en-505": { subtype: 4, ground: "If someone broke a broadband contract halfway through / I'm not going anywhere" },
 };
+
+/**
+ * A digest of the table, so a freeze record can bind it.
+ *
+ * The dataset digest does not cover this file — it fingerprints cases, and the
+ * subtype of a case is a judgement *about* a case rather than part of it. That
+ * means a freeze pinning only the dataset digest would leave the classification
+ * free to move afterwards, and the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is decided by the classification.
+ * Two rows re-read differently would take a cell below 38 with every recorded
+ * digest still matching.
+ *
+ * So the manifest carries this alongside the dataset digest, and the freeze
+ * record pins both. Ids, subtypes and grounds all go in: a ground rewritten to
+ * justify a different subtype is exactly the drift worth catching, and the
+ * review status is in because a table signed by nobody is a different artefact
+ * from the same rows signed by a reviewer.
+ */
+export function subtypeTableFingerprintInput(): string {
+    const rows = Object.keys(ASSISTANT_ONLY_SUBTYPES)
+        .sort()
+        .map((id) => {
+            const entry = ASSISTANT_ONLY_SUBTYPES[id];
+            return `${id}=${entry.subtype}:${entry.ground}`;
+        });
+    return [
+        `status=${SUBTYPE_REVIEW.status}`,
+        `reviewer=${SUBTYPE_REVIEW.reviewer ?? "-"}`,
+        `reviewedAt=${SUBTYPE_REVIEW.reviewedAt ?? "-"}`,
+        `rows=${rows.length}`,
+        ...rows,
+    ].join("\n");
+}
+
+export function subtypeTableDigest(): string {
+    return createHash("sha256")
+        .update(subtypeTableFingerprintInput(), "utf8")
+        .digest("hex");
+}
 
 /** Who has confirmed the table above, and who has not. */
 export const SUBTYPE_REVIEW = {

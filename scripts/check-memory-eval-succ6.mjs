@@ -43,13 +43,19 @@ import {
 } from "../lib/memoryEvalSucc6Replacements.ts";
 import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
-import { SUCC6_REPLACEMENT_CASE_IDS, SUCC6_TRANSITIONS } from "../lib/memoryEvalSucc6Transition.ts";
+import {
+    SUCC6_REPLACEMENT_CASE_IDS,
+    SUCC6_SUPERSEDED_CASE_IDS,
+    SUCC6_TRANSITIONS,
+} from "../lib/memoryEvalSucc6Transition.ts";
 import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
 import {
+    ASSISTANT_ONLY_SUBTYPES,
     SUBTYPE_REVIEW,
     assistantOnlySubtypeFloor,
     unknownSubtypeRows,
 } from "../lib/memoryEvalAssistantOnlySubtypes.ts";
+import { SUCC6_COMPOSITION_REPAIRS } from "../lib/memoryEvalSucc6CompositionRepairs.ts";
 import { MEMORY_EVAL_SUCC5_CASES as SUCC5_FOR_FLOOR } from "../lib/memoryEvalSucc5.ts";
 import {
     regressionLeakViolations,
@@ -433,6 +439,41 @@ if (stale.length > 0) {
     ok("subtype table rows all resolve", "no stale ids");
 }
 
+/* -------------------------------------------------- composition repairs -- */
+
+// Kept apart from the B+ ten on purpose: those left because they formed the
+// boundary rule and are preserved with their history, these because the cells
+// were below the docs/ops/memory-extraction-eval-dataset.md §3.3 floor. One id in both lists would make its provenance a
+// question with two answers.
+for (const repair of SUCC6_COMPOSITION_REPAIRS) {
+    if (ids.has(repair.removedId)) {
+        fail(`${repair.removedId} was swapped for composition and is still in the set`);
+    }
+    if (!succ5Ids.has(repair.removedId)) {
+        fail(`${repair.removedId} was swapped out and was never a succ-5 case`);
+    }
+    if (!ids.has(repair.addedId)) {
+        fail(`${repair.addedId} is a composition repair and is missing`);
+    }
+    if (SUCC6_SUPERSEDED_CASE_IDS.has(repair.removedId)) {
+        fail(`${repair.removedId} is in both the B+ and the composition lists`);
+    }
+    // The swap has to be worth making: a hard case in, an easy one out.
+    if (ASSISTANT_ONLY_SUBTYPES[repair.addedId]?.subtype !== repair.addedSubtype) {
+        fail(`${repair.addedId} is declared subtype ${repair.addedSubtype} and the table disagrees`);
+    }
+    if (ASSISTANT_ONLY_SUBTYPES[repair.removedId]) {
+        fail(
+            `${repair.removedId} was subtype 3/4 and swapping it out lowers the very ` +
+                "count this repair exists to raise"
+        );
+    }
+}
+ok(
+    "composition repairs",
+    `${SUCC6_COMPOSITION_REPAIRS.length} swapped for the docs/ops/memory-extraction-eval-dataset.md §3.3 floor, disjoint from B+`
+);
+
 // The floor itself reports. It rests on a reading of 250 conversations, and a
 // gate over that reading would fail the build on one person's judgement of a
 // handful of borderline cases.
@@ -455,12 +496,22 @@ notes.push(
         "for at least 30% in subtypes 3 and 4 — 38 of 125. Measured against the " +
         `declared table in lib/memoryEvalAssistantOnlySubtypes.ts (status: ${SUBTYPE_REVIEW.status}):\n` +
         floorLines.join("\n") +
-        "\n\n        NEITHER CELL MEETS IT, and neither did succ-5: the shortfall is " +
-        "inherited, not introduced. The ten B+ replacements moved both cells toward " +
-        "the floor rather than away from it. Closing the remaining gap means changing " +
-        "cases the B+ decision did not touch, which is a decision outside this " +
-        "dataset's scope. The table is an AI draft and the margin is a few rows wide, " +
-        "so confirming or correcting it is the first step, not the last."
+        "\n\n        " +
+        (floorRows.every((row) => row.meetsFloor)
+            ? "Both cells clear it, and neither did in succ-5 — the shortfall was " +
+              "inherited and had never been measured. It was closed by swapping the " +
+              "three most redundant subtype 1/2 cases for new subtype 3/4 " +
+              "conversations (lib/memoryEvalSucc6CompositionRepairs.ts), not by " +
+              "reclassifying borderline cases: moving a boundary until the number " +
+              "passes is fitting the measurement to the threshold, and the " +
+              "measurement stops meaning anything the moment that is done once."
+            : `SHORT. ${floorRows
+                  .filter((row) => !row.meetsFloor)
+                  .map((row) => `${row.cell} needs ${row.shortfall} more`)
+                  .join("; ")}. Close it by changing the sample, never by ` +
+              "reclassifying borderline cases to reach the number.") +
+        "\n        The table is an AI draft until a reviewer signs it, and the margin " +
+        "is a few rows wide, so confirming or correcting it decides the verdict above."
 );
 
 /* ------------------------------------------------------------ readiness -- */
