@@ -92,26 +92,39 @@ side back to its arm. It is encrypted to a public key committed at
 never enters this repository.
 
 ```
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out private.pem
+openssl genpkey -algorithm RSA -aes-256-cbc \
+  -pkeyopt rsa_keygen_bits:4096 -out private.pem
 openssl pkey -in private.pem -pubout \
   -out docs/ops/router-human-review/key-recipient.pub.pem
 ```
+
+`-aes-256-cbc` puts a passphrase on the private key. The operator holds both
+the file and the passphrase; a private key sitting unencrypted on a laptop is a
+copy of the review key for anyone who reads that laptop.
 
 Not a repository secret, and the reason is recoverability rather than secrecy.
 A passphrase that exists only as a GitHub secret cannot be read back by a
 person, so the key it protects would be one nobody can open. It must be an
 encryption key: an Ed25519 key parses as a public key and then cannot encrypt
-at all, and the workflow refuses it by trying a real encryption before it draws
-anything.
+at all, and both workflows refuse it by trying a real encryption first.
 
-### Dispatch against the branch that carries the code
+### The envelope
 
-A copy of the workflow lives on the default branch, because GitHub lists a
-`workflow_dispatch` workflow only if it is there. That copy is a listing, not
-an implementation: the default branch does not carry the draw scripts, and it
-is also what the dispatch form preselects. Select the branch the
-implementation is on. A dispatch against the default branch refuses in its
-first step and says so.
+Written down rather than left to a default, in `KEY_ENVELOPE`
+(`lib/routerHumanReviewSource.ts`), and emitted as `envelope.json` beside every
+ciphertext:
+
+| | |
+|---|---|
+| payload | AES-256-CBC, PBKDF2-SHA256, 600,000 iterations |
+| key transport | RSA-OAEP, SHA-256, MGF1-SHA256 |
+| fingerprint | SHA-256 over the DER SubjectPublicKeyInfo |
+
+The OAEP options are required on the **decrypt** as well. `openssl pkeyutl`
+defaults to PKCS#1 v1.5, and OpenSSL 3 will not error on the mismatch: it
+returns implicit-rejection garbage, and the failure surfaces one step later as
+a bad AES decrypt. Somebody debugging that will suspect the ciphertext long
+before they suspect the padding.
 
 ### First dispatch: the digest
 
@@ -123,34 +136,54 @@ the same dispatch becomes repeatable.
 This happens before the key steps, so the digest can be settled before the
 recipient key exists.
 
-### Before the second dispatch
+### Second dispatch: the recovery probe
 
-Once the digest is committed, four things must be true, and each of them is
-cheaper to fix now than after the only draw exists:
+`.github/workflows/router-human-review-recovery-probe.yml` is a separate
+workflow, and separate for a reason that is not tidiness. An Actions artifact
+can only be downloaded once its job has finished. A probe sealed inside the
+draw's own job could therefore only be opened *after* the real key was already
+sealed — which makes it a report, not a precondition. Two runs with a committed
+record between them is what makes it a gate.
+
+The probe run draws nothing, reads no bundle and names no reviewer. It seals a
+throwaway file with the exact envelope above and uploads it. The operator opens
+it with the private half:
+
+```
+openssl pkeyutl -decrypt -inkey private.pem \
+  -pkeyopt rsa_padding_mode:oaep \
+  -pkeyopt rsa_oaep_md:sha256 \
+  -pkeyopt rsa_mgf1_md:sha256 \
+  -in probe.key.enc -out probe.key
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+  -in probe.txt.enc -out probe.txt -pass file:probe.key
+sha256sum -c probe.sha256
+```
+
+Once that prints `probe.txt: OK`, commit the `keyRecovery` block the run
+printed — `verifiedBy`, `verifiedAt`, `recipientKeyFingerprint`, `probeSha256`,
+`probeRunId`. The draw refuses without it, and refuses again if the public key
+has been replaced since: a recovery proved against a key that was then swapped
+proves nothing about the one that would seal the draw.
+
+### Before the third dispatch
+
+Four things must be true, and each is cheaper to fix now than after the only
+draw exists:
 
 1. `reviewer_a` and `reviewer_b` are decided and are pseudonyms. The mapping to
    real people is kept outside this repository.
 2. `adjudicatorId` is filled in. The third grader is named before anyone sees a
    disagreement, not chosen once there is one to settle.
 3. `key-recipient.pub.pem` is committed.
-4. The operator has decrypted the `human-review-recovery-probe` artifact with
-   their private half. The probe is a throwaway file sealed exactly the way the
-   key will be sealed; opening it proves the private key works while there is
-   still nothing that matters sealed with it.
+4. `keyRecovery` is committed, against that same key.
 
-```
-openssl pkeyutl -decrypt -inkey private.pem -in probe.key.enc -out probe.key
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
-  -in probe.txt.enc -out probe.txt -pass file:probe.key
-sha256sum -c probe.sha256
-```
-
-The sealed key comes back the same way, with `key.json.session.enc`,
-`key.json.enc` and `key.json.sha256`.
+The sealed key then comes back the same way as the probe, with
+`key.json.session.enc`, `key.json.enc`, `key.json.sha256` and `envelope.json`.
 
 ### The draw happens once
 
-The second dispatch is the canonical draw. Commit its `manifest.json`
+The third dispatch is the canonical draw. Commit its `manifest.json`
 immediately; re-running the workflow to get a different sample is the thing
 every pin above exists to prevent, so a second canonical draw needs a void
 record saying why the first one was discarded, exactly as a voided evaluation
@@ -163,7 +196,8 @@ One subdirectory per draw, holding the `manifest.json` (primary) or
 `settled.json` and `human-verdicts.json`.
 
 A workflow draw also produces `draw-provenance.json`: the commit and ref it
-ran from, and the bundle, digest and seed as that commit pinned them. Commit it
+ran from, the bundle, digest and seed as that commit pinned them, the
+`keyRecovery` record it ran under, and the key envelope. Commit it
 with the manifest. The ref chosen at dispatch selects the pre-registration
 file, so it is a lever on the draw even though nothing about it is typed in as
 an input, and this is what lets a later reader check the draw against the pins

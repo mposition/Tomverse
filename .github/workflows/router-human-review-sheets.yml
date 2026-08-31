@@ -156,8 +156,8 @@ jobs:
       # dispatch has to be able to reach its refusal without a recipient key
       # existing yet, and no plaintext key may exist before this passes.
       #
-      # The key maps every item back to its pair, so it undoes the blinding
-      # for anyone holding it. It is encrypted to a key the OPERATOR holds.
+      # The key maps every item back to its pair, so it undoes the blinding for
+      # anyone holding it. It is encrypted to a key the OPERATOR holds.
       #
       # Not a repository secret, and the reason is recoverability rather than
       # secrecy: a passphrase that exists only as a GitHub secret cannot be
@@ -165,6 +165,7 @@ jobs:
       # Public-key encryption puts the private half with the operator, outside
       # this repository and outside Actions.
       - name: The recipient key is present and usable
+        id: recipient
         run: |
           set -euo pipefail
           recipient=docs/ops/router-human-review/key-recipient.pub.pem
@@ -172,6 +173,8 @@ jobs:
             echo "::error::$recipient is missing. The draw writes a key mapping items to pairs, which is"
             echo "::error::encrypted to the operator's public key. Generate a keypair, keep the private half"
             echo "::error::outside this repository, and commit the public half. Nothing was drawn."
+            echo "::error::  openssl genpkey -algorithm RSA -aes-256-cbc -pkeyopt rsa_keygen_bits:4096 -out private.pem"
+            echo "::error::  openssl pkey -in private.pem -pubout -out $recipient"
             exit 1
           fi
           if ! openssl pkey -pubin -in "$recipient" -noout 2>/dev/null; then
@@ -180,42 +183,40 @@ jobs:
           fi
           # Readable is not the same as usable. An Ed25519 public key parses
           # here and then cannot encrypt at all -- it is a signing key. Trying
-          # a real encryption is the only check that distinguishes them, so it
-          # is done on a throwaway value before any draw exists.
+          # a real encryption under the padding this workflow actually uses is
+          # the only check that distinguishes them.
           openssl rand -out trial.bin 32
           if ! openssl pkeyutl -encrypt -pubin -inkey "$recipient" \
+              -pkeyopt rsa_padding_mode:oaep \
+              -pkeyopt rsa_oaep_md:sha256 \
+              -pkeyopt rsa_mgf1_md:sha256 \
               -in trial.bin -out /dev/null 2>trial.err; then
             sed 's/^/::error::/' trial.err
-            echo "::error::$recipient parses but cannot encrypt. It must be an encryption key --"
-            echo "::error::RSA, not an Ed25519 signing key. Generate one with:"
-            echo "::error::  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out private.pem"
-            echo "::error::  openssl pkey -in private.pem -pubout -out $recipient"
-            echo "::error::Keep private.pem outside this repository. Nothing was drawn."
+            echo "::error::$recipient parses but cannot encrypt under RSA-OAEP/SHA-256. It must be an RSA"
+            echo "::error::encryption key, not an Ed25519 signing key. Nothing was drawn."
             rm -f trial.bin trial.err
             exit 1
           fi
           rm -f trial.bin trial.err
-          echo "Recipient public key, and it encrypts:"
-          openssl pkey -pubin -in "$recipient" -noout -text | head -2
+          fingerprint="sha256:$(openssl pkey -pubin -in "$recipient" -outform DER | openssl dgst -sha256 -r | cut -d' ' -f1)"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Recipient public key $fingerprint, and it encrypts under RSA-OAEP/SHA-256."
 
-      # Encrypted here, decrypted by the operator on their own machine, before
-      # the canonical draw exists. It proves the private half actually opens
-      # what this workflow seals -- a key that cannot be recovered is found out
-      # now rather than after the only draw is sealed with it.
-      - name: Recovery probe
+      # The gate the probe exists for. An Actions artifact is downloadable only
+      # once its job has finished, so a probe sealed in THIS job could only be
+      # opened after the real key was already sealed -- a report, not a
+      # precondition. The probe is its own workflow and its own dispatch, and
+      # this reads the record a person committed after opening it.
+      #
+      # Re-checked against the committed public key: a recovery proved against
+      # a key that has since been replaced proves nothing about the one that
+      # would seal this draw.
+      - name: Somebody has proved they can open what this seals
         run: |
-          set -euo pipefail
-          mkdir -p out-probe
-          printf 'router-human-review recovery probe %s\n' "${{ github.run_id }}" > probe.txt
-          sha256sum probe.txt | tee out-probe/probe.sha256
-          openssl rand -out probe.key 32
-          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
-            -in probe.txt -out out-probe/probe.txt.enc -pass file:probe.key
-          openssl pkeyutl -encrypt -pubin \
-            -inkey docs/ops/router-human-review/key-recipient.pub.pem \
-            -in probe.key -out out-probe/probe.key.enc
-          rm -f probe.key probe.txt
-          echo "Probe sealed. Decrypt it with the private half before the canonical draw."
+          npm run check:router-review-source -- \
+            --bundle=source/${{ steps.source.outputs.file }} \
+            --preregistration=docs/ops/router-human-review/primary-60-preregistration.json \
+            --recipient-key=docs/ops/router-human-review/key-recipient.pub.pem
 
       # Into a temporary directory, because the generator writes the manifest,
       # both sheets and the key side by side -- and those three have three
@@ -264,6 +265,8 @@ jobs:
       # actual control is that the runner is destroyed and the plaintext is
       # never uploaded anywhere.
       - name: Encrypt the key to the operator, and remove the plaintext copy
+        env:
+          FINGERPRINT: ${{ steps.recipient.outputs.fingerprint }}
         run: |
           set -euo pipefail
           mkdir -p out-key
@@ -272,7 +275,19 @@ jobs:
             -in draw/key.json -out out-key/key.json.enc -pass file:session.key
           openssl pkeyutl -encrypt -pubin \
             -inkey docs/ops/router-human-review/key-recipient.pub.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
             -in session.key -out out-key/key.json.session.enc
+          # The parameters travel with the ciphertext. OpenSSL will not supply
+          # them: decrypting an OAEP ciphertext under the PKCS#1 v1.5 default
+          # returns garbage rather than an error, and that surfaces as a
+          # confusing bad AES decrypt one step later.
+          npm run --silent print:router-key-envelope -- \
+            --recipientKeyFingerprint="$FINGERPRINT" \
+            --sealedRunId="$GITHUB_RUN_ID" \
+            > out-key/envelope.json
+          cat out-key/envelope.json
           # Named key.json, two-space separated: this is the exact line
           # `sha256sum -c` expects once the operator has decrypted the
           # file back to that name.
@@ -290,10 +305,16 @@ jobs:
           A: ${{ inputs.reviewer_a }}
           B: ${{ inputs.reviewer_b }}
           DRAW_SEED: ${{ steps.draw.outputs.seed }}
+          FINGERPRINT: ${{ steps.recipient.outputs.fingerprint }}
         run: |
           set -euo pipefail
           mkdir -p out-manifest "out-sheet-$A" "out-sheet-$B"
           cp draw/manifest.json out-manifest/
+          # How the key beside this draw was sealed, so the parameters survive
+          # with the record rather than only with the ciphertext.
+          KEY_ENVELOPE="$(npm run --silent print:router-key-envelope -- \
+            --recipientKeyFingerprint="$FINGERPRINT")"
+          export KEY_ENVELOPE
           # Which commit's pins produced this draw. The ref selected at
           # dispatch chooses the pre-registration file, so it is a lever on the
           # draw even though nothing about it is typed in as an input. Recorded
@@ -313,6 +334,8 @@ jobs:
               bundleDigest: frozen.bundleDigest,
               seed: Number(process.env.DRAW_SEED),
               adjudicatorId: frozen.adjudicatorId,
+              keyRecovery: frozen.keyRecovery,
+              keyEnvelope: JSON.parse(process.env.KEY_ENVELOPE),
             }, null, 2) + "\n");
           '
           cat out-manifest/draw-provenance.json
@@ -355,15 +378,6 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload the recovery probe
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: human-review-recovery-probe
-          path: out-probe/
-          if-no-files-found: warn
-          retention-days: 90
-
       - name: How to hand these out
         run: |
           cat <<'NOTE'
@@ -372,15 +386,20 @@ jobs:
             human-review-manifest              the draw. Commit it.
             human-review-sheet-<A>             give to reviewer A only.
             human-review-sheet-<B>             give to reviewer B only.
-            human-review-key-encrypted         operators only. Decrypt with the
-                                               private half of the recipient key:
+            human-review-key-encrypted         operators only. envelope.json carries
+                                               the parameters. The OAEP options
+                                               are REQUIRED on the decrypt: without
+                                               them OpenSSL returns garbage rather
+                                               than an error, and it surfaces as a
+                                               bad AES decrypt one step later.
               openssl pkeyutl -decrypt -inkey <private.pem> \
+                -pkeyopt rsa_padding_mode:oaep \
+                -pkeyopt rsa_oaep_md:sha256 \
+                -pkeyopt rsa_mgf1_md:sha256 \
                 -in key.json.session.enc -out session.key
               openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
                 -in key.json.enc -out key.json -pass file:session.key
               sha256sum -c key.json.sha256   # matches what was sealed
-            human-review-recovery-probe        decrypt this the same way BEFORE
-                                               trusting the sealed key
 
           GitHub Actions artifacts have NO per-file access control. A reviewer
           with Actions access to this repository can read every artifact on

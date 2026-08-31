@@ -63,7 +63,8 @@ reversal rail      10%    -- auto<->baseline inversions against the humans
 is. Where the interval contains zero the two are **not** separated, and the
 answer is a larger human sample — not the better point estimate and not the
 better exact agreement. A rule that falls through to a second criterion
-whenever the first is inconclusive is a rule that always decides.
+whenever the first is inconclusive is a rule that always decides, so this one
+has no second criterion to fall through to.
 
 `T` is applied to the judge that would be adopted. If the closer judge is
 beyond `T`, so is the other, so "both are far" is the same check rather than a
@@ -76,7 +77,13 @@ decides on a margin, so the judge that misstates the margin least is the judge
 whose error matters least. A judge can agree pair-by-pair more often and still
 be worse here, if its disagreements all lean one way.
 
-**Second: exact agreement**, used when the margin shifts cannot be told apart.
+**Exact agreement is reported, and it is not a tiebreaker.** It goes in the
+write-up beside the margin, because a judge that lands the aggregate by
+cancelling errors is worth seeing. It does not break a tie and it does not
+override the margin: where the margin shifts cannot be told apart, the rule
+returns `undecided` and asks for a larger sample. `selectJudge` has no path
+from an interval containing zero to a decision, and that absence is the policy
+rather than an omission.
 
 **Safety rail: the opposite-verdict rate.** A judge that reverses verdicts
 against people is not adopted on a good margin figure — two errors that cancel
@@ -100,22 +107,32 @@ residual bias is smaller than ROUTE-01's −2pp decision boundary — that is a
 finer question than 60 labels can answer, and claiming otherwise would put a
 ±10pp instrument behind a 2pp decision.
 
-So adopting a judge under this rule licenses computing `n` and running the
-decision set. It does not license treating the adopted judge as unbiased. Any
-report that turns on a margin near −2pp has to say that its judge was selected
-at ±10pp resolution.
+So this rule can say which judge is closer. It does not license computing `n`,
+running the decision set, or treating the closer judge as unbiased. Any report
+that turns on a margin near −2pp has to say that its judge was selected at
+±10pp resolution.
 
-## There is no `accepted` outcome
+## Three separate things, three separate words
 
-The rule returns `preferred` or `undecided`, and nothing else. 60 pairs resolve
-to roughly ±10pp, so no result from them can certify that a judge's residual
-bias is under ROUTE-01's −2pp decision boundary. `preferred` says one judge is
-measurably closer to people than the other, at an instrument coarser than the
-decision it feeds.
+Collapsing these is how a ±10pp comparison ends up standing behind a −2pp
+decision without anyone deciding that it should.
+
+| | what it is | who produces it | where it is recorded |
+|---|---|---|---|
+| `preferred` | one judge is measurably closer to the humans than the other | `selectJudge`, from the numbers | the comparison output |
+| **adopted** | this judge will be used | a person | its own decision record |
+| **`n` activated** | the sample size may be computed from that judge and the decision set run | a person | a v2 pre-registration |
+
+The rule returns `preferred` or `undecided`, and nothing else. There is no
+`accepted`: 60 pairs resolve to roughly ±10pp, so no result from them can
+certify that a judge's residual bias is under ROUTE-01's −2pp decision
+boundary. `preferred` is a comparison result, and a comparison result is not a
+permission.
 
 `activatesSampleSize` is therefore false for every outcome the rule can return.
 Whether a ±10pp instrument may stand behind a −2pp decision is a judgement for
-a person, recorded as its own decision — not a consequence of this comparison.
+a person, and each of the two rows below `preferred` is made and recorded
+separately — neither follows from the row above it.
 
 ## After a judge is adopted
 
