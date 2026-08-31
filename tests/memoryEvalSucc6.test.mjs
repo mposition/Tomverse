@@ -3,14 +3,17 @@
  * contract-only one does not.
  *
  * `succ-5` had to show its sample was byte-identical to `succ-4`'s. This one
- * has to show the opposite — that ten cases really left, ten really arrived,
- * the cells survived it, and the history of the ten is kept somewhere the
- * decision set cannot read. The tests below are mostly that inversion.
+ * has to show the opposite — that thirteen cases really left, thirteen really
+ * arrived, the cells survived it, and the history of the B+ ten is kept
+ * somewhere the decision set cannot read. The tests below are mostly that
+ * inversion.
  *
- * The freeze state is asserted as `false` on purpose. It is not an oversight
- * waiting to be tidied: nobody has reviewed the ten replacements yet, and a
- * test that let it flip to `true` without one would make the adoption a thing
- * the code could grant itself.
+ * Frozen and signed since 2026-08-31, so the freeze assertions changed
+ * direction: what they now hold is that the record is a pinned literal rather
+ * than a computed view, that it disagrees when the sample moves under it, and
+ * that the freeze and the subtype table's signature cannot come apart. The
+ * digests are written out here as well as inside the module, so editing a
+ * signed value fails a named test rather than only a digest comparison.
  */
 
 import assert from "node:assert/strict";
@@ -408,9 +411,33 @@ test("the manifest digest covers the manifest, and not itself or the freeze", ()
 
 /* ---------------------------------------------------------- the freeze -- */
 
-test("it is not frozen, and the manifest says the same", () => {
-    assert.equal(MEMORY_EVAL_SUCC6_DATASET_FROZEN, false);
-    assert.equal(MEMORY_EVAL_SUCC6_MANIFEST.frozen, false);
+test("it is frozen, and the manifest is a literal rather than a view", () => {
+    assert.equal(MEMORY_EVAL_SUCC6_DATASET_FROZEN, true);
+    assert.equal(MEMORY_EVAL_SUCC6_MANIFEST.frozen, true);
+    // Pinned, not computed. A computed manifest cannot disagree with the tree,
+    // and disagreeing is the only thing a frozen record is for: with
+    // `buildSucc6Manifest()` on the right-hand side, `verifySucc6Manifest()`
+    // would compare the tree with itself and report no drift forever.
+    const source = readFileSync(path.join(REPO, "lib/memoryEvalSucc6.ts"), "utf8");
+    const pin = source.slice(source.indexOf("export const MEMORY_EVAL_SUCC6_MANIFEST"));
+    assert.ok(
+        !pin.startsWith("export const MEMORY_EVAL_SUCC6_MANIFEST: Succ6DatasetManifest =\n    buildSucc6Manifest()"),
+        "the frozen manifest is still a computed view"
+    );
+    // The signed values, written out so an edit to any of them fails here and
+    // not only inside a digest comparison.
+    assert.equal(
+        MEMORY_EVAL_SUCC6_MANIFEST.datasetDigest,
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
+    );
+    assert.equal(
+        MEMORY_EVAL_SUCC6_MANIFEST.subtypeTableDigest,
+        "89e10d0d8b16901f2989f655a39786ffd6487fbe6d21272fefe232a00c234e83"
+    );
+    assert.equal(
+        MEMORY_EVAL_SUCC6_MANIFEST.manifestDigest,
+        "b1904682a2920a6554f533001a2b59cbd2d4cdc06b517aa2b53588c094ce603d"
+    );
 });
 
 test("the freeze cannot run ahead of the subtype table's signature", () => {
@@ -439,38 +466,46 @@ test("the freeze cannot run ahead of the subtype table's signature", () => {
         source.includes("!SUBTYPE_REVIEW.reviewer || !SUBTYPE_REVIEW.reviewedAt"),
         "freezing no longer requires a named reviewer and a date"
     );
-    // And the two states agree right now: not frozen, not signed.
-    assert.equal(MEMORY_EVAL_SUCC6_DATASET_FROZEN, false);
-    assert.equal(SUBTYPE_REVIEW.status, "ai_draft");
+    // And the two states agree: frozen, and signed by a named person on a
+    // date. The guard above is what makes that pairing an invariant rather
+    // than a coincidence of this commit.
+    assert.equal(MEMORY_EVAL_SUCC6_DATASET_FROZEN, true);
+    assert.equal(SUBTYPE_REVIEW.status, "human_confirmed");
+    assert.equal(SUBTYPE_REVIEW.reviewer, "mposition");
+    assert.equal(SUBTYPE_REVIEW.reviewedAt, "2026-08-31");
 });
 
 test("recording the signature moves the subtype digest, so it cannot be pinned first", () => {
     // The ordering constraint as arithmetic rather than as a comment: the same
     // rows under a different review status fingerprint differently.
-    const draft = subtypeTableFingerprintInput();
-    assert.ok(draft.includes("status=ai_draft"));
-    assert.ok(draft.includes("reviewer=-"));
-    assert.ok(draft.includes("reviewedAt=-"));
+    const signed = subtypeTableFingerprintInput();
+    assert.ok(signed.includes("status=human_confirmed"));
+    assert.ok(signed.includes("reviewer=mposition"));
+    assert.ok(signed.includes("reviewedAt=2026-08-31"));
     // `method` too — a signature covers what was claimed when it was given.
-    assert.ok(draft.includes(`method=${SUBTYPE_REVIEW.method}`));
-    const signed = draft
-        .replace("status=ai_draft", "status=human_confirmed")
-        .replace("reviewer=-", "reviewer=someone")
-        .replace("reviewedAt=-", "reviewedAt=2026-08-31");
+    assert.ok(signed.includes(`method=${SUBTYPE_REVIEW.method}`));
+    // Run the clock backwards: the same rows, unsigned, fingerprint
+    // differently. That difference is why the order had to be sign, recompute,
+    // pin — pinning the draft's digests first would have recorded a table that
+    // ceased to exist the moment it was signed.
+    const draft = signed
+        .replace("status=human_confirmed", "status=ai_draft")
+        .replace("reviewer=mposition", "reviewer=-")
+        .replace("reviewedAt=2026-08-31", "reviewedAt=-");
     assert.notEqual(
-        createHash("sha256").update(signed, "utf8").digest("hex"),
+        createHash("sha256").update(draft, "utf8").digest("hex"),
         subtypeTableDigest(),
         "the signature does not move the digest, so the pin order would not matter"
     );
 });
 
-test("a manifest claiming adoption the tree has not granted is refused", () => {
-    // `frozen` sits outside the fingerprint on purpose, which means the digest
-    // checks cannot see it move. This is the check that can: a record saying
-    // the set is adopted while the tree still says it is not would otherwise
-    // satisfy every other assertion in `verifySucc6Manifest()`.
+test("a manifest disagreeing with the tree about adoption is refused", () => {
+    // `frozen` sits outside the fingerprint on purpose, so the digest checks
+    // cannot see it move. This is the check that can, and it has to work in
+    // both directions — now that the tree says `true`, the record that would
+    // slip past every other assertion is one still claiming the draft state.
     const built = buildSucc6Manifest();
-    const failures = verifySucc6Manifest({ ...built, frozen: true });
+    const failures = verifySucc6Manifest({ ...built, frozen: false });
     assert.ok(
         failures.some((line) => line.startsWith("frozen:")),
         failures.join(" | ")
@@ -478,6 +513,20 @@ test("a manifest claiming adoption the tree has not granted is refused", () => {
     // And it is the *only* thing that changed: the digests still recompute, so
     // the failure names adoption rather than drift.
     assert.equal(failures.length, 1, failures.join(" | "));
+});
+
+test("the pinned record disagrees when the sample moves under it", () => {
+    // What the pin is for. A computed manifest could not fail this: it would
+    // recompute alongside the edit and report nothing.
+    const moved = {
+        ...MEMORY_EVAL_SUCC6_MANIFEST,
+        datasetDigest: "0".repeat(64),
+    };
+    const failures = verifySucc6Manifest(moved);
+    assert.ok(
+        failures.some((line) => line.startsWith("datasetDigest:")),
+        failures.join(" | ")
+    );
 });
 
 /* --------------------------------------------------------- the replacements */
