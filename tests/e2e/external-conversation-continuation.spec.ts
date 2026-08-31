@@ -69,6 +69,16 @@ const mockContinuationApi = async (
     options: TimelineOptions & {
         /** What POST .../continuations answers. */
         createStatus?: number;
+        /**
+         * Drops the connection on the first create only.
+         *
+         * Reproduces the one case the server's own idempotency cannot see: the
+         * row was written and the *response* was lost, so the browser reports
+         * a failure for a request that succeeded. Whether the retry sends the
+         * same key is then the only thing standing between the user and two
+         * conversations.
+         */
+        abortFirstCreate?: boolean;
         tomverseMessages?: { id: string; role: string; content: string }[];
     } = {}
 ) => {
@@ -119,6 +129,12 @@ const mockContinuationApi = async (
             state.createBodies.push(
                 route.request().postDataJSON() as { idempotencyKey: string }
             );
+            // Recorded first, so the aborted attempt still shows the key it
+            // sent -- which is the whole point of the comparison.
+            if (options.abortFirstCreate && state.createBodies.length === 1) {
+                await route.abort("connectionreset");
+                return;
+            }
             if ((options.createStatus ?? 201) !== 201) {
                 await route.fulfill(
                     json(
@@ -356,6 +372,61 @@ test.describe("continuing an imported conversation", () => {
         expect(api.createBodies).toHaveLength(1);
         // Still on the viewer: nothing was created, so nothing to navigate to.
         expect(page.url()).toContain("/settings/imports/conversations/");
+    });
+
+    test("a retry after a lost response keeps the first attempt's key", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        const api = await mockContinuationApi(page, { abortFirstCreate: true });
+
+        await page.goto(`/settings/imports/conversations/${EXTERNAL_ID}`);
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+
+        // The connection died, so the browser knows nothing about the row the
+        // server may already have written.
+        await expect(page.getByTestId("continuation-cta-error")).toBeVisible();
+        expect(api.createBodies).toHaveLength(1);
+        // "Try again" comes back through the same CTA the idle card shows.
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+
+        expect(api.createBodies).toHaveLength(2);
+        // The assertion this test exists for. With two different keys the
+        // server is obliged to create a second conversation, and it would be
+        // right to -- so the duplicate has to be prevented here.
+        expect(api.createBodies[1].idempotencyKey).toBe(
+            api.createBodies[0].idempotencyKey
+        );
+    });
+
+    test("cancelling and starting again is a new fork, with a new key", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        const api = await mockContinuationApi(page, { abortFirstCreate: true });
+
+        await page.goto(`/settings/imports/conversations/${EXTERNAL_ID}`);
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+        await expect(page.getByTestId("continuation-cta-error")).toBeVisible();
+
+        // Arming again and backing out is the deliberate "no, start over" that
+        // §3 allows -- and it is the only thing that may drop the key.
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-cancel").click();
+        await expect(page.getByTestId("continuation-disclosure")).toBeHidden();
+
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+
+        expect(api.createBodies).toHaveLength(2);
+        expect(api.createBodies[1].idempotencyKey).not.toBe(
+            api.createBodies[0].idempotencyKey
+        );
     });
 
     test("imported turns and Tomverse turns are told apart on screen", async ({

@@ -35,6 +35,18 @@ export const CONTINUATION_SEED_OUTCOMES = [
     "seeded",
     /** The rollout flag is off. The rollback path, and the commonest reason. */
     "flag_off",
+    /**
+     * The flag was off in the database but on in *this process's* snapshot
+     * cache, and the seed loader's re-read caught it.
+     *
+     * Its own outcome rather than a second way to say `flag_off`, because the
+     * two answer different questions. `flag_off` says the rollback is holding
+     * where it was made; this one says it reached an instance that had not
+     * heard about it yet, which is the only evidence that the cross-instance
+     * half of the rollback works at all. An operator watching a rollback wants
+     * to see this go non-zero and then return to zero.
+     */
+    "flag_off_stale_cache",
     /** An ordinary conversation. Not a refusal; the denominator's other half. */
     "no_bridge",
     /** The imported original was deleted, so the foreign key is NULL. */
@@ -74,6 +86,7 @@ const dayStartUtc = (date: Date) =>
  */
 const LOGGED_OUTCOMES: ReadonlySet<ContinuationSeedOutcome> = new Set([
     "flag_off",
+    "flag_off_stale_cache",
     "source_deleted",
     "locked",
     "empty_selection",

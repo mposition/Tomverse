@@ -214,6 +214,39 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 
 - 세 번째 줄이 rollback 계약입니다. 이미 만들어진 사용자의 새 Tomverse 메시지가
   사라지거나 접근 불가능해지면 안 됩니다.
+
+### 7.1 flag를 끄면 **모든 인스턴스에서** 즉시 멈춥니다
+
+**snapshot 캐시는 rollback이 아닙니다.** `isExternalContinuationEnabledCached()`
+는 `lib/publicSnapshotCache.ts`의 프로세스 내부 `Map`이고 TTL은 10초이며,
+`invalidatePublicSnapshot()`은 **admin write를 처리한 그 프로세스의 Map만**
+비웁니다. 나머지 인스턴스는 자기 항목이 만료될 때까지 계속 "켜짐"이라고
+답합니다.
+
+2026-08-31 리뷰가 이것을 재현했습니다 — 두 인스턴스를 모의 실행하니 변경한 쪽은
+`false`, 다른 쪽은 여전히 `true`였고, 최대 10초간 외부 원문이 더 나갈 수 있었습니다.
+위 표의 "주입 없음"은 그 상태에서 **한 대에서만** 참이었습니다.
+
+그래서 판정을 두 단계로 나눕니다.
+
+| 단계 | 읽는 함수 | 역할 |
+|---|---|---|
+| 사전 필터 | `isExternalContinuationEnabledCached()` | bridge 조회를 hot path에서 걷어내기 위한 것. **판정이 아닙니다.** |
+| 판정 | `isExternalContinuationEnabled()` (uncached) | `loadContinuationTurnSeed()`가 bridge를 찾은 **뒤** 행을 다시 읽습니다. 발췌를 만들기 전입니다. |
+
+- 비용은 **bridge가 있는 대화에만** 붙습니다. 일반 대화는 그 앞에서
+  `no_bridge`로 끝나므로 추가 질의가 없습니다.
+- 비대칭은 의도된 것이고 안전한 방향입니다. 캐시는 기능을 **켜는** 것을 최대
+  TTL만큼 늦출 수 있지만, **끄는** 것은 더 이상 늦추지 못합니다.
+- 생성 경로(`assertExternalContinuationEnabled`)는 처음부터 uncached이므로
+  바뀐 것이 없습니다.
+- 이 판정이 실제로 동작했다는 증거는 §12의 `flag_off_stale_cache`입니다.
+  `flag_off`와 합치지 않습니다 — 앞은 "변경한 그 인스턴스에서 rollback이
+  유지된다", 뒤는 "아직 못 들은 인스턴스까지 도달했다"이고, 후자만이 이
+  절이 존재하는 이유를 관측 가능하게 만듭니다.
+- **읽기는 어느 단계에서도 flag를 보지 않습니다.** 위 표 세 번째 줄이 그대로
+  유지되며, 통합 테스트가 flag off 상태에서 bridge·timeline·사용자 메시지가
+  전부 남아 있음을 고정합니다.
 - **활성화·롤백 경로는 Admin Console에 있습니다** — `GET`·`PATCH
   /api/admin/app-settings`의 `externalConversationContinuationEnabled`와
   Platform Settings의 전용 체크박스. 기존 audit-integrity 계약(`ops:write`,
@@ -339,7 +372,8 @@ USD를 싣지 않습니다.
 |---|---|---|
 | `seeded` | 발췌가 실림 | 없음(정상 경로) |
 | `no_bridge` | 일반 대화 | 없음(분모의 나머지 절반) |
-| `flag_off` | rollout flag off | 있음 |
+| `flag_off` | rollout flag off (이 프로세스의 캐시 기준) | 있음 |
+| `flag_off_stale_cache` | DB는 off인데 이 프로세스 캐시는 on — seed loader의 재확인이 잡음(§7.1) | 있음 |
 | `source_deleted` | 원본 삭제 또는 조회 불가 | 있음 |
 | `locked` | 잠긴 snapshot, 이 요청에 grant 없음 | 있음 |
 | `empty_selection` | 읽히지만 고를 turn이 없음 | 있음 |
@@ -353,6 +387,11 @@ USD를 싣지 않습니다.
   seed 없이 나갔다"입니다 — 가리는 것이 아니라 구조상 담을 수 없습니다.
 - **기록은 `/api/chat`에서만 합니다.** preflight는 같은 turn을 견적낼 뿐이므로
   양쪽에서 세면 모든 수치가 두 배가 되고 comparison은 세 배가 됩니다.
+- **rollback 중에는 `flag_off_stale_cache`가 잠깐 올랐다가 0으로 돌아오는 것이
+  정상입니다.** 계속 0이면 아직 아무 인스턴스도 캐시가 만료되지 않았거나 그
+  경로를 지나는 turn이 없었다는 뜻이고, 계속 0이 아니면 어떤 인스턴스가 flag
+  변경을 못 읽고 있다는 뜻입니다. 두 해석이 다르므로 `flag_off`와 합치지
+  않습니다.
 
 ## 13. 출시 차단 조건
 

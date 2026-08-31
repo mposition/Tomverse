@@ -23,6 +23,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { ApiSecurityError } from "@/lib/apiSecurity";
+import { isExternalContinuationEnabled } from "@/lib/appSettings";
 import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
 import { createConversation } from "@/lib/conversationCreation";
 import {
@@ -551,6 +552,36 @@ export async function loadContinuationTurnSeed(input: {
         },
     });
     if (!bridge) return { seed: null, outcome: "no_bridge" };
+
+    /*
+      The flag is read twice on purpose, and the second read is the one that
+      decides (docs/policy/external-conversation-continuation.md §7).
+
+      `isExternalContinuationEnabledCached()` is a per-process `Map` with a ten
+      second TTL, and `invalidatePublicSnapshot` empties that Map *in the
+      process that ran the admin write*. Every other instance keeps answering
+      "enabled" until its own entry expires. The caller's check is therefore a
+      cheap pre-filter that keeps the bridge lookup off the hot path -- it is
+      not the rollback, and treating it as one meant a turn on another instance
+      could still carry imported text for up to ten seconds after an operator
+      turned the feature off. §2 says the source is the user's and §7 says
+      switching the feature off stops the text going out; "stops it on one of
+      N machines" is not that contract.
+
+      So the row is re-read here, uncached, once we know this conversation has
+      a bridge and can actually carry external text. The cost lands only on
+      bridged conversations -- a small minority, already several queries deep
+      into building a seed -- and never on the ordinary chat turn, which
+      returned `no_bridge` above.
+
+      The asymmetry is deliberate and is the safe one. A stale cache can delay
+      turning the feature *on* by up to the TTL; it can no longer delay turning
+      it *off* at all.
+    */
+    if (!(await isExternalContinuationEnabled())) {
+        return { seed: null, outcome: "flag_off_stale_cache" };
+    }
+
     if (!bridge.externalConversationId) {
         return { seed: null, outcome: "source_deleted" };
     }

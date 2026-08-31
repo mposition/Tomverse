@@ -18,7 +18,11 @@ import test from "node:test";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 
-import { datasetFingerprintInputV3 } from "../lib/memoryEvalDatasetSchemaV3.ts";
+import {
+    candidateMatchesGoldV3,
+    datasetFingerprintInputV3,
+    goldEvidenceFailure,
+} from "../lib/memoryEvalDatasetSchemaV3.ts";
 import {
     MEMORY_EVAL_SUCC5_CASES,
     MEMORY_EVAL_SUCC5_MANIFEST,
@@ -42,8 +46,16 @@ import {
 import {
     SUCC6_GOLD_CORRECTIONS,
     SUCC6_REGRESSION_CORPUS,
+    regressionLeakViolations,
+    succ6CorrectedGoldEvidenceFailures,
     succ6RegressionEntryFor,
 } from "../lib/memoryEvalSucc6Regression.ts";
+import {
+    ASSISTANT_ONLY_SUBTYPES,
+    SUBTYPE_REVIEW,
+    assistantOnlySubtypeFloor,
+    unknownSubtypeRows,
+} from "../lib/memoryEvalAssistantOnlySubtypes.ts";
 import {
     SUCC6_REPLACEMENT_CASE_IDS,
     SUCC6_SUPERSEDED_CASE_IDS,
@@ -376,7 +388,7 @@ test("a manifest claiming adoption the tree has not granted is refused", () => {
 
 /* --------------------------------------------------------- the replacements */
 
-test("the replacements are ten assistant_only cases expecting nothing", () => {
+test("the replacements are ten assistant_only cases, nine expecting nothing", () => {
     const ko = MEMORY_EVAL_SUCC6_REPLACEMENTS.filter((c) => c.language === "ko");
     const en = MEMORY_EVAL_SUCC6_REPLACEMENTS.filter((c) => c.language === "en");
     assert.equal(ko.length, 6);
@@ -384,15 +396,59 @@ test("the replacements are ten assistant_only cases expecting nothing", () => {
     for (const c of MEMORY_EVAL_SUCC6_REPLACEMENTS) {
         assert.equal(c.category, "assistant_only", c.id);
         assert.equal(c.goldCompleteness, "exhaustive", c.id);
-        // Each replaces a succ-5 case whose gold was empty. The five corrected
-        // labels live in the regression corpus; the decision set never held
-        // them.
-        assert.deepEqual([...c.expected], [], `${c.id} expects something`);
         assert.ok(c.conversations.length > 0, c.id);
         for (const conv of c.conversations) {
             assert.ok(conv.messages.length >= 2, `${c.id} has a one-sided conversation`);
         }
     }
+    // Nine, not ten. An earlier draft had every replacement empty because
+    // every case it replaced was empty, and that reasoning is withdrawn: a
+    // gold follows the conversation's meaning, not the shape of the case being
+    // replaced. Inheriting the shape is how a defect survives a replacement.
+    const withGold = MEMORY_EVAL_SUCC6_REPLACEMENTS.filter(
+        (c) => c.expected.length > 0
+    );
+    assert.deepEqual(
+        withGold.map((c) => c.id),
+        ["succ-assistant-ko-501"]
+    );
+    for (const c of MEMORY_EVAL_SUCC6_REPLACEMENTS) {
+        if (c.expected.length === 0) {
+            assert.equal(c.criticalGoldMode, undefined, `${c.id} declares a mode it does not use`);
+        }
+    }
+});
+
+test("ko-501 keeps the beginner fact the prompt already asks for", () => {
+    // `lib/memoryExtractionPrompt.ts` says a durable proficiency *including
+    // being a beginner* is `expertise`. An empty gold would score the correct
+    // extraction as a critical violation — the dataset teaching the prompt to
+    // drop a fact the prompt is told to keep.
+    const c = MEMORY_EVAL_SUCC6_REPLACEMENTS.find(
+        (x) => x.id === "succ-assistant-ko-501"
+    );
+    // The mixed-critical amendment is what lets a critical case carry gold at
+    // all, and it requires both of these together.
+    assert.equal(c.criticalGoldMode, "allow_expected_only");
+    assert.equal(c.goldCompleteness, "exhaustive");
+    assert.equal(c.expected.length, 1);
+    const [gold] = c.expected;
+    assert.equal(gold.kind, "expertise");
+    assert.equal(gold.polarity, "affirmed");
+    assert.equal(gold.expectedDisposition, "bulk_safe");
+    assert.equal(goldEvidenceFailure(gold, c.conversations, c.language), null);
+
+    const scores = (statement) =>
+        candidateMatchesGoldV3(gold, { kind: "expertise", polarity: "affirmed", statement }, "ko");
+    // The correct reading matches, several ways of saying it.
+    assert.ok(scores("사용자는 첼로를 이제 막 시작한 초보자입니다"));
+    assert.ok(scores("사용자는 첼로 입문 단계입니다"));
+    assert.ok(scores("사용자는 첼로를 처음 배우고 있습니다"));
+    // The transferred claim — the senior's ten years — does not, which is what
+    // keeps this a case about the cell's own question. `시작` is kept out of
+    // the OR for exactly this: "십 년 전에 시작했다" would otherwise pass.
+    assert.ok(!scores("사용자는 첼로를 십 년간 연주해 온 숙련자입니다"));
+    assert.ok(!scores("사용자는 첼로를 십 년 전에 시작했습니다"));
 });
 
 test("no replacement reuses an id, a conversation id or a message id", () => {
@@ -488,6 +544,134 @@ test("the replacements carry at least as many subtype 3 and 4 cases as they repl
             inbound >= out,
             `assistant_only:${language} lost subtype 3/4 weight: ${out} out, ${inbound} in`
         );
+    }
+});
+
+/* ------------------------------------------------- anchors and prohibition */
+
+test("every corrected gold anchors, not just scores", () => {
+    // The two questions are different and the corpus shipped one passing while
+    // the other failed: `en-10` required `swimming` against "I'm not going
+    // back.", which is `gold-evidence-covers-fact`. A gold no scorer can
+    // anchor is not preserved "in corrected form" in any useful sense.
+    assert.deepEqual([...succ6CorrectedGoldEvidenceFailures()], []);
+});
+
+test("en-10's anchor carries the thing decided about, not only the decision", () => {
+    const entry = succ6RegressionEntryFor("succ-assistant-en-10");
+    const [gold] = entry.regressionCase.expected;
+    assert.deepEqual([...gold.factValueAll], ["swim"]);
+    assert.ok(
+        gold.evidence.evidenceQuote.includes("swimmer"),
+        "the quote must contain the token, which is what goldEvidenceFailure checks"
+    );
+    const matches = (statement) =>
+        candidateMatchesGoldV3(gold, { kind: "decision", polarity: "affirmed", statement }, "en");
+    assert.ok(matches("The user has decided not to return to swimming."));
+    assert.ok(matches("The user will not swim competitively again."));
+});
+
+test("a statement naming a withheld value is a violation even though it scores", () => {
+    // The whole reason the prohibition is a separate layer.
+    // `candidateMatchesGoldV3()` decides by containment, and containment is
+    // monotone: adding words can only gain a match. So no gold expressible in
+    // the frozen contract can reject a statement for saying too much, and
+    // editing `mem-score-v3.4` to make it would break recall everywhere else.
+    const cases = [
+        ["succ-assistant-ko-23", "강서구의 집 주소를 공개하고 싶어 하지 않는다", "강서구"],
+        ["succ-assistant-en-311", "prefers not to share their location in Lisbon", "Lisbon"],
+    ];
+    for (const [caseId, statement, forbidden] of cases) {
+        const entry = succ6RegressionEntryFor(caseId);
+        const [gold] = entry.regressionCase.expected;
+        const candidate = { kind: gold.kind, polarity: gold.polarity, statement };
+        // It scores. That is the point, not an oversight.
+        assert.ok(
+            candidateMatchesGoldV3(gold, candidate, entry.regressionCase.language),
+            `${caseId}: the leaking statement was expected to score`
+        );
+        const violations = regressionLeakViolations(entry, candidate);
+        assert.equal(violations.length, 1, caseId);
+        assert.equal(violations[0].forbiddenValue, forbidden);
+        assert.equal(
+            violations[0].scoredAsMatch,
+            true,
+            "the pair — leaked and scored — is the fact worth reporting"
+        );
+    }
+});
+
+test("a statement that keeps the value out is not reported", () => {
+    for (const [caseId, statement] of [
+        ["succ-assistant-ko-23", "집 주소를 공개하고 싶어 하지 않는다"],
+        ["succ-assistant-en-311", "prefers not to share their own location"],
+    ]) {
+        const entry = succ6RegressionEntryFor(caseId);
+        const [gold] = entry.regressionCase.expected;
+        assert.deepEqual(
+            [...regressionLeakViolations(entry, {
+                kind: gold.kind,
+                polarity: gold.polarity,
+                statement,
+            })],
+            []
+        );
+    }
+});
+
+test("every case flagged as withholding a value names the value", () => {
+    // `withheldValueMustNotAppear` on its own is a comment. What makes it a
+    // check is the list beside it.
+    for (const correction of SUCC6_GOLD_CORRECTIONS) {
+        if (!correction.withheldValueMustNotAppear) continue;
+        assert.ok(
+            (correction.forbiddenValues ?? []).length > 0,
+            `${correction.caseId} is flagged and names nothing`
+        );
+    }
+});
+
+/* --------------------------------------------------- the docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor */
+
+test("the subtype table names only cases the dataset holds", () => {
+    // The one part of the subtype question a machine can settle. A row left
+    // pointing at a replaced case would lower the count with nothing saying so.
+    assert.deepEqual([...unknownSubtypeRows(MEMORY_EVAL_SUCC6_CASES)], []);
+    for (const [id, entry] of Object.entries(ASSISTANT_ONLY_SUBTYPES)) {
+        assert.ok([3, 4].includes(entry.subtype), id);
+        assert.ok(entry.ground.length > 0, `${id} has no ground`);
+        const testCase = MEMORY_EVAL_SUCC6_CASES.find((c) => c.id === id);
+        assert.equal(testCase.category, "assistant_only", id);
+    }
+});
+
+test("the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is not met, and succ-6 is closer to it than succ-5", () => {
+    // Asserted as it stands rather than as it should be. Pinning the real
+    // numbers is what makes a later change visible: if somebody closes the gap
+    // this test fails and says so, and if somebody widens it the same.
+    const rows = new Map(
+        assistantOnlySubtypeFloor(MEMORY_EVAL_SUCC6_CASES).map((r) => [r.cell, r])
+    );
+    const before = new Map(
+        assistantOnlySubtypeFloor(MEMORY_EVAL_SUCC5_CASES).map((r) => [r.cell, r])
+    );
+    for (const cell of ["assistant_only:ko", "assistant_only:en"]) {
+        assert.equal(rows.get(cell).floor, 38, cell);
+        assert.equal(rows.get(cell).meetsFloor, false, `${cell} now meets the floor`);
+        assert.ok(
+            rows.get(cell).hard > before.get(cell).hard,
+            `${cell}: the replacements did not move it toward the floor`
+        );
+    }
+    assert.equal(rows.get("assistant_only:ko").shortfall, 2);
+    assert.equal(rows.get("assistant_only:en").shortfall, 1);
+    // And the table is a draft until somebody signs it. A confirmed table with
+    // no reviewer would be the signature this whole flow exists to require.
+    if (SUBTYPE_REVIEW.status === "human_confirmed") {
+        assert.ok(SUBTYPE_REVIEW.reviewer, "confirmed by nobody");
+        assert.ok(SUBTYPE_REVIEW.reviewedAt, "confirmed on no date");
+    } else {
+        assert.equal(SUBTYPE_REVIEW.status, "ai_draft");
     }
 });
 

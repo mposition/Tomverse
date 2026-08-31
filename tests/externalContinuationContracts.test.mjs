@@ -533,3 +533,96 @@ test("the lock grant is the external namespace, never the native one", () => {
     }
     assert.doesNotMatch(source, /hasConversationUnlockGrant/);
 });
+
+test("the seed loader decides on an uncached flag read, not the snapshot", () => {
+    const source = readFileSync("lib/externalContinuationService.ts", "utf8");
+    const loader = source.slice(
+        source.indexOf("export async function loadContinuationTurnSeed")
+    );
+    const withComments = loader.slice(0, loader.indexOf("\n}\n") + 1);
+    // Comments in here discuss the cached reader by name; the claim is about
+    // what runs.
+    const body = withComments
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/.*$/gm, "");
+
+    // The uncached reader, and only it. The snapshot-backed one answers from a
+    // per-process Map, so an instance that did not serve the admin write would
+    // keep carrying imported text for the rest of its TTL -- the multi-instance
+    // half of the rollback that
+    // docs/policy/external-conversation-continuation.md §7.1 requires.
+    assert.match(body, /await isExternalContinuationEnabled\(\)/);
+    assert.doesNotMatch(body, /isExternalContinuationEnabledCached/);
+
+    // And it is checked before anything that can produce transcript text.
+    const flagAt = body.indexOf("isExternalContinuationEnabled()");
+    const promptAt = body.indexOf("buildContinuationSeedPrompt");
+    const planAt = body.indexOf("readSeedPlan");
+    assert.ok(flagAt > -1 && promptAt > -1 && planAt > -1);
+    assert.ok(
+        flagAt < planAt && flagAt < promptAt,
+        "the flag is read before the excerpt is built"
+    );
+});
+
+test("a stale-cache refusal is its own recorded outcome", () => {
+    // Without a distinct outcome the cross-instance catch is indistinguishable
+    // from an ordinary `flag_off`, and there would be no way to confirm from
+    // outside that the re-read ever fires.
+    const metrics = readFileSync("lib/externalContinuationMetrics.ts", "utf8");
+    const outcomes = metrics.slice(
+        metrics.indexOf("CONTINUATION_SEED_OUTCOMES"),
+        metrics.indexOf("] as const;")
+    );
+    assert.match(outcomes, /"flag_off_stale_cache"/);
+    const logged = metrics.slice(metrics.indexOf("LOGGED_OUTCOMES"));
+    assert.match(
+        logged.slice(0, logged.indexOf("]")),
+        /flag_off_stale_cache/,
+        "an operator has to be able to read it during a rollback"
+    );
+});
+
+test("the cached flag is never the last word before imported text goes out", () => {
+    // The chat and preflight routes may use the cached read as a pre-filter --
+    // that is what keeps the bridge lookup off the hot path -- but neither may
+    // build a seed from it. Both delegate to the loader, which re-reads.
+    for (const path of ["app/api/chat/route.ts", "app/api/chat/preflight/route.ts"]) {
+        const source = readFileSync(path, "utf8");
+        assert.match(source, /isExternalContinuationEnabledCached/);
+        assert.match(source, /loadContinuationTurnSeed/);
+    }
+});
+
+test("a retry reuses the attempt's idempotency key and only cancel clears it", () => {
+    const card = readFileSync(
+        "components/imports/ContinueInTomverseCard.tsx",
+        "utf8"
+    );
+    const arm = card.slice(card.indexOf("const arm = useCallback"));
+    const armBody = arm.slice(0, arm.indexOf("}, []);"));
+
+    // The failed card renders the same CTA the idle card does, so `arm` runs
+    // again on every retry. Minting unconditionally there issued a fresh key
+    // and turned one lost response into two conversations.
+    assert.match(
+        armBody,
+        /idempotencyKeyRef\.current\s*\?\?=/,
+        "arm mints only when the card is holding no key"
+    );
+    assert.doesNotMatch(
+        armBody,
+        /idempotencyKeyRef\.current\s*=[^=?]/,
+        "no unconditional assignment"
+    );
+
+    // Cancel is the one place the key is dropped, because that is the only
+    // deliberate "start a second fork" in the card.
+    const clears = card.match(/idempotencyKeyRef\.current\s*=\s*null/g) ?? [];
+    assert.equal(clears.length, 1);
+    const cancelAt = card.indexOf("continuation-cancel");
+    assert.ok(
+        card.indexOf("idempotencyKeyRef.current = null") > cancelAt,
+        "the only clear belongs to the cancel button"
+    );
+});

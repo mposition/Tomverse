@@ -5,6 +5,7 @@ import { after, beforeEach, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { createResourceUnlockCookie } from "@/lib/conversationLock";
+import { EXTERNAL_CONTINUATION_FLAG_KEY } from "@/lib/externalContinuationAccess";
 import { CONTINUATION_SEED_VERSION } from "@/lib/externalContinuationSeedCore";
 import {
     createExternalContinuation,
@@ -111,7 +112,31 @@ const requestWithGrant = (
             : {},
     });
 
-beforeEach(resetData);
+/**
+ * Writes the rollout flag straight to its row, deliberately without going
+ * through `setExternalContinuationEnabled`.
+ *
+ * That helper also invalidates this process's snapshot cache, which is exactly
+ * the step another instance never performs. Writing the row on its own is
+ * therefore the honest reproduction of a multi-instance flag change, and it is
+ * what makes the refusal below evidence of anything.
+ */
+const setContinuationFlagRow = (enabled: boolean) =>
+    prisma.appSetting.upsert({
+        where: { key: EXTERNAL_CONTINUATION_FLAG_KEY },
+        update: { value: enabled ? "true" : "false" },
+        create: {
+            key: EXTERNAL_CONTINUATION_FLAG_KEY,
+            value: enabled ? "true" : "false",
+        },
+    });
+
+beforeEach(async () => {
+    await resetData();
+    // The seed loader consults this row itself (§7), so leaving it unset would
+    // make every seed assertion below pass for the wrong reason.
+    await setContinuationFlagRow(true);
+});
 after(async () => {
     await resetData();
     await prisma.$disconnect();
@@ -806,5 +831,95 @@ test("a prompt-injection payload stays inside the fenced region", async () => {
     assert.doesNotMatch(
         seed.prompt.rulesText ?? "",
         /IGNORE ALL PREVIOUS INSTRUCTIONS/
+    );
+});
+
+test("a flag change this process never saw still stops the excerpt", async () => {
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+    const created = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        request: requestWithGrant(),
+    });
+
+    // The feature is on, so the excerpt is carried. Establishes that the
+    // refusal below is caused by the flag and not by a broken fixture.
+    const seeded = await loadContinuationTurnSeed({
+        userId: user.id,
+        conversationId: created.conversationId,
+        request: requestWithGrant(),
+    });
+    assert.equal(seeded.outcome, "seeded");
+    assert.ok(seeded.seed?.prompt.transcriptText);
+
+    /*
+      Now an operator turns the feature off on a different instance. Only the
+      row changes: this process's snapshot cache is never invalidated, so
+      `isExternalContinuationEnabledCached()` in here still answers `true` --
+      which is precisely the state every other instance is in for up to the
+      ten second TTL.
+
+      §7 says switching the feature off stops imported text going out. Not on
+      one machine, and not ten seconds later.
+    */
+    await setContinuationFlagRow(false);
+
+    const afterRollback = await loadContinuationTurnSeed({
+        userId: user.id,
+        conversationId: created.conversationId,
+        request: requestWithGrant(),
+    });
+    assert.equal(afterRollback.seed, null);
+    // Its own outcome, not `flag_off`: this is the cross-instance catch, and
+    // an operator watching a rollback needs to be able to see it happen.
+    assert.equal(afterRollback.outcome, "flag_off_stale_cache");
+});
+
+test("the rollback takes the excerpt, never the conversation or its messages", async () => {
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+    const created = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        request: requestWithGrant(),
+    });
+    await prisma.message.create({
+        data: {
+            conversationId: created.conversationId,
+            role: "user",
+            content: "written while the feature was on",
+        },
+    });
+
+    await setContinuationFlagRow(false);
+
+    // Absolute condition 17: turning the feature off must not delete or make
+    // inaccessible what the user already wrote. Reads are never gated on the
+    // flag (§7), so the bridge and the screen it draws are both still there.
+    const bridge = await getContinuationBridge(user.id, created.conversationId);
+    assert.ok(bridge);
+    const timeline = await getContinuationTimeline(
+        user.id,
+        created.conversationId,
+        { request: requestWithGrant() }
+    );
+    assert.ok(timeline);
+    // The rollback took the *excerpt*, so the source is still presentable --
+    // it is the next turn that goes without it, which the test above settles.
+    assert.equal(timeline.source.status, "available");
+
+    // And the message the user wrote is untouched. This is the one that has no
+    // history table behind it: if the flag could take it, nothing could give
+    // it back.
+    const own = await prisma.message.findMany({
+        where: { conversationId: created.conversationId },
+        select: { content: true },
+    });
+    assert.deepEqual(
+        own.map((message) => message.content),
+        ["written while the feature was on"]
     );
 });

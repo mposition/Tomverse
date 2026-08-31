@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-conversation-continuation-staging-checklist.md
-templateRevision: 2026-08-30b
+templateRevision: 2026-08-31a
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 관련 표면 diff 결과 | |
-| template revision | 2026-08-30b |
+| template revision | 2026-08-31a |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -100,7 +100,17 @@ digest:
 | I-1 전용 체크박스 존재 | | |
 | I-2 GET이 값 반환 | | |
 | I-3 audit 두 행 | | |
-| I-4 끈 직후 사유 `flag_off` | | |
+| I-4 끈 직후 발췌 없음, 사유 `flag_off` 또는 `flag_off_stale_cache` | | |
+| I-5 다중 인스턴스에서 어느 turn에도 원문 없음 | | |
+| I-6 배포 인스턴스 수 | | |
+
+## §J 중복 방지 (차단)
+
+| 항목 | 관측 | 판정 |
+|---|---|---|
+| J-1 두 번 클릭 → 대화 1개 | | |
+| J-2 응답 유실 후 재시도 → 대화 1개 | | |
+| J-3 취소 후 재시도 → 새 fork | | |
 
 ## §F 화면 (비차단)
 
@@ -113,12 +123,6 @@ digest:
 | F-5 320px 겹침·overflow 없음 | | |
 | F-6 한국어 IME | | |
 
-## §G 중복 방지 (비차단)
-
-| 항목 | 관측 | 판정 |
-|---|---|---|
-| G-1 두 번 클릭 → 대화 1개 | | |
-| G-2 취소 후 재시도 → 새 fork | | |
 
 ## 크레딧
 
@@ -128,6 +132,7 @@ digest:
 | §D | | |
 | §E-2 | | |
 | §I-4 | | |
+| §I-5 (다중 인스턴스일 때만) | | |
 | 합계 | | |
 
 ## 건너뛴 구획과 이유
