@@ -51,9 +51,16 @@ const TTL_MS: Record<PublicSnapshotKey, number> = {
   // whether to look for a continuation bridge at all
   // (docs/policy/external-conversation-continuation.md §7). Its own key for the
   // same two reasons the image flag has one: `app-settings` is served to
-  // anyone who asks, and this is default-off rollout state. Same TTL, and the
-  // admin toggle invalidates it, so turning continuation off stops the
-  // injection now rather than in ten seconds' time.
+  // anyone who asks, and this is default-off rollout state.
+  //
+  // This entry is a pre-filter and NOT the rollback. Everything in this module
+  // is per-process: `invalidatePublicSnapshot` empties the Map belonging to
+  // the instance that served the admin write, and every other instance keeps
+  // its own entry until the TTL runs out. An earlier version of this comment
+  // claimed the invalidation made a rollback immediate, which is true of one
+  // process and false of a deployment -- so `loadContinuationTurnSeed` re-reads
+  // the row uncached once it knows a conversation actually has a bridge, and
+  // that read is what stops imported text going out.
   "external-continuation-flag": 10_000,
 };
 
