@@ -8,7 +8,7 @@
 //
 // Usage:
 //   npm run make:ai-review-blind-sheet -- --journal=<path> [--dataset=<path>]
-//                                        [--sample=24] [--seed=1]
+//                                        [--sample=<threshold set default>] [--seed=1]
 //                                        [--task-types=safety_sensitive,...]
 
 import { execFileSync } from "node:child_process";
@@ -21,6 +21,7 @@ import {
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
 import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
+import { findThresholdSet } from "../lib/aiReviewQualityThresholds.ts";
 
 /**
  * The commit the sheet is about. Empty rather than a guess when git cannot
@@ -73,7 +74,13 @@ if (observations.size === 0) {
 }
 
 const seed = Number(argValue("seed", "1"));
-const sampleSize = Number(argValue("sample", "24"));
+// The default is the threshold set's own coverage bar, so the sheet a person
+// is handed is the size the approval will be judged against. Three different
+// numbers -- 24 here, 60 in the runbook, 20 in the evidence reader -- was how
+// a coverage bar came to exist that nobody had decided.
+const sampleSize = Number(
+  argValue("sample", String(findThresholdSet("v1-draft")?.minBlindReviewedCases ?? 60))
+);
 const taskTypes = argValue("task-types", "")
   .split(",")
   .map((value) => value.trim())

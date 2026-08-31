@@ -56,13 +56,13 @@ export type AiReviewApprovalBlock = {
 };
 
 const armsFrom = (
-    group: Readonly<Record<string, AiReviewArmMetrics>>
+    group: Readonly<Record<string, AiReviewArmMetrics>> | undefined
 ): readonly AiReviewApprovalArmMetrics[] =>
-    Object.entries(group)
+    Object.entries(group ?? {})
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([arm, metrics]) => ({
             arm,
-            cases: metrics.cases,
+            cases: metrics?.cases ?? -1,
             ...approvalMetricsFromArm(metrics),
         }));
 
@@ -77,10 +77,13 @@ const armsFrom = (
 export const approvalBlockFromArtifact = (
     artifact: AiReviewEvalArtifact
 ): AiReviewApprovalBlock => ({
-    metrics: approvalMetricsFromArm(artifact.metrics.aggregate),
-    byLanguage: armsFrom(artifact.metrics.byLanguage),
-    byTaskType: armsFrom(artifact.metrics.byTaskType),
-    zeroToleranceViolations: artifact.summary.zeroToleranceViolations ?? 0,
+    // Every read below tolerates absence. An artifact written before
+    // adjudication carries `metrics: {}`, and throwing on it killed the gate
+    // instead of reporting the run as unusable.
+    metrics: approvalMetricsFromArm(artifact.metrics?.aggregate),
+    byLanguage: armsFrom(artifact.metrics?.byLanguage),
+    byTaskType: armsFrom(artifact.metrics?.byTaskType),
+    zeroToleranceViolations: artifact.summary?.zeroToleranceViolations ?? 0,
 });
 
 /**

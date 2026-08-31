@@ -61,6 +61,17 @@ export type AiReviewThresholdSet = {
     maxTaskTypeArmShortfall: number;
     /** Total zero-tolerance violations permitted. */
     maxZeroToleranceViolations: number;
+    /**
+     * How many cases a blind human review must cover.
+     *
+     * Here rather than as a constant beside the reader, because it is a
+     * judgement about how much human reading an approval rests on, and every
+     * other such judgement in this file is versioned and signed. It was a bare
+     * 20 in the evidence reader for a while, gating approvals under nobody's
+     * name, while the runbook suggested 60 and the sheet generator defaulted
+     * to 24 -- three numbers and no decision.
+     */
+    minBlindReviewedCases: number;
 };
 
 export const AI_REVIEW_THRESHOLD_SETS: readonly AiReviewThresholdSet[] = [
@@ -89,6 +100,9 @@ export const AI_REVIEW_THRESHOLD_SETS: readonly AiReviewThresholdSet[] = [
         maxLanguageArmGap: 0.05,
         maxTaskTypeArmShortfall: 0.1,
         maxZeroToleranceViolations: 0,
+        // The runbook's own worked example. Part of the proposal, like every
+        // number here, and unsigned until somebody signs the set.
+        minBlindReviewedCases: 60,
     },
 ];
 
@@ -326,18 +340,35 @@ export const thresholdShortfalls = (input: {
  * being re-typed by a person -- which is where a digit gets dropped.
  */
 export const approvalMetricsFromArm = (
-    metrics: AiReviewArmMetrics
-): AiReviewApprovalMetrics => ({
-    contradictionRecallWilsonLower: metrics.contradictionRecall.wilsonLower ?? -1,
-    contradictionPrecisionWilsonLower:
-        metrics.contradictionPrecision.wilsonLower ?? -1,
-    omissionRecallWilsonLower: metrics.omissionRecall.wilsonLower ?? -1,
-    omissionPrecisionWilsonLower: metrics.omissionPrecision.wilsonLower ?? -1,
-    exactQuoteMatchRateWilsonLower: metrics.exactQuoteMatchRate.wilsonLower ?? -1,
-    schemaValidRateWilsonLower: metrics.schemaValidRate.wilsonLower ?? -1,
-    // An unmeasured error rate becomes 2, which fails every ceiling. A `null`
-    // here means the denominator was empty, and an empty denominator is not
-    // evidence that a rate is low.
-    falseConsensusRateWilsonUpper: metrics.falseConsensusRate.wilsonUpper ?? 2,
-    inventedIssueRateWilsonUpper: metrics.inventedIssueRate.wilsonUpper ?? 2,
-});
+    /**
+     * Tolerates a missing or partial arm rather than throwing.
+     *
+     * The evaluation runner writes `metrics: {}` before adjudication, which is
+     * the shape an operator naturally hands to `--artifact` to check a fresh
+     * run. Reading `.wilsonLower` off an absent arm threw a TypeError, and the
+     * gate died with a stack trace on the first such entry -- so no other
+     * approved entry was checked and the operator got no reason, only a trace.
+     * A gate that crashes cannot be told apart from a broken tool.
+     *
+     * Absent is treated exactly as `null` already is: an unmeasured rate is not
+     * evidence, so it becomes the sentinel that fails every bar.
+     */
+    metrics: Partial<AiReviewArmMetrics> | null | undefined
+): AiReviewApprovalMetrics => {
+    // -1 fails every floor and 2 fails every ceiling. An empty denominator is
+    // not evidence that a rate is good, and neither is a missing arm.
+    const lower = (rate: { wilsonLower?: number | null } | undefined) =>
+        rate?.wilsonLower ?? -1;
+    const upper = (rate: { wilsonUpper?: number | null } | undefined) =>
+        rate?.wilsonUpper ?? 2;
+    return {
+        contradictionRecallWilsonLower: lower(metrics?.contradictionRecall),
+        contradictionPrecisionWilsonLower: lower(metrics?.contradictionPrecision),
+        omissionRecallWilsonLower: lower(metrics?.omissionRecall),
+        omissionPrecisionWilsonLower: lower(metrics?.omissionPrecision),
+        exactQuoteMatchRateWilsonLower: lower(metrics?.exactQuoteMatchRate),
+        schemaValidRateWilsonLower: lower(metrics?.schemaValidRate),
+        falseConsensusRateWilsonUpper: upper(metrics?.falseConsensusRate),
+        inventedIssueRateWilsonUpper: upper(metrics?.inventedIssueRate),
+    };
+};

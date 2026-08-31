@@ -72,8 +72,14 @@ export type AiReviewEvidenceInputs = {
     recordText: string;
     /** What the record must be about. Compared field by field. */
     identity: AiReviewBlindReviewIdentity;
-    /** How many cases a blind review must cover at minimum. */
-    minimumReviewedCases: number;
+    /**
+     * The approved coverage bar, when the caller has one.
+     *
+     * Omitted by adjudication, which is not an approval and only has to refuse
+     * an empty review. Supplied by the gate from the threshold set the entry
+     * names, so the bar an approval is judged against is the signed one.
+     */
+    minimumReviewedCases?: number;
 };
 
 export type AiReviewEvidenceBundle = {
@@ -97,15 +103,24 @@ export type AiReviewEvidenceBundle = {
 };
 
 /**
- * The floor a blind review has to clear before it counts as one.
+ * Two different questions, and only one of them is this module's.
  *
- * Zero is the number this exists to refuse: an empty answer key and a record
- * with only a header adjudicated cleanly, reporting five rules judged over no
- * cases, because every check that walks a population does nothing when the
- * population is empty. A floor is not a quality bar -- it is the statement
- * that a review happened at all.
+ * **Did a review happen at all** is structural. An empty answer key and a
+ * record with only a header adjudicated cleanly, reporting five rules judged
+ * over no cases, because every check that walks a population does nothing when
+ * the population is empty. Refusing that needs no approval; it is not a
+ * judgement about quality, it is the observation that nothing was judged.
+ *
+ * **Did it cover enough cases to mean anything** is a quality threshold, and
+ * this repository's whole design says a quality threshold is versioned and
+ * signed. It was briefly a bare `20` in this file, gating approvals, which is
+ * exactly the thing the threshold module exists to prevent -- and the runbook
+ * suggested 60 while the sheet generator defaulted to 24, so there were three
+ * numbers and no decision. It now lives in `AiReviewThresholdSet` as
+ * `minBlindReviewedCases`, so a caller with an approved set passes that value
+ * and a caller without one gets the structural check alone.
  */
-export const AI_REVIEW_MIN_BLIND_REVIEWED_CASES = 20;
+export const AI_REVIEW_BLIND_REVIEW_MUST_NOT_BE_EMPTY = 1;
 
 export const verifyEvidenceBundle = (
     input: AiReviewEvidenceInputs
@@ -199,9 +214,11 @@ export const verifyEvidenceBundle = (
         }
         reviewedCaseIds.add(caseId);
     }
-    if (labels.length > 0 && labels.length < input.minimumReviewedCases) {
+    const coverageFloor = input.minimumReviewedCases ?? 0;
+    if (labels.length > 0 && labels.length < coverageFloor) {
         problems.push(
-            `the blind review covered ${labels.length} case(s); ${input.minimumReviewedCases} is the floor`
+            `the blind review covered ${labels.length} case(s); the approved threshold ` +
+                `set asks for ${coverageFloor}`
         );
     }
 
@@ -340,12 +357,12 @@ export const adjudicatedArtifactProblems = (input: {
  * difference that shape cannot see is a difference no approval rests on.
  * Anything it CAN see is reported to the digit.
  */
-const armsOf = (group: Readonly<Record<string, AiReviewArmMetrics>>) =>
-    Object.entries(group)
+const armsOf = (group: Readonly<Record<string, AiReviewArmMetrics>> | undefined) =>
+    Object.entries(group ?? {})
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([arm, metrics]) => ({
             arm,
-            cases: metrics.cases,
+            cases: metrics?.cases ?? -1,
             ...approvalMetricsFromArm(metrics),
         }));
 
@@ -353,7 +370,12 @@ const armDrift = (
     stored: AiReviewArmBreakdown | undefined,
     computed: AiReviewArmBreakdown
 ): readonly string[] => {
-    if (!stored) return ["the artifact carries no metrics to compare"];
+    // `metrics: {}` is what the runner writes before adjudication, so an
+    // absent aggregate is the ordinary un-adjudicated case rather than a
+    // corruption -- and it must be a reported problem, not a thrown one.
+    if (!stored?.aggregate) {
+        return ["the artifact carries no metrics to compare"];
+    }
     return approvalBlockDrift(
         {
             metrics: approvalMetricsFromArm(stored.aggregate),

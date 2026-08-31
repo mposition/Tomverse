@@ -372,7 +372,7 @@ export type AiReviewEvalArtifactSummary = {
  * dirty tree and a missing blind review each produce real numbers, and each
  * of those numbers means something narrower than an approval needs.
  */
-export const artifactAdmissibilityProblems = (
+export const artifactRunProblems = (
     artifact: AiReviewEvalArtifactSummary | null | undefined
 ): readonly string[] => {
     if (!artifact) return ["no artifact"];
@@ -414,6 +414,23 @@ export const artifactAdmissibilityProblems = (
     if (artifact.sampleAdequate !== true) {
         problems.push("the sample was not adequate for the per-arm rules");
     }
+    return problems;
+};
+
+/**
+ * Why an artifact may not be cited as evidence.
+ *
+ * The run-level checks above, plus the ones that are only answerable after a
+ * person has judged the blind sheet. Split from them because a run that has
+ * just finished is not defective for lacking a review that happens afterwards
+ * -- and reporting it as four failures, at the moment somebody is deciding
+ * whether the run is worth reviewing at all, answers a question nobody asked.
+ */
+export const artifactAdmissibilityProblems = (
+    artifact: AiReviewEvalArtifactSummary | null | undefined
+): readonly string[] => {
+    if (!artifact) return ["no artifact"];
+    const problems: string[] = [...artifactRunProblems(artifact)];
     if (!isNonEmptyString(artifact.humanBlindReviewRef)) {
         problems.push(
             "no blind human review reference; the human-judged zero-tolerance rules were not evaluated"

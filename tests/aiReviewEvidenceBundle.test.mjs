@@ -5,8 +5,8 @@ import {
   adjudicatedArtifactProblems,
   fileDigest,
   verifyEvidenceBundle,
-  AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
 } from "../lib/aiReviewEvidenceBundle.ts";
+import { findThresholdSet } from "../lib/aiReviewQualityThresholds.ts";
 import {
   breakdownOutcomes,
   scoreCase,
@@ -96,7 +96,12 @@ const answerKeyOf = (cases) =>
     ])
   );
 
-const bundleFor = ({ journalCases = DATASET.cases, keyCases = DATASET.cases, marked = {} } = {}) => {
+const bundleFor = ({
+  journalCases = DATASET.cases,
+  keyCases = DATASET.cases,
+  marked = {},
+  minimumReviewedCases = undefined,
+} = {}) => {
   const answerKey = answerKeyOf(keyCases);
   const answerKeyText = JSON.stringify(answerKey, null, 2);
   const journal = journalOf(journalCases);
@@ -111,7 +116,7 @@ const bundleFor = ({ journalCases = DATASET.cases, keyCases = DATASET.cases, mar
       answerKeyText,
       recordText,
       identity: { ...IDENTITY, datasetDigest: datasetDigest(DATASET) },
-      minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+      minimumReviewedCases,
     },
     answerKeyText,
     journalText,
@@ -193,12 +198,23 @@ test("an empty answer key and an empty record are refused, not adjudicated as cl
   assert.equal(bundle.metrics, null);
 });
 
-test("a review below the floor is refused even though every row is filled in", () => {
-  const { inputs } = bundleFor({ keyCases: DATASET.cases.slice(0, 5) });
-  const bundle = verifyEvidenceBundle(inputs);
+test("the coverage bar comes from the signed threshold set, not from this module", () => {
+  // It was a bare 20 here, gating approvals under nobody's name, while the
+  // runbook suggested 60 and the sheet generator defaulted to 24. Three
+  // numbers and no decision. Refusing an EMPTY review is structural and stays;
+  // how many cases are enough is a judgement, so it is versioned.
+  const withoutBar = verifyEvidenceBundle(
+    bundleFor({ keyCases: DATASET.cases.slice(0, 5) }).inputs
+  );
+  assert.deepEqual(withoutBar.problems, []);
+
+  const bar = findThresholdSet("v1-draft").minBlindReviewedCases;
+  const withBar = verifyEvidenceBundle(
+    bundleFor({ keyCases: DATASET.cases.slice(0, 5), minimumReviewedCases: bar }).inputs
+  );
   assert.ok(
-    bundle.problems.some((problem) =>
-      problem.includes(`covered 5 case(s); ${AI_REVIEW_MIN_BLIND_REVIEWED_CASES} is the floor`)
+    withBar.problems.some((problem) =>
+      problem.includes(`covered 5 case(s); the approved threshold set asks for ${bar}`)
     )
   );
 });

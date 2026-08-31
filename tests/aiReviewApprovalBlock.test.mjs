@@ -119,3 +119,22 @@ test("a zero-tolerance count the register lowered is caught", () => {
     "zeroToleranceViolations: register 0, artifact 3",
   ]);
 });
+
+test("an artifact written before adjudication is reported, not thrown on", () => {
+  // The evaluation runner writes `metrics: {}` before adjudication, which is
+  // the shape an operator hands to --artifact to check a fresh run. Reading
+  // .wilsonLower off an absent arm threw a TypeError, so the gate died with a
+  // stack trace on the first such entry -- no other entry was checked, and the
+  // operator got no reason. A gate that crashes cannot be told apart from a
+  // broken tool.
+  const block = approvalBlockFromArtifact({ summary: {}, metrics: {} });
+  assert.equal(block.metrics.contradictionRecallWilsonLower, -1);
+  assert.equal(block.metrics.falseConsensusRateWilsonUpper, 2);
+  assert.deepEqual(block.byLanguage, []);
+  assert.deepEqual(block.byTaskType, []);
+
+  // The sentinels are the ones that fail every bar, so an artifact with no
+  // numbers can never be read as one that met them.
+  const drift = approvalBlockDrift(block, artifact());
+  assert.ok(drift.length > 0);
+});

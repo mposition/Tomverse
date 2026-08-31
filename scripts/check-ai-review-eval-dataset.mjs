@@ -29,6 +29,7 @@ import {
 } from "../lib/aiReviewEvalCore.ts";
 import {
   artifactAdmissibilityProblems,
+  artifactRunProblems,
   datasetDigest,
   datasetProblems,
   freezeDrift,
@@ -45,8 +46,8 @@ import {
   adjudicatedArtifactProblems,
   decisionDatasetProblems,
   verifyEvidenceBundle,
-  AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
 } from "../lib/aiReviewEvidenceBundle.ts";
+import { findThresholdSet } from "../lib/aiReviewQualityThresholds.ts";
 
 const argValue = (name) => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -248,7 +249,7 @@ if (approvedEntries.length === 0) {
  * this artifact yet. Identity is compared against it when it is there; the
  * evidence bundle is verified either way.
  */
-const verifyRunArtifact = ({ artifactPath, expected, decisionSets }) => {
+const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVersion, stage = "evidence" }) => {
   const problems = [];
   if (!artifactPath) return ["names no artifact"];
 
@@ -257,7 +258,13 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets }) => {
     return [`${artifactPath} could not be read: ${artifact?.__readError ?? "missing"}`];
   }
   const summary = artifact.summary ?? {};
-  problems.push(...artifactAdmissibilityProblems(summary));
+  // A run that has just finished is not defective for lacking a blind review
+  // that happens afterwards. `stage: "run"` asks only what is answerable now.
+  problems.push(
+    ...(stage === "run"
+      ? artifactRunProblems(summary)
+      : artifactAdmissibilityProblems(summary))
+  );
 
   if (expected) {
     const identical = (key, stated, recorded) => {
@@ -318,6 +325,7 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets }) => {
   // The bundle: record, answer key and journal, verified together and
   // recomputed, then compared with what the artifact says about them.
   const recordRef = summary.humanBlindReviewRef;
+  if (stage === "run") return problems;
   const artifactDirectory = dirname(artifactPath);
   const artifactStem = basename(artifactPath).replace(/(--adjudicated)?\.json$/, "");
   const answerKeyPath = join(artifactDirectory, `${artifactStem}--answer-key.json`);
@@ -356,7 +364,11 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets }) => {
         // The sheet's seed as the artifact recorded it, not the run's.
         sheetSeed: summary.blindReviewSheetSeed,
       },
-      minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+      // The signed bar, when the entry names a set that has one. An entry
+      // resting on an unsigned set is already refused by the register check;
+      // here it means the coverage bar simply is not applied, rather than an
+      // unapproved number being applied in its place.
+      minimumReviewedCases: findThresholdSet(thresholdVersion)?.minBlindReviewedCases,
     });
     problems.push(...adjudicatedArtifactProblems({ artifact, bundle }));
   }
@@ -378,6 +390,7 @@ for (const entry of approvedEntries) {
         artifactPath: run.artifactRef,
         expected: run,
         decisionSets: decisionSetsByDigest,
+        thresholdVersion: entry.evaluation?.thresholdVersion,
       })
     );
   }
@@ -397,12 +410,29 @@ if (!artifactPath) {
       "artifacts above; this is for a run not yet recorded anywhere."
   );
 } else {
+  // Which question this artifact can answer yet.
+  //
+  // An adjudicated one is checked in full, including the record it names. One
+  // that has only been run is checked on what a run can be judged on, and the
+  // next step is stated rather than reported as four defects -- a fresh run is
+  // not broken for lacking a review nobody has done.
+  const loose = readJson(artifactPath);
+  const adjudicated = loose?.summary?.adjudicated === true;
+  if (!adjudicated) {
+    console.log(
+      "  note this artifact has not been adjudicated, so it is checked on what a run\n" +
+        "       can be judged on now. Its violation count is still only what a term list\n" +
+        "       screened; `npm run adjudicate:ai-review-eval` folds in the blind review,\n" +
+        "       and only the adjudicated artifact may be cited by an approval."
+    );
+  }
   report(
     artifactPath,
     verifyRunArtifact({
       artifactPath,
       expected: null,
       decisionSets: decisionSetsByDigest,
+      stage: adjudicated ? "evidence" : "run",
     })
   );
 }

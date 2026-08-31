@@ -31,10 +31,7 @@ import {
   parseBlindReviewRecord,
 } from "../lib/aiReviewBlindReviewRecord.ts";
 import { datasetDigest, datasetProblems } from "../lib/aiReviewEvalRun.ts";
-import {
-  verifyEvidenceBundle,
-  AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
-} from "../lib/aiReviewEvidenceBundle.ts";
+import { verifyEvidenceBundle } from "../lib/aiReviewEvidenceBundle.ts";
 
 /**
  * The seed the SHEET was built with, read from the record's own header.
@@ -148,7 +145,11 @@ const bundle = verifyEvidenceBundle({
     // the gate reads it rather than guessing again.
     sheetSeed: sheetSeedFromRecord(recordText),
   },
-  minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+  // No coverage bar here. Adjudication is not an approval: it has to refuse an
+  // EMPTY review, which the bundle does structurally, but how many cases are
+  // enough is a signed threshold and the gate applies it from the set the
+  // register entry names.
+  minimumReviewedCases: undefined,
 });
 
 if (bundle.problems.length > 0) {

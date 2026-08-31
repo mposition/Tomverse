@@ -211,8 +211,15 @@ npm run make:ai-review-blind-sheet -- \
   --journal=docs/ops/ai-review-evaluation-records/<key>--ordinal-1.journal.jsonl \
   --dataset=<decision set> \
   --task-types=safety_sensitive \
-  --sample=60 --seed=<정수>
+  --seed=<정수>
 ```
+
+**`--sample`을 손으로 주지 않습니다.** 기본값이 threshold 집합의
+`minBlindReviewedCases`이고, 승인이 판정될 때 쓰는 바로 그 수입니다. 한동안 숫자가
+셋이었습니다 — 스크립트 기본 24, 이 문서의 예시 60, 증거 판독기 안의 상수 20 —
+그리고 셋 중 어느 것도 승인된 적이 없었습니다. **검토 범위는 품질 판단이므로
+버전과 서명을 갖는 threshold 집합에 있습니다.** 검토가 **아예 없었다**(0건)는
+것을 거절하는 것만이 구조적 검사로 코드에 남습니다.
 
 세 파일이 나옵니다.
 
@@ -325,6 +332,17 @@ journal · answer key · 블라인드 기록 · artifact. 검증이 두 스크�
 - **digest 결속.** artifact가 자기가 쓴 기록·answer key·journal의 digest를
   적어 두므로, 같은 모양의 다른 파일로 바꾸거나 나중에 한 칸을 고치면 어긋납니다.
 - **수치 재계산.** 같은 scorer로 다시 매기고 자릿수까지 대조합니다.
+
+### 등록 전 `--artifact` 검사는 단계를 구분합니다
+
+방금 끝난 실행은 **아직 하지 않은 검토가 없다는 이유로 결함이 아닙니다.** 한동안
+`--artifact`가 "검토 참조 없음 / 미판정 / 서명 없음"을 실패로 넉 줄 쏟아냈고, 그건
+인용할 가치가 있는지 판단하려는 사람이 묻지 않은 질문에 답한 것입니다.
+
+이제 artifact가 `adjudicated: true`를 말하지 않으면 **실행이 지금 답할 수 있는
+것만** 검사하고(decision-grade · 깨끗한 commit · 완주 · 표본 적격성 · dataset이
+트리에 있는가), 다음 단계가 무엇인지 note로 적습니다. `adjudicated: true`이면
+기록 파일까지 여는 전체 검사를 합니다.
 
 ### 등록 전 `--artifact` 검사도 같은 경로를 지납니다
 

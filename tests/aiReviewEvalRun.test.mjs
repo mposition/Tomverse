@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   artifactAdmissibilityProblems,
+  artifactRunProblems,
   datasetDigest,
   datasetProblems,
   decideAiReviewEvalRunMode,
@@ -359,6 +360,37 @@ test("an un-adjudicated artifact is not admissible evidence", () => {
       blindReviewSignedBy: "@mposition",
     }),
     []
+  );
+});
+
+test("a run is judged on what a run can answer, apart from what a review adds", () => {
+  // A run that has just finished is not defective for lacking a blind review
+  // that happens afterwards. Reporting it as four failures, at the moment
+  // somebody is deciding whether the run is worth reviewing, answers a
+  // question nobody asked.
+  const fresh = {
+    decisionGrade: true,
+    datasetPurpose: "decision",
+    datasetSchemaVersion: 1,
+    datasetDigest: "sha256:abc",
+    commitSha: "b".repeat(40),
+    workingTreeDirty: false,
+    runOrdinal: 1,
+    completedCases: 1_200,
+    plannedCases: 1_200,
+    sampleAdequate: true,
+    humanBlindReviewRef: null,
+  };
+  assert.deepEqual(artifactRunProblems(fresh), []);
+  const admissibility = artifactAdmissibilityProblems(fresh);
+  assert.ok(admissibility.some((problem) => problem.includes("not adjudicated")));
+  assert.ok(admissibility.some((problem) => problem.includes("blind human review")));
+
+  // And a run that is genuinely broken is still broken at the run stage.
+  assert.ok(
+    artifactRunProblems({ ...fresh, workingTreeDirty: true }).some((problem) =>
+      problem.includes("working tree was dirty")
+    )
   );
 });
 
