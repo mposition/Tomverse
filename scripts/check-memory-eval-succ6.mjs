@@ -37,7 +37,13 @@ import {
     SUCC6_REGRESSION_CORPUS,
     SUCC6_GOLD_CORRECTIONS,
 } from "../lib/memoryEvalSucc6Regression.ts";
-import { SUCC6_TRANSITIONS } from "../lib/memoryEvalSucc6Transition.ts";
+import {
+    SUCC6_REPLACEMENT_SUBTYPES,
+    SUCC6_SUPERSEDED_SUBTYPES,
+} from "../lib/memoryEvalSucc6Replacements.ts";
+import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
+import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
+import { SUCC6_REPLACEMENT_CASE_IDS, SUCC6_TRANSITIONS } from "../lib/memoryEvalSucc6Transition.ts";
 import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
 
 const failures = [];
@@ -140,7 +146,7 @@ if (failures.length === 0) ok("one replacement per superseded case", "10 → 10"
 /* --------------------------------------------- decision and regression -- */
 
 const regressionIds = new Set(
-    SUCC6_REGRESSION_CORPUS.map((entry) => entry.supersededCase.id)
+    SUCC6_REGRESSION_CORPUS.map((entry) => entry.originalCase.id)
 );
 const overlap = [...regressionIds].filter((id) => ids.has(id));
 if (overlap.length > 0) {
@@ -155,11 +161,11 @@ if (regressionIds.size !== 10) {
 /* ------------------------------------------------- the preservation split -- */
 
 const corrected = SUCC6_REGRESSION_CORPUS.filter(
-    (entry) => entry.corrections.length > 0
-).map((entry) => entry.supersededCase.id);
+    (entry) => entry.correctionRecord.length > 0
+).map((entry) => entry.originalCase.id);
 const unchanged = SUCC6_REGRESSION_CORPUS.filter(
-    (entry) => entry.corrections.length === 0
-).map((entry) => entry.supersededCase.id);
+    (entry) => entry.correctionRecord.length === 0
+).map((entry) => entry.originalCase.id);
 if (corrected.length !== 5 || unchanged.length !== 5) {
     fail(
         `preservation split is ${corrected.length} corrected / ${unchanged.length} unchanged, ` +
@@ -199,6 +205,161 @@ if (MEMORY_EVAL_SUCC6_MANIFEST.datasetDigest === MEMORY_EVAL_SUCC5_MANIFEST.data
     ok("dataset digest", MEMORY_EVAL_SUCC6_MANIFEST.datasetDigest);
 }
 ok("scoring contract carried across", `${MEMORY_EVAL_SUCC6_MANIFEST.scoringContractVersion} (unchanged)`);
+
+/* ------------------------------------- a replacement stays in its own cell -- */
+
+// A replacement in another cell would keep the total at 1,150 and move the
+// shortfall somewhere else, which the floor check alone would not catch when
+// both cells happen to sit above their floor.
+const byId = new Map(
+    [...MEMORY_EVAL_SUCC5_CASES, ...MEMORY_EVAL_SUCC6_REPLACEMENTS].map((c) => [c.id, c])
+);
+for (const transition of SUCC6_TRANSITIONS) {
+    const original = byId.get(transition.originalId);
+    const replacement = byId.get(transition.replacementId);
+    if (!original || !replacement) continue;
+    if (
+        original.category !== replacement.category ||
+        original.language !== replacement.language
+    ) {
+        fail(
+            `${transition.replacementId} is ${replacement.category}:${replacement.language} ` +
+                `and replaces a ${original.category}:${original.language} case`
+        );
+    }
+}
+if (failures.length === 0) ok("every replacement is in its original's cell", "10");
+
+/* -------------------------------- the corrected gold is actually runnable -- */
+
+// §12.2 asks for the corrected gold preserved *in corrected form*, and a kind
+// and a polarity in a metadata row are not that. Each corrected case is scored
+// against a candidate built from its own gold: if it does not match, the
+// record is a note rather than a regression case.
+for (const entry of SUCC6_REGRESSION_CORPUS) {
+    if (entry.correctionRecord.length === 0) {
+        if (entry.regressionCase !== entry.originalCase) {
+            fail(`${entry.originalCase.id} has no correction and a rebuilt case`);
+        }
+        continue;
+    }
+    const gold = entry.regressionCase.expected[0];
+    if (!gold) {
+        fail(`${entry.originalCase.id} is corrected and its case carries no gold`);
+        continue;
+    }
+    const outcome = scoreCaseV3(entry.regressionCase, [
+        {
+            kind: gold.kind,
+            polarity: gold.polarity,
+            statement: entry.correctionRecord[0].establishes,
+            bulkSafe: true,
+            disposition: "accepted",
+            evidence: [
+                {
+                    evidenceMessageId: gold.evidence.evidenceMessageId,
+                    evidenceQuote: gold.evidence.evidenceQuote,
+                },
+            ],
+        },
+    ]);
+    if (outcome.goldMatched !== outcome.goldTotal) {
+        fail(
+            `${entry.originalCase.id}: its own corrected gold does not match a candidate ` +
+                `built from it, so nothing can score this regression case`
+        );
+    }
+    // The original is never edited in place.
+    if (entry.originalCase.expected.length !== 0) {
+        fail(`${entry.originalCase.id}: the preserved original was rewritten`);
+    }
+}
+ok("corrected regression cases score", `${corrected.length} runnable`);
+
+// The two privacy-preference golds may not require the value the user
+// withheld. Checked as an absence rather than trusted to the comment.
+const WITHHELD = {
+    "succ-assistant-ko-23": ["강서구", "서울"],
+    "succ-assistant-en-311": ["lisbon"],
+};
+for (const correction of SUCC6_GOLD_CORRECTIONS) {
+    const withheld = WITHHELD[correction.caseId];
+    if (!withheld) continue;
+    if (!correction.withheldValueMustNotAppear) {
+        fail(`${correction.caseId} withholds a value and is not flagged`);
+    }
+    const tokens = [
+        ...correction.expected.factValueAll,
+        ...(correction.expected.factValueAny ?? []),
+    ].map((t) => t.toLowerCase());
+    for (const value of withheld) {
+        if (tokens.some((t) => t.includes(value.toLowerCase()))) {
+            fail(
+                `${correction.caseId}'s gold requires "${value}", which is the value the ` +
+                    "user withheld: only a sentence repeating it could satisfy this gold"
+            );
+        }
+    }
+}
+ok("withheld values absent from their golds", "2 checked");
+
+/* ------------------------------------------------------------- subtypes -- */
+
+// Declared, not inferred. A keyword classifier over this cell left 66 of 125
+// unclassified and failed to recognise the cases written here, so the cell-wide
+// floor of docs/ops/memory-extraction-eval-dataset.md §3.3 is a reviewer's
+// judgement and is reported below rather than gated. What *is* mechanical is
+// the like-for-like comparison: the replacements must not carry fewer hard
+// subtypes than the cases they replace.
+const hard = (subtype) => subtype === 3 || subtype === 4;
+for (const [cellLang, label] of [["ko", "assistant_only:ko"], ["en", "assistant_only:en"]]) {
+    const out = SUCC6_TRANSITIONS.filter((t) => t.originalId.includes(`-${cellLang}-`));
+    const leftHard = out.filter((t) => hard(SUCC6_SUPERSEDED_SUBTYPES[t.originalId])).length;
+    const arrivedHard = out.filter((t) => hard(SUCC6_REPLACEMENT_SUBTYPES[t.replacementId])).length;
+    if (arrivedHard < leftHard) {
+        fail(
+            `${label}: ${leftHard} subtype 3/4 cases left and only ${arrivedHard} arrived, ` +
+                "so the cell's hard-case share fell"
+        );
+    } else {
+        ok(`${label} subtype 3/4, out → in`, `${leftHard} → ${arrivedHard}`);
+    }
+}
+for (const [id, subtype] of Object.entries(SUCC6_REPLACEMENT_SUBTYPES)) {
+    if (![1, 2, 3, 4].includes(subtype)) fail(`${id} declares subtype ${subtype}`);
+}
+
+/* ------------------------------------------------------ near duplicates -- */
+
+// Reported, never gated: docs/ops/memory-extraction-eval-dataset.md §6.5 makes
+// diversity a reviewer's call, and a threshold here would decide it for them.
+const pairs = nearDuplicatePairs(MEMORY_EVAL_SUCC6_CASES)
+    .filter(
+        (pair) =>
+            SUCC6_REPLACEMENT_CASE_IDS.has(pair.a) ||
+            SUCC6_REPLACEMENT_CASE_IDS.has(pair.b)
+    )
+    .slice(0, 8);
+notes.push(
+    pairs.length === 0
+        ? "No near-duplicate pair involving a replacement was reported."
+        : "Near-duplicate pairs involving a replacement, highest first — a reviewer " +
+          "decides whether any is too close:\n" +
+          pairs
+              .map(
+                  (pair) =>
+                      `        token ${pair.token.toFixed(2)}  shape ${pair.shape.toFixed(2)}  ${pair.a} ~ ${pair.b}`
+              )
+              .join("\n")
+);
+notes.push(
+    "The docs/ops/memory-extraction-eval-dataset.md §3.3 floor — at least 30% of " +
+        "each cell in subtypes 3 and 4 — is NOT machine-checked here. Classifying " +
+        "the 250 existing cases needs a reader: a keyword pass left 66 of 125 " +
+        "unclassified and missed corrections like \"3년 전에 접었고 지금은 전혀 다른 " +
+        "일 합니다\". What is checked above is that the replacements carry at least " +
+        "as many subtype 3/4 cases as the ones they replace."
+);
 
 /* ------------------------------------------------------------ readiness -- */
 

@@ -34,7 +34,11 @@ import {
     succ6ManifestFingerprintInput,
     verifySucc6Manifest,
 } from "../lib/memoryEvalSucc6.ts";
-import { MEMORY_EVAL_SUCC6_REPLACEMENTS } from "../lib/memoryEvalSucc6Replacements.ts";
+import {
+    MEMORY_EVAL_SUCC6_REPLACEMENTS,
+    SUCC6_REPLACEMENT_SUBTYPES,
+    SUCC6_SUPERSEDED_SUBTYPES,
+} from "../lib/memoryEvalSucc6Replacements.ts";
 import {
     SUCC6_GOLD_CORRECTIONS,
     SUCC6_REGRESSION_CORPUS,
@@ -113,11 +117,11 @@ test("ko-23 is one case and one transition, whatever its candidates did", () => 
 test("five are preserved corrected and five unchanged", () => {
     assert.equal(SUCC6_REGRESSION_CORPUS.length, 10);
     const corrected = SUCC6_REGRESSION_CORPUS.filter(
-        (e) => e.corrections.length > 0
-    ).map((e) => e.supersededCase.id);
+        (e) => e.correctionRecord.length > 0
+    ).map((e) => e.originalCase.id);
     const unchanged = SUCC6_REGRESSION_CORPUS.filter(
-        (e) => e.corrections.length === 0
-    ).map((e) => e.supersededCase.id);
+        (e) => e.correctionRecord.length === 0
+    ).map((e) => e.originalCase.id);
     assert.deepEqual(corrected.sort(), [
         "succ-assistant-en-10",
         "succ-assistant-en-27",
@@ -135,40 +139,140 @@ test("five are preserved corrected and five unchanged", () => {
     assert.equal(SUCC6_GOLD_CORRECTIONS.length, 5);
 });
 
-test("the preserved case is succ-5's, not a rewritten one", () => {
-    // The correction is recorded beside the case, never folded into it. A
-    // history that rewrote what it is a history of would answer nothing.
+test("the original is succ-5's own object, not a rewritten one", () => {
+    // The correction is recorded beside the case and carried in a second,
+    // runnable copy — never folded into the original. A history that rewrote
+    // what it is a history of would answer nothing.
     const succ5 = new Map(MEMORY_EVAL_SUCC5_CASES.map((c) => [c.id, c]));
     for (const entry of SUCC6_REGRESSION_CORPUS) {
         assert.equal(
-            entry.supersededCase,
-            succ5.get(entry.supersededCase.id),
-            `${entry.supersededCase.id} is not the succ-5 object`
+            entry.originalCase,
+            succ5.get(entry.originalCase.id),
+            `${entry.originalCase.id} is not the succ-5 object`
         );
         assert.deepEqual(
-            entry.supersededCase.expected,
-            succ5.get(entry.supersededCase.id).expected,
-            `${entry.supersededCase.id}'s expected was altered in place`
+            [...entry.originalCase.expected],
+            [...succ5.get(entry.originalCase.id).expected],
+            `${entry.originalCase.id}'s expected was altered in place`
         );
     }
+});
+
+test("an uncorrected entry's regression case is the original, by identity", () => {
+    // Identity rather than a flag: a spread copy would make the two halves
+    // look different while being the same case, and then nothing in the file
+    // would say which five were actually corrected.
+    for (const entry of SUCC6_REGRESSION_CORPUS) {
+        if (entry.correctionRecord.length === 0) {
+            assert.equal(
+                entry.regressionCase,
+                entry.originalCase,
+                `${entry.originalCase.id} was copied for no reason`
+            );
+        } else {
+            assert.notEqual(entry.regressionCase, entry.originalCase);
+            assert.equal(entry.regressionCase.id, entry.originalCase.id);
+            assert.deepEqual(
+                entry.regressionCase.conversations,
+                entry.originalCase.conversations,
+                `${entry.originalCase.id}'s conversation was edited`
+            );
+        }
+    }
+});
+
+test("the corrected regression cases are runnable, and score their own gold", () => {
+    // `.github/audits/memory-eval-gold-contract-2026-08-27.md` §12.2 asks for
+    // the corrected gold "in corrected form", and a `kind` and a `polarity` in
+    // a metadata row are not that: nothing can score them.
+    // This is the assertion that the corrected half is a case and not a note.
+    for (const entry of SUCC6_REGRESSION_CORPUS) {
+        if (entry.correctionRecord.length === 0) continue;
+        const gold = entry.regressionCase.expected;
+        assert.equal(
+            gold.length,
+            entry.correctionRecord.length,
+            `${entry.originalCase.id} carries a different number of golds`
+        );
+        for (const [index, correction] of entry.correctionRecord.entries()) {
+            const expected = gold[index];
+            assert.equal(expected.kind, correction.kind);
+            assert.equal(expected.polarity, correction.polarity);
+            // Anchored to a message that exists in this very case, or the
+            // evidence binding resolves against nothing.
+            const messageIds = new Set(
+                entry.regressionCase.conversations.flatMap((conv) =>
+                    conv.messages.map((m) => m.externalMessageId)
+                )
+            );
+            assert.ok(
+                messageIds.has(expected.evidence.evidenceMessageId),
+                `${entry.originalCase.id} cites ${expected.evidence.evidenceMessageId}, which is not in it`
+            );
+            const quoted = entry.regressionCase.conversations
+                .flatMap((conv) => conv.messages)
+                .find(
+                    (m) =>
+                        m.externalMessageId === expected.evidence.evidenceMessageId
+                );
+            assert.ok(
+                quoted.content.includes(expected.evidence.evidenceQuote),
+                `${entry.originalCase.id}'s evidence quote is not in the message it cites`
+            );
+        }
+    }
+});
+
+test("a withheld value never appears in the gold that replaced it", () => {
+    // The retraction clause, as a machine check rather than a comment. The
+    // two privacy corrections keep the preference and must not name the
+    // district or the city the user withdrew.
+    const WITHHELD = {
+        "succ-assistant-ko-23": ["강서구"],
+        "succ-assistant-en-311": ["lisbon"],
+    };
+    let checked = 0;
+    for (const entry of SUCC6_REGRESSION_CORPUS) {
+        for (const correction of entry.correctionRecord) {
+            if (!correction.withheldValueMustNotAppear) continue;
+            const values = WITHHELD[correction.caseId];
+            assert.ok(values, `${correction.caseId} claims a withheld value and names none`);
+            const tokens = [
+                ...(correction.expected.factValueAll ?? []),
+                ...(correction.expected.factValueAny ?? []),
+            ]
+                .join(" ")
+                .toLowerCase();
+            for (const value of values) {
+                assert.ok(
+                    !tokens.includes(value.toLowerCase()),
+                    `${correction.caseId}'s gold requires the withheld ${value}`
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert.equal(checked, 2, "the two privacy corrections are the ones this covers");
 });
 
 test("ko-23's correction adds the preference and leaves the location alone", () => {
     // The retraction clause in one assertion: the withdrawn location keeps no
     // gold, and the preference that survives may not name it.
     const entry = succ6RegressionEntryFor("succ-assistant-ko-23");
-    assert.equal(entry.corrections.length, 1);
-    assert.equal(entry.corrections[0].kind, "preference");
-    assert.equal(entry.corrections[0].polarity, "affirmed");
-    assert.equal(entry.corrections[0].withheldValueMustNotAppear, true);
-    // And the case as preserved still expects nothing: the correction is a
-    // record of what the next dataset should carry, not an edit to this one.
-    assert.deepEqual([...entry.supersededCase.expected], []);
+    assert.equal(entry.correctionRecord.length, 1);
+    assert.equal(entry.correctionRecord[0].kind, "preference");
+    assert.equal(entry.correctionRecord[0].polarity, "affirmed");
+    assert.equal(entry.correctionRecord[0].withheldValueMustNotAppear, true);
+    // The original still expects nothing — that is what succ-5 held — and the
+    // corrected form beside it carries the preference the decision allowed.
+    assert.deepEqual([...entry.originalCase.expected], []);
+    assert.equal(entry.regressionCase.expected.length, 1);
+    assert.deepEqual([...entry.regressionCase.expected[0].factValueAll], ["주소"]);
 });
 
 test("every correction names a case that actually moved", () => {
     const moved = new Set(
-        SUCC6_REGRESSION_CORPUS.map((e) => e.supersededCase.id)
+        SUCC6_REGRESSION_CORPUS.map((e) => e.originalCase.id)
     );
     for (const correction of SUCC6_GOLD_CORRECTIONS) {
         assert.ok(moved.has(correction.caseId), correction.caseId);
@@ -254,6 +358,22 @@ test("it is not frozen, and the manifest says the same", () => {
     assert.equal(MEMORY_EVAL_SUCC6_MANIFEST.frozen, false);
 });
 
+test("a manifest claiming adoption the tree has not granted is refused", () => {
+    // `frozen` sits outside the fingerprint on purpose, which means the digest
+    // checks cannot see it move. This is the check that can: a record saying
+    // the set is adopted while the tree still says it is not would otherwise
+    // satisfy every other assertion in `verifySucc6Manifest()`.
+    const built = buildSucc6Manifest();
+    const failures = verifySucc6Manifest({ ...built, frozen: true });
+    assert.ok(
+        failures.some((line) => line.startsWith("frozen:")),
+        failures.join(" | ")
+    );
+    // And it is the *only* thing that changed: the digests still recompute, so
+    // the failure names adoption rather than drift.
+    assert.equal(failures.length, 1, failures.join(" | "));
+});
+
 /* --------------------------------------------------------- the replacements */
 
 test("the replacements are ten assistant_only cases expecting nothing", () => {
@@ -296,6 +416,78 @@ test("no replacement reuses an id, a conversation id or a message id", () => {
                 seenMessages.add(m.externalMessageId);
             }
         }
+    }
+});
+
+/* ------------------------------------------------------- cell and subtype */
+
+test("a replacement stays in the cell its original left", () => {
+    // The cell floors are per category *and* language, so a replacement that
+    // wandered would leave one cell short while the total still read 1,150 —
+    // arithmetic that looks correct and is not.
+    const succ5 = new Map(MEMORY_EVAL_SUCC5_CASES.map((c) => [c.id, c]));
+    const succ6 = new Map(MEMORY_EVAL_SUCC6_CASES.map((c) => [c.id, c]));
+    for (const transition of SUCC6_TRANSITIONS) {
+        const original = succ5.get(transition.originalId);
+        const replacement = succ6.get(transition.replacementId);
+        assert.equal(
+            replacement.category,
+            original.category,
+            `${transition.replacementId} left ${original.category}`
+        );
+        assert.equal(
+            replacement.language,
+            original.language,
+            `${transition.replacementId} left ${original.language}`
+        );
+    }
+});
+
+test("every moved and every new case carries a declared subtype", () => {
+    // Declared, not inferred. A keyword classifier over these conversations
+    // left 66 of 125 existing cases unclassified and missed corrections as
+    // plain as "3년 전에 접었고 지금은 전혀 다른 일 합니다", so a derived
+    // subtype would be a guess wearing a number.
+    for (const id of SUCC6_REPLACEMENT_CASE_IDS) {
+        assert.ok(
+            [1, 2, 3, 4].includes(SUCC6_REPLACEMENT_SUBTYPES[id]),
+            `${id} has no declared subtype`
+        );
+    }
+    for (const id of SUCC6_SUPERSEDED_CASE_IDS) {
+        assert.ok(
+            id in SUCC6_SUPERSEDED_SUBTYPES,
+            `${id} left without its subtype being recorded`
+        );
+    }
+});
+
+test("the replacements carry at least as many subtype 3 and 4 cases as they replaced", () => {
+    // docs/ops/memory-extraction-eval-dataset.md §3.3 asks each
+    // `assistant_only` cell for at least 30% in subtypes 3 (the user corrected
+    // themselves) and 4 (hypothetical). Whether the whole cell clears that
+    // floor is a reader's question — the 250 inherited cases are unlabelled.
+    // What is machine-checkable is that this transition did not lower it, and
+    // ten replacements written entirely as subtypes 1 and 2 is exactly how it
+    // would be lowered without anything noticing.
+    const succ5 = new Map(MEMORY_EVAL_SUCC5_CASES.map((c) => [c.id, c]));
+    const succ6 = new Map(MEMORY_EVAL_SUCC6_CASES.map((c) => [c.id, c]));
+    const hard = (subtype) => subtype === 3 || subtype === 4;
+    for (const language of ["ko", "en"]) {
+        const out = [...SUCC6_SUPERSEDED_CASE_IDS].filter(
+            (id) =>
+                succ5.get(id).language === language &&
+                hard(SUCC6_SUPERSEDED_SUBTYPES[id])
+        ).length;
+        const inbound = [...SUCC6_REPLACEMENT_CASE_IDS].filter(
+            (id) =>
+                succ6.get(id).language === language &&
+                hard(SUCC6_REPLACEMENT_SUBTYPES[id])
+        ).length;
+        assert.ok(
+            inbound >= out,
+            `assistant_only:${language} lost subtype 3/4 weight: ${out} out, ${inbound} in`
+        );
     }
 });
 

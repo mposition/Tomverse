@@ -223,6 +223,19 @@ export function verifySucc6Manifest(
             `manifestDigest: recorded ${manifest.manifestDigest}, tree computes ${built.manifestDigest}`
         );
     }
+    // `frozen` is deliberately outside the digest (see
+    // `succ6ManifestFingerprintInput()`), so the digest checks above cannot
+    // notice it. That is exactly why it is compared here on its own: a record
+    // claiming adoption while the tree still says `false` would otherwise pass
+    // every check in this function, and adoption is the one field a person —
+    // not this file — sets.
+    if (manifest.frozen !== MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
+        failures.push(
+            `frozen: the manifest records ${manifest.frozen}, the tree declares ` +
+                `${MEMORY_EVAL_SUCC6_DATASET_FROZEN}. This field is outside the ` +
+                "digest, so nothing else here would have caught it."
+        );
+    }
     // A sample-changing successor whose sample did not change is a version
     // number and nothing else.
     if (manifest.datasetDigest === manifest.composition.sourceDatasetDigest) {
@@ -257,6 +270,23 @@ export function verifySucc6Manifest(
     return failures;
 }
 
-/** The recorded manifest. Regenerate with `buildSucc6Manifest()`. */
+/**
+ * The manifest, computed — and this is a draft, not the frozen record.
+ *
+ * While `MEMORY_EVAL_SUCC6_DATASET_FROZEN` is `false` the manifest may be a
+ * view over the tree, because there is nothing yet to be inconsistent with:
+ * every edit to the cases moves the digest and the record follows it.
+ *
+ * **At freeze this must become a literal.** A computed manifest cannot be
+ * wrong about the tree, which sounds like a virtue and is the defect: what a
+ * frozen record is for is to disagree when the cases move afterwards, and
+ * `verifySucc6Manifest()` — whose entire job is to report that disagreement —
+ * compares its argument against `buildSucc6Manifest()` and would then be
+ * comparing the tree with itself. So the freeze commit replaces this with the
+ * object literal `buildSucc6Manifest()` produced at that commit, digests
+ * included, alongside `MEMORY_EVAL_SUCC6_DATASET_FROZEN = true` and the signed
+ * adoption. `mem-eval-succ-5` carries the same pinned shape, for the same
+ * reason.
+ */
 export const MEMORY_EVAL_SUCC6_MANIFEST: Succ6DatasetManifest =
     buildSucc6Manifest();
