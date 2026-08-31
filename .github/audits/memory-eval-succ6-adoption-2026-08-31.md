@@ -16,7 +16,11 @@
 | subtype table digest | `89e10d0d8b16901f2989f655a39786ffd6487fbe6d21272fefe232a00c234e83` |
 | manifest digest | `b1904682a2920a6554f533001a2b59cbd2d4cdc06b517aa2b53588c094ce603d` |
 | scoring contract | `mem-score-v3.4`, digest `a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd` |
-| 동결 commit SHA (40자리) | *(다음 commit에서 기입)* |
+| 동결 commit SHA (40자리) | `c40798f47928408a6563dd59f7a59d1df0cdb2f7` |
+
+SHA는 동결 commit 자신을 가리키므로 그 commit 안에 담을 수 없습니다. 바로 다음
+commit이 기입했고, 그 사이에 dataset·subtype·manifest digest는 움직이지 않았습니다
+— 위 세 값이 SHA와 무관하게 대조 가능한 이유입니다.
 
 dataset digest만으로는 부족합니다. `docs/ops/memory-extraction-eval-dataset.md`
 §3.3 하한은 **분류표**가 정하는데, 어떤 case가 subtype 3인지는 case에 대한
