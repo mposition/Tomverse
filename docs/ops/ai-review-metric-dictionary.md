@@ -55,7 +55,7 @@ attempt가 둘(실패 + 성공)입니다. 개정 전에는 attempt 목록이 없
 | `dualAvailabilityRate` | 두 번째 reviewer 후보가 존재한 실행 | 두 번째를 요청한 실행 | — |
 | `dualCompletionRate` | 두 번째가 실제로 완료된 실행 | **두 번째 후보가 존재한 실행** | 후보가 없던 실행 |
 | `cachedRate` | `cached` | 전체 실행 | — |
-| `retryRate` | 재시도가 1회 이상인 **attempt** | provider에 도달한 attempt | 거부된 attempt |
+| `retryRate` | 서비스가 재시도한 **attempt** | provider에 도달한 attempt | 거부된 attempt, **SDK가 스스로 재시도해 성공한 요청**(하한값) |
 | `missingTraceRate` | 시도됐지만 표에 없는 telemetry write | **이 window에서 시도된 write** | writer 컬럼 이전 행. 하한값입니다(§1.2a) |
 | `unreconciledSettlements` | 정산액도 환급액도 없는 attempt | **크레딧을 잡은 채 provider에 도달한 attempt** | 예약이 0인 attempt |
 | `creditReconciliation` | 잘못된 방향으로 정리된 크레딧(초과 정산 + 미환급) | 금액이 기록된 attempt | 금액이 없는 attempt(위 지표가 셈) |
@@ -95,6 +95,13 @@ attempt가 둘(실패 + 성공)입니다. 개정 전에는 attempt 목록이 없
 fire-and-forget이고 그 자체의 실패는 이미 로그에 남습니다. 다만 예약이 정산되지
 않기 시작하면 움직이는 숫자이므로 카드에 있습니다. 실제로 크레딧이 잘못 나간
 것을 세는 것은 그 옆의 `creditReconciliation`입니다.
+
+**`retryRate`는 하한입니다.** 세는 것은 **서비스 자신의** 재시도 루프이고, 그
+아래 SDK 호출은 `maxRetries: 1`로 돕니다. SDK가 재시도해서 성공한 요청은 여기
+평범한 1회 성공으로 돌아오므로 `retryCount`가 보지 못합니다. 정확하게 만들려면
+`maxRetries: 0`으로 두고 여기서 재시도해야 하는데, 그러면 SDK의 backoff도 함께
+사라집니다 — 429에 즉시 다시 던지는 것은 측정되지 않는 것보다 나쁜 동작이므로,
+**동작이 아니라 숫자에 이름을 붙였습니다.**
 
 ### 1.2a `missingTraceRate` — 표에 없는 것을 세는 법
 
@@ -220,6 +227,17 @@ analytics dashboard와 같은 규칙입니다.
 - `reviewAnchoredReturnDay*` — **첫 AI Review로부터 N일 이후에 무엇이든 한**
   사용자. 가치 질문이 실제로 묻는 것입니다. **하한**입니다: 돌아왔지만 analytics
   이벤트를 남기지 않은 사용자는 세어지지 않습니다.
+
+**분모는 관측 창이 닫힌 cohort뿐입니다.** 어제 처음 검토한 사용자는 30일 뒤에
+돌아왔을 수가 없습니다 — 30일째가 아직 오지 않았습니다. 그런데 그를 분모에 넣으면
+**"돌아오지 않음"으로 채점**됩니다. 어제 한 번씩만 검토한 사용자 20명이
+`0 / 20, status ok`를 만들었습니다 — 아무도 물을 만큼 기다리지 않은 질문에 대한
+자신 있는 0입니다.
+
+그래서 `reviewAnchoredReturnDayN`의 분모는 **첫 검토가 `now`로부터 N일 이상
+지난** 사용자입니다. 분모가 작아지고, 지표 하한 아래로 내려가면
+`insufficient_evidence`가 됩니다 — 3주 된 기능에게 30일 재방문을 물었을 때의
+정답입니다.
 
 **cohort 비교는 인과 주장이 아닙니다.** 두 cohort는 스스로 나뉘었고, 차이는
 기능이 무엇을 해 줬는지만큼이나 누가 그 기능을 썼는지의 차이입니다. 보고서가

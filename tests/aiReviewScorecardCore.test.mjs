@@ -342,6 +342,51 @@ test("rows written before the writer columns existed are excluded, not counted a
   assert.equal(card.missingTraceRate.status, "insufficient_evidence");
 });
 
+test("a return window that has not closed is not a zero", () => {
+  // Twenty users whose first and only AI Review was yesterday. They cannot
+  // have returned on day 30 -- there has not been a thirtieth day -- and
+  // counting them in the denominator scored them as non-returns, so the
+  // metric answered `0 / 20, status ok` to a question nobody had waited long
+  // enough to ask.
+  const now = new Date("2026-08-31T00:00:00Z");
+  const rows = Array.from({ length: 20 }, (_, index) => ({
+    actorKey: `u${index}`,
+    eventName: "comparison_review_completed",
+    occurredAt: new Date(now.getTime() - 86_400_000),
+  }));
+  const card = summariseAdoption(rows, 90, { now });
+  assert.equal(card.reviewAnchoredReturnDay30.denominator, 0);
+  assert.equal(card.reviewAnchoredReturnDay30.value, null);
+  assert.equal(card.reviewAnchoredReturnDay30.status, "insufficient_evidence");
+  // Day 1 HAS closed for this cohort, so a measured zero there is honest.
+  assert.equal(card.reviewAnchoredReturnDay1.denominator, 20);
+  assert.equal(card.reviewAnchoredReturnDay1.value, 0);
+  assert.equal(card.reviewAnchoredReturnDay1.status, "ok");
+});
+
+test("a cohort whose window closed is measured, and a later return counts", () => {
+  const now = new Date("2026-08-31T00:00:00Z");
+  const day = 86_400_000;
+  const rows = [];
+  for (let index = 0; index < 25; index += 1) {
+    rows.push({
+      actorKey: `u${index}`,
+      eventName: "comparison_review_completed",
+      occurredAt: new Date(now.getTime() - 40 * day),
+    });
+    if (index < 10) {
+      rows.push({
+        actorKey: `u${index}`,
+        eventName: "chat_message_sent",
+        occurredAt: new Date(now.getTime() - 5 * day),
+      });
+    }
+  }
+  const card = summariseAdoption(rows, 90, { now });
+  assert.equal(card.reviewAnchoredReturnDay30.denominator, 25);
+  assert.equal(card.reviewAnchoredReturnDay30.numerator, 10);
+});
+
 test("dual availability and dual completion have different denominators", () => {
   const rows = [
     ...Array.from({ length: 20 }, () => run()),
@@ -503,7 +548,12 @@ test("retention by account age is reported apart from retention after a review",
     now: new Date("2026-08-30T00:00:00Z"),
   });
   assert.equal(card.reviewAnchoredReturnDay7.value, 1);
-  assert.equal(card.reviewAnchoredReturnDay30.value, 0);
+  // Their first review was 2026-08-01 and the window ends 2026-08-30, so the
+  // thirtieth day has not arrived. This used to assert 0, which is the defect
+  // stated as an expectation: a cohort that cannot yet have returned was being
+  // scored as one that did not.
+  assert.equal(card.reviewAnchoredReturnDay30.value, null);
+  assert.equal(card.reviewAnchoredReturnDay30.status, "insufficient_evidence");
   // The account-age series is a different question and says so.
   assert.equal(card.accountAgeReturnDay7.value, 0);
   assert.match(card.accountAgeReturnDay7.excluded, /not review retention/);

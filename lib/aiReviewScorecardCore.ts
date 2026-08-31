@@ -215,6 +215,17 @@ export type ReliabilityScorecard = {
     dualAvailabilityRate: ScorecardMetric;
     dualCompletionRate: ScorecardMetric;
     cachedRate: ScorecardMetric;
+    /**
+     * Attempts the service itself retried.
+     *
+     * A LOWER bound on provider requests retried: the SDK call runs with
+     * maxRetries: 1, and a request it retried and won returns as an ordinary
+     * success with nothing to count. Making this exact would mean taking the
+     * SDK's retry away and doing it here, which would also take away its
+     * backoff -- an immediate re-request on a 429 is worse behaviour than an
+     * unmeasured one, so the number is labelled rather than the behaviour
+     * changed.
+     */
     retryRate: ScorecardMetric;
     /**
      * Provider-reached attempts that held credits and have no figure at all --
@@ -371,11 +382,20 @@ export const summariseReliability = (
         cachedRate: metric(rows.filter((row) => row.outcome === "cached").length, rows.length, "all runs", {
             minimumDenominator,
         }),
+        // Counts the SERVICE's own retry loop only. The SDK call underneath it
+        // runs with maxRetries: 1, and a request the SDK retried successfully
+        // returns as a first-try success, so `retryCount` never sees it. The
+        // rate is therefore a lower bound on provider requests retried, and
+        // says so rather than being read as the whole picture.
         retryRate: metric(
             dispatched.filter((attempt) => attempt.retryCount > 0).length,
             dispatched.length,
             "reviewer attempts that reached a provider",
-            { minimumDenominator }
+            {
+                minimumDenominator,
+                excluded:
+                    "retries the provider SDK made and won on its own; those return as a first-try success, so this is a lower bound on requests retried",
+            }
         ),
         // Both halves of the reservation lifecycle, over every attempt that
         // reached a provider holding credits. Asking only about completions
@@ -514,6 +534,11 @@ export type AdoptionScorecard = {
      * asks. Computed from any later event by the same actor, so it is a floor:
      * a user who returned but generated no analytics event that day is not
      * counted.
+     *
+     * The denominator is the cohort whose N-day window has CLOSED. A user who
+     * reviewed yesterday has not had a thirtieth day, and counting them scored
+     * them as a non-return -- twenty such users reported `0 / 20, status ok`,
+     * a confident zero about a question nobody had waited long enough to ask.
      */
     reviewAnchoredReturnDay1: ScorecardMetric;
     reviewAnchoredReturnDay7: ScorecardMetric;
@@ -537,20 +562,46 @@ export type AdoptionScorecard = {
  * not record is invisible here. Stated on the card rather than left for a
  * reader to assume.
  */
+/**
+ * Came back at least `days` after their first AI Review.
+ *
+ * ## Why the denominator is not everyone who reviewed
+ *
+ * It was, and that made the D30 figure meaningless. A user whose first review
+ * was yesterday cannot have returned thirty days later yet -- there has not
+ * been a thirtieth day. Counting them in the denominator scores them as "did
+ * not return", so twenty users who each reviewed once, yesterday, produced
+ * `0 / 20, status ok`: a confident zero about a question nobody had waited
+ * long enough to ask.
+ *
+ * The population is therefore the cohort whose window has actually closed:
+ * first review at least `days` before `observedThrough`. That shrinks the
+ * denominator, and a shrunken denominator below the metric's floor reports
+ * `insufficient_evidence` -- which is the correct answer for a feature that is
+ * three weeks old and being asked about day 30.
+ */
 const reviewAnchoredReturn = (
     rows: readonly ScorecardEventRow[],
-    days: number
+    days: number,
+    observedThrough: Date
 ): { returned: number; population: number } => {
     const firstReview = firstOccurrence(rows, ["comparison_review_completed"]);
+    const window = days * 86_400_000;
+    const observable = new Map<string, Date>();
+    for (const [actorKey, anchor] of firstReview) {
+        if (observedThrough.getTime() - anchor.getTime() >= window) {
+            observable.set(actorKey, anchor);
+        }
+    }
     const returned = new Set<string>();
     for (const row of rows) {
-        const anchor = firstReview.get(row.actorKey);
+        const anchor = observable.get(row.actorKey);
         if (!anchor) continue;
-        if (row.occurredAt.getTime() - anchor.getTime() >= days * 86_400_000) {
+        if (row.occurredAt.getTime() - anchor.getTime() >= window) {
             returned.add(row.actorKey);
         }
     }
-    return { returned: returned.size, population: firstReview.size };
+    return { returned: returned.size, population: observable.size };
 };
 
 const actorsWith = (
@@ -681,9 +732,9 @@ export const summariseAdoption = (
         ["multi_model_compare_completed"],
         ["comparison_review_started"]
     );
-    const anchored1 = reviewAnchoredReturn(rows, 1);
-    const anchored7 = reviewAnchoredReturn(rows, 7);
-    const anchored30 = reviewAnchoredReturn(rows, 30);
+    const anchored1 = reviewAnchoredReturn(rows, 1, options.now);
+    const anchored7 = reviewAnchoredReturn(rows, 7, options.now);
+    const anchored30 = reviewAnchoredReturn(rows, 30, options.now);
 
     const orderedNote =
         "ordered: the second event must follow the first. Still not causation -- " +
@@ -755,20 +806,32 @@ export const summariseAdoption = (
         reviewAnchoredReturnDay1: metric(
             anchored1.returned,
             anchored1.population,
-            "users who completed an AI Review",
-            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+            "users whose first AI Review was at least 1 day(s) ago",
+            {
+                minimumDenominator,
+                excluded:
+                    "users whose 1-day window has not closed yet; they cannot have returned on day 1 and counting them would score them as a non-return. Also a floor: a silent return is not counted",
+            }
         ),
         reviewAnchoredReturnDay7: metric(
             anchored7.returned,
             anchored7.population,
-            "users who completed an AI Review",
-            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+            "users whose first AI Review was at least 7 day(s) ago",
+            {
+                minimumDenominator,
+                excluded:
+                    "users whose 7-day window has not closed yet; they cannot have returned on day 7 and counting them would score them as a non-return. Also a floor: a silent return is not counted",
+            }
         ),
         reviewAnchoredReturnDay30: metric(
             anchored30.returned,
             anchored30.population,
-            "users who completed an AI Review",
-            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+            "users whose first AI Review was at least 30 day(s) ago",
+            {
+                minimumDenominator,
+                excluded:
+                    "users whose 30-day window has not closed yet; they cannot have returned on day 30 and counting them would score them as a non-return. Also a floor: a silent return is not counted",
+            }
         ),
         cohortReturnDay7: {
             comparisonOnly: metric(
