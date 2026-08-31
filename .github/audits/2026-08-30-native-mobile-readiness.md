@@ -549,16 +549,24 @@ flowchart TD
 | 하지 않을 것 | 게이트 | 어기면 |
 |---|---|---|
 | **N1b** — bearer로 mutation-origin 대체 | **N2-구현**(보안 의존) | 검증되지 않은 헤더 한 줄이 CSRF 검사를 끕니다(§3.1) |
-| **N2-구현** — Prisma migration·토큰 발급 | **정책 승인**(승인 의존) | 승인 전 스키마가 굳고, 되돌리려면 migration을 또 씁니다 |
+| ~~**N2-구현** — Prisma migration·토큰 발급~~ | ~~정책 승인~~ → **해소** (2026-08-31 승인) | 승인 전 스키마가 굳는 것을 막으려던 게이트. 이제 열렸습니다 |
 | **N4b** — 실제 `.well-known` 배포 | **식별자 확정**(§7.1) | 틀린 fingerprint가 **실패한 상태로 캐시**됩니다 |
 | ~~**N5 2차 seed 3모듈**~~ | ~~Voice 병합~~ → **해소됨** | rev.3에서 착수 가능. 착수 직전 소비자 재대조만 남습니다(§7.2) |
 | **N7 `chat-ui`** | ~~Voice 완료~~ → **N5·N6·N1b** | Voice 조건은 충족됐지만 코드 의존이 남습니다 — 포트 설계와 `api-client`, 그리고 `api-client`가 필요로 하는 N1b |
 
 ### 6.1 모바일 인증 정책이 아직 draft라는 사실
 
-`docs/policy/tomverse-chat-mobile-authentication.md`의 첫 줄은 **`Status: draft for Phase 0
-approval`** 이고, 결정 소유자는 Backend/AI와 Mobile/Release **공동**입니다. 계획서 Phase 0의
-나가는 문도 "mobile auth ADR 승인"을 명시합니다.
+> **2026-08-31 갱신: 이 절의 전제가 해소됐습니다.** 아래는 승인 전의 상태를
+> 기록한 것입니다. `docs/policy/tomverse-chat-mobile-authentication.md`의 Status는
+> 이제 `Phase 0 approved; N2 implementation authorized`이고, **N2 구현은
+> 허가됐습니다** — 확정된 18개 값은
+> `.github/audits/2026-08-31-native-mobile-auth-n2-design-approval.md`의 8.1.1에
+> 있습니다. 아래 "승인 후에 할 것"은 이제 할 수 있는 일입니다.
+
+작성 당시 `docs/policy/tomverse-chat-mobile-authentication.md`의 첫 줄은
+**`Status: draft for Phase 0 approval`** 이었고, 결정 소유자는 Backend/AI와
+Mobile/Release **공동**입니다. 계획서 Phase 0의 나가는 문도 "mobile auth ADR 승인"을
+명시합니다.
 
 그러므로 N2를 **설계와 구현으로 나눕니다.**
 
