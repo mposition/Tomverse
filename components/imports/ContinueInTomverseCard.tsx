@@ -22,13 +22,21 @@ import { continuationPath } from "@/lib/continuationRoutes";
  * recent slice of the transcript reaches the model. A confirmation dialog that
  * appears after the conversation exists would be a notification, not a choice.
  *
- * ## Why the idempotency key is minted once per armed card
+ * ## Why the idempotency key is minted once per attempt, not once per press
  *
- * The key identifies *this attempt*. It is generated when the disclosure is
- * opened and reused by every retry of the same attempt, so a double click, a
- * dropped response and a "try again" all resolve to the one conversation the
- * first request created. Cancelling and arming again mints a new key, because
- * that is a second, deliberate fork — which §3 allows.
+ * The key identifies *this attempt*. It is minted when the card has none and
+ * kept across every retry of that attempt, so a double click, a dropped
+ * response and a "try again" all resolve to the one conversation the first
+ * request created. Only cancelling clears it, because arming again from there
+ * is a second, deliberate fork — which §3 allows.
+ *
+ * The distinction matters because the server's idempotency is keyed on this
+ * value: `createExternalContinuation` reads by key, creates, and re-reads on a
+ * unique violation, so two presses that send the *same* key can only ever
+ * yield one conversation, and two presses that send *different* keys are
+ * required to yield two. A retry that re-mints therefore defeats a working
+ * server guard from the client side — the failure this section now exists to
+ * prevent.
  */
 
 type CardState =
@@ -56,12 +64,27 @@ export function ContinueInTomverseCard({
     const idempotencyKeyRef = useRef<string | null>(null);
 
     const arm = useCallback(() => {
-        // One key for this attempt, minted here and kept until the card is
-        // cancelled. `crypto.randomUUID` is available in every browser this
-        // application supports; the fallback exists so a non-secure context
-        // (an http:// preview) fails by creating one conversation rather than
-        // by throwing before the click does anything.
-        idempotencyKeyRef.current =
+        // Minted only when this card is holding no key, which is what makes a
+        // retry a retry.
+        //
+        // A failed attempt renders the same CTA the idle card does, so "try
+        // again" comes back through here. Minting unconditionally therefore
+        // issued a *new* key on every retry, and the server -- correctly --
+        // treated it as a new request: a POST that had already stored a
+        // conversation and only lost its response produced a second one on the
+        // next press. The comment above this function claimed the key was
+        // "reused by every retry"; the render tree said otherwise, and the
+        // render tree was what ran.
+        //
+        // Cancel is the one thing that clears the ref, so a deliberate second
+        // fork still gets its own key -- which §3 allows. A successful attempt
+        // navigates away and the card unmounts.
+        //
+        // `crypto.randomUUID` is available in every browser this application
+        // supports; the fallback exists so a non-secure context (an http://
+        // preview) fails by creating one conversation rather than by throwing
+        // before the click does anything.
+        idempotencyKeyRef.current ??=
             typeof crypto !== "undefined" && "randomUUID" in crypto
                 ? crypto.randomUUID()
                 : `${Date.now()}-${Math.random().toString(16).slice(2)}`;

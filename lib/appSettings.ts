@@ -405,6 +405,13 @@ export async function isExternalContinuationEnabled(): Promise<boolean> {
  * Its own snapshot key, and its own interpretation: reusing `enabledFromValue`
  * would read a missing row as enabled, which is the exact direction a
  * fail-closed rollout flag exists to refuse.
+ *
+ * **This is a pre-filter, not the rollback.** The snapshot cache is per
+ * process, so an instance that did not serve the admin write keeps answering
+ * `true` until its own entry expires. Callers that can emit imported text must
+ * therefore re-read the row with `isExternalContinuationEnabled()` before they
+ * do -- which `loadContinuationTurnSeed` does, once it knows the conversation
+ * has a bridge. Use this one only to decide whether to look.
  */
 export async function isExternalContinuationEnabledCached(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
@@ -427,9 +434,12 @@ export async function setExternalContinuationEnabled(enabled: boolean) {
       value: enabled ? "true" : "false",
     },
   });
-  // Without this an operator who turns continuation off keeps having imported
-  // excerpts injected for the rest of the TTL -- which is the half of the
-  // rollback that has to be immediate.
+  // Drops the snapshot on *this* instance, so the console and this process's
+  // own turns stop announcing what the operator just switched off. It is not
+  // the rollback: the other instances still hold their own entries, and what
+  // actually stops imported text going out on them is the uncached re-read in
+  // `loadContinuationTurnSeed`
+  // (docs/policy/external-conversation-continuation.md §7).
   invalidatePublicSnapshot("external-continuation-flag");
 }
 
