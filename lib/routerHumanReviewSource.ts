@@ -61,11 +61,22 @@ export type FrozenReviewSource = {
  * parameters, not a guess at them.
  */
 export const KEY_ENVELOPE = {
-    version: "router-human-review-key-envelope-v1",
+    version: "router-human-review-key-envelope-v2",
     /** Seals `key.json`. */
     payloadCipher: "aes-256-cbc",
     payloadKdf: "pbkdf2-sha256",
     payloadKdfIterations: 600_000,
+    /**
+     * How the payload key is written to the file `-pass file:` reads.
+     *
+     * v1 wrote 32 raw random bytes and was wrong. `openssl enc -pass file:`
+     * reads the first LINE, so the passphrase depended on which bytes the
+     * randomness produced -- and a Windows text-mode read truncates at 0x1a
+     * and moves the line boundary on 0x0d, so the machine sealing and the
+     * machine opening could disagree about a byte-identical file. 31% of
+     * 32-byte keys contain 0x0a, 0x0d or 0x1a. base64 cannot.
+     */
+    payloadKeyEncoding: "base64-no-newline",
     /** Seals the random 32-byte payload key to the recipient. */
     keyTransport: "rsa-oaep",
     keyTransportHash: "sha256",

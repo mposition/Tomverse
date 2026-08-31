@@ -100,7 +100,31 @@ jobs:
           echo "sha=$PROBE_SHA" >> "$GITHUB_OUTPUT"
           printf '%s  probe.txt\n' "${PROBE_SHA#sha256:}" > out-probe/probe.sha256
 
-          openssl rand -out probe.key 32
+          # base64, not raw bytes. `openssl enc -pass file:` reads the first
+          # LINE of the file, so a random 32-byte passphrase is read differently
+          # depending on what those bytes happen to be -- and differently again
+          # on the machine that opens it. 0x1a is EOF to a Windows text-mode
+          # read and truncates the passphrase there; 0x0a and 0x0d move the line
+          # boundary. 31% of 32-byte keys contain at least one of the three, and
+          # the failure is silent on the sealing side: the recipient gets
+          # "bad decrypt" from the AES step with an intact ciphertext and an
+          # intact key, which points at everything except the cause.
+          #
+          # Measured, not guessed: probe run 33366358837 sealed on a Linux
+          # runner could not be opened by Git Bash OpenSSL on Windows, with all
+          # three files byte-exact (32 / 512 / 128).
+          #
+          # 44 printable ASCII characters cannot contain any of those bytes, so
+          # the first line is the whole key on every platform. `tr -d` removes
+          # the newline openssl appends.
+          openssl rand -base64 32 | tr -d '\n' > probe.key
+          # A future edit that goes back to raw bytes fails here rather than
+          # months later in somebody's terminal.
+          if LC_ALL=C grep -qP '[\r\n\x1a]' probe.key; then
+            echo "::error::the session key contains a byte that -pass file: reads differently"
+            echo "::error::across platforms. It must be text-safe. Nothing was sealed."
+            exit 1
+          fi
           openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
             -in probe.txt -out out-probe/probe.txt.enc -pass file:probe.key
           openssl pkeyutl -encrypt -pubin \
