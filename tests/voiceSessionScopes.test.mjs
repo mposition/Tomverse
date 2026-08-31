@@ -3,40 +3,49 @@ import test from "node:test";
 
 import {
   createVoiceSessionScopes,
-  voiceSessionBoundaryChanged,
+  resolveVoiceSessionBoundary,
 } from "../lib/voiceSessionScopes.ts";
 
 /**
- * The bounded record of which conversation each voice session started in:
+ * Where each voice session belongs, and when a running one must end:
  * docs/policy/voice-input.md §8.4.
  *
- * This was a bare `Map` inside `useVoiceRecorder`. Every session added an
- * entry and nothing ever removed one, so a tab left open all day grew one per
- * recording. The retention rule is here, and executed, rather than being a
- * `delete` call at each of the four places a session can end — the sprinkled
- * version only has to miss one of them to be back where it started.
+ * Both rules are here because neither can be reached through the hook that
+ * uses them — that needs a React renderer — and both were wrong in a way
+ * nothing would have noticed until a transcript landed in the wrong draft.
  */
+
+// ---------------------------------------------------------------------------
+// The scope record
+// ---------------------------------------------------------------------------
 
 test("a session's scope is returned to it", () => {
   const scopes = createVoiceSessionScopes();
   scopes.remember(1, "conversation-a");
 
-  assert.equal(scopes.scopeFor(1), "conversation-a");
+  assert.deepEqual(scopes.scopeFor(1), { known: true, scopeId: "conversation-a" });
 });
 
-test("the new-conversation draft is a scope, not a missing entry", () => {
-  // `null` is what `draftKeyFor(null)` means — the new-conversation draft —
-  // so it has to survive the round trip as itself.
+test("the new-conversation draft is a scope, and reads back as one", () => {
+  // `null` is what `draftKeyFor(null)` means, so it has to survive the round
+  // trip as a *known* scope rather than as an absence.
   const scopes = createVoiceSessionScopes();
   scopes.remember(7, null);
 
-  assert.equal(scopes.scopeFor(7), null);
-  assert.equal(scopes.size(), 1);
+  assert.deepEqual(scopes.scopeFor(7), { known: true, scopeId: null });
 });
 
-test("an unknown session answers null rather than throwing", () => {
+test("a forgotten session is a miss, never the new-conversation draft", () => {
+  // The defect: `scopeFor` answered `null` for a session it no longer held,
+  // and `null` is a real scope. A late callback for a pruned session would
+  // have written its transcript into the new-conversation draft.
   const scopes = createVoiceSessionScopes();
-  assert.equal(scopes.scopeFor(99), null);
+
+  assert.deepEqual(scopes.scopeFor(99), { known: false });
+  assert.ok(
+    !("scopeId" in scopes.scopeFor(99)),
+    "a miss must not carry a scope a caller could read"
+  );
 });
 
 test("the record stays bounded however many sessions run", () => {
@@ -48,17 +57,30 @@ test("the record stays bounded however many sessions run", () => {
   assert.equal(scopes.size(), 2, "a long-lived tab must not accumulate entries");
 });
 
-test("the newest sessions are the ones kept", () => {
+test("sessions 1, 2 and 3: 1 is dropped and says so; 2 keeps its own scope", () => {
+  // The exact sequence the review asked for, in the layer that decides it.
   const scopes = createVoiceSessionScopes();
-  for (let sessionId = 1; sessionId <= 10; sessionId++) {
-    scopes.remember(sessionId, `conversation-${sessionId}`);
-  }
+  scopes.remember(1, "conversation-a");
+  scopes.remember(2, "conversation-b");
+  scopes.remember(3, "conversation-c");
 
-  // The current session, and the one before it, so a callback that races a
-  // freshly started session still finds its own answer.
-  assert.equal(scopes.scopeFor(10), "conversation-10");
-  assert.equal(scopes.scopeFor(9), "conversation-9");
-  assert.equal(scopes.scopeFor(8), null);
+  assert.deepEqual(
+    scopes.scopeFor(1),
+    { known: false },
+    "session 1's late callback has nowhere to write, and must be told so"
+  );
+  assert.deepEqual(scopes.scopeFor(2), { known: true, scopeId: "conversation-b" });
+  assert.deepEqual(scopes.scopeFor(3), { known: true, scopeId: "conversation-c" });
+});
+
+test("a dropped session whose scope was the new conversation is still a miss", () => {
+  // The case where the two failures would have been indistinguishable.
+  const scopes = createVoiceSessionScopes();
+  scopes.remember(1, null);
+  scopes.remember(2, "conversation-b");
+  scopes.remember(3, "conversation-c");
+
+  assert.deepEqual(scopes.scopeFor(1), { known: false });
 });
 
 test("re-recording the same session id overwrites rather than accumulating", () => {
@@ -67,7 +89,7 @@ test("re-recording the same session id overwrites rather than accumulating", () 
   scopes.remember(1, "conversation-b");
 
   assert.equal(scopes.size(), 1);
-  assert.equal(scopes.scopeFor(1), "conversation-b");
+  assert.deepEqual(scopes.scopeFor(1), { known: true, scopeId: "conversation-b" });
 });
 
 test("the retention depth is configurable, and one is enough to work", () => {
@@ -76,74 +98,180 @@ test("the retention depth is configurable, and one is enough to work", () => {
   scopes.remember(2, "b");
 
   assert.equal(scopes.size(), 1);
-  assert.equal(scopes.scopeFor(2), "b");
+  assert.deepEqual(scopes.scopeFor(2), { known: true, scopeId: "b" });
+  assert.deepEqual(scopes.scopeFor(1), { known: false });
+});
+
+/**
+ * The hook's own use of a miss, stated here because the hook cannot be
+ * executed: a lookup that is not `known` must produce no write at all.
+ */
+test("a caller that honours the lookup writes nothing on a miss", () => {
+  const scopes = createVoiceSessionScopes(1);
+  scopes.remember(1, "conversation-a");
+  scopes.remember(2, "conversation-b");
+
+  const writes = [];
+  const deliver = (sessionId, transcript) => {
+    const lookup = scopes.scopeFor(sessionId);
+    if (!lookup.known) return;
+    writes.push({ scopeId: lookup.scopeId, transcript });
+  };
+
+  deliver(1, "session one's words");
+  deliver(2, "session two's words");
+
+  assert.deepEqual(writes, [
+    { scopeId: "conversation-b", transcript: "session two's words" },
+  ]);
 });
 
 // ---------------------------------------------------------------------------
-// The boundary rule: when a running session must end
+// The boundary rule
 // ---------------------------------------------------------------------------
 
 const boundary = (overrides) =>
-  voiceSessionBoundaryChanged({
+  resolveVoiceSessionBoundary({
     previousScope: "conversation-a",
     nextScope: "conversation-a",
-    previousIdentity: "account:user-1",
+    lastKnownIdentity: "account:user-1",
     nextIdentity: "account:user-1",
     ...overrides,
   });
 
 test("nothing moving is not a change", () => {
-  assert.equal(boundary({}), false);
+  assert.equal(boundary({}).changed, false);
 });
 
 test("a conversation switch is a change", () => {
-  assert.equal(boundary({ nextScope: "conversation-b" }), true);
+  assert.equal(boundary({ nextScope: "conversation-b" }).changed, true);
 });
 
 test("moving to or from the new-conversation draft is a change", () => {
-  assert.equal(boundary({ nextScope: null }), true);
+  assert.equal(boundary({ nextScope: null }).changed, true);
   assert.equal(
-    boundary({ previousScope: null, nextScope: "conversation-a" }),
+    boundary({ previousScope: null, nextScope: "conversation-a" }).changed,
     true
   );
 });
 
 test("one account replacing another in the same tab is a change", () => {
-  // The defect this rule was rewritten for: the identity key used to be
-  // "guest" or "account", so account A becoming account B looked identical
-  // and a recording made as A could finish into B's draft.
-  assert.equal(boundary({ nextIdentity: "account:user-2" }), true);
+  assert.equal(boundary({ nextIdentity: "account:user-2" }).changed, true);
 });
 
-test("a guest signing in is a change", () => {
+test("a guest signing in, and signing out, are changes", () => {
   assert.equal(
-    boundary({ previousIdentity: "guest", nextIdentity: "account:user-1" }),
+    boundary({ lastKnownIdentity: "guest", nextIdentity: "account:user-1" }).changed,
+    true
+  );
+  assert.equal(
+    boundary({ lastKnownIdentity: "account:user-1", nextIdentity: "guest" }).changed,
     true
   );
 });
 
-test("signing out is a change", () => {
-  assert.equal(
-    boundary({ previousIdentity: "account:user-1", nextIdentity: "guest" }),
-    true
+/**
+ * The four paths the review named, driven as sequences rather than as single
+ * comparisons — which is the only way the `A -> null -> B` defect is visible.
+ *
+ * The second version of this rule stored the `null` as its comparison basis,
+ * so `A -> null` and then `null -> B` were both "one side is unknown, not a
+ * change" and the account switch went through with a session still running.
+ */
+const sequence = (identities, scope = "conversation-a") => {
+  let lastKnownIdentity = identities[0];
+  const changes = [];
+  for (const nextIdentity of identities.slice(1)) {
+    const result = resolveVoiceSessionBoundary({
+      previousScope: scope,
+      nextScope: scope,
+      lastKnownIdentity,
+      nextIdentity,
+    });
+    lastKnownIdentity = result.identity;
+    changes.push(result.changed);
+  }
+  return { changes, lastKnownIdentity };
+};
+
+test("F-2 path: null -> A does not cancel", () => {
+  const { changes, lastKnownIdentity } = sequence([null, "account:A"]);
+
+  assert.deepEqual(changes, [false]);
+  assert.equal(lastKnownIdentity, "account:A", "A becomes the basis");
+});
+
+test("F-2 path: A -> null -> A does not cancel", () => {
+  const { changes, lastKnownIdentity } = sequence([
+    "account:A",
+    null,
+    "account:A",
+  ]);
+
+  assert.deepEqual(changes, [false, false]);
+  assert.equal(lastKnownIdentity, "account:A");
+});
+
+test("F-2 path: A -> B cancels", () => {
+  const { changes } = sequence(["account:A", "account:B"]);
+
+  assert.deepEqual(changes, [true]);
+});
+
+test("F-2 path: A -> null -> B cancels", () => {
+  // The defect. Both steps used to report "no change".
+  const { changes } = sequence(["account:A", null, "account:B"]);
+
+  assert.deepEqual(
+    changes,
+    [false, true],
+    "the gap is not a change, but it must not erase A as the basis either"
   );
 });
 
-test("an identity that is not known yet is never a change", () => {
-  // The session provider settles after hydration, and a refetch can go the
-  // other way. Cancelling on either would end a recording the user just
-  // started, for no reason they could see.
-  assert.equal(boundary({ previousIdentity: null }), false);
-  assert.equal(boundary({ nextIdentity: null }), false);
+test("an unresolved identity never becomes the comparison basis", () => {
+  const result = resolveVoiceSessionBoundary({
+    previousScope: "conversation-a",
+    nextScope: "conversation-a",
+    lastKnownIdentity: "account:A",
+    nextIdentity: null,
+  });
+
+  assert.equal(result.changed, false);
   assert.equal(
-    boundary({ previousIdentity: null, nextIdentity: null }),
-    false
+    result.identity,
+    "account:A",
+    "storing the null is what reopened the A -> null -> B hole"
   );
+});
+
+test("a long run of unresolved reports still remembers who was signed in", () => {
+  const { changes } = sequence([
+    "account:A",
+    null,
+    null,
+    null,
+    "account:B",
+  ]);
+
+  assert.deepEqual(changes, [false, false, false, true]);
 });
 
 test("an unknown identity does not mask a real conversation switch", () => {
   assert.equal(
-    boundary({ previousIdentity: null, nextScope: "conversation-b" }),
+    boundary({ lastKnownIdentity: null, nextScope: "conversation-b" }).changed,
     true
   );
+});
+
+test("before any identity is known, nothing is a change on identity alone", () => {
+  const result = resolveVoiceSessionBoundary({
+    previousScope: "conversation-a",
+    nextScope: "conversation-a",
+    lastKnownIdentity: null,
+    nextIdentity: null,
+  });
+
+  assert.equal(result.changed, false);
+  assert.equal(result.identity, null);
 });

@@ -419,17 +419,40 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
    못했습니다.** 그것이 이 규칙에서 가장 중요한 전환입니다 — 정리 문제가 아니라
    개인정보 경계이기 때문입니다.
 
-   **아직 모르는 신원은 변경이 아닙니다.** session provider는 hydration 뒤에
-   확정되므로 `null → account:x`를 변경으로 보면 방금 시작한 녹음을 취소하게
-   되고, refetch로 인한 `account:x → null`도 마찬가지입니다. 판정은
-   `voiceSessionBoundaryChanged()` 한 곳이고 순수 함수라 테스트가 직접
+   **아직 모르는 신원은 변경이 아니지만, 비교 기준을 덮어쓰지도 않습니다.**
+   session provider는 hydration 뒤에 확정되므로 `null → account:x`를 변경으로
+   보면 방금 시작한 녹음을 취소하게 되고, refetch로 인한 `account:x → null`도
+   마찬가지입니다. 그런데 그 `null`을 **비교 기준으로 저장하면** 막으려던 구멍이
+   그대로 다시 열립니다.
+
+   ```
+   A → null    변경 아님, 그리고 기준이 null이 됨
+   null → B    한쪽이 null이라 변경 아님
+   ```
+
+   결과는 **세션이 살아 있는 채로 계정이 A에서 B로 바뀐 것**입니다. 그래서
+   기준은 **마지막으로 실제로 알려진 신원**을 유지하고, `null`은 기록의 값이
+   아니라 공백입니다. `A → null → B`는 A와 B를 비교해 세션을 끝내고,
+   `A → null → A`는 끝내지 않습니다.
+
+   판정은 `resolveVoiceSessionBoundary()` 한 곳이며, **다음 비교 기준을 함께
+   돌려줍니다** — 호출부가 `nextIdentity`를 그냥 저장하면 위 결함이 되돌아오기
+   때문입니다. 네 경로 전부 `tests/voiceSessionScopes.test.mjs`가 순차로
    구동합니다.
-3. **세션→scope 기록은 상한이 있습니다.** `lib/voiceSessionScopes.ts`가
-   최신 두 세션만 남깁니다. transcript는 세션이 live 상태를 떠난 뒤에 도착하므로
-   "세션이 끝나면 지운다"는 필요한 직전에 지우는 일이 되고, 반대로 아무것도
-   지우지 않던 처음 구현은 composer가 mount돼 있는 동안 녹음마다 한 항목씩
-   늘었습니다. 종료 경로 네 곳에 `delete`를 뿌리는 대신 **보존 규칙 하나**로
-   둔 이유는, 뿌리는 쪽은 하나만 빠뜨려도 원래대로 돌아가기 때문입니다.
+3. **세션→scope 기록은 상한이 있고, 조회 실패는 fail-closed입니다.**
+   `lib/voiceSessionScopes.ts`가 최신 두 세션만 남깁니다. transcript는 세션이
+   live 상태를 떠난 뒤에 도착하므로 "세션이 끝나면 지운다"는 필요한 직전에
+   지우는 일이 되고, 반대로 아무것도 지우지 않던 처음 구현은 composer가
+   mount돼 있는 동안 녹음마다 한 항목씩 늘었습니다. 종료 경로 네 곳에
+   `delete`를 뿌리는 대신 **보존 규칙 하나**로 둔 이유는, 뿌리는 쪽은 하나만
+   빠뜨려도 원래대로 돌아가기 때문입니다.
+
+   **상한이 안전한 것은 조회 실패를 실패로 보고하기 때문입니다.** `scopeFor()`는
+   `string | null`이 아니라 `{ known: true, scopeId } | { known: false }`를
+   돌려줍니다. `null`은 **실재하는 scope**(새 대화 초안)이므로, 제거된 세션에
+   대해 `null`을 돌려주면 늦게 도착한 transcript가 **새 대화 초안에 기록**됩니다.
+   `known: false`면 hook은 **아무 데도 쓰지 않고 버립니다** — 추측해서 쓰는 것은
+   말한 적 없는 대화에 문장을 넣는 일입니다.
 4. **쓰기는 scope를 명시하고 함수형으로 합니다** —
    `setDraftText((current) => append(current, text), scopeId)`. scope 명시가
    대화를 맞추고, 함수형 갱신이 **기다리는 동안 사용자가 친 글을 보존**합니다.

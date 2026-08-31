@@ -8,7 +8,7 @@ import {
 } from "@/lib/voiceCaptureAdapter";
 import {
   createVoiceSessionScopes,
-  voiceSessionBoundaryChanged,
+  resolveVoiceSessionBoundary,
 } from "@/lib/voiceSessionScopes";
 import {
   VOICE_CLIP_MAX_SECONDS,
@@ -157,7 +157,15 @@ export function useVoiceRecorder(
 
   const onTranscriptRef = useRef(options.onTranscript);
   const scopeRef = useRef(options.scopeId);
-  const identityRef = useRef(options.identityKey ?? null);
+  /**
+   * The last identity that was actually *known*.
+   *
+   * Not "the last one seen": an unresolved session provider reports `null`,
+   * and storing that would make `A -> null -> B` two non-changes in a row —
+   * an account switch with a recording still running
+   * (`lib/voiceSessionScopes.ts`).
+   */
+  const lastKnownIdentityRef = useRef(options.identityKey ?? null);
   const endpoint = options.endpoint ?? "/api/chat/voice-transcription";
 
   // The latest-callback pattern, in an effect rather than the render body: the
@@ -276,10 +284,13 @@ export function useVoiceRecorder(
         dispatch: (event) => dispatchRef.current(event as VoiceRecorderEvent),
         onTranscript: (transcript, sessionId) => {
           // The scope this session started in, not the one on screen now.
-          onTranscriptRef.current(
-            transcript,
-            sessionScopesRef.current.scopeFor(sessionId)
-          );
+          const lookup = sessionScopesRef.current.scopeFor(sessionId);
+          // Fail closed. A session whose scope is no longer held cannot be
+          // written anywhere: `null` is the new-conversation draft, not "put
+          // it wherever", and guessing would land the words in a conversation
+          // they were not spoken into.
+          if (!lookup.known) return;
+          onTranscriptRef.current(transcript, lookup.scopeId);
         },
         onElapsed: (elapsedMs) =>
           setElapsedSeconds(Math.floor(elapsedMs / 1000)),
@@ -304,16 +315,18 @@ export function useVoiceRecorder(
     const nextScope = options.scopeId;
     const nextIdentity = options.identityKey ?? null;
     // The rule itself is pure and tested (`lib/voiceSessionScopes.ts`); this
-    // effect only supplies the two before/after pairs and acts on the answer.
-    const changed = voiceSessionBoundaryChanged({
+    // effect supplies the before/after pairs and acts on the answer. The
+    // comparison basis comes back from the rule rather than being assigned
+    // here, because an unresolved identity must not become the basis.
+    const boundary = resolveVoiceSessionBoundary({
       previousScope: scopeRef.current,
       nextScope,
-      previousIdentity: identityRef.current,
+      lastKnownIdentity: lastKnownIdentityRef.current,
       nextIdentity,
     });
     scopeRef.current = nextScope;
-    identityRef.current = nextIdentity;
-    if (!changed) return;
+    lastKnownIdentityRef.current = boundary.identity;
+    if (!boundary.changed) return;
     if (!isVoiceRecorderBusy(stateRef.current)) return;
     const sessionId =
       "sessionId" in stateRef.current ? stateRef.current.sessionId : null;

@@ -1,43 +1,62 @@
 /**
- * Which conversation each voice session was started in.
+ * Which conversation, and whose account, each voice session belongs to.
  *
  * Contract: docs/policy/voice-input.md §8.4.
  *
- * Pure and framework-free so the retention rule is assertable. It was a bare
- * `Map` inside the hook that grew for as long as the composer stayed mounted:
- * every session added an entry and nothing ever removed one, so a tab left
- * open all day accumulated one per recording. Small, but unbounded, and the
- * fix is a rule rather than a cleanup call sprinkled at each exit — there are
- * four ways a session ends and the sprinkled version only has to miss one.
- *
- * ## Why anything is kept at all
- *
- * The scope is read when a transcript comes back, which is after the session
- * has usually already left the state machine's live states. So the entry has
- * to outlive the session it belongs to, and "delete it when the session ends"
- * would delete it moments before it is needed.
- *
- * ## Why so few are kept
- *
- * A transcript for an abandoned session is dropped by the adapter before it
- * ever asks for a scope, so in practice only the newest session's entry is
- * ever read. Two are retained rather than one purely so an in-flight callback
- * that races a freshly started session still finds its own answer, and the
- * cap is the backstop for any path neither of those arguments covers.
+ * Pure and framework-free so both rules here are assertable. Neither can be
+ * reached from a test through the hook that uses them — that needs a React
+ * renderer — and both are the kind of rule that is wrong in a way nothing
+ * notices until a transcript lands somewhere it should not.
  */
 
-/** Sessions retained beyond the current one. See the header. */
+/** Sessions retained beyond the current one. See `createVoiceSessionScopes`. */
 const RETAINED_SESSIONS = 2;
+
+/**
+ * The answer to "where did this session start?".
+ *
+ * A discriminated result rather than `string | null`, because `null` is a
+ * *real* scope — the new-conversation draft — and "I no longer know" must not
+ * collapse into it. It did: `scopeFor` returned `null` for a pruned session,
+ * so a late callback for a forgotten session would have written its transcript
+ * into the new-conversation draft. The lookup is fail-closed instead, and the
+ * caller drops the transcript.
+ */
+export type VoiceScopeLookup =
+  | { known: true; scopeId: string | null }
+  | { known: false };
 
 export type VoiceSessionScopes = {
   /** Records the scope a session started in. */
   remember: (sessionId: number, scopeId: string | null) => void;
-  /** The scope a session started in, or `null` if it is no longer known. */
-  scopeFor: (sessionId: number) => string | null;
+  /** Where a session started, or `{ known: false }` if it is no longer held. */
+  scopeFor: (sessionId: number) => VoiceScopeLookup;
   /** How many entries are held. For tests and for nothing else. */
   size: () => number;
 };
 
+/**
+ * A bounded record of where each session started.
+ *
+ * This was a bare `Map` inside the hook: every session added an entry and
+ * nothing removed one, so a tab left open all day accumulated one per
+ * recording.
+ *
+ * ## Why anything is kept at all
+ *
+ * The scope is read when a transcript comes back, which is after the session
+ * has usually already left the state machine's live states. "Delete it when
+ * the session ends" would delete it moments before it is needed.
+ *
+ * ## Why so few are kept, and why a miss is not `null`
+ *
+ * A transcript for an abandoned session is dropped by the adapter before it
+ * ever asks for a scope, so in practice only the newest session's entry is
+ * read. Two are retained so a callback racing a freshly started session still
+ * finds its own answer, and the cap is the backstop for any path neither
+ * argument covers. That backstop is only safe because a miss is reported as a
+ * miss — see `VoiceScopeLookup`.
+ */
 export const createVoiceSessionScopes = (
   retained: number = RETAINED_SESSIONS
 ): VoiceSessionScopes => {
@@ -58,16 +77,33 @@ export const createVoiceSessionScopes = (
       scopes.set(sessionId, scopeId);
       prune();
     },
-    // `??` rather than `||`: `null` is a real scope — the new-conversation
-    // draft — and must not be confused with "no entry".
-    scopeFor: (sessionId) => scopes.get(sessionId) ?? null,
+    scopeFor: (sessionId) =>
+      scopes.has(sessionId)
+        ? { known: true, scopeId: scopes.get(sessionId) ?? null }
+        : { known: false },
     size: () => scopes.size,
   };
 };
 
+// ---------------------------------------------------------------------------
+// The identity and scope boundary
+// ---------------------------------------------------------------------------
+
+export type VoiceSessionBoundary = {
+  /** Whether a running session must end. */
+  changed: boolean;
+  /**
+   * The identity to compare against next time.
+   *
+   * Returned rather than assumed to be `nextIdentity`, and that is the whole
+   * point of this function's shape — see below.
+   */
+  identity: string | null;
+};
+
 /**
  * Whether a running session must end because it no longer belongs where it
- * started.
+ * started, and what to compare against next time.
  *
  * Contract: docs/policy/voice-input.md §8.4.
  *
@@ -78,27 +114,43 @@ export const createVoiceSessionScopes = (
  * ## Why identity is compared as a *person*
  *
  * The first version compared `"guest"` against `"account"`. That sees a guest
- * signing in, and misses account A being replaced by account B in the same
- * tab — which is the transition that matters most, because it is a privacy
- * boundary rather than a tidiness one. The key passed in is
- * `identityNamespaceKey` (`account:<userId>`), so the accounts are distinct.
+ * signing in and misses account A being replaced by account B in the same tab
+ * — the transition that matters most, because it is a privacy boundary rather
+ * than a tidiness one. The key passed in is `identityNamespaceKey`
+ * (`account:<userId>`), so accounts are distinct.
  *
- * ## Why an unknown identity is never a change
+ * ## Why an unknown identity does not *overwrite* the last known one
  *
- * `null` means the session provider has not settled yet, on either side of the
- * comparison. Treating `null -> account:x` as a change would cancel a
- * recording started during hydration, and `account:x -> null` (a refetch)
- * would cancel one for no reason at all. Neither is the user going anywhere.
+ * `null` means the session provider has not settled. Treating `null` as a
+ * change would cancel a recording started during hydration, so it is not one.
+ * But the second version of this rule also *stored* the `null`, and that
+ * reopened the exact hole it was written to close:
+ *
+ *     A -> null   no change, and the comparison basis became null
+ *     null -> B   no change, because one side was null
+ *
+ * — so `A -> null -> B` passed through unnoticed, which is an account switch
+ * with a session still running. The basis therefore keeps the last identity
+ * that was actually known, and `null` is a gap in the record rather than a
+ * value in it. `A -> null -> B` then compares A against B and ends the
+ * session; `A -> null -> A` compares A against A and does not.
  */
-export const voiceSessionBoundaryChanged = (input: {
+export const resolveVoiceSessionBoundary = (input: {
   previousScope: string | null;
   nextScope: string | null;
-  previousIdentity: string | null;
+  /** The last identity that was actually known, not merely the last seen. */
+  lastKnownIdentity: string | null;
   nextIdentity: string | null;
-}): boolean => {
-  if (input.previousScope !== input.nextScope) return true;
-  if (input.previousIdentity === null || input.nextIdentity === null) {
-    return false;
+}): VoiceSessionBoundary => {
+  // An unknown identity never displaces a known one.
+  const identity = input.nextIdentity ?? input.lastKnownIdentity;
+
+  if (input.previousScope !== input.nextScope) return { changed: true, identity };
+  if (input.nextIdentity === null || input.lastKnownIdentity === null) {
+    return { changed: false, identity };
   }
-  return input.previousIdentity !== input.nextIdentity;
+  return {
+    changed: input.lastKnownIdentity !== input.nextIdentity,
+    identity,
+  };
 };
