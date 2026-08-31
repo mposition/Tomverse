@@ -38,6 +38,11 @@ import {
     succ6ManifestFingerprintInput,
     verifySucc6Manifest,
 } from "../lib/memoryEvalSucc6.ts";
+import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
+import {
+    SUCC6_COMPOSITION_ADDITIONS,
+    SUCC6_COMPOSITION_REPAIRS,
+} from "../lib/memoryEvalSucc6CompositionRepairs.ts";
 import {
     MEMORY_EVAL_SUCC6_REPLACEMENTS,
     SUCC6_REPLACEMENT_SUBTYPES,
@@ -66,14 +71,48 @@ const ids = new Set(MEMORY_EVAL_SUCC6_CASES.map((c) => c.id));
 
 /* ------------------------------------------------------------- the shape -- */
 
-test("the set is succ-5 less ten, plus ten", () => {
+test("the set is succ-5 less thirteen, plus thirteen", () => {
+    // Ten from B+ and three composition repairs, counted separately because
+    // they left for different reasons. Merging them would make "why did this
+    // case go" unanswerable, and the answers are not the same.
     assert.equal(MEMORY_EVAL_SUCC6_DATASET_VERSION, "mem-eval-succ-6");
     assert.equal(MEMORY_EVAL_SUCC6_SUPERSEDES, "mem-eval-succ-5");
     assert.equal(MEMORY_EVAL_SUCC5_CASES.length, 1150);
-    assert.equal(MEMORY_EVAL_SUCC6_INHERITED_COUNT, 1140);
+    assert.equal(MEMORY_EVAL_SUCC6_INHERITED_COUNT, 1137);
     assert.equal(MEMORY_EVAL_SUCC6_REPLACEMENTS.length, 10);
+    assert.equal(SUCC6_COMPOSITION_ADDITIONS.length, 3);
+    assert.equal(SUCC6_COMPOSITION_REPAIRS.length, 3);
     assert.equal(MEMORY_EVAL_SUCC6_CASES.length, 1150);
     assert.equal(ids.size, 1150, "an id is duplicated");
+});
+
+test("a composition repair removes a case and adds one in the same cell", () => {
+    const succ5 = new Map(MEMORY_EVAL_SUCC5_CASES.map((c) => [c.id, c]));
+    const succ6 = new Map(MEMORY_EVAL_SUCC6_CASES.map((c) => [c.id, c]));
+    for (const repair of SUCC6_COMPOSITION_REPAIRS) {
+        const removed = succ5.get(repair.removedId);
+        assert.ok(removed, `${repair.removedId} was never a succ-5 case`);
+        assert.ok(!succ6.has(repair.removedId), `${repair.removedId} is still present`);
+        const added = succ6.get(repair.addedId);
+        assert.ok(added, `${repair.addedId} is missing`);
+        assert.equal(`${added.category}:${added.language}`, repair.cell);
+        assert.equal(`${removed.category}:${removed.language}`, repair.cell);
+        // The point of the swap: what arrives is a subtype 3 or 4 case, and
+        // what leaves is not — otherwise the cell gains nothing.
+        assert.equal(ASSISTANT_ONLY_SUBTYPES[repair.addedId].subtype, repair.addedSubtype);
+        assert.equal(ASSISTANT_ONLY_SUBTYPES[repair.removedId], undefined);
+        assert.ok(repair.removalReason.length > 0, repair.removedId);
+    }
+});
+
+test("the two lists of departures do not overlap", () => {
+    // A case cannot both have formed the rule and have been swapped for
+    // redundancy, and a single id in both would make its provenance a
+    // question with two answers.
+    for (const repair of SUCC6_COMPOSITION_REPAIRS) {
+        assert.ok(!SUCC6_SUPERSEDED_CASE_IDS.has(repair.removedId), repair.removedId);
+        assert.ok(!SUCC6_REPLACEMENT_CASE_IDS.has(repair.addedId), repair.addedId);
+    }
 });
 
 test("the cells the transitions touch keep their floor", () => {
@@ -299,8 +338,8 @@ test("the manifest recomputes, and says the sample moved", () => {
     assert.equal(built.manifestDigest, MEMORY_EVAL_SUCC6_MANIFEST.manifestDigest);
     assert.equal(built.caseCount, 1150);
     assert.equal(built.composition.kind, "case-replacement");
-    assert.equal(built.composition.inheritedCaseCount, 1140);
-    assert.equal(built.composition.replacedCaseCount, 10);
+    assert.equal(built.composition.inheritedCaseCount, 1137);
+    assert.equal(built.composition.replacedCaseCount, 13);
 });
 
 test("the dataset digest is new and succ-5's is untouched", () => {
@@ -356,8 +395,9 @@ test("the manifest digest covers the manifest, and not itself or the freeze", ()
     assert.ok(!input.includes("frozen"), "the freeze state is inside the digest");
     for (const fragment of [
         `datasetDigest=${built.datasetDigest}`,
-        "inherited=1140",
-        "replaced=10",
+        "inherited=1137",
+        "replaced=13",
+        `subtypeTableDigest=${built.subtypeTableDigest}`,
     ]) {
         assert.ok(input.includes(fragment), `the fingerprint drops ${fragment}`);
     }
@@ -388,7 +428,7 @@ test("a manifest claiming adoption the tree has not granted is refused", () => {
 
 /* --------------------------------------------------------- the replacements */
 
-test("the replacements are ten assistant_only cases, nine expecting nothing", () => {
+test("the B+ replacements are ten assistant_only cases, eight expecting nothing", () => {
     const ko = MEMORY_EVAL_SUCC6_REPLACEMENTS.filter((c) => c.language === "ko");
     const en = MEMORY_EVAL_SUCC6_REPLACEMENTS.filter((c) => c.language === "en");
     assert.equal(ko.length, 6);
@@ -410,7 +450,7 @@ test("the replacements are ten assistant_only cases, nine expecting nothing", ()
     );
     assert.deepEqual(
         withGold.map((c) => c.id),
-        ["succ-assistant-ko-501"]
+        ["succ-assistant-ko-501", "succ-assistant-ko-504"]
     );
     for (const c of MEMORY_EVAL_SUCC6_REPLACEMENTS) {
         if (c.expected.length === 0) {
@@ -449,6 +489,88 @@ test("ko-501 keeps the beginner fact the prompt already asks for", () => {
     // the OR for exactly this: "십 년 전에 시작했다" would otherwise pass.
     assert.ok(!scores("사용자는 첼로를 십 년간 연주해 온 숙련자입니다"));
     assert.ok(!scores("사용자는 첼로를 십 년 전에 시작했습니다"));
+});
+
+/**
+ * A candidate as the scorer wants one, so the two mixed-critical cases can be
+ * asserted at `scoreCaseV3()` rather than at string matching.
+ *
+ * String matching says whether a gold *would* match. It does not say what the
+ * scorer does with a critical case, and that is the half the mixed-critical
+ * amendment changed: a bulk-safe candidate matching a bulk-safe gold is
+ * spared, and every other bulk-safe candidate is still counted. Only the
+ * scorer can be asked whether that is what happens.
+ */
+const candidateFor = (gold, statement) => ({
+    kind: gold.kind,
+    polarity: gold.polarity,
+    statement,
+    bulkSafe: true,
+    disposition: "accepted",
+    evidence: [
+        {
+            evidenceMessageId: gold.evidence.evidenceMessageId,
+            evidenceQuote: gold.evidence.evidenceQuote,
+        },
+    ],
+});
+
+test("the two mixed-critical cases score as the amendment says they should", () => {
+    // The right answer is recalled and costs nothing; the wrong one recalls
+    // nothing and is a critical adoption. Both halves matter: a case that only
+    // proved the first would pass with the gold missing, and one that only
+    // proved the second would pass with an empty gold — which is the defect
+    // this pair replaced.
+    const expectations = [
+        {
+            id: "succ-assistant-ko-501",
+            right: "사용자는 첼로를 이제 막 시작한 초보자입니다",
+            wrong: "사용자는 첼로를 십 년간 연주해 온 숙련자입니다",
+        },
+        {
+            id: "succ-assistant-ko-504",
+            right: "사용자는 격주로 열리는 모임에 참석한다",
+            wrong: "사용자는 매주 목요일 모임을 한다",
+        },
+    ];
+    for (const { id, right, wrong } of expectations) {
+        const testCase = MEMORY_EVAL_SUCC6_REPLACEMENTS.find((c) => c.id === id);
+        assert.equal(testCase.criticalGoldMode, "allow_expected_only", id);
+        const [gold] = testCase.expected;
+
+        const good = scoreCaseV3(testCase, [candidateFor(gold, right)]);
+        assert.equal(good.goldMatched, 1, `${id}: the right answer was not recalled`);
+        assert.equal(good.goldTotal, 1, id);
+        assert.equal(
+            good.criticalBulkSafeAdoptions,
+            0,
+            `${id}: the right answer was counted as a critical adoption`
+        );
+
+        const bad = scoreCaseV3(testCase, [candidateFor(gold, wrong)]);
+        assert.equal(bad.goldMatched, 0, `${id}: the wrong answer was recalled`);
+        assert.equal(
+            bad.criticalBulkSafeAdoptions,
+            1,
+            `${id}: the wrong answer was not counted, so the case tests nothing`
+        );
+    }
+});
+
+test("a mixed-critical case still counts an extra bulk-safe candidate", () => {
+    // The amendment spares the matching candidate, not the case. A model that
+    // returns the right fact and also the transferred one is still wrong, and
+    // this is the assertion that the exception did not widen into an amnesty.
+    const testCase = MEMORY_EVAL_SUCC6_REPLACEMENTS.find(
+        (c) => c.id === "succ-assistant-ko-501"
+    );
+    const [gold] = testCase.expected;
+    const outcome = scoreCaseV3(testCase, [
+        candidateFor(gold, "사용자는 첼로를 이제 막 시작한 초보자입니다"),
+        candidateFor(gold, "사용자는 첼로를 십 년간 연주해 온 숙련자입니다"),
+    ]);
+    assert.equal(outcome.goldMatched, 1);
+    assert.equal(outcome.criticalBulkSafeAdoptions, 1);
 });
 
 test("no replacement reuses an id, a conversation id or a message id", () => {
@@ -645,10 +767,11 @@ test("the subtype table names only cases the dataset holds", () => {
     }
 });
 
-test("the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is not met, and succ-6 is closer to it than succ-5", () => {
-    // Asserted as it stands rather than as it should be. Pinning the real
-    // numbers is what makes a later change visible: if somebody closes the gap
-    // this test fails and says so, and if somebody widens it the same.
+test("the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is met, and succ-5's was not", () => {
+    // succ-5 sat at ko 31 and en 34 with nothing measuring it. Both halves are
+    // asserted: that succ-6 clears the floor, and that its predecessor did
+    // not — the second is what stops the first from reading as a fact about
+    // the dataset family rather than about this change.
     const rows = new Map(
         assistantOnlySubtypeFloor(MEMORY_EVAL_SUCC6_CASES).map((r) => [r.cell, r])
     );
@@ -657,14 +780,12 @@ test("the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is not met, and
     );
     for (const cell of ["assistant_only:ko", "assistant_only:en"]) {
         assert.equal(rows.get(cell).floor, 38, cell);
-        assert.equal(rows.get(cell).meetsFloor, false, `${cell} now meets the floor`);
-        assert.ok(
-            rows.get(cell).hard > before.get(cell).hard,
-            `${cell}: the replacements did not move it toward the floor`
-        );
+        assert.equal(rows.get(cell).meetsFloor, true, `${cell} is below the floor`);
+        assert.equal(rows.get(cell).shortfall, 0, cell);
+        assert.equal(before.get(cell).meetsFloor, false, `${cell}: succ-5 already met it`);
     }
-    assert.equal(rows.get("assistant_only:ko").shortfall, 2);
-    assert.equal(rows.get("assistant_only:en").shortfall, 1);
+    assert.equal(rows.get("assistant_only:ko").hard, 38);
+    assert.equal(rows.get("assistant_only:en").hard, 38);
     // And the table is a draft until somebody signs it. A confirmed table with
     // no reviewer would be the signature this whole flow exists to require.
     if (SUBTYPE_REVIEW.status === "human_confirmed") {

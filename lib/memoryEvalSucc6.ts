@@ -55,6 +55,12 @@ import {
 } from "@/lib/memoryEvalScoringContractDigest";
 import { MEMORY_EVAL_SUCC5_CASES } from "@/lib/memoryEvalSucc5";
 import { MEMORY_EVAL_SUCC6_REPLACEMENTS } from "@/lib/memoryEvalSucc6Replacements";
+import { subtypeTableDigest } from "@/lib/memoryEvalAssistantOnlySubtypes";
+import {
+    SUCC6_COMPOSITION_ADDITIONS,
+    SUCC6_COMPOSITION_ADDITION_IDS,
+    SUCC6_REMOVED_FOR_COMPOSITION,
+} from "@/lib/memoryEvalSucc6CompositionRepairs";
 import {
     SUCC6_REPLACEMENT_CASE_IDS,
     SUCC6_SUPERSEDED_CASE_IDS,
@@ -63,7 +69,8 @@ import {
 export const MEMORY_EVAL_SUCC6_DATASET_VERSION = "mem-eval-succ-6";
 export const MEMORY_EVAL_SUCC6_SUPERSEDES = "mem-eval-succ-5";
 export const MEMORY_EVAL_SUCC6_CHANGE_REASON =
-    "B+ isolation of ten rule-forming cases, with 1:1 replacements";
+    "B+ isolation of ten rule-forming cases, plus three composition repairs " +
+    "for the docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor; 1:1 replacements throughout";
 
 /**
  * False until a person adopts it.
@@ -85,12 +92,24 @@ export const MEMORY_EVAL_SUCC6_DATASET_PURPOSE: "development" | "decision" =
  * datasets shows ten removals and ten additions instead of a reshuffle.
  */
 const INHERITED: readonly MemoryEvalCaseV3[] = MEMORY_EVAL_SUCC5_CASES.filter(
-    (testCase) => !SUCC6_SUPERSEDED_CASE_IDS.has(testCase.id)
+    (testCase) =>
+        !SUCC6_SUPERSEDED_CASE_IDS.has(testCase.id) &&
+        !SUCC6_REMOVED_FOR_COMPOSITION.has(testCase.id)
 );
 
+/**
+ * Thirteen out, thirteen in, from two decisions that are kept apart.
+ *
+ * Ten are B+ (`lib/memoryEvalSucc6Transition.ts`), moved because they formed
+ * the boundary rule and preserved with their history. Three are composition
+ * repairs (`lib/memoryEvalSucc6CompositionRepairs.ts`), swapped because the
+ * cells sat below the docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor. Merging the two lists would make
+ * "why did this case leave" unanswerable, and the answers are not the same.
+ */
 export const MEMORY_EVAL_SUCC6_CASES: readonly MemoryEvalCaseV3[] = [
     ...INHERITED,
     ...MEMORY_EVAL_SUCC6_REPLACEMENTS,
+    ...SUCC6_COMPOSITION_ADDITIONS,
 ];
 
 export const MEMORY_EVAL_SUCC6_INHERITED_COUNT = INHERITED.length;
@@ -110,6 +129,15 @@ export type Succ6DatasetManifest = {
     schemaVersion: 3;
     supersedes: "mem-eval-succ-5";
     composition: EvalDatasetCompositionCaseReplacement;
+    /**
+     * Digest of the subtype classification the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is measured against.
+     *
+     * Not covered by `datasetDigest`, which fingerprints cases: a subtype is a
+     * judgement about a case, not part of it. Without this a freeze would pin
+     * the sample and leave the reading of it free to move, and the floor is
+     * decided by the reading.
+     */
+    subtypeTableDigest: string;
     caseCount: number;
     cellCounts: Readonly<Record<string, number>>;
     datasetDigest: string;
@@ -141,6 +169,7 @@ export function succ6ManifestFingerprintInput(
         `caseCount=${manifest.caseCount}`,
         `cells=${cells}`,
         `datasetDigest=${manifest.datasetDigest}`,
+        `subtypeTableDigest=${manifest.subtypeTableDigest}`,
         `scoringContractVersion=${manifest.scoringContractVersion}`,
         `scoringContractDigest=${manifest.scoringContractDigest}`,
         // Deliberately excluded: `frozen`. Adoption is a state the record
@@ -180,9 +209,12 @@ export function buildSucc6Manifest(): Succ6DatasetManifest {
                 datasetFingerprintInputV3(MEMORY_EVAL_SUCC5_CASES)
             ),
             inheritedCaseCount: INHERITED.length,
-            replacedCaseCount: MEMORY_EVAL_SUCC6_REPLACEMENTS.length,
+            replacedCaseCount:
+                MEMORY_EVAL_SUCC6_REPLACEMENTS.length +
+                SUCC6_COMPOSITION_ADDITIONS.length,
             changeReason: MEMORY_EVAL_SUCC6_CHANGE_REASON,
         },
+        subtypeTableDigest: subtypeTableDigest(),
         caseCount: MEMORY_EVAL_SUCC6_CASES.length,
         cellCounts: cellCountsOf(MEMORY_EVAL_SUCC6_CASES),
         datasetDigest,
@@ -236,6 +268,13 @@ export function verifySucc6Manifest(
                 "digest, so nothing else here would have caught it."
         );
     }
+    if (manifest.subtypeTableDigest !== built.subtypeTableDigest) {
+        failures.push(
+            `subtypeTableDigest: recorded ${manifest.subtypeTableDigest}, tree computes ` +
+                `${built.subtypeTableDigest}. The classification moved under a record ` +
+                "that pinned it, and the docs/ops/memory-extraction-eval-dataset.md §3.3 floor is decided by the classification."
+        );
+    }
     // A sample-changing successor whose sample did not change is a version
     // number and nothing else.
     if (manifest.datasetDigest === manifest.composition.sourceDatasetDigest) {
@@ -265,6 +304,16 @@ export function verifySucc6Manifest(
     for (const replacement of SUCC6_REPLACEMENT_CASE_IDS) {
         if (!ids.has(replacement)) {
             failures.push(`${replacement} is a recorded replacement and is missing`);
+        }
+    }
+    for (const removed of SUCC6_REMOVED_FOR_COMPOSITION) {
+        if (ids.has(removed)) {
+            failures.push(`${removed} was swapped for composition and is still present`);
+        }
+    }
+    for (const added of SUCC6_COMPOSITION_ADDITION_IDS) {
+        if (!ids.has(added)) {
+            failures.push(`${added} is a composition repair and is missing`);
         }
     }
     return failures;
