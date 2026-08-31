@@ -1,0 +1,162 @@
+name: Router eval — human review recovery probe
+#
+# Stage one of two. It draws nothing, reads no bundle and names no reviewer.
+#
+# All it does is seal a throwaway file exactly the way the draw will seal the
+# key that maps every review item back to its pair, so the operator can prove
+# their private half opens it -- while there is still nothing that matters
+# sealed with it.
+#
+# This is a separate workflow rather than a step inside the draw because an
+# Actions artifact can only be downloaded once its job has finished. A probe
+# sealed in the draw's own job could only be opened after the real key was
+# already sealed, which makes it a report rather than a precondition. Two runs
+# with a committed record between them is what makes it a gate:
+#
+#   1. this workflow seals a probe
+#   2. a person opens it with the private half and commits what it printed
+#   3. the draw refuses unless that record matches the committed public key
+#
+# It makes no provider calls and costs nothing.
+
+on:
+  workflow_dispatch:
+
+# Deliberately no inputs. There is nothing here to choose.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: router-human-review-recovery-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Seal a recovery probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: The recipient key is present and usable
+        id: recipient
+        run: |
+          set -euo pipefail
+          recipient=docs/ops/router-human-review/key-recipient.pub.pem
+          if [ ! -s "$recipient" ]; then
+            echo "::error::$recipient is missing. Generate a keypair, keep the private half outside"
+            echo "::error::this repository, and commit the public half:"
+            echo "::error::  openssl genpkey -algorithm RSA -aes-256-cbc -pkeyopt rsa_keygen_bits:4096 -out private.pem"
+            echo "::error::  openssl pkey -in private.pem -pubout -out $recipient"
+            exit 1
+          fi
+          if ! openssl pkey -pubin -in "$recipient" -noout 2>/dev/null; then
+            echo "::error::$recipient is not a readable public key."
+            exit 1
+          fi
+          # Readable is not usable. An Ed25519 public key parses here and then
+          # cannot encrypt at all -- it is a signing key. A real encryption is
+          # the only check that tells them apart.
+          openssl rand -out trial.bin 32
+          if ! openssl pkeyutl -encrypt -pubin -inkey "$recipient" \
+              -pkeyopt rsa_padding_mode:oaep \
+              -pkeyopt rsa_oaep_md:sha256 \
+              -pkeyopt rsa_mgf1_md:sha256 \
+              -in trial.bin -out /dev/null 2>trial.err; then
+            sed 's/^/::error::/' trial.err
+            echo "::error::$recipient parses but cannot encrypt under RSA-OAEP/SHA-256. It must be an"
+            echo "::error::RSA encryption key, not an Ed25519 signing key."
+            rm -f trial.bin trial.err
+            exit 1
+          fi
+          rm -f trial.bin trial.err
+          fingerprint="sha256:$(openssl pkey -pubin -in "$recipient" -outform DER | openssl dgst -sha256 -r | cut -d' ' -f1)"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Recipient public key $fingerprint, and it encrypts."
+
+      # Sealed with the same envelope as the key, because a probe opened under
+      # different parameters proves nothing about the key.
+      # Sealed with the same envelope as the key, because a probe opened under
+      # different parameters proves nothing about the key.
+      - name: Seal the probe
+        id: probe
+        env:
+          FINGERPRINT: ${{ steps.recipient.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          mkdir -p out-probe
+          printf 'router-human-review recovery probe\nrun %s\ncommit %s\n' \
+            "${{ github.run_id }}" "${{ github.sha }}" > probe.txt
+          PROBE_SHA="sha256:$(sha256sum probe.txt | cut -d' ' -f1)"
+          export PROBE_SHA
+          echo "sha=$PROBE_SHA" >> "$GITHUB_OUTPUT"
+          printf '%s  probe.txt\n' "${PROBE_SHA#sha256:}" > out-probe/probe.sha256
+
+          openssl rand -out probe.key 32
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+            -in probe.txt -out out-probe/probe.txt.enc -pass file:probe.key
+          openssl pkeyutl -encrypt -pubin \
+            -inkey docs/ops/router-human-review/key-recipient.pub.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -in probe.key -out out-probe/probe.key.enc
+          rm -f probe.key probe.txt
+
+          # The parameters travel with the ciphertext, read from the one place
+          # they are defined rather than retyped here.
+          npm run --silent print:router-key-envelope -- \
+            --recipientKeyFingerprint="$FINGERPRINT" \
+            --probeSha256="$PROBE_SHA" \
+            --probeRunId="$GITHUB_RUN_ID" \
+            > out-probe/envelope.json
+          cat out-probe/envelope.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: human-review-recovery-probe
+          path: out-probe/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: What to do with it
+        run: |
+          cat <<NOTE
+          Download the human-review-recovery-probe artifact and open it with the
+          PRIVATE half of the committed key. The OAEP options are required on
+          the decrypt too: without them OpenSSL returns garbage rather than an
+          error, and the failure shows up as a bad AES decrypt one step later.
+
+            openssl pkeyutl -decrypt -inkey private.pem \\
+              -pkeyopt rsa_padding_mode:oaep \\
+              -pkeyopt rsa_oaep_md:sha256 \\
+              -pkeyopt rsa_mgf1_md:sha256 \\
+              -in probe.key.enc -out probe.key
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \\
+              -in probe.txt.enc -out probe.txt -pass file:probe.key
+            sha256sum -c probe.sha256
+
+          Once that prints "probe.txt: OK", commit this into
+          docs/ops/router-human-review/primary-60-preregistration.json:
+
+            "keyRecovery": {
+              "verifiedBy": "<who opened it>",
+              "verifiedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "recipientKeyFingerprint": "${{ steps.recipient.outputs.fingerprint }}",
+              "probeSha256": "${{ steps.probe.outputs.sha }}",
+              "probeRunId": "${{ github.run_id }}"
+            }
+
+          The draw refuses until that record is there, and refuses again if the
+          public key is replaced afterwards: a recovery proved against a key
+          that has since been swapped proves nothing about the one that would
+          seal the draw.
+          NOTE

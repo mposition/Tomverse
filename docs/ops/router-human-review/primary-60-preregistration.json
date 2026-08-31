@@ -1,0 +1,21 @@
+{
+  "version": "router-human-review-primary-v1",
+  "purpose": "Freeze the bundle and the draw for the ROUTE-01 primary human review, before any reviewer is named.",
+  "frozenAt": "2026-08-30",
+  "frozenBy": "mposition",
+  "sourceRunId": "33312326437",
+  "sourceArtifact": "route01-calibration-20260830a",
+  "bundleFile": "route01-pilot-20260830a.answers.jsonl",
+  "bundleDigest": null,
+  "expectedCells": 15,
+  "expectedPrimaryPairs": 60,
+  "adjudicatorId": null,
+  "keyRecovery": null,
+  "notes": [
+    "bundleDigest is null until one free dispatch reads it off the pinned artifact and refuses. Commit the value it prints, then dispatch again. It is read, never chosen.",
+    "The seed is derived from bundleDigest by lib/routerHumanReviewSource.ts and is not an input to anything.",
+    "adjudicatorId must be filled before the first dispatch: the third reviewer is named before the first two verdicts exist, so a tie-breaker is not chosen once it is known which way they would break the tie.",
+    "keyRecovery is null until the recovery-probe workflow has run and a person has opened its probe with the private half of the committed public key. The draw refuses without it, and refuses again if the public key has been replaced since: an artifact is only downloadable once its job has finished, so a probe sealed in the draw's own job could only be opened after the key it stands in for was already sealed.",
+    "The judges have already graded these answers and disagree by +40.48pp, which is why neither the bundle nor the seed is a dispatch input."
+  ]
+}
