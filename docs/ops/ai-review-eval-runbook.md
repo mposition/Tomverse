@@ -272,6 +272,29 @@ npm run check:ai-review-eval -- --artifact=<경로>
 버전을 이름으로 인용하므로, 기존 버전을 고치면 그 이름으로 승인된 pair가 조용히
 다른 기준으로 재해석됩니다.
 
+## 6a. 승인 항목의 증거는 기본 검사가 직접 엽니다
+
+`npm run check:ai-review-eval`은 **인자 없이** 실행돼도 승인된 항목마다
+`evaluation.runs[].artifactRef`를 직접 읽습니다. PR Fast Gate가 이 형태로
+부르므로, 증거 검사가 `--artifact`를 주는 사람에게 달려 있으면 실질적으로
+아무도 하지 않는 검사가 됩니다. 2026-08-31에 확인했습니다 — 존재하지 않는
+artifact 두 개를 인용한 승인 항목이 `All checks passed`로 통과했습니다.
+
+run마다 넷을 요구합니다.
+
+1. artifact 파일이 존재하고 파싱될 것
+2. 결정 증거로 적격일 것(decision-grade, 깨끗한 commit, 완주, 표본 충족)
+3. artifact의 summary가 기록된 신원과 일치할 것 — reviewer·prompt version·
+   commit·run ordinal·dataset digest **다섯 개 전부**
+4. 수치가 기록된 값과 자릿수까지 같을 것
+
+**3번이 다섯 개인 이유:** dataset은 모든 reviewer가 함께 치르는 **시험지**이지
+응시자가 아닙니다. digest로 짝을 찾으면 같은 set으로 평가한 다른 reviewer의
+artifact가 걸리고, A의 정직한 수치가 B의 artifact 앞에서 전사 오류로 거절됩니다.
+그리고 **독립 실행 두 회의 수치는 각각 보존되고 각각 threshold를 통과해야
+합니다** — 합산 규칙을 아무도 정한 적이 없고, 합산값은 대응하는 artifact가
+없어서 무엇으로도 검증할 수 없습니다.
+
 ## 7. 승인 — **사람의 행위**
 
 두 실행이 §6을 통과하고 §5의 검토가 끝났을 때, 사람이

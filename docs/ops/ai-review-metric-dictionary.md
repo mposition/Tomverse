@@ -56,7 +56,8 @@ attempt가 둘(실패 + 성공)입니다. 개정 전에는 attempt 목록이 없
 | `dualCompletionRate` | 두 번째가 실제로 완료된 실행 | **두 번째 후보가 존재한 실행** | 후보가 없던 실행 |
 | `cachedRate` | `cached` | 전체 실행 | — |
 | `retryRate` | 서비스가 재시도한 **attempt** | provider에 도달한 attempt | 거부된 attempt, **SDK가 스스로 재시도해 성공한 요청**(하한값) |
-| `missingTraceRate` | 시도됐지만 표에 없는 telemetry write | **이 window에서 시도된 write** | writer 컬럼 이전 행. 하한값입니다(§1.2a) |
+| `detectedTraceGaps` | **비율이 아니라 개수**. span 안에서 확인된 유실 write | — | writer 컬럼 이전 행, 그리고 §1.2a의 세 사각지대 |
+| `traceCompleteness` | 표 **밖에서** 센 시도 총계 − 남은 행 | 그 시도 총계 | 총계가 없으면 `null`(= 모름) |
 | `unreconciledSettlements` | 정산액도 환급액도 없는 attempt | **크레딧을 잡은 채 provider에 도달한 attempt** | 예약이 0인 attempt |
 | `creditReconciliation` | 잘못된 방향으로 정리된 크레딧(초과 정산 + 미환급) | 금액이 기록된 attempt | 금액이 없는 attempt(위 지표가 셈) |
 | `overSettledRate` | **예약보다 많이 정산된** 완료 attempt | 금액이 기록된 완료 attempt | — |
@@ -103,39 +104,69 @@ fire-and-forget이고 그 자체의 실패는 이미 로그에 남습니다. 다
 사라집니다 — 429에 즉시 다시 던지는 것은 측정되지 않는 것보다 나쁜 동작이므로,
 **동작이 아니라 숫자에 이름을 붙였습니다.**
 
-### 1.2a `missingTraceRate` — 표에 없는 것을 세는 법
+### 1.2a 유실 **탐지**와 **완전성**은 다른 것입니다
 
 **나머지 모든 비율은 남아 있는 행에서 계산되므로, 몇 개가 없는지 말할 수
 없습니다.** insert가 일부만 실패하는 부분 장애에서는 살아남은 행이 "잘 된
-것들"로 치우친 표본이 되고, 완료율은 완벽하게 나옵니다. 실제로 그 상태였습니다 —
-`comparisonReviewRunTelemetry.ts`의 주석이 scorecard가 `missingTraceRate`를
-보고한다고 적어 두었지만, 저장소 전체에서 그 이름은 **그 주석에만** 있었습니다.
+것들"로 치우친 표본이 되고, 완료율은 완벽하게 나옵니다.
 
-이제 각 write는 **쓰기를 시도할 때** 자기 process의 sequence를 하나 당겨서
+각 write는 **쓰기를 시도할 때** 자기 process의 sequence를 하나 당겨서
 가집니다(`writerId`, `writerSequence`). 한 writer 안에서 최소~최대 sequence
 구간이 시도한 횟수이고, 실제 행 수가 도달한 횟수이며, 차이가 구멍입니다.
-실패한 insert도 번호를 소비하므로 구멍이 남습니다.
+실패한 insert도 번호를 소비하므로 구멍이 남습니다. 이것이 `detectedTraceGaps`
+이고 **비율이 아니라 개수**입니다.
 
-**셋은 보이지 않고, 지표는 그것을 감추지 않습니다.**
+#### 왜 개수인가 — 사각지대가 코너 케이스가 아니기 때문입니다
 
-1. process가 죽기 직전에 잃은 write — 뒤에 닻이 될 행이 없습니다.
-2. 모든 write가 실패한 process — 행이 하나도 없으니 writer 자체가 없습니다.
-3. window 경계가 자른 sequence — 안쪽 첫·마지막 행이 닻이 됩니다.
+**write가 전부 실패한 process는 통째로 보이지 않습니다.** 행이 하나도 없으니
+span도 없고, span이 없으니 구멍을 찾을 자리가 없습니다.
 
-그래서 이 값은 **하한**입니다. 0보다 크면 구멍이 있다는 증명이고, 0이라고
-없다는 증명은 아닙니다. `comparison_review_run_record_failed` 구조화 이벤트가
-계속 두 번째 신호로 남으며, 실패 로그에 같은 `writerId`·`writerSequence`가
-찍히므로 로그와 표의 구멍이 같은 write를 가리킵니다.
+```
+writer A: 80건 시도, 80건 저장
+writer B: 20건 시도, 20건 전부 유실
+detectedTraceGaps: { missing: 0, withinSpans: 80, writers: 1 }
+```
+
+window의 5분의 1이 사라졌는데 산술은 깨끗합니다. 이 숫자로 완전성을 승인하면
+**막으려던 실패 양상을 정확히 못 보는 값으로 승인**하는 것입니다. 나머지 둘도
+같은 성격입니다 — process 종료 직전 유실(뒤에 닻이 될 행 없음), window 경계가
+자른 sequence.
+
+그래서 규칙이 둘로 갈립니다.
+
+- **`detectedTraceGaps.missing > 0`은 유실의 증명이고 그 자체로 거절 사유**입니다.
+- **`= 0`은 유실이 없다는 증거가 아닙니다.** 여기서 완전성을 승인하지 않습니다.
+
+#### 완전성은 표 밖의 총계가 있어야 답할 수 있습니다
+
+`comparison_review_run` 구조화 로그는 **쓰기 전에, 모든 실행마다** 나갑니다.
+그러므로 같은 window에서 그 이벤트를 센 값이 독립적인 시도 총계입니다.
+
+```
+npm run report:ai-review-operations -- --window=90 \
+  --attempted-writes=<로그에서 센 값> \
+  --attempted-writes-source="<어떤 쿼리로 셌는지>"
+```
+
+- 총계를 주지 않으면 `traceCompleteness`는 **`null`(모름)**이고, 0이 아닙니다.
+- `--attempted-writes-source`는 필수입니다 — 어떤 쿼리에서 나왔는지 되짚을 수
+  없는 숫자는 증거가 아닙니다.
+- eligibility의 `telemetry_complete_over_approved_window`는 **탐지된 구멍 0
+  그리고 독립 총계 기준 완전성이 `maxMissingTraceRate` 이내**를 함께 요구합니다.
+  하나라도 없으면 열린 채로 둡니다.
+
+실패 로그에 같은 `writerId`·`writerSequence`가 찍히므로 로그와 표의 구멍이 같은
+write를 가리킵니다.
 
 **`writerId`는 식별자가 아닙니다.** process마다 새로 만드는 난수이고 host·
 사용자·배포에서 유도하지 않습니다. counter의 범위를 정하는 것 외에 아무 뜻도
 없으며, 뜻이 있으면 그것은 "아무 신원도 담지 않는다"가 계약인 표에 신원을 하나
 들이는 일입니다.
 
-**신뢰성 비율에 접지 않습니다.** missing이 4%인 window는 완료율이 4% 나쁜
+**신뢰성 비율에 접지 않습니다.** 구멍이 있는 window는 완료율이 그만큼 나쁜
 window가 아니라 **완료율이 불완전한 표본 위에서 측정된** window이고, 둘은 다른
-대응을 부릅니다. 그래서 운영 리포트에서 이 줄이 신뢰성 숫자들보다 **먼저**
-나옵니다 — 아래 숫자들을 한정하는 값이기 때문입니다.
+대응을 부릅니다. 그래서 운영 리포트에서 이 두 줄이 신뢰성 숫자들보다 **먼저**
+나옵니다.
 
 `§2`의 telemetry coverage와도 다릅니다. 그쪽은 server와 client 두 계측기의
 비교이고, 이쪽은 server 계측기 **자기 자신**이 놓친 양입니다.

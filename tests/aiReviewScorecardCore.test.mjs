@@ -301,6 +301,38 @@ test("an attempt that reserved nothing is outside the reconciliation question", 
   assert.equal(card.unreconciledSettlements.status, "insufficient_evidence");
 });
 
+test("a writer whose every write was lost is invisible, so zero gaps is not completeness", () => {
+  // The reason detection and completeness are different fields. Writer A wrote
+  // 80 and every one landed; writer B attempted 20 and every one was lost, so
+  // B left no rows, so B left no span. The arithmetic reports a clean window
+  // with a fifth of it gone, and a gate that approved completeness from this
+  // number passed at a permitted loss of zero.
+  const rows = Array.from({ length: 80 }, (_, index) =>
+    run({ writerId: "A", writerSequence: index + 1 })
+  );
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.detectedTraceGaps.missing, 0);
+  assert.equal(card.detectedTraceGaps.writers, 1);
+  // Unknown, not zero. Nothing in the table can supply the denominator.
+  assert.equal(card.traceCompleteness, null);
+  assert.equal(card.traceCompletenessSource, null);
+});
+
+test("an attempted total counted outside the table is what makes completeness answerable", () => {
+  const rows = Array.from({ length: 80 }, (_, index) =>
+    run({ writerId: "A", writerSequence: index + 1 })
+  );
+  const card = summariseReliability(rows, 7, {}, {
+    attemptedWrites: 100,
+    attemptedWritesSource: "log query: count(comparison_review_run)",
+  });
+  assert.equal(card.traceCompleteness.numerator, 20);
+  assert.equal(card.traceCompleteness.denominator, 100);
+  assert.equal(card.traceCompleteness.value, 0.2);
+  assert.match(card.traceCompleteness.excluded, /attested by/);
+  assert.equal(card.traceCompletenessSource, "log query: count(comparison_review_run)");
+});
+
 test("a partial telemetry outage is countable, and does not look like a healthy window", () => {
   // The state this replaces: the telemetry module promised a missingTraceRate
   // in a comment and the repository contained the name nowhere else. Every
@@ -314,8 +346,8 @@ test("a partial telemetry outage is countable, and does not look like a healthy 
   const card = summariseReliability(rows, 7);
   assert.equal(card.runs, 80);
   assert.equal(card.completionRate.value, 1);
-  assert.equal(card.missingTraceRate.numerator, 20);
-  assert.equal(card.missingTraceRate.denominator, 100);
+  assert.equal(card.detectedTraceGaps.missing, 20);
+  assert.equal(card.detectedTraceGaps.withinSpans, 100);
 });
 
 test("each writer is counted on its own span, so restarts are not gaps", () => {
@@ -329,8 +361,9 @@ test("each writer is counted on its own span, so restarts are not gaps", () => {
     ),
   ];
   const card = summariseReliability(rows, 7);
-  assert.equal(card.missingTraceRate.numerator, 0);
-  assert.equal(card.missingTraceRate.denominator, 30);
+  assert.equal(card.detectedTraceGaps.missing, 0);
+  assert.equal(card.detectedTraceGaps.writers, 2);
+  assert.equal(card.detectedTraceGaps.withinSpans, 30);
 });
 
 test("rows written before the writer columns existed are excluded, not counted as one writer", () => {
@@ -338,8 +371,8 @@ test("rows written before the writer columns existed are excluded, not counted a
     run({ writerId: "", writerSequence: 0 })
   );
   const card = summariseReliability(rows, 7);
-  assert.equal(card.missingTraceRate.denominator, 0);
-  assert.equal(card.missingTraceRate.status, "insufficient_evidence");
+  assert.equal(card.detectedTraceGaps.withinSpans, 0);
+  assert.equal(card.detectedTraceGaps.writers, 0);
 });
 
 test("a return window that has not closed is not a zero", () => {

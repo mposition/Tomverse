@@ -582,7 +582,7 @@ migration을 넣으면 스키마가 결정보다 먼저 굳고, 되돌리는 비
 | 기준 | 결과 |
 |---|---|
 | 허용된 preflight에 올바른 CORS 응답 | `capacitor://localhost`·`https://localhost` 둘 다 **204** + `ACAO`·`ACAM`(7개 메서드)·`ACAH`(4개 헤더)·`Max-Age` |
-| 가짜 Bearer로 기존 보안 우회 불가 | `Authorization: Bearer forged…`를 붙여도 응답이 **바이트 단위로 동일**(traceId 제외) — 403 `INVALID_REQUEST_ORIGIN` |
+| 가짜 Bearer로 기존 보안 우회 불가 | `Authorization: Bearer forged…`를 붙여도 **상태 코드가 같고, traceId를 제외한 파싱된 JSON 본문이 같습니다** — 403 `INVALID_REQUEST_ORIGIN` |
 | N1b 이전 Native mutation 계속 차단 | 두 origin × `POST`·`PUT`·`PATCH`·`DELETE` **전부 403** |
 
 추가로 확인한 것:
@@ -592,9 +592,18 @@ migration을 넣으면 스키마가 결정보다 먼저 굳고, 되돌리는 비
   CORS 헤더 0개. **reflection이 아니라 literal 비교**입니다.
 - **preflight가 앞선 검사를 건너뛰지 않습니다.** 잘못된 host → **421**, Cloudflare
   origin-secret 미제공 → **421**. 두 검사 뒤에 놓였다는 것을 환경변수를 켜서 관측했습니다.
-- **`Access-Control-Allow-Credentials`를 절대 보내지 않습니다.** 이것이
-  `https://localhost`를 허용해도 되는 이유입니다 — 그 origin은 사용자 기기의 아무 프로세스나
-  주장할 수 있지만, credential이 없으면 그 요청은 익명이고 익명이 볼 수 있는 것만 봅니다.
+- **`Access-Control-Allow-Credentials`를 절대 보내지 않습니다.** 다만 이것이 사는 것은
+  처음 보이는 것보다 좁으므로 정확히 적습니다(N2가 잘못된 전제를 물려받지 않도록).
+  **뜻하는 것**: credentialed cross-origin 요청과 응답을 공유하지 않습니다 —
+  `credentials: "include"` fetch는 CORS 검사에서 떨어지고 호출자는 아무것도 읽지 못합니다.
+  **뜻하지 않는 것**: "쿠키가 전송되지 않는다"는 보장은 아닙니다. simple request는 브라우저
+  자신의 쿠키 규칙(SameSite 포함)에 따라 서버에 도달할 수 있고, 차단되는 지점은 도착 전이
+  아니라 **응답을 읽는 단계**입니다(Fetch 명세, CORS protocol and credentials). 클라이언트가
+  명시적으로 붙이는 `Authorization`은 또 별개이고 이 헤더가 말하는 바가 아닙니다.
+  따라서 `https://localhost`를 허용해도 되는 근거는 "요청이 익명이라서"가 아니라 셋입니다 —
+  (1) credentialed 공유를 허용하지 않고, (2) 서버가 인증·권한·CSRF를 따로 검사하며(두 native
+  origin은 여전히 CSRF 검사에서 떨어집니다), (3) Native transport가 쿠키 대신 **검증 대상
+  Bearer를 명시적으로 전달**합니다 — (3)은 N2의 몫이고 아직 없습니다.
 - **`Vary: Origin`은 origin이 일치하지 않아도 붙습니다.** 공유 캐시가 한 origin의 허용을
   다른 origin에게 재생하지 못하게 하려는 것입니다.
 - **refusal에도 CORS를 붙입니다.** N1b 전까지 Native가 가장 자주 받을 응답이 이 403이고,

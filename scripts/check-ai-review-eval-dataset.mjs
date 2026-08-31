@@ -139,43 +139,120 @@ if (!AI_REVIEW_EVAL_REGISTER.some((entry) => entry.status === "approved")) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Every approved entry's artifacts, read from the entry itself
+// ---------------------------------------------------------------------------
+//
+// This runs on the DEFAULT invocation, with no arguments, which is how PR Fast
+// Gate calls this script.
+//
+// The comparison used to happen only when `--artifact=<path>` was passed, and
+// nothing passes it. An approved entry citing two artifacts that do not exist,
+// under an approved threshold set, came out of `npm run check:ai-review-eval`
+// as "All checks passed" -- the gate verified the shape of an approval and
+// never once opened the evidence it named. An approval's artifacts are named
+// BY the approval, so the check has no reason to wait to be told where they
+// are.
+//
+// Four things are required of each run, and a failure in any of them fails the
+// gate:
+//
+//   1. the artifact file exists and parses;
+//   2. it is admissible as decision evidence (decision-grade, clean commit,
+//      complete run, adequate sample);
+//   3. its own summary agrees with the run's recorded identity -- reviewer,
+//      prompt version, commit, ordinal, dataset digest;
+//   4. its numbers equal the recorded numbers, digit for digit.
+//
+// (3) is why identity is five fields rather than the dataset digest. A dataset
+// is a test paper every reviewer sits, so matching on its digest attributed one
+// reviewer's artifact to another and reported the second reviewer's honest
+// numbers as the first one's transcription error.
+
+console.log("\nAI Review approved-entry evidence");
+const approvedEntries = AI_REVIEW_EVAL_REGISTER.filter(
+  (entry) => entry.status === "approved"
+);
+if (approvedEntries.length === 0) {
+  console.log(
+    "  note no pair is approved, so there is no evidence to open. An entry that " +
+      "becomes approved is checked here without anything being passed to this script."
+  );
+}
+for (const entry of approvedEntries) {
+  const runs = entry.evaluation?.runs ?? [];
+  if (runs.length === 0) {
+    report(`${entry.reviewerModelId}@${entry.promptVersion}`, [
+      "approved with no run evidence to open",
+    ]);
+    continue;
+  }
+  for (const run of runs) {
+    const label = `${entry.reviewerModelId}@${entry.promptVersion} run ${run.runOrdinal}`;
+    const problems = [];
+    const artifact = run.artifactRef ? readJson(run.artifactRef) : null;
+    if (!run.artifactRef) {
+      problems.push("names no artifact");
+    } else if (!artifact || artifact.__readError) {
+      problems.push(
+        `${run.artifactRef} could not be read: ${artifact?.__readError ?? "missing"}`
+      );
+    } else {
+      const summary = artifact.summary ?? {};
+      problems.push(...artifactAdmissibilityProblems(summary));
+      if (summary.reviewerModelId !== run.reviewerModelId) {
+        problems.push(
+          `artifact was written by ${String(summary.reviewerModelId)}, ` +
+            `recorded as ${run.reviewerModelId}`
+        );
+      }
+      if (summary.promptVersion !== run.promptVersion) {
+        problems.push(
+          `artifact used prompt ${String(summary.promptVersion)}, ` +
+            `recorded as ${run.promptVersion}`
+        );
+      }
+      if (summary.commitSha !== run.evaluatedCommit) {
+        problems.push(
+          `artifact ran at ${String(summary.commitSha)}, recorded as ${run.evaluatedCommit}`
+        );
+      }
+      if (summary.runOrdinal !== run.runOrdinal) {
+        problems.push(
+          `artifact is ordinal ${String(summary.runOrdinal)}, recorded as ${run.runOrdinal}`
+        );
+      }
+      if (summary.datasetDigest !== run.datasetDigest) {
+        problems.push(
+          `artifact scored ${String(summary.datasetDigest)}, recorded as ${run.datasetDigest}`
+        );
+      }
+      if (!artifact.metrics) {
+        problems.push("artifact carries no metrics, so nothing can be compared");
+      } else {
+        problems.push(...approvalBlockDrift(run, artifact));
+      }
+    }
+    report(label, problems);
+  }
+}
+
+// A loose artifact, checked on request. Separate from the block above and no
+// longer the only path to a comparison: this answers "is the run I just made
+// admissible", which is a question asked before any entry cites it.
 const artifactPath = argValue("artifact");
 console.log("\nAI Review evaluation run artifact");
 if (!artifactPath) {
-  console.log("  note no --artifact given; no decision run has been recorded.");
+  console.log(
+    "  note no --artifact given. Approved entries are checked against their own " +
+      "artifacts above; this is for a run not yet recorded anywhere."
+  );
 } else {
   const artifact = readJson(artifactPath);
   if (artifact.__readError) {
     report(artifactPath, [`could not be read: ${artifact.__readError}`]);
   } else {
     report(artifactPath, artifactAdmissibilityProblems(artifact.summary ?? artifact));
-
-    // The numbers in the register, against the numbers the run produced.
-    //
-    // The approval gate applies thresholds to whatever an entry records. Until
-    // this comparison existed, what it recorded was typed by a person from a
-    // report, so the gate was testing the transcription. Any entry citing this
-    // artifact is now checked digit for digit against it.
-    if (artifact.metrics) {
-      const digest = artifact.summary?.datasetDigest;
-      const citing = AI_REVIEW_EVAL_REGISTER.filter(
-        (entry) =>
-          entry.evaluation &&
-          (entry.evaluation.artifactRefs.some((ref) => ref.includes(artifactPath)) ||
-            (digest && entry.evaluation.datasetDigest === digest))
-      );
-      if (citing.length === 0) {
-        console.log(
-          "  note no register entry cites this artifact, so there are no recorded numbers to compare."
-        );
-      }
-      for (const entry of citing) {
-        report(
-          `${entry.reviewerModelId}@${entry.promptVersion} against the artifact`,
-          approvalBlockDrift(entry.evaluation, artifact)
-        );
-      }
-    }
   }
 }
 
