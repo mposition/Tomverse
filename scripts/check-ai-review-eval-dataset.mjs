@@ -37,6 +37,10 @@ import {
   AI_REVIEW_EVAL_REGISTER,
   approvedEntryProblems,
 } from "../lib/aiReviewEvalRegister.ts";
+import {
+  approvalBlockDrift,
+  approvalBlockFromArtifact,
+} from "../lib/aiReviewApprovalBlock.ts";
 
 const DATASET_DIRECTORY = "docs/ops/ai-review-evaluation-set";
 
@@ -145,6 +149,49 @@ if (!artifactPath) {
     report(artifactPath, [`could not be read: ${artifact.__readError}`]);
   } else {
     report(artifactPath, artifactAdmissibilityProblems(artifact.summary ?? artifact));
+
+    // The numbers in the register, against the numbers the run produced.
+    //
+    // The approval gate applies thresholds to whatever an entry records. Until
+    // this comparison existed, what it recorded was typed by a person from a
+    // report, so the gate was testing the transcription. Any entry citing this
+    // artifact is now checked digit for digit against it.
+    if (artifact.metrics) {
+      const digest = artifact.summary?.datasetDigest;
+      const citing = AI_REVIEW_EVAL_REGISTER.filter(
+        (entry) =>
+          entry.evaluation &&
+          (entry.evaluation.artifactRefs.some((ref) => ref.includes(artifactPath)) ||
+            (digest && entry.evaluation.datasetDigest === digest))
+      );
+      if (citing.length === 0) {
+        console.log(
+          "  note no register entry cites this artifact, so there are no recorded numbers to compare."
+        );
+      }
+      for (const entry of citing) {
+        report(
+          `${entry.reviewerModelId}@${entry.promptVersion} against the artifact`,
+          approvalBlockDrift(entry.evaluation, artifact)
+        );
+      }
+    }
+  }
+}
+
+// The block a person would otherwise retype. Printing rather than writing: an
+// approval is recorded by a human in a commit, and a tool that edited the
+// register would remove the audit trail the register exists to be.
+if (process.argv.includes("--print-approval-block")) {
+  const artifact = artifactPath ? readJson(artifactPath) : null;
+  if (!artifact || artifact.__readError || !artifact.metrics) {
+    console.error(
+      "\n--print-approval-block needs --artifact=<path> pointing at a run artifact."
+    );
+    process.exitCode = 1;
+  } else {
+    console.log("\nApproval block generated from the artifact:");
+    console.log(JSON.stringify(approvalBlockFromArtifact(artifact), null, 4));
   }
 }
 
