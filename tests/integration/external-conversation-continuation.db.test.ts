@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
+import { conversationSurface } from "@/lib/continuationRoutes";
 import { createResourceUnlockCookie } from "@/lib/conversationLock";
 import { CONTINUATION_SEED_VERSION } from "@/lib/externalContinuationSeedCore";
 import {
@@ -194,13 +195,17 @@ test("the imported model label never becomes a runtime model id", async () => {
         },
     });
     assert.equal(withLabel, 0);
-    const seed = await loadContinuationTurnSeed({
+    const { seed } = await loadContinuationTurnSeed({
         userId: user.id,
         conversationId: result.conversationId,
         request: requestWithGrant(),
     });
     assert.ok(seed);
-    assert.doesNotMatch(seed.prompt.text ?? "", /gpt-4-turbo-2024-04-09/);
+    assert.doesNotMatch(seed.prompt.rulesText ?? "", /gpt-4-turbo-2024-04-09/);
+    assert.doesNotMatch(
+        seed.prompt.transcriptText ?? "",
+        /gpt-4-turbo-2024-04-09/
+    );
 });
 
 test("a retried request with the same key returns the same conversation", async () => {
@@ -225,6 +230,120 @@ test("a retried request with the same key returns the same conversation", async 
     assert.equal(first.idempotentReplay, false);
     assert.equal(second.idempotentReplay, true);
     assert.equal(await prisma.conversation.count({ where: { userId: user.id } }), 1);
+});
+
+test("two concurrent requests with one key both get the same conversation", async () => {
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+    const key = randomUUID();
+
+    // Both read "no existing bridge" before either commits, so one of them
+    // loses the unique index. The contract is not that a duplicate is refused
+    // -- the index guarantees that on its own -- it is that the loser is
+    // answered with the winner's conversation rather than a 500.
+    const [first, second] = await Promise.all([
+        createExternalContinuation({
+            userId: user.id,
+            externalConversationId: snapshot.id,
+            idempotencyKey: key,
+            request: requestWithGrant(),
+        }),
+        createExternalContinuation({
+            userId: user.id,
+            externalConversationId: snapshot.id,
+            idempotencyKey: key,
+            request: requestWithGrant(),
+        }),
+    ]);
+
+    assert.equal(first.conversationId, second.conversationId);
+    assert.equal(
+        await prisma.conversation.count({ where: { userId: user.id } }),
+        1,
+        "the losing transaction takes its conversation back with it"
+    );
+    assert.equal(
+        await prisma.conversationContinuationBridge.count({
+            where: { userId: user.id },
+        }),
+        1
+    );
+    // Exactly one of them created it; the other replayed.
+    assert.deepEqual(
+        [first.idempotentReplay, second.idempotentReplay].sort(),
+        [false, true]
+    );
+});
+
+test("a source with nothing seedable is reported as an empty selection", async () => {
+    const user = await createUser();
+    // Two blank turns: readable, unlocked, and nothing survives the seed rule.
+    const { snapshot } = await seedSnapshot(user.id, {
+        count: 2,
+        content: () => "   ",
+    });
+    const created = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        request: requestWithGrant(),
+    });
+
+    const result = await loadContinuationTurnSeed({
+        userId: user.id,
+        conversationId: created.conversationId,
+        request: requestWithGrant(),
+    });
+    assert.equal(result.seed, null);
+    // Distinct from the access reasons: the source is reachable and the
+    // excerpt is genuinely empty, which is a seed-rule question.
+    assert.equal(result.outcome, "empty_selection");
+});
+
+test("the surface a conversation opens at is decided from the row", async () => {
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+    const created = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        request: requestWithGrant(),
+    });
+    const ordinary = await prisma.conversation.create({
+        data: { userId: user.id, title: "ordinary", productKey: "review" },
+    });
+
+    // The exact shape the list, detail and search routes select: relation
+    // existence, nothing else.
+    const rows = await prisma.conversation.findMany({
+        where: { userId: user.id },
+        select: { id: true, continuationBridge: { select: { id: true } } },
+    });
+    const surfaceById = new Map(
+        rows.map((row) => [
+            row.id,
+            conversationSurface({
+                hasContinuationBridge: row.continuationBridge !== null,
+            }),
+        ])
+    );
+    assert.equal(surfaceById.get(created.conversationId), "continuation");
+    assert.equal(surfaceById.get(ordinary.id), "workspace");
+
+    // And deleting the source does not move it back to the workspace: the
+    // conversation still continues something, and the screen still owes the
+    // owner the tombstone.
+    await deleteExternalConversationSnapshot(user.id, snapshot.id);
+    const afterDelete = await prisma.conversation.findUniqueOrThrow({
+        where: { id: created.conversationId },
+        select: { continuationBridge: { select: { id: true } } },
+    });
+    assert.equal(
+        conversationSurface({
+            hasContinuationBridge: afterDelete.continuationBridge !== null,
+        }),
+        "continuation"
+    );
 });
 
 test("a new key from the same source is a second, deliberate fork", async () => {
@@ -382,12 +501,15 @@ test("a re-locked snapshot stops seeding without touching the conversation", asy
         request: requestWithGrant(),
     });
 
-    assert.ok(
-        await loadContinuationTurnSeed({
-            userId: user.id,
-            conversationId: created.conversationId,
-            request: requestWithGrant(),
-        })
+    assert.equal(
+        (
+            await loadContinuationTurnSeed({
+                userId: user.id,
+                conversationId: created.conversationId,
+                request: requestWithGrant(),
+            })
+        ).outcome,
+        "seeded"
     );
 
     await prisma.externalConversation.update({
@@ -395,14 +517,15 @@ test("a re-locked snapshot stops seeding without touching the conversation", asy
         data: { password: "hashed-password-stand-in" },
     });
 
-    assert.equal(
-        await loadContinuationTurnSeed({
-            userId: user.id,
-            conversationId: created.conversationId,
-            request: requestWithGrant(),
-        }),
-        null
-    );
+    // §12: one shape for the caller, and a reason an operator can read --
+    // which is what the staging checklist's C-3 asks for.
+    const relocked = await loadContinuationTurnSeed({
+        userId: user.id,
+        conversationId: created.conversationId,
+        request: requestWithGrant(),
+    });
+    assert.equal(relocked.seed, null);
+    assert.equal(relocked.outcome, "locked");
     // The conversation is untouched: locking hides the source, it does not
     // withdraw anything the user wrote.
     assert.ok(
@@ -472,14 +595,13 @@ test("deleting the source stops the seed and shows a tombstone", async () => {
 
     await deleteExternalConversationSnapshot(user.id, snapshot.id);
 
-    assert.equal(
-        await loadContinuationTurnSeed({
-            userId: user.id,
-            conversationId: created.conversationId,
-            request: requestWithGrant(),
-        }),
-        null
-    );
+    const afterDelete = await loadContinuationTurnSeed({
+        userId: user.id,
+        conversationId: created.conversationId,
+        request: requestWithGrant(),
+    });
+    assert.equal(afterDelete.seed, null);
+    assert.equal(afterDelete.outcome, "source_deleted");
 
     const timeline = await getContinuationTimeline(user.id, created.conversationId, {
         request: requestWithGrant(),
@@ -571,14 +693,13 @@ test("an ordinary conversation has no bridge and no timeline", async () => {
         }),
         null
     );
-    assert.equal(
-        await loadContinuationTurnSeed({
-            userId: user.id,
-            conversationId: conversation.id,
-            request: requestWithGrant(),
-        }),
-        null
-    );
+    const ordinary = await loadContinuationTurnSeed({
+        userId: user.id,
+        conversationId: conversation.id,
+        request: requestWithGrant(),
+    });
+    assert.equal(ordinary.seed, null);
+    assert.equal(ordinary.outcome, "no_bridge");
 });
 
 test("another account cannot read a bridge or its timeline", async () => {
@@ -599,14 +720,15 @@ test("another account cannot read a bridge or its timeline", async () => {
         }),
         null
     );
-    assert.equal(
-        await loadContinuationTurnSeed({
-            userId: stranger.id,
-            conversationId: created.conversationId,
-            request: requestWithGrant(),
-        }),
-        null
-    );
+    // Somebody else's bridge is "no bridge": `userId` is in the `where`, so
+    // there is no branch that could report the difference.
+    const stranger_ = await loadContinuationTurnSeed({
+        userId: stranger.id,
+        conversationId: created.conversationId,
+        request: requestWithGrant(),
+    });
+    assert.equal(stranger_.seed, null);
+    assert.equal(stranger_.outcome, "no_bridge");
 });
 
 test("the timeline returns the imported turns and no storage identifiers", async () => {
@@ -655,24 +777,34 @@ test("a prompt-injection payload stays inside the fenced region", async () => {
         request: requestWithGrant(),
     });
 
-    const seed = await loadContinuationTurnSeed({
+    const { seed } = await loadContinuationTurnSeed({
         userId: user.id,
         conversationId: created.conversationId,
         request: requestWithGrant(),
     });
-    assert.ok(seed?.prompt.text);
-    const text = seed.prompt.text;
+    assert.ok(seed?.prompt.transcriptText);
+    const transcript = seed.prompt.transcriptText;
     // One opening marker and one closing marker: the ones the builder wrote.
-    assert.equal(text.split("<<<IMPORTED_CONVERSATION>>>").length - 1, 1);
-    assert.equal(text.split("<<<END_IMPORTED_CONVERSATION>>>").length - 1, 1);
+    assert.equal(transcript.split("<<<IMPORTED_CONVERSATION>>>").length - 1, 1);
+    assert.equal(
+        transcript.split("<<<END_IMPORTED_CONVERSATION>>>").length - 1,
+        1
+    );
     // The payload is on one line, inside the fence, and its forged marker is
     // defused.
-    const payload = text
+    const payload = transcript
         .split("\n")
-        .find((line) => line.includes("IGNORE ALL PREVIOUS INSTRUCTIONS"));
+        .find((line: string) => line.includes("IGNORE ALL PREVIOUS INSTRUCTIONS"));
     assert.ok(payload);
     assert.match(payload, /\[marker\]/);
     assert.ok(
-        text.indexOf(payload) < text.lastIndexOf("<<<END_IMPORTED_CONVERSATION>>>")
+        transcript.indexOf(payload) <
+            transcript.lastIndexOf("<<<END_IMPORTED_CONVERSATION>>>")
+    );
+    // And the payload is nowhere in the half that goes out at system
+    // authority: the rules are Tomverse's own words and interpolate nothing.
+    assert.doesNotMatch(
+        seed.prompt.rulesText ?? "",
+        /IGNORE ALL PREVIOUS INSTRUCTIONS/
     );
 });

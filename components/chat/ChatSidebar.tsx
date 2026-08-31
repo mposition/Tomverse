@@ -20,6 +20,7 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
+import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -37,7 +38,17 @@ type ChatSidebarProps = {
     /** Set when image generation is visible but not usable for this viewer. */
     imageLock?: "sign_in" | "upgrade" | null;
     onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-    onSelectConversation: (id: string) => void;
+    /**
+     * `surfaceHint` is what a search result knows and the conversation list
+     * does not: a hit can name a conversation this sidebar never loaded, so
+     * the row carries its own answer. Omitted from the list rows, where the
+     * handler reads the conversation it already holds.
+     */
+    onSelectConversation: (
+        id: string,
+        skipLockCheck?: boolean,
+        surfaceHint?: ConversationSurface
+    ) => void;
     onRename: (id: string, title: string) => void;
     onDelete: (id: string) => void;
     onLock?: (id: string, password: string) => void;
@@ -178,6 +189,15 @@ export function ChatSidebar({
         conversationId: string;
         conversationTitle: string;
         snippet: string;
+        /**
+         * Where the conversation behind this hit opens
+         * (docs/policy/external-conversation-continuation.md §8.2). Carried on
+         * the result rather than looked up in the sidebar's list, because a
+         * search can surface a conversation the list has not loaded -- and a
+         * hit that fell back to the workspace would open a continuation
+         * without the imported half it continues.
+         */
+        surface?: ConversationSurface;
     }>>([]);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
@@ -1401,7 +1421,13 @@ export function ChatSidebar({
                             <button
                                 key={result.id}
                                 type="button"
-                                onClick={() => onSelectConversation(result.conversationId)}
+                                onClick={() =>
+                                    onSelectConversation(
+                                        result.conversationId,
+                                        false,
+                                        result.surface
+                                    )
+                                }
                                 className="block w-full rounded-lg px-2 py-1.5 text-left text-zinc-600 hover:bg-white dark:text-zinc-300 dark:hover:bg-zinc-900"
                             >
                                 <span className="block truncate font-bold">{result.conversationTitle}</span>
