@@ -24,9 +24,16 @@
  *
  * This container has no production or Railway credentials, by policy, so it
  * cannot read what staging is running. The operator reads the SHA from the
- * Admin Console header — it renders `RAILWAY_GIT_COMMIT_SHA` — and passes it
+ * Admin Console's **footer status bar** — `Version <first 12>`, beside "Job
+ * health" and "API/DB", rendered from `RAILWAY_GIT_COMMIT_SHA` — and passes it
  * here. The script says plainly in the record that it took the value on trust
  * and whether the local tree matches it, rather than implying it checked.
+ *
+ * The one refusal worth naming is a Railway deployment id: it is a UUID, it
+ * sits next to the commit in Railway's own UI, and it identifies a *deploy*
+ * rather than the code that was deployed. Recording one would put a value in
+ * the `deploySha` field that no `git` command can resolve, which is exactly
+ * what the 40-character rule exists to prevent.
  *
  * Usage (this container or a clone; no credentials needed):
  *   npm run staging:continuation-record -- --deploy-sha <40 hex>
@@ -55,12 +62,33 @@ const fail = (message) => {
 };
 
 const deploySha = (arg("deploy-sha") ?? "").trim().toLowerCase();
+
+const WHERE_TO_LOOK =
+    "Where to find it: Admin Console, the status bar along the BOTTOM of the page,\n" +
+    '  "Version xxxxxxxxxxxx" beside "Job health" and "API/DB". That is the first 12\n' +
+    "  characters of the deployed commit. Expand it locally with\n" +
+    "    git rev-parse <those 12 characters>";
+
+if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deploySha)) {
+    // Named on purpose. Railway shows a deployment id right next to the commit,
+    // and it is the likelier thing to copy: it is what the URL and the CLI talk
+    // about. It identifies a deploy, not the code, so nothing in git can resolve
+    // it and the record's `deploySha` would name something no reader could check
+    // out.
+    fail(
+        `That looks like a Railway deployment id (a UUID), not a git commit.\n\n` +
+            "A deployment id says which deploy ran; the record needs which *code* ran, so it\n" +
+            "has to be a 40-character hex commit SHA.\n\n" +
+            WHERE_TO_LOOK
+    );
+}
+
 if (!/^[0-9a-f]{40}$/.test(deploySha)) {
     fail(
         "--deploy-sha must be the full 40-character commit the deployment is running.\n" +
-            "Read it from the Admin Console header (it shows the first 12) and expand it with\n" +
-            "  git rev-parse <short sha>\n" +
-            "A short SHA in a record sends the next reader looking."
+            `Got ${deploySha.length} character(s).\n\n` +
+            WHERE_TO_LOOK +
+            "\n\nA short SHA in a record sends the next reader looking."
     );
 }
 
@@ -164,7 +192,9 @@ record = record.replace(
 >
 > \`--deploy-sha\`는 실행자가 준 값을 **그대로 믿고** 적었습니다. 이 컨테이너에는
 > production·Railway 자격증명이 없어 배포본을 읽을 수 없습니다. Admin Console
-> 헤더의 12자리와 위 SHA의 앞 12자리가 같은지 확인하십시오.`
+> **화면 아래쪽 상태 표시줄**의 \`Version\` 12자리와 위 SHA의 앞 12자리가 같은지
+> 확인하십시오 — 헤더가 아니라 footer이고, \`Job health\`·\`API/DB\`와 같은
+> 줄입니다.`
 );
 
 record = record.replace(

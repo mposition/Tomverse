@@ -46,7 +46,10 @@ deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 npm run staging:continuation-record -- --deploy-sha <배포 SHA 40자리>
 ```
 
-배포 SHA 앞 12자리는 **Admin Console 헤더**에 있습니다. 이 명령이 D-0을 그
+배포 SHA 앞 12자리는 **Admin Console 화면 아래쪽 상태 표시줄**의 `Version`에
+있습니다 — 헤더가 아니라 footer이고, `Job health`·`API/DB`와 같은 줄입니다.
+Railway의 deployment id(UUID)는 배포를 가리키지 코드를 가리키지 않으므로
+쓰지 않습니다. 이 명령이 D-0을 그
 자리에서 실행하고, 시료와 정답지가 맞는지 확인하고, 판정·서명을 비워 둔 기록
 파일을 엽니다. 회차가 끝나기 전에는 그 파일을 commit 하지 않습니다.
 

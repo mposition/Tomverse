@@ -1,0 +1,13 @@
+# Staging verification fixtures are checked out byte-for-byte on every platform.
+#
+# `manifest.json` records each fixture's size and SHA-256 so an operator can
+# confirm the file they are about to upload is the one the answer key describes.
+# That only works if the bytes on disk are the same everywhere. Without this,
+# Git's autocrlf on Windows rewrites every LF to CRLF at checkout and the file
+# gains one byte per line -- 150 for `plain-conversation.json` -- so the digest
+# check fails on a clone that is in fact correct.
+#
+# Deliberately scoped to these files rather than the repository. A repo-wide
+# `text=auto` would rewrite every contributor's working tree, which is a much
+# larger decision than this one and is not needed to make a digest meaningful.
+docs/ops/external-conversation-continuation-staging-verification-records/fixtures/*.json text eol=lf
