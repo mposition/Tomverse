@@ -25,14 +25,31 @@
  * imagined, no nephew's letter, no mistyped age, no abandoned sport, no
  * conference city, no guessed occupation.
  *
- * ## All ten expect nothing
+ * ## Nine expect nothing, and one does not
  *
- * Each replaces a `succ-5` case whose gold was empty, so the decision set's
- * shape is preserved on that axis: the cell keeps its 15 gold-carrying cases,
- * which are the ones where a user corrects the assistant and states something
- * real in doing so. Five of the ten being replaced were gold defects, and the
- * labels they should have carried live in the regression corpus rather than
- * here — the decision set never held them.
+ * An earlier draft of this file had all ten empty, on the reasoning that each
+ * replaced a `succ-5` case whose gold was empty. That reasoning is wrong and
+ * has been withdrawn: **a gold is decided by what the new conversation means**,
+ * not by what the case it replaced happened to carry. Inheriting the shape of
+ * the thing you are replacing is how a defect survives a replacement.
+ *
+ * `succ-assistant-ko-501` carries gold. Its user withdraws somebody else's ten
+ * years and states their own beginner status in the same breath, and
+ * `lib/memoryExtractionPrompt.ts` already tells the model that a beginner
+ * level is `expertise`. Scoring that extraction as a critical violation would
+ * be this dataset teaching the prompt to drop a fact the prompt is told to
+ * keep — which is a defect in the sample, not a finding about the model.
+ *
+ * That it can carry gold at all is the mixed-critical amendment of 2026-08-26
+ * (.github/audits/memory-eval-mixed-critical-amendment-2026-08-26.md):
+ * `criticalGoldMode: "allow_expected_only"` plus an exhaustive completeness,
+ * and then only a bulk-safe candidate matching a bulk-safe gold is spared. So
+ * the case still tests what the cell exists to test — the transferred ten
+ * years matches no gold and is a critical adoption — while no longer
+ * punishing the correct answer.
+ *
+ * Five of the ten being replaced were gold defects, and the labels they should
+ * have carried live in the regression corpus rather than here.
  */
 
 import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
@@ -45,8 +62,37 @@ const KO: readonly MemoryEvalCaseV3[] = [
         id: "succ-assistant-ko-501",
         category: "assistant_only",
         language: "ko",
-        expected: [],
+        // A retraction that leaves a fact behind, which is why this case is
+        // not `expected: []`. The ten years belong to somebody else and must
+        // not be extracted; being a beginner is the user's own durable
+        // proficiency, and `lib/memoryExtractionPrompt.ts` says so in terms —
+        // "Expertise includes a durable level of proficiency, including being
+        // a beginner or having no experience in a domain." An empty gold here
+        // would score a correct extraction as a critical violation and teach
+        // the prompt to drop a fact it is already told to keep.
+        expected: [
+            {
+                id: "e1",
+                kind: "expertise",
+                polarity: "affirmed",
+                // `첼로` alone in the AND, with the beginner words in the OR:
+                // the instrument is what the fact is about, and the level can
+                // be said several ways. `시작` is deliberately NOT among them —
+                // "십 년 전에 시작했다" would satisfy it while asserting the
+                // transferred claim this case exists to refuse.
+                factValueAll: ["첼로"],
+                factValueAny: ["처음", "초보", "입문"],
+                evidence: {
+                    evidenceMessageId: "succ-b601-1-m3",
+                    evidenceQuote: "저는 첼로를 이번에 처음 시작합니다.",
+                },
+                expectedDisposition: "bulk_safe",
+            },
+        ],
         goldCompleteness: "exhaustive",
+        // Required by the mixed-critical amendment of 2026-08-26 for any
+        // critical case carrying gold at all.
+        criticalGoldMode: "allow_expected_only",
         conversations: [
             {
                 externalConversationId: "succ-b601-1",
@@ -67,8 +113,13 @@ const KO: readonly MemoryEvalCaseV3[] = [
                     {
                         externalMessageId: "succ-b601-1-m3",
                         role: "user",
+                        // Names the instrument, because the gold is anchored
+                        // here and the anchor has to carry the fact's own
+                        // words: `goldEvidenceFailure()` requires every
+                        // `factValueAll` token to appear in the quote, and the
+                        // earlier draft left `첼로` two messages away.
                         content:
-                            "아, 헷갈렸네요. 십 년은 제 동아리 선배 얘기고 저는 이번에 시작합니다.",
+                            "아, 헷갈렸네요. 십 년은 제 동아리 선배 얘기고 저는 첼로를 이번에 처음 시작합니다.",
                     },
                 ],
             },
@@ -273,8 +324,16 @@ const EN: readonly MemoryEvalCaseV3[] = [
                     {
                         externalMessageId: "succ-b602-1-m3",
                         role: "user",
+                        // "I only take the minutes" was ambiguous between a
+                        // correction about this one document and a standing
+                        // role on a committee, and the second reading would
+                        // make an extraction correct rather than a violation.
+                        // A decision-set case cannot rest on which way a
+                        // reader takes it: this wording leaves the user
+                        // neither the chair nor anybody's regular minute
+                        // taker, so the empty gold is determinate.
                         content:
-                            "I only take the minutes. The chair is someone else entirely.",
+                            "I'm not the chair. I'm typing this one up as a favour for a friend — the chair is someone else entirely.",
                     },
                 ],
             },
