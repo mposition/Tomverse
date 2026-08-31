@@ -611,6 +611,38 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             evalBudget: null,
             evaluation: null,
         },
+        {
+            // The pair for the boundary rule, registered on 2026-08-31 with
+            // no budget — step 5 of
+            // .github/audits/memory-boundary-decision-2026-08-30.md §5.3,
+            // which says in terms that it starts unfunded.
+            //
+            // It exists so the tree has a pair for the version it ships. Until
+            // now the register's newest pair was v6's, and bumping the prompt
+            // left the harness unable to name the pair it would run — which
+            // several gates report as a missing entry rather than as a
+            // refusal, and a refusal is what this state should read as.
+            //
+            // v6's budget is NOT carried over and could not be: it is bound to
+            // v6's prompt digest, and `memoryEvalBudgetBinding` compares that
+            // tuple against the tree. A v7 run under v6's approval is exactly
+            // what that comparison exists to stop.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v7",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-08-31",
+            notes:
+                "Candidate for mem-extract-v7, the boundary rule of " +
+                "2026-08-30. Unfunded and never run. Scores against the " +
+                "frozen mem-eval-succ-6 under mem-score-v3.4. v6's budget, " +
+                "approval and run history are not transferred: a budget " +
+                "cannot move to another prompt version, and the ten cases " +
+                "that shaped this rule left the decision set under B+ so " +
+                "this pair would be measured on cases it did not produce.",
+            evalBudget: null,
+            evaluation: null,
+        },
     ];
 
 /** §12.3 acceptance thresholds — the register check re-verifies them. */

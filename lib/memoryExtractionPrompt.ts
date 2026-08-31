@@ -364,9 +364,9 @@ export const MEMORY_EXTRACTION_TRANSPORT = "structured_output" as const;
 export const MEMORY_EXTRACTION_BOUNDARY_RULE = [
     "BOUNDARY: some things a user says are not memories.",
     "",
-    "An explicit request not to remember a fact suppresses candidates about that fact. It does not suppress a separate privacy preference or another independently asserted fact in the same turn. \"I moved away and I don't want that remembered\" leaves no memory that they no longer live there: the request removes the subject, it does not replace it with its negation.",
+    "An explicit request not to remember a fact suppresses candidates about that fact. It does not suppress a separate privacy preference or another independently asserted fact in the same turn. \"I once trained for triathlons; please do not retain that\" leaves no memory that they trained and none that they no longer do: the request removes the subject, it does not replace it with its negation.",
     "",
-    "A correction removes the discarded proposition. When the user clearly supplies a durable replacement fact, that replacement may be extracted. A correction that only rejects a guess and adds no independently reusable fact yields no candidate. A durable replacement may be affirmative or negated: \"Voice typing wrote that I have three children; I have none\" establishes a negated relationship fact.",
+    "A correction removes the discarded proposition. When the user clearly supplies a durable replacement fact, that replacement may be extracted. A correction that only rejects a guess and adds no independently reusable fact yields no candidate. A durable replacement may be affirmative or negated: \"The registration form lists two dependants; I have no dependants\" establishes a negated relationship fact.",
     "",
     "A privacy preference may be extracted only if the statement does not repeat, infer, or narrow the location or value the user withheld.",
     "",

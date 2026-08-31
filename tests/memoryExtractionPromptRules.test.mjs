@@ -342,6 +342,23 @@ test("G: the rule announces itself as a list of things that are not memories", (
     assert.match(text, /BOUNDARY: some things a user says are not memories/);
 });
 
+test("G: neither example is an eval case's own sentence", () => {
+    // The defect that blocked the first implementation. A prompt example
+    // copied from a case shows the model that case's answer, and the case
+    // stops measuring anything — `tests/memoryEvalPromptDatasetSeparation.
+    // test.mjs` is the general check and this is the specific memory of why
+    // these two sentences are synthetic.
+    const text = promptText();
+    assert.ok(
+        !/I moved away and I don't want that remembered/i.test(text),
+        "the withdrawal example is succ-assistant-en-3's own utterance again"
+    );
+    assert.ok(
+        !/Voice typing wrote that I have three children/i.test(text),
+        "the correction example is succ-assistant-en-27's own utterance again"
+    );
+});
+
 test("G1: a withdrawal removes the subject and does not store its negation", () => {
     // The defect: `ko-3`, `en-3` and `ko-23`a were stored as negated facts —
     // "no longer lives there" — from a user asking not to be remembered. A
@@ -349,6 +366,9 @@ test("G1: a withdrawal removes the subject and does not store its negation", () 
     const text = promptText();
     assert.match(text, /request not to remember a fact suppresses candidates about that fact/i);
     assert.match(text, /removes the subject, it does not replace it with its negation/i);
+    // The example carries both halves of that: neither the withdrawn fact nor
+    // its negation is kept.
+    assert.match(text, /leaves no memory that they trained and none that they no longer do/i);
     // And it is bounded: the same turn can still carry a separate fact.
     assert.match(
         text,
@@ -371,7 +391,7 @@ test("G2: a correction is judged on what it adds, never on its polarity", () => 
     assert.match(text, /durable replacement may be affirmative or negated/i);
     // The worked example is the negated one, because that is the side a
     // reader is likely to get wrong.
-    assert.match(text, /I have three children; I have none/);
+    assert.match(text, /registration form lists two dependants; I have no dependants/);
 });
 
 test("G3: a privacy preference may not carry the value it withheld", () => {
@@ -439,18 +459,24 @@ test("G: the boundary rule suppresses and never grants", () => {
     }
 });
 
-test("G: the boundary rule is the approved text, not a paraphrase of it", () => {
-    // Copied from the audit rather than retyped, so this compares against the
-    // audit. Only the markdown block's hard wraps differ.
+test("G: the boundary rule is the recorded text, not a paraphrase of it", () => {
+    // Compared against the *implementation* record, not the decision that
+    // approved the rule. The decision's §5 block stays as it was signed; two
+    // of its examples were lifted from eval cases — one of them
+    // `succ-assistant-en-3`, still in the frozen decision set — and the
+    // approved substitution is recorded in the implementation audit instead.
+    // So that document carries the wording that ships, and this compares the
+    // two. Editing the prompt without the record fails here, and so does the
+    // reverse.
     const audit = readFileSync(
         path.join(
             path.resolve(import.meta.dirname, ".."),
-            ".github/audits/memory-boundary-decision-2026-08-30.md"
+            ".github/audits/mem-extract-v7-implementation-2026-08-31.md"
         ),
         "utf8"
     );
     const start = audit.indexOf("BOUNDARY: some things a user says are not memories.");
-    assert.ok(start > 0, "the approved wording is no longer in the audit");
+    assert.ok(start > 0, "the recorded wording is no longer in the implementation audit");
     const approved = audit.slice(start, audit.indexOf("```", start)).trim();
     const unwrap = (value) =>
         value

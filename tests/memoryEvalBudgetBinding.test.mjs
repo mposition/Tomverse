@@ -45,10 +45,22 @@ const fundedPair = () => {
 
 /* ------------------------------------------------------------ the tuple -- */
 
-test("the registered tuple is what this tree assembles", () => {
-    // The whole point. Every value below is recomputed rather than restated,
-    // so a dataset, contract or prompt that moves fails here — in CI, for
-    // free — instead of in a run that was approved for different bytes.
+test("v6's instrument cannot fund the prompt this tree now ships", () => {
+    // The whole point, and it reads inverted since 2026-08-31 because the
+    // tree moved on. Every value below is still recomputed rather than
+    // restated; what changed is which answer is correct.
+    //
+    // While the tree shipped v6 this asserted no divergence at all. The tree
+    // now ships `mem-extract-v7`, so v6's instrument no longer describes the
+    // bytes a run would use — and the comparison firing is the protection
+    // working, not a stale expectation. Asserting emptiness here today would
+    // mean asserting that a v7 run may proceed on v6's approval, which is
+    // precisely what this file exists to prevent.
+    //
+    // Both halves are pinned. The dataset and contract must still match,
+    // because nothing approved them to move; the prompt fields must differ,
+    // and by exactly the two names below, so a *third* divergence appearing
+    // quietly is a failure rather than noise inside an expected one.
     const budget = fundedPair().evalBudget;
     assert.ok(budget?.boundTuple, "the funded pair records no instrument");
     const target = harnessTarget();
@@ -63,7 +75,21 @@ test("the registered tuple is what this tree assembles", () => {
             .update(extractionPromptContract(), "utf8")
             .digest("hex"),
     };
-    assert.deepEqual([...evalBudgetTupleFailures(budget.boundTuple, actual)], []);
+    const failures = [...evalBudgetTupleFailures(budget.boundTuple, actual)];
+    assert.ok(
+        failures.length > 0,
+        "v6's budget still matches the shipped prompt — a v7 run could take it"
+    );
+    assert.deepEqual(
+        failures.map((line) => line.split(":")[0]).sort(),
+        ["promptDigest", "promptVersion"],
+        `only the prompt was approved to move; failures were:\n${failures.join("\n")}`
+    );
+    // Named rather than left to the field list: the dataset and the contract
+    // are what a moved digest would show up in, and they must be silent.
+    assert.equal(budget.boundTuple.datasetDigest, actual.datasetDigest);
+    assert.equal(budget.boundTuple.datasetManifestDigest, actual.datasetManifestDigest);
+    assert.equal(budget.boundTuple.scoringContractDigest, actual.scoringContractDigest);
 
     // And the approved values, written out, so the diff of any future change
     // to this file shows what was approved rather than only that it moved.
