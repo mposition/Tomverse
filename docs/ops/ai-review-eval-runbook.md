@@ -295,10 +295,41 @@ npm run adjudicate:ai-review-eval -- \
   `adjudicated: true`가 없는 artifact는 `artifactAdmissibilityProblems()`가
   거절합니다.
 
+### 증거는 묶음으로 검증합니다 — 두 명령이 같은 코어를 씁니다
+
+승인이 인용하는 것은 다섯 파일이고, **함께여야만 뜻이 있습니다** — dataset ·
+journal · answer key · 블라인드 기록 · artifact. 검증이 두 스크립트에 흩어져
+있는 동안, 각자는 자기 저자가 기억한 것만 검사했고 빠진 것은 매번 같은
+모양이었습니다: **파일을 열고, 형식을 검사하고, 그 내용이 짝과 일치하는지는 묻지
+않는 것.**
+
+실제로 셋이 그렇게 통과했습니다.
+
+- adjudication **후에** 기록의 판정을 고치면 artifact가 낡은 채 남고, 게이트는
+  통과했습니다 — 기록의 형식과 artifact의 수치를 각각 검사했을 뿐 **한쪽이
+  다른 쪽을 만들었는지**는 묻지 않았습니다.
+- 빈 answer key와 머리말만 있는 기록이 "다섯 규칙 검토 완료"로 adjudicate
+  됐습니다 — 빈 모집단 위의 검사 루프는 그냥 끝납니다.
+- journal에서 20건이 빠져도 1,420건만 재계산하고 summary의 `completedCases:
+  1,440`을 **상속**했습니다.
+
+그래서 `lib/aiReviewEvidenceBundle.ts`가 묶음을 한 번에 검증하고, adjudication과
+`check:ai-review-eval`이 **같은 함수**를 부릅니다.
+
+- **journal ↔ dataset 일대일.** 누락·중복·모르는 id 전부 거절. 완주 건수와
+  `decisionGrade`는 파일에서 **다시 계산**하고 artifact에서 상속하지 않습니다.
+- **answer key ↔ journal.** 없는 case, 실행되지 않은 case, 한 case를 가리키는 두
+  label을 거절하고, **검토 0건과 하한(20건) 미만을 거절**합니다.
+- **기록 ↔ answer key.** 모든 label이 답해졌고 다섯 규칙 전부 판정됐고 서명이
+  있어야 합니다.
+- **digest 결속.** artifact가 자기가 쓴 기록·answer key·journal의 digest를
+  적어 두므로, 같은 모양의 다른 파일로 바꾸거나 나중에 한 칸을 고치면 어긋납니다.
+- **수치 재계산.** 같은 scorer로 다시 매기고 자릿수까지 대조합니다.
+
 ### 기록 양식은 신원을 싣고, 빈칸은 거절입니다
 
 `*--blind-review-record.csv`의 머리말에 run ordinal · reviewer · prompt version ·
-dataset digest · commit · sheet seed가 들어가고, 사람이 `signed-by`와 `signed-at`을
+dataset digest · commit · **sheet seed**가 들어가고, 사람이 `signed-by`와 `signed-at`을
 채웁니다. adjudication과 `check:ai-review-eval`이 이 여섯 항목을 **하나씩** 대조합니다 —
 다른 실행에서 채운 양식은 다른 reviewer에 대한 다른 사람의 판정이고, 옮겨 다닐 수
 있는 판정은 증거가 아닙니다.
@@ -307,6 +338,12 @@ dataset digest · commit · sheet seed가 들어가고, 사람이 `signed-by`와
 "안 봤다"를 구분하지 못하며, 빈칸을 깨끗함으로 읽으면 다섯 규칙이 셋이 됩니다 —
 선별된 셋은 harness에서 채워져 오고 사람만 판정하는 둘만 비어 있게 되므로, 그
 모습이 정확히 깨끗한 실행과 같습니다.
+
+**sheet seed는 평가 실행의 seed와 다른 값입니다.** 평가 runner의 기본값은 `0`,
+시트 생성기의 기본값은 `1`이라, 하나를 다른 하나로 읽으면 **정상적인 기본값
+조합이 `sheetSeed 1, not 0`으로 거절**됩니다. 시트가 자기 seed를 기록 머리말에
+적고, adjudication이 그것을 artifact의 `blindReviewSheetSeed`로 옮기며, 게이트는
+그 값을 읽습니다 — 세 단계가 같은 시트 메타데이터를 봅니다.
 
 ### 승인 검사는 기록 파일을 엽니다
 

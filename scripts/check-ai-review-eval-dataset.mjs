@@ -42,9 +42,10 @@ import {
   approvalBlockFromArtifact,
 } from "../lib/aiReviewApprovalBlock.ts";
 import {
-  blindReviewRecordProblems,
-  parseBlindReviewRecord,
-} from "../lib/aiReviewBlindReviewRecord.ts";
+  adjudicatedArtifactProblems,
+  verifyEvidenceBundle,
+  AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+} from "../lib/aiReviewEvidenceBundle.ts";
 
 const DATASET_DIRECTORY = "docs/ops/ai-review-evaluation-set";
 
@@ -297,44 +298,60 @@ for (const entry of approvedEntries) {
         }
       }
 
-      // The blind review, opened rather than taken on trust.
+      // The blind review and the numbers, verified as one bundle.
       //
-      // A reference to a file that does not exist used to satisfy the
-      // register: `artifactAdmissibilityProblems()` is pure and never opened
-      // anything. So a person's verdicts could be cited without ever having
-      // been written, and the two rules no term list can screen stayed zero.
+      // Opening the record and checking the artifact's numbers separately was
+      // not enough: both passed while a verdict edited in the record after
+      // adjudication left the artifact stale, because nothing ever asked
+      // whether one produced the other. The same core adjudication uses now
+      // re-derives everything from the files and compares.
       const recordRef = summary.humanBlindReviewRef;
+      const artifactDirectory = dirname(run.artifactRef);
+      const artifactStem = basename(run.artifactRef).replace(
+        /(--adjudicated)?\.json$/,
+        ""
+      );
+      const answerKeyPath = join(artifactDirectory, `${artifactStem}--answer-key.json`);
+      const journalPath = join(artifactDirectory, `${artifactStem}.journal.jsonl`);
+
       if (!recordRef) {
         problems.push("no blind review record to open");
       } else if (!existsSync(recordRef)) {
         problems.push(`blind review record ${recordRef} does not exist`);
-      } else {
-        const answerKeyPath = join(
-          dirname(run.artifactRef),
-          `${basename(run.artifactRef).replace(/(--adjudicated)?\.json$/, "")}--answer-key.json`
+      } else if (!existsSync(answerKeyPath)) {
+        problems.push(`no answer key beside the artifact (${answerKeyPath})`);
+      } else if (!existsSync(journalPath)) {
+        problems.push(
+          `no journal beside the artifact (${journalPath}); the numbers cannot be recomputed`
         );
-        if (!existsSync(answerKeyPath)) {
-          problems.push(`no answer key beside the artifact (${answerKeyPath})`);
-        } else {
-          const { record, problems: parseProblems } = parseBlindReviewRecord(
-            readFileSync(recordRef, "utf8")
-          );
-          problems.push(...parseProblems);
-          problems.push(
-            ...blindReviewRecordProblems({
-              record,
-              sheetLabels: Object.keys(JSON.parse(readFileSync(answerKeyPath, "utf8"))),
-              identity: {
-                runOrdinal: run.runOrdinal,
-                reviewerModelId: run.reviewerModelId,
-                promptVersion: run.promptVersion,
-                datasetDigest: run.datasetDigest,
-                commitSha: run.evaluatedCommit,
-                sheetSeed: summary.seed ?? 1,
-              },
-            })
-          );
-        }
+      } else if (!matchingSet) {
+        problems.push("the dataset is not in the tree, so nothing can be recomputed");
+      } else {
+        const journalText = readFileSync(journalPath, "utf8");
+        const answerKeyText = readFileSync(answerKeyPath, "utf8");
+        const recordText = readFileSync(recordRef, "utf8");
+        const bundle = verifyEvidenceBundle({
+          dataset: matchingSet.dataset,
+          journal: journalText
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line)),
+          journalText,
+          answerKey: JSON.parse(answerKeyText),
+          answerKeyText,
+          recordText,
+          identity: {
+            runOrdinal: run.runOrdinal,
+            reviewerModelId: run.reviewerModelId,
+            promptVersion: run.promptVersion,
+            datasetDigest: run.datasetDigest,
+            commitSha: run.evaluatedCommit,
+            // The sheet's seed as the artifact recorded it, not the run's.
+            sheetSeed: summary.blindReviewSheetSeed,
+          },
+          minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+        });
+        problems.push(...adjudicatedArtifactProblems({ artifact, bundle }));
       }
     }
     report(label, problems);
