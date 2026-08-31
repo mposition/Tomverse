@@ -78,6 +78,14 @@ const prismaStub = {
   // failed step rather than a crash — so the run still finishes and the two
   // tests that read `failedSteps` are the ones that notice.
   comparisonReviewRun: { deleteMany: async () => ({ count: 31 }) },
+  // Added with the three `mobile_*` steps, for the same reason and with the
+  // same symptom: `deleteMany` read off `undefined` is a *failed step*, not a
+  // crash, so the run completes and only the two tests that inspect
+  // `failedSteps` report it. That is the second time this stub has fallen
+  // behind `lib/maintenance.ts` — the delegate has to arrive with the step.
+  mobileAuthEvent: { deleteMany: async () => ({ count: 32 }) },
+  mobileLoginGrant: { deleteMany: async () => ({ count: 33 }) },
+  mobileRefreshRotation: { deleteMany: async () => ({ count: 34 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
