@@ -26,6 +26,20 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
+  // PROVISIONAL. This is the spike's identifier, not the product's.
+  //
+  // It is named here because `cap add` needs one, and it must be replaced
+  // before anything depends on it. The deep-link association files are what
+  // depend on it: `assetlinks.json` names the final `applicationId` together
+  // with the SHA-256 fingerprint of the signing certificate, and
+  // `apple-app-site-association` names `TEAMID.BUNDLEID`. Publishing either
+  // with a placeholder is worse than publishing neither -- a failed
+  // verification is cached, so the app does not silently fall back, it stays
+  // unverified.
+  //
+  // Choosing the identifier also decides things this spike has not: the Apple
+  // Team ID, and whether Android signs through Play App Signing or an upload
+  // key (which changes the fingerprint the file must carry).
   appId: "app.tomverse.shell",
   appName: "Tomverse",
   // Vite's build output. `cap sync` copies this directory into the native

@@ -76,6 +76,16 @@ import type { AiModel } from "@/lib/models";
 export type AnthropicPromptCachePath =
     /** A chat turn. The conversation prefix is resent every turn. */
     | "chat_turn"
+    /**
+     * A chat turn that attaches a provider-native server tool -- today, native
+     * web search.
+     *
+     * Its own path rather than a flag on `chat_turn`, because the *request
+     * shape* differs in the one way this table is about: a server tool runs an
+     * agentic loop inside a single request, and the API writes the cache again
+     * on each iteration.
+     */
+    | "chat_turn_native_search"
     /** A chat turn's automatic fallback to a second model. */
     | "chat_fallback_turn"
     /** AI Review over a comparison's answers. */
@@ -118,6 +128,27 @@ export const ANTHROPIC_PROMPT_CACHE_PATHS: Readonly<
             "The whole reason the feature exists. Turn N+1 resends turns 1..N " +
             "byte-identically ahead of the new question, so the automatic " +
             "breakpoint moves forward over a prefix that is already cached.",
+    },
+    chat_turn_native_search: {
+        caches: false,
+        rationale:
+            "Held out of the first launch scope, and this one is not a missing " +
+            "prefix argument -- the prefix repeats exactly as it does on any " +
+            "chat turn. It is a reservation-safety argument. Anthropic's own " +
+            "documentation: 'When your request has prompt caching enabled and " +
+            "Claude uses a server tool such as web search... the API " +
+            "automatically places a cache breakpoint on the server tool result " +
+            "before running the next iteration of the agentic loop', and 'This " +
+            "behavior only applies when your request already has at least one " +
+            "cache_control marker.' So the marker does not merely permit those " +
+            "writes, it causes them: one automatic 5-minute write per loop " +
+            "iteration, each over a prefix that has grown by the search results " +
+            "just retrieved. The reservation this application takes is " +
+            "0.25x the *estimated input tokens* -- a bound for one write of the " +
+            "prompt, and not a bound for N writes of a prompt that keeps " +
+            "growing. Re-enabling needs a proven ceiling on the write tokens a " +
+            "turn can produce at the enforced search-query ceiling, not an " +
+            "argument that the prefix repeats.",
     },
     chat_fallback_turn: {
         caches: false,

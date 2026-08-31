@@ -3823,6 +3823,12 @@ export const settleChatUsage = async (
                 actualOutput: 0,
                 actualCachedInput: 0,
                 actualCost: 0,
+                // Nothing was applied by THIS call, so it settled nothing.
+                // Null rather than 0: a reservation that some earlier call
+                // already settled did charge credits, and reporting 0 here
+                // would let a reconciliation read it as a refund.
+                settledCredits: null,
+                reservedCredits: durable.reservedCredits,
                 provider: durable.provider as AiModel["provider"],
                 modelId: durable.modelId,
             };
@@ -4490,6 +4496,17 @@ export const settleChatUsage = async (
             actualOutput,
             actualCachedInput,
             actualCost,
+            // What the caller was actually charged, and what it had held.
+            //
+            // Read-only additions: nothing about the transaction, its
+            // arguments or its lock order changes. They exist because
+            // `status` alone cannot answer "did the reservation and the
+            // settlement agree" -- "settled" says credits were taken, not how
+            // many, so a reservation of 8 settling at 3 and one settling at 8
+            // are indistinguishable, and reconciliation is exactly that
+            // comparison (docs/policy/credit-and-cost-limits.md §9).
+            settledCredits: actualCredits,
+            reservedCredits: canonical.usageCredits,
             costBreakdown,
             provider: canonical.provider,
             modelId: canonical.modelId,
@@ -4587,7 +4604,16 @@ export const settleChatUsage = async (
             );
         }
     }
-    return { applied: settlement.applied, status: settlement.status };
+    return {
+        applied: settlement.applied,
+        status: settlement.status,
+        // Passed through so a caller can reconcile what it held against what
+        // it was charged. `status` alone cannot: "settled" says credits were
+        // taken and not how many. Read-only -- nothing about the transaction
+        // above changes.
+        reservedCredits: settlement.reservedCredits,
+        settledCredits: settlement.settledCredits,
+    };
 };
 
 // Heartbeat for a reservation backing a long-running async job (Perplexity

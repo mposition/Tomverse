@@ -94,6 +94,11 @@ mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니�
 | `pricing-purchase-cta.spec.ts` |
 | `web-search-composer-state.spec.ts` |
 | `assistant-knowledge-upload.spec.ts` |
+| `voice-input-composer.spec.ts` |
+
+`voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
+이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
+파일 수는 2026-08-31 현재 53개입니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —

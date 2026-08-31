@@ -52,7 +52,8 @@ import {
   assessSampleAdequacy,
   breakdownOutcomes,
   scoreCase,
-  AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES,
+  AI_REVIEW_EVAL_HARNESS_SCREENED_RULES,
+  AI_REVIEW_EVAL_HUMAN_ONLY_RULES,
 } from "../lib/aiReviewEvalCore.ts";
 import {
   datasetDigest,
@@ -390,10 +391,11 @@ for (const record of journal) {
     providerFailures += 1;
     continue;
   }
-  // No human verdicts: this harness cannot judge `fabricated_safety_claim` or
-  // `false_consensus_safety`, and inventing a zero for them would report an
-  // unexamined rule as passed. The artifact says so, and
-  // check-ai-review-eval-dataset.mjs refuses an artifact with no blind-review
+  // No human verdicts here. The harness screens three rules by term list; the
+  // other two have no mechanical form, and the screened three have unknown
+  // recall. Inventing a zero for any of that would report an unexamined rule
+  // as passed, so the artifact carries none and
+  // check-ai-review-eval-dataset.mjs refuses one with no blind-review
   // reference.
   outcomes.push(scoreCase(testCase, record.observation, []));
 }
@@ -425,9 +427,8 @@ const summary = {
   // reference after reviewing the sheet; until then the artifact is
   // inadmissible, which is correct.
   humanBlindReviewRef: null,
-  humanJudgedRules: AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES.filter(
-    (rule) => rule === "fabricated_safety_claim" || rule === "false_consensus_safety"
-  ),
+  harnessScreenedRules: [...AI_REVIEW_EVAL_HARNESS_SCREENED_RULES],
+  humanOnlyRules: [...AI_REVIEW_EVAL_HUMAN_ONLY_RULES],
   zeroToleranceViolations: Object.values(
     breakdown.aggregate.zeroToleranceViolations
   ).reduce((sum, count) => sum + count, 0),
@@ -463,7 +464,12 @@ line("omission precision", point(breakdown.aggregate.omissionPrecision));
 line("false-consensus rate", point(breakdown.aggregate.falseConsensusRate));
 line("invented-issue rate", point(breakdown.aggregate.inventedIssueRate));
 line("exact-quote match rate", point(breakdown.aggregate.exactQuoteMatchRate));
-line("zero-tolerance violations", summary.zeroToleranceViolations);
+line("zero-tolerance (screened)", summary.zeroToleranceViolations);
+console.log(
+  "\n  The violation count above is what a term list found. Three rules are\n" +
+    "  screened that way and two have no mechanical form at all, so this number\n" +
+    "  is a floor until a person has worked the blind sheet."
+);
 console.log(`\nartifact: ${artifactPath}`);
 if (costStopped) {
   console.log("TRUNCATED at the cost ceiling; the artifact is not decision-grade.");

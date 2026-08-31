@@ -346,6 +346,35 @@ export const de = {
         guestAttachmentUnreadable: "Diese Datei konnte nicht verarbeitet werden.",
         guestAttachmentFailed: "Diese Datei konnte nicht verarbeitet werden. Bitte erneut versuchen.",
         guestAttachmentUnavailable: "Dateianhänge sind vorübergehend nicht verfügbar.",
+        // -- Voice input (docs/policy/voice-input.md §13) ------------------
+        voiceStart: "Spracheingabe aufnehmen",
+        voiceStop: "Aufnahme beenden und in Text umwandeln",
+        voiceCancel: "Verwerfen",
+        voiceRecording: "Aufnahme {time}",
+        voiceRequestingPermission: "Warten auf Mikrofonzugriff…",
+        voiceTranscribing: "Sprache wird in Text umgewandelt…",
+        voiceLimitReached: "Maximale Aufnahmedauer erreicht. Wird in Text umgewandelt…",
+        voiceDismissError: "Hinweis schließen",
+        voicePrivacyNote:
+            "Die Audiodaten gehen ausschließlich zur Umwandlung an den Spracherkennungsanbieter. Tomverse speichert die Aufnahme nicht, und der Text landet im Eingabefeld, damit Sie ihn vor dem Senden prüfen können.",
+        voiceErrorUnsupportedBrowser:
+            "Dieser Browser kann kein Audio aufnehmen. Verwenden Sie die neueste Version von Chrome, Edge, Safari oder Firefox.",
+        voiceErrorPermissionDenied:
+            "Der Mikrofonzugriff ist blockiert. Erlauben Sie ihn für diese Website in den Browsereinstellungen und versuchen Sie es erneut.",
+        voiceErrorDeviceUnavailable:
+            "Es konnte kein Mikrofon verwendet werden. Prüfen Sie, ob ein Mikrofon angeschlossen ist und nicht von einer anderen App belegt wird.",
+        voiceErrorClipEmpty: "Es wurde nichts aufgenommen. Halten Sie die Taste etwas länger und sprechen Sie.",
+        voiceErrorClipTooLarge: "Die Aufnahme ist zu groß zum Senden.",
+        voiceErrorClipTooLong: "Die Aufnahme überschreitet die zulässige Länge.",
+        voiceErrorClipUnreadable: "Die Aufnahme konnte nicht gelesen werden.",
+        voiceErrorTranscriptEmpty: "Es wurde keine Sprache erkannt. Versuchen Sie es in einer ruhigeren Umgebung erneut.",
+        voiceErrorUnavailable: "Spracheingabe ist derzeit nicht verfügbar.",
+        voiceErrorSignInRequired: "Melden Sie sich an, um die Spracheingabe zu nutzen.",
+        voiceErrorLimitReached: "Sie haben das heutige Limit für Spracheingaben erreicht. Versuchen Sie es morgen erneut.",
+        voiceErrorProviderUnavailable:
+            "Der Spracherkennungsdienst ist nicht erreichbar. Bitte versuchen Sie es gleich noch einmal.",
+        voiceErrorNetwork: "Die Aufnahme konnte nicht gesendet werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+        voiceErrorTranscriptionFailed: "Die Sprache konnte nicht in Text umgewandelt werden. Bitte erneut versuchen.",
         guestAttachmentTemporary: "Gastdateien sind temporär: Sie werden nur kurz für diesen Chat vorgehalten und niemals gespeichert, geteilt oder exportiert.",
         guestGoogleDriveSignIn: "Melden Sie sich an, um Google Drive zu verbinden",
         // Guest AI Review: one real run per month, on the same pipeline.
@@ -2035,6 +2064,8 @@ export const de = {
         purpose: "Wir nutzen Informationen für Authentifizierung, KI-Antwortgenerierung, Chat-Speicherung, Wiederherstellung, Export und Teilen, Anhangsverarbeitung, Dienstsicherheit, Missbrauchsvermeidung und Incident Response.",
         providersTitle: "Externe KI-Anbieter",
         providers: "Prompts, notwendiger Kontext, Modellauswahl und Anhänge werden an den ausgewählten KI-Anbieter gesendet, um Antworten zu erzeugen. Anbieter können Daten nach ihren eigenen Bedingungen und Richtlinien verarbeiten oder speichern, möglicherweise in einem anderen Land.",
+        voiceInputTitle: "Spracheingabe",
+        voiceInput: "Wenn Sie das Mikrofon im Eingabefeld verwenden, wird die Aufnahme ausschließlich zur Umwandlung in Text an einen Spracherkennungsanbieter — derzeit OpenAI — gesendet und kann nach dessen eigenen Bedingungen in einem anderen Land verarbeitet werden. Tomverse speichert die Audiodaten nicht: Sie liegen nur für die Dauer dieser einen Anfrage im Arbeitsspeicher und werden niemals in eine Datenbank, einen Dateispeicher, ein Protokoll oder ein Fehler-Tracking geschrieben; eine Aufnahme, die Sie abbrechen, wird überhaupt nicht versendet. Der zurückgegebene Text erscheint im Eingabefeld, damit Sie ihn vor dem Senden lesen, bearbeiten oder löschen können; bis dahin ist er ein Entwurf auf Ihrem Gerät, und Tomverse speichert nichts davon. Nach dem Senden ist er eine gewöhnliche Nachricht, für die der Rest dieser Richtlinie gilt. Spracheingabe steht nur angemeldeten Nutzern zur Verfügung.",
         attachmentsTitle: "Anhänge",
         attachments: "Anhänge werden für Modellzustellung und Dokumentextraktion in verschlüsseltem Objektspeicher gespeichert. Bei angemeldeten Konten bleiben sie bei der Unterhaltung und werden gelöscht, wenn du diese Unterhaltung oder dein Konto löschst. Ohne Konto angehängte Dateien sind temporär und werden automatisch entfernt.",
         externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",

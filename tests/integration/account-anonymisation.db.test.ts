@@ -27,7 +27,8 @@ const sentinel = (label: string) => {
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ChatLimitDecisionEvent", "ComparisonReviewRun", "ChatCreditReservation", "ImageCreditReservation",
+      "ChatLimitDecisionEvent", "ComparisonReviewRunAttempt", "ComparisonReviewRun",
+      "ChatCreditReservation", "ImageCreditReservation",
       "MemoryExtractionCreditReservation", "Feedback", "RefundRequest",
       "AdminNote", "ModelOverride", "User"
     RESTART IDENTITY CASCADE
@@ -80,6 +81,19 @@ const seedUser = async () => {
       durationMs: 1_000,
       primaryStatus: "completed",
       secondaryStatus: "completed",
+      attempts: {
+        create: [
+          {
+            ordinal: 1,
+            slot: "primary",
+            reviewerModelId: "mistral-medium-3-1",
+            reviewerProvider: "mistral",
+            status: "completed",
+            reservedCredits: 4,
+            settledCredits: 4,
+          },
+        ],
+      },
     },
   });
 
@@ -210,9 +224,10 @@ const seedUser = async () => {
 
 /** Everything that survived the deletion, as one string. */
 const survivingRows = async () => {
-  const [limitDecisions, reviewRuns, chat, image, memory, feedback, refunds] = await Promise.all([
+  const [limitDecisions, reviewRuns, reviewAttempts, chat, image, memory, feedback, refunds] = await Promise.all([
     prisma.chatLimitDecisionEvent.findMany(),
     prisma.comparisonReviewRun.findMany(),
+    prisma.comparisonReviewRunAttempt.findMany(),
     prisma.chatCreditReservation.findMany(),
     prisma.imageCreditReservation.findMany(),
     prisma.memoryExtractionCreditReservation.findMany(),
@@ -226,6 +241,7 @@ const survivingRows = async () => {
   return {
     limitDecisions,
     reviewRuns,
+    reviewAttempts,
     chat,
     image,
     memory,
@@ -241,7 +257,7 @@ const serialise = (value: unknown) =>
 
 test("deleting the account leaves no planted identifier behind", async () => {
   const userId = await seedUser();
-  assert.ok(sentinels.length >= 19, `only ${sentinels.length} sentinels were planted`);
+  assert.ok(sentinels.length >= 20, `only ${sentinels.length} sentinels were planted`);
 
   const result = await deleteTomverseAccount(userId, { cancelSubscription: false });
   assert.equal(result.deleted, true);
@@ -272,6 +288,12 @@ test("the anonymised rows survive, without their identifiers", async () => {
   // computable after the person is gone.
   assert.equal(remaining.reviewRuns[0].outcome, "completed_dual");
   assert.equal(remaining.reviewRuns[0].durationMs, 1_000);
+  // The attempt survives with its reliability facts. It carries no identifier
+  // of its own -- an over-settlement is traced through the run's traceId,
+  // which is anonymised above -- so there is nothing here to scrub.
+  assert.equal(remaining.reviewAttempts.length, 1);
+  assert.equal(remaining.reviewAttempts[0].reviewerModelId, "mistral-medium-3-1");
+  assert.equal(remaining.reviewAttempts[0].settledCredits, 4);
   assert.equal(remaining.chat.length, 1);
   assert.equal(remaining.image.length, 1);
   assert.equal(remaining.memory.length, 1);

@@ -346,6 +346,35 @@ export const fr = {
         guestAttachmentUnreadable: "Ce fichier n'a pas pu être traité.",
         guestAttachmentFailed: "Ce fichier n'a pas pu être traité. Veuillez réessayer.",
         guestAttachmentUnavailable: "L'ajout de fichiers est temporairement indisponible.",
+        // -- Voice input (docs/policy/voice-input.md §13) ------------------
+        voiceStart: "Dicter un message",
+        voiceStop: "Arrêter l'enregistrement et convertir en texte",
+        voiceCancel: "Annuler",
+        voiceRecording: "Enregistrement {time}",
+        voiceRequestingPermission: "En attente de l'accès au microphone…",
+        voiceTranscribing: "Conversion de la voix en texte…",
+        voiceLimitReached: "Durée d'enregistrement maximale atteinte. Conversion en texte…",
+        voiceDismissError: "Fermer ce message",
+        voicePrivacyNote:
+            "L'audio est envoyé au prestataire de reconnaissance vocale uniquement pour la conversion. Tomverse ne conserve pas l'enregistrement, et le texte obtenu arrive dans la zone de saisie pour que vous puissiez le vérifier avant l'envoi.",
+        voiceErrorUnsupportedBrowser:
+            "Ce navigateur ne peut pas enregistrer d'audio. Essayez la dernière version de Chrome, Edge, Safari ou Firefox.",
+        voiceErrorPermissionDenied:
+            "L'accès au microphone est bloqué. Autorisez-le pour ce site dans les réglages du navigateur, puis réessayez.",
+        voiceErrorDeviceUnavailable:
+            "Aucun microphone utilisable. Vérifiez qu'un microphone est branché et qu'aucune autre application ne l'utilise.",
+        voiceErrorClipEmpty: "Rien n'a été enregistré. Maintenez le bouton un peu plus longtemps et parlez.",
+        voiceErrorClipTooLarge: "L'enregistrement est trop volumineux pour être envoyé.",
+        voiceErrorClipTooLong: "L'enregistrement dépasse la durée autorisée.",
+        voiceErrorClipUnreadable: "L'enregistrement n'a pas pu être lu.",
+        voiceErrorTranscriptEmpty: "Aucune parole n'a été reconnue. Réessayez dans un endroit plus calme.",
+        voiceErrorUnavailable: "La dictée n'est pas disponible pour le moment.",
+        voiceErrorSignInRequired: "Connectez-vous pour utiliser la dictée.",
+        voiceErrorLimitReached: "Vous avez atteint la limite de dictée du jour. Réessayez demain.",
+        voiceErrorProviderUnavailable:
+            "Le service de reconnaissance vocale est indisponible. Réessayez dans un instant.",
+        voiceErrorNetwork: "L'enregistrement n'a pas pu être envoyé. Vérifiez votre connexion et réessayez.",
+        voiceErrorTranscriptionFailed: "La voix n'a pas pu être convertie en texte. Réessayez.",
         guestAttachmentTemporary: "Les fichiers des invités sont temporaires : conservés brièvement pour cette conversation uniquement, ils ne sont jamais enregistrés, partagés ni exportés.",
         guestGoogleDriveSignIn: "Connectez-vous pour relier Google Drive",
         // Guest AI Review: one real run per month, on the same pipeline.
@@ -2032,6 +2061,8 @@ export const fr = {
         purpose: "Nous utilisons les informations pour l'authentification, la génération de réponses IA, le stockage, la restauration, l'export et le partage de chats, le traitement des pièces jointes, la sécurité du service, la prévention des abus et la réponse aux incidents.",
         providersTitle: "Fournisseurs IA externes",
         providers: "Les prompts, le contexte nécessaire, les données de sélection du modèle et les pièces jointes sont envoyés au fournisseur IA sélectionné pour générer des réponses. Les fournisseurs peuvent traiter ou conserver les données selon leurs propres conditions et politiques, éventuellement dans un autre pays.",
+        voiceInputTitle: "Dictée vocale",
+        voiceInput: "Si vous utilisez le microphone de la zone de saisie, l'enregistrement est envoyé à un prestataire de reconnaissance vocale — aujourd'hui OpenAI — dans le seul but de le convertir en texte, et il peut être traité dans un autre pays selon les conditions de ce prestataire. Tomverse ne conserve pas l'audio : il reste en mémoire le temps de cette seule requête et n'est jamais écrit dans une base de données, un stockage de fichiers, un journal ou un outil de suivi d'erreurs ; un enregistrement que vous annulez n'est envoyé nulle part. Le texte obtenu est placé dans la zone de saisie pour que vous puissiez le lire, le modifier ou le supprimer avant tout envoi ; tant que vous ne l'envoyez pas, c'est un brouillon sur votre appareil et Tomverse n'en conserve rien. Une fois envoyé, il devient un message ordinaire auquel s'applique le reste de cette politique. La dictée n'est disponible que si vous êtes connecté.",
         attachmentsTitle: "Pièces jointes",
         attachments: "Les pièces jointes sont stockées dans un stockage objet chiffré pour l'envoi au modèle et l'extraction de documents. Pour un compte connecté, elles sont conservées avec la conversation et supprimées lorsque vous supprimez cette conversation ou votre compte. Les fichiers joints sans compte sont temporaires et sont supprimés automatiquement.",
         externalImportTitle: "Conversations importées depuis d'autres services d'IA",
