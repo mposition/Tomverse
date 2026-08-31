@@ -144,18 +144,40 @@ export type NativeCorsHeaders = Record<string, string>;
  * hostile one: nothing is echoed, so a page on `https://attacker.example`
  * receives a response its own browser will not let it read.
  *
- * `Access-Control-Allow-Credentials` is deliberately absent, which is what
- * makes widening the allowlist to `https://localhost` safe. Any process on a
- * user's machine can serve that origin, so if credentials were allowed it
- * could read the signed-in user's data. Without it the browser sends no
- * cookie and no `Authorization` it did not obtain itself, so such a request
- * arrives unauthenticated and sees only what an anonymous caller sees.
+ * `Access-Control-Allow-Credentials` is deliberately absent. What that buys is
+ * narrower than it first looks, and stating it precisely matters because N2
+ * will be designed on top of whatever this comment claims.
  *
- * The bearer path this exists for does not need credentialed CORS: a bearer
- * token is attached by the client explicitly, which is also why bearer
- * requests do not need CSRF protection while cookie requests do
+ * **What it does mean.** The response is not shared with a credentialed
+ * cross-origin request. A `fetch` with `credentials: "include"` fails the CORS
+ * check and its initiator reads nothing, so a cross-origin caller cannot use
+ * the browser's ambient credentials to read this API.
+ *
+ * **What it does not mean.** It is not a guarantee that no cookie was sent. A
+ * simple request reaches the server according to the browser's own cookie
+ * rules -- SameSite among them -- and is blocked at the point the initiator
+ * tries to *read* the response, not before it arrives
+ * (https://fetch.spec.whatwg.org/#cors-protocol-and-credentials). An
+ * `Authorization` header a client attaches explicitly is a separate matter
+ * again: it is not an ambient credential and this flag has nothing to say
+ * about it.
+ *
+ * So the safety of allowing `https://localhost` -- an origin any process on a
+ * user's machine can serve -- does not rest on requests from it being
+ * anonymous. It rests on three things, none of which live in this file:
+ *
+ *   1. no credentialed CORS sharing, which is what this absence provides;
+ *   2. the server authenticating and authorising every request on its own,
+ *      including the CSRF check in `lib/requestOrigin.ts` that both native
+ *      origins still fail;
+ *   3. the native transport carrying no cookie and instead presenting a bearer
+ *      token the server verifies -- which is N2's job, and does not exist yet.
+ *
+ * A bearer token is attached explicitly rather than sent ambiently, which is
+ * why the bearer path does not need CSRF protection while the cookie path does
  * (docs/policy/tomverse-chat-mobile-authentication.md, "Why not extend the
- * cookie session").
+ * cookie session"). That is an argument about how the credential travels, not
+ * about this header.
  */
 export const nativeAppCorsHeaders = (
   origin: string | null | undefined
