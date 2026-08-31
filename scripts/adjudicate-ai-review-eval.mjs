@@ -25,18 +25,29 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
+import { AI_REVIEW_EVAL_BLIND_SHEET_RULES } from "../lib/aiReviewEvalCore.ts";
 import {
-  aggregateOutcomes,
-  breakdownOutcomes,
-  scoreCase,
-  AI_REVIEW_EVAL_BLIND_SHEET_RULES,
-} from "../lib/aiReviewEvalCore.ts";
-import {
-  blindReviewRecordProblems,
   humanVerdictsByCase,
   parseBlindReviewRecord,
 } from "../lib/aiReviewBlindReviewRecord.ts";
 import { datasetDigest, datasetProblems } from "../lib/aiReviewEvalRun.ts";
+import {
+  verifyEvidenceBundle,
+  AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+} from "../lib/aiReviewEvidenceBundle.ts";
+
+/**
+ * The seed the SHEET was built with, read from the record's own header.
+ *
+ * Not the run's seed. The evaluation runner defaults to 0 and the sheet
+ * generator to 1, so an ordinary pair of defaults produced a record the gate
+ * refused with "sheetSeed 1, not 0". The two are separate decisions and the
+ * record is where the sheet's is written down.
+ */
+const sheetSeedFromRecord = (text) => {
+  const match = text.match(/^#\s*sheet-seed:\s*(\d+)\s*$/m);
+  return match ? Number(match[1]) : Number.NaN;
+};
 
 const argValue = (name, fallback = "") => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -102,56 +113,65 @@ if (summary.datasetDigest && summary.datasetDigest !== treeDigest) {
   );
 }
 
-const answerKey = JSON.parse(read(answerKeyPath));
-const { record, problems: parseProblems } = parseBlindReviewRecord(read(recordPath));
-const identityProblems = blindReviewRecordProblems({
-  record,
-  sheetLabels: Object.keys(answerKey),
+const answerKeyText = read(answerKeyPath);
+const answerKey = JSON.parse(answerKeyText);
+const recordText = read(recordPath);
+const journalText = read(journalPath);
+const journal = journalText
+  .split("\n")
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+
+// One verification for both commands.
+//
+// Everything below is derived from these files -- never inherited from the
+// artifact's own summary, which is the thing being replaced. A journal missing
+// twenty cases used to re-score 1,420 and leave `completedCases: 1,440`
+// standing, because the new summary was spread from the old one.
+const bundle = verifyEvidenceBundle({
+  dataset,
+  journal,
+  journalText,
+  answerKey,
+  answerKeyText,
+  recordText,
   identity: {
     runOrdinal: summary.runOrdinal ?? 0,
     reviewerModelId: summary.reviewerModelId ?? "",
     promptVersion: summary.promptVersion ?? "",
     datasetDigest: summary.datasetDigest ?? treeDigest,
     commitSha: summary.commitSha ?? "",
-    sheetSeed: Number(argValue("seed", "1")),
+    // The SHEET's seed, which is not the run's. The evaluation runner defaults
+    // to 0 and the sheet generator to 1, so reading one for the other refused
+    // an ordinary pair of defaults. The sheet wrote its own seed into the
+    // record header; that is the value, and it is carried into the artifact so
+    // the gate reads it rather than guessing again.
+    sheetSeed: sheetSeedFromRecord(recordText),
   },
+  minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
 });
-const problems = [...parseProblems, ...identityProblems];
-if (problems.length > 0) {
-  console.error("The blind review record cannot be used:\n");
-  for (const problem of problems.slice(0, 40)) console.error(`  - ${problem}`);
-  if (problems.length > 40) console.error(`  ... and ${problems.length - 40} more`);
+
+if (bundle.problems.length > 0) {
+  console.error("The evidence cannot be adjudicated:\n");
+  for (const problem of bundle.problems.slice(0, 40)) console.error(`  - ${problem}`);
+  if (bundle.problems.length > 40) {
+    console.error(`  ... and ${bundle.problems.length - 40} more`);
+  }
   console.error(
-    "\nNothing was written. A half-filled or mis-identified form is not a verdict, " +
-      "and treating it as one is how five rules quietly become three."
+    "\nNothing was written. A half-filled form, a journal missing cases, or an " +
+      "answer key covering nothing is not evidence, and treating any of them as " +
+      "evidence is how a clean number gets produced from an incomplete run."
   );
   process.exit(1);
 }
 
-const verdicts = humanVerdictsByCase(record, answerKey);
-const byId = new Map(dataset.cases.map((testCase) => [testCase.id, testCase]));
-const journal = readFileSync(journalPath, "utf8")
-  .split("\n")
-  .filter(Boolean)
-  .map((line) => JSON.parse(line));
-
-const outcomes = [];
-for (const entry of journal) {
-  const testCase = byId.get(entry.caseId);
-  if (!testCase || !entry.observation) continue;
-  outcomes.push(scoreCase(testCase, entry.observation, verdicts.get(entry.caseId) ?? []));
-}
-
-const breakdown = breakdownOutcomes(outcomes);
-const aggregate = aggregateOutcomes(outcomes);
-const total = Object.values(aggregate.zeroToleranceViolations).reduce(
-  (sum, count) => sum + count,
-  0
-);
-
 const humanOnly = [];
-for (const [caseId, rules] of verdicts) {
-  for (const rule of rules) humanOnly.push(`${caseId}: ${rule}`);
+{
+  const { record } = parseBlindReviewRecord(recordText);
+  const verdicts = humanVerdictsByCase(record, answerKey);
+  for (const [caseId, rules] of verdicts) {
+    for (const rule of rules) humanOnly.push(`${caseId}: ${rule}`);
+  }
 }
 
 const adjudicated = {
@@ -160,27 +180,49 @@ const adjudicated = {
     ...summary,
     adjudicated: true,
     humanBlindReviewRef: recordPath,
-    blindReviewSignedBy: record.signedBy,
-    blindReviewSignedAt: record.signedAt,
-    blindReviewCasesJudged: record.rows.length,
+    blindReviewSignedBy: bundle.derived.signedBy,
+    blindReviewSignedAt: bundle.derived.signedAt,
+    blindReviewCasesJudged: bundle.derived.reviewedCases,
     blindReviewRulesJudged: AI_REVIEW_EVAL_BLIND_SHEET_RULES.length,
-    zeroToleranceViolations: total,
+    blindReviewSheetSeed: sheetSeedFromRecord(recordText),
+    // Bound by digest, so a record swapped for another of the same shape --
+    // or a verdict edited after this ran -- is a mismatch rather than a file
+    // nobody re-read.
+    blindReviewRecordDigest: bundle.derived.recordDigest,
+    blindReviewAnswerKeyDigest: bundle.derived.answerKeyDigest,
+    journalDigest: bundle.derived.journalDigest,
+    // Recomputed, not inherited.
+    plannedCases: bundle.derived.plannedCases,
+    completedCases: bundle.derived.completedCases,
+    sampleAdequate: bundle.derived.sampleAdequate,
+    zeroToleranceViolations: bundle.zeroToleranceViolations,
+    decisionGrade:
+      dataset.purpose === "decision" &&
+      summary.workingTreeDirty !== true &&
+      Boolean(summary.commitSha) &&
+      summary.commitSha !== "unknown" &&
+      bundle.derived.completedCases === bundle.derived.plannedCases &&
+      bundle.derived.sampleAdequate,
     adjudicatedAt: new Date().toISOString(),
   },
-  metrics: breakdown,
+  metrics: bundle.metrics,
 };
 
 const outputPath = join(directory, `${stem}--adjudicated.json`);
 writeFileSync(outputPath, `${JSON.stringify(adjudicated, null, 2)}\n`, "utf8");
 
 console.log(`AI Review adjudication — ${stem}\n`);
-console.log(`  record signed by  ${record.signedBy} on ${record.signedAt}`);
-console.log(`  cases judged      ${record.rows.length}`);
+console.log(
+  `  record signed by  ${bundle.derived.signedBy} on ${bundle.derived.signedAt}`
+);
+console.log(`  cases judged      ${bundle.derived.reviewedCases}`);
 console.log(`  rules per case    ${AI_REVIEW_EVAL_BLIND_SHEET_RULES.length}`);
-console.log(`  cases re-scored   ${outcomes.length}`);
+console.log(
+  `  cases re-scored   ${bundle.derived.completedCases} / ${bundle.derived.plannedCases}`
+);
 console.log(
   `\n  zero-tolerance violations  before ${summary.zeroToleranceViolations ?? "?"}  ` +
-    `after ${total}`
+    `after ${bundle.zeroToleranceViolations}`
 );
 if (humanOnly.length > 0) {
   console.log("\n  marked by the person:");
