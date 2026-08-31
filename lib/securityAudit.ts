@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHmac } from "node:crypto";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import type { MobileAuthEventName } from "@/lib/mobileAuthContract";
 
 type AuthAuditEvent =
     | "auth.create_user"
@@ -47,7 +48,12 @@ export type SecurityAuditEvent =
     // only successes cannot show that.
     | "account.data_export.request"
     | "account.data_export.download"
-    | "account.data_export.refused";
+    | "account.data_export.refused"
+    // Native mobile bearer authentication (mobile auth design D15). Imported
+    // rather than re-listed: the same eight names are a database CHECK on
+    // MobileAuthEvent.event, and two copies of a closed list are two copies
+    // that drift.
+    | MobileAuthEventName;
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

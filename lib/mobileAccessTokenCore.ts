@@ -64,6 +64,16 @@ export type MobileAccessTokenIdentity = {
   family: string;
   /** `jti` -- this token, for correlation and replay reporting. */
   tokenId: string;
+  /**
+   * `iat`, in seconds, as the token states it.
+   *
+   * Returned because the authorization layer needs it: a global sign-out
+   * stamps `User.sessionsRevokedAt`, and the only way to tell a token minted
+   * before that stamp from one minted after is to compare against when it was
+   * issued. Safe to expose only because it is read *after* the signature
+   * check, like every other claim here.
+   */
+  issuedAtSeconds: number;
   /** `exp`, in seconds, as the token states it. */
   expiresAtSeconds: number;
 };
@@ -224,6 +234,7 @@ export const verifyMobileAccessToken = (
       device: c.did as string,
       family: c.fid as string,
       tokenId: c.jti as string,
+      issuedAtSeconds: iat,
       expiresAtSeconds: exp,
     },
   };

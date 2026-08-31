@@ -346,6 +346,10 @@ run(
     // and the constraint stopping an audit row from naming somebody's device
     // without naming the account that cascade reaches.
     "tests/integration/mobile-auth-schema.db.test.ts",
+    // The lifecycle on top of those tables: the conditional UPDATE that makes
+    // strict single use true under a real race, and D8's contract that a
+    // replay's revocation commits even though the caller is refused.
+    "tests/integration/mobile-auth-service.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",
