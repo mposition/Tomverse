@@ -41,6 +41,107 @@ export type FrozenReviewSource = {
      * built only after a disagreement, from the disagreeing pairs.
      */
     adjudicatorId: string;
+    /**
+     * Evidence that a person opened a probe sealed exactly the way the key
+     * will be sealed, with the private half of the key committed here.
+     *
+     * Null until that has happened. See `keyRecoveryProblems`.
+     */
+    keyRecovery: KeyRecoveryRecord | null;
+};
+
+/**
+ * What the key envelope is, written down rather than left to a default.
+ *
+ * `openssl pkeyutl -encrypt` defaults to PKCS#1 v1.5, and OpenSSL 3 will
+ * "decrypt" an OAEP ciphertext under that default without erroring -- it
+ * returns implicit-rejection garbage, and the failure then surfaces one step
+ * later as a bad AES decrypt. So the padding is pinned on both sides and
+ * recorded with the draw, because a recipient months from now needs the
+ * parameters, not a guess at them.
+ */
+export const KEY_ENVELOPE = {
+    version: "router-human-review-key-envelope-v1",
+    /** Seals `key.json`. */
+    payloadCipher: "aes-256-cbc",
+    payloadKdf: "pbkdf2-sha256",
+    payloadKdfIterations: 600_000,
+    /** Seals the random 32-byte payload key to the recipient. */
+    keyTransport: "rsa-oaep",
+    keyTransportHash: "sha256",
+    keyTransportMgf1Hash: "sha256",
+    /** SHA-256 over the DER SubjectPublicKeyInfo. */
+    fingerprint: "sha256-spki-der",
+} as const;
+
+/**
+ * A person opened a sealed probe with the private key, and said so.
+ *
+ * The probe run and the draw run are separate dispatches for one reason: an
+ * artifact is only downloadable once its job has finished, so a probe sealed
+ * in the same job as the draw can only be opened after the key it is standing
+ * in for has already been sealed. That is a report, not a gate. Splitting the
+ * runs is what makes it a precondition.
+ */
+export type KeyRecoveryRecord = {
+    /** Who decrypted the probe. A person, not a workflow. */
+    verifiedBy: string;
+    /** When, ISO 8601. */
+    verifiedAt: string;
+    /**
+     * SHA-256 over the DER SubjectPublicKeyInfo of the key they proved they
+     * hold the private half of, as `sha256:<hex>`.
+     *
+     * Checked against the committed public key at draw time: a verification
+     * against a key that has since been replaced verifies nothing.
+     */
+    recipientKeyFingerprint: string;
+    /** The probe they opened, as `sha256:<hex>` of its plaintext. */
+    probeSha256: string;
+    /** The probe workflow run that sealed it. */
+    probeRunId: string;
+};
+
+/**
+ * Why the key may not be sealed for this draw yet. Empty means it may.
+ *
+ * `observedFingerprint` is taken from the public key actually committed in the
+ * repository, so a recovery proved against a different key does not carry.
+ */
+export const keyRecoveryProblems = (
+    frozen: Pick<FrozenReviewSource, "keyRecovery">,
+    observed: { recipientKeyFingerprint: string }
+): readonly string[] => {
+    const record = frozen.keyRecovery;
+    if (!record) {
+        return [
+            "the pre-registration records no keyRecovery. Run the recovery-probe workflow, open its " +
+                "probe with the private half, and commit what it prints. The draw seals a key that maps " +
+                "every item back to its pair, and a key nobody has proved they can open is a key nobody " +
+                "can open",
+        ];
+    }
+    const problems: string[] = [];
+    for (const field of [
+        "verifiedBy",
+        "verifiedAt",
+        "recipientKeyFingerprint",
+        "probeSha256",
+        "probeRunId",
+    ] as const) {
+        if (typeof record[field] !== "string" || record[field] === "") {
+            problems.push(`the keyRecovery record has no ${field}`);
+        }
+    }
+    if (problems.length > 0) return problems;
+    if (record.recipientKeyFingerprint !== observed.recipientKeyFingerprint) {
+        problems.push(
+            `the recovery was proved against ${record.recipientKeyFingerprint}, but the committed ` +
+                `public key is ${observed.recipientKeyFingerprint}. The key was replaced after it was ` +
+                "verified, so nothing has been proved about the one that would seal this draw"
+        );
+    }
+    return problems;
 };
 
 /**

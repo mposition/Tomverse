@@ -183,7 +183,8 @@
     "check:release-records": "node scripts/check-release-records.mjs",
     "backfill:model-lifecycle-work-items": "node --conditions=react-server --import tsx scripts/backfill-model-lifecycle-work-items.mjs",
     "check:edge-robots": "node --import tsx scripts/check-edge-robots.mjs",
-    "report:deployed-commit-drift": "node scripts/report-deployed-commit-drift.mjs"
+    "report:deployed-commit-drift": "node scripts/report-deployed-commit-drift.mjs",
+    "print:router-key-envelope": "node --import tsx scripts/print-router-key-envelope.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.44",
