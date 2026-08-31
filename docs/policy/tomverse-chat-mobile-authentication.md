@@ -1,6 +1,10 @@
 # Tomverse Chat mobile authentication
 
-- Status: draft for Phase 0 approval
+- Status: Phase 0 approved; N2 implementation authorized
+- Approval: `.github/audits/2026-08-31-native-mobile-auth-n2-design-approval.md`
+  sections 8.1-8.2, recorded in `bb108653da93e039a659be2a281ca4cd7561a477`;
+  approved design SHA `190056fc2ee9ffc923a8f6e1331081e272762d2f`;
+  approved by `mposition` on 2026-08-31
 - Decision owners: Backend/AI and Mobile/Release, **jointly**
 - Gates: `AUTH-01` through `AUTH-04`, `PRIVACY-01`, `STORE-01`, `STORE-02`
 - Related: `docs/ops/tomverse-chat-store-review.md`,

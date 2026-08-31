@@ -2,13 +2,14 @@
 
 - 대상: `mposition/Tomverse` `develop`
 - **상태: 승인됨** — 2026-08-31, `mposition`. 승인 SHA `190056fc2ee9ffc923a8f6e1331081e272762d2f`. 확정값은 §8.1.1
-- **기준 HEAD (rev.6): `6c52c04`** — rev.5는 `d836680`/`190056f` — rev.4는 `94e9e94`, rev.3은 `af06a99`, rev.2는 `49c2624`/`ffca693`, rev.1은 `1ee7793`/`7a1dd05`
+- **기준 HEAD (rev.7): `bb10865`** — rev.6은 `6c52c04`, rev.5는 `d836680`/`190056f` — rev.4는 `94e9e94`, rev.3은 `af06a99`, rev.2는 `49c2624`/`ffca693`, rev.1은 `1ee7793`/`7a1dd05`
 - **설계 기준본은 rev.4(`c0667ec`)입니다.** rev.5는 승인표 안내만, rev.6은 **승인 기록만** 더했습니다 — 설계 내용은 rev.4 이후 바뀌지 않았습니다
 - 산출물: 이 문서 하나. **코드·Prisma schema·migration·API route·테스트·feature
   flag·production 설정을 만들거나 바꾸지 않았습니다.**
 - 정책 문서 `docs/policy/tomverse-chat-mobile-authentication.md`의 Status는
-  `draft for Phase 0 approval` **그대로입니다.** release-gate registry의
-  `status`·`evidenceRefs`도 건드리지 않았습니다.
+  승인자의 명시적 지시로 **`Phase 0 approved; N2 implementation authorized`로
+  옮겨졌습니다**(rev.7). release-gate registry의 `status`·`evidenceRefs`는 여전히
+  **건드리지 않았습니다** — 이 승인은 게이트 통과가 아닙니다.
 - 선행 문서: `.github/audits/2026-08-30-native-mobile-readiness.md` §3.1·§6.1·§6.2
 
 > **이 패킷이 하는 일.** 승인 가능한 보안 설계를 제시하고, **사람이 결정해야 하는
@@ -16,6 +17,18 @@
 > 대안을 제시하되 확정하지 않았습니다. §8의 승인란은 비워 두었습니다.
 
 ## 개정 이력
+
+**rev.7 (2026-08-31, HEAD `bb10865`)** — 승인자의 명시적 지시로
+`docs/policy/tomverse-chat-mobile-authentication.md`의 Status를
+`draft for Phase 0 approval` → **`Phase 0 approved; N2 implementation authorized`**
+로 옮기고, 그 문서 머리말에 이 패킷·승인 기록 커밋·승인된 설계 SHA·승인자·날짜를
+적었습니다. **release-gate registry는 그대로입니다.** 이 패킷에서는 그 사실을
+서술하던 두 문장(머리말과 §8.3)만 고쳤고 설계는 바뀌지 않았습니다.
+
+승인자가 준 문구 중 `§8.1–§8.2`만 **`sections 8.1-8.2`** 로 옮겨 적었습니다 —
+`npm run check:policy-section-references`가 `§` 뒤의 번호를 인용으로 읽고, 그
+파일이 이름 댄 policy 문서(`tomverse-chat-delivery-plan.md`)에 8.1·8.2가 없어
+실패했기 때문입니다. **가리키는 대상은 그대로**이고 기호만 뺐습니다.
 
 **rev.6 (2026-08-31, HEAD `6c52c04`)** — **설계 변경 없음. 승인 기록입니다.**
 승인자가 내린 판정과 18개 확정값을 §8.1·§8.1.1에 옮겨 적고, §8.2의 "N2 구현"을
@@ -1094,10 +1107,12 @@ production 활성화, `AUTH-01`·`AUTH-04` 실기기 판정, R2의 `capacitor://
 
 ### 8.3 정책 문서와 registry에 대해
 
-- docs/policy/tomverse-chat-mobile-authentication.md의 Status는 **아직
-  `draft for Phase 0 approval` 그대로입니다.** 이 승인은 **이 패킷**에 대한
-  것이고, 그 정책 문서의 Status를 옮기는 것은 별개의 기록 행위입니다. **승인자의
-  명시적 지시 없이 바꾸지 않았습니다** — 필요하다면 별도로 지시해 주십시오.
+- docs/policy/tomverse-chat-mobile-authentication.md의 Status는 **승인자의 명시적
+  지시에 따라 옮겼습니다**(rev.7, 2026-08-31):
+  `Phase 0 approved; N2 implementation authorized`. 그 문서의 머리말이 이 패킷과
+  승인 기록 커밋, 승인된 설계 SHA, 승인자와 날짜를 함께 가리킵니다.
+  **rev.6까지는 지시가 없어 바꾸지 않았습니다** — Status를 옮기는 것은 이 패킷에
+  대한 승인과 별개의 기록 행위였고, 그 구분은 지켜졌습니다.
 - docs/release-gates/tomverse-chat-v1.yaml의 `AUTH-01`~`AUTH-04`·`PRIVACY-01`의
   `status`·`approvedBy`·`evidenceRefs`를 **건드리지 않았습니다.** 승인자가 이 승인은
   release-gate 통과를 뜻하지 않는다고 명시했으므로, registry는 그대로 둡니다.
