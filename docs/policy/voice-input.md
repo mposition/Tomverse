@@ -412,7 +412,25 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
    `VOICE_SCOPE_CHANGED`). 녹음도 변환 대기도 마찬가지이며, 클립은 버리고
    마이크를 닫습니다. 사용자에게는 "다른 대화로 이동해 중단됐고 추가된 내용은
    없다"고 한 문장으로 알립니다.
-3. **쓰기는 scope를 명시하고 함수형으로 합니다** —
+
+   **신원은 사람 단위로 비교합니다.** 키는
+   `identityNamespaceKey`(`account:<userId>`)이며, 처음 구현은 `"guest"`/
+   `"account"` 두 값뿐이라 **같은 탭에서 계정 A가 계정 B로 바뀌는 것을 보지
+   못했습니다.** 그것이 이 규칙에서 가장 중요한 전환입니다 — 정리 문제가 아니라
+   개인정보 경계이기 때문입니다.
+
+   **아직 모르는 신원은 변경이 아닙니다.** session provider는 hydration 뒤에
+   확정되므로 `null → account:x`를 변경으로 보면 방금 시작한 녹음을 취소하게
+   되고, refetch로 인한 `account:x → null`도 마찬가지입니다. 판정은
+   `voiceSessionBoundaryChanged()` 한 곳이고 순수 함수라 테스트가 직접
+   구동합니다.
+3. **세션→scope 기록은 상한이 있습니다.** `lib/voiceSessionScopes.ts`가
+   최신 두 세션만 남깁니다. transcript는 세션이 live 상태를 떠난 뒤에 도착하므로
+   "세션이 끝나면 지운다"는 필요한 직전에 지우는 일이 되고, 반대로 아무것도
+   지우지 않던 처음 구현은 composer가 mount돼 있는 동안 녹음마다 한 항목씩
+   늘었습니다. 종료 경로 네 곳에 `delete`를 뿌리는 대신 **보존 규칙 하나**로
+   둔 이유는, 뿌리는 쪽은 하나만 빠뜨려도 원래대로 돌아가기 때문입니다.
+4. **쓰기는 scope를 명시하고 함수형으로 합니다** —
    `setDraftText((current) => append(current, text), scopeId)`. scope 명시가
    대화를 맞추고, 함수형 갱신이 **기다리는 동안 사용자가 친 글을 보존**합니다.
    값을 캡처해 쓰면 그 글이 덮어써집니다.

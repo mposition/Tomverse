@@ -5,7 +5,7 @@
 하나**이고(§14의 B-6), 나머지 다섯 개 차단 사유(B-1~B-5)는 이 문서로 해소되지
 않습니다.
 
-- **template revision**: `2026-08-31`
+- **template revision**: `2026-08-31b`
 
 ## 이 문서는 template입니다
 
@@ -39,6 +39,7 @@ AGENTS.md의 "사람에게 남기는 것은 사람만 할 수 있는 것뿐입�
 | 생성 실패·start/stop 예외·녹음 중 오류의 자원 회수 | `tests/voiceCaptureAdapter.test.mjs` |
 | 늦은 이벤트가 새 세션을 끝내거나 새 마이크를 닫지 못함 | 같은 파일 + `tests/voiceRecorderMachine.test.mjs` |
 | 대화 전환 시 세션 종료·초안 격리·타이핑 보존 | `tests/e2e/voice-input-composer.spec.ts` |
+| 대화/신원 경계 판정과 세션 scope 보존 상한 | `tests/voiceSessionScopes.test.mjs` |
 | provider usage 형태 구분과 정산 근거 | `tests/voiceProviderSettlement.test.mjs` |
 | 결과 불명 호출이 예약을 유지함 | `tests/server-contract/voice-transcription-route.test.ts` |
 
@@ -187,6 +188,18 @@ production에 갈 수 없습니다.
 - [ ] 멀티 모델 선택 → 모델 수가 바뀌고 크레딧 추정이 따라온다
 - [ ] 전송 → 응답 → **중단** 버튼이 동작한다
 - [ ] 위 넷을 **마이크가 켜진 상태에서** 다시 한 번
+
+### F-2. 계정 전환 (실기기 아님, 브라우저면 충분)
+
+같은 탭에서 계정 A로 녹음을 시작하고 변환을 기다리는 동안 로그아웃 후 계정
+B로 로그인합니다.
+
+- [ ] 세션이 `VOICE_SCOPE_CHANGED`로 끝난다
+- [ ] 계정 B의 입력창에 **아무것도 추가되지 않는다**
+
+판정 규칙 자체는 `voiceSessionBoundaryChanged()`로 단위 테스트돼 있지만,
+**계정 A→B 전환을 끝에서 끝까지 실행한 관측은 아직 없습니다.** 이 항목이 그
+관측입니다. 유료 turn이 아닙니다.
 
 마지막 항목이 요점입니다. 앞의 넷은 flag off로도 동작해야 하고, 이 기능이
 깨뜨릴 수 있는 것은 컨트롤이 하나 늘어난 composer입니다.
