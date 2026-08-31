@@ -73,7 +73,18 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
             /QA_EXTERNAL_NETWORK_BLOCKED/,
             "the smoke path attempted an outbound connection"
         );
-        assert.match(result.output, /mem-eval-succ-5/);
+        // The binding the 2026-08-31 switch was approved to produce, asserted
+        // on the harness's own output rather than on the modules it imports:
+        // the pair and the dataset have to appear together, because a run
+        // that named the new prompt over the old sample would be the failure
+        // the switch exists to avoid.
+        assert.match(result.output, /gpt-5-6-luna::mem-extract-v7/);
+        assert.match(result.output, /mem-eval-succ-6 \(decision, frozen\)/);
+        assert.match(result.output, /digest: 2ffc8c09/);
+        // succ-5 is the previous target and must not be what a default run
+        // reports; it stays reachable by name, which the harness-target tests
+        // cover.
+        assert.doesNotMatch(result.output, /mem-eval-succ-5/);
         assert.match(result.output, /SMOKE RUN/);
 
         const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
@@ -94,8 +105,18 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // be ignored and every citation unchecked, and the run would still
         // pass — so the assertion that matters is the one below it.
         assert.equal(artifact.verdict.aggregate.failures, 0);
-        assert.equal(artifact.verdict.aggregate.recallNumerator, 474);
-        assert.equal(artifact.verdict.aggregate.recallDenominator, 474);
+        // 476 since the target moved to succ-6, and the two are derivable
+        // from each other: succ-5 carried 474, the thirteen cases that left
+        // carried none between them — ten B+ `assistant_only` cases and three
+        // composition repairs, all of which expected nothing — and the
+        // thirteen that arrived carry two, `ko-501`'s expertise gold and
+        // `ko-504`'s recurring_context. 474 − 0 + 2.
+        //
+        // Written out rather than read from the dataset, for the reason the
+        // whole file exists: a denominator computed from the same array the
+        // scorer walked would agree with itself whatever went wrong.
+        assert.equal(artifact.verdict.aggregate.recallNumerator, 476);
+        assert.equal(artifact.verdict.aggregate.recallDenominator, 476);
         assert.equal(
             artifact.verdict.aggregate.unboundCandidates,
             0,

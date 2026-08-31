@@ -42,7 +42,11 @@ import {
     scoringContractDescriptorInput,
 } from "@/lib/memoryEvalScoringContractDigest";
 import { adoptedBatchDigest } from "@/lib/memoryEvalAdoptedBatchSuccession";
-import { EVAL_DATASET_COMPOSITIONS } from "@/lib/memoryEvalDatasetRegistry";
+// From the leaf module rather than the registry: importing the registry
+// here made it a dependency of every schema-3 dataset that reads this
+// manifest, and the registry now imports succ-6, which reads succ-5 at
+// module scope. See `lib/memoryEvalDatasetCompositions.ts`.
+import { EVAL_DATASET_COMPOSITIONS } from "@/lib/memoryEvalDatasetCompositions";
 import { evalDatasetManifest } from "@/lib/memoryEvalDatasetManifests";
 import {
     MEMORY_EVAL_SUCC4_CASES,

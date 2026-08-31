@@ -58,17 +58,17 @@ import {
     verifyEvalDatasetManifest,
     type EvalDatasetComposition,
 } from "@/lib/memoryEvalDatasetManifests";
-import { MEMORY_EVAL_CASES } from "@/lib/memoryExtractionEvalFixtures";
-import { ADOPTED_BATCHES } from "@/lib/memoryExtractionEvalAdopted";
-import { MEMORY_EVAL_SUCCESSOR_CASES } from "@/lib/memoryEvalSuccessorFixtures";
-import { SUCCESSOR_ADOPTED_BATCHES } from "@/lib/memoryEvalSuccessorAdopted";
-import { MEMORY_EVAL_SUCC3_CASES } from "@/lib/memoryEvalSucc3Fixtures";
-import { SUCC3_ADOPTED_BATCHES } from "@/lib/memoryEvalSucc3Adopted";
+import { EVAL_DATASET_COMPOSITIONS as COMPOSITIONS } from "@/lib/memoryEvalDatasetCompositions";
 import { MEMORY_EVAL_SUCC4_CASES } from "@/lib/memoryEvalSucc4Dataset";
 import {
     MEMORY_EVAL_SUCC4_MANIFEST,
     verifySucc4Manifest,
 } from "@/lib/memoryEvalSucc4Manifest";
+import {
+    MEMORY_EVAL_SUCC6_CASES,
+    MEMORY_EVAL_SUCC6_MANIFEST,
+    verifySucc6Manifest,
+} from "@/lib/memoryEvalSucc6";
 import {
     MEMORY_EVAL_SUCC5_CASES,
     MEMORY_EVAL_SUCC5_MANIFEST,
@@ -111,31 +111,11 @@ export const MEMORY_EVAL_ARTIFACT_SCHEMA_WITH_CONTRACT_DIGEST = 2;
 export const MEMORY_EVAL_SUPPORTED_DATASET_SCHEMAS: readonly number[] = [1, 2, 3];
 
 /**
- * Every dataset this tree can still supply cases for, by version.
- *
- * A manifest without an entry here is still a record — it says what the
- * dataset was — but its artifacts cannot be classified, because classifying
- * a record means comparing it against that case's gold labels.
+ * Re-exported from `lib/memoryEvalDatasetCompositions.ts`, where it moved on
+ * 2026-08-31 to break a cycle. Every existing consumer imports it from here,
+ * and the table's own module explains why it is no longer defined here.
  */
-export const EVAL_DATASET_COMPOSITIONS: Readonly<
-    Record<string, EvalDatasetComposition>
-> = {
-    "mem-eval-seed-11": {
-        schemaVersion: 1,
-        batches: ADOPTED_BATCHES,
-        cases: MEMORY_EVAL_CASES,
-    },
-    "mem-eval-succ-2": {
-        schemaVersion: 2,
-        batches: SUCCESSOR_ADOPTED_BATCHES,
-        cases: MEMORY_EVAL_SUCCESSOR_CASES,
-    },
-    "mem-eval-succ-3": {
-        schemaVersion: 2,
-        batches: SUCC3_ADOPTED_BATCHES,
-        cases: MEMORY_EVAL_SUCC3_CASES,
-    },
-};
+export { EVAL_DATASET_COMPOSITIONS } from "@/lib/memoryEvalDatasetCompositions";
 
 /**
  * The identity every schema-3 manifest shares, whatever its composition.
@@ -187,9 +167,20 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         verify: () => verifySucc4Manifest(MEMORY_EVAL_SUCC4_MANIFEST),
     },
     {
+        // Superseded by succ-6 and kept resolvable for the same reason succ-4
+        // is: the 2026-08-29 decision-grade run was scored against it, and
+        // that artifact has to stay readable.
         manifest: MEMORY_EVAL_SUCC5_MANIFEST,
         cases: MEMORY_EVAL_SUCC5_CASES,
         verify: () => verifySucc5Manifest(),
+    },
+    {
+        manifest: MEMORY_EVAL_SUCC6_MANIFEST,
+        cases: MEMORY_EVAL_SUCC6_CASES,
+        // Takes no argument, so it compares the pinned record against the
+        // tree rather than an argument against itself — see the note on
+        // `verifySucc6Manifest`.
+        verify: () => verifySucc6Manifest(),
     },
 ];
 
@@ -432,7 +423,7 @@ export function resolveArtifactDataset(
 
     /* --- can this tree still supply the cases? --------------------------- */
 
-    const composition = EVAL_DATASET_COMPOSITIONS[declaredVersion];
+    const composition = COMPOSITIONS[declaredVersion];
     if (!composition) {
         return refuse(
             "dataset_not_in_tree",

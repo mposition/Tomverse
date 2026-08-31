@@ -45,6 +45,13 @@ import {
     MEMORY_EVAL_SUCC5_DATASET_VERSION,
     MEMORY_EVAL_SUCC5_MANIFEST,
 } from "@/lib/memoryEvalSucc5";
+import {
+    MEMORY_EVAL_SUCC6_CASES,
+    MEMORY_EVAL_SUCC6_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC6_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC6_DATASET_VERSION,
+    MEMORY_EVAL_SUCC6_MANIFEST,
+} from "@/lib/memoryEvalSucc6";
 import { MEMORY_EVAL_DATASET_MANIFESTS } from "@/lib/memoryEvalDatasetManifests";
 import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
 import { datasetFingerprintInputV3 } from "@/lib/memoryEvalDatasetSchemaV3";
@@ -84,11 +91,16 @@ export type HarnessTarget =
 /**
  * The dataset the harness is pointed at.
  *
- * One name, changed in one place. The harness has moved target three times —
- * seed-11 to succ-2 to succ-3 to succ-4 — and each move was a set of import
- * renames spread across the file.
+ * One name, changed in one place. The harness has moved target five times —
+ * seed-11 to succ-2 to succ-3 to succ-4 to succ-5 to succ-6 — and before this
+ * module each move was a set of import renames spread across the file.
+ *
+ * succ-6 is the first move that changes the *sample*: succ-5 shared succ-4's
+ * cases and corrected only the contract. Thirteen cases differ here, so a
+ * half-switched harness would fingerprint one set and score another — which
+ * is the failure this module was written to make impossible.
  */
-export const HARNESS_TARGET_DATASET_VERSION = MEMORY_EVAL_SUCC5_DATASET_VERSION;
+export const HARNESS_TARGET_DATASET_VERSION = MEMORY_EVAL_SUCC6_DATASET_VERSION;
 
 /** Every dataset this module can build a target for, newest last. */
 const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
@@ -137,6 +149,20 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
+    [MEMORY_EVAL_SUCC6_DATASET_VERSION]: () => ({
+        datasetSchemaVersion: 3,
+        datasetVersion: MEMORY_EVAL_SUCC6_DATASET_VERSION,
+        datasetFrozen: MEMORY_EVAL_SUCC6_DATASET_FROZEN,
+        datasetPurpose: MEMORY_EVAL_SUCC6_DATASET_PURPOSE,
+        cases: MEMORY_EVAL_SUCC6_CASES,
+        // Computed, not read from the manifest — that is the whole point of
+        // the binding check below. succ-6's manifest is a pinned literal, so
+        // the comparison is a record against a tree rather than a tree
+        // against itself.
+        datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC6_CASES)),
+        scoringContractDigest: sha256(scoringContractDescriptorInput()),
+        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    }),
 };
 
 /**
@@ -172,7 +198,11 @@ export type TargetManifestDigests = {
 export function targetManifestDigests(
     datasetVersion: string
 ): TargetManifestDigests | null {
-    for (const manifest of [MEMORY_EVAL_SUCC5_MANIFEST, MEMORY_EVAL_SUCC4_MANIFEST]) {
+    for (const manifest of [
+        MEMORY_EVAL_SUCC6_MANIFEST,
+        MEMORY_EVAL_SUCC5_MANIFEST,
+        MEMORY_EVAL_SUCC4_MANIFEST,
+    ]) {
         if (datasetVersion === manifest.datasetVersion) {
             return {
                 datasetDigest: manifest.datasetDigest,
