@@ -515,6 +515,78 @@ test("a manifest disagreeing with the tree about adoption is refused", () => {
     assert.equal(failures.length, 1, failures.join(" | "));
 });
 
+test("the no-argument call compares the record with the tree, not the tree with itself", () => {
+    // The defect this replaced: `manifest` defaulted to `buildSucc6Manifest()`
+    // while the body computed `buildSucc6Manifest()` too, so calling with no
+    // argument compared the tree with itself and always returned empty. The
+    // pin existed and nothing consulted it —
+    // `scripts/check-memory-eval-succ6.mjs` called it exactly this way and
+    // printed a clean bill over a dataset it had not checked.
+    const source = readFileSync(path.join(REPO, "lib/memoryEvalSucc6.ts"), "utf8");
+    const signature = source.slice(
+        source.indexOf("export function verifySucc6Manifest("),
+        source.indexOf("): readonly string[] {", source.indexOf("export function verifySucc6Manifest("))
+    );
+    assert.ok(
+        signature.includes("manifest: Succ6DatasetManifest = MEMORY_EVAL_SUCC6_MANIFEST"),
+        "the record side defaults to something other than the pinned literal"
+    );
+    assert.ok(
+        !signature.includes("manifest: Succ6DatasetManifest = buildSucc6Manifest()"),
+        "the record side is computed again, so a no-argument call is a tautology"
+    );
+    // And the two calls agree, which is what makes the check script's
+    // no-argument call meaningful.
+    assert.deepEqual(
+        [...verifySucc6Manifest()],
+        [...verifySucc6Manifest(MEMORY_EVAL_SUCC6_MANIFEST)]
+    );
+});
+
+test("a moved tree is reported against the pinned record", () => {
+    // The tree side is injectable so this can be shown to fail without
+    // editing a file. A check that cannot be made to fail is not evidence
+    // that anything passed.
+    const mutated = MEMORY_EVAL_SUCC6_CASES.map((testCase, index) =>
+        index > 0
+            ? testCase
+            : {
+                  ...testCase,
+                  conversations: testCase.conversations.map((conversation) => ({
+                      ...conversation,
+                      messages: conversation.messages.map((message, position) =>
+                          position > 0
+                              ? message
+                              : { ...message, content: `${message.content} CHANGED` }
+                      ),
+                  })),
+              }
+    );
+    const movedDigest = createHash("sha256")
+        .update(datasetFingerprintInputV3(mutated), "utf8")
+        .digest("hex");
+    assert.notEqual(movedDigest, MEMORY_EVAL_SUCC6_MANIFEST.datasetDigest);
+
+    const withoutDigest = { ...buildSucc6Manifest(), datasetDigest: movedDigest };
+    delete withoutDigest.manifestDigest;
+    const movedTree = {
+        ...withoutDigest,
+        manifestDigest: createHash("sha256")
+            .update(succ6ManifestFingerprintInput(withoutDigest), "utf8")
+            .digest("hex"),
+    };
+
+    const failures = verifySucc6Manifest(undefined, movedTree);
+    assert.ok(
+        failures.some((line) => line.startsWith("datasetDigest:")),
+        failures.join(" | ")
+    );
+    assert.ok(
+        failures.some((line) => line.startsWith("manifestDigest:")),
+        failures.join(" | ")
+    );
+});
+
 test("the pinned record disagrees when the sample moves under it", () => {
     // What the pin is for. A computed manifest could not fail this: it would
     // recompute alongside the edit and report nothing.
