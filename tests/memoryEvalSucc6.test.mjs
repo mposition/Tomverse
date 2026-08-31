@@ -14,6 +14,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
@@ -59,6 +60,8 @@ import {
     ASSISTANT_ONLY_SUBTYPES,
     SUBTYPE_REVIEW,
     assistantOnlySubtypeFloor,
+    subtypeTableDigest,
+    subtypeTableFingerprintInput,
     unknownSubtypeRows,
 } from "../lib/memoryEvalAssistantOnlySubtypes.ts";
 import {
@@ -408,6 +411,57 @@ test("the manifest digest covers the manifest, and not itself or the freeze", ()
 test("it is not frozen, and the manifest says the same", () => {
     assert.equal(MEMORY_EVAL_SUCC6_DATASET_FROZEN, false);
     assert.equal(MEMORY_EVAL_SUCC6_MANIFEST.frozen, false);
+});
+
+test("the freeze cannot run ahead of the subtype table's signature", () => {
+    // The hazard this encodes: the review status, reviewer and date are inside
+    // `subtypeTableDigest`, so recording the signature moves that digest and
+    // the manifest digest with it. Pin first and sign after, and the record's
+    // digests describe a table that no longer exists. Sign, recompute, pin.
+    //
+    // Asserted by reading the source rather than by flipping the constant,
+    // because the constant is a module-level literal — there is nothing to
+    // flip at runtime, and a test that could would be testing a mutability
+    // this file does not have.
+    const source = readFileSync(
+        path.join(REPO, "lib/memoryEvalSucc6.ts"),
+        "utf8"
+    );
+    assert.ok(
+        source.includes("MEMORY_EVAL_SUCC6_DATASET_FROZEN) {"),
+        "verifySucc6Manifest no longer guards the frozen case"
+    );
+    assert.ok(
+        source.includes('SUBTYPE_REVIEW.status !== "human_confirmed"'),
+        "freezing no longer requires a signed subtype table"
+    );
+    assert.ok(
+        source.includes("!SUBTYPE_REVIEW.reviewer || !SUBTYPE_REVIEW.reviewedAt"),
+        "freezing no longer requires a named reviewer and a date"
+    );
+    // And the two states agree right now: not frozen, not signed.
+    assert.equal(MEMORY_EVAL_SUCC6_DATASET_FROZEN, false);
+    assert.equal(SUBTYPE_REVIEW.status, "ai_draft");
+});
+
+test("recording the signature moves the subtype digest, so it cannot be pinned first", () => {
+    // The ordering constraint as arithmetic rather than as a comment: the same
+    // rows under a different review status fingerprint differently.
+    const draft = subtypeTableFingerprintInput();
+    assert.ok(draft.includes("status=ai_draft"));
+    assert.ok(draft.includes("reviewer=-"));
+    assert.ok(draft.includes("reviewedAt=-"));
+    // `method` too — a signature covers what was claimed when it was given.
+    assert.ok(draft.includes(`method=${SUBTYPE_REVIEW.method}`));
+    const signed = draft
+        .replace("status=ai_draft", "status=human_confirmed")
+        .replace("reviewer=-", "reviewer=someone")
+        .replace("reviewedAt=-", "reviewedAt=2026-08-31");
+    assert.notEqual(
+        createHash("sha256").update(signed, "utf8").digest("hex"),
+        subtypeTableDigest(),
+        "the signature does not move the digest, so the pin order would not matter"
+    );
 });
 
 test("a manifest claiming adoption the tree has not granted is refused", () => {

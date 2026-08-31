@@ -5,8 +5,8 @@
  *
  * `succ-5` shares `succ-4`'s case array by reference and records the same
  * dataset digest deliberately: only the contract descriptor moved, so the
- * sample had to be provably identical. `succ-6` is the other kind. Ten cases
- * leave and thirteen arrive, so the array really does diverge and the dataset
+ * sample had to be provably identical. `succ-6` is the other kind. Thirteen
+ * cases leave and thirteen arrive, so the array really does diverge and the dataset
  * digest really is new — and `verifySucc6Manifest()` refuses a manifest whose
  * digest matches `succ-5`, which is the exact inverse of the check `succ-5`
  * carries.
@@ -56,7 +56,10 @@ import {
 } from "@/lib/memoryEvalScoringContractDigest";
 import { MEMORY_EVAL_SUCC5_CASES } from "@/lib/memoryEvalSucc5";
 import { MEMORY_EVAL_SUCC6_REPLACEMENTS } from "@/lib/memoryEvalSucc6Replacements";
-import { subtypeTableDigest } from "@/lib/memoryEvalAssistantOnlySubtypes";
+import {
+    SUBTYPE_REVIEW,
+    subtypeTableDigest,
+} from "@/lib/memoryEvalAssistantOnlySubtypes";
 import {
     SUCC6_COMPOSITION_ADDITIONS,
     SUCC6_COMPOSITION_ADDITION_IDS,
@@ -86,7 +89,7 @@ export const MEMORY_EVAL_SUCC6_DATASET_PURPOSE: "development" | "decision" =
     "decision";
 
 /**
- * The 1,140 cases carried over, in `succ-5`'s order.
+ * The 1,137 cases carried over, in `succ-5`'s order.
  *
  * Order is preserved rather than rebuilt so that the inherited part of the
  * fingerprint is the inherited part of `succ-5`'s, and a diff of the two
@@ -270,6 +273,32 @@ export function verifySucc6Manifest(
                 `${MEMORY_EVAL_SUCC6_DATASET_FROZEN}. This field is outside the ` +
                 "digest, so nothing else here would have caught it."
         );
+    }
+    // Freezing is a claim about two artefacts, and only one of them is the
+    // sample. A dataset frozen over a classification nobody signed would carry
+    // a floor measured by an AI draft into every later citation of it, and the
+    // docs/ops/memory-extraction-eval-dataset.md §3.3 floor is decided by the classification.
+    //
+    // This also fixes the order the freeze has to run in. The review status,
+    // reviewer and date are inside `subtypeTableDigest`, so recording the
+    // signature *moves* that digest and the manifest digest with it. Pinning
+    // the draft's values first and signing afterwards produces a record whose
+    // digests describe a table that no longer exists: sign, recompute, then
+    // pin.
+    if (MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
+        if (SUBTYPE_REVIEW.status !== "human_confirmed") {
+            failures.push(
+                `frozen with the subtype table still ${SUBTYPE_REVIEW.status}: the ` +
+                    "docs/ops/memory-extraction-eval-dataset.md §3.3 floor rests on " +
+                    "that table, and freezing over an unsigned reading freezes the " +
+                    "reading too"
+            );
+        }
+        if (!SUBTYPE_REVIEW.reviewer || !SUBTYPE_REVIEW.reviewedAt) {
+            failures.push(
+                "frozen with a subtype table confirmed by nobody, or on no date"
+            );
+        }
     }
     if (manifest.subtypeTableDigest !== built.subtypeTableDigest) {
         failures.push(
