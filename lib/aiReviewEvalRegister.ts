@@ -29,6 +29,48 @@ import {
 
 export const AI_REVIEW_EVAL_REGISTER_MIN_INDEPENDENT_RUNS = 2;
 
+/**
+ * One decision run, with the artifact it came from and the numbers it
+ * produced.
+ *
+ * ## Why the identity is five fields and not the dataset digest
+ *
+ * The first version of the artifact comparison found the register entry to
+ * check by matching on `datasetDigest`. A dataset is a test paper: every
+ * reviewer sits the same one, so the digest identifies the exam and not the
+ * candidate. Two reviewers evaluated on one set therefore matched each other's
+ * artifacts, and checking reviewer A against reviewer B's numbers reported B
+ * as a transcription error in A's approval.
+ *
+ * A run is identified by the reviewer, the prompt version, the commit, the
+ * ordinal and the artifact it wrote. All five are recorded here and all five
+ * are asserted against the artifact's own summary, so a run cannot be
+ * attributed to a pair that did not produce it.
+ */
+export type AiReviewEvalRunEvidence = {
+    /** Repository-relative path to the artifact this run wrote. */
+    artifactRef: string;
+    /** Which of the independent runs this is. Two runs, two ordinals. */
+    runOrdinal: number;
+    /** The commit the harness ran at, as the artifact records it. */
+    evaluatedCommit: string;
+    /** The dataset this run scored. Must equal the entry's. */
+    datasetDigest: string;
+    /** Must equal the entry's; asserted against the artifact too. */
+    reviewerModelId: string;
+    promptVersion: string;
+    /**
+     * The aggregate the thresholds are applied to, plus the per-arm numbers
+     * the gap and shortfall rules need. Generated from the artifact by
+     * `approvalBlockFromArtifact()` and compared back against it digit for
+     * digit; nothing here is typed by hand.
+     */
+    metrics: AiReviewApprovalMetrics;
+    byLanguage: readonly AiReviewApprovalArmMetrics[];
+    byTaskType: readonly AiReviewApprovalArmMetrics[];
+    zeroToleranceViolations: number;
+};
+
 export type AiReviewEvalEntry = {
     reviewerModelId: string;
     promptVersion: string;
@@ -51,16 +93,23 @@ export type AiReviewEvalEntry = {
      * §3.2 evidence. Required and complete on an approved entry; null while
      * the pair is a candidate.
      *
-     * `runOrdinals` carries the two independent decision runs by ordinal, so
-     * an approval resting on one run re-reported twice is visible as a single
-     * ordinal rather than hidden inside a prose claim.
+     * The numbers live on the RUNS, not here. An approval rests on two
+     * independent decision runs, and a single aggregate for both cannot be
+     * checked against either artifact -- there is no artifact it corresponds
+     * to. Each run carries its own artifact, ordinal, commit and numbers, and
+     * the thresholds are applied to each of them, so "two independent runs
+     * both cleared the bar" is what the gate actually verifies rather than
+     * "some pooled figure did".
      */
     evaluation: {
-        artifactRefs: readonly string[];
-        runOrdinals: readonly number[];
-        evaluatedCommit: string;
+        runs: readonly AiReviewEvalRunEvidence[];
         datasetVersion: string;
         datasetSchemaVersion: number;
+        /**
+         * The digest every run must carry. Recorded here as well so the entry
+         * states which test paper it is about, and so a run evaluated against
+         * a different one is a mismatch rather than a silent substitution.
+         */
         datasetDigest: string;
         languages: readonly string[];
         sampleCounts: Readonly<Record<string, number>>;
@@ -71,16 +120,6 @@ export type AiReviewEvalEntry = {
          * re-bless an approval that was granted against the old one.
          */
         thresholdVersion: string;
-        metrics: AiReviewApprovalMetrics;
-        /**
-         * Per-arm numbers, recorded because the aggregate is exactly what
-         * hides a collapsed arm. The language gap rule and the task-type
-         * shortfall rule are computed from these and cannot be checked
-         * without them.
-         */
-        byLanguage: readonly AiReviewApprovalArmMetrics[];
-        byTaskType: readonly AiReviewApprovalArmMetrics[];
-        zeroToleranceViolations: number;
         /**
          * How many of the five zero-tolerance rules a person actually judged.
          * A run screens three by term list; an approval that examined only
@@ -174,21 +213,41 @@ export const approvedEntryProblems = (
     if (!evaluation) {
         return ["approved without any evaluation evidence"];
     }
-    if (evaluation.artifactRefs.length === 0) {
-        problems.push("no evaluation artifact reference");
-    }
-    const ordinals = new Set(evaluation.runOrdinals);
+    const ordinals = new Set(evaluation.runs.map((run) => run.runOrdinal));
     if (ordinals.size < AI_REVIEW_EVAL_REGISTER_MIN_INDEPENDENT_RUNS) {
         problems.push(
             `${ordinals.size} distinct run ordinal(s); ` +
                 `${AI_REVIEW_EVAL_REGISTER_MIN_INDEPENDENT_RUNS} independent runs are required`
         );
     }
-    if (!evaluation.evaluatedCommit || evaluation.evaluatedCommit === "unknown") {
-        problems.push("the evaluated commit is not named");
-    }
     if (!evaluation.datasetDigest.startsWith("sha256:")) {
         problems.push("the dataset digest is missing or not a sha256 digest");
+    }
+
+    // Each run's own identity. A run belongs to a pair, and attributing it to
+    // another one is how reviewer A ends up approved on reviewer B's numbers.
+    for (const run of evaluation.runs) {
+        const label = `run ${run.runOrdinal}`;
+        if (!run.artifactRef) problems.push(`${label}: no artifact reference`);
+        if (!run.evaluatedCommit || run.evaluatedCommit === "unknown") {
+            problems.push(`${label}: the evaluated commit is not named`);
+        }
+        if (run.datasetDigest !== evaluation.datasetDigest) {
+            problems.push(
+                `${label}: scored dataset ${run.datasetDigest}, but the approval is about ` +
+                    `${evaluation.datasetDigest}`
+            );
+        }
+        if (run.reviewerModelId !== entry.reviewerModelId) {
+            problems.push(
+                `${label}: was run by ${run.reviewerModelId}, not ${entry.reviewerModelId}`
+            );
+        }
+        if (run.promptVersion !== entry.promptVersion) {
+            problems.push(
+                `${label}: used prompt ${run.promptVersion}, not ${entry.promptVersion}`
+            );
+        }
     }
     if (!evaluation.blindReviewRef) {
         problems.push(
@@ -225,15 +284,26 @@ export const approvedEntryProblems = (
                 `a quality approval cannot rest on an unapproved bar`
         );
     } else {
-        problems.push(
-            ...thresholdShortfalls({
-                thresholds,
-                aggregate: evaluation.metrics,
-                byLanguage: evaluation.byLanguage,
-                byTaskType: evaluation.byTaskType,
-                zeroToleranceViolations: evaluation.zeroToleranceViolations,
-            })
-        );
+        // Applied to EACH run, not to a pooled figure.
+        //
+        // Two independent runs both clearing the bar is the claim the approval
+        // makes; pooling them would need a combining rule nobody has decided,
+        // and the pooled number would correspond to no artifact, so nothing
+        // could check it. A run that fell short is named by its ordinal.
+        if (evaluation.runs.length === 0) {
+            problems.push("no run evidence, so nothing was measured");
+        }
+        for (const run of evaluation.runs) {
+            problems.push(
+                ...thresholdShortfalls({
+                    thresholds,
+                    aggregate: run.metrics,
+                    byLanguage: run.byLanguage,
+                    byTaskType: run.byTaskType,
+                    zeroToleranceViolations: run.zeroToleranceViolations,
+                }).map((problem) => `run ${run.runOrdinal}: ${problem}`)
+            );
+        }
     }
     return problems;
 };

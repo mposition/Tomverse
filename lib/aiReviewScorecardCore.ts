@@ -136,10 +136,20 @@ export type ScorecardRunRow = {
  *     inside the window are the anchors, not the process's true first and
  *     last.
  *
- * All three make this a LOWER bound on what went missing. A lower bound above
- * zero is still proof of a gap, which is what the metric is for; a bound of
- * zero is not proof there was none, and the structured
- * `comparison_review_run_record_failed` events remain the second signal.
+ * All three make this a LOWER bound on what went missing, and the second case
+ * is not a corner: a writer whose every write failed is INVISIBLE. Eighty
+ * writes that landed from one process and twenty that were all lost from
+ * another report as `attempted 80, landed 80, missing 0` -- a fifth of the
+ * window gone and the arithmetic clean.
+ *
+ * So this detects loss; it does not measure completeness, and nothing may
+ * approve completeness from it. A count above zero is proof of a gap and a
+ * reason to refuse; a count of zero is not evidence there was none. Measuring
+ * completeness needs an attempted total from outside this table -- the
+ * `comparison_review_run` log line is emitted for every run BEFORE the write,
+ * so counting those over the window is the independent total, and
+ * `summariseReliability` computes `traceCompleteness` only when it is given
+ * one.
  *
  * Rows written before the writer columns existed carry an empty writer id and
  * are excluded -- counting them as one enormous writer would invent a span of
@@ -147,7 +157,7 @@ export type ScorecardRunRow = {
  */
 export const telemetryCompleteness = (
     rows: readonly Pick<ScorecardRunRow, "writerId" | "writerSequence">[]
-): { attempted: number; landed: number; missing: number } => {
+): { attempted: number; landed: number; missing: number; writers: number } => {
     const spans = new Map<string, { min: number; max: number; count: number }>();
     for (const row of rows) {
         if (!row.writerId) continue;
@@ -173,7 +183,7 @@ export const telemetryCompleteness = (
         attempted += span.max - span.min + 1;
         landed += span.count;
     }
-    return { attempted, landed, missing: attempted - landed };
+    return { attempted, landed, missing: attempted - landed, writers: spans.size };
 };
 
 /**
@@ -253,20 +263,36 @@ export type ReliabilityScorecard = {
     /** The failed half: refunds that reported a figure above zero. */
     unrefundedFailureRate: ScorecardMetric;
     /**
-     * Telemetry writes this window attempted that are not in the table.
+     * Writes this window is missing that the sequence arithmetic can SEE.
      *
-     * Every other rate here is computed from rows that landed and therefore
-     * cannot say how many did not. This one can, because each write carries a
-     * per-process sequence claimed before the insert. It is a LOWER bound --
-     * see telemetryCompleteness() for the three cases it cannot see -- so a
-     * value above zero proves a gap and a value of zero does not disprove one.
+     * A count, deliberately not a rate. A rate invites being read as "the
+     * window is 99% complete", and this number cannot support that: a writer
+     * whose every write failed leaves no rows, so it leaves no span, so it is
+     * invisible here. Eighty landed writes from one process and twenty lost
+     * ones from another produce `missing: 0`.
      *
-     * It is reported beside the others rather than folded into them: a window
-     * with a 4% missing rate is not a window whose completion rate is 4% worse,
-     * it is a window whose completion rate is measured over an incomplete
-     * sample, and those call for different responses.
+     * So: above zero is proof of loss and a reason to refuse. Zero is not
+     * evidence of completeness, and nothing may approve completeness from it.
      */
-    missingTraceRate: ScorecardMetric;
+    detectedTraceGaps: {
+        missing: number;
+        /** Writes accounted for inside the spans that were visible. */
+        withinSpans: number;
+        writers: number;
+    };
+    /**
+     * Actual completeness, against an attempted total counted OUTSIDE this
+     * table.
+     *
+     * `null` when no such total was supplied, and null is the honest answer
+     * rather than a zero: completeness is unknown until something that is not
+     * the surviving rows says how many writes there should have been. The
+     * `comparison_review_run` log line is emitted for every run before its
+     * write, so the log platform's count over the window is that total.
+     */
+    traceCompleteness: ScorecardMetric | null;
+    /** Who attested the attempted total. Null when none was supplied. */
+    traceCompletenessSource: string | null;
     p50DurationMs: number | null;
     p95DurationMs: number | null;
     reviewerHealth: readonly ReviewerHealthRow[];
@@ -279,7 +305,20 @@ const REACHED_PROVIDER_STATUSES = new Set(["completed", "failed"]);
 export const summariseReliability = (
     rows: readonly ScorecardRunRow[],
     windowDays: number,
-    minimums: { rate?: number } = {}
+    minimums: { rate?: number } = {},
+    /**
+     * How many writes were attempted, counted somewhere other than this table.
+     *
+     * Without it `traceCompleteness` is null and stays null: the gap
+     * arithmetic cannot supply it, because a writer whose every write failed
+     * leaves nothing to count. The `comparison_review_run` log line is emitted
+     * for every run before the write, so the log platform's count over the
+     * same window is the independent total.
+     */
+    evidence: {
+        attemptedWrites?: number | null;
+        attemptedWritesSource?: string | null;
+    } = {}
 ): ReliabilityScorecard => {
     const minimumDenominator = minimums.rate ?? 20;
     const byOutcome: Record<string, number> = {};
@@ -440,16 +479,26 @@ export const summariseReliability = (
                     "failed attempts whose refund did not report; those are counted by unreconciledSettlements instead",
             }
         ),
-        missingTraceRate: metric(
-            completeness.missing,
-            completeness.attempted,
-            "telemetry writes this window attempted",
-            {
-                minimumDenominator,
-                excluded:
-                    "rows written before the writer columns existed; and this is a lower bound -- writes lost at the end of a process's life leave no later row to anchor them",
-            }
-        ),
+        detectedTraceGaps: {
+            missing: completeness.missing,
+            withinSpans: completeness.attempted,
+            writers: completeness.writers,
+        },
+        traceCompleteness:
+            typeof evidence.attemptedWrites === "number" &&
+            evidence.attemptedWrites > 0
+                ? metric(
+                      Math.max(0, evidence.attemptedWrites - rows.length),
+                      evidence.attemptedWrites,
+                      "telemetry writes attempted, counted outside this table",
+                      {
+                          minimumDenominator,
+                          excluded:
+                              `attested by: ${evidence.attemptedWritesSource ?? "an unnamed source"}`,
+                      }
+                  )
+                : null,
+        traceCompletenessSource: evidence.attemptedWritesSource ?? null,
         p50DurationMs: percentile(durations, 0.5),
         p95DurationMs: percentile(durations, 0.95),
         reviewerHealth: [...health.entries()]
@@ -894,15 +943,17 @@ export const AI_REVIEW_M5_READINESS_ITEMS = [
     /** Reservation and settlement are both recorded, so mismatch is computable. */
     "credit_reconciliation_measurable",
     /**
-     * A telemetry write that did not land is countable.
+     * A telemetry write that did not land is countable, and a completeness
+     * figure can be computed when an attempted total is supplied.
      *
-     * Without this, every reliability rate is computed over whatever happened
-     * to be written, and a partial outage -- some inserts failing, some not --
-     * reads as a healthy window. An instrument that cannot say how much of its
-     * own input is missing cannot produce a believable number, which is what
-     * this list is for.
+     * Two halves, because detection alone is not completeness. The sequence
+     * arithmetic finds writes missing between rows that landed; it cannot see
+     * a writer whose every write failed, since that leaves no rows to find a
+     * gap in. So the instrument must also accept an attempted total counted
+     * outside the table, and eligibility -- not this list -- is where an
+     * actual total gets judged.
      */
-    "telemetry_completeness_measurable",
+    "telemetry_loss_detection",
     /** Conversions are ordered in time, so a rate means what it says. */
     "sequenced_conversion_metrics",
     /** There is somewhere for production evidence to be recorded. */

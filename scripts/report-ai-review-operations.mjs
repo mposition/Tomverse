@@ -48,9 +48,36 @@ const pct = (metric) =>
 
 const line = (label, value) => console.log(`  ${label.padEnd(34)} ${value}`);
 
+// The attempted-write total, counted somewhere other than the run table.
+//
+// The run table cannot supply its own denominator: a writer whose every write
+// failed leaves no rows and therefore no gap to find. The
+// `comparison_review_run` structured log line is emitted for every run BEFORE
+// its write, so the log platform's count of that event over the same window is
+// the independent total. Without it the report says completeness is unknown,
+// which is the honest answer and not a zero.
+const attemptedWrites = argValue("attempted-writes")
+  ? Number(argValue("attempted-writes"))
+  : null;
+const attemptedWritesSource = argValue("attempted-writes-source") || null;
+if (attemptedWrites !== null && !Number.isInteger(attemptedWrites)) {
+  console.error("--attempted-writes must be a whole number.");
+  process.exit(1);
+}
+if (attemptedWrites !== null && !attemptedWritesSource) {
+  console.error(
+    "--attempted-writes-source is required with --attempted-writes: a total " +
+      "nobody can trace back to a query is not evidence."
+  );
+  process.exit(1);
+}
+
 const cards = [];
 for (const windowDays of windows) {
-  const card = await readAiReviewScorecard(windowDays);
+  const card = await readAiReviewScorecard(windowDays, new Date(), {
+    attemptedWrites,
+    attemptedWritesSource,
+  });
   cards.push(card);
   if (asJson) continue;
 
@@ -74,7 +101,20 @@ for (const windowDays of windows) {
   // Printed first among the reliability figures, because it qualifies every
   // one of them: a rate above zero here means the numbers below are computed
   // over an incomplete sample.
-  line("missing telemetry writes", pct(card.reliability.missingTraceRate));
+  // Detection first, because it qualifies every figure under it: a gap above
+  // zero means the numbers below are computed over an incomplete sample.
+  const gaps = card.reliability.detectedTraceGaps;
+  line(
+    "telemetry writes provably lost",
+    `${gaps.missing} of ${gaps.withinSpans} across ${gaps.writers} writer(s)`
+  );
+  line(
+    "telemetry completeness",
+    card.reliability.traceCompleteness
+      ? `${pct(card.reliability.traceCompleteness)}  attested by ${card.reliability.traceCompletenessSource}`
+      : "unknown — pass --attempted-writes=<n> --attempted-writes-source=<text>; " +
+        "zero detected gaps is not evidence of none"
+  );
   line("unreconciled settlements", pct(card.reliability.unreconciledSettlements));
   line("credits resolved wrongly", pct(card.reliability.creditReconciliation));
   line("  settled above reservation", pct(card.reliability.overSettledRate));

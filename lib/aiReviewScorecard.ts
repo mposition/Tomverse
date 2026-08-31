@@ -78,8 +78,17 @@ export const readQualityScorecard = (): AiReviewQualityScorecard => {
         ).length,
         datasetVersion: evaluation?.datasetVersion ?? null,
         evaluatedAt: evaluation?.approvedAt ?? null,
-        independentRunOrdinals: evaluation?.runOrdinals ?? [],
-        zeroToleranceViolations: evaluation?.zeroToleranceViolations ?? null,
+        independentRunOrdinals: (evaluation?.runs ?? []).map((run) => run.runOrdinal),
+        // The worst of the runs, not a sum and not the first.
+        //
+        // A summed total would grow with the number of runs and read as a
+        // worse pair; the first run's figure would hide a second run that
+        // produced a violation. The question a scorecard answers here is "did
+        // any run produce one", so the maximum is what it shows.
+        zeroToleranceViolations:
+            evaluation && evaluation.runs.length > 0
+                ? Math.max(...evaluation.runs.map((run) => run.zeroToleranceViolations))
+                : null,
         drift: registerDrift(servedReviewerPairs()),
     };
 };
@@ -89,7 +98,11 @@ const windowStart = (windowDays: number, now: Date) =>
 
 export const readReliabilityScorecard = async (
     windowDays: number,
-    now = new Date()
+    now = new Date(),
+    evidence: {
+        attemptedWrites?: number | null;
+        attemptedWritesSource?: string | null;
+    } = {}
 ): Promise<ReliabilityScorecard> => {
     const rows = (await prisma.comparisonReviewRun.findMany({
         where: { createdAt: { gte: windowStart(windowDays, now) } },
@@ -130,7 +143,7 @@ export const readReliabilityScorecard = async (
             },
         },
     })) as ScorecardRunRow[];
-    return summariseReliability(rows, windowDays);
+    return summariseReliability(rows, windowDays, {}, evidence);
 };
 
 export const readAdoptionScorecard = async (
@@ -200,10 +213,19 @@ export type AiReviewScorecard = {
 
 export const readAiReviewScorecard = async (
     windowDays: number,
-    now = new Date()
+    now = new Date(),
+    /**
+     * An attempted-write total counted outside the run table, when an operator
+     * has one. Without it `traceCompleteness` stays null, which is the honest
+     * answer: the run table cannot supply its own denominator.
+     */
+    evidence: {
+        attemptedWrites?: number | null;
+        attemptedWritesSource?: string | null;
+    } = {}
 ): Promise<AiReviewScorecard> => {
     const [reliability, adoption, coverage] = await Promise.all([
-        readReliabilityScorecard(windowDays, now),
+        readReliabilityScorecard(windowDays, now, evidence),
         readAdoptionScorecard(windowDays, now),
         readTelemetryCoverage(windowDays, now),
     ]);
