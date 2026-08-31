@@ -25,6 +25,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 
@@ -40,8 +42,18 @@ const MODULES = [
 ];
 
 const loads = (modules) => {
+    // `pathToFileURL`, not the path. A Windows path begins with a drive
+    // letter, and an ESM specifier beginning `H:` is read as a URL scheme —
+    // `ERR_UNSUPPORTED_ESM_URL_SCHEME`, "Received protocol 'h:'". The tests
+    // passed here and failed on the reviewer's machine, which is the whole
+    // failure mode of building a specifier by string concatenation.
     const source = modules
-        .map((name) => `import ${JSON.stringify(`${REPO}/lib/${name}.ts`)};`)
+        .map(
+            (name) =>
+                `import ${JSON.stringify(
+                    pathToFileURL(path.join(REPO, "lib", `${name}.ts`)).href
+                )};`
+        )
         .join("\n");
     const result = spawnSync(
         process.execPath,
@@ -77,16 +89,10 @@ test("succ-4's manifest does not depend on the registry", () => {
     // pair test above would go green again if somebody restored this import
     // and also made succ-6 lazy, and then the next eager read would bring the
     // whole thing back.
-    const source = spawnSync(
-        process.execPath,
-        [
-            "-e",
-            `process.stdout.write(require("fs").readFileSync(${JSON.stringify(
-                path.join(REPO, "lib/memoryEvalSucc4Manifest.ts")
-            )}, "utf8"))`,
-        ],
-        { encoding: "utf8" }
-    ).stdout;
+    const source = readFileSync(
+        path.join(REPO, "lib", "memoryEvalSucc4Manifest.ts"),
+        "utf8"
+    );
     assert.doesNotMatch(
         source,
         /import\s*\{[^}]*\}\s*from\s*"@\/lib\/memoryEvalDatasetRegistry"/,

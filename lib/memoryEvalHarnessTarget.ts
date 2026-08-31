@@ -74,6 +74,7 @@ export type HarnessTarget =
           datasetPurpose: "decision" | "development";
           cases: readonly MemoryEvalCaseV2[];
           datasetDigest: string;
+          datasetManifestDigest: string | null;
           scoringContractDigest: string;
           scoringContractVersion: string;
       }
@@ -84,6 +85,18 @@ export type HarnessTarget =
           datasetPurpose: "decision" | "development";
           cases: readonly MemoryEvalCaseV3[];
           datasetDigest: string;
+          /**
+           * The manifest's own digest, or `null` where the manifest has none.
+           *
+           * succ-3 and succ-4 predate the field; neither is a run target, so
+           * neither needs one. It is on the target rather than read from a
+           * dataset module by the caller because a caller that names a
+           * dataset has half-switched — which is what happened: the live
+           * harness built its budget tuple with `MEMORY_EVAL_SUCC5_MANIFEST`
+           * hard-coded, so pointing the harness at succ-6 would have left a
+           * succ-6 budget refused as a tuple mismatch.
+           */
+          datasetManifestDigest: string | null;
           scoringContractDigest: string;
           scoringContractVersion: string;
       };
@@ -111,6 +124,8 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         datasetPurpose: MEMORY_EVAL_SUCC3_DATASET_PURPOSE,
         cases: MEMORY_EVAL_SUCC3_CASES,
         datasetDigest: sha256(datasetFingerprintInput(MEMORY_EVAL_SUCC3_CASES)),
+        // Schema-2 manifests carry no digest of their own.
+        datasetManifestDigest: null,
         // The schema-2 form: the descriptor AND a labelling pass over the
         // cases, because `datasetFingerprintInput()` reads only `mustInclude`.
         scoringContractDigest: scoringContractDigest(MEMORY_EVAL_SUCC3_CASES),
@@ -123,6 +138,7 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         datasetPurpose: MEMORY_EVAL_SUCC4_DATASET_PURPOSE,
         cases: MEMORY_EVAL_SUCC4_CASES,
         datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC4_CASES)),
+        datasetManifestDigest: null,
         // The schema-3 form: the descriptor alone. `datasetFingerprintInputV3`
         // already covers the labelling, and hashing it again here would pin
         // the same bytes twice — an edit would move both digests and leave a
@@ -146,6 +162,7 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         // agreeing about it.
         cases: MEMORY_EVAL_SUCC5_CASES,
         datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC5_CASES)),
+        datasetManifestDigest: MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest,
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
@@ -160,6 +177,7 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         // the comparison is a record against a tree rather than a tree
         // against itself.
         datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC6_CASES)),
+        datasetManifestDigest: MEMORY_EVAL_SUCC6_MANIFEST.manifestDigest,
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
@@ -285,4 +303,45 @@ export function harnessTargetBindingFailures(
         );
     }
     return failures;
+}
+
+/**
+ * The tuple a run would be billed under, built once for every caller.
+ *
+ * The live harness used to assemble this inline, with
+ * `MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest` written into it by name. That
+ * survived the switch to succ-6 because nothing compared it against anything:
+ * the budget test built its own tuple and checked that, so it passed while
+ * the bytes a real run would present stayed wrong. A succ-6 budget would then
+ * have been refused as `budget_tuple_mismatch` — after approval, at the point
+ * of spending.
+ *
+ * So there is one builder and both the harness and the test call it. A test
+ * that constructs the object it is checking is testing its own arithmetic.
+ */
+export type HarnessRunTuple = {
+    datasetVersion: string;
+    datasetDigest: string;
+    datasetManifestDigest: string | null;
+    scoringContractVersion: string;
+    scoringContractDigest: string;
+    promptVersion: string;
+    promptDigest: string;
+};
+
+export function harnessRunTuple(input: {
+    target?: HarnessTarget;
+    promptVersion: string;
+    promptDigest: string;
+}): HarnessRunTuple {
+    const target = input.target ?? harnessTarget();
+    return {
+        datasetVersion: target.datasetVersion,
+        datasetDigest: target.datasetDigest,
+        datasetManifestDigest: target.datasetManifestDigest,
+        scoringContractVersion: target.scoringContractVersion,
+        scoringContractDigest: target.scoringContractDigest,
+        promptVersion: input.promptVersion,
+        promptDigest: input.promptDigest,
+    };
 }
