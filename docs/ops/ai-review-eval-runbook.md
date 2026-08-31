@@ -52,6 +52,39 @@ readiness가 NO인 이유는 위 표의 2·3행이고, **둘 다 사람이 해�
 kind는 recall에만 기여하며, precision을 잃는 것보다 지어낸 precision을 보고하는
 쪽이 훨씬 나쁩니다.
 
+### 1.1a 무엇을 도구가 하고 무엇을 사람이 하는가
+
+**"1,200건 작성"을 통째로 사람 일로 넘기지 않습니다.** 그것은 AGENTS.md의
+"사람에게 남기는 것은 사람만 할 수 있는 것뿐"을 어기는 배분이고, 실제로는 표본이
+아예 만들어지지 않거나 어느 cell이 조용히 40건에 머무는 결과가 됩니다.
+
+이 표본에서 **사람만 할 수 있는 것은 판정**입니다 — "이 두 답변이 정말 모순인가",
+"이 gold가 정말 빠짐없는 목록인가", 블라인드 검토, 동결, 승인, 서명. 나머지는
+산술이거나 초안입니다.
+
+| 하는 일 | 누가 | 무엇으로 |
+|---|---|---|
+| cell별 부족분 계산, 중복 질문·빈 exhaustive 주장 적발 | 도구 | `npm run report:ai-review-eval-coverage` |
+| 질문과 답변 초안, gold **제안** | 도구 | `npm run draft:ai-review-eval-candidates` |
+| gold 채택 — 이 case가 정말 그것을 심었는지 | **사람** | 파일을 읽고 `status: "adopted"`와 자기 이름을 적음 |
+| 블라인드 검토(zero-tolerance 5종) | **사람** | §5 |
+| 동결·예산 승인·threshold 승인·최종 승인 | **사람** | §2 · §3 · §7a · §7 |
+
+**초안 도구는 절대 채택하지 않습니다.** 모든 case를 `status: "candidate"`,
+`adoptedBy: null`로 씁니다. `datasetProblems()`가 candidate를 담은 decision set을
+거부하고, **field가 없으면 candidate로 읽습니다** — 필드를 빠뜨린 case가 채택된
+것처럼 통과하지 않게 하기 위해서입니다.
+
+**초안 모델은 reviewer 후보가 아니어야 합니다.** reviewer가 표본을 쓰면 그 모델이
+자기 문체와 자기 기준의 모순을 얼마나 잘 다루는지를 품질로 보고하게 됩니다.
+스크립트가 `COMPARISON_REVIEW_DEFAULT_MODEL_IDS`의 모델을 거부하며,
+`--allow-reviewer-drafter`로 넘길 수 있지만 그 선택은 모든 case의 `draftedBy`에
+기록됩니다.
+
+**초안 도구는 `--send` 없이는 아무것도 부르지 않습니다.** 기본 실행은 나갈
+instruction 전문과 비용 상한을 출력하고 끝납니다 — 설명이 아니라 요청 자체를
+보고 결정하기 위해서입니다.
+
 ### 1.2 cell 구조
 
 정책 §3.3의 12개 cell(2 언어 × 6 작업 유형)을 **독립적으로** 관리합니다.

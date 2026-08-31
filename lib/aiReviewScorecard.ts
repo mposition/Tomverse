@@ -96,6 +96,8 @@ export const readReliabilityScorecard = async (
         select: {
             outcome: true,
             durationMs: true,
+            writerId: true,
+            writerSequence: true,
             dualReviewRequested: true,
             dualReviewAvailable: true,
             dualReviewCompleted: true,

@@ -282,6 +282,34 @@ export type AiReviewEvalCase = {
     injectionMarkers?: readonly string[];
     /** Free-text note carried into the blind review sheet. */
     notes?: string;
+    /**
+     * Whether a person has adopted this case's gold.
+     *
+     * A drafted case is a proposal: the question and the answers can be
+     * generated, but "this really is a contradiction, and this list of them is
+     * exhaustive" is a judgement, and a judgement made by the same kind of
+     * system being evaluated is not evidence about it. Absent means
+     * `candidate`, so a case that arrives without the field is not silently
+     * treated as adopted.
+     *
+     * Only enforced on `decision` sets. A development set is for iterating on
+     * the harness and its cases are never evidence.
+     */
+    status?: "candidate" | "adopted";
+    /** Who adopted it. A person, named. Null while it is a candidate. */
+    adoptedBy?: string | null;
+    adoptedAt?: string | null;
+    /**
+     * What produced the draft, when one did: model id, prompt template
+     * version, and the date. Kept so a set can answer "which of these did a
+     * model write" long after the fact, which is a question about the set's
+     * independence from the thing it measures.
+     */
+    draftedBy?: {
+        modelId: string;
+        templateVersion: string;
+        draftedAt: string;
+    } | null;
 };
 
 export type AiReviewEvalDataset = {

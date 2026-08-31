@@ -354,6 +354,15 @@ export const runComparisonReview = async (
                 promptCachePath: "comparison_review",
             }),
             maxOutputTokens: outputBudget.outputTokens,
+            // The SDK retries once, with its own backoff, before this loop
+            // sees a failure. That costs the reliability scorecard something
+            // and it is a deliberate trade: a request the SDK retried and won
+            // returns here as a first-try success, so `retryCount` -- and
+            // `retryRate` on the scorecard -- is a LOWER bound on provider
+            // requests retried. Making it exact would mean maxRetries: 0 and
+            // retrying here, which would also drop the backoff, and an
+            // immediate re-request on a 429 is worse behaviour than an
+            // unmeasured one. The metric is labelled instead.
             maxRetries: 1,
             abortSignal: AbortSignal.timeout(45_000),
             headers:

@@ -185,7 +185,9 @@
     "backfill:model-lifecycle-work-items": "node --conditions=react-server --import tsx scripts/backfill-model-lifecycle-work-items.mjs",
     "check:edge-robots": "node --import tsx scripts/check-edge-robots.mjs",
     "report:deployed-commit-drift": "node scripts/report-deployed-commit-drift.mjs",
-    "print:router-key-envelope": "node --import tsx scripts/print-router-key-envelope.mjs"
+    "print:router-key-envelope": "node --import tsx scripts/print-router-key-envelope.mjs",
+    "report:ai-review-eval-coverage": "node --conditions=react-server --import tsx scripts/report-ai-review-eval-coverage.mjs",
+    "draft:ai-review-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-ai-review-eval-candidates.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.44",

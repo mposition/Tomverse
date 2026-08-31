@@ -25,6 +25,8 @@
  *     them into one score would make a consent decision look like an outage.
  */
 
+import { settlementReconciliation } from "@/lib/comparisonReviewRunCore";
+
 export type ScorecardStatus = "ok" | "insufficient_evidence";
 
 export type ScorecardMetric = {
@@ -102,7 +104,76 @@ export type ScorecardRunRow = {
     secondarySettlementStatus: string | null;
     subjectKind: string;
     createdAt: Date;
+    /** The process that wrote the row, and its own attempt counter. */
+    writerId: string;
+    writerSequence: number;
     attempts: readonly ScorecardAttemptRow[];
+};
+
+/**
+ * How many telemetry writes were attempted, and how many landed.
+ *
+ * ## The question no query over the table can answer on its own
+ *
+ * Every rate on this scorecard is computed from rows that exist. If some
+ * inserts fail and others do not, the surviving rows are a biased sample of a
+ * healthy-looking subset, and nothing about them says how many are missing.
+ * That was the state this replaces: the telemetry module's own comment
+ * promised a `missingTraceRate` and the repository contained the name nowhere
+ * else.
+ *
+ * Each writer stamps a sequence that increments on every ATTEMPTED write. So
+ * within one writer, the span from its lowest to its highest sequence is how
+ * many writes it tried, and the rows present are how many landed.
+ *
+ * ## What it cannot see, stated rather than implied
+ *
+ *   * Writes lost at the end of a process's life have no later row to anchor
+ *     them, so the span stops at the last row that landed.
+ *   * A process whose every write failed leaves no rows at all and therefore
+ *     no writer to count.
+ *   * A window boundary cuts a writer's sequence, so the first and last rows
+ *     inside the window are the anchors, not the process's true first and
+ *     last.
+ *
+ * All three make this a LOWER bound on what went missing. A lower bound above
+ * zero is still proof of a gap, which is what the metric is for; a bound of
+ * zero is not proof there was none, and the structured
+ * `comparison_review_run_record_failed` events remain the second signal.
+ *
+ * Rows written before the writer columns existed carry an empty writer id and
+ * are excluded -- counting them as one enormous writer would invent a span of
+ * every row ever written.
+ */
+export const telemetryCompleteness = (
+    rows: readonly Pick<ScorecardRunRow, "writerId" | "writerSequence">[]
+): { attempted: number; landed: number; missing: number } => {
+    const spans = new Map<string, { min: number; max: number; count: number }>();
+    for (const row of rows) {
+        if (!row.writerId) continue;
+        if (!Number.isSafeInteger(row.writerSequence) || row.writerSequence < 1) {
+            continue;
+        }
+        const span = spans.get(row.writerId);
+        if (!span) {
+            spans.set(row.writerId, {
+                min: row.writerSequence,
+                max: row.writerSequence,
+                count: 1,
+            });
+            continue;
+        }
+        span.min = Math.min(span.min, row.writerSequence);
+        span.max = Math.max(span.max, row.writerSequence);
+        span.count += 1;
+    }
+    let attempted = 0;
+    let landed = 0;
+    for (const span of spans.values()) {
+        attempted += span.max - span.min + 1;
+        landed += span.count;
+    }
+    return { attempted, landed, missing: attempted - landed };
 };
 
 /**
@@ -144,24 +215,58 @@ export type ReliabilityScorecard = {
     dualAvailabilityRate: ScorecardMetric;
     dualCompletionRate: ScorecardMetric;
     cachedRate: ScorecardMetric;
+    /**
+     * Attempts the service itself retried.
+     *
+     * A LOWER bound on provider requests retried: the SDK call runs with
+     * maxRetries: 1, and a request it retried and won returns as an ordinary
+     * success with nothing to count. Making this exact would mean taking the
+     * SDK's retry away and doing it here, which would also take away its
+     * backoff -- an immediate re-request on a 429 is worse behaviour than an
+     * unmeasured one, so the number is labelled rather than the behaviour
+     * changed.
+     */
     retryRate: ScorecardMetric;
     /**
-     * Completed attempts with no settled figure at all. Not proof of a lost
-     * credit -- settlement is fire-and-forget and its own failure is already
-     * logged -- but the number that moves if reservations stop being settled.
+     * Provider-reached attempts that held credits and have no figure at all --
+     * neither a settlement nor a refund reported one.
+     *
+     * Not proof of a lost credit on its own, but the number that moves when
+     * reservations stop being resolved. The population is deliberately not
+     * "completed attempts": a failed attempt's refund can fail too, and while
+     * this asked only about completions those reservations were invisible.
      */
     unreconciledSettlements: ScorecardMetric;
     /**
-     * Completed attempts charged MORE than they reserved.
+     * Credits resolved in the wrong direction, over both halves of the
+     * lifecycle: a completed attempt charged MORE than it reserved, or a
+     * failed attempt that was not fully refunded.
      *
-     * Settling below a reservation is normal: the unused part is released.
-     * Settling above it means credits were taken that nothing held, which is
-     * the direction that costs a user something, and it is the metric the
-     * `zero_credit_reconciliation_mismatch` eligibility item reads. It could
-     * not be computed at all until the settled figure was recorded beside the
-     * reserved one.
+     * Settling below a reservation is normal -- the unused part is released.
+     * Settling above it, or charging anything at all for a failure, means a
+     * user is out credits nothing entitles the app to. This is the metric the
+     * `zero_credit_reconciliation_mismatch` eligibility item reads.
      */
     creditReconciliation: ScorecardMetric;
+    /** The completed half of `creditReconciliation`, on its own denominator. */
+    overSettledRate: ScorecardMetric;
+    /** The failed half: refunds that reported a figure above zero. */
+    unrefundedFailureRate: ScorecardMetric;
+    /**
+     * Telemetry writes this window attempted that are not in the table.
+     *
+     * Every other rate here is computed from rows that landed and therefore
+     * cannot say how many did not. This one can, because each write carries a
+     * per-process sequence claimed before the insert. It is a LOWER bound --
+     * see telemetryCompleteness() for the three cases it cannot see -- so a
+     * value above zero proves a gap and a value of zero does not disprove one.
+     *
+     * It is reported beside the others rather than folded into them: a window
+     * with a 4% missing rate is not a window whose completion rate is 4% worse,
+     * it is a window whose completion rate is measured over an incomplete
+     * sample, and those call for different responses.
+     */
+    missingTraceRate: ScorecardMetric;
     p50DurationMs: number | null;
     p95DurationMs: number | null;
     reviewerHealth: readonly ReviewerHealthRow[];
@@ -222,8 +327,23 @@ export const summariseReliability = (
         health.set(attempt.reviewerModelId, entry);
     }
 
-    const completedAttempts = attempts.filter(
-        (attempt) => attempt.status === "completed"
+    // Reconciliation is computed by the run core, not here. Two modules
+    // deriving the same figure is how the CLI report and a screen come to
+    // quote different numbers, and the population rule below is subtle enough
+    // that a second copy of it would drift.
+    const reconciliation = settlementReconciliation(attempts);
+    const completeness = telemetryCompleteness(rows);
+    const completedWithFigure = attempts.filter(
+        (attempt) =>
+            attempt.status === "completed" &&
+            attempt.reservedCredits > 0 &&
+            attempt.settledCredits !== null
+    );
+    const failedWithFigure = attempts.filter(
+        (attempt) =>
+            attempt.status === "failed" &&
+            attempt.reservedCredits > 0 &&
+            attempt.settledCredits !== null
     );
 
     return {
@@ -262,32 +382,72 @@ export const summariseReliability = (
         cachedRate: metric(rows.filter((row) => row.outcome === "cached").length, rows.length, "all runs", {
             minimumDenominator,
         }),
+        // Counts the SERVICE's own retry loop only. The SDK call underneath it
+        // runs with maxRetries: 1, and a request the SDK retried successfully
+        // returns as a first-try success, so `retryCount` never sees it. The
+        // rate is therefore a lower bound on provider requests retried, and
+        // says so rather than being read as the whole picture.
         retryRate: metric(
             dispatched.filter((attempt) => attempt.retryCount > 0).length,
             dispatched.length,
             "reviewer attempts that reached a provider",
-            { minimumDenominator }
+            {
+                minimumDenominator,
+                excluded:
+                    "retries the provider SDK made and won on its own; those return as a first-try success, so this is a lower bound on requests retried",
+            }
         ),
+        // Both halves of the reservation lifecycle, over every attempt that
+        // reached a provider holding credits. Asking only about completions
+        // let a failed refund -- credits still held, nobody releasing them --
+        // report as a clean window.
         unreconciledSettlements: metric(
-            completedAttempts.filter((attempt) => attempt.settledCredits === null)
-                .length,
-            completedAttempts.length,
-            "completed reviewer attempts",
-            { minimumDenominator }
+            reconciliation.unreported,
+            reconciliation.held,
+            "reviewer attempts that reached a provider holding credits",
+            {
+                minimumDenominator,
+                excluded:
+                    "attempts that reserved nothing; there is no reservation to reconcile",
+            }
         ),
         creditReconciliation: metric(
-            completedAttempts.filter(
-                (attempt) =>
-                    attempt.settledCredits !== null &&
-                    attempt.settledCredits > attempt.reservedCredits
-            ).length,
-            completedAttempts.filter((attempt) => attempt.settledCredits !== null)
-                .length,
-            "completed attempts with a settled figure",
+            reconciliation.mismatched,
+            reconciliation.reported,
+            "attempts with a settled or refunded figure",
             {
                 minimumDenominator,
                 excluded:
                     "attempts whose settlement did not report; those are counted by unreconciledSettlements instead",
+            }
+        ),
+        // The two mismatches split out, because they call for different
+        // investigations: one is a pricing or settlement bug, the other is a
+        // refund that did not happen.
+        overSettledRate: metric(
+            reconciliation.overSettled,
+            completedWithFigure.length,
+            "completed attempts with a settled figure",
+            { minimumDenominator }
+        ),
+        unrefundedFailureRate: metric(
+            reconciliation.unrefunded,
+            failedWithFigure.length,
+            "failed attempts with a refund figure",
+            {
+                minimumDenominator,
+                excluded:
+                    "failed attempts whose refund did not report; those are counted by unreconciledSettlements instead",
+            }
+        ),
+        missingTraceRate: metric(
+            completeness.missing,
+            completeness.attempted,
+            "telemetry writes this window attempted",
+            {
+                minimumDenominator,
+                excluded:
+                    "rows written before the writer columns existed; and this is a lower bound -- writes lost at the end of a process's life leave no later row to anchor them",
             }
         ),
         p50DurationMs: percentile(durations, 0.5),
@@ -374,6 +534,11 @@ export type AdoptionScorecard = {
      * asks. Computed from any later event by the same actor, so it is a floor:
      * a user who returned but generated no analytics event that day is not
      * counted.
+     *
+     * The denominator is the cohort whose N-day window has CLOSED. A user who
+     * reviewed yesterday has not had a thirtieth day, and counting them scored
+     * them as a non-return -- twenty such users reported `0 / 20, status ok`,
+     * a confident zero about a question nobody had waited long enough to ask.
      */
     reviewAnchoredReturnDay1: ScorecardMetric;
     reviewAnchoredReturnDay7: ScorecardMetric;
@@ -397,20 +562,46 @@ export type AdoptionScorecard = {
  * not record is invisible here. Stated on the card rather than left for a
  * reader to assume.
  */
+/**
+ * Came back at least `days` after their first AI Review.
+ *
+ * ## Why the denominator is not everyone who reviewed
+ *
+ * It was, and that made the D30 figure meaningless. A user whose first review
+ * was yesterday cannot have returned thirty days later yet -- there has not
+ * been a thirtieth day. Counting them in the denominator scores them as "did
+ * not return", so twenty users who each reviewed once, yesterday, produced
+ * `0 / 20, status ok`: a confident zero about a question nobody had waited
+ * long enough to ask.
+ *
+ * The population is therefore the cohort whose window has actually closed:
+ * first review at least `days` before `observedThrough`. That shrinks the
+ * denominator, and a shrunken denominator below the metric's floor reports
+ * `insufficient_evidence` -- which is the correct answer for a feature that is
+ * three weeks old and being asked about day 30.
+ */
 const reviewAnchoredReturn = (
     rows: readonly ScorecardEventRow[],
-    days: number
+    days: number,
+    observedThrough: Date
 ): { returned: number; population: number } => {
     const firstReview = firstOccurrence(rows, ["comparison_review_completed"]);
+    const window = days * 86_400_000;
+    const observable = new Map<string, Date>();
+    for (const [actorKey, anchor] of firstReview) {
+        if (observedThrough.getTime() - anchor.getTime() >= window) {
+            observable.set(actorKey, anchor);
+        }
+    }
     const returned = new Set<string>();
     for (const row of rows) {
-        const anchor = firstReview.get(row.actorKey);
+        const anchor = observable.get(row.actorKey);
         if (!anchor) continue;
-        if (row.occurredAt.getTime() - anchor.getTime() >= days * 86_400_000) {
+        if (row.occurredAt.getTime() - anchor.getTime() >= window) {
             returned.add(row.actorKey);
         }
     }
-    return { returned: returned.size, population: firstReview.size };
+    return { returned: returned.size, population: observable.size };
 };
 
 const actorsWith = (
@@ -541,9 +732,9 @@ export const summariseAdoption = (
         ["multi_model_compare_completed"],
         ["comparison_review_started"]
     );
-    const anchored1 = reviewAnchoredReturn(rows, 1);
-    const anchored7 = reviewAnchoredReturn(rows, 7);
-    const anchored30 = reviewAnchoredReturn(rows, 30);
+    const anchored1 = reviewAnchoredReturn(rows, 1, options.now);
+    const anchored7 = reviewAnchoredReturn(rows, 7, options.now);
+    const anchored30 = reviewAnchoredReturn(rows, 30, options.now);
 
     const orderedNote =
         "ordered: the second event must follow the first. Still not causation -- " +
@@ -615,20 +806,32 @@ export const summariseAdoption = (
         reviewAnchoredReturnDay1: metric(
             anchored1.returned,
             anchored1.population,
-            "users who completed an AI Review",
-            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+            "users whose first AI Review was at least 1 day(s) ago",
+            {
+                minimumDenominator,
+                excluded:
+                    "users whose 1-day window has not closed yet; they cannot have returned on day 1 and counting them would score them as a non-return. Also a floor: a silent return is not counted",
+            }
         ),
         reviewAnchoredReturnDay7: metric(
             anchored7.returned,
             anchored7.population,
-            "users who completed an AI Review",
-            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+            "users whose first AI Review was at least 7 day(s) ago",
+            {
+                minimumDenominator,
+                excluded:
+                    "users whose 7-day window has not closed yet; they cannot have returned on day 7 and counting them would score them as a non-return. Also a floor: a silent return is not counted",
+            }
         ),
         reviewAnchoredReturnDay30: metric(
             anchored30.returned,
             anchored30.population,
-            "users who completed an AI Review",
-            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+            "users whose first AI Review was at least 30 day(s) ago",
+            {
+                minimumDenominator,
+                excluded:
+                    "users whose 30-day window has not closed yet; they cannot have returned on day 30 and counting them would score them as a non-return. Also a floor: a silent return is not counted",
+            }
         ),
         cohortReturnDay7: {
             comparisonOnly: metric(
@@ -690,6 +893,16 @@ export const AI_REVIEW_M5_READINESS_ITEMS = [
     "per_attempt_reliability_record",
     /** Reservation and settlement are both recorded, so mismatch is computable. */
     "credit_reconciliation_measurable",
+    /**
+     * A telemetry write that did not land is countable.
+     *
+     * Without this, every reliability rate is computed over whatever happened
+     * to be written, and a partial outage -- some inserts failing, some not --
+     * reads as a healthy window. An instrument that cannot say how much of its
+     * own input is missing cannot produce a believable number, which is what
+     * this list is for.
+     */
+    "telemetry_completeness_measurable",
     /** Conversions are ordered in time, so a rate means what it says. */
     "sequenced_conversion_metrics",
     /** There is somewhere for production evidence to be recorded. */
@@ -705,6 +918,14 @@ export const AI_REVIEW_M5_ELIGIBILITY_ITEMS = [
     "reliability_trend_over_approved_period",
     "sufficient_production_sample",
     "zero_credit_reconciliation_mismatch",
+    /**
+     * The window being judged is not missing rows.
+     *
+     * Separate from the readiness item above: being able to measure the gap
+     * and having measured it to be within an approved bound are different
+     * facts, and only the second one licenses a promotion.
+     */
+    "telemetry_complete_over_approved_window",
     "zero_critical_quality_violations",
     "adoption_and_repeat_use_thresholds_met",
     "rollback_drill_completed",

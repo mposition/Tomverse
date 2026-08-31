@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { prisma } from "@/lib/prisma";
 import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import {
@@ -24,11 +26,39 @@ import {
  *     succeeded -- so nothing here throws, and every call is awaited only for
  *     its own error handling;
  *   * a missing record must not be invisible -- so every failure emits a
- *     structured log line, and the scorecard reports a `missingTraceRate`
- *     computed from the runs that did land. A telemetry gap that nothing
- *     reports is worse than no telemetry, because the numbers still look
- *     complete.
+ *     structured log line AND leaves a countable hole in the table. A
+ *     telemetry gap that nothing reports is worse than no telemetry, because
+ *     the numbers still look complete.
+ *
+ * ## How a missing row is counted
+ *
+ * The second property was, for a while, only half true. The failure log line
+ * existed; the rate the comment promised did not, and could not -- the
+ * scorecard reads rows that landed, and no query over the rows that landed can
+ * count the ones that did not. A partial outage, inserts failing for some runs
+ * and succeeding for others, left every rate looking healthy.
+ *
+ * So each write carries the identity of the process that made it and a
+ * sequence number that increments on every ATTEMPT, landed or not. Within one
+ * writer the highest sequence minus the lowest, plus one, is how many writes
+ * were tried; the number of rows present is how many landed; the difference is
+ * the gap. `telemetryCompleteness()` in lib/aiReviewScorecardCore.ts does that
+ * arithmetic and the scorecard reports it as `missingTraceRate`.
+ *
+ * Two things this cannot see, and the metric says so rather than implying
+ * otherwise: writes lost at the very end of a process's life, which have no
+ * later row to anchor them, and a process every one of whose writes failed,
+ * which leaves no rows and therefore no writer. The rate is a lower bound.
  */
+
+/**
+ * Identity of this process, for the sequence above. A fresh random value per
+ * process, never derived from a host, a user or a deployment: it exists to
+ * scope a counter and nothing else, and a writer id that meant something would
+ * be a new identifier in a table whose whole contract is that it holds none.
+ */
+const WRITER_ID = randomUUID();
+let writerSequence = 0;
 
 const RETENTION_DAYS = 90;
 
@@ -43,9 +73,16 @@ export const recordComparisonReviewRun = async (
     // copy: if the table is missing or the insert fails, the run is still
     // observable, and the gap between the two is what makes a silent
     // telemetry outage detectable at all.
+    // Claimed before the write, so a failed insert consumes a number and
+    // leaves the hole this exists to make visible.
+    writerSequence += 1;
+    const sequence = writerSequence;
+
     const logLine = {
         event: "comparison_review_run",
         traceId: record.traceId,
+        writerId: WRITER_ID,
+        writerSequence: sequence,
         subjectKind: record.subjectKind,
         outcome: record.outcome,
         errorCode: record.errorCode,
@@ -114,6 +151,8 @@ export const recordComparisonReviewRun = async (
                 groundingTotalQuotes: record.groundingTotalQuotes,
                 groundingMatchedQuotes: record.groundingMatchedQuotes,
                 sourceGroundingLevel: record.sourceGroundingLevel,
+                writerId: WRITER_ID,
+                writerSequence: sequence,
                 // Written with the run, in one statement, so a run can never
                 // exist with its attempts missing -- which would read as a run
                 // that dispatched nothing.
@@ -154,6 +193,11 @@ export const recordComparisonReviewRun = async (
                     event: "comparison_review_run_record_failed",
                     traceId: record.traceId,
                     outcome: record.outcome,
+                    // The number the missing row would have carried, so a log
+                    // search and the table's own gap agree on which write it
+                    // was.
+                    writerId: WRITER_ID,
+                    writerSequence: sequence,
                 })
             );
         }

@@ -6,7 +6,7 @@ import {
   buildComparisonReviewRunRecord,
   comparisonReviewRunOutcome,
   dispatchedAttempts,
-  settlementMismatches,
+  settlementReconciliation,
   contentFreeViolations,
   emptyAttemptRecord,
   reachedProvider,
@@ -219,17 +219,54 @@ test("only attempts that dispatched count toward a reviewer's failure rate", () 
   );
 });
 
-test("settling above the reservation is the mismatch; settling below it is not", () => {
-  const summary = settlementMismatches([
+test("both halves of the reservation lifecycle are reconciled, not just completions", () => {
+  // The premise this replaces was written into the previous test as a comment:
+  // "a failed attempt is not a settlement question at all". It is. A reviewer
+  // that fails after reserving has to be refunded, that refund can fail on its
+  // own, and while only completions were counted those reservations -- credits
+  // still held, nobody releasing them -- reported as a clean window.
+  const summary = settlementReconciliation([
+    // Settling below the reservation: normal, the unused part is released.
     entry({ ordinal: 1, reservedCredits: 8, settledCredits: 3 }),
+    // Settling above it: charged more than was ever held.
     entry({ ordinal: 2, reservedCredits: 4, settledCredits: 9 }),
+    // Completed, no figure: "we do not know", which is its own question.
     entry({ ordinal: 3, reservedCredits: 4, settledCredits: null }),
-    // A failed attempt is not a settlement question at all.
-    entry({ ordinal: 4, status: "failed", settledCredits: null }),
+    // Failed and refunded to zero: the correct failure outcome.
+    entry({ ordinal: 4, status: "failed", reservedCredits: 6, settledCredits: 0 }),
+    // Failed and the refund never reported: the case that used to vanish.
+    entry({ ordinal: 5, status: "failed", reservedCredits: 6, settledCredits: null }),
+    // Failed but still charged: a user paid for a review they did not get.
+    entry({ ordinal: 6, status: "failed", reservedCredits: 6, settledCredits: 6 }),
+    // Reserved nothing, so there is no reservation to reconcile.
+    entry({ ordinal: 7, reservedCredits: 0, settledCredits: null }),
+    // Never dispatched, so it never held anything either.
+    entry({ ordinal: 8, status: "refused", reservedCredits: 0 }),
   ]);
-  assert.equal(summary.completed, 3);
+  assert.equal(summary.held, 6);
+  assert.equal(summary.reported, 4);
+  assert.equal(summary.unreported, 2);
   assert.equal(summary.overSettled, 1);
-  assert.equal(summary.unreported, 1);
+  assert.equal(summary.unrefunded, 1);
+  assert.equal(summary.mismatched, 2);
+});
+
+test("a failed refund that never reported is not counted as a clean window", () => {
+  // The reproduction, stated as a test: twenty clean completions and five
+  // failures whose refunds never reported used to read as 0 unreported out of
+  // 20, status ok.
+  const attempts = [];
+  for (let i = 1; i <= 20; i += 1) {
+    attempts.push(entry({ ordinal: i, reservedCredits: 8, settledCredits: 5 }));
+  }
+  for (let i = 21; i <= 25; i += 1) {
+    attempts.push(
+      entry({ ordinal: i, status: "failed", reservedCredits: 8, settledCredits: null })
+    );
+  }
+  const summary = settlementReconciliation(attempts);
+  assert.equal(summary.held, 25);
+  assert.equal(summary.unreported, 5);
 });
 
 test("a fallback keeps the failure and still names the reviewer that answered", () => {

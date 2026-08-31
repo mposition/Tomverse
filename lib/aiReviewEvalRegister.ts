@@ -313,6 +313,17 @@ export type AiReviewObservationPolicy = {
     minComparisonToReviewRate: number;
     /** Minimum first→second review conversion. */
     minRepeatUseRate: number;
+    /**
+     * The largest share of telemetry writes that may be missing from the
+     * window a promotion is judged on.
+     *
+     * A number, not a boolean, and deliberately not zero by default: the
+     * measurement is a lower bound, so demanding an exact zero would be
+     * demanding proof of something the instrument cannot prove. What it can
+     * prove is that the gap it CAN see is small, and how small is a decision
+     * somebody makes after seeing a baseline.
+     */
+    maxMissingTraceRate: number;
     rationale: string;
 };
 
