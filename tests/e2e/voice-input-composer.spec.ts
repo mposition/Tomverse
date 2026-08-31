@@ -150,6 +150,101 @@ const openComposerWithVoice = async (page: Page) => {
   await freezeAnimations(page);
 };
 
+/**
+ * Seeds two guest conversations and opens the first, so a spec can perform a
+ * real conversation switch.
+ *
+ * "New chat" is not a switch here: the guest flow reuses an empty conversation
+ * rather than creating a second one, so clicking it leaves `currentChatId`
+ * exactly where it was. Measured, not assumed — the first version of these
+ * specs used it and the scope never changed.
+ */
+const openTwoGuestConversations = async (page: Page) => {
+  await prepareGuestPage(page, "ko");
+  await mockGuestUsage(page, 0, 20);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await installFakeMicrophone(page);
+  await page.addInitScript(() => {
+    const models = ["gpt-5-6-luna"];
+    const conversations = [
+      {
+        id: "guest_conv_a",
+        title: "대화 A",
+        selectedModels: models,
+        disabledPanels: [],
+        webSearchMode: "off",
+        createdAt: "2026-08-30T00:00:00.000Z",
+      },
+      {
+        id: "guest_conv_b",
+        title: "대화 B",
+        selectedModels: models,
+        disabledPanels: [],
+        webSearchMode: "off",
+        createdAt: "2026-08-30T00:01:00.000Z",
+      },
+    ];
+    window.localStorage.setItem("guest_conversations", JSON.stringify(conversations));
+    // A guest conversation with no stored transcript is not listed, so both
+    // need one before the sidebar will offer a switch between them.
+    for (const conversation of conversations) {
+      window.localStorage.setItem(
+        `guest_messages_${conversation.id}_${models[0]}`,
+        JSON.stringify([
+          { id: `${conversation.id}-u1`, role: "user", content: "안녕" },
+          {
+            id: `${conversation.id}-a1`,
+            role: "assistant",
+            content: "네",
+            modelId: models[0],
+          },
+        ])
+      );
+    }
+    window.sessionStorage.setItem("tomverse_active_chat_id", "guest_conv_a");
+  });
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_voice_input",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await page.goto("/chat?lang=ko");
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await freezeAnimations(page);
+};
+
+/**
+ * Clicks a seeded conversation, whichever shell is rendering.
+ *
+ * Desktop keeps the sidebar on screen; the mobile shell puts the same list in
+ * a drawer behind `mobile-sidebar-open`. Written shell-agnostically rather
+ * than skipped on mobile, because a conversation switch on a phone is the
+ * case this most needs to hold: the composer is portalled into a bottom dock
+ * there and the drawer closes over it.
+ */
+const switchToConversation = async (page: Page, title: string) => {
+  const opener = page.getByTestId("mobile-sidebar-open");
+  if (await opener.count()) {
+    await opener.click();
+    const drawer = page.getByRole("dialog");
+    await drawer
+      .getByTestId("sidebar-conversation-item")
+      .filter({ hasText: title })
+      .first()
+      .click();
+    await expect(drawer).toHaveCount(0);
+    return;
+  }
+  await page
+    .getByTestId("sidebar-conversation-item")
+    .filter({ hasText: title })
+    .first()
+    .click();
+};
+
 /** Records for `ms` and waits for the flow to settle. */
 const recordFor = async (page: Page, ms: number) => {
   await page.getByTestId("composer-voice-button").click();
@@ -456,5 +551,163 @@ test.describe("the microphone does not break the composer's geometry", () => {
     expect(scroll.left).toBe(0);
 
     await page.getByTestId("voice-input-cancel").click();
+  });
+});
+
+/**
+ * A recording belongs to the conversation it was started in.
+ *
+ * docs/policy/voice-input.md §8.4. `ChatInput` is not remounted when the user
+ * opens another conversation, so before this the transcript of a recording
+ * started in one conversation was appended to whichever draft was on screen
+ * when the server answered.
+ *
+ * "New chat" is used as the switch because it is the one scope change every
+ * shell offers from the composer, and it moves the draft key from a
+ * conversation id to the new-conversation key — exactly the transition the
+ * scoped write has to survive.
+ */
+test.describe("a voice session belongs to one conversation", () => {
+  test("switching conversation mid-recording ends it and says so @ui-risk", async ({
+    page,
+  }) => {
+    await openTwoGuestConversations(page);
+    const voiceServer = await mockVoiceEndpoint(page);
+    const chatRequests: string[] = [];
+    await page.route("**/api/chat", async (route) => {
+      chatRequests.push(route.request().method());
+      await route.abort();
+    });
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(600);
+
+    await switchToConversation(page, "대화 B");
+
+    const error = page.getByTestId("voice-input-error");
+    await expect(error).toBeVisible();
+    await expect(error).toHaveAttribute("data-voice-error-code", "VOICE_SCOPE_CHANGED");
+
+    // The clip was thrown away rather than transcribed into the new draft.
+    await page.waitForTimeout(800);
+    expect(voiceServer.requests).toEqual([]);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    expect(chatRequests).toEqual([]);
+
+    // And the microphone was closed by the switch.
+    const openTracks = await page.evaluate(
+      () => (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice.openTracks
+    );
+    expect(openTracks).toBe(0);
+  });
+
+  test("a transcript that arrives after a switch reaches no draft @ui-risk", async ({
+    page,
+  }) => {
+    await openTwoGuestConversations(page);
+
+    // The server answers only when the test says so, so the switch lands while
+    // the request is genuinely in flight. Captured through an object because a
+    // `let` assigned only inside a callback narrows to `never` at the call site.
+    const gate: { release: (() => void) | null } = { release: null };
+    await page.route(VOICE_ENDPOINT, async (route) => {
+      await new Promise<void>((resolve) => {
+        gate.release = resolve;
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ transcript: "이 문장은 사라져야 합니다" }),
+      });
+    });
+    const chatRequests: string[] = [];
+    await page.route("**/api/chat", async (route) => {
+      chatRequests.push(route.request().method());
+      await route.abort();
+    });
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(900);
+    await page.getByTestId("composer-voice-button").click();
+
+    // Now transcribing. Leave the conversation, then let the server answer.
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await switchToConversation(page, "대화 B");
+    await expect(page.getByTestId("voice-input-error")).toHaveAttribute(
+      "data-voice-error-code",
+      "VOICE_SCOPE_CHANGED"
+    );
+    gate.release?.();
+    await page.waitForTimeout(1000);
+
+    // The words were spoken into a conversation the user has left; they belong
+    // to no draft at all — not B's, and not A's either.
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    await page.getByTestId("voice-input-error-dismiss").click();
+    await switchToConversation(page, "대화 A");
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    expect(chatRequests).toEqual([]);
+  });
+
+  test("each conversation keeps its own typed draft across a switch @ui-risk", async ({
+    page,
+  }) => {
+    await openTwoGuestConversations(page);
+    await mockVoiceEndpoint(page);
+
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("대화 A의 초안");
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await switchToConversation(page, "대화 B");
+
+    // B starts blank and is told why the recording stopped...
+    await expect(textarea).toHaveValue("");
+    await expect(page.getByTestId("voice-input-error")).toHaveAttribute(
+      "data-voice-error-code",
+      "VOICE_SCOPE_CHANGED"
+    );
+    await page.getByTestId("voice-input-error-dismiss").click();
+
+    // ...and A's draft is exactly as it was left.
+    await switchToConversation(page, "대화 A");
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("대화 A의 초안");
+  });
+
+  test("typing while transcribing is preserved and the transcript follows it @ui-risk", async ({
+    page,
+  }) => {
+    await openTwoGuestConversations(page);
+
+    const gate: { release: (() => void) | null } = { release: null };
+    await page.route(VOICE_ENDPOINT, async (route) => {
+      await new Promise<void>((resolve) => {
+        gate.release = resolve;
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ transcript: "말한 부분" }),
+      });
+    });
+
+    const textarea = page.getByTestId("chat-textarea");
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(900);
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+
+    // The user keeps typing while the server works. The functional draft
+    // update is what keeps this: a captured-value write would overwrite it.
+    await textarea.fill("기다리는 동안 친 글");
+    gate.release?.();
+
+    await expect(textarea).toHaveValue("기다리는 동안 친 글 말한 부분", {
+      timeout: 15_000,
+    });
   });
 });

@@ -57,6 +57,7 @@ import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
+import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -5409,6 +5410,32 @@ export function ChatPageClient({
   // Local files yes, Google Drive no: Drive needs an OAuth grant an anonymous
   // session cannot hold, and one ephemeral file per message is the guest
   // allowance the server independently enforces.
+  /*
+    A finished voice transcript, written into the conversation it was recorded
+    in (docs/policy/voice-input.md §8.4).
+
+    Two things make this correct where a plain `setInputValue(text)` was not:
+
+      * the explicit `scopeId`, so a transcription that finishes after the user
+        opened another conversation lands in the one they spoke into rather
+        than the one on screen — `ChatInput` is not remounted by a switch, so
+        nothing else would have caught this; and
+      * the functional update, so anything typed while the server was working
+        is preserved and the transcript is appended once, after it.
+
+    `appendVoiceTranscript` never replaces: the microphone must not be the one
+    control in the composer that can destroy work with no undo.
+  */
+  const handleVoiceTranscript = useCallback(
+    (transcript: string, scopeId: string | null) => {
+      setInputValue(
+        (current) => appendVoiceTranscript(current, transcript),
+        scopeId
+      );
+    },
+    [setInputValue]
+  );
+
   const attachmentCapabilities: ChatAttachmentCapabilities = isGuestMode
     ? {
         canAttachLocalFiles: true,
@@ -5952,6 +5979,7 @@ export function ChatPageClient({
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
+          onVoiceTranscript={handleVoiceTranscript}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -6069,6 +6097,7 @@ export function ChatPageClient({
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
+          onVoiceTranscript={handleVoiceTranscript}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}

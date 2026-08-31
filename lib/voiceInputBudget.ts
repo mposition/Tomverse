@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import {
   VOICE_OPERATIONAL_LIMIT_REACHED,
   resolveVoiceGuardrails,
+  voiceSettlementRelease,
+  type VoiceSettlementBasis,
 } from "@/lib/voiceInputGuardrails";
 import { VOICE_CLIP_MAX_SECONDS } from "@/lib/voiceInputFormats";
 
@@ -124,11 +126,31 @@ export const voiceReservationSeconds = (
  * only updated when it still has room, so two concurrent requests cannot both
  * read the same remaining budget and both proceed.
  */
+/**
+ * A booking, and the bucket it went into.
+ *
+ * `periodStart` is the point of it. Settlement used to recompute today's UTC
+ * day at the moment it ran, so a clip reserved at 23:59:58 and settled at
+ * 00:00:01 aimed its `UPDATE` at tomorrow's row: the reservation was never
+ * released, and the user silently lost that budget for a day. A reservation
+ * now carries the bucket it belongs to and every later write targets that one.
+ *
+ * `settled` makes the handle single-use. A double callback, or a `catch` that
+ * releases after a `finally` already settled, must not give back budget twice
+ * — and must never reach another request's booking.
+ */
+export type VoiceSecondsReservation = {
+  userId: string;
+  reservedSeconds: number;
+  periodStart: Date;
+  settled: boolean;
+};
+
 export const reserveVoiceSeconds = async (input: {
   userId: string;
   seconds: number;
   env?: Record<string, string | undefined>;
-}): Promise<{ reservedSeconds: number }> => {
+}): Promise<VoiceSecondsReservation> => {
   const { limits } = resolveVoiceGuardrails(input.env ?? process.env);
   const now = new Date();
   const seconds = Math.max(1, Math.ceil(input.seconds));
@@ -168,55 +190,60 @@ export const reserveVoiceSeconds = async (input: {
     );
   }
 
-  return { reservedSeconds: seconds };
+  return {
+    userId: input.userId,
+    reservedSeconds: seconds,
+    periodStart: start,
+    settled: false,
+  };
 };
 
 /**
- * Moves a reservation to what the provider actually charged for.
+ * Closes a reservation on an explicit basis.
  *
- * Always called, on success and on failure alike:
+ * Contract: docs/policy/voice-input.md §7.2.
  *
- *   * a failed transcription settles to zero, because a provider that refused
- *     the clip did not bill for it, and leaving the reservation in place would
- *     spend a user's daily budget on our own outage;
- *   * a successful one settles to the provider's reported duration, or keeps
- *     the reservation when the provider did not report one.
+ * The basis is passed in rather than inferred, because the caller is the only
+ * place that knows which of four different things happened, and the previous
+ * version collapsed them: every failure released everything, which is right
+ * for a request that was never sent and wrong for one whose answer never came
+ * back. `lib/voiceInputGuardrails.ts` holds the arithmetic so it can be
+ * asserted without a database.
  *
- * Floored at zero. A settlement can only ever give budget back — it never
- * books more than the reservation already did, so a provider reporting a
- * duration longer than the clip could possibly be cannot be used to charge
- * somebody else's budget.
+ * Idempotent through the handle. Calling this twice — a duplicate callback, or
+ * a `catch` running after a `finally` — books nothing the second time.
  */
 export const settleVoiceSeconds = async (input: {
-  userId: string;
-  reservedSeconds: number;
-  actualSeconds: number | null;
-}): Promise<void> => {
-  const actual =
-    input.actualSeconds === null || !Number.isFinite(input.actualSeconds)
-      ? input.reservedSeconds
-      : Math.max(0, Math.ceil(input.actualSeconds));
-  const release = Math.max(0, input.reservedSeconds - actual);
-  if (release === 0) return;
+  reservation: VoiceSecondsReservation;
+  basis: VoiceSettlementBasis;
+}): Promise<{ releasedSeconds: number }> => {
+  const { reservation } = input;
+  if (reservation.settled) return { releasedSeconds: 0 };
+  reservation.settled = true;
 
-  const key = bucketKey(input.userId);
-  const start = dayStart(new Date());
+  const release = voiceSettlementRelease({
+    reservedSeconds: reservation.reservedSeconds,
+    basis: input.basis,
+  });
+  if (release === 0) return { releasedSeconds: 0 };
+
+  const key = bucketKey(reservation.userId);
   await prisma.$executeRaw`
     UPDATE "ChatUsageBucket"
     SET "count" = GREATEST("count" - ${release}, 0), "updatedAt" = NOW()
     WHERE "key" = ${key}
       AND "period" = ${SECONDS_PERIOD}
-      AND "periodStart" = ${start}
+      AND "periodStart" = ${reservation.periodStart}
   `;
+  return { releasedSeconds: release };
 };
 
-/** Gives the whole reservation back. Used when nothing was ever sent. */
-export const releaseVoiceSeconds = (input: {
-  userId: string;
-  reservedSeconds: number;
-}) =>
-  settleVoiceSeconds({
-    userId: input.userId,
-    reservedSeconds: input.reservedSeconds,
-    actualSeconds: 0,
-  });
+/**
+ * Gives the whole reservation back.
+ *
+ * Only for the cases where nothing was billed and that is *known*: the request
+ * was never sent, or the provider answered with a refusal. An outcome nobody
+ * can account for is `{ kind: "reservation" }`, not this — see §7.2.
+ */
+export const releaseVoiceSeconds = (reservation: VoiceSecondsReservation) =>
+  settleVoiceSeconds({ reservation, basis: { kind: "not_billed" } });

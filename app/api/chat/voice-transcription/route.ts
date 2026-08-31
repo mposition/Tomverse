@@ -22,7 +22,9 @@ import {
   settleVoiceSeconds,
   voiceReservationSeconds,
   VoiceBudgetError,
+  type VoiceSecondsReservation,
 } from "@/lib/voiceInputBudget";
+import type { VoiceSettlementBasis } from "@/lib/voiceInputGuardrails";
 import { resolveVoiceGuardrails } from "@/lib/voiceInputGuardrails";
 import {
   voiceTranscriptionKeySource,
@@ -127,6 +129,7 @@ const readBoundedBody = async (
 const PROVIDER_FAILURE_CODES: Record<string, string> = {
   provider_not_configured: "VOICE_PROVIDER_UNAVAILABLE",
   provider_rejected_credentials: "VOICE_PROVIDER_UNAVAILABLE",
+  provider_rate_limited: "VOICE_PROVIDER_UNAVAILABLE",
   provider_unavailable: "VOICE_PROVIDER_UNAVAILABLE",
   provider_unreachable: "VOICE_PROVIDER_UNAVAILABLE",
   provider_rejected_audio: "VOICE_TRANSCRIPTION_FAILED",
@@ -146,6 +149,21 @@ const report = (fields: {
   durationSource?: string;
   durationSeconds?: number | null;
   reservedSeconds?: number;
+  releasedSeconds?: number;
+  /** Which of the four §7.2 bases closed the reservation. */
+  settlementBasis?: string;
+  /**
+   * What the provider said it used: "duration", "tokens" or "absent".
+   *
+   * The *shape*, never the counts. `output_tokens` is a proxy for how long
+   * the transcript is, and §11.2 forbids logging the transcript's length as
+   * firmly as it forbids logging the transcript. Knowing which unit the
+   * provider bills in is what an operator needs here; knowing how much the
+   * user said is not.
+   */
+  usageKind?: string;
+  /** `not_sent`, `refused` or `indeterminate`. */
+  disposition?: string;
   providerFailure?: string;
   providerStatus?: number | null;
 }) => {
@@ -159,7 +177,7 @@ const report = (fields: {
 };
 
 export async function POST(request: Request) {
-  let reservation: { userId: string; reservedSeconds: number } | null = null;
+  let reservation: VoiceSecondsReservation | null = null;
   try {
     // Order matters and is the fail-closed one: the feature flag is consulted
     // before the session, so a request to a disabled feature never touches the
@@ -227,8 +245,7 @@ export async function POST(request: Request) {
     // Reserved before the provider call, on the honest basis: the container's
     // own length when it declared one, the per-clip ceiling when it did not.
     const reservedSeconds = voiceReservationSeconds(inspection.durationSeconds);
-    await reserveVoiceSeconds({ userId, seconds: reservedSeconds });
-    reservation = { userId, reservedSeconds };
+    reservation = await reserveVoiceSeconds({ userId, seconds: reservedSeconds });
 
     const result = await voiceTranscriptionProvider().transcribe({
       audio: body.bytes,
@@ -242,30 +259,75 @@ export async function POST(request: Request) {
     });
 
     if (!result.ok) {
-      // The provider did not bill for a call it refused, so the reservation
-      // goes back rather than spending the user's day on our outage.
-      await releaseVoiceSeconds(reservation);
-      reservation = null;
+      /*
+        Three outcomes, not one (docs/policy/voice-input.md §7.2).
+
+        The reservation used to be released for every failure. That is right
+        only when nothing was billed and we *know* it: no request was made, or
+        the provider answered with a refusal. A request that went out and whose
+        answer never came back — a timeout, a dropped connection, a 5xx, or a
+        2xx we could not parse — is evidence of nothing, and the last of those
+        was almost certainly transcribed and paid for. Assuming otherwise makes
+        a spending guardrail stop guarding exactly when the provider is unwell.
+
+        So an indeterminate call keeps its reservation. It costs the user part
+        of a daily allowance that resets at the next UTC day, and it does not
+        charge them anything: there is no user-facing charge for voice input at
+        all while §6 is open.
+      */
+      const basis: VoiceSettlementBasis =
+        result.disposition === "indeterminate"
+          ? { kind: "reservation" }
+          : { kind: "not_billed" };
+      const settlement = await settleVoiceSeconds({ reservation, basis });
       report({
         outcome: "provider_failed",
         mediaType: inspection.format.mediaType,
         durationSource: inspection.durationSource,
         durationSeconds: inspection.durationSeconds,
+        reservedSeconds,
+        releasedSeconds: settlement.releasedSeconds,
+        settlementBasis: basis.kind,
+        disposition: result.disposition,
         providerFailure: result.code,
         providerStatus: result.status,
       });
+      reservation = null;
       return jsonError(
         PROVIDER_FAILURE_CODES[result.code] || "VOICE_TRANSCRIPTION_FAILED",
         result.code === "provider_rejected_audio" ? 422 : 502
       );
     }
 
-    // Settled to what the provider says it processed, which is what it bills.
-    await settleVoiceSeconds({
-      userId,
-      reservedSeconds,
-      actualSeconds: result.durationSeconds,
-    });
+    /*
+      What the call is settled against, in order of what it actually proves
+      (docs/policy/voice-input.md §7.2):
+
+        1. seconds the provider itself reported — the only figure that is a
+           statement about the bill;
+        2. the length this endpoint measured out of the container — a fact
+           about the audio, measured by us;
+        3. otherwise the conservative reservation stands.
+
+      A token-billed model — which the configured default is — reports
+      `input_tokens`/`output_tokens` and no seconds. Those are recorded and
+      never converted: this guardrail counts seconds, and turning tokens into
+      seconds would be inventing a rate nobody has approved (§6.1).
+    */
+    const providerSeconds =
+      result.usage.kind === "duration" ? result.usage.seconds : null;
+    const basis: VoiceSettlementBasis =
+      providerSeconds !== null
+        ? { kind: "provider_seconds", seconds: providerSeconds }
+        : inspection.durationSeconds !== null
+          ? { kind: "measured_clip", seconds: inspection.durationSeconds }
+          : { kind: "reservation" };
+    const settlement = await settleVoiceSeconds({ reservation, basis });
+    const usageFields = {
+      usageKind: result.usage.kind,
+      settlementBasis: basis.kind,
+      releasedSeconds: settlement.releasedSeconds,
+    };
     reservation = null;
 
     const transcript = normalizeVoiceTranscript(result.text, {
@@ -279,7 +341,9 @@ export async function POST(request: Request) {
         outcome: "empty_transcript",
         mediaType: inspection.format.mediaType,
         durationSource: inspection.durationSource,
-        durationSeconds: result.durationSeconds ?? inspection.durationSeconds,
+        durationSeconds: providerSeconds ?? inspection.durationSeconds,
+        reservedSeconds,
+        ...usageFields,
       });
       return jsonError("VOICE_TRANSCRIPT_EMPTY", 422);
     }
@@ -288,8 +352,9 @@ export async function POST(request: Request) {
       outcome: "succeeded",
       mediaType: inspection.format.mediaType,
       durationSource: inspection.durationSource,
-      durationSeconds: result.durationSeconds ?? inspection.durationSeconds,
+      durationSeconds: providerSeconds ?? inspection.durationSeconds,
       reservedSeconds,
+      ...usageFields,
     });
 
     return Response.json(
@@ -298,7 +363,15 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     if (reservation) {
-      // Whatever went wrong, the user does not owe their daily budget for it.
+      /*
+        An exception here happened *before* the provider was reached, or while
+        the request was still being prepared — every path after a successful
+        provider call settles and clears the handle first. So nothing was
+        billed and the reservation goes back.
+
+        The handle is single-use, so this cannot double-release, and it cannot
+        reach another request's booking: `reservation` is a local.
+      */
       await releaseVoiceSeconds(reservation).catch(() => undefined);
     }
     if (error instanceof VoiceBudgetError) {

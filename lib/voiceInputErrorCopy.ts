@@ -36,6 +36,12 @@ export const VOICE_INPUT_ERROR_COPY_KEYS: Readonly<Record<string, string>> = {
   // "Try again" is right here and wrong almost everywhere else on this list.
   VOICE_TRANSCRIPT_EMPTY: "chat.voiceErrorTranscriptEmpty",
 
+  // -- The recording could not follow the user ------------------------------
+  // Not a fault. The user opened another conversation, or signed out, while a
+  // recording was running; it ended rather than putting its words somewhere
+  // they were not spoken (docs/policy/voice-input.md §8.4).
+  VOICE_SCOPE_CHANGED: "chat.voiceErrorScopeChanged",
+
   // -- Access ----------------------------------------------------------------
   VOICE_INPUT_DISABLED: "chat.voiceErrorUnavailable",
   VOICE_AUTHENTICATION_REQUIRED: "chat.voiceErrorSignInRequired",

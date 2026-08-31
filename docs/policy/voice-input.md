@@ -242,21 +242,103 @@ switch의 일이며 그쪽은 그렇다고 말합니다.**
 일이고, 이쪽은 entitlement가 없으므로 잘못될 수 있는 방향은 청구서가 커지는
 쪽뿐입니다.
 
-### 7.2 예약 후 정산
+### 7.2 예약 후 정산 — 네 가지 근거
 
 provider가 답하기 전에는 몇 초인지 모릅니다. 나중에만 기록하면 동시에 연
 요청 수만큼 예산을 넘길 수 있으므로, 채팅 경로와 같은 모양을 씁니다.
 
-- **예약 기준**: 컨테이너가 선언한 길이(올림), 선언하지 않았으면 **클립당
-  최대치**. 길이를 말하지 않는 클립은 허용된 만큼 길다고 가정해야 합니다 —
-  fail-closed이고, 채팅 예약의 `conservative_default`와 같은 논리입니다.
-- **정산**: provider가 보고한 duration으로 내립니다. 실패한 호출은 **0으로
-  정산**합니다 — provider가 거절한 클립에 과금하지 않았는데 예약을 남겨 두면
-  우리 장애에 사용자의 하루 예산을 쓰는 일입니다.
-- 정산은 예약보다 **더 쓰지 않습니다**(0에서 floor). provider가 불가능하게 긴
-  duration을 보고해도 남의 예산을 건드릴 수 없습니다.
+**예약 기준**: 컨테이너가 선언한 길이(올림), 선언하지 않았으면 **클립당
+최대치**. 길이를 말하지 않는 클립은 허용된 만큼 길다고 가정해야 합니다 —
+fail-closed이고, 채팅 예약의 `conservative_default`와 같은 논리입니다.
 
----
+**정산 근거는 네 가지이고 서로 다른 사실입니다**
+(`VoiceSettlementBasis`, `lib/voiceInputGuardrails.ts`).
+
+| 근거 | 무엇을 아는가 | 예약 처리 |
+|---|---|---|
+| `provider_seconds` | provider가 처리했다고 **스스로 보고한 초** | 그 값으로 정산 |
+| `measured_clip` | **우리가** 컨테이너에서 읽은 길이 | 그 값으로 정산 |
+| `reservation` | 아무 근거도 없음 | 예약 유지 |
+| `not_billed` | 청구가 없었음을 **안다** | 전액 반환 |
+
+`provider_seconds`와 `measured_clip`을 구분하는 이유: 앞은 상대의 청구에 대한
+진술이고 뒤는 오디오에 대한 우리 측정입니다. 값이 같아도 근거가 다르므로
+로그에 `settlementBasis`로 남깁니다.
+
+**토큰은 초로 환산하지 않습니다.** §7.3을 보십시오.
+
+### 7.3 provider가 무엇을 보고하는가 — 확인된 사실
+
+공식 문서 확인(OpenAI, `POST /v1/audio/transcriptions`, 2026-08-31 열람):
+
+- `usage`는 두 형태 중 하나입니다 — `{type:"duration", seconds}` 또는
+  `{type:"tokens", input_tokens, output_tokens, total_tokens}`.
+- **`gpt-4o-transcribe`·`gpt-4o-mini-transcribe`는 토큰 과금**,
+  `whisper-1`은 시간 과금입니다.
+- 최상위 `duration` 필드는 **`verbose_json` 응답(`TranscriptionVerbose`)에만**
+  있습니다. 이 port가 요청하는 `json` 응답에는 없습니다.
+
+**여기서 발견된 결함**: adapter가 `json`을 요청하면서 최상위 `duration`만
+읽었으므로, 성공한 모든 호출에서 `durationSeconds`가 `null`이었습니다. "provider가
+청구한 값으로 정산한다"는 문장은 실제로 아무것도 움직이지 않았습니다.
+
+**현재 설정 모델은 토큰 과금이므로 provider가 보고하는 초가 없습니다.**
+따라서 이 배포에서 성공 경로의 정산 근거는 사실상 `measured_clip`(컨테이너를
+읽을 수 있을 때)이거나 `reservation`(읽을 수 없을 때)입니다. 토큰 수를 초나
+금액으로 환산하지 않습니다 — 승인된 환산율이 없고, 만드는 순간 §6.1이 미결로
+둔 결정을 코드가 대신 내리는 것이 됩니다.
+
+**토큰 수는 로그에도 남기지 않습니다.** `output_tokens`는 transcript 길이의
+대리 지표이고, §11.2는 transcript의 길이를 transcript 자체만큼 단호하게
+금지합니다. 로그에는 **단위의 종류**(`usageKind`: `duration`·`tokens`·`absent`)만
+남깁니다.
+
+**이것은 원가 집계가 아닙니다.** 이 저장소는 audio 1초·1토큰의 실제 원가를
+측정할 수 없고, 그 검증은 §14 B-3으로 남아 있습니다.
+
+### 7.4 실패를 세 가지로 나눕니다 — §7의 이전 문장에서 바뀐 부분
+
+**이전 계약**: "실패한 호출은 0으로 정산합니다 — provider가 거절한 클립에
+과금하지 않았는데 예약을 남겨 두면 우리 장애에 사용자의 하루 예산을 쓰는
+일입니다."
+
+그 문장은 **provider가 거절한** 경우에 대해 맞습니다. 문제는 코드가 *모든*
+실패를 그렇게 처리했다는 것입니다. 타임아웃은 provider가 일을 하지 않았다는
+증거가 아니고, 파싱하지 못한 2xx는 오히려 **일이 끝났을 가능성이 높습니다.**
+
+그래서 실패를 `VoiceTranscriptionDisposition` 세 가지로 나눕니다.
+
+| disposition | 언제 | 예산 |
+|---|---|---|
+| `not_sent` | 요청을 아예 보내지 않음(키 없음) | 전액 반환 |
+| `refused` | provider가 답했고 그 답이 거절(401/403, 4xx, 429) | 전액 반환 |
+| `indeterminate` | 보냈고 결과를 모름(타임아웃·연결 끊김·5xx·2xx 파싱 실패) | **예약 유지** |
+
+**변경 이유와 대가**: `indeterminate`를 미청구로 확정하는 것은 근거 없는
+낙관이고, 공급자가 불안정할 때 정확히 그 순간에 guardrail이 작동을 멈추게
+합니다. 대가는 실제로 청구되지 않은 호출이 사용자의 그날 예산 일부를 차지할 수
+있다는 것입니다. 이 대가를 받아들이는 근거는 셋입니다 — (1) 이것은 지출
+guardrail이지 entitlement가 아니고, (2) 사용자에게 청구되는 크레딧이 **없으며**,
+(3) 예산은 다음 UTC 일에 초기화됩니다.
+
+**429는 5xx와 다르게 분류합니다.** rate limit은 "시작하지 않겠다"는 거절이고,
+5xx는 "무슨 일이 있었는지 모른다"입니다.
+
+`provider_rate_limited`가 `provider_unavailable`에서 분리된 것도 이 때문입니다.
+
+### 7.5 예약과 정산은 같은 bucket을 씁니다
+
+`reserveVoiceSeconds()`가 돌려주는 `VoiceSecondsReservation`이 자기
+`periodStart`를 들고 다니고, 정산·해제는 **그 bucket**을 갱신합니다.
+
+**고쳐진 결함**: 정산이 실행 시점의 UTC 날짜를 다시 계산했으므로,
+23:59:58에 예약하고 00:00:01에 정산한 클립은 **다음 날의 행**을 향해 `UPDATE`를
+보냈습니다. 그 행은 없거나 다른 날의 것이므로 예약은 영원히 반환되지 않고,
+사용자는 그만큼의 예산을 하루 동안 조용히 잃었습니다.
+
+핸들은 **1회용**입니다(`settled`). 중복 callback이나 `finally` 뒤에 도는
+`catch`가 예산을 두 번 돌려주지 못하고, 핸들이 지역 변수이므로 다른 요청의
+예약에 닿을 수도 없습니다.
 
 ## 8. 상태 머신
 
@@ -316,6 +398,75 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
 - 색: 녹음 중 `red`(status 색, guarded hue 아님), 나머지 zinc/blue. **accent
   role token을 새로 만들지 않았습니다** — 이 기능에 필요 없는 색 결정이고
   맞춰야 할 네 번째 대상이 늘 뿐입니다.
+
+### 8.4 녹음은 시작한 대화에 속합니다
+
+**`ChatInput`은 대화를 바꿔도 remount되지 않습니다.** 그래서 A에서 시작한
+변환의 결과가 B가 열린 뒤에 도착하면, 그대로 **B의 초안에 붙었습니다.**
+
+이제 세 지점에서 막습니다.
+
+1. **세션은 시작 시점의 draft scope를 붙잡습니다.** `onTranscript`는 화면에
+   열려 있는 대화가 아니라 **그 scope**를 함께 돌려줍니다.
+2. **scope나 로그인 신원이 바뀌면 세션을 끝냅니다**(`scope_changed` →
+   `VOICE_SCOPE_CHANGED`). 녹음도 변환 대기도 마찬가지이며, 클립은 버리고
+   마이크를 닫습니다. 사용자에게는 "다른 대화로 이동해 중단됐고 추가된 내용은
+   없다"고 한 문장으로 알립니다.
+3. **쓰기는 scope를 명시하고 함수형으로 합니다** —
+   `setDraftText((current) => append(current, text), scopeId)`. scope 명시가
+   대화를 맞추고, 함수형 갱신이 **기다리는 동안 사용자가 친 글을 보존**합니다.
+   값을 캡처해 쓰면 그 글이 덮어써집니다.
+
+**전체 remount로 해결하지 않았습니다.** 첨부 업로드·포커스·IME·다른 대화의
+초안이 모두 그 remount에 딸려 초기화되기 때문입니다.
+
+탭 전환을 넘나드는 백그라운드 녹음 복구는 만들지 않았습니다.
+
+### 8.5 자원을 소유하는 층은 따로 있습니다
+
+`lib/voiceCaptureAdapter.ts`. framework-free이고 의존성을 주입받으므로,
+`stop()`이 예외를 던지는 브라우저를 테스트가 만들 수 있습니다.
+
+reducer 테스트는 머신이 **올바른 effect를 지목한다**는 것만 증명합니다. track이
+정말 멈췄는지, timer가 지워졌는지, 예외를 던진 정리 단계가 뒤의 단계를
+건너뛰지 않았는지는 증명하지 못합니다 — reducer는 effect를 수행하지 않기
+때문입니다. 그 주장들은 `tests/voiceCaptureAdapter.test.mjs`입니다.
+
+규칙 넷:
+
+1. **정리는 멱등입니다.** `destroy()` 이후를 포함해 몇 번 불려도 안전합니다.
+2. **정리는 던지지 않고, 중간에 멈추지 않습니다.** 각 단계가 격리돼 있어
+   `stop()`이 던져도 track은 멈추고 timer는 지워집니다. effect 실행 루프도
+   effect마다 격리돼 있습니다 — 취소는 `discard` 다음에 `release`를 내는데,
+   던지는 `discard`가 `release`를 데려가면 버린 녹음의 마이크가 열린 채로
+   남습니다.
+3. **세션을 확인합니다.** 끝난 세션의 effect는 무시합니다. 특히
+   `release_microphone`이 세션을 들고 다니므로, 늦은 해제가 **새 세션의
+   마이크를 닫을 수 없습니다.**
+4. **실패는 자기가 연 것을 닫습니다.** 오류를 보고하고 스트림을 열어 두는
+   경로가 없습니다.
+
+### 8.6 녹음 시작 뒤의 실패
+
+`permission_granted` 다음 상태는 `recording`입니다. 그런데 어댑터는 그 뒤에도
+실패를 보고합니다 — `new MediaRecorder(...)`가 던지거나, `recorder.start()`가
+던지거나, `recorder.onerror`가 발생합니다.
+
+**고쳐진 결함**: reducer는 `unsupported`를 `idle`·`permission_pending`에서만,
+`device_unavailable`을 `permission_pending`에서만 받았습니다. 위 세 가지는 전부
+`recording`(또는 `stopping`)에서 오므로 **전이가 버려졌고**, 머신은 마이크가
+열린 채 `recording`에 남았습니다. `onerror`의 경우 tick timer까지 돌았습니다.
+빠져나갈 길은 취소뿐이었고 이유는 아무 데도 표시되지 않았습니다.
+
+이제 두 이벤트 모두 모든 live 상태에서 세션을 끝내고, `discard_capture` +
+`release_microphone`을 함께 냅니다. `recorder.stop()`이 던지면 `onstop`은
+오지 않으므로 그것도 `device_unavailable`로 보고합니다 — 그렇지 않으면 머신이
+오지 않을 클립을 영원히 기다립니다.
+
+**`unsupported`는 세션을 들고 다닙니다.** 세션 없는 형태는 누르는 순간의
+사전 점검(=`idle`)에서만 유효합니다. 예전에는 `permission_pending`에서도
+받았으므로, 끝난 세션의 늦은 `unsupported` 하나가 **그것을 대체한 새 세션을
+끝내고 마이크를 해제**했습니다.
 
 ---
 
@@ -395,10 +546,15 @@ sweeper가 지우는 것이 아니라 애초에 어디에도 쓰지 않습니다
 오디오, transcript, transcript의 길이, transcript의 앞부분, API key, provider
 응답 본문.
 
-요청당 구조화 이벤트 하나가 남고 필드는 **outcome, mediaType, durationSource,
-durationSeconds, reservedSeconds, providerFailure, providerStatus, keySource**
-뿐입니다 — 전부 이 코드가 고른 코드이거나 컨테이너에서 측정한 숫자입니다.
+요청당 구조화 이벤트 하나가 남고 필드는 다음뿐입니다 — **outcome, mediaType,
+durationSource, durationSeconds, reservedSeconds, releasedSeconds,
+settlementBasis, usageKind, disposition, providerFailure, providerStatus,
+keySource**. 전부 이 코드가 고른 코드이거나 컨테이너에서 측정한 숫자입니다.
 필드가 하나라도 늘면 `tests/voiceInputPrivacy.test.mjs`가 실패합니다.
+
+**`usageKind`는 단위의 종류일 뿐 수치가 아닙니다.** provider의 토큰 수는 남기지
+않습니다 — `output_tokens`는 transcript 길이의 대리 지표이고, 이 절은 그것을
+transcript 자체만큼 단호하게 금지합니다(§7.3).
 
 provider 실패는 **코드와 HTTP status로만** 보고합니다. 일부 provider는 오류
 본문에 요청을 되비추고, 그 요청은 오디오입니다. `fetch`가 throw한 error도

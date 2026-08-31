@@ -110,7 +110,7 @@ test("cancelling discards the capture and releases the microphone", () => {
   assert.equal(state.status, "idle");
   assert.deepEqual(effects.slice(-2), [
     { type: "discard_capture", sessionId: 1 },
-    { type: "release_microphone" },
+    { type: "release_microphone", sessionId: 1 },
   ]);
 });
 
@@ -293,4 +293,140 @@ test("isVoiceRecorderBusy covers every non-resting state", () => {
   ]) {
     assert.equal(isVoiceRecorderBusy(state), true, state.status);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Stabilisation: failures that arrive *after* recording has begun
+//
+// The reducer accepted `unsupported` only from `idle`/`permission_pending` and
+// `device_unavailable` only from `permission_pending`. Both are dispatched by
+// the adapter from states those guards reject:
+//
+//   * `new MediaRecorder(...)` throwing dispatches `unsupported` while the
+//     machine is already `recording` (permission_granted moved it there before
+//     the capture was attempted);
+//   * `recorder.onerror` dispatches `device_unavailable` from `recording` or
+//     `stopping`.
+//
+// Both transitions were dropped, so the machine sat in `recording` with the
+// microphone open and — in the onerror case — a tick timer still running. The
+// only way out was Cancel, and nothing told the user why.
+// ---------------------------------------------------------------------------
+
+test("a recorder that cannot be constructed ends the recording it was for", () => {
+  const { state, effects } = run([
+    ...recordingAt(),
+    { type: "unsupported", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "error");
+  assert.equal(state.code, "VOICE_UNSUPPORTED_BROWSER");
+  assert.ok(
+    effects.some((effect) => effect.type === "release_microphone"),
+    "a failure while recording must close the microphone it opened"
+  );
+  assert.ok(
+    effects.some((effect) => effect.type === "discard_capture"),
+    "the partial capture is not a clip the user asked to send"
+  );
+});
+
+test("a recorder error during recording ends the recording", () => {
+  const { state, effects } = run([
+    ...recordingAt(),
+    { type: "device_unavailable", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "error");
+  assert.equal(state.code, "VOICE_DEVICE_UNAVAILABLE");
+  assert.ok(effects.some((effect) => effect.type === "release_microphone"));
+});
+
+test("a recorder error while stopping ends the recording", () => {
+  // Without this the machine waits forever for an `onstop` that a failed
+  // recorder will never fire.
+  const { state, effects } = run([
+    ...recordingAt(),
+    { type: "stop_requested" },
+    { type: "device_unavailable", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "error");
+  assert.equal(state.code, "VOICE_DEVICE_UNAVAILABLE");
+  assert.ok(effects.some((effect) => effect.type === "release_microphone"));
+});
+
+test("a stale failure from a finished session cannot end the current one", () => {
+  // `unsupported` carried no session id, so a late one from session 1 was
+  // accepted while session 2 sat in `permission_pending` — ending session 2 and
+  // releasing the microphone it was about to be granted.
+  const { state, effects } = run([
+    ...recordingAt(1),
+    { type: "cancel_requested" },
+    { type: "start_requested" },
+    { type: "unsupported", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "permission_pending");
+  assert.equal(state.sessionId, 2);
+  assert.equal(
+    effects.filter((effect) => effect.type === "release_microphone").length,
+    1,
+    "only the cancelled session may release a microphone"
+  );
+});
+
+test("a stale device error from a finished session is dropped", () => {
+  const { state } = run([
+    ...recordingAt(1),
+    { type: "cancel_requested" },
+    ...recordingAt(2),
+    { type: "device_unavailable", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "recording");
+  assert.equal(state.sessionId, 2);
+});
+
+test("a conversation switch ends the recording and says so", () => {
+  // Problem B's machine half: the session belongs to the conversation it was
+  // started in, so leaving that conversation ends it rather than letting the
+  // transcript follow the user.
+  const { state, effects } = run([
+    ...recordingAt(),
+    { type: "scope_changed", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "error");
+  assert.equal(state.code, "VOICE_SCOPE_CHANGED");
+  assert.deepEqual(
+    effects.slice(-2).map((effect) => effect.type),
+    ["discard_capture", "release_microphone"],
+    "a switch throws the capture away rather than uploading it"
+  );
+});
+
+test("a switch ends a transcription that is already in flight", () => {
+  const { state, effects } = run([
+    ...recordingAt(),
+    { type: "stop_requested" },
+    { type: "clip_ready", sessionId: 1, byteLength: CLIP_BYTES },
+    { type: "scope_changed", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "error");
+  assert.equal(state.code, "VOICE_SCOPE_CHANGED");
+  assert.ok(effects.some((effect) => effect.type === "discard_capture"));
+});
+
+test("a switch reported for a session that already ended changes nothing", () => {
+  const { state } = run([
+    ...recordingAt(1),
+    { type: "cancel_requested" },
+    ...recordingAt(2),
+    { type: "scope_changed", sessionId: 1 },
+  ]);
+
+  assert.equal(state.status, "recording");
+  assert.equal(state.sessionId, 2);
 });

@@ -359,6 +359,7 @@ export const en = {
         voiceErrorClipTooLong: "The recording is longer than the limit.",
         voiceErrorClipUnreadable: "The recording could not be read.",
         voiceErrorTranscriptEmpty: "No speech was recognised. Try again somewhere quieter.",
+        voiceErrorScopeChanged: "Voice input stopped because you moved to another chat. Nothing was added.",
         voiceErrorUnavailable: "Voice input is not available right now.",
         voiceErrorSignInRequired: "Log in to use voice input.",
         voiceErrorLimitReached: "You have reached today's voice input limit. Try again tomorrow.",
