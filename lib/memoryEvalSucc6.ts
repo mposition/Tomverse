@@ -1,12 +1,12 @@
 /**
- * `mem-eval-succ-6` — the decision set with the ten B+ cases replaced.
+ * `mem-eval-succ-6` — thirteen cases replaced: the B+ ten, and three more.
  *
  * ## A sample-changing successor, not a contract-only one
  *
  * `succ-5` shares `succ-4`'s case array by reference and records the same
  * dataset digest deliberately: only the contract descriptor moved, so the
- * sample had to be provably identical. `succ-6` is the other kind. Ten cases
- * leave and ten arrive, so the array really does diverge and the dataset
+ * sample had to be provably identical. `succ-6` is the other kind. Thirteen
+ * cases leave and thirteen arrive, so the array really does diverge and the dataset
  * digest really is new — and `verifySucc6Manifest()` refuses a manifest whose
  * digest matches `succ-5`, which is the exact inverse of the check `succ-5`
  * carries.
@@ -37,7 +37,8 @@
  * ## Not frozen
  *
  * `MEMORY_EVAL_SUCC6_DATASET_FROZEN` is `false` and stays false until a person
- * has reviewed the ten replacements and signed the adoption
+ * has reviewed **all thirteen** new cases — the B+ ten and the three
+ * composition repairs — and signed the adoption
  * (.github/audits/memory-boundary-decision-2026-08-30.md §5.3 step 3). The
  * structural checks in `scripts/check-memory-eval-succ6.mjs` pass long before
  * that, and passing them is not the same as being adopted.
@@ -55,7 +56,10 @@ import {
 } from "@/lib/memoryEvalScoringContractDigest";
 import { MEMORY_EVAL_SUCC5_CASES } from "@/lib/memoryEvalSucc5";
 import { MEMORY_EVAL_SUCC6_REPLACEMENTS } from "@/lib/memoryEvalSucc6Replacements";
-import { subtypeTableDigest } from "@/lib/memoryEvalAssistantOnlySubtypes";
+import {
+    SUBTYPE_REVIEW,
+    subtypeTableDigest,
+} from "@/lib/memoryEvalAssistantOnlySubtypes";
 import {
     SUCC6_COMPOSITION_ADDITIONS,
     SUCC6_COMPOSITION_ADDITION_IDS,
@@ -85,11 +89,12 @@ export const MEMORY_EVAL_SUCC6_DATASET_PURPOSE: "development" | "decision" =
     "decision";
 
 /**
- * The 1,140 cases carried over, in `succ-5`'s order.
+ * The 1,137 cases carried over, in `succ-5`'s order.
  *
  * Order is preserved rather than rebuilt so that the inherited part of the
  * fingerprint is the inherited part of `succ-5`'s, and a diff of the two
- * datasets shows ten removals and ten additions instead of a reshuffle.
+ * datasets shows thirteen removals and thirteen additions rather than a
+ * reshuffle.
  */
 const INHERITED: readonly MemoryEvalCaseV3[] = MEMORY_EVAL_SUCC5_CASES.filter(
     (testCase) =>
@@ -144,7 +149,7 @@ export type Succ6DatasetManifest = {
     scoringContractDigest: string;
     scoringContractVersion: string;
     manifestDigest: string;
-    /** False until a person adopts the ten replacements. */
+    /** False until a person adopts all thirteen new cases. */
     frozen: boolean;
 };
 
@@ -237,7 +242,8 @@ export function buildSucc6Manifest(): Succ6DatasetManifest {
  * Empty means the record describes the dataset this tree holds. The two
  * negative checks are the ones a case-replacement successor needs and a
  * contract-only one does not: the sample must have moved, and it must have
- * moved by exactly the ten transitions recorded.
+ * moved by exactly the thirteen swaps recorded — the B+ ten and the three
+ * composition repairs, each checked against its own list.
  */
 export function verifySucc6Manifest(
     manifest: Succ6DatasetManifest = buildSucc6Manifest()
@@ -268,6 +274,32 @@ export function verifySucc6Manifest(
                 "digest, so nothing else here would have caught it."
         );
     }
+    // Freezing is a claim about two artefacts, and only one of them is the
+    // sample. A dataset frozen over a classification nobody signed would carry
+    // a floor measured by an AI draft into every later citation of it, and the
+    // docs/ops/memory-extraction-eval-dataset.md §3.3 floor is decided by the classification.
+    //
+    // This also fixes the order the freeze has to run in. The review status,
+    // reviewer and date are inside `subtypeTableDigest`, so recording the
+    // signature *moves* that digest and the manifest digest with it. Pinning
+    // the draft's values first and signing afterwards produces a record whose
+    // digests describe a table that no longer exists: sign, recompute, then
+    // pin.
+    if (MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
+        if (SUBTYPE_REVIEW.status !== "human_confirmed") {
+            failures.push(
+                `frozen with the subtype table still ${SUBTYPE_REVIEW.status}: the ` +
+                    "docs/ops/memory-extraction-eval-dataset.md §3.3 floor rests on " +
+                    "that table, and freezing over an unsigned reading freezes the " +
+                    "reading too"
+            );
+        }
+        if (!SUBTYPE_REVIEW.reviewer || !SUBTYPE_REVIEW.reviewedAt) {
+            failures.push(
+                "frozen with a subtype table confirmed by nobody, or on no date"
+            );
+        }
+    }
     if (manifest.subtypeTableDigest !== built.subtypeTableDigest) {
         failures.push(
             `subtypeTableDigest: recorded ${manifest.subtypeTableDigest}, tree computes ` +
@@ -279,7 +311,7 @@ export function verifySucc6Manifest(
     // number and nothing else.
     if (manifest.datasetDigest === manifest.composition.sourceDatasetDigest) {
         failures.push(
-            "the dataset digest equals succ-5's: this successor replaced ten cases and " +
+            "the dataset digest equals succ-5's: this successor replaced thirteen cases and " +
                 "its sample is supposed to differ, so an equal digest means it did not."
         );
     }

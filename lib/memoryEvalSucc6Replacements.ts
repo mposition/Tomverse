@@ -193,8 +193,12 @@ const KO: readonly MemoryEvalCaseV3[] = [
             },
         ],
     },
-    // 3 — correction of the assistant's arithmetic premise, not of a user
-    // fact: nothing about the user is established either way.
+    // 3 — the user corrects the assistant's reading of a cadence they had
+    // already given. Written when this case expected nothing, the comment here
+    // said "nothing about the user is established either way", and that was
+    // the defect: the correction is about the assistant's arithmetic, but the
+    // sentence being corrected *from* is the user's own statement of a
+    // fortnightly meeting, which stands whatever the assistant did with it.
     {
         id: "succ-assistant-ko-504",
         category: "assistant_only",

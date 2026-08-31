@@ -38,9 +38,15 @@ assistant가 주기를 잘못 읽었다는 사실과, 사용자가 "격주로 �
 
 ## 1. 이 시트로 판정할 것
 
+검수 범위는 **신규 13건 전부**입니다 — B+ 10건과 cell 하한 보완 3건. 뒤의
+3건은 이유가 다를 뿐 새로 들어온 case이고, 검수 밖이 아닙니다.
+
 1. 각 case의 gold — 열한 건의 빈 gold와 `ko-501`·`ko-504`의 gold.
-2. §3.1 제외 기준 4종. **이것이 §3 하한 판정을 좌우합니다.**
-3. §2.1 cell 하한 보완 3건 — 무엇이 나가고 무엇이 들어왔는지.
+2. §3.1 제외 기준 4종. **분류표의 의미를 확정합니다.** 표본을 교체하기 전에는
+   이 기준이 하한 판정을 좌우했지만, §2.2 이후에는 넷을 그대로 제외해도
+   38/38입니다. 즉 지금 판정하는 것은 통과 여부가 아니라 **무엇을 subtype 3이라
+   부르는가**이고, 그 정의가 이후 모든 cell 계약 판정에 쓰입니다.
+3. §2.2 cell 하한 보완 3건 — 무엇이 나가고 무엇이 들어왔는지.
 4. §4 다양성.
 
 ## 2. 무엇이 나가고 무엇이 들어왔나
@@ -97,6 +103,10 @@ en 34). 부족분은 승계된 것입니다.
 인정하면 각 cell에 4건이 더해져 바로 하한을 넘지만, 그것은 임계값에 측정을
 맞추는 것이고 한 번 하면 그 측정은 이후 아무 뜻도 갖지 못합니다. 대신 §2.2의
 표본 교체로 메웠습니다.
+
+그 결과 **§3.1은 더 이상 통과·미달을 가르지 않습니다.** 넷을 모두 제외한 채로
+38/38이고, 넷을 인정하면 42/42가 됩니다. 남은 쟁점은 수치가 아니라 정의이며,
+그 정의는 앞으로의 cell 계약 판정에 계속 쓰입니다.
 
 - 분류표: `lib/memoryEvalAssistantOnlySubtypes.ts` — case별 **판정 근거 인용** 포함
 - 상태: `SUBTYPE_REVIEW.status = "ai_draft"` — 사람이 확정해야 합니다
@@ -554,33 +564,60 @@ dataset digest는 **subtype 분류표를 결속하지 않습니다** — case를
 manifest가 셋을 함께 싣고, 동결 기록은 셋 전부와 40자리 commit SHA를 pin 합니다.
 
 - dataset digest: `2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63`
-- subtype table digest: `4eb1cdf8634296ee3b3aa179113110f71777bb300d448c30502242eff7eb707b`
-- manifest digest: `4a992212caa2c9996338203cad10c801a79a2b88cfd2f1998e799e2d516405e4`
+- subtype table digest: `3b147808948cad5e2ccf506821aca36ffd1978f183f6461079403863f55a2205`
+- manifest digest: `3503cf0e9f23b03e579d61b03e5ab1053aed25ffc4fb6d7c015973fa37ff10d1`
 - commit SHA(40자리): 이 문서를 담은 commit
 
 이 값들은 **채택 전까지 계속 바뀝니다.** 지금 pin 하면 안 됩니다.
 
 ## 8. 판정란
 
-아래는 사람이 채웁니다. 이 시트를 만든 주체가 채우지 않습니다.
+**이 표는 AI가 만든 초안입니다.** 검수자가 실제로 진술한 내용만 옮겨 적었고,
+진술이 없는 칸은 비워 두었습니다. 각 줄을 확인하고 고친 뒤 서명과 함께 commit
+하는 것이 채택입니다. 지어낸 관측은 어느 칸에도 넣지 않았습니다.
 
-| 항목 | 판정 | 근거 |
+| 항목 | 판정 (초안) | 근거 |
 | --- | --- | --- |
-| §3.1 제외 기준 4종 | | |
-| §3 subtype 분류표 (`ai_draft` → 확정/정정) | | |
-| §2.2 cell 하한 보완 3건 (교체 대상·신규 case) | | |
-| `ko-501` mixed-critical gold | | |
-| `ko-504` mixed-critical gold | | |
-| `en-501` 모호성 제거 | | |
-| 나머지 열 건의 빈 gold | | |
-| §4 다양성 | | |
-| §5 수정 gold 5건 | | |
-| 채택·동결 여부 | | |
+| §3.1 제외 기준 4종 | **동의 — 네 유형 모두 제외** | 추측 놀이의 부정은 subtype 1의 응답 구조, 처음부터 제3자로 제시된 질문은 귀속이 바뀐 정정이 아님, 처음부터 허구 선언은 subtype 2, 전문·소문 확인은 자기 사실의 정정이 아님 |
+| §3 subtype 분류표 (`ai_draft` → 확정) | *(미판정)* | |
+| §2.2 cell 하한 보완 3건 | **타당** | 표본을 1:1 교체해 ko/en 모두 38/38. 임계값에 분류를 맞추지 않음 |
+| 신규 `ko-507`·`ko-508`·`en-505`의 subtype과 빈 gold | **동의** | |
+| `ko-501` mixed-critical gold | **채택 권고** | `expertise`/`affirmed`/`bulk_safe`, 선배의 10년은 불허, 사용자 입문 사실만 허용 |
+| `ko-504` mixed-critical gold | **적절** | 반복 상황은 `recurring_context`. assistant의 주기 오독과 별개 |
+| `en-501` 모호성 제거 | **채택 권고** | 일회성 대필이며 지속적 직책·역할을 확정하지 않음 → subtype 3, `expected: []` |
+| 정답/오답 채점 (`1/0`, `0/1`) | **동작 확인** | 두 mixed-critical case 모두 |
+| digest 재현 | **일치** | dataset·subtype·manifest 3종 |
+| §4 다양성 | *(미판정)* | |
+| §5 수정 gold 5건 | *(미판정)* | |
+| **채택·동결** | *(미판정)* | |
 
 - 검수자:
 - 검수일:
 - 채택 기록 경로:
 
-채택하면 그 commit에서 `MEMORY_EVAL_SUCC6_DATASET_FROZEN`을 `true`로 올리고,
-manifest를 계산식이 아니라 literal record로 pin 하며, §7의 세 digest와 commit
-SHA를 채택 기록에 적습니다.
+## 9. 동결 절차 — 순서가 계약입니다
+
+**초안 digest를 그대로 pin 하면 안 됩니다.** 검수 상태·검수자·검수일·검수
+방법이 모두 `subtypeTableDigest` 안에 있으므로, 서명을 기록하는 행위 자체가 그
+digest와 manifest digest를 움직입니다. 먼저 pin 하고 나중에 서명하면, 기록된
+digest가 더 이상 존재하지 않는 표를 가리키게 됩니다.
+
+순서는 하나입니다.
+
+1. **서명을 코드에 기록합니다** — `SUBTYPE_REVIEW`의 `status`를
+   `"human_confirmed"`로, `reviewer`와 `reviewedAt`을 실제 값으로. 같은 commit에서
+   위 §8 판정란을 채웁니다.
+2. **재계산합니다** — `npm run check:memory-eval-succ6`이 새 dataset·subtype·
+   manifest digest를 출력합니다.
+3. **최종값을 pin 합니다** — `MEMORY_EVAL_SUCC6_DATASET_FROZEN = true`,
+   `MEMORY_EVAL_SUCC6_MANIFEST`를 `buildSucc6Manifest()` 호출이 아니라 그 시점의
+   **object literal**로. 채택 기록에 세 digest와 40자리 commit SHA를 적습니다.
+
+표본을 건드리지 않으면 **dataset digest는 유지됩니다**(`2ffc8c09…`). 움직이는
+것은 subtype과 manifest 둘입니다.
+
+이 순서는 문서만이 아니라 검사로도 강제됩니다. `verifySucc6Manifest()`는
+`MEMORY_EVAL_SUCC6_DATASET_FROZEN`이 `true`인데 `SUBTYPE_REVIEW.status`가
+`"human_confirmed"`가 아니거나 검수자·검수일이 비어 있으면 실패합니다 — docs/ops/memory-extraction-eval-dataset.md §3.3
+하한이 그 표에 기대고 있으므로, 서명 없는 읽기 위에서 동결하면 그 읽기까지 함께
+동결됩니다.

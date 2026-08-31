@@ -157,7 +157,10 @@ export const ASSISTANT_ONLY_SUBTYPES: Readonly<
  * record pins both. Ids, subtypes and grounds all go in: a ground rewritten to
  * justify a different subtype is exactly the drift worth catching, and the
  * review status is in because a table signed by nobody is a different artefact
- * from the same rows signed by a reviewer.
+ * from the same rows signed by a reviewer. `method` is in for the same reason
+ * as the status — it is the claim about how the reading was done, and a
+ * signature covers what was claimed when it was given. Outside the digest, the
+ * methodology sentence could be rewritten after a freeze with nothing moving.
  */
 export function subtypeTableFingerprintInput(): string {
     const rows = Object.keys(ASSISTANT_ONLY_SUBTYPES)
@@ -170,6 +173,7 @@ export function subtypeTableFingerprintInput(): string {
         `status=${SUBTYPE_REVIEW.status}`,
         `reviewer=${SUBTYPE_REVIEW.reviewer ?? "-"}`,
         `reviewedAt=${SUBTYPE_REVIEW.reviewedAt ?? "-"}`,
+        `method=${SUBTYPE_REVIEW.method}`,
         `rows=${rows.length}`,
         ...rows,
     ].join("\n");

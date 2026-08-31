@@ -4,15 +4,16 @@
  * Two tiers, and the difference between them is the whole point.
  *
  * **Structure** fails immediately. These are the facts a person cannot check
- * by reading — the total, the cell floors, that the ten originals are gone and
- * the ten replacements are present, that the decision set and the regression
+ * by reading — the total, the cell floors, that the thirteen originals are
+ * gone and the thirteen new cases are present, that the decision set and the regression
  * corpus share no case, that the mapping is one to one, that the preservation
  * split is five corrected and five not, and that `succ-5`'s own digest did not
  * move underneath. A dataset that fails any of them is malformed, not
  * unreviewed.
  *
  * **Readiness** reports and does not fail. `frozen` is false until a person
- * has read the ten replacements and signed the adoption, and no script can do
+ * has read all thirteen new cases — the B+ ten and the three composition
+ * repairs — and signed the adoption, and no script can do
  * that for them (AGENTS.md: what is left to a person is what only a person can
  * do). Reporting it as a failure would teach the operator to run this with a
  * flag that ignores failures, which is the opposite of what the structure tier
@@ -518,7 +519,8 @@ notes.push(
 
 if (!MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
     notes.push(
-        "FROZEN=false — the ten replacements have not been reviewed and the adoption " +
+        "FROZEN=false — the thirteen new cases (ten B+ replacements and three " +
+            "composition repairs) have not been reviewed and the adoption " +
             "is unsigned. Structure passing is not adoption; a decision-grade run against " +
             "an unfrozen decision sample is refused by `decideEvalRunMode()`, and that " +
             "refusal is what this state is for."
