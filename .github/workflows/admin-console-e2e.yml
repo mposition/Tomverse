@@ -157,10 +157,23 @@ jobs:
       # is about 22 minutes.
       #
       # This is a ceiling raise and nothing else -- no retry, no test change.
-      # If the cap is reached again at 20 minutes, do not raise it a second
-      # time: 20 is already 2.5x a healthy run, so a step that reaches it is
-      # hanging rather than running slowly, and the next step is to find which
-      # spec or which server start is hanging.
+      #
+      # Reaching 20 minutes is a stop condition, not a diagnosis. It does not
+      # establish a hang; it establishes that the cause is no longer worth
+      # absorbing with a bigger number. Do not raise it a second time --
+      # investigate instead, and the candidates are not only the suite: a
+      # particular spec, the server start, the database, or runner latency of
+      # the kind seen in 33349427451.
+      #
+      # Post-change observation is NOT complete. Two runs since:
+      #
+      #   33353197874  step 7m45s  job 9m15s
+      #   33353265602  step 7m34s  job 9m15s
+      #
+      # Both sit with the pre-change readings, so no clear degradation has
+      # been introduced. That is all they show. Two green runs cannot
+      # establish that an intermittent timeout is resolved, and nothing here
+      # should be read as claiming it. The intended sample is roughly 20 runs.
       - name: Run the Admin Console E2E suite
         timeout-minutes: 20
         run: npm run test:e2e:admin:run
