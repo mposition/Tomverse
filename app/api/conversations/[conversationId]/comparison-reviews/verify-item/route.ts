@@ -191,7 +191,13 @@ export async function POST(
         system: verificationPrompt.system,
         prompt: verificationPrompt.prompt,
         output: Output.object({ schema: verificationCheckSchema }),
-        ...getModelGenerationSettings(model, { temperature: 0.1 }),
+        ...getModelGenerationSettings(model, {
+            temperature: 0.1,
+            // Its own path, not the full review's. The two are different
+            // requests over different prompts, and one policy decision must
+            // not silently cover both -- lib/anthropicPromptCaching.ts.
+            promptCachePath: "comparison_review_verify_item",
+        }),
         maxOutputTokens: budget.maxOutputTokens,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(30_000),
@@ -219,6 +225,13 @@ export async function POST(
         {
           inputTokens: generated.usage.inputTokens,
           cachedInputTokens: generated.usage.inputTokenDetails.cacheReadTokens,
+          // Harvested beside the read count on every settlement, whether or
+          // not this path caches today. A settlement that takes reads and not
+          // writes is the 25% undercount that shipped once already, and
+          // `tests/anthropicPromptCachingWiring.test.mjs` refuses the pairing
+          // repo-wide rather than per allowlisted path.
+          cacheWriteInputTokens:
+            generated.usage.inputTokenDetails.cacheWriteTokens,
           outputTokens: generated.usage.outputTokens,
           outcome: "completed",
         },

@@ -90,6 +90,22 @@ const cachedInputTokensOf = (attempt: LedgerAttempt) =>
     Math.min(attempt.inputTokens, attempt.cachedInputTokens);
 
 /**
+ * Cache-write tokens, bounded by what the reads have not already claimed.
+ *
+ * The same clamp `calculateProviderUsageCost` applies, and it has to be the
+ * same one: the row's three token columns are read as a split of its own
+ * `inputTokens`, and two clamps that disagree make that split stop adding up.
+ */
+const cacheWriteInputTokensOf = (attempt: LedgerAttempt) =>
+    Math.max(
+        0,
+        Math.min(
+            attempt.inputTokens - cachedInputTokensOf(attempt),
+            attempt.cacheWriteInputTokens ?? 0
+        )
+    );
+
+/**
  * An attempt as this ledger accepts it.
  *
  * Two values wider than `PricedAttempt`, and both belong to the sweep alone:
@@ -153,6 +169,13 @@ export type AttemptCostRecord = {
     rollup?: {
         uncachedInputCostMicroUsd: number;
         cachedInputCostMicroUsd: number;
+        /**
+         * Optional, and absent means zero rather than unknown: the only caller
+         * that supplies its own split without this is one taking a
+         * provider-reported total (Perplexity), and that report has no
+         * cache-write line to split out.
+         */
+        cacheWriteInputCostMicroUsd?: number;
         outputCostMicroUsd: number;
     };
     /**
@@ -194,6 +217,7 @@ export const recordAttemptCost = async (
     }: AttemptCostRecord
 ): Promise<AttemptCostOutcome> => {
     const cachedInputTokens = cachedInputTokensOf(attempt);
+    const cacheWriteInputTokens = cacheWriteInputTokensOf(attempt);
     // One value for the row and its rollup. Read once, here, so the two
     // cannot land on different days when a turn settles across midnight.
     const day = rollupDate ?? rollupDayOf();
@@ -214,6 +238,9 @@ export const recordAttemptCost = async (
                 ),
                 inputTokens: unknownTokens ? null : attempt.inputTokens,
                 cachedInputTokens: unknownTokens ? null : cachedInputTokens,
+                cacheWriteInputTokens: unknownTokens
+                    ? null
+                    : cacheWriteInputTokens,
                 outputTokens: unknownTokens ? null : attempt.outputTokens,
                 reasoningTokens:
                     !unknownTokens && Number.isSafeInteger(attempt.reasoningTokens)
@@ -258,10 +285,13 @@ export const recordAttemptCost = async (
         calculateProviderUsageCost({
             inputTokens: attempt.inputTokens,
             cachedInputTokens: attempt.cachedInputTokens,
+            cacheWriteInputTokens: attempt.cacheWriteInputTokens,
             outputTokens: attempt.outputTokens,
             inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
+            cacheWriteUsdPerMillionTokens:
+                attempt.price.cacheWriteUsdPerMillionTokens,
         });
     await recordInternalProviderUsage({
         client: tx,
@@ -270,10 +300,16 @@ export const recordAttemptCost = async (
         modelId: attempt.price.modelId,
         inputTokens: unknownTokens ? 0 : attempt.inputTokens,
         cachedInputTokens: unknownTokens ? 0 : cachedInputTokens,
+        cacheWriteInputTokens: unknownTokens ? 0 : cacheWriteInputTokens,
         outputTokens: unknownTokens ? 0 : attempt.outputTokens,
         estimatedCostMicroUsd: attempt.costMicroUsd,
         uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
         cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
+        // Absent on a caller-supplied split from a provider-reported total
+        // (Perplexity), which has no cache-write line -- so zero there is the
+        // truth rather than a default.
+        cacheWriteInputCostMicroUsd:
+            breakdown.cacheWriteInputCostMicroUsd ?? 0,
         outputCostMicroUsd: breakdown.outputCostMicroUsd,
     });
     return "inserted";
@@ -347,6 +383,7 @@ const correctExistingAttemptCost = async (
                 kind: "late_provider_actual",
                 observedInputTokens: attempt.inputTokens,
                 observedCachedInputTokens: cachedInputTokensOf(attempt),
+                observedCacheWriteInputTokens: cacheWriteInputTokensOf(attempt),
                 observedOutputTokens: attempt.outputTokens,
                 observedCostMicroUsd: BigInt(attempt.costMicroUsd),
                 costDeltaMicroUsd: delta,
@@ -381,6 +418,7 @@ const correctExistingAttemptCost = async (
         costDeltaMicroUsd: delta,
         inputTokens: attempt.inputTokens,
         cachedInputTokens: cachedInputTokensOf(attempt),
+        cacheWriteInputTokens: cacheWriteInputTokensOf(attempt),
         outputTokens: attempt.outputTokens,
         create: false,
     });
@@ -432,6 +470,7 @@ const applyAdjustmentDelta = async (
         costDeltaMicroUsd: bigint;
         inputTokens: number;
         cachedInputTokens: number;
+        cacheWriteInputTokens: number;
         outputTokens: number;
         create: boolean;
     }
@@ -445,6 +484,7 @@ const applyAdjustmentDelta = async (
     const delta = input.costDeltaMicroUsd;
     const input_ = BigInt(Math.max(0, input.inputTokens));
     const cached_ = BigInt(Math.max(0, input.cachedInputTokens));
+    const cacheWrite_ = BigInt(Math.max(0, input.cacheWriteInputTokens));
     const output_ = BigInt(Math.max(0, input.outputTokens));
     if (!input.create) {
         const rows = await tx.$executeRaw`
@@ -455,6 +495,8 @@ const applyAdjustmentDelta = async (
                     "inputTokens"::bigint + ${input_}::bigint))::int,
                 "cachedInputTokens" = LEAST(2000000000, GREATEST(0,
                     "cachedInputTokens"::bigint + ${cached_}::bigint))::int,
+                "cacheWriteInputTokens" = LEAST(2000000000, GREATEST(0,
+                    "cacheWriteInputTokens"::bigint + ${cacheWrite_}::bigint))::int,
                 "outputTokens" = LEAST(2000000000, GREATEST(0,
                     "outputTokens"::bigint + ${output_}::bigint))::int,
                 "updatedAt" = NOW()
@@ -468,9 +510,11 @@ const applyAdjustmentDelta = async (
     await tx.$executeRaw`
         INSERT INTO "ProviderDailyUsage" (
             "id", "provider", "modelId", "source", "date",
-            "requestCount", "inputTokens", "cachedInputTokens", "outputTokens",
+            "requestCount", "inputTokens", "cachedInputTokens",
+            "cacheWriteInputTokens", "outputTokens",
             "estimatedCostMicroUsd", "uncachedInputCostMicroUsd",
-            "cachedInputCostMicroUsd", "outputCostMicroUsd",
+            "cachedInputCostMicroUsd", "cacheWriteInputCostMicroUsd",
+            "outputCostMicroUsd",
             "createdAt", "updatedAt"
         )
         VALUES (
@@ -479,8 +523,9 @@ const applyAdjustmentDelta = async (
             0,
             LEAST(2000000000, GREATEST(0, ${input_}::bigint))::int,
             LEAST(2000000000, GREATEST(0, ${cached_}::bigint))::int,
+            LEAST(2000000000, GREATEST(0, ${cacheWrite_}::bigint))::int,
             LEAST(2000000000, GREATEST(0, ${output_}::bigint))::int,
-            LEAST(2000000000, GREATEST(0, ${delta}::bigint))::int, 0, 0, 0,
+            LEAST(2000000000, GREATEST(0, ${delta}::bigint))::int, 0, 0, 0, 0,
             NOW(), NOW()
         )
         ON CONFLICT ("provider", "modelId", "source", "date")
@@ -491,6 +536,8 @@ const applyAdjustmentDelta = async (
                 "ProviderDailyUsage"."inputTokens"::bigint + ${input_}::bigint))::int,
             "cachedInputTokens" = LEAST(2000000000, GREATEST(0,
                 "ProviderDailyUsage"."cachedInputTokens"::bigint + ${cached_}::bigint))::int,
+            "cacheWriteInputTokens" = LEAST(2000000000, GREATEST(0,
+                "ProviderDailyUsage"."cacheWriteInputTokens"::bigint + ${cacheWrite_}::bigint))::int,
             "outputTokens" = LEAST(2000000000, GREATEST(0,
                 "ProviderDailyUsage"."outputTokens"::bigint + ${output_}::bigint))::int,
             "updatedAt" = NOW()
@@ -563,6 +610,8 @@ export const applyPendingAttemptCostAdjustments = async (
                     costDeltaMicroUsd: adjustment.costDeltaMicroUsd,
                     inputTokens: adjustment.observedInputTokens ?? 0,
                     cachedInputTokens: adjustment.observedCachedInputTokens ?? 0,
+                    cacheWriteInputTokens:
+                        adjustment.observedCacheWriteInputTokens ?? 0,
                     outputTokens: adjustment.observedOutputTokens ?? 0,
                     create: true,
                 });

@@ -483,19 +483,111 @@ registry가 **가정한** tier가 남고 요청이 **실제로 처리된** tier�
 따로 제공하되(기본은 읽기 한 번, `--invoke`는 명시적 opt-in과 예상 비용 표시
 필요), 출력 자체가 "이것은 가격 근거가 아니다"라고 적습니다.
 
-### cache write 가격은 기록하되 과금하지 않습니다
+### cache write 가격은 측정된 곳에서 과금합니다 (2026-08-30 개정)
 
-`ModelPriceTier.cacheWriteUsdPerMillionTokens`는 감사용 기록이며 **과금에
-쓰이지 않습니다**(`CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`). cache read와
-cache write는 공급자 가격표에서 별개 항목인데, 이 앱이 세는 것은 read뿐입니다 —
-`cachedInputTokens`(`lib/providerUsageCost.ts`)가 read 수이고, **cache write
-토큰을 보고하는 provider usage adapter는 하나도 없습니다.** 측정한 값에서 write
-수를 유도하는 것은 숫자를 지어내는 일이므로, 요율은 gap이 보이도록 적어만 두고
-`resolveModelPricing`은 무시합니다.
+**이전 계약**(`CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`)은
+`ModelPriceTier.cacheWriteUsdPerMillionTokens`를 감사용 기록으로만 두고 과금에
+쓰지 않았습니다. 그때는 맞았습니다 — **cache write 토큰을 보고하는 provider
+usage adapter가 하나도 없었고**, read 수에서 write 수를 유도하는 것은 숫자를
+지어내는 일이었습니다.
 
-- `gpt-5-6-luna`: 단문 US$0.25, 장문 US$0.50 (입력 요율과 같은 x2)
+Anthropic prompt caching을 켜면서 그 전제가 깨졌습니다. AI SDK가
+`usage.inputTokenDetails.cacheWriteTokens`(API의
+`cache_creation_input_tokens`)를 보고합니다. 새 계약은
+
+```
+CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED = true
+```
+
+이고, **양쪽이 다 있을 때만 과금합니다** — tier의 검증된 요율 **그리고**
+provider가 보고한 write 토큰 수. 한쪽만으로는 어느 쪽도 지어내기입니다.
+
+- 요율이 없는 모델의 write는 비용 0으로 계산되되
+  `unpricedCacheWriteTokens`로 **보고**됩니다. 알려진 토큰 수만큼 과소 기록된
+  비용과 완전한 비용은 다른 것입니다.
+- `cacheWriteUsdPerMillionTokens`는 **env·DB override 대상이 아닙니다.** 관리자
+  콘솔에 이 요율 컨트롤이 없으므로, override 경로는 아무도 볼 수 없는 가격을
+  움직이는 뒷문이 됩니다.
+- 5분 write는 base input의 1.25배입니다
+  (`PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER`). 이 상수는 요율을 **계산하지
+  않고 검사합니다** — 모든 요율은 Anthropic 가격표에서 읽어 적고,
+  `npm run check:model-pricing`이 각 요율이 자기 tier의 입력 요율 × 1.25인지
+  대조합니다.
+- **1시간 캐시(2배)는 쓰지 않습니다.** 요청 경로가 없으므로 상수도 두지
+  않습니다: docs/policy/anthropic-prompt-caching.md §3.
+
+기록된 요율:
+
+- `claude-opus-4-8`(Opus 5) US$6.25 · `claude-fable-5` US$12.50 ·
+  `claude-sonnet-5` US$2.50 · `claude-haiku-4-5` US$1.25 — 전부 과금됩니다.
+- `gpt-5-6-luna`: 단문 US$0.25, 장문 US$0.50 (입력 요율과 같은 x2). 요율은
+  해석되지만 **OpenAI usage adapter가 write 수를 보고하지 않으므로 write 수가
+  항상 0이고 비용도 0입니다** — 요율이 없어서가 아니라 측정이 없어서입니다. 이
+  구분이 "양쪽이 다 있을 때만"의 요점입니다: adapter가 생기면 아무도 flag를
+  뒤집지 않아도 0이 아니게 됩니다.
 - `gpt-5-4-mini`: **기록하지 않습니다.** 확인된 값이 없으며, 아무도 확인하지
   않은 값을 기록하는 것은 없는 것보다 나쁩니다.
+
+이중 계산 함정과 예약 계약은 docs/policy/anthropic-prompt-caching.md §4–§5에
+있습니다. 요약: AI SDK의 `usage.inputTokens`는 **총합**(`noCache + cacheRead +
+cacheWrite`)이므로 두 캐시 수치를 **빼야** 하고, 캐시 marker를 다는 요청은
+0.25배 premium을 provider budget에 **미리** 예약하되 `usageCredits`에는 절대
+닿지 않습니다.
+
+### 가격은 effective date로 선택합니다 (2026-08-30)
+
+`ModelPricingProfile.priceSchedule`은 예고된 가격 변경을 **효력 발생 전에 적어
+둘 수 있게** 합니다. 이전에는 registry가 "오늘 참인 가격" 하나만 담을 수 있어서,
+예고된 변경에 대해 나쁜 선택지가 둘뿐이었습니다 — 미래 숫자를 지금 써서 효력
+전부터 청구하거나, 아무것도 안 써서 효력 후에 옛 숫자로 청구하거나.
+
+- 각 항목은 `effectiveFrom`(RFC 3339 **UTC** instant, `Z` 필수)·`tiers`·
+  `priceSource`·**새 `pricingVersion`**·`effectiveDate`를 갖습니다.
+- 경계는 **포함**입니다: `at === effectiveFrom`이면 새 가격, 1밀리초 전이면 이전
+  가격. 어느 쪽에도 속하지 않는 순간이 없습니다.
+- UTC인 이유는 이 시스템의 다른 모든 경계가 UTC이기 때문입니다 —
+  `ChatUsageBucket` period, `ProviderDailyUsage` day(`rollupDayOf`), 그리고
+  대조 대상인 provider usage·cost API. local time 경계는 정산과 rollup을 변경의
+  반대편에 놓습니다.
+- **소급 적용은 여전히 금지입니다.** 항목은 자기 instant 이후 요청만 설명하고,
+  저장된 snapshot은 이미 자기 요율과 `pricingVersion`을 갖고 있으므로 항목을
+  추가해도 다시 계산되지 않습니다.
+- **override 우선순위는 그대로입니다**: DB/admin override > env override >
+  schedule이 고른 tier > class fallback. override가 있는 행은 tier가 평탄해지고
+  schedule도 함께 평탄해집니다 — 컬럼이 둘 다 표현하지 못합니다.
+- module load 시 검사합니다: 오름차순, 중복 `pricingVersion` 금지,
+  `effectiveDate`가 `effectiveFrom`의 UTC 날짜와 일치.
+
+**Claude Sonnet 5.** launch 시 US$2/US$10은 2026-08-31까지의 introductory
+가격이고 2026-09-01부터 US$3/US$15로 오른다고 예고됐습니다. **2026-08-10에
+Anthropic이 그 인상을 취소했습니다** — 공식 pricing 페이지의
+`claude-sonnet-5-introductory-pricing` 각주: "is now the standard price. The
+previously scheduled increase to $3/$15 per million input/output tokens on
+September 1, 2026 will not occur."
+
+그래서 registry는 US$3/US$15를 **예약하지 않습니다.** 예약했다면 2026-09-01부터
+모든 Sonnet 5 요청을 50% 과대 계상했을 것이고, 과대 계상은 안전한 방향이
+아닙니다 — provider budget과 operational guardrail이 이 숫자로 소진되므로
+부풀린 요율은 돈이 있던 요청을 거절합니다. 대신 취소 사실을
+`anthropic-claude-sonnet-5-standard-2026-08-11` 항목으로 적었습니다. 요율은
+이전과 같고 **기간(term)이 달라졌으며**, 그것이 이 registry가 기록하는
+것입니다. 2026-08-11T00:00:00Z 이전 요청은 계속
+`anthropic-claude-sonnet-5-intro-2026-08-04`로 재현됩니다.
+
+**날짜가 둘이고, 다른 것은 의도입니다.** 발표는 **2026-08-10**,
+이 registry의 청구 경계는 **2026-08-11T00:00:00Z**입니다.
+`ScheduledModelPrice.verifiedAt`이 전자(공급자 페이지에서 읽은 날),
+`effectiveFrom`이 후자(청구가 갈리는 instant)를 기록합니다.
+
+공급자는 **날짜를 발표하지 instant를 발표하지 않으므로**, 경계는 그 읽음에서
+골라야 합니다. 규칙은 **발표 다음 UTC 일의 첫 instant**입니다 — 요청이 실행된
+시점에 아직 공개되지 않았던 결정으로 그 요청을 청구하지 않는 유일한 선택이기
+때문입니다. 발표일 자정으로 소급하면 그날 이른 시각의 모든 요청이 그렇게
+됩니다. 검증기가 `verifiedAt > effectiveFrom`을 거부합니다.
+
+이번 건에서는 이 선택이 **돈을 전혀 움직이지 않습니다**(양쪽 요율이 동일).
+정하는 것은 2026-08-10의 turn이 어느 `pricingVersion`으로 기록되는가뿐입니다.
+다음 개정은 그렇지 않을 것이므로 규칙을 적어 둡니다.
 
 ### 알 수 없는 모델과 CI
 

@@ -1,5 +1,9 @@
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { AiModel } from "@/lib/models";
+import {
+  anthropicPromptCacheOptions,
+  type AnthropicPromptCachePath,
+} from "@/lib/anthropicPromptCaching";
 
 // Google made these rules part of the contract for Gemini 3.6 Flash,
 // Gemini 3.5 Flash-Lite, and later releases. Keep this exact allowlist next
@@ -72,7 +76,7 @@ export const getModelProviderOptions = (
  * `reasoningEffort` -- both were set, in the same namespace, by two callers
  * that never saw each other.
  */
-const mergeProviderOptions = (
+export const mergeProviderOptions = (
   base: ProviderOptions | undefined,
   overlay: ProviderOptions | undefined
 ): ProviderOptions | undefined => {
@@ -102,17 +106,38 @@ export const getModelGenerationSettings = (
      * field the cost reservation is sized on.
      */
     openAiMaxToolCalls?: number;
+    /**
+     * Which call path this request is, for Anthropic prompt caching.
+     *
+     * Required to get a cache marker and absent by default, so a new call site
+     * caches only once somebody has named it in
+     * `ANTHROPIC_PROMPT_CACHE_PATHS` with the repeated prefix it has. The
+     * opposite default -- cache unless told not to -- would have turned the
+     * health probe and the conversation-title call into cache writes nothing
+     * reads, and would have done it silently.
+     */
+    promptCachePath?: AnthropicPromptCachePath;
   }
 ) => {
   const providerOptions = mergeProviderOptions(
-    getModelProviderOptions(model),
-    // Merged rather than assigned: a reasoning OpenAI model already has an
-    // `openai` namespace holding `reasoningEffort`, and this has to land
-    // beside it. It also has to be reachable on a model with no reasoning
-    // profile at all, where `getModelProviderOptions` returns undefined.
-    options?.openAiMaxToolCalls !== undefined &&
-      options.openAiMaxToolCalls > 0
-      ? { openai: { maxToolCalls: options.openAiMaxToolCalls } }
+    mergeProviderOptions(
+      getModelProviderOptions(model),
+      // Merged rather than assigned: a reasoning OpenAI model already has an
+      // `openai` namespace holding `reasoningEffort`, and this has to land
+      // beside it. It also has to be reachable on a model with no reasoning
+      // profile at all, where `getModelProviderOptions` returns undefined.
+      options?.openAiMaxToolCalls !== undefined &&
+        options.openAiMaxToolCalls > 0
+        ? { openai: { maxToolCalls: options.openAiMaxToolCalls } }
+        : undefined
+    ),
+    // Merged one namespace deep for the same reason, and here the collision is
+    // certain rather than possible: every reasoning Anthropic model already
+    // has `thinking` and `effort` under `anthropic`, and a shallow spread
+    // would replace them with `cacheControl` alone -- a request that stops
+    // reasoning and says nothing about it.
+    options?.promptCachePath
+      ? anthropicPromptCacheOptions(model, options.promptCachePath)
       : undefined
   );
   return {

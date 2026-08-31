@@ -79,6 +79,10 @@ import {
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
 import {
+    ANTHROPIC_PROMPT_CACHE_TTL,
+    type AnthropicPromptCachePath,
+} from "@/lib/anthropicPromptCaching";
+import {
     getWebSearchCapability,
     nativeSearchIsDispatchable,
     openAiNativeSearchToolCallCeiling,
@@ -1475,12 +1479,28 @@ async function handleChatPost(
         // capability is native or application-managed -- and kept as its own
         // name because the two differ in which budget pays, which tools may
         // coexist with them, and where the citations come from.
+        // Which caching path this turn is, decided once here and read by both
+        // the budget and the request builder below.
+        //
+        // A turn that attaches a provider-native server tool is a different
+        // path, not the same path with a flag: Anthropic writes the cache again
+        // on every iteration of the agentic loop a server tool runs, and only
+        // does so because our marker is present. `lib/anthropicPromptCaching.ts`
+        // holds the reasoning and the fact that the search variant is off.
+        //
+        // Computed here rather than at either call site because the two are
+        // hundreds of lines apart, and two independent readings of
+        // `nativeSearchEnabled` is exactly the drift that would put a marker on
+        // a turn whose budget did not authorise it.
         const appManagedSearchEnabled =
             webSearchRequested &&
             appManagedSearchIsDispatchable(
                 webSearchCapability,
                 searchBackendReadiness
             );
+        const promptCachePath: AnthropicPromptCachePath = nativeSearchEnabled
+            ? "chat_turn_native_search"
+            : "chat_turn";
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -2976,6 +2996,13 @@ async function handleChatPost(
                 appManagedSearchEnabled,
                 nativeSearch: nativeSearchReservation.native,
                 searchBackend: nativeSearchReservation.searchBackend,
+                // The same value `getModelGenerationSettings` is given below.
+                // One variable rather than two literals: the budget is built
+                // hundreds of lines before the generation settings, and two
+                // independent readings of `nativeSearchEnabled` would be the
+                // drift that puts a marker on a turn whose budget did not
+                // authorise it.
+                promptCachePath,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -3549,6 +3576,10 @@ async function handleChatPost(
                 capability: webSearchCapability,
                 nativeSearchEnabled,
             }),
+            // The same value the budget above was given -- see there. A no-op
+            // for every provider but Anthropic, and a no-op on a searching turn
+            // whatever the provider: see lib/anthropicPromptCaching.ts.
+            promptCachePath,
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -3756,6 +3787,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                // Per attempt for the same reason as everything above it: a
+                // fallback caches on its own model at its own write rate, and
+                // its writes must not be priced at the primary's.
+                cacheWriteUsdPerMillionTokens:
+                    budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: budget.pricingVersion ?? null,
             } satisfies AttemptPriceSnapshot,
         };
@@ -3901,6 +3941,7 @@ async function handleChatPost(
             usage?: {
                 inputTokens?: number;
                 cachedInputTokens?: number;
+                cacheWriteInputTokens?: number;
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
@@ -3950,6 +3991,7 @@ async function handleChatPost(
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
                         cachedInputTokens: usage?.cachedInputTokens,
+                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
@@ -3977,6 +4019,8 @@ async function handleChatPost(
                                       inputTokens: settledInputTokens,
                                       cachedInputTokens:
                                           usage?.cachedInputTokens ?? 0,
+                                      cacheWriteInputTokens:
+                                          usage?.cacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -4516,6 +4560,17 @@ async function handleChatPost(
                     cachedInputPriceMultiplier:
                         plan.budget.cachedInputPriceMultiplier,
                     pricingVersion: plan.budget.pricingVersion ?? null,
+                    // Part of `reservedMicroUsd` above, so the payload's own
+                    // consistency check can reconstruct that total from its
+                    // components. Omitted when zero, which keeps an uncached
+                    // fallback's payload exactly what it has always been.
+                    ...(plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? {
+                              promptCacheWriteReservedPremiumMicroUsd:
+                                  plan.budget
+                                      .promptCacheWriteReservedPremiumMicroUsd,
+                          }
+                        : {}),
                 },
             }).catch((budgetError: unknown) => {
                 logRequestError(
@@ -4756,6 +4811,15 @@ async function handleChatPost(
                 inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
                 outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
                 cachedInputPriceMultiplier: plan.budget.cachedInputPriceMultiplier,
+                // The fallback's own write rate and TTL, not the primary's.
+                // Caches are model-scoped, so these two attempts wrote into
+                // different entries at whatever each model's rate is.
+                cacheWriteUsdPerMillionTokens:
+                    plan.budget.cacheWriteUsdPerMillionTokens,
+                promptCacheTtl:
+                    plan.budget.promptCacheWriteReservedPremiumMicroUsd > 0
+                        ? ANTHROPIC_PROMPT_CACHE_TTL
+                        : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
             };
             // The next attempt captures under its own key, so the memo from
@@ -4993,6 +5057,18 @@ async function handleChatPost(
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
+                                    // `usage.inputTokens` is the *total* --
+                                    // the SDK builds it as noCache + cacheRead
+                                    // + cacheWrite, unlike the Anthropic API's
+                                    // own `input_tokens`, which is the
+                                    // uncached remainder. So the write count
+                                    // is carved out of that total rather than
+                                    // added to it; settlement prices it at
+                                    // 1.25x instead of the 1.0x it was
+                                    // silently getting as part of the
+                                    // "uncached" remainder.
+                                    cacheWriteInputTokens:
+                                        usage.inputTokenDetails.cacheWriteTokens,
                                     outputTokens: usage.outputTokens,
                                     reasoningTokens:
                                         usage.outputTokenDetails
