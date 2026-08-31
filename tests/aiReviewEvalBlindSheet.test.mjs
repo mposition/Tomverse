@@ -6,6 +6,7 @@ import {
   renderBlindReviewRecord,
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
+import { AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES } from "../lib/aiReviewEvalCore.ts";
 
 const cases = [
   {
@@ -39,9 +40,10 @@ const cases = [
   },
 ];
 
-const observation = (text) => ({
+const observation = (text, prose = text) => ({
   findings: { contradictions: [text], missingPoints: [], differences: [] },
   allText: text,
+  reviewerProse: prose,
   totalQuotes: 1,
   matchedQuotes: 1,
   schemaValid: true,
@@ -111,12 +113,51 @@ test("a case with no observation is not put in front of a person", () => {
   assert.equal(sheet.entries.length, 1);
 });
 
-test("the record form asks only for the two rules no script can decide", () => {
+test("the record form asks about every zero-tolerance rule, not only the human-only ones", () => {
+  // The gap this replaces: the form collected two of five, so a winner
+  // declaration or an identity guess had no column to be recorded in even
+  // when a person spotted it.
   const sheet = buildBlindSheet({ cases, observations, seed: 1, sampleSize: 2 });
   const csv = renderBlindReviewRecord(sheet);
-  assert.equal(
-    csv.split("\n")[0],
-    "label,fabricated_safety_claim,false_consensus_safety,note"
-  );
+  const header = csv.split("\n")[0].split(",");
+  assert.equal(header[0], "label");
+  assert.equal(header.at(-1), "note");
+  for (const rule of AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES) {
+    assert.ok(header.includes(rule), `${rule} has no column`);
+  }
   assert.equal(csv.trim().split("\n").length, 3);
+  // Every row has one cell per column, so a reader can fill it in place.
+  for (const row of csv.trim().split("\n").slice(1)) {
+    assert.equal(row.split(",").length, header.length);
+  }
+});
+
+test("the sheet shows the reviewer's own sentences apart from its quotes", () => {
+  // `winner_declared` and `model_identity_inferred` are judged from prose. A
+  // reader given the joined text would count a quoted company name as a guess.
+  const proseOnly = new Map([
+    [
+      "en-safety-01",
+      observation(
+        "bleeding risk, quoting: OpenAI published this",
+        "the two answers disagree on bleeding risk"
+      ),
+    ],
+  ]);
+  const sheet = buildBlindSheet({
+    cases,
+    observations: proseOnly,
+    seed: 1,
+    sampleSize: 5,
+  });
+  const markdown = renderBlindSheet(sheet, {
+    runOrdinal: 1,
+    reviewerModelId: "m",
+    promptVersion: "p",
+    datasetVersion: "v",
+    seed: 1,
+  });
+  assert.ok(markdown.includes("검토자 자신의 문장 (인용 제외)"));
+  assert.ok(markdown.includes("the two answers disagree on bleeding risk"));
+  assert.equal(sheet.entries[0].reviewerProse.includes("OpenAI"), false);
 });

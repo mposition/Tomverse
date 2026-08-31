@@ -346,6 +346,35 @@ export const pt = {
         guestAttachmentUnreadable: "Não foi possível processar este arquivo.",
         guestAttachmentFailed: "Não foi possível processar este arquivo. Tente novamente.",
         guestAttachmentUnavailable: "Anexos de arquivo estão temporariamente indisponíveis.",
+        // -- Voice input (docs/policy/voice-input.md §13) ------------------
+        voiceStart: "Gravar entrada de voz",
+        voiceStop: "Parar a gravação e converter em texto",
+        voiceCancel: "Descartar",
+        voiceRecording: "Gravando {time}",
+        voiceRequestingPermission: "Aguardando o acesso ao microfone…",
+        voiceTranscribing: "Convertendo a voz em texto…",
+        voiceLimitReached: "Duração máxima de gravação atingida. Convertendo em texto…",
+        voiceDismissError: "Fechar este aviso",
+        voicePrivacyNote:
+            "O áudio é enviado ao provedor de reconhecimento de voz apenas para a conversão. A Tomverse não guarda a gravação, e o texto entra na caixa de digitação para você conferir antes de enviar.",
+        voiceErrorUnsupportedBrowser:
+            "Este navegador não consegue gravar áudio. Use a versão mais recente do Chrome, Edge, Safari ou Firefox.",
+        voiceErrorPermissionDenied:
+            "O acesso ao microfone está bloqueado. Libere-o para este site nas configurações do navegador e tente de novo.",
+        voiceErrorDeviceUnavailable:
+            "Nenhum microfone pôde ser usado. Verifique se há um microfone conectado e se outro aplicativo não está usando-o.",
+        voiceErrorClipEmpty: "Nada foi gravado. Segure o botão um pouco mais e fale.",
+        voiceErrorClipTooLarge: "A gravação é grande demais para ser enviada.",
+        voiceErrorClipTooLong: "A gravação passou da duração permitida.",
+        voiceErrorClipUnreadable: "Não foi possível ler a gravação.",
+        voiceErrorTranscriptEmpty: "Nenhuma fala foi reconhecida. Tente de novo em um lugar mais silencioso.",
+        voiceErrorUnavailable: "A entrada de voz não está disponível no momento.",
+        voiceErrorSignInRequired: "Faça login para usar a entrada de voz.",
+        voiceErrorLimitReached: "Você atingiu o limite de entrada de voz de hoje. Tente de novo amanhã.",
+        voiceErrorProviderUnavailable:
+            "O serviço de reconhecimento de voz está indisponível. Tente novamente em instantes.",
+        voiceErrorNetwork: "Não foi possível enviar a gravação. Verifique sua conexão e tente de novo.",
+        voiceErrorTranscriptionFailed: "Não foi possível converter a voz em texto. Tente novamente.",
         guestAttachmentTemporary: "Arquivos de convidado são temporários: ficam guardados por pouco tempo apenas para esta conversa e nunca são salvos, compartilhados ou exportados.",
         guestGoogleDriveSignIn: "Entre para conectar o Google Drive",
         // Guest AI Review: one real run per month, on the same pipeline.
@@ -2031,6 +2060,8 @@ export const pt = {
         purpose: "Usamos informações para autenticação, geração de respostas de IA, armazenamento, restauração, exportação e compartilhamento de chats, processamento de anexos, segurança do serviço, prevenção de abuso e resposta a incidentes.",
         providersTitle: "Provedores externos de IA",
         providers: "Prompts, contexto necessário, seleção de modelo e anexos são enviados ao provedor de IA selecionado para gerar respostas. Provedores podem processar ou reter dados segundo seus próprios termos e políticas, possivelmente em outro país.",
+        voiceInputTitle: "Entrada de voz",
+        voiceInput: "Se você usar o microfone na caixa de mensagem, a gravação é enviada a um provedor de reconhecimento de voz — hoje a OpenAI — com a única finalidade de convertê-la em texto, e pode ser processada em outro país segundo os termos desse provedor. A Tomverse não armazena o áudio: ele fica em memória apenas durante essa requisição e nunca é gravado em banco de dados, armazenamento de arquivos, log ou rastreamento de erros; uma gravação que você cancela não é enviada a lugar nenhum. O texto devolvido é colocado na caixa de mensagem para que você leia, edite ou apague antes de enviar qualquer coisa; até o envio, ele é um rascunho no seu dispositivo e a Tomverse não guarda nada. Depois de enviado, torna-se uma mensagem comum e o restante desta política se aplica a ele. A entrada de voz está disponível apenas quando você está logado.",
         attachmentsTitle: "Anexos",
         attachments: "Anexos são armazenados em armazenamento de objetos criptografado para envio ao modelo e extração de documentos. Em contas conectadas, ficam retidos junto com a conversa e são excluídos quando você apaga essa conversa ou sua conta. Arquivos anexados sem conta são temporários e removidos automaticamente.",
         externalImportTitle: "Conversas importadas de outros serviços de IA",

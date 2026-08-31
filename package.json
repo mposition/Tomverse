@@ -64,6 +64,8 @@
     "check:router-human-review": "node --import tsx scripts/check-router-human-review.mjs",
     "check:router-decision-preregistration": "node --import tsx scripts/check-router-decision-preregistration.mjs",
     "check:router-answer-bundle": "node --import tsx scripts/check-router-answer-bundle.mjs",
+    "check:router-review-source": "node --import tsx scripts/check-router-review-source.mjs",
+    "check:router-review-sheets": "node --conditions=react-server --import tsx scripts/check-router-review-sheets.mjs",
     "router:cost-projection": "node --conditions=react-server --import tsx scripts/router-cost-projection.mjs",
     "router:judge-cap-probe": "node --conditions=react-server --import tsx scripts/router-judge-cap-probe.mjs",
     "check:auto-rollout-readiness": "node --conditions=react-server --import tsx scripts/check-auto-rollout-readiness.mjs",
@@ -182,7 +184,8 @@
     "check:release-records": "node scripts/check-release-records.mjs",
     "backfill:model-lifecycle-work-items": "node --conditions=react-server --import tsx scripts/backfill-model-lifecycle-work-items.mjs",
     "check:edge-robots": "node --import tsx scripts/check-edge-robots.mjs",
-    "report:deployed-commit-drift": "node scripts/report-deployed-commit-drift.mjs"
+    "report:deployed-commit-drift": "node scripts/report-deployed-commit-drift.mjs",
+    "print:router-key-envelope": "node --import tsx scripts/print-router-key-envelope.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.44",

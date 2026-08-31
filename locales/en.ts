@@ -337,6 +337,35 @@ export const en = {
         guestAttachmentUnreadable: "This file could not be processed.",
         guestAttachmentFailed: "This file could not be processed. Please try again.",
         guestAttachmentUnavailable: "File attachments are temporarily unavailable.",
+        // -- Voice input (docs/policy/voice-input.md §13) ------------------
+        voiceStart: "Record voice input",
+        voiceStop: "Stop recording and convert to text",
+        voiceCancel: "Discard",
+        voiceRecording: "Recording {time}",
+        voiceRequestingPermission: "Waiting for microphone access…",
+        voiceTranscribing: "Converting speech to text…",
+        voiceLimitReached: "Maximum recording length reached. Converting to text…",
+        voiceDismissError: "Dismiss this message",
+        voicePrivacyNote:
+            "Audio is sent to the speech-to-text provider for conversion only. Tomverse does not save the recording, and the text goes into the input box for you to check before sending.",
+        voiceErrorUnsupportedBrowser:
+            "This browser cannot record audio. Try the latest Chrome, Edge, Safari or Firefox.",
+        voiceErrorPermissionDenied:
+            "Microphone access is blocked. Allow it for this site in your browser settings and try again.",
+        voiceErrorDeviceUnavailable:
+            "No microphone could be used. Check that a microphone is connected and not in use by another app.",
+        voiceErrorClipEmpty: "Nothing was recorded. Hold the button a little longer and speak.",
+        voiceErrorClipTooLarge: "The recording is too large to send.",
+        voiceErrorClipTooLong: "The recording is longer than the limit.",
+        voiceErrorClipUnreadable: "The recording could not be read.",
+        voiceErrorTranscriptEmpty: "No speech was recognised. Try again somewhere quieter.",
+        voiceErrorUnavailable: "Voice input is not available right now.",
+        voiceErrorSignInRequired: "Log in to use voice input.",
+        voiceErrorLimitReached: "You have reached today's voice input limit. Try again tomorrow.",
+        voiceErrorProviderUnavailable:
+            "The speech-to-text service is unavailable. Please try again shortly.",
+        voiceErrorNetwork: "The recording could not be sent. Check your connection and try again.",
+        voiceErrorTranscriptionFailed: "Speech could not be converted to text. Please try again.",
         guestAttachmentTemporary: "Guest files are temporary: they are held briefly for this chat only and are never saved, shared, or exported.",
         guestGoogleDriveSignIn: "Sign in to connect Google Drive",
         // Guest AI Review: one real run per month, on the same pipeline.
@@ -2042,6 +2071,8 @@ export const en = {
         purpose: "We use information for authentication, AI response generation, chat storage, restoration, export and sharing, attachment processing, service security, abuse prevention, and incident response.",
         providersTitle: "External AI providers",
         providers: "Prompts, necessary conversation context, model selection data, and attachments are sent to the selected AI provider to generate responses. Providers may process or retain data under their own terms and privacy policies, potentially in a different country.",
+        voiceInputTitle: "Voice input",
+        voiceInput: "If you use the microphone in the message box, the recording is sent to a speech-to-text provider — OpenAI today — for the sole purpose of converting it into text, and it may be processed in a different country under that provider's own terms. Tomverse does not store the audio: it is held in memory for the length of that one request and is never written to a database, to file storage, to a log or to error tracking, and a recording you cancel is never sent anywhere at all. The text that comes back is placed in the message box for you to read, edit or delete before you send anything; until you send it, it is a draft on your device and Tomverse stores nothing. Once you send it, it is an ordinary message and the rest of this policy applies to it. Voice input is available only when you are logged in.",
         attachmentsTitle: "Attachments",
         attachments: "Attachments are stored in encrypted object storage for model delivery and document extraction. For signed-in accounts they are retained with the conversation and deleted when you delete that conversation or your account. Files attached without an account are temporary and are removed automatically.",
         externalImportTitle: "Conversations imported from other AI services",

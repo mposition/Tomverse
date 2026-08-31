@@ -38,6 +38,20 @@
 /** Cache-write price multiples over base input, from Anthropic's price table. */
 export const CACHE_WRITE_MULTIPLIER = { "5m": 1.25, "1h": 2 };
 /** Cache reads cost this multiple of base input. */
+/**
+ * Reads per written token at which the 5-minute cache pays for itself.
+ *
+ * `1.25 + 0.1R = 1 + R` -> `R = 0.25 / 0.9`. Written as the division rather
+ * than as 0.278 for the same reason `glm-5.2`'s cached multiplier is written
+ * as `0.26 / 1.4` in lib/modelPricing.ts: the rounded decimal is not the
+ * number, and somebody will later compare against it exactly.
+ *
+ * A threshold to read the ratio against, never a launch criterion on its own
+ * -- see `cacheEfficiencyMetrics` for why `listPriceSavingUsd` is the figure
+ * that decides.
+ */
+export const CACHE_5M_BREAK_EVEN_READ_RATIO = 0.25 / 0.9;
+
 export const CACHE_READ_MULTIPLIER = 0.1;
 
 /** Why a usage row could not be priced against the registry. */
@@ -249,8 +263,265 @@ export const attributionScope = ({ workspaceIds = [], apiKeyIds = [] }) => {
         caveat: filtered
             ? "Scoped by the workspace and API key filters given on the command line. Anything Tomverse sends outside them is not counted."
             : "ORGANIZATION-WIDE: no workspace or API key filter was given, so every Anthropic request this organization made is counted -- including any product, staging key or console usage that is not Tomverse. Pass --workspace-id or --api-key-id to attribute these numbers to Tomverse.",
+        cost: costScopeFor({ workspaceIds, apiKeyIds }),
     };
 };
+
+/**
+ * Whether the Cost API can be narrowed to the same traffic the Usage side was.
+ *
+ * It usually cannot, and the two APIs do not fail the same way about it. The
+ * usage report takes `workspace_ids[]` and `api_key_ids[]` filters; the cost
+ * report takes neither, and offers only `group_by[]=workspace_id`. So:
+ *
+ *   - a **workspace** filter can be honoured, by grouping the cost report by
+ *     workspace and summing only the named ones;
+ *   - an **API key** filter cannot be honoured at all -- cost is not reported
+ *     per key -- so the billed total is organization-wide whatever the usage
+ *     side was narrowed to;
+ *   - no filter means both sides are organization-wide, which is the one case
+ *     where they describe the same traffic.
+ *
+ * The failure this exists to prevent is quiet and specific: a run filtered to
+ * Tomverse's workspace printing Tomverse's token usage directly beside the
+ * whole organization's bill, with nothing on screen saying they are different
+ * populations. Somebody then reads a ratio between them.
+ *
+ * ## The Default Workspace, which is where this got it wrong
+ *
+ * Every organization has a Default Workspace, and it has a real `wrkspc_` id
+ * like any other -- that is what the Usage API's `workspace_ids[]` filter takes
+ * and the only thing it takes. But the *reports* do not echo that id back:
+ * "usage reports, and cost reports show `null` for its `workspace_id`"
+ * (Anthropic's Workspaces guide).
+ *
+ * So the two sides of a filtered run disagree about how the same workspace is
+ * named, and the first version of this code did not reconcile them: it mapped
+ * every `null` in the cost results to a `default_workspace` sentinel and then
+ * compared that against the real `wrkspc_...` id from the command line. If
+ * Tomverse *is* the Default Workspace the usage side filtered correctly, the
+ * cost side matched nothing, and the run reported "no cost rows matched the
+ * named workspace(s)" -- a wrong answer dressed as a warning about a typo.
+ *
+ * Passing `default_workspace` on the command line is not the fix either: the
+ * Usage API needs the real id.
+ *
+ * The reconciliation is a lookup. `GET /v1/organizations/workspaces/{id}`
+ * accepts the Default Workspace's real id and answers with `"name": "Default"`
+ * -- the documented way to ask "is this one the default", and necessary
+ * because List Workspaces omits it entirely. `resolveWorkspaceIdentity` does
+ * that ask; this module only consumes the answer.
+ *
+ * ## `null` is the Default Workspace; `undefined` is a broken response
+ *
+ * Also fixed here: the first version treated a *missing* `workspace_id` key the
+ * same as an explicit `null`. It is not the same. When the request grouped by
+ * workspace, every result carries the field and `null` means the Default
+ * Workspace; a result with no field at all means the response is not the shape
+ * this parser was written against, and reading it as "the default workspace"
+ * would silently attribute somebody else's spend to Tomverse.
+ */
+
+/**
+ * The name `GET /v1/organizations/workspaces/{id}` returns for the Default
+ * Workspace. Anthropic's Workspaces guide: "the Default Workspace comes back
+ * with `\"name\": \"Default\"`, even though List Workspaces omits it."
+ */
+export const costScopeFor = ({ workspaceIds = [], apiKeyIds = [] }) => {
+    if (apiKeyIds.length > 0) {
+        return {
+            comparable: false,
+            mode: "not_comparable",
+            groupByWorkspace: false,
+            workspaceIds: [],
+            note: "NOT COMPARABLE: the usage figures were filtered by API key, and the Cost API does not report cost per API key -- it offers only workspace grouping. The billed total below is ORGANIZATION-WIDE and describes a different population from the token counts above. Do not take a ratio between them.",
+        };
+    }
+    if (workspaceIds.length > 0) {
+        return {
+            comparable: true,
+            mode: "workspace_filtered",
+            // The cost report has no workspace *filter*, so the narrowing is
+            // done here: group by workspace and sum only the named ones.
+            groupByWorkspace: true,
+            workspaceIds,
+            note: `Billed total is the sum of ${workspaceIds.length} named workspace(s), grouped from the Cost API. Same population as the usage figures above.`,
+        };
+    }
+    return {
+        comparable: true,
+        mode: "organization_wide",
+        groupByWorkspace: false,
+        workspaceIds: [],
+        note: "Billed total is organization-wide, and so are the usage figures above -- the same population.",
+    };
+};
+
+export const DEFAULT_WORKSPACE_NAME = "Default";
+
+/**
+ * Split the workspace ids given on the command line into the ones that appear
+ * in cost results under their own id, and the one (at most) that appears as
+ * `null`.
+ *
+ * `lookup(id)` returns the `GET Workspace` body, or null when the id could not
+ * be resolved. An unresolvable id is kept as an ordinary id rather than
+ * guessed at: it may be a typo, and the "matched nothing" warning downstream is
+ * the right thing to show for one.
+ */
+export const classifyWorkspaceIds = async (workspaceIds, lookup) => {
+    const named = [];
+    const defaults = [];
+    const unresolved = [];
+    for (const id of workspaceIds) {
+        let workspace = null;
+        try {
+            workspace = await lookup(id);
+        } catch {
+            workspace = null;
+        }
+        if (!workspace || typeof workspace.name !== "string") {
+            unresolved.push(id);
+            named.push(id);
+            continue;
+        }
+        if (workspace.name === DEFAULT_WORKSPACE_NAME) defaults.push(id);
+        else named.push(id);
+    }
+    return {
+        named,
+        defaultWorkspaceIds: defaults,
+        matchesDefaultWorkspace: defaults.length > 0,
+        unresolved,
+    };
+};
+
+/**
+ * Sum a cost report, optionally keeping only the named workspaces.
+ *
+ * Fail-closed on currency and on the amount's shape, matching
+ * `lib/providerUsageSyncCore.ts`: a non-USD amount summed into a USD total is
+ * a wrong number that looks like a right one.
+ *
+ * Amounts are decimal *cents* per the Cost API's own documentation, and are
+ * returned here as cents-derived USD so the caller does no conversion.
+ *
+ * `workspace_id` is only inspected when a filter needs it -- which is also when
+ * the request grouped by it. An unfiltered run never reads the field, because
+ * an ungrouped response legitimately omits it.
+ */
+export const sumCostReport = (
+    payload,
+    { workspaceIds = [], matchesDefaultWorkspace = false } = {}
+) => {
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.data)) {
+        throw new AnthropicUsageParseError(
+            "ANTHROPIC_COST_INVALID_PAYLOAD",
+            "Cost API response did not contain a data array."
+        );
+    }
+    const wanted = new Set(workspaceIds);
+    const filtering = wanted.size > 0 || matchesDefaultWorkspace;
+    let cents = 0;
+    let matchedResults = 0;
+    let skippedResults = 0;
+    for (const bucket of payload.data) {
+        for (const result of bucket?.results ?? []) {
+            if (filtering) {
+                if (!result || !("workspace_id" in result)) {
+                    // Grouped by workspace and answered without the field. Not
+                    // the Default Workspace -- an unexpected response shape,
+                    // and reading it as the default would attribute somebody
+                    // else's spend to this workspace.
+                    throw new AnthropicUsageParseError(
+                        "ANTHROPIC_COST_MISSING_WORKSPACE",
+                        "Cost API result omitted workspace_id even though the request grouped by it."
+                    );
+                }
+                const isDefault = result.workspace_id === null;
+                const matches = isDefault
+                    ? matchesDefaultWorkspace
+                    : wanted.has(result.workspace_id);
+                if (!matches) {
+                    skippedResults += 1;
+                    continue;
+                }
+            }
+            const currency =
+                typeof result?.currency === "string"
+                    ? result.currency.toUpperCase()
+                    : null;
+            if (currency !== "USD") {
+                throw new AnthropicUsageParseError(
+                    "ANTHROPIC_COST_INVALID_CURRENCY",
+                    "Cost API returned an unsupported or missing currency."
+                );
+            }
+            if (
+                typeof result.amount !== "string" ||
+                !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(result.amount.trim())
+            ) {
+                throw new AnthropicUsageParseError(
+                    "ANTHROPIC_COST_INVALID_AMOUNT",
+                    "Cost API returned an invalid decimal-cent amount."
+                );
+            }
+            cents += Number(result.amount);
+            matchedResults += 1;
+        }
+    }
+    if (!Number.isFinite(cents)) {
+        throw new AnthropicUsageParseError(
+            "ANTHROPIC_COST_INVALID_AMOUNT",
+            "Cost API total is outside the supported numeric range."
+        );
+    }
+    const nextPage =
+        typeof payload.next_page === "string" && payload.next_page.trim()
+            ? payload.next_page
+            : null;
+    const hasMore = payload.has_more === true;
+    if (hasMore && !nextPage) {
+        throw new AnthropicUsageParseError(
+            "ANTHROPIC_COST_MISSING_CURSOR",
+            "Cost API reported more pages and omitted the cursor."
+        );
+    }
+    return {
+        costUsd: cents / 100,
+        matchedResults,
+        skippedResults,
+        hasMore,
+        nextPage,
+    };
+};
+
+/** Build the cost report URL, grouping by workspace when a filter needs it. */
+export const anthropicCostReportUrl = ({
+    baseUrl,
+    startingAt,
+    endingAt,
+    limit,
+    groupByWorkspace = false,
+    page,
+}) => {
+    const url = new URL(baseUrl);
+    url.searchParams.set("starting_at", startingAt.toISOString());
+    url.searchParams.set("ending_at", endingAt.toISOString());
+    url.searchParams.set("bucket_width", "1d");
+    // The cost report has no workspace filter; grouping is the only way to get
+    // a per-workspace breakdown to narrow locally.
+    if (groupByWorkspace) url.searchParams.append("group_by[]", "workspace_id");
+    url.searchParams.set("limit", String(limit));
+    if (page) url.searchParams.set("page", page);
+    return url;
+};
+
+/** `GET /v1/organizations/workspaces/{id}`, for the Default Workspace check. */
+export const anthropicWorkspaceUrl = ({ baseUrl, workspaceId }) =>
+    new URL(
+        `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(workspaceId)}`
+    );
 
 /**
  * One page of `GET /v1/organizations/usage_report/messages`, validated.
@@ -565,11 +836,22 @@ const addRow = (totals, row, priced) => {
  *   every input token, not just the cacheable ones, because the question is
  *   what fraction of the input bill the cache is carrying.
  * - **cache read/write ratio** = `cacheRead / (write5m + write1h)`. How many
- *   tokens each written token is read back as. Below 1 the cache is costing
- *   more than it saves on those tokens (a write is 1.25x, a read is 0.1x, so
- *   break-even for the 5-minute TTL is at about 0.25 reads per written token,
- *   but a ratio under 1 means most entries expire unread and is worth looking
- *   at whatever the arithmetic says).
+ *   tokens each written token is read back as.
+ *
+ *   Break-even for the 5-minute TTL is `CACHE_5M_BREAK_EVEN_READ_RATIO` --
+ *   about **0.278**, not 0.25. A token written once and read R times costs
+ *   `1.25 + 0.1R` cached against `1 + R` uncached, so break-even is
+ *   `1.25 + 0.1R = 1 + R`, i.e. `R = 0.25 / 0.9 = 0.2777...`. The 0.25 figure
+ *   drops the 0.1x the reads themselves cost, which is only correct if reads
+ *   were free.
+ *
+ *   The ratio alone does not settle the question, and this is not the number
+ *   to act on: it weights every token equally regardless of which model wrote
+ *   it, so a period mixing an expensive and a cheap model can clear the
+ *   threshold and still lose money. `listPriceSavingUsd` is the figure that
+ *   answers "did caching pay", because it prices each row at its own rate.
+ *   Use the ratio to see *why* -- a ratio well under break-even says entries
+ *   are expiring or the prefix is not repeating.
  * - **list-price saving** = counterfactual uncached input cost minus actual
  *   input cost, both at list price. Input only: output tokens are unaffected
  *   by caching and including them would dilute the rate with a constant.

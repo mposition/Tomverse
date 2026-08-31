@@ -665,11 +665,22 @@ test("settles partial cancelled usage and refunds only the unused reservation", 
     outputTokens: 500,
     outcome: "cancelled",
   });
-  assert.deepEqual(result, { applied: true, status: "settled" });
+  // The returned figures are the same two the stored row carries, which is the
+  // point of returning them: a caller reconciling what it held against what it
+  // was charged should not have to re-read the reservation to find out.
+  // `status` alone cannot answer it -- "settled" says credits were taken and
+  // not how many.
+  assert.deepEqual(result, {
+    applied: true,
+    status: "settled",
+    reservedCredits: 5,
+    settledCredits: 3,
+  });
   const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
     where: { id: acquired.usageReservation.reservationId },
   });
   assert.equal(reservation.settledCredits, 3);
+  assert.equal(reservation.reservedCredits, 5);
   assert.equal(
     (await prisma.creditLot.findUniqueOrThrow({ where: { id: lot.id } }))
       .remainingCredits,

@@ -63,6 +63,25 @@ export const metric = (
 // Reliability -- from ComparisonReviewRun
 // ---------------------------------------------------------------------------
 
+/**
+ * One provider attempt, as the scorecard reads it.
+ *
+ * Reviewer health, the retry rate and the reconciliation counts are all
+ * computed from these and not from the run row's two slots. The slots name the
+ * reviewer that produced each result, so a run where the first candidate
+ * failed and the second succeeded shows only the success there -- which made
+ * every reviewer look healthier than it was.
+ */
+export type ScorecardAttemptRow = {
+    reviewerModelId: string;
+    reviewerProvider: string;
+    status: string;
+    retryCount: number;
+    reservedCredits: number;
+    settledCredits: number | null;
+    settlementStatus: string | null;
+};
+
 export type ScorecardRunRow = {
     outcome: string;
     durationMs: number;
@@ -83,6 +102,7 @@ export type ScorecardRunRow = {
     secondarySettlementStatus: string | null;
     subjectKind: string;
     createdAt: Date;
+    attempts: readonly ScorecardAttemptRow[];
 };
 
 /**
@@ -126,12 +146,22 @@ export type ReliabilityScorecard = {
     cachedRate: ScorecardMetric;
     retryRate: ScorecardMetric;
     /**
-     * Attempts whose reservation has no recorded settlement outcome. Not a
-     * proof of a lost credit -- the settlement call is fire-and-forget and its
-     * own failure is already logged -- but the only number that would move if
-     * reservations stopped being settled, which is why it is on the card.
+     * Completed attempts with no settled figure at all. Not proof of a lost
+     * credit -- settlement is fire-and-forget and its own failure is already
+     * logged -- but the number that moves if reservations stop being settled.
      */
     unreconciledSettlements: ScorecardMetric;
+    /**
+     * Completed attempts charged MORE than they reserved.
+     *
+     * Settling below a reservation is normal: the unused part is released.
+     * Settling above it means credits were taken that nothing held, which is
+     * the direction that costs a user something, and it is the metric the
+     * `zero_credit_reconciliation_mismatch` eligibility item reads. It could
+     * not be computed at all until the settled figure was recorded beside the
+     * reserved one.
+     */
+    creditReconciliation: ScorecardMetric;
     p50DurationMs: number | null;
     p95DurationMs: number | null;
     reviewerHealth: readonly ReviewerHealthRow[];
@@ -168,35 +198,32 @@ export const summariseReliability = (
 
     const durations = completed.map((row) => row.durationMs);
 
-    const health = new Map<string, { provider: string | null; attempts: number; failures: number }>();
-    const noteAttempt = (
-        modelId: string | null,
-        provider: string | null,
-        status: string
-    ) => {
-        if (!modelId || !REACHED_PROVIDER_STATUSES.has(status)) return;
-        const entry = health.get(modelId) ?? { provider, attempts: 0, failures: 0 };
-        entry.attempts += 1;
-        if (status === "failed") entry.failures += 1;
-        health.set(modelId, entry);
-    };
-    for (const row of rows) {
-        noteAttempt(row.primaryModelId, row.primaryProvider, row.primaryStatus);
-        noteAttempt(row.secondaryModelId, row.secondaryProvider, row.secondaryStatus);
-    }
-
-    const settledAttempts = rows.flatMap((row) =>
-        [
-            { status: row.primaryStatus, settlement: row.primarySettlementStatus },
-            { status: row.secondaryStatus, settlement: row.secondarySettlementStatus },
-        ].filter((attempt) => attempt.status === "completed")
+    // Everything below reads the ATTEMPT rows, never the run's two slots. The
+    // slots hold whoever produced each result, so a fallback -- first reviewer
+    // fails, second succeeds -- recorded only the success there, and every
+    // reviewer's failure rate came out better than production was.
+    const attempts = rows.flatMap((row) => row.attempts);
+    const dispatched = attempts.filter((attempt) =>
+        REACHED_PROVIDER_STATUSES.has(attempt.status)
     );
 
-    const retryingAttempts = rows.flatMap((row) =>
-        [
-            { status: row.primaryStatus, retries: row.primaryRetryCount },
-            { status: row.secondaryStatus, retries: row.secondaryRetryCount },
-        ].filter((attempt) => REACHED_PROVIDER_STATUSES.has(attempt.status))
+    const health = new Map<
+        string,
+        { provider: string | null; attempts: number; failures: number }
+    >();
+    for (const attempt of dispatched) {
+        const entry = health.get(attempt.reviewerModelId) ?? {
+            provider: attempt.reviewerProvider,
+            attempts: 0,
+            failures: 0,
+        };
+        entry.attempts += 1;
+        if (attempt.status === "failed") entry.failures += 1;
+        health.set(attempt.reviewerModelId, entry);
+    }
+
+    const completedAttempts = attempts.filter(
+        (attempt) => attempt.status === "completed"
     );
 
     return {
@@ -236,16 +263,32 @@ export const summariseReliability = (
             minimumDenominator,
         }),
         retryRate: metric(
-            retryingAttempts.filter((attempt) => attempt.retries > 0).length,
-            retryingAttempts.length,
+            dispatched.filter((attempt) => attempt.retryCount > 0).length,
+            dispatched.length,
             "reviewer attempts that reached a provider",
             { minimumDenominator }
         ),
         unreconciledSettlements: metric(
-            settledAttempts.filter((attempt) => !attempt.settlement).length,
-            settledAttempts.length,
+            completedAttempts.filter((attempt) => attempt.settledCredits === null)
+                .length,
+            completedAttempts.length,
             "completed reviewer attempts",
             { minimumDenominator }
+        ),
+        creditReconciliation: metric(
+            completedAttempts.filter(
+                (attempt) =>
+                    attempt.settledCredits !== null &&
+                    attempt.settledCredits > attempt.reservedCredits
+            ).length,
+            completedAttempts.filter((attempt) => attempt.settledCredits !== null)
+                .length,
+            "completed attempts with a settled figure",
+            {
+                minimumDenominator,
+                excluded:
+                    "attempts whose settlement did not report; those are counted by unreconciledSettlements instead",
+            }
         ),
         p50DurationMs: percentile(durations, 0.5),
         p95DurationMs: percentile(durations, 0.95),
@@ -312,9 +355,29 @@ export type AdoptionScorecard = {
     reviewToSaveOrShare: ScorecardMetric;
     reviewToItemWebCheck: ScorecardMetric;
     firstToSecondReview: ScorecardMetric;
-    returnDay1: ScorecardMetric;
-    returnDay7: ScorecardMetric;
-    returnDay30: ScorecardMetric;
+    /**
+     * `return_day_N` among AI Review users.
+     *
+     * Named for what it is. The event fires on the day the ACCOUNT turns N
+     * days old, not N days after a review, so this answers "how many AI Review
+     * users were also around on their own day N" -- it is not review-anchored
+     * retention and must never be labelled as such. It is kept because it is
+     * comparable with the product-wide funnel, which uses the same events.
+     */
+    accountAgeReturnDay1: ScorecardMetric;
+    accountAgeReturnDay7: ScorecardMetric;
+    accountAgeReturnDay30: ScorecardMetric;
+    /**
+     * Came back at least N days after their FIRST AI Review.
+     *
+     * Anchored on the review, which is the question the value case actually
+     * asks. Computed from any later event by the same actor, so it is a floor:
+     * a user who returned but generated no analytics event that day is not
+     * counted.
+     */
+    reviewAnchoredReturnDay1: ScorecardMetric;
+    reviewAnchoredReturnDay7: ScorecardMetric;
+    reviewAnchoredReturnDay30: ScorecardMetric;
     /**
      * The comparison-only cohort against the AI Review cohort, on the same
      * return metric. Presented side by side and never as a causal claim: the
@@ -327,6 +390,29 @@ export type AdoptionScorecard = {
     };
 };
 
+/**
+ * Actors who generated any event at least `days` after their first review.
+ *
+ * A floor, not a rate: a user who came back and did something analytics does
+ * not record is invisible here. Stated on the card rather than left for a
+ * reader to assume.
+ */
+const reviewAnchoredReturn = (
+    rows: readonly ScorecardEventRow[],
+    days: number
+): { returned: number; population: number } => {
+    const firstReview = firstOccurrence(rows, ["comparison_review_completed"]);
+    const returned = new Set<string>();
+    for (const row of rows) {
+        const anchor = firstReview.get(row.actorKey);
+        if (!anchor) continue;
+        if (row.occurredAt.getTime() - anchor.getTime() >= days * 86_400_000) {
+            returned.add(row.actorKey);
+        }
+    }
+    return { returned: returned.size, population: firstReview.size };
+};
+
 const actorsWith = (
     rows: readonly ScorecardEventRow[],
     eventNames: readonly string[]
@@ -335,6 +421,54 @@ const actorsWith = (
     const actors = new Set<string>();
     for (const row of rows) if (names.has(row.eventName)) actors.add(row.actorKey);
     return actors;
+};
+
+/** The earliest time each actor did one of these things, if they did. */
+const firstOccurrence = (
+    rows: readonly ScorecardEventRow[],
+    eventNames: readonly string[]
+) => {
+    const names = new Set(eventNames);
+    const earliest = new Map<string, Date>();
+    for (const row of rows) {
+        if (!names.has(row.eventName)) continue;
+        const current = earliest.get(row.actorKey);
+        if (!current || row.occurredAt < current) {
+            earliest.set(row.actorKey, row.occurredAt);
+        }
+    }
+    return earliest;
+};
+
+/**
+ * Actors who did the second thing AFTER they did the first.
+ *
+ * The whole point, and the defect it replaces: a conversion used to be "this
+ * actor has both events somewhere in the window". A user who sent a follow-up
+ * in the morning and opened their first AI Review that afternoon counted as
+ * "AI Review led to a follow-up". So did one whose follow-up was in an
+ * entirely different conversation. Neither is a conversion, and a rate built
+ * from them says nothing about whether the feature caused anything.
+ *
+ * Ordering is the strongest claim this event stream can support. It is still
+ * not causation -- the events carry no conversation id, so a follow-up after a
+ * review may belong to another thread -- and the scorecard says so rather than
+ * implying otherwise.
+ */
+export const sequencedConversion = (
+    rows: readonly ScorecardEventRow[],
+    fromEvents: readonly string[],
+    toEvents: readonly string[]
+): { converted: number; population: number } => {
+    const from = firstOccurrence(rows, fromEvents);
+    const toNames = new Set(toEvents);
+    const converted = new Set<string>();
+    for (const row of rows) {
+        if (!toNames.has(row.eventName)) continue;
+        const anchor = from.get(row.actorKey);
+        if (anchor && row.occurredAt > anchor) converted.add(row.actorKey);
+    }
+    return { converted: converted.size, population: from.size };
 };
 
 const intersectionSize = (left: ReadonlySet<string>, right: ReadonlySet<string>) => {
@@ -353,9 +487,6 @@ export const summariseAdoption = (
     const compared = actorsWith(rows, ["multi_model_compare_completed"]);
     const reviewStarted = actorsWith(rows, ["comparison_review_started"]);
     const reviewCompleted = actorsWith(rows, ["comparison_review_completed"]);
-    const followUp = actorsWith(rows, ["followup_sent"]);
-    const savedOrShared = actorsWith(rows, ["conversation_saved", "share_created"]);
-    const itemChecked = actorsWith(rows, ["comparison_review_item_verified"]);
     const returned1 = actorsWith(rows, ["return_day_1"]);
     const returned7 = actorsWith(rows, ["return_day_7"]);
     const returned30 = actorsWith(rows, ["return_day_30"]);
@@ -387,32 +518,63 @@ export const summariseAdoption = (
         [...compared].filter((actor) => !reviewStarted.has(actor))
     );
 
+    // Every conversion below is ORDERED: the second event has to follow the
+    // first. Counting any actor who has both somewhere in the window credited
+    // a morning follow-up to an afternoon review.
+    const toFollowUp = sequencedConversion(
+        rows,
+        ["comparison_review_completed"],
+        ["followup_sent"]
+    );
+    const toSaveOrShare = sequencedConversion(
+        rows,
+        ["comparison_review_completed"],
+        ["conversation_saved", "share_created"]
+    );
+    const toItemCheck = sequencedConversion(
+        rows,
+        ["comparison_review_completed"],
+        ["comparison_review_item_verified"]
+    );
+    const comparisonToReviewSeq = sequencedConversion(
+        rows,
+        ["multi_model_compare_completed"],
+        ["comparison_review_started"]
+    );
+    const anchored1 = reviewAnchoredReturn(rows, 1);
+    const anchored7 = reviewAnchoredReturn(rows, 7);
+    const anchored30 = reviewAnchoredReturn(rows, 30);
+
+    const orderedNote =
+        "ordered: the second event must follow the first. Still not causation -- " +
+        "these events carry no conversation id, so a later action may belong to another thread";
+
     return {
         windowDays,
         weeklyActiveReviewUsers: weeklyActive.size,
         comparisonToReview: metric(
-            intersectionSize(compared, reviewStarted),
-            compared.size,
+            comparisonToReviewSeq.converted,
+            comparisonToReviewSeq.population,
             "users who completed a multi-model comparison",
-            { minimumDenominator }
+            { minimumDenominator, excluded: orderedNote }
         ),
         reviewToFollowUp: metric(
-            intersectionSize(reviewCompleted, followUp),
-            reviewCompleted.size,
+            toFollowUp.converted,
+            toFollowUp.population,
             "users who completed an AI Review",
-            { minimumDenominator }
+            { minimumDenominator, excluded: orderedNote }
         ),
         reviewToSaveOrShare: metric(
-            intersectionSize(reviewCompleted, savedOrShared),
-            reviewCompleted.size,
+            toSaveOrShare.converted,
+            toSaveOrShare.population,
             "users who completed an AI Review",
-            { minimumDenominator }
+            { minimumDenominator, excluded: orderedNote }
         ),
         reviewToItemWebCheck: metric(
-            intersectionSize(reviewCompleted, itemChecked),
-            reviewCompleted.size,
+            toItemCheck.converted,
+            toItemCheck.population,
             "users who completed an AI Review",
-            { minimumDenominator }
+            { minimumDenominator, excluded: orderedNote }
         ),
         firstToSecondReview: metric(
             secondReviewActors,
@@ -420,23 +582,53 @@ export const summariseAdoption = (
             "users who completed at least one AI Review",
             { minimumDenominator }
         ),
-        returnDay1: metric(
+        accountAgeReturnDay1: metric(
             intersectionSize(reviewCompleted, returned1),
             reviewCompleted.size,
             "users who completed an AI Review",
-            { minimumDenominator }
+            {
+                minimumDenominator,
+                excluded:
+                    "anchored on ACCOUNT age, not on the review; this is not review retention",
+            }
         ),
-        returnDay7: metric(
+        accountAgeReturnDay7: metric(
             intersectionSize(reviewCompleted, returned7),
             reviewCompleted.size,
             "users who completed an AI Review",
-            { minimumDenominator }
+            {
+                minimumDenominator,
+                excluded:
+                    "anchored on ACCOUNT age, not on the review; this is not review retention",
+            }
         ),
-        returnDay30: metric(
+        accountAgeReturnDay30: metric(
             intersectionSize(reviewCompleted, returned30),
             reviewCompleted.size,
             "users who completed an AI Review",
-            { minimumDenominator }
+            {
+                minimumDenominator,
+                excluded:
+                    "anchored on ACCOUNT age, not on the review; this is not review retention",
+            }
+        ),
+        reviewAnchoredReturnDay1: metric(
+            anchored1.returned,
+            anchored1.population,
+            "users who completed an AI Review",
+            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+        ),
+        reviewAnchoredReturnDay7: metric(
+            anchored7.returned,
+            anchored7.population,
+            "users who completed an AI Review",
+            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
+        ),
+        reviewAnchoredReturnDay30: metric(
+            anchored30.returned,
+            anchored30.population,
+            "users who completed an AI Review",
+            { minimumDenominator, excluded: "a floor: a silent return is not counted" }
         ),
         cohortReturnDay7: {
             comparisonOnly: metric(
@@ -459,10 +651,18 @@ export const summariseAdoption = (
 // The readiness verdict
 // ---------------------------------------------------------------------------
 
-export const AI_REVIEW_M5_READINESS_ITEMS = [
+/**
+ * The tools exist and are wired together.
+ *
+ * Split out from readiness because conflating them is what produced a
+ * `readiness complete: YES` on a repository whose only evaluation sample was
+ * 24 development cases. "The instrument is built" and "the instrument has been
+ * calibrated and pointed at something" are different claims, and the first one
+ * is worth reporting -- just not under the second one's name.
+ */
+export const AI_REVIEW_M5_SCAFFOLDING_ITEMS = [
     "decision_grade_eval_harness",
-    "versioned_eval_dataset",
-    "scored_and_tested_evaluator",
+    "scored_and_verified_evaluator",
     "paid_run_budget_contract",
     "server_run_telemetry",
     "shared_scorecard_core",
@@ -470,6 +670,30 @@ export const AI_REVIEW_M5_READINESS_ITEMS = [
     "cached_review_compatibility",
     "documented_rollback",
     "reviewer_pair_drift_detection",
+] as const;
+export type AiReviewM5ScaffoldingItem =
+    (typeof AI_REVIEW_M5_SCAFFOLDING_ITEMS)[number];
+
+/**
+ * What has to be true before a decision-grade evaluation can even be run and
+ * believed. Every item here is decidable from the repository, and none of them
+ * is satisfied by a file existing.
+ */
+export const AI_REVIEW_M5_READINESS_ITEMS = [
+    /** A decision dataset that is valid, frozen, and meets the sample floors. */
+    "frozen_adequate_decision_dataset",
+    /** Thresholds a person has signed, so an approval has a bar to clear. */
+    "approved_quality_thresholds",
+    /** Every zero-tolerance rule has a detection path, screened or human. */
+    "complete_zero_tolerance_coverage",
+    /** Every provider attempt is recorded, so a fallback cannot hide a failure. */
+    "per_attempt_reliability_record",
+    /** Reservation and settlement are both recorded, so mismatch is computable. */
+    "credit_reconciliation_measurable",
+    /** Conversions are ordered in time, so a rate means what it says. */
+    "sequenced_conversion_metrics",
+    /** There is somewhere for production evidence to be recorded. */
+    "promotion_evidence_structure",
 ] as const;
 export type AiReviewM5ReadinessItem =
     (typeof AI_REVIEW_M5_READINESS_ITEMS)[number];
@@ -497,27 +721,37 @@ export type ReadinessCheck = {
 };
 
 export type M5Verdict = {
+    scaffoldingComplete: boolean;
     readinessComplete: boolean;
     eligible: boolean;
+    scaffolding: readonly ReadinessCheck[];
     readiness: readonly ReadinessCheck[];
     eligibility: readonly ReadinessCheck[];
 };
 
 /**
- * The two states, judged separately and never collapsed.
+ * The three states, judged separately and never collapsed.
  *
- * `readinessComplete` is decidable from the repository: the tools exist, are
- * tested, and refuse the things they must refuse. `eligible` is not, and this
- * function will not derive it from readiness -- it takes the eligibility
- * checks as given and requires every one, so an eligibility claim can only
- * come from evidence somebody supplied.
+ * None implies another, and this function will not derive one from another --
+ * it takes three lists and requires every item of each. Scaffolding says the
+ * instrument is built; readiness says it is calibrated and has something to
+ * measure; eligibility says it was pointed at production and a person signed
+ * the result.
+ *
+ * The middle state exists because it was missing: a report that called a built
+ * harness "readiness complete" said the loudest possible thing about a
+ * repository whose only sample was 24 development cases.
  */
 export const judgeM5 = (
+    scaffolding: readonly ReadinessCheck[],
     readiness: readonly ReadinessCheck[],
     eligibility: readonly ReadinessCheck[]
 ): M5Verdict => ({
+    scaffoldingComplete:
+        scaffolding.length > 0 && scaffolding.every((check) => check.met),
     readinessComplete: readiness.length > 0 && readiness.every((check) => check.met),
     eligible: eligibility.length > 0 && eligibility.every((check) => check.met),
+    scaffolding,
     readiness,
     eligibility,
 });

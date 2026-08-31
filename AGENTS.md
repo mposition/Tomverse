@@ -1006,12 +1006,33 @@ AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측
 
 절대 조건:
 
-- **`M5 readiness complete`와 `M5 eligible`은 한 척도의 두 눈금이 아니라 서로
-  다른 두 상태입니다.** 앞은 저장소만으로 판정하고(도구가 있고 테스트되고 막아야
-  할 것을 막는가), 뒤는 production 관측·유료 평가·사람의 서명을 요구합니다.
-  `judgeM5()`가 두 목록을 각각 받고 각각 전부 충족을 요구하며, **readiness에서
-  eligibility를 유도하지 않습니다.** 실제 운영 데이터 없이 M5라고 선언하지
+- **상태는 셋이고 서로를 함의하지 않습니다** — `instrument scaffolding
+  complete`(도구가 있고 연결됐다), `M5 readiness complete`(그 도구가 믿을 수
+  있는 숫자를 낼 수 있다: 동결된 충분한 decision dataset, 서명된 threshold,
+  다섯 zero-tolerance 규칙의 판정 경로, attempt 단위 계측, 계산 가능한 정산
+  대조, 순서 있는 전환), `M5 eligible`(production에 겨눴고 사람이 서명했다).
+  `judgeM5()`가 세 목록을 각각 받고 각각 전부 충족을 요구합니다.
+  **readiness 항목은 파일 존재로 충족되지 않습니다** — 평가기는 정답이 정해진
+  fixture로 실제 실행해 검사합니다. 실제 운영 데이터 없이 M5라고 선언하지
   않습니다.
+- **precision은 gold가 exhaustive인 case에서만 계산합니다 — 분모뿐 아니라
+  분자도.** 분자를 빠뜨리면 심어 둔 것 하나를 맞히고 판정 불가능한 99개를
+  덧붙인 검토자가 precision 100%로 보고됩니다. recall은 모든 case를 셉니다.
+- **zero-tolerance 다섯 규칙 모두 판정 경로가 있어야 합니다.** 셋은 용어
+  목록으로 선별하고 둘은 사람만 판정하며, **블라인드 시트는 다섯 전부를
+  묻습니다** — 목록은 자기가 담은 표현만 찾으므로 recall은 사람의 몫입니다.
+  선별은 검토자 자신의 문장(`reviewerProse`, 인용 제외)만 읽고, case 자신이
+  말하는 용어는 금지 목록에서 뺍니다.
+- **품질 임계값은 버전을 가지고 승인 gate에 연결됩니다.**
+  `approvedEntryProblems()`가 승인 항목의 수치를 그 항목이 이름 댄 threshold
+  집합과 대조하고, arm별 격차와 붕괴 arm까지 봅니다. 미승인 집합에 기댄 승인은
+  거부됩니다.
+- **reviewer health는 `ComparisonReviewRunAttempt`에서 계산합니다.** run 행의
+  slot은 결과를 만든 reviewer이고 attempt는 실제로 일어난 일입니다. 둘을
+  합치면 fallback이 앞선 실패를 지웁니다.
+- **전환은 시간 순서를 지키고, 재방문은 두 종류가 다른 이름을 갖습니다.**
+  `accountAgeReturnDay*`는 계정 나이 기준이라 AI Review retention이
+  아니며, `reviewAnchoredReturnDay*`가 그 질문의 답입니다.
 - **source grounding은 사실 정확도가 아닙니다.** `exactQuoteMatchRate`는
   reviewer의 인용문이 그 인용문이 귀속된 답변에 실제로 있는지만 말합니다.
   `lib/sourceGrounding.ts`가 저장된 `confidence`를 이 이름으로 번역하는 유일한

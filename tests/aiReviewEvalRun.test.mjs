@@ -262,15 +262,21 @@ test("an approved entry missing its evidence is reported item by item", () => {
       datasetDigest: "not-a-digest",
       languages: ["ko"],
       sampleCounts: {},
+      thresholdVersion: "v1-draft",
       metrics: {
         contradictionRecallWilsonLower: 0.8,
         contradictionPrecisionWilsonLower: 0.8,
         omissionRecallWilsonLower: 0.8,
         omissionPrecisionWilsonLower: 0.8,
-        falseConsensusRateWilsonUpper: 0.05,
         exactQuoteMatchRateWilsonLower: 0.9,
+        schemaValidRateWilsonLower: 0.99,
+        falseConsensusRateWilsonUpper: 0.05,
+        inventedIssueRateWilsonUpper: 0.05,
       },
+      byLanguage: [],
+      byTaskType: [],
       zeroToleranceViolations: 2,
+      zeroToleranceRulesHumanJudged: 2,
       blindReviewRef: "",
       approver: "",
       approvedAt: "2026-01-01",
@@ -283,9 +289,17 @@ test("an approved entry missing its evidence is reported item by item", () => {
   assert.ok(problems.some((p) => p.includes("evaluated commit is not named")));
   assert.ok(problems.some((p) => p.includes("dataset digest")));
   assert.ok(problems.some((p) => p.includes("blind human review")));
-  assert.ok(problems.some((p) => p.includes("2 zero-tolerance violation")));
   assert.ok(problems.some((p) => p.includes("no approver")));
   assert.ok(problems.some((p) => p.includes("no re-evaluation deadline")));
+  // Three of five rules were only screened by a term list, which is not the
+  // same as five having been examined.
+  assert.ok(
+    problems.some((p) => p.includes("2 of 5 zero-tolerance rules were judged"))
+  );
+  // And the numbers themselves are refused, because the bar they name is a
+  // proposal nobody has signed. Until this existed, an approval that carried
+  // an artifact, a commit and two ordinals was accepted whatever it measured.
+  assert.ok(problems.some((p) => p.includes("is a proposal and has no approver")));
 });
 
 test("register drift reads production's served pairs, never the register itself", () => {

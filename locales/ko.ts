@@ -341,6 +341,35 @@ export const ko = {
         guestAttachmentUnreadable: "이 파일을 처리할 수 없습니다.",
         guestAttachmentFailed: "이 파일을 처리할 수 없습니다. 다시 시도해 주세요.",
         guestAttachmentUnavailable: "파일 첨부를 일시적으로 사용할 수 없습니다.",
+        // -- Voice input (docs/policy/voice-input.md §13) ------------------
+        voiceStart: "음성으로 입력하기",
+        voiceStop: "녹음을 멈추고 텍스트로 변환",
+        voiceCancel: "취소",
+        voiceRecording: "녹음 중 {time}",
+        voiceRequestingPermission: "마이크 사용 권한을 기다리는 중…",
+        voiceTranscribing: "음성을 텍스트로 변환하는 중…",
+        voiceLimitReached: "최대 녹음 길이에 도달했습니다. 텍스트로 변환합니다…",
+        voiceDismissError: "안내 닫기",
+        voicePrivacyNote:
+            "음성은 변환을 위해서만 음성 인식 제공업체로 전송됩니다. Tomverse는 녹음을 저장하지 않으며, 변환된 문장은 입력창에 들어가 보내기 전에 직접 확인할 수 있습니다.",
+        voiceErrorUnsupportedBrowser:
+            "이 브라우저에서는 녹음할 수 없습니다. 최신 Chrome, Edge, Safari, Firefox에서 사용해 주세요.",
+        voiceErrorPermissionDenied:
+            "마이크 사용이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 마이크를 허용한 뒤 다시 시도해 주세요.",
+        voiceErrorDeviceUnavailable:
+            "사용할 수 있는 마이크가 없습니다. 마이크가 연결되어 있고 다른 앱이 쓰고 있지 않은지 확인해 주세요.",
+        voiceErrorClipEmpty: "녹음된 소리가 없습니다. 버튼을 조금 더 길게 누른 채 말해 주세요.",
+        voiceErrorClipTooLarge: "녹음 파일이 너무 커서 보낼 수 없습니다.",
+        voiceErrorClipTooLong: "녹음이 허용된 길이를 넘었습니다.",
+        voiceErrorClipUnreadable: "녹음 파일을 읽을 수 없습니다.",
+        voiceErrorTranscriptEmpty: "말소리를 인식하지 못했습니다. 조용한 곳에서 다시 시도해 주세요.",
+        voiceErrorUnavailable: "지금은 음성 입력을 사용할 수 없습니다.",
+        voiceErrorSignInRequired: "음성 입력을 사용하려면 로그인해 주세요.",
+        voiceErrorLimitReached: "오늘 사용할 수 있는 음성 입력 한도에 도달했습니다. 내일 다시 시도해 주세요.",
+        voiceErrorProviderUnavailable:
+            "음성 인식 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        voiceErrorNetwork: "녹음을 전송하지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.",
+        voiceErrorTranscriptionFailed: "음성을 텍스트로 변환하지 못했습니다. 다시 시도해 주세요.",
         guestAttachmentTemporary: "게스트 파일은 임시입니다. 이 대화에서만 잠시 보관되며 저장·공유·내보내기에 포함되지 않습니다.",
         guestGoogleDriveSignIn: "Google Drive를 연결하려면 로그인하세요",
         // Guest AI Review: one real run per month, on the same pipeline.
@@ -2031,6 +2060,8 @@ export const ko = {
         purpose: "인증, AI 응답 생성, 대화 저장과 복원, 내보내기와 공유, 첨부파일 처리, 서비스 보안, 남용 방지, 사고 대응을 위해 정보를 사용합니다.",
         providersTitle: "외부 AI 공급자",
         providers: "질문, 필요한 대화 맥락, 모델 선택 정보, 첨부파일은 응답 생성을 위해 선택한 AI 공급자에게 전송됩니다. 공급자는 자체 약관과 개인정보 처리방침에 따라 데이터를 처리하거나 보관할 수 있으며, 처리 국가가 다를 수 있습니다.",
+        voiceInputTitle: "음성 입력",
+        voiceInput: "입력창의 마이크를 사용하면 녹음은 텍스트 변환이라는 목적에만 사용되도록 음성 인식 제공업체(현재 OpenAI)로 전송되며, 해당 업체의 약관에 따라 다른 국가에서 처리될 수 있습니다. Tomverse는 음성을 저장하지 않습니다. 녹음은 해당 요청이 처리되는 동안에만 메모리에 존재하고 데이터베이스·파일 저장소·로그·오류 추적 어디에도 기록되지 않으며, 취소한 녹음은 어디로도 전송되지 않습니다. 변환된 문장은 입력창에 들어가므로 보내기 전에 읽고 고치거나 지울 수 있습니다. 보내기 전까지 그 문장은 사용자의 기기에 있는 초안이고 Tomverse는 아무것도 저장하지 않습니다. 보낸 뒤에는 일반 메시지가 되며 이 방침의 나머지 내용이 적용됩니다. 음성 입력은 로그인한 경우에만 사용할 수 있습니다.",
         attachmentsTitle: "첨부파일",
         attachments: "첨부파일은 모델 전달과 문서 추출을 위해 암호화된 객체 저장소에 저장됩니다. 로그인 계정의 첨부파일은 대화와 함께 보관되며 해당 대화나 계정을 삭제할 때 삭제됩니다. 로그인하지 않고 첨부한 파일은 임시 보관이며 자동으로 삭제됩니다.",
         externalImportTitle: "다른 AI 서비스에서 가져온 대화",

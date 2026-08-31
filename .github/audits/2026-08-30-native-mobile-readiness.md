@@ -1,8 +1,10 @@
 # iOS·Android Native 앱 준비도 스파이크 (2026-08-30)
 
 - 대상: `mposition/Tomverse` `develop`
-- 조사 기준 커밋: `96f012b`. 작업 중 원격이 앞서 나가 `be5aebe`를 병합했고,
-  **§2의 수치와 §11의 검증은 병합 후 트리에서 전부 다시 측정·재실행했습니다.**
+- **기준 커밋: `b760383`** (rev.3). Voice Input MVP가 이 커밋까지 병합 완료입니다.
+  초판 조사는 `96f012b`에서 시작했고, 이후 `be5aebe` → `8cd3e5e` → `4635eb7` →
+  `b760383`을 차례로 병합했습니다. **§1의 성숙도, §2의 수치, §11의 검증은 전부
+  `b760383` 트리에서 다시 측정·재실행한 값입니다** — 옮겨 적은 값이 아닙니다.
 - 목적: 스토어 출시 앱 구현이 아니라, **Capacitor 로컬 번들 Native 앱으로 전환할 준비가 어디까지 되어 있는지**를 코드와 실행 증거로 확인하고 작업량을 산정하는 것
 - 근거 문서: `docs/policy/tomverse-chat-delivery-plan.md`, `docs/policy/shared-packages.md`,
   `docs/policy/tomverse-chat-mobile-authentication.md`, `docs/policy/chat-concurrency-and-identity.md`,
@@ -13,6 +15,38 @@
 > **이 문서가 주장하지 않는 것.** 실행한 검증은 §11에 전부 나열했습니다. iOS 빌드,
 > 실기기 동작, Android Gradle 빌드는 **하나도 실행하지 않았고 통과로 기록하지 않았습니다.**
 > 이 컨테이너는 Linux이고 Xcode도 Android SDK도 없습니다.
+
+## 개정 이력
+
+**rev.3 (2026-08-30, 기준 `b760383`)** — 설계 교정이 아니라 **최신성 갱신**입니다.
+rev.2 승인 뒤 Voice Input MVP가 병합돼 여섯 가지 사실이 바뀌었습니다.
+
+| # | rev.2 | `b760383` 기준 | 고친 곳 |
+|---|---|---|---|
+| 1 | 기준 커밋 `96f012b`/`be5aebe` | `b760383` | 머리말 |
+| 2 | "`getUserMedia` 0건", "Voice 진행 중" | Voice **병합 완료**. `getUserMedia`·`MediaRecorder` 실제 사용 | §1의 23번, §12 |
+| 3 | 마이크 성숙도 **M0** | **M3**(웹 구현, flag default-off) / **M0**(Native 권한·실기기) | §1의 23번 |
+| 4 | 단위 테스트 6,960 pass | **7,051 pass** (두 lane 합계, 재실행) | §11.4 |
+| 5 | seed 2차 192줄 = "Voice 병합 후 **대기**" | **착수 가능** — 최신 변경 파일 재대조가 조건 | §7.2 |
+| 6 | `chat-ui`가 Voice를 기다림 | Voice 선행 조건 **충족**. 남은 것은 N5·N6·N1b | §6, §7.3 |
+
+`b760383`에서 새로 생긴 사실 둘도 반영했습니다 — Voice가 **port 주입 패턴의 실제
+선례**(`lib/voiceTranscriptionPort.ts` + `…PortCore.ts`)를 남겼고(§2.3),
+framework-neutral한 순수 모듈 **1,197줄**이 추가로 존재합니다(§2.2).
+
+**rev.2 (2026-08-30)** — N0은 승인됐고, 검토에서 지적된 네 가지와 수치 하나를 고쳤습니다.
+전부 초판이 틀렸던 것이므로 지운 것이 아니라 무엇이 왜 틀렸는지를 남깁니다.
+
+| # | 초판 | 무엇이 틀렸나 | 고친 곳 |
+|---|---|---|---|
+| 1 | "`Authorization: Bearer`로 인증된 요청은 별도 경로로 판정" | **헤더의 존재**와 **토큰의 검증**을 구분하지 않았습니다. `proxy.ts`는 route보다 먼저 돌고 그 자리에 검증기가 없으므로, 가짜 헤더 한 줄이 CSRF 검사를 끄는 스위치가 됩니다 | §3.1을 N1a / N2 / N1b로 분리 |
+| 2 | N2를 "지금 병렬 가능"으로 분류 | 모바일 인증 정책이 아직 **`draft for Phase 0 approval`** 입니다. 설계·테스트 벡터는 지금 가능하지만 migration과 토큰 발급은 승인 뒤입니다 | §6.1, N2-설계 / N2-구현 분리 |
+| 3 | `chat-core` seed 804줄 전체를 "Voice와 무관" | `chatAttachmentErrorCopy`·`chatCreditAllocation`·`chatKeyboardPolicy`가 **`ChatInput.tsx`를 지납니다** | §7.2, 1차 612줄 / 2차 192줄 분리 |
+| 4 | AASA·`assetlinks.json`을 "파일 배포일 뿐" | 최종 Bundle/Application ID·Apple Team ID·**서명 인증서 SHA-256 fingerprint**·entitlement가 전부 미정입니다. `appId: "app.tomverse.shell"`은 스파이크 식별자입니다 | §7.1, N4a / N4b 분리 |
+| 5 | 단위 테스트를 "6,892 pass"로 보고 | 그것은 server lane의 **`tests`** 수이고 pass는 6,891이었으며, client lane 33건을 더하지 않았습니다 | §11.4 (합계 표) |
+
+4번에 따라 `apps/mobile/capacitor.config.ts`의 `appId`에 잠정 식별자임을 명시하는 주석을
+달았습니다.
 
 ---
 
@@ -26,6 +60,17 @@
 `lib/requestOrigin.ts`가 Capacitor의 두 origin 중 어느 것도 받지 않아 **Native의 모든
 비-GET 요청이 라우트에 닿기 전에 403 `INVALID_REQUEST_ORIGIN`으로 거절된다**는
 것입니다(§3.1).
+
+**rev.3 시점의 착수 상태**: Voice Input MVP가 `b760383`에서 병합돼 UI 계열 대기가 풀렸고,
+지금 막혀 있지 않은 작업은 다섯입니다 — N1a(CORS·`OPTIONS`), N2-설계(승인 패킷),
+`chat-core` seed 804줄, N4a(딥링크 형식·도구), PRIVACY 미결정 2건. 우선순위는
+**N1a → N2-설계**입니다(§7.3).
+
+그 문제를 푸는 순서가 이 보고서에서 가장 틀리기 쉬운 부분이고, 초판이 실제로 틀렸습니다.
+`Authorization` 헤더가 **있다는 이유로** CSRF 검사를 건너뛰면, `proxy.ts`가 route보다 먼저
+도는 이상 아무 값이나 담은 헤더 한 줄이 edge 보안 계층 전체를 끄는 스위치가 됩니다. 그래서
+CORS(N1a)와 **검증된** bearer identity의 대체 경로(N1b)를 나누고, N1b는 토큰 검증기(N2)
+뒤에 둡니다 — §3.1.
 
 ---
 
@@ -54,11 +99,13 @@
 | 16 | 기기 목록·기기별 해제 | **M0** | `sessionRevocationCore.ts`는 계정 전체 revocation만 |
 | 17 | explicit CORS allowlist | **M0** | `Access-Control-Allow-Origin` 문자열이 저장소에 **0건** |
 | 18 | Sign in with Apple | **M0** | provider는 Google·AzureAD·Credentials 셋뿐 |
-| 19 | Universal Link / App Link | **M0** | `public/.well-known/`에 microsoft 파일 1개뿐 |
+| 19 | Universal Link / App Link | **M0** | `public/.well-known/`에 microsoft 파일 1개뿐. 식별자도 미확정(§7.1) |
 | 20 | 스토어 심사 자격증명 lifecycle | **M1** | `docs/ops/tomverse-chat-store-review.md`는 완성, 구현 0 |
-| 21 | 백그라운드·포그라운드 전환 | **M0** | `visibilitychange`·`pagehide` 처리 **0건** |
+| 21 | 백그라운드·포그라운드 전환 | **M0** | `visibilitychange`·`pagehide` 처리 **0건** — Voice 녹음기도 다루지 않습니다 |
 | 22 | 파일 선택 | **M3**(웹) | `<input type="file">` — WebView에서 그대로 동작 |
-| 23 | 카메라·마이크 권한 | **M0** | `getUserMedia` 호출 **0건** (Voice Input이 최초 도입 예정) |
+| 23a | **마이크 (웹)** | **M3** | Voice Input MVP 병합 완료. `navigator.mediaDevices.getUserMedia` + `MediaRecorder` 실사용(`components/chat/useVoiceRecorder.ts`). 단 rollout flag는 default-off이고 production 활성화는 `docs/policy/voice-input.md` §14가 별도로 막습니다 |
+| 23b | **마이크 (Native 권한·실기기)** | **M0** | `NSMicrophoneUsageDescription`·`RECORD_AUDIO` 선언 없음. 네이티브 프로젝트 자체가 없고, Voice 정책 §1이 native를 명시적으로 범위 밖으로 둡니다 |
+| 23c | 카메라 | **M0** | 사용처 없음 |
 | 24 | Google Drive 첨부 | **M3**(웹) / **M0**(Native) | GIS 토큰 클라이언트가 WebView origin을 등록할 수 없음(§3.3) |
 | 25 | PWA (manifest·SW) | **M0** | manifest·service worker 모두 없음 |
 | 26 | 개인정보 표시·스토어 메타데이터 | **M0** | 산출물 없음 |
@@ -98,6 +145,31 @@ import하는 것만 추리면 다음 8개(합 **804줄**)이고, 이것이 `chat
 "desktop과 mobile이 같은 함수로 판정한다"를 이미 강제하고 있으므로, 세 번째 클라이언트가
 생겨도 그 계약이 그대로 따라옵니다 — 옮길 이유가 가장 분명한 모듈입니다.
 
+#### rev.3 추가 — Voice가 순수 모듈 1,197줄을 더 남겼습니다
+
+`b760383`에서 같은 기준(주석 제거 후 alias·framework import·전역·`process.env` 없음)으로
+다시 세면 Voice 모듈 여섯 개가 통과합니다.
+
+| 모듈 | 줄 | 쓰는 곳 |
+|---|---:|---|
+| `lib/voiceClipDuration.ts` | 417 | server (컨테이너 파싱) |
+| `lib/voiceRecorderMachine.ts` | 348 | client ×2 |
+| `lib/voiceInputFormats.ts` | 172 | **client ×3 + server ×4** |
+| `lib/voiceInputGuardrails.ts` | 127 | server ×2 |
+| `lib/voiceTranscript.ts` | 72 | **client ×1 + server ×1** |
+| `lib/voiceInputErrorCopy.ts` | 61 | client ×1 |
+| **합계** | **1,197** | |
+
+**이 보고서는 이것들의 이관을 제안하지 않습니다.** 두 가지 이유입니다. Voice의 production
+활성화가 `docs/policy/voice-input.md` §14의 B-1~B-6에 막혀 있어 아직 움직이는 표면이고,
+`chat-core`의 seed 기준은 `docs/policy/shared-packages.md` §7.4의 "이미 공유된 코드를
+옮긴다"입니다 — 여섯 중 그 기준을 확실히 만족하는 것은 client와 server가 함께 쓰는
+`voiceInputFormats`(172)와 `voiceTranscript`(72) 둘입니다.
+
+기록하는 이유는 하나입니다. **`voiceRecorderMachine.ts`는 전역을 하나도 쓰지 않는 348줄짜리
+상태 기계**이고, 그것은 `chat-core`가 존재하는 이유 그 자체의 형태입니다 — 다음에 seed 범위를
+넓힐 때 후보 목록이 `chat*`에서 끝나지 않는다는 사실을 여기 남겨 둡니다.
+
 ### 2.3 포트가 필요한 것 (전역을 쓰는 스트리밍 코어)
 
 `chat-core`의 tsconfig는 `lib: ["ES2022"]`·`types: []`라 `window`·`TextDecoder`·`fetch`가
@@ -115,6 +187,25 @@ import하는 것만 추리면 다음 8개(합 **804줄**)이고, 이것이 `chat
 `chatStreamRuntime.ts`가 `@/components/chat/types`를 import한다는 점이 중요합니다 — 즉
 **메시지 타입 자체가 먼저 package로 가야** 스트림 런타임이 갈 수 있습니다. 이것이
 `chat-core` 확장의 실제 임계 경로입니다.
+
+#### rev.3 추가 — 포트 패턴의 선례가 저장소 안에 생겼습니다
+
+초판을 쓸 때 "포트를 설계해서 옮긴다"는 이 저장소에 사례가 없는 추상적 계획이었습니다.
+`b760383`에는 있습니다.
+
+```
+lib/voiceTranscriptionPortCore.ts   225줄  결정 전부 — 요청 모양, 실패 분류, 허용 응답
+lib/voiceTranscriptionPort.ts        90줄  `server-only`. process.env를 넣어 주기만 함
+```
+
+`voiceTranscriptionPort.ts`의 주석이 분담을 직접 적습니다 — *"every decision … lives in
+`lib/voiceTranscriptionPortCore.ts`, and this file supplies `process.env` and nothing else."*
+그리고 그 형태를 `lib/emailProviderPort.ts`에서 가져왔다고 밝힙니다. 즉 이 저장소에는 이제
+**같은 패턴의 구현이 둘** 있습니다.
+
+storage·timer·transport 포트를 설계할 때 새 규약을 발명하지 말고 이 둘을 따릅니다. 다만
+§4.3의 제약은 그대로입니다 — **토큰 저장과 대화 상태 저장은 서로 다른 포트**여야 하며,
+하나로 합치면 refresh token이 `localStorage`에 들어가는 길이 열립니다.
 
 ### 2.4 옮기면 안 되는 것
 
@@ -177,11 +268,43 @@ Native는 `Host: tomverse.app`로 보내므로 호스트 검사는 통과하고 
 문제입니다 — CORS는 브라우저가 응답을 읽게 해 주는 것이고, 이쪽은 서버가 요청을 아예
 받지 않는 것입니다.
 
-고치는 방향은 **완화가 아니라 분기**여야 합니다. 쿠키 요청에는 mutation-origin 검사를
-그대로 두고, `Authorization: Bearer`로 인증된 요청은 CSRF 대상이 아니므로
-(`docs/policy/tomverse-chat-mobile-authentication.md` "Why not extend the cookie session" 2번)
-별도 경로로 판정합니다. 두 경로를 하나로 합치면 정책이 경고한 "더 엄격한 규칙을 모든 곳에
-적용하거나, 조용히 어느 쪽도 만족시키지 않거나" 둘 중 하나가 됩니다.
+#### 고치는 순서 — 헤더의 *존재*로 검사를 건너뛰지 않는다
+
+**초판의 이 문단은 틀렸습니다.** 원문은 "`Authorization: Bearer`로 인증된 요청은 CSRF
+대상이 아니므로 별도 경로로 판정한다"였는데, 이 문장은 **헤더가 있다는 사실**과 **토큰이
+검증됐다는 사실**을 구분하지 않습니다. `proxy.ts`는 route보다 먼저 돌고 그 자리에는 토큰
+검증기가 없으므로, 그렇게 구현하면 아무 값이나 담은 `Authorization: Bearer x` 한 줄이
+mutation-origin 검사 전체를 끄는 스위치가 됩니다.
+
+이것은 새로운 통찰이 아니라 **이 파일이 이미 적어 둔 규칙**입니다. `proxy.ts`의 prefetch
+분기 주석이 같은 말을 합니다 — *"gating those on request headers would let any caller opt
+out of the entire edge security layer."* 그 규칙이 prefetch에 적용되는 이유가 bearer에는
+적용되지 않을 이유가 없습니다.
+
+그래서 하나의 작업을 셋으로 나눕니다.
+
+| 단계 | 하는 일 | 검증된 토큰이 필요한가 |
+|---|---|---|
+| **N1a** | 두 origin literal에 대한 CORS 응답과 **`OPTIONS` preflight 처리**, hostile origin 거절 | 아니오 |
+| **N2** | bearer 발급·검증·회전·family·재사용 탐지 | — (여기서 만듭니다) |
+| **N1b** | **검증된** bearer identity에 한해 mutation-origin 검사를 대체하는 경로 | 예 |
+
+**N1b는 N2 뒤입니다.** 검증기가 없는 동안에는 "대체할 자격"을 판정할 방법이 없고, 판정할
+수 없는 것을 통과시키는 코드가 곧 우회로입니다. 순서를 지키면 최악의 중간 상태가
+"Native가 아직 mutation 요청을 못 보낸다"이고, 순서를 어기면 최악의 중간 상태가
+"누구나 CSRF 검사를 끌 수 있다"입니다.
+
+N1a가 N2 없이 먼저 갈 수 있는 이유는 CORS가 **다른 질문에 답하기 때문**입니다. CORS는
+브라우저에게 응답을 읽어도 되는지 알려 주는 것이고 서버의 수락 여부와 무관합니다. 그리고
+지금 `OPTIONS`는 `lib/requestOrigin.ts`의 `SAFE_METHODS`에 있어 검사를 통과하지만
+**저장소 전체에 `OPTIONS` 핸들러가 0개**이므로, preflight가 CORS 헤더 없는 응답을 받습니다.
+N1a는 그 구멍을 메우는 일이며 bearer와 무관합니다.
+
+N1b를 설계할 때의 계약: 대체 조건은 "헤더가 있다"가 아니라 **"토큰 서명·만료·subject
+결속이 검증됐고, 그 identity가 이 요청의 주체다"** 입니다. 검증을 proxy에서 할지 route에서
+할지는 열린 결정이고, edge에서 검증하려면 서명 검증이 Edge runtime에서 가능해야 합니다 —
+`lib/chatAdmissionCore.ts`가 `Buffer`·`node:crypto`를 쓰는 것과 같은 제약이 걸립니다.
+쿠키 요청의 mutation-origin 검사는 어느 쪽에서도 **완화하지 않습니다.**
 
 ### 3.2 게스트 쿠키는 Native에서 전달되지 않는다
 
@@ -317,18 +440,23 @@ revoke입니다. `AUTH-02` 증거에서 build binding을 하드 경계로 제시
 | 작업 | 크기 | 비고 |
 |---|---|---|
 | `apps/mobile` 로컬 번들 scaffold | **S** | *이번에 완료* (§11) |
-| `chat-core` 무-포트 seed 8모듈(804줄) | **S** | import 경로 변경이 대부분 |
+| `chat-core` 무-포트 seed 1차 5모듈(612줄) | **S** | Voice와 겹치지 않음 (§7.2) |
+| `chat-core` seed 2차 3모듈(192줄) | **S** | **Voice 병합 후** — `ChatInput.tsx` 경유 |
 | storage / timer / transport 포트 설계 | **M** | 토큰용과 상태용을 분리하는 것이 핵심 |
 | 메시지 타입 + 스트림 런타임 이관 | **L** | `chatStreamRuntime`이 `components/chat/types`에 묶임 |
 | `api-client` (cookie/bearer 이중 transport) | **M** | 라우트 계약은 이미 안정 |
 | `chat-ui` 추출 (message list·renderer·composer shell) | **XL** | `ChatInput` 4,601줄이 실질 경계 |
-| bearer 발급·회전·family·재사용 탐지 (서버) | **L** | 스키마 신설 + 트랜잭션 계약 |
+| bearer 설계·위협 모델·테스트 벡터 | **M** | 승인 패킷 — 지금 가능 |
+| bearer migration·발급·회전·family·재사용 탐지 | **L** | **정책 승인 이후** (§6.1) |
 | 기기 목록·기기 해제 UI + API | **M** | 위 스키마에 종속 |
 | 이메일 OTP → bearer 교환 | **M** | `emailLogin.ts` 재사용, 쿠키 발급부만 분기 |
 | system-browser OAuth + PKCE (Native) | **M** | `lib/oauthLink.ts` PKCE 로직 재사용 |
 | Sign in with Apple (서버+클라) | **L** | private relay 신원, 삭제 시 token revoke 포함 |
-| CORS allowlist + hostile-origin 테스트 | **M** | mutation-origin 403 분기(§3.1)까지 포함하면 M 상단 |
-| Universal Link / App Link + 탈취 테스트 | **M** | 파일 배포는 S, 실기기 검증이 나머지 |
+| N1a: CORS allowlist + `OPTIONS` + hostile-origin 테스트 | **M** | bearer 불필요 — 지금 가능 |
+| N1b: 검증된 bearer의 mutation-origin 대체 | **M** | **bearer 검증기 이후** (§3.1) |
+| N4a: AASA/assetlinks 형식 + 검증 도구 | **S** | 식별자는 플레이스홀더 — 지금 가능 |
+| N4b: `.well-known` 배포 + entitlement + intent-filter | **M** | **식별자 확정 이후** (§7.1) |
+| 딥링크 탈취 실기기 테스트 | **M** | N4b 이후 |
 | 게스트 subject를 헤더로 이동 | **M** | 동시 실행 계약을 깨지 않아야 함 |
 | 백그라운드·포그라운드 스트림 복구 | **L** | 오늘 관련 처리 0건 |
 | R2 업로드 origin 대응 | **S~M** | 버킷 CORS 확인 필요(§10 미검증) |
@@ -344,38 +472,100 @@ revoke입니다. `AUTH-02` 증거에서 build binding을 하드 경계로 제시
 
 ## 6. 선행 의존성과 병렬화
 
+세 종류의 선행 조건이 있고, 섞으면 잘못된 순서가 나옵니다. **코드 의존**(A가 없으면 B가
+컴파일되지 않는다), **승인 의존**(사람이 결정해야 시작할 수 있다), **보안 의존**(먼저 하면
+그 자체가 취약점이다). 다이어그램에서 승인 의존은 점선, 보안 의존은 굵은 선입니다.
+
 ```mermaid
 flowchart TD
-    A["chat-core 무-포트 seed (S)"] --> B["포트 설계 (M)"]
-    B --> C["스트림 런타임 이관 (L)"]
-    C --> D["chat-ui (XL)"]
-    E["bearer 서버 스키마·회전·재사용 탐지 (L)"] --> F["기기 목록·해제 (M)"]
-    E --> G["OTP → bearer 교환 (M)"]
-    E --> H["api-client 이중 transport (M)"]
-    H --> D
-    I["mutation-origin 분기 + CORS (M)"] --> H
-    J["딥링크 파일·엔타이틀먼트 (S)"] --> K["system-browser OAuth (M)"]
-    K --> L["Sign in with Apple (L)"]
-    E --> K
-    D --> M["Native 핵심 Chat 흐름"]
-    L --> M
-    M --> N["실기기 보안 회귀 (L)"]
-    N --> O["스토어 제출"]
-    P["PRIVACY unverified 2건 (결정)"] --> O
-    Q["심사 자격증명 lifecycle (L)"] --> O
+    APPROVE{{"모바일 인증 정책 승인<br/>(오늘 Phase 0 draft)"}}
+    IDS{{"최종 Bundle/Application ID<br/>Team ID · 서명 인증서 digest"}}
+    VOICE{{"Voice Input MVP 병합<br/>(b760383에서 충족)"}}
+
+    N1A["N1a CORS + OPTIONS (M)"]
+    N2D["N2-설계 위협모델·테스트벡터 (M)"]
+    N2I["N2-구현 migration·발급·회전 (L)"]
+    N1B["N1b 검증된 bearer의<br/>mutation-origin 대체 (M)"]
+    N3["N3 기기 해제 + OTP 교환 (M)"]
+    N4A["N4a AASA/assetlinks 형식·도구 (S)"]
+    N4B["N4b .well-known 배포·entitlement (M)"]
+    N4C["N4c system-browser OAuth (M)"]
+    N5A["N5 1차 seed 5모듈 612줄 (S)"]
+    N5B["N5 2차 seed 3모듈 192줄 (S)"]
+    N5C["포트 설계 → 스트림 런타임 (M+L)"]
+    N6["N6 api-client 이중 transport (M)"]
+    N7["N7 chat-ui (XL)"]
+    N8["N8 Native 핵심 흐름 (L)"]
+    N9["N9 Sign in with Apple (L)"]
+    N10["N10 실기기 보안 회귀 (L)"]
+    N11["N11 심사 자격증명·개인정보 표시 (L)"]
+    PRIV["PRIVACY unverified 2건 (결정)"]
+    SUBMIT["스토어 제출"]
+
+    N2D -.-> APPROVE
+    APPROVE -.-> N2I
+    N2I ==> N1B
+    N2I --> N3
+    N2I --> N4C
+    N4A --> IDS
+    IDS -.-> N4B
+    N4B --> N4C
+    VOICE -. 충족 .-> N5B
+    VOICE -. 충족 .-> N7
+    N5A --> N5C
+    N5B --> N5C
+    N5C --> N6
+    N1A --> N6
+    N1B --> N6
+    N6 --> N7
+    N7 --> N8
+    N4C --> N9
+    N8 --> N10
+    N9 --> N10
+    N10 --> N11
+    N11 --> SUBMIT
+    PRIV --> SUBMIT
 ```
 
-**지금 즉시 병렬로 가능한 것 (서로 닿지 않음):**
+**지금 즉시 병렬로 가능한 것 (서로 닿지 않고, 무엇도 기다리지 않음):**
 
-1. `chat-core` 무-포트 seed — 서버 코드를 건드리지 않습니다.
-2. bearer 서버 스키마 설계·마이그레이션 — 클라이언트를 건드리지 않습니다.
-3. mutation-origin 분기 + CORS allowlist — 별도 계층입니다.
-4. AASA·`assetlinks.json` 배포 + 엔타이틀먼트 — 파일 배포일 뿐입니다.
-5. PRIVACY `unverified` 2건 결정 — 문서 작업입니다.
-6. 개인정보 표시 초안 — registry 58개 도메인에서 유도합니다.
+1. **N1a — 두 origin CORS + `OPTIONS` preflight + hostile-origin 테스트.** bearer가
+   필요 없는 유일한 보안 작업입니다.
+2. **N2-설계 — bearer 수명주기 설계·위협 모델·테스트 벡터.** 코드가 아니라 승인 패킷입니다.
+3. **N4a — AASA·`assetlinks.json` 형식과 검증 도구.** 식별자 자리는 플레이스홀더입니다.
+4. **N5 seed 8모듈(804줄).** rev.2에서는 1차 612줄만 열려 있었지만 Voice가 병합돼 2차
+   192줄도 열렸습니다(§7.2). 1차부터 가는 것은 되돌리기가 싸기 때문이지 막혀서가 아닙니다.
+5. **PRIVACY `unverified` 2건 결정.** security-privacy와 finance-ops의 결정입니다.
+6. **개인정보 표시 초안** — registry 58개 도메인에서 유도합니다.
 
-**반드시 뒤에 와야 하는 것:** `chat-ui`는 포트 설계 뒤, 기기 해제 UI는 스키마 뒤,
-Apple 로그인은 bearer 발급 뒤, 실기기 회귀는 전부 뒤.
+**세 가지 게이트 때문에 지금 시작하면 안 되는 것:**
+
+| 하지 않을 것 | 게이트 | 어기면 |
+|---|---|---|
+| **N1b** — bearer로 mutation-origin 대체 | **N2-구현**(보안 의존) | 검증되지 않은 헤더 한 줄이 CSRF 검사를 끕니다(§3.1) |
+| **N2-구현** — Prisma migration·토큰 발급 | **정책 승인**(승인 의존) | 승인 전 스키마가 굳고, 되돌리려면 migration을 또 씁니다 |
+| **N4b** — 실제 `.well-known` 배포 | **식별자 확정**(§7.1) | 틀린 fingerprint가 **실패한 상태로 캐시**됩니다 |
+| ~~**N5 2차 seed 3모듈**~~ | ~~Voice 병합~~ → **해소됨** | rev.3에서 착수 가능. 착수 직전 소비자 재대조만 남습니다(§7.2) |
+| **N7 `chat-ui`** | ~~Voice 완료~~ → **N5·N6·N1b** | Voice 조건은 충족됐지만 코드 의존이 남습니다 — 포트 설계와 `api-client`, 그리고 `api-client`가 필요로 하는 N1b |
+
+### 6.1 모바일 인증 정책이 아직 draft라는 사실
+
+`docs/policy/tomverse-chat-mobile-authentication.md`의 첫 줄은 **`Status: draft for Phase 0
+approval`** 이고, 결정 소유자는 Backend/AI와 Mobile/Release **공동**입니다. 계획서 Phase 0의
+나가는 문도 "mobile auth ADR 승인"을 명시합니다.
+
+그러므로 N2를 **설계와 구현으로 나눕니다.**
+
+- **지금 할 수 있는 것**: 위협 모델, 토큰 수명·회전 규칙의 구체화, family 무효화 시맨틱,
+  기기 레코드 필드 목록, **테스트 벡터**(재사용 탐지·만료·타 subject·동시 회전 경합),
+  그리고 §3.1의 N1b 대체 조건. 전부 저장소에 코드를 남기지 않고 승인 대상을 만듭니다.
+- **승인 후에 할 것**: Prisma migration과 토큰 발급 구현.
+
+이 저장소는 1인 조직이고 registry가 `soleApproverAllowed: true`이므로 승인은 **다른 사람을
+기다리는 일이 아니라 문서를 읽고 서명하는 일**입니다. 그래도 순서는 지킵니다 — 승인 전에
+migration을 넣으면 스키마가 결정보다 먼저 굳고, 되돌리는 비용이 migration 한 번 더입니다.
+그리고 `AUTH-03`은 회전·재사용 탐지·로그아웃·기기 해제를 **함께** 채점하므로, 넷 중 하나만
+먼저 만든 스키마는 나머지 셋이 정해질 때 다시 바뀝니다.
 
 ---
 
@@ -385,32 +575,148 @@ Apple 로그인은 bearer 발급 뒤, 실기기 회귀는 전부 뒤.
 "이 저장소는 1인 조직입니다"). 병렬 3레인을 직렬 1레인으로 접되, **순서를 되돌릴 수 없는
 것부터** 놓습니다.
 
-| 마일스톤 | 내용 | 규모 | 나가는 문 |
-|---|---|---|---|
-| **N0** *(완료)* | 로컬 번들 scaffold, `server.url` 게이트, 준비도 보고서 | S | 이 문서 |
-| **N1** | mutation-origin 분기 + CORS allowlist + hostile-origin 테스트 | M | Native origin이 서버에 닿음 |
-| **N2** | bearer 스키마·발급·회전·family·재사용 탐지 (서버, 테스트 우선) | L | AUTH-03 증거의 절반 |
-| **N3** | 기기 목록·로그아웃·기기 해제 + OTP→bearer 교환 | M | AUTH-03 나머지, AUTH-02 절반 |
-| **N4** | 딥링크 파일·엔타이틀먼트 + system-browser OAuth/PKCE | M | AUTH-04 절반 |
-| **N5** | `chat-core` seed → 포트 → 메시지 타입·스트림 런타임 | S+M+L | `api-client` 착수 가능 |
-| **N6** | `api-client` 이중 transport | M | 셸이 실제 요청을 보냄 |
-| **N7** | `chat-ui` 추출 (Review 회귀 E2E 고정 후) | XL | UI-01·UI-02 대상 생김 |
-| **N8** | Native 핵심 Chat 흐름 + 게스트 subject 헤더 이동 + 백그라운드 복구 | L | 앱이 쓸 만해짐 |
-| **N9** | Sign in with Apple + 계정 삭제·내보내기 도달 경로 | L | AUTH-01, PRIVACY-01 |
-| **N10** | 실기기 보안·회귀 (CORS·딥링크·토큰 재생·기기 해제) | L | AUTH-04 완결 |
-| **N11** | 심사 자격증명 lifecycle + synthetic login + 개인정보 표시 | L | STORE-01·02 |
-| **N12** | 제출·심사 대응 | M | — |
+| 마일스톤 | 내용 | 규모 | 선행 조건 | 나가는 문 |
+|---|---|---|---|---|
+| **N0** *(완료)* | 로컬 번들 scaffold, `server.url` 게이트, 준비도 보고서 | S | — | 이 문서 |
+| **N1a** | 두 origin CORS + `OPTIONS` preflight + hostile-origin 거절 | M | — | 브라우저가 응답을 읽을 수 있음 |
+| **N2-설계** | bearer 수명주기 설계·위협 모델·테스트 벡터 | M | — | 정책 승인 요청 패킷 |
+| **N2-구현** | Prisma migration + 발급·검증·회전·family·재사용 탐지 | L | **정책 승인** | AUTH-03 증거의 절반 |
+| **N1b** | **검증된** bearer identity의 mutation-origin 대체 경로 | M | **N2-구현** | Native가 mutation을 보낼 수 있음 |
+| **N3** | 기기 목록·로그아웃·기기 해제 + OTP→bearer 교환 | M | N2-구현 | AUTH-03 나머지, AUTH-02 절반 |
+| **N4a** | AASA·`assetlinks.json` **형식과 검증 도구** | S | — | 배포 직전까지 준비 완료 |
+| **N4b** | 실제 `.well-known` 배포 + entitlement + intent-filter | M | **식별자 확정**(§7.1) | AUTH-04 절반 |
+| **N4c** | system-browser OAuth/PKCE | M | N2-구현, N4b | 로그인 왕복 성립 |
+| **N5** | `chat-core` seed(1차 5모듈) → 포트 → 메시지 타입·스트림 런타임 | S+M+L | 1차는 즉시, 2차는 **Voice 병합 후**(§7.2) | `api-client` 착수 가능 |
+| **N6** | `api-client` 이중 transport | M | N5, N1b | 셸이 실제 요청을 보냄 |
+| **N7** | `chat-ui` 추출 (Review 회귀 E2E 고정 후) | XL | N6, **Voice 완료** | UI-01·UI-02 대상 생김 |
+| **N8** | Native 핵심 Chat 흐름 + 게스트 subject 헤더 이동 + 백그라운드 복구 | L | N7 | 앱이 쓸 만해짐 |
+| **N9** | Sign in with Apple + 계정 삭제·내보내기 도달 경로 | L | N4c | AUTH-01, PRIVACY-01 |
+| **N10** | 실기기 보안·회귀 (CORS·딥링크·토큰 재생·기기 해제) | L | N9 | AUTH-04 완결 |
+| **N11** | 심사 자격증명 lifecycle + synthetic login + 개인정보 표시 | L | N10 | STORE-01·02 |
+| **N12** | 제출·심사 대응 | M | N11 | — |
 
-**N1을 맨 앞에 두는 이유**는 크기가 작아서가 아니라, 이것이 풀리기 전에는 셸이 무엇을 해도
-서버에 닿지 못해 **뒤의 모든 작업이 검증 불가**이기 때문입니다.
+**N1a를 맨 앞에 두는 이유**는 크기가 작아서가 아니라, 유일하게 **아무것도 기다리지 않는
+보안 작업**이기 때문입니다. 반대로 **N1b는 의도적으로 뒤**입니다 — §3.1이 설명하듯 검증기
+없이 먼저 만들면 그 자체가 우회로입니다.
+
+### 7.1 N4를 셋으로 나눈 이유 — 식별자가 없으면 파일을 쓸 수 없다
+
+초판은 AASA·`assetlinks.json`을 "파일 배포일 뿐"이라고 적었습니다. **틀렸습니다.** 두 파일은
+전부 **아직 확정되지 않은 식별자**로 채워집니다.
+
+| 파일 | 필요한 값 | 오늘 상태 |
+|---|---|---|
+| `apple-app-site-association` | Apple Team ID + 최종 Bundle ID (`TEAMID.com.example.app`) | **둘 다 미정** |
+| `assetlinks.json` | 최종 `applicationId` + **서명 인증서 SHA-256 fingerprint** | **둘 다 미정** |
+| iOS entitlement | `applinks:<도메인>` + Associated Domains capability | 네이티브 프로젝트 자체가 없음 |
+| Android manifest | `autoVerify="true"` intent-filter | 같음 |
+
+`apps/mobile/capacitor.config.ts`의 `appId: "app.tomverse.shell"`은 **스파이크 식별자**이며
+제품 식별자가 아닙니다. 그리고 `assetlinks.json`의 fingerprint는 **어떤 키로 서명하느냐**에
+달려 있으므로, Play App Signing을 쓸지 자체 upload key를 쓸지 정해지기 전에는 값을 적을 수
+없습니다. 잘못된 fingerprint를 올린 `assetlinks.json`은 없는 것보다 나쁩니다 — 검증이
+**실패한 상태로 캐시**되기 때문입니다.
+
+그래서 N4a는 **형식·검증 도구·테스트 절차**까지만 만들고(플레이스홀더가 들어간 템플릿,
+`pm verify-app-links`/`pm get-app-links` 실행 스크립트, 두 번째 앱의 최소 매니페스트),
+실제 `.well-known` 배포는 식별자가 확정된 뒤 N4b에서 합니다.
+
+### 7.2 N5의 이관 범위 — rev.3에서 2차가 열렸습니다
+
+**rev.2에서는 대기, rev.3에서는 착수 가능입니다.** Voice가 `b760383`에서 병합됐고,
+`components/chat/ChatInput.tsx`에 실제로 82줄을 더했습니다(`VoiceInputButton`,
+`useVoiceRecorder`, `appendVoiceTranscript`). 그 작업이 끝났으므로 rev.2가 걱정한 동시 편집은
+더 이상 성립하지 않습니다.
+
+다만 **"Voice가 끝났으니 그냥 옮긴다"가 아니라 "최신 변경 파일로 다시 대조한 뒤 옮긴다"** 입니다.
+아래는 `b760383`에서 다시 센 소비자 목록이고, 착수 직전에 같은 명령으로 한 번 더 확인합니다.
+
+```
+$ for m in chatAttachmentErrorCopy chatCreditAllocation chatKeyboardPolicy; do
+    grep -rln "@/lib/$m\"" components "app/(site)"; done
+
+chatAttachmentErrorCopy  ChatInput.tsx
+chatCreditAllocation     ChatInput.tsx, ChatPageClient.tsx
+chatKeyboardPolicy       ChatInput.tsx, ChatApp.tsx, ImageGenerationWorkspace.tsx
+```
+
+소비자 목록은 rev.2와 **동일**합니다 — Voice는 이 세 모듈의 import를 늘리지도 줄이지도
+않았습니다. 그러므로 1차·2차 구분은 이제 **순서의 근거가 아니라 배치의 편의**이며, 둘을
+한 번에 옮겨도 됩니다. 그래도 나눠 두는 이유는 1차 5모듈이 `ChatInput.tsx`를 전혀 건드리지
+않아 되돌리기가 더 싸기 때문입니다.
+
+원래의 분할 근거는 아래에 그대로 둡니다 — 왜 나뉘었는지가 지워지면 다음에 같은 판단을 다시
+해야 합니다.
+
+| 1차 (즉시, Voice와 무관) | 줄 | 클라이언트 소비자 |
+|---|---:|---|
+| `lib/comparisonReadiness.ts` | 212 | DesktopChatShell, MobileChatShell, ComparisonActionRail |
+| `lib/chatCostSafetyCore.ts` | 147 | ChatApp, ChatPageClient |
+| `lib/chatModelSummary.ts` | 110 | MobileChatShell |
+| `lib/chatRuntimeStatus.ts` | 107 | DesktopChatShell, MobileChatShell, ChatApp |
+| `lib/comparisonReviewCost.ts` | 36 | ComparisonActionRail |
+| **소계** | **612** | |
+
+| 2차 (**Voice 병합 후**) | 줄 | 클라이언트 소비자 |
+|---|---:|---|
+| `lib/chatAttachmentErrorCopy.ts` | 92 | **ChatInput** |
+| `lib/chatCreditAllocation.ts` | 56 | **ChatInput**, ChatPageClient |
+| `lib/chatKeyboardPolicy.ts` | 44 | **ChatInput**, ChatApp, ImageGenerationWorkspace |
+| **소계** | **192** | |
+
+612 + 192 = 804로 §2.2의 합과 같습니다. 나뉜 것은 순서일 뿐 범위가 아닙니다.
+
+경계선은 **`ChatInput.tsx`**였습니다. rev.2는 "Voice가 `ChatApp.tsx`까지 손대면
+`chatCostSafetyCore`·`chatRuntimeStatus`도 1차에서 빠져야 한다"고 적었는데, `b760383`에서
+확인한 결과 Voice가 실제로 건드린 것은 `ChatInput.tsx`(+82), `DesktopChatShell.tsx`(+4),
+`MobileChatShell.tsx`(+4), `ReviewWorkspaceShell.tsx`이고 **`ChatApp.tsx`는 아닙니다.**
+그러므로 선을 다시 그을 필요가 없었고, 1차 5모듈은 rev.2가 정한 그대로입니다.
 
 **N7(`chat-ui`)이 늦은 이유**는 계획서 §12의 유예 순서와 같습니다. 셸은 `chat-ui` 없이도
 N1~N6의 인증 경계를 실기기에서 검증할 수 있고, 인증은 유예 금지 목록에 있습니다.
 
-일정 감각(1인, 하루 실질 4~5시간 기준): **N1~N4가 6~8주**, **N5~N8이 10~14주**,
-**N9~N12가 8~10주**로 **총 24~32주**입니다. 계획서의 3인 22~30주와 비슷해 보이지만
-같은 뜻이 아닙니다 — 3인 계획은 Router·Planner·Memory를 포함하고, 이 추정은 **Native 경로만**
-입니다. 그 둘을 한 사람이 동시에 진행할 수는 없습니다.
+### 7.3 일정 감각과, 그 안에서 지금 시작하는 것
+
+1인, 하루 실질 4~5시간 기준으로 **인증·보안 기반(N1a~N4c) 7~9주**,
+**공유 코드·UI(N5~N8) 10~14주**, **Apple·실기기·심사(N9~N12) 8~10주**로 **총 25~33주**
+입니다. 초판보다 1주 늘어난 것은 N1을 둘로 나누면서 N1b가 N2 뒤로 갔기 때문이고, 이것은
+비용이 아니라 **초판이 세지 않았던 순서 제약**입니다.
+
+rev.3에서 Voice가 끝났지만 **총량은 줄지 않습니다.** Voice는 `chat-ui`의 선행 조건이었을 뿐
+그 작업 자체를 대신하지 않고, 임계 경로는 여전히 N2-구현 → N1b → N6 → N7입니다. 줄어든 것은
+**대기**이고, 그만큼 3순위 작업을 앞당겨 채울 수 있습니다.
+
+계획서의 3인 22~30주와 숫자가 비슷해 보이지만 같은 뜻이 아닙니다 — 3인 계획은
+Router·Planner·Memory를 포함하고, 이 추정은 **Native 경로만**입니다. 그 둘을 한 사람이
+동시에 진행할 수는 없습니다.
+
+**그래서 지금의 병행 구도는 다음과 같습니다.**
+
+`b760383`에서 Voice가 완료됐으므로 rev.2의 "Voice 대기" 칸은 사라지고, 표는 이렇게
+바뀝니다.
+
+| 순위 | 무엇 | 상태 | 왜 지금/나중인가 |
+|---|---|---|---|
+| **1** | **N1a** CORS·`OPTIONS`·hostile-origin 거절 | **착수 가능** | 아무것도 기다리지 않는 유일한 보안 작업 |
+| **2** | **N2-설계** + 정책 승인 패킷 | **착수 가능** | 코드가 아니라 승인 대상. `AUTH-03` 넷을 함께 설계(§6.1) |
+| 3 | `chat-core` seed — 1차 612줄, 이어서 2차 192줄 | **착수 가능** | Voice 조건 해소. 착수 직전 소비자 재대조(§7.2) |
+| 3 | N4a AASA/assetlinks 형식·검증 도구 | **착수 가능** | 식별자 자리는 플레이스홀더(§7.1) |
+| 3 | PRIVACY `unverified` 2건 | **착수 가능** | security-privacy·finance-ops 결정 |
+| 3 | 개인정보 표시 초안 | **착수 가능** | registry 58개 도메인에서 유도. Voice가 새 항목(오디오) 추가 |
+| 4 | 포트 설계 → 메시지 타입 → 스트림 런타임 | seed 뒤 | 선례는 `voiceTranscriptionPort*`(§2.3) |
+| 5 | **N2-구현** → N3 | **정책 승인 뒤** | 승인 의존(§6.1) |
+| 6 | **N1b** | **N2-구현 뒤** | 보안 의존(§3.1) |
+| 6 | N4b `.well-known` → N4c OAuth | **식별자 확정 뒤** | 틀린 fingerprint는 캐시됨(§7.1) |
+| 7 | N6 `api-client` | N5 + N1b 뒤 | 두 transport 중 하나가 아직 없음 |
+| 8 | N7 `chat-ui` → N8 | N6 뒤 | **Voice 조건은 충족됐고, 남은 것은 코드 의존입니다** |
+| 9 | N9 Apple → N10 실기기 → N11 심사 → N12 제출 | 순차 | — |
+
+**우선순위는 N1a → N2-설계 승인 패킷**이고, 3순위 넷은 서로 닿지 않으므로 사이사이에
+채웁니다.
+
+rev.2의 "Native UI 본개발은 Voice 완료 이후"는 여전히 맞지만 **이유가 바뀌었습니다.**
+rev.2에서는 파일 충돌 회피였고, 지금은 **`chat-ui`가 `api-client`를, `api-client`가 N1b를,
+N1b가 N2-구현을 기다리기 때문**입니다. Voice는 더 이상 그 사슬에 없습니다.
 
 ---
 
@@ -466,7 +772,7 @@ bearer lifecycle, CORS, 계정 삭제·내보내기, 개인정보 표시의 데�
 - system browser 왕복과 앱 복귀
 - 백그라운드 진입 시 스트림 중단·복구
 - 파일 선택기의 실제 MIME 보고 (AGENTS.md "사람만 할 수 있는 것" 1번)
-- 카메라·마이크 권한 다이얼로그와 거부 후 동작
+- 카메라·마이크 **네이티브 권한 다이얼로그**와 거부 후 동작 (웹 권한 흐름은 Voice가 이미 구현했고 브라우저에서 검증됩니다 — 네이티브에서만 다른 것은 OS 다이얼로그와 설정 앱 복귀입니다)
 - 스토어 심사 빌드 그 자체
 
 ---
@@ -512,6 +818,9 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 
 ### 11.1 실제로 성공한 것
 
+**아래는 전부 `b760383` 트리에서 실행한 결과입니다.** rev.1·rev.2 때의 값을 옮겨 적은 행은
+없습니다.
+
 | 검증 | 명령 | 결과 |
 |---|---|---|
 | 공유 package 순수성 | `npm run check:shared-packages` | `forbidden_nextjs_imports_in_shared_packages = 0`, 2 package |
@@ -526,14 +835,14 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 | **셸 실행 (Chromium)** | `vite preview` + Playwright Chromium | light·dark **각 7/7 통과, 페이지 오류 0** |
 | 셸 번들 정적 검사 | 수동 grep | env 변수·API host·토큰 **0건** |
 | 비밀 정적 검사 | 변경 파일 대상 패턴 스캔 | 0건 |
-| PUSH-01 | `npm run check:push-scope` | 통과 (1,264 파일, 47 의존성 — Capacitor 4개 추가 후에도) |
+| PUSH-01 | `npm run check:push-scope` | 통과 (1,281 파일, 47 의존성 — Capacitor 4개 추가 후에도) |
 | data-domain registry | `npm run check:data-domain-registry` | 58 도메인, `unverified` 2건 (§3.4) |
 | 릴리스 게이트 registry | `npm run verify:tomverse-chat-release-gates` | 40 gates, 40 blocking, draft |
 | 릴리스 게이트 뷰 | `npm run check:tomverse-chat-release-gate-view` | 일치 |
 | 게이트 커버리지 | `npm run check:release-gate-coverage` | **45** CI 강제 (새 검사 포함) |
 | 문서 참조·정책 인용·인코딩·accent·릴리스 기록·staging 기록·UI tier·구제품명 | 각 `npm run check:*` | 전부 통과 |
 | 공유 package 단위 테스트 | `tests/sharedPackages.test.mjs` (저장소 러너 플래그) | 23 tests: 22 pass / 0 fail / 1 skip |
-| 전체 단위 테스트 | `npm run test:unit` | §11.4 참조 |
+| 전체 단위 테스트 | `npm run test:unit` | 두 lane 합계 **7,051 pass / 0 fail / 1 skip** (§11.4) |
 
 셸 실행 결과 원문:
 
@@ -609,12 +918,37 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 
 ### 11.4 전체 단위 테스트
 
-`npm run test:unit` — **exit 0** (병합 후 트리에서 재실행).
+`npm run test:unit` — **exit 0**. **`b760383` 트리에서 재실행한 값**입니다(rev.3).
 
-```
-server lane:  tests 6892   pass 6891   fail 0   skipped 1
-client lane:  tests 33     pass 33     fail 0   skipped 0
-```
+`scripts/run-unit-tests.mjs`는 프로세스를 둘로 나누므로(`--conditions=react-server`가
+프로세스 전역이라 client component lane이 분리됩니다) 요약이 **두 번** 출력됩니다.
+`/tmp` 로그의 7107행과 7159행이 각각의 블록이고, 값은 다음과 같습니다.
+
+| lane | tests | pass | fail | skipped |
+|---|---:|---:|---:|---:|
+| server (`--conditions=react-server`) | 7,008 | 7,007 | 0 | 1 |
+| client (`tests/client/**`, 4개 파일) | 44 | 44 | 0 | 0 |
+| **합계** | **7,052** | **7,051** | **0** | **1** |
+
+**보고할 수치는 마지막 행 — 7,051 pass입니다.**
+
+`7,007`은 **server lane 하나의 pass**입니다. 이 숫자가 두 번 잘못 옮겨졌으므로 셈하는
+방법을 여기 고정합니다.
+
+| 잘못 옮긴 값 | 실제로 그 숫자였던 것 | 맞는 총계 |
+|---|---|---|
+| rev.1의 "6,892 pass" | server lane의 `tests` | 6,960 |
+| rev.3 검토의 "7,007 pass" | server lane의 `pass` | **7,051** |
+
+두 실수의 모양이 다릅니다 — 앞은 `tests`와 `pass`를 바꿔 읽었고, 뒤는 값은 맞게 읽었지만
+**client lane 44건을 더하지 않았습니다.** 공통점은 하나뿐이고 그것이 원인입니다:
+**출력이 두 번 나오는데 한 번만 읽었습니다.**
+
+셈하는 규칙: `npm run test:unit`의 출력에는 `ℹ tests` 블록이 **정확히 두 개** 있고, 총계는
+둘을 더한 값입니다. 하나만 인용하려면 어느 lane인지 함께 적습니다.
+
+skip 1건은 `packages/ui-tokens does not inherit the app's tsconfig`로, 그 package에
+TypeScript가 없어 의도적으로 건너뜁니다 — 실패가 아닙니다.
 
 이 저장소의 워크스페이스에 `apps/*`를 추가하고 root `tsconfig`/`eslint`/`.gitignore`를
 바꾼 뒤에도 전량 통과합니다. `tests/sharedPackages.test.mjs`의 "the root manifest declares
@@ -641,40 +975,75 @@ tsconfig의 `jsx: "react-jsx"`로 TSX를 처리하므로 fast refresh를 위해�
 
 ## 12. Voice Input MVP와 충돌하거나 재사용할 영역
 
-동시에 진행 중인 Voice Input 작업의 **Composer·locale·audio API 파일은 이번 작업에서 전혀
-건드리지 않았습니다.** 확인:
+**rev.3: Voice Input MVP는 `b760383`에서 병합 완료입니다.** 이 절은 "동시에 진행 중인
+작업과 어떻게 겹치지 않을 것인가"에서 "무엇이 실제로 들어왔고 Native에 무엇이 남았는가"로
+바뀝니다.
 
-- `components/chat/ChatInput.tsx` — 수정 없음
-- `components/chat/MobileChatShell.tsx` — 수정 없음
-- `locales/*.ts` — 수정 없음 (셸 문구는 영어 인라인이며 제품 문구가 아닙니다)
-- audio 관련 파일 — 저장소에 아직 `getUserMedia` 호출이 0건이므로 접점 자체가 없습니다
+이 스파이크가 Voice 파일을 건드리지 않았다는 사실은 그대로입니다 — `apps/mobile/`,
+`scripts/check-capacitor-local-bundle.mjs`, root 설정, 보고서 외에는 수정한 파일이 없습니다.
 
-### 충돌 가능성
+### 실제로 들어온 것
 
-| 영역 | 성격 | 대응 |
+| | |
+|---|---|
+| 새 파일 | `components/chat/VoiceInputControl.tsx`, `useVoiceRecorder.ts`, `voiceInputCopy.ts`, `lib/voice*.ts` 9개 |
+| 기존 파일 수정 | `ChatInput.tsx` **+82**, `DesktopChatShell.tsx` +4, `MobileChatShell.tsx` +4, `ReviewWorkspaceShell.tsx`, `PrivacyPolicy.tsx` |
+| locale | 7개 언어 각 +30~31줄 |
+| 정책·운영 | `docs/policy/voice-input.md` (508줄), `docs/ops/voice-input-staging-checklist.md` |
+| 테스트 | 단위 5개 파일, client 1개, server-contract 1개, E2E 1개, fixture 3개 |
+
+**활성화 상태**: rollout flag `AppSetting["feature.voiceInputEnabled"]`는 **default-off**이고,
+kill switch `VOICE_INPUT_KILL_SWITCH`가 따로 있습니다. production 활성화는
+`docs/policy/voice-input.md` §14의 **B-1~B-6이 막고 있습니다** — 오디오 1초의 가격,
+실패 시 과금, provider 원가 검증, audio provider 예산, provider 데이터 보존, 실기기 검증.
+**Native 계획은 이 여섯 개를 기다리지 않습니다.** Voice가 production에서 켜지든 아니든
+`getUserMedia` 코드는 트리에 있고, Native 권한 선언이 필요한 시점은 그 코드가 네이티브
+WebView에서 실행될 때입니다.
+
+### 충돌 가능성 — 해소된 것과 남은 것
+
+| 영역 | rev.2 걱정 | `b760383` 결과 |
 |---|---|---|
-| `ChatInput.tsx` | Voice가 소유. `chat-ui` 추출(N7)이 같은 파일을 크게 움직임 | **N7은 Voice MVP 이후에 시작합니다.** 4,600줄 파일에서 두 작업이 만나면 충돌이 아니라 재작업입니다 |
-| 모바일 composer UI 계약 | Voice 버튼이 textarea 행을 침범하면 안 됨 | 계약이 이미 이를 금지하고 회귀 테스트가 고정합니다. Native가 새 제약을 더하지 않습니다 |
-| `locales/*.ts` | Voice가 문구 추가 | Native는 v1 단계에서 새 제품 문구를 만들지 않습니다 |
-| 마이크 권한 | **Voice가 이 앱 최초의 `getUserMedia` 도입** | Native 관점에서 이것은 **선물입니다**(아래) |
+| `ChatInput.tsx` | N7 `chat-ui`가 같은 파일을 크게 움직임 | **해소.** Voice가 +82줄로 끝났습니다. N7이 늦은 이유는 이제 파일 충돌이 아니라 N5·N6·N1b 코드 의존입니다 |
+| `chat-core` seed 3모듈 | `ChatInput.tsx` 경유라 import 충돌 | **해소.** Voice는 이 세 모듈의 import를 늘리지도 줄이지도 않았습니다(§7.2) |
+| `ChatApp.tsx`로 번질 가능성 | 번지면 1차 5모듈도 다시 나눠야 함 | **번지지 않았습니다.** Voice가 건드린 shell은 Desktop·Mobile·Review 셋이고 `ChatApp.tsx`는 아닙니다 |
+| 모바일 composer UI 계약 | Voice 버튼이 textarea 행 침범 | 계약이 금지하고 회귀 테스트가 고정합니다. `tests/e2e/voice-input-composer.spec.ts`가 460줄로 들어왔습니다 |
+| `locales/*.ts` | Voice가 문구 추가 | 7개 언어 각 +30~31줄. Native는 v1에서 새 제품 문구를 만들지 않으므로 접점 없음 |
 
-### 재사용
+**남은 충돌은 없습니다.** Voice와 Native 사이에 열려 있던 파일 수준 제약은 전부 닫혔고,
+남은 것은 Native 내부의 순서 제약(§6)뿐입니다.
 
-**Voice Input이 Native 작업을 실질적으로 앞당깁니다.**
+### 재사용 — Voice가 Native에 남긴 것
 
-1. **권한 모델.** `getUserMedia`가 들어오면 Capacitor에서 `NSMicrophoneUsageDescription`과
-   `RECORD_AUDIO`가 필요해지고, 그것이 **이 앱 최초의 네이티브 권한 선언**이 됩니다.
-   개인정보 표시 항목도 그때 처음 생깁니다. Native가 나중에 카메라를 추가할 때 그 경로를
-   그대로 씁니다.
-2. **secure context 요구.** `getUserMedia`는 secure context를 요구하고, Capacitor 설정
+rev.2는 이것을 예상으로 적었습니다. `b760383`에서는 확인된 사실입니다.
+
+1. **port 주입 패턴의 실제 구현.** `lib/voiceTranscriptionPortCore.ts`(225줄, 결정 전부) +
+   `lib/voiceTranscriptionPort.ts`(90줄, `server-only`, `process.env`만 주입). §2.3의
+   storage·timer·transport 포트는 이 형태를 따릅니다 — **§4.3의 제약과 함께**: 토큰
+   저장과 대화 상태 저장은 다른 포트여야 합니다.
+2. **framework-neutral 모듈 1,197줄.** 그중 `voiceRecorderMachine.ts`는 전역을 하나도 쓰지
+   않는 348줄 상태 기계입니다(§2.2).
+3. **권한 모델의 첫 사례.** `getUserMedia`가 트리에 있으므로 Capacitor에서
+   `NSMicrophoneUsageDescription`·`RECORD_AUDIO`가 **필요해질 것**입니다. 아직 선언은
+   없습니다 — Voice 정책 §1이 native를 명시적으로 범위 밖에 두었기 때문이고, 그 선언은
+   N4b에서 네이티브 프로젝트를 만들 때 함께 들어갑니다.
+4. **secure context 요구.** `getUserMedia`는 secure context를 요구하고, Capacitor 설정
    문서가 `server.hostname`을 `localhost`로 유지하라고 권하는 이유가 정확히 그것입니다.
-   **즉 Voice가 §3.1의 origin 결정을 검증 가능한 요구사항으로 바꿔 줍니다** — 추상적인
-   "origin이 다르다"가 "마이크가 안 켜진다"라는 관측으로 바뀝니다.
-3. **긴 작업의 백그라운드 처리.** 음성 캡처는 백그라운드 전환에 민감하고, 그 처리 코드가
-   §1의 21번(오늘 M0)의 첫 사례가 됩니다. 스트리밍 복구가 같은 패턴을 씁니다.
+   **§3.1의 origin 결정이 이제 관측 가능한 요구사항입니다** — "origin이 다르다"가 실기기에서
+   "마이크가 안 켜진다"로 나타납니다.
+5. **개인정보 표시에 새 항목.** Voice 정책 §11.1이 원본 오디오를 저장하지 않는다고 못
+   박았고(`tests/voiceInputPrivacy.test.mjs`가 강제), §11.3은 provider 데이터 보존을
+   미결(B-5)로 둡니다. Apple 5.1.2(i)의 "third-party AI와 공유"는 오디오에도 걸리므로,
+   §11.3이 닫히기 전에는 개인정보 표시의 오디오 항목을 확정할 수 없습니다.
 
-**결론: Voice Input을 먼저 끝내고, 그 권한·secure context 경험을 Native N1에 입력으로
-씁니다.** 반대 순서로 하면 Native가 권한 모델을 먼저 만들고 Voice가 그것을 다시 고칩니다.
+### 예상이 빗나간 것
+
+rev.2는 "음성 캡처가 백그라운드 전환에 민감하므로 그 처리 코드가 §1의 21번 첫 사례가 된다"고
+적었습니다. **그렇게 되지 않았습니다** — `b760383`에도 `visibilitychange`·`pagehide` 처리는
+**0건**이고, `useVoiceRecorder.ts`도 `voiceRecorderMachine.ts`도 이를 다루지 않습니다.
+
+백그라운드·포그라운드 전환은 여전히 **M0이고, Native가 처음부터 만들어야 합니다.**
+Voice에서 물려받을 코드가 없다는 것이 이 항목의 실제 상태입니다.
 
 ---
 

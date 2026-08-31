@@ -5,11 +5,18 @@ import test from "node:test";
 
 import {
   AnthropicUsageParseError,
+  anthropicCostReportUrl,
   anthropicUsageReportUrl,
   attributionScope,
+  anthropicWorkspaceUrl,
+  classifyWorkspaceIds,
+  costScopeFor,
+  DEFAULT_WORKSPACE_NAME,
+  sumCostReport,
   BASE_GROUP_BY,
   cacheEfficiencyMetrics,
   FAST_MODE_BETA_HEADER,
+  CACHE_5M_BREAK_EVEN_READ_RATIO,
   CACHE_READ_MULTIPLIER,
   CACHE_WRITE_MULTIPLIER,
   completedUtcDayRange,
@@ -344,6 +351,272 @@ test("an unfiltered run reports itself as organization-wide", () => {
   assert.doesNotMatch(narrow.caveat, /ORGANIZATION-WIDE/);
 });
 
+// ---------------------------------------------------------------------------
+// Usage/Cost scope agreement
+// ---------------------------------------------------------------------------
+
+const costPage = (results, { hasMore = false, nextPage = null } = {}) => ({
+  data: [{ starting_at: "2026-08-20T00:00:00Z", results }],
+  has_more: hasMore,
+  next_page: nextPage,
+});
+const costResult = (amountCents, workspaceId = undefined) => ({
+  currency: "USD",
+  amount: String(amountCents),
+  // `undefined` omits the key entirely -- an ungrouped response. `null` is an
+  // explicit Default Workspace. The two are different and the parser treats
+  // them differently.
+  ...(workspaceId === undefined ? {} : { workspace_id: workspaceId }),
+});
+
+test("an API-key filter makes the billed total not comparable", () => {
+  // The Usage API takes `api_key_ids[]`; the Cost API does not report cost per
+  // key at all. So a run narrowed to one key gets Tomverse's tokens beside the
+  // whole organization's bill, and the only safe thing is to say so -- somebody
+  // will otherwise take a ratio between two different populations.
+  const cost = costScopeFor({ apiKeyIds: ["apikey_1"] });
+  assert.equal(cost.comparable, false);
+  assert.equal(cost.mode, "not_comparable");
+  assert.equal(cost.groupByWorkspace, false);
+  assert.match(cost.note, /NOT COMPARABLE/);
+  assert.match(cost.note, /ORGANIZATION-WIDE/);
+  assert.match(cost.note, /Do not take a ratio/);
+});
+
+test("a workspace filter is honoured by grouping the cost report", () => {
+  const cost = costScopeFor({ workspaceIds: ["wrkspc_1"] });
+  assert.equal(cost.comparable, true);
+  assert.equal(cost.mode, "workspace_filtered");
+  assert.equal(
+    cost.groupByWorkspace,
+    true,
+    "the cost report has no workspace filter, so grouping is the only way to narrow"
+  );
+  const url = anthropicCostReportUrl({
+    baseUrl: "https://api.anthropic.com/v1/organizations/cost_report",
+    startingAt: new Date("2026-08-23T00:00:00.000Z"),
+    endingAt: new Date("2026-08-30T00:00:00.000Z"),
+    limit: 7,
+    groupByWorkspace: true,
+  });
+  assert.deepEqual(url.searchParams.getAll("group_by[]"), ["workspace_id"]);
+  // And no grouping when nothing needs narrowing.
+  assert.deepEqual(
+    anthropicCostReportUrl({
+      baseUrl: "https://api.anthropic.com/v1/organizations/cost_report",
+      startingAt: new Date("2026-08-23T00:00:00.000Z"),
+      endingAt: new Date("2026-08-30T00:00:00.000Z"),
+      limit: 7,
+    }).searchParams.getAll("group_by[]"),
+    []
+  );
+});
+
+test("an unfiltered run compares two organization-wide numbers", () => {
+  const cost = costScopeFor({});
+  assert.equal(cost.comparable, true);
+  assert.equal(cost.mode, "organization_wide");
+  assert.match(cost.note, /same population/);
+  // And attributionScope carries it, so the runner has one object to read.
+  assert.equal(attributionScope({}).cost.mode, "organization_wide");
+  assert.equal(
+    attributionScope({ apiKeyIds: ["k"] }).cost.comparable,
+    false
+  );
+});
+
+test("the cost sum keeps only the named workspaces", () => {
+  const page = costPage([
+    costResult(1_000, "wrkspc_1"),
+    costResult(2_500, "wrkspc_2"),
+    costResult(400, null),
+  ]);
+  assert.equal(sumCostReport(page, { workspaceIds: ["wrkspc_1"] }).costUsd, 10);
+  assert.equal(
+    sumCostReport(page, { workspaceIds: ["wrkspc_1", "wrkspc_2"] }).costUsd,
+    35
+  );
+  // No filter sums everything and never inspects workspace_id -- an ungrouped
+  // response legitimately omits the field.
+  assert.equal(sumCostReport(page).costUsd, 39);
+  // And a filter that matches nothing reports that, rather than a quiet zero.
+  const missed = sumCostReport(page, { workspaceIds: ["wrkspc_nope"] });
+  assert.equal(missed.costUsd, 0);
+  assert.equal(missed.matchedResults, 0);
+  assert.equal(missed.skippedResults, 3);
+});
+
+test("the Default Workspace's real id is matched against the null the report returns", () => {
+  // The defect this replaced. The Default Workspace has a real `wrkspc_` id --
+  // that is what the Usage API filter takes, and the only thing it takes --
+  // but usage and cost reports echo `null` for it. Mapping every null to a
+  // `default_workspace` sentinel and comparing that against the command line's
+  // real id matched nothing, so a Tomverse that *is* the Default Workspace got
+  // its usage filtered correctly and its cost reported as "matched nothing".
+  const page = costPage([
+    costResult(400, null), // the Default Workspace's own spend
+    costResult(1_000, "wrkspc_other"),
+  ]);
+
+  // Told that the named id is the default, the null row is the match.
+  const asDefault = sumCostReport(page, {
+    workspaceIds: [],
+    matchesDefaultWorkspace: true,
+  });
+  assert.equal(asDefault.costUsd, 4);
+  assert.equal(asDefault.matchedResults, 1);
+  assert.equal(asDefault.skippedResults, 1);
+
+  // Not told, the same page matches nothing -- which is the old behaviour, and
+  // is correct only when the named workspace really is not the default.
+  const asNamed = sumCostReport(page, {
+    workspaceIds: ["wrkspc_default_real_id"],
+  });
+  assert.equal(asNamed.costUsd, 0);
+  assert.equal(asNamed.matchedResults, 0);
+});
+
+test("a missing workspace_id is an error, not the Default Workspace", () => {
+  // `null` is the Default Workspace. A *missing* key is a response that is not
+  // the shape this parser was written against, and reading it as the default
+  // would attribute somebody else's spend to this workspace.
+  const page = costPage([{ currency: "USD", amount: "400" }]);
+  assert.throws(
+    () => sumCostReport(page, { workspaceIds: ["wrkspc_1"] }),
+    (error) =>
+      error instanceof AnthropicUsageParseError &&
+      error.code === "ANTHROPIC_COST_MISSING_WORKSPACE"
+  );
+  assert.throws(
+    () => sumCostReport(page, { matchesDefaultWorkspace: true }),
+    (error) => error.code === "ANTHROPIC_COST_MISSING_WORKSPACE"
+  );
+  // But an unfiltered run never looks, because an ungrouped response omits it
+  // legitimately.
+  assert.equal(sumCostReport(page).costUsd, 4);
+});
+
+test("workspace ids are classified by asking GET Workspace", () => {
+  // The documented check: the Default Workspace answers `"name": "Default"`,
+  // and List Workspaces omits it entirely, so there is no cheaper lookup.
+  assert.equal(DEFAULT_WORKSPACE_NAME, "Default");
+  const url = anthropicWorkspaceUrl({
+    baseUrl: "https://api.anthropic.com/v1/organizations/workspaces",
+    workspaceId: "wrkspc_01ABC",
+  });
+  assert.equal(
+    url.toString(),
+    "https://api.anthropic.com/v1/organizations/workspaces/wrkspc_01ABC"
+  );
+  return classifyWorkspaceIds(
+    ["wrkspc_default", "wrkspc_prod", "wrkspc_gone"],
+    async (id) => {
+      if (id === "wrkspc_default") return { id, name: "Default" };
+      if (id === "wrkspc_prod") return { id, name: "Production" };
+      throw new Error("404");
+    }
+  ).then((classified) => {
+    assert.deepEqual(classified.defaultWorkspaceIds, ["wrkspc_default"]);
+    assert.equal(classified.matchesDefaultWorkspace, true);
+    // An unresolvable id stays an ordinary id rather than being guessed at: it
+    // may simply be a typo, and the "matched nothing" warning is right for one.
+    assert.deepEqual(classified.named, ["wrkspc_prod", "wrkspc_gone"]);
+    assert.deepEqual(classified.unresolved, ["wrkspc_gone"]);
+  });
+});
+
+test("a non-default workspace is not matched against null", () => {
+  return classifyWorkspaceIds(["wrkspc_prod"], async (id) => ({
+    id,
+    name: "Production",
+  })).then((classified) => {
+    assert.equal(classified.matchesDefaultWorkspace, false);
+    assert.deepEqual(classified.named, ["wrkspc_prod"]);
+    // So the Default Workspace's own spend stays out of the total.
+    const page = costPage([costResult(999, null), costResult(100, "wrkspc_prod")]);
+    const summed = sumCostReport(page, {
+      workspaceIds: classified.named,
+      matchesDefaultWorkspace: classified.matchesDefaultWorkspace,
+    });
+    assert.equal(summed.costUsd, 1);
+  });
+});
+
+test("the cost report is paginated to the end", () => {
+  // A first-page-only total presented as "the bill" is wrong by however much
+  // the later pages held, and nothing on screen would say by how much.
+  const first = costPage([costResult(1_000, "wrkspc_1")], {
+    hasMore: true,
+    nextPage: "page_2",
+  });
+  const parsed = sumCostReport(first, { workspaceIds: ["wrkspc_1"] });
+  assert.equal(parsed.hasMore, true);
+  assert.equal(parsed.nextPage, "page_2");
+
+  // A page that promises more and names no cursor cannot be continued from.
+  assert.throws(
+    () =>
+      sumCostReport(costPage([costResult(1_000, "wrkspc_1")], { hasMore: true }), {
+        workspaceIds: ["wrkspc_1"],
+      }),
+    (error) => error.code === "ANTHROPIC_COST_MISSING_CURSOR"
+  );
+
+  // And the URL carries the cursor.
+  const url = anthropicCostReportUrl({
+    baseUrl: "https://api.anthropic.com/v1/organizations/cost_report",
+    startingAt: new Date("2026-08-23T00:00:00.000Z"),
+    endingAt: new Date("2026-08-30T00:00:00.000Z"),
+    limit: 7,
+    page: "page_2",
+  });
+  assert.equal(url.searchParams.get("page"), "page_2");
+});
+
+test("the runner paginates cost and withholds a partial total", () => {
+  const runner = readFileSync(
+    join(import.meta.dirname, "..", "scripts/report-anthropic-cache-efficiency.mjs"),
+    "utf8"
+  );
+  assert.match(runner, /if \(!summed\.hasMore\) break;/);
+  assert.match(runner, /costPage = summed\.nextPage;/);
+  assert.match(runner, /the billed total would be partial, so it is withheld/);
+  // And it resolves the workspace identity before summing.
+  assert.match(runner, /classifyWorkspaceIds\(/);
+  assert.match(runner, /matchesDefaultWorkspace:\s*\n?\s*workspaceIdentity\.matchesDefaultWorkspace/);
+});
+
+test("the cost sum is fail-closed on currency and amount shape", () => {
+  for (const bad of [
+    costPage([{ currency: "EUR", amount: "100" }]),
+    costPage([{ amount: "100" }]),
+    costPage([{ currency: "USD", amount: 100 }]),
+    costPage([{ currency: "USD", amount: "1e5" }]),
+    { data: "nope" },
+    null,
+  ]) {
+    assert.throws(
+      () => sumCostReport(bad),
+      (error) => error instanceof AnthropicUsageParseError,
+      `expected a refusal for ${JSON.stringify(bad)?.slice(0, 60)}`
+    );
+  }
+});
+
+test("the runner states the billed scope on every run, not only on a mismatch", () => {
+  const runner = readFileSync(
+    join(import.meta.dirname, "..", "scripts/report-anthropic-cache-efficiency.mjs"),
+    "utf8"
+  );
+  assert.match(runner, /SCOPE MISMATCH/);
+  assert.match(runner, /billed\.comparable \? "scope" : "SCOPE MISMATCH"/);
+  // And the cost request is built from the scope rather than unfiltered, and
+  // summed against the *classified* ids -- the ones GET Workspace said are not
+  // the Default Workspace, since the report names that one `null`.
+  assert.match(runner, /groupByWorkspace: scope\.cost\.groupByWorkspace/);
+  assert.match(runner, /workspaceIds: workspaceIdentity\.named/);
+});
+
 test("the report says it cannot decide the 1-hour TTL question", () => {
   // The claim that was there before -- that this report is the thing that will
   // answer the TTL question -- was wrong: a daily total cannot distinguish
@@ -604,4 +877,32 @@ test("cacheEfficiencyMetrics is a pure function of its totals", () => {
   assert.equal(metrics.cacheReadToWriteRatio, 3);
   assert.equal(metrics.listPriceSavingUsd, 3);
   assert.equal(metrics.listPriceSavingShare, 0.75);
+});
+
+test("the 5-minute break-even ratio is 0.25/0.9, not 0.25", () => {
+  // A token written once and read R times costs 1.25 + 0.1R cached against
+  // 1 + R uncached, so break-even is 1.25 + 0.1R = 1 + R -> R = 0.25/0.9.
+  // The 0.25 figure drops the 0.1x the reads themselves cost, which is only
+  // correct if reads were free.
+  assert.ok(Math.abs(CACHE_5M_BREAK_EVEN_READ_RATIO - 0.2777777) < 1e-6);
+  assert.notEqual(CACHE_5M_BREAK_EVEN_READ_RATIO, 0.25);
+
+  // Derived from the multipliers rather than asserted against a literal, so a
+  // change to either rate moves the threshold with it.
+  const R = CACHE_5M_BREAK_EVEN_READ_RATIO;
+  const cached = CACHE_WRITE_MULTIPLIER["5m"] + CACHE_READ_MULTIPLIER * R;
+  const uncached = 1 + R;
+  assert.ok(Math.abs(cached - uncached) < 1e-9, "break-even must balance");
+
+  // At the threshold, a period's saving is ~0; below it, negative.
+  const atBreakEven = summariseUsageRows(
+    [row({ cacheCreation5mTokens: 1_000_000, cacheReadInputTokens: 277_778 })],
+    resolveFixedPrice
+  );
+  assert.ok(Math.abs(atBreakEven.overall.metrics.listPriceSavingUsd) < 0.01);
+  const below = summariseUsageRows(
+    [row({ cacheCreation5mTokens: 1_000_000, cacheReadInputTokens: 100_000 })],
+    resolveFixedPrice
+  );
+  assert.ok(below.overall.metrics.listPriceSavingUsd < 0);
 });
