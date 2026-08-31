@@ -24,9 +24,11 @@ import {
     AnthropicUsageParseError,
     anthropicUsageReportUrl,
     anthropicCostReportUrl,
+    anthropicWorkspaceUrl,
     attributionScope,
     BASE_GROUP_BY,
     CACHE_5M_BREAK_EVEN_READ_RATIO,
+    classifyWorkspaceIds,
     cacheEfficiencyMetrics,
     FAST_MODE_BETA_HEADER,
     formatShare,
@@ -42,6 +44,7 @@ import {
 const USAGE_URL =
     "https://api.anthropic.com/v1/organizations/usage_report/messages";
 const COST_URL = "https://api.anthropic.com/v1/organizations/cost_report";
+const WORKSPACES_URL = "https://api.anthropic.com/v1/organizations/workspaces";
 const REQUEST_TIMEOUT_MS = 30_000;
 // The report is bounded at 31 daily buckets and the API returns at most
 // `limit` per page, so 8 pages is far more than a well-formed response needs.
@@ -269,10 +272,34 @@ const main = async () => {
 
     const summary = summariseUsageRows(rows, buildPriceResolver());
 
-    // The billed total, read separately and never reconciled with the estimate
-    // above. A failure here is not a failure of the report: the cache metrics
-    // come entirely from the usage side, so the billed column is reported as
-    // unavailable and everything else stands.
+    // Which of the named workspaces is the Default Workspace.
+    //
+    // It has a real `wrkspc_` id -- that is what the Usage API filter takes --
+    // but usage and cost reports echo `null` for it. So a filtered run has to
+    // reconcile two names for one workspace, and the only documented way to ask
+    // is `GET /v1/organizations/workspaces/{id}`, which answers `"name":
+    // "Default"` for it. List Workspaces omits it entirely, so there is no
+    // cheaper lookup.
+    let workspaceIdentity = {
+        named: scope.cost.workspaceIds,
+        defaultWorkspaceIds: [],
+        matchesDefaultWorkspace: false,
+        unresolved: [],
+    };
+    if (scope.cost.workspaceIds.length > 0) {
+        workspaceIdentity = await classifyWorkspaceIds(
+            scope.cost.workspaceIds,
+            async (id) =>
+                adminFetch(
+                    anthropicWorkspaceUrl({
+                        baseUrl: WORKSPACES_URL,
+                        workspaceId: id,
+                    }),
+                    adminKey
+                )
+        );
+    }
+
     // The billed total, read separately and never reconciled with the estimate
     // above. A failure here is not a failure of the report: the cache metrics
     // come entirely from the usage side, so the billed column is reported as
@@ -290,36 +317,69 @@ const main = async () => {
         comparable: scope.cost.comparable,
         mode: scope.cost.mode,
         note: scope.cost.note,
+        defaultWorkspaceIds: workspaceIdentity.defaultWorkspaceIds,
+        unresolvedWorkspaceIds: workspaceIdentity.unresolved,
     };
     try {
-        const payload = await adminFetch(
-            anthropicCostReportUrl({
-                baseUrl: COST_URL,
-                startingAt: range.startingAt,
-                endingAt: range.endingAt,
-                limit: range.days,
-                groupByWorkspace: scope.cost.groupByWorkspace,
-            }),
-            adminKey
-        );
-        const summed = sumCostReport(payload, {
-            workspaceIds: scope.cost.workspaceIds,
-        });
+        let costUsd = 0;
+        let matchedResults = 0;
+        let skippedResults = 0;
+        let costPage = null;
+        let costPageCount = 0;
+        // Paginated to the end, like the usage side. A first-page-only total
+        // presented as "the bill" is a number that is wrong by however much the
+        // later pages held, and nothing on screen would say by how much.
+        for (;;) {
+            costPageCount += 1;
+            if (costPageCount > MAX_PAGES) {
+                throw new Error(
+                    `Cost API pagination exceeded ${MAX_PAGES} pages; the billed total would be partial, so it is withheld rather than shown incomplete.`
+                );
+            }
+            const payload = await adminFetch(
+                anthropicCostReportUrl({
+                    baseUrl: COST_URL,
+                    startingAt: range.startingAt,
+                    endingAt: range.endingAt,
+                    limit: range.days,
+                    groupByWorkspace: scope.cost.groupByWorkspace,
+                    page: costPage,
+                }),
+                adminKey
+            );
+            const summed = sumCostReport(payload, {
+                workspaceIds: workspaceIdentity.named,
+                matchesDefaultWorkspace:
+                    workspaceIdentity.matchesDefaultWorkspace,
+            });
+            costUsd += summed.costUsd;
+            matchedResults += summed.matchedResults;
+            skippedResults += summed.skippedResults;
+            if (!summed.hasMore) break;
+            costPage = summed.nextPage;
+        }
         billed = {
             ...billed,
             available: true,
-            costUsd: summed.costUsd,
-            matchedResults: summed.matchedResults,
-            skippedResults: summed.skippedResults,
-            reason: summed.hasMore
-                ? "The Cost API reported more pages; this total covers the first page only."
-                : null,
+            costUsd,
+            matchedResults,
+            skippedResults,
+            pageCount: costPageCount,
+            reason: null,
         };
         // A workspace filter that matched nothing is a filter that is probably
         // wrong -- a mistyped id sums to zero and looks like a quiet month.
-        if (scope.cost.workspaceIds.length > 0 && summed.matchedResults === 0) {
+        if (scope.cost.workspaceIds.length > 0 && matchedResults === 0) {
             billed.reason =
                 "No cost rows matched the named workspace(s). Check the ids: a filter that matches nothing sums to zero and reads like an unused period.";
+        }
+        if (workspaceIdentity.unresolved.length > 0) {
+            billed.reason = [
+                billed.reason,
+                `Could not resolve ${workspaceIdentity.unresolved.length} workspace id(s) against GET Workspace, so they were matched by id alone; if one of them is the Default Workspace its cost is NOT included (the report calls it null).`,
+            ]
+                .filter(Boolean)
+                .join(" ");
         }
     } catch (error) {
         billed = {
@@ -363,6 +423,11 @@ const main = async () => {
             workspaceIds: scope.workspaceIds,
             apiKeyIds: scope.apiKeyIds,
             caveat: scope.caveat,
+            // Which of the named ids the cost report calls `null`, so a
+            // consumer can reproduce the matching without repeating the
+            // lookup.
+            defaultWorkspaceIds: workspaceIdentity.defaultWorkspaceIds,
+            unresolvedWorkspaceIds: workspaceIdentity.unresolved,
         },
         definitions: {
             cacheReadShare:
@@ -502,6 +567,20 @@ const main = async () => {
     // Which population the bill describes, always -- not only when it differs.
     // A reader who has to infer that from the flags above will not.
     lines.push(`  ${billed.comparable ? "scope" : "SCOPE MISMATCH"}: ${billed.note}`);
+    if (billed.defaultWorkspaceIds?.length) {
+        // Said out loud because it is the one case where the two APIs name the
+        // same workspace differently, and a reader checking the arithmetic by
+        // hand against the Console would otherwise not know why a `null` row
+        // was counted.
+        lines.push(
+            `  note: ${billed.defaultWorkspaceIds.join(", ")} is the Default Workspace; cost reports name it \`null\`, and its rows were matched on that.`
+        );
+    }
+    if (billed.unresolvedWorkspaceIds?.length) {
+        lines.push(
+            `  warning: could not resolve ${billed.unresolvedWorkspaceIds.join(", ")} against GET Workspace.`
+        );
+    }
     lines.push(
         "  These are not the same measurement. The estimate is tokens x published rates; the billed total carries any contract discount, credit or tax. A difference is not a defect."
     );
