@@ -79,11 +79,6 @@ const prismaStub = {
   // failed step rather than a crash — so the run still finishes and the two
   // tests that read `failedSteps` are the ones that notice.
   comparisonReviewRun: { deleteMany: async () => ({ count: 31 }) },
-  // Added with the three `mobile_*` steps, for the same reason and with the
-  // same symptom: `deleteMany` read off `undefined` is a *failed step*, not a
-  // crash, so the run completes and only the two tests that inspect
-  // `failedSteps` report it. That is the second time this stub has fallen
-  // behind `lib/maintenance.ts` — the delegate has to arrive with the step.
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
@@ -98,6 +93,13 @@ const prismaStub = {
   // failed steps rather than a crash. So the suite stayed green everywhere
   // except the two tests that read `failedSteps` -- which is exactly where it
   // went red on develop.
+  //
+  // Two PRs fixed this independently on 2026-08-31 (#1219 and #1220) and both
+  // merged, leaving develop with duplicate keys: legal JavaScript, so the
+  // suite stayed green, and TS1117 under `tsc`. The second copy is removed
+  // here. Worth noticing that the stub falling behind `lib/maintenance.ts` is
+  // now a recurring failure with no check of its own -- the delegate has to
+  // arrive with the step, and nothing enforces it.
   mobileAuthEvent: { deleteMany: async () => ({ count: 32 }) },
   mobileLoginGrant: { deleteMany: async () => ({ count: 33 }) },
   mobileRefreshRotation: { deleteMany: async () => ({ count: 34 }) },
