@@ -34,6 +34,8 @@
     "validate:week1-marketing-kit": "node scripts/validate-week1-marketing-kit.mjs",
     "capture:week1-marketing-kit:en": "node scripts/capture-week1-marketing-kit-en.mjs",
     "validate:week1-marketing-kit:en": "node scripts/validate-week1-marketing-kit-en.mjs",
+    "staging:continuation-record": "node scripts/start-continuation-staging-record.mjs",
+    "staging:continuation-fixtures": "node --import tsx scripts/build-continuation-staging-fixtures.mjs",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "test:server-contract": "node scripts/run-server-contract-tests.mjs",

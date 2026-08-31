@@ -1,0 +1,150 @@
+[
+  {
+    "title": "Migration plan review",
+    "conversation_id": "tv-staging-plain",
+    "id": "tv-staging-plain",
+    "create_time": 1782864000,
+    "update_time": 1782864360,
+    "current_node": "tv-staging-plain-node-5",
+    "mapping": {
+      "tv-staging-plain-root": {
+        "id": "tv-staging-plain-root",
+        "message": null,
+        "parent": null,
+        "children": [
+          "tv-staging-plain-node-0"
+        ]
+      },
+      "tv-staging-plain-node-0": {
+        "id": "tv-staging-plain-node-0",
+        "parent": "tv-staging-plain-root",
+        "children": [
+          "tv-staging-plain-node-1"
+        ],
+        "message": {
+          "id": "tv-staging-plain-msg-0",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1782864000,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "What did we decide about the migration?"
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-staging-plain-node-1": {
+        "id": "tv-staging-plain-node-1",
+        "parent": "tv-staging-plain-node-0",
+        "children": [
+          "tv-staging-plain-node-2"
+        ],
+        "message": {
+          "id": "tv-staging-plain-msg-1",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1782864060,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "You decided to expand first and contract later, so the nullable column ships before anything writes to it."
+            ]
+          },
+          "metadata": {
+            "model_slug": "gpt-4-turbo"
+          }
+        }
+      },
+      "tv-staging-plain-node-2": {
+        "id": "tv-staging-plain-node-2",
+        "parent": "tv-staging-plain-node-1",
+        "children": [
+          "tv-staging-plain-node-3"
+        ],
+        "message": {
+          "id": "tv-staging-plain-msg-2",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1782864120,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "And the rollback if the backfill stalls?"
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-staging-plain-node-3": {
+        "id": "tv-staging-plain-node-3",
+        "parent": "tv-staging-plain-node-2",
+        "children": [
+          "tv-staging-plain-node-4"
+        ],
+        "message": {
+          "id": "tv-staging-plain-msg-3",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1782864180,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Stop the backfill, leave the column in place, and keep reading from the old one. Nothing needs reverting."
+            ]
+          },
+          "metadata": {
+            "model_slug": "gpt-4-turbo"
+          }
+        }
+      },
+      "tv-staging-plain-node-4": {
+        "id": "tv-staging-plain-node-4",
+        "parent": "tv-staging-plain-node-3",
+        "children": [
+          "tv-staging-plain-node-5"
+        ],
+        "message": {
+          "id": "tv-staging-plain-msg-4",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1782864240,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Good. Remind me why we did not add a default."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-staging-plain-node-5": {
+        "id": "tv-staging-plain-node-5",
+        "parent": "tv-staging-plain-node-4",
+        "children": [],
+        "message": {
+          "id": "tv-staging-plain-msg-5",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1782864300,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "A default would make a writer that forgot the column look like a writer that meant it."
+            ]
+          },
+          "metadata": {
+            "model_slug": "gpt-4-turbo"
+          }
+        }
+      }
+    }
+  }
+]
