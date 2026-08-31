@@ -326,6 +326,11 @@ export async function listExternalConversations(
             },
         }),
     ]);
+    const continuations = await listContinuationsBySource(
+        userId,
+        rows.map((row) => row.id)
+    );
+
     return {
         total,
         offset,
@@ -345,8 +350,113 @@ export async function listExternalConversations(
             // list to say which snapshots will ask for a password before they
             // open one; nothing else about the lock belongs in a list.
             locked: row.password != null,
+            ...(continuations.get(row.id) ?? EMPTY_CONTINUATION_SUMMARY),
         })),
     };
+}
+
+/**
+ * How many Tomverse conversations each of these snapshots has been continued
+ * into, and enough about them to choose one.
+ *
+ * docs/policy/external-conversation-continuation.md §3, §8.2.
+ *
+ * ## One query for the page, not one per row
+ *
+ * The list renders up to fifty snapshots and each needs its own count, which
+ * is exactly the shape that becomes fifty round trips if it is asked for a row
+ * at a time. `externalConversationId in (…)` asks once and the grouping
+ * happens here; `@@index([externalConversationId])` on the bridge is what
+ * makes that read cheap.
+ *
+ * ## What is returned and what is not
+ *
+ * `userId` is in the `where`, so another account's continuation of the same
+ * snapshot is not counted, not summarised, and not distinguishable from none
+ * -- there is no branch here that could report it. The summary carries the
+ * conversation's own id, title and creation time and nothing else: no bridge
+ * id, no digest, no seed counts, no source ordinals. The title is the owner's
+ * own words about their own conversation, which is what makes a chooser
+ * possible at all.
+ *
+ * A bridge whose source was deleted has a NULL `externalConversationId` and so
+ * matches nothing here, which is correct: this list only shows snapshots that
+ * still exist, and §6 keeps that continuation reachable from its own screen.
+ */
+const CONTINUATION_SUMMARY_LIMIT = 10;
+
+const EMPTY_CONTINUATION_SUMMARY = {
+    continuationCount: 0,
+    latestContinuationId: null as string | null,
+    continuations: [] as ContinuationSummary[],
+};
+
+export type ContinuationSummary = {
+    conversationId: string;
+    title: string | null;
+    createdAt: string;
+};
+
+export async function listContinuationsBySource(
+    userId: string,
+    externalConversationIds: readonly string[]
+): Promise<
+    Map<
+        string,
+        {
+            continuationCount: number;
+            latestContinuationId: string | null;
+            continuations: ContinuationSummary[];
+        }
+    >
+> {
+    const grouped = new Map<
+        string,
+        {
+            continuationCount: number;
+            latestContinuationId: string | null;
+            continuations: ContinuationSummary[];
+        }
+    >();
+    if (externalConversationIds.length === 0) return grouped;
+
+    const bridges = await prisma.conversationContinuationBridge.findMany({
+        where: {
+            userId,
+            externalConversationId: { in: [...externalConversationIds] },
+        },
+        // Newest first, so the first summary a source collects is the one the
+        // single-continuation case opens and the multi case lists at the top.
+        orderBy: { createdAt: "desc" },
+        select: {
+            externalConversationId: true,
+            createdAt: true,
+            conversation: { select: { id: true, title: true } },
+        },
+    });
+
+    for (const bridge of bridges) {
+        const sourceId = bridge.externalConversationId;
+        if (!sourceId) continue;
+        const entry =
+            grouped.get(sourceId) ??
+            {
+                continuationCount: 0,
+                latestContinuationId: null,
+                continuations: [] as ContinuationSummary[],
+            };
+        entry.continuationCount += 1;
+        entry.latestContinuationId ??= bridge.conversation.id;
+        if (entry.continuations.length < CONTINUATION_SUMMARY_LIMIT) {
+            entry.continuations.push({
+                conversationId: bridge.conversation.id,
+                title: bridge.conversation.title,
+                createdAt: bridge.createdAt.toISOString(),
+            });
+        }
+        grouped.set(sourceId, entry);
+    }
+    return grouped;
 }
 
 /**

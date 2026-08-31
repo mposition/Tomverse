@@ -16,6 +16,7 @@ import {
     SourceDeletionNotice,
     type SourceDeletionImpactView,
 } from "@/components/imports/SourceDeletionNotice";
+import { ContinuationQuickAction } from "@/components/imports/ContinuationQuickAction";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     formatBytes,
@@ -125,12 +126,39 @@ export type ViewerConversationRow = {
     importedAt: string;
     /** A password is set on this snapshot (§7) -- never the hash itself. */
     locked?: boolean;
+    /**
+     * How many Tomverse conversations this snapshot has been continued into,
+     * and enough about them to open one
+     * (docs/policy/external-conversation-continuation.md §8). Server-computed
+     * in one query for the whole page; scoped to this account, so another
+     * owner's continuation of the same snapshot is not counted here and
+     * cannot be told apart from none.
+     */
+    continuationCount?: number;
+    latestContinuationId?: string | null;
+    continuations?: {
+        conversationId: string;
+        title: string | null;
+        createdAt: string;
+    }[];
 };
 
 /** Hidden covers 401/403: the viewer list is flag-gated, unlike history. */
 type ConversationsState =
     | { kind: "loading" }
-    | { kind: "ready"; rows: ViewerConversationRow[]; total: number }
+    | {
+          kind: "ready";
+          rows: ViewerConversationRow[];
+          total: number;
+          /**
+           * Whether the rollout flag is on, from the same response as the
+           * rows so the list never draws an action from one snapshot of the
+           * flag beside counts from another. Display-only: the create
+           * endpoint re-reads the row uncached and is the authority
+           * (docs/policy/external-conversation-continuation.md §7.1).
+           */
+          continuationEnabled: boolean;
+      }
     | { kind: "hidden" }
     | { kind: "error" };
 
@@ -259,6 +287,7 @@ export function ExternalImportManagement() {
                 const body = (await response.json()) as {
                     total: number;
                     conversations: ViewerConversationRow[];
+                    continuationEnabled?: boolean;
                 };
                 const nextRows = Array.isArray(body.conversations)
                     ? body.conversations
@@ -266,6 +295,10 @@ export function ExternalImportManagement() {
                 setConversationsState((current) => ({
                     kind: "ready",
                     total: body.total,
+                    // Absent reads as off, the same direction the flag itself
+                    // fails: a client talking to a server that does not send
+                    // the field shows no action rather than one that 403s.
+                    continuationEnabled: body.continuationEnabled === true,
                     rows:
                         append && current.kind === "ready"
                             ? [...current.rows, ...nextRows]
@@ -563,6 +596,9 @@ export function ExternalImportManagement() {
                                         <LineageGroupRow
                                             key={group.latest.id}
                                             group={group}
+                                            continuationEnabled={
+                                                conversationsState.continuationEnabled
+                                            }
                                             expanded={expandedLineages.has(
                                                 group.latest.id
                                             )}
@@ -816,15 +852,31 @@ function UnfinishedImportCard({
     );
 }
 
-function ConversationRowLink({ row }: { row: ViewerConversationRow }) {
+/**
+ * One snapshot: its body opens the source, its trailing action continues it.
+ *
+ * The body and the action are siblings rather than a button nested inside the
+ * row's `<Link>`. Nesting them would put one interactive element inside
+ * another -- invalid, and a screen reader announces the pair as one confusing
+ * control -- and would leave the action's click needing `stopPropagation` to
+ * avoid also navigating. Two elements side by side need no such rule: the row
+ * still opens the source because that is what its own link does.
+ */
+function ConversationRow({
+    row,
+    continuationEnabled,
+}: {
+    row: ViewerConversationRow;
+    continuationEnabled: boolean;
+}) {
     const { t } = useLanguage();
     return (
-        <Link
-            href={`/settings/imports/conversations/${row.id}`}
-            className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-            data-testid="external-import-conversation-link"
-        >
-            <span className="min-w-0">
+        <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+            <Link
+                href={`/settings/imports/conversations/${row.id}`}
+                className="min-w-0 flex-1 rounded-lg py-1 hover:opacity-80"
+                data-testid="external-import-conversation-link"
+            >
                 <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {row.title}
                 </span>
@@ -849,8 +901,18 @@ function ConversationRowLink({ row }: { row: ViewerConversationRow }) {
                     {" · "}
                     {new Date(row.importedAt).toLocaleDateString()}
                 </span>
-            </span>
-        </Link>
+            </Link>
+            {continuationEnabled ? (
+                <ContinuationQuickAction
+                    externalConversationId={row.id}
+                    sourceTitle={row.title}
+                    locked={row.locked === true}
+                    continuationCount={row.continuationCount ?? 0}
+                    latestContinuationId={row.latestContinuationId ?? null}
+                    continuations={row.continuations ?? []}
+                />
+            ) : null}
+        </div>
     );
 }
 
@@ -863,15 +925,20 @@ function LineageGroupRow({
     group,
     expanded,
     onToggleExpanded,
+    continuationEnabled,
 }: {
     group: LineageGroup<ViewerConversationRow>;
     expanded: boolean;
     onToggleExpanded: () => void;
+    continuationEnabled: boolean;
 }) {
     const { t } = useLanguage();
     return (
         <li data-testid="external-import-lineage">
-            <ConversationRowLink row={group.latest} />
+            <ConversationRow
+                row={group.latest}
+                continuationEnabled={continuationEnabled}
+            />
             {group.previous.length > 0 && (
                 <div className="mt-1 pl-4">
                     <button
@@ -889,7 +956,12 @@ function LineageGroupRow({
                         <ul className="mt-1 space-y-1">
                             {group.previous.map((row) => (
                                 <li key={row.id}>
-                                    <ConversationRowLink row={row} />
+                                    <ConversationRow
+                                        row={row}
+                                        continuationEnabled={
+                                            continuationEnabled
+                                        }
+                                    />
                                 </li>
                             ))}
                         </ul>
