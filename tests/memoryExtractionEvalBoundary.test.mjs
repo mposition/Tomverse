@@ -232,7 +232,10 @@ test("only a funded, open pair can run live, and it is named", () => {
     // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
     // the record -- the approval was real and part of it was really spent --
     // which is why "funded" and "runnable" are not the same list.
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
+    assert.deepEqual(runnable, [
+        "gpt-5-6-luna::mem-extract-v4",
+        "gpt-5-6-luna::mem-extract-v7",
+    ]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.
@@ -241,8 +244,15 @@ test("only a funded, open pair can run live, and it is named", () => {
     // `tests/memoryEvalV5Budget.test.mjs` shows, that budget cannot fund a run
     // at all — being in this list means the register would allow it, not that
     // the binding would.
+    //
+    // v7's US$6.39 is the first entry for which both halves hold: it names an
+    // instrument, and that instrument matches what the tree assembles. So it
+    // is genuinely runnable, and the thing standing between it and a provider
+    // is an explicit instruction to run — not another gate
+    // (.github/audits/memory-eval-v7-budget-approval-2026-08-31.md section 3).
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
+        "gpt-5-6-luna::mem-extract-v7": 6.39,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(

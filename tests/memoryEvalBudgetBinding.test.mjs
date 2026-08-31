@@ -49,56 +49,78 @@ const fundedPair = () => {
 
 /* ------------------------------------------------------------ the tuple -- */
 
-test("a budget bound to what this tree ships passes the tuple check", () => {
-    // The other direction, and the one the divergence test cannot give: that
-    // an instrument approved for succ-6 and v7 would actually be accepted.
-    // Without it, "the tuple check refuses everything" would pass every
-    // assertion in this file.
+const v7Pair = () => {
+    const entry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (candidate) =>
+            candidate.extractionModelId === "gpt-5-6-luna" &&
+            candidate.promptVersion === "mem-extract-v7"
+    );
+    assert.ok(entry, "the v7 pair is not registered");
+    return entry;
+};
+
+test("the v7 instrument is the tuple this tree assembles", () => {
+    // The other direction from the divergence test above, and the one that
+    // matters now that a budget exists: an instrument approved on 2026-08-31
+    // for succ-6 and v7 must actually be accepted. Without this, "the tuple
+    // check refuses everything" would satisfy every other assertion here.
     //
-    // Synthetic on purpose. No such budget is registered — that is a separate
-    // approval — so this constructs one from the production builder and
-    // checks the gate, which is exactly the check a real registration would
-    // face.
-    const tuple = harnessRunTuple({
+    // The registered budget against the production builder — not a synthetic
+    // tuple compared with itself, which was the placeholder while no v7
+    // budget existed and would have passed however wrong the register was.
+    const budget = v7Pair().evalBudget;
+    assert.ok(budget?.boundTuple, "the v7 pair records no instrument");
+    const actual = harnessRunTuple({
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         promptDigest: createHash("sha256")
             .update(extractionPromptContract(), "utf8")
             .digest("hex"),
     });
-    assert.deepEqual([...evalBudgetTupleFailures(tuple, tuple)], []);
-    assert.equal(tuple.datasetVersion, "mem-eval-succ-6");
-    assert.equal(tuple.promptVersion, "mem-extract-v7");
-    // A manifest digest of `null` would pass a comparison against itself and
-    // mean the tuple pins nothing about the manifest, so it is asserted
-    // present rather than merely equal.
-    assert.ok(
-        tuple.datasetManifestDigest,
-        "the tuple carries no manifest digest, so it binds nothing about the record"
-    );
+    assert.deepEqual([...evalBudgetTupleFailures(budget.boundTuple, actual)], []);
 
-    // And it reaches the next gate rather than stopping here: with the tuple
-    // satisfied, what refuses a run is the budget's own absence, which is the
-    // state the register is deliberately in.
-    const decision = decideEvalRunMode({
-        live: true,
-        registerEntry: MEMORY_EXTRACTION_EVAL_REGISTER.find(
-            (entry) =>
-                entry.extractionModelId === "gpt-5-6-luna" &&
-                entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
-        ),
-        hasApiKey: true,
-        datasetFrozen: true,
-        datasetPurpose: "decision",
-        datasetSchemaVersion: harnessTarget().datasetSchemaVersion,
-        commitKnown: true,
-        budgetBindingProblems: [],
-        budgetTupleFailures: [],
+    // The approved values, written out, so a diff of this file shows what was
+    // approved rather than only that something moved
+    // (.github/audits/memory-eval-v7-budget-approval-2026-08-31.md section 1).
+    assert.deepEqual(budget.boundTuple, {
+        datasetVersion: "mem-eval-succ-6",
+        datasetDigest:
+            "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+        datasetManifestDigest:
+            "b1904682a2920a6554f533001a2b59cbd2d4cdc06b517aa2b53588c094ce603d",
+        scoringContractVersion: "mem-score-v3.4",
+        scoringContractDigest:
+            "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+        promptVersion: "mem-extract-v7",
+        promptDigest:
+            "7ec5e591628ad719be7f13faf850a537c6f77cfcb22cc50471a245bee7beb912",
     });
-    assert.notEqual(
-        decision.mode,
-        "live",
-        "a pair with no budget became runnable once its tuple agreed"
+    // A `null` manifest digest would compare equal to itself and pin nothing
+    // about the record, so presence is asserted rather than only equality.
+    assert.ok(budget.boundTuple.datasetManifestDigest);
+});
+
+test("the v7 ceilings are the approved figures, per run and per programme", () => {
+    // Two numbers with different meanings, and the difference is the one this
+    // file exists for: `accruedCostUsd` restarts at zero every invocation, so
+    // `maxUsd` bounds one run and the programme total has to be its own
+    // field. Writing US$12.78 into `maxUsd` would have allowed it twice.
+    const budget = v7Pair().evalBudget;
+    assert.equal(budget.maxUsd, 6.39);
+    assert.equal(budget.programmeMaxMicroUsd, 12_780_000);
+    assert.equal(budget.programmeMaxMicroUsd, Math.round(budget.maxUsd * 2 * 1_000_000));
+    assert.equal(budget.maxProviderDispatchedRuns, 2);
+    assert.equal(budget.approvedBy, "@mposition");
+    assert.equal(budget.approvedAt, "2026-08-31");
+    assert.equal(
+        budget.approvedImplementationSha,
+        "51bebe56fb9833f9a8209fd9ca32aa499865d3d4"
     );
+    assert.match(budget.ticket, /memory-eval-v7-budget-approval-2026-08-31\.md/);
+    // Funding a pair is not starting it. The status stays `candidate` — the
+    // approval excluded the transition to `approved` — and no evaluation has
+    // been recorded.
+    assert.equal(v7Pair().status, "candidate");
+    assert.equal(v7Pair().evaluation, null);
 });
 
 test("v6's instrument cannot fund what this tree now ships", () => {
