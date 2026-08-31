@@ -373,6 +373,46 @@ commit에는 그것을 취소하는 SQL이 없으므로 **컬럼 5개는 DB에 �
 - 그래서 기본값은 **남겨 두기**입니다. 쓰이지 않는 컬럼 5개의 비용은 0에
   가깝고, 지운 정산 이력은 돌아오지 않습니다.
 
+## 7.2 보고서의 workspace 귀속 — Default Workspace
+
+`--workspace-id`로 범위를 좁힐 때 **Usage와 Cost가 같은 workspace를 다르게
+부릅니다.**
+
+- Default Workspace도 **실제 `wrkspc_` ID를 갖고**, Usage API의
+  `workspace_ids[]`는 그 실제 ID만 받습니다.
+- 그런데 **usage·cost 보고서는 그 workspace를 `null`로 되돌려 줍니다**
+  (Anthropic Workspaces 문서). Default Workspace는 List Workspaces 결과에도
+  나오지 않습니다.
+
+초기 구현은 cost 결과의 모든 `null`을 `default_workspace` sentinel로 바꾼 뒤
+CLI가 준 실제 ID와 비교했습니다. **Tomverse가 Default Workspace라면** usage는
+정상 필터되고 cost는 하나도 안 맞아서 "workspace를 찾지 못했다"고 보고합니다 —
+오타 경고처럼 보이는 **틀린 답**입니다. CLI에 `default_workspace`를 넘기는 것도
+답이 아닙니다(Usage API는 실제 ID를 요구).
+
+**해결은 조회입니다.** `GET /v1/organizations/workspaces/{id}`는 Default
+Workspace의 실제 ID를 받아 `"name": "Default"`로 답합니다 — "이게 기본인가"를
+묻는 문서화된 방법이고, List Workspaces가 빠뜨리므로 더 싼 방법이 없습니다.
+`classifyWorkspaceIds()`가 그것을 묻고, **cost 집계에서만** 해당 ID를 `null`에
+대응시킵니다. Usage 요청은 실제 ID를 그대로 씁니다.
+
+**`null`과 키 부재는 다릅니다.** grouping을 요청했는데 `workspace_id` 키가 아예
+없는 결과는 Default Workspace가 아니라 **예상 못 한 응답 형태**이고, 그것을
+default로 읽으면 남의 지출을 Tomverse에 귀속시킵니다. `null`만 Default로
+인정하고 키 부재는 `ANTHROPIC_COST_MISSING_WORKSPACE`로 거절합니다. 필터가 없는
+실행은 `workspace_id`를 **아예 읽지 않습니다**(grouping 안 한 응답은 정당하게
+그 필드를 생략).
+
+해석 불가 ID는 추측하지 않고 일반 ID로 두되 경고합니다 — 오타일 수 있고, 그때는
+"안 맞았다"가 맞는 표시입니다.
+
+## 7.3 Cost API도 끝까지 pagination 합니다
+
+Usage와 같습니다. 첫 페이지만 합산한 값을 "청구액"으로 내놓으면 나머지 페이지만큼
+틀린 숫자이고, 화면 어디에도 얼마나 틀렸는지 나오지 않습니다. `has_more`를 따라
+끝까지 읽고, cursor 없이 `has_more: true`면 거절하며, 페이지 상한을 넘으면
+**부분 합계를 보여주는 대신 billed를 unavailable로** 처리합니다.
+
 ## 8. 측정은 아직 남아 있습니다
 
 `npm run report:anthropic-cache-efficiency -- --days=7`은 **읽기 전용 도구가

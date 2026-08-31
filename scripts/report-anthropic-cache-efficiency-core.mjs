@@ -287,12 +287,46 @@ export const attributionScope = ({ workspaceIds = [], apiKeyIds = [] }) => {
  * whole organization's bill, with nothing on screen saying they are different
  * populations. Somebody then reads a ratio between them.
  *
- * `default_workspace` is a real value here, not a placeholder: the cost report
- * returns `workspace_id: null` for the organization's default workspace, and a
- * filter naming it has to match that null rather than a string.
+ * ## The Default Workspace, which is where this got it wrong
+ *
+ * Every organization has a Default Workspace, and it has a real `wrkspc_` id
+ * like any other -- that is what the Usage API's `workspace_ids[]` filter takes
+ * and the only thing it takes. But the *reports* do not echo that id back:
+ * "usage reports, and cost reports show `null` for its `workspace_id`"
+ * (Anthropic's Workspaces guide).
+ *
+ * So the two sides of a filtered run disagree about how the same workspace is
+ * named, and the first version of this code did not reconcile them: it mapped
+ * every `null` in the cost results to a `default_workspace` sentinel and then
+ * compared that against the real `wrkspc_...` id from the command line. If
+ * Tomverse *is* the Default Workspace the usage side filtered correctly, the
+ * cost side matched nothing, and the run reported "no cost rows matched the
+ * named workspace(s)" -- a wrong answer dressed as a warning about a typo.
+ *
+ * Passing `default_workspace` on the command line is not the fix either: the
+ * Usage API needs the real id.
+ *
+ * The reconciliation is a lookup. `GET /v1/organizations/workspaces/{id}`
+ * accepts the Default Workspace's real id and answers with `"name": "Default"`
+ * -- the documented way to ask "is this one the default", and necessary
+ * because List Workspaces omits it entirely. `resolveWorkspaceIdentity` does
+ * that ask; this module only consumes the answer.
+ *
+ * ## `null` is the Default Workspace; `undefined` is a broken response
+ *
+ * Also fixed here: the first version treated a *missing* `workspace_id` key the
+ * same as an explicit `null`. It is not the same. When the request grouped by
+ * workspace, every result carries the field and `null` means the Default
+ * Workspace; a result with no field at all means the response is not the shape
+ * this parser was written against, and reading it as "the default workspace"
+ * would silently attribute somebody else's spend to Tomverse.
  */
-export const DEFAULT_WORKSPACE_SENTINEL = "default_workspace";
 
+/**
+ * The name `GET /v1/organizations/workspaces/{id}` returns for the Default
+ * Workspace. Anthropic's Workspaces guide: "the Default Workspace comes back
+ * with `\"name\": \"Default\"`, even though List Workspaces omits it."
+ */
 export const costScopeFor = ({ workspaceIds = [], apiKeyIds = [] }) => {
     if (apiKeyIds.length > 0) {
         return {
@@ -300,8 +334,7 @@ export const costScopeFor = ({ workspaceIds = [], apiKeyIds = [] }) => {
             mode: "not_comparable",
             groupByWorkspace: false,
             workspaceIds: [],
-            note:
-                "NOT COMPARABLE: the usage figures were filtered by API key, and the Cost API does not report cost per API key -- it offers only workspace grouping. The billed total below is ORGANIZATION-WIDE and describes a different population from the token counts above. Do not take a ratio between them.",
+            note: "NOT COMPARABLE: the usage figures were filtered by API key, and the Cost API does not report cost per API key -- it offers only workspace grouping. The billed total below is ORGANIZATION-WIDE and describes a different population from the token counts above. Do not take a ratio between them.",
         };
     }
     if (workspaceIds.length > 0) {
@@ -324,6 +357,45 @@ export const costScopeFor = ({ workspaceIds = [], apiKeyIds = [] }) => {
     };
 };
 
+export const DEFAULT_WORKSPACE_NAME = "Default";
+
+/**
+ * Split the workspace ids given on the command line into the ones that appear
+ * in cost results under their own id, and the one (at most) that appears as
+ * `null`.
+ *
+ * `lookup(id)` returns the `GET Workspace` body, or null when the id could not
+ * be resolved. An unresolvable id is kept as an ordinary id rather than
+ * guessed at: it may be a typo, and the "matched nothing" warning downstream is
+ * the right thing to show for one.
+ */
+export const classifyWorkspaceIds = async (workspaceIds, lookup) => {
+    const named = [];
+    const defaults = [];
+    const unresolved = [];
+    for (const id of workspaceIds) {
+        let workspace = null;
+        try {
+            workspace = await lookup(id);
+        } catch {
+            workspace = null;
+        }
+        if (!workspace || typeof workspace.name !== "string") {
+            unresolved.push(id);
+            named.push(id);
+            continue;
+        }
+        if (workspace.name === DEFAULT_WORKSPACE_NAME) defaults.push(id);
+        else named.push(id);
+    }
+    return {
+        named,
+        defaultWorkspaceIds: defaults,
+        matchesDefaultWorkspace: defaults.length > 0,
+        unresolved,
+    };
+};
+
 /**
  * Sum a cost report, optionally keeping only the named workspaces.
  *
@@ -332,9 +404,16 @@ export const costScopeFor = ({ workspaceIds = [], apiKeyIds = [] }) => {
  * a wrong number that looks like a right one.
  *
  * Amounts are decimal *cents* per the Cost API's own documentation, and are
- * returned here as cents so the caller does the single conversion.
+ * returned here as cents-derived USD so the caller does no conversion.
+ *
+ * `workspace_id` is only inspected when a filter needs it -- which is also when
+ * the request grouped by it. An unfiltered run never reads the field, because
+ * an ungrouped response legitimately omits it.
  */
-export const sumCostReport = (payload, { workspaceIds = [] } = {}) => {
+export const sumCostReport = (
+    payload,
+    { workspaceIds = [], matchesDefaultWorkspace = false } = {}
+) => {
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.data)) {
         throw new AnthropicUsageParseError(
             "ANTHROPIC_COST_INVALID_PAYLOAD",
@@ -342,22 +421,28 @@ export const sumCostReport = (payload, { workspaceIds = [] } = {}) => {
         );
     }
     const wanted = new Set(workspaceIds);
+    const filtering = wanted.size > 0 || matchesDefaultWorkspace;
     let cents = 0;
     let matchedResults = 0;
     let skippedResults = 0;
     for (const bucket of payload.data) {
         for (const result of bucket?.results ?? []) {
-            if (wanted.size > 0) {
-                // `null` is the organization's default workspace, which a
-                // filter names with the sentinel rather than with an empty
-                // string -- otherwise "no workspace" and "the default
-                // workspace" would be the same filter value.
-                const id =
-                    result?.workspace_id === null ||
-                    result?.workspace_id === undefined
-                        ? DEFAULT_WORKSPACE_SENTINEL
-                        : result.workspace_id;
-                if (!wanted.has(id)) {
+            if (filtering) {
+                if (!result || !("workspace_id" in result)) {
+                    // Grouped by workspace and answered without the field. Not
+                    // the Default Workspace -- an unexpected response shape,
+                    // and reading it as the default would attribute somebody
+                    // else's spend to this workspace.
+                    throw new AnthropicUsageParseError(
+                        "ANTHROPIC_COST_MISSING_WORKSPACE",
+                        "Cost API result omitted workspace_id even though the request grouped by it."
+                    );
+                }
+                const isDefault = result.workspace_id === null;
+                const matches = isDefault
+                    ? matchesDefaultWorkspace
+                    : wanted.has(result.workspace_id);
+                if (!matches) {
                     skippedResults += 1;
                     continue;
                 }
@@ -391,11 +476,23 @@ export const sumCostReport = (payload, { workspaceIds = [] } = {}) => {
             "Cost API total is outside the supported numeric range."
         );
     }
+    const nextPage =
+        typeof payload.next_page === "string" && payload.next_page.trim()
+            ? payload.next_page
+            : null;
+    const hasMore = payload.has_more === true;
+    if (hasMore && !nextPage) {
+        throw new AnthropicUsageParseError(
+            "ANTHROPIC_COST_MISSING_CURSOR",
+            "Cost API reported more pages and omitted the cursor."
+        );
+    }
     return {
         costUsd: cents / 100,
         matchedResults,
         skippedResults,
-        hasMore: payload.has_more === true,
+        hasMore,
+        nextPage,
     };
 };
 
@@ -406,6 +503,7 @@ export const anthropicCostReportUrl = ({
     endingAt,
     limit,
     groupByWorkspace = false,
+    page,
 }) => {
     const url = new URL(baseUrl);
     url.searchParams.set("starting_at", startingAt.toISOString());
@@ -415,8 +513,15 @@ export const anthropicCostReportUrl = ({
     // a per-workspace breakdown to narrow locally.
     if (groupByWorkspace) url.searchParams.append("group_by[]", "workspace_id");
     url.searchParams.set("limit", String(limit));
+    if (page) url.searchParams.set("page", page);
     return url;
 };
+
+/** `GET /v1/organizations/workspaces/{id}`, for the Default Workspace check. */
+export const anthropicWorkspaceUrl = ({ baseUrl, workspaceId }) =>
+    new URL(
+        `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(workspaceId)}`
+    );
 
 /**
  * One page of `GET /v1/organizations/usage_report/messages`, validated.
