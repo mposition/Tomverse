@@ -69,3 +69,21 @@ test("the envelope pins the padding rather than leaving it to a default", () => 
   assert.equal(KEY_ENVELOPE.payloadKdfIterations, 600_000);
   assert.match(KEY_ENVELOPE.version, /^router-human-review-key-envelope-v\d+$/);
 });
+
+// The defect v2 exists for: `openssl enc -pass file:` reads the first LINE of
+// the key file, so raw random bytes are read differently depending on what the
+// randomness produced, and differently again by a Windows text-mode read (0x1a
+// is EOF there). A byte-identical file then yields two different passphrases
+// and the recipient sees "bad decrypt" with nothing visibly wrong.
+test("the payload key is written text-safe, so every platform reads the whole of it", () => {
+  assert.equal(KEY_ENVELOPE.payloadKeyEncoding, "base64-no-newline");
+  // base64's alphabet is exactly what makes the guarantee: no byte in it can
+  // end a line or an MS-DOS text read.
+  const base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  for (const byte of [0x0a, 0x0d, 0x1a]) {
+    assert.ok(
+      !base64Alphabet.includes(String.fromCharCode(byte)),
+      `0x${byte.toString(16)} must not be producible by the payload key encoding`
+    );
+  }
+});
