@@ -1,0 +1,215 @@
+{
+  "manifestVersion": "router-human-review-sample-v1",
+  "populationDigest": "sha256:1defd342b573fb6692fadedafd3d79b74a8284ce7d8821239bd291ab94014d49",
+  "digestAlgorithm": "sha256-canonical-pairs-v1",
+  "bundleVersion": "router-answer-bundle-v1",
+  "judgeTemplateVersion": "judge-rubric-v1",
+  "seed": 2780572796999807,
+  "drawnAt": "2026-08-31T08:16:35.201Z",
+  "drawnBy": "OP-01",
+  "perCell": {
+    "primary": 4,
+    "reserve": 2
+  },
+  "reviewersPerPair": 2,
+  "adjudicateOnDisagreement": true,
+  "cells": [
+    {
+      "cell": "analysis_and_reasoning/en",
+      "primary": [
+        "analysis-en-001",
+        "analysis-en-004",
+        "analysis-en-013",
+        "analysis-en-007"
+      ],
+      "reserve": [
+        "analysis-en-009",
+        "analysis-en-011"
+      ]
+    },
+    {
+      "cell": "analysis_and_reasoning/ko",
+      "primary": [
+        "analysis-ko-001",
+        "analysis-ko-007",
+        "analysis-ko-012",
+        "analysis-ko-008"
+      ],
+      "reserve": [
+        "analysis-ko-013",
+        "analysis-ko-002"
+      ]
+    },
+    {
+      "cell": "coding/en",
+      "primary": [
+        "coding-en-004",
+        "coding-en-005",
+        "coding-en-007",
+        "coding-en-006"
+      ],
+      "reserve": [
+        "coding-en-010",
+        "coding-en-008"
+      ]
+    },
+    {
+      "cell": "coding/ko",
+      "primary": [
+        "coding-ko-010",
+        "coding-ko-001",
+        "coding-ko-014",
+        "coding-ko-007"
+      ],
+      "reserve": [
+        "coding-ko-003",
+        "coding-ko-006"
+      ]
+    },
+    {
+      "cell": "current_information/en",
+      "primary": [
+        "current-en-002",
+        "current-en-007",
+        "current-en-004",
+        "current-en-011"
+      ],
+      "reserve": [
+        "current-en-013",
+        "current-en-010"
+      ]
+    },
+    {
+      "cell": "current_information/ko",
+      "primary": [
+        "current-ko-004",
+        "current-ko-010",
+        "current-ko-006",
+        "current-ko-013"
+      ],
+      "reserve": [
+        "current-ko-007",
+        "current-ko-015"
+      ]
+    },
+    {
+      "cell": "document_and_attachment/en",
+      "primary": [
+        "document-en-007",
+        "document-en-006",
+        "document-en-004",
+        "document-en-001"
+      ],
+      "reserve": [
+        "document-en-014",
+        "document-en-011"
+      ]
+    },
+    {
+      "cell": "document_and_attachment/ko",
+      "primary": [
+        "document-ko-014",
+        "document-ko-009",
+        "document-ko-006",
+        "document-ko-008"
+      ],
+      "reserve": [
+        "document-ko-007",
+        "document-ko-004"
+      ]
+    },
+    {
+      "cell": "general_question_answering/en",
+      "primary": [
+        "general-en-010",
+        "general-en-003",
+        "general-en-001",
+        "general-en-012"
+      ],
+      "reserve": [
+        "general-en-013",
+        "general-en-011"
+      ]
+    },
+    {
+      "cell": "general_question_answering/ko",
+      "primary": [
+        "general-ko-011",
+        "general-ko-003",
+        "general-ko-009",
+        "general-ko-010"
+      ],
+      "reserve": [
+        "general-ko-004",
+        "general-ko-012"
+      ]
+    },
+    {
+      "cell": "long_context_conversation/en",
+      "primary": [
+        "long-en-020",
+        "long-en-027",
+        "long-en-017",
+        "long-en-025"
+      ],
+      "reserve": [
+        "long-en-028",
+        "long-en-023"
+      ]
+    },
+    {
+      "cell": "long_context_conversation/ko",
+      "primary": [
+        "long-ko-005",
+        "long-ko-006",
+        "long-ko-011",
+        "long-ko-007"
+      ],
+      "reserve": [
+        "long-ko-002",
+        "long-ko-010"
+      ]
+    },
+    {
+      "cell": "translation_cross_language/ko-en",
+      "primary": [
+        "translation-ko-en-004",
+        "translation-ko-en-006",
+        "translation-ko-en-008",
+        "translation-ko-en-013"
+      ],
+      "reserve": [
+        "translation-ko-en-005",
+        "translation-ko-en-007"
+      ]
+    },
+    {
+      "cell": "writing_and_rewriting/en",
+      "primary": [
+        "writing-en-005",
+        "writing-en-003",
+        "writing-en-008",
+        "writing-en-002"
+      ],
+      "reserve": [
+        "writing-en-014",
+        "writing-en-006"
+      ]
+    },
+    {
+      "cell": "writing_and_rewriting/ko",
+      "primary": [
+        "writing-ko-004",
+        "writing-ko-009",
+        "writing-ko-010",
+        "writing-ko-011"
+      ],
+      "reserve": [
+        "writing-ko-002",
+        "writing-ko-003"
+      ]
+    }
+  ],
+  "substitutions": [],
+  "redrawOf": null
+}

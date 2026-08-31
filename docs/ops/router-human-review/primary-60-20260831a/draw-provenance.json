@@ -1,0 +1,30 @@
+{
+  "commit": "c6c96ccc66a4d1cc6a288e28452ab4b4a089dd4b",
+  "ref": "refs/heads/develop",
+  "runId": "33372069120",
+  "sourceRunId": "33312326437",
+  "sourceArtifact": "route01-calibration-20260830a",
+  "bundleFile": "route01-pilot-20260830a.answers.jsonl",
+  "bundleDigest": "sha256:9e0ea8dd6587f51bfa8f7d545fc405361e6a4830d2af792c85ed49f773d74fe3",
+  "seed": 2780572796999807,
+  "adjudicatorId": "A-01",
+  "keyRecovery": {
+    "verifiedBy": "A-01",
+    "verifiedAt": "2026-08-31T07:57Z",
+    "recipientKeyFingerprint": "sha256:6271ac1afca28509b96a6fc8424b1973a19ad0413eefafa719ac19ce133ac4ab",
+    "probeSha256": "sha256:f7bb647b5ce710f218c133a38e6d6a8e2000bef935725c00b62b7a52d2dd99a4",
+    "probeRunId": "33369782907"
+  },
+  "keyEnvelope": {
+    "version": "router-human-review-key-envelope-v2",
+    "payloadCipher": "aes-256-cbc",
+    "payloadKdf": "pbkdf2-sha256",
+    "payloadKdfIterations": 600000,
+    "payloadKeyEncoding": "base64-no-newline",
+    "keyTransport": "rsa-oaep",
+    "keyTransportHash": "sha256",
+    "keyTransportMgf1Hash": "sha256",
+    "fingerprint": "sha256-spki-der",
+    "recipientKeyFingerprint": "sha256:6271ac1afca28509b96a6fc8424b1973a19ad0413eefafa719ac19ce133ac4ab"
+  }
+}
