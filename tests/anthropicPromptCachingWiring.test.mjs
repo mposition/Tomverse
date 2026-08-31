@@ -233,7 +233,7 @@ const PATH_CALL_SITES = {
   },
   comparison_review: {
     budget: [],
-    request: ["lib/comparisonReviewService.ts", "lib/aiReviewEvalLiveAdapter.ts"],
+    request: ["lib/comparisonReviewService.ts"],
     settlement: [],
   },
   comparison_review_verify_item: {

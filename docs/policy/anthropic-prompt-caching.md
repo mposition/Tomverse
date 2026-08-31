@@ -130,8 +130,8 @@ write로 잡힙니다(같은 문서).
 
 - **DB `inputHash` cache로 provider 호출이 생략되는 재실행.** 캐시를 읽었을
   요청이 발생하지 않으므로, 그 재실행은 prompt cache에 대해 아무것도 말하지
-  않습니다. `tests/comparisonReviewCacheCompatibility.test.mjs`가 지키는 것이
-  바로 그 DB 캐시입니다 — 두 캐시는 서로 다른 층입니다.
+  않습니다. AI Review가 `inputHash`로 저장된 결과를 돌려주는 것은 DB 층의
+  캐시이고, prompt cache는 provider 층입니다 — 서로 다른 층입니다.
 - **대칭성 논거**("primary가 캐시하니 fallback도").
 - **내용 공유 논거**("같은 답변을 담으니 prefix도 같을 것").
 

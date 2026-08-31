@@ -309,6 +309,7 @@ export type AttemptCostIntent = {
         maxQueries: number;
         pricingVersion: string;
     };
+    /**
      * The prompt-cache write premium this attempt was authorized to spend, if
      * any (docs/policy/anthropic-prompt-caching.md section 5).
      *

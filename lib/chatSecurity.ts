@@ -443,6 +443,7 @@ const durableReservationPayloadSchema = z
                                 pricingVersion: z.string().min(1).max(120),
                             })
                             .strict()
+                            .optional(),
                         // Optional so every reservation written before prompt
                         // caching still deserializes; absent means the attempt
                         // authorized no premium, which is what those turns did.
@@ -831,6 +832,7 @@ export const createChatBudget = (
             maxQueries: number;
             pricingVersion: string;
         } | null;
+        /**
          * Which call path this turn is, when it may carry an Anthropic prompt
          * cache marker.
          *
