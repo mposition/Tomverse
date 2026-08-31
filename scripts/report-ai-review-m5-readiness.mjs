@@ -538,7 +538,9 @@ const eligibility = [
         : window90.reliability?.detectedTraceGaps?.missing > 0
           ? `${window90.reliability.detectedTraceGaps.missing} write(s) provably missing; ` +
             `a detected gap refuses on its own`
-          : !window90.reliability?.traceCompleteness
+          : window90.reliability?.traceCompletenessProblem
+            ? `the attempted total was refused: ${window90.reliability.traceCompletenessProblem}`
+            : !window90.reliability?.traceCompleteness
             ? "completeness is unknown: no attempted total was counted outside the run table, " +
               "and zero detected gaps is not evidence of none " +
               "(a writer whose every write failed leaves no rows to find a gap in)"

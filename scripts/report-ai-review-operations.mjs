@@ -71,6 +71,20 @@ if (attemptedWrites !== null && !attemptedWritesSource) {
   );
   process.exit(1);
 }
+// One total cannot describe three windows.
+//
+// The report defaults to 7, 30 and 90 days. A single --attempted-writes reused
+// across all three would be right for at most one of them and would silently
+// become a 90-day count applied to the 7-day window, or the reverse. So a
+// total requires the window it was counted over.
+if (attemptedWrites !== null && windows.length !== 1) {
+  console.error(
+    "--attempted-writes describes one window, so --window=<days> is required with it.\n" +
+      "Counting once and reusing the figure across 7, 30 and 90 days would be right " +
+      "for at most one of them."
+  );
+  process.exit(1);
+}
 
 const cards = [];
 for (const windowDays of windows) {
@@ -112,8 +126,10 @@ for (const windowDays of windows) {
     "telemetry completeness",
     card.reliability.traceCompleteness
       ? `${pct(card.reliability.traceCompleteness)}  attested by ${card.reliability.traceCompletenessSource}`
-      : "unknown — pass --attempted-writes=<n> --attempted-writes-source=<text>; " +
-        "zero detected gaps is not evidence of none"
+      : card.reliability.traceCompletenessProblem
+        ? `REFUSED — ${card.reliability.traceCompletenessProblem}`
+        : "unknown — pass --attempted-writes=<n> --attempted-writes-source=<text> " +
+          "--window=<days>; zero detected gaps is not evidence of none"
   );
   line("unreconciled settlements", pct(card.reliability.unreconciledSettlements));
   line("credits resolved wrongly", pct(card.reliability.creditReconciliation));
