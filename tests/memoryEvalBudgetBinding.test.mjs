@@ -26,12 +26,16 @@ import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
-import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
+import { MEMORY_EVAL_SUCC6_MANIFEST } from "../lib/memoryEvalSucc6.ts";
 import {
     MEMORY_EXTRACTION_PROMPT_VERSION,
     extractionPromptContract,
 } from "../lib/memoryExtractionPrompt.ts";
+import {
+    harnessRunTuple,
+    harnessTarget,
+} from "../lib/memoryEvalHarnessTarget.ts";
 
 const fundedPair = () => {
     const entry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
@@ -45,36 +49,96 @@ const fundedPair = () => {
 
 /* ------------------------------------------------------------ the tuple -- */
 
-test("v6's instrument cannot fund the prompt this tree now ships", () => {
-    // The whole point, and it reads inverted since 2026-08-31 because the
-    // tree moved on. Every value below is still recomputed rather than
-    // restated; what changed is which answer is correct.
+test("a budget bound to what this tree ships passes the tuple check", () => {
+    // The other direction, and the one the divergence test cannot give: that
+    // an instrument approved for succ-6 and v7 would actually be accepted.
+    // Without it, "the tuple check refuses everything" would pass every
+    // assertion in this file.
     //
-    // While the tree shipped v6 this asserted no divergence at all. The tree
-    // now ships `mem-extract-v7`, so v6's instrument no longer describes the
-    // bytes a run would use — and the comparison firing is the protection
-    // working, not a stale expectation. Asserting emptiness here today would
-    // mean asserting that a v7 run may proceed on v6's approval, which is
-    // precisely what this file exists to prevent.
-    //
-    // Both halves are pinned. The dataset and contract must still match,
-    // because nothing approved them to move; the prompt fields must differ,
-    // and by exactly the two names below, so a *third* divergence appearing
-    // quietly is a failure rather than noise inside an expected one.
-    const budget = fundedPair().evalBudget;
-    assert.ok(budget?.boundTuple, "the funded pair records no instrument");
-    const target = harnessTarget();
-    const actual = {
-        datasetVersion: target.datasetVersion,
-        datasetDigest: target.datasetDigest,
-        datasetManifestDigest: MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest,
-        scoringContractVersion: target.scoringContractVersion,
-        scoringContractDigest: target.scoringContractDigest,
+    // Synthetic on purpose. No such budget is registered — that is a separate
+    // approval — so this constructs one from the production builder and
+    // checks the gate, which is exactly the check a real registration would
+    // face.
+    const tuple = harnessRunTuple({
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         promptDigest: createHash("sha256")
             .update(extractionPromptContract(), "utf8")
             .digest("hex"),
-    };
+    });
+    assert.deepEqual([...evalBudgetTupleFailures(tuple, tuple)], []);
+    assert.equal(tuple.datasetVersion, "mem-eval-succ-6");
+    assert.equal(tuple.promptVersion, "mem-extract-v7");
+    // A manifest digest of `null` would pass a comparison against itself and
+    // mean the tuple pins nothing about the manifest, so it is asserted
+    // present rather than merely equal.
+    assert.ok(
+        tuple.datasetManifestDigest,
+        "the tuple carries no manifest digest, so it binds nothing about the record"
+    );
+
+    // And it reaches the next gate rather than stopping here: with the tuple
+    // satisfied, what refuses a run is the budget's own absence, which is the
+    // state the register is deliberately in.
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: MEMORY_EXTRACTION_EVAL_REGISTER.find(
+            (entry) =>
+                entry.extractionModelId === "gpt-5-6-luna" &&
+                entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
+        ),
+        hasApiKey: true,
+        datasetFrozen: true,
+        datasetPurpose: "decision",
+        datasetSchemaVersion: harnessTarget().datasetSchemaVersion,
+        commitKnown: true,
+        budgetBindingProblems: [],
+        budgetTupleFailures: [],
+    });
+    assert.notEqual(
+        decision.mode,
+        "live",
+        "a pair with no budget became runnable once its tuple agreed"
+    );
+});
+
+test("v6's instrument cannot fund what this tree now ships", () => {
+    // The whole point, and it reads inverted since 2026-08-31 because the
+    // tree moved on. Every value below is still recomputed rather than
+    // restated; what changed is which answer is correct.
+    //
+    // While the tree shipped v6 against succ-5 this asserted no divergence at
+    // all. Two approved moves have happened since — the prompt to
+    // `mem-extract-v7` on 2026-08-31, and the harness target to the frozen
+    // `mem-eval-succ-6` the same day — so v6's instrument no longer describes
+    // the bytes a run would use. The comparison firing is the protection
+    // working. Asserting emptiness today would assert that a v7 run against a
+    // different sample may proceed on v6's approval, which is exactly what
+    // this file exists to prevent.
+    //
+    // The divergence is pinned by name, all four of them, so a *fifth* one
+    // appearing cannot hide inside an expected failure. The contract is the
+    // one thing that did not move, and it is asserted equal below.
+    const budget = fundedPair().evalBudget;
+    assert.ok(budget?.boundTuple, "the funded pair records no instrument");
+    // The production builder, not a copy of it. This test used to assemble
+    // the tuple itself, and that is how the live harness came to keep
+    // `MEMORY_EVAL_SUCC5_MANIFEST` hard-coded through the switch to succ-6:
+    // the test's own object was right, the harness's was not, and nothing
+    // compared them. A succ-6 budget would then have been refused as a tuple
+    // mismatch at the moment of spending.
+    const actual = harnessRunTuple({
+        promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
+        promptDigest: createHash("sha256")
+            .update(extractionPromptContract(), "utf8")
+            .digest("hex"),
+    });
+    // And it really is the dataset the harness would run, named here so a
+    // builder that quietly stopped following the target fails.
+    assert.equal(actual.datasetVersion, harnessTarget().datasetVersion);
+    assert.equal(
+        actual.datasetManifestDigest,
+        MEMORY_EVAL_SUCC6_MANIFEST.manifestDigest
+    );
     const failures = [...evalBudgetTupleFailures(budget.boundTuple, actual)];
     assert.ok(
         failures.length > 0,
@@ -82,14 +146,30 @@ test("v6's instrument cannot fund the prompt this tree now ships", () => {
     );
     assert.deepEqual(
         failures.map((line) => line.split(":")[0]).sort(),
-        ["promptDigest", "promptVersion"],
-        `only the prompt was approved to move; failures were:\n${failures.join("\n")}`
+        [
+            "datasetDigest",
+            "datasetManifestDigest",
+            "datasetVersion",
+            "promptDigest",
+            "promptVersion",
+        ].sort(),
+        `only the prompt and the dataset were approved to move; failures were:\n${failures.join(
+            "\n"
+        )}`
     );
-    // Named rather than left to the field list: the dataset and the contract
-    // are what a moved digest would show up in, and they must be silent.
-    assert.equal(budget.boundTuple.datasetDigest, actual.datasetDigest);
-    assert.equal(budget.boundTuple.datasetManifestDigest, actual.datasetManifestDigest);
+    // The contract did not move, and is named rather than left to the list
+    // above: succ-6 is scored under the same `mem-score-v3.4` succ-5 was, so
+    // a divergence here would mean something nobody approved.
+    assert.equal(budget.boundTuple.scoringContractVersion, actual.scoringContractVersion);
     assert.equal(budget.boundTuple.scoringContractDigest, actual.scoringContractDigest);
+    // And v6's own record still says what it always said. The instrument is
+    // evidence of an approval that happened; it is not edited when the tree
+    // moves past it.
+    assert.equal(budget.boundTuple.datasetVersion, "mem-eval-succ-5");
+    assert.equal(
+        budget.boundTuple.datasetDigest,
+        MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest
+    );
 
     // And the approved values, written out, so the diff of any future change
     // to this file shows what was approved rather than only that it moved.
