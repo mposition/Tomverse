@@ -28,7 +28,12 @@
  * at all, which is the honest state and not an accident.
  */
 
-import type { AiReviewArmMetrics } from "@/lib/aiReviewEvalCore";
+import {
+    AI_REVIEW_EVAL_LANGUAGES,
+    AI_REVIEW_EVAL_MIN_CASES,
+    AI_REVIEW_EVAL_TASK_TYPES,
+    type AiReviewArmMetrics,
+} from "@/lib/aiReviewEvalCore";
 
 export type AiReviewThresholdSet = {
     version: string;
@@ -138,6 +143,72 @@ const METRIC_CEILINGS: ReadonlyArray<
 ];
 
 /**
+ * The arms an approval has to carry, and how many cases each needs.
+ *
+ * ## Why "two or more" was not enough
+ *
+ * The language rule used to be `byLanguage.length < 2`. Two arms both labelled
+ * `en` satisfied it, and so did two arms of one case each. The task-type rule
+ * was weaker still: the loop walked whatever arms it was handed, so an
+ * approval carrying `byTaskType: []` had every task-type bar applied to
+ * nothing and passed. Both were reproduced against `v1-draft` with a perfect
+ * aggregate and no shortfall was reported.
+ *
+ * That mattered because of what the arms are FOR. The aggregate is the number
+ * that hides a collapsed arm; the arms are how the gate sees past it. An
+ * approval that may omit them is an approval judged on the aggregate alone,
+ * which is the failure the arm rules exist to prevent -- and the omission is
+ * invisible, because a missing arm produces no message.
+ *
+ * So the required set is named here, out of the axes the evaluation set is
+ * built on, and an approval is refused for a missing arm, a duplicated one, an
+ * unrecognised one, or one too small to support the rate it reports.
+ */
+const armProblems = (
+    arms: readonly AiReviewApprovalArmMetrics[],
+    required: readonly string[],
+    minimumCases: number,
+    kind: string
+): readonly string[] => {
+    const problems: string[] = [];
+    const seen = new Map<string, number>();
+    for (const arm of arms) seen.set(arm.arm, (seen.get(arm.arm) ?? 0) + 1);
+
+    for (const name of required) {
+        if (!seen.has(name)) problems.push(`no ${kind} arm for "${name}"`);
+    }
+    for (const [name, count] of seen) {
+        if (!required.includes(name)) {
+            problems.push(
+                `${kind} arm "${name}" is not one of ${required.join(", ")}`
+            );
+        }
+        if (count > 1) {
+            problems.push(`${kind} arm "${name}" appears ${count} times`);
+        }
+    }
+    for (const arm of arms) {
+        if (!(typeof arm.cases === "number" && arm.cases >= minimumCases)) {
+            problems.push(
+                `${kind} arm "${arm.arm}" reports ${String(arm.cases)} case(s); ` +
+                    `${minimumCases} needed`
+            );
+        }
+    }
+    return problems;
+};
+
+/**
+ * A task-type arm spans both languages, so its floor is the per-cell floor
+ * times the number of languages. Derived rather than added as a fourth
+ * constant: a floor that can drift away from the cell it is made of is a floor
+ * that will.
+ */
+const MIN_TASK_TYPE_ARM_CASES =
+    AI_REVIEW_EVAL_MIN_CASES.perLanguageTaskTypeCell *
+    AI_REVIEW_EVAL_LANGUAGES.length;
+
+/**
  * Every way a set of measured numbers falls short of a threshold set.
  *
  * Returns the list rather than a boolean so a refusal can say which bar was
@@ -181,9 +252,27 @@ export const thresholdShortfalls = (input: {
     // Language arms: a gap, not a floor. Korean quality far below English is a
     // defect even when the average clears every bar, and the average is
     // exactly what hides it.
-    if (input.byLanguage.length < 2) {
+    problems.push(
+        ...armProblems(
+            input.byLanguage,
+            AI_REVIEW_EVAL_LANGUAGES,
+            AI_REVIEW_EVAL_MIN_CASES.perLanguage,
+            "language"
+        )
+    );
+    problems.push(
+        ...armProblems(
+            input.byTaskType,
+            AI_REVIEW_EVAL_TASK_TYPES,
+            MIN_TASK_TYPE_ARM_CASES,
+            "task-type"
+        )
+    );
+
+    const distinctLanguages = new Set(input.byLanguage.map((arm) => arm.arm));
+    if (distinctLanguages.size < 2) {
         problems.push(
-            `${input.byLanguage.length} language arm(s) recorded; the gap rule needs both`
+            `${distinctLanguages.size} distinct language arm(s) recorded; the gap rule needs both`
         );
     } else {
         for (const [metric] of [...METRIC_FLOORS, ...METRIC_CEILINGS]) {

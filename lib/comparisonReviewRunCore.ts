@@ -124,30 +124,95 @@ export const dispatchedAttempts = (
     );
 
 /**
- * Attempts whose settlement disagrees with what they reserved.
+ * How the credits an attempt held were resolved.
  *
- * A completed attempt that reserved credits and settled a different number is
- * the reconciliation question, stated. An attempt with no settled figure at
- * all is counted separately (`settledCredits === null`), because "we do not
- * know" and "they disagree" call for different investigations.
+ * ## Why the population is every attempt that held credits, not the completed ones
+ *
+ * The first version of this asked the question only of `completed` attempts,
+ * on the reasoning that settlement is what a completed call does. That left
+ * the other half of the reservation lifecycle unmeasured. A reviewer that
+ * fails after reserving still has to give the credits back, and that refund
+ * can fail on its own -- the service records the outcome of BOTH calls, and a
+ * refund that threw is written down as `settledCredits: null` exactly as an
+ * unreported settlement is.
+ *
+ * So a window with twenty clean completions and five failures whose refunds
+ * never reported read as `unreported 0 / 20, status ok`: five reservations
+ * were still holding a user's credits and the operational record said the
+ * reconciliation was clean. That is the shape `zero_credit_reconciliation_mismatch`
+ * exists to refuse, and it would have passed.
+ *
+ * The population is therefore every attempt that reached a provider AND held
+ * credits, and the two halves are judged by different rules:
+ *
+ *   * a completed attempt may settle anywhere from 0 up to what it reserved --
+ *     settling BELOW is normal, since the unused part is released. Settling
+ *     ABOVE means more was charged than was ever held.
+ *   * a failed attempt was refunded, so its settled figure must be 0. Anything
+ *     above that is a user charged for a review they did not get.
+ *
+ * An attempt that reserved nothing is outside all of this: there is no
+ * reservation to reconcile, so counting it would only dilute the rate.
  */
-export const settlementMismatches = (
-    attempts: readonly ComparisonReviewAttemptEntry[]
-) => {
-    const completed = attempts.filter((attempt) => attempt.status === "completed");
+export type ComparisonReviewSettlementReconciliation = {
+    /** Attempts that reached a provider holding credits. The denominator. */
+    held: number;
+    /** Of those, the ones settlement or refund reported a figure for. */
+    reported: number;
+    /** Of those, the ones neither reported -- "we do not know". */
+    unreported: number;
+    /** Completed attempts charged more than they reserved. */
+    overSettled: number;
+    /** Failed attempts that were not fully refunded. */
+    unrefunded: number;
+    /** overSettled + unrefunded. Both are credits owed in the wrong direction. */
+    mismatched: number;
+};
+
+/**
+ * The four fields reconciliation reads, and nothing else.
+ *
+ * Stated structurally so the scorecard can pass its own narrower row type in
+ * rather than casting. A cast here would be the seam where the two modules
+ * quietly stop agreeing about what an attempt is.
+ */
+export type SettleableAttempt = {
+    status: string;
+    reservedCredits: number;
+    settledCredits: number | null;
+};
+
+/** Attempts that reached a provider and held credits: the whole population. */
+export const heldCreditAttempts = <T extends SettleableAttempt>(
+    attempts: readonly T[]
+): readonly T[] =>
+    attempts.filter(
+        (attempt) =>
+            (attempt.status === "completed" || attempt.status === "failed") &&
+            attempt.reservedCredits > 0
+    );
+
+export const settlementReconciliation = (
+    attempts: readonly SettleableAttempt[]
+): ComparisonReviewSettlementReconciliation => {
+    const held = heldCreditAttempts(attempts);
+    const reported = held.filter((attempt) => attempt.settledCredits !== null);
+    const overSettled = reported.filter(
+        (attempt) =>
+            attempt.status === "completed" &&
+            (attempt.settledCredits as number) > attempt.reservedCredits
+    ).length;
+    const unrefunded = reported.filter(
+        (attempt) =>
+            attempt.status === "failed" && (attempt.settledCredits as number) > 0
+    ).length;
     return {
-        completed: completed.length,
-        unreported: completed.filter((attempt) => attempt.settledCredits === null)
-            .length,
-        // Settling BELOW the reservation is normal -- the unused part is
-        // released. Settling ABOVE it is not: it means more was charged than
-        // was ever held, which is the direction that costs a user credits
-        // nothing reserved for them.
-        overSettled: completed.filter(
-            (attempt) =>
-                attempt.settledCredits !== null &&
-                attempt.settledCredits > attempt.reservedCredits
-        ).length,
+        held: held.length,
+        reported: reported.length,
+        unreported: held.length - reported.length,
+        overSettled,
+        unrefunded,
+        mismatched: overSettled + unrefunded,
     };
 };
 

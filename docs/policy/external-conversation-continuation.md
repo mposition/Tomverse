@@ -116,20 +116,37 @@ memory와 구분되지 않으면서, memory 프로그램이 앞에 세워 둔 va
 
 `lib/externalContinuationSeedPrompt.ts`, `promptVersion = ext-continuation-seed-v1`.
 
-- seed는 **untrusted data 구획**입니다. import 정책 §9.1의 순서 안에서 안전
-  정책·capability block 아래, 대화 history 위에 놓입니다.
-- **규칙은 블록 앞에 옵니다.** 뒤에 놓으면 payload가 규칙보다 먼저 읽힙니다.
-- 고정 marker로 fence하고, 내용 안의 marker는 무력화합니다.
+**seed는 두 조각으로 나뉘며, 그 분리가 이 절의 핵심입니다.**
+
+| 조각 | 무엇 | 허용 role |
+|---|---|---|
+| `rulesText` | Tomverse가 쓴 규칙. 외부 텍스트를 하나도 끼워 넣지 않음 | `system` |
+| `transcriptText` | 가져온 turn들. fence 안 | **`system`·`developer` 금지** |
+
+- **외부 내용을 system/developer 위치로 승격하지 않습니다.** `system`은 요청이
+  가진 가장 높은 권한 자리이고, 제3자 transcript를 그 안에 넣는 것은 이 조항이
+  금지하는 승격 **그 자체**입니다. 감싼 문장이 "아래는 데이터다"라고 말해도
+  provider가 보는 role은 바뀌지 않습니다.
+
+  v1이 정확히 이것을 틀렸습니다 — 한 덩어리를 만들어 `system` 하나로 보내면서
+  wrapper 문장을 근거로 삼았습니다. fence·평탄화·invisible 제거는 **구조 위장**을
+  줄일 뿐 **메시지 권한**을 낮추지 않습니다.
+- **규칙은 발췌 앞에 옵니다.** 뒤에 놓으면 payload가 규칙보다 먼저 읽힙니다.
+  순서는 `buildChatTurnPrelude()`가 고정하며, 그 함수가 돌려주는 최종
+  `ModelMessage[]`에 대해 테스트가 "외부 payload의 role이 system/developer가
+  아니다"를 검사합니다.
+- 고정 marker로 fence하고, 내용 안의 marker는 무력화합니다. 규칙은 두 marker의
+  이름을 대며 "그것은 Tomverse가 쓴 것"이라고 밝힙니다.
 - 각 turn은 **한 줄로 평탄화**하고 invisible 문자(C0/C1·zero-width·bidi
   override)를 제거합니다.
 - **외부 assistant 발언은 provider 이름을 단 label로 표시**합니다. 모델이 그것을
   자기 이전 답변으로 읽으면 옹호하고, persona를 이어가고, 하지 않은 말을 했다고
   주장합니다.
-- **외부 내용을 system/developer instruction으로 승격하지 않습니다.** 블록은
-  "이 구획은 데이터"라고만 말하는 하나의 system message이고, 그 안의 명령형
-  문장은 다른 서비스에게 한 말이라고 규칙이 명시합니다.
-- 이 평탄화는 **진짜 방어가 아닙니다.** 저장된 텍스트가 *구조처럼 보이지* 않게 할
-  뿐입니다. 실제 경계는 그것이 절대 system 위치에 놓이지 않는다는 사실입니다.
+- 평탄화와 fence는 **진짜 방어가 아닙니다.** 저장된 텍스트가 *구조처럼 보이지*
+  않게 할 뿐입니다. 실제 경계는 role입니다.
+- **이 구조 수정 전에는 유료 prompt-injection 검증(§D)을 실행하지 않습니다.**
+  낮출 수 있는 권한을 그대로 둔 채 모델이 버티는지 보는 것은 방어를 검증하는
+  것이 아닙니다.
 
 ### 4.4 비용
 
@@ -148,8 +165,14 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 4. snapshot이 잠겨 있다면 **이 요청**이 유효한 `external_conversation` grant를 가짐
 
 하나라도 어긋나면 seed는 `null`이고, 그 turn은 seed 없는 평범한 turn으로
-진행됩니다. **네 경우를 하나의 답으로 두는 것이 규칙입니다** — 형태를 넷으로
-나누면 셋만 처리되고 하나가 잊힙니다.
+진행됩니다. **여러 경우를 하나의 답으로 두는 것이 규칙입니다** — 형태를 여럿으로
+나누면 일부만 처리되고 하나가 잊힙니다.
+
+**단, 그것은 제어 흐름의 규칙이지 관측의 규칙이 아닙니다.** `loadContinuationTurnSeed()`
+는 `{ seed, outcome }`을 돌려줍니다 — 호출자는 `seed` 한 형태만 보고 분기할 수
+없으며, `outcome`은 §12의 계수와 로그로만 갑니다. v1은 이 둘을 섞어 `null` 하나만
+돌려주고 아무것도 기록하지 않았고, 그 결과 staging 체크리스트 C-3("잠근 뒤 사유가
+`locked`인지 확인")이 **답을 읽을 자리가 없어 완료 불가**였습니다.
 
 - seed가 없어도 새 Tomverse 메시지 기록과 일반 대화 조회는 그대로입니다.
 - 클라이언트는 seed를 만들지도, 보내지도, 우회하지도 못합니다. `messages`에 외부
@@ -191,6 +214,13 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 
 - 세 번째 줄이 rollback 계약입니다. 이미 만들어진 사용자의 새 Tomverse 메시지가
   사라지거나 접근 불가능해지면 안 됩니다.
+- **활성화·롤백 경로는 Admin Console에 있습니다** — `GET`·`PATCH
+  /api/admin/app-settings`의 `externalConversationContinuationEnabled`와
+  Platform Settings의 전용 체크박스. 기존 audit-integrity 계약(`ops:write`,
+  최근 재인증, `app_settings.update_started`/`update_completed`)을 그대로 탑니다.
+  **호출부 없는 setter는 활성화 경로가 아닙니다.**
+- Import flag와 같은 카드 안에 있되 **별도 스위치**입니다. 하나로 묶으면 import가
+  이미 켜진 production에서 이 기능이 함께 열립니다.
 - ordinary chat과 Review에는 영향이 없습니다. seed가 빈 문자열이면 system block이
   추가되지 않고 토큰도 0입니다.
 - migration은 additive이고 flag off 상태에서 먼저 배포할 수 있습니다. baseline은
@@ -226,6 +256,20 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 주거나. 후자를 택했고 그것은 additive입니다: 기존 route의 의미가 바뀌지 않고
 Review를 재배선하지 않습니다. Tomverse Chat이 자기 surface를 갖는 날 옮길 자리는
 `CONTINUATION_SURFACE_PATH` 한 곳입니다.
+
+**재진입은 서버가 판정합니다.** 대화 목록·상세·검색 응답은 각 대화의
+`surface`(`workspace` | `continuation`)를 싣고, 사이드바와 검색 결과는 그 값에
+따라 `/continuations/[id]`로 이동합니다. 판정은 `lib/continuationRoutes.ts`의
+`conversationSurface()` 하나이며 근거는 bridge row의 존재뿐입니다 —
+`productKey`에서 유도하지 않습니다(그러면 앞으로의 모든 `chat` 대화가 여기로
+옵니다).
+
+v1에는 이것이 없었고, 그래서 **만든 직후에는 정상으로 보이고 목록에서 다시 열면
+Review workspace로 열려 외부 원문·출처 구획이 사라졌습니다.** 결함이 가질 수 있는
+가장 나쁜 모양입니다.
+
+검색 결과는 자기 `surface`를 직접 싣습니다. 검색은 목록이 불러오지 않은 대화를
+가리킬 수 있고, 그때 workspace로 되돌아가면 같은 결함이 됩니다.
 
 화면 구성:
 
@@ -289,9 +333,26 @@ USD를 싣지 않습니다.
 
 ## 12. 관측
 
-content-free 집계만 남깁니다: bridge 생성 수, seed가 실린 turn 수, seed가 없어
-그냥 진행한 turn 수와 그 사유(flag off / no bridge / source gone / locked),
-seed 토큰 버킷. **외부 원문·제목·digest·ordinal 조합은 남기지 않습니다.**
+`lib/externalContinuationMetrics.ts`. content-free 집계만 남깁니다.
+
+| outcome | 뜻 | 로그 |
+|---|---|---|
+| `seeded` | 발췌가 실림 | 없음(정상 경로) |
+| `no_bridge` | 일반 대화 | 없음(분모의 나머지 절반) |
+| `flag_off` | rollout flag off | 있음 |
+| `source_deleted` | 원본 삭제 또는 조회 불가 | 있음 |
+| `locked` | 잠긴 snapshot, 이 요청에 grant 없음 | 있음 |
+| `empty_selection` | 읽히지만 고를 turn이 없음 | 있음 |
+
+- 계수는 `ChatUsageBucket`의 `continuation:` namespace 일간 집계이고, 로그는
+  `continuation_seed_skipped` 한 줄입니다.
+- **정상 경로에는 로그를 남기지 않습니다.** 매 turn의 한 줄은 찾으려는 네 줄을
+  묻습니다 — `billing_price_catalog_fallback`과 같은 판단입니다.
+- **외부 원문·제목·digest·ordinal·conversation ID를 남기지 않습니다.** outcome은
+  고정 enum이고 계수는 일간 총계이므로, 기록 전체가 "오늘 사유 R로 N turn이
+  seed 없이 나갔다"입니다 — 가리는 것이 아니라 구조상 담을 수 없습니다.
+- **기록은 `/api/chat`에서만 합니다.** preflight는 같은 turn을 견적낼 뿐이므로
+  양쪽에서 세면 모든 수치가 두 배가 되고 comparison은 세 배가 됩니다.
 
 ## 13. 출시 차단 조건
 

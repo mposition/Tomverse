@@ -802,6 +802,14 @@ model ComparisonReviewRun {
   groundingTotalQuotes      Int      @default(0)
   groundingMatchedQuotes    Int      @default(0)
   sourceGroundingLevel      String?
+  /// Identifies the process that wrote this row. Random per process, carries
+  /// no user or machine identity, and exists only to scope the sequence below.
+  writerId                  String   @default("")
+  /// Monotonic per writer, incremented for every write this process ATTEMPTED.
+  /// A gap between two rows of the same writer is a write that did not land,
+  /// which is the only way a table of successful inserts can report what is
+  /// missing from it. See lib/aiReviewScorecardCore.ts telemetryCompleteness().
+  writerSequence            Int      @default(0)
   createdAt                 DateTime @default(now())
 
   attempts ComparisonReviewRunAttempt[]
@@ -811,6 +819,7 @@ model ComparisonReviewRun {
   @@index([userId, createdAt])
   @@index([subjectKey, createdAt])
   @@index([traceId])
+  @@index([writerId, writerSequence])
 }
 
 /// One provider attempt inside one AI Review run.

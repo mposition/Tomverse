@@ -46,6 +46,8 @@ const run = (overrides = {}) => ({
   secondarySettlementStatus: "settled",
   subjectKind: "account",
   createdAt: new Date("2026-08-30T00:00:00Z"),
+  writerId: "writer-a",
+  writerSequence: 1,
   ...overrides,
 });
 
@@ -236,6 +238,155 @@ test("an attempt whose settlement never reported is unreconciled, not a mismatch
   assert.equal(card.creditReconciliation.status, "insufficient_evidence");
 });
 
+test("a failed reviewer whose refund never reported is not a clean window", () => {
+  // The reproduction that showed this metric could pass with real unreleased
+  // credits: twenty clean completions and five failures whose refund threw.
+  // Asking only about completed attempts reported 0 unreconciled out of 20.
+  const rows = [
+    ...Array.from({ length: 20 }, () =>
+      run({ attempts: [attempt({ reservedCredits: 8, settledCredits: 5 })] })
+    ),
+    ...Array.from({ length: 5 }, () =>
+      run({
+        attempts: [
+          attempt({
+            status: "failed",
+            reservedCredits: 8,
+            settledCredits: null,
+            settlementStatus: null,
+          }),
+        ],
+      })
+    ),
+  ];
+  const card = summariseReliability(rows, 30);
+  assert.equal(card.unreconciledSettlements.numerator, 5);
+  assert.equal(card.unreconciledSettlements.denominator, 25);
+  assert.equal(card.unreconciledSettlements.status, "ok");
+});
+
+test("a failed attempt that was still charged is a mismatch of its own", () => {
+  const rows = [
+    ...Array.from({ length: 20 }, () =>
+      run({ attempts: [attempt({ reservedCredits: 8, settledCredits: 5 })] })
+    ),
+    ...Array.from({ length: 5 }, () =>
+      run({
+        attempts: [
+          attempt({
+            status: "failed",
+            reservedCredits: 8,
+            settledCredits: 8,
+            settlementStatus: "settled",
+          }),
+        ],
+      })
+    ),
+  ];
+  const card = summariseReliability(rows, 30);
+  assert.equal(card.unrefundedFailureRate.numerator, 5);
+  assert.equal(card.unrefundedFailureRate.denominator, 5);
+  assert.equal(card.overSettledRate.numerator, 0);
+  // The combined metric the eligibility item reads sees both halves.
+  assert.equal(card.creditReconciliation.numerator, 5);
+  assert.equal(card.creditReconciliation.denominator, 25);
+});
+
+test("an attempt that reserved nothing is outside the reconciliation question", () => {
+  const rows = Array.from({ length: 25 }, () =>
+    run({ attempts: [attempt({ reservedCredits: 0, settledCredits: null })] })
+  );
+  const card = summariseReliability(rows, 30);
+  assert.equal(card.unreconciledSettlements.denominator, 0);
+  assert.equal(card.unreconciledSettlements.status, "insufficient_evidence");
+});
+
+test("a partial telemetry outage is countable, and does not look like a healthy window", () => {
+  // The state this replaces: the telemetry module promised a missingTraceRate
+  // in a comment and the repository contained the name nowhere else. Every
+  // rate was computed from rows that landed, so inserts failing for some runs
+  // and not others produced a perfect completion rate over a biased sample.
+  const rows = [];
+  for (let sequence = 1; sequence <= 100; sequence += 1) {
+    if (sequence >= 30 && sequence < 50) continue; // writes that never landed
+    rows.push(run({ writerId: "writer-a", writerSequence: sequence }));
+  }
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.runs, 80);
+  assert.equal(card.completionRate.value, 1);
+  assert.equal(card.missingTraceRate.numerator, 20);
+  assert.equal(card.missingTraceRate.denominator, 100);
+});
+
+test("each writer is counted on its own span, so restarts are not gaps", () => {
+  // Two processes each numbering from 1 is the normal case, not a hole.
+  const rows = [
+    ...Array.from({ length: 15 }, (_, index) =>
+      run({ writerId: "a", writerSequence: index + 1 })
+    ),
+    ...Array.from({ length: 15 }, (_, index) =>
+      run({ writerId: "b", writerSequence: index + 1 })
+    ),
+  ];
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.missingTraceRate.numerator, 0);
+  assert.equal(card.missingTraceRate.denominator, 30);
+});
+
+test("rows written before the writer columns existed are excluded, not counted as one writer", () => {
+  const rows = Array.from({ length: 25 }, () =>
+    run({ writerId: "", writerSequence: 0 })
+  );
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.missingTraceRate.denominator, 0);
+  assert.equal(card.missingTraceRate.status, "insufficient_evidence");
+});
+
+test("a return window that has not closed is not a zero", () => {
+  // Twenty users whose first and only AI Review was yesterday. They cannot
+  // have returned on day 30 -- there has not been a thirtieth day -- and
+  // counting them in the denominator scored them as non-returns, so the
+  // metric answered `0 / 20, status ok` to a question nobody had waited long
+  // enough to ask.
+  const now = new Date("2026-08-31T00:00:00Z");
+  const rows = Array.from({ length: 20 }, (_, index) => ({
+    actorKey: `u${index}`,
+    eventName: "comparison_review_completed",
+    occurredAt: new Date(now.getTime() - 86_400_000),
+  }));
+  const card = summariseAdoption(rows, 90, { now });
+  assert.equal(card.reviewAnchoredReturnDay30.denominator, 0);
+  assert.equal(card.reviewAnchoredReturnDay30.value, null);
+  assert.equal(card.reviewAnchoredReturnDay30.status, "insufficient_evidence");
+  // Day 1 HAS closed for this cohort, so a measured zero there is honest.
+  assert.equal(card.reviewAnchoredReturnDay1.denominator, 20);
+  assert.equal(card.reviewAnchoredReturnDay1.value, 0);
+  assert.equal(card.reviewAnchoredReturnDay1.status, "ok");
+});
+
+test("a cohort whose window closed is measured, and a later return counts", () => {
+  const now = new Date("2026-08-31T00:00:00Z");
+  const day = 86_400_000;
+  const rows = [];
+  for (let index = 0; index < 25; index += 1) {
+    rows.push({
+      actorKey: `u${index}`,
+      eventName: "comparison_review_completed",
+      occurredAt: new Date(now.getTime() - 40 * day),
+    });
+    if (index < 10) {
+      rows.push({
+        actorKey: `u${index}`,
+        eventName: "chat_message_sent",
+        occurredAt: new Date(now.getTime() - 5 * day),
+      });
+    }
+  }
+  const card = summariseAdoption(rows, 90, { now });
+  assert.equal(card.reviewAnchoredReturnDay30.denominator, 25);
+  assert.equal(card.reviewAnchoredReturnDay30.numerator, 10);
+});
+
 test("dual availability and dual completion have different denominators", () => {
   const rows = [
     ...Array.from({ length: 20 }, () => run()),
@@ -397,7 +548,12 @@ test("retention by account age is reported apart from retention after a review",
     now: new Date("2026-08-30T00:00:00Z"),
   });
   assert.equal(card.reviewAnchoredReturnDay7.value, 1);
-  assert.equal(card.reviewAnchoredReturnDay30.value, 0);
+  // Their first review was 2026-08-01 and the window ends 2026-08-30, so the
+  // thirtieth day has not arrived. This used to assert 0, which is the defect
+  // stated as an expectation: a cohort that cannot yet have returned was being
+  // scored as one that did not.
+  assert.equal(card.reviewAnchoredReturnDay30.value, null);
+  assert.equal(card.reviewAnchoredReturnDay30.status, "insufficient_evidence");
   // The account-age series is a different question and says so.
   assert.equal(card.accountAgeReturnDay7.value, 0);
   assert.match(card.accountAgeReturnDay7.excluded, /not review retention/);

@@ -31,7 +31,7 @@
 //   npm run report:ai-review-m5-readiness -- --operations=ops.json
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   aggregateOutcomes,
@@ -63,11 +63,27 @@ const argValue = (name, fallback = "") => {
 };
 
 const exists = (path) => existsSync(join(process.cwd(), path));
+/**
+ * Reads a JSON file the operator named.
+ *
+ * `resolve` rather than `join`, because an operator passing an absolute path
+ * is the normal case and `join(cwd, "/tmp/ops.json")` silently produces
+ * `<cwd>/tmp/ops.json`. The read then failed, the report said "no operations
+ * report supplied", and the production half of the checklist stayed open for
+ * a reason that had nothing to do with production.
+ *
+ * Throwing rather than returning null for the same reason: a path that was
+ * given and could not be read is a different fact from a path that was never
+ * given, and reporting the first as the second is how a run gets judged
+ * against no evidence while looking like it was judged against some.
+ */
 const readJson = (path) => {
+  const full = resolve(process.cwd(), path);
   try {
-    return JSON.parse(readFileSync(join(process.cwd(), path), "utf8"));
-  } catch {
-    return null;
+    return JSON.parse(readFileSync(full, "utf8"));
+  } catch (error) {
+    console.error(`Could not read ${full}: ${error.message}`);
+    process.exit(1);
   }
 };
 
@@ -325,10 +341,23 @@ const settlementTelemetry =
   attemptModel.includes("settledCredits") &&
   attemptModel.includes("reservedCredits") &&
   attemptModel.includes("settlementStatus");
-const sequencedConversions = readFileSync(
-  "lib/aiReviewScorecardCore.ts",
-  "utf8"
-).includes("export const sequencedConversion");
+const scorecardCore = readFileSync("lib/aiReviewScorecardCore.ts", "utf8");
+const sequencedConversions = scorecardCore.includes(
+  "export const sequencedConversion"
+);
+// Three parts, because any two without the third measure nothing: the columns
+// have to exist, the writer has to claim a sequence before it writes, and the
+// scorecard has to do the arithmetic and report it.
+const runModel =
+  schema.split("model ComparisonReviewRun {")[1]?.split("\n}")[0] ?? "";
+const completenessTelemetry =
+  runModel.includes("writerId") &&
+  runModel.includes("writerSequence") &&
+  readFileSync("lib/comparisonReviewRunTelemetry.ts", "utf8").includes(
+    "writerSequence += 1"
+  ) &&
+  scorecardCore.includes("export const telemetryCompleteness") &&
+  scorecardCore.includes("missingTraceRate:");
 
 const thresholdSets = approvedThresholdSets();
 
@@ -365,6 +394,13 @@ const readiness = [
     settlementTelemetry
       ? "reserved and settled credits are both recorded, so a mismatch is computable"
       : "only the reserved amount and a status are recorded; reservation-vs-settlement cannot be computed"
+  ),
+  check(
+    "telemetry_completeness_measurable",
+    completenessTelemetry,
+    completenessTelemetry
+      ? "each write claims a per-writer sequence before it runs, so a write that never landed leaves a countable hole"
+      : "the scorecard reads only rows that landed, so a partial write outage reports as a healthy window"
   ),
   check(
     "sequenced_conversion_metrics",
@@ -470,6 +506,20 @@ const eligibility = [
       ? `${window90.reliability?.creditReconciliation?.numerator ?? "?"} reservation/settlement mismatch(es), ` +
         `${window90.reliability?.unreconciledSettlements?.numerator ?? "?"} unsettled attempt(s)`
       : noOperations
+  ),
+  check(
+    "telemetry_complete_over_approved_window",
+    Boolean(
+      policy &&
+        window90?.reliability?.missingTraceRate?.status === "ok" &&
+        window90.reliability.missingTraceRate.value <= policy.maxMissingTraceRate
+    ),
+    !policy
+      ? "no approved observation policy, so there is no bound on how much of the window may be missing"
+      : !window90
+        ? noOperations
+        : `${window90.reliability?.missingTraceRate?.value ?? "?"} missing against ` +
+          `${policy.maxMissingTraceRate}`
   ),
   check(
     "zero_critical_quality_violations",

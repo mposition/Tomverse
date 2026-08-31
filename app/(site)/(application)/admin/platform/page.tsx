@@ -7,6 +7,7 @@ import {
   isAssistantKnowledgeEnabled,
   isAssistantPackageImportEnabled,
   isAssistantProfilesEnabled,
+  isExternalContinuationEnabled,
   isExternalImportEnabled,
   isImageGenerationEnabled,
   isMemoryExtractionEnabled,
@@ -19,6 +20,7 @@ export default async function AdminPlatformSettingsPage() {
     settings,
     imageGenerationEnabled,
     externalConversationImportEnabled,
+    externalConversationContinuationEnabled,
     assistantProfilesEnabled,
     assistantKnowledgeEnabled,
     assistantPackageImportEnabled,
@@ -29,6 +31,7 @@ export default async function AdminPlatformSettingsPage() {
     getPublicAppSettings(),
     isImageGenerationEnabled(),
     isExternalImportEnabled(),
+    isExternalContinuationEnabled(),
     isAssistantProfilesEnabled(),
     isAssistantKnowledgeEnabled(),
     // Reported here, changed through its own control and its own request: a
@@ -49,6 +52,9 @@ export default async function AdminPlatformSettingsPage() {
       settings={settings}
       imageGenerationEnabled={imageGenerationEnabled}
       externalConversationImportEnabled={externalConversationImportEnabled}
+      externalConversationContinuationEnabled={
+        externalConversationContinuationEnabled
+      }
       assistantProfilesEnabled={assistantProfilesEnabled}
       assistantKnowledgeEnabled={assistantKnowledgeEnabled}
       assistantPackageImportEnabled={assistantPackageImportEnabled}

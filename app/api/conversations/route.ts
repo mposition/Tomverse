@@ -5,6 +5,7 @@ import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecy
 import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
+import { conversationSurface } from "@/lib/continuationRoutes";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -86,6 +87,11 @@ export async function GET(req: Request) {
         // Read to derive `isLocked`, never emitted. Selecting it is the point
         // at which that decision is visible.
         password: true,
+        // Whether this row opens at its own surface rather than in the
+        // workspace (docs/policy/external-conversation-continuation.md §8.2).
+        // Selected as a relation existence check, not a join of the bridge's
+        // columns: the list needs the answer, and none of the provenance.
+        continuationBridge: { select: { id: true } },
         _count: { select: { messages: true } },
       },
     });
@@ -126,6 +132,11 @@ export async function GET(req: Request) {
           conv.shareExpiresAt > new Date(),
         shareExpiresAt: conv.shareExpiresAt?.toISOString() || null,
         messageCount: conv._count.messages,
+        // Server-decided, so the sidebar cannot open a continuation in the
+        // workspace -- where the imported half it continues does not exist.
+        surface: conversationSurface({
+          hasContinuationBridge: conv.continuationBridge !== null,
+        }),
       };
     });
 

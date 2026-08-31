@@ -188,6 +188,33 @@ export const datasetProblems = (value: unknown): readonly string[] => {
             }
         }
     }
+    // A decision set may only contain cases a person adopted.
+    //
+    // The drafting tool writes `status: "candidate"` and leaves `adoptedBy`
+    // null, and absence is read as candidate rather than adopted, so a case
+    // that arrives without the field cannot slip through. Adoption is the
+    // judgement -- "this really is a contradiction, and this list is
+    // exhaustive" -- and a judgement made by the same kind of system under
+    // evaluation is not evidence about it.
+    //
+    // Development sets are exempt: they exist to iterate on the harness and
+    // are never evidence, which is why `artifactAdmissibilityProblems()`
+    // refuses one outright.
+    if (dataset.purpose === "decision") {
+        for (const raw of dataset.cases) {
+            const testCase = raw as Partial<AiReviewEvalCase>;
+            const label = isNonEmptyString(testCase.id) ? testCase.id : "a case";
+            if (testCase.status !== "adopted") {
+                problems.push(
+                    `${label}: status is ${String(testCase.status ?? "candidate")}; ` +
+                        `a decision set holds only cases a person adopted`
+                );
+            } else if (!isNonEmptyString(testCase.adoptedBy)) {
+                problems.push(`${label}: adopted, but nobody is named as the adopter`);
+            }
+        }
+    }
+
     return problems;
 };
 

@@ -8,7 +8,11 @@ import {
   findThresholdSet,
   thresholdShortfalls,
 } from "../lib/aiReviewQualityThresholds.ts";
-import { aggregateOutcomes } from "../lib/aiReviewEvalCore.ts";
+import {
+  aggregateOutcomes,
+  AI_REVIEW_EVAL_LANGUAGES,
+  AI_REVIEW_EVAL_TASK_TYPES,
+} from "../lib/aiReviewEvalCore.ts";
 import { approvedEntryProblems } from "../lib/aiReviewEvalRegister.ts";
 
 const thresholds = findThresholdSet("v1-draft");
@@ -31,12 +35,20 @@ const arm = (name, overrides = {}) => ({
   ...overrides,
 });
 
+// The full required sets, because a partial one is now itself a shortfall.
+// The fixtures used to carry two task-type arms out of six and produced no
+// complaint about the other four -- which was the defect, not the fixture.
+const languageArms = (overrides = {}) =>
+  AI_REVIEW_EVAL_LANGUAGES.map((name) => arm(name, overrides));
+const taskTypeArms = (overrides = {}) =>
+  AI_REVIEW_EVAL_TASK_TYPES.map((name) => arm(name, { cases: 200, ...overrides }));
+
 const check = (overrides = {}) =>
   thresholdShortfalls({
     thresholds,
     aggregate: passingMetrics(),
-    byLanguage: [arm("ko"), arm("en")],
-    byTaskType: [arm("planning_decision"), arm("safety_sensitive")],
+    byLanguage: languageArms(),
+    byTaskType: taskTypeArms(),
     zeroToleranceViolations: 0,
     ...overrides,
   });
@@ -94,15 +106,56 @@ test("a language gap fails even when both arms clear the floor", () => {
 
 test("one language arm is not enough to judge the gap rule", () => {
   const problems = check({ byLanguage: [arm("en")] });
-  assert.match(problems[0], /1 language arm\(s\) recorded/);
+  assert.ok(problems.some((problem) => /no language arm for "ko"/.test(problem)));
+  assert.ok(
+    problems.some((problem) => /1 distinct language arm\(s\) recorded/.test(problem))
+  );
+});
+
+test("two arms of the same language do not satisfy the gap rule", () => {
+  // The hole this closes: the rule was `byLanguage.length < 2`, so two arms
+  // both labelled `en` passed it and the Korean arm was never asked for.
+  const problems = check({ byLanguage: [arm("en"), arm("en")] });
+  assert.ok(problems.some((problem) => /no language arm for "ko"/.test(problem)));
+  assert.ok(problems.some((problem) => /"en" appears 2 times/.test(problem)));
+});
+
+test("an approval carrying no task-type arms is refused", () => {
+  // Reproduced against v1-draft with a perfect aggregate: `byTaskType: []`
+  // produced no shortfall at all, because the rule walked the arms it was
+  // handed and was handed none. The aggregate is what hides a collapsed arm,
+  // so an approval judged on the aggregate alone is the failure the arm rules
+  // exist to prevent.
+  const problems = check({ byTaskType: [] });
+  for (const taskType of AI_REVIEW_EVAL_TASK_TYPES) {
+    assert.ok(
+      problems.some((problem) => problem.includes(`no task-type arm for "${taskType}"`)),
+      `${taskType} was not required`
+    );
+  }
+});
+
+test("an arm too small to support its own rate is refused", () => {
+  const problems = check({ byLanguage: [arm("ko", { cases: 12 }), arm("en")] });
+  assert.ok(
+    problems.some((problem) => /language arm "ko" reports 12 case\(s\); 600 needed/.test(problem))
+  );
+});
+
+test("an arm nobody recognises is refused rather than ignored", () => {
+  const problems = check({
+    byTaskType: [...taskTypeArms(), arm("vibes", { cases: 200 })],
+  });
+  assert.ok(problems.some((problem) => /"vibes" is not one of/.test(problem)));
 });
 
 test("a collapsed task-type arm fails under a passing average", () => {
   const problems = check({
-    byTaskType: [
-      arm("planning_decision"),
-      arm("safety_sensitive", { contradictionRecallWilsonLower: 0.2 }),
-    ],
+    byTaskType: taskTypeArms().map((entry) =>
+      entry.arm === "safety_sensitive"
+        ? { ...entry, contradictionRecallWilsonLower: 0.2 }
+        : entry
+    ),
   });
   assert.equal(problems.length, 1);
   assert.match(problems[0], /safety_sensitive contradictionRecallWilsonLower 0\.2 < 0\.7000/);
@@ -110,18 +163,16 @@ test("a collapsed task-type arm fails under a passing average", () => {
 
 test("a task-type arm may sit below the aggregate floor, but only so far", () => {
   // 0.75 is under the 0.8 aggregate floor and inside the 0.1 allowance.
-  assert.deepEqual(
+  const withBusinessWriting = (value) =>
     check({
-      byTaskType: [arm("business_writing", { contradictionRecallWilsonLower: 0.75 })],
-    }),
-    []
-  );
-  assert.equal(
-    check({
-      byTaskType: [arm("business_writing", { contradictionRecallWilsonLower: 0.69 })],
-    }).length,
-    1
-  );
+      byTaskType: taskTypeArms().map((entry) =>
+        entry.arm === "business_writing"
+          ? { ...entry, contradictionRecallWilsonLower: value }
+          : entry
+      ),
+    });
+  assert.deepEqual(withBusinessWriting(0.75), []);
+  assert.equal(withBusinessWriting(0.69).length, 1);
 });
 
 test("a zero-tolerance violation fails", () => {

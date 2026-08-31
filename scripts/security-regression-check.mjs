@@ -921,9 +921,31 @@ const checks = [
   {
     name: "Conversation search filters locked results by unlock grant",
     file: "app/api/conversations/search/route.ts",
+    /*
+      The guarantee, not the formatting.
+
+      This used to match the select verbatim --
+      `conversation: { select: { title: true, password: true } }` -- which held
+      the property hostage to the line's shape. Adding one more selected field
+      (the continuation surface, 2026-08-30) reformatted the object across
+      several lines and failed the check while the property it guards was
+      untouched. A rule that fires on a reformat is a rule people learn to
+      edit rather than read.
+
+      What actually has to be true is that the route selects the lock column
+      and passes it to the grant check. Both are asserted, and the second is
+      asserted as a *call* rather than as two independent substrings: the old
+      rule was satisfied by the import line alone, so replacing the call with
+      anything else while keeping the import passed it. Verified by mutation --
+      dropping `password` from the select fails, and renaming the call fails.
+    */
     test: (source) =>
-      source.includes("hasConversationUnlockGrant") &&
-      source.includes("conversation: { select: { title: true, password: true } }"),
+      /conversation:\s*\{\s*select:\s*\{[\s\S]*?\bpassword:\s*true\b/.test(
+        source
+      ) &&
+      /hasConversationUnlockGrant\([^)]*message\.conversation\.password[^)]*\)/.test(
+        source
+      ),
   },
   {
     name: "Bulk conversation deletion requires unlock grants",
