@@ -21,7 +21,7 @@
 //   npm run check:ai-review-eval -- --artifact=<path>
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import {
   assessSampleAdequacy,
@@ -41,6 +41,10 @@ import {
   approvalBlockDrift,
   approvalBlockFromArtifact,
 } from "../lib/aiReviewApprovalBlock.ts";
+import {
+  blindReviewRecordProblems,
+  parseBlindReviewRecord,
+} from "../lib/aiReviewBlindReviewRecord.ts";
 
 const DATASET_DIRECTORY = "docs/ops/ai-review-evaluation-set";
 
@@ -169,6 +173,21 @@ if (!AI_REVIEW_EVAL_REGISTER.some((entry) => entry.status === "approved")) {
 // reviewer's artifact to another and reported the second reviewer's honest
 // numbers as the first one's transcription error.
 
+// Every decision set in the tree, by the digest it actually fingerprints to.
+//
+// Computed here rather than read from the file, because a digest a file states
+// about itself is not evidence about the file.
+const decisionSetsByDigest = new Map();
+if (existsSync(DATASET_DIRECTORY)) {
+  for (const file of readdirSync(DATASET_DIRECTORY).filter((name) => name.endsWith(".json"))) {
+    const path = join(DATASET_DIRECTORY, file);
+    const dataset = readJson(path);
+    if (dataset.__readError || dataset.purpose !== "decision") continue;
+    if (datasetProblems(dataset).length > 0) continue;
+    decisionSetsByDigest.set(datasetDigest(dataset), { path, dataset });
+  }
+}
+
 console.log("\nAI Review approved-entry evidence");
 const approvedEntries = AI_REVIEW_EVAL_REGISTER.filter(
   (entry) => entry.status === "approved"
@@ -231,6 +250,91 @@ for (const entry of approvedEntries) {
         problems.push("artifact carries no metrics, so nothing can be compared");
       } else {
         problems.push(...approvalBlockDrift(run, artifact));
+      }
+
+      // The dataset, resolved from the digest to a file in this tree.
+      //
+      // Readiness finds an adequate decision set A. The approval check asks
+      // that the artifact and the register agree on a digest B. Nothing asked
+      // whether A and B are the same set -- so a reviewer could be approved on
+      // an artifact whose dataset was never committed, or was deleted, while
+      // readiness stayed satisfied by an unrelated one. The digest is the
+      // handle, so it has to resolve.
+      const matchingSet = decisionSetsByDigest.get(run.datasetDigest);
+      if (!matchingSet) {
+        problems.push(
+          `no dataset in ${DATASET_DIRECTORY} fingerprints to ${run.datasetDigest}; ` +
+            `the set this run scored is not in the tree` +
+            (decisionSetsByDigest.size > 0
+              ? ` (found: ${[...decisionSetsByDigest.keys()].join(", ")})`
+              : " (no valid decision set exists)")
+        );
+      } else {
+        if (matchingSet.dataset.version !== summary.datasetVersion) {
+          problems.push(
+            `artifact names dataset version ${String(summary.datasetVersion)}, but ` +
+              `${matchingSet.path} is ${matchingSet.dataset.version}`
+          );
+        }
+        if (matchingSet.dataset.schemaVersion !== summary.datasetSchemaVersion) {
+          problems.push(
+            `artifact names schema ${String(summary.datasetSchemaVersion)}, but ` +
+              `${matchingSet.path} is ${matchingSet.dataset.schemaVersion}`
+          );
+        }
+        const drift = freezeDrift(matchingSet.dataset);
+        if (drift) problems.push(`${matchingSet.path}: ${drift}`);
+        if (!matchingSet.dataset.frozenAt || !matchingSet.dataset.frozenBy) {
+          problems.push(
+            `${matchingSet.path} is not frozen; an approval cannot rest on a set that can still change`
+          );
+        }
+        const adequacy = assessSampleAdequacy(matchingSet.dataset.cases);
+        if (!adequacy.adequate) {
+          problems.push(
+            `${matchingSet.path} is not adequate: ${adequacy.shortfalls.join("; ")}`
+          );
+        }
+      }
+
+      // The blind review, opened rather than taken on trust.
+      //
+      // A reference to a file that does not exist used to satisfy the
+      // register: `artifactAdmissibilityProblems()` is pure and never opened
+      // anything. So a person's verdicts could be cited without ever having
+      // been written, and the two rules no term list can screen stayed zero.
+      const recordRef = summary.humanBlindReviewRef;
+      if (!recordRef) {
+        problems.push("no blind review record to open");
+      } else if (!existsSync(recordRef)) {
+        problems.push(`blind review record ${recordRef} does not exist`);
+      } else {
+        const answerKeyPath = join(
+          dirname(run.artifactRef),
+          `${basename(run.artifactRef).replace(/(--adjudicated)?\.json$/, "")}--answer-key.json`
+        );
+        if (!existsSync(answerKeyPath)) {
+          problems.push(`no answer key beside the artifact (${answerKeyPath})`);
+        } else {
+          const { record, problems: parseProblems } = parseBlindReviewRecord(
+            readFileSync(recordRef, "utf8")
+          );
+          problems.push(...parseProblems);
+          problems.push(
+            ...blindReviewRecordProblems({
+              record,
+              sheetLabels: Object.keys(JSON.parse(readFileSync(answerKeyPath, "utf8"))),
+              identity: {
+                runOrdinal: run.runOrdinal,
+                reviewerModelId: run.reviewerModelId,
+                promptVersion: run.promptVersion,
+                datasetDigest: run.datasetDigest,
+                commitSha: run.evaluatedCommit,
+                sheetSeed: summary.seed ?? 1,
+              },
+            })
+          );
+        }
       }
     }
     report(label, problems);

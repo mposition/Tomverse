@@ -213,6 +213,10 @@ test("artifact admissibility refuses a partial, dirty, development or unreviewed
     plannedCases: 1_200,
     sampleAdequate: true,
     humanBlindReviewRef: "docs/ops/.../record.csv",
+    // A run straight out of the harness has neither of these: the blind review
+    // happens afterwards, so the adjudication step sets them.
+    adjudicated: true,
+    blindReviewSignedBy: "@mposition",
   };
   assert.deepEqual(artifactAdmissibilityProblems(admissible), []);
 
@@ -323,6 +327,39 @@ test("an approved entry missing its evidence is reported item by item", () => {
   // proposal nobody has signed. Until this existed, an approval that carried
   // an artifact, a commit and two ordinals was accepted whatever it measured.
   assert.ok(problems.some((p) => p.includes("is a proposal and has no approver")));
+});
+
+test("an un-adjudicated artifact is not admissible evidence", () => {
+  // The run cannot fold in a person's verdicts -- the blind review happens
+  // afterwards -- so an artifact straight out of the runner carries only what
+  // a term list could screen. Two of the five rules have no mechanical form,
+  // so its zero is a zero for rules nothing looked at.
+  const base = {
+    decisionGrade: true,
+    datasetPurpose: "decision",
+    datasetVersion: "decision-v1",
+    datasetDigest: "sha256:abc",
+    datasetSchemaVersion: 1,
+    commitSha: "b".repeat(40),
+    workingTreeDirty: false,
+    runOrdinal: 1,
+    plannedCases: 1200,
+    completedCases: 1200,
+    sampleAdequate: true,
+    humanBlindReviewRef: "docs/ops/record.csv",
+  };
+  const problems = artifactAdmissibilityProblems(base);
+  assert.ok(problems.some((p) => p.includes("not adjudicated")));
+  assert.ok(problems.some((p) => p.includes("blind review is unsigned")));
+
+  assert.deepEqual(
+    artifactAdmissibilityProblems({
+      ...base,
+      adjudicated: true,
+      blindReviewSignedBy: "@mposition",
+    }),
+    []
+  );
 });
 
 test("register drift reads production's served pairs, never the register itself", () => {

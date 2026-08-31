@@ -293,6 +293,15 @@ export type ReliabilityScorecard = {
     traceCompleteness: ScorecardMetric | null;
     /** Who attested the attempted total. Null when none was supplied. */
     traceCompletenessSource: string | null;
+    /**
+     * Why a supplied attempted total was refused, when one was.
+     *
+     * Null means either none was supplied or it was usable. A total below the
+     * rows already in the window describes some other window -- a query over
+     * the wrong period, a stale saved search -- and clamping it to zero turned
+     * that into a clean result.
+     */
+    traceCompletenessProblem: string | null;
     p50DurationMs: number | null;
     p95DurationMs: number | null;
     reviewerHealth: readonly ReviewerHealthRow[];
@@ -372,6 +381,18 @@ export const summariseReliability = (
     // that a second copy of it would drift.
     const reconciliation = settlementReconciliation(attempts);
     const completeness = telemetryCompleteness(rows);
+    const traceCompletenessProblem =
+        typeof evidence.attemptedWrites !== "number"
+            ? null
+            : !Number.isSafeInteger(evidence.attemptedWrites) ||
+                evidence.attemptedWrites < 0
+              ? `the attempted total ${String(evidence.attemptedWrites)} is not a whole count`
+              : evidence.attemptedWrites < rows.length
+                ? `the attempted total ${evidence.attemptedWrites} is below the ${rows.length} ` +
+                  `row(s) this window already holds, so it is not a count of this window`
+                : !evidence.attemptedWritesSource
+                  ? "the attempted total names no source, so it cannot be traced back to a query"
+                  : null;
     const completedWithFigure = attempts.filter(
         (attempt) =>
             attempt.status === "completed" &&
@@ -484,21 +505,34 @@ export const summariseReliability = (
             withinSpans: completeness.attempted,
             writers: completeness.writers,
         },
-        traceCompleteness:
-            typeof evidence.attemptedWrites === "number" &&
-            evidence.attemptedWrites > 0
-                ? metric(
-                      Math.max(0, evidence.attemptedWrites - rows.length),
-                      evidence.attemptedWrites,
-                      "telemetry writes attempted, counted outside this table",
-                      {
-                          minimumDenominator,
-                          excluded:
-                              `attested by: ${evidence.attemptedWritesSource ?? "an unnamed source"}`,
-                      }
-                  )
-                : null,
-        traceCompletenessSource: evidence.attemptedWritesSource ?? null,
+        // An attempted total below the rows that landed is impossible, so it is
+        // refused rather than clamped.
+        //
+        // `Math.max(0, attempted - landed)` turned an undercount into a clean
+        // 0/30 with status ok: 50 rows against an attested 30 attempts read as
+        // a perfectly complete window. The realistic causes are a query over
+        // the wrong period and a stale saved search, and both would have
+        // passed the telemetry eligibility item. Impossible evidence is not
+        // weak evidence to be rounded off; it is a sign the number describes
+        // something other than this window.
+        traceCompleteness: traceCompletenessProblem
+            ? null
+            : typeof evidence.attemptedWrites === "number" &&
+                evidence.attemptedWrites > 0
+              ? metric(
+                    evidence.attemptedWrites - rows.length,
+                    evidence.attemptedWrites,
+                    "telemetry writes attempted, counted outside this table",
+                    {
+                        minimumDenominator,
+                        excluded: `attested by: ${evidence.attemptedWritesSource ?? "an unnamed source"}`,
+                    }
+                )
+              : null,
+        traceCompletenessSource: traceCompletenessProblem
+            ? null
+            : (evidence.attemptedWritesSource ?? null),
+        traceCompletenessProblem,
         p50DurationMs: percentile(durations, 0.5),
         p95DurationMs: percentile(durations, 0.95),
         reviewerHealth: [...health.entries()]

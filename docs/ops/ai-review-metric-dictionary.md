@@ -151,6 +151,14 @@ npm run report:ai-review-operations -- --window=90 \
 - 총계를 주지 않으면 `traceCompleteness`는 **`null`(모름)**이고, 0이 아닙니다.
 - `--attempted-writes-source`는 필수입니다 — 어떤 쿼리에서 나왔는지 되짚을 수
   없는 숫자는 증거가 아닙니다.
+- **저장된 행 수보다 작은 총계는 잘라내지 않고 거절합니다.** 50건이 저장된
+  window에 30을 주면 `max(0, 30 − 50) = 0`이 되어 `0/30 status ok` — 완벽하게
+  깨끗한 window로 읽혔습니다. 기간을 잘못 잡은 쿼리와 오래된 저장 검색이 정확히
+  이 모양을 만들고, 둘 다 telemetry eligibility를 통과했을 것입니다. 불가능한
+  증거는 약한 증거가 아니라 **다른 window를 설명하는 숫자**이므로
+  `traceCompletenessProblem`에 이유를 담아 거절합니다.
+- **총계 하나가 세 window를 설명할 수 없습니다.** 기본 리포트는 7·30·90일을 함께
+  내므로, 총계를 줄 때는 `--window=<days>`가 필수입니다.
 - eligibility의 `telemetry_complete_over_approved_window`는 **탐지된 구멍 0
   그리고 독립 총계 기준 완전성이 `maxMissingTraceRate` 이내**를 함께 요구합니다.
   하나라도 없으면 열린 채로 둡니다.

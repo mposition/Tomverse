@@ -11,6 +11,7 @@
 //                                        [--sample=24] [--seed=1]
 //                                        [--task-types=safety_sensitive,...]
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -19,6 +20,20 @@ import {
   renderBlindReviewRecord,
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
+import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
+
+/**
+ * The commit the sheet is about. Empty rather than a guess when git cannot
+ * answer: an identity field that quietly says "unknown" would match another
+ * run whose commit is also unknown.
+ */
+const currentCommitSha = () => {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+};
 
 const argValue = (name, fallback = "") => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -90,7 +105,24 @@ const recordPath = join(directory, `${stem}--blind-review-record.csv`);
 
 writeFileSync(sheetPath, renderBlindSheet(sheet, meta), "utf8");
 writeFileSync(keyPath, `${JSON.stringify(sheet.answerKey, null, 2)}\n`, "utf8");
-writeFileSync(recordPath, renderBlindReviewRecord(sheet), "utf8");
+// The record carries the run's identity, because its verdicts are read back
+// into that run's violation count. A form filled in for one run and applied to
+// another would move somebody else's numbers, so adjudication compares every
+// field of this header against the run it is adjudicating.
+const commitSha = argValue("commit", "");
+const datasetDigestValue = argValue("dataset-digest", datasetDigest(dataset));
+writeFileSync(
+  recordPath,
+  renderBlindReviewRecord(sheet, {
+    runOrdinal: meta.runOrdinal ?? 0,
+    reviewerModelId: meta.reviewerModelId,
+    promptVersion: meta.promptVersion,
+    datasetDigest: datasetDigestValue,
+    commitSha: commitSha || currentCommitSha(),
+    sheetSeed: seed,
+  }),
+  "utf8"
+);
 
 console.log(`sheet        ${sheetPath}   (${sheet.entries.length} item(s))`);
 console.log(`answer key   ${keyPath}   — open only after judging`);

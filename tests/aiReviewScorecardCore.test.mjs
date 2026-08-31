@@ -333,6 +333,46 @@ test("an attempted total counted outside the table is what makes completeness an
   assert.equal(card.traceCompletenessSource, "log query: count(comparison_review_run)");
 });
 
+test("an attempted total below the rows already present is refused, not clamped", () => {
+  // Math.max(0, attempted - landed) turned an undercount into a clean 0/30
+  // with status ok: 50 rows against an attested 30 attempts read as a
+  // perfectly complete window. A query over the wrong period and a stale
+  // saved search both produce exactly this, and both would have passed the
+  // telemetry eligibility item.
+  const rows = Array.from({ length: 50 }, (_, index) =>
+    run({ writerId: "A", writerSequence: index + 1 })
+  );
+  const card = summariseReliability(rows, 90, {}, {
+    attemptedWrites: 30,
+    attemptedWritesSource: "a stale saved search",
+  });
+  assert.equal(card.traceCompleteness, null);
+  assert.equal(card.traceCompletenessSource, null);
+  assert.match(card.traceCompletenessProblem, /below the 50 row\(s\)/);
+});
+
+test("an attempted total with no source is refused", () => {
+  const rows = Array.from({ length: 50 }, (_, index) =>
+    run({ writerId: "A", writerSequence: index + 1 })
+  );
+  const card = summariseReliability(rows, 90, {}, { attemptedWrites: 60 });
+  assert.equal(card.traceCompleteness, null);
+  assert.match(card.traceCompletenessProblem, /names no source/);
+});
+
+test("a usable attempted total is accepted and carries no problem", () => {
+  const rows = Array.from({ length: 50 }, (_, index) =>
+    run({ writerId: "A", writerSequence: index + 1 })
+  );
+  const card = summariseReliability(rows, 90, {}, {
+    attemptedWrites: 60,
+    attemptedWritesSource: "log query over the same window",
+  });
+  assert.equal(card.traceCompletenessProblem, null);
+  assert.equal(card.traceCompleteness.numerator, 10);
+  assert.equal(card.traceCompleteness.denominator, 60);
+});
+
 test("a partial telemetry outage is countable, and does not look like a healthy window", () => {
   // The state this replaces: the telemetry module promised a missingTraceRate
   // in a comment and the repository contained the name nowhere else. Every

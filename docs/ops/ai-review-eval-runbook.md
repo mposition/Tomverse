@@ -272,6 +272,62 @@ npm run check:ai-review-eval -- --artifact=<경로>
 버전을 이름으로 인용하므로, 기존 버전을 고치면 그 이름으로 승인된 pair가 조용히
 다른 기준으로 재해석됩니다.
 
+## 6b. 블라인드 판정을 수치에 반영합니다 — **adjudication**
+
+**사람이 채운 시트를 다시 읽는 단계가 없으면, 사람의 판정은 숫자에 도달하지
+않습니다.** `scoreCase()`는 처음부터 세 번째 인자로 사람이 판정한 규칙을
+받았고, 평가 runner는 언제나 `[]`를 넘겼습니다 — 블라인드 검토는 실행 **이후**에
+일어나므로 넘길 것이 없습니다. 그래서 사람이 `fabricated_safety_claim`(용어
+목록으로 선별할 수 없는 두 규칙 중 하나)을 발견해 시트에 적어도, artifact와
+register에는 **0**으로 남았습니다.
+
+```
+npm run adjudicate:ai-review-eval -- \
+  --artifact=<run.json> --record=<...--blind-review-record.csv>
+```
+
+- **실제 scorer를 다시 돌립니다.** 기계 판정 수에 사람 판정 수를 더하지 않습니다 —
+  harness가 `winner_declared`를 선별한 case를 사람도 표시했으면 위반은 **하나**이고,
+  `scoreCase()`가 이미 그것을 압니다. 여기서 두 번째 산술을 만들면 언젠가 첫
+  번째와 어긋납니다.
+- 실행의 **journal**을 다시 읽으므로 provider를 부르지 않고 비용이 0입니다.
+- 결과는 `*--adjudicated.json`이고, **승인이 인용하는 것은 이 파일**입니다.
+  `adjudicated: true`가 없는 artifact는 `artifactAdmissibilityProblems()`가
+  거절합니다.
+
+### 기록 양식은 신원을 싣고, 빈칸은 거절입니다
+
+`*--blind-review-record.csv`의 머리말에 run ordinal · reviewer · prompt version ·
+dataset digest · commit · sheet seed가 들어가고, 사람이 `signed-by`와 `signed-at`을
+채웁니다. adjudication과 `check:ai-review-eval`이 이 여섯 항목을 **하나씩** 대조합니다 —
+다른 실행에서 채운 양식은 다른 reviewer에 대한 다른 사람의 판정이고, 옮겨 다닐 수
+있는 판정은 증거가 아닙니다.
+
+**모든 칸에 `yes`/`no`가 있어야 하고 빈칸은 거절입니다.** 빈칸은 "봤는데 없었다"와
+"안 봤다"를 구분하지 못하며, 빈칸을 깨끗함으로 읽으면 다섯 규칙이 셋이 됩니다 —
+선별된 셋은 harness에서 채워져 오고 사람만 판정하는 둘만 비어 있게 되므로, 그
+모습이 정확히 깨끗한 실행과 같습니다.
+
+### 승인 검사는 기록 파일을 엽니다
+
+존재하지 않는 `humanBlindReviewRef`도 예전에는 통과했습니다 —
+`artifactAdmissibilityProblems()`는 순수 함수라 아무것도 열지 않습니다.
+이제 `check:ai-review-eval`이 기본 실행에서 파일을 열고, answer key의 모든
+label이 답해졌는지·다섯 규칙이 전부 판정됐는지·서명이 있는지·신원 여섯이 맞는지를
+검사합니다.
+
+## 6c. 승인 run의 dataset은 트리의 동결된 set과 결속됩니다
+
+readiness는 트리에서 적격한 decision set A를 찾고, 승인 검사는 artifact와
+register가 같은 digest B를 말하는지 봤습니다. **A와 B가 같은지는 아무도 묻지
+않았습니다.** 그래서 A로 readiness를 충족시키면서, 커밋된 적 없거나 삭제된 B의
+artifact로 reviewer를 승인할 수 있었습니다.
+
+이제 각 run의 `datasetDigest`로 트리의 파일을 **찾고**(파일이 스스로 적은 digest가
+아니라 실제로 계산한 digest로), 찾은 파일의 version · schema · 동결 여부 · freeze
+drift · 표본 적격성을 다시 검사합니다. 해당하는 파일이 없으면 그 자체가 거절
+사유입니다.
+
 ## 6a. 승인 항목의 증거는 기본 검사가 직접 엽니다
 
 `npm run check:ai-review-eval`은 **인자 없이** 실행돼도 승인된 항목마다

@@ -357,6 +357,11 @@ export type AiReviewEvalArtifactSummary = {
     sampleAdequate?: boolean;
     humanBlindReviewRef?: string | null;
     zeroToleranceViolations?: number;
+    /** Set by the adjudication step, never by the run. */
+    adjudicated?: boolean;
+    blindReviewSignedBy?: string | null;
+    blindReviewSignedAt?: string | null;
+    blindReviewCasesJudged?: number;
 };
 
 /**
@@ -413,6 +418,23 @@ export const artifactAdmissibilityProblems = (
         problems.push(
             "no blind human review reference; the human-judged zero-tolerance rules were not evaluated"
         );
+    }
+    // A run scored without a person's verdicts carries only what a term list
+    // could screen. Two of the five rules have no mechanical form at all, so
+    // an un-adjudicated artifact reporting zero violations is reporting zero
+    // for rules nothing looked at.
+    //
+    // This function is pure and cannot open the record it names, so it asks
+    // for the flag the adjudication step sets; the check script opens the file
+    // and re-validates it row by row.
+    if (artifact.adjudicated !== true) {
+        problems.push(
+            "not adjudicated: the blind review's verdicts were never folded in, so the " +
+                "violation count is only what a term list screened"
+        );
+    }
+    if (!isNonEmptyString(artifact.blindReviewSignedBy)) {
+        problems.push("the blind review is unsigned");
     }
     return problems;
 };

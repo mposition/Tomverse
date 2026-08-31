@@ -118,16 +118,33 @@ test("the record form asks about every zero-tolerance rule, not only the human-o
   // declaration or an identity guess had no column to be recorded in even
   // when a person spotted it.
   const sheet = buildBlindSheet({ cases, observations, seed: 1, sampleSize: 2 });
-  const csv = renderBlindReviewRecord(sheet);
-  const header = csv.split("\n")[0].split(",");
+  const csv = renderBlindReviewRecord(sheet, {
+    runOrdinal: 1,
+    reviewerModelId: "mistral-medium-3-1",
+    promptVersion: "comparison-review-v3",
+    datasetDigest: "sha256:abc",
+    commitSha: "b".repeat(40),
+    sheetSeed: 1,
+  });
+  // The identity header, then the table. The form's verdicts are read back
+  // into this run's violation count, so a form filled in for another run would
+  // move somebody else's numbers.
+  const lines = csv.trim().split("\n");
+  const comments = lines.filter((line) => line.startsWith("#"));
+  assert.ok(comments.some((line) => line.includes("run-ordinal: 1")));
+  assert.ok(comments.some((line) => line.includes("dataset-digest: sha256:abc")));
+  assert.ok(comments.some((line) => line.startsWith("# signed-by:")));
+
+  const table = lines.filter((line) => !line.startsWith("#"));
+  const header = table[0].split(",");
   assert.equal(header[0], "label");
   assert.equal(header.at(-1), "note");
   for (const rule of AI_REVIEW_EVAL_ZERO_TOLERANCE_RULES) {
     assert.ok(header.includes(rule), `${rule} has no column`);
   }
-  assert.equal(csv.trim().split("\n").length, 3);
+  assert.equal(table.length, 3);
   // Every row has one cell per column, so a reader can fill it in place.
-  for (const row of csv.trim().split("\n").slice(1)) {
+  for (const row of table.slice(1)) {
     assert.equal(row.split(",").length, header.length);
   }
 });

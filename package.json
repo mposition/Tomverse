@@ -189,7 +189,8 @@
     "report:deployed-commit-drift": "node scripts/report-deployed-commit-drift.mjs",
     "print:router-key-envelope": "node --import tsx scripts/print-router-key-envelope.mjs",
     "report:ai-review-eval-coverage": "node --conditions=react-server --import tsx scripts/report-ai-review-eval-coverage.mjs",
-    "draft:ai-review-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-ai-review-eval-candidates.mjs"
+    "draft:ai-review-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-ai-review-eval-candidates.mjs",
+    "adjudicate:ai-review-eval": "node --conditions=react-server --import tsx scripts/adjudicate-ai-review-eval.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.44",

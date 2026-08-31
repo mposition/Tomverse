@@ -29,6 +29,11 @@
  */
 
 import { createHash } from "node:crypto";
+
+import {
+    renderBlindReviewRecordHeader,
+    type AiReviewBlindReviewIdentity,
+} from "@/lib/aiReviewBlindReviewRecord";
 import {
     AI_REVIEW_EVAL_BLIND_SHEET_RULES,
     type AiReviewEvalCase,
@@ -226,12 +231,26 @@ export function renderBlindSheet(sheet: AiReviewBlindSheet, meta: {
     return `${lines.join("\n")}\n`;
 }
 
-/** The form the reviewer fills in. One row per sheet entry, no gold. */
-export function renderBlindReviewRecord(sheet: AiReviewBlindSheet): string {
+/**
+ * The form the reviewer fills in. One row per sheet entry, no gold.
+ *
+ * The identity header is not decoration. This form's verdicts are read back
+ * and folded into the run's violation count, so a form filled in for another
+ * run would move another reviewer's numbers. `blindReviewRecordProblems()`
+ * compares every field of it against the run being adjudicated.
+ */
+export function renderBlindReviewRecord(
+    sheet: AiReviewBlindSheet,
+    identity: AiReviewBlindReviewIdentity
+): string {
     // Every zero-tolerance rule gets a column. Derived from the constant rather
     // than written out, so a rule added to the contract cannot reach the
     // scorer while quietly missing the form a person fills in.
     const header = ["label", ...AI_REVIEW_EVAL_BLIND_SHEET_RULES, "note"].join(",");
     const blanks = ",".repeat(AI_REVIEW_EVAL_BLIND_SHEET_RULES.length + 1);
-    return `${[header, ...sheet.entries.map((entry) => `${entry.label}${blanks}`)].join("\n")}\n`;
+    return `${[
+        renderBlindReviewRecordHeader(identity),
+        header,
+        ...sheet.entries.map((entry) => `${entry.label}${blanks}`),
+    ].join("\n")}\n`;
 }
