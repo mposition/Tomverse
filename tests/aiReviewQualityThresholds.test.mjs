@@ -6,6 +6,8 @@ import {
   approvalMetricsFromArm,
   approvedThresholdSets,
   findThresholdSet,
+  isApprovedThresholdSet,
+  thresholdSetApprovalProblems,
   thresholdShortfalls,
 } from "../lib/aiReviewQualityThresholds.ts";
 import {
@@ -243,5 +245,44 @@ test("an approval that screened but never judged the zero-tolerance rules is ref
     problems.some((problem) =>
       /3 of 5 zero-tolerance rules were judged by a person/.test(problem)
     )
+  );
+});
+
+test("an approver with no date is not an approval", () => {
+  // Both callers asked only about `approvedBy`, so a name with no date counted
+  // as approved in `approvedThresholdSets()` and in `approvedEntryProblems()`.
+  // An approval is an act somebody performed at a moment; without the moment
+  // there is nothing to audit, and a name alone is a claim rather than a
+  // record.
+  const base = {
+    ...thresholds,
+    version: "fixture",
+    approvedBy: "AUDIT_FIXTURE_NOT_A_HUMAN_APPROVAL",
+    approvedAt: null,
+  };
+  assert.equal(isApprovedThresholdSet(base), false);
+  assert.match(
+    thresholdSetApprovalProblems(base)[0],
+    /names an approver but no date/
+  );
+
+  // A date nobody can turn into a day is the same as no day.
+  assert.equal(
+    isApprovedThresholdSet({ ...base, approvedAt: "someday" }),
+    false
+  );
+
+  // A set nobody approved reports that once, not twice.
+  const unapproved = { ...base, approvedBy: null };
+  assert.equal(thresholdSetApprovalProblems(unapproved).length, 1);
+  assert.match(thresholdSetApprovalProblems(unapproved)[0], /has no approver/);
+
+  assert.equal(
+    isApprovedThresholdSet({
+      ...base,
+      approvedBy: "@mposition",
+      approvedAt: "2026-08-31",
+    }),
+    true
   );
 });

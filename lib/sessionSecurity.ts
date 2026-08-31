@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
+import { revokeAllMobileSessions } from "@/lib/mobileAuthService";
 import type {
     SessionSecuritySnapshotResult,
 } from "@/lib/sessionRevocationCore";
@@ -48,6 +49,11 @@ export const revokeAllUserSessions = async (userId: string) => {
         data: { sessionsRevokedAt: revokedAt },
     });
     await prisma.session.deleteMany({ where: { userId } });
+    // D11's widest revocation row: a forced sign-out reaches the mobile
+    // families too. Without this the stamp above would stop the access tokens
+    // and leave the refresh tokens working, so the next refresh would mint an
+    // access token dated after the sign-out and the session would come back.
+    await revokeAllMobileSessions({ userId, reason: "logout", now: revokedAt });
     invalidateSnapshot(userId);
     return revokedAt;
 };

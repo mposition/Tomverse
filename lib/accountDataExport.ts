@@ -951,6 +951,55 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       orderBy: [{ fileId: "asc" }, { ordinal: "asc" }],
       take: EXPORT_ROW_CAP,
     }),
+
+  // --- native mobile sign-in ------------------------------------------------
+  //
+  // Each of these three withholds the same kind of thing: the server-issued
+  // handle. `id`, `deviceId` and `familyId` are what a live refresh token is
+  // bound to and what a revocation check reads, and they identify nothing to
+  // the person holding them, so they buy the reader nothing and cost the
+  // account the one value worth guessing at.
+  mobileDevice: (userId) =>
+    prisma.mobileDevice.findMany({
+      where: { userId },
+      select: {
+        label: true,
+        platform: true,
+        appVersion: true,
+        createdAt: true,
+        lastSeenAt: true,
+        revokedAt: true,
+        revokedReason: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  mobileTokenFamily: (userId) =>
+    prisma.mobileTokenFamily.findMany({
+      where: { userId },
+      select: {
+        createdAt: true,
+        lastRotatedAt: true,
+        absoluteExpiresAt: true,
+        revokedAt: true,
+        revokedReason: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  mobileAuthEvent: (userId) =>
+    prisma.mobileAuthEvent.findMany({
+      where: { userId },
+      select: {
+        event: true,
+        reason: true,
+        occurredAt: true,
+      },
+      orderBy: { occurredAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
 };
 
 /**

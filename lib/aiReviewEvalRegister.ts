@@ -22,6 +22,8 @@
 
 import {
     findThresholdSet,
+    isApprovedThresholdSet,
+    thresholdSetApprovalProblems,
     thresholdShortfalls,
     type AiReviewApprovalArmMetrics,
     type AiReviewApprovalMetrics,
@@ -276,13 +278,14 @@ export const approvedEntryProblems = (
         problems.push(
             `threshold set "${evaluation.thresholdVersion}" does not exist`
         );
-    } else if (!thresholds.approvedBy) {
+    } else if (!isApprovedThresholdSet(thresholds)) {
         // An unapproved set is a proposal. An approval may not rest on one,
         // which is why no pair can be approved today.
-        problems.push(
-            `threshold set "${thresholds.version}" is a proposal and has no approver; ` +
-                `a quality approval cannot rest on an unapproved bar`
-        );
+        //
+        // Asked through the shared predicate: this used to check `approvedBy`
+        // alone, as `approvedThresholdSets()` did separately, so a set with an
+        // approver and no date passed both.
+        problems.push(...thresholdSetApprovalProblems(thresholds));
     } else {
         // Applied to EACH run, not to a pooled figure.
         //

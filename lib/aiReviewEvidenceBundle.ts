@@ -65,9 +65,18 @@ export type AiReviewJournalEntry = {
 export type AiReviewEvidenceInputs = {
     /** The parsed dataset, and its bytes, from the tree. */
     dataset: { version?: string; schemaVersion?: number; purpose?: string; cases?: AiReviewEvalCase[]; frozenAt?: string | null; frozenBy?: string | null };
-    journal: readonly AiReviewJournalEntry[];
+    /**
+     * The evidence files as BYTES, not as parsed objects.
+     *
+     * Parsed here rather than by each caller. Both callers used to run
+     * `JSON.parse` themselves, and a corrupted answer key threw a SyntaxError
+     * that killed the gate on the first run it reached -- the second run was
+     * never checked. That is the same failure shape as reading a field off an
+     * absent arm: an input this tool exists to judge took the tool down
+     * instead of being judged. A caller that cannot forget to parse safely is
+     * the fix; a second `try` in each caller is the one that gets forgotten.
+     */
     journalText: string;
-    answerKey: Readonly<Record<string, { caseId?: string }>>;
     answerKeyText: string;
     recordText: string;
     /** What the record must be about. Compared field by field. */
@@ -122,6 +131,53 @@ export type AiReviewEvidenceBundle = {
  */
 export const AI_REVIEW_BLIND_REVIEW_MUST_NOT_BE_EMPTY = 1;
 
+/**
+ * Reads one evidence file, and reports a bad one instead of throwing.
+ *
+ * The message names the file, because "Unexpected token } in JSON at position
+ * 412" with no filename in front of it is what an operator gets from an
+ * unguarded parse, and there are three of these files.
+ */
+const parseEvidence = (
+    label: string,
+    text: string
+): { value: unknown; problem: string | null } => {
+    try {
+        return { value: JSON.parse(text), problem: null };
+    } catch (error) {
+        return {
+            value: null,
+            problem: `${label} is not valid JSON: ${(error as Error).message}`,
+        };
+    }
+};
+
+/**
+ * The journal, line by line, with a bad line named by its number.
+ *
+ * One malformed line used to take the whole process down. It is now one
+ * problem, on the line it is on, and every other line is still read -- so an
+ * operator sees "line 419 is not valid JSON" rather than a stack trace, and
+ * the run's other faults are reported in the same pass.
+ */
+const parseJournal = (
+    text: string
+): { entries: AiReviewJournalEntry[]; problems: string[] } => {
+    const entries: AiReviewJournalEntry[] = [];
+    const problems: string[] = [];
+    for (const [index, line] of text.split("\n").entries()) {
+        if (line.trim() === "") continue;
+        try {
+            entries.push(JSON.parse(line) as AiReviewJournalEntry);
+        } catch (error) {
+            problems.push(
+                `journal line ${index + 1} is not valid JSON: ${(error as Error).message}`
+            );
+        }
+    }
+    return { entries, problems };
+};
+
 export const verifyEvidenceBundle = (
     input: AiReviewEvidenceInputs
 ): AiReviewEvidenceBundle => {
@@ -145,7 +201,21 @@ export const verifyEvidenceBundle = (
     });
 
     problems.push(...datasetProblems(input.dataset).map((p) => `dataset: ${p}`));
+
+    const answerKeyParse = parseEvidence("the answer key", input.answerKeyText);
+    if (answerKeyParse.problem) problems.push(answerKeyParse.problem);
+    const journalParse = parseJournal(input.journalText);
+    problems.push(...journalParse.problems);
     if (problems.length > 0) return empty();
+
+    const answerKey = (answerKeyParse.value ?? {}) as Readonly<
+        Record<string, { caseId?: string }>
+    >;
+    if (typeof answerKey !== "object" || Array.isArray(answerKey)) {
+        problems.push("the answer key is not an object of labels");
+        return empty();
+    }
+    const journal = journalParse.entries;
 
     const cases = (input.dataset.cases ?? []) as AiReviewEvalCase[];
     const byId = new Map(cases.map((testCase) => [testCase.id, testCase]));
@@ -158,7 +228,7 @@ export const verifyEvidenceBundle = (
     // loose: an id the dataset does not contain is a journal from another set,
     // and a duplicate is one case counted twice.
     const observed = new Map<string, AiReviewEvalObservation>();
-    for (const [index, entry] of input.journal.entries()) {
+    for (const [index, entry] of journal.entries()) {
         const caseId = entry.caseId;
         if (typeof caseId !== "string" || caseId === "") {
             problems.push(`journal[${index}]: no case id`);
@@ -187,7 +257,7 @@ export const verifyEvidenceBundle = (
     }
 
     // --- answer key against the journal ------------------------------------
-    const labels = Object.keys(input.answerKey);
+    const labels = Object.keys(answerKey);
     if (labels.length === 0) {
         problems.push(
             "the answer key is empty, so the blind review covered no case at all"
@@ -195,7 +265,7 @@ export const verifyEvidenceBundle = (
     }
     const reviewedCaseIds = new Set<string>();
     for (const label of labels) {
-        const caseId = input.answerKey[label]?.caseId;
+        const caseId = answerKey[label]?.caseId;
         if (typeof caseId !== "string" || caseId === "") {
             problems.push(`answer key: ${label} names no case`);
             continue;
@@ -241,7 +311,7 @@ export const verifyEvidenceBundle = (
     }
 
     // --- re-score, with the verdicts -------------------------------------
-    const verdicts = humanVerdictsByCase(record, input.answerKey as Record<string, { caseId: string }>);
+    const verdicts = humanVerdictsByCase(record, answerKey as Record<string, { caseId: string }>);
     const outcomes = cases.map((testCase) =>
         scoreCase(
             testCase,

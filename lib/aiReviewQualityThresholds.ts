@@ -109,8 +109,56 @@ export const AI_REVIEW_THRESHOLD_SETS: readonly AiReviewThresholdSet[] = [
 export const findThresholdSet = (version: string) =>
     AI_REVIEW_THRESHOLD_SETS.find((set) => set.version === version) ?? null;
 
+/**
+ * Why a threshold set is not an approved bar, if it is not.
+ *
+ * One predicate, because there were two places asking the question and both
+ * asked only about `approvedBy`. A set carrying an approver and
+ * `approvedAt: null` counted as approved in both -- so a name with no date
+ * could bless every pair that cited it, and readiness would read the bar as
+ * signed. An approval is an act somebody performed at a moment; without the
+ * moment there is nothing to audit, and "who" alone is a claim rather than a
+ * record.
+ *
+ * The date is parsed, not merely present: a string nobody can turn into a day
+ * is the same as no day.
+ */
+export const thresholdSetApprovalProblems = (
+    set: AiReviewThresholdSet
+): readonly string[] => {
+    const problems: string[] = [];
+    const hasApprover = Boolean(set.approvedBy && set.approvedBy.trim() !== "");
+    if (!hasApprover) {
+        problems.push(
+            `threshold set "${set.version}" is a proposal and has no approver; ` +
+                "a quality approval cannot rest on an unapproved bar"
+        );
+        // No second complaint about the date. A set nobody approved is not
+        // also guilty of not saying when; saying both would report one absence
+        // twice, and the second sentence would claim an approver it just said
+        // was missing.
+        return problems;
+    }
+    if (!set.approvedAt || set.approvedAt.trim() === "") {
+        problems.push(
+            `threshold set "${set.version}" names an approver but no date; ` +
+                "an approval is an act performed at a moment, and without one there is " +
+                "nothing to audit"
+        );
+    } else if (Number.isNaN(Date.parse(set.approvedAt))) {
+        problems.push(
+            `threshold set "${set.version}" has an unreadable approval date ` +
+                `"${set.approvedAt}"`
+        );
+    }
+    return problems;
+};
+
+export const isApprovedThresholdSet = (set: AiReviewThresholdSet): boolean =>
+    thresholdSetApprovalProblems(set).length === 0;
+
 export const approvedThresholdSets = () =>
-    AI_REVIEW_THRESHOLD_SETS.filter((set) => Boolean(set.approvedBy));
+    AI_REVIEW_THRESHOLD_SETS.filter(isApprovedThresholdSet);
 
 /**
  * The metrics an approval has to carry for the gate to be able to judge it.

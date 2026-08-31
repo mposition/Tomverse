@@ -31,6 +31,7 @@ const RUN = {
   reviewerModelId: "mistral-medium-3-1",
   promptVersion: "comparison-review-v3",
   sheetSeed: 1,
+  thresholdVersion: "v1-draft",
 };
 
 const testCase = (index) => ({
@@ -367,8 +368,15 @@ test("the gate itself accepts the evidence, and refuses it once a verdict is edi
   assert.match(clean.stdout, /NOT the committed register/);
 
   const evidence = section(clean.stdout, "AI Review approved-entry evidence");
-  assert.equal(evidence.length, 2, clean.stdout);
-  for (const line of evidence) assert.match(line, /^\s+ok\s/, clean.stdout);
+  const verdicts = evidence.filter((line) => /^\s+(ok|FAIL)\s/.test(line));
+  assert.equal(verdicts.length, 2, clean.stdout);
+  for (const line of verdicts) assert.match(line, /^\s+ok\s/, clean.stdout);
+  // What the pass did NOT judge is printed beside it, so an "ok" cannot be
+  // read as more than it is: no threshold set is signed, so no coverage bar
+  // exists to apply.
+  const notes = evidence.filter((line) => line.trim().startsWith("note"));
+  assert.equal(notes.length, 2, clean.stdout);
+  for (const line of notes) assert.match(line, /coverage not judged/);
 
   // The register-shape check still refuses, and for exactly one reason: the
   // threshold set is a proposal nobody has signed. That is permanent and
@@ -378,6 +386,9 @@ test("the gate itself accepts the evidence, and refuses it once a verdict is edi
     .filter((line) => line.trim().startsWith("-"));
   assert.equal(shape.length, 1, clean.stdout);
   assert.match(shape[0], /is a proposal and has no approver/);
+  // And exactly one: a set nobody approved is not separately guilty of not
+  // saying when, so the date rule stays quiet rather than reporting one
+  // absence twice.
 
   // A verdict changed in the record, and adjudication NOT re-run. The artifact
   // is stale; nothing about its own shape says so.
