@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import path from "node:path";
+import { readFileSync } from "node:fs";
+import * as boundary from "../lib/memoryExtractionPrompt.ts";
 import {
     MEMORY_EXTRACTION_PROMPT_VERSION,
     buildExtractionPrompt,
@@ -35,8 +38,8 @@ const promptText = () => {
     return `${prompt.system}\n${prompt.user}`;
 };
 
-test("the version is v6", () => {
-    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v6");
+test("the version is v7", () => {
+    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v7");
 });
 
 /* ------------------------------------------------- A. output language -- */
@@ -315,6 +318,172 @@ test("F4: a citation carries an exact quote, copied rather than composed", () =>
         text,
         /quote that does not occur in the message it names discards the candidate/i
     );
+});
+
+/* ------------------------------------------------- G. the boundary rule -- */
+
+/*
+ * G came from the `mem-extract-v6` decision-grade run of 2026-08-29, which
+ * failed: 41 critical bulk-safe adoptions across the `assistant_only` cells,
+ * and a diagnosis showing that none of them cited an assistant message. The
+ * model was not confusing its own words for the user's — it was storing
+ * things the user really did say, in shapes that are not memories. The
+ * boundary decision of 2026-08-30 named five of those shapes, and these
+ * assertions are that they are still in the prompt the provider receives.
+ *
+ * Each assertion matches wording from the approved text
+ * (.github/audits/memory-boundary-decision-2026-08-30.md §5) rather than a
+ * paraphrase, for the reason the file's header gives: a rewrite that dropped
+ * a paragraph and bumped the version would otherwise pass.
+ */
+
+test("G: the rule announces itself as a list of things that are not memories", () => {
+    const text = promptText();
+    assert.match(text, /BOUNDARY: some things a user says are not memories/);
+});
+
+test("G: neither example is an eval case's own sentence", () => {
+    // The defect that blocked the first implementation. A prompt example
+    // copied from a case shows the model that case's answer, and the case
+    // stops measuring anything — `tests/memoryEvalPromptDatasetSeparation.
+    // test.mjs` is the general check and this is the specific memory of why
+    // these two sentences are synthetic.
+    const text = promptText();
+    assert.ok(
+        !/I moved away and I don't want that remembered/i.test(text),
+        "the withdrawal example is succ-assistant-en-3's own utterance again"
+    );
+    assert.ok(
+        !/Voice typing wrote that I have three children/i.test(text),
+        "the correction example is succ-assistant-en-27's own utterance again"
+    );
+});
+
+test("G1: a withdrawal removes the subject and does not store its negation", () => {
+    // The defect: `ko-3`, `en-3` and `ko-23`a were stored as negated facts —
+    // "no longer lives there" — from a user asking not to be remembered. A
+    // request to forget is not an assertion of the opposite.
+    const text = promptText();
+    assert.match(text, /request not to remember a fact suppresses candidates about that fact/i);
+    assert.match(text, /removes the subject, it does not replace it with its negation/i);
+    // The example carries both halves of that: neither the withdrawn fact nor
+    // its negation is kept.
+    assert.match(text, /leaves no memory that they trained and none that they no longer do/i);
+    // And it is bounded: the same turn can still carry a separate fact.
+    assert.match(
+        text,
+        /does not suppress a separate privacy preference or another independently asserted fact in the same turn/i
+    );
+});
+
+test("G2: a correction is judged on what it adds, never on its polarity", () => {
+    // The line the whole rule turns on. `ko-19` ("I'm not an office worker")
+    // and `en-27` ("I have none") are both negative, and only one of them
+    // leaves a fact behind. A rule keyed on negation gets `en-27` wrong, so
+    // the wording keys on independent reusability instead — and says outright
+    // that a replacement may be negated.
+    const text = promptText();
+    assert.match(text, /A correction removes the discarded proposition/i);
+    assert.match(
+        text,
+        /only rejects a guess and adds no independently reusable fact yields no candidate/i
+    );
+    assert.match(text, /durable replacement may be affirmative or negated/i);
+    // The worked example is the negated one, because that is the side a
+    // reader is likely to get wrong.
+    assert.match(text, /registration form lists two dependants; I have no dependants/);
+});
+
+test("G3: a privacy preference may not carry the value it withheld", () => {
+    // `ko-23`b and `en-311`: the preference is extractable, and a statement
+    // that names the district or the city defeats the purpose of storing it.
+    const text = promptText();
+    assert.match(
+        text,
+        /privacy preference may be extracted only if the statement does not repeat, infer, or narrow the location or value the user withheld/i
+    );
+});
+
+test("G4: closing a hypothetical is not itself a fact, and present tense is not the test", () => {
+    // Narrowed twice. The condition is that the sentence *only* closes the
+    // hypothetical; a present-tense statement that establishes something
+    // durable is still extractable, or the rule would swallow ordinary
+    // self-description.
+    const text = promptText();
+    assert.match(text, /A hypothetical is not a memory/i);
+    assert.match(
+        text,
+        /yields no candidate when it only closes the hypothetical and does not independently establish a durable, future-useful fact/i
+    );
+    assert.match(text, /the second sentence exists to close the first/i);
+});
+
+test("G5: someone else's relationship belongs to the question, not to the user", () => {
+    // The ten D-series cases: a task performed for a nephew, a mother, a
+    // neighbour. The relationship is how the request was phrased.
+    const text = promptText();
+    assert.match(
+        text,
+        /relationship that surfaces is part of the question, not a fact about the user/i
+    );
+    assert.match(text, /is a task, not a record that they have a nephew/i);
+    assert.match(
+        text,
+        /only when the user separately establishes it as an ongoing part of their own life/i
+    );
+    // And the health carve-out keeps the earlier minimisation rule rather
+    // than replacing it.
+    assert.match(text, /never stored as that person's/i);
+    assert.match(text, /minimised constraint about the user, and it is sensitive/i);
+});
+
+test("G: the boundary rule suppresses and never grants", () => {
+    // What makes `en-10` come out right without a paragraph of its own: the
+    // rule is a list of exclusions, and anything it does not exclude is left
+    // to the extraction rules above it. A paragraph phrased as a permission
+    // would change that, so none of them is.
+    const { MEMORY_EXTRACTION_BOUNDARY_RULE } = boundary;
+    const paragraphs = MEMORY_EXTRACTION_BOUNDARY_RULE.split("\n").filter(
+        (line) => line.trim().length > 0
+    );
+    assert.equal(paragraphs.length, 6, "the approved wording has six paragraphs");
+    // Every paragraph after the heading names something that yields nothing,
+    // or bounds when something may be kept. None introduces a new class of
+    // fact to go and look for.
+    for (const paragraph of paragraphs.slice(1)) {
+        assert.match(
+            paragraph,
+            /no candidate|not a memory|not a fact about the user|leaves no memory|only if|never stored|leaves nothing to store|suppresses/i,
+            `a boundary paragraph reads as a permission: ${paragraph.slice(0, 60)}`
+        );
+    }
+});
+
+test("G: the boundary rule is the recorded text, not a paraphrase of it", () => {
+    // Compared against the *implementation* record, not the decision that
+    // approved the rule. The decision's §5 block stays as it was signed; two
+    // of its examples were lifted from eval cases — one of them
+    // `succ-assistant-en-3`, still in the frozen decision set — and the
+    // approved substitution is recorded in the implementation audit instead.
+    // So that document carries the wording that ships, and this compares the
+    // two. Editing the prompt without the record fails here, and so does the
+    // reverse.
+    const audit = readFileSync(
+        path.join(
+            path.resolve(import.meta.dirname, ".."),
+            ".github/audits/mem-extract-v7-implementation-2026-08-31.md"
+        ),
+        "utf8"
+    );
+    const start = audit.indexOf("BOUNDARY: some things a user says are not memories.");
+    assert.ok(start > 0, "the recorded wording is no longer in the implementation audit");
+    const approved = audit.slice(start, audit.indexOf("```", start)).trim();
+    const unwrap = (value) =>
+        value
+            .split(/\n\s*\n/)
+            .map((paragraph) => paragraph.split(/\s+/).join(" ").trim())
+            .join("\n");
+    assert.equal(unwrap(boundary.MEMORY_EXTRACTION_BOUNDARY_RULE), unwrap(approved));
 });
 
 /* --------------------------------------------------------- unchanged -- */

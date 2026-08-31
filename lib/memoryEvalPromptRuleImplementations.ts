@@ -40,6 +40,13 @@ export const MEMORY_EVAL_PROMPT_RULE_IMPLEMENTATIONS: Readonly<
     // lower confidence. `MEMORY_EXTRACTION_POLARITY_RULE` carries the
     // sentences and `tests/memoryExtractionPromptRules.test.mjs` pins them.
     "mem-extract-v6": ["v3-unfixable-evidence-emits-nothing"],
+    // `mem-extract-v7` carries `MEMORY_EXTRACTION_POLARITY_RULE` unchanged —
+    // the boundary rule was added beside it, not in place of it — so it
+    // implements the same rule for the same reason. Listed rather than
+    // inherited from v6: a version that answered a rule by accident of
+    // sharing a file with the version that answered it is not a claim
+    // anybody made, and this table exists to record claims people make.
+    "mem-extract-v7": ["v3-unfixable-evidence-emits-nothing"],
 };
 
 /**

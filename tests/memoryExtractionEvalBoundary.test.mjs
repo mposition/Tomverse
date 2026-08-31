@@ -469,21 +469,28 @@ test("--live with a key never reaches the network for a pair that cannot run", (
             entry.extractionModelId === "gpt-5-4-mini" &&
             entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
     );
-    assert.ok(pair, "the pair this test relies on is not registered");
-    const decision = decideEvalRunMode({
-        live: true,
-        registerEntry: pair,
-        hasApiKey: true,
-        datasetFrozen: true,
-        datasetPurpose: "decision",
-        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
-        commitKnown: true,
-    });
-    assert.notEqual(
-        decision.mode,
-        "live",
-        `gpt-5-4-mini::${MEMORY_EXTRACTION_PROMPT_VERSION} can run -- this test now spends money`
-    );
+    // The pair may not exist at all, and since 2026-08-31 it does not: v7 was
+    // registered for `gpt-5-6-luna` only. An absent entry is a stronger
+    // safety position than an unfundable one — the harness refuses on the
+    // register miss, earlier than any budget question — so this asserts the
+    // premise rather than the entry: whatever the register holds for this
+    // model at the shipped version, it cannot run.
+    if (pair) {
+        const decision = decideEvalRunMode({
+            live: true,
+            registerEntry: pair,
+            hasApiKey: true,
+            datasetFrozen: true,
+            datasetPurpose: "decision",
+            datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
+            commitKnown: true,
+        });
+        assert.notEqual(
+            decision.mode,
+            "live",
+            `gpt-5-4-mini::${MEMORY_EXTRACTION_PROMPT_VERSION} can run -- this test now spends money`
+        );
+    }
 
     const result = runHarness(["--live", "--model=gpt-5-4-mini"], {
         // Plausible enough that a missing-key check could not be what stops it.
@@ -494,7 +501,7 @@ test("--live with a key never reaches the network for a pair that cannot run", (
     // this test owns is that the refusal happened before anything dialled out.
     assert.match(
         result.output,
-        /no approved eval budget|in the\s+register/i,
+        /no approved eval budget|in the\s+register|No register entry/i,
         result.output
     );
     assert.doesNotMatch(
