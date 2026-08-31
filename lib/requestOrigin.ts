@@ -20,6 +20,32 @@ const EXEMPT_MUTATION_PATHS = [
   // spam button is for. Authenticated by the token instead, which can only
   // ever switch one purpose off for one subject (lib/unsubscribeToken.ts).
   "/api/unsubscribe",
+  // The three native mobile auth paths (mobile auth design D14).
+  //
+  // They belong to the same rule the entries above follow -- a caller that
+  // cannot send an Origin, authenticated by something stronger than one. The
+  // Capacitor origins are `capacitor://localhost` and `https://localhost`,
+  // which are not this deployment's public origin and never will be, so the
+  // mutation-origin check refuses every one of these before the handler runs.
+  //
+  // CSRF's premise does not hold here: a one-time login grant and a refresh
+  // token are body credentials, not ambient ones. A hostile page can make the
+  // browser send a cookie it never saw; it cannot make it send a secret it
+  // does not have.
+  //
+  // **The condition, and it is what makes the exemption safe:** these three
+  // handlers never accept a cookie identity. They call no session helper and
+  // read no cookie, and `tests/mobileAuthExemptPaths.test.mjs` fails if one
+  // starts to. The day one of them reads `getServerSession`, this exemption
+  // becomes a CSRF hole rather than a correct exception -- so the test is the
+  // condition, written down.
+  //
+  // Device revocation is deliberately absent: D14 puts it behind N1b, so it
+  // keeps meeting this check and keeps being refused until its route is
+  // registered.
+  "/api/auth/mobile/exchange",
+  "/api/auth/mobile/refresh",
+  "/api/auth/mobile/logout",
 ];
 
 const parseOrigin = (value: string | null) => {

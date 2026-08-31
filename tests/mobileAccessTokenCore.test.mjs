@@ -83,6 +83,10 @@ test("V1 -- a well-formed current token verifies and yields its identity", () =>
     device: "device_1",
     family: "family_1",
     tokenId: "token_1",
+    // `iat` comes back too, because the authorization layer compares it
+    // against a global sign-out stamp. It is read after the signature, like
+    // every other claim here.
+    issuedAtSeconds: NOW - 60,
     expiresAtSeconds: NOW + 540,
   });
 });
