@@ -198,6 +198,29 @@ test("the reserved and settled figures are both stored, so a mismatch is computa
   assert.equal(attempt.settledCredits, 9);
 });
 
+test("consecutive writes carry consecutive sequences from one writer", async () => {
+  // The property the missing-write measurement rests on. The scorecard counts
+  // the span between a writer's lowest and highest sequence and compares it
+  // with the rows present; if the sequence did not advance once per write, or
+  // if two processes shared an id, that arithmetic would be meaningless.
+  await recordComparisonReviewRun(baseInput());
+  await recordComparisonReviewRun(baseInput());
+  await recordComparisonReviewRun(baseInput());
+  const rows = await prisma.comparisonReviewRun.findMany({
+    orderBy: { writerSequence: "asc" },
+    select: { writerId: true, writerSequence: true },
+  });
+  assert.equal(rows.length, 3);
+  assert.equal(new Set(rows.map((row) => row.writerId)).size, 1);
+  assert.ok(rows[0].writerId.length > 0);
+  const sequences = rows.map((row) => row.writerSequence);
+  assert.deepEqual(
+    sequences,
+    [sequences[0], sequences[0] + 1, sequences[0] + 2],
+    "the sequence must advance exactly once per write"
+  );
+});
+
 test("attempts cascade away with their run", async () => {
   await recordComparisonReviewRun(baseInput());
   assert.equal(await prisma.comparisonReviewRunAttempt.count(), 2);

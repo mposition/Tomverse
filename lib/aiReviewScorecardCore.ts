@@ -104,7 +104,76 @@ export type ScorecardRunRow = {
     secondarySettlementStatus: string | null;
     subjectKind: string;
     createdAt: Date;
+    /** The process that wrote the row, and its own attempt counter. */
+    writerId: string;
+    writerSequence: number;
     attempts: readonly ScorecardAttemptRow[];
+};
+
+/**
+ * How many telemetry writes were attempted, and how many landed.
+ *
+ * ## The question no query over the table can answer on its own
+ *
+ * Every rate on this scorecard is computed from rows that exist. If some
+ * inserts fail and others do not, the surviving rows are a biased sample of a
+ * healthy-looking subset, and nothing about them says how many are missing.
+ * That was the state this replaces: the telemetry module's own comment
+ * promised a `missingTraceRate` and the repository contained the name nowhere
+ * else.
+ *
+ * Each writer stamps a sequence that increments on every ATTEMPTED write. So
+ * within one writer, the span from its lowest to its highest sequence is how
+ * many writes it tried, and the rows present are how many landed.
+ *
+ * ## What it cannot see, stated rather than implied
+ *
+ *   * Writes lost at the end of a process's life have no later row to anchor
+ *     them, so the span stops at the last row that landed.
+ *   * A process whose every write failed leaves no rows at all and therefore
+ *     no writer to count.
+ *   * A window boundary cuts a writer's sequence, so the first and last rows
+ *     inside the window are the anchors, not the process's true first and
+ *     last.
+ *
+ * All three make this a LOWER bound on what went missing. A lower bound above
+ * zero is still proof of a gap, which is what the metric is for; a bound of
+ * zero is not proof there was none, and the structured
+ * `comparison_review_run_record_failed` events remain the second signal.
+ *
+ * Rows written before the writer columns existed carry an empty writer id and
+ * are excluded -- counting them as one enormous writer would invent a span of
+ * every row ever written.
+ */
+export const telemetryCompleteness = (
+    rows: readonly Pick<ScorecardRunRow, "writerId" | "writerSequence">[]
+): { attempted: number; landed: number; missing: number } => {
+    const spans = new Map<string, { min: number; max: number; count: number }>();
+    for (const row of rows) {
+        if (!row.writerId) continue;
+        if (!Number.isSafeInteger(row.writerSequence) || row.writerSequence < 1) {
+            continue;
+        }
+        const span = spans.get(row.writerId);
+        if (!span) {
+            spans.set(row.writerId, {
+                min: row.writerSequence,
+                max: row.writerSequence,
+                count: 1,
+            });
+            continue;
+        }
+        span.min = Math.min(span.min, row.writerSequence);
+        span.max = Math.max(span.max, row.writerSequence);
+        span.count += 1;
+    }
+    let attempted = 0;
+    let landed = 0;
+    for (const span of spans.values()) {
+        attempted += span.max - span.min + 1;
+        landed += span.count;
+    }
+    return { attempted, landed, missing: attempted - landed };
 };
 
 /**
@@ -172,6 +241,21 @@ export type ReliabilityScorecard = {
     overSettledRate: ScorecardMetric;
     /** The failed half: refunds that reported a figure above zero. */
     unrefundedFailureRate: ScorecardMetric;
+    /**
+     * Telemetry writes this window attempted that are not in the table.
+     *
+     * Every other rate here is computed from rows that landed and therefore
+     * cannot say how many did not. This one can, because each write carries a
+     * per-process sequence claimed before the insert. It is a LOWER bound --
+     * see telemetryCompleteness() for the three cases it cannot see -- so a
+     * value above zero proves a gap and a value of zero does not disprove one.
+     *
+     * It is reported beside the others rather than folded into them: a window
+     * with a 4% missing rate is not a window whose completion rate is 4% worse,
+     * it is a window whose completion rate is measured over an incomplete
+     * sample, and those call for different responses.
+     */
+    missingTraceRate: ScorecardMetric;
     p50DurationMs: number | null;
     p95DurationMs: number | null;
     reviewerHealth: readonly ReviewerHealthRow[];
@@ -237,6 +321,7 @@ export const summariseReliability = (
     // quote different numbers, and the population rule below is subtle enough
     // that a second copy of it would drift.
     const reconciliation = settlementReconciliation(attempts);
+    const completeness = telemetryCompleteness(rows);
     const completedWithFigure = attempts.filter(
         (attempt) =>
             attempt.status === "completed" &&
@@ -333,6 +418,16 @@ export const summariseReliability = (
                 minimumDenominator,
                 excluded:
                     "failed attempts whose refund did not report; those are counted by unreconciledSettlements instead",
+            }
+        ),
+        missingTraceRate: metric(
+            completeness.missing,
+            completeness.attempted,
+            "telemetry writes this window attempted",
+            {
+                minimumDenominator,
+                excluded:
+                    "rows written before the writer columns existed; and this is a lower bound -- writes lost at the end of a process's life leave no later row to anchor them",
             }
         ),
         p50DurationMs: percentile(durations, 0.5),
@@ -735,6 +830,16 @@ export const AI_REVIEW_M5_READINESS_ITEMS = [
     "per_attempt_reliability_record",
     /** Reservation and settlement are both recorded, so mismatch is computable. */
     "credit_reconciliation_measurable",
+    /**
+     * A telemetry write that did not land is countable.
+     *
+     * Without this, every reliability rate is computed over whatever happened
+     * to be written, and a partial outage -- some inserts failing, some not --
+     * reads as a healthy window. An instrument that cannot say how much of its
+     * own input is missing cannot produce a believable number, which is what
+     * this list is for.
+     */
+    "telemetry_completeness_measurable",
     /** Conversions are ordered in time, so a rate means what it says. */
     "sequenced_conversion_metrics",
     /** There is somewhere for production evidence to be recorded. */
@@ -750,6 +855,14 @@ export const AI_REVIEW_M5_ELIGIBILITY_ITEMS = [
     "reliability_trend_over_approved_period",
     "sufficient_production_sample",
     "zero_credit_reconciliation_mismatch",
+    /**
+     * The window being judged is not missing rows.
+     *
+     * Separate from the readiness item above: being able to measure the gap
+     * and having measured it to be within an approved bound are different
+     * facts, and only the second one licenses a promotion.
+     */
+    "telemetry_complete_over_approved_window",
     "zero_critical_quality_violations",
     "adoption_and_repeat_use_thresholds_met",
     "rollback_drill_completed",

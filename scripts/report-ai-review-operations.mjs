@@ -71,6 +71,10 @@ for (const windowDays of windows) {
   line("dual review completed", pct(card.reliability.dualCompletionRate));
   line("cached", pct(card.reliability.cachedRate));
   line("attempts that retried", pct(card.reliability.retryRate));
+  // Printed first among the reliability figures, because it qualifies every
+  // one of them: a rate above zero here means the numbers below are computed
+  // over an incomplete sample.
+  line("missing telemetry writes", pct(card.reliability.missingTraceRate));
   line("unreconciled settlements", pct(card.reliability.unreconciledSettlements));
   line("credits resolved wrongly", pct(card.reliability.creditReconciliation));
   line("  settled above reservation", pct(card.reliability.overSettledRate));

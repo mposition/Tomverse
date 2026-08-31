@@ -56,12 +56,32 @@ attempt가 둘(실패 + 성공)입니다. 개정 전에는 attempt 목록이 없
 | `dualCompletionRate` | 두 번째가 실제로 완료된 실행 | **두 번째 후보가 존재한 실행** | 후보가 없던 실행 |
 | `cachedRate` | `cached` | 전체 실행 | — |
 | `retryRate` | 재시도가 1회 이상인 **attempt** | provider에 도달한 attempt | 거부된 attempt |
-| `unreconciledSettlements` | `settledCredits`가 `null`인 완료 attempt | 완료된 attempt | — |
-| `creditReconciliation` | **예약보다 많이 정산된** 완료 attempt | 정산액이 기록된 완료 attempt | 정산액이 없는 attempt(위 지표가 셈) |
+| `missingTraceRate` | 시도됐지만 표에 없는 telemetry write | **이 window에서 시도된 write** | writer 컬럼 이전 행. 하한값입니다(§1.2a) |
+| `unreconciledSettlements` | 정산액도 환급액도 없는 attempt | **크레딧을 잡은 채 provider에 도달한 attempt** | 예약이 0인 attempt |
+| `creditReconciliation` | 잘못된 방향으로 정리된 크레딧(초과 정산 + 미환급) | 금액이 기록된 attempt | 금액이 없는 attempt(위 지표가 셈) |
+| `overSettledRate` | **예약보다 많이 정산된** 완료 attempt | 금액이 기록된 완료 attempt | — |
+| `unrefundedFailureRate` | **0보다 크게 정산된** 실패 attempt | 금액이 기록된 실패 attempt | 환급이 보고되지 않은 실패 attempt |
 
-**`creditReconciliation`이 예약 대비 초과만 세는 이유:** 예약보다 적게 정산되는
-것은 정상입니다 — 쓰지 않은 부분은 반환됩니다. 초과는 아무것도 잡아 두지 않은
-크레딧이 청구된 것이고, **사용자가 손해를 보는 유일한 방향**입니다.
+**모집단은 완료된 attempt가 아니라 크레딧을 잡은 채 provider에 도달한 attempt
+전체입니다.** 예약의 수명은 둘로 끝납니다 — 완료되면 정산, 실패하면 환급. 그런데
+환급도 실패할 수 있고, 서비스는 실패한 환급을 실패한 정산과 **같은 방식으로**
+기록합니다(`settledCredits: null`). 완료된 attempt만 물으면 그 절반이 통째로
+보이지 않습니다.
+
+2026-08-31에 재현했습니다 — 깨끗한 완료 20건과 환급이 보고되지 않은 실패 5건이
+`unreconciled 0 / 20, status ok`로 나왔습니다. 사용자 크레딧 5건이 아무도 놓지
+않는 예약에 묶여 있는 채로, `zero_credit_reconciliation_mismatch`가 통과할 수
+있는 상태였습니다.
+
+**두 절반의 판정 규칙이 다릅니다.** 완료된 attempt는 예약액 이하 어디든
+정상입니다 — 쓰지 않은 부분은 반환됩니다. 초과는 아무것도 잡아 두지 않은
+크레딧이 청구된 것입니다. 실패한 attempt는 환급됐으므로 정산액이 **0이어야**
+하고, 그보다 크면 받지 못한 검토에 대해 청구된 것입니다. 둘을 `overSettledRate`
+와 `unrefundedFailureRate`로 나눠 보고하는 이유는 **부르는 조사가 다르기**
+때문입니다 — 앞은 정산·가격 결함이고 뒤는 일어나지 않은 환급입니다.
+
+**예약이 0인 attempt는 이 질문 밖입니다.** 정리할 예약이 없으므로, 세면 비율만
+희석됩니다.
 
 **`settledCredits`의 `null`은 0이 아닙니다.** 정산이 실행되지 않았거나 보고하지
 않았다는 뜻이며, 둘을 구분하지 못하면 정산 안 된 시도가 전부 환급으로 읽힙니다.
@@ -75,6 +95,43 @@ attempt가 둘(실패 + 성공)입니다. 개정 전에는 attempt 목록이 없
 fire-and-forget이고 그 자체의 실패는 이미 로그에 남습니다. 다만 예약이 정산되지
 않기 시작하면 움직이는 숫자이므로 카드에 있습니다. 실제로 크레딧이 잘못 나간
 것을 세는 것은 그 옆의 `creditReconciliation`입니다.
+
+### 1.2a `missingTraceRate` — 표에 없는 것을 세는 법
+
+**나머지 모든 비율은 남아 있는 행에서 계산되므로, 몇 개가 없는지 말할 수
+없습니다.** insert가 일부만 실패하는 부분 장애에서는 살아남은 행이 "잘 된
+것들"로 치우친 표본이 되고, 완료율은 완벽하게 나옵니다. 실제로 그 상태였습니다 —
+`comparisonReviewRunTelemetry.ts`의 주석이 scorecard가 `missingTraceRate`를
+보고한다고 적어 두었지만, 저장소 전체에서 그 이름은 **그 주석에만** 있었습니다.
+
+이제 각 write는 **쓰기를 시도할 때** 자기 process의 sequence를 하나 당겨서
+가집니다(`writerId`, `writerSequence`). 한 writer 안에서 최소~최대 sequence
+구간이 시도한 횟수이고, 실제 행 수가 도달한 횟수이며, 차이가 구멍입니다.
+실패한 insert도 번호를 소비하므로 구멍이 남습니다.
+
+**셋은 보이지 않고, 지표는 그것을 감추지 않습니다.**
+
+1. process가 죽기 직전에 잃은 write — 뒤에 닻이 될 행이 없습니다.
+2. 모든 write가 실패한 process — 행이 하나도 없으니 writer 자체가 없습니다.
+3. window 경계가 자른 sequence — 안쪽 첫·마지막 행이 닻이 됩니다.
+
+그래서 이 값은 **하한**입니다. 0보다 크면 구멍이 있다는 증명이고, 0이라고
+없다는 증명은 아닙니다. `comparison_review_run_record_failed` 구조화 이벤트가
+계속 두 번째 신호로 남으며, 실패 로그에 같은 `writerId`·`writerSequence`가
+찍히므로 로그와 표의 구멍이 같은 write를 가리킵니다.
+
+**`writerId`는 식별자가 아닙니다.** process마다 새로 만드는 난수이고 host·
+사용자·배포에서 유도하지 않습니다. counter의 범위를 정하는 것 외에 아무 뜻도
+없으며, 뜻이 있으면 그것은 "아무 신원도 담지 않는다"가 계약인 표에 신원을 하나
+들이는 일입니다.
+
+**신뢰성 비율에 접지 않습니다.** missing이 4%인 window는 완료율이 4% 나쁜
+window가 아니라 **완료율이 불완전한 표본 위에서 측정된** window이고, 둘은 다른
+대응을 부릅니다. 그래서 운영 리포트에서 이 줄이 신뢰성 숫자들보다 **먼저**
+나옵니다 — 아래 숫자들을 한정하는 값이기 때문입니다.
+
+`§2`의 telemetry coverage와도 다릅니다. 그쪽은 server와 client 두 계측기의
+비교이고, 이쪽은 server 계측기 **자기 자신**이 놓친 양입니다.
 
 ### 1.3 duration
 

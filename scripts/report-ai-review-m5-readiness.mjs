@@ -341,10 +341,23 @@ const settlementTelemetry =
   attemptModel.includes("settledCredits") &&
   attemptModel.includes("reservedCredits") &&
   attemptModel.includes("settlementStatus");
-const sequencedConversions = readFileSync(
-  "lib/aiReviewScorecardCore.ts",
-  "utf8"
-).includes("export const sequencedConversion");
+const scorecardCore = readFileSync("lib/aiReviewScorecardCore.ts", "utf8");
+const sequencedConversions = scorecardCore.includes(
+  "export const sequencedConversion"
+);
+// Three parts, because any two without the third measure nothing: the columns
+// have to exist, the writer has to claim a sequence before it writes, and the
+// scorecard has to do the arithmetic and report it.
+const runModel =
+  schema.split("model ComparisonReviewRun {")[1]?.split("\n}")[0] ?? "";
+const completenessTelemetry =
+  runModel.includes("writerId") &&
+  runModel.includes("writerSequence") &&
+  readFileSync("lib/comparisonReviewRunTelemetry.ts", "utf8").includes(
+    "writerSequence += 1"
+  ) &&
+  scorecardCore.includes("export const telemetryCompleteness") &&
+  scorecardCore.includes("missingTraceRate:");
 
 const thresholdSets = approvedThresholdSets();
 
@@ -381,6 +394,13 @@ const readiness = [
     settlementTelemetry
       ? "reserved and settled credits are both recorded, so a mismatch is computable"
       : "only the reserved amount and a status are recorded; reservation-vs-settlement cannot be computed"
+  ),
+  check(
+    "telemetry_completeness_measurable",
+    completenessTelemetry,
+    completenessTelemetry
+      ? "each write claims a per-writer sequence before it runs, so a write that never landed leaves a countable hole"
+      : "the scorecard reads only rows that landed, so a partial write outage reports as a healthy window"
   ),
   check(
     "sequenced_conversion_metrics",
@@ -486,6 +506,20 @@ const eligibility = [
       ? `${window90.reliability?.creditReconciliation?.numerator ?? "?"} reservation/settlement mismatch(es), ` +
         `${window90.reliability?.unreconciledSettlements?.numerator ?? "?"} unsettled attempt(s)`
       : noOperations
+  ),
+  check(
+    "telemetry_complete_over_approved_window",
+    Boolean(
+      policy &&
+        window90?.reliability?.missingTraceRate?.status === "ok" &&
+        window90.reliability.missingTraceRate.value <= policy.maxMissingTraceRate
+    ),
+    !policy
+      ? "no approved observation policy, so there is no bound on how much of the window may be missing"
+      : !window90
+        ? noOperations
+        : `${window90.reliability?.missingTraceRate?.value ?? "?"} missing against ` +
+          `${policy.maxMissingTraceRate}`
   ),
   check(
     "zero_critical_quality_violations",

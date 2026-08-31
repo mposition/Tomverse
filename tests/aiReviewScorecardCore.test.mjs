@@ -46,6 +46,8 @@ const run = (overrides = {}) => ({
   secondarySettlementStatus: "settled",
   subjectKind: "account",
   createdAt: new Date("2026-08-30T00:00:00Z"),
+  writerId: "writer-a",
+  writerSequence: 1,
   ...overrides,
 });
 
@@ -297,6 +299,47 @@ test("an attempt that reserved nothing is outside the reconciliation question", 
   const card = summariseReliability(rows, 30);
   assert.equal(card.unreconciledSettlements.denominator, 0);
   assert.equal(card.unreconciledSettlements.status, "insufficient_evidence");
+});
+
+test("a partial telemetry outage is countable, and does not look like a healthy window", () => {
+  // The state this replaces: the telemetry module promised a missingTraceRate
+  // in a comment and the repository contained the name nowhere else. Every
+  // rate was computed from rows that landed, so inserts failing for some runs
+  // and not others produced a perfect completion rate over a biased sample.
+  const rows = [];
+  for (let sequence = 1; sequence <= 100; sequence += 1) {
+    if (sequence >= 30 && sequence < 50) continue; // writes that never landed
+    rows.push(run({ writerId: "writer-a", writerSequence: sequence }));
+  }
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.runs, 80);
+  assert.equal(card.completionRate.value, 1);
+  assert.equal(card.missingTraceRate.numerator, 20);
+  assert.equal(card.missingTraceRate.denominator, 100);
+});
+
+test("each writer is counted on its own span, so restarts are not gaps", () => {
+  // Two processes each numbering from 1 is the normal case, not a hole.
+  const rows = [
+    ...Array.from({ length: 15 }, (_, index) =>
+      run({ writerId: "a", writerSequence: index + 1 })
+    ),
+    ...Array.from({ length: 15 }, (_, index) =>
+      run({ writerId: "b", writerSequence: index + 1 })
+    ),
+  ];
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.missingTraceRate.numerator, 0);
+  assert.equal(card.missingTraceRate.denominator, 30);
+});
+
+test("rows written before the writer columns existed are excluded, not counted as one writer", () => {
+  const rows = Array.from({ length: 25 }, () =>
+    run({ writerId: "", writerSequence: 0 })
+  );
+  const card = summariseReliability(rows, 7);
+  assert.equal(card.missingTraceRate.denominator, 0);
+  assert.equal(card.missingTraceRate.status, "insufficient_evidence");
 });
 
 test("dual availability and dual completion have different denominators", () => {
