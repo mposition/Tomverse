@@ -440,12 +440,20 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
    때문입니다. 네 경로 전부 `tests/voiceSessionScopes.test.mjs`가 순차로
    구동합니다.
 3. **세션→scope 기록은 상한이 있고, 조회 실패는 fail-closed입니다.**
-   `lib/voiceSessionScopes.ts`가 최신 두 세션만 남깁니다. transcript는 세션이
-   live 상태를 떠난 뒤에 도착하므로 "세션이 끝나면 지운다"는 필요한 직전에
-   지우는 일이 되고, 반대로 아무것도 지우지 않던 처음 구현은 composer가
-   mount돼 있는 동안 녹음마다 한 항목씩 늘었습니다. 종료 경로 네 곳에
-   `delete`를 뿌리는 대신 **보존 규칙 하나**로 둔 이유는, 뿌리는 쪽은 하나만
-   빠뜨려도 원래대로 돌아가기 때문입니다.
+   `lib/voiceSessionScopes.ts`가 최신 두 세션만 남깁니다. **scope를 읽는 시점은
+   `onTranscript`이고, adapter는 그것을 `transcription_succeeded` 직전에
+   부릅니다** — 즉 읽는 순간 세션은 아직 live이고 읽히는 항목은 최신 항목입니다.
+
+   **지금 코드에서는 1개로도 충분합니다.** 머신이 busy(=`transcribing` 포함)
+   중에는 `start_requested`를 무시하므로 이전 업로드가 끝나기 전에 새 세션이
+   자기 항목을 기록할 수 없고, 버려진 세션은 `onTranscript` **앞의**
+   `discarded` 검사에서 걸러져 scope를 묻지도 않습니다. 2를 유지하는 이유는
+   지금 존재하는 경합이 아니라 **이름 댈 수 있는 변경 하나에 대한 여유**입니다
+   — 이전 클립이 변환 중일 때 새 녹음을 시작할 수 있게 하면 첫 번째 조건이
+   사라집니다. 반대로 아무것도 지우지 않던 처음 구현은 composer가 mount돼
+   있는 동안 녹음마다 한 항목씩 늘었습니다. 종료 경로 네 곳에 `delete`를
+   뿌리는 대신 **보존 규칙 하나**로 둔 이유는, 뿌리는 쪽은 하나만 빠뜨려도
+   원래대로 돌아가기 때문입니다.
 
    **상한이 안전한 것은 조회 실패를 실패로 보고하기 때문입니다.** `scopeFor()`는
    `string | null`이 아니라 `{ known: true, scopeId } | { known: false }`를

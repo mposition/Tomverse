@@ -42,20 +42,38 @@ export type VoiceSessionScopes = {
  * nothing removed one, so a tab left open all day accumulated one per
  * recording.
  *
- * ## Why anything is kept at all
+ * ## When the scope is actually read
  *
- * The scope is read when a transcript comes back, which is after the session
- * has usually already left the state machine's live states. "Delete it when
- * the session ends" would delete it moments before it is needed.
+ * From `onTranscript`, which `lib/voiceCaptureAdapter.ts` invokes immediately
+ * *before* it dispatches `transcription_succeeded` — so the session is still
+ * live at read time, and the entry being read is the newest one. Nothing here
+ * is read after a session has finished.
  *
- * ## Why so few are kept, and why a miss is not `null`
+ * ## One entry is enough today; the second is declared margin
  *
- * A transcript for an abandoned session is dropped by the adapter before it
- * ever asks for a scope, so in practice only the newest session's entry is
- * read. Two are retained so a callback racing a freshly started session still
- * finds its own answer, and the cap is the backstop for any path neither
- * argument covers. That backstop is only safe because a miss is reported as a
- * miss — see `VoiceScopeLookup`.
+ * Two things together mean only the newest entry is ever read, and this is
+ * worth saying plainly rather than inventing a race for the number to guard:
+ *
+ *   * the machine ignores `start_requested` while it is busy, and
+ *     `isVoiceRecorderBusy` counts `transcribing` — so no new session can
+ *     `remember` itself while a previous session's upload is outstanding;
+ *   * a session that was abandoned is in the adapter's `discarded` set, which
+ *     is checked *before* `onTranscript` — so its scope is never asked for.
+ *
+ * `RETAINED_SESSIONS = 1` would therefore be correct for the code as it
+ * stands, and `tests/voiceSessionScopes.test.mjs` shows one working. The
+ * second is kept as margin against one specific, plausible change: allowing a
+ * new recording to start while the previous clip is still transcribing. That
+ * removes the first bullet, and with it the guarantee that the newest entry is
+ * the one being read. Two costs nothing and survives that edit; the honest
+ * reason is "a small allowance for a reordering we can name", not a race that
+ * exists now.
+ *
+ * ## Why the cap is safe at all
+ *
+ * Not because of the number. Whatever falls off the end is reported as a miss
+ * rather than as the new-conversation draft, and the caller drops the
+ * transcript — see `VoiceScopeLookup`.
  */
 export const createVoiceSessionScopes = (
   retained: number = RETAINED_SESSIONS
