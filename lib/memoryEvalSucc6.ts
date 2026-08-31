@@ -244,7 +244,23 @@ export function buildSucc6Manifest(): Succ6DatasetManifest {
 }
 
 /**
- * Everything about this manifest the tree does not reproduce.
+ * Everything about the recorded manifest the tree does not reproduce.
+ *
+ * Two sides, and both defaults matter. `manifest` is the **record** — the
+ * pinned literal below — and `built` is the **tree**, recomputed on the spot.
+ * Calling this with no arguments therefore asks the question it is supposed
+ * to: does what was signed still describe what is here?
+ *
+ * The record's default used to be `buildSucc6Manifest()`, which made the
+ * no-argument call compare the tree with itself. That is a tautology and it
+ * always returned empty: a case could be edited and this would report nothing,
+ * which is precisely the drift the freeze exists to catch. The pin was in
+ * place and nothing consulted it — `scripts/check-memory-eval-succ6.mjs`
+ * called this with no argument and printed a clean bill.
+ *
+ * `built` is a parameter rather than a local so a test can hand in the
+ * manifest a *moved* tree would produce, without editing a file on disk. A
+ * check that cannot be shown to fail is not evidence that anything passed.
  *
  * Empty means the record describes the dataset this tree holds. The two
  * negative checks are the ones a case-replacement successor needs and a
@@ -253,10 +269,10 @@ export function buildSucc6Manifest(): Succ6DatasetManifest {
  * composition repairs, each checked against its own list.
  */
 export function verifySucc6Manifest(
-    manifest: Succ6DatasetManifest = buildSucc6Manifest()
+    manifest: Succ6DatasetManifest = MEMORY_EVAL_SUCC6_MANIFEST,
+    built: Succ6DatasetManifest = buildSucc6Manifest()
 ): readonly string[] {
     const failures: string[] = [];
-    const built = buildSucc6Manifest();
 
     if (manifest.datasetDigest !== built.datasetDigest) {
         failures.push(
