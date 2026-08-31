@@ -43,16 +43,51 @@ import {
 } from "../lib/aiReviewApprovalBlock.ts";
 import {
   adjudicatedArtifactProblems,
+  decisionDatasetProblems,
   verifyEvidenceBundle,
   AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
 } from "../lib/aiReviewEvidenceBundle.ts";
-
-const DATASET_DIRECTORY = "docs/ops/ai-review-evaluation-set";
 
 const argValue = (name) => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
   return match ? match.slice(name.length + 3) : "";
 };
+
+/**
+ * Where the register and the evaluation sets come from.
+ *
+ * The defaults are the real ones, and CI passes nothing, so the run that gates
+ * a pull request always reads the committed register. `--register` and
+ * `--dataset-dir` exist so this script can be run against an isolated fixture
+ * -- which is how tests/aiReviewEvalCliFlow.test.mjs checks that THIS command,
+ * and not a function it happens to import, still refuses stale evidence.
+ *
+ * They are announced loudly and they only ever narrow: pointing at a fixture
+ * register checks that register, and cannot make the default run check less.
+ * Both are required together, so a half-override cannot mix a fixture's
+ * artifacts with the real register's expectations.
+ */
+const registerOverride = argValue("register");
+const datasetDirectoryOverride = argValue("dataset-dir");
+if (Boolean(registerOverride) !== Boolean(datasetDirectoryOverride)) {
+  console.error(
+    "--register and --dataset-dir must be given together: a fixture register " +
+      "read against the real evaluation sets, or the reverse, checks neither."
+  );
+  process.exit(1);
+}
+
+const DATASET_DIRECTORY = datasetDirectoryOverride || "docs/ops/ai-review-evaluation-set";
+const REGISTER = registerOverride
+  ? JSON.parse(readFileSync(registerOverride, "utf8"))
+  : AI_REVIEW_EVAL_REGISTER;
+if (registerOverride) {
+  console.log(
+    `NOT the committed register: --register=${registerOverride} ` +
+      `--dataset-dir=${DATASET_DIRECTORY}\n` +
+      "This run says nothing about what is approved in this repository.\n"
+  );
+}
 
 let failures = 0;
 
@@ -131,13 +166,13 @@ if (explicitDataset) {
 }
 
 console.log("\nAI Review reviewer-pair register");
-for (const entry of AI_REVIEW_EVAL_REGISTER) {
+for (const entry of REGISTER) {
   report(
     `${entry.reviewerModelId}@${entry.promptVersion} (${entry.status})`,
     approvedEntryProblems(entry)
   );
 }
-if (!AI_REVIEW_EVAL_REGISTER.some((entry) => entry.status === "approved")) {
+if (!REGISTER.some((entry) => entry.status === "approved")) {
   console.log(
     "  note no pair is approved. `M5 eligible` is therefore false by construction, " +
       "which is the honest state and not a failure of this check."
@@ -190,7 +225,7 @@ if (existsSync(DATASET_DIRECTORY)) {
 }
 
 console.log("\nAI Review approved-entry evidence");
-const approvedEntries = AI_REVIEW_EVAL_REGISTER.filter(
+const approvedEntries = REGISTER.filter(
   (entry) => entry.status === "approved"
 );
 if (approvedEntries.length === 0) {
@@ -199,6 +234,135 @@ if (approvedEntries.length === 0) {
       "becomes approved is checked here without anything being passed to this script."
   );
 }
+/**
+ * Everything an artifact must survive, whether or not a register cites it yet.
+ *
+ * One function for both callers. The `--artifact` branch used to check only
+ * the summary, so the same stale evidence the approved-entry path refused --
+ * a verdict edited after adjudication -- passed here. That is not a bypass of
+ * CI, which reads the register, but it is a wrong answer at exactly the moment
+ * a person is deciding whether a run is worth citing, and the second check
+ * existing at all was what made it look answered.
+ *
+ * `expected` is the register's record of the run, or null when nothing cites
+ * this artifact yet. Identity is compared against it when it is there; the
+ * evidence bundle is verified either way.
+ */
+const verifyRunArtifact = ({ artifactPath, expected, decisionSets }) => {
+  const problems = [];
+  if (!artifactPath) return ["names no artifact"];
+
+  const artifact = readJson(artifactPath);
+  if (!artifact || artifact.__readError) {
+    return [`${artifactPath} could not be read: ${artifact?.__readError ?? "missing"}`];
+  }
+  const summary = artifact.summary ?? {};
+  problems.push(...artifactAdmissibilityProblems(summary));
+
+  if (expected) {
+    const identical = (key, stated, recorded) => {
+      if (stated !== recorded) {
+        problems.push(`artifact ${key} is ${String(stated)}, recorded as ${String(recorded)}`);
+      }
+    };
+    identical("reviewerModelId", summary.reviewerModelId, expected.reviewerModelId);
+    identical("promptVersion", summary.promptVersion, expected.promptVersion);
+    identical("commitSha", summary.commitSha, expected.evaluatedCommit);
+    identical("runOrdinal", summary.runOrdinal, expected.runOrdinal);
+    identical("datasetDigest", summary.datasetDigest, expected.datasetDigest);
+    if (!artifact.metrics) {
+      problems.push("artifact carries no metrics, so nothing can be compared");
+    } else {
+      problems.push(...approvalBlockDrift(expected, artifact));
+    }
+  }
+
+  // The dataset, resolved from the digest to a file in this tree.
+  //
+  // Readiness finds an adequate decision set A. The approval check asks that
+  // the artifact and the register agree on a digest B. Nothing asked whether A
+  // and B are the same set -- so a reviewer could be approved on an artifact
+  // whose dataset was never committed, or was deleted, while readiness stayed
+  // satisfied by an unrelated one. The digest is the handle, so it has to
+  // resolve.
+  const digest = expected?.datasetDigest ?? summary.datasetDigest;
+  const matchingSet = decisionSets.get(digest);
+  if (!matchingSet) {
+    problems.push(
+      `no dataset in ${DATASET_DIRECTORY} fingerprints to ${String(digest)}; ` +
+        "the set this run scored is not in the tree" +
+        (decisionSets.size > 0
+          ? ` (found: ${[...decisionSets.keys()].join(", ")})`
+          : " (no valid decision set exists)")
+    );
+    return problems;
+  }
+  if (matchingSet.dataset.version !== summary.datasetVersion) {
+    problems.push(
+      `artifact names dataset version ${String(summary.datasetVersion)}, but ` +
+        `${matchingSet.path} is ${matchingSet.dataset.version}`
+    );
+  }
+  if (matchingSet.dataset.schemaVersion !== summary.datasetSchemaVersion) {
+    problems.push(
+      `artifact names schema ${String(summary.datasetSchemaVersion)}, but ` +
+        `${matchingSet.path} is ${matchingSet.dataset.schemaVersion}`
+    );
+  }
+  problems.push(
+    ...decisionDatasetProblems(matchingSet.dataset).map(
+      (problem) => `${matchingSet.path}: ${problem}`
+    )
+  );
+
+  // The bundle: record, answer key and journal, verified together and
+  // recomputed, then compared with what the artifact says about them.
+  const recordRef = summary.humanBlindReviewRef;
+  const artifactDirectory = dirname(artifactPath);
+  const artifactStem = basename(artifactPath).replace(/(--adjudicated)?\.json$/, "");
+  const answerKeyPath = join(artifactDirectory, `${artifactStem}--answer-key.json`);
+  const journalPath = join(artifactDirectory, `${artifactStem}.journal.jsonl`);
+
+  if (!recordRef) {
+    problems.push("no blind review record to open");
+  } else if (!existsSync(recordRef)) {
+    problems.push(`blind review record ${recordRef} does not exist`);
+  } else if (!existsSync(answerKeyPath)) {
+    problems.push(`no answer key beside the artifact (${answerKeyPath})`);
+  } else if (!existsSync(journalPath)) {
+    problems.push(
+      `no journal beside the artifact (${journalPath}); the numbers cannot be recomputed`
+    );
+  } else {
+    const journalText = readFileSync(journalPath, "utf8");
+    const answerKeyText = readFileSync(answerKeyPath, "utf8");
+    const recordText = readFileSync(recordRef, "utf8");
+    const bundle = verifyEvidenceBundle({
+      dataset: matchingSet.dataset,
+      journal: journalText
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line)),
+      journalText,
+      answerKey: JSON.parse(answerKeyText),
+      answerKeyText,
+      recordText,
+      identity: {
+        runOrdinal: expected?.runOrdinal ?? summary.runOrdinal,
+        reviewerModelId: expected?.reviewerModelId ?? summary.reviewerModelId,
+        promptVersion: expected?.promptVersion ?? summary.promptVersion,
+        datasetDigest: expected?.datasetDigest ?? summary.datasetDigest,
+        commitSha: expected?.evaluatedCommit ?? summary.commitSha,
+        // The sheet's seed as the artifact recorded it, not the run's.
+        sheetSeed: summary.blindReviewSheetSeed,
+      },
+      minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
+    });
+    problems.push(...adjudicatedArtifactProblems({ artifact, bundle }));
+  }
+  return problems;
+};
+
 for (const entry of approvedEntries) {
   const runs = entry.evaluation?.runs ?? [];
   if (runs.length === 0) {
@@ -208,159 +372,23 @@ for (const entry of approvedEntries) {
     continue;
   }
   for (const run of runs) {
-    const label = `${entry.reviewerModelId}@${entry.promptVersion} run ${run.runOrdinal}`;
-    const problems = [];
-    const artifact = run.artifactRef ? readJson(run.artifactRef) : null;
-    if (!run.artifactRef) {
-      problems.push("names no artifact");
-    } else if (!artifact || artifact.__readError) {
-      problems.push(
-        `${run.artifactRef} could not be read: ${artifact?.__readError ?? "missing"}`
-      );
-    } else {
-      const summary = artifact.summary ?? {};
-      problems.push(...artifactAdmissibilityProblems(summary));
-      if (summary.reviewerModelId !== run.reviewerModelId) {
-        problems.push(
-          `artifact was written by ${String(summary.reviewerModelId)}, ` +
-            `recorded as ${run.reviewerModelId}`
-        );
-      }
-      if (summary.promptVersion !== run.promptVersion) {
-        problems.push(
-          `artifact used prompt ${String(summary.promptVersion)}, ` +
-            `recorded as ${run.promptVersion}`
-        );
-      }
-      if (summary.commitSha !== run.evaluatedCommit) {
-        problems.push(
-          `artifact ran at ${String(summary.commitSha)}, recorded as ${run.evaluatedCommit}`
-        );
-      }
-      if (summary.runOrdinal !== run.runOrdinal) {
-        problems.push(
-          `artifact is ordinal ${String(summary.runOrdinal)}, recorded as ${run.runOrdinal}`
-        );
-      }
-      if (summary.datasetDigest !== run.datasetDigest) {
-        problems.push(
-          `artifact scored ${String(summary.datasetDigest)}, recorded as ${run.datasetDigest}`
-        );
-      }
-      if (!artifact.metrics) {
-        problems.push("artifact carries no metrics, so nothing can be compared");
-      } else {
-        problems.push(...approvalBlockDrift(run, artifact));
-      }
-
-      // The dataset, resolved from the digest to a file in this tree.
-      //
-      // Readiness finds an adequate decision set A. The approval check asks
-      // that the artifact and the register agree on a digest B. Nothing asked
-      // whether A and B are the same set -- so a reviewer could be approved on
-      // an artifact whose dataset was never committed, or was deleted, while
-      // readiness stayed satisfied by an unrelated one. The digest is the
-      // handle, so it has to resolve.
-      const matchingSet = decisionSetsByDigest.get(run.datasetDigest);
-      if (!matchingSet) {
-        problems.push(
-          `no dataset in ${DATASET_DIRECTORY} fingerprints to ${run.datasetDigest}; ` +
-            `the set this run scored is not in the tree` +
-            (decisionSetsByDigest.size > 0
-              ? ` (found: ${[...decisionSetsByDigest.keys()].join(", ")})`
-              : " (no valid decision set exists)")
-        );
-      } else {
-        if (matchingSet.dataset.version !== summary.datasetVersion) {
-          problems.push(
-            `artifact names dataset version ${String(summary.datasetVersion)}, but ` +
-              `${matchingSet.path} is ${matchingSet.dataset.version}`
-          );
-        }
-        if (matchingSet.dataset.schemaVersion !== summary.datasetSchemaVersion) {
-          problems.push(
-            `artifact names schema ${String(summary.datasetSchemaVersion)}, but ` +
-              `${matchingSet.path} is ${matchingSet.dataset.schemaVersion}`
-          );
-        }
-        const drift = freezeDrift(matchingSet.dataset);
-        if (drift) problems.push(`${matchingSet.path}: ${drift}`);
-        if (!matchingSet.dataset.frozenAt || !matchingSet.dataset.frozenBy) {
-          problems.push(
-            `${matchingSet.path} is not frozen; an approval cannot rest on a set that can still change`
-          );
-        }
-        const adequacy = assessSampleAdequacy(matchingSet.dataset.cases);
-        if (!adequacy.adequate) {
-          problems.push(
-            `${matchingSet.path} is not adequate: ${adequacy.shortfalls.join("; ")}`
-          );
-        }
-      }
-
-      // The blind review and the numbers, verified as one bundle.
-      //
-      // Opening the record and checking the artifact's numbers separately was
-      // not enough: both passed while a verdict edited in the record after
-      // adjudication left the artifact stale, because nothing ever asked
-      // whether one produced the other. The same core adjudication uses now
-      // re-derives everything from the files and compares.
-      const recordRef = summary.humanBlindReviewRef;
-      const artifactDirectory = dirname(run.artifactRef);
-      const artifactStem = basename(run.artifactRef).replace(
-        /(--adjudicated)?\.json$/,
-        ""
-      );
-      const answerKeyPath = join(artifactDirectory, `${artifactStem}--answer-key.json`);
-      const journalPath = join(artifactDirectory, `${artifactStem}.journal.jsonl`);
-
-      if (!recordRef) {
-        problems.push("no blind review record to open");
-      } else if (!existsSync(recordRef)) {
-        problems.push(`blind review record ${recordRef} does not exist`);
-      } else if (!existsSync(answerKeyPath)) {
-        problems.push(`no answer key beside the artifact (${answerKeyPath})`);
-      } else if (!existsSync(journalPath)) {
-        problems.push(
-          `no journal beside the artifact (${journalPath}); the numbers cannot be recomputed`
-        );
-      } else if (!matchingSet) {
-        problems.push("the dataset is not in the tree, so nothing can be recomputed");
-      } else {
-        const journalText = readFileSync(journalPath, "utf8");
-        const answerKeyText = readFileSync(answerKeyPath, "utf8");
-        const recordText = readFileSync(recordRef, "utf8");
-        const bundle = verifyEvidenceBundle({
-          dataset: matchingSet.dataset,
-          journal: journalText
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => JSON.parse(line)),
-          journalText,
-          answerKey: JSON.parse(answerKeyText),
-          answerKeyText,
-          recordText,
-          identity: {
-            runOrdinal: run.runOrdinal,
-            reviewerModelId: run.reviewerModelId,
-            promptVersion: run.promptVersion,
-            datasetDigest: run.datasetDigest,
-            commitSha: run.evaluatedCommit,
-            // The sheet's seed as the artifact recorded it, not the run's.
-            sheetSeed: summary.blindReviewSheetSeed,
-          },
-          minimumReviewedCases: AI_REVIEW_MIN_BLIND_REVIEWED_CASES,
-        });
-        problems.push(...adjudicatedArtifactProblems({ artifact, bundle }));
-      }
-    }
-    report(label, problems);
+    report(
+      `${entry.reviewerModelId}@${entry.promptVersion} run ${run.runOrdinal}`,
+      verifyRunArtifact({
+        artifactPath: run.artifactRef,
+        expected: run,
+        decisionSets: decisionSetsByDigest,
+      })
+    );
   }
 }
 
-// A loose artifact, checked on request. Separate from the block above and no
-// longer the only path to a comparison: this answers "is the run I just made
-// admissible", which is a question asked before any entry cites it.
+// A run not yet cited by any entry, checked on request.
+//
+// Through the same evidence path. It used to check the artifact's summary and
+// stop, so a verdict edited after adjudication passed here while the
+// approved-entry path refused it -- a wrong answer at exactly the moment a
+// person is deciding whether a run is worth citing.
 const artifactPath = argValue("artifact");
 console.log("\nAI Review evaluation run artifact");
 if (!artifactPath) {
@@ -369,12 +397,14 @@ if (!artifactPath) {
       "artifacts above; this is for a run not yet recorded anywhere."
   );
 } else {
-  const artifact = readJson(artifactPath);
-  if (artifact.__readError) {
-    report(artifactPath, [`could not be read: ${artifact.__readError}`]);
-  } else {
-    report(artifactPath, artifactAdmissibilityProblems(artifact.summary ?? artifact));
-  }
+  report(
+    artifactPath,
+    verifyRunArtifact({
+      artifactPath,
+      expected: null,
+      decisionSets: decisionSetsByDigest,
+    })
+  );
 }
 
 // The block a person would otherwise retype. Printing rather than writing: an

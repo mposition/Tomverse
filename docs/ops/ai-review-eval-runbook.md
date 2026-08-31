@@ -326,6 +326,36 @@ journal · answer key · 블라인드 기록 · artifact. 검증이 두 스크�
   적어 두므로, 같은 모양의 다른 파일로 바꾸거나 나중에 한 칸을 고치면 어긋납니다.
 - **수치 재계산.** 같은 scorer로 다시 매기고 자릿수까지 대조합니다.
 
+### 등록 전 `--artifact` 검사도 같은 경로를 지납니다
+
+`--artifact`는 **아직 register가 인용하지 않은 실행**을 확인하는 용도이고, 한동안
+artifact의 summary만 보고 끝냈습니다. 그래서 승인 항목 경로가 거절하는 낡은
+증거 — adjudication 후 고친 판정 — 가 이쪽에서는 통과했습니다. CI가 register를
+읽으므로 승인 우회는 아니지만, **인용할 가치가 있는지 사람이 판단하는 바로 그
+순간에 틀린 답**을 줍니다. 두 갈래가 이제 같은 `verifyRunArtifact()`를 지나며,
+차이는 하나뿐입니다 — register 기록이 있으면 신원과 수치를 그것과도 대조하고,
+없으면 artifact 자신의 summary를 신원으로 씁니다.
+
+### 게이트 자체를 회귀 테스트가 실행합니다
+
+`tests/aiReviewEvalCliFlow.test.mjs`는 두 명령을 **명령으로** 실행합니다.
+adjudication만 돌리는 테스트는, 게이트가 내일 공유 코어를 부르지 않게 되어도
+전부 통과합니다 — 이 층의 결함은 언제나 한 스크립트 안의 계산이 아니라 **두
+스크립트 사이의 이음매**였습니다.
+
+격리해서 돌리기 위해 `check-ai-review-eval-dataset.mjs`가 `--register`와
+`--dataset-dir`를 받습니다. **함께 주어야 하고**(fixture register를 진짜 평가
+set과 맞대면 어느 쪽도 검사하지 않습니다), 출력 첫 줄에 "NOT the committed
+register"를 크게 찍습니다. CI는 아무 인자도 주지 않으므로 PR을 막는 실행은 언제나
+커밋된 register를 읽습니다.
+
+테스트가 고정하는 것: 온전한 두 실행이 증거 구획을 통과하고, 기록 한 칸을 고친 뒤
+**재판정 없이** 같은 게이트가 digest 불일치와 위반 수 차이 양쪽으로 거절하며,
+손대지 않은 두 번째 실행은 계속 통과한다는 것. 그리고 register 형태 검사에 남는
+불만이 **정확히 하나** — threshold 집합이 아직 제안이라는 것 — 임을 함께 고정합니다.
+이 저장소가 낼 수 없는 exit code를 기대하는 대신, 남아 있어야 할 거절이 그것
+하나임을 못 박습니다.
+
 ### 기록 양식은 신원을 싣고, 빈칸은 거절입니다
 
 `*--blind-review-record.csv`의 머리말에 run ordinal · reviewer · prompt version ·
