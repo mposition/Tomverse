@@ -40,6 +40,8 @@ AGENTS.md의 "사람에게 남기는 것은 사람만 할 수 있는 것뿐입�
 | 늦은 이벤트가 새 세션을 끝내거나 새 마이크를 닫지 못함 | 같은 파일 + `tests/voiceRecorderMachine.test.mjs` |
 | 대화 전환 시 세션 종료·초안 격리·타이핑 보존 | `tests/e2e/voice-input-composer.spec.ts` |
 | 대화/신원 경계 판정(4경로)과 scope 조회 실패의 fail-closed | `tests/voiceSessionScopes.test.mjs` |
+| 같은 탭에서 계정이 바뀌면 세션 종료·클립 미전송·마이크 해제(F-2) | `tests/e2e/voice-input-composer.spec.ts` |
+| 늦게 도착한 transcript가 어느 초안에도 안 감(중단 아님) | `tests/voiceCaptureAdapter.test.mjs` |
 | provider usage 형태 구분과 정산 근거 | `tests/voiceProviderSettlement.test.mjs` |
 | 결과 불명 호출이 예약을 유지함 | `tests/server-contract/voice-transcription-route.test.ts` |
 
@@ -189,23 +191,60 @@ production에 갈 수 없습니다.
 - [ ] 전송 → 응답 → **중단** 버튼이 동작한다
 - [ ] 위 넷을 **마이크가 켜진 상태에서** 다시 한 번
 
-### F-2. 계정 전환 (실기기 아님, 브라우저면 충분)
+### F-2. 계정 전환 — 자동화됨, 사람이 할 일 없음
 
-같은 탭에서 계정 A로 녹음을 시작하고 변환을 기다리는 동안 로그아웃 후 계정
-B로 로그인합니다.
+**이 항목은 `tests/e2e/voice-input-composer.spec.ts`의
+"a voice session belongs to one person"이 desktop·mobile 두 project에서
+수행합니다.** 유료 turn도 실기기도 아니고, 사람이 손으로 반복할 이유가
+없습니다. 계정 전환은 `/api/auth/session` 응답을 바꾸고
+`visibilitychange`를 보내는 방식으로 일으키며, 이는 next-auth의 실제
+refetch 경로입니다 — 제품에 테스트 전용 hook을 넣지 않았고 `useSession` →
+`voiceIdentityKey` → hook의 boundary effect가 그대로 실행됩니다.
 
-네 경로를 각각 봅니다. 앞의 둘은 **취소되지 않아야** 하고 뒤의 둘은
-**취소되어야** 합니다.
+브라우저가 실제로 만들 수 있는 전환은 셋이고, 셋 다 자동화돼 있습니다.
 
-- [ ] `null → A` (로그인 상태가 확정되는 중에 녹음 시작) → **취소되지 않는다**
-- [ ] `A → null → A` (session refetch) → **취소되지 않는다**
-- [ ] `A → B` (로그아웃 후 다른 계정으로 로그인) → `VOICE_SCOPE_CHANGED`
-- [ ] `A → null → B` (전환 중 session이 잠시 비는 경우) → `VOICE_SCOPE_CHANGED`
-- [ ] 위 두 취소 경우에 계정 B의 입력창에 **아무것도 추가되지 않는다**
+- [x] `A → A` (같은 계정으로 refetch) → **취소되지 않는다**
+      (session을 다시 읽었다는 사실까지 함께 확인합니다 — refetch가 일어나지
+      않았다면 이 항목은 아무것도 지키지 않는 채 통과합니다)
+- [x] `A → B` (다른 계정이 같은 탭을 차지) → `VOICE_SCOPE_CHANGED`, 클립
+      미전송, 마이크 해제, **계정 A의 음성 transcript가 B의 입력창에 추가되지
+      않음**
+- [x] `A → 로그아웃` → `VOICE_SCOPE_CHANGED`, 마이크 해제
+- [x] 변환 중 전환 → **진행 중인 업로드를 버리고** 어느 초안에도 쓰지 않음
+      (요청이 실제로 route에 도달한 뒤 전환합니다)
 
-네 경로 모두 `resolveVoiceSessionBoundary()`로 단위 테스트돼 있지만,
-**브라우저에서 끝에서 끝까지 실행한 관측은 아직 없습니다.** 이 항목이 그
-관측이며, 유료 turn도 실기기도 아닙니다.
+**"B의 입력창이 빈 상태"는 이 항목의 주장이 아닙니다.** 초안은 대화 id로만
+key가 잡히므로 B는 A가 **타이핑한** 글을 그대로 봅니다 — 확인된 사실이고
+`docs/policy/voice-input.md` §8.4 "이 기능이 고치지 않은 것"에 근거와 함께
+적었습니다. Voice가 보장하는 것은 **음성 transcript가 추가되지 않는다**까지이며,
+테스트도 그 범위만 단언합니다.
+
+**"늦게 도착한 transcript를 버린다"도 이 항목의 주장이 아닙니다.** 전환 시
+`discardCapture()`가 요청을 abort하므로 이후 응답은 `onTranscript`에 도달조차
+하지 않습니다. 즉 브라우저에서 관측되는 것은 **중단**이고, 늦은 callback을
+fail-closed로 버리는 경로는 실행 가능한 곳 —
+`tests/voiceCaptureAdapter.test.mjs`("a transcript for a cancelled session
+reaches no draft at all", 주입한 fetch가 abort를 무시하므로 응답이 실제로 늦게
+도착합니다)와 `tests/voiceSessionScopes.test.mjs` — 에 있습니다.
+
+**`null`이 끼는 두 경로는 이 페이지에서 발생하지 않습니다.** 원래 항목은
+`null → A`와 `A → null → B`를 브라우저에서 보라고 했지만,
+`app/(site)/(application)/layout.tsx`가 session을 서버에서 확정해
+`SessionProvider`에 넘기므로 `hasInitialSession`이 항상 참이고 `status`는
+이 화면에서 `"loading"`이 되지 않습니다. 이후 refetch도 진행 중에 이전
+session을 유지하므로 `sessionUserId`가 비지 않습니다. 즉 `voiceIdentityKey`가
+`null`인 상태는 **이 앱이 렌더링하지 않는 페이지**를 가리킵니다.
+
+그래서 그 두 경로는 실행할 수 있는 곳 —
+`tests/voiceSessionScopes.test.mjs` — 에 남겨 둡니다. 규칙 자체는 계속
+필요합니다: `null`은 "아직 모른다"의 표현이고, 나중에 어떤 화면이
+`SessionProvider`에 session을 넘기지 않게 되면 그때부터 발생합니다.
+
+**자동 테스트가 진짜로 실패할 수 있는지 확인했습니다.**
+`resolveVoiceSessionBoundary()`의 신원 비교를 `changed: false`로 바꾸면 위
+취소 3건이 실패하고 `A → A`는 통과합니다. 취소가 scope 변경이 아니라 신원
+변경으로 일어난다는 근거도 이것입니다 — scope가 함께 움직였다면 신원 비교를
+없애도 취소됐을 것입니다.
 
 마지막 항목이 요점입니다. 앞의 넷은 flag off로도 동작해야 하고, 이 기능이
 깨뜨릴 수 있는 것은 컨트롤이 하나 늘어난 composer입니다.

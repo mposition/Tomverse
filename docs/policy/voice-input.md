@@ -439,11 +439,19 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
    돌려줍니다** — 호출부가 `nextIdentity`를 그냥 저장하면 위 결함이 되돌아오기
    때문입니다. 네 경로 전부 `tests/voiceSessionScopes.test.mjs`가 순차로
    구동합니다.
+
+   **브라우저에서 실행되는 것은 그중 셋이고, 나머지는 이 앱이 만들지 않는
+   상태입니다.** `tests/e2e/voice-input-composer.spec.ts`가 `A → A`(취소 안 됨),
+   `A → B`, 로그아웃을 실제 next-auth refetch 경로로 구동합니다. `null`이 끼는
+   두 경로는 `app/(site)/(application)/layout.tsx`가 session을 서버에서 확정해
+   넘기므로 이 화면에서 발생하지 않습니다 — `status`가 `"loading"`이 되지 않고,
+   refetch 중에도 이전 session이 유지되어 `sessionUserId`가 비지 않습니다.
+   규칙은 그대로 둡니다. `null`은 "아직 모른다"의 표현이고, 어떤 화면이
+   `SessionProvider`에 session을 넘기지 않게 되는 순간 다시 발생합니다.
 3. **세션→scope 기록은 상한이 있고, 조회 실패는 fail-closed입니다.**
    `lib/voiceSessionScopes.ts`가 최신 두 세션만 남깁니다. **scope를 읽는 시점은
    `onTranscript`이고, adapter는 그것을 `transcription_succeeded` 직전에
    부릅니다** — 즉 읽는 순간 세션은 아직 live이고 읽히는 항목은 최신 항목입니다.
-
    **지금 코드에서는 1개로도 충분합니다.** 머신이 busy(=`transcribing` 포함)
    중에는 `start_requested`를 무시하므로 이전 업로드가 끝나기 전에 새 세션이
    자기 항목을 기록할 수 없고, 버려진 세션은 `onTranscript` **앞의**
@@ -470,6 +478,27 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
 초안이 모두 그 remount에 딸려 초기화되기 때문입니다.
 
 탭 전환을 넘나드는 백그라운드 녹음 복구는 만들지 않았습니다.
+
+#### 이 기능이 고치지 않은 것 — 초안은 신원별로 격리되지 않습니다
+
+**확인된 사실입니다.** 같은 탭에서 계정 A가 새 대화 입력창에 글을 쓰고 계정
+B가 그 탭을 이어받으면, **B는 A가 쓰던 글을 그대로 봅니다.**
+`lib/conversationDraftStore.ts`의 `draftKeyFor()`가 대화 id만으로 key를 만들고
+신원을 보지 않기 때문이며, 브라우저에서 재현했습니다(계정 전환 뒤 textarea 값
+= `"계정 A가 쓰던 초안"`).
+
+**이것은 Voice가 만든 것도 Voice가 고칠 것도 아닙니다.** Voice의 경계는 음성
+세션에 있고, 이 항목에서 Voice가 보장하는 것은 하나뿐입니다 — **A의 음성
+transcript가 B의 입력창에 추가되지 않는다.** 클립이 전송되지도 않으므로 추가될
+문장 자체가 없습니다.
+
+**남은 결정**: 신원이 바뀔 때 초안을 지울 것인가, 아니면 신원 namespace별로
+격리해 B는 빈 입력창을 보고 A로 돌아오면 복원되게 할 것인가. 뒤쪽이 더
+안전하지만 모든 대화가 공유하는 store를 바꾸는 일이고, 이 변경의 세부사항이
+아니라 별도 제품 결정입니다. 결정 전까지
+`tests/e2e/voice-input-composer.spec.ts`는 **관측된 값**을 단언합니다 — `""`를
+단언하면 지금 사실이 아닌 것을 통과시키게 되고, 관측값을 단언해 두면 그 결정이
+내려지는 날 테스트가 소리내어 실패합니다.
 
 ### 8.5 자원을 소유하는 층은 따로 있습니다
 
