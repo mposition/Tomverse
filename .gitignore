@@ -36,6 +36,11 @@ playwright.local-sandbox.config.ts
 # misc
 .DS_Store
 *.pem
+# One exception, and it is a public key: the ROUTE-01 review draw encrypts
+# key.json to it, so a GitHub runner has to be able to read it from the
+# repository. Its private half lives outside any checkout, passphrase-
+# protected, and is what the blanket rule above still exists to stop.
+!docs/ops/router-human-review/key-recipient.pub.pem
 
 # debug
 npm-debug.log*
