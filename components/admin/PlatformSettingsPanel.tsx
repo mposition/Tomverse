@@ -28,6 +28,7 @@ type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
   imageGenerationEnabled?: boolean;
   externalConversationImportEnabled?: boolean;
+  externalConversationContinuationEnabled?: boolean;
   assistantProfilesEnabled?: boolean;
   assistantKnowledgeEnabled?: boolean;
   memoryExtractionEnabled?: boolean;
@@ -59,6 +60,12 @@ type Props = {
   imageGenerationEnabled: boolean;
   /** Release A import rollout flag; same opt-in, fail-closed shape. */
   externalConversationImportEnabled: boolean;
+  /**
+   * "Tomverse에서 이어가기"; same opt-in, fail-closed shape, and deliberately
+   * a separate switch from the import flag above
+   * (docs/policy/external-conversation-continuation.md §7).
+   */
+  externalConversationContinuationEnabled: boolean;
   /** Release C profile rollout flag; same opt-in, fail-closed shape. */
   assistantProfilesEnabled: boolean;
   /**
@@ -91,6 +98,7 @@ export function PlatformSettingsPanel({
   assistantPackageImportEnabled: initialAssistantPackageImportEnabled = false,
   imageGenerationEnabled: initialImageGenerationEnabled,
   externalConversationImportEnabled: initialExternalImportEnabled,
+  externalConversationContinuationEnabled: initialExternalContinuationEnabled,
   assistantProfilesEnabled: initialAssistantProfilesEnabled,
   assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
@@ -121,6 +129,8 @@ export function PlatformSettingsPanel({
   const [externalImportEnabled, setExternalImportEnabled] = useState(
     initialExternalImportEnabled
   );
+  const [externalContinuationEnabled, setExternalContinuationEnabled] =
+    useState(initialExternalContinuationEnabled);
   /**
    * The package import rollout control, kept apart from the form.
    *
@@ -220,6 +230,7 @@ export function PlatformSettingsPanel({
     nextSettings: PublicAppSettings,
     nextImageGenerationEnabled?: boolean,
     nextExternalImportEnabled?: boolean,
+    nextExternalContinuationEnabled?: boolean,
     nextAssistantProfilesEnabled?: boolean,
     nextAssistantKnowledgeEnabled?: boolean
   ) => {
@@ -232,6 +243,9 @@ export function PlatformSettingsPanel({
     }
     if (typeof nextExternalImportEnabled === "boolean") {
       setExternalImportEnabled(nextExternalImportEnabled);
+    }
+    if (typeof nextExternalContinuationEnabled === "boolean") {
+      setExternalContinuationEnabled(nextExternalContinuationEnabled);
     }
     if (typeof nextAssistantProfilesEnabled === "boolean") {
       setAssistantProfilesEnabled(nextAssistantProfilesEnabled);
@@ -282,6 +296,7 @@ export function PlatformSettingsPanel({
         data.settings,
         data.imageGenerationEnabled,
         data.externalConversationImportEnabled,
+        data.externalConversationContinuationEnabled,
         data.assistantProfilesEnabled,
         data.assistantKnowledgeEnabled
       );
@@ -308,6 +323,7 @@ export function PlatformSettingsPanel({
           publicSharingEnabled,
           imageGenerationEnabled,
           externalConversationImportEnabled: externalImportEnabled,
+          externalConversationContinuationEnabled: externalContinuationEnabled,
           assistantProfilesEnabled,
           assistantKnowledgeEnabled,
         }),
@@ -346,6 +362,7 @@ export function PlatformSettingsPanel({
         data.settings,
         data.imageGenerationEnabled,
         data.externalConversationImportEnabled,
+        data.externalConversationContinuationEnabled,
         data.assistantProfilesEnabled,
         data.assistantKnowledgeEnabled
       );
@@ -543,6 +560,28 @@ export function PlatformSettingsPanel({
                   className="h-5 w-5 accent-blue-600"
                 />
                 <span>External conversation import enabled</span>
+              </label>
+              <p className="mt-4 text-sm leading-6 text-zinc-400">
+                Continuing an imported conversation is a{" "}
+                <strong className="text-zinc-200">separate</strong> switch. It
+                starts a new Tomverse conversation from an imported one and
+                gives each of its turns a bounded excerpt of the source. Turning
+                it off stops new continuations and stops the excerpt reaching a
+                prompt; conversations already continued stay open and their
+                messages stay readable
+                (docs/policy/external-conversation-continuation.md §7).
+              </p>
+              <label className="mt-3 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-external-continuation-flag"
+                  checked={externalContinuationEnabled}
+                  onChange={(event) =>
+                    setExternalContinuationEnabled(event.target.checked)
+                  }
+                  className="h-5 w-5 accent-blue-600"
+                />
+                <span>Continue an imported conversation enabled</span>
               </label>
             </div>
           </div>

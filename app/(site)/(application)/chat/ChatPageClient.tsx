@@ -61,6 +61,10 @@ import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import {
+  conversationSurfaceHref,
+  type ConversationSurface,
+} from "@/lib/continuationRoutes";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -2817,7 +2821,35 @@ export function ChatPageClient({
     // Blocking would cost far more than it buys: a Deep Research run answers in
     // minutes, and refusing every sidebar click for its duration would strand
     // the user in one conversation with no indication why the click did nothing.
-    const handleSelectConversation = async (id: string, skipLockCheck = false) => {
+    const handleSelectConversation = async (
+        id: string,
+        skipLockCheck = false,
+        surfaceHint?: ConversationSurface
+    ) => {
+        /*
+          A continuation opens at its own URL
+          (docs/policy/external-conversation-continuation.md §8.2).
+
+          First, and before any workspace state is touched: this workspace has
+          no idea an imported half exists, so opening a continuation in it
+          showed the Tomverse turns alone -- correct at creation time and wrong
+          on every later visit, which is the worst shape a defect can have.
+
+          The hint is what a search result carries, because a hit can name a
+          conversation this list never loaded. Otherwise the row the sidebar is
+          already holding answers it. Both come from the server; nothing here
+          derives a surface from an id or a kind.
+        */
+        const targetSurface =
+            surfaceHint ?? conversations.find((c) => c.id === id)?.surface;
+        if (targetSurface === "continuation") {
+            const href = conversationSurfaceHref(targetSurface, id);
+            if (href) {
+                router.push(href);
+                return;
+            }
+        }
+
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
 

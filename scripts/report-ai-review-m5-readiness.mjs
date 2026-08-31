@@ -357,7 +357,10 @@ const completenessTelemetry =
     "writerSequence += 1"
   ) &&
   scorecardCore.includes("export const telemetryCompleteness") &&
-  scorecardCore.includes("missingTraceRate:");
+  scorecardCore.includes("detectedTraceGaps:") &&
+  // The half that makes completeness answerable at all: a total from outside
+  // the run table. Without it the scorecard can only ever report detection.
+  scorecardCore.includes("attemptedWrites");
 
 const thresholdSets = approvedThresholdSets();
 
@@ -396,10 +399,10 @@ const readiness = [
       : "only the reserved amount and a status are recorded; reservation-vs-settlement cannot be computed"
   ),
   check(
-    "telemetry_completeness_measurable",
+    "telemetry_loss_detection",
     completenessTelemetry,
     completenessTelemetry
-      ? "each write claims a per-writer sequence before it runs, so a write that never landed leaves a countable hole"
+      ? "each write claims a per-writer sequence before it runs, so a lost write leaves a countable hole; and the scorecard accepts an attempted total counted outside the table, which is the only thing that can turn detection into completeness"
       : "the scorecard reads only rows that landed, so a partial write outage reports as a healthy window"
   ),
   check(
@@ -450,9 +453,9 @@ const rateMet = (metric, floor) =>
 const eligibility = [
   check(
     "two_independent_decision_runs",
-    new Set(evaluation?.runOrdinals ?? []).size >= 2,
+    new Set((evaluation?.runs ?? []).map((run) => run.runOrdinal)).size >= 2,
     evaluation
-      ? `${new Set(evaluation.runOrdinals).size} distinct run ordinal(s) recorded`
+      ? `${new Set(evaluation.runs.map((run) => run.runOrdinal)).size} distinct run ordinal(s) recorded`
       : "no approved pair, so no decision run is recorded"
   ),
   check(
@@ -507,25 +510,54 @@ const eligibility = [
         `${window90.reliability?.unreconciledSettlements?.numerator ?? "?"} unsettled attempt(s)`
       : noOperations
   ),
+  // Two conditions, and the second one is the reason this item exists.
+  //
+  // A detected gap is proof of loss and refuses on its own. But zero detected
+  // gaps is NOT evidence the window is complete: a writer whose every write
+  // failed leaves no rows, so it leaves no span, so it is invisible to the
+  // arithmetic -- eighty landed writes and twenty lost ones report `missing:
+  // 0`. Approving completeness from that lower bound was approving a number
+  // that cannot see the failure mode it is meant to catch.
+  //
+  // So completeness has to come from an attempted total counted somewhere
+  // other than this table, and without one the answer is unknown rather than
+  // clean.
   check(
     "telemetry_complete_over_approved_window",
     Boolean(
       policy &&
-        window90?.reliability?.missingTraceRate?.status === "ok" &&
-        window90.reliability.missingTraceRate.value <= policy.maxMissingTraceRate
+        window90?.reliability?.detectedTraceGaps?.missing === 0 &&
+        window90.reliability.traceCompleteness &&
+        window90.reliability.traceCompleteness.status === "ok" &&
+        window90.reliability.traceCompleteness.value <= policy.maxMissingTraceRate
     ),
     !policy
       ? "no approved observation policy, so there is no bound on how much of the window may be missing"
       : !window90
         ? noOperations
-        : `${window90.reliability?.missingTraceRate?.value ?? "?"} missing against ` +
-          `${policy.maxMissingTraceRate}`
+        : window90.reliability?.detectedTraceGaps?.missing > 0
+          ? `${window90.reliability.detectedTraceGaps.missing} write(s) provably missing; ` +
+            `a detected gap refuses on its own`
+          : !window90.reliability?.traceCompleteness
+            ? "completeness is unknown: no attempted total was counted outside the run table, " +
+              "and zero detected gaps is not evidence of none " +
+              "(a writer whose every write failed leaves no rows to find a gap in)"
+            : `${window90.reliability.traceCompleteness.value} missing against ` +
+              `${policy.maxMissingTraceRate}, attested by ` +
+              `${window90.reliability.traceCompletenessSource ?? "an unnamed source"}`
   ),
   check(
     "zero_critical_quality_violations",
-    evaluation ? evaluation.zeroToleranceViolations === 0 : false,
+    // Every run, not the first. An approval rests on two, and a violation in
+    // the second one is exactly what reading only the first would miss.
     evaluation
-      ? `${evaluation.zeroToleranceViolations} recorded`
+      ? evaluation.runs.length > 0 &&
+        evaluation.runs.every((run) => run.zeroToleranceViolations === 0)
+      : false,
+    evaluation
+      ? `${evaluation.runs
+          .map((run) => `run ${run.runOrdinal}: ${run.zeroToleranceViolations}`)
+          .join(", ")} recorded`
       : "no approved pair, so no violation count exists"
   ),
   check(

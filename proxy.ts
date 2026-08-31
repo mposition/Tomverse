@@ -25,6 +25,12 @@ import {
   requiresMutationOriginCheck,
 } from "@/lib/requestOrigin";
 import {
+  isPreflightRequest,
+  nativeAppCorsHeaders,
+  nativeAppPreflightHeaders,
+  varyWithOrigin,
+} from "@/lib/nativeAppCors";
+import {
   DOCUMENT_LANGUAGE_HEADER,
   DOCUMENT_LANGUAGE_SOURCE_HEADER,
   isSupportedDocumentLanguage,
@@ -90,6 +96,36 @@ const blockedMutationOriginResponse = (request: NextRequest) => {
   );
 };
 
+/**
+ * N1a. Make an API response readable by the Capacitor shell, and by nothing
+ * else.
+ *
+ * Applied to every `/api/*` response after the host and origin-secret checks
+ * have passed -- including the refusals. A native client that is told `403
+ * INVALID_REQUEST_ORIGIN` can act on it; one that receives an opaque CORS
+ * failure cannot tell a refusal from an outage.
+ *
+ * `Vary: Origin` goes on regardless of whether the origin matched, so a shared
+ * cache cannot replay one origin's allowance to another. Decisions live in
+ * `lib/nativeAppCors.ts`; this only carries them onto a response.
+ */
+const withNativeCors = <T extends NextResponse>(
+  response: T,
+  request: NextRequest
+): T => {
+  if (!request.nextUrl.pathname.startsWith("/api/")) return response;
+  response.headers.set(
+    "Vary",
+    varyWithOrigin(response.headers.get("Vary"))
+  );
+  const cors = nativeAppCorsHeaders(request.headers.get("origin"));
+  if (!cors) return response;
+  for (const [key, value] of Object.entries(cors)) {
+    response.headers.set(key, value);
+  }
+  return response;
+};
+
 export function proxy(request: NextRequest) {
   // Container liveness must remain directly reachable by Railway. Readiness
   // performs database and monitoring work, so it goes through the same host
@@ -105,12 +141,52 @@ export function proxy(request: NextRequest) {
     return blockedOriginResponse();
   }
 
+  // N1a. Answer a CORS preflight from the Capacitor shell here, because no
+  // route does: there is not one `export async function OPTIONS` in the whole
+  // of `app/api/`, so a preflight would otherwise reach a handler that answers
+  // 405 with no CORS headers, and the browser would report the real request as
+  // a network failure.
+  //
+  // Deliberately *after* the host and origin-secret checks and *before* the
+  // mutation-origin check. After, because a preflight is not exempt from the
+  // edge boundary. Before, only because `OPTIONS` is one of the safe methods
+  // that check already skips -- this does not step around it, and the request
+  // the preflight is asking about still has to face it.
+  //
+  // A preflight from any other origin gets no headers and falls through, which
+  // is what makes a hostile origin's fetch fail in its own browser.
+  if (
+    request.nextUrl.pathname.startsWith("/api/") &&
+    isPreflightRequest({
+      method: request.method,
+      accessControlRequestMethod: request.headers.get(
+        "access-control-request-method"
+      ),
+    })
+  ) {
+    const preflight = nativeAppPreflightHeaders(request.headers.get("origin"));
+    if (preflight) {
+      return withNativeCors(
+        new NextResponse(null, {
+          status: 204,
+          headers: { ...preflight, "Cache-Control": "no-store" },
+        }),
+        request
+      );
+    }
+  }
+
   if (
     request.nextUrl.pathname.startsWith("/api/") &&
     requiresMutationOriginCheck(request.method, request.nextUrl.pathname) &&
     !hasValidMutationOrigin(request)
   ) {
-    return blockedMutationOriginResponse(request);
+    // Unchanged. A native origin fails this exactly as it did before N1a --
+    // `capacitor://localhost` is not an http(s) origin and `https://localhost`
+    // is not an allowed host -- and nothing above consulted an `Authorization`
+    // header to decide otherwise. Replacing this check for a *verified* bearer
+    // identity is N1b, and N1b waits on the verifier that N2 builds.
+    return withNativeCors(blockedMutationOriginResponse(request), request);
   }
 
   // Router prefetches fetch an RSC payload rather than a document, so they need
@@ -122,7 +198,7 @@ export function proxy(request: NextRequest) {
   // behaving exactly as it did while the matcher excluded it -- the fix adds
   // the security checks to prefetches without also starting to redirect them.
   if (isRouterPrefetch(request)) {
-    return NextResponse.next();
+    return withNativeCors(NextResponse.next(), request);
   }
 
   // R-05-LANG. Send a non-English visitor to their own localized page before
@@ -270,7 +346,7 @@ export function proxy(request: NextRequest) {
       ],
     })
   );
-  return response;
+  return withNativeCors(response, request);
 }
 
 export const config = {

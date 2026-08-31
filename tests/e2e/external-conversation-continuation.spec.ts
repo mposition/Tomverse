@@ -1,6 +1,9 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
-import { prepareGuestPage } from "./support/app-fixtures";
+import {
+    mockAuthenticatedApi,
+    prepareGuestPage,
+} from "./support/app-fixtures";
 
 /**
  * "Tomverse에서 이어가기" — the CTA in the read-only viewer, and the screen it
@@ -66,6 +69,16 @@ const mockContinuationApi = async (
     options: TimelineOptions & {
         /** What POST .../continuations answers. */
         createStatus?: number;
+        /**
+         * Drops the connection on the first create only.
+         *
+         * Reproduces the one case the server's own idempotency cannot see: the
+         * row was written and the *response* was lost, so the browser reports
+         * a failure for a request that succeeded. Whether the retry sends the
+         * same key is then the only thing standing between the user and two
+         * conversations.
+         */
+        abortFirstCreate?: boolean;
         tomverseMessages?: { id: string; role: string; content: string }[];
     } = {}
 ) => {
@@ -116,6 +129,12 @@ const mockContinuationApi = async (
             state.createBodies.push(
                 route.request().postDataJSON() as { idempotencyKey: string }
             );
+            // Recorded first, so the aborted attempt still shows the key it
+            // sent -- which is the whole point of the comparison.
+            if (options.abortFirstCreate && state.createBodies.length === 1) {
+                await route.abort("connectionreset");
+                return;
+            }
             if ((options.createStatus ?? 201) !== 201) {
                 await route.fulfill(
                     json(
@@ -239,6 +258,78 @@ const mockContinuationApi = async (
     return state;
 };
 
+/**
+ * The conversation list, with each row's server-decided surface.
+ *
+ * Its own helper rather than a field on `mockContinuationApi`, because the
+ * question it answers is different: that one is about the continuation screen,
+ * this one is about how the sidebar gets there.
+ */
+const mockConversationList = async (
+    page: Page,
+    rows: { id: string; title: string; surface?: "workspace" | "continuation" }[]
+) => {
+    await page.route("**/api/conversations", (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        // A bare array, exactly as the route answers.
+        return route.fulfill(
+            json(
+                rows.map((row) => ({
+                    id: row.id,
+                    title: row.title,
+                    kind: "chat",
+                    projectId: null,
+                    selectedModels: ["gpt-5-6-luna"],
+                    disabledPanels: [],
+                    webSearchMode: "off",
+                    isLocked: false,
+                    shareEnabled: false,
+                    shareExpiresAt: null,
+                    messageCount: 2,
+                    surface: row.surface ?? "workspace",
+                }))
+            )
+        );
+    });
+};
+
+/**
+ * The sidebar is a drawer on the mobile shells and always visible on the
+ * desktop ones, so a spec about *what a sidebar row does* has to open it first
+ * on mobile. Identified by its test id, never by the brand string in its
+ * accessible name -- that rename broke two specs on every commit to main once.
+ */
+const openConversationList = async (page: Page): Promise<Locator> => {
+    const shell = page.getByTestId("mobile-chat-shell");
+    // Wait for *a* shell before asking which one. `isVisible()` resolves
+    // against the frame as it is right now, so probing before either has
+    // mounted answers "not mobile" on a mobile project -- and the desktop
+    // branch below then looks for a sidebar the mobile shell keeps in a
+    // drawer. That is what made this flake in a full-file run and pass on its
+    // own.
+    await expect(shell.or(page.getByTestId("chat-sidebar"))).toBeVisible();
+    if (!(await shell.isVisible())) return page.locator("body");
+    // The conversation list is fetched after the first paint, so the entry
+    // point appears late. Deciding which control to press before it arrives is
+    // what made this flake: an `isVisible()` resolves against the frame as it
+    // is right now, so the header fallback fired while the disclosure was
+    // still on its way and the two raced for the drawer.
+    //
+    // `toBeVisible()` retries, so this waits for the control a mobile user
+    // actually presses instead of guessing which one exists yet.
+    // The disclosure, not the header button. On the mobile shell the drawer
+    // withholds conversation *titles* until an explicit user action
+    // (tests/e2e/mobile-recent-conversations.spec.ts fixes that as a privacy
+    // property), so opening it any other way leaves rows this spec cannot
+    // identify by name.
+    const disclosure = page.getByTestId("recent-conversations-disclosure");
+    await expect(disclosure).toBeVisible();
+    await disclosure.click();
+    const drawer = page.getByRole("dialog");
+    await expect(drawer).toBeVisible();
+    return drawer;
+};
+
 test.describe("continuing an imported conversation", () => {
     test("the viewer explains what happens before it creates anything", async ({
         page,
@@ -281,6 +372,61 @@ test.describe("continuing an imported conversation", () => {
         expect(api.createBodies).toHaveLength(1);
         // Still on the viewer: nothing was created, so nothing to navigate to.
         expect(page.url()).toContain("/settings/imports/conversations/");
+    });
+
+    test("a retry after a lost response keeps the first attempt's key", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        const api = await mockContinuationApi(page, { abortFirstCreate: true });
+
+        await page.goto(`/settings/imports/conversations/${EXTERNAL_ID}`);
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+
+        // The connection died, so the browser knows nothing about the row the
+        // server may already have written.
+        await expect(page.getByTestId("continuation-cta-error")).toBeVisible();
+        expect(api.createBodies).toHaveLength(1);
+        // "Try again" comes back through the same CTA the idle card shows.
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+
+        expect(api.createBodies).toHaveLength(2);
+        // The assertion this test exists for. With two different keys the
+        // server is obliged to create a second conversation, and it would be
+        // right to -- so the duplicate has to be prevented here.
+        expect(api.createBodies[1].idempotencyKey).toBe(
+            api.createBodies[0].idempotencyKey
+        );
+    });
+
+    test("cancelling and starting again is a new fork, with a new key", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        const api = await mockContinuationApi(page, { abortFirstCreate: true });
+
+        await page.goto(`/settings/imports/conversations/${EXTERNAL_ID}`);
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+        await expect(page.getByTestId("continuation-cta-error")).toBeVisible();
+
+        // Arming again and backing out is the deliberate "no, start over" that
+        // §3 allows -- and it is the only thing that may drop the key.
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-cancel").click();
+        await expect(page.getByTestId("continuation-disclosure")).toBeHidden();
+
+        await page.getByTestId("continuation-cta").click();
+        await page.getByTestId("continuation-confirm").click();
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+
+        expect(api.createBodies).toHaveLength(2);
+        expect(api.createBodies[1].idempotencyKey).not.toBe(
+            api.createBodies[0].idempotencyKey
+        );
     });
 
     test("imported turns and Tomverse turns are told apart on screen", async ({
@@ -446,6 +592,72 @@ test.describe("continuing an imported conversation", () => {
         // exists on screen rather than matching a specific translation.
         const banner = page.getByTestId("continued-conversation-workspace");
         await expect(banner).toContainText(/공유|share/i);
+    });
+
+    test("the sidebar reopens a continuation at its own surface", async ({
+        page,
+    }) => {
+        // The defect this covers: a continuation opened correctly at creation
+        // and, once the user left the screen, opened in the Review workspace
+        // from the conversation list -- without the imported half it
+        // continues.
+        await prepareGuestPage(page, "ko");
+        // The shared fixture first, for the signed-in identity and the
+        // baseline routes; the list below then overrides the one route this
+        // spec is actually about.
+        await mockAuthenticatedApi(page);
+        await mockContinuationApi(page);
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+            },
+            { id: "qa-ordinary", title: "An ordinary conversation" },
+        ]);
+
+        await page.goto("/chat");
+        const list = await openConversationList(page);
+        await list
+            .getByTestId("sidebar-conversation-item")
+            .filter({ hasText: "Continued from an imported chat" })
+            .last()
+            .click();
+
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toBeVisible();
+        await expect(page.getByTestId("continuation-divider")).toBeVisible();
+    });
+
+    test("an ordinary conversation still opens in the workspace", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page);
+        await mockContinuationApi(page);
+        await mockConversationList(page, [
+            { id: "qa-ordinary", title: "An ordinary conversation" },
+        ]);
+
+        await page.goto("/chat");
+        const list = await openConversationList(page);
+        const row = list
+            .getByTestId("sidebar-conversation-item")
+            .filter({ hasText: "An ordinary conversation" })
+            .last();
+        await expect(row).toBeVisible();
+        await row.click();
+
+        // No navigation: the workspace selects the conversation in place,
+        // exactly as it always has. Asserted on the URL rather than on the
+        // row, because the mobile drawer closes on selection and the row it
+        // was clicked on is gone by the time the workspace has it open.
+        await expect(
+            page.getByTestId("continued-conversation-workspace")
+        ).toHaveCount(0);
+        await expect(page).not.toHaveURL(/\/continuations\//);
     });
 
     test("at 320px the composer keeps its own row and nothing overflows", async ({

@@ -102,19 +102,26 @@ export type ChatTurnSystemBlocksInput = {
   /** `planAllowsImageGeneration(tier)` for this caller. */
   planAllowsImageGeneration: boolean;
   /**
-   * The imported-conversation excerpt this turn carries, already rendered and
-   * already made inert by `lib/externalContinuationSeedPrompt.ts`. Empty
-   * string on every turn that has none, which is all of them outside a bridged
-   * conversation (docs/policy/external-conversation-continuation.md §5).
+   * The imported-conversation excerpt this turn carries, in the two halves
+   * `buildContinuationSeedPrompt` returns
+   * (docs/policy/external-conversation-continuation.md §4.3). Absent on every
+   * turn that has none, which is all of them outside a bridged conversation.
+   *
+   * Two fields rather than one string, and the split is the security contract:
+   * `rulesText` is Tomverse's own words and goes out at system authority;
+   * `transcriptText` is a third-party transcript and must never be sent under
+   * `system` or `developer`. The first version of this feature sent one
+   * combined block as a system message, which is the promotion §4.3 forbids --
+   * a wrapper sentence saying "this is data" does not lower the role the
+   * provider sees.
    *
    * It arrives here rather than being built here for the reason the memory
    * block is built elsewhere too: this module is pure and the seed needs a
-   * database read. What it gains by passing *through* here is the one thing
-   * that matters -- it is counted in `promptTokens`, so the number the
-   * preparation step quotes and the number the send is priced at are the same
-   * number by construction rather than by review.
+   * database read. What it gains by passing *through* here is that both halves
+   * are counted in `promptTokens`, so the number the preparation step quotes
+   * and the number the send is priced at are the same number by construction.
    */
-  continuationSeedPrompt?: string;
+  continuationSeed?: { rulesText: string; transcriptText: string };
 };
 
 export type ChatTurnSystemBlocks = {
@@ -130,8 +137,22 @@ export type ChatTurnSystemBlocks = {
    */
   webSearchTurnState: WebSearchTurnState;
   webSearchCapabilityPrompt: string;
-  /** In request order, ready to push after the context block. */
+  /**
+   * Blocks Tomverse itself authored, in request order. Everything here is our
+   * own text, which is what makes `system` the right role for all of it.
+   */
   systemMessages: { role: "system"; content: string }[];
+  /**
+   * Content this application did not write, carried at ordinary conversation
+   * authority rather than system authority
+   * (docs/policy/external-conversation-continuation.md §4.3).
+   *
+   * Today that is one thing: the imported excerpt of a continuation. The field
+   * is a list and is named for the property that decides membership -- not
+   * ours -- so the next such payload has an obvious place to go and cannot be
+   * appended to `systemMessages` because that is where the loop already was.
+   */
+  untrustedDataMessages: { role: "user"; content: string }[];
   /**
    * Text tokens of every block here, plus the tool schemas the provider adds
    * when a tool is registered. This is the number both routes add to the input
@@ -161,6 +182,7 @@ export const buildChatTurnSystemBlocks = (
       webSearchTurnState: "searching",
       webSearchCapabilityPrompt: "",
       systemMessages: [],
+      untrustedDataMessages: [],
       promptTokens: 0,
     };
   }
@@ -218,15 +240,22 @@ export const buildChatTurnSystemBlocks = (
     ...(input.appManagedSearchEnabled
       ? [{ role: "system" as const, content: APP_MANAGED_WEB_SEARCH_PROMPT }]
       : []),
-    // Last among the system blocks, and still above the conversation history
-    // -- which is where the import policy's §9.1 order puts untrusted imported
-    // material: below the safety policy and the capability blocks, above the
-    // turns it is context for. Its own rules are stated inside it, before the
-    // fenced region they govern.
-    ...(input.continuationSeedPrompt
-      ? [{ role: "system" as const, content: input.continuationSeedPrompt }]
+    // The continuation's *rules* -- ours, and the last system block, so they
+    // are stated immediately before the excerpt they govern. The excerpt
+    // itself is not here; it is in `untrustedDataMessages` below.
+    ...(input.continuationSeed
+      ? [{ role: "system" as const, content: input.continuationSeed.rulesText }]
       : []),
   ];
+
+  // The imported transcript. Separated from the list above by role, not by
+  // convention: a reviewer reading `systemMessages` can see that nothing
+  // third-party is in it, and a change that moved this line would have to say
+  // so in the type.
+  const untrustedDataMessages: { role: "user"; content: string }[] =
+    input.continuationSeed
+      ? [{ role: "user", content: input.continuationSeed.transcriptText }]
+      : [];
 
   // Priced like any other input. The tool *definitions* are a separate cost
   // the provider adds when the schema is sent, and they are build-time
@@ -243,7 +272,11 @@ export const buildChatTurnSystemBlocks = (
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
       : 0) +
-    estimateTextTokens(input.continuationSeedPrompt ?? "");
+    // Both halves. Splitting the seed by role changed where the text is sent,
+    // not what it costs, and pricing only the rules would under-quote every
+    // continuation turn by the size of its excerpt.
+    estimateTextTokens(input.continuationSeed?.rulesText ?? "") +
+    estimateTextTokens(input.continuationSeed?.transcriptText ?? "");
 
   return {
     artifactPlan,
@@ -252,6 +285,42 @@ export const buildChatTurnSystemBlocks = (
     webSearchTurnState,
     webSearchCapabilityPrompt,
     systemMessages,
+    untrustedDataMessages,
     promptTokens,
   };
 };
+
+/**
+ * The messages a turn opens with, in order, before its conversation history.
+ *
+ * Exported and pure so the role boundary is a property of a function a test
+ * can call, rather than of eight lines inside a six-thousand-line route. The
+ * claim it makes testable is the one
+ * docs/policy/external-conversation-continuation.md §4.3 turns on: no message
+ * this returns carries third-party text at `system` or `developer` authority.
+ *
+ * Order is the docs/policy/external-conversation-import-and-memory.md §9.1
+ * order and is fixed here:
+ *
+ *   1. the memory/profile/knowledge context block, when a bundle priced one;
+ *   2. Tomverse's own capability blocks, including a continuation's rules;
+ *   3. content Tomverse did not write, at ordinary authority;
+ *   ... then the caller appends the conversation history and this turn.
+ *
+ * Rules before excerpt is not cosmetic: text placed after a payload is read
+ * after the payload.
+ */
+export type ChatTurnPreludeMessage =
+  | { role: "system"; content: string }
+  | { role: "user"; content: string };
+
+export const buildChatTurnPrelude = (input: {
+  contextSystemPrompt: string | null;
+  blocks: Pick<ChatTurnSystemBlocks, "systemMessages" | "untrustedDataMessages">;
+}): ChatTurnPreludeMessage[] => [
+  ...(input.contextSystemPrompt
+    ? [{ role: "system" as const, content: input.contextSystemPrompt }]
+    : []),
+  ...input.blocks.systemMessages,
+  ...input.blocks.untrustedDataMessages,
+];

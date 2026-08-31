@@ -1,10 +1,15 @@
 # iOS·Android Native 앱 준비도 스파이크 (2026-08-30)
 
 - 대상: `mposition/Tomverse` `develop`
-- **기준 커밋: `b760383`** (rev.3). Voice Input MVP가 이 커밋까지 병합 완료입니다.
-  초판 조사는 `96f012b`에서 시작했고, 이후 `be5aebe` → `8cd3e5e` → `4635eb7` →
-  `b760383`을 차례로 병합했습니다. **§1의 성숙도, §2의 수치, §11의 검증은 전부
-  `b760383` 트리에서 다시 측정·재실행한 값입니다** — 옮겨 적은 값이 아닙니다.
+- **조사 기준 커밋: `b760383`** (rev.3). Voice Input MVP가 이 커밋까지 병합 완료입니다.
+- **검증 실행 HEAD**: `06cbac9` — `b760383` 위에 원격의 `0317c4b`를 병합한 실제 트리입니다.
+  §11의 명령은 전부 이 HEAD에서 돌았습니다. **조사 기준 SHA와 검증 HEAD를 따로 적는 이유**는
+  둘이 다를 수 있기 때문입니다: 조사는 "무엇이 들어와 있는가"를 읽은 시점이고, 검증은
+  "지금 이 트리에서 무엇이 통과하는가"를 실행한 시점입니다. 하나만 적으면 나중에 어느 쪽
+  질문에도 대답할 수 없습니다.
+- 병합 경로: 초판 조사는 `96f012b`에서 시작했고 `be5aebe` → `8cd3e5e` → `4635eb7` →
+  `b760383` → `06cbac9`을 차례로 병합했습니다. **§1의 성숙도, §2의 수치, §11의 검증은 전부
+  다시 측정·재실행한 값입니다** — 옮겨 적은 값이 아닙니다.
 - 목적: 스토어 출시 앱 구현이 아니라, **Capacitor 로컬 번들 Native 앱으로 전환할 준비가 어디까지 되어 있는지**를 코드와 실행 증거로 확인하고 작업량을 산정하는 것
 - 근거 문서: `docs/policy/tomverse-chat-delivery-plan.md`, `docs/policy/shared-packages.md`,
   `docs/policy/tomverse-chat-mobile-authentication.md`, `docs/policy/chat-concurrency-and-identity.md`,
@@ -62,9 +67,10 @@ framework-neutral한 순수 모듈 **1,197줄**이 추가로 존재합니다(§2
 것입니다(§3.1).
 
 **rev.3 시점의 착수 상태**: Voice Input MVP가 `b760383`에서 병합돼 UI 계열 대기가 풀렸고,
-지금 막혀 있지 않은 작업은 다섯입니다 — N1a(CORS·`OPTIONS`), N2-설계(승인 패킷),
-`chat-core` seed 804줄, N4a(딥링크 형식·도구), PRIVACY 미결정 2건. 우선순위는
-**N1a → N2-설계**입니다(§7.3).
+**N1a는 2026-08-30에 구현됐습니다**(§6.2) — 두 origin의 preflight가 답을 받고, 가짜 Bearer
+헤더는 아무것도 우회하지 못하며, Native mutation은 계속 403입니다. 남아서 막혀 있지 않은
+작업은 넷입니다 — N2-설계(승인 패킷), `chat-core` seed 804줄, N4a(딥링크 형식·도구),
+PRIVACY 미결정 2건. 다음 우선순위는 **N2-설계**입니다(§7.3).
 
 그 문제를 푸는 순서가 이 보고서에서 가장 틀리기 쉬운 부분이고, 초판이 실제로 틀렸습니다.
 `Authorization` 헤더가 **있다는 이유로** CSRF 검사를 건너뛰면, `proxy.ts`가 route보다 먼저
@@ -97,7 +103,7 @@ CORS(N1a)와 **검증된** bearer identity의 대체 경로(N1b)를 나누고, N
 | 14 | mobile bearer token lifecycle | **M0** | Prisma 116개 model 중 refresh/device 관련 **0개** |
 | 15 | refresh 회전·재사용 탐지·token family | **M0** | 코드·스키마 어디에도 없음 |
 | 16 | 기기 목록·기기별 해제 | **M0** | `sessionRevocationCore.ts`는 계정 전체 revocation만 |
-| 17 | explicit CORS allowlist | **M0** | `Access-Control-Allow-Origin` 문자열이 저장소에 **0건** |
+| 17 | explicit CORS allowlist | **M2** | **N1a 구현됨** — `lib/nativeAppCors.ts` + `proxy.ts`. 두 origin literal, preflight 응답, credentials 불가. 실기기 검증(AUTH-04)은 아직 M0 |
 | 18 | Sign in with Apple | **M0** | provider는 Google·AzureAD·Credentials 셋뿐 |
 | 19 | Universal Link / App Link | **M0** | `public/.well-known/`에 microsoft 파일 1개뿐. 식별자도 미확정(§7.1) |
 | 20 | 스토어 심사 자격증명 lifecycle | **M1** | `docs/ops/tomverse-chat-store-review.md`는 완성, 구현 0 |
@@ -567,6 +573,58 @@ migration을 넣으면 스키마가 결정보다 먼저 굳고, 되돌리는 비
 그리고 `AUTH-03`은 회전·재사용 탐지·로그아웃·기기 해제를 **함께** 채점하므로, 넷 중 하나만
 먼저 만든 스키마는 나머지 셋이 정해질 때 다시 바뀝니다.
 
+### 6.2 N1a는 구현됐습니다 (2026-08-30)
+
+세 가지 완료 기준을 실제 `proxy()` 호출로 확인했습니다. 근거는 소스 문자열이 아니라
+응답입니다 — 이 마일스톤이 막으려는 결함이 **순서** 결함이고, 늦게 도달하는 검사와 존재하는
+검사는 소스에서 똑같이 읽히기 때문입니다.
+
+| 기준 | 결과 |
+|---|---|
+| 허용된 preflight에 올바른 CORS 응답 | `capacitor://localhost`·`https://localhost` 둘 다 **204** + `ACAO`·`ACAM`(7개 메서드)·`ACAH`(4개 헤더)·`Max-Age` |
+| 가짜 Bearer로 기존 보안 우회 불가 | `Authorization: Bearer forged…`를 붙여도 **상태 코드가 같고, traceId를 제외한 파싱된 JSON 본문이 같습니다** — 403 `INVALID_REQUEST_ORIGIN` |
+| N1b 이전 Native mutation 계속 차단 | 두 origin × `POST`·`PUT`·`PATCH`·`DELETE` **전부 403** |
+
+추가로 확인한 것:
+
+- **hostile origin은 응답을 못 읽습니다.** `https://attacker.example`,
+  `https://localhost.attacker.example`, `https://localhost:3000`, `http://localhost` 전부
+  CORS 헤더 0개. **reflection이 아니라 literal 비교**입니다.
+- **preflight가 앞선 검사를 건너뛰지 않습니다.** 잘못된 host → **421**, Cloudflare
+  origin-secret 미제공 → **421**. 두 검사 뒤에 놓였다는 것을 환경변수를 켜서 관측했습니다.
+- **`Access-Control-Allow-Credentials`를 절대 보내지 않습니다.** 다만 이것이 사는 것은
+  처음 보이는 것보다 좁으므로 정확히 적습니다(N2가 잘못된 전제를 물려받지 않도록).
+  **뜻하는 것**: credentialed cross-origin 요청과 응답을 공유하지 않습니다 —
+  `credentials: "include"` fetch는 CORS 검사에서 떨어지고 호출자는 아무것도 읽지 못합니다.
+  **뜻하지 않는 것**: "쿠키가 전송되지 않는다"는 보장은 아닙니다. simple request는 브라우저
+  자신의 쿠키 규칙(SameSite 포함)에 따라 서버에 도달할 수 있고, 차단되는 지점은 도착 전이
+  아니라 **응답을 읽는 단계**입니다(Fetch 명세, CORS protocol and credentials). 클라이언트가
+  명시적으로 붙이는 `Authorization`은 또 별개이고 이 헤더가 말하는 바가 아닙니다.
+  따라서 `https://localhost`를 허용해도 되는 근거는 "요청이 익명이라서"가 아니라 셋입니다 —
+  (1) credentialed 공유를 허용하지 않고, (2) 서버가 인증·권한·CSRF를 따로 검사하며(두 native
+  origin은 여전히 CSRF 검사에서 떨어집니다), (3) Native transport가 쿠키 대신 **검증 대상
+  Bearer를 명시적으로 전달**합니다 — (3)은 N2의 몫이고 아직 없습니다.
+- **`Vary: Origin`은 origin이 일치하지 않아도 붙습니다.** 공유 캐시가 한 origin의 허용을
+  다른 origin에게 재생하지 못하게 하려는 것입니다.
+- **refusal에도 CORS를 붙입니다.** N1b 전까지 Native가 가장 자주 받을 응답이 이 403이고,
+  읽을 수 없는 거절은 서버 장애와 구분되지 않습니다. **mutation이 허용된 것이 아니라
+  진단 가능해진 것**입니다.
+
+**회귀 테스트가 실제로 무는지 확인했습니다.** 두 번의 mutation testing으로:
+
+| 일부러 넣은 결함 | 잡은 테스트 |
+|---|---|
+| preflight 분기를 host·origin-secret 검사 **앞**으로 이동 | 행동 테스트 2건 실패 |
+| `Authorization` 헤더가 **있으면** CSRF 검사를 건너뛰도록 변경 (= rev.1이 제안했던 그 실수) | 행동 테스트 2건 + 구조 테스트 1건 실패 |
+
+두 번째가 특히 중요합니다. 구조 테스트
+(`no security decision reads an Authorization header`)는 `proxy.ts`와
+`lib/requestOrigin.ts`의 **주석을 제거한 코드**에 `authorization`이 등장하면 실패합니다.
+행동 테스트가 놓칠 수 있는 미래의 변경을 이쪽이 잡습니다 — N1b는 **검증기와 함께** 와야지
+헤더 검사만으로 오면 안 된다는 규칙을 코드로 고정한 것입니다.
+
+**N1a가 하지 않은 것**: 토큰 검증, mutation 허용, `chat-ui`·`api-client` 관련 어떤 것도.
+`hasValidMutationOrigin`은 한 글자도 바뀌지 않았습니다.
 ---
 
 ## 7. 1인 조직 기준 현실적인 구현 순서
@@ -697,8 +755,9 @@ Router·Planner·Memory를 포함하고, 이 추정은 **Native 경로만**입�
 
 | 순위 | 무엇 | 상태 | 왜 지금/나중인가 |
 |---|---|---|---|
-| **1** | **N1a** CORS·`OPTIONS`·hostile-origin 거절 | **착수 가능** | 아무것도 기다리지 않는 유일한 보안 작업 |
-| **2** | **N2-설계** + 정책 승인 패킷 | **착수 가능** | 코드가 아니라 승인 대상. `AUTH-03` 넷을 함께 설계(§6.1) |
+| ~~1~~ | **N1a** CORS·`OPTIONS`·hostile-origin 거절 | **완료** (§6.2) | — |
+| **1** | **N2-설계** + 정책 승인 패킷 | **착수 가능** | 다음 우선순위 |
+| ↑ | *(위 줄)* | | 코드가 아니라 승인 대상. `AUTH-03` 넷을 함께 설계(§6.1) |
 | 3 | `chat-core` seed — 1차 612줄, 이어서 2차 192줄 | **착수 가능** | Voice 조건 해소. 착수 직전 소비자 재대조(§7.2) |
 | 3 | N4a AASA/assetlinks 형식·검증 도구 | **착수 가능** | 식별자 자리는 플레이스홀더(§7.1) |
 | 3 | PRIVACY `unverified` 2건 | **착수 가능** | security-privacy·finance-ops 결정 |
@@ -711,8 +770,8 @@ Router·Planner·Memory를 포함하고, 이 추정은 **Native 경로만**입�
 | 8 | N7 `chat-ui` → N8 | N6 뒤 | **Voice 조건은 충족됐고, 남은 것은 코드 의존입니다** |
 | 9 | N9 Apple → N10 실기기 → N11 심사 → N12 제출 | 순차 | — |
 
-**우선순위는 N1a → N2-설계 승인 패킷**이고, 3순위 넷은 서로 닿지 않으므로 사이사이에
-채웁니다.
+**N1a가 끝났으므로 다음 우선순위는 N2-설계 승인 패킷**이고, 3순위 넷은 서로 닿지 않으므로
+사이사이에 채웁니다.
 
 rev.2의 "Native UI 본개발은 Voice 완료 이후"는 여전히 맞지만 **이유가 바뀌었습니다.**
 rev.2에서는 파일 충돌 회피였고, 지금은 **`chat-ui`가 `api-client`를, `api-client`가 N1b를,
@@ -830,6 +889,9 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 | ESLint 전체 | `npm run lint` | 0 error / 0 warning |
 | **Capacitor 원격 server.url 부재** | `npm run check:capacitor-local-bundle` | `remote_server_config_findings = 0` |
 | 위 게이트의 역방향 확인 | 일부러 `server.url`+`cleartext` 주입 | **2건 검출, exit 1** — 그리고 원복 |
+| **N1a 회귀 (결정)** | `tests/nativeAppCors.test.mjs` | 12/12 |
+| **N1a 회귀 (실제 `proxy()` 호출)** | `tests/nativeAppCorsProxy.test.mjs` | 11/11 |
+| **N1a mutation testing** | 결함 2종 주입 | 각각 테스트가 실패 — 회귀망이 실제로 뭅니다(§6.2) |
 | **Vite 셸 빌드** | `npm run build:mobile-shell` | `vite v8.2.1`, 20 modules, 성공 |
 | 셸 타입체크 | `tsc -p apps/mobile/tsconfig.json` | 성공 |
 | **셸 실행 (Chromium)** | `vite preview` + Playwright Chromium | light·dark **각 7/7 통과, 페이지 오류 0** |
@@ -842,7 +904,7 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 | 게이트 커버리지 | `npm run check:release-gate-coverage` | **45** CI 강제 (새 검사 포함) |
 | 문서 참조·정책 인용·인코딩·accent·릴리스 기록·staging 기록·UI tier·구제품명 | 각 `npm run check:*` | 전부 통과 |
 | 공유 package 단위 테스트 | `tests/sharedPackages.test.mjs` (저장소 러너 플래그) | 23 tests: 22 pass / 0 fail / 1 skip |
-| 전체 단위 테스트 | `npm run test:unit` | 두 lane 합계 **7,051 pass / 0 fail / 1 skip** (§11.4) |
+| 전체 단위 테스트 | `npm run test:unit` | 두 lane 합계 **7,111 pass / 0 fail / 1 skip** (§11.4) |
 
 셸 실행 결과 원문:
 
@@ -926,11 +988,13 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 
 | lane | tests | pass | fail | skipped |
 |---|---:|---:|---:|---:|
-| server (`--conditions=react-server`) | 7,008 | 7,007 | 0 | 1 |
+| server (`--conditions=react-server`) | 7,068 | 7,067 | 0 | 1 |
 | client (`tests/client/**`, 4개 파일) | 44 | 44 | 0 | 0 |
-| **합계** | **7,052** | **7,051** | **0** | **1** |
+| **합계** | **7,112** | **7,111** | **0** | **1** |
 
-**보고할 수치는 마지막 행 — 7,051 pass입니다.**
+**보고할 수치는 마지막 행 — 7,111 pass입니다.** N1a의 회귀 테스트 23건
+(`tests/nativeAppCors.test.mjs` 12 + `tests/nativeAppCorsProxy.test.mjs` 11)이 포함된
+값이고, rev.3 시점의 7,051에서 늘어난 나머지는 그 사이 병합된 develop 작업입니다.
 
 `7,007`은 **server lane 하나의 pass**입니다. 이 숫자가 두 번 잘못 옮겨졌으므로 셈하는
 방법을 여기 고정합니다.
@@ -938,7 +1002,7 @@ AGENTS.md "사람만 할 수 있는 것은 사람만 할 수 있는 것뿐입니
 | 잘못 옮긴 값 | 실제로 그 숫자였던 것 | 맞는 총계 |
 |---|---|---|
 | rev.1의 "6,892 pass" | server lane의 `tests` | 6,960 |
-| rev.3 검토의 "7,007 pass" | server lane의 `pass` | **7,051** |
+| rev.3 검토의 "7,007 pass" | server lane의 `pass` | 7,051 (그 시점) |
 
 두 실수의 모양이 다릅니다 — 앞은 `tests`와 `pass`를 바꿔 읽었고, 뒤는 값은 맞게 읽었지만
 **client lane 44건을 더하지 않았습니다.** 공통점은 하나뿐이고 그것이 원인입니다:

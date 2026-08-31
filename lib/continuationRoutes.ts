@@ -27,3 +27,43 @@ export const CONTINUATION_SURFACE_PATH = "/continuations";
 
 export const continuationPath = (conversationId: string): string =>
     `${CONTINUATION_SURFACE_PATH}/${encodeURIComponent(conversationId)}`;
+
+/**
+ * Which surface a conversation opens at.
+ *
+ * `"workspace"` is the Review workspace every conversation has always opened
+ * in; `"continuation"` is `/continuations/[id]`.
+ *
+ * Server-decided, from a row rather than from a URL or a request body. That is
+ * the whole point of it existing: a continuation is an ordinary `Conversation`
+ * to the sidebar, so without a field on the list the sidebar opened it in the
+ * Review workspace -- where the imported half and its provenance do not exist.
+ * The conversation looked correct the moment it was created and wrong the next
+ * time it was opened, which is the worst shape a defect can have.
+ *
+ * A boolean rather than a productKey: `productKey` is the product a
+ * conversation belongs to and `PRODUCT_SURFACE_PATH` is where each product
+ * will live after the cutover. Neither answers "where does *this* row open
+ * today", and deriving the surface from the product would send every future
+ * `chat` conversation here, continuation or not.
+ */
+export type ConversationSurface = "workspace" | "continuation";
+
+export const conversationSurface = (input: {
+    hasContinuationBridge: boolean;
+}): ConversationSurface =>
+    input.hasContinuationBridge ? "continuation" : "workspace";
+
+/**
+ * The path a surface opens at, or `null` for the workspace.
+ *
+ * Null rather than the workspace's own path because the two are not the same
+ * kind of answer: the workspace selects a conversation in place, without
+ * navigating, and handing it a path would make every sidebar click a page
+ * load. A caller reads `null` as "do what you have always done".
+ */
+export const conversationSurfaceHref = (
+    surface: ConversationSurface,
+    conversationId: string
+): string | null =>
+    surface === "continuation" ? continuationPath(conversationId) : null;

@@ -217,12 +217,13 @@ test("an empty plan renders no block at all", () => {
         importedAt: new Date("2026-08-01T00:00:00.000Z"),
         plan: emptyContinuationSeedPlan(0),
     });
-    assert.equal(prompt.text, null);
+    assert.equal(prompt.rulesText, null);
+    assert.equal(prompt.transcriptText, null);
     assert.equal(prompt.usedTurnCount, 0);
     assert.equal(prompt.promptVersion, CONTINUATION_SEED_PROMPT_VERSION);
 });
 
-test("the rules are stated before the fenced region, never after it", () => {
+test("the rules are their own half, and the transcript is the fenced one", () => {
     const prompt = buildContinuationSeedPrompt({
         provider: "claude",
         importedAt: "2026-08-01T00:00:00.000Z",
@@ -230,13 +231,20 @@ test("the rules are stated before the fenced region, never after it", () => {
             messages: [message({ ordinal: 0, role: "user", content: "hi" })],
         }),
     });
-    const text = prompt.text ?? "";
-    assert.ok(
-        text.indexOf(CONTINUATION_SEED_RULES) <
-            text.indexOf(CONTINUATION_SEED_MARKERS.open),
-        "the rules must precede the opening marker"
-    );
-    assert.ok(text.trimEnd().endsWith(CONTINUATION_SEED_MARKERS.close));
+    // §4.3: the rules go out at system authority, so they must be exactly our
+    // constant -- no imported text is interpolated into them.
+    assert.equal(prompt.rulesText, CONTINUATION_SEED_RULES);
+
+    const transcript = prompt.transcriptText ?? "";
+    assert.ok(transcript.startsWith(CONTINUATION_SEED_MARKERS.open));
+    assert.ok(transcript.trimEnd().endsWith(CONTINUATION_SEED_MARKERS.close));
+    // The imported half carries no rules of its own: a payload that ended the
+    // fence would otherwise find instructions waiting after it.
+    assert.doesNotMatch(transcript, /never claim to be/i);
+
+    // Ordering is the caller's, and `buildChatTurnPrelude` is what fixes it --
+    // asserted in tests/externalContinuationContracts.test.mjs against the
+    // array the chat route actually sends.
 });
 
 test("a turn cannot close the fence or draw its own structure", () => {
@@ -256,17 +264,25 @@ test("a turn cannot close the fence or draw its own structure", () => {
             ],
         }),
     });
-    const text = prompt.text ?? "";
+    const transcript = prompt.transcriptText ?? "";
 
     // Exactly one opening and one closing marker: the ones this module wrote.
-    assert.equal(text.split(CONTINUATION_SEED_MARKERS.open).length - 1, 1);
-    assert.equal(text.split(CONTINUATION_SEED_MARKERS.close).length - 1, 1);
+    assert.equal(
+        transcript.split(CONTINUATION_SEED_MARKERS.open).length - 1,
+        1
+    );
+    assert.equal(
+        transcript.split(CONTINUATION_SEED_MARKERS.close).length - 1,
+        1
+    );
     // And the payload is one line, so it cannot look like a heading.
-    const payloadLines = text
+    const payloadLines = transcript
         .split("\n")
         .filter((line) => line.includes("IGNORE ALL PREVIOUS"));
     assert.equal(payloadLines.length, 1);
     assert.ok(payloadLines[0].includes("[marker]"));
+    // The payload never reaches the half sent at system authority.
+    assert.doesNotMatch(prompt.rulesText ?? "", /IGNORE ALL PREVIOUS/);
 });
 
 test("invisible and bidi characters are stripped from a turn", () => {
@@ -291,12 +307,14 @@ test("an assistant turn is labelled with the provider, never as our own", () => 
             ],
         }),
     });
-    const text = prompt.text ?? "";
-    assert.match(text, /\[1\] Gemini \(Google\) replied: a/);
-    assert.match(text, /\[0\] User: q/);
-    // The two rules that stop the model adopting the other service's identity.
-    assert.match(text, /NOT written by you/);
-    assert.match(text, /Never claim to be/);
+    const transcript = prompt.transcriptText ?? "";
+    assert.match(transcript, /\[1\] Gemini \(Google\) replied: a/);
+    assert.match(transcript, /\[0\] User: q/);
+    // The two rules that stop the model adopting the other service's identity
+    // live in the half Tomverse authored, which is the half it is safe to
+    // assert them in.
+    assert.match(prompt.rulesText ?? "", /NOT written by you/);
+    assert.match(prompt.rulesText ?? "", /Never claim to be/);
 });
 
 test("an unknown provider still gets a neutral label rather than a raw id", () => {

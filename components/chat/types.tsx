@@ -1,6 +1,7 @@
 ﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
+import type { ConversationSurface } from "@/lib/continuationRoutes";
 
 export type ChatAttachment = {
   id: string;
@@ -200,6 +201,15 @@ export type Conversation = {
      * export are all unavailable for it (docs/policy/image-generation.md §1).
      */
     kind?: "chat" | "image";
+    /**
+     * Where this conversation opens (`lib/continuationRoutes.ts`).
+     *
+     * Server-decided from the row, and absent on a guest conversation, which
+     * has no server row and can never be a continuation. Absent reads as
+     * `"workspace"` -- the behaviour every conversation had before
+     * continuations existed.
+     */
+    surface?: ConversationSurface;
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];

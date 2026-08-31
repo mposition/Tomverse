@@ -254,28 +254,37 @@ test("an approved entry missing its evidence is reported item by item", () => {
     registeredAt: "2026-01-01",
     evalBudget: null,
     evaluation: {
-      artifactRefs: [],
-      runOrdinals: [1],
-      evaluatedCommit: "unknown",
+      runs: [
+        {
+          // Names no artifact, was run by another pair, and scored a
+          // different dataset than the approval claims to be about.
+          artifactRef: "",
+          runOrdinal: 1,
+          evaluatedCommit: "unknown",
+          datasetDigest: "sha256:something-else",
+          reviewerModelId: "another-model",
+          promptVersion: "another-prompt",
+          metrics: {
+            contradictionRecallWilsonLower: 0.8,
+            contradictionPrecisionWilsonLower: 0.8,
+            omissionRecallWilsonLower: 0.8,
+            omissionPrecisionWilsonLower: 0.8,
+            exactQuoteMatchRateWilsonLower: 0.9,
+            schemaValidRateWilsonLower: 0.99,
+            falseConsensusRateWilsonUpper: 0.05,
+            inventedIssueRateWilsonUpper: 0.05,
+          },
+          byLanguage: [],
+          byTaskType: [],
+          zeroToleranceViolations: 2,
+        },
+      ],
       datasetVersion: "v",
       datasetSchemaVersion: 1,
       datasetDigest: "not-a-digest",
       languages: ["ko"],
       sampleCounts: {},
       thresholdVersion: "v1-draft",
-      metrics: {
-        contradictionRecallWilsonLower: 0.8,
-        contradictionPrecisionWilsonLower: 0.8,
-        omissionRecallWilsonLower: 0.8,
-        omissionPrecisionWilsonLower: 0.8,
-        exactQuoteMatchRateWilsonLower: 0.9,
-        schemaValidRateWilsonLower: 0.99,
-        falseConsensusRateWilsonUpper: 0.05,
-        inventedIssueRateWilsonUpper: 0.05,
-      },
-      byLanguage: [],
-      byTaskType: [],
-      zeroToleranceViolations: 2,
       zeroToleranceRulesHumanJudged: 2,
       blindReviewRef: "",
       approver: "",
@@ -284,10 +293,24 @@ test("an approved entry missing its evidence is reported item by item", () => {
       knownLimitations: "",
     },
   });
-  assert.ok(problems.some((p) => p.includes("no evaluation artifact reference")));
+  assert.ok(problems.some((p) => p.includes("run 1: no artifact reference")));
   assert.ok(problems.some((p) => p.includes("1 distinct run ordinal")));
   assert.ok(problems.some((p) => p.includes("evaluated commit is not named")));
   assert.ok(problems.some((p) => p.includes("dataset digest")));
+  // A run has to belong to the pair it is evidence for. Matching a run to an
+  // approval by the dataset alone attributed one reviewer's work to another:
+  // a dataset is the test paper every reviewer sits, not the candidate.
+  assert.ok(
+    problems.some((p) => p.includes("run 1: was run by another-model, not m"))
+  );
+  assert.ok(
+    problems.some((p) => p.includes("run 1: used prompt another-prompt, not p"))
+  );
+  assert.ok(
+    problems.some((p) =>
+      p.includes("run 1: scored dataset sha256:something-else")
+    )
+  );
   assert.ok(problems.some((p) => p.includes("blind human review")));
   assert.ok(problems.some((p) => p.includes("no approver")));
   assert.ok(problems.some((p) => p.includes("no re-evaluation deadline")));

@@ -23,6 +23,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { ApiSecurityError } from "@/lib/apiSecurity";
+import { isExternalContinuationEnabled } from "@/lib/appSettings";
 import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
 import { createConversation } from "@/lib/conversationCreation";
 import {
@@ -39,6 +40,7 @@ import {
     buildContinuationSeedPrompt,
     type ContinuationSeedPrompt,
 } from "@/lib/externalContinuationSeedPrompt";
+import type { ContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -180,13 +182,54 @@ export async function createExternalContinuation(input: {
     idempotencyKey: string;
     request: Request;
 }): Promise<CreatedContinuation> {
-    const existing = await prisma.conversationContinuationBridge.findUnique({
-        where: {
-            userId_idempotencyKey: {
-                userId: input.userId,
-                idempotencyKey: input.idempotencyKey,
-            },
-        },
+    const existing = await readContinuationByKey(
+        input.userId,
+        input.idempotencyKey
+    );
+    if (existing) {
+        return { ...existing, idempotentReplay: true };
+    }
+
+    try {
+        return await createContinuationRows(input);
+    } catch (error) {
+        /*
+          Two requests with the same key raced past the read above.
+
+          The unique index stops the second conversation from existing, which
+          is the half that matters -- but a 500 is not what idempotency
+          promises. "The same key returns the same result" has to hold for
+          concurrent attempts too, or a browser that fired the click twice gets
+          one conversation and one server error, and the user is told the thing
+          that worked failed.
+
+          So the conflict is caught and the winner's row is read back. The
+          loser's whole transaction has already rolled back -- its conversation
+          with it -- so there is no orphan to clean up, and the row this reads
+          is the one the winner committed. Anything that is not a unique
+          conflict is rethrown, and so is a conflict whose row cannot then be
+          found: neither is a race, and swallowing them would hide a real
+          failure behind an idempotent-looking answer.
+        */
+        if (!isUniqueConstraintError(error)) throw error;
+        const winner = await readContinuationByKey(
+            input.userId,
+            input.idempotencyKey
+        );
+        if (!winner) throw error;
+        return { ...winner, idempotentReplay: true };
+    }
+}
+
+/** Prisma's unique-constraint violation, without importing its error class. */
+const isUniqueConstraintError = (error: unknown): boolean =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "P2002";
+
+const readContinuationByKey = (userId: string, idempotencyKey: string) =>
+    prisma.conversationContinuationBridge.findUnique({
+        where: { userId_idempotencyKey: { userId, idempotencyKey } },
         select: {
             conversationId: true,
             provider: true,
@@ -196,10 +239,13 @@ export async function createExternalContinuation(input: {
             sourceMessageCount: true,
         },
     });
-    if (existing) {
-        return { ...existing, idempotentReplay: true };
-    }
 
+async function createContinuationRows(input: {
+    userId: string;
+    externalConversationId: string;
+    idempotencyKey: string;
+    request: Request;
+}): Promise<CreatedContinuation> {
     return prisma.$transaction(async (tx) => {
         const snapshot = await loadUnlockedSnapshot(
             tx,
@@ -464,31 +510,81 @@ export type ContinuationTurnSeed = {
     plan: ContinuationSeedPlan;
 };
 
+export type ContinuationTurnSeedResult = {
+    /**
+     * The excerpt, or null. One shape for every way it can be absent — no
+     * bridge, source deleted, source unreadable, source locked, nothing
+     * selected — because §5 is explicit that a caller must not branch on why:
+     * five shapes would invite four of them to be handled and one forgotten.
+     */
+    seed: ContinuationTurnSeed | null;
+    /**
+     * Why, for observation only (§12).
+     *
+     * Beside the answer rather than inside it. The first version returned a
+     * bare `null` and recorded nothing, which made the staging checklist's C-3
+     * — re-lock the source and confirm the refusal reads `locked` —
+     * unanswerable, because there was nowhere the answer existed. Control flow
+     * still sees one shape; an operator sees which of the five it was.
+     */
+    outcome: ContinuationSeedOutcome;
+};
+
 /**
- * The seed one chat turn carries, or null when this conversation has none.
+ * The seed one chat turn carries.
  *
- * Null in four cases, and they are one answer on purpose: no bridge, the
- * source deleted, the source unreadable, or the source locked with no grant on
- * this request. §5 states the rule as one sentence — a turn that cannot read
- * the source is a turn with no seed — and giving the four cases four shapes
- * would invite three of them to be handled and one forgotten.
- *
- * The flag is the caller's check. This function is what the tests drive.
+ * The flag is the caller's check, and the caller reports `flag_off` itself:
+ * this function is also what the tests drive, and a service that read a global
+ * setting could not be given one.
  */
 export async function loadContinuationTurnSeed(input: {
     userId: string;
     conversationId: string;
     request: Request;
-}): Promise<ContinuationTurnSeed | null> {
+}): Promise<ContinuationTurnSeedResult> {
     const bridge = await prisma.conversationContinuationBridge.findFirst({
         where: { conversationId: input.conversationId, userId: input.userId },
         select: {
             externalConversationId: true,
             provider: true,
             sourceImportedAt: true,
+            sourceDeletedAt: true,
         },
     });
-    if (!bridge?.externalConversationId) return null;
+    if (!bridge) return { seed: null, outcome: "no_bridge" };
+
+    /*
+      The flag is read twice on purpose, and the second read is the one that
+      decides (docs/policy/external-conversation-continuation.md §7).
+
+      `isExternalContinuationEnabledCached()` is a per-process `Map` with a ten
+      second TTL, and `invalidatePublicSnapshot` empties that Map *in the
+      process that ran the admin write*. Every other instance keeps answering
+      "enabled" until its own entry expires. The caller's check is therefore a
+      cheap pre-filter that keeps the bridge lookup off the hot path -- it is
+      not the rollback, and treating it as one meant a turn on another instance
+      could still carry imported text for up to ten seconds after an operator
+      turned the feature off. §2 says the source is the user's and §7 says
+      switching the feature off stops the text going out; "stops it on one of
+      N machines" is not that contract.
+
+      So the row is re-read here, uncached, once we know this conversation has
+      a bridge and can actually carry external text. The cost lands only on
+      bridged conversations -- a small minority, already several queries deep
+      into building a seed -- and never on the ordinary chat turn, which
+      returned `no_bridge` above.
+
+      The asymmetry is deliberate and is the safe one. A stale cache can delay
+      turning the feature *on* by up to the TTL; it can no longer delay turning
+      it *off* at all.
+    */
+    if (!(await isExternalContinuationEnabled())) {
+        return { seed: null, outcome: "flag_off_stale_cache" };
+    }
+
+    if (!bridge.externalConversationId) {
+        return { seed: null, outcome: "source_deleted" };
+    }
 
     const snapshot = await prisma.externalConversation.findFirst({
         where: {
@@ -498,7 +594,11 @@ export async function loadContinuationTurnSeed(input: {
         },
         select: { id: true, messageCount: true, password: true },
     });
-    if (!snapshot) return null;
+    // The foreign key still names a row this account cannot read. Reported as
+    // deleted rather than as its own reason: to the owner it is the same fact,
+    // and a sixth outcome nobody could act on differently would only dilute
+    // the four that carry a decision.
+    if (!snapshot) return { seed: null, outcome: "source_deleted" };
     if (
         !hasResourceUnlockGrant(
             "external_conversation",
@@ -508,19 +608,24 @@ export async function loadContinuationTurnSeed(input: {
             snapshot.password
         )
     ) {
-        return null;
+        return { seed: null, outcome: "locked" };
     }
 
     const plan = await readSeedPlan(prisma, snapshot.id, snapshot.messageCount);
-    if (plan.turns.length === 0) return null;
+    if (plan.turns.length === 0) {
+        return { seed: null, outcome: "empty_selection" };
+    }
 
     return {
-        plan,
-        prompt: buildContinuationSeedPrompt({
-            provider: bridge.provider,
-            importedAt: bridge.sourceImportedAt,
+        outcome: "seeded",
+        seed: {
             plan,
-        }),
+            prompt: buildContinuationSeedPrompt({
+                provider: bridge.provider,
+                importedAt: bridge.sourceImportedAt,
+                plan,
+            }),
+        },
     };
 }
 

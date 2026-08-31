@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-conversation-continuation-staging-checklist.md
-templateRevision: 2026-08-30a
+templateRevision: 2026-08-31a
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 관련 표면 diff 결과 | |
-| template revision | 2026-08-30a |
+| template revision | 2026-08-31a |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -70,6 +70,7 @@ digest:
 
 | 항목 | 관측(답변 요지) | 판정 |
 |---|---|---|
+| D-0 role 경계 테스트 통과 | | |
 | D-1 지시 미수행 | | |
 | D-2 제공자 사칭 없음 | | |
 | D-3 외부 발언을 자기 것으로 주장하지 않음 | | |
@@ -83,6 +84,34 @@ digest:
 | E-3 CTA 403 | | |
 | E-4 ordinary chat·Review 무회귀 | | |
 
+## §H 목록 재진입 (차단)
+
+| 항목 | 관측 | 판정 |
+|---|---|---|
+| H-1 목록에서 `/continuations/[id]`로 열림 | | |
+| H-2 외부 원문·출처 재표시 | | |
+| H-3 검색 결과도 같은 곳 | | |
+| H-4 일반·이미지 대화 무회귀 | | |
+
+## §I 플래그 경로 (차단)
+
+| 항목 | 관측 | 판정 |
+|---|---|---|
+| I-1 전용 체크박스 존재 | | |
+| I-2 GET이 값 반환 | | |
+| I-3 audit 두 행 | | |
+| I-4 끈 직후 발췌 없음, 사유 `flag_off` 또는 `flag_off_stale_cache` | | |
+| I-5 다중 인스턴스에서 어느 turn에도 원문 없음 | | |
+| I-6 배포 인스턴스 수 | | |
+
+## §J 중복 방지 (차단)
+
+| 항목 | 관측 | 판정 |
+|---|---|---|
+| J-1 두 번 클릭 → 대화 1개 | | |
+| J-2 응답 유실 후 재시도 → 대화 1개 | | |
+| J-3 취소 후 재시도 → 새 fork | | |
+
 ## §F 화면 (비차단)
 
 | 항목 | 관측 | 판정 |
@@ -94,12 +123,6 @@ digest:
 | F-5 320px 겹침·overflow 없음 | | |
 | F-6 한국어 IME | | |
 
-## §G 중복 방지 (비차단)
-
-| 항목 | 관측 | 판정 |
-|---|---|---|
-| G-1 두 번 클릭 → 대화 1개 | | |
-| G-2 취소 후 재시도 → 새 fork | | |
 
 ## 크레딧
 
@@ -108,6 +131,8 @@ digest:
 | §A-3 | | |
 | §D | | |
 | §E-2 | | |
+| §I-4 | | |
+| §I-5 (다중 인스턴스일 때만) | | |
 | 합계 | | |
 
 ## 건너뛴 구획과 이유
