@@ -188,13 +188,22 @@ export function subtypeTableDigest(): string {
 /** Who has confirmed the table above, and who has not. */
 export const SUBTYPE_REVIEW = {
     /**
-     * `ai_draft` until a person signs it. The floor is decided by a handful of
-     * rows either way, so an unreviewed table cannot settle whether docs/ops/memory-extraction-eval-dataset.md §3.3 is
-     * met — it can only say what a careful reading found.
+     * Confirmed by a person on 2026-08-31, after four rounds in which the
+     * reviewer read the table, adopted by name the four exclusions in
+     * docs/ops/memory-eval-succ6-replacement-review.md §3.1, and reproduced
+     * the counts.
+     *
+     * The confirmation matters more than it looks. While this said `ai_draft`
+     * the docs/ops/memory-extraction-eval-dataset.md §3.3 floor was only ever
+     * what a careful reading found; signed, it is what the dataset claims. And
+     * because the status, reviewer, date and method are all inside
+     * `subtypeTableDigest`, writing this line moved that digest and the
+     * manifest digest with it — which is why the freeze had to be signed
+     * before it was pinned, and never the other way round.
      */
-    status: "ai_draft" as "ai_draft" | "human_confirmed",
-    reviewer: null as string | null,
-    reviewedAt: null as string | null,
+    status: "human_confirmed" as "ai_draft" | "human_confirmed",
+    reviewer: "mposition" as string | null,
+    reviewedAt: "2026-08-31" as string | null,
     method:
         "Every assistant_only case in mem-eval-succ-6 was read in full; the clause " +
         "quoted in each row is the one the subtype rests on.",

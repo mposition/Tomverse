@@ -74,16 +74,23 @@ export const MEMORY_EVAL_SUCC6_DATASET_VERSION = "mem-eval-succ-6";
 export const MEMORY_EVAL_SUCC6_SUPERSEDES = "mem-eval-succ-5";
 export const MEMORY_EVAL_SUCC6_CHANGE_REASON =
     "B+ isolation of ten rule-forming cases, plus three composition repairs " +
-    "for the docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor; 1:1 replacements throughout";
+    "for the assistant_only subtype floor; 1:1 replacements throughout";
 
 /**
- * False until a person adopts it.
+ * Adopted by @mposition on 2026-08-31.
  *
- * The gate that reads this is `decideEvalRunMode()`, and it refuses a
- * decision-grade run against an unfrozen decision sample. That refusal is the
- * point: the structural checks can pass on a set nobody has read.
+ * The gate that reads this is `decideEvalRunMode()`, which refuses a
+ * decision-grade run against an unfrozen decision sample. Flipping it removes
+ * that refusal and nothing else: it does not approve a paid run, register a
+ * pair, or authorise a budget, each of which is its own human decision with
+ * its own record.
+ *
+ * What the signature covers is in the adoption record — the thirteen new
+ * cases, the two mixed-critical golds, the four subtype exclusions, and the
+ * classification the subtype floor is measured against. It does not cover
+ * `mem-extract-v7`, which does not exist yet.
  */
-export const MEMORY_EVAL_SUCC6_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC6_DATASET_FROZEN = true;
 
 export const MEMORY_EVAL_SUCC6_DATASET_PURPOSE: "development" | "decision" =
     "decision";
@@ -352,22 +359,56 @@ export function verifySucc6Manifest(
 }
 
 /**
- * The manifest, computed — and this is a draft, not the frozen record.
+ * The frozen record, pinned as a literal on 2026-08-31.
  *
- * While `MEMORY_EVAL_SUCC6_DATASET_FROZEN` is `false` the manifest may be a
- * view over the tree, because there is nothing yet to be inconsistent with:
- * every edit to the cases moves the digest and the record follows it.
+ * It was a computed view — `buildSucc6Manifest()` — for as long as the dataset
+ * was a draft, which was correct then: every edit moved the digest and the
+ * record followed. Once frozen that becomes the defect. A computed manifest
+ * cannot be wrong about the tree, which sounds like a virtue and is the whole
+ * problem: what a frozen record exists for is to *disagree* when the cases
+ * move afterwards, and `verifySucc6Manifest()` compares its argument against
+ * `buildSucc6Manifest()` — so a computed one would have it comparing the tree
+ * with itself and reporting no drift, forever.
  *
- * **At freeze this must become a literal.** A computed manifest cannot be
- * wrong about the tree, which sounds like a virtue and is the defect: what a
- * frozen record is for is to disagree when the cases move afterwards, and
- * `verifySucc6Manifest()` — whose entire job is to report that disagreement —
- * compares its argument against `buildSucc6Manifest()` and would then be
- * comparing the tree with itself. So the freeze commit replaces this with the
- * object literal `buildSucc6Manifest()` produced at that commit, digests
- * included, alongside `MEMORY_EVAL_SUCC6_DATASET_FROZEN = true` and the signed
- * adoption. `mem-eval-succ-5` carries the same pinned shape, for the same
- * reason.
+ * `changeReason` stays a reference to the constant rather than a copied
+ * string: the two would then have to be kept equal by hand, and the digest
+ * below is what fixes the value regardless.
+ *
+ * These are the values `@mposition` signed. Nothing here is edited without a
+ * new adoption record: `.github/audits/memory-eval-succ6-adoption-2026-08-31.md`.
  */
-export const MEMORY_EVAL_SUCC6_MANIFEST: Succ6DatasetManifest =
-    buildSucc6Manifest();
+export const MEMORY_EVAL_SUCC6_MANIFEST: Succ6DatasetManifest = {
+    datasetVersion: "mem-eval-succ-6",
+    schemaVersion: 3,
+    supersedes: "mem-eval-succ-5",
+    composition: {
+        kind: "case-replacement",
+        sourceDatasetVersion: "mem-eval-succ-5",
+        sourceDatasetDigest:
+            "0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0",
+        inheritedCaseCount: 1137,
+        replacedCaseCount: 13,
+        changeReason: MEMORY_EVAL_SUCC6_CHANGE_REASON,
+    },
+    subtypeTableDigest:
+        "89e10d0d8b16901f2989f655a39786ffd6487fbe6d21272fefe232a00c234e83",
+    caseCount: 1150,
+    cellCounts: {
+        "durable_facts:ko": 200,
+        "durable_facts:en": 200,
+        "injection_directives:ko": 125,
+        "injection_directives:en": 125,
+        "assistant_only:ko": 125,
+        "assistant_only:en": 125,
+        "sensitive_secrets:ko": 125,
+        "sensitive_secrets:en": 125,
+    },
+    datasetDigest:
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+    scoringContractDigest:
+        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+    scoringContractVersion: "mem-score-v3.4",
+    frozen: true,
+    manifestDigest:
+        "b1904682a2920a6554f533001a2b59cbd2d4cdc06b517aa2b53588c094ce603d",
+};

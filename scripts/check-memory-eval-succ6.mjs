@@ -511,13 +511,28 @@ notes.push(
                   .map((row) => `${row.cell} needs ${row.shortfall} more`)
                   .join("; ")}. Close it by changing the sample, never by ` +
               "reclassifying borderline cases to reach the number.") +
-        "\n        The table is an AI draft until a reviewer signs it, and the margin " +
-        "is a few rows wide, so confirming or correcting it decides the verdict above."
+        "\n        " +
+        (SUBTYPE_REVIEW.status === "human_confirmed"
+            ? `Signed by ${SUBTYPE_REVIEW.reviewer} on ${SUBTYPE_REVIEW.reviewedAt}. The ` +
+              "signature is inside the subtype digest, so it cannot be edited without " +
+              "moving the digest the frozen manifest pins."
+            : "The table is an AI draft until a reviewer signs it, and the margin is a " +
+              "few rows wide, so confirming or correcting it decides the verdict above.")
 );
 
 /* ------------------------------------------------------------ readiness -- */
 
-if (!MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
+if (MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
+    notes.push(
+        `FROZEN=true — adopted by ${SUBTYPE_REVIEW.reviewer} on ${SUBTYPE_REVIEW.reviewedAt}, ` +
+            ".github/audits/memory-eval-succ6-adoption-2026-08-31.md. The manifest is a " +
+            "pinned literal, so this check now reports drift rather than describing the " +
+            "tree back to itself.\n\n        This removes `decideEvalRunMode()`'s refusal " +
+            "of a decision-grade run and NOTHING ELSE. A paid run still needs an approved " +
+            "eval budget, a registered pair, a clean named commit and an unused run " +
+            "ordinal, each recorded separately."
+    );
+} else if (!MEMORY_EVAL_SUCC6_DATASET_FROZEN) {
     notes.push(
         "FROZEN=false — the thirteen new cases (ten B+ replacements and three " +
             "composition repairs) have not been reviewed and the adoption " +
