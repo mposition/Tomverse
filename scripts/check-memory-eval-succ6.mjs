@@ -45,6 +45,16 @@ import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
 import { SUCC6_REPLACEMENT_CASE_IDS, SUCC6_TRANSITIONS } from "../lib/memoryEvalSucc6Transition.ts";
 import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
+import {
+    SUBTYPE_REVIEW,
+    assistantOnlySubtypeFloor,
+    unknownSubtypeRows,
+} from "../lib/memoryEvalAssistantOnlySubtypes.ts";
+import { MEMORY_EVAL_SUCC5_CASES as SUCC5_FOR_FLOOR } from "../lib/memoryEvalSucc5.ts";
+import {
+    regressionLeakViolations,
+    succ6CorrectedGoldEvidenceFailures,
+} from "../lib/memoryEvalSucc6Regression.ts";
 
 const failures = [];
 const notes = [];
@@ -276,6 +286,63 @@ for (const entry of SUCC6_REGRESSION_CORPUS) {
 }
 ok("corrected regression cases score", `${corrected.length} runnable`);
 
+// Scoring and anchoring are different questions, and the first version of this
+// corpus passed the first while failing the second: `succ-assistant-en-10`
+// required the token `swimming` against the quote "I'm not going back.", which
+// `goldEvidenceFailure()` rejects as `gold-evidence-covers-fact`. Nothing was
+// looking, because every check written for the corpus asked whether the gold
+// scored.
+const evidenceFailures = succ6CorrectedGoldEvidenceFailures();
+if (evidenceFailures.length > 0) {
+    for (const failure of evidenceFailures) {
+        fail(
+            `${failure.caseId} gold ${failure.goldId}: ${failure.failure} — the corrected ` +
+                "gold cannot be anchored, so no scorer can run it"
+        );
+    }
+} else {
+    ok("corrected golds anchor", `${corrected.length} × goldEvidenceFailure()`);
+}
+
+// A leak the score cannot see. `candidateMatchesGoldV3()` is monotone in
+// words, so a statement naming the withheld value scores 1/1 against the very
+// gold written to keep it out. The prohibition is a separate layer and this
+// asserts it is actually wired, not merely declared: each forbidden value is
+// pushed through a statement that matches the gold and names it.
+let leakChecks = 0;
+for (const entry of SUCC6_REGRESSION_CORPUS) {
+    for (const [index, correction] of entry.correctionRecord.entries()) {
+        for (const forbidden of correction.forbiddenValues ?? []) {
+            const gold = entry.regressionCase.expected[index];
+            const leaking = {
+                kind: gold.kind,
+                polarity: gold.polarity,
+                statement: `${gold.factValueAll.join(" ")} ${gold.factValueAny?.[0] ?? ""} ${forbidden}`,
+            };
+            const violations = regressionLeakViolations(entry, leaking);
+            if (!violations.some((v) => v.forbiddenValue === forbidden)) {
+                fail(
+                    `${correction.caseId}: a statement naming the withheld ${forbidden} is not ` +
+                        "reported as a leak, so the prohibition is declared and not enforced"
+                );
+            }
+            if (!violations.some((v) => v.scoredAsMatch)) {
+                fail(
+                    `${correction.caseId}: the leaking statement does not score, so this check ` +
+                        "is not exercising the case the prohibition exists for"
+                );
+            }
+            // And a clean statement must not be reported.
+            const clean = { ...leaking, statement: leaking.statement.replace(forbidden, "") };
+            if (regressionLeakViolations(entry, clean).length > 0) {
+                fail(`${correction.caseId}: a statement without the withheld value is reported as a leak`);
+            }
+            leakChecks += 1;
+        }
+    }
+}
+ok("withheld values rejected by the prohibition", `${leakChecks} value(s), leak scores as a match`);
+
 // The two privacy-preference golds may not require the value the user
 // withheld. Checked as an absence rather than trusted to the comment.
 const WITHHELD = {
@@ -352,13 +419,48 @@ notes.push(
               )
               .join("\n")
 );
+/* ----------------------------------------------- the docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor -- */
+
+// A row naming a case the dataset does not hold is the one part of this a
+// check can settle, and it fails: a stale row lowers the count silently.
+const stale = unknownSubtypeRows(MEMORY_EVAL_SUCC6_CASES);
+if (stale.length > 0) {
+    fail(
+        `the subtype table names ${stale.length} case(s) succ-6 does not hold: ` +
+            `${stale.join(", ")}`
+    );
+} else {
+    ok("subtype table rows all resolve", "no stale ids");
+}
+
+// The floor itself reports. It rests on a reading of 250 conversations, and a
+// gate over that reading would fail the build on one person's judgement of a
+// handful of borderline cases.
+const floorRows = assistantOnlySubtypeFloor(MEMORY_EVAL_SUCC6_CASES);
+const succ5Rows = new Map(
+    assistantOnlySubtypeFloor(SUCC5_FOR_FLOOR).map((row) => [row.cell, row])
+);
+const floorLines = floorRows.map((row) => {
+    const before = succ5Rows.get(row.cell);
+    const delta = before ? row.hard - before.hard : 0;
+    return (
+        `        ${row.cell.padEnd(20)} ${String(row.hard).padStart(3)}/${row.floor}` +
+        `  (3:${row.subtype3.length} 4:${row.subtype4.length})` +
+        `  succ-5 was ${before ? before.hard : "?"}${delta >= 0 ? " +" : " "}${delta}` +
+        `  ${row.meetsFloor ? "MEETS" : `SHORT BY ${row.shortfall}`}`
+    );
+});
 notes.push(
-    "The docs/ops/memory-extraction-eval-dataset.md §3.3 floor — at least 30% of " +
-        "each cell in subtypes 3 and 4 — is NOT machine-checked here. Classifying " +
-        "the 250 existing cases needs a reader: a keyword pass left 66 of 125 " +
-        "unclassified and missed corrections like \"3년 전에 접었고 지금은 전혀 다른 " +
-        "일 합니다\". What is checked above is that the replacements carry at least " +
-        "as many subtype 3/4 cases as the ones they replace."
+    "docs/ops/memory-extraction-eval-dataset.md §3.3 asks each assistant_only cell " +
+        "for at least 30% in subtypes 3 and 4 — 38 of 125. Measured against the " +
+        `declared table in lib/memoryEvalAssistantOnlySubtypes.ts (status: ${SUBTYPE_REVIEW.status}):\n` +
+        floorLines.join("\n") +
+        "\n\n        NEITHER CELL MEETS IT, and neither did succ-5: the shortfall is " +
+        "inherited, not introduced. The ten B+ replacements moved both cells toward " +
+        "the floor rather than away from it. Closing the remaining gap means changing " +
+        "cases the B+ decision did not touch, which is a decision outside this " +
+        "dataset's scope. The table is an AI draft and the margin is a few rows wide, " +
+        "so confirming or correcting it is the first step, not the last."
 );
 
 /* ------------------------------------------------------------ readiness -- */
