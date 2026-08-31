@@ -10,7 +10,13 @@
   "expectedCells": 15,
   "expectedPrimaryPairs": 60,
   "adjudicatorId": "A-01",
-  "keyRecovery": null,
+  "keyRecovery": {
+    "verifiedBy": "A-01",
+    "verifiedAt": "2026-08-31T07:57Z",
+    "recipientKeyFingerprint": "sha256:6271ac1afca28509b96a6fc8424b1973a19ad0413eefafa719ac19ce133ac4ab",
+    "probeSha256": "sha256:f7bb647b5ce710f218c133a38e6d6a8e2000bef935725c00b62b7a52d2dd99a4",
+    "probeRunId": "33369782907"	  
+  },
   "notes": [
     "bundleDigest was read off the pinned artifact by run 33346660064, which refused and printed it. It is read, never chosen: the same run reported 210 pair(s) across 15 cell(s), and the download action verified the artifact's own sha256 8c2a96e3527370bd9ecb6d39ed8cb65c3f59a06931933ef86dfcaebf58f4b288 before the content digest was taken.",
     "The seed is derived from bundleDigest by lib/routerHumanReviewSource.ts and is not an input to anything.",
