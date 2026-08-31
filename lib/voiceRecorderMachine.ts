@@ -52,7 +52,16 @@ export type VoiceRecorderErrorCode =
   /** The request never reached the server. */
   | "VOICE_NETWORK_ERROR"
   /** The server refused, or the provider did. Carries the server's own code. */
-  | "VOICE_TRANSCRIPTION_FAILED";
+  | "VOICE_TRANSCRIPTION_FAILED"
+  /**
+   * The conversation the recording belonged to is no longer the open one, or
+   * the signed-in identity changed (docs/policy/voice-input.md §8.4).
+   *
+   * Not a fault, which is why it has a code of its own rather than borrowing
+   * a failure's: the user did something reasonable and the recording could
+   * not follow them.
+   */
+  | "VOICE_SCOPE_CHANGED";
 
 export type VoiceRecorderState =
   | { status: "idle" }
@@ -75,7 +84,16 @@ export type VoiceRecorderState =
 
 export type VoiceRecorderEvent =
   | { type: "start_requested" }
-  | { type: "unsupported" }
+  /**
+   * This browser cannot record.
+   *
+   * `sessionId` is absent only for the pre-flight check on the press, when
+   * there is no session yet. Every dispatch from a live state must name its
+   * session: a session-less failure used to be accepted from
+   * `permission_pending`, so a stale one from a finished recording ended the
+   * recording that had replaced it and released its microphone.
+   */
+  | { type: "unsupported"; sessionId?: number }
   | { type: "permission_granted"; sessionId: number }
   | { type: "permission_denied"; sessionId: number }
   | { type: "device_unavailable"; sessionId: number }
@@ -90,7 +108,16 @@ export type VoiceRecorderEvent =
       code: VoiceRecorderErrorCode;
       serverCode?: string | null;
     }
-  | { type: "dismiss_error" };
+  | { type: "dismiss_error" }
+  /**
+   * The conversation draft scope, or the signed-in identity, changed under a
+   * running session (docs/policy/voice-input.md §8.4).
+   *
+   * A recording belongs to the conversation it was started in. Rather than let
+   * its transcript follow the user into whatever they opened next, the session
+   * ends here and says so.
+   */
+  | { type: "scope_changed"; sessionId: number };
 
 /**
  * What the adapter must do as a result of the transition, as data.
@@ -114,8 +141,15 @@ export type VoiceRecorderEffect =
    * distinction to be got wrong.
    */
   | { type: "discard_capture"; sessionId: number }
-  /** Release the microphone. Always paired with reaching a resting state. */
-  | { type: "release_microphone" }
+  /**
+   * Release the microphone. Always paired with reaching a resting state.
+   *
+   * Carries the session it belongs to, `null` only for the pre-flight refusal
+   * that happens before any session exists. The adapter refuses to act on a
+   * release that names a session it is no longer running, so a release cannot
+   * close a microphone that a later session opened.
+   */
+  | { type: "release_microphone"; sessionId: number | null }
   /** Send the recorded clip for transcription. */
   | { type: "upload_clip"; sessionId: number };
 
@@ -162,6 +196,34 @@ const assertHandled = (
 };
 
 /**
+ * Ending a live session because something went wrong, or because it no longer
+ * belongs to the conversation on screen.
+ *
+ * Always both effects, from every live state including `permission_pending`.
+ * `discard_capture` is not only about bytes: it is what marks the session
+ * abandoned, so a `getUserMedia` grant that resolves afterwards releases the
+ * stream it was handed instead of leaving the microphone open behind a failure
+ * the user has already been told about.
+ */
+const endLiveSession = (
+  sessionId: number,
+  code: VoiceRecorderErrorCode
+): VoiceRecorderTransition => ({
+  state: { status: "error", code, serverCode: null },
+  effects: [
+    { type: "discard_capture", sessionId },
+    { type: "release_microphone", sessionId },
+  ],
+});
+
+/** The states from which a failure can still end a running session. */
+const isLiveStatus = (state: VoiceRecorderState) =>
+  state.status === "permission_pending" ||
+  state.status === "recording" ||
+  state.status === "stopping" ||
+  state.status === "transcribing";
+
+/**
  * `sessionId` is supplied by the caller rather than generated here so the
  * reducer stays a function of its arguments. The hook increments a ref.
  */
@@ -173,7 +235,11 @@ export const voiceRecorderReducer = (
   // Late events from a session that is no longer the current one are dropped
   // before any state is consulted. See the header: this is the whole reason
   // sessions exist, so it is one check rather than a case in every branch.
-  if ("sessionId" in event && event.sessionId !== sessionOf(state)) {
+  if (
+    "sessionId" in event &&
+    event.sessionId !== undefined &&
+    event.sessionId !== sessionOf(state)
+  ) {
     return stay(state);
   }
 
@@ -191,16 +257,26 @@ export const voiceRecorderReducer = (
     }
 
     case "unsupported": {
-      // Reachable from `idle` (feature-detected on press) and from
-      // `permission_pending` (no container both ends accept). Not an error the
-      // user can retry out of, but still dismissible: it must not sit in the
-      // composer forever.
-      if (state.status !== "idle" && state.status !== "permission_pending") {
-        return stay(state);
+      // Three ways to arrive here, and the third is why this case changed:
+      //
+      //   * the pre-flight check on the press, from `idle`, with no session;
+      //   * no container both ends accept, from `permission_pending`;
+      //   * `new MediaRecorder(...)` throwing, which happens *after*
+      //     `permission_granted` has already moved the machine to `recording`.
+      //
+      // The third used to be dropped, leaving the machine recording with an
+      // open microphone and nothing on screen to explain it.
+      const sessionId = sessionOf(state);
+      if (sessionId !== null && isLiveStatus(state)) {
+        return endLiveSession(sessionId, "VOICE_UNSUPPORTED_BROWSER");
       }
+      // A session-less report is only meaningful before a session exists.
+      // Accepting one from a live state is how a stale failure came to end the
+      // recording that replaced it.
+      if (state.status !== "idle") return stay(state);
       return {
         state: { status: "error", code: "VOICE_UNSUPPORTED_BROWSER", serverCode: null },
-        effects: [{ type: "release_microphone" }],
+        effects: [{ type: "release_microphone", sessionId: null }],
       };
     }
 
@@ -221,16 +297,18 @@ export const voiceRecorderReducer = (
       if (state.status !== "permission_pending") return stay(state);
       return {
         state: { status: "error", code: "VOICE_PERMISSION_DENIED", serverCode: null },
-        effects: [{ type: "release_microphone" }],
+        effects: [{ type: "release_microphone", sessionId: state.sessionId }],
       };
     }
 
     case "device_unavailable": {
-      if (state.status !== "permission_pending") return stay(state);
-      return {
-        state: { status: "error", code: "VOICE_DEVICE_UNAVAILABLE", serverCode: null },
-        effects: [{ type: "release_microphone" }],
-      };
+      // `recorder.onerror` fires while recording or stopping, not only while
+      // permission is pending. A recorder that has errored will never fire
+      // `onstop`, so a machine that ignored this waited for a clip that could
+      // not arrive — with the microphone still open.
+      const sessionId = sessionOf(state);
+      if (sessionId === null || !isLiveStatus(state)) return stay(state);
+      return endLiveSession(sessionId, "VOICE_DEVICE_UNAVAILABLE");
     }
 
     case "tick": {
@@ -283,7 +361,7 @@ export const voiceRecorderReducer = (
         state: { status: "idle" },
         effects: [
           { type: "discard_capture", sessionId },
-          { type: "release_microphone" },
+          { type: "release_microphone", sessionId },
         ],
       };
     }
@@ -298,7 +376,9 @@ export const voiceRecorderReducer = (
         // pre-emption, not the enforcement.
         return {
           state: { status: "error", code: "VOICE_CLIP_EMPTY", serverCode: null },
-          effects: [{ type: "release_microphone" }],
+          effects: [
+            { type: "release_microphone", sessionId: state.sessionId },
+          ],
         };
       }
       return {
@@ -308,7 +388,7 @@ export const voiceRecorderReducer = (
           elapsedMs: state.elapsedMs,
         },
         effects: [
-          { type: "release_microphone" },
+          { type: "release_microphone", sessionId: state.sessionId },
           { type: "upload_clip", sessionId: state.sessionId },
         ],
       };
@@ -332,6 +412,12 @@ export const voiceRecorderReducer = (
         },
         effects: [],
       };
+    }
+
+    case "scope_changed": {
+      const sessionId = sessionOf(state);
+      if (sessionId === null || !isLiveStatus(state)) return stay(state);
+      return endLiveSession(sessionId, "VOICE_SCOPE_CHANGED");
     }
 
     case "dismiss_error": {

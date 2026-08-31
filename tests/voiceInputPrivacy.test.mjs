@@ -158,13 +158,17 @@ test("the endpoint's structured event carries only outcome fields", () => {
   assert.deepEqual(
     fields.sort(),
     [
+      "disposition",
       "durationSeconds",
       "durationSource",
       "mediaType",
       "outcome",
       "providerFailure",
       "providerStatus",
+      "releasedSeconds",
       "reservedSeconds",
+      "settlementBasis",
+      "usageKind",
     ],
     "a new log field was added; every one of these must be a code this file chose or a number measured from the container"
   );
@@ -209,6 +213,15 @@ test("a provider failure is reported as a code, never as its body", async () => 
   assert.ok(!JSON.stringify(result).includes("a secret"));
 });
 
+test("the log names the usage *shape* but never the token counts", () => {
+  // `output_tokens` is a proxy for how long the transcript is, and §11.2
+  // forbids the transcript's length as firmly as the transcript itself.
+  const source = read("app/api/chat/voice-transcription/route.ts");
+  assert.ok(!/inputTokens/.test(source));
+  assert.ok(!/outputTokens/.test(source));
+  assert.ok(/usageKind/.test(source), "the billing unit is still reported");
+});
+
 test("a network failure is reported without the thrown error", async () => {
   const result = await transcribeWithOpenAi(
     {
@@ -230,6 +243,7 @@ test("a network failure is reported without the thrown error", async () => {
     ok: false,
     code: "provider_unreachable",
     status: null,
+    disposition: "indeterminate",
   });
 });
 
@@ -270,7 +284,7 @@ test("the request carries the audio, the model and nothing that identifies a use
   assert.equal(form.get("response_format"), "json");
 });
 
-test("a successful response yields the text and the billed duration", async () => {
+test("a successful response yields the text and the reported usage", async () => {
   const result = await transcribeWithOpenAi(
     {
       audio: new Uint8Array([1]),
@@ -288,7 +302,11 @@ test("a successful response yields the text and the billed duration", async () =
     }
   );
 
-  assert.deepEqual(result, { ok: true, text: "안녕하세요", durationSeconds: 2.25 });
+  assert.deepEqual(result, {
+    ok: true,
+    text: "안녕하세요",
+    usage: { kind: "duration", seconds: 2.25 },
+  });
 });
 
 test("a 2xx that is not the expected shape is a failure, not an empty transcript", async () => {
@@ -331,7 +349,7 @@ test("credentials, rate limits and refusals are classified apart", async () => {
 
   assert.equal(await classify(401), "provider_rejected_credentials");
   assert.equal(await classify(403), "provider_rejected_credentials");
-  assert.equal(await classify(429), "provider_unavailable");
+  assert.equal(await classify(429), "provider_rate_limited");
   assert.equal(await classify(503), "provider_unavailable");
   assert.equal(await classify(400), "provider_rejected_audio");
   assert.equal(await classify(415), "provider_rejected_audio");
@@ -358,6 +376,7 @@ test("a missing key is reported rather than thrown", async () => {
       ok: false,
       code: "provider_not_configured",
       status: null,
+      disposition: "not_sent",
       notConfigured: true,
     });
   } finally {

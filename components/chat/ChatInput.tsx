@@ -685,6 +685,20 @@ type ChatInputProps = {
    * deliberately not turned on.
    */
   voiceInputEnabled?: boolean;
+  /**
+   * Appends a finished transcript to one conversation's draft
+   * (docs/policy/voice-input.md §8.4).
+   *
+   * Takes the scope explicitly because the conversation a recording started in
+   * is not necessarily the one on screen when the server answers, and
+   * `ChatInput` is not remounted by a conversation switch. The caller writes
+   * through the draft store's own scoped, functional update, so text the user
+   * typed while waiting is preserved and the words land in the right place.
+   *
+   * Absent only where no draft store exists; the composer then falls back to
+   * appending to the value it currently holds.
+   */
+  onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
@@ -821,6 +835,7 @@ export function ChatInput({
   onOpenDeepResearchSetup,
   onStartImageDraft,
   voiceInputEnabled = false,
+  onVoiceTranscript,
   imageGenerationLock = null,
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
@@ -1246,13 +1261,28 @@ export function ChatInput({
     destroy work with no undo.
   */
   const voiceCopy = useMemo(() => resolveVoiceInputCopy({ t }), [t]);
+  // The composer's own draft key, not the raw conversation id. `draftKeyFor`
+  // is idempotent and never undefined, and `undefined` is the one value the
+  // draft store reads as "whatever is open now" — which is exactly what a
+  // scoped write must never mean here.
+  const voiceScopeId = draftScopeId;
   const voice = useVoiceRecorder({
-    onTranscript: (transcript) => {
-      onChange(appendVoiceTranscript(value, transcript));
-      // Focus returns to the textarea so the caret is where the user has to
-      // edit. Without this the transcript lands in a box nobody is typing in,
-      // and on a phone the keyboard does not come back.
-      textareaRef.current?.focus();
+    scopeId: voiceScopeId,
+    // A change of who is signed in ends a running session for the same reason
+    // a conversation change does: the draft it was going to land in is no
+    // longer the same person's.
+    identityKey: isGuestMode ? "guest" : "account",
+    onTranscript: (transcript, scopeId) => {
+      if (onVoiceTranscript) {
+        onVoiceTranscript(transcript, scopeId);
+      } else {
+        onChange(appendVoiceTranscript(value, transcript));
+      }
+      // Focus returns to the textarea only when the transcript landed in the
+      // conversation still on screen. Pulling focus into a composer the user
+      // has already left would be this feature reaching into a conversation it
+      // no longer belongs to.
+      if (scopeId === voiceScopeId) textareaRef.current?.focus();
     },
   });
 

@@ -125,3 +125,63 @@ export const resolveVoiceGuardrails = (
 
   return { limits, clamped, ignored };
 };
+
+// ---------------------------------------------------------------------------
+// Settlement
+// ---------------------------------------------------------------------------
+
+/**
+ * What a reservation should finally be worth, and on what evidence.
+ *
+ * Contract: docs/policy/voice-input.md §7.2.
+ *
+ * Four kinds, because three different things used to be collapsed into one
+ * number and the collapse is where the reasoning went wrong:
+ *
+ *   * `provider_seconds` — the provider told us how many seconds of audio it
+ *     processed. The only figure that is a fact about *their* billing.
+ *   * `measured_clip` — nobody told us, but we read the length out of the
+ *     container ourselves (`lib/voiceClipDuration.ts`). A fact about the
+ *     audio, measured by us; not a statement about what was charged.
+ *   * `reservation` — neither is available. The conservative estimate stands.
+ *   * `not_billed` — the call provably did no work: no request was made, or
+ *     the provider answered by refusing. Give it all back.
+ *
+ * There is deliberately no kind for "tokens". A token-billed model reports
+ * `input_tokens`/`output_tokens` and no seconds, and this budget is
+ * denominated in seconds: converting one to the other would be inventing a
+ * rate nobody has approved (AGENTS.md, "Credit entitlement vs operational
+ * guardrail", and docs/policy/voice-input.md §6.1). Token usage is observed
+ * and reported; it never moves this number.
+ */
+export type VoiceSettlementBasis =
+  | { kind: "provider_seconds"; seconds: number }
+  | { kind: "measured_clip"; seconds: number }
+  | { kind: "reservation" }
+  | { kind: "not_billed" };
+
+/**
+ * How much of a reservation to hand back.
+ *
+ * Never more than was reserved, and never less than nothing. A provider that
+ * reports an impossible duration — negative, NaN, or longer than the clip
+ * could be — cannot use this to release somebody else's budget or to book more
+ * than this request ever held.
+ */
+export const voiceSettlementRelease = (input: {
+  reservedSeconds: number;
+  basis: VoiceSettlementBasis;
+}): number => {
+  const reserved = Math.max(0, Math.floor(input.reservedSeconds));
+  if (input.basis.kind === "not_billed") return reserved;
+  if (input.basis.kind === "reservation") return 0;
+
+  const reported = input.basis.seconds;
+  // A malformed measurement is not a measurement. Treating it as zero would
+  // make a broken provider response the cheapest possible outcome, which is
+  // the wrong direction for a spending guardrail.
+  if (!Number.isFinite(reported) || reported < 0) return 0;
+
+  const billed = Math.min(reserved, Math.max(0, Math.ceil(reported)));
+  return reserved - billed;
+};

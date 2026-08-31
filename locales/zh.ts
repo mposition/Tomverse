@@ -377,6 +377,7 @@ export const zh = {
         voiceErrorClipTooLong: "录音超过了允许的时长。",
         voiceErrorClipUnreadable: "无法读取录音文件。",
         voiceErrorTranscriptEmpty: "没有识别到语音。请到安静的环境再试一次。",
+        voiceErrorScopeChanged: "因切换到其他对话，语音输入已停止，未添加任何内容。",
         voiceErrorUnavailable: "当前无法使用语音输入。",
         voiceErrorSignInRequired: "请登录后使用语音输入。",
         voiceErrorLimitReached: "已达到今天的语音输入上限，请明天再试。",

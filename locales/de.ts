@@ -368,6 +368,7 @@ export const de = {
         voiceErrorClipTooLong: "Die Aufnahme überschreitet die zulässige Länge.",
         voiceErrorClipUnreadable: "Die Aufnahme konnte nicht gelesen werden.",
         voiceErrorTranscriptEmpty: "Es wurde keine Sprache erkannt. Versuchen Sie es in einer ruhigeren Umgebung erneut.",
+        voiceErrorScopeChanged: "Die Spracheingabe wurde beendet, weil Sie zu einer anderen Unterhaltung gewechselt sind. Es wurde nichts eingefügt.",
         voiceErrorUnavailable: "Spracheingabe ist derzeit nicht verfügbar.",
         voiceErrorSignInRequired: "Melden Sie sich an, um die Spracheingabe zu nutzen.",
         voiceErrorLimitReached: "Sie haben das heutige Limit für Spracheingaben erreicht. Versuchen Sie es morgen erneut.",

@@ -5,7 +5,7 @@
 하나**이고(§14의 B-6), 나머지 다섯 개 차단 사유(B-1~B-5)는 이 문서로 해소되지
 않습니다.
 
-- **template revision**: `2026-08-30`
+- **template revision**: `2026-08-31`
 
 ## 이 문서는 template입니다
 
@@ -36,6 +36,11 @@ AGENTS.md의 "사람에게 남기는 것은 사람만 할 수 있는 것뿐입�
 | 실제 브라우저 recorder로 녹음 → 자동 전송 안 됨 | `tests/e2e/voice-input-composer.spec.ts` |
 | composer 기하(320/360/390/430px, 겹침 0, IME) | 같은 파일 |
 | 7개 locale key parity와 번역 | `tests/localeParity.test.mjs`, `npm run check:locale-translation` |
+| 생성 실패·start/stop 예외·녹음 중 오류의 자원 회수 | `tests/voiceCaptureAdapter.test.mjs` |
+| 늦은 이벤트가 새 세션을 끝내거나 새 마이크를 닫지 못함 | 같은 파일 + `tests/voiceRecorderMachine.test.mjs` |
+| 대화 전환 시 세션 종료·초안 격리·타이핑 보존 | `tests/e2e/voice-input-composer.spec.ts` |
+| provider usage 형태 구분과 정산 근거 | `tests/voiceProviderSettlement.test.mjs` |
+| 결과 불명 호출이 예약을 유지함 | `tests/server-contract/voice-transcription-route.test.ts` |
 
 시료도 만들어 두었습니다: `scripts/make-voice-fixtures.mjs`가 실제
 `MediaRecorder` 출력 3개(WebM 2.5s / MP4 3.0s / WebM 0.4s)를 생성하며, 각각의
@@ -157,7 +162,7 @@ Firefox는 기본이 Ogg이고, 이 제품은 Ogg를 받지 않습니다(§5.1).
 - [ ] 위 실행 동안의 staging 로그에서 `event: "voice_transcription"` 라인을
       전부 꺼내 에이전트에게 전달한다
 
-에이전트가 대조합니다: 필드가 §11.2의 여덟 개뿐인지, transcript나 오디오의
+에이전트가 대조합니다: 필드가 §11.2의 목록뿐인지, transcript나 오디오의
 흔적이 없는지, `keySource`가 무엇인지. **사람은 로그를 꺼내 주기만 합니다.**
 
 ---
@@ -187,6 +192,33 @@ production에 갈 수 없습니다.
 깨뜨릴 수 있는 것은 컨트롤이 하나 늘어난 composer입니다.
 
 ---
+
+## 차단 / 비차단
+
+이 체크리스트 안에서도 무게가 다릅니다. 기준은 AGENTS.md의 "검증 범위는
+되돌릴 수 없는 것에 비례합니다" — **틀렸을 때 되돌릴 수 없는가**입니다.
+
+**차단(이것이 실패하면 flag를 켜지 않습니다)**
+
+- **E. kill switch.** 끄는 방법이 동작하지 않는 기능은 production에 갈 수
+  없습니다. 유료가 아닙니다.
+- **A-1 / A-2의 마이크 표시등과 취소.** 제품이 듣고 있지 않은데 듣고 있는
+  것처럼 보이거나, 그 반대인 것은 되돌릴 수 없는 신뢰 문제입니다.
+- **C의 "자동 전송되지 않음" 확인.** 잘못 인식된 문장이 전송되면 모델 응답과
+  크레딧 차감이 이미 일어난 뒤입니다.
+- **F의 회귀 4종.** 기존 기능이 깨지는 것은 이 기능을 끄는 것으로 복구되지
+  않습니다.
+
+**비차단(기록하고 넘어갈 수 있습니다)**
+
+- **B-1 Safari MP4 길이 선언.** `unknown`이어도 §5.2가 이미 예상한 결과이고,
+  바이트 상한·일일 초 예산이 남습니다. 결과를 **기록**하되 flag를 막지
+  않습니다.
+- **B-2 Firefox 컨테이너 협상.** 실패해도 그 브라우저에서만 쓸 수 없고,
+  조용한 실패가 아니라 명시적 안내로 끝나는지가 확인 대상입니다.
+- **A-3 통화 경합.** 어떤 코드가 나오는지 **알아내는** 항목입니다. 미리 정한
+  기대값이 없으므로 관측을 적는 것이 통과입니다.
+- **C의 인식 품질.** 품질은 모델 선택의 문제이고 flag로 되돌릴 수 있습니다.
 
 ## 판정
 

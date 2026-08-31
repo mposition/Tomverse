@@ -50,7 +50,8 @@ type World = {
   rateLimitScopes: string[];
   rateLimitShouldFail: boolean;
   reserved: Array<{ userId: string; seconds: number }>;
-  settled: Array<{ reservedSeconds: number; actualSeconds: number | null }>;
+  /** Every settlement, with the basis the route chose for it. */
+  settled: Array<{ reservedSeconds: number; basis: string; released: number }>;
   budgetShouldRefuse: boolean;
   providerCalls: ProviderCall[];
   providerResult: unknown;
@@ -66,7 +67,11 @@ const freshWorld = (): World => ({
   settled: [],
   budgetShouldRefuse: false,
   providerCalls: [],
-  providerResult: { ok: true, text: "  hello   there  ", durationSeconds: 2.4 },
+  providerResult: {
+    ok: true,
+    text: "  hello   there  ",
+    usage: { kind: "duration", seconds: 2.4 },
+  },
   logs: [],
 });
 
@@ -121,6 +126,34 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
       string,
       unknown
     >;
+    const realGuardrails = (await import(
+      mod("lib/voiceInputGuardrails.ts")
+    )) as {
+      voiceSettlementRelease: (input: {
+        reservedSeconds: number;
+        basis: { kind: string; seconds?: number };
+      }) => number;
+    };
+    // The settlement *arithmetic* is the real one; only the database write is
+    // replaced. A stubbed release would make every assertion below about how
+    // much came back meaningless.
+    const settle = async (input: {
+      reservation: { reservedSeconds: number; settled: boolean };
+      basis: { kind: string; seconds?: number };
+    }) => {
+      if (input.reservation.settled) return { releasedSeconds: 0 };
+      input.reservation.settled = true;
+      const released = realGuardrails.voiceSettlementRelease({
+        reservedSeconds: input.reservation.reservedSeconds,
+        basis: input.basis as never,
+      });
+      world.settled.push({
+        reservedSeconds: input.reservation.reservedSeconds,
+        basis: input.basis.kind,
+        released,
+      });
+      return { releasedSeconds: released };
+    };
     mock.module(mod("lib/voiceInputBudget.ts"), {
       namedExports: {
         ...realBudget,
@@ -142,23 +175,18 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
             );
           }
           world.reserved.push(input);
-          return { reservedSeconds: input.seconds };
+          return {
+            userId: input.userId,
+            reservedSeconds: input.seconds,
+            periodStart: new Date("2026-08-31T00:00:00.000Z"),
+            settled: false,
+          };
         },
-        settleVoiceSeconds: async (input: {
+        settleVoiceSeconds: settle,
+        releaseVoiceSeconds: (reservation: {
           reservedSeconds: number;
-          actualSeconds: number | null;
-        }) => {
-          world.settled.push({
-            reservedSeconds: input.reservedSeconds,
-            actualSeconds: input.actualSeconds,
-          });
-        },
-        releaseVoiceSeconds: async (input: { reservedSeconds: number }) => {
-          world.settled.push({
-            reservedSeconds: input.reservedSeconds,
-            actualSeconds: 0,
-          });
-        },
+          settled: boolean;
+        }) => settle({ reservation, basis: { kind: "not_billed" } }),
       },
     });
 
@@ -358,14 +386,58 @@ test("a clip longer than the limit is refused before the provider is paid", asyn
 // The operational guardrail
 // ---------------------------------------------------------------------------
 
-test("seconds are reserved before the provider call and settled to what it billed", async () => {
+test("provider-reported seconds settle the reservation", async () => {
   reset();
-  world.providerResult = { ok: true, text: "hello", durationSeconds: 2.4 };
+  world.providerResult = {
+    ok: true,
+    text: "hello",
+    usage: { kind: "duration", seconds: 2.4 },
+  };
   await post(WEBM_2500MS, "audio/webm");
 
   // The container declared about 2.4s, rounded up to 3 for the reservation.
   assert.deepEqual(world.reserved, [{ userId: "user_voice_contract", seconds: 3 }]);
-  assert.deepEqual(world.settled, [{ reservedSeconds: 3, actualSeconds: 2.4 }]);
+  assert.deepEqual(world.settled, [
+    { reservedSeconds: 3, basis: "provider_seconds", released: 0 },
+  ]);
+});
+
+test("a token-billed model settles on the length this endpoint measured", async () => {
+  // The configured default is token-billed, so there are no provider seconds
+  // at all. Tokens are not converted; the container's own measurement is what
+  // closes the reservation (docs/policy/voice-input.md §7.2).
+  reset();
+  world.providerResult = {
+    ok: true,
+    text: "hello",
+    usage: { kind: "tokens", inputTokens: 40, outputTokens: 8 },
+  };
+  await post(WEBM_2500MS, "audio/webm");
+
+  assert.deepEqual(world.settled, [
+    { reservedSeconds: 3, basis: "measured_clip", released: 0 },
+  ]);
+});
+
+test("a clip of unknown length with token usage keeps its conservative reservation", async () => {
+  reset();
+  world.providerResult = {
+    ok: true,
+    text: "hello",
+    usage: { kind: "absent" },
+  };
+  // An EBML container with no Info Duration: nothing measured it, so the
+  // per-clip ceiling was reserved and nothing justifies releasing any of it.
+  const noDuration = new Uint8Array(4096);
+  noDuration.set(
+    [0x1a, 0x45, 0xdf, 0xa3, 0x84, 0, 0, 0, 0, 0x18, 0x53, 0x80, 0x67, 0x84, 0, 0, 0, 0],
+    0
+  );
+  await post(noDuration, "audio/webm");
+
+  assert.equal(world.settled.length, 1);
+  assert.equal(world.settled[0].basis, "reservation");
+  assert.equal(world.settled[0].released, 0);
 });
 
 test("a refused budget stops the request before the provider", async () => {
@@ -399,23 +471,98 @@ test("a rate-limited caller is refused before the provider", async () => {
 // Provider outcomes
 // ---------------------------------------------------------------------------
 
-test("a provider failure gives the reservation back", async () => {
+test("a provider that refused the clip gives the reservation back", async () => {
   reset();
-  world.providerResult = { ok: false, code: "provider_unavailable", status: 503 };
+  world.providerResult = {
+    ok: false,
+    code: "provider_rejected_audio",
+    status: 400,
+    disposition: "refused",
+  };
   const response = await post(WEBM_2500MS, "audio/webm");
 
-  assert.equal(response.status, 502);
-  assert.equal((await response.json()).code, "VOICE_PROVIDER_UNAVAILABLE");
+  assert.equal(response.status, 422);
   assert.deepEqual(
     world.settled,
-    [{ reservedSeconds: 3, actualSeconds: 0 }],
-    "a provider that refused the clip did not bill for it"
+    [{ reservedSeconds: 3, basis: "not_billed", released: 3 }],
+    "a provider that answered with a refusal did no billable work"
   );
+});
+
+test("a rate limit gives the reservation back", async () => {
+  reset();
+  world.providerResult = {
+    ok: false,
+    code: "provider_rate_limited",
+    status: 429,
+    disposition: "refused",
+  };
+  await post(WEBM_2500MS, "audio/webm");
+
+  assert.deepEqual(world.settled, [
+    { reservedSeconds: 3, basis: "not_billed", released: 3 },
+  ]);
+});
+
+test("a call whose answer never came back keeps its reservation", async () => {
+  // The behaviour this stabilisation changed (docs/policy/voice-input.md §7.2).
+  // A timeout is not evidence the provider did no work, and the previous
+  // version released the whole reservation for exactly these cases.
+  for (const code of [
+    "provider_unreachable",
+    "provider_unavailable",
+    "provider_response_unreadable",
+  ]) {
+    reset();
+    world.providerResult = {
+      ok: false,
+      code,
+      status: code === "provider_unreachable" ? null : 503,
+      disposition: "indeterminate",
+    };
+    const response = await post(WEBM_2500MS, "audio/webm");
+
+    assert.equal(response.status, 502, code);
+    assert.deepEqual(
+      world.settled,
+      [{ reservedSeconds: 3, basis: "reservation", released: 0 }],
+      `${code} must not be assumed free`
+    );
+  }
+});
+
+test("an indeterminate outcome is reported as one", async () => {
+  reset();
+  world.providerResult = {
+    ok: false,
+    code: "provider_unreachable",
+    status: null,
+    disposition: "indeterminate",
+  };
+  await post(WEBM_2500MS, "audio/webm");
+
+  const line = world.logs.map((entry) => JSON.parse(entry)).at(-1);
+  assert.equal(line.disposition, "indeterminate");
+  assert.equal(line.settlementBasis, "reservation");
+  assert.equal(line.releasedSeconds, 0);
+});
+
+test("a settlement runs once however the request ends", async () => {
+  // The handle is single-use, so a duplicate settle books nothing the second
+  // time and can never reach another request's reservation.
+  reset();
+  await post(WEBM_2500MS, "audio/webm");
+  assert.equal(world.settled.length, 1);
 });
 
 test("a provider that refused the audio is distinguished from one that is down", async () => {
   reset();
-  world.providerResult = { ok: false, code: "provider_rejected_audio", status: 400 };
+  world.providerResult = {
+    ok: false,
+    code: "provider_rejected_audio",
+    status: 400,
+    disposition: "refused",
+  };
   const response = await post(WEBM_2500MS, "audio/webm");
 
   assert.equal(response.status, 422);
@@ -428,6 +575,7 @@ test("a missing provider key reads as unavailable, not as the user's fault", asy
     ok: false,
     code: "provider_not_configured",
     status: null,
+    disposition: "not_sent",
     notConfigured: true,
   };
   const response = await post(WEBM_2500MS, "audio/webm");
@@ -438,7 +586,11 @@ test("a missing provider key reads as unavailable, not as the user's fault", asy
 
 test("a clip with no speech gets its own code", async () => {
   reset();
-  world.providerResult = { ok: true, text: "   ", durationSeconds: 1.2 };
+  world.providerResult = {
+    ok: true,
+    text: "   ",
+    usage: { kind: "duration", seconds: 1.2 },
+  };
   const response = await post(WEBM_2500MS, "audio/webm");
 
   assert.equal(response.status, 422);
@@ -447,8 +599,10 @@ test("a clip with no speech gets its own code", async () => {
     "VOICE_TRANSCRIPT_EMPTY",
     "'try again' is right here and wrong for most of this endpoint's other refusals"
   );
-  // Still settled: the provider did the work and billed for it.
-  assert.deepEqual(world.settled, [{ reservedSeconds: 3, actualSeconds: 1.2 }]);
+  // Still settled on the provider's own figure: it did the work and billed it.
+  assert.deepEqual(world.settled, [
+    { reservedSeconds: 3, basis: "provider_seconds", released: 1 },
+  ]);
 });
 
 test("an impossibly long transcript is refused rather than truncated", async () => {
@@ -456,7 +610,7 @@ test("an impossibly long transcript is refused rather than truncated", async () 
   world.providerResult = {
     ok: true,
     text: "a".repeat(10_000),
-    durationSeconds: 2,
+    usage: { kind: "duration", seconds: 2 },
   };
   const response = await post(WEBM_2500MS, "audio/webm");
 
@@ -473,11 +627,16 @@ test("no log line from any outcome contains the transcript or the audio", async 
   world.providerResult = {
     ok: true,
     text: "my bank password is hunter2",
-    durationSeconds: 2,
+    usage: { kind: "duration", seconds: 2 },
   };
   await post(WEBM_2500MS, "audio/webm");
 
-  world.providerResult = { ok: false, code: "provider_rejected_audio", status: 400 };
+  world.providerResult = {
+    ok: false,
+    code: "provider_rejected_audio",
+    status: 400,
+    disposition: "refused",
+  };
   await post(WEBM_2500MS, "audio/webm");
 
   world.userId = null;

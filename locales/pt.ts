@@ -368,6 +368,7 @@ export const pt = {
         voiceErrorClipTooLong: "A gravação passou da duração permitida.",
         voiceErrorClipUnreadable: "Não foi possível ler a gravação.",
         voiceErrorTranscriptEmpty: "Nenhuma fala foi reconhecida. Tente de novo em um lugar mais silencioso.",
+        voiceErrorScopeChanged: "A entrada de voz parou porque você mudou para outra conversa. Nada foi adicionado.",
         voiceErrorUnavailable: "A entrada de voz não está disponível no momento.",
         voiceErrorSignInRequired: "Faça login para usar a entrada de voz.",
         voiceErrorLimitReached: "Você atingiu o limite de entrada de voz de hoje. Tente de novo amanhã.",

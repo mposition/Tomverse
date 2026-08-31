@@ -103,6 +103,8 @@ type DesktopChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  /** Passed straight through to the composer; see ChatInput's own prop. */
+  onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -279,6 +281,7 @@ export function DesktopChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  onVoiceTranscript,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -1229,6 +1232,7 @@ export function DesktopChatShell({
               onAttachmentsChange={setAttachments}
               attachmentCapabilities={attachmentCapabilities}
               voiceInputEnabled={voiceInputEnabled}
+              onVoiceTranscript={onVoiceTranscript}
               onGuestSignInPrompt={onGuestSignInPrompt}
               isGuestMode={isGuestMode}
               guestPreviewMode={guestPreviewMode}

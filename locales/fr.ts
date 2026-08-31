@@ -368,6 +368,7 @@ export const fr = {
         voiceErrorClipTooLong: "L'enregistrement dépasse la durée autorisée.",
         voiceErrorClipUnreadable: "L'enregistrement n'a pas pu être lu.",
         voiceErrorTranscriptEmpty: "Aucune parole n'a été reconnue. Réessayez dans un endroit plus calme.",
+        voiceErrorScopeChanged: "La dictée s'est arrêtée parce que vous avez changé de conversation. Rien n'a été ajouté.",
         voiceErrorUnavailable: "La dictée n'est pas disponible pour le moment.",
         voiceErrorSignInRequired: "Connectez-vous pour utiliser la dictée.",
         voiceErrorLimitReached: "Vous avez atteint la limite de dictée du jour. Réessayez demain.",

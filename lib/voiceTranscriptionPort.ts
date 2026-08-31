@@ -55,6 +55,7 @@ export class OpenAiVoiceTranscriptionProvider implements VoiceTranscriptionPort 
         ok: false,
         code: "provider_not_configured",
         status: null,
+        disposition: "not_sent",
         notConfigured: true,
       };
     }

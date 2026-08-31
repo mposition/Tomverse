@@ -363,6 +363,7 @@ export const ko = {
         voiceErrorClipTooLong: "녹음이 허용된 길이를 넘었습니다.",
         voiceErrorClipUnreadable: "녹음 파일을 읽을 수 없습니다.",
         voiceErrorTranscriptEmpty: "말소리를 인식하지 못했습니다. 조용한 곳에서 다시 시도해 주세요.",
+        voiceErrorScopeChanged: "다른 대화로 이동해 음성 입력이 중단되었습니다. 입력창에 추가된 내용은 없습니다.",
         voiceErrorUnavailable: "지금은 음성 입력을 사용할 수 없습니다.",
         voiceErrorSignInRequired: "음성 입력을 사용하려면 로그인해 주세요.",
         voiceErrorLimitReached: "오늘 사용할 수 있는 음성 입력 한도에 도달했습니다. 내일 다시 시도해 주세요.",
