@@ -48,3 +48,41 @@ YYYY-MM-DD__<40자리 deploy SHA>.md
 8. **시료는 에이전트가 만들어 건넵니다.** prompt-injection 문자열과 fence
    marker를 담은 import 파일은 이 컨테이너에서 만들 수 있으므로, "이런 파일을
    준비하세요" 목록을 남기지 않습니다.
+
+## 회차를 여는 방법
+
+시료도 기록 초안도 손으로 만들지 않습니다. 두 명령이 전부이고, 둘 다
+**자격증명 없이** 됩니다.
+
+이 컨테이너(제가 실행) 또는 로컬 PC의 PowerShell, Tomverse clone 폴더 안.
+Node 22와 `npm ci`가 끝나 있어야 합니다. 읽기 전용이며 시료 파일만 씁니다.
+
+```
+npm run staging:continuation-fixtures
+```
+
+`fixtures/` 안의 세 import 파일과 정답지 `manifest.json`을 다시 만듭니다.
+파일이 이미 있으면 다시 만들 필요가 없습니다 — 저장소에 commit 돼 있습니다.
+
+로컬 PC의 PowerShell, 같은 폴더. 배포 SHA 40자리가 필요하고,
+**Admin Console 헤더에 앞 12자리가 보입니다**(`RAILWAY_GIT_COMMIT_SHA`).
+
+```
+npm run staging:continuation-record -- --deploy-sha <40자리 SHA>
+```
+
+- D-0(prompt role 경계)을 **그 자리에서 실행**하고 결과를 기록에 적습니다.
+  과거 실행을 인용하지 않습니다 — 다른 commit에서 통과한 사실은 이 배포에
+  대한 증거가 아니고, D-0이 존재하는 이유가 바로 그것입니다.
+- 시료와 정답지가 서로 맞는지 확인하고, 어긋나면 기록을 만들지 않고 멈춥니다.
+- 로컬 트리가 배포 SHA와 다르면 **§D를 실행하지 말라는 경고와 확인용 diff
+  명령**을 기록 안에 넣습니다.
+- `--deploy-sha`는 **검증하지 않습니다.** 이 컨테이너에 production·Railway
+  자격증명이 없기 때문이고, 기록에도 "실행자 신고, 스크립트가 검증하지 않음"
+  이라고 적힙니다. 검증한 척하지 않는 것이 요점입니다.
+- **판정과 서명은 비워 둡니다**(위 5번).
+
+만들어진 기록은 회차가 끝나기 전에는 commit 하지 않습니다. `executor`와
+`result`가 비어 있는 동안 `npm run check:staging-verification-records`가
+실패하며, 그것은 의도된 동작입니다.
+

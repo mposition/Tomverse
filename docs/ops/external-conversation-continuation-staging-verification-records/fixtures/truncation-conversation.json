@@ -1,0 +1,150 @@
+[
+  {
+    "title": "A very long answer",
+    "conversation_id": "tv-staging-truncation",
+    "id": "tv-staging-truncation",
+    "create_time": 1783036800,
+    "update_time": 1783037160,
+    "current_node": "tv-staging-truncation-node-5",
+    "mapping": {
+      "tv-staging-truncation-root": {
+        "id": "tv-staging-truncation-root",
+        "message": null,
+        "parent": null,
+        "children": [
+          "tv-staging-truncation-node-0"
+        ]
+      },
+      "tv-staging-truncation-node-0": {
+        "id": "tv-staging-truncation-node-0",
+        "parent": "tv-staging-truncation-root",
+        "children": [
+          "tv-staging-truncation-node-1"
+        ],
+        "message": {
+          "id": "tv-staging-truncation-msg-0",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1783036800,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Explain the whole pricing model."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-staging-truncation-node-1": {
+        "id": "tv-staging-truncation-node-1",
+        "parent": "tv-staging-truncation-node-0",
+        "children": [
+          "tv-staging-truncation-node-2"
+        ],
+        "message": {
+          "id": "tv-staging-truncation-msg-1",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1783036860,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail pricing detail "
+            ]
+          },
+          "metadata": {
+            "model_slug": "gpt-4-turbo"
+          }
+        }
+      },
+      "tv-staging-truncation-node-2": {
+        "id": "tv-staging-truncation-node-2",
+        "parent": "tv-staging-truncation-node-1",
+        "children": [
+          "tv-staging-truncation-node-3"
+        ],
+        "message": {
+          "id": "tv-staging-truncation-msg-2",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1783036920,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Now the credit weights."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-staging-truncation-node-3": {
+        "id": "tv-staging-truncation-node-3",
+        "parent": "tv-staging-truncation-node-2",
+        "children": [
+          "tv-staging-truncation-node-4"
+        ],
+        "message": {
+          "id": "tv-staging-truncation-msg-3",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1783036980,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail credit weight detail "
+            ]
+          },
+          "metadata": {
+            "model_slug": "gpt-4-turbo"
+          }
+        }
+      },
+      "tv-staging-truncation-node-4": {
+        "id": "tv-staging-truncation-node-4",
+        "parent": "tv-staging-truncation-node-3",
+        "children": [
+          "tv-staging-truncation-node-5"
+        ],
+        "message": {
+          "id": "tv-staging-truncation-msg-4",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1783037040,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "And finally the guardrails."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-staging-truncation-node-5": {
+        "id": "tv-staging-truncation-node-5",
+        "parent": "tv-staging-truncation-node-4",
+        "children": [],
+        "message": {
+          "id": "tv-staging-truncation-msg-5",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1783037100,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail guardrail detail "
+            ]
+          },
+          "metadata": {
+            "model_slug": "gpt-4-turbo"
+          }
+        }
+      }
+    }
+  }
+]
