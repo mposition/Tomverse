@@ -154,6 +154,38 @@ test("the gate now admits the schema the harness scores", () => {
     assert.deepEqual(decision, { mode: "live", ceilingUsd: 50 });
 });
 
+test("whatever version the tree ships, its pair cannot run", () => {
+    // The property the test below used to carry implicitly by resolving
+    // through the shipped version. Kept as its own assertion so a new prompt
+    // version cannot arrive runnable: v6 is refused because it was revoked
+    // and v7 because it has no budget, and this does not care which — only
+    // that the answer is never `live`.
+    const target = harnessTarget();
+    const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (entry) =>
+            entry.extractionModelId === "gpt-5-6-luna" &&
+            entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
+    );
+    assert.ok(
+        pair,
+        `no register entry for gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION}`
+    );
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: pair,
+        hasApiKey: true,
+        datasetFrozen: target.datasetFrozen,
+        datasetPurpose: target.datasetPurpose,
+        datasetSchemaVersion: target.datasetSchemaVersion,
+        commitKnown: true,
+    });
+    assert.notEqual(
+        decision.mode,
+        "live",
+        `gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION} can run — this test now spends money`
+    );
+});
+
 test("the shipped pair is closed, and the status answers before the budget", () => {
     // The register entry as the tree actually holds it. It was funded on
     // 2026-08-28, ran once on 2026-08-29, missed every floor of
@@ -167,12 +199,17 @@ test("the shipped pair is closed, and the status answers before the budget", () 
     // reason removed rather than absent: a full binding, a key, a frozen
     // dataset and the right ordinal, and it still refuses.
     const target = harnessTarget();
+    // Pinned to v6 by name. This assertion is about the pair that ran and was
+    // revoked, and that is a fact about `mem-extract-v6` — resolving it
+    // through the shipped version made it silently become an assertion about
+    // whatever the tree ships, which since 2026-08-31 is v7, a candidate that
+    // never ran.
     const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
             entry.extractionModelId === "gpt-5-6-luna" &&
-            entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
+            entry.promptVersion === "mem-extract-v6"
     );
-    assert.ok(pair, "the shipped pair is not registered");
+    assert.ok(pair, "the revoked v6 pair is not registered");
     assert.equal(pair.status, "revoked");
     assert.ok(pair.evalBudget, "the spent budget was dropped rather than kept");
 

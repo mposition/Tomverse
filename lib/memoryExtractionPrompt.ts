@@ -1,5 +1,5 @@
 /**
- * `mem-extract-v6` — the extraction prompt and its structured output schema
+ * `mem-extract-v7` — the extraction prompt and its structured output schema
  * (Release B, policy §8.2, §9.1, §12.1).
  *
  * Pure and provider-free by construction. Nothing in this module imports an
@@ -8,6 +8,29 @@
  * the exact shape a provider is expected to return. Whoever eventually calls
  * a provider does so elsewhere, which is what keeps "is a model being called
  * yet?" answerable by reading imports rather than by tracing control flow.
+ *
+ * ## What v7 added
+ *
+ * One block: `MEMORY_EXTRACTION_BOUNDARY_RULE`, spliced in beside the polarity
+ * rule. Nothing was removed and nothing else was reworded, which is why the
+ * prompt-side scoring rule v6 claimed is claimed unchanged here.
+ *
+ * v6's decision-grade run failed on 2026-08-29: 41 critical bulk-safe
+ * adoptions, concentrated in the `assistant_only` cells. The diagnosis found
+ * that **none of them cited an assistant message**, which ruled out the
+ * explanation the cell's name suggests. The model was not mistaking its own
+ * words for the user's; it was storing things the user really did say, in
+ * shapes that are not memories — a withdrawal read as its own negation, a
+ * correction that only rejected a guess, a value the user had just withheld,
+ * a sentence closing a hypothetical, somebody else's relationship arriving
+ * through a task. v6 has no sentence that excludes any of them, so the run
+ * was measuring a prompt that had never been asked the question.
+ *
+ * The boundary rule is that question, in the wording approved on 2026-08-30
+ * after three narrowings. What it is *not* is a rule tuned against the ten
+ * cases that produced it: those ten left the decision set under B+ and live
+ * in `lib/memoryEvalSucc6Regression.ts`, so `mem-eval-succ-6` scores this
+ * prompt on cases that did not shape it.
  *
  * ## What v6 added
  *
@@ -175,7 +198,7 @@ import {
  * `tests/memoryExtractionPromptFingerprint.test.mjs` pins a digest over all
  * four, so changing any of them without bumping this fails the build.
  */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v6";
+export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v7";
 
 /** Bounds carried into the schema so the model is told them, not just checked. */
 export const MEMORY_EXTRACTION_MAX_CANDIDATES_PER_CHUNK = 25;
@@ -297,6 +320,62 @@ export const MEMORY_EXTRACTION_OUTPUT_SCHEMA = {
 export const MEMORY_EXTRACTION_TRANSPORT = "structured_output" as const;
 
 /**
+ * The boundary half of v7, as one exported string.
+ *
+ * Approved verbatim on 2026-08-30
+ * (.github/audits/memory-boundary-decision-2026-08-30.md §5) and copied from
+ * that document rather than retyped: only the markdown block's hard line
+ * wraps became spaces, so every word and every quotation mark is the wording
+ * a person signed.
+ *
+ * ## What it is
+ *
+ * A **suppression list**, not an extraction rule. Each paragraph names a
+ * shape whose surface looks like a fact about the user and is not one — a
+ * withdrawal, a correction that only rejects a guess, a withheld value, a
+ * hypothetical being closed, somebody else's relationship. What is not
+ * suppressed here falls through to the ordinary extraction rules above,
+ * which is why the decision could say `en-10` — a plain statement about
+ * giving up a sport — stays extractable without adding a paragraph for it.
+ *
+ * ## Why it is this narrow
+ *
+ * The draft was cut back three times, each time for the same defect: it
+ * suppressed too much. The first draft sent every `corrects something they
+ * said` to no candidate at all, which throws away the new fact a correction
+ * can create. The second illustrated corrections with an example that read
+ * as excluding negated ones. The third let a rule about a sentence closing a
+ * hypothetical generalise to present-tense statements at large.
+ *
+ * The line the wording has to hold is between `ko-19` and `en-27`: both
+ * users answered in the negative, and what separates them is not polarity
+ * but whether an independently reusable fact arrived. "I'm not an office
+ * worker" rejects a guess and says nothing about what the user is; "I have
+ * no children" is a fact somebody can use next week. A version of this rule
+ * that keys on negation gets `en-27` wrong, and that is the failure this
+ * paragraph is shaped to avoid.
+ *
+ * Exported for the same reason as `MEMORY_EXTRACTION_POLARITY_RULE`: so a
+ * test can assert the sentences are present rather than match a paraphrase
+ * of them, and spliced into the system prompt rather than appended after it,
+ * because a rule about what may be claimed belongs among the rules about how
+ * to write a claim.
+ */
+export const MEMORY_EXTRACTION_BOUNDARY_RULE = [
+    "BOUNDARY: some things a user says are not memories.",
+    "",
+    "An explicit request not to remember a fact suppresses candidates about that fact. It does not suppress a separate privacy preference or another independently asserted fact in the same turn. \"I once trained for triathlons; please do not retain that\" leaves no memory that they trained and none that they no longer do: the request removes the subject, it does not replace it with its negation.",
+    "",
+    "A correction removes the discarded proposition. When the user clearly supplies a durable replacement fact, that replacement may be extracted. A correction that only rejects a guess and adds no independently reusable fact yields no candidate. A durable replacement may be affirmative or negated: \"The registration form lists two dependants; I have no dependants\" establishes a negated relationship fact.",
+    "",
+    "A privacy preference may be extracted only if the statement does not repeat, infer, or narrow the location or value the user withheld.",
+    "",
+    "A hypothetical is not a memory. A present-tense statement yields no candidate when it only closes the hypothetical and does not independently establish a durable, future-useful fact. \"If I quit and studied abroad…\" followed by \"I was just imagining it, I'm still at my job\" leaves nothing to store: the second sentence exists to close the first.",
+    "",
+    "When a user writes on someone else's behalf or asks about someone else, the relationship that surfaces is part of the question, not a fact about the user. \"Proofread my nephew's letter\" is a task, not a record that they have a nephew. Store such a relationship only when the user separately establishes it as an ongoing part of their own life. Health information about another person is never stored as that person's; at most it becomes a minimised constraint about the user, and it is sensitive.",
+].join("\n");
+
+/**
  * The polarity half of v6, as one exported string.
  *
  * Exported rather than inlined so `lib/memoryValidatorCore.ts` can point at
@@ -339,6 +418,8 @@ const SYSTEM_PROMPT = [
     "A correction or rejection can itself be an assertion. Extract it only when the user unambiguously states a stable fact about themselves, outside quoted or task material, and that fact would remain useful in a future, unrelated conversation. Negation does not make a fact non-durable. Do not extract a rejection that only resolves a premise for the current artifact, role-play, hypothetical, or one-off task and provides no independently reusable fact.",
     "",
     MEMORY_EXTRACTION_POLARITY_RULE,
+    "",
+    MEMORY_EXTRACTION_BOUNDARY_RULE,
     "",
     "Approval of an answer you already gave is not a preference. \"That framing works well\", \"better, thanks\", and \"yes, like that\" say that this answer succeeded. An answer-style preference is extractable when the user asks for that style, not merely when they accept one answer.",
     "",
