@@ -1262,3 +1262,89 @@ domains:
       the same reason -- a plain digest over a body containing a six-digit code
       is reversible in a million tries, which would make the audit column the
       thing worth stealing.
+
+  # --- native mobile sign-in ------------------------------------------------
+  #
+  # Four rows for five tables. MobileRefreshRotation is absent deliberately and
+  # not by oversight: it carries no user column and no User relation -- a
+  # digest, a pepper generation and four timestamps hanging off a family -- so
+  # the sweep does not ask it to register and registering it would fail on the
+  # "carries no user data in the schema" rule. It is removed by the cascade
+  # from MobileTokenFamily, which is removed by the cascade from User.
+  - domain: mobileDevice
+    prismaModel: MobileDevice
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The devices a person has signed in on. What it deliberately does not hold
+      is the point of the row: no hardware fingerprint, advertising identifier,
+      IDFV, ANDROID_ID, model detail or OS build, and no IP at all -- not even
+      a truncated one (mobile auth design D16 and D17, approved 2026-08-31).
+      A device list rich enough to be genuinely useful is also a location and
+      hardware history, and this product has no password, so the account
+      takeover path is email and the collateral is correspondingly larger.
+      The `id` is a server-issued random value, so it identifies the device to
+      Tomverse and to nothing else.
+
+  - domain: mobileTokenFamily
+    prismaModel: MobileTokenFamily
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One row per mobile sign-in, and the parent of the rotation chain that
+      keeps it alive. Reached from User twice over -- directly and through
+      MobileDevice -- because both deletions must take it: removing a device
+      ends its sessions, and removing an account ends all of them.
+
+  - domain: mobileLoginGrant
+    prismaModel: MobileLoginGrant
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      The sixty-second one-time grant that carries an authorisation from the
+      signed-in browser to the native app (design D14.1). Neither the grant
+      secret nor the PKCE verifier is stored -- only digests of each -- and the
+      row is single-use. The maintenance sweep deletes expired grants on its own
+      schedule; the cascade is what covers a deletion that arrives inside the
+      minute.
+
+  - domain: mobileAuthEvent
+    prismaModel: MobileAuthEvent
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The mobile auth audit trail (design D15). Approved decision 9 of
+      2026-08-31 requires that account deletion remove the rows and identifiers
+      naming the user, their devices and their families, leaving only
+      de-identified aggregates -- so the row cascades rather than being
+      anonymised, and no aggregate table exists yet to keep anything in. The
+      two columns that could have escaped that, `deviceId` and `familyId`, carry
+      no foreign key of their own (an audit row outlives the device it describes,
+      which is the point of auditing a revocation); a CHECK constraint therefore
+      requires `userId` to be present whenever either of them is, so the only
+      rows the cascade leaves behind are refusals that name nobody.
+      Separately from deletion, the table has a 90-day operational ceiling
+      (`MOBILE_AUTH_EVENT_RETENTION_DAYS`, approved decision 9), enforced by the
+      `mobileAuthEvents` retention policy and its maintenance step. That is an
+      age limit on a live account's rows, not a period anything survives a
+      deletion for, which is why this row's retentionPolicy is `immediate`.

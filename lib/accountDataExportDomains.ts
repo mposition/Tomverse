@@ -493,6 +493,44 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason:
       "Each extraction the user ran, which conversations they chose for it, and how far it got. The worker lease, the prompt version and the pricing version are how Tomverse executed it.",
   },
+
+  // --- native mobile sign-in -----------------------------------------------
+  //
+  // Three of the five mobile auth tables appear here; MobileRefreshRotation
+  // does not, because it carries no user column at all -- it hangs off a family
+  // and holds a digest, a pepper generation and four timestamps.
+  {
+    domain: "mobileDevice",
+    publicName: "mobile_devices",
+    prismaModel: "MobileDevice",
+    state: "included_filtered",
+    withheldReason:
+      "The devices the person signed in on: the name they gave each one, whether it is an iPhone or an Android, the app version, when it was registered, when it was last used and whether it has been removed. Withheld: the server-issued device id, which is the value a live refresh token is bound to. Nothing else about the device is collected -- no model name, OS build, advertising identifier, IDFV or ANDROID_ID -- so what is missing from this export is mostly missing from the database.",
+  },
+  {
+    domain: "mobileTokenFamily",
+    publicName: "mobile_sessions",
+    prismaModel: "MobileTokenFamily",
+    state: "included_filtered",
+    withheldReason:
+      "One row per mobile sign-in: when it started, when it last refreshed, when it expires regardless, and whether and why it was ended. Withheld: the family id and the invalidation generation counter, both internal handles that a session-revocation check reads and that identify nothing to the person holding them.",
+  },
+  {
+    domain: "mobileAuthEvent",
+    publicName: "mobile_sign_in_events",
+    prismaModel: "MobileAuthEvent",
+    state: "included_filtered",
+    withheldReason:
+      "What happened on their mobile sign-ins -- an exchange, a refresh, a refusal, a device removed -- and when. Withheld: the device and family identifiers the row carries, which are the same internal handles withheld above. No token, fragment, digest or header value is in the table to withhold.",
+  },
+  {
+    domain: "mobileLoginGrant",
+    publicName: "mobile_login_grants",
+    prismaModel: "MobileLoginGrant",
+    state: "excluded",
+    exclusionReason:
+      "A sixty-second handshake row that lets a signed-in browser hand the native app one exchange. It holds two digests -- of the grant secret and of the PKCE verifier -- an expiry and a consumed-at, and no content the user wrote. A completed sign-in consumes it and the sweep deletes it, so an export run at any ordinary moment would find nothing to include.",
+  },
 ];
 
 /** Domains whose data reaches the export at all. */

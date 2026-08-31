@@ -891,6 +891,35 @@ export async function cleanupExpiredData() {
     compactAgedContextManifests(now)
   );
 
+  // --- native mobile sign-in -------------------------------------------------
+  //
+  // Three sweeps, and only two of them are ages.
+  const mobileAuthEvents = await step("mobile_auth_events", () =>
+    prisma.mobileAuthEvent.deleteMany({
+      where: { occurredAt: { lt: retentionCutoff("mobileAuthEvents", now) } },
+    })
+  );
+
+  const mobileLoginGrants = await step("mobile_login_grants", () =>
+    prisma.mobileLoginGrant.deleteMany({ where: { expiresAt: { lt: now } } })
+  );
+
+  // Not an age. A consumed rotation row is the only thing that turns a replayed
+  // refresh token into `reuse_detected` rather than `unknown_record`, so
+  // deleting rows because they are old would convert the detection into a shrug
+  // for precisely the tokens an attacker has had longest. What is safe to take
+  // is a row under a family that can never rotate again: revoking a dead family
+  // a second time is not a security outcome.
+  const mobileRefreshRotations = await step("mobile_refresh_rotations", () =>
+    prisma.mobileRefreshRotation.deleteMany({
+      where: {
+        family: {
+          OR: [{ revokedAt: { not: null } }, { absoluteExpiresAt: { lt: now } }],
+        },
+      },
+    })
+  );
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
@@ -902,6 +931,9 @@ export async function cleanupExpiredData() {
     // small for the volume, and it is only visible if the step reports it.
     contextManifestsAwaitingCompaction: contextManifests?.remaining ?? null,
     contextBundleConsumptions,
+    mobileAuthEvents: mobileAuthEvents?.count ?? null,
+    mobileLoginGrants: mobileLoginGrants?.count ?? null,
+    mobileRefreshRotations: mobileRefreshRotations?.count ?? null,
     memoryExtractionRuns: memoryExtraction?.reclaimedRuns ?? null,
     memoryExtractionDispatched: memoryExtraction?.dispatchedRuns ?? null,
     memoryExtractionChunks: memoryExtraction?.chunksProcessed ?? null,

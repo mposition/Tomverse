@@ -109,3 +109,75 @@ export type MobileAuthErrorCode =
  * which is the intended state until routes are converted one at a time.
  */
 export const N1B_BEARER_ROUTES: readonly string[] = [];
+
+// --- the closed lists the database also enforces ---------------------------
+//
+// Each of these is mirrored by a CHECK constraint, registered in
+// scripts/check-enum-constraints.mjs so the two cannot drift. The arrays are
+// the application's copy; the constraint is the database's, and
+// `npm run check:enum-constraints` fails when they stop agreeing.
+
+/**
+ * D16 -- the platform labels a device row may carry.
+ *
+ * Coarse on purpose, and the coarseness is the decision rather than an
+ * omission: a device list rich enough to be useful is also a location and
+ * hardware history for anyone who takes over the account, and this product has
+ * no password, so the takeover path is email. Model name, OS build, IDFV and
+ * ANDROID_ID are all deliberately absent.
+ */
+export const MOBILE_DEVICE_PLATFORMS = ["ios", "android"] as const;
+
+export type MobileDevicePlatform = (typeof MOBILE_DEVICE_PLATFORMS)[number];
+
+/**
+ * Why a device stopped being usable.
+ *
+ * One value, because there is only one event that leaves a revoked device row
+ * behind: the person removed it from their own list. Account deletion is
+ * deliberately absent -- it takes the row with it through the cascade, so a
+ * value for it would be one nothing could ever write and a state nobody could
+ * ever query for.
+ */
+export const MOBILE_DEVICE_REVOKED_REASONS = ["user_revoked"] as const;
+
+export type MobileDeviceRevokedReason =
+  (typeof MOBILE_DEVICE_REVOKED_REASONS)[number];
+
+/**
+ * D11 -- why a token family stopped being usable. Section 6.2's list verbatim.
+ *
+ * `account_deleted` is here and not on the device list above because a family
+ * can be revoked in the transaction that begins a deletion, before the cascade
+ * reaches it.
+ */
+export const MOBILE_FAMILY_REVOKED_REASONS = [
+  "logout",
+  "device_revoked",
+  "reuse_detected",
+  "account_deleted",
+] as const;
+
+export type MobileFamilyRevokedReason =
+  (typeof MOBILE_FAMILY_REVOKED_REASONS)[number];
+
+/**
+ * D15 -- the audit events this subsystem writes.
+ *
+ * The refusal codes above are deliberately coarser than this list: every
+ * refusal reason answers the client with one message, and the reason it was
+ * really refused is recorded here instead. That asymmetry is the design, so
+ * the two lists are not derived from each other.
+ */
+export const MOBILE_AUTH_EVENT_NAMES = [
+  "mobile_auth.exchanged",
+  "mobile_auth.refreshed",
+  "mobile_auth.refresh_rejected",
+  "mobile_auth.reuse_detected",
+  "mobile_auth.family_revoked",
+  "mobile_auth.device_revoked",
+  "mobile_auth.logged_out",
+  "mobile_auth.revoked_on_account_deletion",
+] as const;
+
+export type MobileAuthEventName = (typeof MOBILE_AUTH_EVENT_NAMES)[number];

@@ -258,6 +258,35 @@ const REGISTRY = {
     reason:
       "critical, high, normal. Orders the daily report's action section; an unknown value would sort somewhere arbitrary.",
   },
+  MobileDevice_platform_check: {
+    owner: "list",
+    module: "lib/mobileAuthContract.ts",
+    list: "MOBILE_DEVICE_PLATFORMS",
+    reason:
+      "ios or android, and nothing finer (mobile auth design D16). The coarseness is the privacy decision rather than an omission -- a device list rich enough to be useful is also a hardware and location history for whoever takes the account over -- so a third value arriving as data would be a fingerprint the design refused, not a new platform.",
+  },
+  MobileDevice_revokedReason_check: {
+    owner: "list",
+    module: "lib/mobileAuthContract.ts",
+    list: "MOBILE_DEVICE_REVOKED_REASONS",
+    reason:
+      "user_revoked, and deliberately nothing else. Account deletion is the other way a device stops being usable and is absent on purpose: it takes the row with it through the cascade, so a value for it would be one nothing could ever write and a state nobody could query for.",
+  },
+  MobileTokenFamily_revokedReason_check: {
+    owner: "list",
+    module: "lib/mobileAuthContract.ts",
+    list: "MOBILE_FAMILY_REVOKED_REASONS",
+    reason:
+      "logout, device_revoked, reuse_detected, account_deleted -- section 6.2 of the mobile auth design verbatim. reuse_detected is the one that matters most: it is written in the transaction that destroys a family after a replayed refresh token, and the sweep that reports on replays reads it, so a reason it does not recognise is an attack nobody counts.",
+  },
+  MobileAuthEvent_event_check: {
+    owner: "list",
+    module: "lib/mobileAuthContract.ts",
+    list: "MOBILE_AUTH_EVENT_NAMES",
+    reason:
+      "The eight events the mobile auth subsystem writes (D15). Deliberately finer than MOBILE_AUTH_ERROR_CODES beside it, which the client sees: every refusal reason answers with one message and is told apart only here, so the two lists are not derived from each other and a value added to the codes must not be added here by reflex.",
+  },
+
   ModelLifecycleWorkItem_confidence_check: {
     owner: "list",
     module: "lib/modelLifecycleWorkItemCore.ts",

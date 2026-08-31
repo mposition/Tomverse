@@ -341,6 +341,11 @@ run(
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
+    // N2: what the database refuses about mobile bearer authentication -- the
+    // two-step cascade to a rotation row that has no user column of its own,
+    // and the constraint stopping an audit row from naming somebody's device
+    // without naming the account that cascade reaches.
+    "tests/integration/mobile-auth-schema.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",

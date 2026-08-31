@@ -101,6 +101,10 @@ model User {
   emailDeliveries                      EmailDelivery[]
   campaignRecipients                   EmailCampaignRecipient[]
   modelMigrationRecords                ModelMigrationRecord[]
+  mobileDevices                        MobileDevice[]
+  mobileTokenFamilies                  MobileTokenFamily[]
+  mobileLoginGrants                    MobileLoginGrant[]
+  mobileAuthEvents                     MobileAuthEvent[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -4911,4 +4915,149 @@ model ConversationContinuationBridge {
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
   @@index([externalConversationId])
+}
+
+// --- native mobile bearer authentication -----------------------------------
+//
+// The five tables behind the approved N2 design
+// (.github/audits/2026-08-31-native-mobile-auth-n2-design-approval.md section
+// 6). The refresh token itself is never stored: what a row holds is an HMAC of
+// the secret under a rotating pepper, and the id half of the token is not a
+// secret at all -- lib/mobileRefreshRotationCore.ts is what makes knowing an id
+// worth nothing on its own.
+
+model MobileDevice {
+  id            String    @id @default(cuid())
+  userId        String
+  /**
+   * The name the person gave it. Free text, and theirs.
+   */
+  label         String
+  /**
+   * `ios` or `android`. Coarse by decision -- see MOBILE_DEVICE_PLATFORMS.
+   */
+  platform      String
+  appVersion    String?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  revokedAt     DateTime?
+  revokedReason String?
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  families MobileTokenFamily[]
+
+  @@index([userId, lastSeenAt])
+  @@index([userId, revokedAt])
+}
+
+model MobileTokenFamily {
+  id       String @id @default(cuid())
+  userId   String
+  deviceId String
+
+  createdAt         DateTime  @default(now())
+  /**
+   * Moves on every successful rotation; the idle window is measured from it.
+   */
+  lastRotatedAt     DateTime  @default(now())
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  revokedReason     String?
+  /**
+   * The invalidation generation. Read at the start of a revocation lookup and
+   * again at its end, so a revocation that lands mid-flight is seen as a race
+   * rather than missed -- lib/mobileRevocationFreshnessCore.ts.
+   */
+  epoch             Int       @default(0)
+
+  user      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device    MobileDevice            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  rotations MobileRefreshRotation[]
+
+  @@index([userId, revokedAt])
+  @@index([deviceId, revokedAt])
+  @@index([absoluteExpiresAt])
+}
+
+model MobileRefreshRotation {
+  /**
+   * The id half of the presented token, generated with its secret rather than
+   * defaulted here: the two are minted together and the caller supplies both.
+   */
+  id       String @id
+  familyId String
+
+  /**
+   * `HMAC-SHA256(pepper, secret)`. The secret itself is never written down.
+   */
+  secretDigest String @unique
+  /**
+   * Which pepper generation the digest above was computed under.
+   */
+  pepperKid    String
+
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  invalidatedAt DateTime?
+
+  /**
+   * The successor minted when this row was consumed. A plain column rather
+   * than a self-relation on purpose: the chain is a record, the whole family
+   * is deleted together, and a foreign key here would be an ordering
+   * constraint on that delete for no read anybody performs.
+   */
+  supersededById String?
+
+  family MobileTokenFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, consumedAt, invalidatedAt, expiresAt])
+  @@index([expiresAt])
+}
+
+model MobileLoginGrant {
+  id     String @id @default(cuid())
+  userId String
+
+  /**
+   * Digest of the one-time grant secret.
+   */
+  secretDigest        String    @unique
+  /**
+   * Digest of the PKCE verifier that started the exchange.
+   */
+  clientBindingDigest String
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model MobileAuthEvent {
+  id    String @id @default(cuid())
+  event String
+
+  /**
+   * Nullable, but never null while `deviceId` or `familyId` is set -- a CHECK
+   * constraint holds that. Without it, an event naming somebody's device could
+   * outlive the cascade that is supposed to remove every row identifying them.
+   */
+  userId     String?
+  deviceId   String?
+  familyId   String?
+  occurredAt DateTime @default(now())
+  /**
+   * A short machine-readable reason. Never a token, digest or header value.
+   */
+  reason     String?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@index([event, occurredAt])
+  @@index([occurredAt])
 }
