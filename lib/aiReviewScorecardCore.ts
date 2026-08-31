@@ -25,6 +25,8 @@
  *     them into one score would make a consent decision look like an outage.
  */
 
+import { settlementReconciliation } from "@/lib/comparisonReviewRunCore";
+
 export type ScorecardStatus = "ok" | "insufficient_evidence";
 
 export type ScorecardMetric = {
@@ -146,22 +148,30 @@ export type ReliabilityScorecard = {
     cachedRate: ScorecardMetric;
     retryRate: ScorecardMetric;
     /**
-     * Completed attempts with no settled figure at all. Not proof of a lost
-     * credit -- settlement is fire-and-forget and its own failure is already
-     * logged -- but the number that moves if reservations stop being settled.
+     * Provider-reached attempts that held credits and have no figure at all --
+     * neither a settlement nor a refund reported one.
+     *
+     * Not proof of a lost credit on its own, but the number that moves when
+     * reservations stop being resolved. The population is deliberately not
+     * "completed attempts": a failed attempt's refund can fail too, and while
+     * this asked only about completions those reservations were invisible.
      */
     unreconciledSettlements: ScorecardMetric;
     /**
-     * Completed attempts charged MORE than they reserved.
+     * Credits resolved in the wrong direction, over both halves of the
+     * lifecycle: a completed attempt charged MORE than it reserved, or a
+     * failed attempt that was not fully refunded.
      *
-     * Settling below a reservation is normal: the unused part is released.
-     * Settling above it means credits were taken that nothing held, which is
-     * the direction that costs a user something, and it is the metric the
-     * `zero_credit_reconciliation_mismatch` eligibility item reads. It could
-     * not be computed at all until the settled figure was recorded beside the
-     * reserved one.
+     * Settling below a reservation is normal -- the unused part is released.
+     * Settling above it, or charging anything at all for a failure, means a
+     * user is out credits nothing entitles the app to. This is the metric the
+     * `zero_credit_reconciliation_mismatch` eligibility item reads.
      */
     creditReconciliation: ScorecardMetric;
+    /** The completed half of `creditReconciliation`, on its own denominator. */
+    overSettledRate: ScorecardMetric;
+    /** The failed half: refunds that reported a figure above zero. */
+    unrefundedFailureRate: ScorecardMetric;
     p50DurationMs: number | null;
     p95DurationMs: number | null;
     reviewerHealth: readonly ReviewerHealthRow[];
@@ -222,8 +232,22 @@ export const summariseReliability = (
         health.set(attempt.reviewerModelId, entry);
     }
 
-    const completedAttempts = attempts.filter(
-        (attempt) => attempt.status === "completed"
+    // Reconciliation is computed by the run core, not here. Two modules
+    // deriving the same figure is how the CLI report and a screen come to
+    // quote different numbers, and the population rule below is subtle enough
+    // that a second copy of it would drift.
+    const reconciliation = settlementReconciliation(attempts);
+    const completedWithFigure = attempts.filter(
+        (attempt) =>
+            attempt.status === "completed" &&
+            attempt.reservedCredits > 0 &&
+            attempt.settledCredits !== null
+    );
+    const failedWithFigure = attempts.filter(
+        (attempt) =>
+            attempt.status === "failed" &&
+            attempt.reservedCredits > 0 &&
+            attempt.settledCredits !== null
     );
 
     return {
@@ -268,26 +292,47 @@ export const summariseReliability = (
             "reviewer attempts that reached a provider",
             { minimumDenominator }
         ),
+        // Both halves of the reservation lifecycle, over every attempt that
+        // reached a provider holding credits. Asking only about completions
+        // let a failed refund -- credits still held, nobody releasing them --
+        // report as a clean window.
         unreconciledSettlements: metric(
-            completedAttempts.filter((attempt) => attempt.settledCredits === null)
-                .length,
-            completedAttempts.length,
-            "completed reviewer attempts",
-            { minimumDenominator }
+            reconciliation.unreported,
+            reconciliation.held,
+            "reviewer attempts that reached a provider holding credits",
+            {
+                minimumDenominator,
+                excluded:
+                    "attempts that reserved nothing; there is no reservation to reconcile",
+            }
         ),
         creditReconciliation: metric(
-            completedAttempts.filter(
-                (attempt) =>
-                    attempt.settledCredits !== null &&
-                    attempt.settledCredits > attempt.reservedCredits
-            ).length,
-            completedAttempts.filter((attempt) => attempt.settledCredits !== null)
-                .length,
-            "completed attempts with a settled figure",
+            reconciliation.mismatched,
+            reconciliation.reported,
+            "attempts with a settled or refunded figure",
             {
                 minimumDenominator,
                 excluded:
                     "attempts whose settlement did not report; those are counted by unreconciledSettlements instead",
+            }
+        ),
+        // The two mismatches split out, because they call for different
+        // investigations: one is a pricing or settlement bug, the other is a
+        // refund that did not happen.
+        overSettledRate: metric(
+            reconciliation.overSettled,
+            completedWithFigure.length,
+            "completed attempts with a settled figure",
+            { minimumDenominator }
+        ),
+        unrefundedFailureRate: metric(
+            reconciliation.unrefunded,
+            failedWithFigure.length,
+            "failed attempts with a refund figure",
+            {
+                minimumDenominator,
+                excluded:
+                    "failed attempts whose refund did not report; those are counted by unreconciledSettlements instead",
             }
         ),
         p50DurationMs: percentile(durations, 0.5),

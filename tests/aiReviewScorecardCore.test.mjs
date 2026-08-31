@@ -236,6 +236,69 @@ test("an attempt whose settlement never reported is unreconciled, not a mismatch
   assert.equal(card.creditReconciliation.status, "insufficient_evidence");
 });
 
+test("a failed reviewer whose refund never reported is not a clean window", () => {
+  // The reproduction that showed this metric could pass with real unreleased
+  // credits: twenty clean completions and five failures whose refund threw.
+  // Asking only about completed attempts reported 0 unreconciled out of 20.
+  const rows = [
+    ...Array.from({ length: 20 }, () =>
+      run({ attempts: [attempt({ reservedCredits: 8, settledCredits: 5 })] })
+    ),
+    ...Array.from({ length: 5 }, () =>
+      run({
+        attempts: [
+          attempt({
+            status: "failed",
+            reservedCredits: 8,
+            settledCredits: null,
+            settlementStatus: null,
+          }),
+        ],
+      })
+    ),
+  ];
+  const card = summariseReliability(rows, 30);
+  assert.equal(card.unreconciledSettlements.numerator, 5);
+  assert.equal(card.unreconciledSettlements.denominator, 25);
+  assert.equal(card.unreconciledSettlements.status, "ok");
+});
+
+test("a failed attempt that was still charged is a mismatch of its own", () => {
+  const rows = [
+    ...Array.from({ length: 20 }, () =>
+      run({ attempts: [attempt({ reservedCredits: 8, settledCredits: 5 })] })
+    ),
+    ...Array.from({ length: 5 }, () =>
+      run({
+        attempts: [
+          attempt({
+            status: "failed",
+            reservedCredits: 8,
+            settledCredits: 8,
+            settlementStatus: "settled",
+          }),
+        ],
+      })
+    ),
+  ];
+  const card = summariseReliability(rows, 30);
+  assert.equal(card.unrefundedFailureRate.numerator, 5);
+  assert.equal(card.unrefundedFailureRate.denominator, 5);
+  assert.equal(card.overSettledRate.numerator, 0);
+  // The combined metric the eligibility item reads sees both halves.
+  assert.equal(card.creditReconciliation.numerator, 5);
+  assert.equal(card.creditReconciliation.denominator, 25);
+});
+
+test("an attempt that reserved nothing is outside the reconciliation question", () => {
+  const rows = Array.from({ length: 25 }, () =>
+    run({ attempts: [attempt({ reservedCredits: 0, settledCredits: null })] })
+  );
+  const card = summariseReliability(rows, 30);
+  assert.equal(card.unreconciledSettlements.denominator, 0);
+  assert.equal(card.unreconciledSettlements.status, "insufficient_evidence");
+});
+
 test("dual availability and dual completion have different denominators", () => {
   const rows = [
     ...Array.from({ length: 20 }, () => run()),

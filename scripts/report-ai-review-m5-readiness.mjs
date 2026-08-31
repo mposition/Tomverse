@@ -31,7 +31,7 @@
 //   npm run report:ai-review-m5-readiness -- --operations=ops.json
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   aggregateOutcomes,
@@ -63,11 +63,27 @@ const argValue = (name, fallback = "") => {
 };
 
 const exists = (path) => existsSync(join(process.cwd(), path));
+/**
+ * Reads a JSON file the operator named.
+ *
+ * `resolve` rather than `join`, because an operator passing an absolute path
+ * is the normal case and `join(cwd, "/tmp/ops.json")` silently produces
+ * `<cwd>/tmp/ops.json`. The read then failed, the report said "no operations
+ * report supplied", and the production half of the checklist stayed open for
+ * a reason that had nothing to do with production.
+ *
+ * Throwing rather than returning null for the same reason: a path that was
+ * given and could not be read is a different fact from a path that was never
+ * given, and reporting the first as the second is how a run gets judged
+ * against no evidence while looking like it was judged against some.
+ */
 const readJson = (path) => {
+  const full = resolve(process.cwd(), path);
   try {
-    return JSON.parse(readFileSync(join(process.cwd(), path), "utf8"));
-  } catch {
-    return null;
+    return JSON.parse(readFileSync(full, "utf8"));
+  } catch (error) {
+    console.error(`Could not read ${full}: ${error.message}`);
+    process.exit(1);
   }
 };
 
