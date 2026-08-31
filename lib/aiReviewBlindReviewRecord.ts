@@ -48,6 +48,15 @@ export type AiReviewBlindReviewIdentity = {
     datasetDigest: string;
     commitSha: string;
     sheetSeed: number;
+    /**
+     * The threshold version the sheet was sized for.
+     *
+     * Carried so the coverage bar an approval is judged against can be found
+     * before the run reaches a register: without it, a pre-registration check
+     * has no version to look up and cannot say whether the review covered
+     * enough.
+     */
+    thresholdVersion: string;
 };
 
 export type AiReviewBlindReviewRow = {
@@ -71,6 +80,7 @@ const HEADER_KEYS = [
     "dataset-digest",
     "commit-sha",
     "sheet-seed",
+    "threshold-version",
     "signed-by",
     "signed-at",
 ] as const;
@@ -92,6 +102,7 @@ export const renderBlindReviewRecordHeader = (
         `# dataset-digest: ${identity.datasetDigest}`,
         `# commit-sha: ${identity.commitSha}`,
         `# sheet-seed: ${identity.sheetSeed}`,
+        `# threshold-version: ${identity.thresholdVersion}`,
         "# signed-by: ",
         "# signed-at: ",
         "#",
@@ -215,6 +226,7 @@ export const parseBlindReviewRecord = (
                 datasetDigest: identity["dataset-digest"] || undefined,
                 commitSha: identity["commit-sha"] || undefined,
                 sheetSeed: numeric(identity["sheet-seed"]),
+                thresholdVersion: identity["threshold-version"] || undefined,
             },
             signedBy: identity["signed-by"] || null,
             signedAt: identity["signed-at"] || null,
@@ -261,6 +273,7 @@ export const blindReviewRecordProblems = (input: {
     compare("datasetDigest");
     compare("commitSha");
     compare("sheetSeed");
+    compare("thresholdVersion");
 
     const answered = new Set(record.rows.map((row) => row.label));
     for (const label of input.sheetLabels) {

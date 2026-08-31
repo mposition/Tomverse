@@ -47,7 +47,10 @@ import {
   decisionDatasetProblems,
   verifyEvidenceBundle,
 } from "../lib/aiReviewEvidenceBundle.ts";
-import { findThresholdSet } from "../lib/aiReviewQualityThresholds.ts";
+import {
+  findThresholdSet,
+  isApprovedThresholdSet,
+} from "../lib/aiReviewQualityThresholds.ts";
 
 const argValue = (name) => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -92,14 +95,19 @@ if (registerOverride) {
 
 let failures = 0;
 
-const report = (label, problems) => {
+const report = (label, problems, notes = []) => {
   if (problems.length === 0) {
     console.log(`  ok   ${label}`);
-    return;
+  } else {
+    failures += 1;
+    console.log(`  FAIL ${label}`);
+    for (const problem of problems) console.log(`         - ${problem}`);
   }
-  failures += 1;
-  console.log(`  FAIL ${label}`);
-  for (const problem of problems) console.log(`         - ${problem}`);
+  // Notes are printed either way. They say what this check did NOT judge,
+  // which is not a defect in the thing being checked and must not be reported
+  // as one -- but is exactly what a person needs to know before relying on an
+  // "ok".
+  for (const note of notes) console.log(`         note ${note}`);
 };
 
 const readJson = (path) => {
@@ -251,11 +259,15 @@ if (approvedEntries.length === 0) {
  */
 const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVersion, stage = "evidence" }) => {
   const problems = [];
-  if (!artifactPath) return ["names no artifact"];
+  const notes = [];
+  if (!artifactPath) return { problems: ["names no artifact"], notes };
 
   const artifact = readJson(artifactPath);
   if (!artifact || artifact.__readError) {
-    return [`${artifactPath} could not be read: ${artifact?.__readError ?? "missing"}`];
+    return {
+      problems: [`${artifactPath} could not be read: ${artifact?.__readError ?? "missing"}`],
+      notes,
+    };
   }
   const summary = artifact.summary ?? {};
   // A run that has just finished is not defective for lacking a blind review
@@ -302,7 +314,7 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
           ? ` (found: ${[...decisionSets.keys()].join(", ")})`
           : " (no valid decision set exists)")
     );
-    return problems;
+    return { problems, notes };
   }
   if (matchingSet.dataset.version !== summary.datasetVersion) {
     problems.push(
@@ -325,7 +337,7 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
   // The bundle: record, answer key and journal, verified together and
   // recomputed, then compared with what the artifact says about them.
   const recordRef = summary.humanBlindReviewRef;
-  if (stage === "run") return problems;
+  if (stage === "run") return { problems, notes };
   const artifactDirectory = dirname(artifactPath);
   const artifactStem = basename(artifactPath).replace(/(--adjudicated)?\.json$/, "");
   const answerKeyPath = join(artifactDirectory, `${artifactStem}--answer-key.json`);
@@ -342,17 +354,35 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
       `no journal beside the artifact (${journalPath}); the numbers cannot be recomputed`
     );
   } else {
+    const effectiveThresholdVersion =
+      thresholdVersion ?? summary.blindReviewThresholdVersion ?? null;
+    const namedSet = effectiveThresholdVersion
+      ? findThresholdSet(effectiveThresholdVersion)
+      : null;
+    const approvedBar =
+      namedSet && isApprovedThresholdSet(namedSet)
+        ? namedSet.minBlindReviewedCases
+        : undefined;
+    // Scope, not a defect. How many cases a blind review had to cover is a
+    // signed number, and while no set is signed there is no bar -- so this
+    // check has not judged coverage, and says so instead of letting an "ok"
+    // imply it did. The refusal for resting on an unsigned set already lives
+    // in the register check, where an approval is what is being refused.
+    if (approvedBar === undefined) {
+      notes.push(
+        effectiveThresholdVersion
+          ? `coverage not judged: threshold set "${effectiveThresholdVersion}" is not approved, ` +
+            "so it supplies no bar for how many cases the blind review had to cover"
+          : "coverage not judged: nothing names a threshold version, so there is no bar " +
+            "for how many cases the blind review had to cover"
+      );
+    }
     const journalText = readFileSync(journalPath, "utf8");
     const answerKeyText = readFileSync(answerKeyPath, "utf8");
     const recordText = readFileSync(recordRef, "utf8");
     const bundle = verifyEvidenceBundle({
       dataset: matchingSet.dataset,
-      journal: journalText
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line)),
       journalText,
-      answerKey: JSON.parse(answerKeyText),
       answerKeyText,
       recordText,
       identity: {
@@ -363,16 +393,20 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
         commitSha: expected?.evaluatedCommit ?? summary.commitSha,
         // The sheet's seed as the artifact recorded it, not the run's.
         sheetSeed: summary.blindReviewSheetSeed,
+        thresholdVersion: effectiveThresholdVersion,
       },
       // The signed bar, when the entry names a set that has one. An entry
       // resting on an unsigned set is already refused by the register check;
       // here it means the coverage bar simply is not applied, rather than an
       // unapproved number being applied in its place.
-      minimumReviewedCases: findThresholdSet(thresholdVersion)?.minBlindReviewedCases,
+      // The bar, from the version the entry names or -- before an entry names
+      // one -- from the version the sheet was built for. An unapproved version
+      // supplies no bar, and the caller says so rather than passing quietly.
+      minimumReviewedCases: approvedBar,
     });
     problems.push(...adjudicatedArtifactProblems({ artifact, bundle }));
   }
-  return problems;
+  return { problems, notes };
 };
 
 for (const entry of approvedEntries) {
@@ -384,15 +418,27 @@ for (const entry of approvedEntries) {
     continue;
   }
   for (const run of runs) {
-    report(
-      `${entry.reviewerModelId}@${entry.promptVersion} run ${run.runOrdinal}`,
-      verifyRunArtifact({
+    const label = `${entry.reviewerModelId}@${entry.promptVersion} run ${run.runOrdinal}`;
+    // A backstop, not a substitute for the safe parsers below it.
+    //
+    // Everything this loop reads is evidence somebody else wrote, and twice
+    // now a malformed one has taken the process down on the first entry so
+    // that later entries were never checked. The named guards handle the
+    // shapes we know about; this makes any future one a reported failure on
+    // its own run rather than a stack trace that ends the report.
+    try {
+      const outcome = verifyRunArtifact({
         artifactPath: run.artifactRef,
         expected: run,
         decisionSets: decisionSetsByDigest,
         thresholdVersion: entry.evaluation?.thresholdVersion,
-      })
-    );
+      });
+      report(label, outcome.problems, outcome.notes);
+    } catch (error) {
+      report(label, [
+        `checking this run threw: ${error instanceof Error ? error.message : String(error)}`,
+      ]);
+    }
   }
 }
 
@@ -426,15 +472,13 @@ if (!artifactPath) {
         "       and only the adjudicated artifact may be cited by an approval."
     );
   }
-  report(
+  const outcome = verifyRunArtifact({
     artifactPath,
-    verifyRunArtifact({
-      artifactPath,
-      expected: null,
-      decisionSets: decisionSetsByDigest,
-      stage: adjudicated ? "evidence" : "run",
-    })
-  );
+    expected: null,
+    decisionSets: decisionSetsByDigest,
+    stage: adjudicated ? "evidence" : "run",
+  });
+  report(artifactPath, outcome.problems, outcome.notes);
 }
 
 // The block a person would otherwise retype. Printing rather than writing: an

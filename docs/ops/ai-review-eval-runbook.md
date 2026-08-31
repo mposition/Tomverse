@@ -333,6 +333,45 @@ journal · answer key · 블라인드 기록 · artifact. 검증이 두 스크�
   적어 두므로, 같은 모양의 다른 파일로 바꾸거나 나중에 한 칸을 고치면 어긋납니다.
 - **수치 재계산.** 같은 scorer로 다시 매기고 자릿수까지 대조합니다.
 
+### threshold version이 흐름 전체를 따라갑니다
+
+시트는 **어느 threshold version을 위해** 만드는지 밝히고, 크기 기본값이 그
+version의 `minBlindReviewedCases`입니다. `v1-draft`에 고정돼 있던 동안에는 `v2`를
+추가해도 시트가 계속 옛 크기로 나왔을 것입니다.
+
+```
+npm run make:ai-review-blind-sheet -- ... --threshold-version=v1-draft
+```
+
+- version은 기록 머리말(`# threshold-version:`)에 실리고, adjudication이 신원
+  대조에 쓰며 artifact의 `blindReviewThresholdVersion`으로 옮깁니다.
+- 그래서 **register에 들어가기 전** `--artifact` 검사도 어느 version의 하한을
+  적용해야 하는지 알 수 있습니다.
+- `--sample`로 그 version의 하한보다 작게 만들면 경고합니다.
+
+**하한이 없으면 "coverage 미판정"을 적습니다.** version이 없거나 그 집합이 아직
+승인되지 않았으면 검사할 바가 없고, 그때는 `ok` 옆에 무엇을 판정하지 **않았는지**를
+note로 남깁니다 — 결함이 아니라 범위이므로 실패로 세지 않고, 승인을 거절하는 일은
+register 검사가 이미 합니다.
+
+### 승인은 사람과 **날짜**를 함께 요구합니다
+
+`approvedThresholdSets()`와 `approvedEntryProblems()`가 `approvedBy`만 보고
+있었습니다. 이름만 있고 `approvedAt: null`인 집합이 양쪽에서 승인으로 통과했고,
+readiness가 그것을 서명된 기준으로 읽을 수 있었습니다. **승인은 누군가가 어느
+시점에 한 행위이고, 시점이 없으면 감사할 것이 없습니다.** 판정은
+`thresholdSetApprovalProblems()` 한 곳이며 날짜는 파싱까지 합니다 — 날로 바꿀 수
+없는 문자열은 날짜가 없는 것과 같습니다.
+
+### 잘못된 증거 파일은 보고되고, 나머지 실행은 계속 검사됩니다
+
+정답지와 journal은 다른 사람이 쓴 파일입니다. 게이트가 그것을 `JSON.parse`로
+직접 읽던 동안, 손상된 정답지 하나가 `SyntaxError`로 **프로세스를 끝냈고 두 번째
+실행은 검사되지 않았습니다.** 파싱은 이제 공유 코어 안에서 일어나고 — 호출자가
+잊을 수 없도록 — 파일 이름과 journal의 **줄 번호**를 담아 문제로 보고합니다.
+그 위에 실행 단위 try/catch가 하나 더 있어, 앞으로 나올 다른 형태의 예외도 그
+실행의 실패로 기록될 뿐 리포트를 끝내지 못합니다.
+
 ### 등록 전 `--artifact` 검사는 단계를 구분합니다
 
 방금 끝난 실행은 **아직 하지 않은 검토가 없다는 이유로 결함이 아닙니다.** 한동안

@@ -19,6 +19,7 @@ const identity = {
   datasetDigest: "sha256:abc",
   commitSha: "b".repeat(40),
   sheetSeed: 7,
+  thresholdVersion: "v1-draft",
 };
 
 const csv = (rows, overrides = {}) => {
