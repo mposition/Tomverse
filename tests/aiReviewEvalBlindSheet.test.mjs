@@ -125,6 +125,7 @@ test("the record form asks about every zero-tolerance rule, not only the human-o
     datasetDigest: "sha256:abc",
     commitSha: "b".repeat(40),
     sheetSeed: 1,
+    thresholdVersion: "v1-draft",
   });
   // The identity header, then the table. The form's verdicts are read back
   // into this run's violation count, so a form filled in for another run would

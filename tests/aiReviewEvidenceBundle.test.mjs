@@ -22,6 +22,7 @@ const IDENTITY = {
   datasetDigest: "",
   commitSha: "b".repeat(40),
   sheetSeed: 1,
+  thresholdVersion: "v1-draft",
 };
 
 const caseAt = (index) => ({
@@ -309,4 +310,37 @@ test("metrics swapped for another run's are caught to the digit", () => {
 test("a file digest changes when one byte does", () => {
   assert.notEqual(fileDigest("a"), fileDigest("b"));
   assert.equal(fileDigest("a"), fileDigest("a"));
+});
+
+test("a corrupted evidence file is reported, not thrown on", () => {
+  // A run's answer key is a file somebody else wrote. An unguarded JSON.parse
+  // in the gate turned a corrupted one into a SyntaxError that ended the
+  // process on the first run it reached, so the second run was never checked
+  // at all -- the same failure shape as reading a field off an absent arm.
+  const base = bundleFor();
+  const broken = verifyEvidenceBundle({
+    ...base.inputs,
+    answerKeyText: '{ "S001": broken',
+  });
+  assert.equal(broken.metrics, null);
+  assert.ok(
+    broken.problems.some((problem) =>
+      problem.startsWith("the answer key is not valid JSON")
+    )
+  );
+});
+
+test("a malformed journal line is named by its line number", () => {
+  const base = bundleFor();
+  const lines = base.inputs.journalText.split("\n");
+  lines[4] = "{ not json";
+  const broken = verifyEvidenceBundle({
+    ...base.inputs,
+    journalText: lines.join("\n"),
+  });
+  assert.ok(
+    broken.problems.some((problem) =>
+      problem.startsWith("journal line 5 is not valid JSON")
+    )
+  );
 });

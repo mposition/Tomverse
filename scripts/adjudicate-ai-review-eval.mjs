@@ -46,6 +46,18 @@ const sheetSeedFromRecord = (text) => {
   return match ? Number(match[1]) : Number.NaN;
 };
 
+/**
+ * The threshold version the sheet was sized for, from the record's own header.
+ *
+ * Carried into the artifact so a check made before the run reaches a register
+ * has a version to look the coverage bar up in. Without it, that check has no
+ * bar and has to say so rather than passing quietly.
+ */
+const thresholdVersionFromRecord = (text) => {
+  const match = text.match(/^#\s*threshold-version:\s*(\S+)\s*$/m);
+  return match ? match[1] : null;
+};
+
 const argValue = (name, fallback = "") => {
   const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
   return match ? match.slice(name.length + 3) : fallback;
@@ -111,13 +123,8 @@ if (summary.datasetDigest && summary.datasetDigest !== treeDigest) {
 }
 
 const answerKeyText = read(answerKeyPath);
-const answerKey = JSON.parse(answerKeyText);
 const recordText = read(recordPath);
 const journalText = read(journalPath);
-const journal = journalText
-  .split("\n")
-  .filter(Boolean)
-  .map((line) => JSON.parse(line));
 
 // One verification for both commands.
 //
@@ -127,9 +134,7 @@ const journal = journalText
 // standing, because the new summary was spread from the old one.
 const bundle = verifyEvidenceBundle({
   dataset,
-  journal,
   journalText,
-  answerKey,
   answerKeyText,
   recordText,
   identity: {
@@ -144,6 +149,7 @@ const bundle = verifyEvidenceBundle({
     // record header; that is the value, and it is carried into the artifact so
     // the gate reads it rather than guessing again.
     sheetSeed: sheetSeedFromRecord(recordText),
+    thresholdVersion: thresholdVersionFromRecord(recordText),
   },
   // No coverage bar here. Adjudication is not an approval: it has to refuse an
   // EMPTY review, which the bundle does structurally, but how many cases are
@@ -169,7 +175,7 @@ if (bundle.problems.length > 0) {
 const humanOnly = [];
 {
   const { record } = parseBlindReviewRecord(recordText);
-  const verdicts = humanVerdictsByCase(record, answerKey);
+  const verdicts = humanVerdictsByCase(record, JSON.parse(answerKeyText));
   for (const [caseId, rules] of verdicts) {
     for (const rule of rules) humanOnly.push(`${caseId}: ${rule}`);
   }
@@ -186,6 +192,7 @@ const adjudicated = {
     blindReviewCasesJudged: bundle.derived.reviewedCases,
     blindReviewRulesJudged: AI_REVIEW_EVAL_BLIND_SHEET_RULES.length,
     blindReviewSheetSeed: sheetSeedFromRecord(recordText),
+    blindReviewThresholdVersion: thresholdVersionFromRecord(recordText),
     // Bound by digest, so a record swapped for another of the same shape --
     // or a verdict edited after this ran -- is a mismatch rather than a file
     // nobody re-read.

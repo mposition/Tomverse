@@ -21,7 +21,10 @@ import {
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
 import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
-import { findThresholdSet } from "../lib/aiReviewQualityThresholds.ts";
+import {
+  findThresholdSet,
+  AI_REVIEW_THRESHOLD_SETS,
+} from "../lib/aiReviewQualityThresholds.ts";
 
 /**
  * The commit the sheet is about. Empty rather than a guess when git cannot
@@ -74,13 +77,30 @@ if (observations.size === 0) {
 }
 
 const seed = Number(argValue("seed", "1"));
-// The default is the threshold set's own coverage bar, so the sheet a person
-// is handed is the size the approval will be judged against. Three different
-// numbers -- 24 here, 60 in the runbook, 20 in the evidence reader -- was how
-// a coverage bar came to exist that nobody had decided.
+// The sheet is built for a named threshold version, and its size defaults to
+// that version's coverage bar -- so the sheet a person is handed is the size
+// the approval will be judged against. It was pinned to `v1-draft` here, which
+// meant adding a `v2` with a different bar would have kept producing sheets of
+// the old size, silently.
+const thresholdVersion = argValue("threshold-version", "v1-draft");
+const thresholdSet = findThresholdSet(thresholdVersion);
+if (!thresholdSet) {
+  console.error(
+    `No threshold set "${thresholdVersion}". Known: ` +
+      `${AI_REVIEW_THRESHOLD_SETS.map((set) => set.version).join(", ")}.`
+  );
+  process.exit(1);
+}
 const sampleSize = Number(
-  argValue("sample", String(findThresholdSet("v1-draft")?.minBlindReviewedCases ?? 60))
+  argValue("sample", String(thresholdSet.minBlindReviewedCases))
 );
+if (sampleSize < thresholdSet.minBlindReviewedCases) {
+  console.warn(
+    `WARNING: --sample=${sampleSize} is below "${thresholdVersion}"'s own bar of ` +
+      `${thresholdSet.minBlindReviewedCases}. A review this size cannot satisfy an ` +
+      "approval granted under that version.\n"
+  );
+}
 const taskTypes = argValue("task-types", "")
   .split(",")
   .map((value) => value.trim())
@@ -127,6 +147,7 @@ writeFileSync(
     datasetDigest: datasetDigestValue,
     commitSha: commitSha || currentCommitSha(),
     sheetSeed: seed,
+    thresholdVersion,
   }),
   "utf8"
 );
