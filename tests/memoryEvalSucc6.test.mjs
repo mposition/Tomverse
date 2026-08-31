@@ -441,10 +441,12 @@ test("the B+ replacements are ten assistant_only cases, eight expecting nothing"
             assert.ok(conv.messages.length >= 2, `${c.id} has a one-sided conversation`);
         }
     }
-    // Nine, not ten. An earlier draft had every replacement empty because
-    // every case it replaced was empty, and that reasoning is withdrawn: a
-    // gold follows the conversation's meaning, not the shape of the case being
-    // replaced. Inheriting the shape is how a defect survives a replacement.
+    // Eight of the ten, not all ten. An earlier draft had every replacement
+    // empty because every case it replaced was empty, and that reasoning is
+    // withdrawn: a gold follows the conversation's meaning, not the shape of
+    // the case being replaced. Inheriting the shape is how a defect survives a
+    // replacement — and it survived twice here, since ko-504 was found only
+    // after ko-501 had been fixed.
     const withGold = MEMORY_EVAL_SUCC6_REPLACEMENTS.filter(
         (c) => c.expected.length > 0
     );
@@ -501,6 +503,28 @@ test("ko-501 keeps the beginner fact the prompt already asks for", () => {
  * spared, and every other bulk-safe candidate is still counted. Only the
  * scorer can be asked whether that is what happens.
  */
+/**
+ * The two cases carrying gold, with a right and a wrong answer for each.
+ *
+ * Shared so every assertion about the mixed-critical exception runs over both.
+ * The two golds are different shapes — ko-501 is one `factValueAll` token plus
+ * a `factValueAny`, ko-504 is two `factValueAll` tokens — and an exception
+ * that held for one and leaked for the other would pass a check written
+ * against either alone.
+ */
+const MIXED_CRITICAL_CASES = [
+    {
+        id: "succ-assistant-ko-501",
+        right: "사용자는 첼로를 이제 막 시작한 초보자입니다",
+        wrong: "사용자는 첼로를 십 년간 연주해 온 숙련자입니다",
+    },
+    {
+        id: "succ-assistant-ko-504",
+        right: "사용자는 격주로 열리는 모임에 참석한다",
+        wrong: "사용자는 매주 목요일 모임을 한다",
+    },
+];
+
 const candidateFor = (gold, statement) => ({
     kind: gold.kind,
     polarity: gold.polarity,
@@ -521,19 +545,7 @@ test("the two mixed-critical cases score as the amendment says they should", () 
     // proved the first would pass with the gold missing, and one that only
     // proved the second would pass with an empty gold — which is the defect
     // this pair replaced.
-    const expectations = [
-        {
-            id: "succ-assistant-ko-501",
-            right: "사용자는 첼로를 이제 막 시작한 초보자입니다",
-            wrong: "사용자는 첼로를 십 년간 연주해 온 숙련자입니다",
-        },
-        {
-            id: "succ-assistant-ko-504",
-            right: "사용자는 격주로 열리는 모임에 참석한다",
-            wrong: "사용자는 매주 목요일 모임을 한다",
-        },
-    ];
-    for (const { id, right, wrong } of expectations) {
+    for (const { id, right, wrong } of MIXED_CRITICAL_CASES) {
         const testCase = MEMORY_EVAL_SUCC6_REPLACEMENTS.find((c) => c.id === id);
         assert.equal(testCase.criticalGoldMode, "allow_expected_only", id);
         const [gold] = testCase.expected;
@@ -559,18 +571,27 @@ test("the two mixed-critical cases score as the amendment says they should", () 
 
 test("a mixed-critical case still counts an extra bulk-safe candidate", () => {
     // The amendment spares the matching candidate, not the case. A model that
-    // returns the right fact and also the transferred one is still wrong, and
-    // this is the assertion that the exception did not widen into an amnesty.
-    const testCase = MEMORY_EVAL_SUCC6_REPLACEMENTS.find(
-        (c) => c.id === "succ-assistant-ko-501"
-    );
-    const [gold] = testCase.expected;
-    const outcome = scoreCaseV3(testCase, [
-        candidateFor(gold, "사용자는 첼로를 이제 막 시작한 초보자입니다"),
-        candidateFor(gold, "사용자는 첼로를 십 년간 연주해 온 숙련자입니다"),
-    ]);
-    assert.equal(outcome.goldMatched, 1);
-    assert.equal(outcome.criticalBulkSafeAdoptions, 1);
+    // returns the right fact and also the wrong one is still wrong, and this is
+    // the assertion that the exception did not widen into an amnesty.
+    //
+    // Over both cases, not just ko-501: an exception that held for one gold
+    // shape and leaked for another would pass a single-case check, and these
+    // two are different shapes — one `factValueAll` plus a `factValueAny`
+    // against two `factValueAll` tokens.
+    for (const { id, right, wrong } of MIXED_CRITICAL_CASES) {
+        const testCase = MEMORY_EVAL_SUCC6_REPLACEMENTS.find((c) => c.id === id);
+        const [gold] = testCase.expected;
+        const outcome = scoreCaseV3(testCase, [
+            candidateFor(gold, right),
+            candidateFor(gold, wrong),
+        ]);
+        assert.equal(outcome.goldMatched, 1, `${id}: the right answer was not recalled`);
+        assert.equal(
+            outcome.criticalBulkSafeAdoptions,
+            1,
+            `${id}: the wrong answer rode in free beside the right one`
+        );
+    }
 });
 
 test("no replacement reuses an id, a conversation id or a message id", () => {

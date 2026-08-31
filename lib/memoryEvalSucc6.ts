@@ -1,12 +1,12 @@
 /**
- * `mem-eval-succ-6` — the decision set with the ten B+ cases replaced.
+ * `mem-eval-succ-6` — thirteen cases replaced: the B+ ten, and three more.
  *
  * ## A sample-changing successor, not a contract-only one
  *
  * `succ-5` shares `succ-4`'s case array by reference and records the same
  * dataset digest deliberately: only the contract descriptor moved, so the
  * sample had to be provably identical. `succ-6` is the other kind. Ten cases
- * leave and ten arrive, so the array really does diverge and the dataset
+ * leave and thirteen arrive, so the array really does diverge and the dataset
  * digest really is new — and `verifySucc6Manifest()` refuses a manifest whose
  * digest matches `succ-5`, which is the exact inverse of the check `succ-5`
  * carries.
@@ -37,7 +37,8 @@
  * ## Not frozen
  *
  * `MEMORY_EVAL_SUCC6_DATASET_FROZEN` is `false` and stays false until a person
- * has reviewed the ten replacements and signed the adoption
+ * has reviewed **all thirteen** new cases — the B+ ten and the three
+ * composition repairs — and signed the adoption
  * (.github/audits/memory-boundary-decision-2026-08-30.md §5.3 step 3). The
  * structural checks in `scripts/check-memory-eval-succ6.mjs` pass long before
  * that, and passing them is not the same as being adopted.
@@ -89,7 +90,8 @@ export const MEMORY_EVAL_SUCC6_DATASET_PURPOSE: "development" | "decision" =
  *
  * Order is preserved rather than rebuilt so that the inherited part of the
  * fingerprint is the inherited part of `succ-5`'s, and a diff of the two
- * datasets shows ten removals and ten additions instead of a reshuffle.
+ * datasets shows thirteen removals and thirteen additions rather than a
+ * reshuffle.
  */
 const INHERITED: readonly MemoryEvalCaseV3[] = MEMORY_EVAL_SUCC5_CASES.filter(
     (testCase) =>
@@ -144,7 +146,7 @@ export type Succ6DatasetManifest = {
     scoringContractDigest: string;
     scoringContractVersion: string;
     manifestDigest: string;
-    /** False until a person adopts the ten replacements. */
+    /** False until a person adopts all thirteen new cases. */
     frozen: boolean;
 };
 
@@ -237,7 +239,8 @@ export function buildSucc6Manifest(): Succ6DatasetManifest {
  * Empty means the record describes the dataset this tree holds. The two
  * negative checks are the ones a case-replacement successor needs and a
  * contract-only one does not: the sample must have moved, and it must have
- * moved by exactly the ten transitions recorded.
+ * moved by exactly the thirteen swaps recorded — the B+ ten and the three
+ * composition repairs, each checked against its own list.
  */
 export function verifySucc6Manifest(
     manifest: Succ6DatasetManifest = buildSucc6Manifest()
@@ -279,7 +282,7 @@ export function verifySucc6Manifest(
     // number and nothing else.
     if (manifest.datasetDigest === manifest.composition.sourceDatasetDigest) {
         failures.push(
-            "the dataset digest equals succ-5's: this successor replaced ten cases and " +
+            "the dataset digest equals succ-5's: this successor replaced thirteen cases and " +
                 "its sample is supposed to differ, so an equal digest means it did not."
         );
     }
