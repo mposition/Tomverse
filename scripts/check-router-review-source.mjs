@@ -12,14 +12,37 @@
 //
 // Usage:
 //   node --import tsx scripts/check-router-review-source.mjs \
-//     --bundle=<answers.jsonl> --preregistration=<json> [--print-seed]
+//     --bundle=<answers.jsonl> --preregistration=<json> \
+//     [--recipient-key=<pub.pem>] [--print-seed]
 //
-// It reads two files and exits. No provider is called.
+// `--recipient-key` additionally requires that a person has opened a sealed
+// probe with the private half of that exact key. It is passed on the draw and
+// deliberately not on the first digest-reading dispatch, which has to be able
+// to reach its refusal before any key exists.
+//
+// It reads files and exits. No provider is called.
 
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { bundleDigest, parseAnswerBundle } from "../lib/routerAnswerBundle.ts";
-import { reviewSourceProblems, seedFromBundleDigest } from "../lib/routerHumanReviewSource.ts";
+import {
+  keyRecoveryProblems,
+  reviewSourceProblems,
+  seedFromBundleDigest,
+} from "../lib/routerHumanReviewSource.ts";
+
+/**
+ * SHA-256 over the DER SubjectPublicKeyInfo, which is what identifies a public
+ * key independently of how the PEM around it happens to be written.
+ */
+export const recipientKeyFingerprint = (pemPath) => {
+  const der = execFileSync("openssl", ["pkey", "-pubin", "-in", pemPath, "-outform", "DER"], {
+    maxBuffer: 1 << 20,
+  });
+  return `sha256:${createHash("sha256").update(der).digest("hex")}`;
+};
 
 const die = (message) => {
   console.error(message);
@@ -33,6 +56,7 @@ const flag = (name) => {
 const bundlePath = flag("bundle") ?? die("--bundle=<answers.jsonl> is required.");
 const preregistrationPath =
   flag("preregistration") ?? die("--preregistration=<json> is required.");
+const recipientKeyPath = flag("recipient-key");
 const printSeedOnly = process.argv.includes("--print-seed");
 
 const frozen = JSON.parse(readFileSync(preregistrationPath, "utf8"));
@@ -57,6 +81,14 @@ if (!frozen.adjudicatorId) {
   );
 }
 
+// Only when a key is named. The digest-reading dispatch runs before a recipient
+// key exists and must still reach its refusal.
+let fingerprint = null;
+if (recipientKeyPath) {
+  fingerprint = recipientKeyFingerprint(recipientKeyPath);
+  problems.push(...keyRecoveryProblems(frozen, { recipientKeyFingerprint: fingerprint }));
+}
+
 if (printSeedOnly) {
   // For the workflow to read. Printed only once the checks above passed.
   if (problems.length > 0) {
@@ -72,6 +104,10 @@ console.log(`  observed   ${bundle.entries.length} pair(s) across ${cells.size} 
 console.log(`  digest     ${digest}`);
 console.log(`  frozen     ${frozen.bundleDigest ?? "(none yet)"}`);
 console.log(`  adjudicator ${frozen.adjudicatorId ?? "(unnamed)"}`);
+if (recipientKeyPath) {
+  console.log(`  recipient  ${fingerprint}`);
+  console.log(`  recovery   ${frozen.keyRecovery?.verifiedBy ?? "(unverified)"}`);
+}
 
 if (problems.length > 0) {
   console.error(`\nThis bundle may not be drawn from:\n`);
