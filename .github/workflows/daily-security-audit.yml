@@ -15,25 +15,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Everything that needs neither a browser nor two hours. This job also warms
+  # the two caches the shards below restore from: it builds through `npm run
+  # check` and installs both browsers, so the shards start from a populated
+  # .next/cache and ~/.cache/ms-playwright instead of six cold copies of the
+  # same work.
   audit:
-    name: Security audit and daily report
+    name: Static, dependency and unit checks
     runs-on: ubuntu-latest
-    # The E2E suite is what sets this, and it has grown into the old 120-minute
-    # cap: 1.76h in run #34, 1.75h in #36, and #38 was killed mid-suite with the
-    # job at exactly 120 minutes. It was not the first -- runs #28 to #32 all
-    # ended at 120.3-120.4 minutes, which is a timeout wearing the word
-    # "cancelled", and it is part of why the mobile-safari failures went unseen
-    # for weeks: a run that never reaches the end reports nothing about it.
-    #
-    # The step below carries its own smaller budget, so an overrun fails that
-    # step and the audit still delivers its report and evidence, instead of the
-    # job being cancelled out from under both.
-    timeout-minutes: 180
-    # The full E2E suite runs against this build. The public test key is not a
-    # credential; it only lets the browser-side Turnstile mock execute in CI.
+    # Was 180 when this job also ran the E2E suite. What is left is ~7 minutes
+    # of checks plus a browser install whose own deadline is 45.
+    timeout-minutes: 70
     env:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+    # Every step below is `continue-on-error`, so the job's own conclusion says
+    # nothing about what passed. These outputs are how the report job and the
+    # enforcing step find out, and they carry `outcome` -- the result before
+    # continue-on-error masks it.
+    outputs:
+      gitleaks: ${{ steps.gitleaks.outcome }}
+      setup_node: ${{ steps.setup_node.outcome }}
+      install: ${{ steps.install.outcome }}
+      dependency_audit: ${{ steps.dependency_audit.outcome }}
+      security_regression: ${{ steps.security_regression.outcome }}
+      unit_tests: ${{ steps.unit_tests.outcome }}
+      encoding: ${{ steps.encoding.outcome }}
+      typecheck: ${{ steps.typecheck.outcome }}
+      production_check: ${{ steps.production_check.outcome }}
+      browser_install: ${{ steps.browser_install.outcome }}
 
     steps:
       - name: Checkout complete Git history
@@ -142,6 +152,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
+      # Kept in this job, ahead of the shards, for two reasons. It populates
+      # the browser cache once instead of six times -- WebKit's apt transaction
+      # is 181 packages and has cost whole runs when it had to be fetched
+      # under a small budget. And it keeps "the browsers could not be
+      # installed" reportable as its own line in the daily report: that
+      # distinction is why runs #33-#34 were diagnosable at all, when a failing
+      # install meant the mobile-safari project had silently not run for weeks.
+      #
+      # The shards call the same script again. On a cache hit that is seconds,
+      # and on a miss it is the shard's own problem to report rather than a
+      # silent launch failure.
       - name: Install Chromium and WebKit
         id: browser_install
         if: steps.install.outcome == 'success'
@@ -154,19 +175,191 @@ jobs:
         timeout-minutes: 45
         run: scripts/ci/install-playwright.sh chromium webkit
 
-      - name: Run full desktop and mobile E2E suite
-        id: e2e
-        if: steps.production_check.outcome == 'success' && steps.browser_install.outcome == 'success'
+      - name: Upload dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-audit-checks-${{ github.run_id }}
+          path: security-audit
+          if-no-files-found: warn
+          retention-days: 30
+
+  # The full desktop and mobile suite, split by `--shard`.
+  #
+  # It used to be one step in the job above, and on 2026-09-01 that step was
+  # killed at its 150-minute budget with test 6136 of 6832 on screen -- so the
+  # last ~700 cases were never reached and run #54 reports nothing about them.
+  # Run #53 stopped at the same 150 minutes, and every run from #47 on except
+  # #48 has a job duration matching that cut.
+  #
+  # Raising the budget is the response that already failed: 120 -> 180 minutes
+  # landed on 2026-08-19 and was back at the wall on 2026-08-24. The suite is
+  # not the problem -- it grew 2.5% between the last completed run and the
+  # first timeout while the per-case cost grew ~44% -- and a single job running
+  # four projects on one worker cannot absorb either.
+  #
+  # Sharded rather than split by project, which is the same call e2e.yml made
+  # and for the same reason: the projects are lopsided, and `--project` would
+  # mean replacing `npm run test:e2e:run` with per-project `playwright test`
+  # calls -- the command the security-regression check pins so nobody can
+  # quietly narrow this run. `--shard` keeps that command and keeps the union
+  # of the shards exactly equal to what the single step used to execute.
+  e2e:
+    name: Full E2E (shard ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: [audit]
+    # The suite runs against the production build and both browsers. Without
+    # either there is nothing to test, and a shard that launches anyway would
+    # report a failure about the wrong thing.
+    if: needs.audit.outputs.production_check == 'success' && needs.audit.outputs.browser_install == 'success'
+    runs-on: ubuntu-latest
+    # The suite was ~167 minutes of execution when it last ran end to end
+    # (6136 indices in 150 minutes, extrapolated to 6832), so six shards puts
+    # the average near 28 minutes.
+    #
+    # The split is even by count. Measured 2026-09-01 with `--list --shard=i/6`
+    # on this tree, which also shows what `--shard` actually cuts here:
+    #
+    #   1/6  1150   desktop-chromium 1150
+    #   2/6  1133   desktop-chromium  558   desktop-compact  575
+    #   3/6  1138   desktop-compact  1133   mobile-safari      5
+    #   4/6  1145   mobile-safari    1145
+    #   5/6  1133   mobile-safari     558   mobile-chromium  575
+    #   6/6  1133   mobile-chromium  1133
+    #
+    # Counts land within 1.5% of each other, and the shards fall almost along
+    # the project boundaries because Playwright shards the list in project
+    # order. That is not the imbalance e2e.yml records -- there the weight was
+    # diffuse inside one browser -- but it does mean the remaining imbalance is
+    # the engines: WebKit owns most of 3, 4 and 5, and it is the slower of the
+    # two. Nothing here measured that, because WebKit cannot be downloaded in
+    # the container this was written in.
+    #
+    # So 75 is a ceiling chosen from the count split plus room for an engine
+    # that costs more per case, not from a timed run. THE FIRST RUN OF THIS
+    # WORKFLOW IS THE MEASUREMENT -- read the six job durations and tighten
+    # this, the way e2e.yml's comment carries its own.
+    #
+    # It is a ceiling, not a target: it exists so a hung Playwright server
+    # fails one shard instead of burning the whole matrix, and raising it to
+    # buy headroom spends exactly the protection it is for. If a shard nears
+    # it, add shards.
+    timeout-minutes: 75
+    strategy:
+      # A failing shard must not cancel its siblings. Their results are the
+      # evidence for what else broke, and cancelling them turns one red spec
+      # into an unreadable run.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+        shards: [6]
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      # Same key the audit job writes, so the first shard to arrive restores
+      # what that job's `npm run check` already built.
+      - name: Restore Next.js build cache
         continue-on-error: true
-        # Above the ~1.8h the full matrix takes, and below the job's own budget,
-        # so a suite that overruns is reported as this step failing rather than
-        # taking the report and the artefacts down with it.
-        timeout-minutes: 150
-        run: npm run test:e2e:run
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-daily-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-daily-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Each shard builds for itself: .next is not carried between jobs, and
+      # `test:e2e:run` starts the production server rather than building one.
+      # The cache above is what keeps this from being six full builds.
+      - name: Build the E2E server
+        run: npm run build
+
+      - name: Restore Playwright browser cache
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium-webkit
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+
+      # Both browsers on every shard, even though the measured split leaves
+      # some shards holding one engine. Which project a shard owns is decided
+      # by Playwright's ordering of the current test list, so it moves
+      # whenever a spec is added -- a shard installing only the browser it
+      # needed last month would fail to launch rather than skip.
+      #
+      # A cache hit after the audit job's install; the deadline is here for the
+      # miss, and it is the script's own retry budget plus room to report.
+      - name: Install Chromium and WebKit
+        timeout-minutes: 45
+        run: scripts/ci/install-playwright.sh chromium webkit
+
+      - name: Run full desktop and mobile E2E suite
+        # Below the job's ceiling, so a shard that overruns fails this step and
+        # still uploads its report and traces, instead of the job being
+        # cancelled out from under all three.
+        timeout-minutes: 60
+        run: npm run test:e2e:run -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
+
+      - name: Upload E2E evidence
+        # `always()`, not `failure()`: a shard that overran its step still
+        # holds the traces and the partial report for everything it did reach,
+        # and that is the evidence for tuning the shard count.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          # Shard-scoped, or the shards race to write one artifact name and
+          # only the first upload survives.
+          name: security-audit-e2e-${{ github.run_id }}-shard-${{ matrix.shard }}
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 30
+
+  report:
+    # Keeps the name this workflow reported before it was sharded, so anything
+    # watching for that result still finds it.
+    name: Security audit and daily report
+    needs: [audit, e2e]
+    # `always()` so the report is delivered and the verdict is enforced even
+    # when a shard fails, is skipped, or is cancelled. Reaching this job is not
+    # itself a pass; the last step decides.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      # The reporter runs under tsx and resolves its sender through
+      # lib/emailSendingIdentityCore.ts, so it needs the dependency tree.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Deliver security audit report
         id: report
-        if: always()
         env:
           SECURITY_AUDIT_SEND_NOTIFICATIONS: "true"
           SECURITY_AUDIT_SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_AUDIT_SLACK_WEBHOOK_URL || secrets.OPS_ALERT_SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK_URL }}
@@ -177,32 +370,33 @@ jobs:
           TRANSACTIONAL_EMAIL_FROM: ${{ vars.TRANSACTIONAL_EMAIL_FROM }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           SECURITY_AUDIT_OUTPUT_PATH: security-audit/daily-report.json
-          SECURITY_AUDIT_GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
-          SECURITY_AUDIT_SETUP_NODE_STATUS: ${{ steps.setup_node.outcome }}
-          SECURITY_AUDIT_INSTALL_STATUS: ${{ steps.install.outcome }}
-          SECURITY_AUDIT_DEPENDENCY_STATUS: ${{ steps.dependency_audit.outcome }}
-          SECURITY_AUDIT_REGRESSION_STATUS: ${{ steps.security_regression.outcome }}
-          SECURITY_AUDIT_UNIT_STATUS: ${{ steps.unit_tests.outcome }}
-          SECURITY_AUDIT_ENCODING_STATUS: ${{ steps.encoding.outcome }}
-          SECURITY_AUDIT_TYPECHECK_STATUS: ${{ steps.typecheck.outcome }}
-          SECURITY_AUDIT_PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
-          SECURITY_AUDIT_BROWSER_INSTALL_STATUS: ${{ steps.browser_install.outcome }}
-          SECURITY_AUDIT_E2E_STATUS: ${{ steps.e2e.outcome }}
+          SECURITY_AUDIT_GITLEAKS_STATUS: ${{ needs.audit.outputs.gitleaks }}
+          SECURITY_AUDIT_SETUP_NODE_STATUS: ${{ needs.audit.outputs.setup_node }}
+          SECURITY_AUDIT_INSTALL_STATUS: ${{ needs.audit.outputs.install }}
+          SECURITY_AUDIT_DEPENDENCY_STATUS: ${{ needs.audit.outputs.dependency_audit }}
+          SECURITY_AUDIT_REGRESSION_STATUS: ${{ needs.audit.outputs.security_regression }}
+          SECURITY_AUDIT_UNIT_STATUS: ${{ needs.audit.outputs.unit_tests }}
+          SECURITY_AUDIT_ENCODING_STATUS: ${{ needs.audit.outputs.encoding }}
+          SECURITY_AUDIT_TYPECHECK_STATUS: ${{ needs.audit.outputs.typecheck }}
+          SECURITY_AUDIT_PRODUCTION_STATUS: ${{ needs.audit.outputs.production_check }}
+          SECURITY_AUDIT_BROWSER_INSTALL_STATUS: ${{ needs.audit.outputs.browser_install }}
+          # `needs.e2e.result` collapses the whole matrix: it is `success` only
+          # when every shard succeeded, and `skipped` when the build or the
+          # browsers never got there. The reporter renders each of those as
+          # itself rather than folding them into a pass.
+          SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e.result }}
         # `--import tsx` because the sender is resolved through
         # lib/emailSendingIdentityCore.ts, which is TypeScript. Sharing that
         # function is the point: a second copy of the rules is what left this
         # sender on the old domain (docs/ops/email-sending-domains.md §1.2).
         run: node --import tsx scripts/send-security-audit-report.mjs
 
-      - name: Upload daily audit evidence
+      - name: Upload daily report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: security-audit-${{ github.run_id }}
-          path: |
-            security-audit
-            test-results
-            playwright-report
+          name: security-audit-report-${{ github.run_id }}
+          path: security-audit
           if-no-files-found: warn
           retention-days: 30
 
@@ -210,17 +404,20 @@ jobs:
         if: always()
         shell: bash
         env:
-          GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
-          SETUP_NODE_STATUS: ${{ steps.setup_node.outcome }}
-          INSTALL_STATUS: ${{ steps.install.outcome }}
-          DEPENDENCY_STATUS: ${{ steps.dependency_audit.outcome }}
-          REGRESSION_STATUS: ${{ steps.security_regression.outcome }}
-          UNIT_STATUS: ${{ steps.unit_tests.outcome }}
-          ENCODING_STATUS: ${{ steps.encoding.outcome }}
-          TYPECHECK_STATUS: ${{ steps.typecheck.outcome }}
-          PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
-          BROWSER_INSTALL_STATUS: ${{ steps.browser_install.outcome }}
-          E2E_STATUS: ${{ steps.e2e.outcome }}
+          GITLEAKS_STATUS: ${{ needs.audit.outputs.gitleaks }}
+          SETUP_NODE_STATUS: ${{ needs.audit.outputs.setup_node }}
+          INSTALL_STATUS: ${{ needs.audit.outputs.install }}
+          DEPENDENCY_STATUS: ${{ needs.audit.outputs.dependency_audit }}
+          REGRESSION_STATUS: ${{ needs.audit.outputs.security_regression }}
+          UNIT_STATUS: ${{ needs.audit.outputs.unit_tests }}
+          ENCODING_STATUS: ${{ needs.audit.outputs.encoding }}
+          TYPECHECK_STATUS: ${{ needs.audit.outputs.typecheck }}
+          PRODUCTION_STATUS: ${{ needs.audit.outputs.production_check }}
+          BROWSER_INSTALL_STATUS: ${{ needs.audit.outputs.browser_install }}
+          # `skipped` and `cancelled` are failures here on purpose -- a shard
+          # that never ran has verified nothing, and treating either as a pass
+          # is how an aggregating gate goes green without gating.
+          E2E_STATUS: ${{ needs.e2e.result }}
           REPORT_STATUS: ${{ steps.report.outcome }}
         run: |
           failed=0
