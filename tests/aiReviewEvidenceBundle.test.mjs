@@ -13,6 +13,10 @@ import {
   AI_REVIEW_EVAL_BLIND_SHEET_RULES,
 } from "../lib/aiReviewEvalCore.ts";
 import { renderBlindReviewRecordHeader } from "../lib/aiReviewBlindReviewRecord.ts";
+import {
+  rebuildBlindSheet,
+  renderBlindSheet,
+} from "../lib/aiReviewEvalBlindSheet.ts";
 import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
 
 const IDENTITY = {
@@ -69,10 +73,11 @@ const DATASET = {
 const journalOf = (cases) =>
   cases.map((testCase) => ({ caseId: testCase.id, observation: observation() }));
 
-const recordOf = (labels, marked = {}) => {
+const recordOf = (labels, marked = {}, blindSheetText = null) => {
   const header = renderBlindReviewRecordHeader({
     ...IDENTITY,
     datasetDigest: datasetDigest(DATASET),
+    blindSheetDigest: blindSheetText ? fileDigest(blindSheetText) : "sha256:sheet",
   })
     .replace("# signed-by: ", "# signed-by: @mposition")
     .replace("# signed-at: ", "# signed-at: 2026-08-31");
@@ -97,6 +102,15 @@ const answerKeyOf = (cases) =>
     ])
   );
 
+const SHEET_META = {
+  runOrdinal: 1,
+  reviewerModelId: IDENTITY.reviewerModelId,
+  promptVersion: IDENTITY.promptVersion,
+  datasetVersion: DATASET.version,
+  seed: IDENTITY.sheetSeed,
+  thresholdVersion: IDENTITY.thresholdVersion,
+};
+
 const bundleFor = ({
   journalCases = DATASET.cases,
   keyCases = DATASET.cases,
@@ -107,21 +121,34 @@ const bundleFor = ({
   const answerKeyText = JSON.stringify(answerKey, null, 2);
   const journal = journalOf(journalCases);
   const journalText = journal.map((entry) => JSON.stringify(entry)).join("\n");
-  const recordText = recordOf(Object.keys(answerKey), marked);
+  // The sheet as the generator would have produced it, so the fixture is the
+  // evidence the checks actually receive.
+  const rebuilt = rebuildBlindSheet({
+    cases: DATASET.cases,
+    observations: new Map(journal.map((entry) => [entry.caseId, entry.observation])),
+    answerKey,
+  });
+  const blindSheetText = rebuilt ? renderBlindSheet(rebuilt, SHEET_META) : null;
+  const recordText = recordOf(Object.keys(answerKey), marked, blindSheetText);
   return {
     inputs: {
       dataset: DATASET,
-      journal,
       journalText,
-      answerKey,
       answerKeyText,
       recordText,
-      identity: { ...IDENTITY, datasetDigest: datasetDigest(DATASET) },
+      blindSheetText,
+      sheetMeta: SHEET_META,
+      identity: {
+        ...IDENTITY,
+        datasetDigest: datasetDigest(DATASET),
+        blindSheetDigest: blindSheetText ? fileDigest(blindSheetText) : undefined,
+      },
       minimumReviewedCases,
     },
     answerKeyText,
     journalText,
     recordText,
+    blindSheetText,
   };
 };
 
@@ -134,6 +161,8 @@ const artifactFrom = (bundle, inputs, overrides = {}) => ({
     datasetDigest: datasetDigest(DATASET),
     adjudicated: true,
     blindReviewSignedBy: bundle.derived.signedBy,
+    blindReviewSignedAt: bundle.derived.signedAt,
+    blindSheetDigest: bundle.derived.blindSheetDigest,
     blindReviewCasesJudged: bundle.derived.reviewedCases,
     blindReviewRulesJudged: AI_REVIEW_EVAL_BLIND_SHEET_RULES.length,
     blindReviewRecordDigest: bundle.derived.recordDigest,
@@ -236,13 +265,12 @@ test("a journal missing cases is refused rather than silently re-scoring fewer",
 test("a journal case the dataset does not contain, or listed twice, is refused", () => {
   const base = bundleFor();
   const journal = [
-    ...base.inputs.journal,
+    ...journalOf(DATASET.cases),
     { caseId: "en-safety-001", observation: observation() },
     { caseId: "not-in-this-set", observation: observation() },
   ];
   const bundle = verifyEvidenceBundle({
     ...base.inputs,
-    journal,
     journalText: journal.map((entry) => JSON.stringify(entry)).join("\n"),
   });
   assert.ok(
@@ -257,12 +285,14 @@ test("a journal case the dataset does not contain, or listed twice, is refused",
 
 test("two answer-key labels pointing at one case are refused", () => {
   const base = bundleFor();
-  const answerKey = { ...base.inputs.answerKey, S999: { caseId: "en-safety-001" } };
+  const answerKey = {
+    ...answerKeyOf(DATASET.cases),
+    S999: { caseId: "en-safety-001" },
+  };
   const bundle = verifyEvidenceBundle({
     ...base.inputs,
-    answerKey,
     answerKeyText: JSON.stringify(answerKey),
-    recordText: recordOf(Object.keys(answerKey)),
+    recordText: recordOf(Object.keys(answerKey), {}, base.blindSheetText),
   });
   assert.ok(
     bundle.problems.some((problem) =>
@@ -341,6 +371,50 @@ test("a malformed journal line is named by its line number", () => {
   assert.ok(
     broken.problems.some((problem) =>
       problem.startsWith("journal line 5 is not valid JSON")
+    )
+  );
+});
+
+test("a sheet showing different questions than the answer key claims is caught", () => {
+  // What a stored digest can never see: if the sheet were wrong when the
+  // digest was taken, the digest matches the wrong sheet. Rebuilding from the
+  // answer key is what makes the CONTENT checkable.
+  const base = bundleFor();
+  const bundle = verifyEvidenceBundle({
+    ...base.inputs,
+    blindSheetText: base.blindSheetText.replace(
+      "question 1",
+      "a question this run never asked"
+    ),
+    // The record names the altered sheet, so its own digest check agrees --
+    // exactly the case where only the rebuild can tell.
+    identity: {
+      ...base.inputs.identity,
+      blindSheetDigest: fileDigest(
+        base.blindSheetText.replace("question 1", "a question this run never asked")
+      ),
+    },
+    recordText: recordOf(
+      Object.keys(answerKeyOf(DATASET.cases)),
+      {},
+      base.blindSheetText.replace("question 1", "a question this run never asked")
+    ),
+  });
+  assert.ok(
+    bundle.problems.some((problem) =>
+      problem.includes("not the sheet this answer key and run produce")
+    )
+  );
+});
+
+test("a missing sheet is a finding, not a silence", () => {
+  const bundle = verifyEvidenceBundle({
+    ...bundleFor().inputs,
+    blindSheetText: null,
+  });
+  assert.ok(
+    bundle.problems.some((problem) =>
+      problem.includes("the blind sheet is missing")
     )
   );
 });

@@ -20,6 +20,7 @@ const identity = {
   commitSha: "b".repeat(40),
   sheetSeed: 7,
   thresholdVersion: "v1-draft",
+  blindSheetDigest: "sha256:sheet",
 };
 
 const csv = (rows, overrides = {}) => {

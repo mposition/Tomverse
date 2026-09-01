@@ -583,6 +583,46 @@ export const revokeAllMobileSessions = async (input: {
   return { revokedFamilies: ids.length };
 };
 
+/**
+ * The one mobile auth record that survives an account deletion, naming nobody.
+ *
+ * Approved decision 9 says deletion removes the rows and identifiers naming the
+ * user, their devices and their families, and that only de-identified
+ * aggregates may be kept. This is that aggregate: one row saying mobile
+ * sessions were ended by a deletion, with no account, device or family on it.
+ *
+ * Written *inside* the deletion transaction and before the `User` row goes, so
+ * that it either happens with the deletion or not at all. Written with a null
+ * `userId` deliberately -- a row naming the account would be taken by the same
+ * cascade a moment later, which would make the record exist for the length of
+ * one transaction and then not at all.
+ *
+ * Skipped when the account had no mobile session. A row on every deletion would
+ * be a counter of deletions rather than of mobile sessions ended, and an
+ * operator reading it would draw the wrong number.
+ */
+export const recordMobileSessionsEndedByDeletion = async (
+  tx: Prisma.TransactionClient,
+  userId: string
+) => {
+  const families = await tx.mobileTokenFamily.count({ where: { userId } });
+  if (families === 0) return { recorded: false as const };
+
+  await tx.mobileAuthEvent.create({
+    data: {
+      event: "mobile_auth.revoked_on_account_deletion",
+      reason: "account_deleted",
+    },
+  });
+  logSecurityAuditEvent("mobile_auth.revoked_on_account_deletion", {
+    // The account is being deleted; naming it in a log line that outlives the
+    // row would undo the deletion in the one place nobody looks.
+    userId: null,
+    reason: "account_deleted",
+  });
+  return { recorded: true as const };
+};
+
 /** What the account's own device list shows (D16). */
 export const listMobileDevices = async (userId: string) => {
   const devices = await prisma.mobileDevice.findMany({

@@ -5458,6 +5458,21 @@ export function ChatPageClient({
     `appendVoiceTranscript` never replaces: the microphone must not be the one
     control in the composer that can destroy work with no undo.
   */
+  /*
+    Which person this tab is operating as, for the voice session's identity
+    boundary (docs/policy/voice-input.md §8.4).
+
+    `identityNamespaceKey` is the repository's existing answer to "did the
+    identity change?" and yields `account:<userId>`, so account A becoming
+    account B is visible. `unresolved` is reported as `null` — "not known yet"
+    — because the session provider settles after hydration and a recording
+    started in that window must not be cancelled by the settling itself.
+  */
+  const voiceIdentityKey =
+    identityNamespace.kind === "unresolved"
+      ? null
+      : identityNamespaceKey(identityNamespace);
+
   const handleVoiceTranscript = useCallback(
     (transcript: string, scopeId: string | null) => {
       setInputValue(
@@ -6012,6 +6027,7 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
+          voiceIdentityKey={voiceIdentityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -6130,6 +6146,7 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
+          voiceIdentityKey={voiceIdentityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}

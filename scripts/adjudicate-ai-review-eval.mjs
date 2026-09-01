@@ -31,7 +31,14 @@ import {
   parseBlindReviewRecord,
 } from "../lib/aiReviewBlindReviewRecord.ts";
 import { datasetDigest, datasetProblems } from "../lib/aiReviewEvalRun.ts";
-import { verifyEvidenceBundle } from "../lib/aiReviewEvidenceBundle.ts";
+import {
+  fileDigest,
+  verifyEvidenceBundle,
+} from "../lib/aiReviewEvidenceBundle.ts";
+import {
+  findThresholdSet,
+  AI_REVIEW_THRESHOLD_SETS,
+} from "../lib/aiReviewQualityThresholds.ts";
 
 /**
  * The seed the SHEET was built with, read from the record's own header.
@@ -125,6 +132,11 @@ if (summary.datasetDigest && summary.datasetDigest !== treeDigest) {
 const answerKeyText = read(answerKeyPath);
 const recordText = read(recordPath);
 const journalText = read(journalPath);
+// The sheet a person read, beside the rest. Null when it is not there, which
+// the bundle reports rather than passing over: verdicts that name a reading
+// nobody can check are verdicts attached to nothing.
+const sheetPath = join(directory, `${stem}--blind-sheet.md`);
+const blindSheetText = existsSync(sheetPath) ? readFileSync(sheetPath, "utf8") : null;
 
 // One verification for both commands.
 //
@@ -132,11 +144,31 @@ const journalText = read(journalPath);
 // artifact's own summary, which is the thing being replaced. A journal missing
 // twenty cases used to re-score 1,420 and leave `completedCases: 1,440`
 // standing, because the new summary was spread from the old one.
+// A version that does not exist is refused before anything is written. The
+// artifact would otherwise carry a bar nobody can look up, and the gate would
+// be left to discover it after the fact.
+const recordThresholdVersion = thresholdVersionFromRecord(recordText);
+if (recordThresholdVersion && !findThresholdSet(recordThresholdVersion)) {
+  die(
+    `The record names threshold version "${recordThresholdVersion}", which does not ` +
+      `exist. Known: ${AI_REVIEW_THRESHOLD_SETS.map((set) => set.version).join(", ")}.`
+  );
+}
+
 const bundle = verifyEvidenceBundle({
   dataset,
   journalText,
   answerKeyText,
   recordText,
+  blindSheetText,
+  sheetMeta: {
+    runOrdinal: summary.runOrdinal ?? null,
+    reviewerModelId: summary.reviewerModelId ?? "",
+    promptVersion: summary.promptVersion ?? "",
+    datasetVersion: dataset.version,
+    seed: sheetSeedFromRecord(recordText),
+    thresholdVersion: thresholdVersionFromRecord(recordText) ?? undefined,
+  },
   identity: {
     runOrdinal: summary.runOrdinal ?? 0,
     reviewerModelId: summary.reviewerModelId ?? "",
@@ -150,6 +182,9 @@ const bundle = verifyEvidenceBundle({
     // the gate reads it rather than guessing again.
     sheetSeed: sheetSeedFromRecord(recordText),
     thresholdVersion: thresholdVersionFromRecord(recordText),
+    // From the sheet on disk, so a record naming a different one is a
+    // mismatch rather than an unchecked claim.
+    blindSheetDigest: blindSheetText ? fileDigest(blindSheetText) : undefined,
   },
   // No coverage bar here. Adjudication is not an approval: it has to refuse an
   // EMPTY review, which the bundle does structurally, but how many cases are
@@ -193,6 +228,7 @@ const adjudicated = {
     blindReviewRulesJudged: AI_REVIEW_EVAL_BLIND_SHEET_RULES.length,
     blindReviewSheetSeed: sheetSeedFromRecord(recordText),
     blindReviewThresholdVersion: thresholdVersionFromRecord(recordText),
+    blindSheetDigest: bundle.derived.blindSheetDigest,
     // Bound by digest, so a record swapped for another of the same shape --
     // or a verdict edited after this ran -- is a mismatch rather than a file
     // nobody re-read.

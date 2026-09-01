@@ -45,6 +45,7 @@ import {
 import {
   adjudicatedArtifactProblems,
   decisionDatasetProblems,
+  fileDigest,
   verifyEvidenceBundle,
 } from "../lib/aiReviewEvidenceBundle.ts";
 import {
@@ -368,7 +369,21 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     // check has not judged coverage, and says so instead of letting an "ok"
     // imply it did. The refusal for resting on an unsigned set already lives
     // in the register check, where an approval is what is being refused.
-    if (approvedBar === undefined) {
+    // Three states, and they are not the same answer.
+    //
+    // Naming a version that does not exist is a FAILURE: the evidence claims
+    // to have been produced under a bar, and there is no such bar -- a typo, a
+    // deleted set, or a version from a branch nobody merged. It was folded in
+    // with "known but unapproved" and came out as ok plus a note.
+    //
+    // Naming nothing, and naming a real set nobody has signed, are both scope:
+    // there is no bar to apply, and the check says so beside its ok.
+    if (effectiveThresholdVersion && !namedSet) {
+      problems.push(
+        `threshold set "${effectiveThresholdVersion}" does not exist; this evidence names ` +
+          "a bar that is not in this tree"
+      );
+    } else if (approvedBar === undefined) {
       notes.push(
         effectiveThresholdVersion
           ? `coverage not judged: threshold set "${effectiveThresholdVersion}" is not approved, ` +
@@ -380,11 +395,24 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     const journalText = readFileSync(journalPath, "utf8");
     const answerKeyText = readFileSync(answerKeyPath, "utf8");
     const recordText = readFileSync(recordRef, "utf8");
+    const sheetPath = join(artifactDirectory, `${artifactStem}--blind-sheet.md`);
+    const blindSheetText = existsSync(sheetPath)
+      ? readFileSync(sheetPath, "utf8")
+      : null;
     const bundle = verifyEvidenceBundle({
       dataset: matchingSet.dataset,
       journalText,
       answerKeyText,
       recordText,
+      blindSheetText,
+      sheetMeta: {
+        runOrdinal: summary.runOrdinal ?? null,
+        reviewerModelId: summary.reviewerModelId ?? "",
+        promptVersion: summary.promptVersion ?? "",
+        datasetVersion: matchingSet.dataset.version,
+        seed: summary.blindReviewSheetSeed,
+        thresholdVersion: effectiveThresholdVersion ?? undefined,
+      },
       identity: {
         runOrdinal: expected?.runOrdinal ?? summary.runOrdinal,
         reviewerModelId: expected?.reviewerModelId ?? summary.reviewerModelId,
@@ -394,6 +422,7 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
         // The sheet's seed as the artifact recorded it, not the run's.
         sheetSeed: summary.blindReviewSheetSeed,
         thresholdVersion: effectiveThresholdVersion,
+        blindSheetDigest: blindSheetText ? fileDigest(blindSheetText) : undefined,
       },
       // The signed bar, when the entry names a set that has one. An entry
       // resting on an unsigned set is already refused by the register check;

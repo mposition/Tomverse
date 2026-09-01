@@ -21,6 +21,7 @@ import {
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
 import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
+import { fileDigest } from "../lib/aiReviewEvidenceBundle.ts";
 import {
   findThresholdSet,
   AI_REVIEW_THRESHOLD_SETS,
@@ -130,7 +131,10 @@ const sheetPath = join(directory, `${stem}--blind-sheet.md`);
 const keyPath = join(directory, `${stem}--answer-key.json`);
 const recordPath = join(directory, `${stem}--blind-review-record.csv`);
 
-writeFileSync(sheetPath, renderBlindSheet(sheet, meta), "utf8");
+// The sheet is rendered first, because its digest goes into the record: the
+// form a person signs names the paper they read.
+const sheetMarkdown = renderBlindSheet(sheet, { ...meta, thresholdVersion });
+writeFileSync(sheetPath, sheetMarkdown, "utf8");
 writeFileSync(keyPath, `${JSON.stringify(sheet.answerKey, null, 2)}\n`, "utf8");
 // The record carries the run's identity, because its verdicts are read back
 // into that run's violation count. A form filled in for one run and applied to
@@ -148,6 +152,7 @@ writeFileSync(
     commitSha: commitSha || currentCommitSha(),
     sheetSeed: seed,
     thresholdVersion,
+    blindSheetDigest: fileDigest(sheetMarkdown),
   }),
   "utf8"
 );

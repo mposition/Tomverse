@@ -36,6 +36,13 @@ import {
   isSupportedDocumentLanguage,
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
+import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
+import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
+import {
+  applyMobileIdentityHeaders,
+  nativeBearerVerdict,
+  stripInternalAuthHeaders,
+} from "@/lib/nativeBearerGate";
 
 const blockedOriginResponse = () =>
   new NextResponse("Misdirected Request", {
@@ -97,6 +104,28 @@ const blockedMutationOriginResponse = (request: NextRequest) => {
 };
 
 /**
+ * N1b's refusal. A presented bearer that does not verify.
+ *
+ * 401 and nothing else -- specifically not a fall-through to the cookie path,
+ * which is section 5.1's fourth prohibition: "attach a broken bearer" must not
+ * become "a cookie request with the CSRF check removed".
+ *
+ * One code for every failure. Which check a forged token tripped is a fact
+ * about the token, and telling its holder is telling them which byte to fix.
+ */
+const blockedBearerResponse = () =>
+  NextResponse.json(
+    { ok: false, code: MOBILE_AUTH_ERROR_CODES.tokenInvalid },
+    {
+      status: 401,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }
+  );
+
+/**
  * N1a. Make an API response readable by the Capacitor shell, and by nothing
  * else.
  *
@@ -141,6 +170,24 @@ export function proxy(request: NextRequest) {
     return blockedOriginResponse();
   }
 
+  // Section 5.4, step 3 of the order. Unconditional, and before anything is
+  // verified.
+  //
+  // Every downstream `NextResponse.next()` in this function forwards *these*
+  // headers rather than the request's own, which is the point: overwriting the
+  // namespace on success would leave a client's forgery intact on every branch
+  // that writes nothing -- an unregistered route, a refusal, a prefetch.
+  const requestHeaders = new Headers(request.headers);
+  const forgedInternalHeaders = stripInternalAuthHeaders(requestHeaders);
+  if (forgedInternalHeaders.length > 0) {
+    // Names only. The values are attacker-controlled text, and what an operator
+    // needs to know is that somebody tried.
+    console.warn("Client sent internal auth headers", {
+      pathname: request.nextUrl.pathname,
+      headers: forgedInternalHeaders,
+    });
+  }
+
   // N1a. Answer a CORS preflight from the Capacitor shell here, because no
   // route does: there is not one `export async function OPTIONS` in the whole
   // of `app/api/`, so a preflight would otherwise reach a handler that answers
@@ -176,8 +223,39 @@ export function proxy(request: NextRequest) {
     }
   }
 
+  // Section 5.5, steps 5 and 6. The verifier has to run *before* the
+  // mutation-origin check or N1b does not exist -- that ordering is the one
+  // surviving reason the design rejected verifying only inside routes.
+  //
+  // `N1B_BEARER_ROUTES` is empty by approval (decision 13), so today every
+  // verdict is `not_applicable` and this changes nothing about any request.
+  // The order is what is being put in place; opening it is a separate act, one
+  // route at a time, each with evidence that the route reads the bearer rather
+  // than the cookie session.
+  const bearer = nativeBearerVerdict({
+    pathname: request.nextUrl.pathname,
+    authorization: request.headers.get("authorization"),
+    registeredRoutes: N1B_BEARER_ROUTES,
+    verify: (token) => {
+      const verdict = verifyMobileAccessTokenString(token);
+      return verdict.ok
+        ? { ok: true, identity: verdict.identity }
+        : { ok: false, failure: verdict.failure };
+    },
+  });
+  if (bearer.kind === "reject") {
+    return withNativeCors(blockedBearerResponse(), request);
+  }
+  if (bearer.kind === "yes") {
+    applyMobileIdentityHeaders(requestHeaders, bearer.identity);
+  }
+
   if (
     request.nextUrl.pathname.startsWith("/api/") &&
+    // Replaced, not skipped: a verified bearer is not an ambient credential,
+    // so the premise the check exists to defend does not hold for it. Every
+    // other verdict -- including `no` and `not_applicable` -- still faces it.
+    bearer.kind !== "yes" &&
     requiresMutationOriginCheck(request.method, request.nextUrl.pathname) &&
     !hasValidMutationOrigin(request)
   ) {
@@ -198,7 +276,13 @@ export function proxy(request: NextRequest) {
   // behaving exactly as it did while the matcher excluded it -- the fix adds
   // the security checks to prefetches without also starting to redirect them.
   if (isRouterPrefetch(request)) {
-    return withNativeCors(NextResponse.next(), request);
+    // The stripped headers, not the request's own: a prefetch is the one early
+    // return that reaches a route, so `NextResponse.next()` with no argument
+    // here would forward a client-sent identity header untouched.
+    return withNativeCors(
+      NextResponse.next({ request: { headers: requestHeaders } }),
+      request
+    );
   }
 
   // R-05-LANG. Send a non-English visitor to their own localized page before
@@ -274,7 +358,8 @@ export function proxy(request: NextRequest) {
   const policyHeader = enforce
     ? "Content-Security-Policy"
     : "Content-Security-Policy-Report-Only";
-  const requestHeaders = new Headers(request.headers);
+  // `requestHeaders` was built above, with the internal auth namespace already
+  // stripped and, where the bearer verified, rewritten.
   requestHeaders.set("x-tomverse-pathname", request.nextUrl.pathname);
   // The query string travels beside the path because a server component cannot
   // read either one. `app/not-found.tsx` needs both to hand a visitor back to
