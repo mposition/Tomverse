@@ -212,37 +212,39 @@ jobs:
     # report a failure about the wrong thing.
     if: needs.audit.outputs.production_check == 'success' && needs.audit.outputs.browser_install == 'success'
     runs-on: ubuntu-latest
-    # The suite was ~167 minutes of execution when it last ran end to end
-    # (6136 indices in 150 minutes, extrapolated to 6832), so six shards puts
-    # the average near 28 minutes.
+    # Measured on run #55 (2026-09-01), the first run of this shape. Test step
+    # time, then whole job, against what `--list --shard=i/6` says each shard
+    # holds:
     #
-    # The split is even by count. Measured 2026-09-01 with `--list --shard=i/6`
-    # on this tree, which also shows what `--shard` actually cuts here:
+    #   1/6  30m10s  32m15s   desktop-chromium 1150
+    #   2/6  24m06s  25m44s   desktop-chromium  558   desktop-compact  575
+    #   3/6  20m22s  22m12s   desktop-compact  1133   mobile-safari      5
+    #   4/6  37m37s  39m12s   mobile-safari    1145
+    #   5/6  29m12s  31m17s   mobile-safari     558   mobile-chromium  575
+    #   6/6  21m13s  23m14s   mobile-chromium  1133
     #
-    #   1/6  1150   desktop-chromium 1150
-    #   2/6  1133   desktop-chromium  558   desktop-compact  575
-    #   3/6  1138   desktop-compact  1133   mobile-safari      5
-    #   4/6  1145   mobile-safari    1145
-    #   5/6  1133   mobile-safari     558   mobile-chromium  575
-    #   6/6  1133   mobile-chromium  1133
+    # 162m40s of execution in 48m48s of wall clock, against a suite that had
+    # been failing at a 150-minute ceiling without reaching its end.
     #
-    # Counts land within 1.5% of each other, and the shards fall almost along
-    # the project boundaries because Playwright shards the list in project
-    # order. That is not the imbalance e2e.yml records -- there the weight was
-    # diffuse inside one browser -- but it does mean the remaining imbalance is
-    # the engines: WebKit owns most of 3, 4 and 5, and it is the slower of the
-    # two. Nothing here measured that, because WebKit cannot be downloaded in
-    # the container this was written in.
+    # The counts are within 1.5% of each other and the times are not: 20m22s to
+    # 37m37s, a factor of 1.85. Two things cause it and neither is fixable by
+    # re-balancing counts. WebKit is the slower engine and shard 4 is all of it.
+    # And desktop-chromium costs more per case than mobile-chromium (30m10s for
+    # 1150 against 21m13s for 1133) because the screenshot goldens are captured
+    # on desktop-chromium only.
     #
-    # So 75 is a ceiling chosen from the count split plus room for an engine
-    # that costs more per case, not from a timed run. THE FIRST RUN OF THIS
-    # WORKFLOW IS THE MEASUREMENT -- read the six job durations and tighten
-    # this, the way e2e.yml's comment carries its own.
+    # 75 stays. The worst shard used 52% of it, and the step below used 63% of
+    # its own 60 -- which sounds like room to give back until you price what
+    # the ceiling is actually insuring against. e2e.yml measured the same suite
+    # at 83 and then 97 minutes of execution on different nights, so a 17%
+    # unkind-runner day puts shard 4 near 46 minutes, and the suite grows. A
+    # ceiling is not an estimate of the run; it is what stops a hung Playwright
+    # server burning the job, and 75 does that while leaving an ordinary bad
+    # night alone.
     #
-    # It is a ceiling, not a target: it exists so a hung Playwright server
-    # fails one shard instead of burning the whole matrix, and raising it to
-    # buy headroom spends exactly the protection it is for. If a shard nears
-    # it, add shards.
+    # If a shard does start nearing it, add shards rather than minutes. Shard 4
+    # is the one to watch, and splitting further would divide the WebKit block
+    # that makes it the slowest.
     timeout-minutes: 75
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
