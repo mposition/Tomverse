@@ -106,6 +106,8 @@ type DesktopChatShellProps = {
   voiceInputEnabled?: boolean;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
+  /** Passed straight through to the composer; see ChatInput's own prop. */
+  voiceIdentityKey?: string | null;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -283,6 +285,7 @@ export function DesktopChatShell({
   attachmentCapabilities,
   voiceInputEnabled = false,
   onVoiceTranscript,
+  voiceIdentityKey = null,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -1252,6 +1255,7 @@ export function DesktopChatShell({
               attachmentCapabilities={attachmentCapabilities}
               voiceInputEnabled={voiceInputEnabled}
               onVoiceTranscript={onVoiceTranscript}
+              voiceIdentityKey={voiceIdentityKey}
               onGuestSignInPrompt={onGuestSignInPrompt}
               isGuestMode={isGuestMode}
               guestPreviewMode={guestPreviewMode}
