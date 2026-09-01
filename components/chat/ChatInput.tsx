@@ -699,6 +699,17 @@ type ChatInputProps = {
    * appending to the value it currently holds.
    */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
+  /**
+   * Which *person* this tab is operating as
+   * (`identityNamespaceKey`, lib/chatIdentityNamespace.ts).
+   *
+   * A running voice session ends when this changes, so it has to distinguish
+   * account A from account B rather than only "guest" from "signed in": the
+   * two-valued form could not see one account replacing another in the same
+   * tab, and that is a privacy boundary. `null` while the session provider is
+   * still resolving, which is never treated as a change.
+   */
+  voiceIdentityKey?: string | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
@@ -836,6 +847,7 @@ export function ChatInput({
   onStartImageDraft,
   voiceInputEnabled = false,
   onVoiceTranscript,
+  voiceIdentityKey = null,
   imageGenerationLock = null,
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
@@ -1268,10 +1280,10 @@ export function ChatInput({
   const voiceScopeId = draftScopeId;
   const voice = useVoiceRecorder({
     scopeId: voiceScopeId,
-    // A change of who is signed in ends a running session for the same reason
-    // a conversation change does: the draft it was going to land in is no
-    // longer the same person's.
-    identityKey: isGuestMode ? "guest" : "account",
+    // The real per-account key, not a two-valued guest/account flag: account A
+    // becoming account B in one tab has to end the session, and only a key
+    // that names the account can see that.
+    identityKey: voiceIdentityKey,
     onTranscript: (transcript, scopeId) => {
       if (onVoiceTranscript) {
         onVoiceTranscript(transcript, scopeId);

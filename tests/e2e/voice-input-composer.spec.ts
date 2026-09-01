@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   expectNoHorizontalOverflow,
+  mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
 import {
@@ -602,24 +603,49 @@ test.describe("a voice session belongs to one conversation", () => {
     expect(openTracks).toBe(0);
   });
 
-  test("a transcript that arrives after a switch reaches no draft @ui-risk", async ({
+  test("a switch mid-transcription abandons the upload and writes no draft @ui-risk", async ({
     page,
   }) => {
+    /*
+      What this proves, precisely: leaving the conversation while the clip is
+      being transcribed abandons that upload, and the words reach no draft —
+      not B's, and not A's either.
+
+      What it deliberately does *not* claim: that a transcript callback
+      arriving after the boundary moved is dropped by the scope lookup. It
+      cannot, because `discardCapture()` aborts the request, so the response
+      below never becomes an `onTranscript` call at all. That path is where it
+      can actually be executed — `tests/voiceCaptureAdapter.test.mjs`, "a
+      transcript for a cancelled session reaches no draft at all", whose
+      injected `fetch` ignores the abort so the response really does arrive
+      late, and `tests/voiceSessionScopes.test.mjs` for the fail-closed lookup.
+    */
     await openTwoGuestConversations(page);
 
-    // The server answers only when the test says so, so the switch lands while
-    // the request is genuinely in flight. Captured through an object because a
-    // `let` assigned only inside a callback narrows to `never` at the call site.
+    // The upload is held open, and the test waits for it to genuinely reach
+    // the wire before switching. Without that wait, a switch that happened to
+    // land before the request started would pass this test having exercised
+    // nothing. Both are captured through objects because a `let` assigned only
+    // inside a callback narrows to `never` at the call site.
+    const arrival: { seen: (() => void) | null } = { seen: null };
+    const uploadStarted = new Promise<void>((resolve) => {
+      arrival.seen = resolve;
+    });
     const gate: { release: (() => void) | null } = { release: null };
     await page.route(VOICE_ENDPOINT, async (route) => {
+      arrival.seen?.();
       await new Promise<void>((resolve) => {
         gate.release = resolve;
       });
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ transcript: "이 문장은 사라져야 합니다" }),
-      });
+      // The switch has aborted this request by now, so fulfilling it is the
+      // gesture of a server that answered anyway; the client is gone.
+      await route
+        .fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ transcript: "이 문장은 사라져야 합니다" }),
+        })
+        .catch(() => {});
     });
     const chatRequests: string[] = [];
     await page.route("**/api/chat", async (route) => {
@@ -632,8 +658,8 @@ test.describe("a voice session belongs to one conversation", () => {
     await page.waitForTimeout(900);
     await page.getByTestId("composer-voice-button").click();
 
-    // Now transcribing. Leave the conversation, then let the server answer.
-    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    // Genuinely uploading now — the request is in the route handler.
+    await uploadStarted;
     await switchToConversation(page, "대화 B");
     await expect(page.getByTestId("voice-input-error")).toHaveAttribute(
       "data-voice-error-code",
@@ -642,8 +668,6 @@ test.describe("a voice session belongs to one conversation", () => {
     gate.release?.();
     await page.waitForTimeout(1000);
 
-    // The words were spoken into a conversation the user has left; they belong
-    // to no draft at all — not B's, and not A's either.
     await expect(page.getByTestId("chat-textarea")).toHaveValue("");
     await page.getByTestId("voice-input-error-dismiss").click();
     await switchToConversation(page, "대화 A");
@@ -709,5 +733,321 @@ test.describe("a voice session belongs to one conversation", () => {
     await expect(textarea).toHaveValue("기다리는 동안 친 글 말한 부분", {
       timeout: 15_000,
     });
+  });
+});
+
+/**
+ * A recording belongs to one *person*, not merely to one conversation.
+ *
+ * docs/policy/voice-input.md §8.4, checklist item F-2. `ChatInput` is not
+ * remounted when the signed-in account changes either, so a transcript of
+ * words spoken by account A could be appended to a composer account B is now
+ * looking at. That is a privacy boundary rather than a tidiness one, which is
+ * why it is driven here and not only in the reducer's tests.
+ *
+ * ## How the account is changed
+ *
+ * `next-auth`'s `SessionProvider` re-reads `/api/auth/session` when the tab
+ * becomes visible again (`refetchOnWindowFocus`), so a test can serve a
+ * different account from that route and dispatch `visibilitychange`. That is
+ * the real client path — no test-only hook in the product, and `useSession`,
+ * `identityNamespaceKey`, `voiceIdentityKey` and the hook's boundary effect
+ * all execute exactly as they do for a user.
+ *
+ * ## What the browser can and cannot produce
+ *
+ * The checklist named four paths, two of which pass through an *unresolved*
+ * session (`voiceIdentityKey === null`). Those two are not reachable here, and
+ * that is a property of the app rather than a gap in the harness:
+ * `app/(site)/(application)/layout.tsx` resolves the session on the server and
+ * hands it to `SessionProvider`, so `hasInitialSession` is always true and
+ * `status` is never `"loading"` on this page. A later refetch keeps the
+ * previous session while it runs, so `sessionUserId` never drops out either.
+ * `null` therefore only ever describes a page this app does not render.
+ *
+ * So the browser is asked for the transitions it can actually make — a refetch
+ * returning the same account, a different account, and a sign-out — and the
+ * `null` paths stay where they can be executed at all, in
+ * `tests/voiceSessionScopes.test.mjs`.
+ */
+
+type QaSessionUser = { id: string; name: string } | null;
+
+const sessionBody = (user: QaSessionUser) =>
+  user === null
+    ? null
+    : {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: `${user.id}@tomverse.app`,
+          image: null,
+          plan: "Free",
+        },
+        expires: "2099-01-01T00:00:00.000Z",
+      };
+
+/**
+ * Serves a session the test can change, and hands back the handle to change
+ * it. Registered after the fixtures' own session route so this one wins.
+ *
+ * `reads` is counted because a refetch that never happened would make every
+ * assertion below pass for the wrong reason. `SessionProvider` does not fetch
+ * at mount when it was given a session, so this starts at 0 and each
+ * `refetchSession` that gets through adds one.
+ */
+const installSwitchableSession = async (page: Page) => {
+  // The server layout signs the page in as `qa-user`, so that is who the tab
+  // is until a test says otherwise.
+  const state: { user: QaSessionUser; reads: number } = {
+    user: { id: "qa-user", name: "QA User" },
+    reads: 0,
+  };
+  await page.route("**/api/auth/session**", (route) => {
+    state.reads++;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "Cache-Control": "no-store" },
+      body: JSON.stringify(sessionBody(state.user)),
+    });
+  });
+  return state;
+};
+
+/**
+ * Makes the page re-read its session, the way returning to the tab does.
+ *
+ * One dispatch is enough here: `SessionProvider` only skips a refetch it made
+ * *later* than the current second (`now() < _lastSync`), and the last sync was
+ * the mount, so the first `visibilitychange` gets through. The callers assert
+ * on what the page did — the same-account test also asserts the read count —
+ * rather than trusting this helper.
+ */
+const refetchSession = async (page: Page) => {
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+};
+
+/** Opens the composer signed in as `qa-user`, with voice input switched on. */
+const openComposerSignedIn = async (page: Page) => {
+  await mockAuthenticatedApi(page);
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await installFakeMicrophone(page);
+  const session = await installSwitchableSession(page);
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_voice_input",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await page.goto("/chat?lang=ko");
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await freezeAnimations(page);
+  return session;
+};
+
+test.describe("a voice session belongs to one person", () => {
+  test("a session refetch for the same account does not end a recording @ui-risk", async ({
+    page,
+  }) => {
+    /*
+      The refetch the checklist calls `A -> A`. It is the one this rule is
+      most likely to get wrong in the direction that costs the user work:
+      cancelling a recording because the tab was left and returned to.
+
+      What holds it is that `voiceIdentityKey` is a *string*, so a refetch
+      returning the same account produces the same key and the hook's boundary
+      effect does not re-run at all. That is also why this test asserts the
+      refetch happened: without the read count it would pass just as happily
+      against a page that ignored `visibilitychange` entirely, and would then
+      be guarding nothing.
+    */
+    const session = await openComposerSignedIn(page);
+    const voiceServer = await mockVoiceEndpoint(page, () => ({
+      status: 200,
+      body: { transcript: "같은 계정에서 계속" },
+    }));
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(600);
+
+    expect(session.reads, "nothing has re-read the session yet").toBe(0);
+    await refetchSession(page);
+    await expect
+      .poll(() => session.reads, { timeout: 5_000 })
+      .toBeGreaterThan(0);
+
+    await expect(page.getByTestId("voice-input-error")).toHaveCount(0);
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+
+    // Still the same recording: it finishes and its words arrive.
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(
+      "같은 계정에서 계속",
+      { timeout: 15_000 }
+    );
+    expect(voiceServer.requests).toHaveLength(1);
+  });
+
+  test("another account signing in mid-recording ends it and says so @ui-risk", async ({
+    page,
+  }) => {
+    const session = await openComposerSignedIn(page);
+    const voiceServer = await mockVoiceEndpoint(page);
+    const chatRequests: string[] = [];
+    await page.route("**/api/chat", async (route) => {
+      chatRequests.push(route.request().method());
+      await route.abort();
+    });
+
+    // Typed into the new-conversation draft, so the *scope* does not move
+    // when the account does — an account switch that also changed the draft
+    // key would prove only the rule already covered above.
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("계정 A가 쓰던 초안");
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(600);
+
+    session.user = { id: "qa-user-2", name: "다른 사람" };
+    await refetchSession(page);
+
+    const error = page.getByTestId("voice-input-error");
+    await expect(error).toBeVisible();
+    await expect(error).toHaveAttribute(
+      "data-voice-error-code",
+      "VOICE_SCOPE_CHANGED"
+    );
+
+    // The clip was thrown away rather than transcribed for the new account.
+    await page.waitForTimeout(800);
+    expect(
+      voiceServer.requests,
+      "account A's audio must not be sent while account B holds the tab"
+    ).toEqual([]);
+    expect(chatRequests).toEqual([]);
+
+    /*
+      What account B's composer holds, stated as it actually is.
+
+      Voice's guarantee is that it added nothing: no clip was uploaded, so
+      there is no transcript to have appended. The text below is account A's
+      *typed* draft, and account B can read it, because
+      `lib/conversationDraftStore.ts` keys drafts by conversation id alone —
+      the boundary this feature added is on the voice session, not on the
+      draft store.
+
+      That is a real finding and it is recorded as one
+      (docs/policy/voice-input.md §8.4, "이 기능이 고치지 않은 것"). It is not
+      fixed here: identity-scoped drafts change a store every conversation
+      shares, and which of "clear on switch" or "keep per identity" is right is
+      a product decision, not a detail of this change. Asserting the observed
+      value rather than `""` keeps this test honest and makes it fail loudly on
+      the day that decision is taken.
+    */
+    await expect(textarea).toHaveValue("계정 A가 쓰던 초안");
+
+    // And the microphone was closed by the switch, not left listening.
+    const openTracks = await page.evaluate(
+      () =>
+        (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice
+          .openTracks
+    );
+    expect(openTracks).toBe(0);
+  });
+
+  test("an account switch mid-transcription abandons the upload @ui-risk", async ({
+    page,
+  }) => {
+    /*
+      Same boundary as the conversation version above, and the same limit on
+      what it claims: the switch abandons an upload that is genuinely on the
+      wire, and account B's composer never receives account A's words. It does
+      not claim the scope lookup dropped a late callback — `discardCapture()`
+      aborts the request, so no callback is ever made. That claim lives in
+      `tests/voiceCaptureAdapter.test.mjs` and `tests/voiceSessionScopes.test.mjs`.
+    */
+    const session = await openComposerSignedIn(page);
+
+    const arrival: { seen: (() => void) | null } = { seen: null };
+    const uploadStarted = new Promise<void>((resolve) => {
+      arrival.seen = resolve;
+    });
+    const gate: { release: (() => void) | null } = { release: null };
+    const transcript = "계정 A가 말한 문장";
+    await page.route(VOICE_ENDPOINT, async (route) => {
+      arrival.seen?.();
+      await new Promise<void>((resolve) => {
+        gate.release = resolve;
+      });
+      await route
+        .fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ transcript }),
+        })
+        .catch(() => {});
+    });
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(900);
+    await page.getByTestId("composer-voice-button").click();
+
+    // The clip is on the wire before the account changes; a switch that beat
+    // the upload would prove nothing about abandoning one.
+    await uploadStarted;
+    session.user = { id: "qa-user-2", name: "다른 사람" };
+    await refetchSession(page);
+    await expect(page.getByTestId("voice-input-error")).toHaveAttribute(
+      "data-voice-error-code",
+      "VOICE_SCOPE_CHANGED"
+    );
+
+    gate.release?.();
+    await page.waitForTimeout(1000);
+
+    const textarea = page.getByTestId("chat-textarea");
+    expect(
+      await textarea.inputValue(),
+      "account B must not receive account A's words"
+    ).not.toContain(transcript);
+    await expect(textarea).toHaveValue("");
+  });
+
+  test("signing out mid-recording ends the session @ui-risk", async ({
+    page,
+  }) => {
+    // The other half of the checklist's "log out, then log in as B": the
+    // sign-out alone is already a change of person, and must not wait for the
+    // next account to arrive before the microphone is closed.
+    const session = await openComposerSignedIn(page);
+    const voiceServer = await mockVoiceEndpoint(page);
+
+    await page.getByTestId("composer-voice-button").click();
+    await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
+    await page.waitForTimeout(600);
+
+    session.user = null;
+    await refetchSession(page);
+
+    await expect(page.getByTestId("voice-input-error")).toHaveAttribute(
+      "data-voice-error-code",
+      "VOICE_SCOPE_CHANGED"
+    );
+    await page.waitForTimeout(800);
+    expect(voiceServer.requests).toEqual([]);
+    const openTracks = await page.evaluate(
+      () =>
+        (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice
+          .openTracks
+    );
+    expect(openTracks).toBe(0);
   });
 });
