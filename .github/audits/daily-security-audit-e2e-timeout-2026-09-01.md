@@ -159,11 +159,7 @@ worker는 1개로 고정돼 있기 때문입니다.
 
 우선순위 순으로, **아직 구현하지 않았습니다.**
 
-1. **스위트를 샤딩합니다.** 이 저장소는 이미 이 패턴을 씁니다 —
-   Nightly Visual Regression은 5샤드, `scripts/run-ui-risk-shard.mjs`도 있습니다.
-   4개 프로젝트를 matrix job으로 쪼개면 벽시계 시간이 대략 1/4이 되고, 실패한
-   프로젝트가 어느 것인지도 체크 이름에서 바로 읽힙니다. 예산을 올리는 것과 달리
-   스위트가 더 자라도 다시 무너지지 않습니다.
+1. ~~**스위트를 샤딩합니다.**~~ **완료 — 8절 참조.**
 2. **CI worker 수를 올릴지 판단합니다.** `workers: 1`은 4 vCPU 러너에서 비쌉니다.
    다만 `chat-state-visual-regression.spec.ts`의 screenshot golden이 병렬 부하에
    민감할 수 있으므로, 골든 스펙만 worker 1로 남기고 나머지를 올리는 형태여야 합니다.
@@ -176,3 +172,69 @@ worker는 1개로 고정돼 있기 때문입니다.
    못한 상태로 남아 있습니다.
 
 1번이 없으면 2·3·4를 다 해도 다음 확장에서 같은 자리로 돌아옵니다.
+
+
+## 8. 1번 조치 — 샤딩 (구현 완료)
+
+`.github/workflows/daily-security-audit.yml`을 세 job으로 나눴습니다.
+
+```
+audit   정적·의존성·단위 검사 + 두 캐시(.next, ms-playwright) 워밍
+e2e     matrix 6샤드, needs: audit, fail-fast: false
+report  needs: [audit, e2e], if: always() — 리포트 발송과 최종 판정
+```
+
+**프로젝트가 아니라 `--shard`로 쪼갰습니다.** 프로젝트 분할은 `e2e.yml`이 이미
+두 가지 이유로 거부한 방식입니다 — 프로젝트가 lopsided하고, `npm run test:e2e:run`
+대신 프로젝트별 `playwright test` 호출로 바뀌어야 하는데 그 명령은
+security-regression이 "아무도 이 실행을 조용히 좁히지 못하도록" 고정해 둔 것입니다.
+`--shard`는 그 명령을 그대로 두고, 여섯 샤드의 합집합이 기존 단일 step이 실행하던
+것과 정확히 같습니다.
+
+측정한 분할입니다 (`--list --shard=i/6`, 2026-09-01, 이 트리):
+
+```
+1/6  1150   desktop-chromium 1150
+2/6  1133   desktop-chromium  558   desktop-compact  575
+3/6  1138   desktop-compact  1133   mobile-safari      5
+4/6  1145   mobile-safari    1145
+5/6  1133   mobile-safari     558   mobile-chromium  575
+6/6  1133   mobile-chromium  1133
+```
+
+개수는 서로 1.5% 안에 들어옵니다. Playwright가 프로젝트 순서대로 자르기 때문에
+샤드가 거의 프로젝트 경계와 일치하고, 이는 `e2e.yml`이 기록한 불균형(한 브라우저
+안에서 무게가 흩어진 경우)과 다른 모양입니다. **남는 불균형은 엔진**입니다 —
+WebKit이 3·4·5의 대부분을 갖고 있고 둘 중 느린 쪽입니다.
+
+### 이 조치가 측정하지 못한 것
+
+**샤드별 실행 시간은 재지 못했습니다.** 이 컨테이너는 WebKit을 받을 수 없고
+(proxy 403), 2시간 반짜리 스위트를 돌릴 수도 없습니다. 그래서 `timeout-minutes: 75`는
+개수 분할과 "엔진 하나가 더 비싸다"는 여유에서 나온 **ceiling이지 측정값이 아닙니다.**
+워크플로 주석에도 그렇게 적혀 있습니다 — **첫 실행의 여섯 job 시간이 측정이고,
+그것을 읽고 조여야 합니다.**
+
+### 설계에서 지킨 것
+
+- **`fail-fast: false`** — 실패한 샤드가 형제를 죽이면 빨간 spec 하나가 읽을 수 없는
+  run이 됩니다.
+- **집계는 `needs.e2e.result`** 하나로 하고, `skipped`·`cancelled`도 실패로 셉니다.
+  실행되지 않은 샤드는 아무것도 검증하지 않았고, 그것을 통과로 세는 것이 집계 gate가
+  gate 없이 초록이 되는 방식입니다. `e2e.yml`의 같은 판정을 그대로 옮겼습니다.
+- **`Playwright browser setup`이 리포트에서 독립 항목으로 남습니다.** 브라우저 설치는
+  audit job에 남겨 캐시를 한 번만 채우고, 그 결과를 job output으로 보고합니다.
+  "브라우저를 못 깔았다"와 "테스트가 실패했다"의 구분은 run #33~#34에서 mobile-safari가
+  몇 주간 조용히 실행되지 않았던 것을 진단 가능하게 만든 바로 그 구분입니다.
+- **모든 샤드가 두 브라우저를 설치합니다.** 어느 샤드가 어느 프로젝트를 갖는지는
+  현재 테스트 목록의 순서가 정하므로 spec 하나만 추가돼도 움직입니다. 지난달 필요했던
+  브라우저만 까는 샤드는 skip이 아니라 launch 실패가 됩니다.
+- **리포트 job 이름은 `Security audit and daily report` 그대로**입니다. 샤딩 이전에
+  이 워크플로가 보고하던 이름을 지켜, 그 결과를 보던 것이 계속 찾을 수 있게 합니다.
+- **아티팩트는 샤드별 이름**을 갖습니다. 하나의 이름을 두고 경쟁하면 첫 업로드만
+  살아남습니다.
+- `npm run security:regression`(188 checks)과 `npm run check:encoding:strict` 통과.
+  이 워크플로에 걸린 substring 계약 — `npm run test:e2e:run`, `chromium webkit`,
+  `--grep` 없음, `--update-snapshots` 없음, `check_result` 라벨들 — 이 모두 유지됩니다.
+
+2·3·4번은 아직 그대로입니다.
