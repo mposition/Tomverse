@@ -7,11 +7,14 @@ import {
   missingConfirmationRuns,
   parseProviderCatalogResponse,
   planCatalogReconciliation,
+  providerCatalogHttpFailure,
   providerCatalogUrl,
+  PROVIDER_CATALOG_KEY_REJECTED,
 } from "../lib/providerModelCatalogCore.ts";
 import {
   AI_PROVIDERS,
   PROVIDER_API_CONFIGURATION,
+  PROVIDER_API_KEY_ENV_NAMES,
 } from "../lib/modelRegistryShared.ts";
 
 test("parses OpenAI-compatible model lists and excludes non-chat products", () => {
@@ -328,5 +331,51 @@ test("only the paginating providers carry a cursor, each in its own parameter", 
   assert.equal(
     providerCatalogUrl("openai", "page_2").search,
     ""
+  );
+});
+
+// A refused credential is not a catalogue failure. Perplexity's model cycle
+// reported `failed (PROVIDER_MODEL_CATALOG_HTTP_401)` while every Sonar chat
+// turn was failing on the same key, and the status code said none of that.
+
+test("a rejected credential is classified apart from every other HTTP failure", () => {
+  for (const status of [401, 403]) {
+    const failure = providerCatalogHttpFailure("perplexity", status);
+    assert.equal(failure.code, PROVIDER_CATALOG_KEY_REJECTED);
+    // The status is kept in the detail: an operator checking the claim needs
+    // to know which of the two it was.
+    assert.match(failure.detail, new RegExp(`HTTP ${status}`));
+  }
+});
+
+test("every other failing status keeps the status in its code", () => {
+  // 404 in particular has to stay distinguishable: it is the shape a dropped
+  // endpoint takes, and a month of them is what put `v1/models` in
+  // CATALOG_PATHS.
+  for (const status of [404, 429, 500, 503]) {
+    assert.equal(
+      providerCatalogHttpFailure("anthropic", status).code,
+      `PROVIDER_MODEL_CATALOG_HTTP_${status}`
+    );
+  }
+});
+
+test("a rejected credential names every accepted spelling of its key", () => {
+  // Same reason PROVIDER_MODEL_CATALOG_KEY_MISSING does it: an operator sent
+  // to the canonical variable rotates one the deployment is not reading.
+  for (const provider of AI_PROVIDERS) {
+    const detail = providerCatalogHttpFailure(provider, 401).detail;
+    for (const name of PROVIDER_API_KEY_ENV_NAMES[provider]) {
+      assert.ok(detail.includes(name), `${provider}: ${name} is not named`);
+    }
+  }
+});
+
+test("a rejected credential says the provider's chat traffic is failing too", () => {
+  // The whole point of the separate code. A row that only reports a failed
+  // scan reads as a reporting problem, and the outage stays invisible.
+  assert.match(
+    providerCatalogHttpFailure("perplexity", 401).detail,
+    /chat requests to this provider send the same key/i
   );
 });
