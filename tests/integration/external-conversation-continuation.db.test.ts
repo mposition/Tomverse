@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
@@ -7,6 +8,10 @@ import { conversationSurface } from "@/lib/continuationRoutes";
 import { createResourceUnlockCookie } from "@/lib/conversationLock";
 import { EXTERNAL_CONTINUATION_FLAG_KEY } from "@/lib/externalContinuationAccess";
 import { CONTINUATION_SEED_VERSION } from "@/lib/externalContinuationSeedCore";
+import {
+    listContinuationsBySource,
+    listExternalConversations,
+} from "@/lib/externalImportService";
 import {
     createExternalContinuation,
     getContinuationBridge,
@@ -921,5 +926,162 @@ test("the rollback takes the excerpt, never the conversation or its messages", a
     assert.deepEqual(
         own.map((message) => message.content),
         ["written while the feature was on"]
+    );
+});
+
+test("the list counts this account's continuations and nobody else's", async () => {
+    const user = await createUser();
+    const stranger = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+
+    // Two of the owner's own forks, and one belonging to somebody else who
+    // imported nothing here -- the stranger's bridge points at the same
+    // snapshot row on purpose, which is the only way to prove the `where`
+    // clause is doing the work rather than the data happening to be tidy.
+    const first = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        request: requestWithGrant(),
+    });
+    const second = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        request: requestWithGrant(),
+    });
+    const strangerConversation = await prisma.conversation.create({
+        data: { userId: stranger.id, title: "theirs", productKey: "chat" },
+    });
+    await prisma.conversationContinuationBridge.create({
+        data: {
+            userId: stranger.id,
+            conversationId: strangerConversation.id,
+            externalConversationId: snapshot.id,
+            provider: "chatgpt",
+            sourceImportedAt: new Date(),
+            sourceConversationDigest: `d-${randomUUID()}`,
+            sourceDigestVersion: 1,
+            sourceMessageCount: 6,
+            seedFromOrdinal: 0,
+            seedToOrdinal: 5,
+            seedMessageCount: 6,
+            seedTruncatedMessageCount: 0,
+            seedOmittedMessageCount: 0,
+            contextSeedVersion: CONTINUATION_SEED_VERSION,
+            idempotencyKey: randomUUID(),
+        },
+    });
+
+    const listed = await listExternalConversations(user.id);
+    const row = listed.conversations.find((entry) => entry.id === snapshot.id);
+    assert.ok(row);
+    // Two, not three: the stranger's continuation of the same snapshot is not
+    // counted, and there is no field here that could report it exists.
+    assert.equal(row.continuationCount, 2);
+    assert.deepEqual(
+        [...row.continuations]
+            .map((entry) => entry.conversationId)
+            .sort(),
+        [first.conversationId, second.conversationId].sort()
+    );
+    assert.ok(
+        [first.conversationId, second.conversationId].includes(
+            row.latestContinuationId ?? ""
+        )
+    );
+
+    // And the stranger's own list does not learn that this snapshot is the
+    // owner's: they see no rows at all, because the snapshot is not theirs.
+    const strangerList = await listExternalConversations(stranger.id);
+    assert.equal(strangerList.conversations.length, 0);
+});
+
+test("a source with no continuation reports zero rather than nothing", async () => {
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+
+    const listed = await listExternalConversations(user.id);
+    const row = listed.conversations.find((entry) => entry.id === snapshot.id);
+    assert.ok(row);
+    // The quick action reads these three on every row, so "no continuations"
+    // has to be a value rather than an absence -- an undefined count would
+    // render the same as a locked row's missing one.
+    assert.equal(row.continuationCount, 0);
+    assert.equal(row.latestContinuationId, null);
+    assert.deepEqual(row.continuations, []);
+});
+
+test("one grouped read answers a whole page of sources", async () => {
+    const user = await createUser();
+    const expected = new Map<string, number>();
+    for (let index = 0; index < 5; index += 1) {
+        const { snapshot } = await seedSnapshot(user.id);
+        // A different number of forks each, so a helper that returned the same
+        // answer for every source would be caught rather than averaged out.
+        for (let fork = 0; fork <= index; fork += 1) {
+            await createExternalContinuation({
+                userId: user.id,
+                externalConversationId: snapshot.id,
+                idempotencyKey: randomUUID(),
+                request: requestWithGrant(),
+            });
+        }
+        expected.set(snapshot.id, index + 1);
+    }
+
+    // The batching function itself: every id in, every count out, one call.
+    const grouped = await listContinuationsBySource(user.id, [
+        ...expected.keys(),
+    ]);
+    for (const [sourceId, count] of expected) {
+        assert.equal(grouped.get(sourceId)?.continuationCount, count, sourceId);
+    }
+
+    // And the list agrees, so the page is served from that one read.
+    const listed = await listExternalConversations(user.id);
+    for (const row of listed.conversations) {
+        assert.equal(row.continuationCount, expected.get(row.id), row.id);
+    }
+});
+
+test("the grouped read asks once for the whole page, not once per row", () => {
+    // A source assertion, because "how many round trips" is a claim about the
+    // shape of the code rather than about any one result. The behavioural half
+    // is the test above; this is the half that would notice somebody moving
+    // the call inside `rows.map`.
+    const source = readFileSync("lib/externalImportService.ts", "utf8");
+    const listFn = source.slice(
+        source.indexOf("export async function listExternalConversations")
+    );
+    const body = listFn.slice(0, listFn.indexOf("\n}\n") + 1);
+
+    const calls = body.match(/listContinuationsBySource\(/g) ?? [];
+    assert.equal(calls.length, 1, "called exactly once for the page");
+    // Called before the rows are mapped, with the whole id list -- not from
+    // inside the mapping over rows.
+    assert.ok(
+        body.indexOf("listContinuationsBySource(") <
+            body.indexOf("conversations: rows.map("),
+        "the grouped read happens before the rows are rendered"
+    );
+    assert.match(body, /rows\.map\(\(row\) => row\.id\)/);
+
+    const helperStart = source.indexOf(
+        "export async function listContinuationsBySource"
+    );
+    // Bounded to this function: slicing to end of file would count every
+    // later query in the module and make the "one query" claim meaningless.
+    const helper = source.slice(
+        helperStart,
+        source.indexOf("\n}\n", helperStart) + 1
+    );
+    // One `findMany` with an `in` filter, and the owner in the where clause.
+    assert.match(helper, /externalConversationId:\s*\{\s*in:/);
+    assert.match(helper, /where:\s*\{[\s\S]{0,120}userId,/);
+    assert.equal(
+        (helper.match(/prisma\.\w+\.findMany/g) ?? []).length,
+        1,
+        "one query in the helper"
     );
 });

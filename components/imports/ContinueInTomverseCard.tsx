@@ -1,15 +1,13 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useState } from "react";
 import { ArrowRight, Loader2, MessageSquare } from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
-import { discardResponseBody } from "@/lib/discardResponseBody";
-import { continuationPath } from "@/lib/continuationRoutes";
+import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 
 /**
- * "Tomverse에서 이어가기" — the one place a continuation is started.
+ * "Tomverse에서 이어가기" — the disclosed way to start a continuation.
  *
  * Policy: docs/policy/external-conversation-continuation.md §8.
  *
@@ -22,28 +20,25 @@ import { continuationPath } from "@/lib/continuationRoutes";
  * recent slice of the transcript reaches the model. A confirmation dialog that
  * appears after the conversation exists would be a notification, not a choice.
  *
- * ## Why the idempotency key is minted once per attempt, not once per press
+ * The list's quick action skips this disclosure deliberately, and is allowed
+ * to: it is reached from a screen the owner opened to manage imports, and the
+ * sentences above describe what they are already looking at. This card is
+ * where somebody meets the feature for the first time.
  *
- * The key identifies *this attempt*. It is minted when the card has none and
- * kept across every retry of that attempt, so a double click, a dropped
- * response and a "try again" all resolve to the one conversation the first
- * request created. Only cancelling clears it, because arming again from there
- * is a second, deliberate fork — which §3 allows.
+ * ## Where the idempotency key lives
  *
- * The distinction matters because the server's idempotency is keyed on this
- * value: `createExternalContinuation` reads by key, creates, and re-reads on a
- * unique violation, so two presses that send the *same* key can only ever
- * yield one conversation, and two presses that send *different* keys are
- * required to yield two. A retry that re-mints therefore defeats a working
- * server guard from the client side — the failure this section now exists to
- * prevent.
+ * Not here. `useContinuationLauncher` owns it, because this card and the
+ * list's quick action must not be able to disagree about what a retry is —
+ * see the contract in that file. This component owns the disclosure and
+ * nothing else.
  */
 
-type CardState =
-    | { kind: "idle" }
-    | { kind: "armed" }
-    | { kind: "creating" }
-    | { kind: "failed"; message: string };
+/**
+ * Whether the disclosure is open. The request's own state -- creating,
+ * failed, and the key behind it -- belongs to the launcher, so this type has
+ * shrunk to the one thing the card actually decides.
+ */
+type CardState = { kind: "idle" } | { kind: "armed" };
 
 export function ContinueInTomverseCard({
     externalConversationId,
@@ -59,78 +54,14 @@ export function ContinueInTomverseCard({
     enabled?: boolean;
 }) {
     const { t } = useLanguage();
-    const router = useRouter();
     const [state, setState] = useState<CardState>({ kind: "idle" });
-    const idempotencyKeyRef = useRef<string | null>(null);
+    const launcher = useContinuationLauncher({ externalConversationId });
+    const creating = launcher.status === "creating";
 
-    const arm = useCallback(() => {
-        // Minted only when this card is holding no key, which is what makes a
-        // retry a retry.
-        //
-        // A failed attempt renders the same CTA the idle card does, so "try
-        // again" comes back through here. Minting unconditionally therefore
-        // issued a *new* key on every retry, and the server -- correctly --
-        // treated it as a new request: a POST that had already stored a
-        // conversation and only lost its response produced a second one on the
-        // next press. The comment above this function claimed the key was
-        // "reused by every retry"; the render tree said otherwise, and the
-        // render tree was what ran.
-        //
-        // Cancel is the one thing that clears the ref, so a deliberate second
-        // fork still gets its own key -- which §3 allows. A successful attempt
-        // navigates away and the card unmounts.
-        //
-        // `crypto.randomUUID` is available in every browser this application
-        // supports; the fallback exists so a non-secure context (an http://
-        // preview) fails by creating one conversation rather than by throwing
-        // before the click does anything.
-        idempotencyKeyRef.current ??=
-            typeof crypto !== "undefined" && "randomUUID" in crypto
-                ? crypto.randomUUID()
-                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        setState({ kind: "armed" });
-    }, []);
-
-    const create = useCallback(async () => {
-        const idempotencyKey = idempotencyKeyRef.current;
-        if (!idempotencyKey) return;
-        setState({ kind: "creating" });
-        try {
-            const response = await fetch(
-                `/api/external-conversations/${encodeURIComponent(externalConversationId)}/continuations`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ idempotencyKey }),
-                }
-            );
-            if (!response.ok) {
-                await discardResponseBody(response);
-                setState({
-                    kind: "failed",
-                    // 403 is the rollout flag, and it is the one refusal with
-                    // its own sentence: "not available" is true and "try
-                    // again" would not be.
-                    message:
-                        response.status === 403
-                            ? t("continuation.unavailable")
-                            : t("continuation.createFailed"),
-                });
-                return;
-            }
-            const body = (await response.json()) as { conversationId?: string };
-            if (!body.conversationId) {
-                setState({ kind: "failed", message: t("continuation.createFailed") });
-                return;
-            }
-            router.push(continuationPath(body.conversationId));
-        } catch {
-            // The attempt keeps its key, so pressing the button again resolves
-            // to whatever the first request created rather than making a
-            // second conversation.
-            setState({ kind: "failed", message: t("continuation.createFailed") });
-        }
-    }, [externalConversationId, router, t]);
+    // Arming does not mint anything. A failed attempt collapses back to this
+    // CTA, so pressing it again is a retry of that attempt and must keep its
+    // key; only `launcher.cancel()` below says otherwise.
+    const arm = useCallback(() => setState({ kind: "armed" }), []);
 
     if (!enabled) return null;
 
@@ -147,7 +78,7 @@ export function ContinueInTomverseCard({
                 {t("continuation.ctaDescription")}
             </p>
 
-            {state.kind === "idle" || state.kind === "failed" ? (
+            {state.kind === "idle" ? (
                 <>
                     <button
                         type="button"
@@ -158,19 +89,19 @@ export function ContinueInTomverseCard({
                         {t("continuation.ctaAction")}
                         <ArrowRight className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    {state.kind === "failed" ? (
+                    {launcher.status === "failed" ? (
                         <p
                             className="mt-2 text-sm leading-6 text-red-600 dark:text-red-300"
                             role="status"
                             data-testid="continuation-cta-error"
                         >
-                            {state.message}
+                            {launcher.errorMessage}
                         </p>
                     ) : null}
                 </>
             ) : null}
 
-            {state.kind === "armed" || state.kind === "creating" ? (
+            {state.kind === "armed" ? (
                 <div
                     className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
                     data-testid="continuation-disclosure"
@@ -187,16 +118,25 @@ export function ContinueInTomverseCard({
                             type="button"
                             className="inline-flex items-center gap-2 rounded-xl border border-zinc-900 bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
                             data-testid="continuation-confirm"
-                            disabled={state.kind === "creating"}
-                            onClick={() => void create()}
+                            disabled={creating}
+                            onClick={() => {
+                                void (async () => {
+                                    // Failure collapses the disclosure back to
+                                    // the CTA, which is the retry. The launcher
+                                    // keeps its key across that, so the next
+                                    // press is the same attempt.
+                                    const created = await launcher.start();
+                                    if (!created) setState({ kind: "idle" });
+                                })();
+                            }}
                         >
-                            {state.kind === "creating" ? (
+                            {creating ? (
                                 <Loader2
                                     className="h-4 w-4 animate-spin"
                                     aria-hidden="true"
                                 />
                             ) : null}
-                            {state.kind === "creating"
+                            {creating
                                 ? t("continuation.creating")
                                 : t("continuation.confirm")}
                         </button>
@@ -204,11 +144,12 @@ export function ContinueInTomverseCard({
                             type="button"
                             className="inline-flex items-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                             data-testid="continuation-cancel"
-                            disabled={state.kind === "creating"}
+                            disabled={creating}
                             onClick={() => {
                                 // A new attempt from here is a new fork, so the
-                                // key is dropped rather than kept.
-                                idempotencyKeyRef.current = null;
+                                // launcher drops its key. This is the only
+                                // place in the product that does.
+                                launcher.cancel();
                                 setState({ kind: "idle" });
                             }}
                         >

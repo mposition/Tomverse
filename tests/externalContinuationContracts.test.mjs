@@ -595,34 +595,48 @@ test("the cached flag is never the last word before imported text goes out", () 
 });
 
 test("a retry reuses the attempt's idempotency key and only cancel clears it", () => {
-    const card = readFileSync(
-        "components/imports/ContinueInTomverseCard.tsx",
+    // The contract moved into the shared launcher when the imported-conversation
+    // list gained its own quick action: two components creating continuations
+    // must not be able to disagree about what a retry is, so neither of them
+    // owns the key any more. The claim is unchanged and is asserted where the
+    // code now lives.
+    const launcher = readFileSync(
+        "components/imports/useContinuationLauncher.ts",
         "utf8"
     );
-    const arm = card.slice(card.indexOf("const arm = useCallback"));
-    const armBody = arm.slice(0, arm.indexOf("}, []);"));
+    const start = launcher.slice(launcher.indexOf("const start = useCallback"));
+    const startBody = start.slice(0, start.indexOf("const cancel = useCallback"));
 
-    // The failed card renders the same CTA the idle card does, so `arm` runs
-    // again on every retry. Minting unconditionally there issued a fresh key
-    // and turned one lost response into two conversations.
+    // A failed attempt is retried by calling `start()` again. Minting
+    // unconditionally there issued a *new* key on every retry, so a POST that
+    // had already stored a conversation and only lost its response produced a
+    // second one on the next press.
     assert.match(
-        armBody,
+        startBody,
         /idempotencyKeyRef\.current\s*\?\?=/,
-        "arm mints only when the card is holding no key"
+        "start mints only when the launcher is holding no key"
     );
     assert.doesNotMatch(
-        armBody,
+        startBody,
         /idempotencyKeyRef\.current\s*=[^=?]/,
         "no unconditional assignment"
     );
 
     // Cancel is the one place the key is dropped, because that is the only
-    // deliberate "start a second fork" in the card.
-    const clears = card.match(/idempotencyKeyRef\.current\s*=\s*null/g) ?? [];
+    // deliberate "start a second fork" in the product.
+    const clears = launcher.match(/idempotencyKeyRef\.current\s*=\s*null/g) ?? [];
     assert.equal(clears.length, 1);
-    const cancelAt = card.indexOf("continuation-cancel");
     assert.ok(
-        card.indexOf("idempotencyKeyRef.current = null") > cancelAt,
-        "the only clear belongs to the cancel button"
+        launcher.indexOf("idempotencyKeyRef.current = null") >
+            launcher.indexOf("const cancel = useCallback"),
+        "the only clear belongs to cancel"
     );
+
+    // And no component may hold a key of its own.
+    for (const path of [
+        "components/imports/ContinueInTomverseCard.tsx",
+        "components/imports/ContinuationQuickAction.tsx",
+    ]) {
+        assert.doesNotMatch(readFileSync(path, "utf8"), /idempotencyKey/, path);
+    }
 });
