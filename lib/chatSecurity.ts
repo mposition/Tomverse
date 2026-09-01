@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
     AVAILABLE_MODELS,
     canUseModelWithPlan,
@@ -1113,28 +1114,42 @@ export const getGuestUsageSnapshot = async (request: Request) => {
     const rules = limitsFor(access);
     const dayLimit = rules.find((rule) => rule.period === "day")?.limit ?? 0;
     const monthLimit = rules.find((rule) => rule.period === "month")?.limit ?? 0;
-    const [dayBucket, monthBucket] = await Promise.all([
-        prisma.chatUsageBucket.findUnique({
-            where: {
-                key_period_periodStart: {
-                    key: access.subjectKey,
-                    period: "day",
-                    periodStart: dayStart,
-                },
-            },
-            select: { count: true },
-        }),
-        prisma.chatUsageBucket.findUnique({
-            where: {
-                key_period_periodStart: {
-                    key: access.subjectKey,
-                    period: "month",
-                    periodStart: monthStart,
-                },
-            },
-            select: { count: true },
-        }),
-    ]);
+    // The Playwright server runs with E2E_DISABLE_DATABASE and a DATABASE_URL
+    // pointed at 127.0.0.1:1, so these two reads threw on every page load and
+    // this endpoint answered 500 for the whole suite -- about twenty lines of
+    // Prisma stack trace per test across two and a half hours, and a guest
+    // usage rail rendered in its error state in every E2E run rather than the
+    // state the specs are meant to be checking.
+    //
+    // Absent rows, not invented numbers: `usageBucketCount(undefined)` is the
+    // same 0 a real guest who has not spent anything reads, and every limit,
+    // remainder and reset below is still computed by the code that runs in
+    // production. `isE2EDatabaseDisabled()` needs the flag *and* a loopback
+    // NEXTAUTH_URL, and /api/ready refuses the flag outright in production.
+    const [dayBucket, monthBucket] = isE2EDatabaseDisabled()
+        ? [null, null]
+        : await Promise.all([
+              prisma.chatUsageBucket.findUnique({
+                  where: {
+                      key_period_periodStart: {
+                          key: access.subjectKey,
+                          period: "day",
+                          periodStart: dayStart,
+                      },
+                  },
+                  select: { count: true },
+              }),
+              prisma.chatUsageBucket.findUnique({
+                  where: {
+                      key_period_periodStart: {
+                          key: access.subjectKey,
+                          period: "month",
+                          periodStart: monthStart,
+                      },
+                  },
+                  select: { count: true },
+              }),
+          ]);
     const used = usageBucketCount(dayBucket?.count);
     const monthUsed = usageBucketCount(monthBucket?.count);
     const dayRemaining = Math.max(0, dayLimit - used);

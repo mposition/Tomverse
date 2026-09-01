@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import { ChatAccessError } from "@/lib/chatSecurity";
 
 export type ComparisonReviewQuotaReservation = {
@@ -71,6 +72,11 @@ const readMonthlyReviewCount = async (
   period: string,
   keySuffix: string
 ) => {
+  // The other half of the guest-usage read that answered 500 on every E2E page
+  // load: /api/user/guest-usage asks for this trial's remainder in the same
+  // request. Reported as an unused trial, which is what an absent row means --
+  // the reservation paths below are untouched and still require a database.
+  if (isE2EDatabaseDisabled()) return 0;
   const bucket = await prisma.chatUsageBucket.findUnique({
     where: {
       key_period_periodStart: {
