@@ -1,5 +1,8 @@
 import type { AiProvider } from "@/lib/models";
-import { PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
+import {
+  PROVIDER_API_CONFIGURATION,
+  PROVIDER_API_KEY_ENV_NAMES,
+} from "@/lib/modelRegistryShared";
 
 /**
  * The model-list path each provider serves, relative to its configured base
@@ -33,6 +36,58 @@ export const providerCatalogUrl = (provider: AiProvider, cursor: string | null) 
     if (cursor) url.searchParams.set("after_id", cursor);
   }
   return url;
+};
+
+/**
+ * The code a rejected credential gets, instead of the HTTP status it arrived
+ * as.
+ *
+ * 401 and 403 are the only statuses in a catalogue scan that are not about the
+ * catalogue. Everything else says something went wrong reading a list;
+ * these two say the provider refused the key this application sends on *every*
+ * request to it -- so the chat traffic carrying that key is failing too, and
+ * the scan is merely where it surfaced first. Reporting it as
+ * `PROVIDER_MODEL_CATALOG_HTTP_401` puts the wire in front of the operator and
+ * leaves the consequence to be inferred, which is how a provider stayed down
+ * behind a row in a daily email.
+ *
+ * Perplexity is the case that prompted this. A GET on this same endpoint is
+ * Perplexity's own documented way to check a key, and the two causes it names
+ * for the 401 -- a key that is invalid or revoked, and an account with no
+ * credit left -- are both facts outside this repository. Neither is
+ * recoverable from a status code, so the detail names them.
+ */
+export const PROVIDER_CATALOG_KEY_REJECTED =
+  "PROVIDER_MODEL_CATALOG_KEY_REJECTED";
+
+/**
+ * What a failing HTTP status means, as a code an operator can act on.
+ *
+ * Pure and here rather than beside the fetch, so the classification is
+ * testable without a network and without the server-only module the fetch
+ * lives in.
+ */
+export const providerCatalogHttpFailure = (
+  provider: AiProvider,
+  status: number
+): { code: string; detail: string } => {
+  if (status !== 401 && status !== 403) {
+    return {
+      code: `PROVIDER_MODEL_CATALOG_HTTP_${status}`,
+      detail: `Model catalog API returned HTTP ${status}.`,
+    };
+  }
+  // Names every accepted spelling, for the same reason
+  // PROVIDER_MODEL_CATALOG_KEY_MISSING does: an operator sent to the canonical
+  // variable rotates one they are not using.
+  return {
+    code: PROVIDER_CATALOG_KEY_REJECTED,
+    detail:
+      `${PROVIDER_API_KEY_ENV_NAMES[provider].join(" / ")} was rejected with ` +
+      `HTTP ${status}. The configured key is invalid, revoked, or its account ` +
+      `has no credit left. Chat requests to this provider send the same key, ` +
+      `so they are failing too.`,
+  };
 };
 
 export type ProviderCatalogObservation = {
