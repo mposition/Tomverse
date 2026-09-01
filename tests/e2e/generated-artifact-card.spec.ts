@@ -619,12 +619,28 @@ test("at 320px the name and the download button never overlap @ui-risk", async (
  * window left wide, is the regression: with the layout keyed to `sm:` the row
  * variant applied here anyway and squeezed the text column to ~80px.
  */
-const NARROW_PANEL_CSS = `
-  [data-testid="generated-artifact-section"] {
-    width: 320px !important;
-    max-width: 320px !important;
-  }
-`;
+/**
+ * Loaded as a same-origin file rather than passed to
+ * `addStyleTag({ content })`, for the reason
+ * `tests/e2e/support/chat-state-fixtures.ts` already documents: an inline
+ * `<style>` is refused by `style-src 'self' 'nonce-...'` and `addStyleTag`
+ * cannot attach the page's per-request nonce, while `addStyleTag({ url })`
+ * inserts a `<link rel="stylesheet">` that `'self'` already permits.
+ *
+ * The two tests below were the last callers to pass `content`, and they failed
+ * on mobile-safari in the daily audit of 2026-08-25 -- three attempts each,
+ * every one on this line, before a single assertion ran. Chromium applies the
+ * stylesheet and files the report, so the same call passed on all three
+ * Chromium projects and the break was only ever visible in the one workflow
+ * that installs WebKit.
+ *
+ * Note the policy is *Report-Only* here and the call still rejected: WebKit
+ * treats the report-only violation as a refusal to apply. That is a difference
+ * between engines and not a product decision, which is why the fix is to stop
+ * needing the exception rather than to widen the directive -- the production
+ * CSP is left exactly as strict as it was.
+ */
+const NARROW_PANEL_STYLESHEET = "/qa/narrow-artifact-panel.css";
 
 test("a narrow panel in a wide window stacks the card @ui-risk", async ({
   page,
@@ -643,7 +659,7 @@ test("a narrow panel in a wide window stacks the card @ui-risk", async ({
   await page.goto("/chat");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
-  await page.addStyleTag({ content: NARROW_PANEL_CSS });
+  await page.addStyleTag({ url: NARROW_PANEL_STYLESHEET });
 
   const box = (await card(page).boundingBox())!;
   const name = (await inCard(page, "generated-artifact-filename").boundingBox())!;
@@ -697,7 +713,7 @@ test("a failure in a narrow panel keeps a readable sentence and its own row @ui-
   await page.goto("/chat?lang=ko");
   await openRecentConversation(page);
   await expect(card(page)).toBeVisible();
-  await page.addStyleTag({ content: NARROW_PANEL_CSS });
+  await page.addStyleTag({ url: NARROW_PANEL_STYLESHEET });
 
   const box = (await card(page).boundingBox())!;
   const failure = (await inCard(page, "generated-artifact-failure").boundingBox())!;
