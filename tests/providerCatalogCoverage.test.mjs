@@ -156,3 +156,32 @@ test("the page budget is small enough that reaching it means something", () => {
         "the incident has to say what the truncation does to the next section"
     );
 });
+
+test("a rejected key raises an incident, per provider", () => {
+    // The scan is not what a 401 breaks. The same key carries this provider's
+    // chat traffic, so the outage is already live when the daily report prints
+    // the row -- and before this the row was the only thing that said anything.
+    const source = readFileSync("lib/providerModelCatalogMonitor.ts", "utf8");
+    assert.match(
+        source,
+        /PROVIDER_CATALOG_KEY_REJECTED\}_\$\{provider\.toUpperCase\(\)\}/,
+        "the incident code must carry the provider"
+    );
+    // Why it must: notification cooldown is keyed on the code alone
+    // (lib/operationalMonitoring.ts), so one shared code lets the first
+    // rejected provider silence every other one in the same run.
+    assert.match(source, /severity: "error"/);
+    // And the classification itself stays out of the fetch, where a network
+    // would be needed to reach it.
+    assert.match(source, /providerCatalogHttpFailure\(provider, response\.status\)/);
+});
+
+test("a rejected key is named in the report row, not left as a status code", () => {
+    const source = readFileSync("lib/providerModelCatalogReport.ts", "utf8");
+    assert.match(source, /PROVIDER_CATALOG_KEY_REJECTED/);
+    assert.match(
+        source,
+        /chat requests are failing too/,
+        "the row has to say the scan is the symptom, not the outage"
+    );
+});

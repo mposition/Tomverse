@@ -15,7 +15,9 @@ import {
   catalogNextCursor,
   missingConfirmationRuns,
   parseProviderCatalogModels,
+  providerCatalogHttpFailure,
   providerCatalogUrl,
+  PROVIDER_CATALOG_KEY_REJECTED,
   type ProviderCatalogObservation,
 } from "@/lib/providerModelCatalogCore";
 
@@ -86,10 +88,8 @@ const fetchJson = async (provider: AiProvider, apiKey: string, cursor: string | 
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new CatalogRequestError(
-      `PROVIDER_MODEL_CATALOG_HTTP_${response.status}`,
-      `Model catalog API returned HTTP ${response.status}.`
-    );
+    const failure = providerCatalogHttpFailure(provider, response.status);
+    throw new CatalogRequestError(failure.code, failure.detail);
   }
   const body = await response.text();
   if (body.length > MAX_RESPONSE_BYTES) {
@@ -180,6 +180,25 @@ const runProviderCheck = async (
   } catch (error) {
     const safe = safeError(error);
     const status = safe.code === "PROVIDER_MODEL_CATALOG_KEY_MISSING" ? "skipped" : "failed";
+    if (safe.code === PROVIDER_CATALOG_KEY_REJECTED) {
+      // Loud, and not because the scan failed. A refused key is refused on
+      // every path that carries it, so this provider's chat turns are failing
+      // for every user right now -- and the only thing that said so was a
+      // `failed (PROVIDER_MODEL_CATALOG_HTTP_401)` cell in a daily model
+      // report, next to eleven providers that were fine.
+      //
+      // The code carries the provider because the notification cooldown is
+      // keyed on the code alone: one shared code means the first rejected
+      // provider silences the rest, and a deploy that drops credentials drops
+      // more than one at a time. Same shape as the provider budget alerts.
+      await reportOperationalIncident({
+        code: `${PROVIDER_CATALOG_KEY_REJECTED}_${provider.toUpperCase()}`,
+        title: "A provider rejected the API key Tomverse is configured with",
+        error: safe.detail,
+        severity: "error",
+        context: { component: "provider-model-catalog", provider },
+      });
+    }
     await prisma.providerModelCatalogRun.update({
       where: { id: run.id },
       data: {
