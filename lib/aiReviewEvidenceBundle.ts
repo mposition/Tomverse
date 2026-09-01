@@ -42,6 +42,7 @@ import {
     type AiReviewEvalCase,
     type AiReviewEvalObservation,
 } from "@/lib/aiReviewEvalCore";
+import { rebuildBlindSheet, renderBlindSheet } from "@/lib/aiReviewEvalBlindSheet";
 import {
     blindReviewRecordProblems,
     humanVerdictsByCase,
@@ -79,6 +80,22 @@ export type AiReviewEvidenceInputs = {
     journalText: string;
     answerKeyText: string;
     recordText: string;
+    /**
+     * The sheet a person read, as bytes, or null when the file is not there.
+     *
+     * Null is itself a finding. The sheet was the one artefact nothing opened,
+     * so a deleted one and a correct one were the same evidence.
+     */
+    blindSheetText: string | null;
+    /** What the sheet's own header says, so a rebuild renders identically. */
+    sheetMeta: {
+        runOrdinal: number | null;
+        reviewerModelId: string;
+        promptVersion: string;
+        datasetVersion: string;
+        seed: number;
+        thresholdVersion?: string;
+    };
     /** What the record must be about. Compared field by field. */
     identity: AiReviewBlindReviewIdentity;
     /**
@@ -105,6 +122,8 @@ export type AiReviewEvidenceBundle = {
         recordDigest: string;
         answerKeyDigest: string;
         journalDigest: string;
+        /** Null when no sheet file was supplied. */
+        blindSheetDigest: string | null;
         datasetDigest: string;
         signedBy: string | null;
         signedAt: string | null;
@@ -194,6 +213,9 @@ export const verifyEvidenceBundle = (
             recordDigest: fileDigest(input.recordText),
             answerKeyDigest: fileDigest(input.answerKeyText),
             journalDigest: fileDigest(input.journalText),
+            blindSheetDigest: input.blindSheetText
+                ? fileDigest(input.blindSheetText)
+                : null,
             datasetDigest: "",
             signedBy: null,
             signedAt: null,
@@ -292,6 +314,44 @@ export const verifyEvidenceBundle = (
         );
     }
 
+    // --- the sheet a person actually read ---------------------------------
+    //
+    // Rebuilt from the answer key, rendered, and compared with the file on
+    // disk. The digest alone would catch a deleted or altered sheet; rebuilding
+    // also catches a sheet whose questions are not the ones the answer key
+    // says were shown, which is the case a stored digest can never see because
+    // the digest would have been stored from that same wrong sheet.
+    //
+    // Run BEFORE the record's own identity check, so a digest mismatch does
+    // not return early and hide what the content comparison would have said.
+    // The two answer different questions and an operator wants both.
+    if (input.blindSheetText === null) {
+        problems.push(
+            "the blind sheet is missing; the verdicts name a reading nobody can check"
+        );
+    } else {
+        const rebuilt = rebuildBlindSheet({
+            cases,
+            observations: observed,
+            answerKey: answerKey as Record<string, { caseId: string }>,
+        });
+        if (!rebuilt) {
+            problems.push(
+                "the blind sheet cannot be rebuilt from the answer key and this run"
+            );
+        } else {
+            const expected = renderBlindSheet(rebuilt, input.sheetMeta);
+            if (fileDigest(expected) !== fileDigest(input.blindSheetText)) {
+                problems.push(
+                    "the blind sheet on disk is not the sheet this answer key and run " +
+                        "produce: it shows different text, or it was edited after the " +
+                        "verdicts were written"
+                );
+            }
+        }
+    }
+
+
     // --- the record against the answer key and the run ---------------------
     const { record, problems: parseProblems } = parseBlindReviewRecord(input.recordText);
     problems.push(...parseProblems);
@@ -337,6 +397,9 @@ export const verifyEvidenceBundle = (
             recordDigest: fileDigest(input.recordText),
             answerKeyDigest: fileDigest(input.answerKeyText),
             journalDigest: fileDigest(input.journalText),
+            blindSheetDigest: input.blindSheetText
+                ? fileDigest(input.blindSheetText)
+                : null,
             datasetDigest: datasetDigest({ cases }),
             signedBy: record.signedBy,
             signedAt: record.signedAt,
@@ -379,6 +442,28 @@ export const adjudicatedArtifactProblems = (input: {
     bind("blindReviewRecordDigest", bundle.derived.recordDigest);
     bind("blindReviewAnswerKeyDigest", bundle.derived.answerKeyDigest);
     bind("journalDigest", bundle.derived.journalDigest);
+    if (bundle.derived.blindSheetDigest) {
+        bind("blindSheetDigest", bundle.derived.blindSheetDigest);
+    }
+
+    // The signature, compared rather than merely present.
+    //
+    // Admissibility asks that `blindReviewSignedBy` is non-empty. That is a
+    // different question from whether it is the name on the record this
+    // artifact was made from -- and a name copied from another review would
+    // pass the first and fail this.
+    if (summary.blindReviewSignedBy !== bundle.derived.signedBy) {
+        problems.push(
+            `blindReviewSignedBy: the artifact says ${String(summary.blindReviewSignedBy)}, ` +
+                `the record is signed by ${String(bundle.derived.signedBy)}`
+        );
+    }
+    if (summary.blindReviewSignedAt !== bundle.derived.signedAt) {
+        problems.push(
+            `blindReviewSignedAt: the artifact says ${String(summary.blindReviewSignedAt)}, ` +
+                `the record is dated ${String(bundle.derived.signedAt)}`
+        );
+    }
 
     const number = (key: string, expected: number) => {
         if (summary[key] !== expected) {
