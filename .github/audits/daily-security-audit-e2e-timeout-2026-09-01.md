@@ -357,3 +357,81 @@ Chromium 실행에는 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`을 썼습니다(이 컨�
 Playwright 빌드가 lockfile이 고정한 것과 다릅니다). 그래서 이 실행은 canonical이
 아니며 **골든에 대해서는 아무 증거도 아닙니다** — 위 결과는 동작 단언에 대한
 것입니다.
+
+
+## 10. 실측 — run #55 (2026-09-01)
+
+[run #55 · 33504862747](https://github.com/mposition/Tomverse/actions/runs/33504862747)를
+이 브랜치(`bb7e65b`)에서 손으로 dispatch했습니다. **8개 job 전부 success.**
+
+### 시간
+
+| job | 테스트 step | job 전체 | 담당 |
+|---|---|---|---|
+| audit | — | **8m48s** | 정적·의존성·단위 + 캐시 워밍 |
+| shard 1/6 | 30m10s | 32m15s | desktop-chromium 1150 |
+| shard 2/6 | 24m06s | 25m44s | desktop-chromium 558 + desktop-compact 575 |
+| shard 3/6 | 20m22s | 22m12s | desktop-compact 1133 + mobile-safari 5 |
+| shard 4/6 | **37m37s** | **39m12s** | mobile-safari 1145 |
+| shard 5/6 | 29m12s | 31m17s | mobile-safari 558 + mobile-chromium 575 |
+| shard 6/6 | 21m13s | 23m14s | mobile-chromium 1133 |
+| report | — | 39s | 발송 + 판정 |
+| **전체 run** | | **48m48s** | |
+
+**실행 시간 합계 162m40s.** 3절에서 "약 167분"으로 추정했던 값과 3% 차이입니다 —
+그 추정은 잘린 run의 인덱스 진행률에서 외삽한 것이었고, 맞았습니다.
+
+**150분에 90%에서 잘리던 스위트가 48분 48초 만에 끝났습니다.**
+
+### 불균형은 개수가 아니라 엔진이었습니다
+
+개수는 서로 1.5% 안이었는데 시간은 20m22s ~ 37m37s, **1.85배**입니다. 원인 둘,
+어느 쪽도 개수 재분배로는 해결되지 않습니다.
+
+- **WebKit이 느립니다.** shard 4는 mobile-safari 전담이고 가장 느립니다. 8절에서
+  "남는 불균형은 엔진"이라고 적은 예상이 맞았습니다.
+- **desktop-chromium이 mobile-chromium보다 케이스당 비쌉니다** — 1150건에
+  30m10s 대 1133건에 21m13s. 골든 스크린샷이 desktop-chromium에만 있기
+  때문으로 보입니다.
+
+### 캐시 워밍이 설계대로 동작했습니다
+
+샤드가 각자 빌드하는 것이 이 설계의 비용이었는데, audit job이 `.next/cache`를
+먼저 채우므로 실측은 이렇습니다.
+
+- `Build the E2E server` **18~21초**
+- `Install Chromium and WebKit` **28~41초** (전부 cache hit)
+- 테스트 시작까지 샤드당 오버헤드 **1분 30초~2분**
+
+### `timeout-minutes: 75`는 유지합니다
+
+최악 샤드가 예산의 52%(테스트 step은 자기 60분의 63%)를 썼습니다. 조일 수 있어
+보이지만, 이 ceiling이 무엇을 보험하는지를 보면 아닙니다.
+
+`e2e.yml`이 같은 스위트를 서로 다른 밤에 83분과 97분으로 측정했습니다 — 17%
+변동입니다. 그런 날이면 shard 4가 46분에 닿고, 스위트는 계속 자랍니다.
+**ceiling은 실행 시간의 추정치가 아니라 hung Playwright server가 job을 태우는
+것을 막는 장치**이고, 75분은 그 일을 하면서 평범하게 나쁜 밤을 자르지 않습니다.
+
+샤드가 ceiling에 닿기 시작하면 **분을 늘리지 말고 샤드를 늘립니다.** 볼 것은
+shard 4이고, 더 쪼개면 그것을 가장 느리게 만드는 WebKit 블록이 나뉩니다.
+
+### 9절에서 검증하지 못했던 것 — 이제 확인됐습니다
+
+**mobile-safari의 CSP 수정이 WebKit에서 통과했습니다.** shard 4가 mobile-safari
+1145건 전담이고 `conclusion: success`입니다. `generated-artifact-card.spec.ts`는
+mobile-safari 구간(shard 3 또는 4)에 있고 두 샤드 모두 통과했으므로, 8/25 이후
+남아 있던 그 2건은 해결됐습니다. 실패했다면 그 샤드가 red였을 것입니다.
+
+9절에서 "판정은 WebKit이 실제로 도는 첫 daily audit 실행의 몫"이라고 적었고,
+그 실행이 이것입니다.
+
+### 이 run이 말하지 않는 것
+
+- **guest-usage 500이 CI에서도 0인지 직접 세지 않았습니다.** 로컬에서 4건 → 0건을
+  실측했고, 여섯 샤드가 전부 통과했으므로 아무것도 깨지 않은 것은 확실하지만,
+  CI 로그에서 그 문자열을 센 것은 아닙니다. GitHub API가 job 로그의 tail만
+  돌려주고 Playwright 요약이 그 창 밖에 있습니다.
+- **샤드별 passed/failed/flaky 내역을 읽지 못했습니다.** 같은 이유입니다. job
+  conclusion은 여섯 개 모두 success이고, flaky가 있었다면 retry로 흡수됐을 수
+  있습니다 — 그것을 보려면 아티팩트의 `playwright-report`를 열어야 합니다.
