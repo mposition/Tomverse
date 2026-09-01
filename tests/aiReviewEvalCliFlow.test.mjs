@@ -22,6 +22,11 @@ import {
   AI_REVIEW_EVAL_TASK_TYPES,
 } from "../lib/aiReviewEvalCore.ts";
 import { renderBlindReviewRecordHeader } from "../lib/aiReviewBlindReviewRecord.ts";
+import {
+  rebuildBlindSheet,
+  renderBlindSheet,
+} from "../lib/aiReviewEvalBlindSheet.ts";
+import { fileDigest } from "../lib/aiReviewEvidenceBundle.ts";
 import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
 import { approvalBlockFromArtifact } from "../lib/aiReviewApprovalBlock.ts";
 
@@ -151,6 +156,27 @@ const build = () => {
       `${JSON.stringify(answerKey, null, 2)}\n`
     );
 
+    // The sheet a person reads, written because it is evidence: the approval
+    // opens it and rebuilds it, so a fixture without one is a fixture that
+    // never exercised the check.
+    const sheetPath = join(runDirectory, `${stem}--blind-sheet.md`);
+    const sheetMarkdown = renderBlindSheet(
+      rebuildBlindSheet({
+        cases,
+        observations: new Map(cases.map((item) => [item.id, observation])),
+        answerKey,
+      }),
+      {
+        runOrdinal,
+        reviewerModelId: RUN.reviewerModelId,
+        promptVersion: RUN.promptVersion,
+        datasetVersion: dataset.version,
+        seed: RUN.sheetSeed,
+        thresholdVersion: RUN.thresholdVersion,
+      }
+    );
+    writeFileSync(sheetPath, sheetMarkdown);
+
     const recordPath = join(runDirectory, `${stem}--blind-review-record.csv`);
     const writeRecord = (marked = {}) => {
       const header = renderBlindReviewRecordHeader({
@@ -158,6 +184,7 @@ const build = () => {
         runOrdinal,
         datasetDigest: datasetDigest(dataset),
         commitSha: COMMIT,
+        blindSheetDigest: fileDigest(sheetMarkdown),
       })
         .replace("# signed-by: ", "# signed-by: @mposition")
         .replace("# signed-at: ", "# signed-at: 2026-08-31");
@@ -174,7 +201,7 @@ const build = () => {
       writeFileSync(recordPath, `${[header, columns, ...rows].join("\n")}\n`);
     };
     writeRecord();
-    return { runOrdinal, stem, artifactPath, recordPath, answerKey, writeRecord };
+    return { runOrdinal, stem, artifactPath, recordPath, sheetPath, answerKey, writeRecord };
   });
 
   return {
@@ -187,6 +214,7 @@ const build = () => {
     // The first run, for the tests that only need one.
     artifactPath: runs[0].artifactPath,
     recordPath: runs[0].recordPath,
+    sheetPath: runs[0].sheetPath,
     stem: runs[0].stem,
     writeRecord: runs[0].writeRecord,
   };
@@ -411,4 +439,90 @@ test("the gate itself accepts the evidence, and refuses it once a verdict is edi
   const looseSection = section(loose.stdout, "AI Review evaluation run artifact");
   assert.match(looseSection.join("\n"), /FAIL/);
   assert.match(looseSection.join("\n"), /blindReviewRecordDigest/);
+});
+
+test("the sheet a person read is evidence: deleted, or altered, and the gate refuses", (t) => {
+  // The approval opened the record, the answer key and the journal, and never
+  // the sheet -- the one artefact a human actually read. So a correct sheet, a
+  // deleted sheet, a sheet of different questions and a sheet edited after the
+  // verdicts were written were the same evidence.
+  const fixture = build();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+
+  const adjudicated = fixture.runs.map((entry) => {
+    const result = run([
+      "scripts/adjudicate-ai-review-eval.mjs",
+      `--artifact=${entry.artifactPath}`,
+      `--record=${entry.recordPath}`,
+      `--dataset=${fixture.datasetPath}`,
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const path = join(fixture.runDirectory, `${entry.stem}--adjudicated.json`);
+    return {
+      path,
+      block: approvalBlockFromArtifact(JSON.parse(readFileSync(path, "utf8"))),
+    };
+  });
+  const registerPath = writeRegister(fixture, adjudicated);
+  const gate = () =>
+    run([
+      "scripts/check-ai-review-eval-dataset.mjs",
+      `--register=${registerPath}`,
+      `--dataset-dir=${fixture.setDirectory}`,
+    ]);
+
+  const clean = section(gate().stdout, "AI Review approved-entry evidence");
+  assert.equal(clean.filter((line) => /^\s+ok\s/.test(line)).length, 2);
+
+  // Edited after the verdicts were written.
+  const original = readFileSync(fixture.runs[0].sheetPath, "utf8");
+  writeFileSync(
+    fixture.runs[0].sheetPath,
+    original.replace("question 1", "a completely different question")
+  );
+  const altered = section(gate().stdout, "AI Review approved-entry evidence").join("\n");
+  assert.match(altered, /FAIL .* run 1/);
+  assert.match(altered, /blindSheetDigest/);
+  assert.match(altered, /not the sheet this answer key and run produce/);
+
+  // Deleted.
+  rmSync(fixture.runs[0].sheetPath);
+  const gone = section(gate().stdout, "AI Review approved-entry evidence").join("\n");
+  assert.match(gone, /the blind sheet is missing/);
+  // The untouched second run still passes throughout.
+  assert.match(gone, /ok\s+.*run 2/);
+});
+
+test("a signature date that is not a date, and a threshold version that does not exist", (t) => {
+  const fixture = build();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+
+  const adjudicate = () =>
+    run([
+      "scripts/adjudicate-ai-review-eval.mjs",
+      `--artifact=${fixture.artifactPath}`,
+      `--record=${fixture.recordPath}`,
+      `--dataset=${fixture.datasetPath}`,
+    ]);
+
+  // `signed-at: someday` used to pass adjudication and the approval check
+  // alike, because only emptiness was tested.
+  const record = readFileSync(fixture.recordPath, "utf8");
+  writeFileSync(
+    fixture.recordPath,
+    record.replace("# signed-at: 2026-08-31", "# signed-at: someday")
+  );
+  const undated = adjudicate();
+  assert.equal(undated.status, 1);
+  assert.match(undated.stderr, /signature date "someday" is not a date/);
+
+  // Naming a bar that is not in this tree is a failure, not a note: the
+  // evidence claims to have been produced under a threshold nobody can look up.
+  writeFileSync(
+    fixture.recordPath,
+    record.replace("# threshold-version: v1-draft", "# threshold-version: v-does-not-exist")
+  );
+  const unknown = adjudicate();
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /"v-does-not-exist", which does not exist/);
 });

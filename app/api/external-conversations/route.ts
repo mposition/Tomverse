@@ -7,6 +7,7 @@ import {
 import {
     assertExternalImportEnabled,
     ExternalImportDisabledError,
+    isExternalContinuationEnabledCached,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { listExternalConversations } from "@/lib/externalImportService";
@@ -36,6 +37,16 @@ export async function GET(req: Request) {
         );
 
         const url = new URL(req.url);
+        // Display-only, and deliberately the cached read.
+        //
+        // This decides whether the list draws a quick action, not whether one
+        // may be taken: `POST …/continuations` calls
+        // `assertExternalContinuationEnabled()`, which reads the row
+        // uncached, and that is the authority
+        // (docs/policy/external-conversation-continuation.md §7.1). A stale
+        // `true` here therefore costs a button that answers 403 and says so,
+        // never a continuation created after a rollback.
+        const continuationEnabled = await isExternalContinuationEnabledCached();
         const result = await listExternalConversations(session.user.id, {
             offset: clampListParam(url.searchParams.get("offset"), {
                 fallback: 0,
@@ -46,9 +57,10 @@ export async function GET(req: Request) {
                 max: 100,
             }),
         });
-        return NextResponse.json(result, {
-            headers: { "Cache-Control": "no-store" },
-        });
+        return NextResponse.json(
+            { ...result, continuationEnabled },
+            { headers: { "Cache-Control": "no-store" } }
+        );
     } catch (error) {
         if (error instanceof ExternalImportDisabledError) {
             return NextResponse.json(

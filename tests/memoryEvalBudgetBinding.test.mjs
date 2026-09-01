@@ -26,12 +26,16 @@ import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
-import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
+import { MEMORY_EVAL_SUCC6_MANIFEST } from "../lib/memoryEvalSucc6.ts";
 import {
     MEMORY_EXTRACTION_PROMPT_VERSION,
     extractionPromptContract,
 } from "../lib/memoryExtractionPrompt.ts";
+import {
+    harnessRunTuple,
+    harnessTarget,
+} from "../lib/memoryEvalHarnessTarget.ts";
 
 const fundedPair = () => {
     const entry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
@@ -45,36 +49,118 @@ const fundedPair = () => {
 
 /* ------------------------------------------------------------ the tuple -- */
 
-test("v6's instrument cannot fund the prompt this tree now ships", () => {
-    // The whole point, and it reads inverted since 2026-08-31 because the
-    // tree moved on. Every value below is still recomputed rather than
-    // restated; what changed is which answer is correct.
+const v7Pair = () => {
+    const entry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (candidate) =>
+            candidate.extractionModelId === "gpt-5-6-luna" &&
+            candidate.promptVersion === "mem-extract-v7"
+    );
+    assert.ok(entry, "the v7 pair is not registered");
+    return entry;
+};
+
+test("the v7 instrument is the tuple this tree assembles", () => {
+    // The other direction from the divergence test above, and the one that
+    // matters now that a budget exists: an instrument approved on 2026-08-31
+    // for succ-6 and v7 must actually be accepted. Without this, "the tuple
+    // check refuses everything" would satisfy every other assertion here.
     //
-    // While the tree shipped v6 this asserted no divergence at all. The tree
-    // now ships `mem-extract-v7`, so v6's instrument no longer describes the
-    // bytes a run would use — and the comparison firing is the protection
-    // working, not a stale expectation. Asserting emptiness here today would
-    // mean asserting that a v7 run may proceed on v6's approval, which is
-    // precisely what this file exists to prevent.
-    //
-    // Both halves are pinned. The dataset and contract must still match,
-    // because nothing approved them to move; the prompt fields must differ,
-    // and by exactly the two names below, so a *third* divergence appearing
-    // quietly is a failure rather than noise inside an expected one.
-    const budget = fundedPair().evalBudget;
-    assert.ok(budget?.boundTuple, "the funded pair records no instrument");
-    const target = harnessTarget();
-    const actual = {
-        datasetVersion: target.datasetVersion,
-        datasetDigest: target.datasetDigest,
-        datasetManifestDigest: MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest,
-        scoringContractVersion: target.scoringContractVersion,
-        scoringContractDigest: target.scoringContractDigest,
+    // The registered budget against the production builder — not a synthetic
+    // tuple compared with itself, which was the placeholder while no v7
+    // budget existed and would have passed however wrong the register was.
+    const budget = v7Pair().evalBudget;
+    assert.ok(budget?.boundTuple, "the v7 pair records no instrument");
+    const actual = harnessRunTuple({
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         promptDigest: createHash("sha256")
             .update(extractionPromptContract(), "utf8")
             .digest("hex"),
-    };
+    });
+    assert.deepEqual([...evalBudgetTupleFailures(budget.boundTuple, actual)], []);
+
+    // The approved values, written out, so a diff of this file shows what was
+    // approved rather than only that something moved
+    // (.github/audits/memory-eval-v7-budget-approval-2026-08-31.md section 1).
+    assert.deepEqual(budget.boundTuple, {
+        datasetVersion: "mem-eval-succ-6",
+        datasetDigest:
+            "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+        datasetManifestDigest:
+            "b1904682a2920a6554f533001a2b59cbd2d4cdc06b517aa2b53588c094ce603d",
+        scoringContractVersion: "mem-score-v3.4",
+        scoringContractDigest:
+            "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+        promptVersion: "mem-extract-v7",
+        promptDigest:
+            "7ec5e591628ad719be7f13faf850a537c6f77cfcb22cc50471a245bee7beb912",
+    });
+    // A `null` manifest digest would compare equal to itself and pin nothing
+    // about the record, so presence is asserted rather than only equality.
+    assert.ok(budget.boundTuple.datasetManifestDigest);
+});
+
+test("the v7 ceilings are the approved figures, per run and per programme", () => {
+    // Two numbers with different meanings, and the difference is the one this
+    // file exists for: `accruedCostUsd` restarts at zero every invocation, so
+    // `maxUsd` bounds one run and the programme total has to be its own
+    // field. Writing US$12.78 into `maxUsd` would have allowed it twice.
+    const budget = v7Pair().evalBudget;
+    assert.equal(budget.maxUsd, 6.39);
+    assert.equal(budget.programmeMaxMicroUsd, 12_780_000);
+    assert.equal(budget.programmeMaxMicroUsd, Math.round(budget.maxUsd * 2 * 1_000_000));
+    assert.equal(budget.maxProviderDispatchedRuns, 2);
+    assert.equal(budget.approvedBy, "@mposition");
+    assert.equal(budget.approvedAt, "2026-08-31");
+    assert.equal(
+        budget.approvedImplementationSha,
+        "51bebe56fb9833f9a8209fd9ca32aa499865d3d4"
+    );
+    assert.match(budget.ticket, /memory-eval-v7-budget-approval-2026-08-31\.md/);
+    // Funding a pair is not starting it. The status stays `candidate` — the
+    // approval excluded the transition to `approved` — and no evaluation has
+    // been recorded.
+    assert.equal(v7Pair().status, "candidate");
+    assert.equal(v7Pair().evaluation, null);
+});
+
+test("v6's instrument cannot fund what this tree now ships", () => {
+    // The whole point, and it reads inverted since 2026-08-31 because the
+    // tree moved on. Every value below is still recomputed rather than
+    // restated; what changed is which answer is correct.
+    //
+    // While the tree shipped v6 against succ-5 this asserted no divergence at
+    // all. Two approved moves have happened since — the prompt to
+    // `mem-extract-v7` on 2026-08-31, and the harness target to the frozen
+    // `mem-eval-succ-6` the same day — so v6's instrument no longer describes
+    // the bytes a run would use. The comparison firing is the protection
+    // working. Asserting emptiness today would assert that a v7 run against a
+    // different sample may proceed on v6's approval, which is exactly what
+    // this file exists to prevent.
+    //
+    // The divergence is pinned by name, all four of them, so a *fifth* one
+    // appearing cannot hide inside an expected failure. The contract is the
+    // one thing that did not move, and it is asserted equal below.
+    const budget = fundedPair().evalBudget;
+    assert.ok(budget?.boundTuple, "the funded pair records no instrument");
+    // The production builder, not a copy of it. This test used to assemble
+    // the tuple itself, and that is how the live harness came to keep
+    // `MEMORY_EVAL_SUCC5_MANIFEST` hard-coded through the switch to succ-6:
+    // the test's own object was right, the harness's was not, and nothing
+    // compared them. A succ-6 budget would then have been refused as a tuple
+    // mismatch at the moment of spending.
+    const actual = harnessRunTuple({
+        promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
+        promptDigest: createHash("sha256")
+            .update(extractionPromptContract(), "utf8")
+            .digest("hex"),
+    });
+    // And it really is the dataset the harness would run, named here so a
+    // builder that quietly stopped following the target fails.
+    assert.equal(actual.datasetVersion, harnessTarget().datasetVersion);
+    assert.equal(
+        actual.datasetManifestDigest,
+        MEMORY_EVAL_SUCC6_MANIFEST.manifestDigest
+    );
     const failures = [...evalBudgetTupleFailures(budget.boundTuple, actual)];
     assert.ok(
         failures.length > 0,
@@ -82,14 +168,30 @@ test("v6's instrument cannot fund the prompt this tree now ships", () => {
     );
     assert.deepEqual(
         failures.map((line) => line.split(":")[0]).sort(),
-        ["promptDigest", "promptVersion"],
-        `only the prompt was approved to move; failures were:\n${failures.join("\n")}`
+        [
+            "datasetDigest",
+            "datasetManifestDigest",
+            "datasetVersion",
+            "promptDigest",
+            "promptVersion",
+        ].sort(),
+        `only the prompt and the dataset were approved to move; failures were:\n${failures.join(
+            "\n"
+        )}`
     );
-    // Named rather than left to the field list: the dataset and the contract
-    // are what a moved digest would show up in, and they must be silent.
-    assert.equal(budget.boundTuple.datasetDigest, actual.datasetDigest);
-    assert.equal(budget.boundTuple.datasetManifestDigest, actual.datasetManifestDigest);
+    // The contract did not move, and is named rather than left to the list
+    // above: succ-6 is scored under the same `mem-score-v3.4` succ-5 was, so
+    // a divergence here would mean something nobody approved.
+    assert.equal(budget.boundTuple.scoringContractVersion, actual.scoringContractVersion);
     assert.equal(budget.boundTuple.scoringContractDigest, actual.scoringContractDigest);
+    // And v6's own record still says what it always said. The instrument is
+    // evidence of an approval that happened; it is not edited when the tree
+    // moves past it.
+    assert.equal(budget.boundTuple.datasetVersion, "mem-eval-succ-5");
+    assert.equal(
+        budget.boundTuple.datasetDigest,
+        MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest
+    );
 
     // And the approved values, written out, so the diff of any future change
     // to this file shows what was approved rather than only that it moved.

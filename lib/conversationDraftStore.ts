@@ -51,6 +51,15 @@ export const EMPTY_DRAFT: ConversationDraft = { text: "", attachments: [] };
  * straight back in as a `scopeId` without converting it to a conversation id
  * first.
  */
+/*
+  Open defect, tracked in docs/policy/conversation-draft-identity-scope.md:
+  this key names a conversation and not a *person*, so two accounts using the
+  same tab share the `NEW_CONVERSATION_DRAFT_KEY` entry. A confirmed
+  reproduction is in that document -- account B reads the text account A was
+  typing into a new chat. The fix is a decision, not an edit here -- what has
+  to be settled first is
+  docs/policy/conversation-draft-identity-scope.md §5.
+*/
 export const draftKeyFor = (conversationId: string | null | undefined) =>
   conversationId || NEW_CONVERSATION_DRAFT_KEY;
 

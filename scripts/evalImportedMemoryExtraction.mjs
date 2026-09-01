@@ -45,7 +45,6 @@ import {
     evalBudgetBindingProblems,
     evalBudgetTupleFailures,
 } from "../lib/memoryEvalBudgetBinding.ts";
-import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
 } from "../lib/memoryExtractionEvalRegister.ts";
@@ -63,6 +62,7 @@ import {
 // to make an arbitrary past dataset billable -- and reading a past one is
 // `resolveArtifactDataset`'s job, which needs no provider and cannot spend.
 import {
+    harnessRunTuple,
     harnessTarget,
     harnessTargetBindingFailures,
 } from "../lib/memoryEvalHarnessTarget.ts";
@@ -260,15 +260,19 @@ const budgetBindingFor = (entry) => {
     }
     return {
         problems,
-        tupleFailures: evalBudgetTupleFailures(budget.boundTuple, {
-            datasetVersion: target.datasetVersion,
-            datasetDigest: target.datasetDigest,
-            datasetManifestDigest: MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest,
-            scoringContractVersion: target.scoringContractVersion,
-            scoringContractDigest: target.scoringContractDigest,
-            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
-            promptDigest: promptContractDigest,
-        }),
+        // Built by `harnessRunTuple()` rather than assembled here. This
+        // object used to name `MEMORY_EVAL_SUCC5_MANIFEST` directly, which
+        // meant pointing the harness at another dataset left the tuple
+        // describing the old one — and the mismatch would only have surfaced
+        // as a refusal at spend time.
+        tupleFailures: evalBudgetTupleFailures(
+            budget.boundTuple,
+            harnessRunTuple({
+                target,
+                promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
+                promptDigest: promptContractDigest,
+            })
+        ),
         descends: descendsFrom(budget.approvedImplementationSha),
     };
 };

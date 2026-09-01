@@ -22,7 +22,7 @@ import { MEMORY_EVAL_SUCC4_MANIFEST } from "../lib/memoryEvalSucc4Manifest.ts";
 import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
 
 test("the harness target is the frozen schema-3 set", () => {
-    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-5");
+    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-6");
     const target = harnessTarget();
     assert.equal(target.datasetSchemaVersion, 3);
     assert.equal(target.datasetFrozen, true);
@@ -36,12 +36,15 @@ test("its digests are the ones the manifest froze", () => {
     // and in the release-gate registry, and a run that computed anything else
     // would produce an artifact no reader could resolve.
     //
-    // The dataset digest is succ-4's, unchanged: succ-5 is a contract-only
-    // successor and the sample it scores is the same 1,150 cases.
+    // The dataset digest moved on 2026-08-31 and this is the first time it
+    // has: succ-5 was a contract-only successor sharing succ-4's cases, so
+    // all three of them recorded `0a516821…`. succ-6 replaced thirteen cases,
+    // so a digest that still read `0a516821…` here would mean the harness was
+    // pointed at the old sample under the new name.
     const target = harnessTarget();
     assert.equal(
         target.datasetDigest,
-        "0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0"
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
     );
     assert.equal(
         target.scoringContractDigest,
@@ -49,6 +52,41 @@ test("its digests are the ones the manifest froze", () => {
     );
     assert.equal(target.scoringContractVersion, "mem-score-v3.4");
     assert.deepEqual([...harnessTargetBindingFailures(target)], []);
+});
+
+test("succ-5 stays resolvable by name, with its own sample", () => {
+    // The historical path. The 2026-08-29 decision-grade run was scored
+    // against succ-5, and its artifact has to stay readable — which means
+    // succ-5 must keep resolving to its own 1,150 cases and its own digest,
+    // not to whatever the default target has since become.
+    const succ5 = harnessTarget("mem-eval-succ-5");
+    assert.equal(succ5.datasetVersion, "mem-eval-succ-5");
+    assert.equal(succ5.cases.length, 1150);
+    assert.equal(
+        succ5.datasetDigest,
+        "0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0"
+    );
+    assert.equal(succ5.scoringContractVersion, "mem-score-v3.4");
+    assert.equal(succ5.datasetDigest, MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest);
+    // And it is not the default any more, which is the other half of the
+    // switch: a test that only checked succ-5 still resolves would pass with
+    // the harness never having moved.
+    assert.notEqual(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-5");
+    assert.notEqual(succ5.datasetDigest, harnessTarget().datasetDigest);
+});
+
+test("succ-6's manifest is what the binding resolves against", () => {
+    // `targetManifestDigests` reads the pinned record. The target recomputes
+    // from the tree. Their agreement is the binding, and it is the reason the
+    // manifest had to be a literal rather than a computed view.
+    const recorded = targetManifestDigests("mem-eval-succ-6");
+    assert.ok(recorded, "succ-6 has no resolvable manifest");
+    assert.equal(
+        recorded.datasetDigest,
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
+    );
+    assert.equal(recorded.scoringContractVersion, "mem-score-v3.4");
+    assert.deepEqual([...harnessTargetBindingFailures(harnessTarget())], []);
 });
 
 test("succ-4 keeps its cases and stops being a run target", () => {
