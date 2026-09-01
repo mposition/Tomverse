@@ -634,13 +634,65 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             registeredAt: "2026-08-31",
             notes:
                 "Candidate for mem-extract-v7, the boundary rule of " +
-                "2026-08-30. Unfunded and never run. Scores against the " +
-                "frozen mem-eval-succ-6 under mem-score-v3.4. v6's budget, " +
-                "approval and run history are not transferred: a budget " +
-                "cannot move to another prompt version, and the ten cases " +
-                "that shaped this rule left the decision set under B+ so " +
-                "this pair would be measured on cases it did not produce.",
-            evalBudget: null,
+                "2026-08-30. Scores against the frozen mem-eval-succ-6 under " +
+                "mem-score-v3.4. Funded 2026-08-31 for two runs; never run. " +
+                "v6's budget, approval and run history are not transferred: a " +
+                "budget cannot move to another prompt version, and the ten " +
+                "cases that shaped this rule left the decision set under B+ " +
+                "so this pair is measured on cases it did not produce. " +
+                "Approval: " +
+                ".github/audits/memory-eval-v7-budget-approval-2026-08-31.md. " +
+                "Ceilings: US$6.39 per run, US$12.78 across the two approved " +
+                "runs. Unused budget from the first run does not carry into " +
+                "the second; a run truncated at its ceiling is not " +
+                "decision-grade and the ceiling is not raised without a new " +
+                "approval. Neither run is started by this record: each needs " +
+                "its own explicit instruction, and run 2 only after run 1's " +
+                "artifact and blind review have been read. Resuming the same " +
+                "ordinal is allowed only for a failure proven to have reached " +
+                "no provider at US$0; a run that reached one consumes its " +
+                "ordinal whatever it returned.",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Per invocation, and half the programme total because the
+                // approval is for two runs. `accruedCostUsd` starts at zero
+                // on every invocation, so the programme figure written here
+                // would be spendable twice.
+                //
+                // US$12.78 is the worst case from
+                // `npm run report:memory-eval-cost-estimate` on succ-6: 1,150
+                // cases with every answer at the 4,096-token output ceiling,
+                // twice. Not rounded — a ceiling rounded up is a ceiling
+                // nobody computed.
+                maxUsd: 6.39,
+                programmeMaxMicroUsd: 12_780_000,
+                ticket:
+                    ".github/audits/memory-eval-v7-budget-approval-2026-08-31.md",
+                approvedAt: "2026-08-31",
+                // Two: the decision-grade run and the §12.4 independent
+                // reproduction. Recorded rather than enforced — see the
+                // field's own note — and neither is started by this entry.
+                maxProviderDispatchedRuns: 2,
+                // The merge commit of the harness switch to succ-6 (#1220).
+                // Every value in `boundTuple` was read from this commit. A
+                // run's own commit must descend from it, and a clone that
+                // cannot see it refuses rather than assuming.
+                approvedImplementationSha:
+                    "51bebe56fb9833f9a8209fd9ca32aa499865d3d4",
+                boundTuple: {
+                    datasetVersion: "mem-eval-succ-6",
+                    datasetDigest:
+                        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+                    datasetManifestDigest:
+                        "b1904682a2920a6554f533001a2b59cbd2d4cdc06b517aa2b53588c094ce603d",
+                    scoringContractVersion: "mem-score-v3.4",
+                    scoringContractDigest:
+                        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+                    promptVersion: "mem-extract-v7",
+                    promptDigest:
+                        "7ec5e591628ad719be7f13faf850a537c6f77cfcb22cc50471a245bee7beb912",
+                },
+            },
             evaluation: null,
         },
     ];

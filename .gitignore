@@ -97,3 +97,9 @@ promotion-metadata-snapshot-*.json
 # Vite build output for the Capacitor shell spike. `cap sync` copies it into
 # the native projects; it is a build artefact, not source.
 /apps/*/dist/
+
+# Claude Code worktrees. `EnterWorktree` registers a real git worktree here
+# (`git worktree list` knows it); to the parent checkout it is an untracked
+# directory holding a second copy of the whole repository. Committing it would
+# vendor the repo into itself.
+.claude/worktrees/

@@ -108,6 +108,57 @@ Access를 통째로 우회합니다. 확인 결과 **421 `Misdirected Request`**
 Railway 서비스에서 생성 도메인 자체를 제거하는 방법이 있고, `README.md` 도 Cloudflare
 프록시를 쓸 때 그렇게 권합니다.
 
+### 다섯 번째 destination — `/api/build-info` (2026-09-01)
+
+위 목록 넷은 §0이 심사한 것들입니다. **`/api/build-info`는 그 심사를 받은 적이
+없습니다** — 그것을 읽는 호출자가 §2의 표가 만들어진 **다음 날** 태어났기
+때문입니다. `Deployed Commit Drift`(2026-08-27 착지)는 첫 실행부터 staging을
+비교하지 못한 채 매시 실패했고, 다섯째 날에야 읽혔습니다.
+
+막힌 것은 그 워크플로 하나가 아닙니다. **staging 검증 체크리스트 전부가 같은
+endpoint를 요구합니다** — `generated-artifacts-staging-checklist.md`와
+`chat-attachment-staging-checklist.md`의 **A-1**,
+`assistant-profile-staging-checklist.md`,
+`assistant-package-import-staging-checklist.md`, 그리고 세 개의
+`*-staging-verification-records/README.md`. 기록의 첫 칸(이 회차가 어느 커밋을
+검증했는가)을 채울 수단이 사라져 있었습니다.
+
+**bypass에 추가했습니다.** 근거는 위 넷과 종류가 다릅니다 — 저 넷은 *자체 인증을
+하므로* 뚫었고, 이것은 **인증할 것이 애초에 없어서** 뚫습니다.
+`app/api/build-info/route.ts`는 `getPublicBuildInfo()`의 allowlist 필드만
+돌려주고 상태를 바꾸지 않으며, 공개·비인증이 그 계약입니다(STG-F010, AUD-R002;
+`final-stg-reaudit-2026-07-28` 두 회차에서 민감정보 없음 확인). §0이 막으려던
+위험은 *미출시 화면이 사람에게 읽히는 것*이고 커밋 SHA는 그 화면이 아닙니다 —
+`/robots.txt`를 공개로 남긴 것과 같은 판단입니다.
+
+service token으로 워크플로만 통과시키는 방법은 채택하지 않았습니다. 체크리스트가
+요구하는 사람 손의 `curl`은 여전히 막히므로 문제의 절반만 풀면서, 토큰 수명·회전이
+새 운영 항목으로 생깁니다.
+
+2026-09-01T01:47Z 실측:
+
+| 경로 | 응답 | 낸 주체 |
+|---|---|---|
+| `/api/build-info` | 200 JSON (`4b618702`) | 앱 |
+| `/api/build-info/` | 308 → `/api/build-info` | 앱의 trailing-slash routing |
+| `/api/health` | 302 | Access |
+
+`/api/health`가 게이트 뒤인 것은 무해합니다. §2가 적어 둔 대로 Railway
+healthcheck는 컨테이너로 직접 가므로 Cloudflare 앞단을 지나지 않습니다.
+
+**`/api/build-info/`의 308은 게이트가 아니라 앱 자신의 routing입니다.** drift
+스크립트가 같은 origin에 머무는 3xx는 따라가고 origin을 떠나는 3xx만 게이트로
+읽는 것이 이 구분 때문입니다 — 전부 게이트로 판정했다면 평범한 끝 슬래시가
+장애로 보고됐을 것입니다.
+
+이후 `npm run report:deployed-commit-drift -- --gate`가 exit 0입니다 —
+production `a37f11a9`, staging `4b618702`, 둘 다 in sync. **staging은 drift 중이
+아니었습니다.** 게이트가 가린 것은 결함이 아니라 답이었고, 그래서 "확인 못 했다"를
+"괜찮다"로 세지 않은 판정이 옳았습니다.
+
+경위 전체는
+`.github/audits/deployed-commit-drift-staging-access-2026-09-01.md`.
+
 ### 아직 안 한 것
 
 Stripe test mode 결제 한 번과 크론 한 바퀴를 실제로 돌려본 확인은 남아 있습니다.
@@ -152,6 +203,13 @@ staging **호스트 전체**에 인증을 걸면 사람만 막히는 게 아닙�
 | Provider usage sync cron | — | `PROVIDER_USAGE_SYNC_SECRET` |
 | `npm run check:edge-robots` | `/robots.txt`, `/` | 없음 (공개 응답을 읽는 것이 목적) |
 | 로그인 코드·매직링크 클릭 | `/auth/*` | 링크 자체 |
+| `Deployed Commit Drift` (매시) | `/api/build-info` | 없음 (공개·비인증이 계약, STG-F010) |
+| staging 검증 체크리스트 A-1 (사람 손) | `/api/build-info` | 같음 |
+
+**끝의 두 행은 2026-09-01에 추가됐습니다.** 이 표는 2026-08-26에 만들어졌고
+`/api/build-info`를 읽는 호출자는 그 다음 날 생겼습니다 — 표가 다시 읽히지 않아
+그 경로가 bypass 심사를 통째로 건너뛰었습니다(§0a). **staging에 새 인바운드
+호출자를 만들 때 이 표를 함께 고칩니다.**
 
 staging 환경에 위 변수들이 **전부 설정돼 있습니다.** 즉 이 호출자들은 가정이 아니라
 실제로 staging을 부릅니다 — 2026-08-24 회차에서 Stripe test mode Checkout을 staging에

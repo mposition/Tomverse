@@ -13,6 +13,7 @@ import {
 import { modelOwnerPhrase } from "@/lib/modelOwner";
 import type { LifecycleReportRow } from "@/lib/modelLifecycleWorkItems";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
+import { PROVIDER_CATALOG_KEY_REJECTED } from "@/lib/providerModelCatalogCore";
 import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
 import { prisma } from "@/lib/prisma";
 import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
@@ -295,10 +296,17 @@ const reportPayload = (input: {
       modelCount: result.status === "checked" ? result.discovered : null,
       lastSuccessLabel: lastSuccess ? input.dayLabel(lastSuccess) : null,
       // What this row does not prove, said in the row rather than left to be
-      // inferred. All three are the same kind of fact: the scan looked at less
-      // than the provider has, and only the row can say so.
+      // inferred. Three of the four are the same kind of fact: the scan looked
+      // at less than the provider has, and only the row can say so. The
+      // rejected key is the odd one -- it says the row is not the failure.
       note:
         [
+          // A refused key is the one failure here that is not about the
+          // catalogue: the same key carries this provider's chat traffic, so
+          // the row has to say that the scan is a symptom and not the outage.
+          result.errorCode === PROVIDER_CATALOG_KEY_REJECTED
+            ? "key rejected; this provider's chat requests are failing too"
+            : null,
           // Perplexity's API describes Agent API models, so absence from it is
           // not evidence of a retirement (.github/audits/model-lifecycle-email-2026-08-22.md ML-07).
           result.provider === "perplexity"
