@@ -9,8 +9,13 @@
 //   npm run report:deployed-commit-drift -- --fetch
 //
 // Reads `/api/build-info`, which is public and unauthenticated by design
-// (STG-F010) -- no token, no dashboard, and nothing here can change a
-// deployment. The comparison itself lives in
+// (STG-F010) -- no token, and nothing here can change a deployment.
+//
+// "By design" is a claim about the endpoint, not a guarantee about the path to
+// it. On 2026-08-27 Cloudflare Access went up in front of staging and this
+// check has been unable to read it since; the repair is an exemption in the
+// gate, and this script's job is to say so loudly rather than to carry a
+// credential around the gate. The comparison itself lives in
 // scripts/report-deployed-commit-drift-core.mjs so it is testable without a
 // network.
 //
@@ -24,9 +29,15 @@ import { execFileSync } from "node:child_process";
 import {
   deployedCommitDrift,
   describeDrift,
+  classifyBuildInfoResponse,
+  describeEndpointFailure,
   BEHIND,
   DIVERGED,
   UNKNOWN,
+  REQUEST_FAILED,
+  NOT_JSON,
+  NO_COMMIT_SHA,
+  REDIRECT_LOOP,
 } from "./report-deployed-commit-drift-core.mjs";
 
 // Both hosts already appear in lib/ (accountEmails, robotsPolicyCore). They are
@@ -107,44 +118,85 @@ const undeployedCommits = (deployedSha, headSha) => {
     });
 };
 
+// Same-origin hops are followed; there is no legitimate shape of this endpoint
+// that needs more than a couple. The bound exists so a misconfigured origin
+// answers "it never arrives" instead of spinning until the job's timeout, where
+// it would be indistinguishable from an environment that is simply down.
+const MAX_SAME_ORIGIN_REDIRECTS = 3;
+
 const fetchDeployedSha = async (url) => {
-  const endpoint = new URL("/api/build-info", url).toString();
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(15000),
+  let endpoint = new URL("/api/build-info", url).toString();
+
+  for (let hop = 0; hop <= MAX_SAME_ORIGIN_REDIRECTS; hop += 1) {
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        headers: { accept: "application/json" },
+        // `manual`, so that a gate is something this check can see rather than
+        // something it follows. Following the redirect fetches a login page
+        // from another host and grades its 200 as the app's answer -- a very
+        // confusing way to say "the gate is on", and the way this check said it
+        // for five days.
+        redirect: "manual",
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (cause) {
+      return {
+        sha: null,
+        error: describeEndpointFailure({
+          reason: REQUEST_FAILED,
+          cause: cause?.message || cause,
+        }),
+      };
+    }
+
+    const status = response.status;
+    const contentType = response.headers.get("content-type") || "no content-type";
+    // Read on every path, including the ones that ignore it: a body left
+    // unconsumed keeps its request outstanding
+    // (.github/audits/unconsumed-response-bodies-2026-08-13.md). A redirect's
+    // body is a few bytes and a login page's is small enough not to care.
+    const text = await response.text().catch(() => "");
+
+    const { reason, gateHost, followTo } = classifyBuildInfoResponse({
+      requestUrl: endpoint,
+      status,
+      location: response.headers.get("location"),
     });
-  } catch (cause) {
-    // Never reached the endpoint at all: DNS, TLS, timeout, refused.
-    return { sha: null, error: `request failed — ${cause?.message || cause}` };
+
+    if (reason) {
+      return { sha: null, error: describeEndpointFailure({ reason, status, contentType, gateHost }) };
+    }
+    if (followTo) {
+      endpoint = followTo;
+      continue;
+    }
+
+    // The status and the content type, because they are what an operator
+    // repairs from. The first run of this check answered `Unexpected token
+    // '<', "<!DOCTYPE "... is not valid JSON` -- accurate, and it names neither
+    // the endpoint's answer nor anything to do about it.
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return {
+        sha: null,
+        error: describeEndpointFailure({
+          reason: NOT_JSON,
+          status,
+          contentType,
+          bodyPrefix: text.slice(0, 40),
+        }),
+      };
+    }
+    if (typeof body?.commitSha !== "string") {
+      return { sha: null, error: describeEndpointFailure({ reason: NO_COMMIT_SHA, status, contentType }) };
+    }
+    return { sha: body.commitSha, error: null };
   }
 
-  const contentType = response.headers.get("content-type") || "no content-type";
-  if (!response.ok) {
-    return { sha: null, error: `HTTP ${response.status} (${contentType})` };
-  }
-
-  // The status and the content type, because they are what an operator repairs
-  // from. The first run of this check answered `Unexpected token '<', "<!DOCTYPE
-  // "... is not valid JSON` -- accurate, and it names neither the endpoint's
-  // answer nor anything to do about it. A 200 carrying HTML is something in
-  // front of the app answering instead of the app: an interstitial, a login
-  // page, a challenge. That is a different repair from a 404 and a very
-  // different one from a timeout, and the line has to say which.
-  const text = await response.text();
-  try {
-    const body = JSON.parse(text);
-    return { sha: typeof body?.commitSha === "string" ? body.commitSha : null, error: null };
-  } catch {
-    return {
-      sha: null,
-      error:
-        `HTTP ${response.status} (${contentType}) did not return JSON. ` +
-        `The first bytes were ${JSON.stringify(text.slice(0, 40))} — something in front of ` +
-        "the app is answering instead of the app.",
-    };
-  }
+  return { sha: null, error: describeEndpointFailure({ reason: REDIRECT_LOOP }) };
 };
 
 const selected = onlyEnvironment
