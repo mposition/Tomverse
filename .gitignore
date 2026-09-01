@@ -88,3 +88,13 @@ promotion-metadata-snapshot-*.json
 # bytes, the manifest carries their digests, and a fixture in the tree is one
 # that drifts from the code it was built to exercise.
 .tmp/
+
+# Agent worktrees. `EnterWorktree` puts a full checkout under here -- with its
+# own node_modules and .next once anything has been built or run in it, so the
+# directory is gigabytes of build output that git would otherwise offer to
+# commit. The worktree has its own working tree and its own branch; nothing in
+# it belongs to this one.
+#
+# Scoped to the subdirectory, not to `.claude/`: settings and skills checked in
+# under .claude/ are repository content and must stay versioned.
+/.claude/worktrees/
