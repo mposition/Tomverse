@@ -7,14 +7,18 @@
  *
  * `/chat` and `/review` both render the Tomverse Review workspace
  * (`lib/productSurfaceRoutes.ts` says so, and says why: the cutover to
- * Tomverse Chat waits on `productKey` reaching strict read mode). A
- * continuation is `productKey = "chat"`, and the two honest options were to
- * open it in the Review shell -- a multi-model comparison workspace that has
- * no idea an imported transcript exists -- or to give it a surface of its own.
+ * Tomverse Chat waits on `productKey` reaching strict read mode).
  *
- * The second is what this is. It is additive: no existing route changes
- * meaning, the Review workspace is not rewired, and when Tomverse Chat gets
- * its own surface this constant is the single place that moves.
+ * A continuation is `productKey = "review"`
+ * (docs/policy/external-conversation-continuation.md §3.1), so the product is
+ * not what puts it here. The *screen* is: the Review workspace has no idea an
+ * imported transcript exists -- no provenance section, no tombstone, no
+ * snapshot lock -- and teaching it would mean rewiring a six-thousand-line
+ * client for a feature that is off by default.
+ *
+ * So this is additive: no existing route changes meaning, the Review workspace
+ * is not rewired, and when it can hold an imported transcript this constant is
+ * the single place that moves.
  *
  * `PRODUCT_SURFACE_PATH.chat` is deliberately *not* reused. That constant is a
  * decision about where Chat will live after the cutover; this one is a fact

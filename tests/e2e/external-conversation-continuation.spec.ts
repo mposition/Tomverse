@@ -31,6 +31,16 @@ const json = (body: unknown, status = 200) => ({
 const CONVERSATION_ID = "qa-continued-conversation";
 const EXTERNAL_ID = "qa-external-conversation";
 
+/**
+ * Two catalogue ids, used as the conversation's selected models.
+ *
+ * Real ids rather than invented ones: the composer resolves each to a name and
+ * a credit weight through the model catalogue, and an id the catalogue does
+ * not know would be rendered as a bare string and priced at nothing.
+ */
+const PRIMARY_MODEL = "gpt-5-6-luna";
+const SECOND_MODEL = "gpt-5-4-mini";
+
 type SourceState =
     | { status: "available" }
     | { status: "deleted" }
@@ -79,13 +89,31 @@ const mockContinuationApi = async (
          * conversations.
          */
         abortFirstCreate?: boolean;
-        tomverseMessages?: { id: string; role: string; content: string }[];
+        tomverseMessages?: {
+            id: string;
+            role: string;
+            content: string;
+            modelId?: string;
+        }[];
+        /**
+         * What the conversation answers as its `selectedModels`.
+         *
+         * A continuation is a Review conversation
+         * (docs/policy/external-conversation-continuation.md §3.1), so this is
+         * one to three models and each of them answers every turn.
+         */
+        selectedModels?: string[];
     } = {}
 ) => {
+    const selectedModels = options.selectedModels ?? [PRIMARY_MODEL];
     const state = {
         createBodies: [] as { idempotencyKey: string }[],
         savedMessages: [] as { id: string; role: string; content: string }[],
         chatRequests: 0,
+        /** Every `/api/chat` body, so a spec can assert what each one carried. */
+        chatBodies: [] as { modelId?: string; messages?: unknown }[],
+        preflightBodies: [] as { modelIds?: string[] }[],
+        selectedModels,
         tomverseMessages: options.tomverseMessages ?? [],
     };
     const source = options.source ?? { status: "available" };
@@ -221,8 +249,9 @@ const mockContinuationApi = async (
                 id: CONVERSATION_ID,
                 title: "Continued from an imported chat",
                 kind: "chat",
-                productKey: "chat",
-                selectedModels: ["gpt-5-6-luna"],
+                // §3.1: a continuation is a Review conversation.
+                productKey: "review",
+                selectedModels: state.selectedModels,
                 disabledPanels: [],
                 webSearchMode: "off",
                 memoryMode: "inherit",
@@ -238,20 +267,34 @@ const mockContinuationApi = async (
         )
     );
 
+    // Registered before `**/api/chat` so it wins for the preflight path:
+    // Playwright hands a request to the most recently registered handler.
+    await page.route("**/api/chat/preflight", async (route) => {
+        state.preflightBodies.push(
+            route.request().postDataJSON() as { modelIds?: string[] }
+        );
+        await route.fulfill(
+            json({ admissionToken: "qa-admission", contextBundle: null })
+        );
+    });
+
     await page.route("**/api/chat", async (route) => {
+        const body = route.request().postDataJSON() as { modelId?: string };
         state.chatRequests += 1;
+        state.chatBodies.push(body);
         state.tomverseMessages = [
             ...state.tomverseMessages,
             {
                 id: `assistant-${state.chatRequests}`,
                 role: "assistant",
-                content: "A Tomverse answer that continues the thread.",
+                modelId: body.modelId,
+                content: `A ${body.modelId} answer that continues the thread.`,
             },
         ];
         await route.fulfill({
             status: 200,
             contentType: "text/plain; charset=utf-8",
-            body: "A Tomverse answer that continues the thread.",
+            body: `A ${body.modelId} answer that continues the thread.`,
         });
     });
 
@@ -348,8 +391,11 @@ test.describe("continuing an imported conversation", () => {
         await cta.click();
         const disclosure = page.getByTestId("continuation-disclosure");
         await expect(disclosure).toBeVisible();
-        // Five sentences, and still no request.
-        await expect(disclosure.locator("li")).toHaveCount(5);
+        // Six sentences, and still no request. The sixth is the one this
+        // feature's Review shape added: every selected model answers, and each
+        // costs credits (docs/policy/external-conversation-continuation.md
+        // §8.1).
+        await expect(disclosure.locator("li")).toHaveCount(6);
         expect(api.createBodies).toHaveLength(0);
 
         await page.getByTestId("continuation-confirm").click();
@@ -439,6 +485,10 @@ test.describe("continuing an imported conversation", () => {
                 {
                     id: "m2",
                     role: "assistant",
+                    // An assistant row names the model that wrote it. A row
+                    // with no model belongs to no panel, which is the point:
+                    // it must never be shown as some other model's words.
+                    modelId: PRIMARY_MODEL,
                     content: "A Tomverse answer.",
                 },
             ],
@@ -499,7 +549,10 @@ test.describe("continuing an imported conversation", () => {
             page.getByTestId("continuation-source-message")
         ).toHaveCount(2);
         await expect(page.getByTestId("continuation-divider")).toBeVisible();
+        // The question, and no answer: one model is selected and it has not
+        // answered this turn, so its panel is there and carries no message.
         await expect(page.getByTestId("continuation-message")).toHaveCount(1);
+        await expect(page.getByTestId("continuation-model-panel")).toHaveCount(1);
     });
 
     test("a message is saved before it is answered, and the answer is stored", async ({
@@ -529,6 +582,164 @@ test.describe("continuing an imported conversation", () => {
         await expect(page.getByTestId("continuation-message")).toHaveCount(2);
     });
 
+    test("every selected model answers the same question, once each", async ({
+        page,
+    }) => {
+        // docs/policy/external-conversation-continuation.md §5.1. The question
+        // is asked once and the imported excerpt is on screen once; what
+        // multiplies is the answers.
+        await prepareGuestPage(page, "ko");
+        const api = await mockContinuationApi(page, {
+            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continued-conversation-workspace")
+        ).toBeVisible();
+        await expect(page.getByTestId("continuation-model-panel")).toHaveCount(0);
+
+        await page
+            .getByTestId("continuation-composer-textarea")
+            .fill("Where did we leave off?");
+        await page.getByTestId("continuation-send").click();
+
+        await expect.poll(() => api.chatRequests, { timeout: 15_000 }).toBe(2);
+
+        // One saved user row for the whole turn, not one per model.
+        expect(api.savedMessages).toHaveLength(1);
+
+        // One admission for the comparison, naming both models.
+        expect(api.preflightBodies).toHaveLength(1);
+        expect(api.preflightBodies[0].modelIds).toEqual([
+            PRIMARY_MODEL,
+            SECOND_MODEL,
+        ]);
+
+        // Each request named its own model, and no request carried the
+        // imported transcript: the excerpt is built and priced server-side.
+        const models = api.chatBodies.map((body) => body.modelId).sort();
+        expect(models).toEqual([PRIMARY_MODEL, SECOND_MODEL].sort());
+        for (const body of api.chatBodies) {
+            const serialised = JSON.stringify(body);
+            // The imported transcript's own words, from the fixture above.
+            expect(serialised).not.toContain(
+                "What did we decide about the migration?"
+            );
+            expect(serialised).not.toContain(
+                "You decided to expand first and contract later."
+            );
+        }
+
+        // Two panels for the one question, and the imported section is still
+        // rendered exactly once.
+        await expect(page.getByTestId("continuation-model-panel")).toHaveCount(2);
+        await expect(page.getByTestId("continuation-turn")).toHaveCount(1);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toHaveCount(1);
+    });
+
+    test("the estimated credits are shown per model and as a total", async ({
+        page,
+    }) => {
+        // §4.4: the seed is charged once per model request, so the figure the
+        // owner sees before sending has to be the sum of per-model figures.
+        await prepareGuestPage(page, "ko");
+        await mockContinuationApi(page, {
+            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-credit-estimate")
+        ).toBeVisible();
+        await expect(
+            page.getByTestId("continuation-credit-estimate-model")
+        ).toHaveCount(2);
+    });
+
+    test("one model failing leaves the other model's answer standing", async ({
+        page,
+    }) => {
+        // §5.1: reservation, settlement and refund are per model request. The
+        // failure is reported on its own panel, never as "the turn failed".
+        await prepareGuestPage(page, "ko");
+        const api = await mockContinuationApi(page, {
+            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
+        });
+        // Registered last, so it wins for the model it names.
+        await page.route("**/api/chat", async (route) => {
+            const body = route.request().postDataJSON() as { modelId?: string };
+            if (body.modelId !== SECOND_MODEL) return route.fallback();
+            await route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "provider failed" }),
+            });
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page
+            .getByTestId("continuation-composer-textarea")
+            .fill("Where did we leave off?");
+        await page.getByTestId("continuation-send").click();
+
+        await expect
+            .poll(() => api.chatRequests, { timeout: 15_000 })
+            .toBeGreaterThanOrEqual(1);
+        // The panel that failed says so; the turn does not.
+        await expect(
+            page.getByTestId("continuation-panel-error")
+        ).toHaveCount(1);
+        await expect(page.getByTestId("continuation-send-error")).toHaveCount(0);
+        // And the model that answered kept its answer.
+        await expect(
+            page
+                .getByTestId("continuation-model-panel")
+                .filter({ has: page.getByTestId("continuation-message") })
+        ).toHaveCount(1);
+    });
+
+    test("the model selection is saved by the ordinary conversation endpoint", async ({
+        page,
+    }) => {
+        // §8.3: no continuation-specific limit and no continuation-specific
+        // endpoint. The screen sends `selectedModels` to the same PATCH the
+        // Review workspace uses, and the server decides.
+        await prepareGuestPage(page, "ko");
+        await mockContinuationApi(page);
+        const patched: string[][] = [];
+        await page.route(`**/api/conversations/${CONVERSATION_ID}`, (route) => {
+            if (route.request().method() !== "PATCH") return route.fallback();
+            const body = route.request().postDataJSON() as {
+                selectedModels?: string[];
+            };
+            patched.push(body.selectedModels ?? []);
+            return route.fulfill(
+                json({ id: CONVERSATION_ID, selectedModels: body.selectedModels })
+            );
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-model-selector")
+        ).toBeVisible();
+        await page
+            .getByTestId("continuation-model-option")
+            .filter({ has: page.locator(`[data-model-id="${SECOND_MODEL}"]`) })
+            .or(
+                page.locator(
+                    `[data-testid="continuation-model-option"][data-model-id="${SECOND_MODEL}"]`
+                )
+            )
+            .first()
+            .click();
+
+        await expect.poll(() => patched.length, { timeout: 15_000 }).toBe(1);
+        expect(patched[0]).toEqual([PRIMARY_MODEL, SECOND_MODEL]);
+    });
+
     test("a deleted source leaves a tombstone and the owner's messages", async ({
         page,
     }) => {
@@ -537,7 +748,12 @@ test.describe("continuing an imported conversation", () => {
             source: { status: "deleted" },
             tomverseMessages: [
                 { id: "m1", role: "user", content: "My own question." },
-                { id: "m2", role: "assistant", content: "A Tomverse answer." },
+                {
+                    id: "m2",
+                    role: "assistant",
+                    modelId: PRIMARY_MODEL,
+                    content: "A Tomverse answer.",
+                },
             ],
         });
 

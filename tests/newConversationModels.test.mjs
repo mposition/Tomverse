@@ -240,7 +240,25 @@ test("existing-conversation fallbacks stay single-model, only new creations use 
     "the GET list must not apply the new-conversation combination to existing rows"
   );
   assert.ok(
-    postSection.includes("resolveNewConversationModels"),
+    postSection.includes("resolveNewConversationSelectedModels"),
     "the POST creation fallback must go through the shared resolver"
+  );
+
+  // The resolver is shared with external continuation, which starts a Review
+  // conversation the same way (docs/policy/external-conversation-continuation.md
+  // §8.3). Two writers that each spelled the two steps out would drift
+  // invisibly -- both would produce a plausible combination and only one would
+  // be the account's.
+  const continuationWriter = readFileSync(
+    new URL("../lib/externalContinuationService.ts", import.meta.url),
+    "utf8"
+  );
+  assert.ok(
+    continuationWriter.includes("resolveNewConversationSelectedModels"),
+    "the continuation writer must use the same resolver as the create route"
+  );
+  assert.ok(
+    !continuationWriter.includes("resolveNewConversationModels("),
+    "the continuation writer must not re-implement the resolution itself"
   );
 });

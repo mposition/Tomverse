@@ -46,8 +46,8 @@ import {
   readConversationProfile,
   resolveProfileBinding,
 } from "@/lib/conversationProfileService";
-import { clampRuntimeSelectedModels, getRuntimeModels } from "@/lib/modelRegistry";
-import { resolveNewConversationModels } from "@/lib/newConversationModels";
+import { clampRuntimeSelectedModels } from "@/lib/modelRegistry";
+import { resolveNewConversationSelectedModels } from "@/lib/newConversationSelectedModels";
 import { prisma } from "@/lib/prisma";
 
 const modelSchema = z.string().min(1).max(120);
@@ -113,15 +113,17 @@ export const createConversationForProduct = async (
 
     // A create without a model array starts from the account's saved
     // new-conversation combination (null -> [defaultModel]), resolved by the
-    // shared resolver -- the same start state the client shows.
+    // shared resolver -- the same start state the client shows, and the same
+    // one `lib/externalContinuationService.ts` starts a continuation with
+    // (docs/policy/external-conversation-continuation.md §8.3).
     const fallbackModels = body.selectedModels
       ? null
-      : resolveNewConversationModels({
-          stored: userSettings?.newConversationModelIds ?? null,
-          defaultModel: defaultEngine,
-          models: await getRuntimeModels(),
-          plan: billingPlan.tier,
-        }).effectiveModelIds;
+      : await resolveNewConversationSelectedModels({
+          storedNewConversationModelIds:
+            userSettings?.newConversationModelIds ?? null,
+          defaultModelId: defaultEngine,
+          planTier: billingPlan.tier,
+        });
 
     // §14's pin, resolved before the models are clamped: a profile names the
     // models this assistant answers on, and a conversation that adopted the
