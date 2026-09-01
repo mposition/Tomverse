@@ -374,6 +374,64 @@ test("an expired grant is refused, and an unknown one says so without a lookup k
   );
 });
 
+test("V14 -- deleting the account takes every mobile row and leaves one nameless record", async () => {
+  // Approved decision 9: deletion removes the rows and identifiers naming the
+  // person, their devices and their families, and only a de-identified
+  // aggregate may remain. The cascade does the first half; this is the second.
+  const { deleteTomverseAccount } = await import("@/lib/accountDeletion");
+  const user = await createUser();
+  await issue(user.id);
+  await issue(user.id);
+
+  const result = await deleteTomverseAccount(user.id, { cancelSubscription: false });
+  assert.equal(result.deleted, true);
+
+  assert.equal(await prisma.mobileDevice.count(), 0);
+  assert.equal(await prisma.mobileTokenFamily.count(), 0);
+  assert.equal(await prisma.mobileRefreshRotation.count(), 0);
+
+  const remaining = await prisma.mobileAuthEvent.findMany();
+  assert.equal(remaining.length, 1, "one aggregate row, and only one");
+  assert.equal(remaining[0]?.event, "mobile_auth.revoked_on_account_deletion");
+  // It survives because it names nobody. A row naming the account would have
+  // been taken by the same cascade a moment later.
+  assert.equal(remaining[0]?.userId, null);
+  assert.equal(remaining[0]?.deviceId, null);
+  assert.equal(remaining[0]?.familyId, null);
+});
+
+test("V14 -- an account with no mobile session leaves no mobile record at all", async () => {
+  // A row on every deletion would count deletions rather than mobile sessions
+  // ended, and an operator reading it would draw the wrong number.
+  const { deleteTomverseAccount } = await import("@/lib/accountDeletion");
+  const user = await createUser();
+
+  await deleteTomverseAccount(user.id, { cancelSubscription: false });
+
+  assert.equal(await prisma.mobileAuthEvent.count(), 0);
+});
+
+test("V28 -- logout works when the access token has already expired", async () => {
+  // The correction rev.2 made to D14: the most common moment to log out is
+  // after the access token has lapsed, so an access-authenticated logout would
+  // fail exactly when it is wanted. Nothing here presents one.
+  const { logoutMobileSession } = await service();
+  const user = await createUser();
+  const tokens = await issue(user.id);
+
+  await logoutMobileSession({
+    // No Authorization header at all, which is the point.
+    request: new Request("https://tomverse.test/api/auth/mobile/logout", {
+      method: "POST",
+    }),
+    refreshToken: tokens.refreshToken,
+  });
+
+  const family = await prisma.mobileTokenFamily.findFirstOrThrow();
+  assert.notEqual(family.revokedAt, null);
+  assert.equal(family.revokedReason, "logout");
+});
+
 test("no audit row carries a token, a digest or a record id", async () => {
   // D15's forbidden list, checked against what was actually written rather
   // than against the schema's intent.

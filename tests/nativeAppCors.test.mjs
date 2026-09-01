@@ -8,10 +8,11 @@
 //   2. a forged `Authorization` header buys nothing;
 //   3. a native mutation stays blocked until N1b exists.
 //
-// (2) and (3) are the ones worth writing tests for even though the code
-// contains nothing that reads `Authorization`. A test that fails the day
-// someone adds that read is the whole point -- the failure mode here is a
-// future change, not the current one.
+// (2) was written when nothing in the edge read `Authorization` at all, as a
+// test that would fail the day something did. It did its job: N2 added the
+// verifier and this file failed, which is where the rewritten pair below came
+// from. The rule it enforces is unchanged -- the header may be read, but only
+// to be verified, and a security decision is never made on its presence.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -152,22 +153,41 @@ test("Vary keeps what was there and adds Origin once", () => {
 
 // --- criterion 2: a forged bearer header buys nothing ---------------------
 
-test("no security decision reads an Authorization header", () => {
-  // The rule `proxy.ts` already states for prefetch headers, applied to the
-  // one header N1b will eventually make meaningful: until a verifier exists,
-  // the *presence* of `Authorization` must change nothing. If it ever does,
-  // `Authorization: Bearer anything` is a switch that turns the edge off.
-  for (const [name, source] of [
-    ["proxy.ts", PROXY],
-    ["lib/requestOrigin.ts", REQUEST_ORIGIN],
-  ]) {
-    const withoutComments = stripComments(source);
-    assert.equal(
-      /authorization/i.test(withoutComments),
-      false,
-      `${name} reads an Authorization header outside a comment; N1b has to arrive with a verifier, not with a header check`
-    );
-  }
+test("the origin decision never reads an Authorization header", () => {
+  // `Authorization: Bearer anything` must never be a switch that turns the
+  // edge off. `lib/requestOrigin.ts` decides on origin alone and has no reason
+  // to know the header exists.
+  assert.equal(
+    /authorization/i.test(stripComments(REQUEST_ORIGIN)),
+    false,
+    "lib/requestOrigin.ts reads an Authorization header outside a comment"
+  );
+});
+
+test("proxy reads Authorization only to hand it to the verifier", () => {
+  // Rewritten when N2 landed, and the original wording is why. It said "until
+  // a verifier exists, the presence of `Authorization` must change nothing" --
+  // a placeholder for the day one did. That day is here: proxy reads the
+  // header, but only as an argument to `nativeBearerVerdict`, and the
+  // mutation-origin check is replaced by the *verdict*, never by the header.
+  //
+  // The behavioural half of this lives in tests/mobileBearerProxy.test.mjs,
+  // which sends a real bearer to a real proxy and gets a 403. This half is
+  // about shape: the one thing a future edit could quietly do is condition the
+  // check on the header instead of the verdict.
+  const withoutComments = stripComments(PROXY);
+  const reads = [...withoutComments.matchAll(/["']authorization["']/gi)];
+  assert.equal(reads.length, 1, "exactly one read of the header, and it is the gate's");
+  assert.match(
+    withoutComments,
+    /authorization:\s*request\.headers\.get\(["']authorization["']\)/i,
+    "the only read should be the argument passed to nativeBearerVerdict"
+  );
+
+  // The bypass is on the verdict. A condition naming the header instead would
+  // be exactly the switch this test exists to prevent.
+  const guard = /bearer\.kind !== "yes"/.test(withoutComments);
+  assert.ok(guard, "the mutation-origin check must be replaced by the verdict");
 });
 
 test("the CORS module decides on origin alone", () => {

@@ -8,6 +8,7 @@ import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 
 const ACCOUNT_DELETION_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -265,6 +266,14 @@ export async function deleteTomverseAccount(
     // provider request identifiers indefinitely. SetNull on its own is not
     // anonymisation; it renames the row and leaves every join intact.
     await anonymiseAccountData(tx, user.id);
+
+    // The mobile devices, families and rotations go with the cascade below --
+    // all four tables reach User by ON DELETE CASCADE, which is what
+    // docs/policy/tomverse-chat-data-domain-registry.yaml records and what
+    // tests/integration/mobile-auth-schema.db.test.ts proves. What the cascade
+    // cannot leave behind is the fact that it happened, so that one
+    // de-identified row is written here, before the User row goes.
+    await recordMobileSessionsEndedByDeletion(tx, user.id);
 
     await tx.user.delete({
       where: { id: user.id },
