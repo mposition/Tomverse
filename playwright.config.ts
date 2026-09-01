@@ -80,6 +80,27 @@ export default defineConfig({
   // See docs/qa/canonical-visual-baseline.md.
   updateSnapshots: "none",
   retries: process.env.CI ? 2 : 0,
+  // One worker in CI, and it stays one. Asked again on 2026-09-01, when the
+  // daily audit's suite outgrew its budget and a four-vCPU runner sitting
+  // three-quarters idle for two and a half hours looked like the obvious
+  // saving.
+  //
+  // It is the wrong one to take here. Screenshot comparison is the part of
+  // this suite most sensitive to render timing under CPU contention -- the
+  // Nightly Visual Regression workflow already says so in as many words --
+  // and the goldens are judged in CI, not skipped there: the substitute-
+  // browser gate in tests/e2e/support/canonical-visual.ts keys on
+  // PLAYWRIGHT_CHROMIUM_EXECUTABLE, which no workflow sets. So a second
+  // worker buys minutes and pays for them in golden stability, and the way
+  // it would be paid is the quiet one: `retries: 2` above absorbs a flaky
+  // golden as "passed on retry", which is the exact failure the nightly
+  // overrides retries to zero to catch.
+  //
+  // The parallelism the audit needed was bought by sharding it instead
+  // (.github/workflows/daily-security-audit.yml). A shard is a whole runner
+  // of its own, so it adds no contention inside the process comparing
+  // pixels -- more shards is the lever, and it is safe in a way more workers
+  // is not.
   workers: process.env.CI ? 1 : 4,
   reporter: [["list"], ["html", { open: "never" }]],
   outputDir: "test-results",

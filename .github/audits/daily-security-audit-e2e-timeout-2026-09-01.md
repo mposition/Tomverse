@@ -160,16 +160,9 @@ worker는 1개로 고정돼 있기 때문입니다.
 우선순위 순으로, **아직 구현하지 않았습니다.**
 
 1. ~~**스위트를 샤딩합니다.**~~ **완료 — 8절 참조.**
-2. **CI worker 수를 올릴지 판단합니다.** `workers: 1`은 4 vCPU 러너에서 비쌉니다.
-   다만 `chat-state-visual-regression.spec.ts`의 screenshot golden이 병렬 부하에
-   민감할 수 있으므로, 골든 스펙만 worker 1로 남기고 나머지를 올리는 형태여야 합니다.
-   `docs/qa/canonical-visual-baseline.md`를 먼저 읽고 결정할 일입니다.
-3. **`/api/user/guest-usage`에 E2E 단락을 넣습니다.** `isE2EDatabaseDisabled()`일 때
-   결정적인 스냅샷을 돌려주면, 로그가 조용해지고 게스트 사용량 UI가 E2E에서 실제로
-   검증됩니다. 5절의 결함입니다.
-4. **mobile-safari 2건을 처리합니다.** `generated-artifact-card.spec.ts:629`와 `:671`.
-   1~3번이 되고 나면 매일 자동으로 재확인되지만, 그 전까지는 8/25 이후 아무도 보지
-   못한 상태로 남아 있습니다.
+2. ~~**CI worker 수를 올릴지 판단합니다.**~~ **판단 완료 — 9절.**
+3. ~~**`/api/user/guest-usage`에 E2E 단락을 넣습니다.**~~ **완료 — 9절.**
+4. ~~**mobile-safari 2건을 처리합니다.**~~ **완료 — 9절.**
 
 1번이 없으면 2·3·4를 다 해도 다음 확장에서 같은 자리로 돌아옵니다.
 
@@ -238,3 +231,129 @@ WebKit이 3·4·5의 대부분을 갖고 있고 둘 중 느린 쪽입니다.
   `--grep` 없음, `--update-snapshots` 없음, `check_result` 라벨들 — 이 모두 유지됩니다.
 
 2·3·4번은 아직 그대로입니다.
+
+
+## 9. 2~4번 조치
+
+### 2번 — CI worker 수: 1로 유지합니다 (변경 없음, 근거를 코드에 남김)
+
+**올리지 않는 것이 결론입니다.** 이유는 두 가지 사실이고, 둘 다 확인했습니다.
+
+- **골든은 daily audit에서 실제로 판정됩니다.** 대체 브라우저 게이트
+  (`tests/e2e/support/canonical-visual.ts`)는 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`을
+  보고 판단하는데, security-regression이 **어떤 워크플로도 그 변수를 설정하지
+  못하게** 막고 있습니다. 그래서 CI에서 골든은 skip되지 않고 비교됩니다.
+- **저장소가 이미 이 판단을 내렸습니다.** Nightly Visual Regression 워크플로:
+  "screenshot comparison is the part of the test set most sensitive to render
+  timing under CPU contention, so there is nothing to buy by parallelising it
+  and a golden's stability to lose."
+
+그리고 지불 방식이 조용합니다 — `retries: 2`가 flaky해진 골든을 "passed on
+retry"로 흡수하고, 그것이 nightly가 `--retries=0`으로 잡으려는 바로 그 실패입니다.
+
+**필요했던 병렬성은 1번 샤딩이 이미 샀습니다.** 샤드는 각자 별도 러너이므로
+픽셀을 비교하는 프로세스 안에 경합을 만들지 않습니다. **병렬성이 더 필요하면
+worker가 아니라 샤드를 늘리는 것**이 답이고, 그것을 `playwright.config.ts`의
+`workers` 옆에 근거와 함께 적어 두었습니다 — 다음 사람이 같은 질문을 하고 같은
+조사를 반복하지 않도록.
+
+### 3번 — guest-usage: 500이 사라졌습니다 (세 곳)
+
+원인이 5절에 쓴 것보다 하나 더 있었습니다. **route가 스냅샷보다 먼저 부르는
+rate limiter가 첫 번째 실패 지점**이었습니다.
+
+- `lib/chatSecurity.ts` — `getGuestUsageSnapshot()`의 `ChatUsageBucket` 읽기 두 건.
+  `isE2EDatabaseDisabled()`면 `[null, null]`, 즉 **행 없음**으로 진행합니다.
+  `usageBucketCount(undefined)`는 아무것도 안 쓴 게스트가 읽는 것과 같은 0이고,
+  한도·잔여·리셋 계산은 전부 production 코드가 그대로 합니다.
+- `lib/comparisonReviewQuota.ts` — 같은 요청이 함께 읽는 AI Review 체험 잔여.
+  미사용으로 보고하며, 예약 경로는 손대지 않았습니다(여전히 DB가 필요합니다).
+- `app/api/user/guest-usage/route.ts` — `consumeApiRateLimit()`이
+  `prisma.$transaction`을 엽니다. 이것이 스냅샷에 닿기도 전에 던지고 있었습니다.
+  E2E에서는 건너뜁니다 — `app/api/models/status/route.ts`가 같은 호출에 대해
+  이미 쓰는 패턴이고, **셀 곳이 없는 limiter는 약한 limiter가 아니라 없는
+  limiter**이기 때문입니다.
+
+세 곳 모두 `isE2EDatabaseDisabled()`(플래그 **그리고** loopback `NEXTAUTH_URL`)
+뒤에 있고, `/api/ready`는 production에서 그 플래그를 거부합니다.
+
+**실측으로 확인했습니다.** 로컬 E2E 서버에서 `GET /api/user/guest-usage`가
+`500 → 200`이 되었고, 스펙 실행 중 `Failed to load guest usage`가 **4건 → 0건**.
+
+### 3번의 부작용 — 그 500에 의존하던 스펙 하나
+
+`tests/e2e/api-response-body-completion.spec.ts`가 **의도적으로** 이 500을
+쓰고 있었습니다. 주석에 명시돼 있습니다 — "The 500 is real, not mocked... A
+`page.route` fulfilment would be served by Playwright rather than by the network
+stack and would prove nothing about either."
+
+그래서 mock으로 바꾸지 않고 **다른 진짜 5xx로 옮겼습니다: `/api/ready`(503).**
+둘의 차이가 요점입니다.
+
+- guest-usage의 500은 **결함**이었습니다. 고쳐질 것이었고, 실제로 고쳐졌습니다.
+- `/api/ready`의 503은 **정확한 보고**입니다. 이 서버에는 DB도, provider 예산도,
+  snapshot keyring도 없으니 서비스할 준비가 안 된 것이 맞습니다. 그렇게 말하는
+  것은 엔드포인트가 고장 난 게 아니라 동작하는 것입니다.
+
+`private, no-store`도 만족하고, 세 번 연속 503으로 안정적임을 확인했습니다.
+언젠가 200이 되면 스펙의 상태 단언이 **소리 내어 실패**합니다 — 조용히 아무것도
+검증하지 않게 되는 대신.
+
+### 4번 — mobile-safari 2건: CSP였고, 제품 결함이 아니었습니다
+
+run #48 로그에서 실제 원인을 찾았습니다. 세 번의 시도 모두 같은 줄에서, 단언이
+하나도 실행되기 전에 죽었습니다.
+
+```
+Error: page.addStyleTag: [Report Only] Refused to apply a stylesheet because its
+hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive
+of the Content Security Policy.
+  646 | await page.addStyleTag({ content: NARROW_PANEL_CSS });
+```
+
+**정책이 Report-Only인데도 호출이 거부됐습니다** — WebKit은 report-only 위반을
+적용 거부로 취급합니다. Chromium은 적용하고 리포트만 보내므로 같은 호출이 세
+Chromium 프로젝트에서 전부 통과했고, 그래서 이 결함은 WebKit을 설치하는 유일한
+워크플로에서만 보였습니다.
+
+**저장소가 이미 이 문제를 풀어 두었습니다.** `tests/e2e/support/chat-state-fixtures.ts`
+가 같은 이유로 `addStyleTag({ content })`를 쓰지 않고 `public/qa/*.css`를
+`addStyleTag({ url })`로 로드합니다 — `<link rel="stylesheet">`는 `style-src 'self'`
+가 이미 허용합니다. 그 패턴을 따랐습니다.
+
+- 새 파일 `public/qa/narrow-artifact-panel.css`
+- `NARROW_PANEL_CSS` → `NARROW_PANEL_STYLESHEET = "/qa/narrow-artifact-panel.css"`
+
+**production CSP는 한 글자도 바꾸지 않았습니다.** 예외를 넓히는 대신 예외가
+필요 없게 만드는 것이 이 저장소가 이미 택한 방향입니다.
+
+### 검증
+
+| | 결과 |
+|---|---|
+| `npm run typecheck` | 통과 |
+| `npx eslint . --max-warnings=0` | 통과 |
+| `npm run test:unit` | 통과 |
+| `npm run security:regression` | 통과 (188 checks) |
+| `npm run check:encoding:strict` | 통과 |
+| 영향 스펙 7개 파일, desktop-chromium | **152 passed**, 6 skipped, 0 failed |
+| 영향 스펙 7개 파일, mobile-chromium | **67 passed**, 91 skipped, 0 failed |
+
+두 narrow-panel 테스트는 통과하며, 그 통과 자체가 스타일시트가 실제로 로드되고
+적용됐다는 증거입니다 — 단언이 `box.width <= 322`이므로 404였거나 적용되지
+않았다면 실패합니다.
+
+### 검증하지 못한 것
+
+**4번을 WebKit에서 재현하지도, 확인하지도 못했습니다.** WebKit 바이너리 다운로드를
+egress proxy가 막습니다(`playwright.download.prss.microsoft.com` 403). 통과를 확인한
+것은 Chromium이고, WebKit에서 통과할 것이라는 근거는 메커니즘입니다 —
+same-origin `<link rel="stylesheet">`는 `style-src 'self'`가 허용하므로 애초에
+위반이 발생하지 않고, 따라서 report-only 위반을 거부로 취급하는 WebKit의 동작이
+관여할 지점이 없습니다. **그래도 이것은 추론이고, 판정은 WebKit이 실제로 도는
+첫 daily audit 실행의 몫입니다.**
+
+Chromium 실행에는 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`을 썼습니다(이 컨테이너의
+Playwright 빌드가 lockfile이 고정한 것과 다릅니다). 그래서 이 실행은 canonical이
+아니며 **골든에 대해서는 아무 증거도 아닙니다** — 위 결과는 동작 단언에 대한
+것입니다.
