@@ -128,6 +128,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:release-gate-coverage
 
+      # A provider price nobody has re-read is a price that used to be true.
+      # The register carries a deadline per model (docs/policy/voice-input.md
+      # §6.1-3) and the unit tests pin their own clock, so only a check that
+      # runs against today can notice one going stale.
+      - name: Voice price register
+        timeout-minutes: 5
+        run: npm run check:voice-price-register
+
       # The @ui-risk tier blocks merges and is selected by a tag, so a spec
       # joins it by being tagged and the document that records the tier does
       # not notice. It had drifted to 25 tagged files against a table naming
@@ -274,6 +282,24 @@ jobs:
       - name: Memory eval freeze conditions
         timeout-minutes: 5
         run: npm run check:memory-eval-freeze
+
+      # succ-6 is the frozen decision set and its structural check was not in
+      # any required gate either -- the dataset a verdict is cited against was
+      # the one nothing guarded. `check:memory-eval-freeze` reads freeze
+      # *conditions*; this reads the sample, the manifest and the signature.
+      - name: Memory eval succ-6 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ6
+
+      # The successor's own invariants, which `check:memory-eval-freeze` does
+      # not cover: it reads the harness target, and succ-7 is not the target.
+      # Without this step succ-7 could lose a case, gain a same-cell mismatch,
+      # break its subtype composition, intersect the regression corpus, drop
+      # `frozen` into the manifest identity, or start claiming adoption -- and
+      # every required check would still be green.
+      - name: Memory eval succ-7 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ7
 
       # Tomverse Chat release thresholds live only in the canonical registry
       # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference

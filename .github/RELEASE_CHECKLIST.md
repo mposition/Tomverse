@@ -154,6 +154,20 @@ Date / timezone:    ____________________
       `MEMORY_EVAL_DATASET_FROZEN` claims a freeze the conditions of
       docs/ops/memory-extraction-eval-dataset.md §7.1 do not support;
       while the dataset is still being authored it reports progress
+- [ ] `npm run check:memory-eval-succ6` — the frozen decision set against
+      its signed manifest: the sample, the digests and the signature, none
+      of which `check:memory-eval-freeze` reads. It checks freeze
+      *conditions*, so succ-6 could lose a case and that check would still
+      pass
+- [ ] `npm run check:memory-eval-succ7` — the successor's own invariants,
+      which nothing else covers because succ-7 is not the harness target:
+      1,150 cases with every cell count preserved, 54 same-cell 1:1
+      replacements, the `assistant_only` subtype composition rather than
+      merely its floor, no case in both the decision set and the
+      regression corpus, the decision loader unable to import that corpus,
+      `frozen` kept out of the manifest's identity so the digest a
+      reviewer signs is the digest that gets frozen, and no claim of
+      adoption while the review sheet carries no signature
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
@@ -177,6 +191,10 @@ Date / timezone:    ____________________
       state with its build unnamed and two owner cells reading `(이름)`
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
+- [ ] `npm run check:voice-price-register` — proves every transcription model
+      this deployment can reach has a price with an owner, a ticket and a
+      re-reading deadline that has not passed. Runs against today, because the
+      unit tests pin their own clock and would pass forever
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
       what CI enforces. It is the reason the list above can be trusted: the
       repository grew to twelve CI-enforced checks while this section named

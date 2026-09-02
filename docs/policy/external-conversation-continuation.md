@@ -248,9 +248,19 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
   그러면 비교가 답이 아니라 입력의 차이를 재게 됩니다.
 - **한 모델의 실패가 다른 모델에 닿지 않습니다.** 예약·정산·환급은 모델 요청
   단위이고, 실패한 요청의 환급은 성공한 요청의 정산과 무관합니다(§4.4).
-- **원본은 화면에 한 번만 나옵니다.** divider 위의 "외부 대화 · 읽기 전용" 구획
-  하나이고 모델 패널은 divider 아래에 놓입니다. 패널마다 원본을 복제해 그리지
-  않으며, 외부 message를 `Message`로 복제하지 않는다는 금지는 그대로입니다.
+- **원본은 각 패널의 timeline 맨 앞에 놓입니다**(2026-09-02 2차 개정). 그 전에는
+  divider 위에 구획 하나를 두고 "화면 전체에서 한 번만" 그렸습니다. 그것이
+  틀렸던 이유는 개수가 아니라 자리입니다 — 패널이 각자 스크롤하므로 구획은
+  자기 스크롤 영역을 하나 더 만들었고, 화면에 대화가 둘 있는 모양이 됐습니다.
+  이어가기 화면에서 원본은 **이 대화의 앞부분**이지 옆에 붙은 자료가 아닙니다.
+  그래서 패널마다 자기 message list 앞에 붙이고, 패널이 이미 가진 스크롤
+  container 하나를 그대로 씁니다.
+  **패널 N개면 원본도 N번 그려집니다.** 일반 비교에서 사용자의 질문이 패널마다
+  보이는 것과 같습니다 — 비교는 모든 모델에게 같은 history를 보여 주는 것이고,
+  가져온 history라고 달라질 이유가 없습니다. 금지되는 것은 **한 패널 안에서**
+  원본이 두 번 나오는 것(구획 하나 + timeline 앞 하나)입니다.
+  외부 message를 `Message` **행으로** 복제하지 않는다는 금지는 그대로입니다 —
+  아래 §8.2의 view model 규칙을 봅니다.
 - **Deep Research는 기존 제약을 유지합니다** — system block을 싣지 않으므로
   가져온 seed가 전달되지 않습니다. 이 개정이 그 제약을 풀지 않습니다.
 - **이미지 생성은 이 대화에서 실행되지 않습니다.** 별도 이미지 대화 draft로
@@ -381,9 +391,10 @@ timeline, 같은 composer이며, continuation이 더하는 것은 **timeline 위
 처리, 그리고 목록에서 다시 찾아 들어갈 방법 없음. continuation에 **고유한 것은
 가져온 transcript 하나뿐**이므로, 고유하지 않은 나머지는 공용 shell이 맡습니다.
 
-**prelude는 shell의 slot입니다**(`conversationPrelude`). `ChatApp` 안이 아니라 —
-shell은 선택한 모델마다 `ChatApp`을 하나씩 mount하므로, 그 안에 두면 같은 제3자
-transcript가 화면에 N번 그려집니다(§5.1).
+**원본은 shell이 한 번 읽어 패널마다 넘깁니다.** 읽기는
+`useContinuationSource()` 하나이고, 대화가 하나이므로 요청도 하나입니다 —
+패널마다 읽으면 선택한 모델 수만큼 같은 bridge를 조회하게 됩니다. 패널은 받은
+것을 자기 message list 앞에 붙입니다(§5.1).
 
 **그래서 판정 근거가 `productKey`가 아니라는 것이 이 개정 이후 더 중요해졌습니다.**
 `conversationSurface()`가 읽는 것은 bridge row의 존재 하나뿐이고, `productKey`에서
@@ -413,24 +424,48 @@ Review workspace로 열려 외부 원문·출처 구획이 사라졌습니다.**
 검색 결과는 자기 `surface`를 직접 싣습니다. 검색은 목록이 불러오지 않은 대화를
 가리킬 수 있고, 그때 workspace로 되돌아가면 같은 결함이 됩니다.
 
-화면 구성:
+**가져온 원본은 timeline 안에 있습니다**(2026-09-02 2차 개정). 별도 구획도,
+별도 disclosure도, 별도 scroll 영역도 아닙니다. 각 패널의 message list는 위에서
+아래로 이렇게 읽힙니다.
 
-- source provider와 import 시점
-- "외부 대화 · 읽기 전용" 구획 — 외부 user·assistant 메시지, assistant에는
-  provider badge와 "외부 답변" 표시, 잘림 고지. **화면 전체에서 한 번만
-  그립니다**(§5.1)
-- "여기부터 Tomverse에서 이어진 대화" divider
-- **일반 Chat의 message timeline** — 선택한 모델마다 패널 하나. continuation
-  전용 renderer를 따로 두지 않습니다
-- **일반 Tomverse composer** — 첨부·web search·전송·중단·재시도·모델 picker·
-  IME 처리가 전부 일반 대화의 것과 같은 컴포넌트입니다
+```
+[provenance 한 줄]  {provider}에서 가져온 대화 · 2026-07-02 · 읽기 전용
+[이전 가져온 메시지 N개 보기]        (원본이 한 페이지보다 길 때만)
+imported user      점선 bubble
+imported assistant 점선 bubble, provider 아이콘과 원본 model 라벨
+──────── 여기부터 Tomverse에서 이어진 대화 ────────   role="separator"
+native user        일반 bubble
+native assistant   일반 bubble
+```
 
-**prelude는 기본으로 접혀 있습니다.** 아래 패널들이 각자 스크롤하므로 그 위의
-것은 모든 viewport에서 고정 높이를 먹습니다. 가져온 대화는 수백 turn일 수
-있고, 펼친 채로 두면 휴대폰에서 composer를 화면 밖으로 밀어냅니다. 접힌 상태로
-보이는 것은 provenance 한 줄이며, 그것은 **항상** 보여야 합니다 — divider 아래가
-Tomverse의 말이 아니라는 사실이 거기 있기 때문입니다. 원본이 삭제됐거나 잠긴
-상태는 예외로 펼쳐집니다: 짧고, 다음 turn이 무엇을 싣는지를 바꿉니다.
+그리고 그 아래는 **일반 Tomverse composer**입니다 — 첨부·web search·전송·중단·
+재시도·모델 picker·IME 처리가 전부 일반 대화의 것과 같은 컴포넌트입니다.
+
+**허용되는 시각적 차이는 넷뿐입니다.**
+
+1. 사이드바 항목의 provider 아이콘(§8.4)
+2. 가져온 bubble의 점선 border — shape·padding·font·정렬은 일반 bubble과 같습니다
+3. divider 한 줄
+4. 위 provenance 한 줄과, 가져온 assistant의 provider·원본 model 라벨
+
+그 밖의 shell·header·timeline·model rail·composer·간격·scroll 동작은 일반 Chat과
+같아야 합니다. **중첩 scrollbar를 만들지 않습니다** — 대화 영역의 세로 스크롤은
+패널의 것 하나입니다.
+
+**이 개정 전에는 원본이 patch 위의 prelude 구획이었습니다.** 접혀 있었고, 자기
+heading과 자기 `max-h`/`overflow-y` scroller를 갖고 있었습니다. 그 화면에서
+사용자가 본 것은 대화 하나가 아니라 둘이었고, 이어가기의 존재 이유인 transcript는
+구석의 control 뒤에 있었습니다. 접어 둔 이유였던 "composer를 밀어낸다"는 문제는
+timeline 안에서는 발생하지 않습니다 — 원본이 스크롤 영역 **안**에 있으므로 고정
+높이를 먹지 않고, 길이는 timeline의 pagination이 감당합니다.
+
+**긴 원본은 timeline 안에서 페이지로 읽습니다.** 첫 페이지는 divider 바로 위,
+즉 **원본의 끝**입니다(`offset=end`). 그 위로는 "이전 가져온 메시지 N개 보기"가
+한 페이지씩 거슬러 올라갑니다. 별도 화면으로 숨기지 않습니다.
+
+**삭제·잠금 상태도 timeline 안입니다.** 가져온 bubble 자리에 한 줄짜리
+tombstone 또는 lock 안내가 들어가고, divider·native message·composer·사이드바
+이동은 그대로입니다. seed는 주입되지 않습니다(§6, §7).
 
 ### 8.3 모델 선택
 
@@ -460,10 +495,34 @@ Tomverse의 말이 아니라는 사실이 거기 있기 때문입니다. 원본�
   더하기 전까지 하나입니다.
 - **예상 크레딧은 제출 전에 모델별로, 그리고 합계로 보여 줍니다**(§4.4).
 
-**외부 source를 일반 `Message` 배열에 합쳐 직렬화하지 않습니다.** 두 배열은 두
-endpoint에서 오고, 수명·삭제 계약·provenance가 다릅니다. 하나로 합치면 그 차이가
-CSS class의 속성이 되고, 그것을 잊은 첫 번째 refactor가 ChatGPT 답변을 Tomverse
-답변으로 보여 줍니다.
+**외부 source는 렌더링 시점의 view model에서만 합쳐집니다**(2026-09-02 2차 개정).
+
+그 전 문장은 "일반 `Message` 배열에 합치지 않는다"였고, 근거는 두 배열의 수명·
+삭제 계약·provenance가 다르다는 것 — 합치면 그 차이가 CSS class의 속성이 되고,
+그것을 잊은 첫 번째 refactor가 ChatGPT 답변을 Tomverse 답변으로 보여 준다 —
+였습니다. 그 위험은 그대로이므로, 합치는 자리와 그것을 막는 것을 여기에 적습니다.
+
+- **합쳐지는 것은 화면에 그릴 배열 하나뿐이고, 그 자리는
+  `continuationTimelineMessages()`입니다.** 두 endpoint는 그대로 둘이고, 원본은
+  여전히 자기 route(`GET /api/conversations/[id]/continuation`)에서 옵니다.
+- **차이를 들고 다니는 것은 CSS class가 아니라 `Message.imported`입니다.**
+  점선 border·provider 헤더·읽기 전용 접근성 설명·숨겨지는 action이 전부 그
+  field의 유무로 갈립니다. class를 지워도 field는 남고, field가 없으면 아무것도
+  imported로 그려지지 않습니다.
+- **`imported`가 있으면 곧 읽기 전용입니다.** `surface` + `readOnly` 두 field가
+  아니라 하나인 이유가 이것입니다 — "imported이지만 쓸 수 있음"을 표현할 수
+  있는 모양이면 언젠가 누군가 그것을 씁니다.
+- **DB에는 아무것도 합쳐지지 않습니다.** 외부 message는 `Message` 행으로
+  복제되지 않고(§4, import 정책 §6), `lib/chatMessageSerialization.ts`는
+  allowlist이므로 `imported`를 실은 message는 요청 본문·저장 transcript·
+  localStorage 어디에도 실리지 않습니다.
+- **다음 turn의 seed는 화면에서 오지 않습니다.** `/api/chat`이 요청마다
+  `loadContinuationTurnSeed()`로 snapshot에서 다시 만듭니다(§5.1). 패널이 무엇을
+  그리고 있든 seed는 바뀌지 않으며, 이 규칙이 "화면의 배열이 곧 모델의 입력"이
+  되는 것을 구조적으로 막습니다.
+- **imported bubble은 native를 수정하는 action을 갖지 않습니다** — 재생성·재시도·
+  수정·삭제·provider 전환·오류 신고. 복사처럼 읽기 전용 자료에도 안전한 action은
+  유지합니다.
 
 composer는 mobile composer 계약의 형태를 따릅니다 — textarea가 전용 full-width
 행을 갖고, 어떤 control도 그 행을 나눠 쓰거나 겹치거나 위에 뜨지 않습니다. 320px에서

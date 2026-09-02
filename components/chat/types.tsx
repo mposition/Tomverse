@@ -182,6 +182,35 @@ export type Message = {
    */
   isGeneratingArtifact?: boolean;
   /**
+   * Present when this bubble is part of an imported transcript rather than a
+   * turn taken in Tomverse.
+   *
+   * One optional object rather than the three loose fields it replaces
+   * (`surface`, `readOnly`, `sourceProvider`): imported and read-only are the
+   * same fact here, and a shape that could say "imported but writable" would
+   * be a shape somebody eventually writes. Its presence *is* the surface.
+   *
+   * A view-model field only. The imported half is never copied into `Message`
+   * rows -- docs/policy/external-conversation-continuation.md keeps the
+   * snapshot immutable and outside this conversation's own storage -- and the
+   * serializers in lib/chatMessageSerialization.ts are allowlists, so a
+   * message carrying this can never ride a transcript, a request body or
+   * localStorage.
+   */
+  imported?: {
+    /** One of `EXTERNAL_IMPORT_PROVIDERS`, as the bridge recorded it. */
+    provider: string;
+    /**
+     * What the source called the model that wrote this answer, verbatim.
+     * Never resolved against the Tomverse catalogue: it names a model this
+     * app may not serve, and rendering it as one of ours would claim a
+     * Tomverse answer where there was none.
+     */
+    sourceModelLabel?: string | null;
+    /** Whether the snapshot itself recorded this message as truncated. */
+    truncated?: boolean;
+  };
+  /**
    * Which format is being generated, so the spinner can name it.
    *
    * Transient for the same reason the flag is, and separate from it because a
@@ -210,6 +239,14 @@ export type Conversation = {
      * continuations existed.
      */
     surface?: ConversationSurface;
+    /**
+     * Which service this conversation's imported half came from, so the
+     * sidebar row can carry that service's icon.
+     *
+     * Server-decided from the bridge's own column, which outlives the
+     * snapshot. Absent on every conversation that has no imported half.
+     */
+    sourceProvider?: string | null;
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];
