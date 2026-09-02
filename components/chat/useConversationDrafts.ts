@@ -20,7 +20,7 @@ import {
 
 export {
   draftKeyFor,
-  NEW_CONVERSATION_DRAFT_KEY,
+  NEW_CONVERSATION_DRAFT_SEGMENT,
   type AttachmentsChangeHandler,
   type ConversationDraft,
 } from "@/lib/conversationDraftStore";
@@ -76,13 +76,30 @@ const releasePreviews = (items: ChatAttachment[], keep: ChatAttachment[]) => {
  *
  * Deliberately in-memory: persisting an unsent question to localStorage or to
  * the server is a separate product decision, not an implementation detail of
- * conversation switching.
+ * conversation switching. That also bounds this store's whole life to the tab,
+ * which is what keeps the identity namespaces below from outliving the person
+ * who filled them.
+ *
+ * ## Drafts belong to a person as well as to a conversation
+ *
+ * docs/policy/conversation-draft-identity-scope.md. `identityKey` names who the
+ * tab is operating as (`identityNamespaceKey`, so `account:` and the user id),
+ * or `null` before the session resolves. It is part of every key rather than a
+ * selector over several stores, for the reason `draftKeyFor` gives: an upload
+ * that finishes after the tab changes hands must land in the draft of the
+ * person who started it, not of the person now looking at the screen.
+ *
+ * The consequence at this level is simply that one identity's drafts are not
+ * reachable from another's. The previous account's text and attachments stay in
+ * memory — coming back to that account restores them — and the composer for the
+ * new one starts blank because it is reading keys that have never been written.
  */
 export function useConversationDrafts(
-  currentConversationId: string | null
+  currentConversationId: string | null,
+  identityKey: string | null
 ): ConversationDraftsApi {
   const [drafts, setDrafts] = useState<ConversationDraftStore>({});
-  const activeDraftKey = draftKeyFor(currentConversationId);
+  const activeDraftKey = draftKeyFor(currentConversationId, identityKey);
 
   // Every writer resolves its target key through these refs rather than
   // through the render's closure: uploads, conversation-detail responses and
@@ -99,9 +116,21 @@ export function useConversationDrafts(
 
   const activeDraft = readDraftEntry(drafts, activeDraftKey);
 
+  // The identity is read through a ref for the same reason the active key is:
+  // a caller that passes a raw conversation id means "this conversation, as the
+  // person this tab is now", and that person may have changed since the render
+  // this callback was created in. A caller that passes a whole key keeps the
+  // identity already in it — see `draftKeyFor`.
+  const identityKeyRef = useRef(identityKey);
+  useEffect(() => {
+    identityKeyRef.current = identityKey;
+  }, [identityKey]);
+
   const resolveKey = useCallback(
     (scopeId?: string | null) =>
-      scopeId === undefined ? activeDraftKeyRef.current : draftKeyFor(scopeId),
+      scopeId === undefined
+        ? activeDraftKeyRef.current
+        : draftKeyFor(scopeId, identityKeyRef.current),
     []
   );
 
@@ -154,8 +183,8 @@ export function useConversationDrafts(
 
   const migrateDraft = useCallback(
     (fromScopeId: string | null, toScopeId: string | null) => {
-      const fromKey = draftKeyFor(fromScopeId);
-      const toKey = draftKeyFor(toScopeId);
+      const fromKey = draftKeyFor(fromScopeId, identityKeyRef.current);
+      const toKey = draftKeyFor(toScopeId, identityKeyRef.current);
       if (fromKey === toKey) return;
       const moving = draftsRef.current[fromKey];
       if (!moving) return;

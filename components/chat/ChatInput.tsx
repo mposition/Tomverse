@@ -709,7 +709,14 @@ type ChatInputProps = {
    * tab, and that is a privacy boundary. `null` while the session provider is
    * still resolving, which is never treated as a change.
    */
-  voiceIdentityKey?: string | null;
+  /**
+   * Who this tab is operating as (`identityNamespaceKey`), or `null` before the
+   * session resolves. Required, not defaulted: the composer scopes its drafts
+   * and its upload state by it, and a shell that forgot to pass it would put
+   * every identity's unsent work in one namespace again — the defect
+   * docs/policy/conversation-draft-identity-scope.md exists for.
+   */
+  identityKey: string | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
@@ -847,7 +854,7 @@ export function ChatInput({
   onStartImageDraft,
   voiceInputEnabled = false,
   onVoiceTranscript,
-  voiceIdentityKey = null,
+  identityKey,
   imageGenerationLock = null,
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
@@ -870,7 +877,7 @@ export function ChatInput({
   // scoped to this, not to the component instance: the composer is shared by
   // every conversation and is deliberately never remounted between them (that
   // would take the portal host, focus and in-flight uploads with it).
-  const draftScopeId = draftKeyFor(currentChatId);
+  const draftScopeId = draftKeyFor(currentChatId, identityKey);
   const draftScopeIdRef = useRef(draftScopeId);
   useEffect(() => {
     draftScopeIdRef.current = draftScopeId;
@@ -1276,14 +1283,16 @@ export function ChatInput({
   // The composer's own draft key, not the raw conversation id. `draftKeyFor`
   // is idempotent and never undefined, and `undefined` is the one value the
   // draft store reads as "whatever is open now" — which is exactly what a
-  // scoped write must never mean here.
+  // scoped write must never mean here. The key names the identity too, so a
+  // transcript can only ever be written into the draft of the person who spoke
+  // it (docs/policy/conversation-draft-identity-scope.md).
   const voiceScopeId = draftScopeId;
   const voice = useVoiceRecorder({
     scopeId: voiceScopeId,
     // The real per-account key, not a two-valued guest/account flag: account A
     // becoming account B in one tab has to end the session, and only a key
     // that names the account can see that.
-    identityKey: voiceIdentityKey,
+    identityKey: identityKey,
     onTranscript: (transcript, scopeId) => {
       if (onVoiceTranscript) {
         onVoiceTranscript(transcript, scopeId);

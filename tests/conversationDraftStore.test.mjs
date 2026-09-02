@@ -4,8 +4,9 @@ import {
   collectReleasablePreviewUrls,
   draftKeyFor,
   isDraftEmpty,
+  isDraftKey,
   moveDraftEntry,
-  NEW_CONVERSATION_DRAFT_KEY,
+  NEW_CONVERSATION_DRAFT_SEGMENT,
   readDraftEntry,
   removeDraftEntry,
   resolveDraftUpdate,
@@ -18,6 +19,9 @@ const setText = (store, key, text) =>
 const setAttachments = (store, key, attachments) =>
   writeDraftEntry(store, key, (existing) => ({ ...existing, attachments }));
 
+/** The key a signed-in account's new-conversation composer writes under. */
+const newChatKey = (identityKey) => draftKeyFor(null, identityKey);
+
 const attachment = (id, data) => ({
   id,
   name: `${id}.png`,
@@ -28,14 +32,90 @@ const attachment = (id, data) => ({
 });
 
 test("a conversation without an id gets an explicit key of its own", () => {
-  assert.equal(draftKeyFor(null), NEW_CONVERSATION_DRAFT_KEY);
-  assert.equal(draftKeyFor(undefined), NEW_CONVERSATION_DRAFT_KEY);
-  assert.equal(draftKeyFor(""), NEW_CONVERSATION_DRAFT_KEY);
-  assert.equal(draftKeyFor("conversation-a"), "conversation-a");
-  // Idempotent, so a caller holding a key can pass it back in as a scope.
+  const key = newChatKey("account:user-1");
+  assert.equal(draftKeyFor(undefined, "account:user-1"), key);
+  assert.equal(draftKeyFor("", "account:user-1"), key);
+  assert.ok(key.endsWith(NEW_CONVERSATION_DRAFT_SEGMENT));
+  assert.ok(isDraftKey(key));
+});
+
+test("a key is idempotent, and keeps the identity it was made with", () => {
+  // The property the composer relies on: it holds keys, not conversation ids,
+  // and passes them back as scopes. If re-resolving them adopted the *current*
+  // identity, an upload finishing after the tab changed hands would land in the
+  // new account's draft — which is the whole defect.
+  const aKey = draftKeyFor("conversation-a", "account:A");
+
+  assert.equal(draftKeyFor(aKey, "account:A"), aKey);
   assert.equal(
-    draftKeyFor(NEW_CONVERSATION_DRAFT_KEY),
-    NEW_CONVERSATION_DRAFT_KEY
+    draftKeyFor(aKey, "account:B"),
+    aKey,
+    "a key already names its person; a later reader must not rewrite that"
+  );
+  assert.equal(draftKeyFor(newChatKey("account:A"), null), newChatKey("account:A"));
+});
+
+/* ------------------------------------------------------------------------ */
+/* Identity isolation: docs/policy/conversation-draft-identity-scope.md      */
+/* ------------------------------------------------------------------------ */
+
+test("two accounts in one tab do not share the new-conversation draft", () => {
+  // The reproduction. Both accounts' composers are on "new chat", which is the
+  // one conversation key every identity used to have in common.
+  const store = setText({}, newChatKey("account:A"), "계정 A가 쓰던 초안");
+
+  assert.equal(readDraftEntry(store, newChatKey("account:B")).text, "");
+  assert.equal(readDraftEntry(store, newChatKey("account:A")).text, "계정 A가 쓰던 초안");
+});
+
+test("a guest and an account do not share it either", () => {
+  const store = setText({}, newChatKey("guest"), "guest question");
+
+  assert.equal(readDraftEntry(store, newChatKey("account:A")).text, "");
+});
+
+test("attachments are separated by the same key, previews included", () => {
+  // §2: the exposure was never only a file card. `data` is a local image
+  // preview the composer renders, so it has to be behind the same boundary.
+  const store = setAttachments({}, newChatKey("account:A"), [
+    attachment("a1", "blob:account-a-thumbnail"),
+  ]);
+
+  assert.deepEqual(readDraftEntry(store, newChatKey("account:B")).attachments, []);
+});
+
+test("an unresolved session gets its own namespace, not somebody else's", () => {
+  const unresolved = draftKeyFor(null, null);
+
+  assert.notEqual(unresolved, newChatKey("account:A"));
+  assert.notEqual(unresolved, newChatKey("guest"));
+  const store = setText({}, unresolved, "typed before the session settled");
+  assert.equal(
+    readDraftEntry(store, newChatKey("account:A")).text,
+    "",
+    "resolving must not adopt text typed by nobody in particular"
+  );
+});
+
+test("the same conversation id under two identities is two drafts", () => {
+  // Not reachable through the UI today — a conversation id belongs to one
+  // identity — but the key must not be what stops it.
+  let store = setText({}, draftKeyFor("conversation-a", "account:A"), "A");
+  store = setText(store, draftKeyFor("conversation-a", "account:B"), "B");
+
+  assert.equal(readDraftEntry(store, draftKeyFor("conversation-a", "account:A")).text, "A");
+  assert.equal(readDraftEntry(store, draftKeyFor("conversation-a", "account:B")).text, "B");
+});
+
+test("coming back to the first account restores what it was writing", () => {
+  // The reason this is isolation rather than deletion: nothing of A's is lost,
+  // it is only unreachable from B. In-memory, so it still dies with the tab.
+  let store = setText({}, newChatKey("account:A"), "half-written question");
+  store = setText(store, newChatKey("account:B"), "B's own question");
+
+  assert.equal(
+    readDraftEntry(store, newChatKey("account:A")).text,
+    "half-written question"
   );
 });
 
@@ -128,31 +208,31 @@ test("removing a conversation with no draft returns the same store", () => {
 });
 
 test("a new conversation's draft follows the id the server issues", () => {
-  let store = setText({}, NEW_CONVERSATION_DRAFT_KEY, "first question");
+  let store = setText({}, newChatKey("account:A"), "first question");
   store = setText(store, "conversation-a", "question for A");
 
-  store = moveDraftEntry(store, NEW_CONVERSATION_DRAFT_KEY, "conversation-new");
+  store = moveDraftEntry(store, newChatKey("account:A"), "conversation-new");
 
-  assert.equal(NEW_CONVERSATION_DRAFT_KEY in store, false);
+  assert.equal(newChatKey("account:A") in store, false);
   assert.equal(readDraftEntry(store, "conversation-new").text, "first question");
   assert.equal(readDraftEntry(store, "conversation-a").text, "question for A");
 });
 
 test("a hand-off never overwrites a draft the target already has", () => {
-  let store = setText({}, NEW_CONVERSATION_DRAFT_KEY, "pending question");
+  let store = setText({}, newChatKey("account:A"), "pending question");
   store = setText(store, "conversation-a", "question for A");
 
-  store = moveDraftEntry(store, NEW_CONVERSATION_DRAFT_KEY, "conversation-a");
+  store = moveDraftEntry(store, newChatKey("account:A"), "conversation-a");
 
   assert.equal(readDraftEntry(store, "conversation-a").text, "question for A");
-  assert.equal(NEW_CONVERSATION_DRAFT_KEY in store, false);
+  assert.equal(newChatKey("account:A") in store, false);
 });
 
 test("a hand-off with nothing to move, or onto itself, changes nothing", () => {
   const store = setText({}, "conversation-a", "question for A");
   assert.equal(moveDraftEntry(store, "conversation-a", "conversation-a"), store);
   assert.equal(
-    moveDraftEntry(store, NEW_CONVERSATION_DRAFT_KEY, "conversation-b"),
+    moveDraftEntry(store, newChatKey("account:A"), "conversation-b"),
     store
   );
 });
