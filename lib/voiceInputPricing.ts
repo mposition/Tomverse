@@ -53,7 +53,14 @@ export type VoiceModelPriceEntry = {
   verifiedAt: string;
   /** Who read it and is accountable for it. A person, never automation. */
   owner: string;
-  /** The ticket the reading and any re-reading is recorded under. */
+  /**
+   * Where the reading and any re-reading is tracked.
+   *
+   * A real reference, not a string that looks like one: an invented ticket id
+   * creates the appearance of traceability and none of the substance, because
+   * nobody can open it to find out what was done. `#<issue number>` in this
+   * repository, or a full URL.
+   */
   ticket: string;
   /** After this date the check fails rather than warns. At most 90 days out. */
   reverifyBy: string;
@@ -88,7 +95,7 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
     },
     verifiedAt: "2026-09-02",
     owner: "@mposition",
-    ticket: "VOICE-PRICE-001",
+    ticket: "#1247",
     reverifyBy: "2026-12-01",
     costObserved: false,
   },
@@ -101,7 +108,7 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
     },
     verifiedAt: "2026-09-02",
     owner: "@mposition",
-    ticket: "VOICE-PRICE-001",
+    ticket: "#1247",
     reverifyBy: "2026-12-01",
     costObserved: false,
   },
@@ -156,11 +163,15 @@ export const auditVoicePriceRegister = (input: {
         detail: "a price with no owner is a price nobody has to re-read",
       });
     }
-    if (!entry.ticket.trim()) {
+    // Shape, not existence: this cannot open GitHub. What it can refuse is a
+    // free-form label that resembles a ticket without being one, which is how
+    // the register nearly shipped -- `VOICE-PRICE-001` named nothing.
+    if (!/^(#\d+|https?:\/\/\S+)$/.test(entry.ticket.trim())) {
       problems.push({
         modelId,
         code: "ticket_missing",
-        detail: "the reading has to be recorded somewhere a person can find",
+        detail:
+          "the ticket must be a reference somebody can open: #<issue number> or a URL",
       });
     }
     const verifiedAt = parseDay(entry.verifiedAt);

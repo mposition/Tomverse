@@ -190,3 +190,16 @@ test("no entry claims an observed cost, because none has been observed", () => {
     );
   }
 });
+
+test("a ticket that names nothing is refused", () => {
+  // The register nearly shipped with `VOICE-PRICE-001`, which was a plausible
+  // string pointing at no tracked work. A reference nobody can open creates
+  // the appearance of traceability and none of it.
+  for (const entry of VOICE_MODEL_PRICE_REGISTER) {
+    assert.match(
+      entry.ticket,
+      /^(#\d+|https?:\/\/\S+)$/,
+      `${entry.modelId}: ${entry.ticket} is not something a person can open`
+    );
+  }
+});

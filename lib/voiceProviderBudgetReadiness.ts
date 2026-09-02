@@ -23,7 +23,10 @@ export type VoiceProviderBudgetReadiness = {
  * never enabled voice input sits in permanently, and failing readiness there
  * would brick production for a feature nobody turned on. The moment the flag
  * is on, a missing budget is a misconfiguration standing between this product
- * and an unbounded third-party bill.
+ * and unbounded third-party usage.
+ *
+ * Ready here means "a usable budget exists", not "the budget is the right
+ * size". The numbers are an operational decision this check cannot make.
  */
 export const getVoiceProviderBudgetReadiness =
   async (): Promise<VoiceProviderBudgetReadiness> => {

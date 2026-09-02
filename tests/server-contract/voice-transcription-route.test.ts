@@ -53,6 +53,10 @@ type World = {
   /** Every settlement, with the basis the route chose for it. */
   settled: Array<{ reservedSeconds: number; basis: string; released: number }>;
   budgetShouldRefuse: boolean;
+  /** The deployment-wide booking, §6.1-4. Separate from the subject's. */
+  providerReserved: Array<{ seconds: number }>;
+  providerSettled: Array<{ basis: string; released: number }>;
+  providerBudgetShouldRefuse: boolean;
   providerCalls: ProviderCall[];
   providerResult: unknown;
   logs: string[];
@@ -66,6 +70,9 @@ const freshWorld = (): World => ({
   reserved: [],
   settled: [],
   budgetShouldRefuse: false,
+  providerReserved: [],
+  providerSettled: [],
+  providerBudgetShouldRefuse: false,
   providerCalls: [],
   providerResult: {
     ok: true,
@@ -187,6 +194,52 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
           reservedSeconds: number;
           settled: boolean;
         }) => settle({ reservation, basis: { kind: "not_billed" } }),
+      },
+    });
+
+    // The provider-side ledger is the database half. Stubbed so the
+    // composition in lib/voiceBudgetReservation.ts runs for real: that the
+    // deployment's budget is booked before the call, and closed on the same
+    // basis as the subject's, is exactly what these tests should observe.
+    mock.module(mod("lib/voiceProviderBudgetLedger.ts"), {
+      namedExports: {
+        reserveVoiceProviderSeconds: async (input: { seconds: number }) => {
+          if (world.providerBudgetShouldRefuse) {
+            const { VoiceBudgetError } = realBudget as {
+              VoiceBudgetError: new (
+                status: number,
+                code: string,
+                message: string,
+                retryAfter?: number
+              ) => Error;
+            };
+            throw new VoiceBudgetError(
+              429,
+              "VOICE_OPERATIONAL_LIMIT_REACHED",
+              "provider limit",
+              3600
+            );
+          }
+          world.providerReserved.push(input);
+          return {
+            bookings: [],
+            reservedSeconds: input.seconds,
+            settled: false,
+          };
+        },
+        settleVoiceProviderSeconds: async (input: {
+          reservation: { reservedSeconds: number; settled: boolean };
+          basis: { kind: string; seconds?: number };
+        }) => {
+          if (input.reservation.settled) return { releasedSeconds: 0 };
+          input.reservation.settled = true;
+          const released = realGuardrails.voiceSettlementRelease({
+            reservedSeconds: input.reservation.reservedSeconds,
+            basis: input.basis as never,
+          });
+          world.providerSettled.push({ basis: input.basis.kind, released });
+          return { releasedSeconds: released };
+        },
       },
     });
 
@@ -449,6 +502,81 @@ test("a refused budget stops the request before the provider", async () => {
   assert.equal((await response.json()).code, "VOICE_OPERATIONAL_LIMIT_REACHED");
   assert.equal(response.headers.get("Retry-After"), "3600");
   assert.deepEqual(world.providerCalls, []);
+});
+
+test("the deployment's budget is booked before the provider is called", async () => {
+  // §6.1-4. The first version of this budget existed only in /api/ready, so
+  // it bounded a readiness probe and no audio at all.
+  reset();
+  await post(WEBM_2500MS, "audio/webm");
+
+  assert.equal(world.providerReserved.length, 1);
+  assert.equal(
+    world.providerReserved[0].seconds,
+    world.reserved[0].seconds,
+    "both layers book the same clip"
+  );
+});
+
+test("a refused deployment budget stops the request, and the subject pays nothing", async () => {
+  // The subject is booked first, so a provider refusal has to give that
+  // booking back -- otherwise one person's daily budget is spent by a global
+  // cap they cannot see and did not cause.
+  reset();
+  world.providerBudgetShouldRefuse = true;
+  const response = await post(WEBM_2500MS, "audio/webm");
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).code, "VOICE_OPERATIONAL_LIMIT_REACHED");
+  assert.deepEqual(world.providerCalls, [], "nothing left this deployment");
+  assert.equal(world.reserved.length, 1, "the subject was booked...");
+  assert.deepEqual(
+    world.settled.map((entry) => entry.basis),
+    ["not_billed"],
+    "...and given straight back"
+  );
+});
+
+test("both layers settle on the same basis, on every outcome", async () => {
+  // The two bookings share one handle precisely so they cannot diverge. Three
+  // outcomes, because the bases differ and a layer that closed on the wrong
+  // one would still look settled.
+  for (const [label, result, expected] of [
+    [
+      "provider-reported seconds",
+      { ok: true, text: "hi", usage: { kind: "duration", seconds: 1 } },
+      "provider_seconds",
+    ],
+    [
+      "a token-billed answer",
+      {
+        ok: true,
+        text: "hi",
+        usage: { kind: "tokens", inputTokens: 10, outputTokens: 2 },
+      },
+      "measured_clip",
+    ],
+    [
+      "a provider refusal",
+      { ok: false, failure: "refused", status: 400, code: null },
+      "not_billed",
+    ],
+  ] as const) {
+    reset();
+    world.providerResult = result;
+    await post(WEBM_2500MS, "audio/webm");
+
+    assert.deepEqual(
+      world.settled.map((entry) => entry.basis),
+      [expected],
+      `${label}: the subject settled on ${expected}`
+    );
+    assert.deepEqual(
+      world.providerSettled.map((entry) => entry.basis),
+      [expected],
+      `${label}: the deployment settled on the same basis`
+    );
+  }
 });
 
 test("the rate limiter is consumed under the voice scope, not a chat one", async () => {
