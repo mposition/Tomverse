@@ -17,6 +17,7 @@ import {
     AI_REVIEW_EVAL_LANGUAGES,
     AI_REVIEW_EVAL_MODES,
     AI_REVIEW_EVAL_PHENOMENA,
+    AI_REVIEW_EVAL_RESPONSE_LABELS,
     AI_REVIEW_EVAL_TASK_TYPES,
     AI_REVIEW_EVAL_FINDING_KINDS,
     type AiReviewEvalCase,
@@ -124,6 +125,33 @@ export const datasetProblems = (value: unknown): readonly string[] => {
                 }
                 if (!isNonEmptyString(response?.modelId)) {
                     problems.push(`${label}: response[${position}] has no modelId`);
+                }
+            }
+            // Labels, checked here as well as in the drafter's parser.
+            //
+            // A gold refers to an answer by its label and the drafting
+            // assignment is stated in them, so a duplicate or an invented one
+            // makes a case's own gold ambiguous. They also reach a regular
+            // expression in `goldLeadLabels()`, which escapes them -- but a
+            // label outside the allowed set is a defect in the case, not
+            // something for a counter to cope with.
+            const labels = responses.map((response) => response?.label);
+            if (labels.some((value) => !isNonEmptyString(value))) {
+                problems.push(`${label}: a response has no label`);
+            } else {
+                const unknown = labels.filter(
+                    (value) => !AI_REVIEW_EVAL_RESPONSE_LABELS.includes(value as never)
+                );
+                if (unknown.length > 0) {
+                    problems.push(
+                        `${label}: response label(s) ${unknown
+                            .map((value) => `"${String(value)}"`)
+                            .join(", ")} are not among ` +
+                            AI_REVIEW_EVAL_RESPONSE_LABELS.join(", ")
+                    );
+                }
+                if (new Set(labels).size !== labels.length) {
+                    problems.push(`${label}: two responses share a label`);
                 }
             }
         }
@@ -240,6 +268,36 @@ export const adoptionProblems = (value: unknown): readonly string[] => {
         }
     }
     return problems;
+};
+
+/**
+ * Splits a set's problems into the ones that are defects and the ones that are
+ * just where the set is in its life.
+ *
+ * A decision set is written over months -- 330 drafting calls, then a person
+ * adopting each case -- and for all of that time every case is a candidate. So
+ * "no adopter" is a defect once the set is evidence and a description of
+ * ordinary progress before then, and the difference is the freeze record.
+ *
+ * Shared by the gate and the coverage report because they were not sharing it,
+ * and the coverage report went on printing one validation problem per
+ * unadopted case: 1,240 of them at the end of the build, in the block an
+ * operator reads to see progress. Noise there is not cosmetic -- it teaches
+ * the reader to skip the block where a real structural fault would appear.
+ */
+export const partitionDatasetProblems = (
+    value: unknown
+): { readonly blocking: readonly string[]; readonly buildState: readonly string[] } => {
+    const all = datasetProblems(value);
+    const dataset = value as Partial<AiReviewEvalDataset>;
+    if (dataset?.purpose !== "decision" || !isUnfrozenDraft(dataset)) {
+        return { blocking: all, buildState: [] };
+    }
+    const adoption = new Set(adoptionProblems(dataset));
+    return {
+        blocking: all.filter((problem) => !adoption.has(problem)),
+        buildState: all.filter((problem) => adoption.has(problem)),
+    };
 };
 
 /**

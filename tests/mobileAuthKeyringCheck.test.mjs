@@ -181,6 +181,28 @@ test("an active key that is also retired fails", () => {
   assert.match(out, /is the active key and is also retired/);
 });
 
+test("a malformed or duplicated retirement line fails, and says which variable", () => {
+  // The parser refuses these outright, so the check's job is to surface the
+  // refusal as a failed exit rather than a stack trace. Listed separately from
+  // the parser's own unit tests because the exit code is what an operator acts
+  // on, and it was claimed as covered here before it was.
+  for (const value of [
+    `sign-1@${LONG_RETIRED},sign-1@${justRetired()}`,
+    "sign-1",
+    "sign-1@",
+    "sign-1@not-a-date",
+    `@${LONG_RETIRED}`,
+  ]) {
+    const { code, out } = run({
+      ...healthy,
+      MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+      MOBILE_AUTH_RETIRED_SIGNING_KEYS: value,
+    });
+    assert.equal(code, 1, `${value}: ${out}`);
+    assert.match(out, /MOBILE_AUTH_RETIRED_SIGNING_KEYS/);
+  }
+});
+
 test("no output carries key material", () => {
   const { out } = run({
     ...healthy,
