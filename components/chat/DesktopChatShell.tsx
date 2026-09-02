@@ -41,6 +41,7 @@ import type { WebSearchSuggestionCopy } from "@/components/chat/webSearchSuggest
 import {
   chatContentStateKey,
   resolveChatContentState,
+  shouldRenderWelcomeSurface,
   type ChatContentState,
 } from "@/lib/chatContentState";
 import {
@@ -143,6 +144,16 @@ type DesktopChatShellProps = {
    * conversation -- not once per column.
    */
   conversationPrelude?: React.ReactNode;
+  /**
+   * Whether this conversation has content the panels cannot see.
+   *
+   * The prelude node itself is not evidence: it renders `null` until its own
+   * read resolves, and forever for a conversation with no bridge. This is the
+   * server's answer -- the conversation row's `surface`, which
+   * `conversationSurface()` derives from the bridge -- so a hand-typed
+   * `/continuations/<an ordinary id>` still gets the ordinary welcome screen.
+   */
+  hasConversationPrelude?: boolean;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -310,6 +321,7 @@ export function DesktopChatShell({
   onStartImageDraft,
   imageWorkspace,
   conversationPrelude,
+  hasConversationPrelude = false,
   onSelectConversation,
   onRename,
   onDelete,
@@ -430,6 +442,24 @@ export function DesktopChatShell({
     pendingSubmission,
   });
   const isConversationEmpty = conversationContentState === "empty";
+  /*
+    Whether the welcome surface renders, which is a narrower question.
+
+    A continuation opens with a read-only imported transcript above the
+    timeline and no native `Message`, so every panel reports `empty` --
+    truthfully -- and this screen used to greet its owner with "welcome back",
+    offer them other recent conversations, and float the composer in the middle
+    of a conversation that already had something in it.
+
+    `isConversationEmpty` still means "no native turn" and still drives the
+    comparison rail, because a conversation with no answers has nothing to
+    compare whatever else is on screen. Only the welcome surface asks the
+    narrower question, and `lib/chatContentState.ts` owns the answer.
+  */
+  const showsWelcomeSurface = shouldRenderWelcomeSurface({
+    contentState: conversationContentState,
+    hasConversationPrelude,
+  });
   // Keyed by (conversation, model), never by model alone: a run started in one
   // conversation used to disable the composer of every other one, because a
   // model id says nothing about where it was running. See
@@ -599,7 +629,7 @@ export function DesktopChatShell({
     useState<HTMLDivElement | null>(null);
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
-  const inputPortalTarget = isConversationEmpty
+  const inputPortalTarget = showsWelcomeSurface
     ? welcomeInputSlot ?? bottomInputSlot
     : bottomInputSlot ?? welcomeInputSlot;
   // STG-F003: portal into a host we move between the two slots, never into
@@ -611,7 +641,7 @@ export function DesktopChatShell({
   // depending on whether the welcome screen is showing.
   const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
   const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
-  const consentSlotTarget = isConversationEmpty
+  const consentSlotTarget = showsWelcomeSurface
     ? welcomeConsentSlot ?? bottomConsentSlot
     : bottomConsentSlot ?? welcomeConsentSlot;
   const registerChatConsentSlot = useChatConsentSlotRef();
@@ -884,7 +914,7 @@ export function DesktopChatShell({
           data-testid="desktop-conversation-surface"
           className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950"
         >
-          {isConversationEmpty && (
+          {showsWelcomeSurface && (
             // UI-EMPTY-001. The light overlay has always been translucent, so
             // the three comparison panels stay legible behind the welcome
             // screen and the first screen still reads as a comparison
@@ -938,7 +968,7 @@ export function DesktopChatShell({
                 // them focusable -- a focusable node hidden from assistive tech
                 // is worse than either. Together they are safe: nothing in here
                 // can take focus, so nothing can be focused-but-unannounced.
-                aria-hidden={!isPanelVisible || isConversationEmpty}
+                aria-hidden={!isPanelVisible || showsWelcomeSurface}
                 // UI-EMPTY-001. While the welcome screen is up these panels are
                 // decoration: they are painted through its translucent surface
                 // so the first screen still reads as a three-model comparison,
@@ -958,7 +988,7 @@ export function DesktopChatShell({
                 // broke a real one. The capability is not in the panels.
                 //
                 // Deliberately not `hidden`: the panels have to keep painting.
-                inert={isConversationEmpty || undefined}
+                inert={showsWelcomeSurface || undefined}
                 style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
                 className={`relative flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
@@ -1274,7 +1304,7 @@ export function DesktopChatShell({
               guestPreviewMode={guestPreviewMode}
               guestMessageCount={guestMessageCount}
               maxGuestMessages={maxGuestMessages}
-              variant={isConversationEmpty ? "floating" : "bar"}
+              variant={showsWelcomeSurface ? "floating" : "bar"}
               hideTopBorder={comparisonReadiness.isVisible}
               conversationDropSurface={conversationDropSurface}
             />,
