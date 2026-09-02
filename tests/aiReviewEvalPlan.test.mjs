@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   coverageGap,
   draftingBatches,
+  draftingCallCostCeilingUsd,
   draftingCostCeilingUsd,
+  modeTargets,
   CELL_PHENOMENON_MIX,
   INJECTION_QUOTA_PER_LANGUAGE,
   datasetManifest,
@@ -217,34 +219,132 @@ test("every mode clears its own floor, which cuts across the cells", () => {
   }
 });
 
-test("cases already written are not drafted again", () => {
-  const existing = Array.from({ length: 20 }, () => ({
+test("cases already written are not drafted again, mode by mode", () => {
+  // Twenty cases of one phenomenon in ONE mode do not retire that phenomenon:
+  // the target is per mode, and a cell filled entirely in `balanced` is the
+  // state the plan exists to avoid. So the remainder is what the other two
+  // modes still need.
+  const targets = modeTargets({
     language: "ko",
     taskType: "planning_decision",
     phenomenon: "direct_contradiction",
-    mode: "balanced",
-  }));
-  const batches = draftingBatches({ existing, batchSize: 10 });
-  const planned = batches
-    .filter(
-      (batch) =>
-        batch.language === "ko" &&
-        batch.taskType === "planning_decision" &&
-        batch.phenomenon === "direct_contradiction"
-    )
-    .reduce((sum, batch) => sum + batch.count, 0);
-  assert.equal(planned, 0);
+    count: CELL_PHENOMENON_MIX.direct_contradiction,
+  });
+  const planned = (existing) =>
+    draftingBatches({ existing, batchSize: 10 })
+      .filter(
+        (batch) =>
+          batch.language === "ko" &&
+          batch.taskType === "planning_decision" &&
+          batch.phenomenon === "direct_contradiction"
+      )
+      .reduce((sum, batch) => sum + batch.count, 0);
+
+  const case_ = (mode) => ({
+    language: "ko",
+    taskType: "planning_decision",
+    phenomenon: "direct_contradiction",
+    mode,
+  });
+
+  assert.equal(planned([]), CELL_PHENOMENON_MIX.direct_contradiction);
+  assert.equal(
+    planned(Array.from({ length: targets.balanced }, () => case_("balanced"))),
+    CELL_PHENOMENON_MIX.direct_contradiction - targets.balanced
+  );
+
+  const everything = [];
+  for (const [mode, count] of Object.entries(targets)) {
+    for (let index = 0; index < count; index += 1) everything.push(case_(mode));
+  }
+  assert.equal(planned(everything), 0);
 });
 
-test("the cost ceiling charges every call its full output cap", () => {
-  // A forecast would understate it, and the figure exists for somebody to
-  // approve a budget against.
+test("the cost is summed per call, so a growing request is not priced at its first one", () => {
+  // The plan priced 136 calls at the length of the first, and the request
+  // grows: each call is shown its cell's existing questions. Measured on the
+  // real instruction it went 685 tokens empty, 2,028 with ninety questions --
+  // so multiplying the first understated the last threefold, and a figure
+  // called a ceiling that is not one is what somebody approves a budget
+  // against.
   const ceiling = draftingCostCeilingUsd({
-    batches: [{ count: 10 }, { count: 10 }],
-    estimatedInputTokensPerCall: 1_000_000,
+    inputTokensPerCall: [1_000_000, 3_000_000],
     outputTokenCapPerCall: 1_000_000,
     inputUsdPerMillionTokens: 1,
     outputUsdPerMillionTokens: 3,
   });
-  assert.equal(ceiling, 8);
+  assert.equal(ceiling, 1 + 3 + 3 + 3);
+
+  // And one call on its own, which is what a hard stop checks before making it.
+  assert.equal(
+    draftingCallCostCeilingUsd({
+      inputTokens: 1_000_000,
+      outputTokenCap: 1_000_000,
+      inputUsdPerMillionTokens: 1,
+      outputUsdPerMillionTokens: 3,
+    }),
+    4
+  );
+});
+
+test("re-planning after each batch converges on a balanced set", () => {
+  // The loop an operator actually runs: draft one batch, re-plan, repeat. The
+  // first version carried a rotating cursor that restarted at zero on every
+  // re-plan, so this loop produced 1,240 cases all `balanced`, with `evidence`
+  // and `action` empty and the plan reporting nothing left to do -- a set that
+  // clears every cell floor and cannot measure two thirds of what it is for.
+  const cases = [];
+  for (let guard = 0; guard < 5_000; guard += 1) {
+    const batches = draftingBatches({ existing: cases, batchSize: 10 });
+    if (batches.length === 0) break;
+    const batch = batches[0];
+    for (let index = 0; index < batch.count; index += 1) {
+      cases.push({
+        language: batch.language,
+        taskType: batch.taskType,
+        phenomenon: batch.phenomenon,
+        mode: batch.mode,
+      });
+    }
+  }
+  assert.equal(draftingBatches({ existing: cases, batchSize: 10 }).length, 0);
+  for (const mode of AI_REVIEW_EVAL_MODES) {
+    const planned = cases.filter((item) => item.mode === mode).length;
+    assert.ok(
+      planned >= AI_REVIEW_EVAL_MIN_CASES.perMode,
+      `${mode} ended at ${planned}, below ${AI_REVIEW_EVAL_MIN_CASES.perMode}`
+    );
+  }
+  // Every cell still holds its floor and its mix.
+  for (const cell of evalCoveragePlan()) {
+    const inCell = cases.filter(
+      (item) => item.language === cell.language && item.taskType === cell.taskType
+    );
+    assert.ok(inCell.length >= cell.required);
+    for (const [phenomenon, wanted] of Object.entries(CELL_PHENOMENON_MIX)) {
+      assert.equal(
+        inCell.filter((item) => item.phenomenon === phenomenon).length,
+        wanted,
+        `${cell.language}/${cell.taskType} ${phenomenon}`
+      );
+    }
+  }
+});
+
+test("the plan is a pure function of what exists, not of how many times it ran", () => {
+  const half = [];
+  for (const batch of draftingBatches({ existing: [], batchSize: 10 }).slice(0, 40)) {
+    for (let index = 0; index < batch.count; index += 1) {
+      half.push({
+        language: batch.language,
+        taskType: batch.taskType,
+        phenomenon: batch.phenomenon,
+        mode: batch.mode,
+      });
+    }
+  }
+  assert.deepEqual(
+    draftingBatches({ existing: half, batchSize: 10 }),
+    draftingBatches({ existing: half, batchSize: 10 })
+  );
 });

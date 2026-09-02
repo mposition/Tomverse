@@ -27,6 +27,35 @@ import {
   draftingCostCeilingUsd,
   evalCoveragePlan,
 } from "../lib/aiReviewEvalPlan.ts";
+
+/**
+ * How long an unwritten question is assumed to be, for the growth estimate.
+ *
+ * The instruction for a later batch contains questions that do not exist yet,
+ * so their length has to be assumed. 220 characters is a little above the
+ * development set's own average, which keeps the estimate on the high side --
+ * the direction a budget figure should err in.
+ */
+const ASSUMED_QUESTION_CHARS = 220;
+
+/**
+ * Providers whose pricing profile in this repository is under question, and
+ * why.
+ *
+ * NOT a correction. `lib/modelPricing.ts` is what the product bills users
+ * against, and changing a number there is a pricing decision with a
+ * `pricingVersion` and an effective date behind it -- not something to adjust
+ * so a drafting estimate comes out nicer. What belongs here is the warning,
+ * so nobody approves a budget against a rate that may be stale.
+ */
+const DRAFTER_PRICE_HOLDS = {
+  deepseek:
+    "the repository prices Flash at $0.14/$0.28 per million; DeepSeek's current " +
+    "published pricing is time-of-day banded and higher (cache-miss input " +
+    "$0.22-$0.44, output $0.66-$1.32). Until lib/modelPricing.ts is verified " +
+    "and updated by a person, a ceiling computed from it is not one. This also " +
+    "affects what users are charged, not just this estimate.",
+};
 import { draftInstruction } from "../lib/aiReviewEvalDraftPrompt.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
 import { COMPARISON_REVIEW_DEFAULT_MODEL_IDS } from "../lib/comparisonReview.ts";
@@ -132,29 +161,53 @@ const eligible = AVAILABLE_MODELS.filter((model) => {
   return configuration.protocol === "openai-compatible" || model.provider === "openai";
 });
 
-// The real instruction, for the largest batch this plan asks for. Its length
-// is the input-token estimate, so the cost below is priced on the text that
-// would actually go out.
-const sample = batches[0];
-const instruction = sample
-  ? draftInstruction({
-      language: sample.language,
-      taskType: sample.taskType,
-      phenomenon: sample.phenomenon,
-      mode: sample.mode,
-      count: sample.count,
-      existingQuestions: [],
-    })
-  : "";
-const estimatedInputTokens = Math.ceil(instruction.length / 4);
+// The real instruction for EVERY batch, built as it will actually be sent.
+//
+// A batch is shown the questions already written for its cell, so the request
+// grows through the plan: ~685 tokens with an empty cell, ~2,028 by the time
+// ninety questions are in front of it. Pricing the whole plan at the first
+// request understated the last ones threefold, and a figure called a ceiling
+// that is not one is worse than none -- it is what somebody approves a budget
+// against.
+const questionsPerCell = new Map();
+for (const item of existing) {
+  const key = `${item.language}:${item.taskType}`;
+  questionsPerCell.set(key, [...(questionsPerCell.get(key) ?? []), item.question ?? ""]);
+}
+const inputTokensPerCall = [];
+let sampleInstruction = "";
+for (const batch of batches) {
+  const key = `${batch.language}:${batch.taskType}`;
+  const seen = questionsPerCell.get(key) ?? [];
+  const instruction = draftInstruction({
+    language: batch.language,
+    taskType: batch.taskType,
+    phenomenon: batch.phenomenon,
+    mode: batch.mode,
+    count: batch.count,
+    existingQuestions: seen,
+  });
+  if (!sampleInstruction) sampleInstruction = instruction;
+  inputTokensPerCall.push(Math.ceil(instruction.length / 4));
+  // What the next batch in this cell will be shown. A placeholder of typical
+  // length rather than the real text, which does not exist yet -- and named as
+  // an assumption in the output below.
+  questionsPerCell.set(key, [
+    ...seen,
+    ...Array.from({ length: batch.count }, () => "x".repeat(ASSUMED_QUESTION_CHARS)),
+  ]);
+}
+const firstCallTokens = inputTokensPerCall[0] ?? 0;
+const lastCallTokens = inputTokensPerCall[inputTokensPerCall.length - 1] ?? 0;
 
 console.log(
   `\ndrafter candidates (reviewer models excluded: ${COMPARISON_REVIEW_DEFAULT_MODEL_IDS.join(", ")})`
 );
 console.log(
-  `  cost ceiling per drafter for ${batches.length} call(s), ` +
-    `~${estimatedInputTokens.toLocaleString("en-US")} input tokens each plus the full ` +
-    `${outputTokenCap.toLocaleString("en-US")}-token output cap:\n`
+  `  input tokens grow through the plan: ~${firstCallTokens.toLocaleString("en-US")} on the\n` +
+    `  first call, ~${lastCallTokens.toLocaleString("en-US")} on the last, because each call is shown its cell's\n` +
+    `  existing questions. Unwritten questions are assumed ${ASSUMED_QUESTION_CHARS} characters.\n` +
+    `  Every call is charged the full ${outputTokenCap.toLocaleString("en-US")}-token output cap.\n`
 );
 const rows = [];
 for (const model of eligible) {
@@ -168,31 +221,36 @@ for (const model of eligible) {
     id: model.id,
     provider: model.provider,
     ceiling: draftingCostCeilingUsd({
-      batches,
-      estimatedInputTokensPerCall: estimatedInputTokens,
+      inputTokensPerCall,
       outputTokenCapPerCall: outputTokenCap,
       inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
       outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
     }),
     source: `${pricing.priceSource}, ${pricing.effectiveDate}`,
+    held: DRAFTER_PRICE_HOLDS[model.provider] ?? null,
   });
 }
 rows.sort((left, right) => (left.ceiling ?? Infinity) - (right.ceiling ?? Infinity));
 for (const row of rows) {
   console.log(
-    `  ${row.id.padEnd(24)} ${row.provider.padEnd(12)} ` +
+    `  ${row.held ? "HOLD" : "    "} ${row.id.padEnd(24)} ${row.provider.padEnd(12)} ` +
       (row.ceiling === null
         ? "no pricing profile"
         : `~$${row.ceiling.toFixed(2)}   (${row.source})`)
   );
 }
+const holds = [...new Set(rows.filter((row) => row.held).map((row) => row.held))];
+for (const hold of holds) {
+  console.log(`\n  HOLD  ${hold}`);
+}
 
-if (process.argv.includes("--show-instruction") && sample) {
+if (process.argv.includes("--show-instruction") && batches[0]) {
+  const first = batches[0];
   console.log(
-    `\n--- the request, for ${sample.language}/${sample.taskType} ` +
-      `${sample.phenomenon} ${sample.mode} x${sample.count} ---\n`
+    `\n--- the first request, for ${first.language}/${first.taskType} ` +
+      `${first.phenomenon} ${first.mode} x${first.count} ---\n`
   );
-  console.log(instruction);
+  console.log(sampleInstruction);
   console.log("\n--- end ---");
 }
 
