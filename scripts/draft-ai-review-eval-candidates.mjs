@@ -29,8 +29,13 @@
 // handles its own phrasing and its own idea of what counts as a contradiction.
 // Those are refused unless overridden, so the choice lands in the record.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
   AI_REVIEW_EVAL_DATASET_SCHEMA_VERSION,
@@ -49,6 +54,7 @@ import { COMPARISON_REVIEW_DEFAULT_MODEL_IDS } from "../lib/comparisonReview.ts"
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
 import { getModelPricingProfile } from "../lib/modelPricing.ts";
+import { draftingCallCostCeilingUsd } from "../lib/aiReviewEvalPlan.ts";
 
 const args = process.argv.slice(2);
 const argValue = (name) =>
@@ -202,12 +208,88 @@ if (tier) {
 
 console.log(`\n--- instruction ---\n${instruction}\n--- end ---`);
 
+// The cumulative hard stop.
+//
+// This script sends ONE batch per invocation, and filling the set takes about
+// 136 of them. A per-call ceiling printed on screen bounds nothing across a
+// loop: an operator running the loop overnight has approved 136 calls' worth
+// of spend one call at a time. So the budget is a total, it is required with
+// --send, and it is enforced against a ledger that survives between
+// invocations.
+//
+// Checked BEFORE the call, against this call's own cost computed from the
+// instruction that is about to go out -- not from a plan-time estimate, which
+// is smaller for exactly the batches that run last.
+const ledgerPath = join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
+const spentSoFarUsd = existsSync(ledgerPath)
+  ? readFileSync(ledgerPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .reduce((total, line) => {
+        try {
+          return total + (JSON.parse(line).costCeilingUsd ?? 0);
+        } catch {
+          // A ledger line that cannot be read is treated as spend of unknown
+          // size, which has to stop the loop: continuing would be spending
+          // against a total nobody can compute.
+          return Number.NaN;
+        }
+      }, 0)
+  : 0;
+
+const maxTotalCostUsd = argValue("max-total-cost-usd")
+  ? Number(argValue("max-total-cost-usd"))
+  : null;
+const callCeilingUsd = tier
+  ? draftingCallCostCeilingUsd({
+      inputTokens: estimatedInputTokens,
+      outputTokenCap,
+      inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+    })
+  : null;
+
+console.log(`\n  budget ledger  ${ledgerPath}`);
+console.log(
+  `  spent so far   ${Number.isNaN(spentSoFarUsd) ? "UNREADABLE" : `~$${spentSoFarUsd.toFixed(4)}`}` +
+    (maxTotalCostUsd === null ? "" : ` of $${maxTotalCostUsd.toFixed(2)}`)
+);
+
 if (!send) {
   console.log(
-    "\nNothing was sent and nothing was spent. Re-run with --send; that calls a " +
-      "provider and is billed."
+    "\nNothing was sent and nothing was spent. Re-run with --send " +
+      "--max-total-cost-usd=<total>; that calls a provider and is billed."
   );
   process.exit(0);
+}
+
+if (maxTotalCostUsd === null || !Number.isFinite(maxTotalCostUsd) || maxTotalCostUsd <= 0) {
+  die(
+    "--max-total-cost-usd=<total> is required with --send.\n\n" +
+      "This sends one batch per run and the set needs about 136 of them, so a\n" +
+      "per-call figure bounds nothing across the loop. The total is enforced\n" +
+      `against ${ledgerPath}, which persists between runs.`
+  );
+}
+if (Number.isNaN(spentSoFarUsd)) {
+  die(
+    `${ledgerPath} has a line that cannot be read, so the total spent is unknown.\n` +
+      "Refusing to add to a total nobody can compute."
+  );
+}
+if (callCeilingUsd === null) {
+  die(
+    `lib/modelPricing.ts has no profile for ${modelId}, so this call's cost cannot be\n` +
+      "bounded. A budget enforced against an unknown price is not a budget."
+  );
+}
+if (spentSoFarUsd + callCeilingUsd > maxTotalCostUsd) {
+  die(
+    `\nHARD STOP. This call's ceiling is ~$${callCeilingUsd.toFixed(4)} and ` +
+      `~$${spentSoFarUsd.toFixed(4)} is already spent,\n` +
+      `which would exceed the approved $${maxTotalCostUsd.toFixed(2)}.\n\n` +
+      "Nothing was sent. Re-plan the remaining work, or approve a new total."
+  );
 }
 
 const apiKey = process.env[configuration.apiKeyEnvName];
@@ -291,6 +373,26 @@ for (const drafted of cases) {
 writeFileSync(
   resolve(process.cwd(), setPath),
   `${JSON.stringify(set, null, 2)}\n`,
+  "utf8"
+);
+
+// Appended after the call, because the call was billed whether or not anything
+// usable came back. A ledger that only recorded successes would let a run of
+// unusable replies spend without moving the total.
+appendFileSync(
+  ledgerPath,
+  `${JSON.stringify({
+    at: draftedAt,
+    modelId,
+    language,
+    taskType,
+    phenomenon,
+    mode,
+    count: cases.length,
+    estimatedInputTokens,
+    outputTokenCap,
+    costCeilingUsd: callCeilingUsd,
+  })}\n`,
   "utf8"
 );
 
