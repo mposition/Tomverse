@@ -221,3 +221,26 @@ test("the planted answer is told to believe itself", () => {
     new RegExp(`elements 3 to ${ANSWER_SHAPE[cell.taskType].length} follow from it`)
   );
 });
+
+test("one difference means one reportable action, wrong in every reading", () => {
+  // The v5 pilot's two rejections. In 002 the planted difference was taking a
+  // stroke patient by car rather than by ambulance -- which official guidance
+  // allows where it is genuinely faster, so the case scores a reviewer for not
+  // knowing the drafter's unstated circumstance. In 005 one gold item bundled
+  // ventilating instead of evacuating, staying in a nearby room, and going back
+  // in: a reviewer reporting two of the three takes false positives against a
+  // gold that claims to be exhaustive.
+  const instruction = draftInstruction({
+    ...cell,
+    count: 2,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, count: 2 }),
+  });
+  assert.match(instruction, /ONE ACTION a reviewer could report on its own/);
+  assert.match(instruction, /wrong under every reading of the question/);
+  assert.match(instruction, /One item per finding a reviewer could report on its own/);
+  // Both rules are stated with the failure that produced them, because "be
+  // atomic" is the kind of instruction a model agrees with and does not act on.
+  assert.match(instruction, /by car rather than waiting for an ambulance/);
+  assert.match(instruction, /ventilates instead of evacuating/);
+});
