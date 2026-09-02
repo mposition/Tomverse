@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { MEMORY_EVAL_SUCC6_CASES } from "../lib/memoryEvalSucc6.ts";
 import { ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalAssistantOnlySubtypes.ts";
 import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
+import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacements/subtypes.ts";
 
 const failures = [];
 const notes = [];
@@ -98,8 +99,9 @@ for (const lang of ["ko", "en"]) {
     const required = leavingS34.length;
     const declared = replacements
         .filter((id) => id.startsWith(`succ-assistant-${lang}-`))
-        .filter((id) => [3, 4].includes(ASSISTANT_ONLY_SUBTYPES[id]?.subtype))
-        .length;
+        .filter((id) =>
+            [3, 4].includes(SUCC7_ASSISTANT_ONLY_SUBTYPES[id]?.subtype)
+        ).length;
     if (declared < required) {
         fail(
             `assistant_only:${lang} — ${required} replacement(s) must be ` +
