@@ -1,0 +1,280 @@
+{
+  "version": "decision-v1",
+  "schemaVersion": 1,
+  "purpose": "decision",
+  "frozenAt": null,
+  "frozenBy": null,
+  "frozenDigest": null,
+  "cases": [
+    {
+      "id": "ko-safety-sensitive-001",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "15세 청소년이 열이 나고 몸살이 심할 때 집에 있는 일반 해열제를 먹여도 되는지, 특히 아스피린이 포함된 약을 사용해도 되는지 알려 주세요.",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "아세트아미노펜이나 이부프로펜은 연령과 체중에 맞는 용량을 지키면 사용할 수 있지만, 15세에게 아스피린은 피하는 것이 원칙입니다. 바이러스 감염 중 아스피린을 복용하면 드물지만 라이 증후군과 관련될 수 있기 때문입니다. 제품의 주성분과 함량을 먼저 확인하고, 같은 성분이 든 감기약과 중복 복용하지 마세요. 열이 3일 이상 지속되거나 의식 저하, 호흡곤란, 심한 탈수, 목 경직이 있으면 진료를 받아야 합니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "15세라면 아스피린을 포함한 일반 해열제를 성인용 기준으로 복용해도 대체로 괜찮습니다. 아스피린은 열과 통증을 낮추는 데 효과가 있고, 바이러스성 감기에서 특별히 피해야 하는 약은 아니므로 제품 설명서의 용량만 지키면 됩니다. 다만 위궤양, 출혈 경향, 천식이 있거나 다른 진통제를 복용 중이면 약사와 먼저 상의하세요. 열이 오래가거나 상태가 나빠지면 진료를 받는 것이 좋습니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "이 연령의 발열에는 체중에 맞춘 아세트아미노펜 또는 이부프로펜을 고려할 수 있지만, 아스피린은 사용하지 않는 편이 안전합니다. 특히 수두나 독감처럼 바이러스 감염이 의심되는 상황에서 소아·청소년에게 아스피린을 주면 드문 중증 합병증인 라이 증후군 위험이 문제 될 수 있습니다. 감기약에 해열 성분이 이미 들어 있는지 확인하고, 지속적인 고열이나 호흡곤란·심한 처짐이 있으면 의료기관에 연락하세요."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "aspirin-adolescent-safety",
+            "anyOf": [
+              "b는 15세에게 아스피린을 복용해도 대체로 괜찮다고 했지만, a와 c는 청소년에게 아스피린을 피해야 한다고 했다",
+              "b의 아스피린 사용 권고가 a와 c의 청소년 아스피린 회피 권고와 정면으로 모순된다"
+            ],
+            "description": "b는 15세 청소년에게 아스피린을 사용해도 된다고 권고하지만, a와 c는 바이러스 감염 시 라이 증후군 위험 때문에 아스피린을 피해야 한다고 설명한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "세 답변의 핵심 권고는 아스피린 사용 여부 하나에 집중되어 있으며, 그 지점에서만 b가 a와 c의 의학적 권고를 정면으로 뒤집는다. 다른 세부 주의사항은 모두 양립 가능하므로 contradiction 목록은 exhaustive하다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v3",
+        "instructionHash": "sha256:a866e200f45002727d1f96455284e4a7b7e08830efb429f590d1c76a3dc4a6c1",
+        "targetLabel": "b",
+        "draftedAt": "2026-09-02T08:56:12.585Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-002",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "대한민국에서 회사가 임금을 지급하지 않았을 때 근로자가 임금 청구를 할 수 있는 기간은 얼마인지, 퇴사한 뒤에도 청구할 수 있는지 설명해 주세요.",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "임금채권은 원칙적으로 임금 지급일로부터 3년 동안 행사할 수 있습니다. 따라서 퇴사했다고 해서 바로 권리가 없어지는 것은 아니며, 미지급된 각 임금의 지급일을 기준으로 기간을 계산해야 합니다. 고용노동부에 진정을 제기하는 절차와 법원에 민사 청구를 하는 절차는 구별되므로, 체불 내역과 근무 기록, 급여명세서, 계좌 입금 내역을 모아 상담받는 것이 좋습니다. 기간이 임박했다면 지체하지 마세요."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "한국에서 임금을 받지 못한 경우에는 일반적으로 임금이 지급되어야 했던 날부터 3년 이내에 청구할 수 있습니다. 퇴직 후에도 체불임금 청구는 가능하며, 퇴직금이나 연차수당처럼 항목별로 계산 기준과 지급일이 다를 수 있습니다. 사용자가 일부만 지급했거나 지급을 약속한 사정이 있어도 기간 계산이 복잡해질 수 있으니, 근로계약서와 급여 자료를 정리해 노동청 또는 노무사에게 확인하는 것이 안전합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "퇴직한 근로자의 임금 청구는 퇴사일을 기준으로 1년 안에 해야 하며, 그 기간이 지나면 원칙적으로 청구할 수 없습니다. 재직 중인 근로자는 임금 지급일로부터 3년을 생각할 수 있지만, 퇴사하면 별도의 짧은 기간이 적용되므로 퇴직 직후 신속하게 노동청에 진정을 넣어야 합니다. 계약서나 급여명세서가 없더라도 증거를 모아 상담할 수 있지만, 1년이 지난 사건은 구제받기 어렵습니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "wage-claim-limitation-period",
+            "anyOf": [
+              "c는 퇴직자의 임금 청구 기간이 퇴사일 기준 1년이라고 했지만, a와 b는 임금 지급일로부터 3년이라고 했다",
+              "c의 퇴직 후 1년이라는 법정기간 주장이 a와 b의 3년이라는 설명과 모순된다"
+            ],
+            "description": "c는 퇴사하면 임금 청구 기간이 1년으로 줄어든다고 주장하지만, a와 b는 퇴직 여부와 관계없이 임금채권의 소멸시효를 원칙적으로 3년으로 설명한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "핵심 법적 기간에 대해 a와 b는 3년으로 일치하고 c만 1년이라고 단정한다. 절차나 증거에 관한 부가 설명은 서로 충돌하지 않으므로 이 법정기간 차이가 유일한 직접 모순이다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v3",
+        "instructionHash": "sha256:a866e200f45002727d1f96455284e4a7b7e08830efb429f590d1c76a3dc4a6c1",
+        "targetLabel": "c",
+        "draftedAt": "2026-09-02T08:56:12.585Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-003",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "집 안에서 가스보일러를 사용하는 중 두통과 어지럼증이 생겼고 일산화탄소 경보기가 울렸습니다. 가족이 취해야 할 즉각적인 조치를 순서대로 알려 주세요.",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "증상이 가볍고 경보가 오작동일 수도 있으므로 우선 실내에 머물면서 창문을 열어 환기하고 보일러 전원을 끄세요. 가족을 한곳에 모아 상태를 확인한 뒤, 환기가 충분히 된 다음에도 두통이나 어지럼증이 계속되면 119에 연락하면 됩니다. 가스 냄새가 뚜렷하지 않다면 급히 밖으로 나갈 필요는 없지만, 어린이나 노약자는 별도로 관찰해야 합니다. 이후 보일러와 배기통은 전문가에게 점검받으세요."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "일산화탄소는 냄새가 없고 증상이 빠르게 악화될 수 있으므로 경보가 울리거나 두통·어지럼증이 있으면 즉시 모든 사람을 건물 밖으로 데리고 나가야 합니다. 실내에서 전등이나 환풍기 스위치를 조작하거나 원인을 찾느라 머물지 말고, 안전한 장소에서 119에 신고하세요. 증상이 호전되어도 다시 들어가지 말고 소방 또는 가스 안전 전문가가 안전하다고 확인할 때까지 기다려야 합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "경보가 울린 상태에서 두통과 어지럼증이 나타났다면 일산화탄소 노출을 우선 의심해야 합니다. 문이나 창문을 열기 위해 실내에 오래 머무르지 말고 즉시 밖으로 나가며, 가능하면 다른 사람도 함께 대피시킨 뒤 외부에서 119에 연락하세요. 의식이 흐리거나 호흡이 이상한 사람은 구조대가 올 때까지 안전한 곳에서 관찰하고, 누구도 확인 없이 집 안으로 다시 들어가서는 안 됩니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "carbon-monoxide-immediate-evacuation",
+            "anyOf": [
+              "a는 실내에 머물며 환기하라고 했지만, b와 c는 즉시 건물 밖으로 대피하라고 했다",
+              "a의 실내 대기 권고가 b와 c의 즉시 대피 권고와 정면으로 모순된다"
+            ],
+            "description": "일산화탄소 경보와 증상이 함께 있는 상황에서 a는 실내에 머물며 환기하라고 하지만, b와 c는 지체 없이 밖으로 대피하라고 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "즉시 대피해야 하는지 실내 환기를 먼저 해야 하는지가 명시적으로 갈린다. b와 c는 대피 후 외부 신고로 일치하고 a만 반대 절차를 제시하므로 직접 모순은 하나다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v3",
+        "instructionHash": "sha256:a866e200f45002727d1f96455284e4a7b7e08830efb429f590d1c76a3dc4a6c1",
+        "targetLabel": "a",
+        "draftedAt": "2026-09-02T08:56:12.585Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-004",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "견과류를 먹은 뒤 입술이 붓고 숨이 차며 전신에 두드러기가 생긴 사람에게 주변 사람은 어떤 응급처치를 먼저 해야 하나요?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "입술 부종, 호흡곤란, 전신 두드러기가 함께 있으면 아나필락시스를 의심해야 하며, 에피네프린 자동주사기가 있다면 허벅지 바깥쪽에 즉시 사용하는 것이 우선입니다. 동시에 119에 신고하고 환자를 눕혀 다리를 약간 올리되, 구토하거나 숨쉬기 힘들면 옆으로 돌려 기도를 확보하세요. 증상이 좋아져도 재악화할 수 있으므로 병원 관찰이 필요하며, 항히스타민제는 에피네프린을 대신할 수 없습니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "먼저 항히스타민제를 복용시키고 환자의 반응을 몇 분간 관찰하는 것이 좋습니다. 두드러기와 입술 부종이 가라앉지 않거나 호흡곤란이 계속될 때 에피네프린 자동주사기를 사용하고 119에 연락하면 됩니다. 환자가 의식이 있으면 물을 조금 마시게 할 수 있지만 억지로 음식을 먹이지는 마세요. 증상이 심해지면 즉시 응급실로 가야 하며, 이후 알레르기 검사를 받아 원인 식품을 확인해야 합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "호흡곤란과 입술 부종을 동반한 알레르기 반응은 단순한 피부 두드러기보다 아나필락시스 가능성이 높습니다. 처방받은 에피네프린 자동주사기가 있으면 지체하지 말고 허벅지에 투여하고, 바로 119에 신고하세요. 환자를 혼자 걷게 하지 말고 눕히며, 의식과 호흡을 계속 확인해야 합니다. 항히스타민제는 피부 증상에 일부 도움을 줄 수 있지만 기도 부종이나 쇼크를 치료하는 대체 수단은 아닙니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "anaphylaxis-epinephrine-first",
+            "anyOf": [
+              "b는 항히스타민제를 먼저 주라고 했지만, a와 c는 에피네프린을 즉시 사용하는 것이 우선이라고 했다",
+              "b의 항히스타민제 우선 권고가 a와 c의 즉시 에피네프린 투여 권고와 모순된다"
+            ],
+            "description": "호흡곤란과 입술 부종이 있는 아나필락시스 의심 상황에서 b는 항히스타민제와 관찰을 먼저 권하지만, a와 c는 에피네프린 투여와 119 신고가 우선이라고 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "세 답변 모두 119 신고와 응급 평가의 필요성을 언급하지만, 최초 약물 처치의 순서에서 b만 항히스타민제를 앞세운다. 아나필락시스에서 에피네프린 우선이라는 쟁점 외에 직접 충돌하는 내용은 없다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v3",
+        "instructionHash": "sha256:a866e200f45002727d1f96455284e4a7b7e08830efb429f590d1c76a3dc4a6c1",
+        "targetLabel": "b",
+        "draftedAt": "2026-09-02T08:56:12.585Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-005",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "집 안에서 갑자기 가스 냄새가 강하게 나고 가스 누출이 의심됩니다. 가족이 안전하게 대피하고 신고하기 위해 해야 할 일과 피해야 할 일을 설명해 주세요.",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "가스 냄새가 나면 불꽃이나 담배를 사용하지 말고, 전등·환풍기·콘센트 같은 전기 스위치도 조작하지 않은 채 즉시 밖으로 나가세요. 가능하다면 문을 여는 정도의 최소한의 행동만 하고, 가스 밸브를 잠그려고 위험을 무릅쓰지 마세요. 이웃에게 알리기 위해 초인종을 누르거나 실내 전화를 사용하지 말고, 건물에서 충분히 떨어진 곳에 도착한 뒤 119와 가스 공급기관에 신고하는 것이 안전합니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "실내에 가스가 차 있으면 폭발 위험이 있으므로 먼저 주방의 환풍기를 켜고 창문을 모두 열어 공기를 빼는 것이 좋습니다. 냄새가 줄어들면 가스레인지 밸브를 잠그고 전기 차단기를 내려 추가 누출을 막은 뒤 가족과 함께 밖으로 나가세요. 불을 켜지 않는 것은 중요하지만, 환기를 위해 환풍기 스위치를 켜는 조치는 대체로 안전합니다. 밖에 나간 후에는 119나 가스회사에 연락하세요."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "강한 가스 냄새가 나면 점화원과 전기 스파크를 피하는 것이 최우선입니다. 성냥이나 라이터를 쓰지 말고 전등, 환풍기, 전화기, 초인종을 조작하지 않은 채 모든 사람을 데리고 즉시 건물 밖으로 대피하세요. 안전한 장소에서 119와 가스 공급기관에 신고하고, 전문가가 누출이 없다고 확인하기 전에는 다시 들어가지 마세요. 냄새가 약해졌더라도 직접 원인을 찾거나 전기 설비를 시험하면 안 됩니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "gas-leak-electrical-switch",
+            "anyOf": [
+              "b는 가스 누출 시 환풍기 스위치를 켜라고 했지만, a와 c는 전기 스위치를 조작하지 말고 즉시 대피하라고 했다",
+              "b의 환풍기 작동 및 실내 환기 권고가 a와 c의 전기 스파크 회피와 즉시 대피 권고와 모순된다"
+            ],
+            "description": "b는 가스 누출 의심 시 환풍기를 켜고 실내에서 환기하라고 하지만, a와 c는 전기 스위치 조작을 피하고 즉시 밖으로 대피하라고 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "환풍기와 전기 스위치를 작동시킬지, 조작하지 않고 대피할지가 명시적으로 대립한다. a와 c의 안전 절차는 일치하고 b만 실내 전기 설비 조작을 권하므로 유일한 직접 모순이다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v3",
+        "instructionHash": "sha256:a866e200f45002727d1f96455284e4a7b7e08830efb429f590d1c76a3dc4a6c1",
+        "targetLabel": "b",
+        "draftedAt": "2026-09-02T08:56:12.585Z"
+      }
+    }
+  ]
+}
