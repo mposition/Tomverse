@@ -132,6 +132,20 @@ Date / timezone:    ____________________
       `MEMORY_EVAL_DATASET_FROZEN` claims a freeze the conditions of
       docs/ops/memory-extraction-eval-dataset.md §7.1 do not support;
       while the dataset is still being authored it reports progress
+- [ ] `npm run check:memory-eval-succ6` — the frozen decision set against
+      its signed manifest: the sample, the digests and the signature, none
+      of which `check:memory-eval-freeze` reads. It checks freeze
+      *conditions*, so succ-6 could lose a case and that check would still
+      pass
+- [ ] `npm run check:memory-eval-succ7` — the successor's own invariants,
+      which nothing else covers because succ-7 is not the harness target:
+      1,150 cases with every cell count preserved, 54 same-cell 1:1
+      replacements, the `assistant_only` subtype composition rather than
+      merely its floor, no case in both the decision set and the
+      regression corpus, the decision loader unable to import that corpus,
+      `frozen` kept out of the manifest's identity so the digest a
+      reviewer signs is the digest that gets frozen, and no claim of
+      adoption while the review sheet carries no signature
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
