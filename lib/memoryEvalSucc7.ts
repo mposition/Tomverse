@@ -15,48 +15,60 @@ import {
     SUCC7_RETIRED_CASE_IDS,
     SUCC7_SAME_BOUNDARY_COUNT,
     SUCC7_TRANSITION,
+    SUCC7_TRANSITION_DIGEST,
 } from "@/lib/memoryEvalSucc7Transition";
 
 /**
- * `mem-eval-succ-7`, adopted and frozen on 2026-09-02.
+ * `mem-eval-succ-7`: signed once, pinned, and awaiting a second signature.
  *
  * Fifty-four out and fifty-four in against succ-6: ten carrying an approved
  * gold change, forty-four that selected the `mem-extract-v8` intervention. The
  * retired cases are preserved in `lib/memoryEvalSucc7Regression.ts`.
  *
- * ## Not adopted, and therefore not pinned
+ * ## Where this stands
  *
- * There is no manifest literal here and `frozen` is false. A pin is the record
- * a person signs, and no one has: the review sheet's verdict, reviewer and
- * signature are blank. An adoption record written ahead of that signature
- * asserts a fact that does not exist, which is what happened once on this
- * branch and was reverted.
+ * `@mposition` signed the 54 cases on 2026-09-02 and the dataset was frozen.
+ * Review of the freeze machinery then found the manifest did not cover the
+ * retired -> replacement pairing, so `transitionDigest` was added and the
+ * manifest digest moved. A signature is of a digest, so it does not survive
+ * that: `MEMORY_EVAL_SUCC7_REVIEW.status` is `superseded`, `frozen` is false
+ * again, and the record keeps every value that was signed. The sample is
+ * untouched — the dataset digest is still the one that was read.
  *
- * When the pin does arrive it must satisfy two things this file is built for.
- * `verifySucc7Manifest()` will take the record and the recomputation as two
- * parameters with two *different* defaults — succ-6 shipped with the builder
- * on both sides, so its no-argument call compared the tree with itself and
- * returned empty however far the tree had moved. And the digest a reviewer
- * signs must be the digest that gets frozen, which is why `frozen` is not part
- * of this manifest's identity (see `manifestFingerprintInput`).
+ * ## What the pin is for
+ *
+ * `MEMORY_EVAL_SUCC7_MANIFEST` is a literal and `verifySucc7Manifest()` takes
+ * the record and the recomputation as two parameters with two *different*
+ * defaults. succ-6 shipped with the builder on both sides, so its no-argument
+ * call compared the tree with itself and returned empty however far the tree
+ * had moved. The record is also hashed against its own fields, because
+ * comparing two digest strings proves only that two strings match.
+ *
+ * And the digest a reviewer signs must be the digest that gets frozen, which
+ * is why `frozen` is not part of this manifest's identity (see
+ * `manifestFingerprintInput`).
  */
 export const MEMORY_EVAL_SUCC7_DATASET_VERSION = "mem-eval-succ-7";
 
 /**
- * Adopted by @mposition on 2026-09-02.
+ * False again, pending a second signature.
  *
- * The gate that reads this is `decideEvalRunMode()`, which refuses a
- * decision-grade run against an unfrozen decision sample. Flipping it removes
- * that refusal and nothing else. It does not point the harness here — that is
- * still succ-6 — and it does not register a pair, authorise a budget, or
- * approve a paid run, each of which is its own human decision with its own
- * record.
+ * It was true between 79ffe616 and the manifest fix: `@mposition` signed on
+ * 2026-09-02 and the dataset was frozen against that signature. Review then
+ * found that the signed manifest did not cover the retired -> replacement
+ * pairing, so adding `transitionDigest` moved the manifest digest — and a
+ * signature is of a digest, not of a version number. Carrying it forward
+ * would be the repository asserting a person approved something they never
+ * saw.
  *
- * The order is signature first, then this. `MEMORY_EVAL_SUCC7_REVIEW` carries
- * the digests that were signed and the check refuses a freeze without them, so
- * a dataset cannot arrive here with nobody's name on it.
+ * The sample did not move. The dataset digest is the one that was read, and
+ * `MEMORY_EVAL_SUCC7_REVIEW` keeps the whole of the first signature so the
+ * second one is a re-reading of a manifest rather than of 54 cases again.
+ *
+ * The order stays signature first, then this: the check refuses a freeze whose
+ * signature does not describe the tree.
  */
-export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = true;
+export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = false;
 
 export const MEMORY_EVAL_SUCC7_DATASET_PURPOSE: "development" | "decision" =
     "decision";
@@ -87,13 +99,24 @@ export const MEMORY_EVAL_SUCC7_DATASET_PURPOSE: "development" | "decision" =
  * its own record, and none of them was signed here.
  */
 export type Succ7AdoptionSignature = {
-    status: "signed";
+    /**
+     * `superseded` means a person did sign, and the artifact has since moved
+     * for a reason that was not theirs to approve. It is not `signed` with a
+     * caveat: nothing may treat it as covering this tree.
+     */
+    status: "signed" | "superseded";
     reviewer: string;
     reviewedAt: string;
     reviewedCommit: string;
     signedDatasetDigest: string;
     signedManifestDigest: string;
     signedSourceDatasetDigest: string;
+    /**
+     * The pairing the reviewer judged 53 times. Absent from the 2026-09-02
+     * signature because the manifest did not carry one yet, which is the
+     * defect that superseded it.
+     */
+    signedTransitionDigest?: string;
     verdict: {
         sameBoundaryPassed: number;
         sameBoundaryTotal: number;
@@ -102,10 +125,12 @@ export type Succ7AdoptionSignature = {
         cellDiversitySufficient: boolean;
     };
     record: string;
+    /** Why a signature stopped covering the tree. Required when superseded. */
+    supersededBecause?: string;
 };
 
 export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
-    status: "signed",
+    status: "superseded",
     reviewer: "@mposition",
     reviewedAt: "2026-09-02",
     reviewedCommit: "e522796dd11e3d009d23a13836b7a45b005f3bc8",
@@ -123,9 +148,24 @@ export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
         cellDiversitySufficient: true,
     },
     record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
+    supersededBecause:
+        "The manifest this was signed against did not cover the retired -> " +
+        "replacement pairing, so two same-cell rows could trade originals with " +
+        "every digest unmoved — the 53 same-boundary verdicts would then point " +
+        "at pairings nobody judged. Adding `transitionDigest` fixes that and " +
+        "moves the manifest digest from 42c9b0a8… to ecfb84a4…. The sample did " +
+        "not change: the dataset digest is still 9326730a…, and the 54 cases " +
+        "the reviewer read are the 54 cases here. What needs signing again is " +
+        "the manifest, not the sample.",
 };
 
-/** True once a person has signed. Nothing in this file may set it. */
+/**
+ * True once a person has signed *this* tree. Nothing in this file may set it.
+ *
+ * A superseded signature reads as false here on purpose. The alternative —
+ * carrying a signature forward across a change the signer did not see — is the
+ * only thing a signature exists to prevent.
+ */
 export const MEMORY_EVAL_SUCC7_REVIEWED =
     MEMORY_EVAL_SUCC7_REVIEW.status === "signed";
 
@@ -186,6 +226,15 @@ export type Succ7DraftManifest = {
         coverage_repair: number;
     }>;
     /**
+     * Which replacement stood in for which original, digested.
+     *
+     * The counts above say 53 and 1; they cannot say *which* 53. Two rows in
+     * one cell can trade originals with the case set, the cell counts, the
+     * tally and the dataset digest all unmoved, and every same-boundary
+     * verdict then points at a pairing nobody judged.
+     */
+    transitionDigest: string;
+    /**
      * The policy questions this dataset carries forward without answering,
      * each named by the transition that raised it. Bound into the digest so a
      * later edit that quietly resolves one moves the manifest.
@@ -229,6 +278,7 @@ export const manifestFingerprintInput = (
         `cases=${manifest.caseCount}`,
         `sameBoundary=${manifest.transitionTypes.same_boundary}`,
         `coverageRepair=${manifest.transitionTypes.coverage_repair}`,
+        `transition=${manifest.transitionDigest}`,
         ...manifest.unresolvedPolicies.map((q) => `unresolved=${q}`),
         ...Object.entries(manifest.cellCounts).map(
             ([cell, n]) => `cell=${cell}:${n}`
@@ -264,6 +314,7 @@ export function buildSucc7DraftManifest(): Succ7DraftManifest {
             same_boundary: SUCC7_SAME_BOUNDARY_COUNT,
             coverage_repair: SUCC7_COVERAGE_REPAIR_COUNT,
         },
+        transitionDigest: SUCC7_TRANSITION_DIGEST,
         unresolvedPolicies: SUCC7_TRANSITION.flatMap((row) =>
             row.unresolvedPolicy
                 ? [`${row.retired} -> ${row.replacement}: ${row.unresolvedPolicy}`]
@@ -329,6 +380,8 @@ export const MEMORY_EVAL_SUCC7_MANIFEST: Succ7DraftManifest = {
         same_boundary: 53,
         coverage_repair: 1,
     },
+    transitionDigest:
+        "36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1",
     unresolvedPolicies: [
         `succ-injection-en-301 -> succ-injection-en-601: ${SUCC7_MIXED_TURN_POLICY_QUESTION}`,
     ],
@@ -338,9 +391,9 @@ export const MEMORY_EVAL_SUCC7_MANIFEST: Succ7DraftManifest = {
     scoringContractDigest:
         "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
     scoringContractVersion: "mem-score-v3.4",
-    frozen: true,
+    frozen: false,
     manifestDigest:
-        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+        "ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902",
 };
 
 /**
@@ -360,6 +413,23 @@ export function verifySucc7Manifest(
     built: Succ7DraftManifest = buildSucc7DraftManifest()
 ): readonly string[] {
     const failures: string[] = [];
+    // The record against itself, before the record against the tree.
+    //
+    // Comparing two digest *strings* only ever proves the two strings match.
+    // Every other field of the pinned record — the case count, the 53/1 tally,
+    // the contract version, the unresolved question — could be edited with the
+    // digest left alone, and nothing here would notice: demonstrated on
+    // 2026-09-02, where `caseCount: 999` and a flipped transition tally both
+    // verified clean. So the digest is recomputed from the fields it is
+    // supposed to summarise.
+    const { manifestDigest: recordedDigest, ...recordedFields } = manifest;
+    const recomputed = sha256(manifestFingerprintInput(recordedFields));
+    if (recordedDigest !== recomputed) {
+        failures.push(
+            `the pinned record does not hash to its own manifestDigest: ` +
+                `records ${recordedDigest}, its fields hash to ${recomputed}`
+        );
+    }
     if (manifest.datasetDigest !== built.datasetDigest) {
         failures.push(
             `datasetDigest: recorded ${manifest.datasetDigest}, tree computes ${built.datasetDigest}`
@@ -377,6 +447,13 @@ export function verifySucc7Manifest(
         failures.push(
             `sourceDatasetDigest: recorded ${manifest.composition.sourceDatasetDigest}, ` +
                 `tree computes ${built.composition.sourceDatasetDigest}`
+        );
+    }
+    if (manifest.transitionDigest !== built.transitionDigest) {
+        failures.push(
+            `transitionDigest: recorded ${manifest.transitionDigest}, tree computes ` +
+                `${built.transitionDigest}. Which replacement stood in for which ` +
+                "original changed, and the case set alone cannot show it."
         );
     }
     // `frozen` is deliberately outside the digest, so the two checks above
@@ -423,6 +500,38 @@ export function succ7SignatureProblems(
     built: Succ7DraftManifest = buildSucc7DraftManifest()
 ): readonly string[] {
     const problems: string[] = [];
+    if (signature.status === "superseded") {
+        problems.push(
+            "no signature covers this tree: the recorded one is superseded" +
+                (signature.supersededBecause
+                    ? ` — ${signature.supersededBecause}`
+                    : ", and records no reason")
+        );
+        return problems;
+    }
+    // A signature has to name a commit that can be looked up and a record that
+    // can be read. Blank strings passed every check until 2026-09-02, which
+    // made "signed by nobody, of nothing" indistinguishable from a signature.
+    if (!/^[0-9a-f]{40}$/.test(signature.reviewedCommit)) {
+        problems.push(
+            `reviewedCommit is not a 40-character SHA: "${signature.reviewedCommit}"`
+        );
+    }
+    if (!/^\.github\/audits\/[\w.-]+\.md$/.test(signature.record)) {
+        problems.push(`record is not an audit path: "${signature.record}"`);
+    }
+    if (signature.signedTransitionDigest === undefined) {
+        problems.push(
+            "the signature does not cover the transition pairing: without it, " +
+                "two same-cell rows can trade originals with every other digest " +
+                "unmoved"
+        );
+    } else if (signature.signedTransitionDigest !== built.transitionDigest) {
+        problems.push(
+            `the signature is of transition ${signature.signedTransitionDigest}, ` +
+                `the tree computes ${built.transitionDigest}`
+        );
+    }
     if (signature.signedDatasetDigest !== built.datasetDigest) {
         problems.push(
             `the signature is of dataset ${signature.signedDatasetDigest}, the ` +

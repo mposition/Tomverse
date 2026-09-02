@@ -10,6 +10,7 @@
  * Nothing here freezes anything. Freezing stays a human act recorded in the
  * register (docs/policy/external-conversation-import-and-memory.md 12.4).
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -411,6 +412,50 @@ if (MEMORY_EVAL_SUCC7_REVIEWED) {
                 `${MEMORY_EVAL_SUCC7_REVIEW.reviewedAt}, dataset ` +
                 `${MEMORY_EVAL_SUCC7_REVIEW.signedDatasetDigest.slice(0, 16)}…`
         );
+    }
+} else {
+    ok(
+        "succ-7 carries no signature for this tree",
+        MEMORY_EVAL_SUCC7_REVIEW.status
+    );
+}
+
+// Two things a module cannot check for itself: whether the record it names is
+// a file, and whether the commit it names is in this history. Both were blank
+// strings away from meaningless on 2026-09-02.
+if (!existsSync(fileURLToPath(new URL(`../${MEMORY_EVAL_SUCC7_REVIEW.record}`, import.meta.url)))) {
+    fail(`the signature's record does not exist: ${MEMORY_EVAL_SUCC7_REVIEW.record}`);
+} else {
+    ok("the signature's record exists", MEMORY_EVAL_SUCC7_REVIEW.record);
+}
+{
+    const sha = MEMORY_EVAL_SUCC7_REVIEW.reviewedCommit;
+    const git = (args) =>
+        execFileSync("git", args, {
+            cwd: fileURLToPath(new URL("..", import.meta.url)),
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+    let known = true;
+    try {
+        git(["cat-file", "-e", `${sha}^{commit}`]);
+    } catch {
+        known = false;
+    }
+    if (!known) {
+        // A shallow CI checkout genuinely does not have the commit. Saying so
+        // beats a red check for a reason that is not a defect — and beats
+        // silence, which would read as "verified".
+        ok("the reviewed commit is not in this checkout", `${sha.slice(0, 12)}… not verifiable here`);
+    } else {
+        try {
+            git(["merge-base", "--is-ancestor", sha, "HEAD"]);
+            ok("the reviewed commit is an ancestor of HEAD", `${sha.slice(0, 12)}…`);
+        } catch {
+            fail(
+                `the signature names ${sha.slice(0, 12)}…, which is not an ` +
+                    "ancestor of HEAD: it describes a history this tree does not have"
+            );
+        }
     }
 }
 if (manifest.frozen !== MEMORY_EVAL_SUCC7_DATASET_FROZEN) {

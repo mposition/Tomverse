@@ -1,6 +1,18 @@
 # `mem-eval-succ-7` 채택·동결 기록
 
-**상태: 채택됨 · 동결됨 (2026-09-02).**
+**상태: 1차 서명됨 · 2026-09-02 같은 날 무효화됨. 재서명 대기.**
+
+> **이 기록은 유효한 채택이 아닙니다.** `@mposition`이 2026-09-02에 54개 케이스를
+> 읽고 서명했고 dataset은 그 서명으로 동결됐습니다. 이어진 동결 장치 검토에서
+> manifest가 **원본↔대체본 대응을 덮지 않는다**는 것이 확인돼 `transitionDigest`를
+> 추가했고, 그 결과 manifest digest가 `42c9b0a8…` → `ecfb84a4…`로 이동했습니다.
+> **서명은 version 번호가 아니라 digest에 대한 것이므로** 이 서명은 새 manifest를
+> 덮지 못합니다. `MEMORY_EVAL_SUCC7_REVIEW.status`는 `superseded`이고 `frozen`은
+> 다시 `false`입니다.
+>
+> **표본은 움직이지 않았습니다** — dataset digest `9326730a…`는 검수자가 읽은 그
+> 값이고 54개 케이스도 그대로입니다. 다시 서명받아야 하는 것은 **manifest이지
+> 표본이 아닙니다.** 자세한 내용은 §9.
 
 - 검수자: **@mposition**
 - 검수일: **2026-09-02**
@@ -18,7 +30,9 @@
 | source dataset digest (succ-6) | `2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63` |
 | scoring contract | `mem-score-v3.4`, digest `a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd` |
 | fingerprint | v4 (대화 `title` 포함) |
-| 동결 commit SHA (40자리) | `79ffe61687e61d31a74b1800fc9361d6b7cf1da4` |
+| 1차 동결 commit SHA (40자리) | `79ffe61687e61d31a74b1800fc9361d6b7cf1da4` *(무효화됨, §9)* |
+| 현재 manifest digest | `ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902` |
+| 현재 transition digest | `36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1` |
 
 SHA는 동결 commit 자신을 가리키므로 그 commit 안에 담을 수 없습니다. succ-6과 같은
 순서로, 바로 다음 commit이 기입합니다. 그 사이에 dataset·manifest digest는 움직이지
@@ -147,3 +161,69 @@ succ-6의 1150건 중 대화가 2개 이상인 케이스는 **0건**입니다. �
 - 판정 수치가 약화되는 경우 (53/53, 0건, 모든 cell 충분)
 
 이 중 하나라도 발생하면 **새 채택 기록 없이는 고치지 않습니다.**
+
+## 9. 1차 서명이 무효화된 이유 (2026-09-02)
+
+서명 직후 동결 장치 자체를 검토한 결과 **차단 결함 3건**이 재현됐습니다. 셋 다
+"검사가 통과했다"와 "검사가 무언가를 확인했다"의 차이에 관한 것입니다.
+
+### 9.1 pinned manifest가 자기 자신과 대조되지 않았습니다
+
+`verifySucc7Manifest()`는 기록된 `manifestDigest` **문자열**을 트리의 문자열과만
+비교했습니다. 그래서 pinned record의 `caseCount`를 999로, 53/1 집계를 1/53으로,
+contract version과 unresolved 질문을 바꿔도 digest를 그대로 두면 `verify=[]`,
+전체 검사 `EXIT=0`이었습니다. 감사 문서 §8의 "manifest의 어느 필드든 움직이면
+실패"는 그 시점에 **사실이 아니었습니다.**
+
+지금은 기록의 나머지 필드에서 `manifestFingerprintInput()`을 다시 계산해 기록된
+digest와 대조합니다. 회귀 테스트 4건이 네 가지 변조를 각각 실패로 고정합니다.
+
+### 9.2 53개 대응 관계가 서명 밖에 있었습니다
+
+manifest는 몇 건이 어떤 유형으로 움직였는지(53과 1)는 담았지만 **어느 대체본이
+어느 원본을 대신하는지**는 담지 않았습니다. 같은 cell의 두 행이 원본을 맞바꿔도
+케이스 집합·cell 수·유형 집계·dataset digest가 전부 그대로이고, 검수자가 53번
+답한 "이 대체본이 이 원본과 같은 경계인가"만 다른 곳을 가리키게 됩니다.
+
+실제로 `succ-durable-en-103 → en-601`과 `succ-durable-en-11 → en-602`를 맞바꾼
+상태에서 모든 검증이 빈 배열이었습니다.
+
+`SUCC7_TRANSITION_DIGEST`가 전 행의 `retired`·`replacement`·`basis`·
+`transitionType`·`unresolvedPolicy`를 덮고, manifest가 그 값을 싣습니다.
+`retired` 기준으로 정렬해 계산하므로 배열 순서 변경은 digest를 움직이지 않고
+대응 변경만 움직입니다.
+
+**이 추가가 manifest digest를 이동시켰고, 그래서 1차 서명이 무효화됐습니다.**
+
+### 9.3 재생성된 시트가 stale signature를 "채택됨"으로 출력했습니다
+
+`make-memory-eval-succ7-review-sheet.mjs`는 `MEMORY_EVAL_SUCC7_REVIEWED` boolean
+하나만 읽었습니다. 서명 후 케이스 title을 바꾸자 두 검증 함수는 drift를 올바르게
+보고했는데, 생성기는 정상 종료하며 `reviewed=true`·`frozen=true`·"@mposition이
+서명해 채택됐습니다"와 **바뀐 digest**를 함께 출력했습니다. 나중에 이 문서를 믿을
+독자에게는 시트가 없는 것보다 나쁩니다.
+
+지금은 생성 전에 `succ7SignatureProblems()`와 `verifySucc7Manifest()`를 호출하고,
+drift가 있으면 사유를 적고 비정상 종료하며 파일을 쓰지 않습니다. **명령 수준
+테스트**가 격리된 sandbox에서 실제로 그 명령을 두 번 실행합니다 — 정상 상태에서
+성공하는 것을 먼저 보이고, 서명이 트리를 덮지 않는 상태에서 exit≠0·stderr·파일
+부재를 확인합니다.
+
+### 9.4 함께 고친 보통 심각도 2건
+
+- `reviewedCommit`과 `record`가 빈 문자열이어도 통과했습니다. 이제 40자리 SHA
+  형식과 `.github/audits/*.md` 경로를 검사하고, 검사 script가 **기록 파일의 존재**와
+  **검수 commit이 HEAD의 조상인지**를 확인합니다. 얕은 checkout에서 commit을 모를
+  때는 실패가 아니라 "여기서는 검증 불가"로 보고합니다 — 결함이 아닌 이유로 빨간
+  검사는 곧 읽히지 않게 되기 때문입니다.
+- `lib/memoryEvalSucc7.ts` 상단에 "adopted and frozen"과 "Not adopted, no manifest
+  literal, frozen=false"가 동시에 남아 있었습니다.
+
+### 9.5 재서명 시 무엇이 달라지는가
+
+새 서명은 `signedTransitionDigest`를 **반드시** 포함해야 합니다 —
+`succ7SignatureProblems()`가 그 필드가 없는 서명을 거절합니다. 1차 서명에 그 값이
+없는 것이 이 무효화의 내용 그 자체입니다.
+
+표본을 다시 읽을 필요는 없습니다. dataset digest와 source digest는 1차 서명 값
+그대로이고, `tests/memoryEvalSucc7Adoption.test.mjs`가 그 사실을 고정합니다.

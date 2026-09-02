@@ -28,6 +28,8 @@ import {
     MEMORY_EVAL_SUCC7_REVIEW,
     MEMORY_EVAL_SUCC7_REVIEWED,
     buildSucc7DraftManifest,
+    succ7SignatureProblems,
+    verifySucc7Manifest,
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
 import { MEMORY_EVAL_SUCC7_CASES } from "../lib/memoryEvalSucc7.ts";
@@ -38,6 +40,28 @@ const out =
     "artifacts/succ7-review.md";
 
 const manifest = buildSucc7DraftManifest();
+
+// A sheet that says "adopted" is a claim about this tree, so the claim is
+// checked before it is written rather than copied from a boolean.
+//
+// The boolean was all this read until 2026-09-02, and it survives edits the
+// signature does not: change a case title after signing and both verifiers
+// report drift correctly, while this script cheerfully printed `reviewed=true`,
+// `frozen=true`, "@mposition signed" — and the new digest. A generated
+// artifact asserting an adoption of a dataset nobody adopted is worse than no
+// sheet: it is the document a later reader would trust.
+if (MEMORY_EVAL_SUCC7_REVIEWED) {
+    const drift = [...succ7SignatureProblems(), ...verifySucc7Manifest()];
+    if (drift.length > 0) {
+        console.error(
+            "Refusing to write a sheet that would claim adoption:\n" +
+                drift.map((line) => `  - ${line}`).join("\n") +
+                "\n\nThe signature no longer describes this tree. Either restore " +
+                "what was signed, or record a new signature for what is here."
+        );
+        process.exit(1);
+    }
+}
 const byId = new Map(MEMORY_EVAL_SUCC7_REPLACEMENTS.map((c) => [c.id, c]));
 const regById = new Map(
     SUCC7_REGRESSION_CORPUS.map((e) => [e.replacementId, e])
@@ -155,6 +179,17 @@ if (MEMORY_EVAL_SUCC7_REVIEWED) {
     );
     p("이 시트는 그 서명의 대상이며, 아래 digest가 서명된 값입니다.");
     p("harness target은 succ-6 그대로입니다 — 이동은 별개 결정입니다.");
+} else if (MEMORY_EVAL_SUCC7_REVIEW.status === "superseded") {
+    p(
+        `succ-7은 **${MEMORY_EVAL_SUCC7_REVIEW.reviewer}** 가 ` +
+            `**${MEMORY_EVAL_SUCC7_REVIEW.reviewedAt}** 에 서명했으나, 그 서명은 ` +
+            "**무효화됐습니다.**"
+    );
+    p("");
+    p(`> ${MEMORY_EVAL_SUCC7_REVIEW.supersededBecause}`);
+    p("");
+    p("따라서 `frozen`은 `false`이고 harness는 succ-6을 가리킵니다. 아래 판정란은");
+    p("다시 채워져야 하며, 새 서명은 `transitionDigest`를 포함해야 합니다.");
 } else {
     p("succ-7은 **조립됐고 채택되지 않았습니다.** 이 시트의 판정과 서명이 채택의");
     p("전제이며, 서명 전까지 `frozen`은 `false`이고 harness는 succ-6을 가리킵니다.");
@@ -178,6 +213,10 @@ p(`| caseCount | ${manifest.caseCount} |`);
 p(`| datasetDigest | \`${manifest.datasetDigest}\` |`);
 p(`| manifestDigest | \`${manifest.manifestDigest}\` |`);
 p(`| sourceDatasetDigest | \`${manifest.composition.sourceDatasetDigest}\` |`);
+// The pairing digest belongs on the page, not only in the manifest: it is
+// the value that fixes which replacement answers for which original, and
+// the 53 same-boundary verdicts below are verdicts about exactly that.
+p(`| transitionDigest | \`${manifest.transitionDigest}\` |`);
 p(`| scoringContract | \`${manifest.scoringContractVersion}\` |`);
 p(`| fingerprint | v${manifest.fingerprintVersion} (대화 title 포함) |`);
 p("| assembled | true |");
