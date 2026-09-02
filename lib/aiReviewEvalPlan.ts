@@ -33,7 +33,7 @@ import {
     type AiReviewEvalCase,
 } from "@/lib/aiReviewEvalCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { DRAFT_MIN_RESPONSE_CHARACTERS } from "@/lib/aiReviewEvalDraftPrompt";
+import { DRAFT_DISCARD_FLOOR_CHARACTERS } from "@/lib/aiReviewEvalDraftPrompt";
 
 export type AiReviewEvalCell = {
     language: string;
@@ -242,7 +242,7 @@ export const goldLeadLabels = (
  * two-sentence stubs has nowhere for an omission to hide and nothing for a
  * contradiction to be buried in, so what gets measured is not what the product
  * does. The runbook asks for the length a real assistant produces, and
- * `DRAFT_MIN_RESPONSE_CHARACTERS` now enforces a floor on new drafting -- but
+ * `DRAFT_DISCARD_FLOOR_CHARACTERS` now enforces a floor on new drafting -- but
  * a floor says nothing about the shape above it, and a cell can still fill up
  * with answers sitting exactly on it.
  *
@@ -276,7 +276,7 @@ export const responseLengths = (
                 : Math.round((lengths[middle - 1] + lengths[middle]) / 2),
         mean: Math.round(lengths.reduce((total, value) => total + value, 0) / lengths.length),
         max: lengths[lengths.length - 1],
-        belowFloor: lengths.filter((value) => value < DRAFT_MIN_RESPONSE_CHARACTERS).length,
+        belowFloor: lengths.filter((value) => value < DRAFT_DISCARD_FLOOR_CHARACTERS).length,
     };
 };
 

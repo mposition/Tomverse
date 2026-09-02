@@ -50,7 +50,7 @@ import {
 } from "../lib/aiReviewEvalCore.ts";
 import {
   AI_REVIEW_DRAFT_TEMPLATE_VERSION,
-  DRAFT_MIN_RESPONSE_CHARACTERS,
+  DRAFT_DISCARD_FLOOR_CHARACTERS,
   assignTargetLabels,
   draftInstruction,
   parseDraftedCases,
@@ -522,7 +522,7 @@ try {
 }
 const { cases, problems } = parseDraftedCases(
   completion.choices?.[0]?.message?.content ?? "",
-  { targetLabels, minResponseCharacters: DRAFT_MIN_RESPONSE_CHARACTERS }
+  { targetLabels, minResponseCharacters: DRAFT_DISCARD_FLOOR_CHARACTERS }
 );
 for (const problem of problems) console.error(`  rejected: ${problem}`);
 if (cases.length === 0) {

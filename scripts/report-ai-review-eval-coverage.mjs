@@ -22,7 +22,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { datasetManifest } from "../lib/aiReviewEvalPlan.ts";
-import { DRAFT_MIN_RESPONSE_CHARACTERS } from "../lib/aiReviewEvalDraftPrompt.ts";
+import {
+  DRAFT_DISCARD_FLOOR_CHARACTERS,
+  DRAFT_TARGET_RESPONSE_RANGE,
+} from "../lib/aiReviewEvalDraftPrompt.ts";
 import { partitionDatasetProblems } from "../lib/aiReviewEvalRun.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
 
@@ -144,11 +147,16 @@ for (const path of paths) {
       `    min ${lengths.min}   median ${lengths.median}   mean ${lengths.mean}   max ${lengths.max}` +
         `   (${lengths.count} answers)`
     );
+    console.log(
+      `    The drafting target is ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max}. ` +
+        `Landing in it is not a pass and missing it is not a failure: whether a case is worth ` +
+        `adopting is a judgement about the reasoning in its answers, and a person makes that.`
+    );
     if (lengths.belowFloor > 0) {
       console.log(
-        `    NOTE ${lengths.belowFloor} answer(s) below the ${DRAFT_MIN_RESPONSE_CHARACTERS}-character ` +
-          `drafting floor. A reviewer comparing stubs has nowhere for an omission to hide, ` +
-          `so short answers measure something easier than the product does.`
+        `    ${lengths.belowFloor} answer(s) are under the ${DRAFT_DISCARD_FLOOR_CHARACTERS}-character ` +
+          `discard floor, which new drafting refuses outright. That floor is a check on the ` +
+          `shape of a reply, not a quality bar -- these predate it.`
       );
     }
   }

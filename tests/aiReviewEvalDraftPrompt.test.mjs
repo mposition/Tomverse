@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DRAFT_MIN_RESPONSE_CHARACTERS,
+  DRAFT_DISCARD_FLOOR_CHARACTERS,
   ANSWER_SHAPE,
   DRAFT_RESPONSE_LABELS,
   DRAFT_TARGET_RESPONSE_RANGE,
@@ -103,7 +103,19 @@ test("the instruction names the assigned answer for every case", () => {
       `${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters`
     )
   );
-  assert.match(instruction, new RegExp(`not go under ${DRAFT_MIN_RESPONSE_CHARACTERS}`));
+  assert.match(
+    instruction,
+    new RegExp(`under ${DRAFT_DISCARD_FLOOR_CHARACTERS} characters is discarded unread`)
+  );
+  // The band is a writing target and the floor is a format check, and the
+  // instruction has to say both. Running them together is what made v2 aim at
+  // 200 and land at 162-190, and v3 aim at 500 and land at 215.
+  assert.match(instruction, /a target for writing, not a test to pass/);
+  assert.match(instruction, /clearing it says nothing at all about whether the case is good/);
+  // Depth is asked for as substance, with padding named as the failure.
+  assert.match(instruction, /specific to THIS case/);
+  assert.match(instruction, /do not invent one to fill the space/);
+  assert.match(instruction, /no facts the question did not ask about/);
   // The one-difference rule is what makes an exhaustive gold honest: a planted
   // answer careless in a second way scores a reviewer wrong for finding it.
   assert.match(instruction, /differs from the others on ONE point/);
@@ -146,11 +158,11 @@ test("labels are checked, never filled in", () => {
 test("a stub answer is refused rather than accepted into the cell", () => {
   const short = parseDraftedCases(reply([caseWith(["a", "b", "c"], { contentLength: "short" })]), {
     targetLabels: ["a"],
-    minResponseCharacters: DRAFT_MIN_RESPONSE_CHARACTERS,
+    minResponseCharacters: DRAFT_DISCARD_FLOOR_CHARACTERS,
   });
   assert.equal(short.cases.length, 0);
   // Every length is named, so a near-miss and a stub are distinguishable.
-  assert.match(short.problems[0], /3 of 3 answer\(s\) below 200 characters \(lengths /);
+  assert.match(short.problems[0], /3 of 3 answer\(s\) below the 200-character discard floor/);
 });
 
 test("an accepted case remembers which case of the batch it was", () => {

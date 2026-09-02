@@ -37,24 +37,29 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v6";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v7";
 
 /** The only labels a drafted response may carry. */
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
 
 /**
- * The shortest a drafted answer may be.
+ * The length below which a drafted answer is discarded unread.
  *
- * The v1 batch averaged 108 characters, between 81 and 133 -- readable, and
- * nothing like the answers this product produces. The runbook asks for
- * "hundreds to thousands of characters" because a reviewer comparing two
- * two-sentence stubs is not doing the job being measured: there is nowhere for
- * an omission to hide and nothing for a contradiction to be buried in.
+ * **This is a format check, not a quality bar.** It exists to catch a reply
+ * that is malformed -- a stub where an answer should be -- in the same way the
+ * label rules catch a missing label. An answer that clears it has been found
+ * well-formed and nothing more: whether the case is worth adopting is a
+ * judgement about the reasoning in it, and a person makes that.
  *
- * A floor rather than a target. It is enforced on the reply, so a drafter that
- * writes stubs fails the batch instead of quietly filling a cell with them.
+ * The distinction matters because the two were run together once and the
+ * number started reading as a target. v2 asked for "at least 200 characters"
+ * and got 162-190; v3 raised the request to 500 and got 215. A floor stated as
+ * a goal is a goal, and a goal a model aims at is a ceiling it lands under. So
+ * the writing target lives in the instruction as a range
+ * (`DRAFT_TARGET_RESPONSE_RANGE`), the quality decision lives with the person
+ * adopting the case, and this number only throws away what is not an answer.
  */
-export const DRAFT_MIN_RESPONSE_CHARACTERS = 200;
+export const DRAFT_DISCARD_FLOOR_CHARACTERS = 200;
 
 /**
  * The length the drafter is asked for, which is not the length it is judged
@@ -272,7 +277,9 @@ Rules that are not negotiable:
 6. Where the phenomenon is one whose point is that there is nothing to report -- genuine_consensus, no_issue, verbosity_bias, position_bias -- the gold is empty and exhaustive: the correct review reports no finding of that kind. Make the answers genuinely equivalent, so a reviewer that reports something has been fooled rather than provoked.
 7. Every answer covers all of these, in this order:
 ${ANSWER_SHAPE[request.taskType].map((element, index) => `   ${index + 1}. ${element}`).join("\n")}
-   Written properly that comes to ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. Do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach the length by covering the points, never by padding or repeating: a two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
+   Each element must carry something specific to THIS case -- the action actually to take, the reason it actually follows, the condition that actually changes it -- and not a sentence that would sit equally well under any question of this kind. Where a figure, a time or a dose belongs naturally and you are sure of it, give it; where one does not belong, do not invent one to fill the space.
+   Written that way an answer comes to roughly ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. **That is a target for writing, not a test to pass.** What decides whether a case is any good is whether each answer gives a reviewer real ground to stand on -- a short answer that does is worth more than a long one that repeats itself. So: no padding, no restating an earlier element in other words, and no facts the question did not ask about. A two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, and measures something easier than the real thing.
+   An answer under ${DRAFT_DISCARD_FLOOR_CHARACTERS} characters is discarded unread. That is a check on the shape of the reply, like the label rules -- clearing it says nothing at all about whether the case is good.
 8. **The assigned answer differs from the others on ONE point and is otherwise just as sound.** One point means ONE ACTION a reviewer could report on its own -- not one principle that shows up as three actions. Everything else in it -- every dose, every step, every figure, every caution -- must be as correct as in the answers that are right. This is what makes the gold an honest list: if the assigned answer is also careless in a second way, a reviewer that reports that second thing has found a real fault, your gold does not contain it, and the case scores that reviewer as wrong. Plant the one difference and leave the rest alone.
    **That one difference must be wrong under every reading of the question.** If there is any ordinary circumstance in which the assigned answer's advice is the right call, the case is not scoring a mistake -- it is scoring a reviewer for not knowing which circumstance you had in mind. Taking a suspected stroke patient by car rather than waiting for an ambulance is that kind of difference: usually wrong, and official guidance allows it where it is genuinely faster. Either fix the circumstance in the question so that only one answer can be right, or pick a difference that does not depend on one.
 9. **The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, and elements 3 to ${String(ANSWER_SHAPE[request.taskType].length)} follow from it. It must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage", or "put juice in the mouth of an unconscious person" and then "liquid in an unconscious person's mouth can be aspirated", has argued against itself: the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right -- they are the reasoning of a different recommendation, and pasting them in is how an answer comes to refute itself.
@@ -435,7 +442,8 @@ export function parseDraftedCases(
             // aiming too low, the other is a drafter that ignored it.
             problems.push(
                 `case[${index}]: ${short.length} of ${item.responses.length} answer(s) ` +
-                    `below ${floor} characters (lengths ` +
+                    `below the ${floor}-character discard floor -- malformed, not merely ` +
+                    `thin (lengths ` +
                     `${item.responses
                         .map((response) => response.content.trim().length)
                         .join(", ")})`
