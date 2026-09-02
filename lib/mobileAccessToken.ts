@@ -33,6 +33,7 @@ import {
 } from "@/lib/mobileAuthContract";
 import {
   activeMobileSigningKey,
+  mobileAuthConfigured,
   mobileSigningKeyById,
   mobileTokenAudience,
   mobileTokenIssuer,
@@ -110,6 +111,87 @@ const verifierPorts = (environment: Environment): MobileAccessTokenVerifierPorts
     }
   },
 });
+
+/**
+ * Whether this deployment can actually sign, checked by signing.
+ *
+ * `mobileAuthConfigured()` reads shapes: four variables present, ids sane,
+ * secrets long enough. That is not the same question. A base64 string of the
+ * right length that is not a PKCS#8 Ed25519 key passes every one of those
+ * checks and throws the first time anything tries to sign with it.
+ *
+ * Where that lands is the problem. Minting happens *after* the transaction that
+ * creates the session, so a bad key would have consumed a one-time login grant,
+ * spent a rate-limit unit and written a device and a family before the 500 --
+ * and on the refresh path it would have consumed the presented refresh token
+ * and minted a successor the client never receives, which on the next attempt
+ * is a replay and destroys the family.
+ *
+ * So the key is exercised end to end -- parse, sign, verify -- before any
+ * credential is consumed. Memoised on the active key's own material, so it
+ * costs one signature per deployment rather than one per request, and
+ * re-evaluates by itself when the key changes.
+ */
+let signingSelfTest: { keyId: string; secret: string; ok: boolean } | null = null;
+
+export const mobileSigningKeyUsable = (
+  environment: Environment = process.env
+): boolean => {
+  let key: { keyId: string; secret: string };
+  try {
+    key = activeMobileSigningKey(environment);
+  } catch {
+    return false;
+  }
+
+  if (
+    signingSelfTest &&
+    signingSelfTest.keyId === key.keyId &&
+    signingSelfTest.secret === key.secret
+  ) {
+    return signingSelfTest.ok;
+  }
+
+  let ok = false;
+  try {
+    const privateKey = privateKeyFrom(key.secret);
+    const probe = Buffer.from("tomverse-mobile-auth-signing-self-test", "utf8");
+    const signature = sign(null, probe, privateKey);
+    // Verified with the public half derived the same way verification derives
+    // it, so this proves the whole path rather than only that `sign` returned
+    // bytes.
+    ok = verify(null, probe, createPublicKey(privateKey), signature);
+  } catch {
+    ok = false;
+  }
+
+  signingSelfTest = { keyId: key.keyId, secret: key.secret, ok };
+  return ok;
+};
+
+/** Test seam: the self-test is memoised, and a test must be able to start clean. */
+export const resetMobileSigningSelfTestForTesting = () => {
+  signingSelfTest = null;
+};
+
+/**
+ * The one question the endpoints ask before doing anything.
+ *
+ * Both halves: the variables are present and well-formed, *and* the active key
+ * really signs. Fail-closed and silent about which half failed -- an
+ * unauthenticated caller is not owed a deployment fact, and the reason goes to
+ * the server log instead.
+ */
+export const mobileAuthReady = (environment: Environment = process.env) => {
+  if (!mobileAuthConfigured(environment)) return false;
+  if (!mobileSigningKeyUsable(environment)) {
+    console.error(
+      "Mobile auth is configured but its active signing key cannot sign; refusing every mobile auth request."
+    );
+    return false;
+  }
+  return true;
+};
 
 export type MintedMobileAccessToken = {
   token: string;

@@ -48,6 +48,16 @@ export const MOBILE_ACTIVE_REFRESH_PEPPER_ENV =
 export const MOBILE_TOKEN_ISSUER_ENV = "MOBILE_AUTH_TOKEN_ISSUER";
 /** `aud`. Exact-matched, element by element -- never a prefix or a substring. */
 export const MOBILE_TOKEN_AUDIENCE_ENV = "MOBILE_AUTH_TOKEN_AUDIENCE";
+/** `MOBILE_AUTH_RETIRED_SIGNING_KEYS=id@2026-09-02T10:00:00Z,...` */
+export const MOBILE_RETIRED_SIGNING_KEYS_ENV = "MOBILE_AUTH_RETIRED_SIGNING_KEYS";
+/** `MOBILE_AUTH_RETIRED_REFRESH_PEPPERS=id@2026-09-02T10:00:00Z,...` */
+export const MOBILE_RETIRED_REFRESH_PEPPERS_ENV =
+  "MOBILE_AUTH_RETIRED_REFRESH_PEPPERS";
+
+import {
+  MOBILE_PREVIOUS_PEPPER_SECONDS,
+  MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
+} from "@/lib/mobileAuthContract";
 
 export class MobileAuthKeyringError extends Error {}
 
@@ -103,8 +113,77 @@ const parseRing = (
   return entries;
 };
 
+/**
+ * When each retired key stopped being current.
+ *
+ * A second variable rather than a third field on the ring entry, because a
+ * pepper is an operator-chosen secret and may legitimately contain a colon --
+ * a third field would make the parse ambiguous for exactly the value nobody
+ * wants misread. Absence means "not retired", so an existing deployment needs
+ * no change until it rotates.
+ *
+ * Errors rather than ignores an unknown id: a retirement naming a key that is
+ * not in the ring is a typo, and a typo here silently protects nothing while
+ * looking like it does.
+ */
+const parseRetirements = (
+  raw: string,
+  variable: string,
+  ring: ReadonlyMap<string, string>,
+  ringVariable: string
+): ReadonlyMap<string, number> => {
+  const retirements = new Map<string, number>();
+  for (const entry of raw.split(",")) {
+    const trimmed = entry.trim();
+    if (trimmed === "") continue;
+    const separator = trimmed.indexOf("@");
+    if (separator <= 0) {
+      throw new MobileAuthKeyringError(
+        `${variable} entries must be "keyId@<ISO 8601 instant>".`
+      );
+    }
+    const keyId = trimmed.slice(0, separator);
+    const retiredAt = Date.parse(trimmed.slice(separator + 1));
+    if (!KEY_ID_PATTERN.test(keyId)) {
+      throw new MobileAuthKeyringError(`"${keyId}" is not a usable ${variable} key id.`);
+    }
+    if (!Number.isFinite(retiredAt)) {
+      throw new MobileAuthKeyringError(
+        `${variable} gives "${keyId}" a retirement time that is not an instant.`
+      );
+    }
+    if (!ring.has(keyId)) {
+      throw new MobileAuthKeyringError(
+        `${variable} retires "${keyId}", which is not in ${ringVariable}.`
+      );
+    }
+    if (retirements.has(keyId)) {
+      throw new MobileAuthKeyringError(`${variable} retires "${keyId}" twice.`);
+    }
+    retirements.set(keyId, retiredAt);
+  }
+  return retirements;
+};
+
+/**
+ * Whether a retired key may still be used to verify.
+ *
+ * This is what turns `MOBILE_PREVIOUS_SIGNING_KEY_SECONDS` and
+ * `MOBILE_PREVIOUS_PEPPER_SECONDS` from numbers in a document into something
+ * the code enforces. Without it a key left in the ring after a rotation is
+ * trusted for ever, and "the previous key is honoured for fifteen minutes"
+ * describes an intention rather than the system.
+ *
+ * The two windows are different on purpose, and D6 says why: a signing key only
+ * has to outlive the access tokens it signed, while a pepper is bound to every
+ * refresh token still alive.
+ */
+const withinGrace = (retiredAtMs: number, graceSeconds: number, nowMs: number) =>
+  nowMs < retiredAtMs + graceSeconds * 1000;
+
 const activeEntry = (
   ring: ReadonlyMap<string, string>,
+  retirements: ReadonlyMap<string, number>,
   keyId: string,
   activeVariable: string,
   ringVariable: string
@@ -116,6 +195,14 @@ const activeEntry = (
   if (!secret) {
     throw new MobileAuthKeyringError(
       `${activeVariable} names "${keyId}", which is not in ${ringVariable}.`
+    );
+  }
+  if (retirements.has(keyId)) {
+    // A retired key that is also the active one is the mistake this whole
+    // mechanism exists to catch: it would keep minting new credentials under a
+    // key somebody has already decided to stop trusting.
+    throw new MobileAuthKeyringError(
+      `${activeVariable} names "${keyId}", which is retired.`
     );
   }
   return { keyId, secret };
@@ -138,12 +225,24 @@ export const mobileSigningKeyring = (
   environment: Record<string, string | undefined> = process.env
 ) => parseRing(environment[MOBILE_SIGNING_KEYS_ENV] ?? "", MOBILE_SIGNING_KEYS_ENV, 32);
 
+/** When each retired signing key stopped being current. */
+export const mobileSigningKeyRetirements = (
+  environment: Record<string, string | undefined> = process.env
+) =>
+  parseRetirements(
+    environment[MOBILE_RETIRED_SIGNING_KEYS_ENV] ?? "",
+    MOBILE_RETIRED_SIGNING_KEYS_ENV,
+    mobileSigningKeyring(environment),
+    MOBILE_SIGNING_KEYS_ENV
+  );
+
 /** The key new access tokens are signed with. Throws rather than falling back. */
 export const activeMobileSigningKey = (
   environment: Record<string, string | undefined> = process.env
 ) =>
   activeEntry(
     mobileSigningKeyring(environment),
+    mobileSigningKeyRetirements(environment),
     environment[MOBILE_ACTIVE_SIGNING_KEY_ENV] ?? "",
     MOBILE_ACTIVE_SIGNING_KEY_ENV,
     MOBILE_SIGNING_KEYS_ENV
@@ -158,11 +257,24 @@ export const activeMobileSigningKey = (
  */
 export const mobileSigningKeyById = (
   keyId: string | null | undefined,
-  environment: Record<string, string | undefined> = process.env
+  environment: Record<string, string | undefined> = process.env,
+  nowMs: number = Date.now()
 ): MobileKeyringEntry | null => {
   if (!keyId) return null;
   const secret = mobileSigningKeyring(environment).get(keyId);
-  return secret ? { keyId, secret } : null;
+  if (!secret) return null;
+
+  const retiredAt = mobileSigningKeyRetirements(environment).get(keyId);
+  if (
+    retiredAt !== undefined &&
+    !withinGrace(retiredAt, MOBILE_PREVIOUS_SIGNING_KEY_SECONDS, nowMs)
+  ) {
+    // Past its grace. The same answer as a key that was never configured, and
+    // for the same reason: this deployment cannot check the token, which the
+    // verifier reports as `unknown_kid` rather than as a bad signature.
+    return null;
+  }
+  return { keyId, secret };
 };
 
 /** Every configured refresh pepper, by id. */
@@ -175,12 +287,24 @@ export const mobileRefreshPepperRing = (
     32
   );
 
+/** When each retired pepper stopped being current. */
+export const mobileRefreshPepperRetirements = (
+  environment: Record<string, string | undefined> = process.env
+) =>
+  parseRetirements(
+    environment[MOBILE_RETIRED_REFRESH_PEPPERS_ENV] ?? "",
+    MOBILE_RETIRED_REFRESH_PEPPERS_ENV,
+    mobileRefreshPepperRing(environment),
+    MOBILE_REFRESH_PEPPERS_ENV
+  );
+
 /** The pepper new refresh digests are computed under. */
 export const activeMobileRefreshPepper = (
   environment: Record<string, string | undefined> = process.env
 ) =>
   activeEntry(
     mobileRefreshPepperRing(environment),
+    mobileRefreshPepperRetirements(environment),
     environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV] ?? "",
     MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
     MOBILE_REFRESH_PEPPERS_ENV
@@ -196,11 +320,24 @@ export const activeMobileRefreshPepper = (
  */
 export const mobileRefreshPepperById = (
   keyId: string | null | undefined,
-  environment: Record<string, string | undefined> = process.env
+  environment: Record<string, string | undefined> = process.env,
+  nowMs: number = Date.now()
 ): MobileKeyringEntry | null => {
   if (!keyId) return null;
   const secret = mobileRefreshPepperRing(environment).get(keyId);
-  return secret ? { keyId, secret } : null;
+  if (!secret) return null;
+
+  const retiredAt = mobileRefreshPepperRetirements(environment).get(keyId);
+  if (
+    retiredAt !== undefined &&
+    !withinGrace(retiredAt, MOBILE_PREVIOUS_PEPPER_SECONDS, nowMs)
+  ) {
+    // A far longer window than the signing key's, because a pepper is bound to
+    // every refresh token still alive rather than to ten minutes of access
+    // tokens. Cutting it to the signing key's window signs everyone out.
+    return null;
+  }
+  return { keyId, secret };
 };
 
 /**

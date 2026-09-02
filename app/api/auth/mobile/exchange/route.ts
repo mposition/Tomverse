@@ -14,12 +14,12 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { mobileAuthReady } from "@/lib/mobileAccessToken";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 import { MOBILE_AUTH_ERROR_CODES, MOBILE_DEVICE_PLATFORMS } from "@/lib/mobileAuthContract";
-import { mobileAuthConfigured } from "@/lib/mobileAuthKeyring";
 import { issueMobileSession } from "@/lib/mobileAuthService";
 import { consumeMobileLoginGrant, isPkceVerifier } from "@/lib/mobileLoginGrant";
-import { mobileAuthRefusal } from "@/lib/mobileAuthRoute";
+import { enforceMobileAuthAdmission, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
 
 const requestSchema = z
   .object({
@@ -34,9 +34,12 @@ const requestSchema = z
 
 export async function POST(request: Request) {
   try {
-    if (!mobileAuthConfigured()) {
+    if (!mobileAuthReady()) {
       return NextResponse.json({ ok: false, code: "NOT_AVAILABLE" }, { status: 503 });
     }
+    // Before the body is even read: a refusal is the cheapest request a caller
+    // can make, and these three paths are reachable without a subject.
+    await enforceMobileAuthAdmission(request);
     const body = await readLimitedJson(request, 2_048, requestSchema);
 
     const consumed = await consumeMobileLoginGrant({

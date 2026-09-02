@@ -26,10 +26,44 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 
-import { bearerTokenFromHeader, verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
-import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
-import { mobileAuthConfigured } from "@/lib/mobileAuthKeyring";
+import {
+  bearerTokenFromHeader,
+  mobileAuthReady,
+  verifyMobileAccessTokenString,
+} from "@/lib/mobileAccessToken";
+import { consumeApiRateLimit } from "@/lib/apiSecurity";
+import { getAnonymousClientKey } from "@/lib/clientIp";
+import {
+  MOBILE_AUTH_ERROR_CODES,
+  MOBILE_AUTH_PRE_AUTH_RATE_LIMIT,
+} from "@/lib/mobileAuthContract";
 import { authorizeMobileSession } from "@/lib/mobileSessionAuthorization";
+
+/**
+ * Admission control, before anything else the handler does.
+ *
+ * `exchange`, `refresh` and `logout` are mutation-origin exceptions, so once
+ * the environment is deployed anyone can reach them. Every call used to write
+ * an audit row and a structured log line with nothing bounding the rate, and a
+ * refusal is the cheapest possible request to make -- a refresh token that does
+ * not parse costs the caller nothing and cost us a row.
+ *
+ * Keyed on the client rather than on a subject, because at this point there is
+ * no subject: that is the whole reason the per-device limit cannot cover it.
+ * `getAnonymousClientKey` is the same key the guest paths use, and it degrades
+ * to a coarse fingerprint rather than to one shared bucket when the trusted
+ * proxy header is unresolvable.
+ *
+ * Throws `ApiSecurityError`, which every one of these routes already turns into
+ * a 429 with a `Retry-After`.
+ */
+export const enforceMobileAuthAdmission = (request: Request) =>
+  consumeApiRateLimit(
+    request,
+    getAnonymousClientKey(request),
+    "mobile-preauth",
+    MOBILE_AUTH_PRE_AUTH_RATE_LIMIT
+  );
 
 export type MobileRouteIdentity = {
   userId: string;
@@ -65,7 +99,7 @@ export const mobileAuthRefusal = (
 export const requireMobileBearer = async (
   request: Request
 ): Promise<{ ok: true; identity: MobileRouteIdentity } | { ok: false; response: Response }> => {
-  if (!mobileAuthConfigured()) {
+  if (!mobileAuthReady()) {
     // Fail closed and say nothing about which variable is missing. The reason
     // is a deployment fact, and an unauthenticated caller is not owed it.
     return { ok: false, response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };

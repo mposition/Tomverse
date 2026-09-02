@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MobileApiPathError,
   MobileAuthUnavailableError,
   authenticatedFetch,
 } from "../apps/mobile/src/authenticatedFetch.ts";
@@ -16,6 +17,8 @@ import {
  * failed. Under option A a redundant refresh is not a wasted request, it is a
  * replay -- and a replay destroys the family.
  */
+
+const API_ORIGIN = "https://tomverse.app";
 
 const grant = (token, msFromNow = 600_000) => ({
   accessToken: token,
@@ -57,6 +60,7 @@ test("the token is attached as a bearer, and no cookie goes with it", async () =
   const response = await authenticatedFetch("/api/conversations", { method: "POST" }, {
     bridge,
     fetchImpl,
+    apiOrigin: API_ORIGIN,
   });
 
   assert.equal(response.status, 200);
@@ -75,6 +79,7 @@ test("a 401 is retried exactly once, with a token that is actually different", a
   const response = await authenticatedFetch("/api/conversations", undefined, {
     bridge,
     fetchImpl,
+    apiOrigin: API_ORIGIN,
   });
 
   assert.equal(response.status, 200);
@@ -93,6 +98,7 @@ test("a second 401 is the answer, not the start of a loop", async () => {
   const response = await authenticatedFetch("/api/conversations", undefined, {
     bridge,
     fetchImpl,
+    apiOrigin: API_ORIGIN,
   });
 
   assert.equal(response.status, 401);
@@ -109,6 +115,7 @@ test("the same token is never presented twice", async () => {
   const response = await authenticatedFetch("/api/conversations", undefined, {
     bridge,
     fetchImpl,
+    apiOrigin: API_ORIGIN,
   });
 
   assert.equal(response.status, 401);
@@ -120,7 +127,7 @@ test("an expired or empty grant spends no request at all", async () => {
     const { bridge } = bridgeReturning(bad);
     const { seen, fetchImpl } = responder(200);
     await assert.rejects(
-      authenticatedFetch("/api/conversations", undefined, { bridge, fetchImpl }),
+      authenticatedFetch("/api/conversations", undefined, { bridge, fetchImpl, apiOrigin: API_ORIGIN }),
       MobileAuthUnavailableError
     );
     assert.equal(seen.length, 0);
@@ -135,9 +142,9 @@ test("concurrent callers each ask the bridge, because single-flight is the nativ
   const { fetchImpl } = responder(200);
 
   await Promise.all([
-    authenticatedFetch("/a", undefined, { bridge, fetchImpl }),
-    authenticatedFetch("/b", undefined, { bridge, fetchImpl }),
-    authenticatedFetch("/c", undefined, { bridge, fetchImpl }),
+    authenticatedFetch("/api/a", undefined, { bridge, fetchImpl, apiOrigin: API_ORIGIN }),
+    authenticatedFetch("/api/b", undefined, { bridge, fetchImpl, apiOrigin: API_ORIGIN }),
+    authenticatedFetch("/api/c", undefined, { bridge, fetchImpl, apiOrigin: API_ORIGIN }),
   ]);
 
   assert.equal(calls.length, 3);
@@ -150,11 +157,92 @@ test("the caller's own headers survive, and only Authorization is imposed", asyn
   await authenticatedFetch(
     "/api/conversations",
     { method: "POST", headers: { "Content-Type": "application/json", "X-Trace": "abc" } },
-    { bridge, fetchImpl }
+    { bridge, fetchImpl, apiOrigin: API_ORIGIN }
   );
 
   const headers = new Headers(seen[0].init.headers);
   assert.equal(headers.get("Content-Type"), "application/json");
   assert.equal(headers.get("X-Trace"), "abc");
   assert.equal(seen[0].init.method, "POST");
+});
+
+// --- the path allowlist ---------------------------------------------------
+
+test("a path is resolved against the API origin, not against the bundle's", async () => {
+  // The bundle is served from capacitor://localhost, so a bare relative path
+  // would reach nothing at all. What the caller passes is a path; the origin is
+  // configuration.
+  const { bridge } = bridgeReturning(grant("token-1"));
+  const { seen, fetchImpl } = responder(200);
+
+  await authenticatedFetch("/api/conversations", undefined, {
+    bridge,
+    fetchImpl,
+    apiOrigin: API_ORIGIN,
+  });
+
+  assert.equal(seen[0].input, "https://tomverse.app/api/conversations");
+});
+
+test("a token is never attached to anything but this API", async () => {
+  // The finding. A caller free to pass an absolute URL is a caller who can send
+  // this device's access token wherever they like -- and the scheme-relative
+  // form is the one that looks like a path while resolving elsewhere.
+  const refused = [
+    "https://evil.example/api/steal",
+    "http://tomverse.app/api/conversations",
+    "//evil.example/api/steal",
+    "//tomverse.app/api/conversations",
+    "/chat",
+    "/",
+    "/api",
+    "/apiary/x",
+    "/api/../../chat",
+    "\\evil.example/api",
+    "/api/\\..\\chat",
+    "capacitor://localhost/api/x",
+    "",
+    "api/conversations",
+  ];
+
+  for (const path of refused) {
+    const { bridge, calls } = bridgeReturning(grant("token-1"));
+    const { seen, fetchImpl } = responder(200);
+    await assert.rejects(
+      authenticatedFetch(path, undefined, { bridge, fetchImpl, apiOrigin: API_ORIGIN }),
+      MobileApiPathError,
+      `${path} should be refused`
+    );
+    assert.equal(seen.length, 0, `${path}: no request may be made`);
+    // And the bridge is not even asked, so a refused path cannot cause a
+    // refresh either.
+    assert.equal(calls.length, 0, `${path}: no token may be fetched`);
+  }
+});
+
+test("an ordinary API path with a query and a fragment still resolves inside /api/", async () => {
+  const { bridge } = bridgeReturning(grant("token-1"));
+  const { seen, fetchImpl } = responder(200);
+
+  await authenticatedFetch("/api/conversations?limit=20", undefined, {
+    bridge,
+    fetchImpl,
+    apiOrigin: API_ORIGIN,
+  });
+  assert.equal(seen[0].input, "https://tomverse.app/api/conversations?limit=20");
+});
+
+test("a redirect is refused rather than followed", async () => {
+  // Same-origin redirects keep the Authorization header, so following one
+  // silently is how a token reaches a path nobody chose. Asserted as the
+  // contract handed to fetch, which is where the platform enforces it.
+  const { bridge } = bridgeReturning(grant("token-1"));
+  const { seen, fetchImpl } = responder(200);
+
+  await authenticatedFetch("/api/conversations", undefined, {
+    bridge,
+    fetchImpl,
+    apiOrigin: API_ORIGIN,
+  });
+  assert.equal(seen[0].init.redirect, "error");
 });
