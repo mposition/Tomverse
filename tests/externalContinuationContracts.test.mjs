@@ -487,16 +487,82 @@ test("every seed outcome is recorded, and the healthy ones are not logged", () =
     assert.match(chat, /recordContinuationSeedOutcome\("flag_off"\)/);
 });
 
-/* --------------------------------------------- product identity (§3, §10) */
+/* --- product identity (external-conversation-continuation.md §3.1, §10) */
 
-test("the service creates chat conversations through the shared writer", () => {
+test("the service creates review conversations through the shared writer", () => {
+    // §3.1: a continuation is a Review conversation. Asked of the source
+    // because the substitutions this guards are textual -- a literal in place
+    // of the constant, or a direct `conversation.create` that skips the writer
+    // the product key is written by.
     const source = readFileSync("lib/externalContinuationService.ts", "utf8");
     assert.match(source, /createConversation\(/);
-    assert.match(source, /productKey: CHAT_PRODUCT_KEY/);
-    // The three substitutions the policy forbids outright.
-    assert.doesNotMatch(source, /REVIEW_PRODUCT_KEY/);
+    assert.match(source, /productKey: REVIEW_PRODUCT_KEY/);
+    assert.doesNotMatch(source, /CHAT_PRODUCT_KEY/);
     assert.doesNotMatch(source, /prisma\.conversation\.create/);
+    // Auto is Chat-only (`AUTO_SELECTION_PRODUCT`), and on a review row the
+    // database's own `Conversation_auto_only_chat_check` would refuse the pair.
     assert.doesNotMatch(source, /selectionMode: "auto"/);
+});
+
+test("the initial model combination is the account's, not one invented here", () => {
+    // docs/policy/external-conversation-continuation.md §8.3: no
+    // continuation-specific default combination. The one resolver
+    // both writers read, and the plan's own ceiling applied to its answer.
+    const source = readFileSync("lib/externalContinuationService.ts", "utf8");
+    assert.match(source, /resolveNewConversationSelectedModels/);
+    assert.match(source, /capToPlanModelLimit/);
+    assert.match(source, /effectivePlanModelLimit/);
+    // The list is not built here: no literal model id, and no default other
+    // than the application's own representative model.
+    assert.doesNotMatch(source, /selectedModels: JSON\.stringify\(\[/);
+
+    // And the create route reaches the same resolver, so the two start states
+    // cannot drift.
+    const createHandler = readFileSync(
+        "lib/conversationCreateHandler.ts",
+        "utf8"
+    );
+    assert.match(createHandler, /resolveNewConversationSelectedModels/);
+});
+
+test("the correction migration touches one column and only bridged chat rows", () => {
+    // docs/policy/external-conversation-continuation.md §15: bridge existence
+    // AND productKey = 'chat'. Read from the migration
+    // rather than from a description of it, because the WHERE clause is the
+    // entire contract -- a missing condition here rewrites rows nobody meant.
+    const sql = readFileSync(
+        "prisma/migrations/20260901090000_continuation_product_key_review/migration.sql",
+        "utf8"
+    );
+    // The executable half only. The file's own comment quotes the reverse
+    // statement, and reading that as though it ran would make this test agree
+    // with prose instead of with SQL.
+    const statement = sql
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim();
+    assert.ok(statement.startsWith("UPDATE"));
+    assert.match(statement, /FROM "ConversationContinuationBridge"/);
+    assert.match(statement, /"productKey" = 'chat'/);
+    assert.match(statement, /"selectionMode" <> 'auto'/);
+    // One column is written.
+    assert.equal(statement.match(/SET /g)?.length, 1);
+    // The policy's §15.2 (none of the four forbidden criteria appears in the
+    // statement) and §15.3 (no other column is written), same document.
+    for (const forbidden of [
+        "selectedModels",
+        "disabledPanels",
+        "title",
+        "kind",
+    ]) {
+        assert.ok(
+            !statement.includes(forbidden),
+            `the migration must not read or write ${forbidden}`
+        );
+    }
+    // NULL stays the backfill's work, not this migration's.
+    assert.ok(!statement.includes("IS NULL"));
 });
 
 test("the service never copies an imported message into a Message row", () => {

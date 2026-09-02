@@ -160,14 +160,27 @@ test("creating a continuation writes the conversation and the bridge together", 
 
     const conversation = await prisma.conversation.findUniqueOrThrow({
         where: { id: result.conversationId },
-        select: { productKey: true, kind: true, selectionMode: true, userId: true },
+        select: {
+            productKey: true,
+            kind: true,
+            selectionMode: true,
+            selectedModels: true,
+            userId: true,
+        },
     });
-    // §3: the product is Chat, stated by the endpoint's own constant. Not
-    // review, not derived from `kind`, not derived from `selectionMode`.
-    assert.equal(conversation.productKey, "chat");
+    // §3.1: the product is Review, stated by the service's own constant. Not
+    // chat, not derived from `kind`, not derived from `selectionMode`, and not
+    // derived from how many models the row starts with.
+    assert.equal(conversation.productKey, "review");
     assert.equal(conversation.kind, "chat");
     assert.equal(conversation.selectionMode, "manual");
     assert.equal(conversation.userId, user.id);
+    // §8.3: the account's own combination, stored as the same JSON string
+    // every other Review conversation stores. At least one model, because a
+    // conversation nothing can answer is not a conversation.
+    const startingModels = JSON.parse(conversation.selectedModels ?? "[]");
+    assert.ok(Array.isArray(startingModels));
+    assert.ok(startingModels.length >= 1);
 
     const bridge = await getContinuationBridge(user.id, result.conversationId);
     assert.ok(bridge);
@@ -1084,4 +1097,143 @@ test("the grouped read asks once for the whole page, not once per row", () => {
         1,
         "one query in the helper"
     );
+});
+
+/* ------------------------------------- the productKey correction migration */
+
+/**
+ * The migration's own statement, read from the file and run here.
+ *
+ * `prisma migrate deploy` has already applied it to this database against no
+ * rows, so re-running it is what actually exercises the WHERE clause. The
+ * statement is extracted rather than retyped: a test that reasserted a
+ * hand-copied query would agree with itself while the migration drifted.
+ */
+const correctionStatement = () => {
+    const sql = readFileSync(
+        "prisma/migrations/20260901090000_continuation_product_key_review/migration.sql",
+        "utf8"
+    );
+    const statement = sql
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim();
+    assert.ok(statement.startsWith("UPDATE"), "one executable statement");
+    return statement;
+};
+
+test("the correction moves bridged chat rows and nothing else", async () => {
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+
+    // A continuation stored under the old definition. Written directly rather
+    // than through the service, because the service now writes 'review' -- the
+    // row this migration exists for cannot be produced by today's code.
+    const legacy = await prisma.conversation.create({
+        data: {
+            userId: user.id,
+            title: "legacy continuation",
+            productKey: "chat",
+            selectedModels: JSON.stringify(["gpt-5-6-luna"]),
+        },
+        select: { id: true },
+    });
+    await prisma.conversationContinuationBridge.create({
+        data: {
+            userId: user.id,
+            conversationId: legacy.id,
+            externalConversationId: snapshot.id,
+            provider: "chatgpt",
+            sourceImportedAt: new Date(),
+            sourceConversationDigest: "digest-legacy",
+            sourceDigestVersion: 1,
+            sourceMessageCount: 6,
+            seedFromOrdinal: 0,
+            seedToOrdinal: 5,
+            seedMessageCount: 6,
+            seedTruncatedMessageCount: 0,
+            seedOmittedMessageCount: 0,
+            contextSeedVersion: CONTINUATION_SEED_VERSION,
+            idempotencyKey: randomUUID(),
+        },
+    });
+
+    // The control group: an ordinary Chat conversation with no bridge. §15.1
+    // says the join is what keeps it out, so a row is put in its way.
+    const ordinary = await prisma.conversation.create({
+        data: { userId: user.id, title: "ordinary chat", productKey: "chat" },
+        select: { id: true },
+    });
+    // A row that has not been classified yet. NULL is the backfill's work, and
+    // this migration must leave it exactly as it found it (§15.1).
+    const undecided = await prisma.conversation.create({
+        data: { userId: user.id, title: "undecided", productKey: "chat" },
+        select: { id: true },
+    });
+    await prisma.$executeRawUnsafe(
+        `UPDATE "Conversation" SET "productKey" = NULL WHERE "id" = $1`,
+        undecided.id
+    );
+    await prisma.conversationContinuationBridge.create({
+        data: {
+            userId: user.id,
+            conversationId: undecided.id,
+            externalConversationId: snapshot.id,
+            provider: "chatgpt",
+            sourceImportedAt: new Date(),
+            sourceConversationDigest: "digest-undecided",
+            sourceDigestVersion: 1,
+            sourceMessageCount: 6,
+            seedFromOrdinal: 0,
+            seedToOrdinal: 5,
+            seedMessageCount: 6,
+            seedTruncatedMessageCount: 0,
+            seedOmittedMessageCount: 0,
+            contextSeedVersion: CONTINUATION_SEED_VERSION,
+            idempotencyKey: randomUUID(),
+        },
+    });
+
+    const affected = await prisma.$executeRawUnsafe(correctionStatement());
+    assert.equal(affected, 1, "exactly the one legacy continuation");
+
+    const rows = await prisma.conversation.findMany({
+        where: { id: { in: [legacy.id, ordinary.id, undecided.id] } },
+        select: {
+            id: true,
+            productKey: true,
+            kind: true,
+            selectionMode: true,
+            title: true,
+            selectedModels: true,
+        },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    assert.equal(byId.get(legacy.id)?.productKey, "review");
+    assert.equal(byId.get(ordinary.id)?.productKey, "chat");
+    assert.equal(byId.get(undecided.id)?.productKey, null);
+
+    // §15.3: one column. The model selection above all -- widening it would
+    // multiply what every later turn costs, with no history table to undo it.
+    const corrected = byId.get(legacy.id);
+    assert.equal(
+        corrected?.selectedModels,
+        JSON.stringify(["gpt-5-6-luna"]),
+        "the migration must not touch selectedModels"
+    );
+    assert.equal(corrected?.kind, "chat");
+    assert.equal(corrected?.selectionMode, "manual");
+    assert.equal(corrected?.title, "legacy continuation");
+
+    // §15.3: the screen does not move. The surface reads the bridge, so the
+    // answer is the same before and after.
+    assert.equal(
+        conversationSurface({ hasContinuationBridge: true }),
+        "continuation"
+    );
+
+    // Idempotent: running it again finds nothing left to correct.
+    assert.equal(await prisma.$executeRawUnsafe(correctionStatement()), 0);
 });
