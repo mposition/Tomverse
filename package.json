@@ -119,6 +119,7 @@
     "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
     "check:release-gate-coverage": "node scripts/check-release-gate-coverage.mjs",
     "check:ui-tier-coverage": "node scripts/check-ui-tier-coverage.mjs",
+    "check:voice-price-register": "node --import tsx scripts/check-voice-price-register.mjs",
     "check:doc-references": "node scripts/check-doc-references.mjs",
     "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
     "check:staging-verification-records": "node scripts/check-staging-verification-records.mjs",
