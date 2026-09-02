@@ -69,23 +69,45 @@ D6과 승인 결정 3번입니다.
 ## 2.1 배포 전 확인 — 필수
 
 **로컬 PC의 PowerShell, Tomverse clone 폴더 안.** Node 22와 `npm ci`가 끝나 있어야
-합니다. **지금 배포하려는 값**을 그 창의 환경변수로 넣고 실행합니다.
+합니다. **지금 배포하려는 값**으로 실행합니다.
 
 ```powershell
-$env:MOBILE_AUTH_SIGNING_KEYS = "<배포할 값>"
-$env:MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID = "<배포할 값>"
-$env:MOBILE_AUTH_RETIRED_SIGNING_KEYS = "<배포할 값>"
-$env:MOBILE_AUTH_REFRESH_PEPPERS = "<배포할 값>"
-$env:MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID = "<배포할 값>"
-$env:MOBILE_AUTH_RETIRED_REFRESH_PEPPERS = "<배포할 값>"
-$env:MOBILE_AUTH_TOKEN_ISSUER = "<배포할 값>"
-$env:MOBILE_AUTH_TOKEN_AUDIENCE = "<배포할 값>"
-npm run check:mobile-auth-keyring -- --require-configured
+./scripts/ops/Check-MobileAuthKeyring.ps1 `
+  -ActiveSigningKeyId "<배포할 값>" `
+  -ActiveRefreshPepperId "<배포할 값>" `
+  -TokenIssuer "<배포할 값>" `
+  -TokenAudience "<배포할 값>" `
+  -RetiredSigningKeys "<배포할 값>" `
+  -RetiredRefreshPeppers "<배포할 값>" `
+  -RequireConfigured
 ```
 
-`$env:`는 그 PowerShell 창에서만 삽니다. 창을 닫으면 사라지고 서비스에는 아무 영향이
-없습니다. 검사는 읽기 전용이고, 출력에 비밀값이 없으므로 결과는 그대로 붙여도
-안전합니다.
+**두 개의 비밀값은 인수로 주지 않습니다.** `MOBILE_AUTH_SIGNING_KEYS`(개인키 링)와
+`MOBILE_AUTH_REFRESH_PEPPERS`는 script가 `Read-Host -AsSecureString`으로 물어보고,
+메모리에서만 평문으로 바꿔 그 프로세스의 환경변수에 넣습니다. 화면에는 값이 아니라
+**길이**만 찍히고 — 붙여넣다 한 글자를 잃은 것은 이걸로 잡힙니다 — 끝나면 `finally`가
+여덟 변수를 전부 지웁니다. `finally`는 성공·실패·Ctrl-C 어디서든 돕니다. 나머지 넷은
+평범한 인수입니다: 이미 Railway 대시보드에 보이는 값이고, 명령줄에서 눈으로 확인하는
+것이 오타를 잡는 방법입니다.
+
+검사는 읽기 전용이고 출력에 비밀값이 없으므로 결과는 그대로 붙여도 안전합니다.
+
+> **rev.7 정정 — 왜 `$env:`로 직접 넣지 않는가.** rev.6까지 이 자리에는
+> `$env:MOBILE_AUTH_SIGNING_KEYS = "<배포할 값>"` 여덟 줄이 있었습니다. 값이 출력에
+> 찍히지는 않지만 **명령 자체가 PSReadLine의 영구 이력 파일에 남습니다.** PSReadLine이
+> 민감해 보이는 명령을 거르기는 하나 `apikey`·`secret`·`token` 같은 패턴을 찾으므로,
+> `MOBILE_AUTH_SIGNING_KEYS`라는 이름이 거기 걸리기를 기대하고 production 서명 키를
+> 걸 이유가 없습니다. 같은 모양의 선례가
+> `.github/audits/google-image-thinking-cap-eval-2026-08-13.md`에 있습니다 —
+> `Read-Host -AsSecureString` → 메모리에서만 변환 → 길이만 출력 → 사용 후 환경변수
+> 제거.
+
+> **이 wrapper는 이 컨테이너에서 실행해 보지 못했습니다.** `pwsh`가 없습니다. 판정은
+> 전부 `npm run check:mobile-auth-keyring` 쪽에 있고 그것은
+> `tests/mobileAuthKeyringCheck.test.mjs`가 subprocess 14건으로 고정합니다. wrapper가
+> 하는 일은 입력받기와 정리뿐이므로, **처음 쓸 때 그 두 가지를 눈으로 확인합니다** —
+> 프롬프트가 두 번 뜨고 입력이 화면에 안 보이는지, 그리고 끝난 뒤
+> `$env:MOBILE_AUTH_SIGNING_KEYS`가 비어 있는지.
 
 **자격증명이 필요합니다.** 검사가 활성 키로 실제 서명해 보므로 그 개인키가 있어야
 합니다 — 회전에서는 방금 만든 새 키이므로 이미 손에 있습니다.
@@ -118,14 +140,32 @@ npm run check:mobile-auth-keyring -- --require-configured
 - **일부만 설정됐을 때** — 모바일 인증이 전부 503이 되는데 endpoint는 어느 변수가
   빠졌는지 말하지 않습니다
 
-아무것도 설정되지 않은 것은 기본 모드에서 **통과**입니다(모바일 인증을 켜지 않은
-배포는 정상입니다). 모바일 인증을 서비스하기로 한 배포의 릴리스 점검에서는
-`--require-configured`를 붙여 그것도 실패로 만듭니다.
+아무것도 설정되지 않은 것은 기본 모드에서 **통과**입니다 — 모바일 인증을 켜지 않은
+배포는 정상 상태이기 때문입니다. 모바일 인증을 서비스하기로 한 배포에서는
+`-RequireConfigured`(script 없이 부를 때는 `-- --require-configured`)를 붙여 그것도
+실패로 만듭니다. 위 명령은 이미 붙어 있고, 릴리스 체크리스트도 그쪽을 씁니다.
 
-모바일 인증을 서비스하는 배포라면 `--require-configured`를 붙입니다(위 명령이 이미
-그렇습니다). 붙이지 않으면 **아무것도 설정되지 않은 상태가 통과**합니다 — 모바일
-인증을 켜지 않은 배포는 정상이기 때문이며, 그래서 릴리스 체크리스트는 플래그가 붙은
-쪽을 씁니다.
+## 2.2 회전에는 **현재 링의 평문**이 필요합니다 — 미결정
+
+§3의 1번은 `MOBILE_AUTH_SIGNING_KEYS`를 `이전id:이전키,새id:새키`로 씁니다. 즉
+**회전하려면 지금 배포돼 있는 링의 평문을 손에 들고 있어야 합니다.** 그런데 이 값을
+sealed 변수로 두면 Railway 대시보드도 API도 되돌려 주지 않습니다. 이 문서가 sealed를
+전제로 쓰였으므로, 그 전제와 §3이 서로를 막습니다.
+
+**첫 설정에서는 드러나지 않습니다** — 그때는 두 값을 방금 만들었으니 손에 있습니다.
+**두 번째 회전부터 절차가 실행 불가능해집니다.**
+
+production 활성화 **전에** 셋 중 하나를 계약으로 정합니다. 이것은 저장소가 답할 수
+있는 사실이 아니라 운영 결정입니다.
+
+| | 무엇을 정하는가 | 대가 |
+|---|---|---|
+| (a) 별도 secret store | 전체 현재 링을 담는 secret store를 **정본**으로 두고 Railway 값은 그 사본으로 취급합니다. 회전은 store에서 읽어 양쪽에 씁니다 | 비밀을 두 곳에 두게 되고, 둘이 어긋나면 어느 쪽이 정본인지가 다시 문제가 됩니다 |
+| (b) 평문 없이는 회전하지 않는다 | 이전 링의 평문이 없으면 그것은 정상 회전이 아니라 **§5(사고 대응)**입니다 — 이전 항목을 버리고, 그 세대 사용자를 재로그인시킵니다 | 평문을 잃으면 사용자에게 보이는 로그아웃을 감수합니다. 절차는 가장 단순합니다 |
+| (c) 대조만 남긴다 | 평문은 보관하지 않되 링의 **key id 목록과 digest**를 기록하고, 배포 뒤 최종 Railway 값이 의도한 것과 같은지 대조합니다 | 회전 자체의 평문 문제는 풀리지 않습니다. (a)·(b)의 보완이지 대체가 아닙니다 |
+
+정해지기 전까지 **production 활성화를 하지 않습니다.** 첫 설정만 하고 회전을 못 하는
+상태로 켜는 것은, 사고가 났을 때 §5가 유일한 선택지가 된다는 뜻입니다.
 
 ---
 
@@ -143,7 +183,7 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
 편집한 변경은 배포로 확정되기 전까지 staged 상태로 모이므로, 셋을 모두 고친 뒤 한 번에
 배포하면 중간 상태가 존재하지 않습니다. 나눠 배포하면 안 되는 이유는 아래에 있습니다.
 
-1. 최종 값 셋을 정합니다.
+1. 최종 값 셋을 정합니다. **`이전키`의 평문이 필요합니다 — §2.2를 먼저 읽습니다.**
    - `MOBILE_AUTH_SIGNING_KEYS` = `이전id:이전키,새id:새키`
    - `MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID` = `새id`
    - `MOBILE_AUTH_RETIRED_SIGNING_KEYS` = `이전id@<지금 UTC instant>` (기존 줄에 추가)
@@ -244,7 +284,9 @@ pepper도 같습니다 — `MOBILE_AUTH_REFRESH_PEPPERS`와
 `.mjs`로 옮겨야 하며(`lib/schemaComparisonCore.mjs`가 그 선례입니다), production
 활성화와 함께 정할 일로 남깁니다.
 
-production 활성화를 결정할 때 함께 정할 것 둘:
+production 활성화를 결정할 때 함께 정할 것 셋:
 
+- **§2.2의 (a)/(b)/(c) 중 하나** — 이것은 활성화의 **선결 조건**입니다. 나머지 둘과
+  달리 정해지지 않으면 두 번째 회전이 실행되지 않습니다.
 - 유예가 지난 항목과 선언되지 않은 키를 보고하는 상시 점검(예: 일일 리포트)
 - 이 절차와 §2.1 확인의 실행 기록을 어디에 남길지
