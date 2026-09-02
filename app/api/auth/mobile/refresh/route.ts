@@ -16,10 +16,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { mobileAuthReady } from "@/lib/mobileAccessToken";
-import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { readLimitedJson } from "@/lib/apiSecurity";
 import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
 import { rotateMobileSession } from "@/lib/mobileAuthService";
-import { enforceMobileAuthAdmission, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
+import { enforceMobileAuthAdmission, mobileApiSecurityResponse, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
 
 const requestSchema = z.object({ refreshToken: z.string().min(1).max(512) }).strict();
 
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, ...result.tokens });
   } catch (error) {
-    const securityResponse = apiSecurityResponse(error);
+    const securityResponse = mobileApiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Mobile refresh failed:", error);
     return NextResponse.json({ ok: false, code: "REFRESH_FAILED" }, { status: 500 });

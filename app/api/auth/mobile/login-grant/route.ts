@@ -14,8 +14,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 
+import { mobileApiSecurityResponse } from "@/lib/mobileAuthRoute";
 import { mobileAuthReady } from "@/lib/mobileAccessToken";
-import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { isPkceChallenge, issueMobileLoginGrant } from "@/lib/mobileLoginGrant";
 
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...grant });
   } catch (error) {
-    const securityResponse = apiSecurityResponse(error);
+    const securityResponse = mobileApiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Mobile login grant failed:", error);
     return NextResponse.json({ ok: false, code: "GRANT_FAILED" }, { status: 500 });

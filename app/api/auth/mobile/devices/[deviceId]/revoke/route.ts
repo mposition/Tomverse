@@ -17,9 +17,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 
-import { apiSecurityResponse } from "@/lib/apiSecurity";
 import { revokeMobileDevice } from "@/lib/mobileAuthService";
-import { requireMobileBearer } from "@/lib/mobileAuthRoute";
+import { mobileApiSecurityResponse, requireMobileBearer } from "@/lib/mobileAuthRoute";
 
 export async function POST(
   request: Request,
@@ -42,7 +41,7 @@ export async function POST(
     }
     return new Response(null, { status: 204 });
   } catch (error) {
-    const securityResponse = apiSecurityResponse(error);
+    const securityResponse = mobileApiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Mobile device revoke failed:", error);
     return NextResponse.json({ ok: false, code: "DEVICE_REVOKE_FAILED" }, { status: 500 });

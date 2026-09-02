@@ -44,8 +44,10 @@ D6과 승인 결정 3번입니다.
   찍어 내는 것이 이 장치가 막으려는 실수입니다.
 - 은퇴 시각 + 유예를 지난 키는 **링에 남아 있어도 검증에 쓰이지 않습니다.** 답은
   "설정된 적 없는 키"와 같고, 검증기는 `unknown_kid`로 보고합니다.
-- 링에 없는 id를 은퇴 목록에 적으면 **거부**합니다. 조용히 무시하면 보호하는 것처럼
-  보이면서 아무것도 보호하지 않습니다.
+- 링에 없는 id가 은퇴 목록에 있으면 **오류 로그를 남기고 무시합니다.** 링에 없는 키는
+  이미 못 쓰는 키라 그 줄이 보호하는 것도 위태롭게 하는 것도 없습니다. 처음에는
+  오타를 잡으려고 거부했는데, 그러면 `mobileAuthReady()`가 false가 되어 **모든 모바일
+  인증이 503**이 됩니다 — 아래 3번의 삭제 단계가 정확히 그 상태를 만들었습니다.
 
 ---
 
@@ -64,11 +66,30 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
 1. `MOBILE_AUTH_SIGNING_KEYS`에 새 항목을 **추가**합니다. 기존 항목은 그대로 둡니다.
 2. 배포가 끝난 뒤 `MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID`를 새 id로 바꿉니다.
 3. `MOBILE_AUTH_RETIRED_SIGNING_KEYS`에 `이전id@<지금 UTC instant>`를 추가합니다.
-4. **15분 뒤부터** 이전 키는 검증에 쓰이지 않습니다. 실제 삭제는 그 뒤 아무 때나
-   `MOBILE_AUTH_SIGNING_KEYS`에서 항목을 지우면 됩니다.
+4. **15분 뒤부터** 이전 키는 검증에 쓰이지 않습니다.
 
 2와 3 사이에 간격을 두지 않습니다. 사이에 발급된 토큰은 새 키로 서명되고, 이전 키는
 그 시점까지 서명한 토큰들을 위해서만 남습니다.
+
+### 3.1 정리(선택) — 두 줄을 같은 배포에서 지웁니다
+
+유예가 지난 항목은 이미 검증에 쓰이지 않으므로 **지우지 않아도 안전합니다.** 변수를
+정리하고 싶을 때만 하고, 할 때는 **한 배포에서 셋을 함께** 합니다.
+
+1. `MOBILE_AUTH_SIGNING_KEYS`에서 이전 항목 삭제
+2. `MOBILE_AUTH_RETIRED_SIGNING_KEYS`에서 **같은 id의 줄도** 삭제
+3. `MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID`가 **남아 있는** 항목을 가리키는지 확인
+
+> **rev.2 정정.** 이 문서의 첫 판은 4번에서 "그 뒤 아무 때나 `MOBILE_AUTH_SIGNING_KEYS`
+> 에서 항목을 지우면 됩니다"라고만 적었습니다. 당시 파서는 링에 없는 은퇴 id를 오류로
+> 보아 거부했으므로, 그 안내대로 링 항목만 지우면 `mobileAuthReady()`가 false가 되어
+> **모든 모바일 인증이 503**이 됐습니다. 파서를 무시+로그로 바꿔 그 실패를 없앴고,
+> 절차도 세 단계를 같이 하도록 고쳤습니다. 지금은 어느 순서로 지워도 서비스가
+> 멈추지 않지만, 셋을 함께 하는 것이 여전히 읽기 쉬운 상태를 남깁니다.
+
+pepper도 같습니다 — `MOBILE_AUTH_REFRESH_PEPPERS`와
+`MOBILE_AUTH_RETIRED_REFRESH_PEPPERS`를 같은 배포에서 정리하고, active가 남아 있는
+항목을 가리키는지 확인합니다.
 
 ## 4. pepper 회전
 
@@ -82,13 +103,27 @@ token이 계속 검증되고, 성공한 refresh마다 후속 토큰이 **현재 
 
 ## 5. 사고 시
 
-키가 유출된 경우 유예를 기다리지 않습니다.
+키가 유출된 경우 유예를 기다리지 않습니다. **다만 유출된 키가 active인지 먼저
+확인합니다** — active인 키를 대체 없이 지우면 `mobileAuthReady()`가 false가 되어 모든
+모바일 인증이 503이 됩니다.
 
-1. `MOBILE_AUTH_SIGNING_KEYS`에서 **항목 자체를 삭제**합니다. 그 키로 서명된 토큰은
+**유출된 키가 active일 때** (한 배포에서 순서대로):
+
+1. 새 키를 만들어 `MOBILE_AUTH_SIGNING_KEYS`에 **추가**합니다.
+2. `MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID`를 새 id로 바꿉니다.
+3. 유출된 항목을 `MOBILE_AUTH_SIGNING_KEYS`에서 **삭제**합니다. 그 키로 서명된 토큰은
    즉시 `unknown_kid`가 됩니다.
-2. pepper가 유출됐다면 항목을 삭제하고, 그 세대로 계산된 refresh token은 전부
-   검증 실패합니다 — 해당 사용자는 재로그인합니다.
-3. 어느 쪽이든 `revokeAllUserSessions`로 세션을 함께 끊을지 판단합니다.
+
+1~3을 나눠 배포하지 않습니다. 2 없이 3을 하면 서비스가 멈추고, 3 없이 1~2만 하면
+유출된 키가 계속 검증됩니다.
+
+**유출된 키가 active가 아닐 때**: 항목만 삭제하면 됩니다.
+
+**pepper가 유출됐을 때**: 같은 구조입니다. active pepper라면 새 pepper 추가 → active
+전환 → 삭제. 삭제한 세대로 계산된 refresh token은 전부 검증 실패하고 해당 사용자는
+재로그인합니다.
+
+어느 쪽이든 `revokeAllUserSessions`로 세션을 함께 끊을지 판단합니다.
 
 ## 6. 남은 것
 

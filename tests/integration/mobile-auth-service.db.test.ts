@@ -53,6 +53,13 @@ const reset = async () => {
       "MobileDevice"
     RESTART IDENTITY CASCADE
   `);
+  // The admission limit is per client and lives in ChatUsageBucket. Without
+  // this, the test that deliberately exhausts a bucket would leave every later
+  // test throttled -- which is how a 429 gets mistaken for the behaviour under
+  // test.
+  await prisma.chatUsageBucket.deleteMany({
+    where: { period: { startsWith: "api-mobile-" } },
+  });
   const { resetMobileSessionSnapshotsForTesting } = await authorization();
   resetMobileSessionSnapshotsForTesting();
 };
@@ -701,17 +708,83 @@ test("an unparseable refresh token writes no row, and the endpoint is rate limit
     POST(
       new Request("https://tomverse.test/api/auth/mobile/refresh", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.9" },
+        headers: { "content-type": "application/json", "x-real-ip": "203.0.113.9" },
         body: JSON.stringify({ refreshToken: "no-dot" }),
       })
     );
 
-  let limited = false;
+  let limited: Response | null = null;
   for (let attempt = 0; attempt < 80 && !limited; attempt += 1) {
     const response = await send();
-    if (response.status === 429) limited = true;
+    if (response.status === 429) limited = response;
   }
   assert.ok(limited, "the pre-auth limit must eventually refuse");
+
+  // The body, not only the status. Checking the status alone is what let the
+  // contract and the wire disagree: every limit in the app throws the shared
+  // API_RATE_LIMITED, and D15 names MOBILE_RATE_LIMITED for these endpoints.
+  const body = await limited.json();
+  assert.equal(body.code, "MOBILE_RATE_LIMITED");
+  assert.equal(body.ok, false);
+  assert.ok(limited.headers.get("Retry-After"), "a rate-limit answer must say when");
+});
+
+test("every client-facing code in the contract is one a route actually returns", async () => {
+  // The finding this covers: MOBILE_RATE_LIMITED was declared and never
+  // reached execution, because the shared responder returned its own code.
+  // A constant nothing emits is a contract nobody keeps, so each of the four
+  // is taken off the wire here rather than read out of the source.
+  const { MOBILE_AUTH_ERROR_CODES } = await import("@/lib/mobileAuthContract");
+  const refresh = (await import("@/app/api/auth/mobile/refresh/route")).POST;
+  const devices = (await import("@/app/api/auth/mobile/devices/route")).GET;
+  const seen = new Set<string>();
+
+  // MOBILE_TOKEN_INVALID -- no bearer at all.
+  const noBearer = await devices(
+    new Request("https://tomverse.test/api/auth/mobile/devices")
+  );
+  assert.equal(noBearer.status, 401);
+  seen.add((await noBearer.json()).code);
+
+  // MOBILE_TOKEN_EXPIRED -- a real token, past its life.
+  const { mintMobileAccessToken } = await import("@/lib/mobileAccessToken");
+  const user = await createUser();
+  const tokens = await issue(user.id);
+  const expired = mintMobileAccessToken({
+    userId: user.id,
+    deviceId: tokens.deviceId,
+    familyId: (await prisma.mobileTokenFamily.findFirstOrThrow()).id,
+    now: new Date(Date.now() - 3_600_000),
+  });
+  const stale = await devices(
+    new Request("https://tomverse.test/api/auth/mobile/devices", {
+      headers: { authorization: `Bearer ${expired.token}` },
+    })
+  );
+  assert.equal(stale.status, 401);
+  seen.add((await stale.json()).code);
+
+  // MOBILE_REFRESH_REJECTED -- a syntactically fine token that is not one.
+  const rejected = await refresh(
+    new Request("https://tomverse.test/api/auth/mobile/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-real-ip": "198.51.100.7" },
+      body: JSON.stringify({ refreshToken: "abc.def" }),
+    })
+  );
+  assert.equal(rejected.status, 401);
+  const rejectedBody = await rejected.json();
+  seen.add(rejectedBody.code);
+  assert.equal(rejectedBody.reauthenticate, true);
+
+  // MOBILE_RATE_LIMITED is taken on the wire by the admission test above.
+  seen.add(MOBILE_AUTH_ERROR_CODES.rateLimited);
+
+  assert.deepEqual(
+    [...seen].sort(),
+    Object.values(MOBILE_AUTH_ERROR_CODES).sort(),
+    "a code the contract declares and no route emits is a promise nobody keeps"
+  );
 });
 
 test("no audit row carries a token, a digest or a record id", async () => {

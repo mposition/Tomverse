@@ -153,9 +153,26 @@ const parseRetirements = (
       );
     }
     if (!ring.has(keyId)) {
-      throw new MobileAuthKeyringError(
-        `${variable} retires "${keyId}", which is not in ${ringVariable}.`
+      // Reported and ignored, not thrown -- and this is a reversal of what the
+      // first version of this function did.
+      //
+      // It threw, to catch a typo: retiring `sign-2` when you meant `sign-1`
+      // leaves the wrong key trusted. But throwing made `mobileAuthReady()`
+      // false, which answers **503 to every mobile auth request**. So the
+      // ordinary act of tidying a ring -- deleting an entry whose grace has
+      // passed and leaving its retirement line behind -- took the whole feature
+      // down, and the runbook's own deletion step did exactly that.
+      //
+      // The cost of the two mistakes is not comparable. A key absent from the
+      // ring is already unusable, so a retirement naming it protects nothing
+      // and endangers nothing; a total outage is a total outage. The typo is
+      // still worth knowing about, which is what the log is for.
+      console.error(
+        `${variable} retires "${keyId}", which is not in ${ringVariable}. ` +
+          "Ignoring it: a key that is not in the ring is already unusable. " +
+          "Check this is not a mistyped id."
       );
+      continue;
     }
     if (retirements.has(keyId)) {
       throw new MobileAuthKeyringError(`${variable} retires "${keyId}" twice.`);

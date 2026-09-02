@@ -31,7 +31,11 @@ import {
   mobileAuthReady,
   verifyMobileAccessTokenString,
 } from "@/lib/mobileAccessToken";
-import { consumeApiRateLimit } from "@/lib/apiSecurity";
+import {
+  ApiSecurityError,
+  apiSecurityResponse,
+  consumeApiRateLimit,
+} from "@/lib/apiSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
   MOBILE_AUTH_ERROR_CODES,
@@ -87,6 +91,43 @@ export const mobileAuthRefusal = (
     { ok: false, code, reauthenticate: code === MOBILE_AUTH_ERROR_CODES.refreshRejected },
     { status }
   );
+
+/**
+ * `apiSecurityResponse`, with the one code this contract renamed.
+ *
+ * Every limit in the app throws the same `ApiSecurityError(429,
+ * "API_RATE_LIMITED")`, and the shared responder hands that code straight to
+ * the client. D15 defines `MOBILE_RATE_LIMITED` for these endpoints, and until
+ * this existed that constant was declared and never reached execution -- the
+ * contract said one thing and the wire said another.
+ *
+ * Only 429 is translated. A 400 for malformed JSON or a 413 for an oversized
+ * body is an ordinary request error, not an auth refusal, and giving those
+ * mobile-specific codes would claim a contract that does not cover them.
+ *
+ * The body is the same shape every other refusal from these routes uses, so a
+ * client parses one thing; `Retry-After` is carried across, because it is the
+ * only part of a rate-limit answer a caller can act on.
+ */
+export const mobileApiSecurityResponse = (error: unknown): Response | null => {
+  const response = apiSecurityResponse(error);
+  if (!response) return null;
+  if (!(error instanceof ApiSecurityError) || error.status !== 429) {
+    return response;
+  }
+
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const retryAfter = response.headers.get("Retry-After");
+  if (retryAfter) headers.set("Retry-After", retryAfter);
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      code: MOBILE_AUTH_ERROR_CODES.rateLimited,
+      reauthenticate: false,
+    }),
+    { status: 429, headers }
+  );
+};
 
 /**
  * The account behind an `Authorization: Bearer` header, or a response to send.

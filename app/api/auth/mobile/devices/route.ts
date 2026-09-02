@@ -15,9 +15,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 
-import { apiSecurityResponse } from "@/lib/apiSecurity";
 import { listMobileDevices } from "@/lib/mobileAuthService";
-import { requireMobileBearer } from "@/lib/mobileAuthRoute";
+import { mobileApiSecurityResponse, requireMobileBearer } from "@/lib/mobileAuthRoute";
 
 export async function GET(request: Request) {
   try {
@@ -35,7 +34,7 @@ export async function GET(request: Request) {
       })),
     });
   } catch (error) {
-    const securityResponse = apiSecurityResponse(error);
+    const securityResponse = mobileApiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Mobile device list failed:", error);
     return NextResponse.json({ ok: false, code: "DEVICE_LIST_FAILED" }, { status: 500 });

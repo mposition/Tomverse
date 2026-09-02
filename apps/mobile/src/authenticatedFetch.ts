@@ -43,14 +43,63 @@ export type AuthenticatedFetchOptions = {
   /**
    * The exact origin of the Tomverse API, e.g. `https://tomverse.app`.
    *
-   * Required, and required to be exact. The bundle is served from
-   * `capacitor://localhost`, so a relative path would resolve against *that*
-   * and reach nothing; and a caller free to pass an absolute URL is a caller
-   * who can send this device's access token wherever they like.
+   * Required, required to be exact, and required to be `https:` -- see
+   * `assertUsableApiOrigin`. The bundle is served from `capacitor://localhost`,
+   * so a relative path would resolve against *that* and reach nothing; and a
+   * caller free to pass an absolute URL is a caller who can send this device's
+   * access token wherever they like.
    */
   apiOrigin: string;
   /** Injected so tests need no network and no globals. */
   fetchImpl?: typeof fetch;
+};
+
+/** The configured API origin is not one a bearer token may be sent to. */
+export class MobileApiOriginError extends Error {
+  constructor(origin: string, reason: string) {
+    super(`Refusing to use "${origin}" as the Tomverse API origin: ${reason}.`);
+    this.name = "MobileApiOriginError";
+  }
+}
+
+/**
+ * The origin has to be an origin, and it has to be encrypted.
+ *
+ * Checked rather than assumed, because everything else in this file trusts it:
+ * the path allowlist compares against it, so a mistake here widens the
+ * allowlist rather than narrowing it. Four rules:
+ *
+ *   * **`https:` only.** `http://tomverse.app` matches the origin check
+ *     perfectly and puts this device's access token on a plaintext connection.
+ *     A `capacitor:` or `file:` origin is refused for the same reason: it is
+ *     not where the API lives;
+ *   * **no credentials.** A `user:pass@` origin would send them on every
+ *     request and appears in nothing anybody reads;
+ *   * **nothing but an origin.** A path, query or fragment here would be
+ *     silently dropped by `new URL(path, base)`, so a value that looks like it
+ *     configures a prefix would configure nothing;
+ *   * **parses at all.**
+ *
+ * Fail-closed: a bad origin throws before the bridge is asked, so a
+ * misconfiguration cannot cause a token to be fetched, let alone sent.
+ */
+const assertUsableApiOrigin = (apiOrigin: string): URL => {
+  let url: URL;
+  try {
+    url = new URL(apiOrigin);
+  } catch {
+    throw new MobileApiOriginError(String(apiOrigin), "it is not a URL");
+  }
+  if (url.protocol !== "https:") {
+    throw new MobileApiOriginError(apiOrigin, "only https is allowed");
+  }
+  if (url.username || url.password) {
+    throw new MobileApiOriginError(apiOrigin, "it carries credentials");
+  }
+  if ((url.pathname !== "" && url.pathname !== "/") || url.search || url.hash) {
+    throw new MobileApiOriginError(apiOrigin, "it must be an origin and nothing more");
+  }
+  return url;
 };
 
 /** The path was not one this client is allowed to send a token to. */
@@ -82,6 +131,8 @@ export class MobileApiPathError extends Error {
  *     traversal that climbs out of `/api/`.
  */
 const resolveApiUrl = (path: string, apiOrigin: string): string => {
+  const base = assertUsableApiOrigin(apiOrigin);
+
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) {
     throw new MobileApiPathError(String(path));
   }
@@ -89,11 +140,11 @@ const resolveApiUrl = (path: string, apiOrigin: string): string => {
 
   let url: URL;
   try {
-    url = new URL(path, apiOrigin);
+    url = new URL(path, base);
   } catch {
     throw new MobileApiPathError(path);
   }
-  if (url.origin !== new URL(apiOrigin).origin) throw new MobileApiPathError(path);
+  if (url.origin !== base.origin) throw new MobileApiPathError(path);
   if (!url.pathname.startsWith("/api/")) throw new MobileApiPathError(path);
   return url.toString();
 };

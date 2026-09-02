@@ -19,9 +19,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { mobileAuthReady } from "@/lib/mobileAccessToken";
-import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { readLimitedJson } from "@/lib/apiSecurity";
 import { logoutMobileSession } from "@/lib/mobileAuthService";
-import { enforceMobileAuthAdmission } from "@/lib/mobileAuthRoute";
+import { enforceMobileAuthAdmission, mobileApiSecurityResponse } from "@/lib/mobileAuthRoute";
 
 const requestSchema = z.object({ refreshToken: z.string().min(1).max(512) }).strict();
 
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   } catch (error) {
     // Rate limiting is the one thing a caller is told about, because it asks
     // them to wait rather than describing their token.
-    const securityResponse = apiSecurityResponse(error);
+    const securityResponse = mobileApiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Mobile logout failed:", error);
     return NextResponse.json({ ok: false, code: "LOGOUT_FAILED" }, { status: 500 });

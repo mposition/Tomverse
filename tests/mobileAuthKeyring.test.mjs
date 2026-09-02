@@ -221,12 +221,37 @@ test("a retired key cannot be the active one", () => {
   );
 });
 
-test("a retirement naming a key that is not in the ring is a typo, not a no-op", () => {
-  // Silently ignoring it would look like protection and be none.
-  assert.throws(
-    () => mobileSigningKeyById("sign-1", env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-9@${RETIRED_AT}` })),
-    /is not in/
-  );
+test("a retirement naming a key that is not in the ring is reported, not fatal", () => {
+  // A reversal, and the reason is worth stating. This threw at first, to catch
+  // a mistyped id. But throwing made `mobileAuthReady()` false, which answers
+  // 503 to *every* mobile auth request -- so the ordinary act of deleting a
+  // ring entry whose grace had passed, and leaving its retirement line behind,
+  // took the whole feature down. The runbook's own deletion step did that.
+  //
+  // A key absent from the ring is already unusable, so the stale retirement
+  // protects nothing and endangers nothing. The typo still deserves to be
+  // noticed, which is what the error log is for.
+  const stale = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-9@${RETIRED_AT}` });
+  assert.equal(mobileSigningKeyById("sign-1", stale)?.secret, KEY_A);
+  assert.equal(activeMobileSigningKey(stale).keyId, "sign-2");
+});
+
+test("deleting a ring entry without its retirement line keeps the deployment up", () => {
+  // The exact operational sequence the review found. Whichever order the two
+  // deletions land in, mobile auth stays answerable.
+  const ringDeletedFirst = env({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-2:${KEY_B}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${RETIRED_AT}`,
+  });
+  assert.equal(activeMobileSigningKey(ringDeletedFirst).keyId, "sign-2");
+  assert.equal(mobileSigningKeyById("sign-1", ringDeletedFirst), null);
+
+  const bothDeleted = env({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-2:${KEY_B}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+  });
+  assert.equal(activeMobileSigningKey(bothDeleted).keyId, "sign-2");
 });
 
 test("a malformed retirement is refused rather than read as 'never'", () => {

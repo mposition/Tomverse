@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MobileApiOriginError,
   MobileApiPathError,
   MobileAuthUnavailableError,
   authenticatedFetch,
@@ -245,4 +246,52 @@ test("a redirect is refused rather than followed", async () => {
     apiOrigin: API_ORIGIN,
   });
   assert.equal(seen[0].init.redirect, "error");
+});
+
+// --- the origin has to be an origin, and encrypted -------------------------
+
+test("a plaintext origin is refused, and no token is fetched for it", async () => {
+  // The finding. `http://tomverse.app` matches an origin comparison perfectly
+  // and puts this device's access token on a plaintext connection.
+  const refused = [
+    ["http://tomverse.app", /only https/],
+    ["capacitor://localhost", /only https/],
+    ["file:///", /only https/],
+    ["https://user:pass@tomverse.app", /credentials/],
+    ["https://tomverse.app/api", /and nothing more/],
+    ["https://tomverse.app/?x=1", /and nothing more/],
+    ["https://tomverse.app/#x", /and nothing more/],
+    ["not-a-url", /not a URL/],
+    ["", /not a URL/],
+  ];
+
+  for (const [apiOrigin, message] of refused) {
+    const { bridge, calls } = bridgeReturning(grant("token-1"));
+    const { seen, fetchImpl } = responder(200);
+    await assert.rejects(
+      authenticatedFetch("/api/conversations", undefined, { bridge, fetchImpl, apiOrigin }),
+      (error) => {
+        assert.ok(error instanceof MobileApiOriginError, `${apiOrigin}: ${error}`);
+        assert.match(error.message, message);
+        return true;
+      },
+      `${apiOrigin} should be refused`
+    );
+    assert.equal(seen.length, 0, `${apiOrigin}: no request may be made`);
+    assert.equal(calls.length, 0, `${apiOrigin}: no token may be fetched`);
+  }
+});
+
+test("an origin with a trailing slash is the same origin", async () => {
+  // A real value an operator would write. Refusing it would be pedantry, and
+  // `new URL` normalises it to exactly the same origin.
+  const { bridge } = bridgeReturning(grant("token-1"));
+  const { seen, fetchImpl } = responder(200);
+
+  await authenticatedFetch("/api/conversations", undefined, {
+    bridge,
+    fetchImpl,
+    apiOrigin: "https://tomverse.app/",
+  });
+  assert.equal(seen[0].input, "https://tomverse.app/api/conversations");
 });
