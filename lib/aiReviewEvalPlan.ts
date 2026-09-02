@@ -33,6 +33,7 @@ import {
     type AiReviewEvalCase,
 } from "@/lib/aiReviewEvalCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { DRAFT_MIN_RESPONSE_CHARACTERS } from "@/lib/aiReviewEvalDraftPrompt";
 
 export type AiReviewEvalCell = {
     language: string;
@@ -208,8 +209,13 @@ export const goldLeadLabels = (
                 let bestLabel: string | null = null;
                 let bestIndex = Number.POSITIVE_INFINITY;
                 for (const label of labels) {
+                    // Escaped, because a label is data. A case whose label is
+                    // `[` would otherwise throw here and take the whole report
+                    // down -- a counter that cannot survive its own input is
+                    // not a counter. `datasetProblems()` refuses such a label
+                    // too, but this must hold for a file nobody has validated.
                     const match = new RegExp(
-                        `(^|[^A-Za-z0-9])${label}([^A-Za-z0-9]|$)`
+                        `(^|[^A-Za-z0-9])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9]|$)`
                     ).exec(lead);
                     if (match && match.index < bestIndex) {
                         bestIndex = match.index;
@@ -228,6 +234,52 @@ export const goldLeadLabels = (
     return { byLabel, attributed };
 };
 
+/**
+ * How long the answers are.
+ *
+ * The first paid batch averaged 108 characters, between 81 and 133. Each case
+ * was well formed and the set would have been useless: a reviewer comparing
+ * two-sentence stubs has nowhere for an omission to hide and nothing for a
+ * contradiction to be buried in, so what gets measured is not what the product
+ * does. The runbook asks for the length a real assistant produces, and
+ * `DRAFT_MIN_RESPONSE_CHARACTERS` now enforces a floor on new drafting -- but
+ * a floor says nothing about the shape above it, and a cell can still fill up
+ * with answers sitting exactly on it.
+ *
+ * Characters, not tokens: the floor is stated in characters and a reader
+ * checking one case by eye counts characters.
+ */
+export const responseLengths = (
+    cases: readonly Pick<AiReviewEvalCase, "responses">[]
+): {
+    readonly count: number;
+    readonly min: number;
+    readonly median: number;
+    readonly mean: number;
+    readonly max: number;
+    readonly belowFloor: number;
+} => {
+    const lengths = cases
+        .flatMap((testCase) => testCase.responses ?? [])
+        .map((response) => (response?.content ?? "").trim().length)
+        .sort((left, right) => left - right);
+    if (lengths.length === 0) {
+        return { count: 0, min: 0, median: 0, mean: 0, max: 0, belowFloor: 0 };
+    }
+    const middle = Math.floor(lengths.length / 2);
+    return {
+        count: lengths.length,
+        min: lengths[0],
+        median:
+            lengths.length % 2 === 1
+                ? lengths[middle]
+                : Math.round((lengths[middle - 1] + lengths[middle]) / 2),
+        mean: Math.round(lengths.reduce((total, value) => total + value, 0) / lengths.length),
+        max: lengths[lengths.length - 1],
+        belowFloor: lengths.filter((value) => value < DRAFT_MIN_RESPONSE_CHARACTERS).length,
+    };
+};
+
 export type AiReviewEvalManifest = {
     cases: number;
     byCell: readonly AiReviewEvalCellGap[];
@@ -240,6 +292,8 @@ export type AiReviewEvalManifest = {
     emptyExhaustiveClaims: readonly { id: string; kind: string }[];
     /** The label each gold item names first, counted. A heuristic; see goldLeadLabels(). */
     goldLeadLabels: { readonly byLabel: Readonly<Record<string, number>>; readonly attributed: number };
+    /** Answer length in characters, against the drafting floor. */
+    responseLengths: ReturnType<typeof responseLengths>;
 };
 
 /**
@@ -277,6 +331,7 @@ export const datasetManifest = (
         duplicates: duplicateQuestions(cases),
         emptyExhaustiveClaims: emptyExhaustiveClaims(cases),
         goldLeadLabels: goldLeadLabels(cases),
+        responseLengths: responseLengths(cases),
     };
 };
 

@@ -126,3 +126,62 @@ test("two callers reading the same balance cannot both fit", () => {
     false
   );
 });
+
+const correct = (id, from, to, reason = "the input bound was replaced") =>
+  JSON.stringify({
+    op: "correct",
+    reservationId: id,
+    at: "2026-09-02",
+    previousCostCeilingUsd: from,
+    costCeilingUsd: to,
+    reason,
+  });
+
+test("a correction reaches the total without editing the line it corrects", () => {
+  // The first paid batch reserved against an input bound that was later
+  // replaced. Rewriting that line would make the ledger's history change under
+  // an approval; the correction restates it instead, and the difference lands
+  // in the running total.
+  const balance = ledgerBalance([
+    reserve("pilot", 0.0145338),
+    settle("pilot", 0.0145338, "drafted_7"),
+    correct("pilot", 0.0145338, 0.014948),
+  ]);
+  assert.deepEqual(balance.problems, []);
+  assert.equal(balance.settledCount, 1);
+  assert.equal(balance.outstandingCount, 0);
+  assert.equal(Number(balance.committedUsd.toFixed(7)), 0.014948);
+});
+
+test("a correction that restates the wrong starting figure is refused", () => {
+  // Two corrections written against the same reservation from the same
+  // starting figure, or one aimed at a line its author misread. Either way the
+  // running total is not what anybody computed.
+  const balance = ledgerBalance([
+    reserve("pilot", 0.0145338),
+    correct("pilot", 0.0145338, 0.014948),
+    correct("pilot", 0.0145338, 0.02),
+  ]);
+  assert.equal(balance.problems.length, 1);
+  assert.match(balance.problems[0], /but 0.014948 is what stands/);
+});
+
+test("a correction needs a reservation and a reason", () => {
+  const orphan = ledgerBalance([correct("nobody", 1, 2)]);
+  assert.match(orphan.problems[0], /never reserved/);
+  const unexplained = ledgerBalance([reserve("a", 1), correct("a", 1, 2, "")]);
+  assert.match(unexplained.problems[0], /gives no reason/);
+});
+
+test("a settlement written before its correction still totals at the corrected ceiling", () => {
+  // The settlement carries the old figure, because it was written when that
+  // was the ceiling. What the total must reflect is what the reservation now
+  // stands at, not what the settlement happens to say.
+  const balance = ledgerBalance([
+    reserve("a", 1),
+    settle("a", 1),
+    correct("a", 1, 3),
+  ]);
+  assert.deepEqual(balance.problems, []);
+  assert.equal(balance.committedUsd, 3);
+});
