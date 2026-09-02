@@ -74,14 +74,24 @@ Date / timezone:    ____________________
       어느 쪽이든 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지 않은
       키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 — CI에는
       모바일 키가 없습니다. 절차와 한계는 `docs/ops/mobile-auth-key-rotation.md`
+- [ ] 모바일 인증을 서비스하는 배포라면 **secret store가 두 링의 정본이고 Railway 값이
+      그 사본과 일치**함 — `docs/ops/mobile-auth-key-rotation.md` §2.2(2026-09-02 승인).
+      어긋나면 배포를 중단하고 store를 기준으로 복구한 뒤 §2.1 검사와 단일 staged 배포를
+      다시 합니다. **§2.2의 세 결정란(store 제품명·vault 이름·복구 권한)이 비어 있으면
+      이 항목은 통과할 수 없습니다** — 대조할 정본이 지목되지 않은 상태입니다
+- [ ] 모바일 인증을 서비스하는 배포라면 **배포 후 두 활성 id 대조** — 통제된 exchange를
+      한 번 성공시켜 access token의 `kid`와 그때 생긴 `MobileRefreshRotation` 행의
+      `pepperKid`가 의도한 id와 같은지 확인합니다. 링의 나머지 항목은 관측 경로가 없어
+      이 대조에 포함되지 않습니다(§2.2). 배포 **후** 항목이므로 §7.6과 함께 기록합니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-CheckMobileAuthKeyring.ps1`
       — wrapper가 지키는 네 가지(비밀이 parameter에 없음 / 출력에 없음 / 성공·실패·
       중단 뒤 환경에 없음 / 검사기의 종료 코드를 그대로 반환)를 고정합니다. **전부
       부재라서 검토로는 안 보입니다.** 자격증명도 네트워크도 필요 없고 실제 `npm`을
-      부르지 않습니다. 출력(10 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
-      되돌릴 수 없으므로 "돌렸다"가 아니라 기록이 증거입니다. **개발 중에는 Linux의
-      PowerShell 7.4.6에서만 통과했습니다.** 막으려는 것이 운영자의 Windows PowerShell
-      습관이므로 이 항목은 그 셸에서 돌린 기록을 요구하고, 그래서 CI 항목이 아닙니다
+      부르지 않습니다. 출력(13 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
+      되돌릴 수 없으므로 "돌렸다"가 아니라 기록이 증거입니다. 개발 중 통과 기록은 Linux의
+      PowerShell 7.4.6, Windows의 PowerShell Core 7.6.4, Windows PowerShell
+      5.1.19041.6456 셋 다 있지만 **전부 최종 release SHA가 아닙니다.** 막으려는 것이 운영자의 Windows PowerShell 습관이므로
+      이 항목은 그 셸에서 그 SHA로 돌린 기록을 요구하고, 그래서 CI 항목이 아닙니다
 - [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
       ships for the three endpoints whose responses carry a refresh token, and
       for the field name itself. D19 states the rule as an absence — the bridge

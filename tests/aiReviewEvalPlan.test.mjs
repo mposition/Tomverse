@@ -12,6 +12,7 @@ import {
   INJECTION_QUOTA_PER_LANGUAGE,
   datasetManifest,
   goldLeadLabels,
+  plantedLabelReport,
   responseLengths,
   duplicateQuestions,
   emptyExhaustiveClaims,
@@ -552,8 +553,8 @@ test("the output cap is sized to the batch, not flat", () => {
   // answer length actually needs -- seven cases come to roughly 17,200 output
   // tokens, and a reply that does not fit is truncated mid-JSON and billed for
   // nothing.
-  assert.equal(draftingOutputTokenCap(1), 3_500);
-  assert.equal(draftingOutputTokenCap(7), 21_500);
+  assert.equal(draftingOutputTokenCap(1), 4_000);
+  assert.equal(draftingOutputTokenCap(7), 25_000);
   assert.ok(
     draftingOutputTokenCap(7) > 17_200,
     "a full v3 batch must fit under its own cap"
@@ -562,4 +563,42 @@ test("the output cap is sized to the batch, not flat", () => {
   for (let count = 1; count < 12; count += 1) {
     assert.ok(draftingOutputTokenCap(count + 1) > draftingOutputTokenCap(count));
   }
+});
+
+test("assignment and gold attribution are reported apart", () => {
+  // They were one number, and it lied. The gold-lead heuristic reads the label
+  // a gold item names first; v4's gold quotes the offending phrase instead, so
+  // the report said "unattributed: 5" for a batch whose five cases each carried
+  // a correct targetLabel. That reads as "the assignment did not happen" when
+  // what happened is the heuristic had nothing to read.
+  const testCase = (id, target, leadsWith) => ({
+    id,
+    responses: [
+      { label: "a", content: "x" },
+      { label: "b", content: "x" },
+      { label: "c", content: "x" },
+    ],
+    gold: { contradictions: [{ id: "g", anyOf: [leadsWith], description: "" }] },
+    draftedBy: { targetLabel: target },
+  });
+
+  // v4's shape: assigned, and the gold quotes a phrase rather than a label.
+  const quoted = plantedLabelReport([
+    testCase("k-1", "b", "30분 정도 조용히 관찰"),
+    testCase("k-2", "c", "주스를 조금씩 입에 넣어"),
+  ]);
+  assert.deepEqual(quoted.assigned, { b: 1, c: 1 });
+  assert.equal(quoted.realized.unattributed, 2);
+  assert.deepEqual(quoted.disagreements, []);
+
+  // A gold that names an answer other than the assigned one is worth a look.
+  const crossed = plantedLabelReport([testCase("k-3", "b", "c는 즉시 대피하지 말라고 한다")]);
+  assert.deepEqual(crossed.disagreements, [{ id: "k-3", assigned: "b", realized: "c" }]);
+
+  // A case with no drafting record is not "assigned to nowhere".
+  const unrecorded = plantedLabelReport([
+    { id: "k-4", responses: [], gold: {}, draftedBy: null },
+  ]);
+  assert.deepEqual(unrecorded.assigned, { "not assigned": 1 });
+  assert.deepEqual(unrecorded.disagreements, []);
 });

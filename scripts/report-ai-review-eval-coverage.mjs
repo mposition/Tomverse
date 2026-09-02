@@ -153,28 +153,49 @@ for (const path of paths) {
     }
   }
 
-  const leads = Object.entries(manifest.goldLeadLabels.byLabel).sort(
-    (left, right) => right[1] - left[1]
-  );
-  if (leads.length > 0) {
-    console.log(
-      "\n  which answer each gold item names first (a heuristic: the first label " +
-        "token in the item's leading phrase, which is where the accused answer goes)"
-    );
-    for (const [label, count] of leads) {
+  const planted = manifest.plantedLabels;
+  const assigned = Object.entries(planted.assigned).sort((l, r) => r[1] - l[1]);
+  if (assigned.length > 0) {
+    console.log("\n  where the fault was ASSIGNED (draftedBy.targetLabel, what the drafter was told)");
+    for (const [label, count] of assigned) {
       console.log(`    ${label.padEnd(16)} ${count}`);
     }
-    const attributed = manifest.goldLeadLabels.attributed;
-    const top = leads.find(([label]) => label !== "unattributed");
-    if (attributed >= 5 && top && top[1] / attributed >= 0.8) {
+    const spread = assigned.filter(([label]) => label !== "not assigned");
+    const total = spread.reduce((sum, [, count]) => sum + count, 0);
+    const top = spread[0];
+    if (total >= 5 && top && top[1] / total >= 0.8) {
       console.log(
-        `    NOTE ${Math.round((top[1] / attributed) * 100)}% of the ${attributed} attributed ` +
-          `item(s) lead with "${top[0]}". If the planted answer really does sit there every ` +
-          `time, a reviewer that always accuses that slot scores as well as one that reads, ` +
-          `and position is being measured alongside reasoning. Read a few and decide; ` +
-          `this counts a leading token and cannot tell you which answer is actually wrong.`
+        `    NOTE ${Math.round((top[1] / total) * 100)}% of ${total} assigned case(s) went to ` +
+          `"${top[0]}". A reviewer that always accuses that slot would score as well as one ` +
+          `that reads, so position is being measured alongside reasoning.`
       );
     }
+  }
+
+  const realized = Object.entries(planted.realized).sort((l, r) => r[1] - l[1]);
+  if (realized.length > 0) {
+    console.log(
+      "\n  where the gold READS as accusing (a heuristic: the first label token in each gold" +
+        " item's leading phrase)"
+    );
+    for (const [label, count] of realized) {
+      console.log(`    ${label.padEnd(16)} ${count}`);
+    }
+    if (planted.realized.unattributed > 0) {
+      console.log(
+        `    ${planted.realized.unattributed} gold item(s) name no answer by label -- they quote ` +
+          `the offending phrase instead. That is not a defect and says nothing about the ` +
+          `assignment above, which is recorded per case rather than inferred.`
+      );
+    }
+  }
+
+  if (planted.disagreements.length > 0) {
+    console.log("\n  gold that appears to accuse an answer other than the assigned one");
+    for (const entry of planted.disagreements) {
+      console.log(`    ${entry.id}: assigned ${entry.assigned}, gold reads ${entry.realized}`);
+    }
+    console.log("    Read these: either the gold points at the wrong answer, or the heuristic did.");
   }
 }
 

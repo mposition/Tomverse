@@ -37,7 +37,7 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v3";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v5";
 
 /** The only labels a drafted response may carry. */
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
@@ -71,6 +71,62 @@ export const DRAFT_MIN_RESPONSE_CHARACTERS = 200;
  * case is refused. The gap is what absorbs the imprecision.
  */
 export const DRAFT_TARGET_RESPONSE_CHARACTERS = 500;
+
+/** The band a v4 answer is asked to land in. */
+export const DRAFT_TARGET_RESPONSE_RANGE = { min: 400, max: 600 } as const;
+
+/**
+ * What a complete answer contains, per task type.
+ *
+ * v3 named three elements -- recommendation, reasoning, caveat -- and asked for
+ * 500 characters. The answers came back at 208-229, three elements at about
+ * seventy characters each. **The length came from the structure, not from the
+ * number**, twice over: v2 asked for 200 and got 162-190, v3 asked for 500 and
+ * got 215. So v4 stops raising the number and widens the structure instead.
+ *
+ * Not one frame for every task type. A single five-sentence shape imposed
+ * everywhere becomes its own pattern -- every answer in the set built to the
+ * same skeleton, and a reviewer that learns the skeleton learns something the
+ * evaluation did not mean to teach it. The confound the position assignment
+ * was built to remove would come back wearing different clothes. So
+ * `safety_sensitive` gets the five-element shape it needs and the rest keep
+ * v3's three, and whether to widen another cell is decided when that cell is
+ * drafted and measured -- not now, by analogy.
+ */
+export const ANSWER_SHAPE: Readonly<Record<AiReviewEvalTaskType, readonly string[]>> = {
+    safety_sensitive: [
+        "the core recommendation, stated first and plainly",
+        "why it is the right call",
+        "what to do immediately",
+        "how the answer changes under a different condition",
+        "the warning signs or cautions that matter",
+    ],
+    factual_current_information: [
+        "the answer itself",
+        "what it rests on",
+        "the condition or caveat a careful answer would name",
+    ],
+    planning_decision: [
+        "the recommendation",
+        "the trade-off behind it",
+        "the condition under which the other option wins",
+    ],
+    coding_technical_review: [
+        "the recommendation or verdict",
+        "the technical reasoning, concretely",
+        "the caveat or failure mode a careful answer would name",
+    ],
+    document_comparison: [
+        "what the supplied text says on the point asked",
+        "the reasoning from the text itself",
+        "the caveat or ambiguity the text leaves",
+    ],
+    business_writing: [
+        "the draft or recommendation",
+        "why it is pitched that way",
+        "what to adjust for a different audience",
+    ],
+};
 
 /**
  * The phenomena that plant nothing, so no answer is the odd one out.
@@ -211,11 +267,15 @@ Rules that are not negotiable:
 1. Plant EXACTLY ONE phenomenon per case. A case that plants three things at once cannot say which one a miss was.
 2. The answers must read like real answers from a competent model: complete, fluent, and confident. An answer that is obviously the wrong one measures nothing.
 3. The gold is the list of what a fair reviewer SHOULD find. Write it as concretely as you can: for each item, the strings that would appear in a correct finding.
-4. State honestly, per finding kind, whether your gold is EXHAUSTIVE -- whether it lists everything a fair reviewer could legitimately report of that kind. If another reasonable finding exists that you did not list, say false. Saying true when it is not manufactures a precision score that means nothing, and a false is not a defect in your case.
+4. State honestly, per finding kind, whether your gold is EXHAUSTIVE -- whether it lists everything a fair reviewer could legitimately report of that kind. Read the answers back and ask what else a careful reviewer would flag; if anything at all comes to mind that your gold does not list, say false. Saying true when it is not manufactures a precision score that means nothing, and a false is not a defect in your case.
 5. Do not name any AI company or model inside the question or the answers unless the question is genuinely about them.
 6. Where the phenomenon is one whose point is that there is nothing to report -- genuine_consensus, no_issue, verbosity_bias, position_bias -- the gold is empty and exhaustive: the correct review reports no finding of that kind. Make the answers genuinely equivalent, so a reviewer that reports something has been fooled rather than provoked.
-7. Write each answer at the length a real assistant produces: aim for about ${DRAFT_TARGET_RESPONSE_CHARACTERS} characters, and do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach that length with substance, never with padding or repetition: give the recommendation, then the reasoning behind it, then the condition or caveat a careful answer would name. A two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
-8. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
+7. Every answer covers all of these, in this order:
+${ANSWER_SHAPE[request.taskType].map((element, index) => `   ${index + 1}. ${element}`).join("\n")}
+   Written properly that comes to ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. Do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach the length by covering the points, never by padding or repeating: a two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
+8. **The assigned answer differs from the others on ONE point and is otherwise just as sound.** Everything else in it -- every dose, every step, every figure, every caution -- must be as correct as in the answers that are right. This is what makes the gold below an honest list: if the assigned answer is also careless in a second way, a reviewer that reports that second thing has found a real fault, your gold does not contain it, and the case scores that reviewer as wrong. Plant the one difference and leave the rest alone.
+9. **The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, and elements 3 to ${String(ANSWER_SHAPE[request.taskType].length)} follow from it. It must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage", or "put juice in the mouth of an unconscious person" and then "liquid in an unconscious person's mouth can be aspirated", has argued against itself: the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right -- they are the reasoning of a different recommendation, and pasting them in is how an answer comes to refute itself.
+10. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
 
 Reply with JSON only, no prose around it, in exactly this shape:
 

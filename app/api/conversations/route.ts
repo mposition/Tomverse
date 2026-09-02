@@ -95,6 +95,19 @@ export async function GET(req: Request) {
           select: {
             id: true,
             /*
+              Which service the transcript came from, so the sidebar row can
+              carry that service's own icon instead of the generic chat
+              bubble every other row has.
+
+              The bridge's own column rather than the snapshot's: the schema
+              keeps it precisely as "provenance kept after the source is
+              gone", so a continuation whose snapshot has been deleted still
+              says where it came from. Not sensitive and not the source's
+              words -- one of three fixed identifiers this deployment already
+              publishes as the set it can import.
+            */
+            provider: true,
+            /*
               The imported conversation's own name, for a row nobody has
               named yet (lib/continuationDisplayTitle.ts).
 
@@ -173,6 +186,10 @@ export async function GET(req: Request) {
           conv.continuationBridge?.externalConversation?.password === null
             ? (conv.continuationBridge.externalConversation.title ?? null)
             : null,
+        // Unlike the title, this is not withheld for a locked or deleted
+        // snapshot: it is the bridge's own provenance, not the transcript's
+        // content, and the row has to be identifiable either way.
+        sourceProvider: conv.continuationBridge?.provider ?? null,
       };
     });
 

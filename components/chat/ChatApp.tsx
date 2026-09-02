@@ -156,6 +156,42 @@ type ChatAppProps = {
   isGuestMode?: boolean;
   webSearchMode?: WebSearchMode;
   hideModelOnlyInput?: boolean;
+  /**
+   * The imported half of a continued conversation, for the timeline.
+   *
+   * Prepended to this panel's own messages rather than drawn beside them:
+   * they are the earlier part of the same conversation, and the panel already
+   * owns the one scroll container the chat has. Every panel is handed the
+   * same transcript, exactly as every panel already shows the same questions
+   * -- a comparison shows each model the same history, and an imported
+   * history is no different.
+   *
+   * A view model only. Nothing here is ever saved: the snapshot stays
+   * immutable and outside this conversation's storage, and the seed the next
+   * turn carries is built server-side from the snapshot, never from what this
+   * panel happens to be showing.
+   */
+  /**
+   * Whether this conversation continues an imported one.
+   *
+   * Separate from `importedTranscript`, and known earlier: the server
+   * classified the row before the transcript itself has been read. The panel
+   * needs it that early because `useCenteredWelcome` hides an empty panel's
+   * message list entirely -- correct for a conversation with nothing in it,
+   * and wrong for a continuation, whose imported half is about to arrive and
+   * has to arrive *into* the list rather than replace it.
+   */
+  hasImportedTranscript?: boolean;
+  importedMessages?: Message[];
+  /** Provenance and paging for that transcript (`ChatMessageList`). */
+  importedTranscript?: {
+    status: "available" | "deleted" | "locked";
+    provider: string;
+    importedAt: string;
+    olderCount: number;
+    onLoadOlder?: () => void;
+    loadingOlder?: boolean;
+  };
   useCenteredWelcome?: boolean;
   /**
    * Reports what this panel knows about its own transcript. Three states, not
@@ -233,6 +269,9 @@ function ChatAppComponent({
   isGuestMode = false,
   webSearchMode,
   hideModelOnlyInput = false,
+  hasImportedTranscript = false,
+  importedMessages,
+  importedTranscript,
   useCenteredWelcome = false,
   onContentStateChange,
   onStatusChange,
@@ -1894,8 +1933,24 @@ function ChatAppComponent({
         >
           {t("auth.loading")}
         </div>
-      ) : useCenteredWelcome && isConversationEmpty ? null : <ChatMessageList
-        messages={useCenteredWelcome ? messages.filter(isTranscriptMessage) : messages}
+      ) : useCenteredWelcome &&
+        isConversationEmpty &&
+        // A continuation is not an empty conversation: the imported half is
+        // its earlier turns, and they render inside this list.
+        !hasImportedTranscript ? null : <ChatMessageList
+        messages={
+          // The imported half first, always: it is what this conversation
+          // continues from. `useCenteredWelcome` drops the panel's own
+          // non-transcript rows (the greeting) and never the imported ones,
+          // which are transcript by definition.
+          [
+            ...(importedMessages ?? []),
+            ...(useCenteredWelcome
+              ? messages.filter(isTranscriptMessage)
+              : messages),
+          ]
+        }
+        importedTranscript={importedTranscript}
         onRetryLast={handleRetryLast}
         onRetryWithoutAttachments={handleRetryWithoutAttachments}
         onContinueWithoutUnavailableAttachments={
