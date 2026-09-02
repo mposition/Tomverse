@@ -93,9 +93,24 @@ test("a late read cannot land on the conversation that replaced it", () => {
     assert.match(source, /generationRef\.current === generation/);
     assert.match(source, /new AbortController\(\)/);
     assert.match(source, /controller\.abort\(\)/);
-    // Cleared on the way in, so one conversation's transcript is never held
-    // above another's answers while the next read is in flight.
-    assert.match(source, /setTimeline\(null\);/);
+    /*
+      And staleness is a *derivation*, not a clear.
+
+      The obvious shape -- one `timeline` wiped at the top of the effect --
+      sets state synchronously during an effect and costs a cascading render on
+      every conversation switch. Holding the owner beside the value makes "this
+      belongs to a conversation that is no longer open" unreadable instead of
+      merely cleared, which is the stronger property: nothing stale exists to
+      be read in the window before the clear would have run.
+    */
+    assert.match(
+        source,
+        /const timeline =\s*\n?\s*loaded && loaded\.conversationId === conversationId \? loaded\.timeline : null;/
+    );
+    assert.ok(
+        !source.includes("setTimeline("),
+        "no state is cleared inside the effect"
+    );
 });
 
 test("the imported half is a view model, never a stored message", () => {
