@@ -25,6 +25,7 @@ import {
   INJECTION_QUOTA_PER_LANGUAGE,
   draftingBatches,
   draftingCostCeilingUsd,
+  draftingInputTokenCeiling,
   evalCoveragePlan,
 } from "../lib/aiReviewEvalPlan.ts";
 
@@ -191,7 +192,7 @@ for (const batch of batches) {
     existingQuestions: seen,
   });
   if (!sampleInstruction) sampleInstruction = instruction;
-  inputTokensPerCall.push(Math.ceil(instruction.length / 4));
+  inputTokensPerCall.push(draftingInputTokenCeiling(instruction));
   // What the next batch in this cell will be shown. A placeholder of typical
   // length rather than the real text, which does not exist yet -- and named as
   // an assumption in the output below.

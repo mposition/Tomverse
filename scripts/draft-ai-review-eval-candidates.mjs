@@ -58,7 +58,10 @@ import { COMPARISON_REVIEW_DEFAULT_MODEL_IDS } from "../lib/comparisonReview.ts"
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
 import { getModelPricingProfile } from "../lib/modelPricing.ts";
-import { draftingCallCostCeilingUsd } from "../lib/aiReviewEvalPlan.ts";
+import {
+  draftingCallCostCeilingUsd,
+  draftingInputTokenCeiling,
+} from "../lib/aiReviewEvalPlan.ts";
 import {
   admitDraftCall,
   ledgerBalance,
@@ -200,9 +203,11 @@ const generationParameters = { [capField]: outputTokenCap };
 // the repository's own table is what the rest of the product bills against.
 const pricing = getModelPricingProfile(modelId);
 const tier = pricing?.tiers?.[0];
-const estimatedInputTokens = Math.ceil(instruction.length / 4);
+// A ceiling, not an estimate: see draftingInputTokenCeiling(). The name says
+// so, because this number is what the hard stop is checked against.
+const inputTokenCeiling = draftingInputTokenCeiling(instruction);
 const estimatedCostUsd = tier
-  ? (estimatedInputTokens / 1_000_000) * tier.inputUsdPerMillionTokens +
+  ? (inputTokenCeiling / 1_000_000) * tier.inputUsdPerMillionTokens +
     (outputTokenCap / 1_000_000) * tier.outputUsdPerMillionTokens
   : null;
 
@@ -223,7 +228,7 @@ if (baseUrlOverride !== null) {
 if (tier) {
   console.log(
     `\n  cost ceiling  ~$${estimatedCostUsd.toFixed(4)}  ` +
-      `(~${estimatedInputTokens.toLocaleString("en-US")} input tokens estimated @ ` +
+      `(<=${inputTokenCeiling.toLocaleString("en-US")} input tokens @ ` +
       `$${tier.inputUsdPerMillionTokens}/M, plus the full ${outputTokenCap.toLocaleString("en-US")} ` +
       `output cap @ $${tier.outputUsdPerMillionTokens}/M)`
   );
@@ -266,7 +271,7 @@ const maxTotalCostUsd = argValue("max-total-cost-usd")
   : null;
 const callCeilingUsd = tier
   ? draftingCallCostCeilingUsd({
-      inputTokens: estimatedInputTokens,
+      inputTokens: inputTokenCeiling,
       outputTokenCap,
       inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
       outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
@@ -276,7 +281,7 @@ const callCeilingUsd = tier
 const balanceBefore = readLedger();
 console.log(`\n  budget ledger  ${ledgerPath}`);
 console.log(
-  `  committed      ~$${balanceBefore.committedUsd.toFixed(4)}` +
+  `  committed ceiling  ~$${balanceBefore.committedUsd.toFixed(4)}` +
     ` (${balanceBefore.settledCount} settled, ${balanceBefore.outstandingCount} outstanding)` +
     (maxTotalCostUsd === null ? "" : ` of $${maxTotalCostUsd.toFixed(2)}`)
 );
@@ -308,8 +313,19 @@ const apiKey = process.env[configuration.apiKeyEnvName];
 if (!apiKey) die(`\n${configuration.apiKeyEnvName} is not set.`);
 
 // The lock. An exclusive create is atomic, so two processes cannot both hold
-// it, which is what stops both from reading the same balance and each
-// deciding it has room.
+// it.
+//
+// Held for the WHOLE run -- reserve, call, write the set, settle -- not just
+// across the ledger read. The ledger was never the only shared thing: both
+// processes also read the whole decision set, append their cases to their own
+// copy in memory and write the file back, so the second one to finish erases
+// the first one's candidates. A budget that admits two calls therefore paid
+// for two and kept one.
+//
+// Serialising the entire run is the fix that matches what this tool is: one
+// batch at a time, 330 times. There is no throughput to protect here, and a
+// lock held across a two-minute provider call costs nothing that concurrency
+// would have bought.
 let lockHandle;
 for (let attempt = 0; attempt < 50; attempt += 1) {
   try {
@@ -330,6 +346,18 @@ if (lockHandle === undefined) {
   );
 }
 
+let lockReleased = false;
+const releaseLock = () => {
+  if (lockReleased) return;
+  lockReleased = true;
+  try {
+    closeSync(lockHandle);
+  } catch {
+    // Already closed. The file removal below is what actually frees the lock.
+  }
+  rmSync(lockPath, { force: true });
+};
+
 const reservationId = randomUUID();
 let reserved = false;
 try {
@@ -342,8 +370,7 @@ try {
     maxTotalCostUsd,
   });
   if (!decision.allowed) {
-    closeSync(lockHandle);
-    rmSync(lockPath, { force: true });
+    releaseLock();
     die(`\nHARD STOP. ${decision.reason}\n\nNothing was sent.`);
   }
   appendFileSync(
@@ -359,7 +386,7 @@ try {
       phenomenon,
       mode,
       requestedCases: count,
-      estimatedInputTokens,
+      inputTokenCeiling,
       outputTokenCap,
     })}\n`,
     "utf8"
@@ -369,10 +396,15 @@ try {
     `  reserved       ~$${callCeilingUsd.toFixed(4)} as ${reservationId}` +
       `  (~$${decision.remainingUsd.toFixed(4)} would remain)`
   );
-} finally {
-  closeSync(lockHandle);
-  rmSync(lockPath, { force: true });
+} catch (error) {
+  releaseLock();
+  throw error;
 }
+
+// Every exit from here on releases the lock. `process.on("exit")` rather than
+// a `finally` around the rest of the file, because `die()` calls
+// `process.exit()` and a finally block does not run through that.
+process.on("exit", releaseLock);
 
 /**
  * Records what the reserved call turned into.
@@ -444,6 +476,38 @@ for (const problem of problems) console.error(`  rejected: ${problem}`);
 if (cases.length === 0) {
   settle("no_usable_cases");
   die("\nNothing usable came back. The call was billed and is settled in the ledger.");
+}
+
+// Re-read the set from disk, under the lock, before appending anything.
+//
+// Holding the lock across the write was not enough. `set` was read at startup,
+// which for the run that waited on the lock is BEFORE the run ahead of it
+// wrote its cases -- so appending to that stale copy and writing the whole
+// file back erased them. The regression caught this: two runs, two
+// settlements, one case in the file.
+//
+// The read has to be here, inside the lock and after the call, because that is
+// the only point at which "what the file holds" is a fact that will still be
+// true when the file is written.
+// On a first --send the file does not exist yet: the skeleton built at startup
+// is the only copy, and it is nobody else's to clobber.
+if (existsSync(resolvedSetPath)) {
+  let setOnDisk;
+  try {
+    setOnDisk = JSON.parse(readFileSync(resolvedSetPath, "utf8"));
+  } catch (error) {
+    settle("set_unreadable");
+    die(
+      `\n${setPath} could not be re-read before writing: ` +
+        `${error instanceof Error ? error.message : error}\n\n` +
+        "The call was billed and is settled. Nothing was written to the set."
+    );
+  }
+  if (!Array.isArray(setOnDisk.cases)) {
+    settle("set_unreadable");
+    die(`\n${setPath} no longer has a cases array. Nothing was written.`);
+  }
+  set = setOnDisk;
 }
 
 const draftedAt = new Date().toISOString();

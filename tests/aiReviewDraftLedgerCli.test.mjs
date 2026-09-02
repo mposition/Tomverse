@@ -47,6 +47,31 @@ const stubProvider = async (reply) => {
   };
 };
 
+
+/** A reply the drafter will accept, carrying one case with the given marker. */
+const usableReply = (marker) =>
+  JSON.stringify({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            cases: [
+              {
+                question: `question ${marker}`,
+                responses: [
+                  { label: "a", content: `answer a ${marker}` },
+                  { label: "b", content: `answer b ${marker}` },
+                ],
+                gold: { contradictions: [{ id: marker, anyOf: [marker], description: marker }] },
+                goldCompleteness: { contradictions: true },
+              },
+            ],
+          }),
+        },
+      },
+    ],
+  });
+
 const fixture = () => {
   const root = mkdtempSync(join(tmpdir(), "ai-review-ledger-"));
   const setPath = join(root, "decision-v1.json");
@@ -170,16 +195,19 @@ test("a process killed after reserving leaves its money held", async (t) => {
   assert.equal(balance.settledCount, 0);
 });
 
-test("a reservation nobody settled blocks a later run that would pass the total", async (t) => {
+test("a reservation nobody settled blocks a later run, room or not", async (t) => {
   const fix = fixture();
   t.after(() => rmSync(fix.root, { recursive: true, force: true }));
+  // Tiny, so the budget has ample room: the refusal must not depend on the
+  // arithmetic. A run holding this reservation may still be writing the
+  // decision set, and a second run would write its own copy back over it.
   writeFileSync(
     fix.ledgerPath,
     `${JSON.stringify({
       op: "reserve",
       id: "orphan",
       at: "2026-09-01",
-      costCeilingUsd: 0.999,
+      costCeilingUsd: 0.0001,
     })}\n`
   );
 
@@ -190,7 +218,7 @@ test("a reservation nobody settled blocks a later run that would pass the total"
   );
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /HARD STOP/);
-  assert.match(result.stderr, /1 outstanding/);
+  assert.match(result.stderr, /have not settled/);
   // Nothing was added: the refusal happens before the reservation is written.
   assert.equal(fix.balance().outstandingCount, 1);
 });
@@ -264,4 +292,44 @@ test("a run with no API key reserves nothing", async (t) => {
   // A reservation stands for money very likely spent. This run could not
   // spend any, so it must not leave one holding the budget for ever.
   assert.equal(existsSync(fix.ledgerPath), false);
+});
+
+test("two concurrent runs never lose a written case", async (t) => {
+  // The defect this serialisation exists for. Both runs read the whole
+  // decision set, append to their own copy in memory and write the file back,
+  // so a budget that admitted two calls paid for two and kept one. Now the
+  // second is refused before it calls, and the set holds exactly the cases of
+  // the run that went ahead.
+  const provider = await stubProvider(usableReply("m1"));
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const [one, two] = await Promise.all([
+    run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url),
+    run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url),
+  ]);
+  // Either outcome is correct: the second run is refused outright, or it waits
+  // out the lock and goes after the first. What must never happen is that both
+  // are billed and only one case survives.
+  const succeeded = [one, two].filter((result) => result.status === 0);
+  assert.ok(succeeded.length >= 1, `${one.stderr}\n---\n${two.stderr}`);
+
+  const set = JSON.parse(readFileSync(fix.setPath, "utf8"));
+  const balance = fix.balance();
+  assert.deepEqual(balance.problems, []);
+  assert.equal(
+    set.cases.length,
+    succeeded.length,
+    "every run that was billed must have left its case in the set"
+  );
+  assert.equal(balance.settledCount, succeeded.length);
+  assert.equal(balance.outstandingCount, 0);
+  assert.equal(
+    new Set(set.cases.map((item) => item.id)).size,
+    set.cases.length,
+    "two runs must not hand out the same case id"
+  );
 });

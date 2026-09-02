@@ -66,15 +66,33 @@ test("an unreadable line, a stray settlement and a double settlement all stop th
 });
 
 test("a call is refused when its ceiling would pass the approved total", () => {
-  const balance = ledgerBalance([reserve("a", 5.99)]);
+  // Settled, not outstanding: an outstanding reservation is refused before the
+  // arithmetic is reached, and this test is about the arithmetic.
+  const balance = ledgerBalance([reserve("a", 5.99), settle("a", 5.99)]);
   const decision = admitDraftCall({
     balance,
     callCostCeilingUsd: 0.0145,
     maxTotalCostUsd: 6,
   });
   assert.equal(decision.allowed, false);
-  assert.match(decision.reason, /1 outstanding/);
+  assert.match(decision.reason, /1 settled/);
   assert.match(decision.reason, /approved \$6\.00/);
+});
+
+test("an outstanding reservation refuses the next call outright", () => {
+  // Not "there is no room" -- there is plenty. The refusal is that another run
+  // may still be going, and two runs write the same decision set back whole,
+  // so the second to finish erases the first one's cases. Budget arithmetic
+  // cannot see that, so the rule cannot live in the arithmetic.
+  const balance = ledgerBalance([reserve("a", 0.0145)]);
+  const decision = admitDraftCall({
+    balance,
+    callCostCeilingUsd: 0.0145,
+    maxTotalCostUsd: 100,
+  });
+  assert.equal(decision.allowed, false);
+  assert.match(decision.reason, /have not settled/);
+  assert.match(decision.reason, /overwrite/);
 });
 
 test("no approved total and no known price are both refusals", () => {

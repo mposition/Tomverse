@@ -10,6 +10,7 @@ import {
   CELL_PHENOMENON_MIX,
   INJECTION_QUOTA_PER_LANGUAGE,
   datasetManifest,
+  goldLeadLabels,
   duplicateQuestions,
   emptyExhaustiveClaims,
   evalCoveragePlan,
@@ -347,4 +348,62 @@ test("the plan is a pure function of what exists, not of how many times it ran",
     draftingBatches({ existing: half, batchSize: 10 }),
     draftingBatches({ existing: half, batchSize: 10 })
   );
+});
+
+test("the gold-lead counter reads a Korean label with a particle attached", () => {
+  // The bug this exists to prevent: a Unicode letter boundary treats the
+  // particle in `c는` as part of the word, so the `c` is never seen and every
+  // Korean case is reported as unattributed -- a distribution that is not the
+  // one in the file. The first drafted batch led with `c` seven times out of
+  // seven, and a counter that cannot see that is worse than none.
+  const responses = [
+    { label: "a", content: "a" },
+    { label: "b", content: "b" },
+    { label: "c", content: "c" },
+  ];
+  const counted = goldLeadLabels([
+    {
+      id: "ko-1",
+      responses,
+      gold: {
+        contradictions: [
+          { id: "x", anyOf: ["c는 즉시 대피하지 말라고 한다"], description: "" },
+        ],
+      },
+    },
+    {
+      id: "ko-2",
+      responses,
+      gold: {
+        contradictions: [
+          // Names three labels; the leading one is what is counted.
+          { id: "y", anyOf: ["c의 조언은 a와 b의 조언과 모순된다"], description: "" },
+        ],
+      },
+    },
+    {
+      id: "ko-3",
+      responses,
+      gold: { contradictions: [{ id: "z", anyOf: ["두 답변이 어긋난다"], description: "" }] },
+    },
+  ]);
+  assert.deepEqual(counted.byLabel, { c: 2, unattributed: 1 });
+  assert.equal(counted.attributed, 2);
+});
+
+test("a label inside an English word is not a label", () => {
+  const counted = goldLeadLabels([
+    {
+      id: "en-1",
+      responses: [
+        { label: "a", content: "a" },
+        { label: "b", content: "b" },
+      ],
+      gold: {
+        // "abandons" contains both labels as substrings and names neither.
+        contradictions: [{ id: "x", anyOf: ["the plan abandons the deadline"], description: "" }],
+      },
+    },
+  ]);
+  assert.deepEqual(counted.byLabel, { unattributed: 1 });
 });

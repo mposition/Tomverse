@@ -32,6 +32,7 @@ import {
     AI_REVIEW_EVAL_TASK_TYPES,
     type AiReviewEvalCase,
 } from "@/lib/aiReviewEvalCore";
+import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 
 export type AiReviewEvalCell = {
     language: string;
@@ -161,6 +162,72 @@ export const emptyExhaustiveClaims = (
     return found;
 };
 
+/**
+ * The response label each gold item names FIRST, counted.
+ *
+ * The first drafted batch put the odd answer out in slot `c` seven times out of
+ * seven. Nothing in those files is wrong -- each case is a clean contradiction
+ * and each gold is right -- but a set built entirely that way measures
+ * something else than it means to: a reviewer that always accuses the last
+ * answer scores perfect recall on it, and a reviewer that reads scores the
+ * same. Position becomes a confound, and it only shows up when you count.
+ *
+ * Deliberately narrow. A gold item's prose names several labels -- "c
+ * contradicts a and b" -- so counting every mention says nothing, and the whole
+ * text cannot be parsed for intent without inventing confidence. What is read
+ * here is one thing: the first label token in the item's first phrasing, which
+ * is where a drafter puts the answer it is accusing. That is a heuristic, and
+ * the name says so; an item whose leading phrase names no label is counted as
+ * `unattributed` rather than guessed at.
+ *
+ * A count, not a rule, and a report rather than a gate. There is no correct
+ * distribution to enforce: a two-response case has no third slot, and a
+ * `genuine_consensus` case plants nothing at all. Concentration is what is
+ * worth seeing, and a person decides whether it is too high.
+ *
+ * Label boundaries are ASCII-only on purpose. Korean gold writes `c는`, and a
+ * Unicode letter boundary would refuse to see the `c` there -- which is how an
+ * earlier version of this counter reported a distribution that was not the
+ * one in the file.
+ */
+export const goldLeadLabels = (
+    cases: readonly Pick<AiReviewEvalCase, "id" | "gold" | "responses">[]
+): { readonly byLabel: Readonly<Record<string, number>>; readonly attributed: number } => {
+    const byLabel: Record<string, number> = {};
+    let attributed = 0;
+    for (const testCase of cases) {
+        const labels = (testCase.responses ?? [])
+            .map((response) => response.label)
+            .filter((label): label is string => typeof label === "string");
+        for (const items of Object.values(testCase.gold ?? {})) {
+            for (const item of items ?? []) {
+                const lead =
+                    (Array.isArray(item?.anyOf) ? item.anyOf[0] : undefined) ??
+                    item?.description ??
+                    "";
+                let bestLabel: string | null = null;
+                let bestIndex = Number.POSITIVE_INFINITY;
+                for (const label of labels) {
+                    const match = new RegExp(
+                        `(^|[^A-Za-z0-9])${label}([^A-Za-z0-9]|$)`
+                    ).exec(lead);
+                    if (match && match.index < bestIndex) {
+                        bestIndex = match.index;
+                        bestLabel = label;
+                    }
+                }
+                if (bestLabel) {
+                    byLabel[bestLabel] = (byLabel[bestLabel] ?? 0) + 1;
+                    attributed += 1;
+                } else {
+                    byLabel.unattributed = (byLabel.unattributed ?? 0) + 1;
+                }
+            }
+        }
+    }
+    return { byLabel, attributed };
+};
+
 export type AiReviewEvalManifest = {
     cases: number;
     byCell: readonly AiReviewEvalCellGap[];
@@ -171,6 +238,8 @@ export type AiReviewEvalManifest = {
     gap: AiReviewEvalCoverageGap;
     duplicates: readonly { normalised: string; ids: readonly string[] }[];
     emptyExhaustiveClaims: readonly { id: string; kind: string }[];
+    /** The label each gold item names first, counted. A heuristic; see goldLeadLabels(). */
+    goldLeadLabels: { readonly byLabel: Readonly<Record<string, number>>; readonly attributed: number };
 };
 
 /**
@@ -207,6 +276,7 @@ export const datasetManifest = (
         gap,
         duplicates: duplicateQuestions(cases),
         emptyExhaustiveClaims: emptyExhaustiveClaims(cases),
+        goldLeadLabels: goldLeadLabels(cases),
     };
 };
 
@@ -401,6 +471,50 @@ export const draftingCostCeilingUsd = (input: {
             (input.outputTokenCapPerCall / 1_000_000) * input.outputUsdPerMillionTokens,
         0
     );
+
+/**
+ * Tokens the chat envelope adds around the instruction itself.
+ *
+ * The request is one user message in a `messages` array plus the reply
+ * priming, none of which is in the instruction text. Sixty-four is far above
+ * what any current chat format spends on that -- which is the point: this is a
+ * ceiling, and the failure it exists to prevent is a hard stop computed on a
+ * number smaller than what is billed.
+ */
+export const DRAFTING_FRAMING_OVERHEAD_TOKENS = 64;
+
+/**
+ * An upper bound on the input tokens one drafting instruction will be billed
+ * for. Not an estimate.
+ *
+ * `instruction.length / 4` was used here and is not a bound at all. It assumes
+ * roughly four ASCII characters per token, and Korean breaks that assumption in
+ * the dangerous direction: on the instruction a full Korean cell produces, it
+ * reported 5,771 tokens where this repository's own multilingual estimator says
+ * 30,521 -- a fifth of the real figure, feeding a hard stop that then lets
+ * through five times the approved spend.
+ *
+ * Two bounds, whichever is larger, plus the envelope:
+ *
+ *   * **UTF-8 bytes.** Every token of a byte-level BPE vocabulary (o200k_base
+ *     and its family) decodes to at least one byte, so a text can never
+ *     tokenize to more tokens than it has bytes. This holds without knowing
+ *     the tokenizer's merges, which is exactly what makes it a bound rather
+ *     than a guess -- and Korean is where it bites, at three bytes per
+ *     character.
+ *   * **The repository's estimator.** `estimatePromptTokens()` is what the
+ *     product reserves credits against. Spending here against a smaller number
+ *     than the product would reserve for the same text cannot be justified,
+ *     whatever a byte count says.
+ *
+ * Deliberately loose. A ceiling that is 3x the truth costs an over-reserved
+ * budget; one that is 0.2x the truth costs money nobody approved.
+ */
+export const draftingInputTokenCeiling = (instruction: string): number =>
+    Math.max(
+        Buffer.byteLength(instruction, "utf8"),
+        estimatePromptTokens(instruction)
+    ) + DRAFTING_FRAMING_OVERHEAD_TOKENS;
 
 /**
  * The cost of one call, which is what a hard stop has to be able to check
