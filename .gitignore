@@ -103,3 +103,9 @@ promotion-metadata-snapshot-*.json
 # directory holding a second copy of the whole repository. Committing it would
 # vendor the repo into itself.
 .claude/worktrees/
+
+# An open staging-verification record is a run in progress, not repository
+# content. `check:staging-verification-records` refuses one with no executor
+# and no result, by design -- a blank page in the tree reads as a finished run.
+# The record is committed by whoever ran it, once it has both.
+docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]__*.md
