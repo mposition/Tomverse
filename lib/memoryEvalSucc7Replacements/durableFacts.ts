@@ -1036,7 +1036,8 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["조개"],
                 evidence: {
                     evidenceMessageId: "succ-b702-27-m1",
-                    evidenceQuote: "저는 조개를 먹으면 안 됩니다",
+                    evidenceQuote:
+                        "저는 조개 알레르기가 있어서 조개가 들어간 것은 먹을 수 없습니다",
                 },
                 expectedDisposition: "sensitive_review",
             },
@@ -1050,7 +1051,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                     {
                         externalMessageId: "succ-b702-27-m1",
                         role: "user",
-                        content: "저는 조개를 먹으면 안 됩니다. 들어간 것은 전부 빼 주세요.",
+                        content: "저는 조개 알레르기가 있어서 조개가 들어간 것은 먹을 수 없습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-27-m2",

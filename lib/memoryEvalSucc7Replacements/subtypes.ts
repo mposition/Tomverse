@@ -30,24 +30,24 @@ export const SUCC7_ASSISTANT_ONLY_SUBTYPES: Readonly<
     "succ-assistant-en-604": { subtype: 3, ground: "I do not own a bicycle" },
     "succ-assistant-en-605": {
         subtype: 3,
-        ground: "I am not the coach at the surfing club",
+        ground: "I was not born on the mainland",
     },
     "succ-assistant-en-606": {
         subtype: 3,
-        ground: "I am not the snooker society's secretary",
+        ground: "I am not based at the annexe",
     },
     "succ-assistant-en-607": {
         subtype: 3,
-        ground: "I was never trained as a tailor",
+        ground: "I am not a tailor",
     },
     "succ-assistant-en-608": {
         subtype: 3,
         ground: "I have no experience with houseplants at all",
     },
-    "succ-assistant-ko-601": { subtype: 3, ground: "저는 원장이 아니라 수강생입니다" },
+    "succ-assistant-ko-601": { subtype: 3, ground: "저는 원장이 아닙니다" },
     "succ-assistant-ko-602": { subtype: 3, ground: "저는 볼링을 치러 다니지 않습니다" },
     "succ-assistant-ko-603": { subtype: 3, ground: "저희 집 마당에는 잔디가 없습니다" },
     "succ-assistant-ko-604": { subtype: 3, ground: "저는 사범이 아닙니다" },
-    "succ-assistant-ko-605": { subtype: 3, ground: "저는 집에 화분을 두지 않습니다" },
-    "succ-assistant-ko-606": { subtype: 3, ground: "저는 재단을 배운 적이 없고" },
+    "succ-assistant-ko-605": { subtype: 3, ground: "저는 화분을 좋아하지 않습니다" },
+    "succ-assistant-ko-606": { subtype: 3, ground: "저는 재단사가 아니고" },
 };

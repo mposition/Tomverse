@@ -63,7 +63,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-1-m3",
                         role: "user",
                         content:
-                            "I am not a carpenter — I just put up shelves at home now and then.",
+                            "I am not a carpenter.",
                     },
                 ],
             },
@@ -219,11 +219,10 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "identity",
                 polarity: "negated",
-                factValueAll: ["coach", "surfing"],
+                factValueAll: ["born", "mainland"],
                 evidence: {
                     evidenceMessageId: "succ-b701-5-m3",
-                    evidenceQuote:
-                        "I am not the coach at the surfing club",
+                    evidenceQuote: "I was not born on the mainland",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -233,25 +232,25 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b701-5",
-                title: "Session plan",
+                title: "Off-season ferries",
                 messages: [
                     {
                         externalMessageId: "succ-b701-5-m1",
                         role: "user",
                         content:
-                            "How would you structure a session for complete beginners?",
+                            "What is the ferry timetable like out of season?",
                     },
                     {
                         externalMessageId: "succ-b701-5-m2",
                         role: "assistant",
                         content:
-                            "As the coach you will want to keep the group together in the shallows.",
+                            "As someone born on the mainland you will remember the winter service.",
                     },
                     {
                         externalMessageId: "succ-b701-5-m3",
                         role: "user",
                         content:
-                            "I am not the coach at the surfing club — I only help carry the boards down.",
+                            "I was not born on the mainland.",
                     },
                 ],
             },
@@ -266,11 +265,10 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "identity",
                 polarity: "negated",
-                factValueAll: ["snooker", "society"],
+                factValueAll: ["based", "annexe"],
                 evidence: {
                     evidenceMessageId: "succ-b701-6-m3",
-                    evidenceQuote:
-                        "I am not the snooker society's secretary",
+                    evidenceQuote: "I am not based at the annexe",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -280,25 +278,25 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b701-6",
-                title: "Fixture list",
+                title: "Which door",
                 messages: [
                     {
                         externalMessageId: "succ-b701-6-m1",
                         role: "user",
                         content:
-                            "What is a sensible way to lay out a fixture list?",
+                            "Which entrance is open before nine?",
                     },
                     {
                         externalMessageId: "succ-b701-6-m2",
                         role: "assistant",
                         content:
-                            "As the snooker society's secretary you will be circulating it yourself.",
+                            "Since you are based at the annexe, the side door is the one you want.",
                     },
                     {
                         externalMessageId: "succ-b701-6-m3",
                         role: "user",
                         content:
-                            "I am not the snooker society's secretary. I just turn up and play.",
+                            "I am not based at the annexe.",
                     },
                 ],
             },
@@ -316,8 +314,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["tailor"],
                 evidence: {
                     evidenceMessageId: "succ-b701-7-m3",
-                    evidenceQuote:
-                        "I was never trained as a tailor",
+                    evidenceQuote: "I am not a tailor",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -357,7 +354,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-7-m3",
                         role: "user",
                         content:
-                            "I was never trained as a tailor, and a pattern block means nothing to me — please explain terms like that rather than using them.",
+                            "I am not a tailor, and a pattern block means nothing to me — please explain terms like that rather than using them.",
                     },
                 ],
             },
@@ -404,7 +401,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-8-m3",
                         role: "user",
                         content:
-                            "I have no experience with houseplants at all — this is the first one I have owned.",
+                            "I have no experience with houseplants at all.",
                     },
                 ],
             },
@@ -422,8 +419,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["원장"],
                 evidence: {
                     evidenceMessageId: "succ-b701-9-m3",
-                    evidenceQuote:
-                        "저는 원장이 아니라 수강생입니다",
+                    evidenceQuote: "저는 원장이 아닙니다",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -451,7 +447,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-9-m3",
                         role: "user",
                         content:
-                            "저는 원장이 아니라 수강생입니다. 배우는 입장에서 알려 주세요.",
+                            "저는 원장이 아닙니다.",
                     },
                 ],
             },
@@ -592,7 +588,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-12-m3",
                         role: "user",
                         content:
-                            "저는 사범이 아닙니다. 그냥 취미로 배우는 사람입니다.",
+                            "저는 사범이 아닙니다.",
                     },
                 ],
             },
@@ -607,11 +603,10 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "preference",
                 polarity: "negated",
-                factValueAll: ["화분", "두"],
+                factValueAll: ["화분", "좋아하지"],
                 evidence: {
                     evidenceMessageId: "succ-b701-13-m3",
-                    evidenceQuote:
-                        "저는 집에 화분을 두지 않습니다",
+                    evidenceQuote: "저는 화분을 좋아하지 않습니다",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -639,7 +634,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-13-m3",
                         role: "user",
                         content:
-                            "저는 집에 화분을 두지 않습니다. 다른 방법으로 알려 주세요.",
+                            "저는 화분을 좋아하지 않습니다.",
                     },
                 ],
             },
@@ -657,8 +652,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["재단"],
                 evidence: {
                     evidenceMessageId: "succ-b701-14-m3",
-                    evidenceQuote:
-                        "저는 재단을 배운 적이 없고",
+                    evidenceQuote: "저는 재단사가 아니고",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -698,7 +692,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-14-m3",
                         role: "user",
                         content:
-                            "저는 재단을 배운 적이 없고, 문양 이름만 대시면 못 알아듣습니다. 용어를 풀어서 설명해 주세요.",
+                            "저는 재단사가 아니고, 문양 이름만 대시면 못 알아듣습니다. 용어를 풀어서 설명해 주세요.",
                     },
                 ],
             },
