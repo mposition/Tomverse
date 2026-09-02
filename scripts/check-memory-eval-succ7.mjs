@@ -11,6 +11,7 @@
  * register (docs/policy/external-conversation-import-and-memory.md 12.4).
  */
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { MEMORY_EVAL_SUCC6_CASES } from "../lib/memoryEvalSucc6.ts";
 import { ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalAssistantOnlySubtypes.ts";
@@ -24,7 +25,7 @@ import {
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
-import { verifySucc7Manifest } from "../lib/memoryEvalSucc7.ts";
+import { manifestFingerprintInput } from "../lib/memoryEvalSucc7.ts";
 
 const failures = [];
 const notes = [];
@@ -128,10 +129,13 @@ for (const lang of ["ko", "en"]) {
 
 /* ---------------------------------------------- the replacement bodies --- */
 
-const bodyPath = new URL(
-    "../lib/memoryEvalSucc7Replacements/index.ts",
-    import.meta.url
-).pathname;
+// `fileURLToPath`, not `.pathname`. On Windows a file URL's pathname is
+// "/H:/…", and joining that to a drive-relative base produced "H:\\H:\\…" —
+// the check reported everything missing on the one platform this repository is
+// developed on.
+const bodyPath = fileURLToPath(
+    new URL("../lib/memoryEvalSucc7Replacements/index.ts", import.meta.url)
+);
 let bodies = [];
 if (existsSync(bodyPath)) {
     ({ MEMORY_EVAL_SUCC7_REPLACEMENTS: bodies = [] } = await import(
@@ -355,7 +359,7 @@ const DECISION_LOADERS = [
 ];
 let importsRegression = false;
 for (const rel of DECISION_LOADERS) {
-    const text = readFileSync(new URL(rel, import.meta.url).pathname, "utf8");
+    const text = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
     for (const line of text.split("\n")) {
         const code = line.replace(/^\s*/, "");
         if (code.startsWith("*") || code.startsWith("//")) continue;
@@ -386,18 +390,35 @@ if (manifest.composition.sourceDatasetDigest !== MEMORY_EVAL_SUCC6_MANIFEST.data
 
 /* ------------------------------------------------------------- not frozen -- */
 
-if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== true || manifest.frozen !== true) {
-    fail("succ-7 is adopted but does not report frozen");
+if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== false || manifest.frozen !== false) {
+    fail(
+        "succ-7 reports frozen, but the review sheet carries no verdict, " +
+            "reviewer or signature. Adoption is a human act."
+    );
 } else {
-    ok("succ-7 is adopted and frozen", "reviewed 2026-09-02 by @mposition");
+    ok(
+        "succ-7 is assembled and NOT adopted",
+        "assembled=true reviewed=false frozen=false"
+    );
 }
-// The pinned record against the tree, both defaults in play. Empty means what
-// was signed still describes what is here.
-const succ7Drift = verifySucc7Manifest();
-if (succ7Drift.length > 0) {
-    fail(`succ-7 no longer matches its signed manifest: ${succ7Drift.join("; ")}`);
+// The digest a reviewer signs must be the digest that gets frozen, so `frozen`
+// is not part of the manifest's identity. Asserted, because the whole point of
+// excluding it is lost the moment someone puts it back.
+{
+    const asFrozen = { ...manifest, frozen: true };
+    if (
+        manifestFingerprintInput({ ...asFrozen, manifestDigest: undefined }) !==
+        manifestFingerprintInput({ ...manifest, manifestDigest: undefined })
+    ) {
+        fail("`frozen` is inside the manifest fingerprint — freezing would move the digest a reviewer signed");
+    } else {
+        ok("freezing will not move the manifest digest", "`frozen` is not identity");
+    }
+}
+if (manifest.fingerprintVersion !== 4) {
+    fail(`succ-7 is fingerprinted with v${manifest.fingerprintVersion}, not v4`);
 } else {
-    ok("succ-7 matches its signed manifest", "record vs tree, not tree vs tree");
+    ok("succ-7 is fingerprinted with v4", "conversation titles are covered");
 }
 
 console.log("");
@@ -411,6 +432,7 @@ console.log(
         ` / coverage_repair ${manifest.transitionTypes.coverage_repair}`
 );
 console.log(`  unresolvedPolicy  ${manifest.unresolvedPolicies.length}`);
+console.log(`  fingerprint       v${manifest.fingerprintVersion}`);
 console.log(`  frozen            ${manifest.frozen}`);
 console.log(`  harness target    mem-eval-succ-6 (unchanged — a separate change)`);
 console.log("");
@@ -428,6 +450,6 @@ if (failures.length > 0) {
     process.exit(1);
 }
 console.log(
-    "\nsucc-7 structural checks all hold. Adopted 2026-09-02; the harness " +
-        "target is a separate change."
+    "\nsucc-7 structural checks all hold. It is NOT adopted: the review sheet " +
+        "has no signature, and freezing is a human act."
 );
