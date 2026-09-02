@@ -61,7 +61,12 @@ p("| reviewed | **false** |");
 p(`| frozen | **${manifest.frozen}** |`);
 p("| harness target | `mem-eval-succ-6` (변경 없음) |");
 p("");
-p(`표본은 ${MEMORY_EVAL_SUCC7_REPLACEMENTS.length}건 전부입니다.`);
+p(
+    `표본은 ${MEMORY_EVAL_SUCC7_REPLACEMENTS.length}건 전부입니다. ` +
+        `유형별로는 same_boundary ${manifest.transitionTypes.same_boundary}건, ` +
+        `coverage_repair ${manifest.transitionTypes.coverage_repair}건이며, ` +
+        `coverage repair는 같은 경계 통과 수에 포함하지 않습니다.`
+);
 p("");
 p("---");
 p("");
@@ -76,6 +81,7 @@ for (const row of SUCC7_TRANSITION) {
     p("");
     p(
         `**${cellOf(rep)}** · 원본 \`${row.retired}\` · 근거 \`${row.basis}\`` +
+            ` · 유형 \`${row.transitionType}\`` +
             (SUCC7_ASSISTANT_ONLY_SUBTYPES[rep.id]
                 ? ` · subtype ${SUCC7_ASSISTANT_ONLY_SUBTYPES[rep.id].subtype}`
                 : "")
@@ -103,6 +109,15 @@ for (const row of SUCC7_TRANSITION) {
         }
     }
     p("");
+    if (row.unresolvedPolicy) {
+        p("> **미해결 정책 질문 (regression에 보존)**");
+        p(">");
+        p(`> ${row.unresolvedPolicy}`);
+        p(">");
+        p("> 이 전환은 이 질문에 답하지 않으며, whole-turn fail-closed 규칙을");
+        p("> 바꾸지 않습니다. 그래서 같은 경계 대체가 아니라 coverage repair입니다.");
+        p("");
+    }
     p("새 gold:");
     p("");
     for (const g of rep.expected ?? []) {
@@ -115,7 +130,11 @@ for (const row of SUCC7_TRANSITION) {
     p("");
     p("| 항목 | 값 |");
     p("|---|---|");
-    p("| 같은 경계를 시험하는가 (예 / 아니오) | |");
+    if (row.transitionType === "coverage_repair") {
+        p("| 같은 경계를 시험하는가 | **해당 없음** (coverage repair) |");
+    } else {
+        p("| 같은 경계를 시험하는가 (예 / 아니오) | |");
+    }
     p("| gold가 옳은가 (예 / 아니오) | |");
     p("| 아니라면 무엇이 문제인가 | |");
     p("");
@@ -129,6 +148,8 @@ p("| 항목 | 값 |");
 p("|---|---|");
 p("| 검수자 | |");
 p("| 검수일 | |");
+p("| same_boundary 통과 건수 (53 중) | |");
+p("| coverage_repair 판정 (해당 없음 / gold 적합) | |");
 p("| 문제 있는 건수 | |");
 p("| succ-7을 decision set으로 채택하는가 | |");
 p("");

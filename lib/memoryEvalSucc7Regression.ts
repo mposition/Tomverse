@@ -43,6 +43,16 @@ export type Succ7RegressionEntry = {
     basis: "approved10" | "polarity44";
     /** The succ-7 case that took its place. */
     replacementId: string;
+    /** Whether that replacement tests this case's boundary. */
+    transitionType: "same_boundary" | "coverage_repair";
+    /**
+     * A question this case raised that the transition did not answer.
+     *
+     * Preserved rather than resolved. The original stays here as the only
+     * record that the question was ever asked — the replacement, by design,
+     * no longer asks it.
+     */
+    unresolvedPolicy?: string;
     /** Empty for `polarity44`; the corrected gold for `approved10`. */
     correctionRecord: readonly ExpectedMemoryV3[];
     auditRef: string;
@@ -185,6 +195,10 @@ export const SUCC7_REGRESSION_CORPUS: readonly Succ7RegressionEntry[] =
                 : originalCase,
             basis: row.basis,
             replacementId: row.replacement,
+            transitionType: row.transitionType,
+            ...(row.unresolvedPolicy
+                ? { unresolvedPolicy: row.unresolvedPolicy }
+                : {}),
             correctionRecord: corrected ? [{ ...corrected, id: "g1" }] : [],
             auditRef:
                 ".github/audits/memory-eval-subtype3-readjudication-2026-09-02.md",

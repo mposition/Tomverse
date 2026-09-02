@@ -282,6 +282,60 @@ for (const entry of carried) {
 }
 if (failures.length === 0) ok("corrected golds anchor, carried golds untouched");
 
+/* ------------------------------------------------------ transition types -- */
+
+// The split is a claim about what the dataset measures, so it is asserted
+// rather than reported. A coverage repair folded into the same-boundary count
+// would have the manifest say 54 boundaries are still covered when one is not.
+const sameBoundary = SUCC7_TRANSITION.filter(
+    (r) => r.transitionType === "same_boundary"
+);
+const coverageRepair = SUCC7_TRANSITION.filter(
+    (r) => r.transitionType === "coverage_repair"
+);
+if (sameBoundary.length !== 53 || coverageRepair.length !== 1) {
+    fail(
+        `transition types split ${sameBoundary.length}/${coverageRepair.length}, ` +
+            `not 53 same_boundary / 1 coverage_repair`
+    );
+} else {
+    ok("transition types", "53 same_boundary / 1 coverage_repair, counted apart");
+}
+for (const row of coverageRepair) {
+    if (!row.unresolvedPolicy) {
+        fail(`${row.retired} is a coverage repair and records no open question`);
+    }
+    const entry = SUCC7_REGRESSION_CORPUS.find(
+        (e) => e.originalCase.id === row.retired
+    );
+    if (!entry?.unresolvedPolicy) {
+        fail(`${row.retired}'s open question is not preserved in regression`);
+    }
+}
+for (const row of sameBoundary) {
+    if (row.unresolvedPolicy) {
+        fail(`${row.retired} is same_boundary but carries an open question`);
+    }
+}
+{
+    const manifest = buildSucc7DraftManifest();
+    if (
+        manifest.transitionTypes.same_boundary !== sameBoundary.length ||
+        manifest.transitionTypes.coverage_repair !== coverageRepair.length
+    ) {
+        fail("the manifest's transition tally disagrees with the transition");
+    }
+    if (manifest.unresolvedPolicies.length !== coverageRepair.length) {
+        fail("the manifest does not carry every open question");
+    }
+    if (failures.length === 0) {
+        ok(
+            "the tally and the open question are bound into the digest",
+            `manifestDigest ${manifest.manifestDigest.slice(0, 16)}…`
+        );
+    }
+}
+
 /* --------------------------------------------------------- import graph -- */
 
 // The regression corpus must not be reachable from the decision loader. It
@@ -343,6 +397,11 @@ console.log(`  supersedes        ${manifest.supersedes}`);
 console.log(`  caseCount         ${manifest.caseCount}`);
 console.log(`  datasetDigest     ${manifest.datasetDigest}`);
 console.log(`  manifestDigest    ${manifest.manifestDigest}`);
+console.log(
+    `  transitions       same_boundary ${manifest.transitionTypes.same_boundary}` +
+        ` / coverage_repair ${manifest.transitionTypes.coverage_repair}`
+);
+console.log(`  unresolvedPolicy  ${manifest.unresolvedPolicies.length}`);
 console.log(`  frozen            ${manifest.frozen}`);
 console.log(`  harness target    mem-eval-succ-6 (unchanged)`);
 console.log("");

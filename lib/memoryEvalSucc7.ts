@@ -9,7 +9,9 @@ import {
 import { MEMORY_EVAL_SUCC6_CASES } from "@/lib/memoryEvalSucc6";
 import { MEMORY_EVAL_SUCC7_REPLACEMENTS } from "@/lib/memoryEvalSucc7Replacements";
 import {
+    SUCC7_COVERAGE_REPAIR_COUNT,
     SUCC7_RETIRED_CASE_IDS,
+    SUCC7_SAME_BOUNDARY_COUNT,
     SUCC7_TRANSITION,
 } from "@/lib/memoryEvalSucc7Transition";
 
@@ -86,6 +88,22 @@ export type Succ7DraftManifest = {
     };
     caseCount: number;
     cellCounts: Readonly<Record<string, number>>;
+    /**
+     * 53 and 1. Bound into the digest, not merely reported, because the split
+     * is a claim about what the dataset measures: fold the coverage repair
+     * into the same-boundary count and the manifest says 54 boundaries are
+     * still covered when one of them is not.
+     */
+    transitionTypes: Readonly<{
+        same_boundary: number;
+        coverage_repair: number;
+    }>;
+    /**
+     * The policy questions this dataset carries forward without answering,
+     * each named by the transition that raised it. Bound into the digest so a
+     * later edit that quietly resolves one moves the manifest.
+     */
+    unresolvedPolicies: readonly string[];
     datasetDigest: string;
     scoringContractDigest: string;
     scoringContractVersion: string;
@@ -119,6 +137,9 @@ const manifestFingerprintInput = (
         `replaced=${manifest.composition.replacedCaseCount}`,
         `reason=${manifest.composition.changeReason}`,
         `cases=${manifest.caseCount}`,
+        `sameBoundary=${manifest.transitionTypes.same_boundary}`,
+        `coverageRepair=${manifest.transitionTypes.coverage_repair}`,
+        ...manifest.unresolvedPolicies.map((q) => `unresolved=${q}`),
         ...Object.entries(manifest.cellCounts).map(
             ([cell, n]) => `cell=${cell}:${n}`
         ),
@@ -145,6 +166,15 @@ export function buildSucc7DraftManifest(): Succ7DraftManifest {
         },
         caseCount: MEMORY_EVAL_SUCC7_CASES.length,
         cellCounts: cellCountsOf(MEMORY_EVAL_SUCC7_CASES),
+        transitionTypes: {
+            same_boundary: SUCC7_SAME_BOUNDARY_COUNT,
+            coverage_repair: SUCC7_COVERAGE_REPAIR_COUNT,
+        },
+        unresolvedPolicies: SUCC7_TRANSITION.flatMap((row) =>
+            row.unresolvedPolicy
+                ? [`${row.retired} -> ${row.replacement}: ${row.unresolvedPolicy}`]
+                : []
+        ),
         datasetDigest: sha256(
             datasetFingerprintInputV3(MEMORY_EVAL_SUCC7_CASES)
         ),
