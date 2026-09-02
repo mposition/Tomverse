@@ -355,6 +355,41 @@ journal · answer key · 블라인드 기록 · artifact. 검증이 두 스크�
 - 시트 머리말에 threshold version도 인쇄합니다 — 사람 앞의 종이가 어느 기준을
   위한 것인지 스스로 말하게.
 
+### 증거 파일은 LF로 고정합니다
+
+기록 디렉터리의 파일은 전부 digest로 승인에 묶여 있고, 시트는 바이트 비교까지
+합니다. Windows의 `core.autocrlf`는 checkout에서 LF를 CRLF로 바꾸므로, **만든
+기계와 CI(Linux)에서는 검증되는 증거가 같은 commit의 새 Windows clone에서는
+실패**할 수 있었습니다.
+
+이 비대칭이 가장 나쁜 모양입니다 — 승인의 당사자인 운영자만 digest 불일치를
+보고, 다른 누구도 재현하지 못하며, digest 불일치의 정직한 해석은 **변조**입니다.
+
+```
+docs/ops/ai-review-evaluation-records/** text eol=lf
+docs/ops/ai-review-evaluation-set/*.json  text eol=lf
+```
+
+네 개 glob이 아니라 디렉터리 전체를 고정합니다 — 그 옆에 쓰이는 것도 증거입니다.
+`tests/aiReviewEvidenceBundle.test.mjs`가 두 줄의 존재를 고정합니다.
+
+### 시트 재구성은 정답지의 순서를 그대로 씁니다
+
+label은 `S` + 세 자리 padding이라 999를 넘으면 네 자리가 되고, 문자열 정렬이
+작성 순서와 어긋납니다 — `S1000`이 `S200`보다 앞에 옵니다. 1,001건 시트가
+재구성본과 index 100부터 갈라졌고, **공식 생성기가 만든 올바른 시트를 게이트가
+거절했을 것입니다.** 기본 검토량 60건에서는 드러나지 않지만 `--sample=1200`은
+허용됩니다.
+
+숫자 파싱으로도 고칠 수 있지만, 더 근본적인 이유로 **정렬을 없앴습니다** —
+정답지가 곧 "무엇을 어떤 순서로 보여 줬는가"의 기록이므로, label에서 순서를
+다시 유도하는 것은 파일이 이미 답한 질문을 다시 묻는 일이고 **어긋날 수만
+있습니다.**
+
+회귀 테스트는 재구성끼리 비교하지 않습니다 — 그건 구성상 언제나 일치합니다.
+운영자가 실제로 쓰는 `buildBlindSheet`로 1,001건을 만들고, 그 정답지를 JSON을
+거쳐 `rebuildBlindSheet`에 넣어 label·caseId·렌더링 결과를 비교합니다.
+
 ### 서명 날짜도 날짜여야 합니다
 
 `signed-at: someday`가 adjudication과 승인 검사를 모두 통과했습니다. 비어 있는지만
@@ -370,13 +405,20 @@ artifact를 만든 그 기록의 서명이다"는 다른 질문이고, 다른 �
 
 | 상태 | 판정 |
 |---|---|
-| version을 안 적음 | `ok` + 범위 note |
+| **version을 안 적음** | **FAIL** |
 | 적었고 존재하지만 미승인 | `ok` + "coverage 미판정" note |
 | **적었는데 존재하지 않음** | **FAIL** |
 
 셋째는 증거가 **어떤 기준 아래 만들어졌다고 주장하는데 그런 기준이 없는** 것입니다 —
 오타이거나, 지워진 집합이거나, 병합되지 않은 브랜치의 버전입니다. adjudication도
 그 상태에서는 artifact를 쓰지 않고 먼저 거절합니다.
+
+첫째를 한동안 "범위 note"라고 적어 뒀지만 **도달할 수 없는 분기였습니다** — 기록의
+신원 검사가 `thresholdVersion`을 필수로 요구하고 대조하므로, version 없는 증거는
+coverage note를 지나더라도 결국 `the record does not state thresholdVersion`으로
+실패합니다. 같은 증거를 두 규칙이 다르게 말하면 계약이 뜻을 잃으므로, 다른 쪽이
+이미 강제하던 것을 이쪽도 그대로 말합니다. **공식 생성기는 언제나 version을
+기록하므로, version 없는 증거는 그 생성기가 만든 것이 아닙니다.**
 
 ### threshold version이 흐름 전체를 따라갑니다
 

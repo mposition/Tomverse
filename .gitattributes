@@ -11,3 +11,19 @@
 # `text=auto` would rewrite every contributor's working tree, which is a much
 # larger decision than this one and is not needed to make a digest meaningful.
 docs/ops/external-conversation-continuation-staging-verification-records/fixtures/*.json text eol=lf
+
+# AI Review evaluation records are bound to their approvals by digest.
+#
+# The blind sheet, the record a person signs, the answer key and the run
+# journal are all fingerprinted, and the sheet is additionally rebuilt and
+# compared byte for byte. Git's autocrlf on Windows rewrites LF to CRLF at
+# checkout, so evidence that verifies on the machine that made it -- and in
+# CI, which is Linux -- would fail on a fresh Windows clone of the same commit.
+#
+# That asymmetry is the worst shape this could take: the operator whose
+# approval it is sees a digest mismatch that nobody else can reproduce, and
+# the honest reading of a digest mismatch is that the evidence was tampered
+# with. Pinning the whole directory rather than four globs, because anything
+# written beside these files is evidence too.
+docs/ops/ai-review-evaluation-records/** text eol=lf
+docs/ops/ai-review-evaluation-set/*.json text eol=lf
