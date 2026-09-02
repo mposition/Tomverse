@@ -41,11 +41,11 @@ import {
   MOBILE_REFRESH_IDLE_SECONDS,
   MOBILE_REVOCATION_OBSERVATION_BOUND_SECONDS,
 } from "@/lib/mobileAuthContract";
+import type { MobileFreshnessRefusal } from "@/lib/mobileRevocationFreshnessCore";
 import {
-  cachedRevocationSnapshotUsable,
-  judgeMobileRevocationFreshness,
-  type MobileFreshnessRefusal,
-} from "@/lib/mobileRevocationFreshnessCore";
+  createMobileSnapshotStore,
+  type MobileSessionSnapshot,
+} from "@/lib/mobileSessionSnapshotCache";
 import type { MobileAccessTokenIdentity } from "@/lib/mobileAccessTokenCore";
 import { prisma } from "@/lib/prisma";
 
@@ -61,60 +61,16 @@ export type MobileSessionRefusal =
   | "sessions_revoked"
   | "family_expired";
 
-type Snapshot = {
-  userId: string;
-  deviceId: string;
-  familyId: string;
-  accountStatus: string;
-  sessionsRevokedAtMs: number | null;
-  familyRevokedAtMs: number | null;
-  deviceRevokedAtMs: number | null;
-  absoluteExpiresAtMs: number;
-  lastRotatedAtMs: number;
-};
-
-type CacheEntry = { snapshot: Snapshot; expiresAtMs: number; generation: number };
-
 /**
- * Keyed by family, not by account.
+ * The Prisma half of the read the cache performs.
  *
- * D11's whole point is that the events have different reach: losing one phone
- * ends one family and leaves the other devices and the web session alone. An
- * account-keyed cache would make the narrow events look like the wide one.
+ * One query, and every column it selects is one the authorization decision
+ * below actually reads. `include` is deliberately absent: a new column on
+ * `MobileTokenFamily` must not silently join a hot path.
  */
-const snapshotCache = new Map<string, CacheEntry>();
-
-/**
- * The in-process invalidation generation, per account.
- *
- * Bumped by every revocation this process performs, and read on both sides of a
- * lookup so a revocation that lands mid-query is detected rather than
- * overwritten. Per account rather than per family because a global sign-out and
- * an account suspension reach every family at once.
- *
- * It is in-process, and that is a bound rather than a hole: a revocation on
- * another instance is caught by the fifteen-second window instead. The counter
- * closes the race this instance can actually see.
- */
-const generations = new Map<string, number>();
-
-const generationFor = (userId: string) => generations.get(userId) ?? 0;
-
-/** Called by every path that revokes anything. */
-export const invalidateMobileSessionSnapshots = (userId: string) => {
-  generations.set(userId, generationFor(userId) + 1);
-  for (const [familyId, entry] of snapshotCache) {
-    if (entry.snapshot.userId === userId) snapshotCache.delete(familyId);
-  }
-};
-
-/** Test seam: the cache is module state, and a test must be able to start clean. */
-export const resetMobileSessionSnapshotsForTesting = () => {
-  snapshotCache.clear();
-  generations.clear();
-};
-
-const loadSnapshot = async (familyId: string): Promise<Snapshot | null> => {
+const loadSnapshot = async (
+  familyId: string
+): Promise<MobileSessionSnapshot | null> => {
   const family = await prisma.mobileTokenFamily.findUnique({
     where: { id: familyId },
     select: {
@@ -144,90 +100,20 @@ const loadSnapshot = async (familyId: string): Promise<Snapshot | null> => {
 };
 
 /**
- * One lookup, judged by the D12 contract.
+ * One store for the process, holding the D12 contract.
  *
- * Returns the snapshot only when the freshness verdict says the *waiting
- * request* may be authorized by it -- which is a different question from
- * whether it may be stored, and both are asked.
+ * The contract itself is in `lib/mobileSessionSnapshotCache.ts`, with its
+ * lookup injected, so V29a and V29b are ordinary unit tests rather than timing
+ * experiments against a database that would have to actually be slow.
  */
-const readFreshSnapshot = async (
-  familyId: string,
-  userId: string
-): Promise<{ snapshot: Snapshot } | { refusal: MobileFreshnessRefusal }> => {
-  const generationAtStart = generationFor(userId);
-  const queryStartedAtMs = Date.now();
+const store = createMobileSnapshotStore({ loadSnapshot, ttlMs: TTL_MS });
 
-  let snapshot: Snapshot | null = null;
-  let outcome: "ok" | "lookup_failed" | "subject_missing" = "ok";
-  try {
-    snapshot = await loadSnapshot(familyId);
-    if (!snapshot) outcome = "subject_missing";
-  } catch {
-    // Fail closed, exactly as lib/sessionRevocationCore.ts does: a lookup that
-    // could not be performed is not evidence that nothing was revoked.
-    outcome = "lookup_failed";
-  }
+/** Called by every path that revokes anything for this account. */
+export const invalidateMobileSessionSnapshots = (userId: string) =>
+  store.invalidate(userId);
 
-  const completedAtMs = Date.now();
-  const verdict = judgeMobileRevocationFreshness({
-    queryStartedAtMs,
-    completedAtMs,
-    nowMs: completedAtMs,
-    ttlMs: TTL_MS,
-    generationAtStart,
-    generationAtCompletion: generationFor(userId),
-    outcome,
-  });
-
-  if (verdict.cacheable && verdict.expiresAtMs !== null && snapshot) {
-    snapshotCache.set(familyId, {
-      snapshot,
-      expiresAtMs: verdict.expiresAtMs,
-      generation: generationAtStart,
-    });
-  }
-  if (!verdict.usable || !snapshot) {
-    return { refusal: verdict.refusal ?? "lookup_failed" };
-  }
-  return { snapshot };
-};
-
-/**
- * The state of one family, fresh enough to act on.
- *
- * One retry, then refuse. A retry is right for the two racing refusals -- a
- * revocation that landed mid-query, or a query slower than the window -- because
- * the second attempt starts after the event and simply reads the new truth. It
- * is not right for `lookup_failed` or `subject_missing`, which a retry would
- * only repeat.
- */
-const currentSnapshot = async (
-  familyId: string,
-  userId: string
-): Promise<{ snapshot: Snapshot } | { refusal: MobileSessionRefusal }> => {
-  const cached = snapshotCache.get(familyId);
-  if (
-    cached &&
-    cached.snapshot.userId === userId &&
-    cachedRevocationSnapshotUsable({
-      expiresAtMs: cached.expiresAtMs,
-      nowMs: Date.now(),
-      storedGeneration: cached.generation,
-      currentGeneration: generationFor(userId),
-    })
-  ) {
-    return { snapshot: cached.snapshot };
-  }
-
-  const first = await readFreshSnapshot(familyId, userId);
-  if ("snapshot" in first) return first;
-  if (first.refusal !== "raced_invalidation" && first.refusal !== "stale_on_arrival") {
-    return { refusal: first.refusal };
-  }
-
-  const second = await readFreshSnapshot(familyId, userId);
-  return "snapshot" in second ? second : { refusal: second.refusal };
-};
+/** Test seam: the cache is process state, and a test must be able to start clean. */
+export const resetMobileSessionSnapshotsForTesting = () => store.reset();
 
 /**
  * Whether a verified token still authorizes its holder.
@@ -244,7 +130,7 @@ export const authorizeMobileSession = async (
   | { ok: true; userId: string; deviceId: string; familyId: string }
   | { ok: false; refusal: MobileSessionRefusal }
 > => {
-  const result = await currentSnapshot(identity.family, identity.subject);
+  const result = await store.read(identity.family, identity.subject);
   if ("refusal" in result) {
     return {
       ok: false,
