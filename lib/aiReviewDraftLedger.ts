@@ -25,19 +25,49 @@
  * the record of spending cannot be the same event, because everything between
  * them can fail.
  *
- *   1. take the lock;
- *   2. balance = settled + reservations that never settled;
- *   3. refuse if balance + this call would pass the approved total;
+ *   1. take the lock, and hold it for the whole run;
+ *   2. balance = settled + reservations that never settled, each at its
+ *      corrected ceiling;
+ *   3. refuse if any reservation is outstanding, or if this call would pass
+ *      the approved total;
  *   4. write the reservation;
- *   5. release the lock, then call the provider;
- *   6. write the settlement, whatever the outcome.
+ *   5. call the provider, still holding the lock;
+ *   6. re-read the decision set, append to it, write it back;
+ *   7. write the settlement, whatever the outcome, and only then release.
+ *
+ * The lock spans the whole run rather than the ledger read. Both runs read the
+ * decision set, append to their own copy and write the file back, so a budget
+ * that admitted two calls paid for two and kept one. Serialising costs nothing
+ * here: this tool sends one batch at a time, 330 times.
  *
  * A reservation that never settles keeps occupying the budget for ever. That
  * is deliberate and it is the safe direction: the call it stands for was very
  * likely billed, and an operator who knows it was not can say so by settling
  * it. Releasing it automatically would mean a process that dies at exactly the
  * wrong moment quietly gets its money back.
+ *
+ * ## Every figure here is a ceiling
+ *
+ * Nothing in this file is what a provider billed -- the drafter never learns
+ * that. A reservation holds the most a call could cost, and its settlement
+ * records that same ceiling rather than an outcome-dependent amount. So the
+ * running total is a COMMITTED CEILING, the operator-facing wording says so,
+ * and the approved total is a bound on what could have been spent rather than
+ * a measurement of what was.
+ *
+ * ## Corrections
+ *
+ * A ceiling can turn out to have been computed wrongly -- the input-token
+ * bound was replaced after the first paid batch, and the reservation that
+ * batch wrote was too small. A past line is never edited: it is what the run
+ * actually did, and a ledger whose history changes underneath an approval is
+ * not a record. Instead a `correct` entry names the reservation, carries the
+ * ceiling it was written with and the ceiling it should have had, and the
+ * difference lands in the running total.
  */
+
+const isNonEmptyString = (value: unknown): value is string =>
+    typeof value === "string" && value.trim() !== "";
 
 export type AiReviewDraftLedgerEntry =
     | {
@@ -52,9 +82,25 @@ export type AiReviewDraftLedgerEntry =
           op: "settle";
           reservationId: string;
           at: string;
-          /** What the call actually cost us, bounded by its reservation. */
+          /**
+           * The reservation's ceiling, repeated. Not what the provider billed:
+           * the drafter never learns that, so a settlement closes a
+           * reservation rather than measuring it.
+           */
           costCeilingUsd: number;
           outcome: string;
+          [key: string]: unknown;
+      }
+    | {
+          op: "correct";
+          reservationId: string;
+          at: string;
+          /** The ceiling the reservation was written with. Must match. */
+          previousCostCeilingUsd: number;
+          /** What it should have been. */
+          costCeilingUsd: number;
+          /** Why, in a sentence a person can audit. */
+          reason: string;
           [key: string]: unknown;
       };
 
@@ -88,69 +134,117 @@ export const ledgerBalance = (
     lines: readonly string[]
 ): AiReviewDraftLedgerBalance => {
     const problems: string[] = [];
-    const reservations = new Map<string, number>();
-    const settled = new Set<string>();
-    let settledUsd = 0;
-
+    const parsed: { entry: AiReviewDraftLedgerEntry; line: number }[] = [];
     for (const [index, line] of lines.entries()) {
         if (line.trim() === "") continue;
-        let entry: AiReviewDraftLedgerEntry;
         try {
-            entry = JSON.parse(line) as AiReviewDraftLedgerEntry;
+            parsed.push({
+                entry: JSON.parse(line) as AiReviewDraftLedgerEntry,
+                line: index + 1,
+            });
         } catch (error) {
             problems.push(
                 `line ${index + 1} cannot be read: ${(error as Error).message}`
             );
+        }
+    }
+
+    // First pass: reservations and the corrections that restate them.
+    //
+    // Two passes because a correction may be written long after the settlement
+    // it affects -- the first paid batch was corrected days later -- and a
+    // settlement has to be checked against the ceiling that ends up standing,
+    // not the one that happened to be read first.
+    const reservations = new Map<string, number>();
+    for (const { entry, line } of parsed) {
+        if (entry.op !== "reserve") continue;
+        if (typeof entry.id !== "string" || entry.id === "") {
+            problems.push(`line ${line}: a reservation with no id`);
             continue;
         }
-        if (entry.op === "reserve") {
-            if (typeof entry.id !== "string" || entry.id === "") {
-                problems.push(`line ${index + 1}: a reservation with no id`);
-                continue;
-            }
-            if (reservations.has(entry.id)) {
-                problems.push(`line ${index + 1}: reservation "${entry.id}" appears twice`);
-                continue;
-            }
-            if (!Number.isFinite(entry.costCeilingUsd) || entry.costCeilingUsd < 0) {
-                problems.push(`line ${index + 1}: reservation "${entry.id}" has no cost`);
-                continue;
-            }
-            reservations.set(entry.id, entry.costCeilingUsd);
+        if (reservations.has(entry.id)) {
+            problems.push(`line ${line}: reservation "${entry.id}" appears twice`);
             continue;
         }
-        if (entry.op === "settle") {
-            const held = reservations.get(entry.reservationId);
-            if (held === undefined) {
-                problems.push(
-                    `line ${index + 1}: settles "${entry.reservationId}", which was never reserved`
-                );
-                continue;
-            }
-            if (settled.has(entry.reservationId)) {
-                problems.push(
-                    `line ${index + 1}: "${entry.reservationId}" was already settled`
-                );
-                continue;
-            }
-            if (!Number.isFinite(entry.costCeilingUsd) || entry.costCeilingUsd < 0) {
-                problems.push(`line ${index + 1}: settlement has no cost`);
-                continue;
-            }
-            // A settlement may not cost more than its reservation held. If it
-            // did, the reservation was not a bound and the budget check that
-            // let the call through was measuring the wrong number.
-            if (entry.costCeilingUsd > held) {
-                problems.push(
-                    `line ${index + 1}: "${entry.reservationId}" settled at ` +
-                        `${entry.costCeilingUsd} above its reservation of ${held}`
-                );
-            }
-            settled.add(entry.reservationId);
-            settledUsd += Math.min(entry.costCeilingUsd, held);
+        if (!Number.isFinite(entry.costCeilingUsd) || entry.costCeilingUsd < 0) {
+            problems.push(`line ${line}: reservation "${entry.id}" has no cost`);
             continue;
         }
-        problems.push(`line ${index + 1}: unknown entry`);
+        reservations.set(entry.id, entry.costCeilingUsd);
+    }
+    for (const { entry, line } of parsed) {
+        if (entry.op !== "correct") continue;
+        const held = reservations.get(entry.reservationId);
+        if (held === undefined) {
+            problems.push(
+                `line ${line}: corrects "${entry.reservationId}", which was never reserved`
+            );
+            continue;
+        }
+        // The correction states what it is replacing. If that does not match
+        // the ceiling standing at this point, two corrections have been
+        // written against the same reservation from the same starting figure,
+        // or one of them is about a different line than its author thought --
+        // and either way the running total is not what anybody computed.
+        if (entry.previousCostCeilingUsd !== held) {
+            problems.push(
+                `line ${line}: corrects "${entry.reservationId}" from ` +
+                    `${entry.previousCostCeilingUsd}, but ${held} is what stands`
+            );
+            continue;
+        }
+        if (!Number.isFinite(entry.costCeilingUsd) || entry.costCeilingUsd < 0) {
+            problems.push(`line ${line}: correction has no cost`);
+            continue;
+        }
+        if (!isNonEmptyString(entry.reason)) {
+            problems.push(
+                `line ${line}: correction of "${entry.reservationId}" gives no reason`
+            );
+            continue;
+        }
+        reservations.set(entry.reservationId, entry.costCeilingUsd);
+    }
+
+    // Second pass: settlements, against the ceilings that stand.
+    const settled = new Set<string>();
+    let settledUsd = 0;
+    for (const { entry, line } of parsed) {
+        if (entry.op === "reserve" || entry.op === "correct") continue;
+        if (entry.op !== "settle") {
+            problems.push(`line ${line}: unknown entry`);
+            continue;
+        }
+        const held = reservations.get(entry.reservationId);
+        if (held === undefined) {
+            problems.push(
+                `line ${line}: settles "${entry.reservationId}", which was never reserved`
+            );
+            continue;
+        }
+        if (settled.has(entry.reservationId)) {
+            problems.push(`line ${line}: "${entry.reservationId}" was already settled`);
+            continue;
+        }
+        if (!Number.isFinite(entry.costCeilingUsd) || entry.costCeilingUsd < 0) {
+            problems.push(`line ${line}: settlement has no cost`);
+            continue;
+        }
+        // A settlement may not close for more than its reservation holds. If
+        // it did, the reservation was not a bound and the budget check that
+        // let the call through was measuring the wrong number. A correction
+        // that raised the ceiling makes this pass; that is the point of one.
+        if (entry.costCeilingUsd > held) {
+            problems.push(
+                `line ${line}: "${entry.reservationId}" settled at ` +
+                    `${entry.costCeilingUsd} above its reservation of ${held}`
+            );
+        }
+        settled.add(entry.reservationId);
+        // The corrected ceiling, not the figure the settlement carries: a
+        // settlement written before its correction still names the old one,
+        // and the total has to reflect what the reservation now stands at.
+        settledUsd += held;
     }
 
     let outstandingUsd = 0;

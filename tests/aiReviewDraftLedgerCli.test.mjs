@@ -48,7 +48,12 @@ const stubProvider = async (reply) => {
 };
 
 
-/** A reply the drafter will accept, carrying one case with the given marker. */
+/**
+ * A reply the drafter will accept, carrying one case with the given marker.
+ *
+ * Shaped to the v2 contract, because that is what the drafter now enforces:
+ * three answers labelled a/b/c, each past the length floor.
+ */
 const usableReply = (marker) =>
   JSON.stringify({
     choices: [
@@ -58,12 +63,17 @@ const usableReply = (marker) =>
             cases: [
               {
                 question: `question ${marker}`,
-                responses: [
-                  { label: "a", content: `answer a ${marker}` },
-                  { label: "b", content: `answer b ${marker}` },
-                ],
-                gold: { contradictions: [{ id: marker, anyOf: [marker], description: marker }] },
+                responses: ["a", "b", "c"].map((label) => ({
+                  label,
+                  content: `answer ${label} for ${marker}. `.repeat(20),
+                })),
+                gold: {
+                  contradictions: [
+                    { id: marker, anyOf: [marker], description: marker },
+                  ],
+                },
                 goldCompleteness: { contradictions: true },
+                injectionMarkers: [marker],
               },
             ],
           }),

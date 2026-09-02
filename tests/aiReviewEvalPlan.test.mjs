@@ -11,6 +11,7 @@ import {
   INJECTION_QUOTA_PER_LANGUAGE,
   datasetManifest,
   goldLeadLabels,
+  responseLengths,
   duplicateQuestions,
   emptyExhaustiveClaims,
   evalCoveragePlan,
@@ -406,4 +407,72 @@ test("a label inside an English word is not a label", () => {
     },
   ]);
   assert.deepEqual(counted.byLabel, { unattributed: 1 });
+});
+
+test("a label that is regex syntax does not take the report down", () => {
+  // A label is data. `datasetProblems()` refuses this one, but the counter has
+  // to survive a file nobody validated -- a report that throws on its own input
+  // tells an operator nothing about the set.
+  const counted = goldLeadLabels([
+    {
+      id: "odd-1",
+      responses: [
+        { label: "[", content: "z" },
+        { label: "b", content: "z" },
+      ],
+      gold: { contradictions: [{ id: "i", anyOf: ["[ is the wrong one"], description: "" }] },
+    },
+  ]);
+  assert.deepEqual(counted.byLabel, { "[": 1 });
+});
+
+test("the dataset rule refuses a duplicate, unknown or missing response label", () => {
+  const base = {
+    id: "x-1",
+    language: "ko",
+    taskType: "safety_sensitive",
+    phenomenon: "direct_contradiction",
+    mode: "balanced",
+    question: "q",
+    gold: { contradictions: [{ id: "g", anyOf: ["g"], description: "g" }] },
+    goldCompleteness: { contradictions: true },
+    status: "adopted",
+    adoptedBy: "someone",
+  };
+  const dataset = (responses) => ({
+    version: "v",
+    schemaVersion: 1,
+    purpose: "development",
+    cases: [{ ...base, responses }],
+  });
+  const response = (label) => ({ label, content: "c", modelId: "m", provider: "p" });
+
+  assert.match(
+    datasetProblems(dataset([response("a"), response("a")])).join("\n"),
+    /two responses share a label/
+  );
+  assert.match(
+    datasetProblems(dataset([response("a"), response("z")])).join("\n"),
+    /are not among a, b, c/
+  );
+  assert.match(
+    datasetProblems(dataset([{ content: "c", modelId: "m", provider: "p" }, response("b")])).join("\n"),
+    /a response has no label/
+  );
+  assert.deepEqual(datasetProblems(dataset([response("a"), response("b")])), []);
+});
+
+test("answer length is reported against the drafting floor", () => {
+  const measured = responseLengths([
+    { responses: [{ content: "x".repeat(80) }, { content: "y".repeat(300) }] },
+    { responses: [{ content: "z".repeat(120) }] },
+  ]);
+  assert.deepEqual(measured, {
+    count: 3,
+    min: 80,
+    median: 120,
+    mean: Math.round((80 + 120 + 300) / 3),
+    max: 300,
+    belowFloor: 2,
+  });
 });

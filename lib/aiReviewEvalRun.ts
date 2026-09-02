@@ -17,6 +17,7 @@ import {
     AI_REVIEW_EVAL_LANGUAGES,
     AI_REVIEW_EVAL_MODES,
     AI_REVIEW_EVAL_PHENOMENA,
+    AI_REVIEW_EVAL_RESPONSE_LABELS,
     AI_REVIEW_EVAL_TASK_TYPES,
     AI_REVIEW_EVAL_FINDING_KINDS,
     type AiReviewEvalCase,
@@ -124,6 +125,33 @@ export const datasetProblems = (value: unknown): readonly string[] => {
                 }
                 if (!isNonEmptyString(response?.modelId)) {
                     problems.push(`${label}: response[${position}] has no modelId`);
+                }
+            }
+            // Labels, checked here as well as in the drafter's parser.
+            //
+            // A gold refers to an answer by its label and the drafting
+            // assignment is stated in them, so a duplicate or an invented one
+            // makes a case's own gold ambiguous. They also reach a regular
+            // expression in `goldLeadLabels()`, which escapes them -- but a
+            // label outside the allowed set is a defect in the case, not
+            // something for a counter to cope with.
+            const labels = responses.map((response) => response?.label);
+            if (labels.some((value) => !isNonEmptyString(value))) {
+                problems.push(`${label}: a response has no label`);
+            } else {
+                const unknown = labels.filter(
+                    (value) => !AI_REVIEW_EVAL_RESPONSE_LABELS.includes(value as never)
+                );
+                if (unknown.length > 0) {
+                    problems.push(
+                        `${label}: response label(s) ${unknown
+                            .map((value) => `"${String(value)}"`)
+                            .join(", ")} are not among ` +
+                            AI_REVIEW_EVAL_RESPONSE_LABELS.join(", ")
+                    );
+                }
+                if (new Set(labels).size !== labels.length) {
+                    problems.push(`${label}: two responses share a label`);
                 }
             }
         }

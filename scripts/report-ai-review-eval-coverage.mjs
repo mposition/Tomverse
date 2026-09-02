@@ -22,6 +22,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { datasetManifest } from "../lib/aiReviewEvalPlan.ts";
+import { DRAFT_MIN_RESPONSE_CHARACTERS } from "../lib/aiReviewEvalDraftPrompt.ts";
 import { datasetProblems } from "../lib/aiReviewEvalRun.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
 
@@ -123,6 +124,22 @@ for (const path of paths) {
     console.log("\n  exhaustive gold that plants nothing (a real 'nothing to find' case, or a flag set before the gold was written)");
     for (const claim of manifest.emptyExhaustiveClaims) {
       console.log(`    ${claim.id}: ${claim.kind}`);
+    }
+  }
+
+  const lengths = manifest.responseLengths;
+  if (lengths.count > 0) {
+    console.log("\n  answer length in characters");
+    console.log(
+      `    min ${lengths.min}   median ${lengths.median}   mean ${lengths.mean}   max ${lengths.max}` +
+        `   (${lengths.count} answers)`
+    );
+    if (lengths.belowFloor > 0) {
+      console.log(
+        `    NOTE ${lengths.belowFloor} answer(s) below the ${DRAFT_MIN_RESPONSE_CHARACTERS}-character ` +
+          `drafting floor. A reviewer comparing stubs has nowhere for an omission to hide, ` +
+          `so short answers measure something easier than the product does.`
+      );
     }
   }
 

@@ -50,6 +50,8 @@ import {
 } from "../lib/aiReviewEvalCore.ts";
 import {
   AI_REVIEW_DRAFT_TEMPLATE_VERSION,
+  DRAFT_MIN_RESPONSE_CHARACTERS,
+  assignTargetLabels,
   draftInstruction,
   parseDraftedCases,
   templateHash,
@@ -182,6 +184,8 @@ if (!Array.isArray(set.cases)) die(`${setPath} has no cases array.`);
 const inCell = set.cases.filter(
   (item) => item.language === language && item.taskType === taskType
 );
+// Which answer carries the fault, decided here and not by the drafter.
+const targetLabels = assignTargetLabels({ language, taskType, phenomenon, mode, count });
 const instruction = draftInstruction({
   language,
   taskType,
@@ -189,7 +193,11 @@ const instruction = draftInstruction({
   mode,
   count,
   existingQuestions: inCell.map((item) => item.question),
+  targetLabels,
 });
+// The digest of THIS instruction, not of the template: each call is shown its
+// cell's existing questions, so two calls of one template version send
+// different text. It goes on every case the call produces.
 const hash = templateHash(instruction);
 
 const capField = model.provider === "openai" ? "max_completion_tokens" : "max_tokens";
@@ -216,6 +224,13 @@ console.log(`  drafter    ${modelId} (${model.provider} ${model.apiModel})`);
 console.log(`  phenomenon ${phenomenon}`);
 console.log(`  mode       ${mode}`);
 console.log(`  count      ${count}`);
+console.log(
+  `  planted in ${
+    targetLabels.every((entry) => entry === null)
+      ? "nothing (this phenomenon plants no fault)"
+      : targetLabels.map((entry, index) => `${index + 1}:${entry}`).join(" ")
+  }`
+);
 console.log(`  template   ${AI_REVIEW_DRAFT_TEMPLATE_VERSION} (${hash})`);
 console.log(`  params     ${JSON.stringify(generationParameters)}`);
 console.log(`  already in this cell: ${inCell.length}`);
@@ -470,7 +485,8 @@ try {
   die(`\nThe reply is not JSON: ${error.message}`);
 }
 const { cases, problems } = parseDraftedCases(
-  completion.choices?.[0]?.message?.content ?? ""
+  completion.choices?.[0]?.message?.content ?? "",
+  { targetLabels, minResponseCharacters: DRAFT_MIN_RESPONSE_CHARACTERS }
 );
 for (const problem of problems) console.error(`  rejected: ${problem}`);
 if (cases.length === 0) {
@@ -551,6 +567,10 @@ for (const drafted of cases) {
     draftedBy: {
       modelId,
       templateVersion: AI_REVIEW_DRAFT_TEMPLATE_VERSION,
+      instructionHash: hash,
+      // What this case was ASKED to plant it in. The reply is never
+      // rearranged, so a person adopting the case reads the gold against this.
+      targetLabel: targetLabels[drafted.requestIndex] ?? null,
       draftedAt,
     },
   });

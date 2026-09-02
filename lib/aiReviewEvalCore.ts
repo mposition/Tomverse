@@ -69,6 +69,17 @@ export type AiReviewEvalTaskType = (typeof AI_REVIEW_EVAL_TASK_TYPES)[number];
  * What the case plants. One phenomenon per case on purpose: a case that
  * plants three things at once cannot say which one a miss was.
  */
+/**
+ * The labels a case's answers may carry.
+ *
+ * A gold refers to an answer by its label, and the drafting assignment that
+ * keeps the planted answer from always sitting in the same place is stated in
+ * them. So the set is closed and the labels are unique within a case: an
+ * invented or repeated label makes the case's own gold ambiguous about which
+ * answer it accuses.
+ */
+export const AI_REVIEW_EVAL_RESPONSE_LABELS = ["a", "b", "c"] as const;
+
 export const AI_REVIEW_EVAL_PHENOMENA = [
     "genuine_consensus",
     "meaningful_difference",
@@ -308,6 +319,23 @@ export type AiReviewEvalCase = {
     draftedBy?: {
         modelId: string;
         templateVersion: string;
+        /**
+         * The digest of the instruction ACTUALLY sent, not of the template.
+         * Two calls of the same template version carry different instructions
+         * -- each is shown the questions already in its cell -- so the version
+         * alone cannot answer "what was this case asked for".
+         */
+        instructionHash?: string;
+        /**
+         * Which answer the drafter was told to plant the phenomenon in, from
+         * `assignTargetLabels()`. Null where the phenomenon plants nothing.
+         *
+         * Recorded rather than enforced after the fact: nothing rearranges a
+         * reply, so this is the intent, and a person adopting the case checks
+         * the gold against it. Without it the realised distribution can be
+         * counted but never compared with what was asked for.
+         */
+        targetLabel?: string | null;
         draftedAt: string;
     } | null;
 };

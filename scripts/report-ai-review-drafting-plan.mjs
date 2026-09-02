@@ -60,7 +60,10 @@ const DRAFTER_PRICE_HOLDS = {
     "derived from it. What a user may spend is credits, a separate layer " +
     "(docs/policy/credit-and-cost-limits.md), and the two must not be conflated.",
 };
-import { draftInstruction } from "../lib/aiReviewEvalDraftPrompt.ts";
+import {
+  assignTargetLabels,
+  draftInstruction,
+} from "../lib/aiReviewEvalDraftPrompt.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
 import { COMPARISON_REVIEW_DEFAULT_MODEL_IDS } from "../lib/comparisonReview.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
@@ -190,6 +193,13 @@ for (const batch of batches) {
     mode: batch.mode,
     count: batch.count,
     existingQuestions: seen,
+    targetLabels: assignTargetLabels({
+      language: batch.language,
+      taskType: batch.taskType,
+      phenomenon: batch.phenomenon,
+      mode: batch.mode,
+      count: batch.count,
+    }),
   });
   if (!sampleInstruction) sampleInstruction = instruction;
   inputTokensPerCall.push(draftingInputTokenCeiling(instruction));
