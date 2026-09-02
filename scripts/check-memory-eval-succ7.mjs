@@ -33,7 +33,6 @@ const fail = (m) => failures.push(m);
 const ok = (label, detail) =>
     notes.push(`OK    ${label}${detail ? `  — ${detail}` : ""}`);
 
-const cellOf = (c) => `${c.category}:${c.language}`;
 const succ6ById = new Map(MEMORY_EVAL_SUCC6_CASES.map((c) => [c.id, c]));
 
 /* ------------------------------------------------- the transition table -- */
