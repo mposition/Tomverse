@@ -10,12 +10,20 @@
  * Nothing here freezes anything. Freezing stays a human act recorded in the
  * register (docs/policy/external-conversation-import-and-memory.md 12.4).
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { MEMORY_EVAL_SUCC6_CASES } from "../lib/memoryEvalSucc6.ts";
 import { ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalAssistantOnlySubtypes.ts";
 import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
 import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacements/subtypes.ts";
+import {
+    MEMORY_EVAL_SUCC7_CASES,
+    MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+    buildSucc7DraftManifest,
+    succ7AssemblyProblems,
+} from "../lib/memoryEvalSucc7.ts";
+import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
+import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
 
 const failures = [];
 const notes = [];
@@ -152,6 +160,192 @@ if (missing.length > 0) {
 } else {
     ok("all 54 replacement bodies exist");
 }
+
+
+/* ------------------------------------------------- the assembled dataset -- */
+
+for (const problem of succ7AssemblyProblems()) fail(problem);
+
+const cellsOf = (cases) => {
+    const counts = {};
+    for (const c of cases) {
+        const k = `${c.category}:${c.language}`;
+        counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return counts;
+};
+const before = cellsOf(MEMORY_EVAL_SUCC6_CASES);
+const after = cellsOf(MEMORY_EVAL_SUCC7_CASES);
+if (MEMORY_EVAL_SUCC7_CASES.length !== MEMORY_EVAL_SUCC6_CASES.length) {
+    fail(
+        `succ-7 holds ${MEMORY_EVAL_SUCC7_CASES.length} cases, succ-6 holds ` +
+            `${MEMORY_EVAL_SUCC6_CASES.length} — a 1:1 transition changes neither`
+    );
+} else {
+    ok("case count preserved", `${MEMORY_EVAL_SUCC7_CASES.length}`);
+}
+const movedCells = Object.keys({ ...before, ...after }).filter(
+    (cell) => before[cell] !== after[cell]
+);
+if (movedCells.length > 0) {
+    fail(`cell counts moved: ${movedCells.join(", ")}`);
+} else {
+    ok("every cell count preserved");
+}
+
+// The subtype composition, not merely the floor. All fourteen departing cases
+// are subtype 3, so a replacement declared subtype 4 would hold the floor and
+// still change what the arm measures.
+for (const lang of ["ko", "en"]) {
+    const out = retired.filter((id) => id.startsWith(`succ-assistant-${lang}-`));
+    const inn = replacements.filter((id) =>
+        id.startsWith(`succ-assistant-${lang}-`)
+    );
+    const tally = (ids, table) => {
+        const t = {};
+        for (const id of ids) {
+            const s = table[id]?.subtype;
+            if (s !== undefined) t[s] = (t[s] ?? 0) + 1;
+        }
+        return JSON.stringify(t);
+    };
+    const outT = tally(out, ASSISTANT_ONLY_SUBTYPES);
+    const inT = tally(inn, SUCC7_ASSISTANT_ONLY_SUBTYPES);
+    if (outT !== inT) {
+        fail(
+            `assistant_only:${lang} subtype composition changed — out ${outT}, in ${inT}`
+        );
+    } else {
+        ok(`assistant_only:${lang} subtype composition preserved`, outT);
+    }
+}
+
+/* ---------------------------------------------------- regression corpus -- */
+
+if (SUCC7_REGRESSION_CORPUS.length !== 54) {
+    fail(`the regression corpus holds ${SUCC7_REGRESSION_CORPUS.length}, not 54`);
+}
+const decisionIds = new Set(MEMORY_EVAL_SUCC7_CASES.map((c) => c.id));
+const crossed = SUCC7_REGRESSION_CORPUS.filter((e) =>
+    decisionIds.has(e.originalCase.id)
+);
+if (crossed.length > 0) {
+    fail(
+        `${crossed.length} regression case(s) are still in the decision set: ` +
+            crossed.map((e) => e.originalCase.id).join(", ")
+    );
+} else {
+    ok("decision and regression do not intersect", "0 shared ids");
+}
+const approved = SUCC7_REGRESSION_CORPUS.filter((e) => e.basis === "approved10");
+const carried = SUCC7_REGRESSION_CORPUS.filter((e) => e.basis === "polarity44");
+if (approved.length !== 10 || carried.length !== 44) {
+    fail(`bases split ${approved.length}/${carried.length}, not 10/44`);
+} else {
+    ok("the two preservation bases are kept apart", "10 corrected, 44 as held");
+}
+for (const entry of approved) {
+    if (entry.correctionRecord.length === 0) {
+        fail(`${entry.originalCase.id} is approved10 but records no correction`);
+        continue;
+    }
+    // A corrected gold that cannot anchor is no more scoreable than a
+    // metadata row, which is what section 12.2 refuses.
+    const messages = new Map(
+        (entry.originalCase.conversations ?? []).flatMap((cv) =>
+            (cv.messages ?? []).map((m) => [m.externalMessageId, m.content])
+        )
+    );
+    for (const gold of entry.correctionRecord) {
+        const source = messages.get(gold.evidence?.evidenceMessageId);
+        if (source === undefined) {
+            fail(`${entry.originalCase.id} corrected gold cites an unknown message`);
+            continue;
+        }
+        if (!source.includes(gold.evidence.evidenceQuote)) {
+            fail(`${entry.originalCase.id} corrected quote is not in its message`);
+        }
+        for (const token of gold.factValueAll ?? []) {
+            if (!gold.evidence.evidenceQuote.includes(token)) {
+                fail(
+                    `${entry.originalCase.id} corrected gold token "${token}" ` +
+                        `is outside its own quote`
+                );
+            }
+        }
+    }
+}
+for (const entry of carried) {
+    if (entry.regressionCase !== entry.originalCase) {
+        fail(`${entry.originalCase.id} is polarity44 but its gold was rewritten`);
+    }
+}
+if (failures.length === 0) ok("corrected golds anchor, carried golds untouched");
+
+/* --------------------------------------------------------- import graph -- */
+
+// The regression corpus must not be reachable from the decision loader. It
+// holds the cases succ-7 exists to have removed, and a module that can see
+// them can score them: an import here is how a retired case gets back into a
+// run without anyone deciding to put it there. Checked as text, because that
+// is what an import is — reading the module and inspecting its exports would
+// have already executed the import being forbidden.
+const DECISION_LOADERS = [
+    "../lib/memoryEvalSucc7.ts",
+    "../lib/memoryEvalSucc7Replacements/index.ts",
+    "../lib/memoryEvalSucc7Replacements/assistantOnly.ts",
+    "../lib/memoryEvalSucc7Replacements/durableFacts.ts",
+    "../lib/memoryEvalSucc7Replacements/injectionDirectives.ts",
+    "../lib/memoryEvalSucc7Transition.ts",
+];
+let importsRegression = false;
+for (const rel of DECISION_LOADERS) {
+    const text = readFileSync(new URL(rel, import.meta.url).pathname, "utf8");
+    for (const line of text.split("\n")) {
+        const code = line.replace(/^\s*/, "");
+        if (code.startsWith("*") || code.startsWith("//")) continue;
+        if (/\bfrom\s+["'][^"']*memoryEvalSucc7Regression["']/.test(code)) {
+            fail(`${rel} imports the regression corpus`);
+            importsRegression = true;
+        }
+    }
+}
+if (!importsRegression) {
+    ok("the decision loader cannot reach the regression corpus");
+}
+
+/* ------------------------------------------------------ succ-6 untouched -- */
+
+const drift = verifySucc6Manifest();
+if (drift.length > 0) {
+    fail(`succ-6 no longer matches its signed manifest: ${drift.join("; ")}`);
+} else {
+    ok("succ-6 still matches its signed manifest", "sample, digests, signature");
+}
+const manifest = buildSucc7DraftManifest();
+if (manifest.composition.sourceDatasetDigest !== MEMORY_EVAL_SUCC6_MANIFEST.datasetDigest) {
+    fail("succ-7 records a source digest succ-6's own manifest does not agree with");
+} else {
+    ok("succ-7's source digest is succ-6's pinned digest");
+}
+
+/* ------------------------------------------------------------- not frozen -- */
+
+if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== false || manifest.frozen !== false) {
+    fail("succ-7 claims to be frozen; adoption is a human act and has not happened");
+} else {
+    ok("succ-7 is assembled and NOT frozen", "assembled=true reviewed=false frozen=false");
+}
+
+console.log("");
+console.log(`  datasetVersion    ${manifest.datasetVersion}`);
+console.log(`  supersedes        ${manifest.supersedes}`);
+console.log(`  caseCount         ${manifest.caseCount}`);
+console.log(`  datasetDigest     ${manifest.datasetDigest}`);
+console.log(`  manifestDigest    ${manifest.manifestDigest}`);
+console.log(`  frozen            ${manifest.frozen}`);
+console.log(`  harness target    mem-eval-succ-6 (unchanged)`);
+console.log("");
 
 /* ------------------------------------------------------------- report --- */
 

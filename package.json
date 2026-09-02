@@ -52,6 +52,7 @@
     "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
     "check:memory-eval-succ6": "node --import tsx scripts/check-memory-eval-succ6.mjs",
     "check:memory-eval-succ7": "node --import tsx scripts/check-memory-eval-succ7.mjs",
+    "make:memory-eval-succ7-review-sheet": "node --import tsx scripts/make-memory-eval-succ7-review-sheet.mjs",
     "report:polarity-calibration": "node --import tsx scripts/report-polarity-calibration.mjs",
     "draft:memory-eval-succ4-golds": "node --import tsx scripts/draft-memory-eval-succ4-golds.mjs",
     "report:memory-eval-succ4-review": "node --import tsx scripts/report-memory-eval-succ4-review.mjs",
