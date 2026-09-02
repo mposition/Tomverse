@@ -163,6 +163,10 @@ Date / timezone:    ____________________
       state with its build unnamed and two owner cells reading `(이름)`
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
+- [ ] `npm run check:voice-price-register` — proves every transcription model
+      this deployment can reach has a price with an owner, a ticket and a
+      re-reading deadline that has not passed. Runs against today, because the
+      unit tests pin their own clock and would pass forever
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
       what CI enforces. It is the reason the list above can be trusted: the
       repository grew to twelve CI-enforced checks while this section named
