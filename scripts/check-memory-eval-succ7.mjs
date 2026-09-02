@@ -20,8 +20,11 @@ import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacement
 import {
     MEMORY_EVAL_SUCC7_CASES,
     MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC7_REVIEW,
+    MEMORY_EVAL_SUCC7_REVIEWED,
     buildSucc7DraftManifest,
     succ7AssemblyProblems,
+    succ7SignatureProblems,
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
@@ -387,19 +390,38 @@ if (manifest.composition.sourceDatasetDigest !== MEMORY_EVAL_SUCC6_MANIFEST.data
     ok("succ-7's source digest is succ-6's pinned digest");
 }
 
-/* ------------------------------------------------------------- not frozen -- */
+/* --------------------------------------------------------- the signature -- */
 
-if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== false || manifest.frozen !== false) {
+// Freezing is downstream of signing, never the other way round. A dataset
+// frozen with nobody's name on it is a claim this repository cannot support,
+// and the flag alone cannot tell the two apart: it is a boolean, and the
+// question is whose.
+if (MEMORY_EVAL_SUCC7_DATASET_FROZEN && !MEMORY_EVAL_SUCC7_REVIEWED) {
+    fail("succ-7 is frozen with no signature. Adoption is a human act.");
+}
+if (MEMORY_EVAL_SUCC7_REVIEWED) {
+    const stale = succ7SignatureProblems();
+    if (stale.length > 0) {
+        fail(`the signature no longer describes this tree: ${stale.join("; ")}`);
+    } else {
+        ok(
+            "the signature describes this tree",
+            `${MEMORY_EVAL_SUCC7_REVIEW.reviewer} on ` +
+                `${MEMORY_EVAL_SUCC7_REVIEW.reviewedAt}, dataset ` +
+                `${MEMORY_EVAL_SUCC7_REVIEW.signedDatasetDigest.slice(0, 16)}…`
+        );
+    }
+}
+if (manifest.frozen !== MEMORY_EVAL_SUCC7_DATASET_FROZEN) {
     fail(
-        "succ-7 reports frozen, but the review sheet carries no verdict, " +
-            "reviewer or signature. Adoption is a human act."
-    );
-} else {
-    ok(
-        "succ-7 is assembled and NOT adopted",
-        "assembled=true reviewed=false frozen=false"
+        `the manifest reports frozen=${manifest.frozen} while the module ` +
+            `declares ${MEMORY_EVAL_SUCC7_DATASET_FROZEN}`
     );
 }
+ok(
+    "succ-7's lifecycle state",
+    `reviewed=${MEMORY_EVAL_SUCC7_REVIEWED} frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}`
+);
 // The digest a reviewer signs must be the digest that gets frozen, so `frozen`
 // is not part of the manifest's identity. Asserted, because the whole point of
 // excluding it is lost the moment someone puts it back.
@@ -449,6 +471,7 @@ if (failures.length > 0) {
     process.exit(1);
 }
 console.log(
-    "\nsucc-7 structural checks all hold. It is NOT adopted: the review sheet " +
-        "has no signature, and freezing is a human act."
+    `\nsucc-7 structural checks all hold. reviewed=${MEMORY_EVAL_SUCC7_REVIEWED}, ` +
+        `frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}; the harness still targets ` +
+        "mem-eval-succ-6."
 );

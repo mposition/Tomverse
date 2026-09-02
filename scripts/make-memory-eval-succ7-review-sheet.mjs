@@ -24,7 +24,11 @@ import { writeFileSync } from "node:fs";
 import { MEMORY_EVAL_SUCC7_REPLACEMENTS } from "../lib/memoryEvalSucc7Replacements/index.ts";
 import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacements/subtypes.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
-import { buildSucc7DraftManifest } from "../lib/memoryEvalSucc7.ts";
+import {
+    MEMORY_EVAL_SUCC7_REVIEW,
+    MEMORY_EVAL_SUCC7_REVIEWED,
+    buildSucc7DraftManifest,
+} from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
 import { MEMORY_EVAL_SUCC7_CASES } from "../lib/memoryEvalSucc7.ts";
 import { nearDuplicatePairs } from "../lib/memoryEvalNearDuplicates.ts";
@@ -144,8 +148,17 @@ p("> 다시 만들 수 있습니다. 판정란 외에는 손으로 고치지 마
 p("");
 p("## 이 시트가 묻는 것");
 p("");
-p("succ-7은 **조립됐고 채택되지 않았습니다.** 이 시트의 판정과 서명이 채택의");
-p("전제이며, 서명 전까지 `frozen`은 `false`이고 harness는 succ-6을 가리킵니다.");
+if (MEMORY_EVAL_SUCC7_REVIEWED) {
+    p(
+        `succ-7은 **${MEMORY_EVAL_SUCC7_REVIEW.reviewer}** 가 ` +
+            `**${MEMORY_EVAL_SUCC7_REVIEW.reviewedAt}** 에 서명해 채택됐습니다.`
+    );
+    p("이 시트는 그 서명의 대상이며, 아래 digest가 서명된 값입니다.");
+    p("harness target은 succ-6 그대로입니다 — 이동은 별개 결정입니다.");
+} else {
+    p("succ-7은 **조립됐고 채택되지 않았습니다.** 이 시트의 판정과 서명이 채택의");
+    p("전제이며, 서명 전까지 `frozen`은 `false`이고 harness는 succ-6을 가리킵니다.");
+}
 p("");
 p("`frozen`은 manifest identity에 들어 있지 않으므로, 아래 `manifestDigest`는");
 p("동결 뒤에도 같은 값입니다 — 검수자가 본 digest가 곧 동결되는 digest입니다.");
@@ -168,7 +181,7 @@ p(`| sourceDatasetDigest | \`${manifest.composition.sourceDatasetDigest}\` |`);
 p(`| scoringContract | \`${manifest.scoringContractVersion}\` |`);
 p(`| fingerprint | v${manifest.fingerprintVersion} (대화 title 포함) |`);
 p("| assembled | true |");
-p("| reviewed | **false** |");
+p(`| reviewed | **${MEMORY_EVAL_SUCC7_REVIEWED}** |`);
 p(`| frozen | **${manifest.frozen}** |`);
 p("| harness target | `mem-eval-succ-6` (변경 없음) |");
 p("");
@@ -319,22 +332,51 @@ p("## 채택 판정");
 p("");
 p("| 항목 | 값 |");
 p("|---|---|");
-p("| 검수자 | |");
-p("| 검수일 | |");
-p("| same_boundary 통과 건수 (53 중) | |");
-p("| coverage_repair 판정 (해당 없음 / gold 적합) | |");
-p("| 문제 있는 건수 | |");
-p("| 다양성 판정 (모든 cell 충분 / 하나라도 불충분) | |");
-p("| succ-7을 decision set으로 채택하는가 | |");
+if (MEMORY_EVAL_SUCC7_REVIEWED) {
+    const { reviewer, reviewedAt, reviewedCommit, verdict, record } =
+        MEMORY_EVAL_SUCC7_REVIEW;
+    p(`| 검수자 | ${reviewer} |`);
+    p(`| 검수일 | ${reviewedAt} |`);
+    p(`| 검수 대상 commit | \`${reviewedCommit}\` |`);
+    p(
+        `| same_boundary 통과 건수 (${verdict.sameBoundaryTotal} 중) | ` +
+            `${verdict.sameBoundaryPassed} |`
+    );
+    p(
+        "| coverage_repair 판정 | " +
+            `${verdict.coverageRepairGoldFit ? "해당 없음 / gold 적합" : "부적합"} |`
+    );
+    p(`| 문제 있는 건수 | ${verdict.problemCases} |`);
+    p(
+        "| 다양성 판정 | " +
+            `${verdict.cellDiversitySufficient ? "모든 cell 충분" : "하나 이상 불충분"} |`
+    );
+    p("| succ-7을 decision set으로 채택하는가 | **예** |");
+    p(`| 채택 기록 | \`${record}\` |`);
+} else {
+    p("| 검수자 | |");
+    p("| 검수일 | |");
+    p("| same_boundary 통과 건수 (53 중) | |");
+    p("| coverage_repair 판정 (해당 없음 / gold 적합) | |");
+    p("| 문제 있는 건수 | |");
+    p("| 다양성 판정 (모든 cell 충분 / 하나라도 불충분) | |");
+    p("| succ-7을 decision set으로 채택하는가 | |");
+}
 p("");
-p("마지막 줄이 **채택**입니다. 이 시트도, 어떤 검사도 그것을 대신하지");
-p("않습니다. 서명 뒤에야 `FROZEN=true` 전환과 manifest literal pin, harness");
-p("target 이동이 각각 별도 변경으로 이어집니다.");
+if (MEMORY_EVAL_SUCC7_REVIEWED) {
+    p("서명이 덮는 것은 54개 대체 케이스와 그 gold까지입니다. harness target");
+    p("이동, `mem-extract-v8`, pair 등록, 예산, 유료 실행, release gate와");
+    p("feature flag는 각각 별개 결정이며 이 서명에 포함되지 않습니다.");
+} else {
+    p("마지막 줄이 **채택**입니다. 이 시트도, 어떤 검사도 그것을 대신하지");
+    p("않습니다. 서명 뒤에야 `FROZEN=true` 전환과 manifest literal pin, harness");
+    p("target 이동이 각각 별도 변경으로 이어집니다.");
+}
 p("");
 
 writeFileSync(out, L.join("\n"), "utf8");
 console.log(
     `Wrote ${MEMORY_EVAL_SUCC7_REPLACEMENTS.length} case(s) to ${out}\n` +
-        `assembled=true  reviewed=false  frozen=${manifest.frozen}  ` +
-        `harness target=mem-eval-succ-6`
+        `assembled=true  reviewed=${MEMORY_EVAL_SUCC7_REVIEWED}  ` +
+        `frozen=${manifest.frozen}  harness target=mem-eval-succ-6`
 );

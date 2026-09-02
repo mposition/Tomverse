@@ -51,6 +51,74 @@ export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = false;
 export const MEMORY_EVAL_SUCC7_DATASET_PURPOSE: "development" | "decision" =
     "decision";
 
+/**
+ * The signature the adoption rests on.
+ *
+ * A record, not a flag. `reviewed` had been the string "false" written into
+ * two scripts, which can only ever say what its author believed on the day —
+ * it names nobody, cites nothing, and cannot disagree with the tree. What a
+ * signature has to survive is the case that follows it: an edit after the
+ * review, keeping the same version number.
+ *
+ * So the digests the reviewer actually read are recorded here, and
+ * `succ7SignatureProblems()` compares them with what the tree computes now.
+ * Move a case and the signature stops matching — which is the whole of what
+ * signing a dataset can mean.
+ *
+ * `reviewedCommit` is the commit whose sheet was read. It is not the commit
+ * that froze the dataset; that one cannot contain its own SHA, and it is
+ * recorded afterwards in the adoption record.
+ *
+ * What the signature covers is in
+ * `.github/audits/memory-eval-succ7-adoption-2026-09-02.md`: the 54
+ * replacements and their gold. It does not cover the harness target, which
+ * still points at succ-6, nor `mem-extract-v8`, a pair, a budget, a paid run,
+ * a release gate or a feature flag — each of those is its own decision with
+ * its own record, and none of them was signed here.
+ */
+export type Succ7AdoptionSignature = {
+    status: "signed";
+    reviewer: string;
+    reviewedAt: string;
+    reviewedCommit: string;
+    signedDatasetDigest: string;
+    signedManifestDigest: string;
+    signedSourceDatasetDigest: string;
+    verdict: {
+        sameBoundaryPassed: number;
+        sameBoundaryTotal: number;
+        coverageRepairGoldFit: boolean;
+        problemCases: number;
+        cellDiversitySufficient: boolean;
+    };
+    record: string;
+};
+
+export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
+    status: "signed",
+    reviewer: "@mposition",
+    reviewedAt: "2026-09-02",
+    reviewedCommit: "e522796dd11e3d009d23a13836b7a45b005f3bc8",
+    signedDatasetDigest:
+        "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+    signedManifestDigest:
+        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+    signedSourceDatasetDigest:
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+    verdict: {
+        sameBoundaryPassed: 53,
+        sameBoundaryTotal: 53,
+        coverageRepairGoldFit: true,
+        problemCases: 0,
+        cellDiversitySufficient: true,
+    },
+    record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
+};
+
+/** True once a person has signed. Nothing in this file may set it. */
+export const MEMORY_EVAL_SUCC7_REVIEWED =
+    MEMORY_EVAL_SUCC7_REVIEW.status === "signed";
+
 const RETIRED = new Set(SUCC7_RETIRED_CASE_IDS);
 
 /**
@@ -203,6 +271,78 @@ export function buildSucc7DraftManifest(): Succ7DraftManifest {
         ...withoutDigest,
         manifestDigest: sha256(manifestFingerprintInput(withoutDigest)),
     };
+}
+
+/**
+ * Everything the signature claims that the tree no longer supports.
+ *
+ * The comparison runs the way a signature has to: a recorded literal against a
+ * value recomputed here and now. A version that recomputed both sides would
+ * agree with itself forever, which is the failure this repository has already
+ * shipped once — `verifySucc6Manifest()` was defaulting both of its arguments
+ * to the builder, so the freeze check compared the tree with the tree and
+ * reported a clean bill through any edit at all.
+ *
+ * `sourceDatasetDigest` is checked too. It is succ-6's identity, and a
+ * signature that still matches succ-7 while its predecessor moved underneath
+ * would be describing a lineage that no longer exists.
+ */
+export function succ7SignatureProblems(
+    signature: Succ7AdoptionSignature = MEMORY_EVAL_SUCC7_REVIEW,
+    built: Succ7DraftManifest = buildSucc7DraftManifest()
+): readonly string[] {
+    const problems: string[] = [];
+    if (signature.signedDatasetDigest !== built.datasetDigest) {
+        problems.push(
+            `the signature is of dataset ${signature.signedDatasetDigest}, the ` +
+                `tree holds ${built.datasetDigest}`
+        );
+    }
+    if (signature.signedManifestDigest !== built.manifestDigest) {
+        problems.push(
+            `the signature is of manifest ${signature.signedManifestDigest}, the ` +
+                `tree computes ${built.manifestDigest}`
+        );
+    }
+    if (
+        signature.signedSourceDatasetDigest !==
+        built.composition.sourceDatasetDigest
+    ) {
+        problems.push(
+            `the signature records succ-6 as ${signature.signedSourceDatasetDigest}, ` +
+                `the tree computes ${built.composition.sourceDatasetDigest}`
+        );
+    }
+    if (!signature.reviewer || !signature.reviewedAt) {
+        problems.push("the signature names no reviewer, or no date");
+    }
+    // A verdict is what was signed; a partial one is not a signature of this
+    // dataset. Recorded as numbers rather than a boolean so a later reader can
+    // see what the reviewer actually passed, and so a quietly weakened verdict
+    // is a diff rather than a mood.
+    const { verdict } = signature;
+    if (verdict.sameBoundaryPassed !== verdict.sameBoundaryTotal) {
+        problems.push(
+            `the verdict passes ${verdict.sameBoundaryPassed} of ` +
+                `${verdict.sameBoundaryTotal} same-boundary transitions`
+        );
+    }
+    if (verdict.sameBoundaryTotal !== SUCC7_SAME_BOUNDARY_COUNT) {
+        problems.push(
+            `the verdict counts ${verdict.sameBoundaryTotal} same-boundary ` +
+                `transitions, the transition declares ${SUCC7_SAME_BOUNDARY_COUNT}`
+        );
+    }
+    if (verdict.problemCases !== 0) {
+        problems.push(`the verdict records ${verdict.problemCases} problem case(s)`);
+    }
+    if (!verdict.coverageRepairGoldFit) {
+        problems.push("the coverage repair's gold was not passed");
+    }
+    if (!verdict.cellDiversitySufficient) {
+        problems.push("a cell's diversity was not found sufficient");
+    }
+    return problems;
 }
 
 /**
