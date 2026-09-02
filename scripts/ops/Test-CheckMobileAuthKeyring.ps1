@@ -122,9 +122,10 @@ function Invoke-Wrapper {
     $global:throwOnPrompt = $ThrowOnPrompt
     Clear-Managed
 
-    # 6>&1 captures the information stream too: Write-Host goes there, so
-    # without it case 4 would be checking a stream the lengths never reach --
-    # and a secret printed with Write-Host would pass unnoticed.
+    # *>&1 and not 2>&1 6>&1: a secret reaches the operator's screen through
+    # whichever stream printed it, so the leak check has to read all of them.
+    # Warning, verbose and debug (3, 4, 5) were the gap -- Write-Warning $secret
+    # showed the value on screen and case 4a saw nothing.
     $output = $null
     $threw = $false
     try {
@@ -135,7 +136,7 @@ function Invoke-Wrapper {
             -TokenAudience "tomverse-mobile-api" `
             -RetiredSigningKeys "sign-1@2026-09-02T10:00:00Z" `
             -RetiredRefreshPeppers "pep-1@2026-09-02T10:00:00Z" `
-            -RequireConfigured 2>&1 6>&1 | Out-String
+            -RequireConfigured *>&1 | Out-String
     }
     catch {
         $threw = $true
@@ -152,11 +153,34 @@ function Invoke-Wrapper {
     }
 }
 
-# 1. Neither ring is a parameter.
-$declared = (Get-Command $wrapper).Parameters.Keys
-$secretParams = @($declared | Where-Object { $_ -match "SigningKeys$|Peppers$" -and $_ -notmatch "^Retired" })
-Assert-Case "1. neither ring is a parameter" ($secretParams.Count -eq 0) `
-    ("declared: {0}" -f ($declared -join ", "))
+# 1. The parameter surface is exactly this, and a name is never guessed at.
+#    Matching "looks like a secret" would pass a parameter called
+#    -SigningKeyRing, so the list is closed instead: anything new has to be
+#    added here deliberately, which is the moment to ask whether it is a secret.
+$ALLOWED_PARAMETERS = @(
+    "ActiveSigningKeyId",
+    "ActiveRefreshPepperId",
+    "TokenIssuer",
+    "TokenAudience",
+    "RetiredSigningKeys",
+    "RetiredRefreshPeppers",
+    "RequireConfigured"
+)
+
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($wrapper, [ref]$tokens, [ref]$parseErrors)
+Assert-Case "1a. the wrapper parses" (@($parseErrors).Count -eq 0) `
+    ("errors: {0}" -f (@($parseErrors | ForEach-Object { $_.Message }) -join "; "))
+
+# ParamBlock, not Get-Command: the AST gives the script's own parameters
+# without PowerShell's common ones mixed in.
+$declared = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+$unexpected = @($declared | Where-Object { $ALLOWED_PARAMETERS -notcontains $_ })
+$missing = @($ALLOWED_PARAMETERS | Where-Object { $declared -notcontains $_ })
+Assert-Case "1b. the parameter surface is exactly the allowed list" `
+    (($unexpected.Count -eq 0) -and ($missing.Count -eq 0)) `
+    ("unexpected: [{0}] missing: [{1}]" -f ($unexpected -join ", "), ($missing -join ", "))
 
 # 2. Exit code of the underlying check is returned. Also: prompted twice,
 #    and the flag reached the check.
@@ -187,8 +211,12 @@ foreach ($run in @($ok, $bad, $interrupted)) {
 }
 Assert-Case "4a. neither secret appears in the output" ($leaked.Count -eq 0) `
     ("leaked: {0}" -f ($leaked -join ", "))
-Assert-Case "4b. lengths are reported" `
-    ($ok.Output -match ("length: {0}" -f $SIGNING_SECRET.Length)) ""
+# Both, separately: the wrapper prints two lines and one of them going missing
+# is exactly the kind of edit that reads as harmless.
+Assert-Case "4b. the signing ring's length is reported" `
+    ($ok.Output -match ("MOBILE_AUTH_SIGNING_KEYS length: {0}\b" -f $SIGNING_SECRET.Length)) ""
+Assert-Case "4c. the pepper ring's length is reported" `
+    ($ok.Output -match ("MOBILE_AUTH_REFRESH_PEPPERS length: {0}\b" -f $PEPPER_SECRET.Length)) ""
 
 $failed = @($global:results | Where-Object { -not $_.Ok })
 Write-Host ""

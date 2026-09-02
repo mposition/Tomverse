@@ -482,11 +482,11 @@ sealed로 두면 그 `이전키`를 어디서도 읽을 수 없습니다. **첫 
 | 대조하고 싶은 것 | 지금 가능한가 |
 |---|---|
 | 활성 **서명** 키 id | **가능** — 발급된 access token의 JWS 헤더 `kid` |
-| 서명 링의 나머지 항목 | **불가** — 링에 있을 뿐인 키를 알리는 것이 없습니다 |
-| 활성 **pepper** id, pepper 링 | **불가** — `MobileRefreshRotation`을 포함해 어떤 행도 digest를 계산한 pepper의 id를 남기지 않습니다 |
+| 활성 **pepper** id | **가능** — `MobileRefreshRotation.pepperKid` (§5.8의 1번에서 정정) |
+| 두 링의 나머지 항목 | **불가** — 링에 있을 뿐인 키를 알리는 것이 없습니다 |
 
-즉 (c)를 지금 채택하면 대조 범위는 **활성 서명 키 id 하나**입니다. runbook §2.2에
-그렇게 적고, 전면 대조로 적어 두고 한 필드만 보는 것이 가장 나쁜 결과라고 덧붙였습니다.
+즉 (c)를 지금 채택하면 대조 범위는 **두 활성 id**입니다. runbook §2.2에 그렇게 적고,
+전면 대조로 적어 두고 두 필드만 보는 것이 가장 나쁜 결과라고 덧붙였습니다.
 
 **2. [회귀망] wrapper의 보안 계약에 자동 테스트가 없었습니다.**
 기존 14건은 내부 `.mjs` 검사기만 돌리고 wrapper는 지나갑니다.
@@ -497,7 +497,7 @@ sealed로 두면 그 `이전키`를 어디서도 읽을 수 없습니다. **첫 
 던지게 해서 만들며 이는 Ctrl-C가 `finally`로 들어가는 것과 같은 경로입니다. 자격증명도
 네트워크도 필요 없고 실제 `npm`을 부르지 않습니다.
 
-**이번에는 실행했습니다 — 10 사례 전부 통과.** rev.7까지 "이 컨테이너에 `pwsh`가
+**이번에는 실행했습니다 — 전부 통과**(rev.8에서 10 사례, rev.9에서 12). rev.7까지 "이 컨테이너에 `pwsh`가
 없다"고 적었는데, 정확히는 **받아 보지 않은 것**이었습니다. PowerShell
 7.4.6(linux-x64)을 내려받아 실행했고, 그 과정에서 테스트 자신의 버그 셋을 잡아
 고쳤습니다 — `$script:` 상태가 *정의된* script가 아니라 *실행 중인* script를 가리켜
@@ -515,7 +515,8 @@ shim이 무력화된 것, 빈 배열이 반환에서 `$null`로 풀려 `.Count`�
 | 무조건 `exit 0` | 2d |
 | 링을 parameter로 추가 | 1 |
 
-그 뒤 트리를 되돌렸고 10/10로 복귀했습니다.
+그 뒤 트리를 되돌렸고 전부 통과로 복귀했습니다. **rev.9에서 mutation은 아홉 건으로,
+사례는 12개로 늘었습니다** — §5.8.
 
 **그래도 릴리스 체크리스트에 release SHA에 묶인 실행 기록을 요구하는 항목을
 넣었습니다.** 여기서 돈 것은 Linux의 PowerShell 7.4.6이고, 이 wrapper가 막으려는 것은
@@ -532,6 +533,55 @@ runbook과 이 보고서를 고쳤습니다.
 것도 아니지만**, 지적대로 그 키는 노출된 것으로 보고 폐기·회전하고 PSReadLine 이력
 파일에서 해당 줄을 지우는 편이 안전합니다 — 그리고 그것이 §5.6의 1번이 막으려던
 바로 그 경로가 실제로 존재한다는 증거입니다.
+
+---
+
+### 5.8 8차 검토(2026-09-02)에서 지적돼 고친 것
+
+**1. [높음] pepper 관측 가능성 표가 사실과 달랐습니다.**
+rev.8은 "`MobileRefreshRotation`을 포함해 어떤 행도 digest를 계산한 pepper의 id를
+남기지 않는다"고 적었습니다. **`pepperKid`가 rotation 행마다 저장됩니다** —
+`prisma/schema.prisma`가 컬럼을 선언하고, `lib/mobileRefreshToken.ts`의
+`mintMobileRefreshToken()`이 `pepper.keyId`로 채우고, `lib/mobileAuthService.ts`가
+`mobileRefreshRotation.create`에 씁니다.
+
+**어떻게 틀렸는지가 중요합니다.** schema를 `pepperKeyId|signingKeyId|KeyId`로 grep
+했고, 실제 이름은 `pepperKid`라 하나도 걸리지 않았습니다. 그리고 **아무것도 안 나온
+것을 없다는 근거로 삼았습니다.** 실패한 검색은 부재의 증거가 아닙니다 — 이 저장소가
+`unknown_kid`·`kid`를 쓰는 곳에서 컬럼 이름도 `Kid`라는 것은 오히려 일관적입니다.
+
+→ runbook §2.2와 위 §5.7의 표를 고쳤습니다. 관측 경로는 **두 활성 id**이고, pepper
+쪽은 통제된 exchange 또는 refresh 직후 **그때 생긴 행**을 읽는 것입니다(오래된 행은
+그때의 세대를 말할 뿐입니다).
+
+**2. [회귀망] 비밀 유출 검사가 stream 셋을 놓쳤습니다.**
+`2>&1 6>&1`은 error와 information만 모으고 warning·verbose·debug(3·4·5)는 지나갑니다.
+검토자가 `Write-Warning $secret`을 주입하니 화면에는 값이 찍혔는데 4a는 통과했습니다.
+→ `*>&1`로 전부 수집합니다. 세 stream 각각으로 유출을 주입해 4a가 세 번 다 실패하는
+것을 확인했습니다.
+
+**그리고 4b가 signing 길이만 봤습니다** — 계약은 "두 비밀의 길이"입니다. 4b·4c로
+나눠 각각 고정하고, pepper 길이 줄을 지워 4c가 실패하는 것을 확인했습니다.
+
+**3. [회귀망] 비밀 parameter 탐지가 이름 규칙에 기댔습니다.**
+`SigningKeys$|Peppers$`는 `-SigningKeyRing`을 통과시킵니다. 계약이 "비밀처럼 보이는
+이름이 없다"가 아니라 "이 일곱 개 말고는 없다"이므로 그렇게 고쳤습니다.
+→ `[Parser]::ParseFile`로 AST의 `ParamBlock`을 읽어 **허용 목록과 정확히 대조**합니다
+(common parameter가 섞이지 않아 `Get-Command`보다 정확합니다). 초과와 누락을 함께
+보고하므로, 새 parameter를 추가하는 사람이 그것이 비밀인지 묻게 되는 자리가
+생깁니다. `-SigningKeyRing`을 넣어 1b가 실패하는 것을 확인했습니다.
+
+**이번 회차의 mutation 확인은 아홉 건이고 전부 걸렸습니다.**
+
+| 고의 결함 | 걸린 사례 |
+|---|---|
+| `finally`의 정리 제거 | 3a · 3b · 3c |
+| 길이 대신 비밀값 출력 | 4a · 4b |
+| 무조건 `exit 0` | 2d |
+| 링을 parameter로 추가 | 1b |
+| `Write-Warning` / `Write-Verbose` / `Write-Debug`로 유출 | 4a (세 번) |
+| `-SigningKeyRing` — 비밀처럼 안 보이는 이름 | 1b |
+| pepper 길이 줄 삭제 | 4c |
 
 ---
 
@@ -561,9 +611,13 @@ runbook과 이 보고서를 고쳤습니다.
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
 >
+> **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
+> 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
 > **rev.8 회차.** 바꾼 것은 문서 셋과 새 PowerShell smoke test 하나입니다. 같은 세
 > 게이트를 다시 돌렸고 `tests/mobileAuthKeyringCheck.test.mjs`도 다시 돌렸습니다
-> (14 pass / 0 fail). **새 smoke test도 돌렸습니다 — 10/10** (PowerShell 7.4.6을
+> (14 pass / 0 fail). **새 smoke test도 돌렸습니다 — 10/10**, rev.9에서 12/12
+> (PowerShell 7.4.6을
 > 컨테이너에 받아서). 남은 공백은 **Windows PowerShell에서의 실행**과 **진짜
 > Ctrl-C**이고, 그것은 §10과 릴리스 체크리스트가 들고 있습니다.
 
@@ -645,7 +699,7 @@ fail-closed로 답합니다. production 활성화를 결정할 때 `/api/ready`�
 | **웹 `sessionSecurity` 캐시 조사** | 승인 항목 18 — 별도 후속. N2에는 D12의 강화된 계약을 처음부터 적용했습니다 |
 | **maintenance stub 검사** | §8의 재발 방지. 아직 없습니다 |
 | **§2.2의 (a) 또는 (b) 택일** | **활성화의 선결 조건.** 회전은 현재 링의 평문을 요구하는데 sealed 값은 그것을 돌려주지 않습니다. 정해지지 않으면 첫 설정은 되고 **두 번째 회전이 안 됩니다.** (c)는 택일 대상이 아니라 그 위의 선택이며, 채택하면 관측 범위(=활성 서명 키 id 하나)도 함께 적습니다 |
-| **wrapper smoke test를 Windows PowerShell에서** | `scripts/ops/Test-CheckMobileAuthKeyring.ps1`은 여기서 10/10 통과했지만 그것은 **Linux의 PowerShell 7.4.6**입니다. 이 wrapper가 막으려는 것은 운영자의 Windows PowerShell 습관이므로, 릴리스 체크리스트가 release SHA에 묶인 실행 기록을 요구합니다 |
+| **wrapper smoke test를 Windows PowerShell에서** | `scripts/ops/Test-CheckMobileAuthKeyring.ps1`은 여기서 12/12 통과했지만 그것은 **Linux의 PowerShell 7.4.6**입니다. 이 wrapper가 막으려는 것은 운영자의 Windows PowerShell 습관이므로, 릴리스 체크리스트가 release SHA에 묶인 실행 기록을 요구합니다 |
 | **검사기를 배포 이미지에서 실행 가능하게** | 순수 판정 부분을 의존성 없는 `.mjs`로. 그래야 `railway ssh`로 들어가 **살아 있는** 설정을 감사할 수 있습니다. 지금은 배포할 값을 손으로 넣는 사전 검증만 됩니다 |
 | **은퇴 키 자동 제거·상시 보고** | 유예가 지난 항목과 선언되지 않은 키를 코드가 쓰지 않을 뿐, 배포 전 확인을 **돌리게 하는 것은 문서뿐**입니다. 상시 점검은 production 활성화와 함께 정합니다 |
 | **`MOBILE_AUTH_PRE_AUTH_RATE_LIMIT`(분 60 / 일 2,000) 승인** | 승인된 18개 밖의 새 값입니다. 재검토에서 "미승인 값으로 명확히 기록됨 — production 승인 전 사람의 결정 필요"로 확인됐습니다 |
