@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -76,4 +77,49 @@ test("what JS may hold is an access token and an expiry, and nothing else", () =
   assert.ok(grant, "MobileAccessGrant should be declared");
   const fields = [...grant.matchAll(/^\s{2}(\w+):/gm)].map((match) => match[1]);
   assert.deepEqual(fields.sort(), ["accessToken", "expiresAt"]);
+});
+
+// --- the boundary as a shipped gate --------------------------------------
+
+test("the bundle's own source passes the boundary check", () => {
+  // The gate runs in CI; running it here too means a change to apps/mobile
+  // fails in the unit lane rather than several minutes later.
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/check-native-token-boundary.mjs"],
+    { encoding: "utf8" }
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /none able to hold a refresh token/);
+});
+
+test("the boundary check actually fails on what it claims to catch", () => {
+  // A validator nobody has seen fail is a validator nobody knows works. Three
+  // shapes, and the comment case, which must not trip it -- the modules here
+  // explain at length why a refresh token is absent, and an explanation is not
+  // a use.
+  const probe = new URL("../apps/mobile/src/boundaryProbe.test-tmp.ts", import.meta.url);
+  const run = () =>
+    spawnSync(process.execPath, ["scripts/check-native-token-boundary.mjs"], {
+      encoding: "utf8",
+    });
+
+  try {
+    for (const source of [
+      'export const url = "/api/auth/mobile/refresh";',
+      'export const refreshToken = "x";',
+      "export const token = { refresh_token: 1 };",
+    ]) {
+      writeFileSync(probe, `${source}\n`);
+      assert.notEqual(run().status, 0, source);
+    }
+
+    writeFileSync(
+      probe,
+      "// refreshToken is absent; /api/auth/mobile/refresh is the native layer's\nexport const ok = 1;\n"
+    );
+    assert.equal(run().status, 0, "a comment explaining the rule must not break it");
+  } finally {
+    rmSync(probe, { force: true });
+  }
 });
