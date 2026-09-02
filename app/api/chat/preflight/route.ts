@@ -339,13 +339,20 @@ export async function POST(request: Request) {
           quote that does not describe the request
           (docs/policy/external-conversation-continuation.md §5).
 
-          A comparison of a bridged conversation is not a shape the product
-          offers today -- a continuation is `productKey = "chat"` and this route
-          takes two or three models -- so in practice this resolves to the empty
-          string. It is wired anyway, because "the two routes price the same
-          blocks" is the contract `buildChatTurnSystemBlocks` exists to keep,
-          and an exception that is true today is how the drift it was written
-          for came back.
+          A continuation is a Review conversation
+          (docs/policy/external-conversation-continuation.md §3.1), so a
+          comparison of a bridged conversation is the ordinary shape rather
+          than an impossible one: this route takes two or three models and the
+          seed is priced into each of their budgets below. §4.4 -- the seed
+          costs one input block per model request, and the quote has to say so
+          before the requests go out.
+
+          The seed itself is read once, here. It is deterministic in the
+          snapshot and the seed version, so every model in the turn is priced
+          against the same excerpt they will each be sent
+          (docs/policy/external-conversation-continuation.md §5.1); reading it
+          per model would cost three identical queries to reach the same
+          answer.
         */
         let continuationSeed:
             | { rulesText: string; transcriptText: string }

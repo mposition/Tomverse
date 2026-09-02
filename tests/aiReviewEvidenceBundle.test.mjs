@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -417,4 +419,26 @@ test("a missing sheet is a finding, not a silence", () => {
       problem.includes("the blind sheet is missing")
     )
   );
+});
+
+test("the evidence directories are pinned to LF, or a Windows clone fails its own approval", () => {
+  // Every one of these files is bound to an approval by digest, and the blind
+  // sheet is additionally rebuilt and compared byte for byte. Git's autocrlf
+  // on Windows rewrites LF to CRLF at checkout, so evidence that verifies on
+  // the machine that produced it -- and in CI, which is Linux -- would fail on
+  // a fresh Windows clone of the same commit.
+  //
+  // That asymmetry is the worst shape it could take: the operator whose
+  // approval it is sees a digest mismatch nobody else can reproduce, and the
+  // honest reading of a digest mismatch is tampering.
+  const attributes = readFileSync(".gitattributes", "utf8");
+  for (const line of [
+    "docs/ops/ai-review-evaluation-records/** text eol=lf",
+    "docs/ops/ai-review-evaluation-set/*.json text eol=lf",
+  ]) {
+    assert.ok(
+      attributes.includes(line),
+      `.gitattributes must pin "${line}"; without it a digest means a different thing on each platform`
+    );
+  }
 });

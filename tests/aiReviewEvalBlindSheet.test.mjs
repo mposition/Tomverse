@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildBlindSheet,
+  rebuildBlindSheet,
   renderBlindReviewRecord,
   renderBlindSheet,
 } from "../lib/aiReviewEvalBlindSheet.ts";
@@ -178,4 +179,78 @@ test("the sheet shows the reviewer's own sentences apart from its quotes", () =>
   assert.ok(markdown.includes("검토자 자신의 문장 (인용 제외)"));
   assert.ok(markdown.includes("the two answers disagree on bleeding risk"));
   assert.equal(sheet.entries[0].reviewerProse.includes("OpenAI"), false);
+});
+
+test("a rebuild matches the real generator past a thousand cases", () => {
+  // Not rebuild-against-rebuild, which agrees with itself by construction.
+  // This runs buildBlindSheet -- the generator an operator actually uses --
+  // and rebuilds from the answer key it produced.
+  //
+  // The labels are `S` plus a three-digit pad, so past 999 they gain a fourth
+  // digit and a string sort stops matching the order they were written in:
+  // `S1000` sorts before `S200`. A 1,001-case sheet diverged from its rebuild
+  // at index 100, so the gate would have refused a correct sheet made by the
+  // official generator. The default review is 60 cases, but --sample=1200 is
+  // allowed.
+  const cases = Array.from({ length: 1_001 }, (_, index) => ({
+    id: `en-safety-${String(index + 1).padStart(4, "0")}`,
+    language: "en",
+    taskType: "safety_sensitive",
+    phenomenon: "direct_contradiction",
+    mode: "balanced",
+    question: `question ${index + 1}`,
+    responses: [
+      { label: "a", modelId: "m1", provider: "openai", content: `first ${index}` },
+      { label: "b", modelId: "m2", provider: "anthropic", content: `second ${index}` },
+    ],
+    gold: {},
+    goldCompleteness: {},
+  }));
+  const observations = new Map(
+    cases.map((testCase) => [
+      testCase.id,
+      {
+        findings: { contradictions: [], missingPoints: [], differences: [] },
+        allText: `review of ${testCase.id}`,
+        reviewerProse: `review of ${testCase.id}`,
+        totalQuotes: 0,
+        matchedQuotes: 0,
+        schemaValid: true,
+      },
+    ])
+  );
+
+  const generated = buildBlindSheet({
+    cases,
+    observations,
+    seed: 7,
+    sampleSize: cases.length,
+  });
+  assert.equal(generated.entries.length, 1_001);
+
+  const rebuilt = rebuildBlindSheet({
+    cases,
+    observations,
+    // Through JSON, because that is how the answer key reaches the rebuild.
+    answerKey: JSON.parse(JSON.stringify(generated.answerKey)),
+  });
+  assert.ok(rebuilt);
+  assert.deepEqual(
+    rebuilt.entries.map((entry) => entry.label),
+    generated.entries.map((entry) => entry.label)
+  );
+  assert.deepEqual(
+    rebuilt.entries.map((entry) => entry.caseId),
+    generated.entries.map((entry) => entry.caseId)
+  );
+
+  const meta = {
+    runOrdinal: 1,
+    reviewerModelId: "mistral-medium-3-1",
+    promptVersion: "comparison-review-v3",
+    datasetVersion: "decision-v1",
+    seed: 7,
+    thresholdVersion: "v1-draft",
+  };
+  assert.equal(renderBlindSheet(rebuilt, meta), renderBlindSheet(generated, meta));
 });

@@ -188,7 +188,20 @@ export function rebuildBlindSheet(input: {
     const entries: AiReviewBlindSheetEntry[] = [];
     const answerKey: Record<string, { caseId: string; gold: unknown; notes?: string }> = {};
 
-    for (const label of Object.keys(input.answerKey).sort()) {
+    // The answer key's own order, not a sorted one.
+    //
+    // The labels are `S` plus a three-digit pad, so past 999 they get a fourth
+    // digit and a string sort stops matching the order they were written in:
+    // `S1000` sorts before `S200`, and a 1,001-case sheet diverged from its
+    // rebuild at index 100. Numeric parsing would fix that, but the deeper
+    // point is that the answer key IS the record of what was shown and in what
+    // order -- so re-deriving an order from the labels answers a question the
+    // file has already answered, and can only disagree with it.
+    //
+    // Insertion order is what `Object.keys` gives for these keys: `S001` is
+    // not an integer index, so it is not subject to the numeric-key ordering
+    // rule, and JSON.parse preserves the order the file was written in.
+    for (const label of Object.keys(input.answerKey)) {
         const caseId = input.answerKey[label]?.caseId;
         const testCase = caseId ? byId.get(caseId) : undefined;
         const observation = caseId ? input.observations.get(caseId) : undefined;

@@ -378,18 +378,27 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     //
     // Naming nothing, and naming a real set nobody has signed, are both scope:
     // there is no bar to apply, and the check says so beside its ok.
-    if (effectiveThresholdVersion && !namedSet) {
+    if (!effectiveThresholdVersion) {
+      // Not a note. The record's identity check requires a threshold version
+      // and compares it, so evidence without one never reaches a coverage
+      // note anyway -- it fails a few lines later with "the record does not
+      // state thresholdVersion". Two rules describing the same evidence
+      // differently is how a contract stops meaning anything, so this says
+      // plainly what the other one already enforced: the generator always
+      // writes a version, and evidence that carries none was not made by it.
+      problems.push(
+        "no threshold version: this evidence does not say which bar it was produced " +
+          "under, and the blind sheet generator always records one"
+      );
+    } else if (!namedSet) {
       problems.push(
         `threshold set "${effectiveThresholdVersion}" does not exist; this evidence names ` +
           "a bar that is not in this tree"
       );
     } else if (approvedBar === undefined) {
       notes.push(
-        effectiveThresholdVersion
-          ? `coverage not judged: threshold set "${effectiveThresholdVersion}" is not approved, ` +
-            "so it supplies no bar for how many cases the blind review had to cover"
-          : "coverage not judged: nothing names a threshold version, so there is no bar " +
-            "for how many cases the blind review had to cover"
+        `coverage not judged: threshold set "${effectiveThresholdVersion}" is not approved, ` +
+          "so it supplies no bar for how many cases the blind review had to cover"
       );
     }
     const journalText = readFileSync(journalPath, "utf8");
