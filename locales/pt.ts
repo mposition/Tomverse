@@ -1278,6 +1278,8 @@ export const pt = {
         sourceUnavailable: "Não foi possível encontrar essa conversa importada.",
         lockedRefusal: "O original importado está bloqueado. Desbloqueie-o na página dele.",
         quickStartFailed: "Não foi possível iniciar a continuação.",
+        showSource: "Mostrar a conversa importada",
+        hideSource: "Ocultar a conversa importada",
         sourceSectionTitle: "Conversa externa · apenas leitura",
         sourceSectionSubtitle: "De {provider}, importada a {date}",
         externalAnswerBadge: "Resposta externa",
