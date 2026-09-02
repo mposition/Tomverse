@@ -17,7 +17,9 @@
  * route segment config export has to be in the route's own file.
  */
 
+import type { ReactNode } from "react";
 import { cookies } from "next/headers";
+import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import { getServerSession } from "next-auth/next";
@@ -45,7 +47,26 @@ import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
 // once the response landed (STG-F006). Resolving it here puts the value in
 // the initial RSC payload, so the client's first render already agrees with
 // the server -- no extra request, and nothing left to correct afterwards.
-export async function ReviewWorkspaceShell() {
+export async function ReviewWorkspaceShell({
+  initialConversationId = null,
+  mountedSurface = "workspace",
+  conversationPrelude = null,
+}: {
+  /**
+   * The conversation this mount opens with, when the route named one.
+   *
+   * `/continuations/[conversationId]` is the caller. Everything else about the
+   * shell is identical, which is the point: a continuation is an ordinary
+   * Tomverse conversation with an imported transcript above it, so it gets the
+   * ordinary workspace rather than a second, thinner one
+   * (docs/policy/external-conversation-continuation.md §8.2).
+   */
+  initialConversationId?: string | null;
+  /** Which surface this mount is, so selecting across surfaces navigates. */
+  mountedSurface?: ConversationSurface;
+  /** The read-only imported half, rendered above the panel row. */
+  conversationPrelude?: ReactNode;
+} = {}) {
   let guestDefaultModelId: string = APP_DEFAULTS.guestDefaultModelId;
   // Default-off opt-in (lib/imageGenerationAccess.ts): a read failure keeps
   // the entry points hidden, exactly like a missing flag row.
@@ -141,6 +162,9 @@ export async function ReviewWorkspaceShell() {
         // page is `force-dynamic`, so the value is the running process's.
         imageGroupMaxModels={maxImageModels}
         webSearchBackendReadiness={webSearchBackendReadiness}
+        initialConversationId={initialConversationId}
+        mountedSurface={mountedSurface}
+        conversationPrelude={conversationPrelude}
       />
     </GuestVerificationProvider>
   );

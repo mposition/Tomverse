@@ -369,19 +369,35 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 `/continuations/[conversationId]` (`lib/continuationRoutes.ts`).
 
 `/chat`과 `/review`는 Tomverse Review workspace를 렌더합니다
-(`lib/productSurfaceRoutes.ts`). continuation은 `productKey=review`이지만
-**여전히 전용 surface에서 열립니다.** 이유는 제품이 아니라 화면에 있습니다 —
-Review workspace는 외부 transcript도, provenance 구획도, tombstone도, lock 상태도
-모르며, 그것을 가르치는 일은 flag 뒤에 있는 기능을 위해 6천 줄짜리 클라이언트를
-재배선하는 것입니다. 전용 surface는 additive입니다: 기존 route의 의미가 바뀌지
-않고 Review를 재배선하지 않습니다.
+(`lib/productSurfaceRoutes.ts`). **continuation도 같은 workspace를 렌더합니다**
+(2026-09-02 개정). route만 다르고 화면은 하나입니다 — 같은 사이드바, 같은
+timeline, 같은 composer이며, continuation이 더하는 것은 **timeline 위의 읽기
+전용 prelude 하나**뿐입니다.
+
+이 개정 전에는 이 route가 자기 화면을 갖고 있었습니다 — 자기 textarea, 모델
+전체를 버튼으로 늘어놓은 격자, 자기 message list, 사이드바 없음. divider 아래
+전부가 chat surface의 두 번째 구현이었고, 그 둘의 차이는 결정이 아니었습니다:
+첨부 없음, web search 없음, 중단 없음, 재시도 없음, 아무도 확인한 적 없는 IME
+처리, 그리고 목록에서 다시 찾아 들어갈 방법 없음. continuation에 **고유한 것은
+가져온 transcript 하나뿐**이므로, 고유하지 않은 나머지는 공용 shell이 맡습니다.
+
+**prelude는 shell의 slot입니다**(`conversationPrelude`). `ChatApp` 안이 아니라 —
+shell은 선택한 모델마다 `ChatApp`을 하나씩 mount하므로, 그 안에 두면 같은 제3자
+transcript가 화면에 N번 그려집니다(§5.1).
 
 **그래서 판정 근거가 `productKey`가 아니라는 것이 이 개정 이후 더 중요해졌습니다.**
 `conversationSurface()`가 읽는 것은 bridge row의 존재 하나뿐이고, `productKey`에서
 유도하면 이제 **모든 Review 대화**가 여기로 옵니다 — 개정 전에는 모든 `chat`
 대화였고 그때도 틀렸지만, 오늘은 그 집합이 저장소의 거의 모든 대화입니다.
-Review workspace가 외부 transcript를 다룰 수 있게 되는 날 옮길 자리는
-`CONTINUATION_SURFACE_PATH` 한 곳입니다.
+**route가 남는 이유는 이제 화면이 아니라 URL의 의미입니다.** 가져온 원본은 이
+대화가 무엇인지의 일부이고, 사이드바와 검색이 bridge를 근거로 이 경로로
+보냅니다. 옮길 자리는 여전히 `CONTINUATION_SURFACE_PATH` 한 곳입니다.
+
+**mount된 surface와 다른 surface의 대화를 고르면 이동합니다.** 두 화면이 같은
+컴포넌트가 된 뒤로 방향이 둘입니다 — `/chat`에서 continuation을 고르면
+`/continuations/[id]`로, `/continuations/[id]`에서 일반 대화를 고르면 workspace
+경로로. 뒤쪽을 제자리 전환으로 두면 continuation의 URL과 그 prelude가 다른
+대화를 설명하게 됩니다.
 
 **재진입은 서버가 판정합니다.** 대화 목록·상세·검색 응답은 각 대화의
 `surface`(`workspace` | `continuation`)를 싣고, 사이드바와 검색 결과는 그 값에
@@ -404,12 +420,24 @@ Review workspace로 열려 외부 원문·출처 구획이 사라졌습니다.**
   provider badge와 "외부 답변" 표시, 잘림 고지. **화면 전체에서 한 번만
   그립니다**(§5.1)
 - "여기부터 Tomverse에서 이어진 대화" divider
-- **모델 패널** — 선택한 모델마다 하나. 각 패널은 자기 모델의 답변만 담습니다
-- composer와 모델 선택 control
+- **일반 Chat의 message timeline** — 선택한 모델마다 패널 하나. continuation
+  전용 renderer를 따로 두지 않습니다
+- **일반 Tomverse composer** — 첨부·web search·전송·중단·재시도·모델 picker·
+  IME 처리가 전부 일반 대화의 것과 같은 컴포넌트입니다
+
+**prelude는 기본으로 접혀 있습니다.** 아래 패널들이 각자 스크롤하므로 그 위의
+것은 모든 viewport에서 고정 높이를 먹습니다. 가져온 대화는 수백 turn일 수
+있고, 펼친 채로 두면 휴대폰에서 composer를 화면 밖으로 밀어냅니다. 접힌 상태로
+보이는 것은 provenance 한 줄이며, 그것은 **항상** 보여야 합니다 — divider 아래가
+Tomverse의 말이 아니라는 사실이 거기 있기 때문입니다. 원본이 삭제됐거나 잠긴
+상태는 예외로 펼쳐집니다: 짧고, 다음 turn이 무엇을 싣는지를 바꿉니다.
 
 ### 8.3 모델 선택
 
-**기존 Review의 절차를 그대로 씁니다.** 이 화면은 자기 규칙을 만들지 않습니다.
+**일반 Chat composer의 모델 picker를 그대로 씁니다.** 이 화면은 자기 규칙도,
+자기 control도 만들지 않습니다 — 2026-09-02 개정 전에는 모델 전체를 버튼 격자로
+늘어놓고 선택을 스스로 저장했고, 그것이 상한·가용성·교체·크레딧 견적을 이미
+소유한 composer 옆에 두 번째 답을 만들었습니다.
 
 - **상한·가용성·entitlement 판정은 서버가 합니다.** 화면은
   `PATCH /api/conversations/[conversationId]`에 `selectedModels`를 보내고,

@@ -245,9 +245,11 @@ continuation 하나. 추가할 때 화면이 상한과 교체를 어떻게 다�
       **둘 다 실행자가 손으로 할 일이 아닙니다**(유료 turn 0).
 
       - **단위 검사는 `staging:continuation-record`가 회차를 열면서 실행하고
-        결과를 기록에 적습니다** — `tests/continuationModelPanels.test.mjs`의
-        격리·admission·요청 본문 세 건. 브라우저도 build도 자격증명도 필요
-        없습니다.
+        결과를 기록에 적습니다** — `tests/continuationNativeShell.test.mjs`의
+        격리·prelude 세 건. 브라우저도 build도 자격증명도 필요 없습니다.
+        continuation이 공용 chat workspace로 옮겨가면서 이 성질은 더 이상
+        continuation 전용이 아닙니다 — 모델마다 자기 `ChatApp`이 자기 요청과
+        자기 오류를 갖는 shell의 성질이고, 검사도 그것을 봅니다.
       - **브라우저 검사는 build와 Chromium이 있는 곳에서 실행합니다** —
         `tests/e2e/external-conversation-continuation.spec.ts`의 "one model
         failing leaves the other model's answer standing". 이 컨테이너에서

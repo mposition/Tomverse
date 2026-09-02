@@ -1278,6 +1278,8 @@ export const de = {
         sourceUnavailable: "Diese importierte Unterhaltung wurde nicht gefunden.",
         lockedRefusal: "Das importierte Original ist gesperrt. Entsperren Sie es auf seiner eigenen Seite.",
         quickStartFailed: "Fortsetzung konnte nicht gestartet werden.",
+        showSource: "Importierte Unterhaltung anzeigen",
+        hideSource: "Importierte Unterhaltung ausblenden",
         sourceSectionTitle: "Externe Unterhaltung · schreibgeschützt",
         sourceSectionSubtitle: "Aus {provider}, importiert am {date}",
         externalAnswerBadge: "Externe Antwort",

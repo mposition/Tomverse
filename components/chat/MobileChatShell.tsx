@@ -181,6 +181,12 @@ type MobileChatShellProps = {
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
   onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: ReactNode;
+  /**
+   * A read-only block above the panel row -- see DesktopChatShell for why it
+   * lives in the shell and not in `ChatApp`. Both shells take it so the two
+   * screens cannot disagree about where the imported half appears.
+   */
+  conversationPrelude?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -349,6 +355,7 @@ export function MobileChatShell({
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
+  conversationPrelude,
   onSelectConversation,
   onRename,
   onDelete,
@@ -1247,6 +1254,8 @@ export function MobileChatShell({
           maxHeight={providerBannerMaxHeight}
         />
       </div>
+
+      {conversationPrelude}
 
       {showModelTabs && (
         <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">

@@ -133,6 +133,16 @@ type DesktopChatShellProps = {
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
   onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: React.ReactNode;
+  /**
+   * A read-only block above the panel row, for a conversation that has one.
+   *
+   * The imported transcript of a continuation is the only user today
+   * (docs/policy/external-conversation-continuation.md §8.2). It sits here
+   * rather than inside `ChatApp` because this shell mounts one `ChatApp` per
+   * selected model, and §5.1 says the source is drawn once for the
+   * conversation -- not once per column.
+   */
+  conversationPrelude?: React.ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -299,6 +309,7 @@ export function DesktopChatShell({
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
+  conversationPrelude,
   onSelectConversation,
   onRename,
   onDelete,
@@ -775,6 +786,7 @@ export function DesktopChatShell({
           onSwapModel={onSwapModel}
           canSelectModel={canSelectModel}
         />
+        {conversationPrelude}
         {/*
           UI-P1-05. The tab bar used to be suppressed while the conversation
           was empty, on the reasoning that the welcome screen covers the panels

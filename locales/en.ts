@@ -1293,6 +1293,8 @@ export const en = {
         sourceUnavailable: "That imported conversation could not be found.",
         lockedRefusal: "The imported original is locked. Unlock it on its own page.",
         quickStartFailed: "Could not start the continuation.",
+        showSource: "Show the imported conversation",
+        hideSource: "Hide the imported conversation",
         sourceSectionTitle: "Imported conversation · read-only",
         sourceSectionSubtitle: "From {provider}, imported {date}",
         externalAnswerBadge: "External reply",
