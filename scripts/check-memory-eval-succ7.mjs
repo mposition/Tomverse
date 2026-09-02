@@ -25,6 +25,7 @@ import {
     buildSucc7DraftManifest,
     succ7AssemblyProblems,
     succ7SignatureProblems,
+    verifySucc7Manifest,
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
@@ -417,6 +418,17 @@ if (manifest.frozen !== MEMORY_EVAL_SUCC7_DATASET_FROZEN) {
         `the manifest reports frozen=${manifest.frozen} while the module ` +
             `declares ${MEMORY_EVAL_SUCC7_DATASET_FROZEN}`
     );
+}
+// The pinned record against a freshly built one. Called with no arguments on
+// purpose: both defaults are load-bearing, and a version that built both sides
+// would compare the tree with itself.
+{
+    const drift = verifySucc7Manifest();
+    if (drift.length > 0) {
+        fail(`succ-7 no longer matches its pinned manifest: ${drift.join("; ")}`);
+    } else {
+        ok("succ-7 matches its pinned manifest", "record against tree");
+    }
 }
 ok(
     "succ-7's lifecycle state",

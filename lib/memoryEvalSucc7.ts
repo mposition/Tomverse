@@ -11,13 +11,14 @@ import { MEMORY_EVAL_SUCC6_CASES } from "@/lib/memoryEvalSucc6";
 import { MEMORY_EVAL_SUCC7_REPLACEMENTS } from "@/lib/memoryEvalSucc7Replacements";
 import {
     SUCC7_COVERAGE_REPAIR_COUNT,
+    SUCC7_MIXED_TURN_POLICY_QUESTION,
     SUCC7_RETIRED_CASE_IDS,
     SUCC7_SAME_BOUNDARY_COUNT,
     SUCC7_TRANSITION,
 } from "@/lib/memoryEvalSucc7Transition";
 
 /**
- * `mem-eval-succ-7`, assembled and NOT frozen.
+ * `mem-eval-succ-7`, adopted and frozen on 2026-09-02.
  *
  * Fifty-four out and fifty-four in against succ-6: ten carrying an approved
  * gold change, forty-four that selected the `mem-extract-v8` intervention. The
@@ -280,6 +281,127 @@ export function buildSucc7DraftManifest(): Succ7DraftManifest {
         ...withoutDigest,
         manifestDigest: sha256(manifestFingerprintInput(withoutDigest)),
     };
+}
+
+/**
+ * The frozen record, pinned as a literal on 2026-09-02.
+ *
+ * `buildSucc7DraftManifest()` was the right shape while succ-7 was a draft:
+ * every edit moved the digest and the record followed it. Once frozen that is
+ * exactly the defect. A computed manifest cannot be wrong about the tree,
+ * which sounds like a virtue and is the whole problem — what a frozen record
+ * is for is to *disagree* when the cases move afterwards, and a check that
+ * builds both sides compares the tree with itself and reports a clean bill
+ * forever. `verifySucc6Manifest()` shipped in that state.
+ *
+ * `changeReason` stays a reference to the constant rather than a copied
+ * string: two copies would have to be kept equal by hand, and the digest below
+ * fixes the value regardless of which one a reader looks at.
+ *
+ * These are the values `@mposition` signed. Nothing here is edited without a
+ * new adoption record: `.github/audits/memory-eval-succ7-adoption-2026-09-02.md`.
+ */
+export const MEMORY_EVAL_SUCC7_MANIFEST: Succ7DraftManifest = {
+    datasetVersion: "mem-eval-succ-7",
+    schemaVersion: 3,
+    supersedes: "mem-eval-succ-6",
+    composition: {
+        kind: "case-replacement",
+        sourceDatasetVersion: "mem-eval-succ-6",
+        sourceDatasetDigest:
+            "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+        inheritedCaseCount: 1096,
+        replacedCaseCount: 54,
+        changeReason: MEMORY_EVAL_SUCC7_CHANGE_REASON,
+    },
+    caseCount: 1150,
+    cellCounts: {
+        "assistant_only:en": 125,
+        "assistant_only:ko": 125,
+        "durable_facts:en": 200,
+        "durable_facts:ko": 200,
+        "injection_directives:en": 125,
+        "injection_directives:ko": 125,
+        "sensitive_secrets:en": 125,
+        "sensitive_secrets:ko": 125,
+    },
+    transitionTypes: {
+        same_boundary: 53,
+        coverage_repair: 1,
+    },
+    unresolvedPolicies: [
+        `succ-injection-en-301 -> succ-injection-en-601: ${SUCC7_MIXED_TURN_POLICY_QUESTION}`,
+    ],
+    fingerprintVersion: 4,
+    datasetDigest:
+        "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+    scoringContractDigest:
+        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+    scoringContractVersion: "mem-score-v3.4",
+    frozen: true,
+    manifestDigest:
+        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+};
+
+/**
+ * Everything about the pinned record the tree no longer reproduces.
+ *
+ * The record is the first argument and the tree is the second, and both
+ * defaults matter: calling this with no arguments asks whether what was signed
+ * still describes what is here. Defaulting the record to the builder would ask
+ * whether the tree equals the tree.
+ *
+ * `built` stays a parameter so a test can hand in the manifest a *moved* tree
+ * would produce without editing a file on disk. A check that cannot be shown
+ * to fail is not evidence that anything passed.
+ */
+export function verifySucc7Manifest(
+    manifest: Succ7DraftManifest = MEMORY_EVAL_SUCC7_MANIFEST,
+    built: Succ7DraftManifest = buildSucc7DraftManifest()
+): readonly string[] {
+    const failures: string[] = [];
+    if (manifest.datasetDigest !== built.datasetDigest) {
+        failures.push(
+            `datasetDigest: recorded ${manifest.datasetDigest}, tree computes ${built.datasetDigest}`
+        );
+    }
+    if (manifest.manifestDigest !== built.manifestDigest) {
+        failures.push(
+            `manifestDigest: recorded ${manifest.manifestDigest}, tree computes ${built.manifestDigest}`
+        );
+    }
+    if (
+        manifest.composition.sourceDatasetDigest !==
+        built.composition.sourceDatasetDigest
+    ) {
+        failures.push(
+            `sourceDatasetDigest: recorded ${manifest.composition.sourceDatasetDigest}, ` +
+                `tree computes ${built.composition.sourceDatasetDigest}`
+        );
+    }
+    // `frozen` is deliberately outside the digest, so the two checks above
+    // cannot see it. That is why it is compared on its own: a record claiming
+    // adoption while the module still says `false` would otherwise pass
+    // everything here, and adoption is the one field a person sets.
+    if (manifest.frozen !== MEMORY_EVAL_SUCC7_DATASET_FROZEN) {
+        failures.push(
+            `frozen: the record says ${manifest.frozen}, the module declares ` +
+                `${MEMORY_EVAL_SUCC7_DATASET_FROZEN}. This field is outside the ` +
+                "digest, so nothing else here would have caught it."
+        );
+    }
+    if (MEMORY_EVAL_SUCC7_DATASET_FROZEN && !MEMORY_EVAL_SUCC7_REVIEWED) {
+        failures.push("frozen with no signature");
+    }
+    // A successor whose sample equals its source is a rename, and every
+    // artifact that records only the version string would be unable to tell.
+    if (manifest.datasetDigest === manifest.composition.sourceDatasetDigest) {
+        failures.push(
+            "the dataset digest equals succ-6's: this successor replaced 54 cases, " +
+                "so an equal digest means the sample did not move"
+        );
+    }
+    return failures;
 }
 
 /**
