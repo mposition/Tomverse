@@ -116,11 +116,60 @@ test("the v7 ceilings are the approved figures, per run and per programme", () =
         "51bebe56fb9833f9a8209fd9ca32aa499865d3d4"
     );
     assert.match(budget.ticket, /memory-eval-v7-budget-approval-2026-08-31\.md/);
-    // Funding a pair is not starting it. The status stays `candidate` — the
-    // approval excluded the transition to `approved` — and no evaluation has
-    // been recorded.
-    assert.equal(v7Pair().status, "candidate");
+    // The budget is kept after revocation, which is the whole reason the
+    // status has to carry the gate: the approval was real and US$0.7893 was
+    // really spent against it, so the ceilings above still read as fundable.
+    // `evaluation` stays null because no approval was ever granted.
+    assert.equal(v7Pair().status, "revoked");
     assert.equal(v7Pair().evaluation, null);
+});
+
+test("a revoked pair refuses both ordinals, and would not have without the status", () => {
+    // The gap this closes. Run 2 was refused in an audit document, and a
+    // manual workflow dispatch does not read audit documents: with the pair
+    // left `candidate` the same call comes back live, because the budget it
+    // keeps still covers two runs.
+    //
+    // Both directions are asserted from the *registered* entry rather than a
+    // synthetic one, so this fails if someone reopens the pair.
+    const registered = v7Pair();
+    const target = harnessTarget();
+    const input = (entry, runOrdinal) => ({
+        live: true,
+        registerEntry: entry,
+        hasApiKey: true,
+        datasetFrozen: target.datasetFrozen,
+        datasetPurpose: target.datasetPurpose,
+        datasetSchemaVersion: target.datasetSchemaVersion,
+        commitKnown: true,
+        runSha: "c3c5ff65acd2cd0f4b3c8c6da6d488f4d7f6d1f8",
+        runShaDescendsFromApproval: true,
+        runTuple: harnessRunTuple({
+            promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
+            promptDigest: createHash("sha256")
+                .update(extractionPromptContract(), "utf8")
+                .digest("hex"),
+        }),
+        unimplementedPromptRules: [],
+        requestedRunCapUsd: registered.evalBudget.maxUsd,
+        runOrdinal,
+    });
+
+    for (const ordinal of [1, 2]) {
+        assert.deepEqual(
+            decideEvalRunMode(input(registered, ordinal)),
+            { mode: "refused", reason: "pair_not_runnable" },
+            `ordinal ${ordinal} must refuse while the pair is revoked`
+        );
+        // Red-before-green, permanently: the only field changed is the
+        // status, and it is what turns a live decision into a refusal.
+        assert.equal(
+            decideEvalRunMode(input({ ...registered, status: "candidate" }, ordinal))
+                .mode,
+            "live",
+            `ordinal ${ordinal} would run again if the pair were reopened`
+        );
+    }
 });
 
 test("v6's instrument cannot fund what this tree now ships", () => {

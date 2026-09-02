@@ -86,6 +86,23 @@ npm run staging:continuation-record -- --deploy-sha <40자리 SHA>
   이라고 적힙니다. 검증한 척하지 않는 것이 요점입니다.
 - **판정과 서명은 비워 둡니다**(위 5번).
 
+### 열린 기록은 git이 무시합니다
+
+`YYYY-MM-DD__<40자리>.md`는 저장소 `.gitignore`에 있습니다. 회차 중의 기록은
+진행 중인 작업이지 저장소 내용이 아니고, `git add -A` 한 번이면 빈 기록이
+브랜치에 올라가 **끝난 회차처럼 읽히기** 때문입니다. 2026-09-02에 실제로 그렇게
+됐습니다.
+
+그래서 **끝난 기록은 경로를 대고 강제로 add 합니다.**
+
+```
+git add -f docs/ops/external-conversation-continuation-staging-verification-records/<파일명>
+```
+
+`executor`와 `result`를 채운 뒤입니다. 그 둘이 비어 있으면
+`npm run check:staging-verification-records`가 계속 실패하며, 그것이 이 순서를
+지키게 하는 장치입니다.
+
 만들어진 기록은 회차가 끝나기 전에는 commit 하지 않습니다. `executor`와
 `result`가 비어 있는 동안 `npm run check:staging-verification-records`가
 실패하며, 그것은 의도된 동작입니다.

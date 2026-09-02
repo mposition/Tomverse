@@ -17,6 +17,7 @@ import {
     AI_REVIEW_EVAL_LANGUAGES,
     AI_REVIEW_EVAL_MODES,
     AI_REVIEW_EVAL_PHENOMENA,
+    AI_REVIEW_EVAL_RESPONSE_LABELS,
     AI_REVIEW_EVAL_TASK_TYPES,
     AI_REVIEW_EVAL_FINDING_KINDS,
     type AiReviewEvalCase,
@@ -126,6 +127,33 @@ export const datasetProblems = (value: unknown): readonly string[] => {
                     problems.push(`${label}: response[${position}] has no modelId`);
                 }
             }
+            // Labels, checked here as well as in the drafter's parser.
+            //
+            // A gold refers to an answer by its label and the drafting
+            // assignment is stated in them, so a duplicate or an invented one
+            // makes a case's own gold ambiguous. They also reach a regular
+            // expression in `goldLeadLabels()`, which escapes them -- but a
+            // label outside the allowed set is a defect in the case, not
+            // something for a counter to cope with.
+            const labels = responses.map((response) => response?.label);
+            if (labels.some((value) => !isNonEmptyString(value))) {
+                problems.push(`${label}: a response has no label`);
+            } else {
+                const unknown = labels.filter(
+                    (value) => !AI_REVIEW_EVAL_RESPONSE_LABELS.includes(value as never)
+                );
+                if (unknown.length > 0) {
+                    problems.push(
+                        `${label}: response label(s) ${unknown
+                            .map((value) => `"${String(value)}"`)
+                            .join(", ")} are not among ` +
+                            AI_REVIEW_EVAL_RESPONSE_LABELS.join(", ")
+                    );
+                }
+                if (new Set(labels).size !== labels.length) {
+                    problems.push(`${label}: two responses share a label`);
+                }
+            }
         }
 
         const gold = testCase.gold ?? {};
@@ -188,34 +216,105 @@ export const datasetProblems = (value: unknown): readonly string[] => {
             }
         }
     }
-    // A decision set may only contain cases a person adopted.
-    //
-    // The drafting tool writes `status: "candidate"` and leaves `adoptedBy`
-    // null, and absence is read as candidate rather than adopted, so a case
-    // that arrives without the field cannot slip through. Adoption is the
-    // judgement -- "this really is a contradiction, and this list is
-    // exhaustive" -- and a judgement made by the same kind of system under
-    // evaluation is not evidence about it.
-    //
-    // Development sets are exempt: they exist to iterate on the harness and
-    // are never evidence, which is why `artifactAdmissibilityProblems()`
-    // refuses one outright.
-    if (dataset.purpose === "decision") {
-        for (const raw of dataset.cases) {
-            const testCase = raw as Partial<AiReviewEvalCase>;
-            const label = isNonEmptyString(testCase.id) ? testCase.id : "a case";
-            if (testCase.status !== "adopted") {
-                problems.push(
-                    `${label}: status is ${String(testCase.status ?? "candidate")}; ` +
-                        `a decision set holds only cases a person adopted`
-                );
-            } else if (!isNonEmptyString(testCase.adoptedBy)) {
-                problems.push(`${label}: adopted, but nobody is named as the adopter`);
-            }
-        }
-    }
+    problems.push(...adoptionProblems(dataset));
 
     return problems;
+};
+
+/**
+ * The cases in a decision set that nobody has adopted.
+ *
+ * Separated from the rest of `datasetProblems()` because two questions are
+ * being asked of the same file and they have different answers while a set is
+ * being written:
+ *
+ *   * "may this stand as evidence?" -- no, and that is what every caller of
+ *     `datasetProblems()` is asking, so the rule stays inside it;
+ *   * "may this file exist in the tree?" -- yes. The set is filled by 330
+ *     drafting calls and adopted by a person over weeks, and a rule that
+ *     failed the repository's own gate for the whole of that time would make
+ *     the work impossible to commit. The gate subtracts these problems while
+ *     the set carries no freeze record at all, and reports them as a count.
+ *
+ * Freezing is the moment a set stops being under construction and becomes
+ * evidence, so every evidence rule attaches there -- which is why the gate's
+ * relaxation is keyed on the freeze record and not on a flag somebody passes.
+ *
+ * Adoption is the judgement -- "this really is a contradiction, and this list
+ * is exhaustive" -- and a judgement made by the same kind of system under
+ * evaluation is not evidence about it. The drafting tool writes
+ * `status: "candidate"` with no adopter, and absence is read as candidate
+ * rather than adopted, so a case that arrives without the field cannot slip
+ * through.
+ *
+ * Development sets are exempt: they exist to iterate on the harness and are
+ * never evidence, which is why `artifactAdmissibilityProblems()` refuses one
+ * outright.
+ */
+export const adoptionProblems = (value: unknown): readonly string[] => {
+    const dataset = value as Partial<AiReviewEvalDataset>;
+    if (dataset?.purpose !== "decision" || !Array.isArray(dataset.cases)) return [];
+    const problems: string[] = [];
+    for (const raw of dataset.cases) {
+        const testCase = raw as Partial<AiReviewEvalCase>;
+        const label = isNonEmptyString(testCase.id) ? testCase.id : "a case";
+        if (testCase.status !== "adopted") {
+            problems.push(
+                `${label}: status is ${String(testCase.status ?? "candidate")}; ` +
+                    `a decision set holds only cases a person adopted`
+            );
+        } else if (!isNonEmptyString(testCase.adoptedBy)) {
+            problems.push(`${label}: adopted, but nobody is named as the adopter`);
+        }
+    }
+    return problems;
+};
+
+/**
+ * Splits a set's problems into the ones that are defects and the ones that are
+ * just where the set is in its life.
+ *
+ * A decision set is written over months -- 330 drafting calls, then a person
+ * adopting each case -- and for all of that time every case is a candidate. So
+ * "no adopter" is a defect once the set is evidence and a description of
+ * ordinary progress before then, and the difference is the freeze record.
+ *
+ * Shared by the gate and the coverage report because they were not sharing it,
+ * and the coverage report went on printing one validation problem per
+ * unadopted case: 1,240 of them at the end of the build, in the block an
+ * operator reads to see progress. Noise there is not cosmetic -- it teaches
+ * the reader to skip the block where a real structural fault would appear.
+ */
+export const partitionDatasetProblems = (
+    value: unknown
+): { readonly blocking: readonly string[]; readonly buildState: readonly string[] } => {
+    const all = datasetProblems(value);
+    const dataset = value as Partial<AiReviewEvalDataset>;
+    if (dataset?.purpose !== "decision" || !isUnfrozenDraft(dataset)) {
+        return { blocking: all, buildState: [] };
+    }
+    const adoption = new Set(adoptionProblems(dataset));
+    return {
+        blocking: all.filter((problem) => !adoption.has(problem)),
+        buildState: all.filter((problem) => adoption.has(problem)),
+    };
+};
+
+/**
+ * Whether a set carries no freeze record at all -- the "still being written"
+ * state, as opposed to a freeze that is present but broken.
+ *
+ * A half-written freeze (a date with no digest, a digest with no name) is not
+ * this state and must keep failing: it is a set that claims to be pinned and
+ * is not, which is worse than one that never claimed to be.
+ */
+export const isUnfrozenDraft = (value: unknown): boolean => {
+    const dataset = value as Partial<AiReviewEvalDataset>;
+    return (
+        !isNonEmptyString(dataset?.frozenAt) &&
+        !isNonEmptyString(dataset?.frozenBy) &&
+        !isNonEmptyString(dataset?.frozenDigest)
+    );
 };
 
 /**

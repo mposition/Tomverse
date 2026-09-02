@@ -5,7 +5,10 @@ import test from "node:test";
 import {
   bearerTokenFromHeader,
   mintMobileAccessToken,
+  mobileAuthReady,
+  mobileSigningKeyUsable,
   parseCompactJws,
+  resetMobileSigningSelfTestForTesting,
   verifyMobileAccessTokenString,
 } from "../lib/mobileAccessToken.ts";
 import { MOBILE_ACCESS_TOKEN_TTL_SECONDS } from "../lib/mobileAuthContract.ts";
@@ -92,6 +95,9 @@ test("a retired key still verifies its own tokens while the new one signs", () =
   const afterRotation = env({
     MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
     MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+    // Required, not decoration. The retirement line is what says `sign-1` is a
+    // previous key rather than one somebody left in the ring.
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${NOW.toISOString()}`,
   });
 
   assert.equal(
@@ -102,6 +108,59 @@ test("a retired key still verifies its own tokens while the new one signs", () =
     true
   );
   assert.equal(parseCompactJws(mint(afterRotation).token).header.kid, "sign-2");
+});
+
+test("the key's retirement grace is judged on the same clock as the claims", () => {
+  // Found by the test above failing for the wrong reason. The verifier passed
+  // no clock to the key lookup, so the grace was measured against `Date.now()`
+  // while `exp` and `nbf` were measured against the caller's -- a verification
+  // that disagreed with itself about what time it is.
+  const minted = mint();
+  const retired = env({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${NOW.toISOString()}`,
+  });
+  const at = (seconds) => new Date(NOW.getTime() + seconds * 1000);
+
+  // Inside the fifteen-minute grace, but only if the grace is read at the
+  // caller's instant. The token itself is well within its own ten minutes.
+  assert.equal(
+    verifyMobileAccessTokenString(minted.token, { now: at(300), environment: retired }).ok,
+    true
+  );
+  // Past the grace: the key is gone before the token is.
+  assert.equal(
+    verifyMobileAccessTokenString(minted.token, { now: at(901), environment: retired })
+      .failure,
+    "unknown_kid"
+  );
+});
+
+test("a rotation that forgets the retirement line stops the old key at once", () => {
+  // Stricter than the fifteen-minute contract rather than laxer, and that is
+  // the safe direction: an undeclared key in the ring cannot be told apart from
+  // one whose retirement was mistyped, and trusting it is how a leaked previous
+  // key keeps working.
+  const beforeRotation = mint();
+  const undeclared = env({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+  });
+
+  assert.equal(
+    verifyMobileAccessTokenString(beforeRotation.token, {
+      now: NOW,
+      environment: undeclared,
+    }).failure,
+    "unknown_kid"
+  );
+  // And the deployment is otherwise fine: the new key signs and verifies.
+  const after = mint(undeclared);
+  assert.equal(
+    verifyMobileAccessTokenString(after.token, { now: NOW, environment: undeclared }).ok,
+    true
+  );
 });
 
 test("dropping the key from the ring is how those tokens stop working", () => {
@@ -239,4 +298,68 @@ test("no verdict and no minted value carries key material", () => {
     assert.ok(!serialized.includes(secret));
   }
   assert.ok(!serialized.includes(minted.token));
+});
+
+// --- the self-test that has to run before any credential is spent ----------
+
+test("a well-shaped key that is not a key is refused, by signing with it", () => {
+  // The gap this closes. `mobileAuthConfigured` reads shapes -- four variables
+  // present, ids sane, secrets long enough -- and a base64 string of the right
+  // length passes every one of them while being unable to sign anything.
+  //
+  // Where that lands is the problem: minting happens after the transaction that
+  // creates the session, so a bad key would consume a one-time grant, spend a
+  // rate-limit unit and write a device and a family before the 500. On refresh
+  // it would consume the presented token and mint a successor the client never
+  // receives, which on the next attempt is a replay.
+  const notAKey = Buffer.from("x".repeat(64), "utf8").toString("base64");
+  const broken = env({ MOBILE_AUTH_SIGNING_KEYS: `sign-1:${notAKey}` });
+
+  resetMobileSigningSelfTestForTesting();
+  assert.equal(mobileSigningKeyUsable(broken), false);
+  assert.equal(mobileAuthReady(broken), false);
+});
+
+test("a real key passes the self-test, and the answer is memoised per key", () => {
+  resetMobileSigningSelfTestForTesting();
+  assert.equal(mobileAuthReady(env()), true);
+  assert.equal(mobileAuthReady(env()), true);
+
+  // A different key re-evaluates rather than inheriting the previous answer.
+  const other = env({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-2:${SIGN_2}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+  });
+  assert.equal(mobileAuthReady(other), true);
+
+  const notAKey = Buffer.from("y".repeat(64), "utf8").toString("base64");
+  assert.equal(
+    mobileAuthReady(env({ MOBILE_AUTH_SIGNING_KEYS: `sign-1:${notAKey}` })),
+    false,
+    "a memoised pass must not carry over to a different key"
+  );
+});
+
+test("a missing variable is still refused, and the two halves are both required", () => {
+  resetMobileSigningSelfTestForTesting();
+  for (const missing of [
+    "MOBILE_AUTH_SIGNING_KEYS",
+    "MOBILE_AUTH_REFRESH_PEPPERS",
+    "MOBILE_AUTH_TOKEN_ISSUER",
+    "MOBILE_AUTH_TOKEN_AUDIENCE",
+  ]) {
+    assert.equal(mobileAuthReady(env({ [missing]: "" })), false, missing);
+  }
+});
+
+test("an unusable key makes minting unreachable rather than throwing late", () => {
+  // The property that matters is the order, so this asserts both halves: the
+  // readiness answer is false, and minting with that key really would have
+  // thrown -- which is what would have happened after the writes.
+  const notAKey = Buffer.from("z".repeat(64), "utf8").toString("base64");
+  const broken = env({ MOBILE_AUTH_SIGNING_KEYS: `sign-1:${notAKey}` });
+
+  resetMobileSigningSelfTestForTesting();
+  assert.equal(mobileAuthReady(broken), false);
+  assert.throws(() => mint(broken));
 });

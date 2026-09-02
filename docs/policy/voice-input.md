@@ -201,6 +201,64 @@ AGENTS.md의 "가격·보존·제3자 전송에 관한 결정이 부족하면 �
    그 안에 들어가지 않습니다. audio 전용 provider 예산을 둘지, 둔다면
    `/api/ready`가 production에서 그 부재를 실패로 볼지.
 
+#### 6.1.1 공급자에게서 확인된 것 (2026-09-02 읽음)
+
+**가격이 정해졌다는 뜻이 아닙니다.** 아래는 공급자가 공개한 숫자와 관측
+경로이며, 1~4의 결정은 그대로 열려 있습니다.
+
+**정가** — developers.openai.com `/api/docs/pricing`. 표의 열은
+`Model | Use case | Input | Output | Estimated cost`입니다.
+
+| 모델 | Input | Output | Estimated cost |
+|---|---|---|---|
+| `gpt-4o-mini-transcribe` | $1.25 / 1M tokens | $5.00 / 1M tokens | $0.003 / minute |
+| `gpt-4o-transcribe` | $2.50 / 1M tokens | $10.00 / 1M tokens | $0.006 / minute |
+
+**토큰 단가는 정가이고, 분당 숫자는 공급자가 이름 붙인 "Estimated cost"입니다.**
+분당 정가로 옮겨 적지 않습니다 — 문서는 그것을 예상 비용이라 부르고, 두 숫자의
+유도 관계를 설명하지 않습니다.
+
+**관측 경로는 넷이고, 서로 다른 것을 셉니다.**
+
+| # | 무엇 | 어디서 | 단위 |
+|---|---|---|---|
+| 1 | 요청이 쓴 토큰 | transcription 응답의 `usage` | input/output tokens |
+| 2 | 이 앱이 잰 클립 길이 | `measured_clip`(`lib/voiceClipDuration.ts`) | 초 |
+| 3 | 공급자가 집계한 길이 | Admin Usage API `GET /organization/usage/audio_transcriptions` | 초 (`seconds`, `num_model_requests`) |
+| 4 | 실제 청구 금액 | Admin Costs API `GET /organization/costs` | USD |
+
+3과 4는 **admin API key**가 필요하며 일반 요청 키와 다른 권한입니다.
+
+**그래서 `provider_seconds` 정산에 대해 말할 수 있는 것은 이것뿐입니다.**
+설정된 기본 모델 `gpt-4o-mini-transcribe`는 token-billed라 **동기 응답의
+`usage`만으로는 초를 알 수 없고**, 그 경로에서는 정산이 `measured_clip`으로
+떨어집니다. "공급자가 초를 전혀 보고하지 않는다"가 아닙니다 — 3의 Usage API는
+집계된 `seconds`를 돌려줍니다. 다만 그것은 **요청 시점의 동기 값이 아니라
+사후 집계**이므로, 요청 하나를 정산하는 데 쓸 수 없습니다.
+
+**4는 요청별 대조가 되지 않습니다.** Costs API는 일 단위 버킷(`1d`)만
+지원하고 `project_id`·`line_item`·`api_key_id` 단위로 집계합니다. 그러므로
+대조는 **격리된 키 또는 프로젝트**에서, 또는 **다른 트래픽이 없는 구간**에서
+집계 대 집계로 해야 합니다. (3의 Usage API는 `1m`·`1h`·`1d`를 지원해 더
+촘촘하지만, 여전히 집계입니다.)
+
+#### 6.1.2 제안 — 결정이 아닙니다
+
+**아래 중 어느 것도 확정되지 않았습니다.** 6.1.1과 섞어 읽지 않도록 절을
+나눠 둡니다. 사람이 승인하기 전에는 코드에도 register에도 넣지 않습니다.
+
+- audio 전용 검증 register를 텍스트 모델의 `PENDING_VERIFIED_PRICE_REGISTER`와
+  **분리해서** 만들자는 것 — 이름, 위치, 형식 전부 미정입니다.
+- 그 register의 **소유자·검증 티켓·재검증 기한** — 1인 조직이라도 증거를 만든
+  주체와 승인자는 구분되며, 승인자는 사람이어야 합니다.
+- **`measured_clip`을 정산 근거로 승인**할지, 아니면 초 단위 동기 정산을 위해
+  duration-billed 모델로 바꿀지. 뒤는 품질·가격이 함께 걸린 별개 결정입니다.
+- ZDR 신청, DPA 체결, 조직·프로젝트 분리 (§11.3.2).
+
+6.1.1은 §14의 B-3을 해제하지 않습니다. B-3이 요구하는 것은 **register의
+소유자·티켓·기한**이고, 그것은 여기 없습니다. 유료 검증은 **실행하지
+않았습니다.**
+
 ### 6.2 정해질 때까지 지켜지는 것
 
 - entitlement 층을 **만들지 않습니다.** 절반만 구현된 과금은 없느니만
@@ -479,29 +537,18 @@ composer 계약(`docs/ui-contracts/mobile-chat-composer.md`)의 anatomy를 지�
 
 탭 전환을 넘나드는 백그라운드 녹음 복구는 만들지 않았습니다.
 
-#### 이 기능이 고치지 않은 것 — 초안은 신원별로 격리되지 않습니다
+#### 초안의 신원 격리는 별개 계약입니다
 
-**확인된 사실입니다.** 같은 탭에서 계정 A가 새 대화 입력창에 글을 쓰고 계정
-B가 그 탭을 이어받으면, **B는 A가 쓰던 글을 그대로 봅니다.**
-`lib/conversationDraftStore.ts`의 `draftKeyFor()`가 대화 id만으로 key를 만들고
-신원을 보지 않기 때문이며, 브라우저에서 재현했습니다(계정 전환 뒤 textarea 값
-= `"계정 A가 쓰던 초안"`).
+Voice의 경계는 **음성 세션**에 있습니다. 이 항목에서 Voice가 보장하는 것은
+하나뿐입니다 — **A의 음성 transcript가 B의 입력창에 추가되지 않는다.** 계정이
+바뀌면 세션을 끝내고 클립을 버리므로 추가될 문장 자체가 없습니다.
 
-**이것은 Voice가 만든 것도 Voice가 고칠 것도 아닙니다.** Voice의 경계는 음성
-세션에 있고, 이 항목에서 Voice가 보장하는 것은 하나뿐입니다 — **A의 음성
-transcript가 B의 입력창에 추가되지 않는다.** 클립이 전송되지도 않으므로 추가될
-문장 자체가 없습니다.
+타이핑한 초안과 첨부는 그 경계 밖이고, Voice의 F-2 검증 중에 **계정 B가 계정 A의
+초안을 그대로 본다**는 별개 결함이 발견됐습니다. 2026-09-02에 초안 key가 대화와
+사람을 함께 지목하도록 고쳐졌습니다: docs/policy/conversation-draft-identity-scope.md.
 
-**남은 결정은 따로 추적합니다** —
-`docs/policy/conversation-draft-identity-scope.md`. 결함이 초안 store에 있고,
-그 파일을 고치는 사람은 이 문서를 읽지 않기 때문입니다. 요약하면: 신원이 바뀔
-때 초안을 지울 것인가, 아니면 신원 namespace별로 격리해 B는 빈 입력창을 보고
-A로 돌아오면 복원되게 할 것인가. 뒤쪽이 더
-안전하지만 모든 대화가 공유하는 store를 바꾸는 일이고, 이 변경의 세부사항이
-아니라 별도 제품 결정입니다. 결정 전까지
-`tests/e2e/voice-input-composer.spec.ts`는 **관측된 값**을 단언합니다 — `""`를
-단언하면 지금 사실이 아닌 것을 통과시키게 되고, 관측값을 단언해 두면 그 결정이
-내려지는 날 테스트가 소리내어 실패합니다.
+두 계약은 같은 방향으로 맞물립니다. 음성 세션의 scope는 **초안 key**이고 그 key가
+신원을 담으므로, transcript는 그것을 말한 사람의 초안에만 기록될 수 있습니다.
 
 ### 8.5 자원을 소유하는 층은 따로 있습니다
 
@@ -651,6 +698,42 @@ provider 실패는 **코드와 HTTP status로만** 보고합니다. 일부 provi
 것은 그 결정이 내려질 때 **코드 변경 없이** 반영할 수 있게 하기 위해서이고,
 결정 자체는 아직 없습니다. 이것도 §14의 차단 사유입니다.
 
+#### 11.3.1 공급자 문서에서 확인된 것 (2026-09-02 읽음)
+
+아래는 **OpenAI 공식 문서를 읽어 확인한 사실**이며, 이 계정의 설정도 체결된
+계약도 아닙니다. 그 구분이 이 절의 요점입니다.
+
+출처: developers.openai.com `/api/docs/guides/your-data`,
+"Storage requirements and retention controls per endpoint" 표.
+
+| Endpoint | Data used for training | Abuse monitoring retention | Application state retention | ZDR eligible | Eyes Off / Safety Retention eligible |
+|---|:-:|:-:|:-:|:-:|:-:|
+| `/v1/audio/transcriptions` | No | None | None | Yes | No |
+
+- **이 endpoint는 ZDR 대상에 포함됩니다.**
+- **ZDR은 사전 승인제입니다** — 문서의 표현은 "subject to prior approval by
+  OpenAI"이고, 자격 확인은 영업 접촉입니다.
+- **별도 조직이나 별도 API key는 문서상 요구되지 않습니다.** 승인 후
+  **조직 또는 프로젝트 단위**로 data controls에서 설정합니다. 그러므로
+  "조직을 나눌 것인가"는 요구사항이 아니라 **우리 쪽 정책 선택**입니다.
+- API 데이터는 기본적으로 학습에 쓰이지 않습니다.
+
+#### 11.3.2 확인되지 않은 것 — 추정으로 메우지 않습니다
+
+1. **표의 `None`과 같은 문서의 "최대 30일" 문장의 관계.** 같은 페이지가
+   "abuse monitoring logs are generated for all API feature usage and retained
+   for up to 30 days"라고도 적습니다. 표는 이 endpoint에 대해 `None`입니다.
+   **문서는 둘의 우선관계를 설명하지 않으며, 이 저장소는 그것을 추정으로
+   해소하지 않습니다.** OpenAI 확인 대기입니다.
+2. **이 계정의 실제 설정.** ZDR 승인 여부, 활성 상태, 조직·프로젝트의 data
+   controls 값. 자격증명이 필요하고 이 문서는 그것을 읽지 않았습니다.
+3. **DPA 체결 여부와 체결 방법.** 원문을 읽지 못했습니다 —
+   `help.openai.com`은 이 환경의 egress 프록시가 차단하고 `openai.com/policies/*`
+   는 403입니다. **검색 요약을 근거로 확정하지 않습니다.**
+
+11.3.1을 근거로 §14의 B-5를 해제하지 않습니다. B-5가 묻는 것은 **계정 설정과
+계약**이고, 여기서 확인된 것은 **공급자 문서의 기본값과 자격**입니다.
+
 ### 11.4 사용자에게 말하는 곳
 
 두 곳입니다.
@@ -715,6 +798,17 @@ moderation을 하지 않습니다(`lib/voiceTranscript.ts`). 이 텍스트는 �
 
 B-1~B-4는 **§6이 열려 있다는 하나의 사실**의 네 얼굴입니다. B-5는 별개이고
 법무 성격입니다. B-6은 사람만 할 수 있습니다.
+
+**2026-09-02에 B-5와 B-3의 공급자 쪽 사실을 조사해 §11.3.1과 §6.1.1에
+적었습니다. 둘 다 해제되지 않았습니다.**
+
+- **B-5**는 공급자 문서의 기본값과 ZDR 자격을 확인했을 뿐이고, 이 항목이 묻는
+  **계정 설정과 계약**은 답해지지 않았습니다. 문서 안에서도 조정되지 않은
+  진술이 하나 남아 있습니다(§11.3.2-1).
+- **B-3**은 정가와 네 개의 관측 경로를 확인했을 뿐이고, 이 항목이 묻는
+  **register의 소유자·티켓·기한**은 없습니다. 유료 검증은 실행하지 않았습니다.
+
+조사가 끝났다는 것과 결정이 내려졌다는 것은 다릅니다. 이 표는 결정을 셉니다.
 
 ---
 

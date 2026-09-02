@@ -398,8 +398,51 @@ test("every route that can lead into a conversation reports its surface", () => 
             /conversationSurface\(/,
             `${path} should decide the surface server-side`
         );
+        // None of the bridge's provenance reaches a list response: the
+        // digest, the seed window and the import time are answers to
+        // questions no list is asking
+        // (docs/policy/external-conversation-continuation.md §3 and
+        // docs/policy/external-conversation-continuation.md §12).
+        for (const forbidden of [
+            "sourceConversationDigest",
+            "sourceDigestVersion",
+            "contextSeedVersion",
+            "seedFromOrdinal",
+            "seedToOrdinal",
+            "seedMessageCount",
+            "sourceImportedAt",
+        ]) {
+            assert.ok(
+                !source.includes(forbidden),
+                `${path} must not select the bridge's ${forbidden}`
+            );
+        }
+    }
+
+    /*
+      The one exception, and it is the list's alone: the imported
+      conversation's own title, for a row still carrying the writer's
+      placeholder (lib/continuationDisplayTitle.ts). Read here rather than
+      copied onto the row at creation, because deleting a snapshot leaves the
+      continuation standing and a stored copy would outlive the deletion.
+
+      Gated on the snapshot having no password: a locked source withholds its
+      transcript, and its title is part of that transcript.
+    */
+    const list = readFileSync("app/api/conversations/route.ts", "utf8");
+    assert.match(list, /externalConversation: \{\s*\n?\s*select: \{ title: true, password: true \}/);
+    assert.match(list, /externalConversation\?\.password === null/);
+    // The password is read to decide, never emitted -- exactly as this query
+    // already treats the conversation's own.
+    assert.doesNotMatch(list, /password: conv\./);
+
+    // The other two routes need only the answer.
+    for (const path of [
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/conversations/search/route.ts",
+    ]) {
         assert.match(
-            source,
+            readFileSync(path, "utf8"),
             /continuationBridge: \{ select: \{ id: true \} \}/,
             `${path} should select the bridge's existence and nothing else`
         );
@@ -412,7 +455,35 @@ test("the client routes by the server's answer, never by a derived one", () => {
         "utf8"
     );
     assert.match(client, /conversationSurfaceHref/);
-    assert.match(client, /targetSurface === "continuation"/);
+    /*
+      The surface comes from the row the server sent, and routing happens
+      whenever it differs from the surface this mount *is*.
+
+      The rule used to read `targetSurface === "continuation"`, which was
+      complete while this workspace only ran at `/chat`. It now also runs at
+      `/continuations/[id]`, where the other direction needs the same
+      treatment: selecting an ordinary conversation in place would leave that
+      URL, and its imported prelude, describing a different conversation.
+    */
+    assert.match(
+        client,
+        /const targetSurface =\s*\n?\s*surfaceHint \?\? conversations\.find\(\(c\) => c\.id === id\)\?\.surface;/
+    );
+    assert.match(
+        client,
+        /if \(targetSurface && targetSurface !== mountedSurface\) \{/
+    );
+    // Never from the product, the modality or the id's shape.
+    const routing = client.slice(
+        client.indexOf("const targetSurface ="),
+        client.indexOf("localComparisonResponsesRef.current.clear()")
+    );
+    for (const forbidden of ["productKey", "kind", "startsWith"]) {
+        assert.ok(
+            !routing.includes(forbidden),
+            `the surface must not be derived from ${forbidden}`
+        );
+    }
     // A search hit can name a conversation the list never loaded, so the row
     // carries its own answer.
     const sidebar = readFileSync("components/chat/ChatSidebar.tsx", "utf8");

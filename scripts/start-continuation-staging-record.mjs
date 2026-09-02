@@ -121,6 +121,32 @@ const d0 = runTest(
 );
 const d0Counts = counts(d0.out);
 
+/*
+  K-7, the half of it that runs anywhere.
+
+  The checklist answers "one model's failure does not damage another's" with
+  deterministic checks rather than paid turns, because staging offers no way to
+  fail one provider and not the others, and buying failures to watch them is
+  more expensive than what the item decides. The unit-level half runs here --
+  no browser, no build, no credentials -- so the record carries a result rather
+  than an instruction to go and get one.
+
+  The browser-level half (tests/e2e/external-conversation-continuation.spec.ts,
+  "one model failing leaves the other model's answer standing") needs a
+  production build and a Chromium; it is run where one is available and its
+  result is written into the row beside this one.
+*/
+console.log("Running K-7 (per-model failure isolation, unit level) ...");
+const k7 = runTest(
+    // The property moved with the screen. A continuation is now answered by
+    // the shared chat workspace -- one `ChatApp` per selected model, each with
+    // its own request and its own error -- so the isolation it asserts is the
+    // shell's rather than a continuation-only module's.
+    "tests/continuationNativeShell.test.mjs",
+    "failure isolation is the shared chat path|prelude cannot send|prelude reads the imported half"
+);
+const k7Counts = counts(k7.out);
+
 console.log("Checking the fixtures against their answer key ...");
 const fixtures = runTest("tests/continuationStagingFixtures.test.mjs");
 const fixtureCounts = counts(fixtures.out);
@@ -169,6 +195,27 @@ if (existsSync(target)) {
 }
 
 let record = readFileSync(TEMPLATE, "utf8");
+
+/*
+  The revision, written once and read from one place.
+
+  The template carried it twice -- in its front matter and again in the
+  execution-environment table -- and only the front matter is what
+  `check:staging-verification-records` compares against the checklist. So the
+  table's copy drifted: it still said 2026-08-31b under a 2026-09-01a header,
+  and a finished record would have named the wrong revision while the gate
+  stayed green. The body now takes its value from the front matter it was
+  opened with.
+*/
+const templateRevision =
+    /^templateRevision:\s*(\S+)\s*$/m.exec(record)?.[1] ?? null;
+if (!templateRevision) {
+    fail("The template has no templateRevision in its front matter.");
+}
+record = record.replace(
+    "| template revision | (기록을 열 때 front matter에서 채워집니다) |",
+    `| template revision | ${templateRevision} |`
+);
 
 record = record.replace("environment:\n", "environment: staging\n");
 record = record.replace("deploySha:\n", `deploySha: ${deploySha}\n`);
@@ -229,6 +276,11 @@ ${fixtureRow("truncation-conversation.json", "4,000자 상한을 넘는 답변 3
 );
 
 record = record.replace(
+    "| K-7 실패 격리 결정적 검사 통과 여부 (유료 turn 없음) | | |",
+    `| K-7 실패 격리 결정적 검사 (유료 turn 없음) | **이 기록을 만들며 실행:** \`tests/continuationNativeShell.test.mjs\` 의 격리·prelude 세 건 — ${k7Counts.pass} pass / ${k7Counts.failed} fail → **${k7.ok ? "통과" : "실패"}**. 로컬 트리 \`${localSha ?? "unknown"}\`. 브라우저 쪽 절반(\`tests/e2e/external-conversation-continuation.spec.ts\` "one model failing leaves the other model's answer standing")은 build와 Chromium이 있는 곳에서 실행하고 그 결과를 여기에 덧붙입니다. | |`
+);
+
+record = record.replace(
     "| D-0 role 경계 테스트 통과 | | |",
     `| D-0 role 경계 테스트 통과 | **이 기록을 만들며 실행:** \`tests/externalContinuationContracts.test.mjs\` 의 role-boundary 두 건 — ${d0Counts.pass} pass / ${d0Counts.failed} fail → **${d0.ok ? "통과" : "실패"}**. 로컬 트리 \`${localSha ?? "unknown"}\`, 신고된 배포 SHA와 ${localMatches ? "**일치**" : "**불일치 — 아래 주의**"}. | |`
 );
@@ -250,6 +302,7 @@ if (!localMatches) {
 writeFileSync(target, record, "utf8");
 
 console.log(`\nD-0: ${d0.ok ? "PASS" : "FAIL"} (${d0Counts.pass} pass / ${d0Counts.failed} fail)`);
+console.log(`K-7 (unit): ${k7.ok ? "PASS" : "FAIL"} (${k7Counts.pass} pass / ${k7Counts.failed} fail)`);
 console.log(
     `fixtures: ${fixtureCounts.pass} pass / ${fixtureCounts.failed} fail`
 );

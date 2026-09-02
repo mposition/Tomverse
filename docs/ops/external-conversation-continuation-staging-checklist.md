@@ -16,6 +16,10 @@ deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
 - **template revision**: `2026-09-01a`
 
+  이 revision은 아직 한 번도 실행되지 않았으므로(기록 0건), K-7의 실행 주체를
+  스크립트로 옮긴 2026-09-02 수정은 **번호를 올리지 않고 제자리에서** 반영했습니다.
+  묻는 것도 답의 형태도 그대로이고, 바뀐 것은 그 답을 누가 만드느냐뿐입니다.
+
   `2026-08-31b`에서 올린 이유는 **검증 대상이 달라졌기** 때문입니다. 이어가기는
   더 이상 단일 모델 Chat이 아니라 여러 모델이 같은 발췌로 답하는 Review
   대화입니다(정책 §3.1·§5.1). 새 구획 §K가 그 계약을 묻고, §A·§C·§E·§I는 모델
@@ -237,11 +241,22 @@ continuation 하나. 추가할 때 화면이 상한과 교체를 어떻게 다�
 - [ ] K-7. **한 모델의 실패가 다른 모델을 손상시키지 않는다**는 것은 이 회차에서
       유료 turn으로 재현하지 않습니다. staging에서 특정 provider만 실패시키는
       수단이 없고, 실패를 만들려고 유료 호출을 반복하는 것은 이 항목이 판별하는
-      것보다 비싼 일이기 때문입니다. 대신 결정적 검사로 답합니다 —
-      `tests/e2e/external-conversation-continuation.spec.ts`의 "one model failing
-      leaves the other model's answer standing"과
-      `tests/continuationModelPanels.test.mjs`의 실패 격리 항목이 이 배포에서
-      통과했는가. **통과 여부를 기록에 적습니다**(유료 turn 0).
+      것보다 비싼 일이기 때문입니다. 대신 결정적 검사 두 겹으로 답하며,
+      **둘 다 실행자가 손으로 할 일이 아닙니다**(유료 turn 0).
+
+      - **단위 검사는 `staging:continuation-record`가 회차를 열면서 실행하고
+        결과를 기록에 적습니다** — `tests/continuationNativeShell.test.mjs`의
+        격리·prelude 세 건. 브라우저도 build도 자격증명도 필요 없습니다.
+        continuation이 공용 chat workspace로 옮겨가면서 이 성질은 더 이상
+        continuation 전용이 아닙니다 — 모델마다 자기 `ChatApp`이 자기 요청과
+        자기 오류를 갖는 shell의 성질이고, 검사도 그것을 봅니다.
+      - **브라우저 검사는 build와 Chromium이 있는 곳에서 실행합니다** —
+        `tests/e2e/external-conversation-continuation.spec.ts`의 "one model
+        failing leaves the other model's answer standing". 이 컨테이너에서
+        실행할 수 있으므로 실행자에게 넘기지 않습니다.
+
+      두 결과와 각각이 실행된 commit을 기록에 적습니다. 다른 commit에서 통과한
+      사실은 이 배포에 대한 증거가 아니라는 §D-0의 규칙이 여기에도 적용됩니다.
 
 ## 비차단 항목 (선택)
 

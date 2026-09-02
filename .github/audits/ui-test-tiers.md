@@ -95,10 +95,18 @@ mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니�
 | `web-search-composer-state.spec.ts` |
 | `assistant-knowledge-upload.spec.ts` |
 | `voice-input-composer.spec.ts` |
+| `conversation-draft-identity.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
 파일 수는 2026-08-31 현재 53개입니다.
+
+`conversation-draft-identity.spec.ts`가 2026-09-02에 합류해 54개입니다.
+같은 방식으로 막혔고, 같은 이유로 이 tier에 있습니다 — 초안이 신원별로
+격리되는지는 화면에서만 확인되고, 틀리면 다음 계정이 이전 계정의 미전송
+글과 이미지 미리보기를 읽습니다(docs/policy/conversation-draft-identity-scope.md).
+회수가 성립하지 않는 종류라 merge를 막는 쪽이 맞습니다. 두 test 파일이며
+desktop·mobile 두 project에서 돕니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
