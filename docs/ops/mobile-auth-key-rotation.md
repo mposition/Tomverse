@@ -35,6 +35,10 @@ D6과 승인 결정 3번입니다.
 | `MOBILE_AUTH_TOKEN_ISSUER` | `iss`. 검증이 정확 일치합니다 |
 | `MOBILE_AUTH_TOKEN_AUDIENCE` | `aud`. 같습니다 |
 
+**여덟 중 여섯이 필수이고 은퇴 목록 둘이 선택**입니다
+(`scripts/check-mobile-auth-keyring.mjs`의 `REQUIRED`·`OPTIONAL`). 필수 중 하나라도
+빠지면 모바일 인증이 전부 503이고, §2.1의 검사가 그것을 "일부만 설정됨"으로 잡습니다.
+
 은퇴 목록은 **별개 변수**입니다. pepper는 운영자가 고른 비밀값이라 콜론을 담을 수
 있고, ring 항목에 세 번째 필드를 두면 하필 그 값에서 파싱이 모호해집니다.
 
