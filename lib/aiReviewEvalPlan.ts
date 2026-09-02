@@ -33,6 +33,7 @@ import {
     type AiReviewEvalCase,
 } from "@/lib/aiReviewEvalCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { DRAFT_MIN_RESPONSE_CHARACTERS } from "@/lib/aiReviewEvalDraftPrompt";
 
 export type AiReviewEvalCell = {
     language: string;
@@ -208,8 +209,13 @@ export const goldLeadLabels = (
                 let bestLabel: string | null = null;
                 let bestIndex = Number.POSITIVE_INFINITY;
                 for (const label of labels) {
+                    // Escaped, because a label is data. A case whose label is
+                    // `[` would otherwise throw here and take the whole report
+                    // down -- a counter that cannot survive its own input is
+                    // not a counter. `datasetProblems()` refuses such a label
+                    // too, but this must hold for a file nobody has validated.
                     const match = new RegExp(
-                        `(^|[^A-Za-z0-9])${label}([^A-Za-z0-9]|$)`
+                        `(^|[^A-Za-z0-9])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9]|$)`
                     ).exec(lead);
                     if (match && match.index < bestIndex) {
                         bestIndex = match.index;
@@ -228,6 +234,52 @@ export const goldLeadLabels = (
     return { byLabel, attributed };
 };
 
+/**
+ * How long the answers are.
+ *
+ * The first paid batch averaged 108 characters, between 81 and 133. Each case
+ * was well formed and the set would have been useless: a reviewer comparing
+ * two-sentence stubs has nowhere for an omission to hide and nothing for a
+ * contradiction to be buried in, so what gets measured is not what the product
+ * does. The runbook asks for the length a real assistant produces, and
+ * `DRAFT_MIN_RESPONSE_CHARACTERS` now enforces a floor on new drafting -- but
+ * a floor says nothing about the shape above it, and a cell can still fill up
+ * with answers sitting exactly on it.
+ *
+ * Characters, not tokens: the floor is stated in characters and a reader
+ * checking one case by eye counts characters.
+ */
+export const responseLengths = (
+    cases: readonly Pick<AiReviewEvalCase, "responses">[]
+): {
+    readonly count: number;
+    readonly min: number;
+    readonly median: number;
+    readonly mean: number;
+    readonly max: number;
+    readonly belowFloor: number;
+} => {
+    const lengths = cases
+        .flatMap((testCase) => testCase.responses ?? [])
+        .map((response) => (response?.content ?? "").trim().length)
+        .sort((left, right) => left - right);
+    if (lengths.length === 0) {
+        return { count: 0, min: 0, median: 0, mean: 0, max: 0, belowFloor: 0 };
+    }
+    const middle = Math.floor(lengths.length / 2);
+    return {
+        count: lengths.length,
+        min: lengths[0],
+        median:
+            lengths.length % 2 === 1
+                ? lengths[middle]
+                : Math.round((lengths[middle - 1] + lengths[middle]) / 2),
+        mean: Math.round(lengths.reduce((total, value) => total + value, 0) / lengths.length),
+        max: lengths[lengths.length - 1],
+        belowFloor: lengths.filter((value) => value < DRAFT_MIN_RESPONSE_CHARACTERS).length,
+    };
+};
+
 export type AiReviewEvalManifest = {
     cases: number;
     byCell: readonly AiReviewEvalCellGap[];
@@ -240,6 +292,8 @@ export type AiReviewEvalManifest = {
     emptyExhaustiveClaims: readonly { id: string; kind: string }[];
     /** The label each gold item names first, counted. A heuristic; see goldLeadLabels(). */
     goldLeadLabels: { readonly byLabel: Readonly<Record<string, number>>; readonly attributed: number };
+    /** Answer length in characters, against the drafting floor. */
+    responseLengths: ReturnType<typeof responseLengths>;
 };
 
 /**
@@ -277,6 +331,7 @@ export const datasetManifest = (
         duplicates: duplicateQuestions(cases),
         emptyExhaustiveClaims: emptyExhaustiveClaims(cases),
         goldLeadLabels: goldLeadLabels(cases),
+        responseLengths: responseLengths(cases),
     };
 };
 
@@ -441,6 +496,39 @@ export const draftingBatches = (input: {
 };
 
 /**
+ * The output cap for a batch, sized to what that batch was asked to write.
+ *
+ * A flat 12,000 was two wrong things at once. For the small batches -- and
+ * most are small, because a batch belongs to one (cell, phenomenon, mode) and
+ * the plan averages under four cases per call -- it charged a ceiling four
+ * times what the call could produce. For a full batch at v3's answer length it
+ * was under what the call NEEDS: measured on the pilot's own Korean answers at
+ * 1.143 tokens per character, seven cases of three ~500-character answers plus
+ * their questions, gold and notes come to about 17,200 output tokens. The
+ * reply would have been truncated mid-JSON and the call billed for nothing --
+ * the same way the length floor took the first v3 batch, one step later.
+ *
+ * So the cap is per case with a fixed allowance for the envelope, and the
+ * ceiling that is checked against the approved total moves with it. 3,000 is
+ * the measured ~2,455 with a fifth again on top: a cap that is occasionally
+ * generous costs a slightly high reservation, and one that is occasionally
+ * tight costs the whole call.
+ *
+ * The 1.143 comes from this repository's own estimator, which its comments say
+ * overstates Korean by roughly 110% against o200k. Left overstated on purpose:
+ * this number decides whether a reply fits, and the failure it prevents is
+ * expensive while the cost of being wrong the other way is a reservation a
+ * little larger than it needed to be.
+ */
+export const DRAFTING_OUTPUT_TOKENS_PER_CASE = 3_000;
+
+/** The envelope: the JSON around the cases, whatever their number. */
+export const DRAFTING_OUTPUT_TOKENS_FIXED = 500;
+
+export const draftingOutputTokenCap = (count: number): number =>
+    DRAFTING_OUTPUT_TOKENS_FIXED + DRAFTING_OUTPUT_TOKENS_PER_CASE * count;
+
+/**
  * What a plan costs at most, call by call.
  *
  * ## Why a single input estimate was not a ceiling
@@ -458,17 +546,21 @@ export const draftingBatches = (input: {
  * instruction as it will actually be sent, and this sums them.
  */
 export const draftingCostCeilingUsd = (input: {
-    /** One entry per call: the input tokens that call will carry. */
-    inputTokensPerCall: readonly number[];
-    outputTokenCapPerCall: number;
+    /**
+     * One entry per call: the input tokens it carries and the output cap it
+     * runs under. Both vary per call -- the input grows as a cell fills, and
+     * the cap is sized to the batch -- so neither can be a single figure for
+     * the whole plan.
+     */
+    perCall: readonly { inputTokens: number; outputTokenCap: number }[];
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
 }): number =>
-    input.inputTokensPerCall.reduce(
-        (total, inputTokens) =>
+    input.perCall.reduce(
+        (total, call) =>
             total +
-            (inputTokens / 1_000_000) * input.inputUsdPerMillionTokens +
-            (input.outputTokenCapPerCall / 1_000_000) * input.outputUsdPerMillionTokens,
+            (call.inputTokens / 1_000_000) * input.inputUsdPerMillionTokens +
+            (call.outputTokenCap / 1_000_000) * input.outputUsdPerMillionTokens,
         0
     );
 

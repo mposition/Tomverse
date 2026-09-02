@@ -17,6 +17,48 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { ledgerBalance } from "../lib/aiReviewDraftLedger.ts";
+import {
+  assignTargetLabels,
+  draftInstruction,
+} from "../lib/aiReviewEvalDraftPrompt.ts";
+import {
+  draftingCallCostCeilingUsd,
+  draftingInputTokenCeiling,
+  draftingOutputTokenCap,
+} from "../lib/aiReviewEvalPlan.ts";
+import { getModelPricingProfile } from "../lib/modelPricing.ts";
+
+/**
+ * What one call of ARGS costs at most, computed the way the drafter computes
+ * it.
+ *
+ * Derived rather than typed in: the per-call ceiling moves whenever the
+ * instruction, the token bound or the output cap changes, and a hard-coded
+ * total quietly stops testing what it was written to test -- it did, the day
+ * the output cap started being sized to the batch.
+ */
+const callCeilingUsd = () => {
+  const cell = {
+    language: "ko",
+    taskType: "safety_sensitive",
+    phenomenon: "prompt_injection",
+    mode: "balanced",
+    count: 2,
+  };
+  const tier = getModelPricingProfile("gpt-5-6-luna").tiers[0];
+  return draftingCallCostCeilingUsd({
+    inputTokens: draftingInputTokenCeiling(
+      draftInstruction({
+        ...cell,
+        existingQuestions: [],
+        targetLabels: assignTargetLabels(cell),
+      })
+    ),
+    outputTokenCap: draftingOutputTokenCap(cell.count),
+    inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+  });
+};
 
 const ARGS = [
   "--model=gpt-5-6-luna",
@@ -48,7 +90,12 @@ const stubProvider = async (reply) => {
 };
 
 
-/** A reply the drafter will accept, carrying one case with the given marker. */
+/**
+ * A reply the drafter will accept, carrying one case with the given marker.
+ *
+ * Shaped to the v2 contract, because that is what the drafter now enforces:
+ * three answers labelled a/b/c, each past the length floor.
+ */
 const usableReply = (marker) =>
   JSON.stringify({
     choices: [
@@ -58,12 +105,17 @@ const usableReply = (marker) =>
             cases: [
               {
                 question: `question ${marker}`,
-                responses: [
-                  { label: "a", content: `answer a ${marker}` },
-                  { label: "b", content: `answer b ${marker}` },
-                ],
-                gold: { contradictions: [{ id: marker, anyOf: [marker], description: marker }] },
+                responses: ["a", "b", "c"].map((label) => ({
+                  label,
+                  content: `answer ${label} for ${marker}. `.repeat(20),
+                })),
+                gold: {
+                  contradictions: [
+                    { id: marker, anyOf: [marker], description: marker },
+                  ],
+                },
                 goldCompleteness: { contradictions: true },
+                injectionMarkers: [marker],
               },
             ],
           }),
@@ -234,9 +286,10 @@ test("two runs at once cannot both decide they have room", async (t) => {
   });
 
   // A total that fits one call and not two, and both runs start at once.
+  const total = (callCeilingUsd() * 1.5).toFixed(6);
   const [one, two] = await Promise.all([
-    run(fix.setPath, ["--send", "--max-total-cost-usd=0.02"], provider.url),
-    run(fix.setPath, ["--send", "--max-total-cost-usd=0.02"], provider.url),
+    run(fix.setPath, ["--send", `--max-total-cost-usd=${total}`], provider.url),
+    run(fix.setPath, ["--send", `--max-total-cost-usd=${total}`], provider.url),
   ]);
   const refused = [one, two].filter((result) => /HARD STOP/.test(result.stderr));
   assert.equal(refused.length, 1, `${one.stderr}\n---\n${two.stderr}`);
@@ -244,8 +297,8 @@ test("two runs at once cannot both decide they have room", async (t) => {
   const balance = fix.balance();
   assert.deepEqual(balance.problems, []);
   assert.ok(
-    balance.committedUsd <= 0.02,
-    `committed ${balance.committedUsd} passed the approved total`
+    balance.committedUsd <= Number(total),
+    `committed ${balance.committedUsd} passed the approved total ${total}`
   );
 });
 
@@ -332,4 +385,57 @@ test("two concurrent runs never lose a written case", async (t) => {
     set.cases.length,
     "two runs must not hand out the same case id"
   );
+});
+
+test("a set holding an older template's cases is refused before anything is reserved", async (t) => {
+  // The shape a stale working copy produces: a decision set that survived a
+  // move, quietly collecting v2 cases on top of v1 ones. Templates differ in
+  // where the fault is planted and how long an answer must be, so a set
+  // holding both measures neither cleanly.
+  const fix = fixture();
+  t.after(() => rmSync(fix.root, { recursive: true, force: true }));
+  writeFileSync(
+    fix.setPath,
+    JSON.stringify({
+      version: "decision-v1",
+      schemaVersion: 1,
+      purpose: "decision",
+      frozenAt: null,
+      frozenBy: null,
+      frozenDigest: null,
+      cases: [
+        {
+          id: "ko-safety-sensitive-001",
+          language: "ko",
+          taskType: "safety_sensitive",
+          phenomenon: "direct_contradiction",
+          mode: "balanced",
+          question: "q",
+          responses: [
+            { label: "a", content: "c", modelId: "drafted", provider: "drafted" },
+            { label: "b", content: "c", modelId: "drafted", provider: "drafted" },
+          ],
+          gold: { contradictions: [{ id: "g", anyOf: ["g"], description: "g" }] },
+          goldCompleteness: { contradictions: true },
+          status: "candidate",
+          adoptedBy: null,
+          adoptedAt: null,
+          draftedBy: {
+            modelId: "gpt-5-6-luna",
+            templateVersion: "ai-review-eval-draft-v1",
+            draftedAt: "2026-09-02T06:59:09.592Z",
+          },
+        },
+      ],
+    })
+  );
+
+  const result = await run(
+    fix.setPath,
+    ["--send", "--max-total-cost-usd=1"],
+    "http://127.0.0.1:1/v1"
+  );
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /ai-review-eval-draft-v1/);
+  assert.equal(existsSync(fix.ledgerPath), false, "nothing may be reserved");
 });

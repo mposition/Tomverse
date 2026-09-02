@@ -31,9 +31,9 @@ import {
   artifactAdmissibilityProblems,
   artifactRunProblems,
   datasetDigest,
-  adoptionProblems,
   datasetProblems,
   isUnfrozenDraft,
+  partitionDatasetProblems,
   freezeDrift,
 } from "../lib/aiReviewEvalRun.ts";
 import {
@@ -139,18 +139,18 @@ const checkDataset = (path) => {
   // Keyed on the freeze record rather than a flag, because freezing IS the
   // moment the set stops being under construction. A half-written freeze is
   // not this state and keeps failing.
+  //
+  // The split itself lives in `partitionDatasetProblems()` so this and the
+  // coverage report cannot answer the question differently -- which they did,
+  // for one release.
   const underConstruction =
     dataset.purpose === "decision" && isUnfrozenDraft(dataset);
-  const adoption = adoptionProblems(dataset);
+  const { blocking, buildState } = partitionDatasetProblems(dataset);
   const notes = [];
-  const problems = [...datasetProblems(dataset)];
-  if (underConstruction && adoption.length > 0) {
-    const excused = new Set(adoption);
-    for (let index = problems.length - 1; index >= 0; index -= 1) {
-      if (excused.has(problems[index])) problems.splice(index, 1);
-    }
+  const problems = [...blocking];
+  if (buildState.length > 0) {
     notes.push(
-      `${adoption.length} of ${dataset.cases.length} case(s) are not adopted yet. ` +
+      `${buildState.length} of ${dataset.cases.length} case(s) are not adopted yet. ` +
         `A person adopts each one; until then this set cannot be frozen and ` +
         `cannot produce evidence.`
     );
@@ -266,6 +266,10 @@ if (existsSync(DATASET_DIRECTORY)) {
     const path = join(DATASET_DIRECTORY, file);
     const dataset = readJson(path);
     if (dataset.__readError || dataset.purpose !== "decision") continue;
+    // Strict on purpose, and NOT the partitioned view: this map is what an
+    // approved run's dataset is matched against, so a set still holding
+    // candidates must never be bindable as evidence. The relaxation above is
+    // about whether a file may sit in the tree.
     if (datasetProblems(dataset).length > 0) continue;
     decisionSetsByDigest.set(datasetDigest(dataset), { path, dataset });
   }

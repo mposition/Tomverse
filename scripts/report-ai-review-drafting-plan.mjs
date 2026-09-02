@@ -26,6 +26,7 @@ import {
   draftingBatches,
   draftingCostCeilingUsd,
   draftingInputTokenCeiling,
+  draftingOutputTokenCap,
   evalCoveragePlan,
 } from "../lib/aiReviewEvalPlan.ts";
 
@@ -60,7 +61,10 @@ const DRAFTER_PRICE_HOLDS = {
     "derived from it. What a user may spend is credits, a separate layer " +
     "(docs/policy/credit-and-cost-limits.md), and the two must not be conflated.",
 };
-import { draftInstruction } from "../lib/aiReviewEvalDraftPrompt.ts";
+import {
+  assignTargetLabels,
+  draftInstruction,
+} from "../lib/aiReviewEvalDraftPrompt.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
 import { COMPARISON_REVIEW_DEFAULT_MODEL_IDS } from "../lib/comparisonReview.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
@@ -77,7 +81,7 @@ const argValue = (name, fallback = "") => {
 
 const setPath = argValue("set", SET_PATH);
 const batchSize = Number(argValue("batch-size", "10"));
-const outputTokenCap = Number(argValue("max-output-tokens", "12000"));
+
 if (!Number.isInteger(batchSize) || batchSize < 1) {
   console.error("--batch-size must be a whole positive number.");
   process.exit(1);
@@ -178,7 +182,7 @@ for (const item of existing) {
   const key = `${item.language}:${item.taskType}`;
   questionsPerCell.set(key, [...(questionsPerCell.get(key) ?? []), item.question ?? ""]);
 }
-const inputTokensPerCall = [];
+const perCall = [];
 let sampleInstruction = "";
 for (const batch of batches) {
   const key = `${batch.language}:${batch.taskType}`;
@@ -190,9 +194,19 @@ for (const batch of batches) {
     mode: batch.mode,
     count: batch.count,
     existingQuestions: seen,
+    targetLabels: assignTargetLabels({
+      language: batch.language,
+      taskType: batch.taskType,
+      phenomenon: batch.phenomenon,
+      mode: batch.mode,
+      count: batch.count,
+    }),
   });
   if (!sampleInstruction) sampleInstruction = instruction;
-  inputTokensPerCall.push(draftingInputTokenCeiling(instruction));
+  perCall.push({
+    inputTokens: draftingInputTokenCeiling(instruction),
+    outputTokenCap: draftingOutputTokenCap(batch.count),
+  });
   // What the next batch in this cell will be shown. A placeholder of typical
   // length rather than the real text, which does not exist yet -- and named as
   // an assumption in the output below.
@@ -201,8 +215,8 @@ for (const batch of batches) {
     ...Array.from({ length: batch.count }, () => "x".repeat(ASSUMED_QUESTION_CHARS)),
   ]);
 }
-const firstCallTokens = inputTokensPerCall[0] ?? 0;
-const lastCallTokens = inputTokensPerCall[inputTokensPerCall.length - 1] ?? 0;
+const firstCallTokens = perCall[0]?.inputTokens ?? 0;
+const lastCallTokens = perCall[perCall.length - 1]?.inputTokens ?? 0;
 
 console.log(
   `\ndrafter candidates (reviewer models excluded: ${COMPARISON_REVIEW_DEFAULT_MODEL_IDS.join(", ")})`
@@ -211,7 +225,9 @@ console.log(
   `  input tokens grow through the plan: ~${firstCallTokens.toLocaleString("en-US")} on the\n` +
     `  first call, ~${lastCallTokens.toLocaleString("en-US")} on the last, because each call is shown its cell's\n` +
     `  existing questions. Unwritten questions are assumed ${ASSUMED_QUESTION_CHARS} characters.\n` +
-    `  Every call is charged the full ${outputTokenCap.toLocaleString("en-US")}-token output cap.\n`
+    `  Every call is charged its full output cap, which is sized to that batch: ` +
+      `${Math.min(...perCall.map((call) => call.outputTokenCap)).toLocaleString("en-US")}` +
+      `-${Math.max(...perCall.map((call) => call.outputTokenCap)).toLocaleString("en-US")} tokens.\n`
 );
 const rows = [];
 for (const model of eligible) {
@@ -225,8 +241,7 @@ for (const model of eligible) {
     id: model.id,
     provider: model.provider,
     ceiling: draftingCostCeilingUsd({
-      inputTokensPerCall,
-      outputTokenCapPerCall: outputTokenCap,
+      perCall,
       inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
       outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
     }),

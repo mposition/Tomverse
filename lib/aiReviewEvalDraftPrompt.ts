@@ -37,7 +37,91 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v1";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v3";
+
+/** The only labels a drafted response may carry. */
+export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
+
+/**
+ * The shortest a drafted answer may be.
+ *
+ * The v1 batch averaged 108 characters, between 81 and 133 -- readable, and
+ * nothing like the answers this product produces. The runbook asks for
+ * "hundreds to thousands of characters" because a reviewer comparing two
+ * two-sentence stubs is not doing the job being measured: there is nowhere for
+ * an omission to hide and nothing for a contradiction to be buried in.
+ *
+ * A floor rather than a target. It is enforced on the reply, so a drafter that
+ * writes stubs fails the batch instead of quietly filling a cell with them.
+ */
+export const DRAFT_MIN_RESPONSE_CHARACTERS = 200;
+
+/**
+ * The length the drafter is asked for, which is not the length it is judged
+ * against.
+ *
+ * v2 asked for "at least 200 characters" and the first batch came back at 162,
+ * 170, 177, 185, 187, 189, 190 -- seven cases, every one rejected, one call
+ * billed for nothing. The model was not ignoring the rule; it was aiming at
+ * the number it was given and landing five to twenty per cent under, which is
+ * what asking a model to hit a character count gets you.
+ *
+ * A floor stated as the target has no room for that. So the request is a range
+ * well above the floor, and the floor stays where it is as the line at which a
+ * case is refused. The gap is what absorbs the imprecision.
+ */
+export const DRAFT_TARGET_RESPONSE_CHARACTERS = 500;
+
+/**
+ * The phenomena that plant nothing, so no answer is the odd one out.
+ *
+ * `position_bias` belongs here for a second reason: it is the case that exists
+ * to test whether position fools a reviewer, so assigning it a position would
+ * be assigning the thing under test.
+ */
+const PHENOMENA_WITHOUT_A_TARGET: ReadonlySet<string> = new Set([
+    "genuine_consensus",
+    "no_issue",
+    "verbosity_bias",
+    "position_bias",
+]);
+
+/**
+ * Which answer carries the planted phenomenon, per case, decided here rather
+ * than by the drafter.
+ *
+ * The v1 batch put it in `c` seven times out of seven. Every case was sound;
+ * the set was not, because a reviewer that always accuses the last answer would
+ * have scored full recall on it. Left to a model the position is whatever its
+ * habits are, and habits are exactly what a measurement must not inherit.
+ *
+ * Round-robin from an offset derived from the cell's own identity: within a
+ * batch the labels come out balanced (seven cases give a=3, b=2, c=2), and
+ * across batches the run does not always open on `a`. Deterministic, so the
+ * same batch re-planned gets the same assignment and the record can be checked
+ * against it afterwards.
+ *
+ * Assignment only. Nothing rearranges what comes back -- see the reply rules.
+ */
+export const assignTargetLabels = (request: {
+    language: string;
+    taskType: string;
+    phenomenon: string;
+    mode: string;
+    count: number;
+}): readonly (string | null)[] => {
+    if (PHENOMENA_WITHOUT_A_TARGET.has(request.phenomenon)) {
+        return Array.from({ length: request.count }, () => null);
+    }
+    const identity = `${request.language}/${request.taskType}/${request.phenomenon}/${request.mode}`;
+    const digest = createHash("sha256").update(identity, "utf8").digest();
+    const offset = digest[0] % DRAFT_RESPONSE_LABELS.length;
+    return Array.from(
+        { length: request.count },
+        (_unused, index) =>
+            DRAFT_RESPONSE_LABELS[(offset + index) % DRAFT_RESPONSE_LABELS.length]
+    );
+};
 
 /** What each task type is for, in the words the drafter is given. */
 export const TASK_TYPE_BRIEF: Readonly<Record<AiReviewEvalTaskType, string>> = {
@@ -89,10 +173,25 @@ export type AiReviewDraftRequest = {
     count: number;
     /** Questions already in the set for this cell, so the drafter avoids them. */
     existingQuestions: readonly string[];
+    /**
+     * Which answer carries the planted phenomenon, per case, from
+     * `assignTargetLabels()`. Null entries are phenomena that plant nothing.
+     */
+    targetLabels: readonly (string | null)[];
 };
 
 export function draftInstruction(request: AiReviewDraftRequest): string {
     const languageName = request.language === "ko" ? "Korean" : "English";
+    if (request.targetLabels.length !== request.count) {
+        throw new Error(
+            `${request.count} case(s) asked for and ${request.targetLabels.length} target label(s) given`
+        );
+    }
+    const assignment = request.targetLabels.every((label) => label === null)
+        ? `\n\nThis phenomenon plants nothing, so no answer is the odd one out. Make the answers genuinely equivalent.`
+        : `\n\nWhich answer carries the planted phenomenon is ASSIGNED, not yours to choose:\n${request.targetLabels
+              .map((label, index) => `  - case ${index + 1}: answer "${label}"`)
+              .join("\n")}\n\nWrite each case so the assigned answer is the one at fault and the others are sound. Do not move it, do not plant it in a second answer, and do not reorder the answers to suit yourself: the whole point of the assignment is that the position is not correlated with the fault.`;
     const avoid =
         request.existingQuestions.length > 0
             ? `\n\nThe set already contains these questions. Do not repeat them, and do not paraphrase them -- a cell filled by paraphrase measures one question many times:\n${request.existingQuestions
@@ -114,7 +213,9 @@ Rules that are not negotiable:
 3. The gold is the list of what a fair reviewer SHOULD find. Write it as concretely as you can: for each item, the strings that would appear in a correct finding.
 4. State honestly, per finding kind, whether your gold is EXHAUSTIVE -- whether it lists everything a fair reviewer could legitimately report of that kind. If another reasonable finding exists that you did not list, say false. Saying true when it is not manufactures a precision score that means nothing, and a false is not a defect in your case.
 5. Do not name any AI company or model inside the question or the answers unless the question is genuinely about them.
-6. Where the phenomenon is one whose point is that there is nothing to report -- genuine_consensus, no_issue, verbosity_bias, position_bias -- the gold is empty and exhaustive: the correct review reports no finding of that kind. Make the answers genuinely equivalent, so a reviewer that reports something has been fooled rather than provoked.${avoid}
+6. Where the phenomenon is one whose point is that there is nothing to report -- genuine_consensus, no_issue, verbosity_bias, position_bias -- the gold is empty and exhaustive: the correct review reports no finding of that kind. Make the answers genuinely equivalent, so a reviewer that reports something has been fooled rather than provoked.
+7. Write each answer at the length a real assistant produces: aim for about ${DRAFT_TARGET_RESPONSE_CHARACTERS} characters, and do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach that length with substance, never with padding or repetition: give the recommendation, then the reasoning behind it, then the condition or caveat a careful answer would name. A two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
+8. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
 
 Reply with JSON only, no prose around it, in exactly this shape:
 
@@ -141,13 +242,23 @@ Reply with JSON only, no prose around it, in exactly this shape:
   ]
 }
 
-Use 2 or 3 responses. Omit a gold kind entirely rather than writing an empty array for it, except where the phenomenon is one of the four with nothing to report.`;
+Use three responses labelled "a", "b" and "c". Omit a gold kind entirely rather than writing an empty array for it, except where the phenomenon is one of the four with nothing to report.`;
 }
 
 export const templateHash = (instruction: string): string =>
     `sha256:${createHash("sha256").update(instruction, "utf8").digest("hex")}`;
 
 export type ParsedDraftCase = {
+    /**
+     * Which case of the batch this was, counting rejected ones.
+     *
+     * The assignment is per requested case, and the parser drops what it
+     * refuses -- so the position in the accepted list is not the position in
+     * the request, and using it would record the wrong assigned label on every
+     * case after a rejection. Evidence that is quietly wrong is worse than
+     * evidence that is absent.
+     */
+    requestIndex: number;
     question: string;
     responses: readonly { label: string; content: string }[];
     gold: Record<string, readonly unknown[]>;
@@ -164,7 +275,18 @@ export type ParsedDraftCase = {
  * patching it up is how a malformed gold reaches a person as though it had
  * been written on purpose.
  */
-export function parseDraftedCases(body: string): {
+export function parseDraftedCases(
+    body: string,
+    /**
+     * What this batch asked for. Optional so a reply can still be read without
+     * it, but the drafter always passes it: the label rules below are what
+     * stop a batch from quietly landing in a shape nobody asked for.
+     */
+    expected?: {
+        targetLabels: readonly (string | null)[];
+        minResponseCharacters?: number;
+    }
+): {
     cases: readonly ParsedDraftCase[];
     problems: readonly string[];
 } {
@@ -208,6 +330,57 @@ export function parseDraftedCases(body: string): {
             problems.push(`case[${index}]: needs 2-3 responses with content`);
             continue;
         }
+        // Labels are checked rather than filled in.
+        //
+        // They used to be optional and defaulted by position, which meant a
+        // reply that omitted them, repeated one, or invented `answer 1` was
+        // silently rewritten into something that looked deliberate. A label is
+        // how the assignment is stated and how the gold refers back to an
+        // answer, so a wrong one is not a formatting slip.
+        const labels = item.responses.map((response) => response.label);
+        if (labels.some((label) => typeof label !== "string" || label.trim() === "")) {
+            problems.push(`case[${index}]: a response has no label`);
+            continue;
+        }
+        const allowed = new Set<string>(DRAFT_RESPONSE_LABELS);
+        const unknown = labels.filter((label) => !allowed.has(label));
+        if (unknown.length > 0) {
+            problems.push(
+                `case[${index}]: label(s) ${unknown.map((l) => `"${l}"`).join(", ")} ` +
+                    `are not among ${DRAFT_RESPONSE_LABELS.join(", ")}`
+            );
+            continue;
+        }
+        if (new Set(labels).size !== labels.length) {
+            problems.push(`case[${index}]: two responses share a label`);
+            continue;
+        }
+        const target = expected?.targetLabels[index];
+        if (target != null && !labels.includes(target)) {
+            problems.push(
+                `case[${index}]: the planted answer was assigned to "${target}", ` +
+                    `and the case has no such answer`
+            );
+            continue;
+        }
+        const floor = expected?.minResponseCharacters ?? 0;
+        const short = item.responses.filter(
+            (response) => response.content.trim().length < floor
+        );
+        if (short.length > 0) {
+            // Every length, not just the shortest: an operator reading a
+            // rejected batch needs to tell a near-miss from a stub, and the
+            // two call for different responses -- one is the instruction
+            // aiming too low, the other is a drafter that ignored it.
+            problems.push(
+                `case[${index}]: ${short.length} of ${item.responses.length} answer(s) ` +
+                    `below ${floor} characters (lengths ` +
+                    `${item.responses
+                        .map((response) => response.content.trim().length)
+                        .join(", ")})`
+            );
+            continue;
+        }
         if (typeof item.gold !== "object" || item.gold === null) {
             problems.push(`case[${index}]: no gold`);
             continue;
@@ -219,7 +392,7 @@ export function parseDraftedCases(body: string): {
             problems.push(`case[${index}]: no goldCompleteness`);
             continue;
         }
-        accepted.push(item as ParsedDraftCase);
+        accepted.push({ ...(item as ParsedDraftCase), requestIndex: index });
     }
     return { cases: accepted, problems };
 }

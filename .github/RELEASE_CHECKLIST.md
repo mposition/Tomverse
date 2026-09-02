@@ -60,14 +60,28 @@ Date / timezone:    ____________________
       authentication policy ("Deliberately excluded") because it changes the
       origin the bearer-token boundary is defined against. Read as text, so a
       URL supplied through an environment variable is still a finding
-- [ ] `npm run check:mobile-auth-keyring` — **Railway 서비스 shell에서**, 배포할 변수
-      값으로 실행합니다(검사가 활성 키로 실제 서명해 보므로 개인키가 필요하고, 그
-      값을 노트북으로 옮기는 편이 더 위험합니다). 키마다 active / 은퇴+유예 /
-      선언되지 않음을 보고하고, 선언되지 않은 키·오타 난 은퇴 id·**일부만 설정된
-      상태**에서 실패합니다. 모바일 인증을 서비스하는 배포라면
-      `-- --require-configured`를 붙여 완전 미설정도 실패로 만듭니다. CI 항목이
-      아닙니다 — CI에는 모바일 키가 없습니다. 절차는
-      `docs/ops/mobile-auth-key-rotation.md`
+- [ ] 모바일 인증 키링 검사 — 이 배포가 모바일 인증을 **서비스하는지**에 따라 명령이
+      갈립니다. 한 항목이고, 둘 중 하나를 실행해 통과시킵니다.
+      - 서비스하는 배포: 로컬 PC의 PowerShell, clone 폴더 안에서
+        `./scripts/ops/Check-MobileAuthKeyring.ps1 ... -RequireConfigured`.
+        **배포하려는 값**으로 돌립니다 — 지금 설정된 것이 아니라. 링 두 개는
+        script가 `Read-Host -AsSecureString`으로 받으므로 명령 이력에 남지 않습니다.
+        `-RequireConfigured`가 필요한 이유는, 없으면 아무것도 설정되지 않은 상태가
+        통과해서 변수를 불러오지 않은 셸에서도 초록이 되기 때문입니다
+      - 서비스하지 않는 배포: `npm run check:mobile-auth-keyring` — 완전 미설정을
+        정상으로 통과시키되 **일부만** 설정된 상태는 여전히 실패합니다
+
+      어느 쪽이든 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지 않은
+      키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 — CI에는
+      모바일 키가 없습니다. 절차와 한계는 `docs/ops/mobile-auth-key-rotation.md`
+- [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-CheckMobileAuthKeyring.ps1`
+      — wrapper가 지키는 네 가지(비밀이 parameter에 없음 / 출력에 없음 / 성공·실패·
+      중단 뒤 환경에 없음 / 검사기의 종료 코드를 그대로 반환)를 고정합니다. **전부
+      부재라서 검토로는 안 보입니다.** 자격증명도 네트워크도 필요 없고 실제 `npm`을
+      부르지 않습니다. 출력(10 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
+      되돌릴 수 없으므로 "돌렸다"가 아니라 기록이 증거입니다. **개발 중에는 Linux의
+      PowerShell 7.4.6에서만 통과했습니다.** 막으려는 것이 운영자의 Windows PowerShell
+      습관이므로 이 항목은 그 셸에서 돌린 기록을 요구하고, 그래서 CI 항목이 아닙니다
 - [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
       ships for the three endpoints whose responses carry a refresh token, and
       for the field name itself. D19 states the rule as an absence — the bridge
@@ -163,6 +177,10 @@ Date / timezone:    ____________________
       state with its build unnamed and two owner cells reading `(이름)`
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
+- [ ] `npm run check:voice-price-register` — proves every transcription model
+      this deployment can reach has a price with an owner, a ticket and a
+      re-reading deadline that has not passed. Runs against today, because the
+      unit tests pin their own clock and would pass forever
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
       what CI enforces. It is the reason the list above can be trusted: the
       repository grew to twelve CI-enforced checks while this section named
