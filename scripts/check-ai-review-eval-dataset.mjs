@@ -371,13 +371,17 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     // in the register check, where an approval is what is being refused.
     // Three states, and they are not the same answer.
     //
-    // Naming a version that does not exist is a FAILURE: the evidence claims
-    // to have been produced under a bar, and there is no such bar -- a typo, a
-    // deleted set, or a version from a branch nobody merged. It was folded in
-    // with "known but unapproved" and came out as ok plus a note.
+    // Naming NOTHING is a failure: evidence that does not say which bar it was
+    // produced under was not produced by the generator, which always writes
+    // one.
     //
-    // Naming nothing, and naming a real set nobody has signed, are both scope:
-    // there is no bar to apply, and the check says so beside its ok.
+    // Naming a version that does not EXIST is a failure too, for a different
+    // reason: the evidence claims a bar, and there is no such bar -- a typo, a
+    // deleted set, or a version from a branch nobody merged.
+    //
+    // Naming a real set nobody has SIGNED is scope: there is no bar to apply
+    // yet, and the check says so beside its ok rather than letting the ok
+    // imply coverage was judged.
     if (!effectiveThresholdVersion) {
       // Not a note. The record's identity check requires a threshold version
       // and compares it, so evidence without one never reaches a coverage
