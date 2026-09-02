@@ -60,16 +60,20 @@ Date / timezone:    ____________________
       authentication policy ("Deliberately excluded") because it changes the
       origin the bearer-token boundary is defined against. Read as text, so a
       URL supplied through an environment variable is still a finding
-- [ ] 모바일 인증을 서비스하는 배포라면
-      `npm run check:mobile-auth-keyring -- --require-configured` — **배포하려는 변수
-      값을** 셸에 넣고 clone 안에서 실행합니다. 플래그가 명령에 포함돼 있습니다:
-      빼면 아무것도 설정되지 않은 상태가 통과하므로, 변수를 불러오지 않은 셸에서도
-      초록이 됩니다. 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지
-      않은 키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 —
-      CI에는 모바일 키가 없습니다. 절차와 한계는
-      `docs/ops/mobile-auth-key-rotation.md`
-- [ ] 모바일 인증을 켜지 않은 배포라면 `npm run check:mobile-auth-keyring` — 완전
-      미설정을 정상으로 통과시키되, **일부만** 설정된 상태는 여전히 실패합니다
+- [ ] 모바일 인증 키링 검사 — 이 배포가 모바일 인증을 **서비스하는지**에 따라 명령이
+      갈립니다. 한 항목이고, 둘 중 하나를 실행해 통과시킵니다.
+      - 서비스하는 배포: 로컬 PC의 PowerShell, clone 폴더 안에서
+        `./scripts/ops/Check-MobileAuthKeyring.ps1 ... -RequireConfigured`.
+        **배포하려는 값**으로 돌립니다 — 지금 설정된 것이 아니라. 링 두 개는
+        script가 `Read-Host -AsSecureString`으로 받으므로 명령 이력에 남지 않습니다.
+        `-RequireConfigured`가 필요한 이유는, 없으면 아무것도 설정되지 않은 상태가
+        통과해서 변수를 불러오지 않은 셸에서도 초록이 되기 때문입니다
+      - 서비스하지 않는 배포: `npm run check:mobile-auth-keyring` — 완전 미설정을
+        정상으로 통과시키되 **일부만** 설정된 상태는 여전히 실패합니다
+
+      어느 쪽이든 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지 않은
+      키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 — CI에는
+      모바일 키가 없습니다. 절차와 한계는 `docs/ops/mobile-auth-key-rotation.md`
 - [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
       ships for the three endpoints whose responses carry a refresh token, and
       for the field name itself. D19 states the rule as an absence — the bridge
