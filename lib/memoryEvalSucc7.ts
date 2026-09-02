@@ -42,11 +42,20 @@ import {
 export const MEMORY_EVAL_SUCC7_DATASET_VERSION = "mem-eval-succ-7";
 
 /**
- * False. `decideEvalRunMode()` refuses a decision-grade run against an
- * unfrozen dataset, which is what should happen to succ-7 until a person
- * signs the review sheet.
+ * Adopted by @mposition on 2026-09-02.
+ *
+ * The gate that reads this is `decideEvalRunMode()`, which refuses a
+ * decision-grade run against an unfrozen decision sample. Flipping it removes
+ * that refusal and nothing else. It does not point the harness here — that is
+ * still succ-6 — and it does not register a pair, authorise a budget, or
+ * approve a paid run, each of which is its own human decision with its own
+ * record.
+ *
+ * The order is signature first, then this. `MEMORY_EVAL_SUCC7_REVIEW` carries
+ * the digests that were signed and the check refuses a freeze without them, so
+ * a dataset cannot arrive here with nobody's name on it.
  */
-export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = true;
 
 export const MEMORY_EVAL_SUCC7_DATASET_PURPOSE: "development" | "decision" =
     "decision";
