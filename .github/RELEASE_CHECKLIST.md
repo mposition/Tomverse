@@ -80,8 +80,8 @@ Date / timezone:    ____________________
       부재라서 검토로는 안 보입니다.** 자격증명도 네트워크도 필요 없고 실제 `npm`을
       부르지 않습니다. 출력(13 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
       되돌릴 수 없으므로 "돌렸다"가 아니라 기록이 증거입니다. 개발 중 통과 기록은 Linux의
-      PowerShell 7.4.6과 Windows의 PowerShell Core 7.6.4 둘 다 있지만 **둘 다 최종
-      release SHA가 아닙니다.** 막으려는 것이 운영자의 Windows PowerShell 습관이므로
+      PowerShell 7.4.6, Windows의 PowerShell Core 7.6.4, Windows PowerShell
+      5.1.19041.6456 셋 다 있지만 **전부 최종 release SHA가 아닙니다.** 막으려는 것이 운영자의 Windows PowerShell 습관이므로
       이 항목은 그 셸에서 그 SHA로 돌린 기록을 요구하고, 그래서 CI 항목이 아닙니다
 - [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
       ships for the three endpoints whose responses carry a refresh token, and

@@ -173,13 +173,12 @@ wrapper가 지키기로 한 것은 **네 가지이고 전부 부재(不在)**입
   망가뜨렸고 전부 걸렸습니다 — `finally` 제거(3a·3b·3c), 길이 대신 값 출력(4a·4b),
   무조건 `exit 0`(2d), 링을 parameter로 추가(1b), **`Write-Warning`·`Write-Verbose`·
   `Write-Debug`로 비밀 유출(4a)**, 이름이 비밀처럼 보이지 않는 `-SigningKeyRing`
-  추가(1b), pepper 길이 줄 삭제(4c), **`-AsSecureString` 제거(2e)**, **두 프롬프트 중
-  하나에서만 제거(2e가 `True, False`로 구분합니다)**. 그 뒤 트리를 되돌렸습니다.
-- **Windows에서도 돌았습니다.** `b10922c`에서 검토자가 Windows의 PowerShell Core
-  7.6.4로 12/12를 확인했습니다(그 시점의 사례 수). 여기서 쓴 것은 Linux의 7.4.6이므로,
-  운영자 셸에서의 증거는 그쪽입니다. 두 script는 Windows PowerShell 5.1에도 있는
-  기능만 쓰지만(`$PSNativeCommandUseErrorActionPreference`는 있을 때만 건드립니다)
-  **5.1에서 돌려 본 증거는 아직 없습니다.**
+  추가(1b), pepper 길이 줄 삭제(4c), **`-AsSecureString` 제거(2e만 실패합니다 — 나머지
+  열두 개는 이 결함을 전부 지나갑니다)**, **두 프롬프트 중 하나에서만 제거(2e가
+  `True, False`로 구분합니다)**. 그 뒤 트리를 되돌렸습니다.
+- **Windows 두 판본에서도 돌았습니다.** `1093f96`에서 검토자가 PowerShell Core 7.6.4와
+  **Windows PowerShell 5.1.19041.6456** 양쪽으로 13/13을 확인했습니다. 여기서 쓴 것은
+  Linux의 7.4.6이므로, 운영자 셸에서의 증거는 그쪽입니다.
 - **릴리스 때는 다시 남깁니다.** 위 두 실행은 개발 중 증거이고, 체크리스트가 요구하는
   것은 **최종 release SHA에 묶인 기록**입니다.
 - **진짜 Ctrl-C는 여전히 사람이 봅니다.** `6d054a2`에서 검토자가 wrapper를 직접 실행해

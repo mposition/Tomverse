@@ -598,18 +598,27 @@ shim이 `$AsSecureString`을 parameter로 받기만 하고 쓰지 않아서, 검
 
 두 가지로 망가뜨려 확인했습니다.
 
-| 고의 결함 | 2e가 본 것 |
+| 고의 결함 | 결과 |
 |---|---|
-| `-AsSecureString` 완전 제거 | `False, False` — 실패(4b·4c도 함께 실패) |
-| 두 프롬프트 중 pepper 쪽만 제거 | `True, False` — 실패 |
+| `-AsSecureString` 제거 | 2e가 `False, False`로 실패. **다른 열두 사례는 통과합니다** |
+| 두 프롬프트 중 pepper 쪽만 제거 | 2e가 `True, False`로 실패 |
 
 두 번째가 요점입니다. **"둘 다"가 계약이므로 하나만 남은 상태를 통과시키면 안
 됩니다.**
 
-**검토자가 Windows에서 실행한 결과도 받았습니다** — `b10922c`에서 PowerShell Core
-7.6.4, 12/12(그 시점의 사례 수). 운영자 셸에서 돌아간다는 개발 증거는 이것으로
-확보됐고, **Windows PowerShell 5.1에서의 증거는 여전히 없습니다.** 릴리스 체크리스트가
-요구하는 것은 그것과 별개로 **최종 release SHA에 묶인 기록**입니다.
+> **rev.11 정정.** 첫 줄에 "4b·4c도 함께 실패"라고 적었고 **재현되지 않습니다.**
+> 제가 그때 쓴 mutation은 플래그만 뺀 것이 아니라 `Read-Host`의 반환을
+> `ConvertTo-SecureString -AsPlainText`에 다시 넣는 모양이었고, shim이 플래그와 무관하게
+> `SecureString`을 돌려주므로 그 변환이 값을 망가뜨려 길이가 어긋난 것입니다. **결함이
+> 아니라 제 mutation의 부수효과였습니다.** 플래그만 제거하면 2e 하나만 실패하며, 그것이
+> 오히려 이 사례가 필요한 이유입니다 — 나머지 열두 개는 이 결함을 전부 지나갑니다.
+
+**검토자가 Windows에서 실행한 결과도 받았습니다.** `b10922c`에서 PowerShell Core
+7.6.4로 12/12(그 시점의 사례 수), `1093f96`에서 **PowerShell Core 7.6.4와 Windows
+PowerShell 5.1.19041.6456 양쪽으로 13/13**, 그리고 플래그 제거 역방향 검사에서 2e 실패
+및 전체 exit 1. **운영자 셸 두 판본 모두에서 돌아간다는 개발 증거가 이것으로
+확보됐습니다.** 릴리스 체크리스트가 요구하는 것은 그것과 별개로 **최종 release SHA에
+묶인 기록**입니다.
 
 ---
 
@@ -638,6 +647,10 @@ shim이 `$AsSecureString`을 parameter로 받기만 하고 쓰지 않아서, 검
 > `check:encoding:strict`(통과)입니다. **wrapper 자체는 실행하지 못했습니다** —
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
+>
+> **rev.11 (2026-09-02).** 10차 검토의 한 건은 §5.9 안의 정정 상자입니다 —
+> mutation 결과 표의 "4b·4c도 함께 실패"가 재현되지 않았습니다. 같은 검토에서 Windows
+> PowerShell 5.1 실행 증거를 받아 함께 기록했습니다.
 >
 > **rev.10 (2026-09-02).** 9차 검토의 한 건은 §5.9입니다 — smoke test가
 > `-AsSecureString` 제거를 잡지 못했습니다. wrapper는 정상이었고 테스트가 그 계약을
@@ -731,7 +744,7 @@ fail-closed로 답합니다. production 활성화를 결정할 때 `/api/ready`�
 | **웹 `sessionSecurity` 캐시 조사** | 승인 항목 18 — 별도 후속. N2에는 D12의 강화된 계약을 처음부터 적용했습니다 |
 | **maintenance stub 검사** | §8의 재발 방지. 아직 없습니다 |
 | **§2.2의 (a) 또는 (b) 택일** | **활성화의 선결 조건.** 회전은 현재 링의 평문을 요구하는데 sealed 값은 그것을 돌려주지 않습니다. 정해지지 않으면 첫 설정은 되고 **두 번째 회전이 안 됩니다.** (c)는 택일 대상이 아니라 그 위의 선택이며, 채택하면 관측 범위(=활성 서명 키 id 하나)도 함께 적습니다 |
-| **wrapper smoke test를 Windows PowerShell에서** | `scripts/ops/Test-CheckMobileAuthKeyring.ps1`은 여기서 13/13(Linux, PowerShell 7.4.6), `b10922c`에서 검토자의 Windows PowerShell Core 7.6.4로 12/12 통과했습니다. **둘 다 개발 중 증거**이고, 체크리스트가 요구하는 것은 **최종 release SHA에 묶인 기록**입니다. Windows PowerShell 5.1에서의 증거는 아직 없습니다 |
+| **wrapper smoke test를 Windows PowerShell에서** | `scripts/ops/Test-CheckMobileAuthKeyring.ps1`은 여기서 13/13(Linux, PowerShell 7.4.6), `1093f96`에서 검토자의 Windows PowerShell Core 7.6.4와 Windows PowerShell 5.1.19041.6456 양쪽으로 13/13 통과했습니다. **전부 개발 중 증거**이고, 체크리스트가 요구하는 것은 **최종 release SHA에 묶인 기록**입니다 |
 | **검사기를 배포 이미지에서 실행 가능하게** | 순수 판정 부분을 의존성 없는 `.mjs`로. 그래야 `railway ssh`로 들어가 **살아 있는** 설정을 감사할 수 있습니다. 지금은 배포할 값을 손으로 넣는 사전 검증만 됩니다 |
 | **은퇴 키 자동 제거·상시 보고** | 유예가 지난 항목과 선언되지 않은 키를 코드가 쓰지 않을 뿐, 배포 전 확인을 **돌리게 하는 것은 문서뿐**입니다. 상시 점검은 production 활성화와 함께 정합니다 |
 | **`MOBILE_AUTH_PRE_AUTH_RATE_LIMIT`(분 60 / 일 2,000) 승인** | 승인된 18개 밖의 새 값입니다. 재검토에서 "미승인 값으로 명확히 기록됨 — production 승인 전 사람의 결정 필요"로 확인됐습니다 |
