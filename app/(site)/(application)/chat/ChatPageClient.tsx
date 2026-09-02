@@ -66,6 +66,7 @@ import {
   conversationSurfaceHref,
   type ConversationSurface,
 } from "@/lib/continuationRoutes";
+import { continuationDisplayTitle } from "@/lib/continuationDisplayTitle";
 import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
@@ -2523,14 +2524,47 @@ export function ChatPageClient({
 
     try {
 	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
-      if (res.ok) setConversations(await res.json());
-      else await discardResponseBody(res);
+      if (res.ok) {
+        /*
+          Resolve each continuation's displayed name once, here, rather than
+          at the dozen places a title is rendered.
+
+          A continuation's row carries the writer's placeholder rather than
+          the imported conversation's name, because
+          docs/policy/external-conversation-continuation.md §3 keeps the
+          source's words out of tables its deletion does not reach. The name is
+          therefore resolved when it is shown, from the snapshot -- and when
+          the snapshot is deleted or locked the server sends no
+          `sourceTitle`, so the row falls back to a translated placeholder.
+          That is the deletion contract working, not a gap.
+
+          Doing it at the boundary means the sidebar row, its accessible name,
+          the mobile header, the rename field and the search results all agree
+          without any of them knowing about continuations.
+        */
+        const rows = (await res.json()) as (Conversation & {
+          sourceTitle?: string | null;
+        })[];
+        setConversations(
+          rows.map(({ sourceTitle, ...conversation }) => ({
+            ...conversation,
+            title: continuationDisplayTitle({
+              storedTitle: conversation.title,
+              sourceTitle,
+              fallback: t("continuation.quickUntitled"),
+            }),
+          }))
+        );
+      } else await discardResponseBody(res);
     } catch (error) {
       console.error("Failed to load conversations:", error);
     } finally {
       setIsConversationsLoaded(true);
     }
-    }, [sessionUserId]);
+    // `t` is in here because the fallback name it returns is language
+    // dependent: without it, switching language left every unnamed
+    // continuation on the previous locale's placeholder until the next reload.
+    }, [sessionUserId, t]);
 
     // The session bootstrap below only *reads* these; it must not re-run when
     // their identity changes. ModelCatalogProvider refreshes the catalog once
@@ -5996,6 +6030,20 @@ export function ChatPageClient({
     />
   ) : null;
 
+  /*
+    Whether the open conversation carries a read-only prelude.
+
+    From the row the server sent -- `conversationSurface()` derives it from the
+    continuation bridge -- and never from the prelude node, which renders
+    `null` until its own read resolves and forever for a conversation with no
+    bridge. A hand-typed `/continuations/<an ordinary id>` therefore still gets
+    the ordinary welcome screen.
+  */
+  const hasConversationPrelude =
+    blendedConversations.find(
+      (conversation) => conversation.id === shellConversationId
+    )?.surface === "continuation";
+
   return (
     // Every surface that decides whether a model searches reads this: the
     // composer's chip and credit estimate, the picker's badge and "Web search"
@@ -6057,6 +6105,7 @@ export function ChatPageClient({
           onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           conversationPrelude={conversationPrelude}
+          hasConversationPrelude={hasConversationPrelude}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
           onDelete={handleDelete}
@@ -6177,6 +6226,7 @@ export function ChatPageClient({
           onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           conversationPrelude={conversationPrelude}
+          hasConversationPrelude={hasConversationPrelude}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
           onDelete={handleDelete}

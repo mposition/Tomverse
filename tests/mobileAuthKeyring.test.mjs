@@ -27,6 +27,8 @@ const KEY_A = "a".repeat(48);
 const KEY_B = "b".repeat(48);
 /** Deliberately not the word "short": the refusal says "too short" about it. */
 const TOO_SHORT = "wxyz";
+const RETIRED_AT = "2026-09-02T10:00:00.000Z";
+const retiredAtMs = Date.parse(RETIRED_AT);
 
 const env = (overrides = {}) => ({
   MOBILE_AUTH_SIGNING_KEYS: `sign-1:${KEY_A},sign-2:${KEY_B}`,
@@ -39,11 +41,17 @@ const env = (overrides = {}) => ({
 });
 
 test("a retired key stays in the ring while a newer one signs", () => {
-  const ring = mobileSigningKeyring(env());
+  // The retirement line is required, not decoration: it is what says this key
+  // is a *previous* key rather than one somebody left lying about. Without it
+  // `sign-1` verifies nothing, which is the rule the mistyped-id test below
+  // exists for.
+  const rotated = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${RETIRED_AT}` });
+
+  const ring = mobileSigningKeyring(rotated);
   assert.deepEqual([...ring.keys()], ["sign-1", "sign-2"]);
-  assert.equal(activeMobileSigningKey(env()).keyId, "sign-2");
+  assert.equal(activeMobileSigningKey(rotated).keyId, "sign-2");
   // The point of the id: a token signed before the rotation still verifies.
-  assert.equal(mobileSigningKeyById("sign-1", env())?.secret, KEY_A);
+  assert.equal(mobileSigningKeyById("sign-1", rotated, retiredAtMs)?.secret, KEY_A);
 });
 
 test("the two rings are independent, so rotating one cannot move the other", () => {
@@ -53,10 +61,15 @@ test("the two rings are independent, so rotating one cannot move the other", () 
   const rotatedSigning = env({
     MOBILE_AUTH_SIGNING_KEYS: `sign-3:${KEY_A}`,
     MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-3",
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${RETIRED_AT}`,
   });
   assert.equal(activeMobileSigningKey(rotatedSigning).keyId, "sign-3");
   assert.equal(activeMobileRefreshPepper(rotatedSigning).keyId, "pep-2");
-  assert.equal(mobileRefreshPepperById("pep-1", rotatedSigning)?.secret, KEY_A);
+  // The signing rotation did not touch the pepper's own window.
+  assert.equal(
+    mobileRefreshPepperById("pep-1", rotatedSigning, retiredAtMs)?.secret,
+    KEY_A
+  );
 });
 
 test("an unknown id answers null rather than the active key", () => {
@@ -153,9 +166,6 @@ test("a deployment missing any one of the four is not configured", () => {
 
 // --- retirement, which is what makes the approved windows real -------------
 
-const RETIRED_AT = "2026-09-02T10:00:00.000Z";
-const retiredAtMs = Date.parse(RETIRED_AT);
-
 test("a retired signing key verifies through its grace and not past it", () => {
   // Before this existed the two windows were constants nothing read: a key left
   // in the ring after a rotation was trusted for ever, and "the previous key is
@@ -221,19 +231,50 @@ test("a retired key cannot be the active one", () => {
   );
 });
 
-test("a retirement naming a key that is not in the ring is reported, not fatal", () => {
-  // A reversal, and the reason is worth stating. This threw at first, to catch
-  // a mistyped id. But throwing made `mobileAuthReady()` false, which answers
-  // 503 to *every* mobile auth request -- so the ordinary act of deleting a
-  // ring entry whose grace had passed, and leaving its retirement line behind,
-  // took the whole feature down. The runbook's own deletion step did that.
+test("a mistyped retirement id does not leave the previous key trusted", () => {
+  // The regression this file previously failed to catch, and the third shape
+  // this rule has taken.
   //
-  // A key absent from the ring is already unusable, so the stale retirement
-  // protects nothing and endangers nothing. The typo still deserves to be
-  // noticed, which is what the error log is for.
-  const stale = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-9@${RETIRED_AT}` });
-  assert.equal(mobileSigningKeyById("sign-1", stale)?.secret, KEY_A);
-  assert.equal(activeMobileSigningKey(stale).keyId, "sign-2");
+  // Ring `{sign-1, sign-2}`, active `sign-2`, and a retirement for `sign-l`
+  // instead of `sign-1`. The earlier version reported the unknown id and
+  // carried on, which left `sign-1` trusted for ever -- the approved fifteen
+  // minutes did not apply, and a leaked previous key kept working. The version
+  // before that threw, which answered 503 to everything.
+  //
+  // The rule now is about the key, not about the retirement line: a ring key
+  // that is neither active nor explicitly retired verifies nothing. A typo
+  // therefore makes the previous key stop verifying *immediately*, which is
+  // stricter than the contract rather than laxer.
+  const typo = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-l@${RETIRED_AT}` });
+
+  assert.equal(mobileSigningKeyById("sign-1", typo, retiredAtMs), null);
+  assert.equal(
+    mobileSigningKeyById("sign-1", typo, Date.parse("2099-01-01T00:00:00Z")),
+    null,
+    "an undeclared key must never be trusted, at any time"
+  );
+  // And the deployment stays up: the active key still signs and verifies.
+  assert.equal(activeMobileSigningKey(typo).keyId, "sign-2");
+  assert.equal(mobileSigningKeyById("sign-2", typo)?.secret, KEY_B);
+});
+
+test("a mistyped pepper retirement is the same, and does not brick the ring", () => {
+  const typo = env({ MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-l@${RETIRED_AT}` });
+
+  assert.equal(
+    mobileRefreshPepperById("pep-1", typo, Date.parse("2099-01-01T00:00:00Z")),
+    null
+  );
+  assert.equal(activeMobileRefreshPepper(typo).keyId, "pep-2");
+  assert.equal(mobileRefreshPepperById("pep-2", typo)?.secret, KEY_B);
+});
+
+test("an undeclared ring key verifies nothing even with no retirement list at all", () => {
+  // The plain case: somebody adds a key and forgets to say what it is for.
+  // Before it becomes active it has signed nothing, so refusing it costs
+  // nothing and is the safe default.
+  assert.equal(mobileSigningKeyById("sign-1", env()), null);
+  assert.equal(mobileSigningKeyById("sign-2", env())?.secret, KEY_B);
 });
 
 test("deleting a ring entry without its retirement line keeps the deployment up", () => {
@@ -264,8 +305,12 @@ test("a malformed retirement is refused rather than read as 'never'", () => {
   }
 });
 
-test("no retirement list means nothing is retired, so an existing deployment is unaffected", () => {
+test("the active key needs no declaration, and everything else does", () => {
+  // The whole rule in two assertions. The active key is declared by being
+  // active; any other ring key has to say what it is, or it verifies nothing.
   const far = Date.parse("2099-01-01T00:00:00Z");
-  assert.equal(mobileSigningKeyById("sign-1", env(), far)?.secret, KEY_A);
-  assert.equal(mobileRefreshPepperById("pep-1", env(), far)?.secret, KEY_A);
+  assert.equal(mobileSigningKeyById("sign-2", env(), far)?.secret, KEY_B);
+  assert.equal(mobileRefreshPepperById("pep-2", env(), far)?.secret, KEY_B);
+  assert.equal(mobileSigningKeyById("sign-1", env(), far), null);
+  assert.equal(mobileRefreshPepperById("pep-1", env(), far), null);
 });

@@ -93,11 +93,32 @@ test("the prelude states provenance, provider and truncation", () => {
 
 test("a gone or locked source is on screen rather than behind the disclosure", () => {
     // Both change what the next turn carries, so neither may need a click to
-    // be discovered. Only an available transcript collapses.
+    // be discovered. Only an available transcript has a disclosure at all,
+    // and it starts open: the imported conversation is why the screen exists.
     const source = read(PRELUDE);
-    assert.match(source, /const alwaysOpen = source\.status !== "available"/);
-    assert.match(source, /const isOpen = alwaysOpen \|\| expanded/);
-    assert.match(source, /useState\(false\)/, "collapsed by default");
+    assert.match(source, /const canDisclose = source\.status === "available"/);
+    assert.match(source, /const \[expanded, setExpanded\] = useState\(true\)/);
+    assert.match(
+        source,
+        /\{canDisclose \? \(\s*<button[\s\S]*?data-testid="continuation-source-toggle"/,
+        "the toggle only exists for an available transcript"
+    );
+
+    const panelAt = source.indexOf("id={panelId}");
+    assert.ok(panelAt > 0, "the collapsible panel is identified");
+    for (const testId of [
+        "continuation-source-tombstone",
+        "continuation-source-locked",
+    ]) {
+        const at = source.indexOf(`data-testid="${testId}"`);
+        assert.ok(at > 0, testId);
+        assert.ok(at < panelAt, `${testId} is outside the collapsible panel`);
+    }
+    assert.match(
+        source,
+        /hidden=\{!canDisclose \|\| !expanded\}/,
+        "only the transcript panel is what the toggle hides"
+    );
 });
 
 /* ------------------------------------------- one prelude, never per panel */

@@ -73,6 +73,64 @@ export type MobileKeyringEntry = { keyId: string; secret: string };
  */
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+/**
+ * The one way an id from a variable is read.
+ *
+ * Ring and retirement ids cannot carry whitespace -- `KEY_ID_PATTERN` has no
+ * space in it, so `"sign-1 :secret"` is refused at parse time. The *active id*
+ * variable had no such guard, and the two readers of it disagreed: the lookup
+ * trimmed and the active-key resolver did not, so `" sign-2 "` made
+ * `activeMobileSigningKey` throw (and every request answer 503) while
+ * `mobileSigningKeyById("sign-2")` cheerfully reported the same key usable.
+ * A pre-deploy check that trimmed then passed a configuration the runtime
+ * refuses.
+ *
+ * One function, used by both, and by the checker.
+ */
+export const normalizeMobileKeyId = (value: string | undefined | null) =>
+  value?.trim() ?? "";
+
+/**
+ * Says a configuration problem once, not once per parse.
+ *
+ * A single `mobileAuthReady()` parses each ring more than once, and the public
+ * endpoints call it before admission -- so a misconfigured deployment was
+ * writing the same line several times per request, which is a log-amplification
+ * path on an unauthenticated route as well as noise that buries the signal.
+ *
+ * Keyed on the message, so a *different* problem still gets said. Cleared by a
+ * restart, which is when configuration changes anyway.
+ */
+const reported = new Set<string>();
+
+const reportOnce = (message: string) => {
+  if (reported.has(message)) return;
+  reported.add(message);
+  console.error(message);
+};
+
+/** Test seam: the report memo is process state. */
+export const resetMobileKeyringReportsForTesting = () => {
+  reported.clear();
+  parseCache.clear();
+};
+
+/**
+ * Parsed rings and retirements, keyed on the raw text they came from.
+ *
+ * The parse is pure, so memoising it is only a cost question -- and the cost
+ * was real: readiness alone parsed each ring three times per request.
+ */
+const parseCache = new Map<string, unknown>();
+
+const memoParse = <T>(cacheKey: string, compute: () => T): T => {
+  const hit = parseCache.get(cacheKey);
+  if (hit !== undefined) return hit as T;
+  const value = compute();
+  parseCache.set(cacheKey, value);
+  return value;
+};
+
 const parseRing = (
   raw: string,
   variable: string,
@@ -119,12 +177,14 @@ const parseRing = (
  * A second variable rather than a third field on the ring entry, because a
  * pepper is an operator-chosen secret and may legitimately contain a colon --
  * a third field would make the parse ambiguous for exactly the value nobody
- * wants misread. Absence means "not retired", so an existing deployment needs
- * no change until it rotates.
+ * wants misread.
  *
- * Errors rather than ignores an unknown id: a retirement naming a key that is
- * not in the ring is a typo, and a typo here silently protects nothing while
- * looking like it does.
+ * **Absence does not mean "keep trusting it".** A retirement line naming an id
+ * that is not in the ring is reported and ignored, because the leftover of a
+ * cleanup and a mistyped id look identical from here and neither of them can
+ * be told apart by this function. What makes the mistyped case safe is the
+ * rule in `usableEntry` below: a ring key that is neither the active one nor
+ * explicitly retired verifies nothing at all.
  */
 const parseRetirements = (
   raw: string,
@@ -167,10 +227,11 @@ const parseRetirements = (
       // ring is already unusable, so a retirement naming it protects nothing
       // and endangers nothing; a total outage is a total outage. The typo is
       // still worth knowing about, which is what the log is for.
-      console.error(
+      reportOnce(
         `${variable} retires "${keyId}", which is not in ${ringVariable}. ` +
-          "Ignoring it: a key that is not in the ring is already unusable. " +
-          "Check this is not a mistyped id."
+          "Ignoring the line, and that key -- if it is in the ring under its " +
+          "real id -- verifies nothing, because a ring key that is neither " +
+          "active nor explicitly retired is not usable. Check for a mistyped id."
       );
       continue;
     }
@@ -197,6 +258,57 @@ const parseRetirements = (
  */
 const withinGrace = (retiredAtMs: number, graceSeconds: number, nowMs: number) =>
   nowMs < retiredAtMs + graceSeconds * 1000;
+
+/**
+ * Whether a ring key may verify anything right now.
+ *
+ * **A key is usable only if it is the active one, or it is explicitly retired
+ * and still inside its grace.** Everything else in the ring verifies nothing --
+ * including a key that is simply sitting there undeclared.
+ *
+ * This is the third shape this rule has taken, and the two it replaces are
+ * worth recording because each failed in the opposite direction.
+ *
+ * The first threw when a retirement named an id that was not in the ring, to
+ * catch a mistyped id. That turned the ordinary act of tidying a ring into a
+ * 503 for every mobile auth request: delete the key, leave its retirement line,
+ * and the whole feature stops answering.
+ *
+ * The second ignored the unknown id, which removed the outage and created a
+ * silent hole. With ring `{sign-old, sign-new}`, active `sign-new`, and a
+ * retirement for `sign-odl`, the deployment reported itself healthy and
+ * `sign-old` stayed trusted for ever -- so the approved fifteen-minute contract
+ * did not apply, and a leaked previous key kept working.
+ *
+ * The mistake in both was asking the wrong question. "Is this retirement line
+ * valid?" cannot be answered: a leftover from a cleanup and a typo look
+ * identical. "May this key verify?" can be, and its safe default is no. A
+ * mistyped retirement now makes the previous key stop verifying *immediately*,
+ * which is stricter than the contract rather than laxer, is visible (tokens it
+ * signed are refused and clients refresh), and takes nothing else down.
+ *
+ * The cost is that forgetting the retirement line is not free: for a pepper it
+ * means those refresh tokens stop verifying and those people sign in again.
+ * `npm run check:mobile-auth-keyring` exists so that is found before a deploy
+ * rather than after one, and `docs/ops/mobile-auth-key-rotation.md` says so.
+ */
+const usableEntry = (
+  keyId: string,
+  ring: ReadonlyMap<string, string>,
+  retirements: ReadonlyMap<string, number>,
+  activeKeyId: string,
+  graceSeconds: number,
+  nowMs: number
+): MobileKeyringEntry | null => {
+  const secret = ring.get(keyId);
+  if (!secret) return null;
+  if (keyId === activeKeyId) return { keyId, secret };
+
+  const retiredAt = retirements.get(keyId);
+  if (retiredAt === undefined) return null;
+  if (!withinGrace(retiredAt, graceSeconds, nowMs)) return null;
+  return { keyId, secret };
+};
 
 const activeEntry = (
   ring: ReadonlyMap<string, string>,
@@ -240,18 +352,25 @@ const activeEntry = (
  */
 export const mobileSigningKeyring = (
   environment: Record<string, string | undefined> = process.env
-) => parseRing(environment[MOBILE_SIGNING_KEYS_ENV] ?? "", MOBILE_SIGNING_KEYS_ENV, 32);
+) => {
+  const raw = environment[MOBILE_SIGNING_KEYS_ENV] ?? "";
+  return memoParse(`${MOBILE_SIGNING_KEYS_ENV}\u0000${raw}`, () =>
+    parseRing(raw, MOBILE_SIGNING_KEYS_ENV, 32)
+  );
+};
 
 /** When each retired signing key stopped being current. */
 export const mobileSigningKeyRetirements = (
   environment: Record<string, string | undefined> = process.env
-) =>
-  parseRetirements(
-    environment[MOBILE_RETIRED_SIGNING_KEYS_ENV] ?? "",
-    MOBILE_RETIRED_SIGNING_KEYS_ENV,
-    mobileSigningKeyring(environment),
-    MOBILE_SIGNING_KEYS_ENV
+) => {
+  const raw = environment[MOBILE_RETIRED_SIGNING_KEYS_ENV] ?? "";
+  const ring = mobileSigningKeyring(environment);
+  return memoParse(
+    `${MOBILE_RETIRED_SIGNING_KEYS_ENV}\u0000${raw}\u0000${[...ring.keys()].join(",")}`,
+    () =>
+      parseRetirements(raw, MOBILE_RETIRED_SIGNING_KEYS_ENV, ring, MOBILE_SIGNING_KEYS_ENV)
   );
+};
 
 /** The key new access tokens are signed with. Throws rather than falling back. */
 export const activeMobileSigningKey = (
@@ -260,7 +379,7 @@ export const activeMobileSigningKey = (
   activeEntry(
     mobileSigningKeyring(environment),
     mobileSigningKeyRetirements(environment),
-    environment[MOBILE_ACTIVE_SIGNING_KEY_ENV] ?? "",
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
     MOBILE_ACTIVE_SIGNING_KEY_ENV,
     MOBILE_SIGNING_KEYS_ENV
   );
@@ -278,42 +397,46 @@ export const mobileSigningKeyById = (
   nowMs: number = Date.now()
 ): MobileKeyringEntry | null => {
   if (!keyId) return null;
-  const secret = mobileSigningKeyring(environment).get(keyId);
-  if (!secret) return null;
-
-  const retiredAt = mobileSigningKeyRetirements(environment).get(keyId);
-  if (
-    retiredAt !== undefined &&
-    !withinGrace(retiredAt, MOBILE_PREVIOUS_SIGNING_KEY_SECONDS, nowMs)
-  ) {
-    // Past its grace. The same answer as a key that was never configured, and
-    // for the same reason: this deployment cannot check the token, which the
-    // verifier reports as `unknown_kid` rather than as a bad signature.
-    return null;
-  }
-  return { keyId, secret };
+  // Null is the answer for "past its grace", "never declared" and "not
+  // configured" alike. The verifier reports all three as `unknown_kid` rather
+  // than as a bad signature, which is what makes a rotation debuggable.
+  return usableEntry(
+    keyId,
+    mobileSigningKeyring(environment),
+    mobileSigningKeyRetirements(environment),
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
+    MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
+    nowMs
+  );
 };
 
 /** Every configured refresh pepper, by id. */
 export const mobileRefreshPepperRing = (
   environment: Record<string, string | undefined> = process.env
-) =>
-  parseRing(
-    environment[MOBILE_REFRESH_PEPPERS_ENV] ?? "",
-    MOBILE_REFRESH_PEPPERS_ENV,
-    32
+) => {
+  const raw = environment[MOBILE_REFRESH_PEPPERS_ENV] ?? "";
+  return memoParse(`${MOBILE_REFRESH_PEPPERS_ENV}\u0000${raw}`, () =>
+    parseRing(raw, MOBILE_REFRESH_PEPPERS_ENV, 32)
   );
+};
 
 /** When each retired pepper stopped being current. */
 export const mobileRefreshPepperRetirements = (
   environment: Record<string, string | undefined> = process.env
-) =>
-  parseRetirements(
-    environment[MOBILE_RETIRED_REFRESH_PEPPERS_ENV] ?? "",
-    MOBILE_RETIRED_REFRESH_PEPPERS_ENV,
-    mobileRefreshPepperRing(environment),
-    MOBILE_REFRESH_PEPPERS_ENV
+) => {
+  const raw = environment[MOBILE_RETIRED_REFRESH_PEPPERS_ENV] ?? "";
+  const ring = mobileRefreshPepperRing(environment);
+  return memoParse(
+    `${MOBILE_RETIRED_REFRESH_PEPPERS_ENV}\u0000${raw}\u0000${[...ring.keys()].join(",")}`,
+    () =>
+      parseRetirements(
+        raw,
+        MOBILE_RETIRED_REFRESH_PEPPERS_ENV,
+        ring,
+        MOBILE_REFRESH_PEPPERS_ENV
+      )
   );
+};
 
 /** The pepper new refresh digests are computed under. */
 export const activeMobileRefreshPepper = (
@@ -322,7 +445,7 @@ export const activeMobileRefreshPepper = (
   activeEntry(
     mobileRefreshPepperRing(environment),
     mobileRefreshPepperRetirements(environment),
-    environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV] ?? "",
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
     MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
     MOBILE_REFRESH_PEPPERS_ENV
   );
@@ -341,20 +464,17 @@ export const mobileRefreshPepperById = (
   nowMs: number = Date.now()
 ): MobileKeyringEntry | null => {
   if (!keyId) return null;
-  const secret = mobileRefreshPepperRing(environment).get(keyId);
-  if (!secret) return null;
-
-  const retiredAt = mobileRefreshPepperRetirements(environment).get(keyId);
-  if (
-    retiredAt !== undefined &&
-    !withinGrace(retiredAt, MOBILE_PREVIOUS_PEPPER_SECONDS, nowMs)
-  ) {
-    // A far longer window than the signing key's, because a pepper is bound to
-    // every refresh token still alive rather than to ten minutes of access
-    // tokens. Cutting it to the signing key's window signs everyone out.
-    return null;
-  }
-  return { keyId, secret };
+  // The same rule, with a far longer window: a pepper is bound to every refresh
+  // token still alive rather than to ten minutes of access tokens. Cutting it
+  // to the signing key's window signs everyone out.
+  return usableEntry(
+    keyId,
+    mobileRefreshPepperRing(environment),
+    mobileRefreshPepperRetirements(environment),
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
+    MOBILE_PREVIOUS_PEPPER_SECONDS,
+    nowMs
+  );
 };
 
 /**

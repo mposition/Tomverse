@@ -59,6 +59,7 @@ import type { WebSearchSuggestionCopy } from "@/components/chat/webSearchSuggest
 import {
   chatContentStateKey,
   resolveChatContentState,
+  shouldRenderWelcomeSurface,
   type ChatContentState,
 } from "@/lib/chatContentState";
 import {
@@ -187,6 +188,16 @@ type MobileChatShellProps = {
    * screens cannot disagree about where the imported half appears.
    */
   conversationPrelude?: ReactNode;
+  /**
+   * Whether this conversation has content the panels cannot see.
+   *
+   * The prelude node itself is not evidence: it renders `null` until its own
+   * read resolves, and forever for a conversation with no bridge. This is the
+   * server's answer -- the conversation row's `surface`, which
+   * `conversationSurface()` derives from the bridge -- so a hand-typed
+   * `/continuations/<an ordinary id>` still gets the ordinary welcome screen.
+   */
+  hasConversationPrelude?: boolean;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -356,6 +367,7 @@ export function MobileChatShell({
   onStartImageDraft,
   imageWorkspace,
   conversationPrelude,
+  hasConversationPrelude = false,
   onSelectConversation,
   onRename,
   onDelete,
@@ -778,6 +790,24 @@ export function MobileChatShell({
     : true;
   const conversationContentState = contentStateFor(selectedModels);
   const isConversationEmpty = conversationContentState === "empty";
+  /*
+    Whether the welcome surface renders, which is a narrower question.
+
+    A continuation opens with a read-only imported transcript above the
+    timeline and no native `Message`, so every panel reports `empty` --
+    truthfully -- and this screen used to greet its owner with "welcome back",
+    offer them other recent conversations, and float the composer in the middle
+    of a conversation that already had something in it.
+
+    `isConversationEmpty` still means "no native turn" and still drives the
+    comparison rail, because a conversation with no answers has nothing to
+    compare whatever else is on screen. Only the welcome surface asks the
+    narrower question, and `lib/chatContentState.ts` owns the answer.
+  */
+  const showsWelcomeSurface = shouldRenderWelcomeSurface({
+    contentState: conversationContentState,
+    hasConversationPrelude,
+  });
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -790,7 +820,7 @@ export function MobileChatShell({
     useState<HTMLElement | null>(null);
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
-  const inputPortalTarget = isConversationEmpty
+  const inputPortalTarget = showsWelcomeSurface
     ? welcomeInputSlot ?? bottomInputSlot
     : bottomInputSlot ?? welcomeInputSlot;
   // STG-F003: portal into a host we move between the two slots, never into
@@ -802,7 +832,7 @@ export function MobileChatShell({
   // depending on whether the welcome screen is showing.
   const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
   const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
-  const consentSlotTarget = isConversationEmpty
+  const consentSlotTarget = showsWelcomeSurface
     ? welcomeConsentSlot ?? bottomConsentSlot
     : bottomConsentSlot ?? welcomeConsentSlot;
   useEffect(() => {
@@ -930,10 +960,10 @@ export function MobileChatShell({
   // REFLOW-P1-01. On a new chat the welcome copy and the composer are one
   // surface: the composer portals into the welcome screen's own slot, so
   // whatever happens to that surface happens to the composer.
-  const showWelcomeSurface = isConversationEmpty && selectedModels.length > 0;
+  const showWelcomeSurface = showsWelcomeSurface && selectedModels.length > 0;
   // UX-026. The single condition the tab strip and its panels both read, so a
   // tab can never be rendered without the panel its `aria-controls` names.
-  const showModelTabs = !isConversationEmpty && selectedModels.length > 1;
+  const showModelTabs = !showsWelcomeSurface && selectedModels.length > 1;
   const isCompactBottomDock = useCompactBottomDock();
   // SHORT-VIEWPORT-001: on iOS Safari and Android Chrome's default mode the
   // layout viewport keeps its full height while the keyboard is up, so a
@@ -1642,7 +1672,7 @@ export function MobileChatShell({
             guestPreviewMode={guestPreviewMode}
             guestMessageCount={guestMessageCount}
             maxGuestMessages={maxGuestMessages}
-            variant={isConversationEmpty ? "floating" : "bar"}
+            variant={showsWelcomeSurface ? "floating" : "bar"}
             hideTopBorder={comparisonReadiness.isVisible}
             hideDisclaimer
             conversationDropSurface={conversationDropSurface}
