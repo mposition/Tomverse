@@ -639,6 +639,32 @@ export function ChatPageClient({
   >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
+  // Which identity this tab is operating as. A conversation id belongs to
+  // exactly one of them (see lib/chatIdentityNamespace.ts), and crossing the
+  // boundary with one is what sent /api/conversations/guest_* to the account
+  // API and got CONVERSATION_FORBIDDEN back -- once for the detail request,
+  // once for the model-settings sync, and once per comparison panel.
+  const identityNamespace = useMemo(
+    () => resolveIdentityNamespace(status, sessionUserId),
+    [sessionUserId, status]
+  );
+  /*
+    Who this tab is, as one string, for everything below that has to notice the
+    person changing rather than merely the conversation.
+
+    `identityNamespaceKey` yields `account:` and the user id, so account A
+    becoming account B is visible; a two-valued guest/account flag was not, and
+    that is the transition that matters most. `unresolved` is reported as
+    `null` — "not known yet" — and every consumer decides for itself what that
+    means: the composer's drafts give it a namespace of its own
+    (docs/policy/conversation-draft-identity-scope.md), and a running voice
+    session treats it as no change so the session provider settling cannot
+    cancel a recording that just started (docs/policy/voice-input.md §8.4).
+  */
+  const identityKey =
+    identityNamespace.kind === "unresolved"
+      ? null
+      : identityNamespaceKey(identityNamespace);
   // Declared before any model state below because the initial selected models
   // depend on it. The session is server-resolved and handed to
   // SessionProviderWrapper, so this is already final on the first render --
@@ -677,7 +703,7 @@ export function ChatPageClient({
     hasDraft,
     discardDraft,
     migrateDraft,
-  } = useConversationDrafts(currentChatId);
+  } = useConversationDrafts(currentChatId, identityKey);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -1369,15 +1395,9 @@ export function ChatPageClient({
   /* --------------------------------------------------------------------- */
   /* Identity namespace                                                     */
   /* --------------------------------------------------------------------- */
-  // Which identity this tab is operating as. A conversation id belongs to
-  // exactly one of them (see lib/chatIdentityNamespace.ts), and crossing the
-  // boundary with one is what sent /api/conversations/guest_* to the account
-  // API and got CONVERSATION_FORBIDDEN back -- once for the detail request,
-  // once for the model-settings sync, and once per comparison panel.
-  const identityNamespace = useMemo(
-    () => resolveIdentityNamespace(status, sessionUserId),
-    [sessionUserId, status]
-  );
+  // `identityNamespace` and `identityKey` are declared with the session above:
+  // the composer's drafts are scoped by identity, and that hook runs long
+  // before this point in the file.
   const identityNamespaceRef = useRef<IdentityNamespace>(identityNamespace);
   const appliedIdentityKeyRef = useRef<string | null>(null);
   // Ids this identity has already been refused. Kept so a stale selection is
@@ -5458,21 +5478,6 @@ export function ChatPageClient({
     `appendVoiceTranscript` never replaces: the microphone must not be the one
     control in the composer that can destroy work with no undo.
   */
-  /*
-    Which person this tab is operating as, for the voice session's identity
-    boundary (docs/policy/voice-input.md §8.4).
-
-    `identityNamespaceKey` is the repository's existing answer to "did the
-    identity change?" and yields `account:<userId>`, so account A becoming
-    account B is visible. `unresolved` is reported as `null` — "not known yet"
-    — because the session provider settles after hydration and a recording
-    started in that window must not be cancelled by the settling itself.
-  */
-  const voiceIdentityKey =
-    identityNamespace.kind === "unresolved"
-      ? null
-      : identityNamespaceKey(identityNamespace);
-
   const handleVoiceTranscript = useCallback(
     (transcript: string, scopeId: string | null) => {
       setInputValue(
@@ -6027,7 +6032,7 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
-          voiceIdentityKey={voiceIdentityKey}
+          identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -6146,7 +6151,7 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
-          voiceIdentityKey={voiceIdentityKey}
+          identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
