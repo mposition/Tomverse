@@ -70,5 +70,11 @@ export const MobileAuth = registerPlugin<MobileAuthBridge>("MobileAuth", {
  * is the boundary, checked by `npm run check:native-token-boundary`, so the
  * code written against it later cannot quietly widen it.
  */
-export const mobileApiFetch = (input: string, init?: RequestInit) =>
-  authenticatedFetch(input, init, { bridge: MobileAuth });
+export const TOMVERSE_API_ORIGIN =
+  import.meta.env.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app";
+
+export const mobileApiFetch = (path: string, init?: RequestInit) =>
+  authenticatedFetch(path, init, {
+    bridge: MobileAuth,
+    apiOrigin: TOMVERSE_API_ORIGIN,
+  });

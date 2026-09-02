@@ -155,7 +155,8 @@ type MobileChatShellProps = {
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
-  voiceIdentityKey?: string | null;
+  /** Who this tab is; see ChatInput's prop of the same name. */
+  identityKey: string | null;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -335,7 +336,7 @@ export function MobileChatShell({
   attachmentCapabilities,
   voiceInputEnabled = false,
   onVoiceTranscript,
-  voiceIdentityKey = null,
+  identityKey,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -1626,7 +1627,7 @@ export function MobileChatShell({
             attachmentCapabilities={attachmentCapabilities}
             voiceInputEnabled={voiceInputEnabled}
             onVoiceTranscript={onVoiceTranscript}
-            voiceIdentityKey={voiceIdentityKey}
+            identityKey={identityKey}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}
             guestPreviewMode={guestPreviewMode}

@@ -35,33 +35,72 @@ export type AttachmentsChangeHandler = (
 ) => void;
 
 /**
- * Draft key for the composer of a conversation that has no id yet. An
- * authenticated "New chat" only gets a conversation id when the first send
- * creates one, so its in-progress question needs a key of its own. The colon
- * makes it impossible to collide with a real conversation id (cuid) or with a
- * guest id (`guest_<timestamp>`).
+ * The conversation segment for a composer that has no conversation id yet. An
+ * authenticated "New chat" only gets an id when the first send creates one, so
+ * its in-progress question needs a name of its own.
  */
-export const NEW_CONVERSATION_DRAFT_KEY = "draft:new-conversation";
+export const NEW_CONVERSATION_DRAFT_SEGMENT = "new-conversation";
+
+/**
+ * The identity segment for a tab whose session has not resolved.
+ *
+ * Its own namespace, never a fallback to somebody else's: see `draftKeyFor`.
+ */
+export const UNRESOLVED_IDENTITY_DRAFT_SEGMENT = "unresolved";
+
+const DRAFT_KEY_PREFIX = "draft";
+const DRAFT_KEY_SEPARATOR = "|";
+
+/** Whether a string is already a draft key rather than a conversation id. */
+export const isDraftKey = (value: string) =>
+  value.startsWith(`${DRAFT_KEY_PREFIX}${DRAFT_KEY_SEPARATOR}`);
 
 export const EMPTY_DRAFT: ConversationDraft = { text: "", attachments: [] };
 
 /**
- * Idempotent on purpose: callers that already hold a draft key (the composer,
- * which needs one to scope its own per-conversation upload state) can pass it
- * straight back in as a `scopeId` without converting it to a conversation id
- * first.
+ * The key one draft lives under: an identity *and* a conversation.
+ *
+ * Contract: docs/policy/conversation-draft-identity-scope.md.
+ *
+ * ## Why the identity is in the key rather than around the store
+ *
+ * A store per identity, selected by whoever is signed in now, would answer the
+ * question the composer asks on every render — and get the other one wrong.
+ * Writes here are not all synchronous: `uploadOneFile` captures a key when the
+ * upload starts and passes it back when the file finishes, which can be after
+ * the tab has changed hands. Resolving such a write against "the identity that
+ * is current now" would drop account A's attachment into account B's draft.
+ * A key that carries its own namespace cannot do that: the late write lands in
+ * A's draft, which B's composer never reads.
+ *
+ * ## Why an unresolved session is its own namespace, not a fallback
+ *
+ * `identityKey` is `null` while the session provider has not settled. That is
+ * not "nobody", and it is certainly not "everybody" — a shared bucket for it is
+ * exactly the defect this key format exists to close, because every identity in
+ * the tab would take turns reading it. It gets its own segment instead, which
+ * no resolved identity ever reads. The cost is that text typed before the
+ * session resolves stays in that namespace rather than moving to whoever turns
+ * out to be signed in; the alternative is guessing which person typed it.
+ *
+ * ## Idempotent on purpose
+ *
+ * A caller holding a key can pass it straight back as a `scopeId` without
+ * converting it to a conversation id first — and, per the first section above,
+ * without its identity being re-resolved to whoever is current. The composer
+ * relies on this: it scopes its own upload state by key.
  */
-/*
-  Open defect, tracked in docs/policy/conversation-draft-identity-scope.md:
-  this key names a conversation and not a *person*, so two accounts using the
-  same tab share the `NEW_CONVERSATION_DRAFT_KEY` entry. A confirmed
-  reproduction is in that document -- account B reads the text account A was
-  typing into a new chat. The fix is a decision, not an edit here -- what has
-  to be settled first is
-  docs/policy/conversation-draft-identity-scope.md §5.
-*/
-export const draftKeyFor = (conversationId: string | null | undefined) =>
-  conversationId || NEW_CONVERSATION_DRAFT_KEY;
+export const draftKeyFor = (
+  conversationId: string | null | undefined,
+  identityKey: string | null
+) => {
+  if (conversationId && isDraftKey(conversationId)) return conversationId;
+  return [
+    DRAFT_KEY_PREFIX,
+    identityKey ?? UNRESOLVED_IDENTITY_DRAFT_SEGMENT,
+    conversationId || NEW_CONVERSATION_DRAFT_SEGMENT,
+  ].join(DRAFT_KEY_SEPARATOR);
+};
 
 export const isDraftEmpty = (draft: ConversationDraft) =>
   draft.text.length === 0 && draft.attachments.length === 0;

@@ -232,10 +232,14 @@ test("only a funded, open pair can run live, and it is named", () => {
     // (.github/audits/memory-eval-v5-run1-2026-08-27.md). Its budget stays on
     // the record -- the approval was real and part of it was really spent --
     // which is why "funded" and "runnable" are not the same list.
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        "gpt-5-6-luna::mem-extract-v7",
-    ]);
+    // One entry since 2026-09-02: v7 was revoked after run 1 came back an
+    // admissible §12.3 failure, so it refuses on the status ahead of its
+    // budget exactly as the v5 pairs do
+    // (.github/audits/memory-eval-v7-run1-blind-review-2026-09-01.md). Its
+    // approved US$6.39 x 2 is still on the record and would still cover a
+    // second run; that is precisely why the status, not the ceiling, is what
+    // closes it.
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.

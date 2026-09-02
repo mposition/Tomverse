@@ -58,6 +58,30 @@ export const MOBILE_AUTH_RATE_LIMITS = {
   logout: { minute: 10, day: 200 },
 } as const;
 
+/**
+ * Admission control in front of the three unauthenticated mobile auth paths.
+ *
+ * **Not one of the eighteen approved values.** Added 2026-09-02 in response to
+ * review finding 3, and it needs recording alongside them the next time this
+ * design is looked at.
+ *
+ * The limits above are all keyed on something the caller has proved -- a
+ * device, an account. That is right, and it is also unreachable until the proof
+ * exists: a refresh token that does not parse is refused before any device is
+ * known, and `exchange` consumes its grant before any account is. Those paths
+ * are mutation-origin exceptions, so with the environment deployed anyone can
+ * call them, and each call was writing an audit row and a log line with nothing
+ * bounding the rate.
+ *
+ * So this sits in front, keyed on the client rather than on a subject. It is
+ * deliberately loose -- a device refreshes roughly six times an hour, and a
+ * shared egress address may carry many devices -- because its job is to bound
+ * amplification, not to be an entitlement. The per-device and per-account
+ * limits above still apply after identity is established, and this does not
+ * replace them.
+ */
+export const MOBILE_AUTH_PRE_AUTH_RATE_LIMIT = { minute: 60, day: 2_000 } as const;
+
 /** 8.1.1 #9 -- `MobileAuthEvent` retention ceiling. */
 export const MOBILE_AUTH_EVENT_RETENTION_DAYS = 90;
 

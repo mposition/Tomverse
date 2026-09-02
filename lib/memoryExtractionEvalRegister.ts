@@ -629,13 +629,38 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // what that comparison exists to stop.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v7",
-            status: "candidate",
+            // Closed 2026-09-02 after run 1. Not a bookkeeping label: this
+            // field is the second thing `decideEvalRunMode()` reads, before
+            // the budget, so a revoked pair refuses with `pair_not_runnable`
+            // however much of its approval is left. The budget below still
+            // funds a second run on paper, and that is exactly the gap this
+            // closes -- "run 2 was not approved" lived only in an audit
+            // document, and a manual dispatch does not read documents.
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-08-31",
             notes:
-                "Candidate for mem-extract-v7, the boundary rule of " +
+                "Revoked 2026-09-02 after run 1 (#13, c3c5ff65) came back an " +
+                "admissible decision-grade FAILURE, and run 2 was not " +
+                "approved: precision Wilson lower 0.7123 against 0.95, recall " +
+                "0.7268 against 0.85, and 20 critical bulk-safe adoptions " +
+                "against a gate of zero. Wide misses, not a borderline result " +
+                "reproduction would settle. The 40-case blind review " +
+                "(@mposition, 36 appropriate / 4 not) found no execution or " +
+                "scoring defect that would rescue the verdict. Record: " +
+                ".github/audits/memory-eval-v7-run1-blind-review-2026-09-01.md. " +
+                "The budget below is KEPT because the approval was real and " +
+                "US$0.7893 was really spent against it; the run and its " +
+                "artifacts (9802989240, 9802990649) stand as a citable " +
+                "negative result. `evaluation` stays null because no approval " +
+                "was ever granted. Superseded by nothing yet -- the three open " +
+                "gold questions in that record's section 7 are decided " +
+                "together, and only then does a successor dataset or prompt " +
+                "get made. " +
+                "Originally registered as a candidate for the boundary rule of " +
                 "2026-08-30. Scores against the frozen mem-eval-succ-6 under " +
-                "mem-score-v3.4. Funded 2026-08-31 for two runs; never run. " +
+                "mem-score-v3.4. Funded 2026-08-31 for two runs, of which one " +
+                "was dispatched. " +
                 "v6's budget, approval and run history are not transferred: a " +
                 "budget cannot move to another prompt version, and the ten " +
                 "cases that shaped this rule left the decision set under B+ " +
@@ -646,12 +671,10 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "runs. Unused budget from the first run does not carry into " +
                 "the second; a run truncated at its ceiling is not " +
                 "decision-grade and the ceiling is not raised without a new " +
-                "approval. Neither run is started by this record: each needs " +
-                "its own explicit instruction, and run 2 only after run 1's " +
-                "artifact and blind review have been read. Resuming the same " +
-                "ordinal is allowed only for a failure proven to have reached " +
-                "no provider at US$0; a run that reached one consumes its " +
-                "ordinal whatever it returned.",
+                "approval. Ordinal 1 is spent: it reached the provider, so it " +
+                "is consumed whatever it returned. Ordinal 2 was never " +
+                "approved and is now unreachable through `status` regardless " +
+                "of the remaining ceiling.",
             evalBudget: {
                 approvedBy: "@mposition",
                 // Per invocation, and half the programme total because the

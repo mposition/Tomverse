@@ -327,7 +327,16 @@ export const rotateMobileSession = async (input: {
   const now = input.now ?? new Date();
   const presented = parseMobileRefreshToken(input.refreshToken);
   if (!presented) {
-    await record("mobile_auth.refresh_rejected", { reason: "malformed", outcome: "denied" });
+    // A structured log line, and deliberately no row. A token that does not
+    // even parse names no account, no device and no family, so the row would
+    // record that somebody sent bytes -- which is what the log is for. It was
+    // also the cheapest row in the system to cause: `enforceMobileAuthAdmission`
+    // now bounds the rate, and this stops the bounded remainder from
+    // accumulating rows nothing can ever query by subject.
+    logSecurityAuditEvent("mobile_auth.refresh_rejected", {
+      outcome: "denied",
+      reason: "malformed",
+    });
     return refuse("malformed");
   }
 
@@ -403,7 +412,17 @@ export const rotateMobileSession = async (input: {
       },
       data: { consumedAt: now, supersededById: successor.recordId },
     });
-    if (consumed.count !== 1) return null;
+    if (consumed.count !== 1) {
+      // The row was already spent, invalidated or expired between the read
+      // above and this write. Which of those it was decides the answer, so it
+      // is read here rather than guessed at -- inside the same transaction,
+      // and after the lock, so what it says is what the winner left behind.
+      const current = await tx.mobileRefreshRotation.findUnique({
+        where: { id: decision.record.id },
+        select: { consumedAt: true, invalidatedAt: true, expiresAt: true },
+      });
+      return { kind: "not_rotated" as const, current };
+    }
 
     // ⓒ the successor, under the *current* pepper generation, which is how a
     // retired pepper drains instead of being cut off.
@@ -433,21 +452,55 @@ export const rotateMobileSession = async (input: {
       familyId: family.familyId,
       tx,
     });
-    return true;
+    return { kind: "rotated" as const };
   });
 
-  if (!rotated) {
-    // The loser of a race. Not reuse: this token was legitimate and simply
-    // arrived second, so the family stands and the client retries with the
-    // successor its single-flight sibling received.
+  if (rotated.kind === "not_rotated") {
+    // Option A, and the reason this branch exists at all.
+    //
+    // An earlier version answered a lost race with its own refusal and left the
+    // family standing, on the reasoning that the loser had presented a
+    // legitimate token which merely arrived second. That was neither A nor B-1,
+    // and worse, it was not deterministic: whether the family survived depended
+    // on whether the second request's *read* happened before or after the
+    // winner committed. Read after, `decideMobileRefresh` saw `consumedAt` and
+    // revoked; read before, the conditional UPDATE failed here and nothing was
+    // revoked. Two identical requests, two different outcomes, decided by
+    // microseconds.
+    //
+    // Option A is strict single use and draws no distinction between a token
+    // consumed a microsecond ago by a sibling and one consumed an hour ago by
+    // an attacker -- section 4 says so outright, and V11 records that a lost
+    // response is indistinguishable from a replay. That is precisely why native
+    // single-flight is an implementation requirement rather than an
+    // optimisation.
+    //
+    // So the state the row is actually in decides, and the answer is the same
+    // one a sequential second request would have received.
+    const current = rotated.current;
+    if (current && (current.consumedAt !== null || current.invalidatedAt !== null)) {
+      await revokeFamily({
+        familyId: family.familyId,
+        userId: family.userId,
+        deviceId: family.deviceId,
+        reason: "reuse_detected",
+        event: "mobile_auth.reuse_detected",
+        now,
+      });
+      return refuse("reuse_detected");
+    }
+
+    // Not reuse: the record expired or vanished in the interval. A rejection,
+    // with the family untouched, exactly as D5's state checks would have said.
+    const reason = current ? "record_expired" : "unknown_record";
     await record("mobile_auth.refresh_rejected", {
       userId: family.userId,
       deviceId: family.deviceId,
       familyId: family.familyId,
-      reason: "lost_rotation_race",
+      reason,
       outcome: "denied",
     });
-    return refuse("lost_rotation_race");
+    return refuse(reason);
   }
 
   const access = mintMobileAccessToken({

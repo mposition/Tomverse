@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MOBILE_PREVIOUS_PEPPER_SECONDS,
+  MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
+} from "../lib/mobileAuthContract.ts";
+import {
   MobileAuthKeyringError,
   activeMobileRefreshPepper,
   activeMobileSigningKey,
@@ -145,4 +149,98 @@ test("a deployment missing any one of the four is not configured", () => {
   ]) {
     assert.equal(mobileAuthConfigured(env({ [missing]: "" })), false, missing);
   }
+});
+
+// --- retirement, which is what makes the approved windows real -------------
+
+const RETIRED_AT = "2026-09-02T10:00:00.000Z";
+const retiredAtMs = Date.parse(RETIRED_AT);
+
+test("a retired signing key verifies through its grace and not past it", () => {
+  // Before this existed the two windows were constants nothing read: a key left
+  // in the ring after a rotation was trusted for ever, and "the previous key is
+  // honoured for fifteen minutes" described an intention rather than the
+  // system.
+  const retired = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${RETIRED_AT}` });
+  const grace = MOBILE_PREVIOUS_SIGNING_KEY_SECONDS * 1000;
+
+  assert.equal(mobileSigningKeyById("sign-1", retired, retiredAtMs)?.secret, KEY_A);
+  assert.equal(
+    mobileSigningKeyById("sign-1", retired, retiredAtMs + grace - 1)?.secret,
+    KEY_A
+  );
+  assert.equal(mobileSigningKeyById("sign-1", retired, retiredAtMs + grace), null);
+});
+
+test("a retired pepper keeps its own, much longer window", () => {
+  // D6's asymmetry, enforced rather than described. A pepper is bound to every
+  // refresh token still alive, so cutting it to the signing key's window signs
+  // every account out.
+  const retired = env({ MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${RETIRED_AT}` });
+  const signingGrace = MOBILE_PREVIOUS_SIGNING_KEY_SECONDS * 1000;
+  const pepperGrace = MOBILE_PREVIOUS_PEPPER_SECONDS * 1000;
+
+  assert.ok(pepperGrace > signingGrace);
+  assert.equal(
+    mobileRefreshPepperById("pep-1", retired, retiredAtMs + signingGrace)?.secret,
+    KEY_A,
+    "a pepper must not expire on the signing key's schedule"
+  );
+  assert.equal(
+    mobileRefreshPepperById("pep-1", retired, retiredAtMs + pepperGrace - 1)?.secret,
+    KEY_A
+  );
+  assert.equal(
+    mobileRefreshPepperById("pep-1", retired, retiredAtMs + pepperGrace),
+    null
+  );
+});
+
+test("a retired key cannot be the active one", () => {
+  // The mistake the mechanism exists to catch: minting new credentials under a
+  // key somebody has already decided to stop trusting.
+  assert.throws(
+    () =>
+      activeMobileSigningKey(
+        env({
+          MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-1",
+          MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${RETIRED_AT}`,
+        })
+      ),
+    /is retired/
+  );
+  assert.throws(
+    () =>
+      activeMobileRefreshPepper(
+        env({
+          MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-1",
+          MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${RETIRED_AT}`,
+        })
+      ),
+    /is retired/
+  );
+});
+
+test("a retirement naming a key that is not in the ring is a typo, not a no-op", () => {
+  // Silently ignoring it would look like protection and be none.
+  assert.throws(
+    () => mobileSigningKeyById("sign-1", env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-9@${RETIRED_AT}` })),
+    /is not in/
+  );
+});
+
+test("a malformed retirement is refused rather than read as 'never'", () => {
+  for (const value of ["sign-1", "sign-1@", "sign-1@not-a-date", "@2026-01-01T00:00:00Z", `sign-1@${RETIRED_AT},sign-1@${RETIRED_AT}`]) {
+    assert.throws(
+      () => mobileSigningKeyById("sign-1", env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: value })),
+      MobileAuthKeyringError,
+      value
+    );
+  }
+});
+
+test("no retirement list means nothing is retired, so an existing deployment is unaffected", () => {
+  const far = Date.parse("2099-01-01T00:00:00Z");
+  assert.equal(mobileSigningKeyById("sign-1", env(), far)?.secret, KEY_A);
+  assert.equal(mobileRefreshPepperById("pep-1", env(), far)?.secret, KEY_A);
 });

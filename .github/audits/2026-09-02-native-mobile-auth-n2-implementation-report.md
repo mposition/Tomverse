@@ -8,6 +8,10 @@
 
 ---
 
+> **rev.2 (2026-09-02).** 승인자 검토에서 다섯 건이 지적됐고 전부 고쳤습니다. §5.1이
+> 각각을 적습니다. **rev.1이 “V1~V14 통과”라고 적은 것은 V10에 대해 사실이
+> 아니었습니다** — 그 정정은 §5.1의 1번과 벡터 커버리지 문서 §1.1에 있습니다.
+
 ## 1. 한 문단 요약
 
 승인된 설계의 §8.1.1을 계약으로 삼아 N2를 구현했습니다. 토큰 발급·검증, refresh
@@ -184,6 +188,61 @@ Capacitor가 권하는 web fallback의 자연스러운 형태가 JS에서 refres
    위로 올려야 했습니다. 실제로 확인했고 테스트는 재작성된 헤더 목록의 **존재를
    단언**합니다 — 없어도 통과하면 회귀를 지나갑니다.
 
+### 5.1 승인자 검토(2026-09-02)에서 지적돼 고친 것
+
+다섯 건이고, 두 건은 차단 사유였습니다. 전부 이 rev.2에서 고쳤습니다.
+
+**1. [차단] 동시 refresh가 A안이 아니었습니다.**
+조건부 UPDATE가 0행이면 `lost_rotation_race`로 거절하고 family를 살려 두었습니다.
+승인된 V10은 하나 200, 하나 401, **family 폐기**입니다. 그 동작은 A안도 B-1도 아니고,
+패자의 조회가 승자의 commit 앞이었는지 뒤였는지에 따라 결과가 달라지는 **비결정적**
+상태였습니다. 통합 테스트가 그 잘못된 동작을 고정하고 있었으므로 테스트의 존재가
+통과를 뜻하지 않았습니다.
+→ 0행이면 같은 트랜잭션에서 행의 실제 상태를 다시 읽어 판정합니다. 소비·폐기면
+재사용(D8), 만료·부재면 거절. 순차 요청이 받았을 답과 같아집니다. 다섯 회 반복
+테스트가 결정성을 고정합니다.
+
+**2. [차단] 잘못된 키를 ‘설정 완료’로 보고 자격증명을 먼저 소비했습니다.**
+`mobileAuthConfigured()`는 형식과 길이만 봤고, 서명은 세션 트랜잭션이 커밋된 뒤에
+일어납니다. 잘못된 키가 배포되면 exchange는 grant와 rate limit을 소비하고 device·
+family를 만든 뒤 500이었고, refresh는 기존 토큰을 소비하고 successor를 만든 뒤
+500이라 다음 시도가 재사용으로 판정될 수 있었습니다.
+→ `mobileAuthReady()`가 활성 키를 **실제로 파싱하고 서명하고 검증**합니다. 키 자료로
+memo하므로 배포당 한 번입니다. 다섯 endpoint 전부 이것을 가장 먼저 부릅니다. 실제
+route handler로 “503, 행 0건, grant 미소비”를 확인하는 db 테스트가 있고, 정상 키에서
+같은 요청이 200이 되는 대조도 함께 둡니다.
+
+**3. [높음] 인증 전 실패가 무제한으로 DB·로그를 늘렸습니다.**
+malformed refresh도 즉시 `MobileAuthEvent`를 썼고, rate limit은 secret과 family가
+확인된 **뒤에만** 걸렸습니다. 이 셋은 mutation-origin 예외 경로라 환경변수가
+배포되면 누구나 부를 수 있습니다.
+→ `enforceMobileAuthAdmission()`이 본문을 읽기 **전에** 클라이언트 키 기준으로
+admission을 겁니다(`MOBILE_AUTH_PRE_AUTH_RATE_LIMIT`, 분 60 / 일 2,000).
+그리고 파싱조차 안 되는 토큰은 **행을 쓰지 않습니다** — 계정도 기기도 family도 이름
+대지 못하는 행이고, 그 사실은 구조화 로그가 담습니다. 기기·계정 기준 한도는 그대로
+남아 있고 이것이 대체하지 않습니다.
+
+**이 숫자는 승인된 18개에 없습니다.** 검토 지적에 따라 새로 만든 운영 guardrail이며,
+다음에 이 설계를 볼 때 함께 기록해야 합니다.
+
+**4. [높음] WebView의 access token을 임의 URL에 붙일 수 있었습니다.**
+`authenticatedFetch()`가 임의 문자열을 받아 origin 검증 없이 Bearer를 붙였습니다.
+→ 이제 **경로**를 받고 설정된 API origin에 대해 해석하며, `/api/` 밖·scheme-relative
+(`//evil`)·절대 URL·백슬래시·해석 결과 origin 불일치를 전부 거절합니다. 거절된 경로는
+**bridge에 토큰을 요청하지도 않습니다.** redirect는 `redirect: "error"`로 따라가지
+않습니다 — same-origin redirect는 `Authorization`을 유지하므로 조용히 따라가는 것이
+토큰이 아무도 고르지 않은 곳에 닿는 경로입니다.
+
+**5. [중간] 승인된 키 유예기간이 상수일 뿐이었습니다.**
+링에 있는 키는 기간 제한 없이 계속 신뢰됐습니다.
+→ 은퇴 시각을 별개 변수(`MOBILE_AUTH_RETIRED_SIGNING_KEYS`,
+`MOBILE_AUTH_RETIRED_REFRESH_PEPPERS`, `id@<ISO instant>`)로 받고, 유예를 지난 키는
+검증에서 **null**이 됩니다 — 설정된 적 없는 키와 같은 답입니다. 은퇴한 id를 active로
+지정하면 거부하고, 링에 없는 id의 은퇴는 오타로 보아 거부합니다. pepper는 자기
+윈도우(30일 + skew)를 쓰며 서명 키 윈도우로 만료되지 않는 것을 테스트가 고정합니다.
+절차는 `docs/ops/mobile-auth-key-rotation.md`에 있고, **자동 제거는 아직 없다**는 것도
+그 문서가 적습니다.
+
 ---
 
 ## 6. 검증
@@ -254,9 +313,12 @@ Capacitor가 권하는 web fallback의 자연스러운 형태가 JS에서 refres
 | `MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID` | `id` | 새 digest를 계산할 pepper |
 | `MOBILE_AUTH_TOKEN_ISSUER` | 문자열 | `iss`. 검증이 **정확 일치**합니다 |
 | `MOBILE_AUTH_TOKEN_AUDIENCE` | 문자열 | `aud`. 같습니다 |
+| `MOBILE_AUTH_RETIRED_SIGNING_KEYS` | `id@<ISO instant>,...` | 선택. 은퇴 시각. 유예 15분이 지나면 검증에서 빠집니다 |
+| `MOBILE_AUTH_RETIRED_REFRESH_PEPPERS` | `id@<ISO instant>,...` | 선택. 유예 30일 + skew |
 
-넷 중 하나라도 없으면 `mobileAuthConfigured()`가 false이고 모든 모바일 endpoint가
-**503**을 답합니다. 어느 변수가 없는지는 말하지 않습니다 — 인증되지 않은 요청자가
+여섯 중 필수는 넷이고(은퇴 목록은 선택), 하나라도 없거나 **활성 서명 키가 실제로
+서명하지 못하면** `mobileAuthReady()`가 false이고 모든 모바일 endpoint가 **503**을
+답합니다. 형식 검사만으로는 부족하다는 것이 검토 지적 2번이었습니다. 어느 변수가 없는지는 말하지 않습니다 — 인증되지 않은 요청자가
 들을 이유가 없는 배포 사실입니다.
 
 **`/api/ready`는 이 여섯을 검사하지 않습니다.** 의도된 것입니다: 모바일 인증이 아직
@@ -264,8 +326,7 @@ Capacitor가 권하는 web fallback의 자연스러운 형태가 JS에서 refres
 fail-closed로 답합니다. production 활성화를 결정할 때 `/api/ready`에 넣을지는 그때의
 결정입니다.
 
-키 생성은 자격증명을 만드는 일이므로 이 저장소에 script를 두지 않았습니다. 필요할 때
-운영자에게 실행 위치와 함께 제시합니다.
+회전 절차와 키 생성 명령은 `docs/ops/mobile-auth-key-rotation.md`에 있습니다.
 
 ---
 
@@ -280,3 +341,5 @@ fail-closed로 답합니다. production 활성화를 결정할 때 `/api/ready`�
 | **B-2 재검토** | 승인 항목 17 — 별도 후속 |
 | **웹 `sessionSecurity` 캐시 조사** | 승인 항목 18 — 별도 후속. N2에는 D12의 강화된 계약을 처음부터 적용했습니다 |
 | **maintenance stub 검사** | §8의 재발 방지. 아직 없습니다 |
+| **은퇴 키 자동 제거·보고** | 유예가 지난 항목을 코드가 쓰지 않을 뿐, 변수에서 지우는 것은 사람의 일입니다 |
+| **`MOBILE_AUTH_PRE_AUTH_RATE_LIMIT` 기록** | 승인된 18개 밖의 새 값. 다음 설계 검토에서 함께 승인 |

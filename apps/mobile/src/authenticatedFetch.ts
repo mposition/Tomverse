@@ -40,8 +40,62 @@ import type { MobileAccessGrant, MobileAuthBridge } from "./authBridgeContract";
 
 export type AuthenticatedFetchOptions = {
   bridge: Pick<MobileAuthBridge, "getAccessToken">;
+  /**
+   * The exact origin of the Tomverse API, e.g. `https://tomverse.app`.
+   *
+   * Required, and required to be exact. The bundle is served from
+   * `capacitor://localhost`, so a relative path would resolve against *that*
+   * and reach nothing; and a caller free to pass an absolute URL is a caller
+   * who can send this device's access token wherever they like.
+   */
+  apiOrigin: string;
   /** Injected so tests need no network and no globals. */
   fetchImpl?: typeof fetch;
+};
+
+/** The path was not one this client is allowed to send a token to. */
+export class MobileApiPathError extends Error {
+  constructor(path: string) {
+    // The path is in the message because this is a programming error the
+    // developer who wrote the call site has to see. It carries no token.
+    super(`Refusing to attach a mobile access token to "${path}".`);
+    this.name = "MobileApiPathError";
+  }
+}
+
+/**
+ * Resolves a caller's path against the API origin, or refuses.
+ *
+ * The refusals, and why each one is separate:
+ *
+ *   * **not starting with `/api/`** -- the bearer is for the API. A document
+ *     route has no use for it and no reason to see it;
+ *   * **scheme-relative (`//evil.example/x`)** -- resolves to another origin
+ *     while looking like a path, which is the classic way this check is got
+ *     wrong;
+ *   * **absolute** -- `https://evil.example/api/x` is the obvious case, and
+ *     `new URL` would happily take it as a base-less URL;
+ *   * **backslashes** -- some URL parsers treat `\` as `/`, so a path
+ *     containing one can mean two different things to two parsers;
+ *   * **anything whose resolved origin is not the API's** -- the backstop,
+ *     which catches whatever the four rules above did not think of, including
+ *     traversal that climbs out of `/api/`.
+ */
+const resolveApiUrl = (path: string, apiOrigin: string): string => {
+  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) {
+    throw new MobileApiPathError(String(path));
+  }
+  if (path.includes("\\")) throw new MobileApiPathError(path);
+
+  let url: URL;
+  try {
+    url = new URL(path, apiOrigin);
+  } catch {
+    throw new MobileApiPathError(path);
+  }
+  if (url.origin !== new URL(apiOrigin).origin) throw new MobileApiPathError(path);
+  if (!url.pathname.startsWith("/api/")) throw new MobileApiPathError(path);
+  return url.toString();
 };
 
 /**
@@ -72,11 +126,15 @@ const withBearer = (init: RequestInit | undefined, token: string) => {
  * reader wonder which one the server used.
  */
 export const authenticatedFetch = async (
-  input: string,
+  path: string,
   init: RequestInit | undefined,
   options: AuthenticatedFetchOptions
 ): Promise<Response> => {
   const run = options.fetchImpl ?? fetch;
+
+  // Before the bridge is even asked. A refused path must not cause a token to
+  // be fetched, let alone sent.
+  const input = resolveApiUrl(path, options.apiOrigin);
 
   const first = await options.bridge.getAccessToken();
   if (!isUsable(first, Date.now())) {
@@ -88,6 +146,11 @@ export const authenticatedFetch = async (
   const response = await run(input, {
     ...withBearer(init, first.accessToken),
     credentials: "omit",
+    // A redirect on an authenticated API call is a bug, not a flow. Browsers
+    // strip `Authorization` across origins, but a same-origin hop to another
+    // path keeps it, and following one silently is how a token ends up
+    // somewhere nobody chose. Failing is the answer that gets noticed.
+    redirect: "error",
   });
   if (response.status !== 401) return response;
 
@@ -101,6 +164,7 @@ export const authenticatedFetch = async (
   return run(input, {
     ...withBearer(init, second.accessToken),
     credentials: "omit",
+    redirect: "error",
   });
 };
 
