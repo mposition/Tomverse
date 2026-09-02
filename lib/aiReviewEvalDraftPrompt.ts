@@ -37,7 +37,7 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v4";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v5";
 
 /** The only labels a drafted response may carry. */
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
@@ -274,7 +274,8 @@ Rules that are not negotiable:
 ${ANSWER_SHAPE[request.taskType].map((element, index) => `   ${index + 1}. ${element}`).join("\n")}
    Written properly that comes to ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. Do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach the length by covering the points, never by padding or repeating: a two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
 8. **The assigned answer differs from the others on ONE point and is otherwise just as sound.** Everything else in it -- every dose, every step, every figure, every caution -- must be as correct as in the answers that are right. This is what makes the gold below an honest list: if the assigned answer is also careless in a second way, a reviewer that reports that second thing has found a real fault, your gold does not contain it, and the case scores that reviewer as wrong. Plant the one difference and leave the rest alone.
-9. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
+9. **The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, and elements 3 to ${String(ANSWER_SHAPE[request.taskType].length)} follow from it. It must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage", or "put juice in the mouth of an unconscious person" and then "liquid in an unconscious person's mouth can be aspirated", has argued against itself: the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right -- they are the reasoning of a different recommendation, and pasting them in is how an answer comes to refute itself.
+10. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
 
 Reply with JSON only, no prose around it, in exactly this shape:
 

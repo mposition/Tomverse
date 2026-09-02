@@ -280,6 +280,58 @@ export const responseLengths = (
     };
 };
 
+/**
+ * Where the fault was ASSIGNED, and where the gold's prose appears to accuse.
+ *
+ * These were one number and should never have been. `goldLeadLabels()` reads
+ * the label a gold item names first, which worked while the drafter wrote
+ * "c는 즉시 대피하지 말라고 한다" -- and stopped the moment v4's gold began
+ * quoting the offending phrase instead ("30분 정도 조용히 관찰"). The report
+ * then said `unattributed: 5` for a batch whose five cases each carried a
+ * correct `targetLabel`, which reads as "the assignment did not happen" when
+ * what happened is that the heuristic had nothing to read.
+ *
+ * So the assignment is reported from the record that actually holds it --
+ * `draftedBy.targetLabel`, written by the drafter from `assignTargetLabels()`
+ * -- and the prose heuristic is reported beside it as a second, weaker
+ * observation. The two answer different questions:
+ *
+ *   * assigned: was the position spread, or is the set building a confound?
+ *   * realized: does the gold, read as text, point at the same answer?
+ *
+ * A disagreement is worth a person's attention -- the gold may be accusing an
+ * answer that was not the assigned one -- and so is a gold nothing can be read
+ * from, but neither is a defect the way a silent `unattributed` implied one.
+ */
+export const plantedLabelReport = (
+    cases: readonly (Pick<AiReviewEvalCase, "id" | "gold" | "responses"> & {
+        draftedBy?: { targetLabel?: string | null } | null;
+    })[]
+): {
+    readonly assigned: Readonly<Record<string, number>>;
+    readonly realized: Readonly<Record<string, number>>;
+    readonly disagreements: readonly { id: string; assigned: string; realized: string }[];
+} => {
+    const assigned: Record<string, number> = {};
+    const disagreements: { id: string; assigned: string; realized: string }[] = [];
+    for (const testCase of cases) {
+        const target = testCase.draftedBy?.targetLabel ?? null;
+        // A case with no drafting record, or one whose phenomenon plants
+        // nothing, is not "assigned to nowhere" -- it was never in the
+        // question. Counted apart so it cannot look like a spread.
+        const key = target ?? "not assigned";
+        assigned[key] = (assigned[key] ?? 0) + 1;
+        if (target === null) continue;
+        const lead = goldLeadLabels([testCase]);
+        for (const [label, count] of Object.entries(lead.byLabel)) {
+            if (count > 0 && label !== "unattributed" && label !== target) {
+                disagreements.push({ id: testCase.id, assigned: target, realized: label });
+            }
+        }
+    }
+    return { assigned, realized: goldLeadLabels(cases).byLabel, disagreements };
+};
+
 export type AiReviewEvalManifest = {
     cases: number;
     byCell: readonly AiReviewEvalCellGap[];
@@ -292,6 +344,8 @@ export type AiReviewEvalManifest = {
     emptyExhaustiveClaims: readonly { id: string; kind: string }[];
     /** The label each gold item names first, counted. A heuristic; see goldLeadLabels(). */
     goldLeadLabels: { readonly byLabel: Readonly<Record<string, number>>; readonly attributed: number };
+    /** Where the fault was assigned, and where the gold appears to accuse. */
+    plantedLabels: ReturnType<typeof plantedLabelReport>;
     /** Answer length in characters, against the drafting floor. */
     responseLengths: ReturnType<typeof responseLengths>;
 };
@@ -331,6 +385,7 @@ export const datasetManifest = (
         duplicates: duplicateQuestions(cases),
         emptyExhaustiveClaims: emptyExhaustiveClaims(cases),
         goldLeadLabels: goldLeadLabels(cases),
+        plantedLabels: plantedLabelReport(cases),
         responseLengths: responseLengths(cases),
     };
 };

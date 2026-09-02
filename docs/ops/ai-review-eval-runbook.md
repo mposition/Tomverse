@@ -166,8 +166,15 @@ cell에서 약 666 토큰, cell이 다 차 갈 무렵이면 약 7,080 토큰입�
 6. **받은 뒤에 자동으로 재배열하지 않습니다.** gold는 자연어로 label을
    참조하므로("c의 조언은 a와 b와 모순된다") 답변 순서를 바꾸면 그 참조를 모두
    안전하게 고칠 방법이 없습니다. 배정은 **요청**이고, 실제로 그렇게 왔는지는
-   `report:ai-review-eval-coverage`의 lead-label 집계와 사람의 채택 판단이
-   확인합니다.
+   사람의 채택 판단이 확인합니다.
+7. **배정과 gold 귀속은 따로 보고합니다.** `report:ai-review-eval-coverage`가
+   **배정**은 기록된 `draftedBy.targetLabel`에서 읽고, **gold가 지목하는 것으로
+   읽히는 답변**은 gold 문구의 heuristic으로 따로 셉니다. 둘을 한 숫자로 합쳐
+   두었다가 v4에서 거짓말을 했습니다 — gold가 label 대신 문제 문구를 인용하기
+   시작하자(`"30분 정도 조용히 관찰"`) `unattributed: 5`가 나왔고, 이는 다섯 건
+   모두 올바른 `targetLabel`을 갖고 있는데도 **"배정이 일어나지 않았다"로
+   읽힙니다.** 둘이 어긋나는 case와 gold에서 아무것도 읽히지 않는 case는 각각
+   따로 표시하며, 어느 쪽도 그 자체로 결함은 아닙니다.
 
 현상이 아무것도 심지 않는 넷(`genuine_consensus`·`no_issue`·`verbosity_bias`·
 `position_bias`)은 배정이 `null`입니다. `position_bias`가 여기 있는 이유는 하나

@@ -198,3 +198,26 @@ test("the answer shape is per task type, not one frame for the whole set", () =>
   assert.match(planning, /the trade-off behind it/);
   assert.doesNotMatch(planning, /the warning signs or cautions that matter/);
 });
+
+test("the planted answer is told to believe itself", () => {
+  // v4's five-element shape asks why the recommendation is right, and the
+  // drafter answered for the CORRECT recommendation because it knows it: an
+  // answer that says "observe for thirty minutes" and then "delay increases
+  // brain damage" has argued against itself. A reviewer quoting that second
+  // sentence has spotted the drafter, not the fault.
+  const instruction = draftInstruction({
+    ...cell,
+    count: 2,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, count: 2 }),
+  });
+  assert.match(instruction, /The assigned answer believes itself/);
+  assert.match(instruction, /element 2 justifies ITS OWN recommendation/);
+  assert.match(instruction, /never state the principle that makes it wrong/);
+  assert.match(instruction, /Do not reuse the reasoning sentences of the answers that are right/);
+  // The element count in the rule tracks the shape rather than being typed in.
+  assert.match(
+    instruction,
+    new RegExp(`elements 3 to ${ANSWER_SHAPE[cell.taskType].length} follow from it`)
+  );
+});
