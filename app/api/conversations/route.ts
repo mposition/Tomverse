@@ -91,7 +91,30 @@ export async function GET(req: Request) {
         // workspace (docs/policy/external-conversation-continuation.md §8.2).
         // Selected as a relation existence check, not a join of the bridge's
         // columns: the list needs the answer, and none of the provenance.
-        continuationBridge: { select: { id: true } },
+        continuationBridge: {
+          select: {
+            id: true,
+            /*
+              The imported conversation's own name, for a row nobody has
+              named yet (lib/continuationDisplayTitle.ts).
+
+              Read here rather than copied onto the row at creation:
+              docs/policy/external-conversation-continuation.md §3 keeps the
+              source's words out of tables its deletion does not reach,
+              and deleting a snapshot deliberately leaves the continuation
+              standing. Nulled by the foreign key when the source goes, so the
+              name goes with it.
+
+              `password` decides whether the name may be shown at all: a
+              locked snapshot withholds its transcript, and its title is part
+              of that transcript. Selected, never emitted -- exactly as this
+              query already treats the conversation's own password.
+            */
+            externalConversation: {
+              select: { title: true, password: true },
+            },
+          },
+        },
         _count: { select: { messages: true } },
       },
     });
@@ -137,6 +160,19 @@ export async function GET(req: Request) {
         surface: conversationSurface({
           hasContinuationBridge: conv.continuationBridge !== null,
         }),
+        /*
+          The imported conversation's name, for the client to display when
+          this row still carries the placeholder the continuation writer
+          wrote (lib/continuationDisplayTitle.ts).
+
+          Withheld for a locked snapshot, whose title is part of the
+          transcript the lock is withholding, and absent entirely once the
+          source is deleted -- both leave the row on its translated fallback.
+        */
+        sourceTitle:
+          conv.continuationBridge?.externalConversation?.password === null
+            ? (conv.continuationBridge.externalConversation.title ?? null)
+            : null,
       };
     });
 

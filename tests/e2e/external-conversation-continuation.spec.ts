@@ -38,6 +38,9 @@ const EXTERNAL_ID = "qa-external-conversation";
  * a credit weight through the model catalogue, and an id the catalogue does
  * not know would be rendered as a bare string and priced at nothing.
  */
+/** The imported conversation's own name, as the fixtures report it. */
+const SOURCE_CONVERSATION_TITLE = "An imported conversation";
+
 const PRIMARY_MODEL = "gpt-5-6-luna";
 const SECOND_MODEL = "gpt-5-4-mini";
 
@@ -310,7 +313,13 @@ const mockContinuationApi = async (
  */
 const mockConversationList = async (
     page: Page,
-    rows: { id: string; title: string; surface?: "workspace" | "continuation" }[]
+    rows: {
+        id: string;
+        title: string;
+        surface?: "workspace" | "continuation";
+        /** What the list route sends for a row whose source it could read. */
+        sourceTitle?: string;
+    }[]
 ) => {
     await page.route("**/api/conversations", (route) => {
         if (route.request().method() !== "GET") return route.fallback();
@@ -330,6 +339,9 @@ const mockConversationList = async (
                     shareExpiresAt: null,
                     messageCount: 2,
                     surface: row.surface ?? "workspace",
+                    ...(row.sourceTitle === undefined
+                        ? {}
+                        : { sourceTitle: row.sourceTitle }),
                 }))
             )
         );
@@ -503,21 +515,197 @@ test.describe("continuing an imported conversation", () => {
         page: Page,
         options: Parameters<typeof mockContinuationApi>[1] & {
             extraRows?: { id: string; title: string }[];
+            /**
+             * The row's stored title. The writer's placeholder by default,
+             * which is what a continuation nobody has renamed actually holds.
+             */
+            listTitle?: string;
+            /**
+             * The imported conversation's own name, as the list route sends
+             * it. Absent stands for a source that is deleted, locked or
+             * unnamed -- three facts with one answer on screen.
+             */
+            sourceTitleForList?: string;
         } = {}
     ) => {
-        const { extraRows = [], ...continuationOptions } = options;
+        const {
+            extraRows = [],
+            listTitle,
+            sourceTitleForList,
+            ...continuationOptions
+        } = options;
         await mockAuthenticatedApi(page);
         const api = await mockContinuationApi(page, continuationOptions);
         await mockConversationList(page, [
             {
                 id: CONVERSATION_ID,
-                title: "Continued from an imported chat",
+                title: listTitle ?? "Continued from an imported chat",
                 surface: "continuation",
+                // The imported conversation's own name, which is what the
+                // sidebar shows for a row still carrying the writer's
+                // placeholder. Defaulted so every list assertion below reads
+                // the name a real account would see.
+                sourceTitle: sourceTitleForList ?? SOURCE_CONVERSATION_TITLE,
             },
             ...extraRows,
         ]);
         return api;
     };
+
+    test("a continuation with no answers yet is not a blank new chat", async ({
+        page,
+    }) => {
+        /*
+          The defect: every panel reports `empty` -- truthfully, there is no
+          native Message -- and the shell greeted the owner with "welcome
+          back", offered them other recent conversations, and floated the
+          composer in the middle of a screen that already had the imported
+          conversation on it.
+        */
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toBeVisible();
+
+        // No welcome surface, and none of what it carries.
+        await expect(page.getByTestId("chat-welcome-greeting")).toHaveCount(0);
+        await expect(
+            page.getByTestId("recent-conversations-disclosure")
+        ).toHaveCount(0);
+
+        // The composer sits below the conversation, not floating in the
+        // middle of it: its top edge is under the divider.
+        const dividerBox = await page
+            .getByTestId("continuation-divider")
+            .boundingBox();
+        const inputBox = await page.getByTestId("chat-input").boundingBox();
+        expect(dividerBox).not.toBeNull();
+        expect(inputBox).not.toBeNull();
+        if (!dividerBox || !inputBox) return;
+        expect(inputBox.y).toBeGreaterThanOrEqual(dividerBox.y);
+    });
+
+    test("an ordinary empty conversation still gets its welcome screen", async ({
+        page,
+    }) => {
+        // The other half of the same decision: nothing about the welcome
+        // surface changed for a conversation that genuinely has nothing in it.
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page);
+
+        await page.goto("/chat");
+        await expect(page.getByTestId("chat-welcome-greeting")).toBeVisible();
+    });
+
+    test("the imported transcript is open on arrival", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        // Both fixture messages, with no press: a short imported conversation
+        // is shown whole.
+        await expect(
+            page.getByTestId("continuation-source-message")
+        ).toHaveCount(2);
+        await expect(
+            page.getByTestId("continuation-source-toggle")
+        ).toHaveAttribute("aria-expanded", "true");
+        // The provenance line and the message count are beside it.
+        await expect(page.getByTestId("continuation-provenance")).toBeVisible();
+        await expect(page.getByTestId("continuation-source-count")).toBeVisible();
+    });
+
+    test("the disclosure collapses and reopens from the keyboard", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const toggle = page.getByTestId("continuation-source-toggle");
+        await toggle.focus();
+        await page.keyboard.press("Enter");
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+        // Hidden, not removed: the panel keeps its identity so `aria-controls`
+        // still points at something and reopening restores what was scrolled.
+        await expect(
+            page.getByTestId("continuation-source-message").first()
+        ).toBeHidden();
+        // Collapsed still says whose conversation this is and how big it is.
+        await expect(page.getByTestId("continuation-provenance")).toBeVisible();
+        await expect(page.getByTestId("continuation-source-count")).toBeVisible();
+        // Focus is still on the control that was pressed.
+        await expect(toggle).toBeFocused();
+
+        await page.keyboard.press("Enter");
+        await expect(toggle).toHaveAttribute("aria-expanded", "true");
+        await expect(
+            page.getByTestId("continuation-source-message").first()
+        ).toBeVisible();
+    });
+
+    test("the divider is a named separator, and survives a deleted source", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page, { source: { status: "deleted" } });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-source-tombstone")
+        ).toBeVisible();
+        const divider = page.getByTestId("continuation-divider");
+        await expect(divider).toBeVisible();
+        await expect(divider).toHaveAttribute("role", "separator");
+        // Nothing to press when there is nothing to show.
+        await expect(
+            page.getByTestId("continuation-source-toggle")
+        ).toHaveCount(0);
+        await expect(page.getByTestId("chat-input")).toBeVisible();
+    });
+
+    test("the sidebar shows the imported conversation's own name", async ({
+        page,
+    }) => {
+        // Not `Continued from an imported chat`: that placeholder is the
+        // writer's, and the name is resolved from the snapshot when displayed.
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page, { sourceTitleForList: "Migration plan review" });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const list = await openConversationList(page);
+        await expect(
+            list
+                .getByTestId("sidebar-conversation-item")
+                .filter({ hasText: "Migration plan review" })
+                .last()
+        ).toBeVisible();
+        await expect(
+            list.getByTestId("sidebar-conversation-item").filter({
+                hasText: "Continued from an imported chat",
+            })
+        ).toHaveCount(0);
+    });
+
+    test("a name the owner typed is left alone", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page, {
+            listTitle: "내가 붙인 이름",
+            sourceTitleForList: "Migration plan review",
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const list = await openConversationList(page);
+        await expect(
+            list
+                .getByTestId("sidebar-conversation-item")
+                .filter({ hasText: "내가 붙인 이름" })
+                .last()
+        ).toBeVisible();
+    });
 
     test("the continued conversation runs in the ordinary chat shell", async ({
         page,
@@ -598,7 +786,7 @@ test.describe("continuing an imported conversation", () => {
         await expect(
             list
                 .getByTestId("sidebar-conversation-item")
-                .filter({ hasText: "Continued from an imported chat" })
+                .filter({ hasText: SOURCE_CONVERSATION_TITLE })
                 .last()
         ).toBeVisible();
     });
@@ -619,16 +807,20 @@ test.describe("continuing an imported conversation", () => {
         // (docs/policy/external-conversation-continuation.md §5.1).
         await expect(prelude).toHaveCount(1);
 
-        // Collapsed by default: the panels below scroll on their own, so the
-        // transcript must not take fixed height before anyone asks for it.
-        await expect(
-            page.getByTestId("continuation-source-message")
-        ).toHaveCount(0);
-
-        await page.getByTestId("continuation-source-toggle").click();
+        // Open on arrival: the imported conversation is what this screen is
+        // about, and a short one is shown whole.
         await expect(
             page.getByTestId("continuation-source-message")
         ).toHaveCount(2);
+        await expect(
+            page.getByTestId("continuation-source-message").first()
+        ).toBeVisible();
+
+        // And the owner can put it away.
+        await page.getByTestId("continuation-source-toggle").click();
+        await expect(
+            page.getByTestId("continuation-source-message").first()
+        ).toBeHidden();
         // The imported assistant answer is badged as somebody else's, and the
         // shortened one says so.
         await expect(
@@ -746,7 +938,7 @@ test.describe("continuing an imported conversation", () => {
         const list = await openConversationList(page);
         await list
             .getByTestId("sidebar-conversation-item")
-            .filter({ hasText: "Continued from an imported chat" })
+            .filter({ hasText: SOURCE_CONVERSATION_TITLE })
             .last()
             .click();
 

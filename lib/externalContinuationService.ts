@@ -59,6 +59,7 @@ import {
     type ContinuationSeedPrompt,
 } from "@/lib/externalContinuationSeedPrompt";
 import type { ContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
+import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -84,12 +85,17 @@ export const clampTimelinePageSize = (value: number | null | undefined) => {
  * The title a continuation starts with.
  *
  * Deliberately not the source's title. §3 keeps the source's own words out of
- * the bridge, and the same reasoning applies to the conversation row: a title
- * copied from an imported conversation is imported content living in a table
- * the source's deletion does not reach. The user renames it if they want to,
- * exactly as with any other conversation.
+ * every table the source's deletion does not reach, and `Conversation.title`
+ * is one of those: deleting a snapshot leaves the continuation and its
+ * Tomverse messages standing, by design, so a title copied here at creation
+ * would outlive the deletion request that was meant to remove it.
+ *
+ * Nobody sees this string. The imported conversation's name is resolved where
+ * it is *displayed*, from the snapshot itself, and this constant is the
+ * provenance signal that says the row has not been named by anyone --
+ * `lib/continuationDisplayTitle.ts` owns both halves of that.
  */
-export const CONTINUATION_DEFAULT_TITLE = "Continued from an imported chat";
+export { LEGACY_CONTINUATION_TITLE as CONTINUATION_DEFAULT_TITLE };
 
 type OwnedSnapshot = {
     id: string;
@@ -330,7 +336,7 @@ async function createContinuationRows(input: {
             tx,
             {
                 userId: input.userId,
-                title: CONTINUATION_DEFAULT_TITLE,
+                title: LEGACY_CONTINUATION_TITLE,
                 // A server constant, never a body field. Review is what the
                 // user is doing here: putting the same imported context and
                 // the same next question to the models they chose

@@ -80,6 +80,15 @@ type Timeline = {
 
 const SOURCE_PAGE_SIZE = 100;
 
+/**
+ * How many imported turns the preview shows before "show all".
+ *
+ * The most recent ones, which are also the end of the window the seed is
+ * drawn from -- so the preview is the part of the transcript the next answer
+ * will actually be reasoning over.
+ */
+const SOURCE_PREVIEW_COUNT = 6;
+
 const formatDate = (iso: string) => {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso : date.toISOString().slice(0, 10);
@@ -92,9 +101,24 @@ export function ContinuationSourcePrelude({
 }) {
     const { t } = useLanguage();
     const [timeline, setTimeline] = useState<Timeline | null>(null);
-    const [expanded, setExpanded] = useState(false);
+    /**
+     * Open, and open on arrival.
+     *
+     * The first version defaulted to closed, which was the wrong trade for the
+     * state this screen is in most often: somebody has just started a
+     * continuation, there is no Tomverse turn yet, and the only thing on the
+     * page is the conversation they came here to continue. Closed, that page
+     * said "Imported conversation · read-only" and showed nothing -- the
+     * transcript the whole feature is about was behind a control in the
+     * corner. It stays bounded instead: a preview of the most recent turns,
+     * with the rest one press away.
+     */
+    const [expanded, setExpanded] = useState(true);
+    /** Whether the owner asked past the preview to the whole transcript. */
+    const [showingAll, setShowingAll] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const panelId = useId();
+    const headingId = useId();
 
     useEffect(() => {
         let cancelled = false;
@@ -169,103 +193,140 @@ export function ContinuationSourcePrelude({
     if (!timeline) return null;
 
     const source = timeline.source;
+    const sourceTitle =
+        source.status === "available" && source.title.trim()
+            ? source.title
+            : t("continuation.quickUntitled");
     // Gone or locked: two short states that change what the next turn carries,
-    // so they are said on screen rather than hidden behind a disclosure.
-    const alwaysOpen = source.status !== "available";
-    const isOpen = alwaysOpen || expanded;
+    // so they are said on screen rather than behind a disclosure, and neither
+    // offers one.
+    const canDisclose = source.status === "available";
+    const messages = canDisclose ? source.messages : [];
+    /*
+      What the preview shows: the most recent turns, which are also the end of
+      the window the seed is taken from. A short imported conversation is
+      shown whole -- hiding six messages behind a control would be the closed
+      default again, in a different shape.
+    */
+    const previewed =
+        showingAll || messages.length <= SOURCE_PREVIEW_COUNT
+            ? messages
+            : messages.slice(-SOURCE_PREVIEW_COUNT);
+    const hasMoreThanPreview =
+        canDisclose &&
+        (source.messageTotal > previewed.length ||
+            messages.length > previewed.length);
 
     return (
-        <section
-            className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60"
-            data-testid="continuation-source-section"
-            aria-label={t("continuation.sourceSectionTitle")}
-        >
-            <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300">
-                    <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                    {t("continuation.sourceSectionTitle")}
-                </span>
-                <span
-                    className="text-xs leading-5 text-zinc-500"
-                    data-testid="continuation-provenance"
-                >
-                    {interpolate(t("continuation.sourceSectionSubtitle"), {
-                        provider: providerLabel(timeline.provider),
-                        date: formatDate(timeline.importedAt),
-                    })}
-                </span>
-                <span
-                    className="text-xs leading-5 text-zinc-400"
-                    data-testid="continuation-seed-summary"
-                >
-                    {timeline.seed.messageCount === 0
-                        ? t("continuation.seedNone")
-                        : interpolate(t("continuation.seedSummary"), {
-                              used: timeline.seed.messageCount,
-                              total:
-                                  source.status === "available"
-                                      ? source.messageTotal
-                                      : timeline.seed.messageCount +
-                                        timeline.seed.omittedMessageCount,
-                          })}
-                    {timeline.seed.truncatedMessageCount > 0 ? (
-                        <span className="ml-1">
-                            {interpolate(t("continuation.seedTruncated"), {
-                                count: timeline.seed.truncatedMessageCount,
+        <div className="shrink-0" data-testid="continuation-prelude">
+            <section
+                className="border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60"
+                data-testid="continuation-source-section"
+                aria-labelledby={headingId}
+            >
+                <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-3 gap-y-1">
+                    <h2
+                        id={headingId}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300"
+                    >
+                        <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t("continuation.sourceSectionTitle")}
+                    </h2>
+                    <span
+                        className="text-xs leading-5 text-zinc-500"
+                        data-testid="continuation-provenance"
+                    >
+                        {interpolate(t("continuation.sourceSectionSubtitle"), {
+                            provider: providerLabel(timeline.provider),
+                            date: formatDate(timeline.importedAt),
+                        })}
+                    </span>
+                    {canDisclose ? (
+                        <span
+                            className="text-xs leading-5 text-zinc-500"
+                            data-testid="continuation-source-count"
+                        >
+                            {interpolate(t("continuation.sourceMessageCount"), {
+                                count: source.messageTotal,
                             })}
                         </span>
                     ) : null}
-                </span>
-                {source.status === "available" ? (
-                    <button
-                        type="button"
-                        className="ml-auto inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        data-testid="continuation-source-toggle"
-                        aria-expanded={expanded}
-                        aria-controls={expanded ? panelId : undefined}
-                        onClick={() => setExpanded((open) => !open)}
+                    <span
+                        className="text-xs leading-5 text-zinc-400"
+                        data-testid="continuation-seed-summary"
                     >
-                        {expanded ? (
-                            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-                        ) : (
-                            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-                        )}
-                        {expanded
-                            ? t("continuation.hideSource")
-                            : t("continuation.showSource")}
-                    </button>
+                        {timeline.seed.messageCount === 0
+                            ? t("continuation.seedNone")
+                            : interpolate(t("continuation.seedSummary"), {
+                                  used: timeline.seed.messageCount,
+                              })}
+                        {timeline.seed.truncatedMessageCount > 0 ? (
+                            <span className="ml-1">
+                                {interpolate(t("continuation.seedTruncated"), {
+                                    count: timeline.seed.truncatedMessageCount,
+                                })}
+                            </span>
+                        ) : null}
+                    </span>
+                    {canDisclose ? (
+                        <button
+                            type="button"
+                            className="ml-auto inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            data-testid="continuation-source-toggle"
+                            aria-expanded={expanded}
+                            aria-controls={panelId}
+                            // The title, so a screen reader hears which
+                            // imported conversation this control belongs to
+                            // rather than "show" repeated down the page.
+                            aria-label={interpolate(
+                                expanded
+                                    ? t("continuation.hideSourceFor")
+                                    : t("continuation.showSourceFor"),
+                                { title: sourceTitle }
+                            )}
+                            onClick={() => setExpanded((open) => !open)}
+                        >
+                            {expanded ? (
+                                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                            ) : (
+                                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                            )}
+                            {expanded
+                                ? t("continuation.hideSource")
+                                : t("continuation.showSource")}
+                        </button>
+                    ) : null}
+                </div>
+
+                {source.status === "deleted" ? (
+                    <p
+                        className="mx-auto mt-1 w-full max-w-5xl text-xs leading-5 text-zinc-500"
+                        data-testid="continuation-source-tombstone"
+                    >
+                        {t("continuation.sourceDeleted")}
+                    </p>
                 ) : null}
-            </div>
 
-            {source.status === "deleted" ? (
-                <p
-                    className="mx-auto mt-1 w-full max-w-5xl text-xs leading-5 text-zinc-500"
-                    data-testid="continuation-source-tombstone"
-                >
-                    {t("continuation.sourceDeleted")}
-                </p>
-            ) : null}
+                {source.status === "locked" ? (
+                    <p
+                        className="mx-auto mt-1 w-full max-w-5xl text-xs leading-5 text-zinc-500"
+                        data-testid="continuation-source-locked"
+                    >
+                        {t("continuation.sourceLocked")}
+                    </p>
+                ) : null}
 
-            {source.status === "locked" ? (
-                <p
-                    className="mx-auto mt-1 w-full max-w-5xl text-xs leading-5 text-zinc-500"
-                    data-testid="continuation-source-locked"
-                >
-                    {t("continuation.sourceLocked")}
-                </p>
-            ) : null}
-
-            {isOpen && source.status === "available" ? (
                 <div
                     id={panelId}
+                    hidden={!canDisclose || !expanded}
                     // Its own scroller, capped: the panels below must keep
-                    // their height whatever the imported conversation's length
-                    // (docs/ui-contracts/mobile-chat-composer.md -- the
-                    // composer's row is not something another section may take).
-                    className="mx-auto mt-2 max-h-[40vh] w-full max-w-5xl overflow-y-auto"
+                    // their height whatever the imported conversation's length,
+                    // and the composer must stay reachable
+                    // (docs/ui-contracts/mobile-chat-composer.md).
+                    className="mx-auto mt-2 max-h-[34vh] w-full max-w-5xl overflow-y-auto"
                 >
                     <ol className="space-y-2">
-                        {source.messages.map((message) => (
+                        {previewed.map((message) => (
                             <li
                                 key={message.id}
                                 className={`rounded-xl border border-dashed p-2.5 ${
@@ -311,29 +372,82 @@ export function ContinuationSourcePrelude({
                             </li>
                         ))}
                     </ol>
-                    {source.messages.length < source.messageTotal ? (
-                        <button
-                            type="button"
-                            className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            data-testid="continuation-source-more"
-                            disabled={loadingMore}
-                            onClick={() => void loadMore()}
-                        >
-                            {loadingMore ? (
-                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                            ) : null}
-                            {t("externalImport.loadMore")}
-                        </button>
+                    {hasMoreThanPreview ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span
+                                className="text-[11px] leading-5 text-zinc-400"
+                                data-testid="continuation-source-preview-notice"
+                            >
+                                {interpolate(
+                                    t("continuation.sourcePreviewNotice"),
+                                    { count: previewed.length }
+                                )}
+                            </span>
+                            <button
+                                type="button"
+                                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                data-testid="continuation-source-more"
+                                disabled={loadingMore}
+                                aria-label={interpolate(
+                                    t("continuation.showAllMessagesFor"),
+                                    {
+                                        count:
+                                            canDisclose
+                                                ? source.messageTotal
+                                                : previewed.length,
+                                        title: sourceTitle,
+                                    }
+                                )}
+                                onClick={() => {
+                                    setShowingAll(true);
+                                    void loadMore();
+                                }}
+                            >
+                                {loadingMore ? (
+                                    <Loader2
+                                        className="h-4 w-4 animate-spin"
+                                        aria-hidden="true"
+                                    />
+                                ) : null}
+                                {interpolate(t("continuation.showAllMessages"), {
+                                    count: canDisclose
+                                        ? source.messageTotal
+                                        : previewed.length,
+                                })}
+                            </button>
+                        </div>
                     ) : null}
                 </div>
-            ) : null}
+            </section>
 
-            <p
-                className="mx-auto mt-2 w-full max-w-5xl text-[11px] font-bold uppercase tracking-wide text-zinc-400"
+            {/*
+              The boundary, as a separator in the timeline rather than a line of
+              small print above it.
+
+              `role="separator"` with a name is what makes it a boundary to a
+              screen reader as well as to the eye, and it renders in every
+              state -- a deleted or locked source still has Tomverse messages
+              under it, and the line between "somebody else's words" and "ours"
+              is exactly what must not disappear when the source does.
+            */}
+            <div
+                role="separator"
+                aria-label={t("continuation.divider")}
+                className="mx-auto flex w-full max-w-5xl items-center gap-3 px-3 py-2"
                 data-testid="continuation-divider"
             >
-                {t("continuation.divider")}
-            </p>
-        </section>
+                <span
+                    aria-hidden="true"
+                    className="h-px flex-1 bg-zinc-300 dark:bg-zinc-700"
+                />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    {t("continuation.divider")}
+                </span>
+                <span
+                    aria-hidden="true"
+                    className="h-px flex-1 bg-zinc-300 dark:bg-zinc-700"
+                />
+            </div>
+        </div>
     );
 }
