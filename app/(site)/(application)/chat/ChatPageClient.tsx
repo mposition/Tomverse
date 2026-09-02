@@ -61,12 +61,16 @@ import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
+  CONVERSATION_HANDOFF_PARAM,
+  conversationHandoffHref,
   conversationSurfaceHref,
   type ConversationSurface,
 } from "@/lib/continuationRoutes";
 import { continuationDisplayTitle } from "@/lib/continuationDisplayTitle";
+import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
@@ -545,7 +549,6 @@ export function ChatPageClient({
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
   initialConversationId = null,
   mountedSurface = "workspace",
-  conversationPrelude = null,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
@@ -602,15 +605,6 @@ export function ChatPageClient({
    * conversation than the one on screen.
    */
   mountedSurface?: ConversationSurface;
-  /**
-   * A read-only block above the panel row, for a conversation that has one.
-   *
-   * Passed through to both shells rather than rendered here, and never into
-   * `ChatApp`: the shell mounts one of those per selected model, and
-   * docs/policy/external-conversation-continuation.md §5.1 says the imported
-   * source is drawn once for the conversation.
-   */
-  conversationPrelude?: ReactNode;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -618,6 +612,10 @@ export function ChatPageClient({
     isEnabledModelId,
   } = useModelCatalog();
   const router = useRouter();
+  // Which URL this mount is actually at, so a selection that already has the
+  // right one does not push it again (a repeated push of the current path is
+  // a history entry that goes nowhere, and Back then appears broken).
+  const pathname = usePathname();
     const { t, setLang, lang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
     Object.entries(values).reduce(
@@ -2972,15 +2970,51 @@ export function ChatPageClient({
           rather than guessed at: it takes the in-place path this screen has
           always taken.
         */
-        if (targetSurface && targetSurface !== mountedSurface) {
-            const href =
-                conversationSurfaceHref(targetSurface, id) ??
+        if (targetSurface) {
+            /*
+              Where this row belongs, decided from this row alone.
+
+              Two different questions, and conflating them was the bug. The
+              first is whether the target's surface has a URL of its own:
+              `conversationSurfaceHref` says `/continuations/[id]` for a
+              continuation and `null` for the workspace, which selects in
+              place. The second is whether *this mount* is that surface.
+
+              Asking only the second one got both directions wrong. Leaving a
+              continuation for an ordinary conversation dropped the id --
+              `null` fell back to a bare `LEGACY_REVIEW_PATH` -- so `/chat`
+              opened naming nothing, its session restore found the
+              continuation the user had just left still recorded as active,
+              selected it, and this branch sent them back: a click that
+              appeared to do nothing. And moving between two continuations
+              matched surfaces, so it navigated nowhere at all and left
+              `/continuations/[a]` in the address bar above conversation `[b]`.
+
+              So: a surface with a per-conversation URL must be *at* that URL,
+              and nothing else navigates unless the surface itself differs.
+              Neither branch consults the surface this mount happens to be
+              showing, the row's title, its icon, or its `kind`.
+            */
+            const ownPath = conversationSurfaceHref(targetSurface, id);
+            if (ownPath) {
+                // Already there (the arrival selection, or a re-click on the
+                // open row): pushing the current path again is a history entry
+                // that goes nowhere.
+                if (pathname !== ownPath) {
+                    router.push(ownPath);
+                    return;
+                }
+            } else if (targetSurface !== mountedSurface) {
+                // The workspace has no per-conversation URL, so the id travels
+                // as a parameter the workspace spends on arrival.
                 // `LEGACY_REVIEW_PATH`, not `PRODUCT_SURFACE_PATH.review`:
                 // this is where the workspace lives *today*, and the two stop
                 // being equal on the day of the cutover.
-                LEGACY_REVIEW_PATH;
-            router.push(href);
-            return;
+                router.push(
+                    conversationHandoffHref(targetSurface, id, LEGACY_REVIEW_PATH)
+                );
+                return;
+            }
         }
 
         localComparisonResponsesRef.current.clear();
@@ -3265,6 +3299,30 @@ export function ChatPageClient({
             )
         ) {
             initialConversationAppliedRef.current = true;
+            /*
+              The handoff parameter is spent the moment it is honoured.
+
+              `/chat?conversation=[id]` is how a click on another surface hands
+              this workspace the conversation it named. Once applied it would
+              only be a claim about which conversation is open, and the
+              workspace changes that in place on every subsequent sidebar
+              click -- so within seconds the address bar would be naming a
+              conversation the user is no longer in, and a reload or a shared
+              link would reopen it.
+
+              `replaceState`, never a pushed entry: Back must return to the
+              screen the user came from, not replay this selection. The
+              continuation's own path carries no parameter and is left alone.
+            */
+            if (window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
+                const url = new URL(window.location.href);
+                url.searchParams.delete(CONVERSATION_HANDOFF_PARAM);
+                window.history.replaceState(
+                    window.history.state,
+                    "",
+                    `${url.pathname}${url.search}${url.hash}`
+                );
+            }
             queueMicrotask(() => {
                 void handleSelectConversation(initialConversationId);
                 setIsInitialConversationResolved(true);
@@ -3273,9 +3331,29 @@ export function ChatPageClient({
         }
 
         const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+        /*
+          A restore reopens what was on screen; it never navigates.
+
+          The saved id belongs to whichever surface last wrote it, and this
+          mount is one particular surface. Restoring one that belongs to
+          another would send the browser somewhere the user did not ask to go
+          -- and when the user got here *by leaving* that very conversation,
+          the destination is the screen they just left. That was the second
+          half of the redirect defect: `/chat` reopened the continuation whose
+          sidebar had just sent them away.
+
+          So a saved conversation from another surface is simply not restored.
+          It is not forgotten either: the id stays in session storage, so
+          returning to its own surface still finds it. A row this list has not
+          classified (`undefined`) reads as the workspace, which is what every
+          conversation was before continuations existed.
+        */
+        const savedRow = savedChatId
+            ? conversations.find((conversation) => conversation.id === savedChatId)
+            : undefined;
         const restorableChatId =
-            savedChatId && conversations.some((conversation) => conversation.id === savedChatId)
-                ? savedChatId
+            savedRow && (savedRow.surface ?? "workspace") === mountedSurface
+                ? savedRow.id
                 : null;
 
         // Returning users with nothing to restore land on the welcome-home
@@ -3297,6 +3375,7 @@ export function ChatPageClient({
         isConversationsLoaded,
         isGuestMode,
         isUserSettingsLoaded,
+        mountedSurface,
     ]);
 
     const handleLock = async (id: string, password: string) => {
@@ -6031,18 +6110,61 @@ export function ChatPageClient({
   ) : null;
 
   /*
-    Whether the open conversation carries a read-only prelude.
+    Whether the open conversation continues an imported one.
 
     From the row the server sent -- `conversationSurface()` derives it from the
-    continuation bridge -- and never from the prelude node, which renders
-    `null` until its own read resolves and forever for a conversation with no
-    bridge. A hand-typed `/continuations/<an ordinary id>` therefore still gets
-    the ordinary welcome screen.
+    continuation bridge -- and never from the transcript itself, which is null
+    until its own read resolves and forever for a conversation with no bridge.
+    A hand-typed `/continuations/[an ordinary id]` therefore still gets the
+    ordinary welcome screen, and this screen does not spend a request asking
+    for an imported half that does not exist.
   */
   const hasConversationPrelude =
     blendedConversations.find(
       (conversation) => conversation.id === shellConversationId
     )?.surface === "continuation";
+
+  /*
+    The imported half, as timeline messages.
+
+    Read here rather than by a component of its own because every panel needs
+    the same answer and there is one conversation open: asking once and handing
+    the result down is the difference between one request and one per selected
+    model. `null` for anything that is not a continuation, which is what stops
+    the hook from firing at all.
+  */
+  const continuationSource = useContinuationSource(
+    hasConversationPrelude ? shellConversationId : null
+  );
+  const importedMessages = useMemo(
+    () =>
+      continuationSource.timeline?.source.status === "available"
+        ? continuationTimelineMessages(
+            continuationSource.timeline.source.messages,
+            continuationSource.timeline.provider
+          )
+        : [],
+    [continuationSource.timeline]
+  );
+  const importedTranscript = useMemo(
+    () =>
+      continuationSource.timeline
+        ? {
+            status: continuationSource.timeline.source.status,
+            provider: continuationSource.timeline.provider,
+            importedAt: continuationSource.timeline.importedAt,
+            olderCount: continuationSource.olderCount,
+            onLoadOlder: continuationSource.loadMore,
+            loadingOlder: continuationSource.loadingMore,
+          }
+        : undefined,
+    [
+      continuationSource.timeline,
+      continuationSource.olderCount,
+      continuationSource.loadMore,
+      continuationSource.loadingMore,
+    ]
+  );
 
   return (
     // Every surface that decides whether a model searches reads this: the
@@ -6104,7 +6226,9 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
-          conversationPrelude={conversationPrelude}
+          hasImportedTranscript={hasConversationPrelude}
+          importedMessages={importedMessages}
+          importedTranscript={importedTranscript}
           hasConversationPrelude={hasConversationPrelude}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -6225,7 +6349,9 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
-          conversationPrelude={conversationPrelude}
+          hasImportedTranscript={hasConversationPrelude}
+          importedMessages={importedMessages}
+          importedTranscript={importedTranscript}
           hasConversationPrelude={hasConversationPrelude}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}

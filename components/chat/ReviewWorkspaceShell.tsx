@@ -17,7 +17,6 @@
  * route segment config export has to be in the route's own file.
  */
 
-import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -50,7 +49,6 @@ import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
 export async function ReviewWorkspaceShell({
   initialConversationId = null,
   mountedSurface = "workspace",
-  conversationPrelude = null,
 }: {
   /**
    * The conversation this mount opens with, when the route named one.
@@ -64,8 +62,6 @@ export async function ReviewWorkspaceShell({
   initialConversationId?: string | null;
   /** Which surface this mount is, so selecting across surfaces navigates. */
   mountedSurface?: ConversationSurface;
-  /** The read-only imported half, rendered above the panel row. */
-  conversationPrelude?: ReactNode;
 } = {}) {
   let guestDefaultModelId: string = APP_DEFAULTS.guestDefaultModelId;
   // Default-off opt-in (lib/imageGenerationAccess.ts): a read failure keeps
@@ -164,7 +160,6 @@ export async function ReviewWorkspaceShell({
         webSearchBackendReadiness={webSearchBackendReadiness}
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
-        conversationPrelude={conversationPrelude}
       />
     </GuestVerificationProvider>
   );

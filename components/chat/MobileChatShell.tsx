@@ -75,6 +75,7 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   type ChatAttachment,
   type Conversation,
+  type Message,
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import type {
@@ -187,7 +188,37 @@ type MobileChatShellProps = {
    * lives in the shell and not in `ChatApp`. Both shells take it so the two
    * screens cannot disagree about where the imported half appears.
    */
-  conversationPrelude?: ReactNode;
+  /**
+   * The imported half of a continued conversation, handed to every panel.
+   *
+   * Replaces the `conversationPrelude` slot this shell used to render above
+   * the panel row. That slot was a second conversation on the page: its own
+   * heading, its own disclosure and its own capped scroller, on a screen
+   * whose whole purpose was the transcript inside it. These are the same
+   * turns as ordinary timeline messages, so each panel prepends them to its
+   * own list and the chat keeps the one scroll container it has always had.
+   */
+  /**
+   * Whether this conversation continues an imported one.
+   *
+   * Separate from `importedTranscript`, and known earlier: the server
+   * classified the row before the transcript itself has been read. The panel
+   * needs it that early because `useCenteredWelcome` hides an empty panel's
+   * message list entirely -- correct for a conversation with nothing in it,
+   * and wrong for a continuation, whose imported half is about to arrive and
+   * has to arrive *into* the list rather than replace it.
+   */
+  hasImportedTranscript?: boolean;
+  importedMessages?: Message[];
+  /** Provenance and paging for that transcript (`ChatMessageList`). */
+  importedTranscript?: {
+    status: "available" | "deleted" | "locked";
+    provider: string;
+    importedAt: string;
+    olderCount: number;
+    onLoadOlder?: () => void;
+    loadingOlder?: boolean;
+  };
   /**
    * Whether this conversation has content the panels cannot see.
    *
@@ -366,7 +397,9 @@ export function MobileChatShell({
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
-  conversationPrelude,
+  hasImportedTranscript = false,
+  importedMessages,
+  importedTranscript,
   hasConversationPrelude = false,
   onSelectConversation,
   onRename,
@@ -1285,7 +1318,6 @@ export function MobileChatShell({
         />
       </div>
 
-      {conversationPrelude}
 
       {showModelTabs && (
         <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -1482,6 +1514,9 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  hasImportedTranscript={hasImportedTranscript}
+                  importedMessages={importedMessages}
+                  importedTranscript={importedTranscript}
                   modelId={modelId}
                   initialConversationId={currentChatId}
                   promptPayload={promptPayload}
