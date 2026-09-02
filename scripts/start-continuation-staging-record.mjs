@@ -192,6 +192,27 @@ if (existsSync(target)) {
 
 let record = readFileSync(TEMPLATE, "utf8");
 
+/*
+  The revision, written once and read from one place.
+
+  The template carried it twice -- in its front matter and again in the
+  execution-environment table -- and only the front matter is what
+  `check:staging-verification-records` compares against the checklist. So the
+  table's copy drifted: it still said 2026-08-31b under a 2026-09-01a header,
+  and a finished record would have named the wrong revision while the gate
+  stayed green. The body now takes its value from the front matter it was
+  opened with.
+*/
+const templateRevision =
+    /^templateRevision:\s*(\S+)\s*$/m.exec(record)?.[1] ?? null;
+if (!templateRevision) {
+    fail("The template has no templateRevision in its front matter.");
+}
+record = record.replace(
+    "| template revision | (기록을 열 때 front matter에서 채워집니다) |",
+    `| template revision | ${templateRevision} |`
+);
+
 record = record.replace("environment:\n", "environment: staging\n");
 record = record.replace("deploySha:\n", `deploySha: ${deploySha}\n`);
 

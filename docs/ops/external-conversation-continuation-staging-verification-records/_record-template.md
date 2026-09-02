@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 관련 표면 diff 결과 | |
-| template revision | 2026-08-31b |
+| template revision | (기록을 열 때 front matter에서 채워집니다) |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
