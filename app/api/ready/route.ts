@@ -91,9 +91,11 @@ const readinessResponse = async (head = false) => {
   const imageProviderBudget = imageBudgetStatus.status?.ready ?? false;
   // The audio budget, on the same terms and for the same reason: flag off is
   // the legal intermediate state of an env-first deploy, flag on with no
-  // budget is a misconfiguration between this product and an unbounded
-  // third-party bill (docs/policy/voice-input.md §6.1-4). A thrown check is
-  // not "ready" -- nobody knows, which is the answer that refuses traffic.
+  // budget is a misconfiguration between this product and unbounded
+  // third-party usage (docs/policy/voice-input.md §6.1-4). It is a usage
+  // budget, in seconds: it bounds how much audio leaves here, not how many
+  // dollars that becomes. A thrown check is not "ready" -- nobody knows,
+  // which is the answer that refuses traffic.
   const voiceBudgetStatus = await getVoiceProviderBudgetReadiness().then(
     (status) => ({ status, error: null as string | null }),
     (error: unknown) => ({
@@ -227,7 +229,7 @@ const readinessResponse = async (head = false) => {
         dependency: "voice-provider-seconds-budget",
         healthy: voiceProviderBudget,
         code: "VOICE_PROVIDER_SECONDS_BUDGET_NOT_READY",
-        title: "Voice provider seconds budget is not configured correctly",
+        title: "Voice provider usage budget (seconds) is not configured correctly",
         error: voiceProviderBudget
           ? "Voice provider budget is configured (or the feature flag is off)."
           : voiceBudgetStatus.error ??

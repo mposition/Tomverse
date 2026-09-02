@@ -17,13 +17,15 @@ import {
   voiceClipFormatFor,
 } from "@/lib/voiceInputFormats";
 import {
-  releaseVoiceSeconds,
-  reserveVoiceSeconds,
-  settleVoiceSeconds,
   voiceReservationSeconds,
   VoiceBudgetError,
-  type VoiceSecondsReservation,
 } from "@/lib/voiceInputBudget";
+import {
+  releaseVoiceBudgets,
+  reserveVoiceBudgets,
+  settleVoiceBudgets,
+  type VoiceBudgetReservation,
+} from "@/lib/voiceBudgetReservation";
 import type { VoiceSettlementBasis } from "@/lib/voiceInputGuardrails";
 import { resolveVoiceGuardrails } from "@/lib/voiceInputGuardrails";
 import {
@@ -177,7 +179,7 @@ const report = (fields: {
 };
 
 export async function POST(request: Request) {
-  let reservation: VoiceSecondsReservation | null = null;
+  let reservation: VoiceBudgetReservation | null = null;
   try {
     // Order matters and is the fail-closed one: the feature flag is consulted
     // before the session, so a request to a disabled feature never touches the
@@ -245,7 +247,7 @@ export async function POST(request: Request) {
     // Reserved before the provider call, on the honest basis: the container's
     // own length when it declared one, the per-clip ceiling when it did not.
     const reservedSeconds = voiceReservationSeconds(inspection.durationSeconds);
-    reservation = await reserveVoiceSeconds({ userId, seconds: reservedSeconds });
+    reservation = await reserveVoiceBudgets({ userId, seconds: reservedSeconds });
 
     const result = await voiceTranscriptionProvider().transcribe({
       audio: body.bytes,
@@ -279,7 +281,7 @@ export async function POST(request: Request) {
         result.disposition === "indeterminate"
           ? { kind: "reservation" }
           : { kind: "not_billed" };
-      const settlement = await settleVoiceSeconds({ reservation, basis });
+      const settlement = await settleVoiceBudgets({ reservation, basis });
       report({
         outcome: "provider_failed",
         mediaType: inspection.format.mediaType,
@@ -322,7 +324,7 @@ export async function POST(request: Request) {
         : inspection.durationSeconds !== null
           ? { kind: "measured_clip", seconds: inspection.durationSeconds }
           : { kind: "reservation" };
-    const settlement = await settleVoiceSeconds({ reservation, basis });
+    const settlement = await settleVoiceBudgets({ reservation, basis });
     const usageFields = {
       usageKind: result.usage.kind,
       settlementBasis: basis.kind,
@@ -372,7 +374,7 @@ export async function POST(request: Request) {
         The handle is single-use, so this cannot double-release, and it cannot
         reach another request's booking: `reservation` is a local.
       */
-      await releaseVoiceSeconds(reservation).catch(() => undefined);
+      await releaseVoiceBudgets(reservation).catch(() => undefined);
     }
     if (error instanceof VoiceBudgetError) {
       report({ outcome: "refused_budget" });

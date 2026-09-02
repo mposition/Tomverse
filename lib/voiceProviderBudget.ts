@@ -4,6 +4,15 @@
  *
  * Contract: docs/policy/voice-input.md §6.1-4.
  *
+ * ## This is a usage budget, not a cost budget
+ *
+ * The name matters because the other provider budgets in this repository are
+ * cost budgets and this one cannot be. It bounds **exposure**: how much audio
+ * leaves this deployment. It bounds money only as far as seconds and dollars
+ * track each other, and this module does not claim to know that they do. A
+ * USD layer belongs on top of a rate verified against a real invoice (B-3),
+ * added beside this one rather than derived from it.
+ *
  * ## Why seconds and not dollars
  *
  * Every other provider budget in this repository is denominated in microUSD.
@@ -22,16 +31,23 @@
  * ## Why this is not the guardrail in `lib/voiceInputGuardrails.ts`
  *
  * That one is per subject: one person's day. This one is the deployment's day
- * and month, across everybody. A per-subject limit cannot bound total spend --
+ * and month, across everybody. A per-subject limit cannot bound the total --
  * the total is "limit x however many people show up" -- which is exactly the
  * split chat already has between a plan guardrail and a provider budget.
  *
  * ## Why there is no default in production
  *
  * A default here would be a number nobody chose standing between this product
- * and an unbounded third-party bill. Outside production a default keeps
+ * and unbounded third-party usage. Outside production a default keeps
  * development working; in production its absence is a misconfiguration and
  * `/api/ready` says so (`lib/voiceProviderBudgetReadiness.ts`).
+ *
+ * ## Configured is not the same as decided
+ *
+ * This module refusing to start without values does not mean the values are
+ * right. B-4 is "operationally complete" only once staging and production
+ * carry limits a person chose for them; until then the code is ready and the
+ * deployment is not (§6.1-4).
  */
 
 export type VoiceProviderBudgetLimits = {
