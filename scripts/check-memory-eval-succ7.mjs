@@ -24,6 +24,7 @@ import {
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
+import { verifySucc7Manifest } from "../lib/memoryEvalSucc7.ts";
 
 const failures = [];
 const notes = [];
@@ -385,10 +386,18 @@ if (manifest.composition.sourceDatasetDigest !== MEMORY_EVAL_SUCC6_MANIFEST.data
 
 /* ------------------------------------------------------------- not frozen -- */
 
-if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== false || manifest.frozen !== false) {
-    fail("succ-7 claims to be frozen; adoption is a human act and has not happened");
+if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== true || manifest.frozen !== true) {
+    fail("succ-7 is adopted but does not report frozen");
 } else {
-    ok("succ-7 is assembled and NOT frozen", "assembled=true reviewed=false frozen=false");
+    ok("succ-7 is adopted and frozen", "reviewed 2026-09-02 by @mposition");
+}
+// The pinned record against the tree, both defaults in play. Empty means what
+// was signed still describes what is here.
+const succ7Drift = verifySucc7Manifest();
+if (succ7Drift.length > 0) {
+    fail(`succ-7 no longer matches its signed manifest: ${succ7Drift.join("; ")}`);
+} else {
+    ok("succ-7 matches its signed manifest", "record vs tree, not tree vs tree");
 }
 
 console.log("");
@@ -403,7 +412,7 @@ console.log(
 );
 console.log(`  unresolvedPolicy  ${manifest.unresolvedPolicies.length}`);
 console.log(`  frozen            ${manifest.frozen}`);
-console.log(`  harness target    mem-eval-succ-6 (unchanged)`);
+console.log(`  harness target    mem-eval-succ-6 (unchanged — a separate change)`);
 console.log("");
 
 /* ------------------------------------------------------------- report --- */
@@ -418,4 +427,7 @@ if (failures.length > 0) {
     );
     process.exit(1);
 }
-console.log("\nsucc-7 structural checks all hold. Freezing is still a human act.");
+console.log(
+    "\nsucc-7 structural checks all hold. Adopted 2026-09-02; the harness " +
+        "target is a separate change."
+);

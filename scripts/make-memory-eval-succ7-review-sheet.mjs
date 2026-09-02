@@ -37,8 +37,8 @@ p("> 다시 만들 수 있습니다. 판정란 외에는 손으로 고치지 마
 p("");
 p("## 이 시트가 묻는 것");
 p("");
-p("succ-7은 **조립됐고 동결되지 않았습니다.** 이 시트의 판정과 서명이 채택의");
-p("전제이며, 서명 전까지 `frozen`은 `false`이고 harness는 succ-6을 가리킵니다.");
+p("succ-7은 **채택·동결됐습니다** (@mposition, 2026-09-02). 이 시트는 그 검수의");
+p("기록이며, harness target은 여전히 succ-6으로 별도 변경 대상입니다.");
 p("");
 p("각 항목에서 답할 것은 둘입니다.");
 p("");
@@ -57,7 +57,7 @@ p(`| manifestDigest | \`${manifest.manifestDigest}\` |`);
 p(`| sourceDatasetDigest | \`${manifest.composition.sourceDatasetDigest}\` |`);
 p(`| scoringContract | \`${manifest.scoringContractVersion}\` |`);
 p("| assembled | true |");
-p("| reviewed | **false** |");
+p("| reviewed | **true** — @mposition, 2026-09-02 |");
 p(`| frozen | **${manifest.frozen}** |`);
 p("| harness target | `mem-eval-succ-6` (변경 없음) |");
 p("");
@@ -161,6 +161,6 @@ p("");
 writeFileSync(out, L.join("\n"), "utf8");
 console.log(
     `Wrote ${MEMORY_EVAL_SUCC7_REPLACEMENTS.length} case(s) to ${out}\n` +
-        `assembled=true  reviewed=false  frozen=${manifest.frozen}  ` +
+        `assembled=true  reviewed=true  frozen=${manifest.frozen}  ` +
         `harness target=mem-eval-succ-6`
 );
