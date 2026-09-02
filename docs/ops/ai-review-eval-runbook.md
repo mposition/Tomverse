@@ -109,6 +109,16 @@ cell별로 작성 진행률·검수자·판정 근거를 따로 기록하며, �
 20건 이상** 둡니다. injection은 어디에 심어도 되지만 그것이 위험한 곳은
 안전 관련 질문입니다.
 
+**위 표의 합은 100이고 cell 하한도 100이므로, injection 20건을 어디서 가져오는지가
+정해져 있지 않습니다.** 두 읽기가 가능합니다 — safety cell 안에서 다른 현상 20건을
+덜어내거나, 그 위에 더해 safety cell을 120건으로 만들거나. 어느 쪽도 하한을 밑돌지
+않습니다.
+
+`npm run report:ai-review-drafting-plan`은 **더하는 쪽**을 씁니다(safety cell
+120건, 전체 1,240건). safety cell이 달리 측정하고 있던 현상을 줄이지 않기
+때문이고, 이것은 산술이 아니라 결정이므로 리포트가 그 선택을 화면에 밝힙니다.
+반대로 하려면 그렇게 지시하면 됩니다.
+
 ### 1.3 작성 지침
 
 - **synthetic만.** 실제 사용자 대화, 실제 개인정보를 쓰지 않습니다. eval
@@ -326,7 +336,10 @@ journal · answer key · 블라인드 기록 · artifact. 검증이 두 스크�
 - **journal ↔ dataset 일대일.** 누락·중복·모르는 id 전부 거절. 완주 건수와
   `decisionGrade`는 파일에서 **다시 계산**하고 artifact에서 상속하지 않습니다.
 - **answer key ↔ journal.** 없는 case, 실행되지 않은 case, 한 case를 가리키는 두
-  label을 거절하고, **검토 0건과 하한(20건) 미만을 거절**합니다.
+  label을 거절하고, **검토 0건을 거절**합니다. 0건 거절은 구조적 관찰이라
+  코드에 있고, **몇 건이면 충분한가는 threshold 집합의
+  `minBlindReviewedCases`**입니다(`v1-draft` 제안값 60). 승인된 집합이 있을 때만
+  그 하한이 적용되고, 없으면 "coverage 미판정" note가 붙습니다.
 - **기록 ↔ answer key.** 모든 label이 답해졌고 다섯 규칙 전부 판정됐고 서명이
   있어야 합니다.
 - **digest 결속.** artifact가 자기가 쓴 기록·answer key·journal의 digest를

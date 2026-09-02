@@ -934,24 +934,19 @@ test.describe("a voice session belongs to one person", () => {
     expect(chatRequests).toEqual([]);
 
     /*
-      What account B's composer holds, stated as it actually is.
+      Account B's composer is blank, and both halves of that matter.
 
-      Voice's guarantee is that it added nothing: no clip was uploaded, so
-      there is no transcript to have appended. The text below is account A's
-      *typed* draft, and account B can read it, because
-      `lib/conversationDraftStore.ts` keys drafts by conversation id alone —
-      the boundary this feature added is on the voice session, not on the
-      draft store.
-
-      That is a real finding and it is recorded as one
-      (docs/policy/voice-input.md §8.4, "이 기능이 고치지 않은 것"). It is not
-      fixed here: identity-scoped drafts change a store every conversation
-      shares, and which of "clear on switch" or "keep per identity" is right is
-      a product decision, not a detail of this change. Asserting the observed
-      value rather than `""` keeps this test honest and makes it fail loudly on
-      the day that decision is taken.
+      Voice added nothing — no clip was uploaded, so there is no transcript to
+      have appended. And account A's *typed* draft is not there either, which
+      it used to be: drafts were keyed by conversation id alone, so both
+      accounts shared the new-conversation draft. They are now keyed by
+      identity as well (docs/policy/conversation-draft-identity-scope.md),
+      which is proved on its own in
+      `tests/e2e/conversation-draft-identity.spec.ts`; this line is here so a
+      regression in that boundary cannot pass unnoticed through the voice
+      specs either.
     */
-    await expect(textarea).toHaveValue("계정 A가 쓰던 초안");
+    await expect(textarea).toHaveValue("");
 
     // And the microphone was closed by the switch, not left listening.
     const openTracks = await page.evaluate(

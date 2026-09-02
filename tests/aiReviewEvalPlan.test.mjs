@@ -3,6 +3,10 @@ import test from "node:test";
 
 import {
   coverageGap,
+  draftingBatches,
+  draftingCostCeilingUsd,
+  CELL_PHENOMENON_MIX,
+  INJECTION_QUOTA_PER_LANGUAGE,
   datasetManifest,
   duplicateQuestions,
   emptyExhaustiveClaims,
@@ -11,6 +15,7 @@ import {
 import {
   AI_REVIEW_EVAL_LANGUAGES,
   AI_REVIEW_EVAL_MIN_CASES,
+  AI_REVIEW_EVAL_MODES,
   AI_REVIEW_EVAL_TASK_TYPES,
 } from "../lib/aiReviewEvalCore.ts";
 import { datasetProblems } from "../lib/aiReviewEvalRun.ts";
@@ -160,4 +165,86 @@ test("a development set is not asked about adoption", () => {
     }),
     []
   );
+});
+
+test("the drafting plan fills every cell to its floor and honours the phenomenon mix", () => {
+  const batches = draftingBatches({ existing: [], batchSize: 10 });
+  for (const cell of evalCoveragePlan()) {
+    const mine = batches.filter(
+      (batch) => batch.language === cell.language && batch.taskType === cell.taskType
+    );
+    const total = mine.reduce((sum, batch) => sum + batch.count, 0);
+    assert.ok(
+      total >= cell.required,
+      `${cell.language}/${cell.taskType} plans ${total}, below its floor of ${cell.required}`
+    );
+    for (const [phenomenon, wanted] of Object.entries(CELL_PHENOMENON_MIX)) {
+      const planned = mine
+        .filter((batch) => batch.phenomenon === phenomenon)
+        .reduce((sum, batch) => sum + batch.count, 0);
+      assert.equal(planned, wanted, `${cell.language}/${cell.taskType} ${phenomenon}`);
+    }
+  }
+});
+
+test("injection is planted in the safety cells only, at the quota", () => {
+  const batches = draftingBatches({ existing: [], batchSize: 10 });
+  const injection = batches.filter((batch) => batch.phenomenon === "prompt_injection");
+  assert.equal(
+    new Set(injection.map((batch) => batch.taskType)).size,
+    1,
+    "injection must not be spread across task types"
+  );
+  assert.equal(injection[0].taskType, "safety_sensitive");
+  for (const language of ["ko", "en"]) {
+    const planned = injection
+      .filter((batch) => batch.language === language)
+      .reduce((sum, batch) => sum + batch.count, 0);
+    assert.equal(planned, INJECTION_QUOTA_PER_LANGUAGE);
+  }
+});
+
+test("every mode clears its own floor, which cuts across the cells", () => {
+  const batches = draftingBatches({ existing: [], batchSize: 10 });
+  for (const mode of AI_REVIEW_EVAL_MODES) {
+    const planned = batches
+      .filter((batch) => batch.mode === mode)
+      .reduce((sum, batch) => sum + batch.count, 0);
+    assert.ok(
+      planned >= AI_REVIEW_EVAL_MIN_CASES.perMode,
+      `${mode} plans ${planned}, below ${AI_REVIEW_EVAL_MIN_CASES.perMode}`
+    );
+  }
+});
+
+test("cases already written are not drafted again", () => {
+  const existing = Array.from({ length: 20 }, () => ({
+    language: "ko",
+    taskType: "planning_decision",
+    phenomenon: "direct_contradiction",
+    mode: "balanced",
+  }));
+  const batches = draftingBatches({ existing, batchSize: 10 });
+  const planned = batches
+    .filter(
+      (batch) =>
+        batch.language === "ko" &&
+        batch.taskType === "planning_decision" &&
+        batch.phenomenon === "direct_contradiction"
+    )
+    .reduce((sum, batch) => sum + batch.count, 0);
+  assert.equal(planned, 0);
+});
+
+test("the cost ceiling charges every call its full output cap", () => {
+  // A forecast would understate it, and the figure exists for somebody to
+  // approve a budget against.
+  const ceiling = draftingCostCeilingUsd({
+    batches: [{ count: 10 }, { count: 10 }],
+    estimatedInputTokensPerCall: 1_000_000,
+    outputTokenCapPerCall: 1_000_000,
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 3,
+  });
+  assert.equal(ceiling, 8);
 });

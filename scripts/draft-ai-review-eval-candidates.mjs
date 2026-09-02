@@ -29,10 +29,11 @@
 // handles its own phrasing and its own idea of what counts as a contradiction.
 // Those are refused unless overridden, so the choice lands in the record.
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 
 import {
+  AI_REVIEW_EVAL_DATASET_SCHEMA_VERSION,
   AI_REVIEW_EVAL_LANGUAGES,
   AI_REVIEW_EVAL_MODES,
   AI_REVIEW_EVAL_PHENOMENA,
@@ -105,17 +106,39 @@ if (configuration.protocol !== "openai-compatible" && model.provider !== "openai
   );
 }
 
+// The set is created on first use rather than committed empty.
+//
+// An empty decision set is a valid JSON file and an invalid dataset -- and
+// `check:ai-review-eval` runs on every pull request, so committing one would
+// turn the repository's own gate red for as long as the set takes to write.
+// Weakening the gate to accommodate a placeholder would be the wrong trade:
+// the rule that a decision set has cases is the rule, and a file that does not
+// satisfy it yet does not need to exist yet.
 let set;
-try {
-  set = JSON.parse(readFileSync(resolve(process.cwd(), setPath), "utf8"));
-} catch (error) {
-  die(
-    `Could not read ${setPath}: ${error instanceof Error ? error.message : error}\n\n` +
-      "This script appends to an existing set; it does not create one. Start the\n" +
-      "decision set with a file carrying version, schemaVersion, purpose\n" +
-      '"decision", frozenAt/frozenBy/frozenDigest null and an empty cases array,\n' +
-      "or point --set at the development set to experiment."
-  );
+const resolvedSetPath = resolve(process.cwd(), setPath);
+if (!existsSync(resolvedSetPath)) {
+  if (!send) {
+    console.log(
+      `\n${setPath} does not exist. --send would create it as an empty decision set\n` +
+        "first. It is created here rather than committed empty because an empty\n" +
+        "decision set fails check:ai-review-eval, which runs on every pull request."
+    );
+  }
+  set = {
+    version: basename(setPath).replace(/\.json$/, ""),
+    schemaVersion: AI_REVIEW_EVAL_DATASET_SCHEMA_VERSION,
+    purpose: "decision",
+    frozenAt: null,
+    frozenBy: null,
+    frozenDigest: null,
+    cases: [],
+  };
+} else {
+  try {
+    set = JSON.parse(readFileSync(resolvedSetPath, "utf8"));
+  } catch (error) {
+    die(`Could not read ${setPath}: ${error instanceof Error ? error.message : error}`);
+  }
 }
 if (!Array.isArray(set.cases)) die(`${setPath} has no cases array.`);
 
