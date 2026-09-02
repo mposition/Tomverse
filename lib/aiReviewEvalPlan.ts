@@ -496,6 +496,39 @@ export const draftingBatches = (input: {
 };
 
 /**
+ * The output cap for a batch, sized to what that batch was asked to write.
+ *
+ * A flat 12,000 was two wrong things at once. For the small batches -- and
+ * most are small, because a batch belongs to one (cell, phenomenon, mode) and
+ * the plan averages under four cases per call -- it charged a ceiling four
+ * times what the call could produce. For a full batch at v3's answer length it
+ * was under what the call NEEDS: measured on the pilot's own Korean answers at
+ * 1.143 tokens per character, seven cases of three ~500-character answers plus
+ * their questions, gold and notes come to about 17,200 output tokens. The
+ * reply would have been truncated mid-JSON and the call billed for nothing --
+ * the same way the length floor took the first v3 batch, one step later.
+ *
+ * So the cap is per case with a fixed allowance for the envelope, and the
+ * ceiling that is checked against the approved total moves with it. 3,000 is
+ * the measured ~2,455 with a fifth again on top: a cap that is occasionally
+ * generous costs a slightly high reservation, and one that is occasionally
+ * tight costs the whole call.
+ *
+ * The 1.143 comes from this repository's own estimator, which its comments say
+ * overstates Korean by roughly 110% against o200k. Left overstated on purpose:
+ * this number decides whether a reply fits, and the failure it prevents is
+ * expensive while the cost of being wrong the other way is a reservation a
+ * little larger than it needed to be.
+ */
+export const DRAFTING_OUTPUT_TOKENS_PER_CASE = 3_000;
+
+/** The envelope: the JSON around the cases, whatever their number. */
+export const DRAFTING_OUTPUT_TOKENS_FIXED = 500;
+
+export const draftingOutputTokenCap = (count: number): number =>
+    DRAFTING_OUTPUT_TOKENS_FIXED + DRAFTING_OUTPUT_TOKENS_PER_CASE * count;
+
+/**
  * What a plan costs at most, call by call.
  *
  * ## Why a single input estimate was not a ceiling
@@ -513,17 +546,21 @@ export const draftingBatches = (input: {
  * instruction as it will actually be sent, and this sums them.
  */
 export const draftingCostCeilingUsd = (input: {
-    /** One entry per call: the input tokens that call will carry. */
-    inputTokensPerCall: readonly number[];
-    outputTokenCapPerCall: number;
+    /**
+     * One entry per call: the input tokens it carries and the output cap it
+     * runs under. Both vary per call -- the input grows as a cell fills, and
+     * the cap is sized to the batch -- so neither can be a single figure for
+     * the whole plan.
+     */
+    perCall: readonly { inputTokens: number; outputTokenCap: number }[];
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
 }): number =>
-    input.inputTokensPerCall.reduce(
-        (total, inputTokens) =>
+    input.perCall.reduce(
+        (total, call) =>
             total +
-            (inputTokens / 1_000_000) * input.inputUsdPerMillionTokens +
-            (input.outputTokenCapPerCall / 1_000_000) * input.outputUsdPerMillionTokens,
+            (call.inputTokens / 1_000_000) * input.inputUsdPerMillionTokens +
+            (call.outputTokenCap / 1_000_000) * input.outputUsdPerMillionTokens,
         0
     );
 

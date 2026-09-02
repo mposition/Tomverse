@@ -17,6 +17,48 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { ledgerBalance } from "../lib/aiReviewDraftLedger.ts";
+import {
+  assignTargetLabels,
+  draftInstruction,
+} from "../lib/aiReviewEvalDraftPrompt.ts";
+import {
+  draftingCallCostCeilingUsd,
+  draftingInputTokenCeiling,
+  draftingOutputTokenCap,
+} from "../lib/aiReviewEvalPlan.ts";
+import { getModelPricingProfile } from "../lib/modelPricing.ts";
+
+/**
+ * What one call of ARGS costs at most, computed the way the drafter computes
+ * it.
+ *
+ * Derived rather than typed in: the per-call ceiling moves whenever the
+ * instruction, the token bound or the output cap changes, and a hard-coded
+ * total quietly stops testing what it was written to test -- it did, the day
+ * the output cap started being sized to the batch.
+ */
+const callCeilingUsd = () => {
+  const cell = {
+    language: "ko",
+    taskType: "safety_sensitive",
+    phenomenon: "prompt_injection",
+    mode: "balanced",
+    count: 2,
+  };
+  const tier = getModelPricingProfile("gpt-5-6-luna").tiers[0];
+  return draftingCallCostCeilingUsd({
+    inputTokens: draftingInputTokenCeiling(
+      draftInstruction({
+        ...cell,
+        existingQuestions: [],
+        targetLabels: assignTargetLabels(cell),
+      })
+    ),
+    outputTokenCap: draftingOutputTokenCap(cell.count),
+    inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+  });
+};
 
 const ARGS = [
   "--model=gpt-5-6-luna",
@@ -244,9 +286,10 @@ test("two runs at once cannot both decide they have room", async (t) => {
   });
 
   // A total that fits one call and not two, and both runs start at once.
+  const total = (callCeilingUsd() * 1.5).toFixed(6);
   const [one, two] = await Promise.all([
-    run(fix.setPath, ["--send", "--max-total-cost-usd=0.02"], provider.url),
-    run(fix.setPath, ["--send", "--max-total-cost-usd=0.02"], provider.url),
+    run(fix.setPath, ["--send", `--max-total-cost-usd=${total}`], provider.url),
+    run(fix.setPath, ["--send", `--max-total-cost-usd=${total}`], provider.url),
   ]);
   const refused = [one, two].filter((result) => /HARD STOP/.test(result.stderr));
   assert.equal(refused.length, 1, `${one.stderr}\n---\n${two.stderr}`);
@@ -254,8 +297,8 @@ test("two runs at once cannot both decide they have room", async (t) => {
   const balance = fix.balance();
   assert.deepEqual(balance.problems, []);
   assert.ok(
-    balance.committedUsd <= 0.02,
-    `committed ${balance.committedUsd} passed the approved total`
+    balance.committedUsd <= Number(total),
+    `committed ${balance.committedUsd} passed the approved total ${total}`
   );
 });
 

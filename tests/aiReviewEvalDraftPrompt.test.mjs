@@ -11,6 +11,7 @@ import test from "node:test";
 import {
   DRAFT_MIN_RESPONSE_CHARACTERS,
   DRAFT_RESPONSE_LABELS,
+  DRAFT_TARGET_RESPONSE_CHARACTERS,
   assignTargetLabels,
   draftInstruction,
   parseDraftedCases,
@@ -87,7 +88,16 @@ test("the instruction names the assigned answer for every case", () => {
     assert.match(instruction, new RegExp(`case ${index + 1}: answer "${label}"`));
   }
   assert.match(instruction, /Do not move it/);
-  assert.match(instruction, new RegExp(`${DRAFT_MIN_RESPONSE_CHARACTERS} characters`));
+  // The request is the target; the floor is the line a case is refused at.
+  // Stating the floor AS the target is what wasted the first v2 call: the
+  // model aimed at 200 and landed between 162 and 190, seven times out of
+  // seven.
+  assert.match(instruction, new RegExp(`about ${DRAFT_TARGET_RESPONSE_CHARACTERS} characters`));
+  assert.match(instruction, new RegExp(`not go under ${DRAFT_MIN_RESPONSE_CHARACTERS}`));
+  assert.ok(
+    DRAFT_TARGET_RESPONSE_CHARACTERS >= DRAFT_MIN_RESPONSE_CHARACTERS * 2,
+    "the target needs room above the floor for a model's imprecision"
+  );
 });
 
 test("an instruction cannot be built with the wrong number of assignments", () => {
@@ -130,7 +140,8 @@ test("a stub answer is refused rather than accepted into the cell", () => {
     minResponseCharacters: DRAFT_MIN_RESPONSE_CHARACTERS,
   });
   assert.equal(short.cases.length, 0);
-  assert.match(short.problems[0], /below 200 characters/);
+  // Every length is named, so a near-miss and a stub are distinguishable.
+  assert.match(short.problems[0], /3 of 3 answer\(s\) below 200 characters \(lengths /);
 });
 
 test("an accepted case remembers which case of the batch it was", () => {

@@ -63,6 +63,7 @@ import { getModelPricingProfile } from "../lib/modelPricing.ts";
 import {
   draftingCallCostCeilingUsd,
   draftingInputTokenCeiling,
+  draftingOutputTokenCap,
 } from "../lib/aiReviewEvalPlan.ts";
 import {
   admitDraftCall,
@@ -235,7 +236,8 @@ const instruction = draftInstruction({
 const hash = templateHash(instruction);
 
 const capField = model.provider === "openai" ? "max_completion_tokens" : "max_tokens";
-const outputTokenCap = Number(argValue("max-output-tokens") ?? 12000);
+// Sized to this batch, not a flat number: see draftingOutputTokenCap().
+const outputTokenCap = Number(argValue("max-output-tokens") ?? draftingOutputTokenCap(count));
 if (!Number.isInteger(outputTokenCap) || outputTokenCap <= 0) {
   die("--max-output-tokens must be a whole positive number.");
 }
