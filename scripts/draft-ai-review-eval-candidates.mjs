@@ -179,6 +179,40 @@ if (!existsSync(resolvedSetPath)) {
 }
 if (!Array.isArray(set.cases)) die(`${setPath} has no cases array.`);
 
+// One set, one template version.
+//
+// The v1 batch planted the fault in the last answer every time and wrote
+// answers a third of the required length. v2 fixes both, and a set holding
+// some of each measures neither cleanly: the position confound is still in
+// there, diluted, which is harder to reason about than a set that has it
+// outright. It is also the shape a stale working copy produces -- a
+// `decision-v1.json` that survived a pull, quietly collecting v2 cases on top
+// of v1 ones while a planner reads the total as progress.
+//
+// There is no override. The way to keep older cases is what was done with the
+// v1 batch: move them to their own file, where they stay readable evidence of
+// the run that produced them.
+const foreignTemplates = [
+  ...new Set(
+    set.cases
+      .map((item) => item?.draftedBy?.templateVersion)
+      .filter(
+        (version) =>
+          typeof version === "string" && version !== AI_REVIEW_DRAFT_TEMPLATE_VERSION
+      )
+  ),
+];
+if (foreignTemplates.length > 0) {
+  die(
+    `${setPath} holds case(s) drafted with ${foreignTemplates.join(", ")}, and this ` +
+      `is ${AI_REVIEW_DRAFT_TEMPLATE_VERSION}.\n\n` +
+      "Templates differ in what they guarantee -- where the fault is planted, how\n" +
+      "long an answer must be -- so a set holding both measures neither cleanly.\n" +
+      "Move the older cases to their own file (a development set keeps them\n" +
+      "readable), or point --set at a new file."
+  );
+}
+
 // Only this cell's questions. Showing the drafter the English cell while
 // asking for Korean is how a Korean cell becomes a translation of it.
 const inCell = set.cases.filter(

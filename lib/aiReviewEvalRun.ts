@@ -271,6 +271,36 @@ export const adoptionProblems = (value: unknown): readonly string[] => {
 };
 
 /**
+ * Splits a set's problems into the ones that are defects and the ones that are
+ * just where the set is in its life.
+ *
+ * A decision set is written over months -- 330 drafting calls, then a person
+ * adopting each case -- and for all of that time every case is a candidate. So
+ * "no adopter" is a defect once the set is evidence and a description of
+ * ordinary progress before then, and the difference is the freeze record.
+ *
+ * Shared by the gate and the coverage report because they were not sharing it,
+ * and the coverage report went on printing one validation problem per
+ * unadopted case: 1,240 of them at the end of the build, in the block an
+ * operator reads to see progress. Noise there is not cosmetic -- it teaches
+ * the reader to skip the block where a real structural fault would appear.
+ */
+export const partitionDatasetProblems = (
+    value: unknown
+): { readonly blocking: readonly string[]; readonly buildState: readonly string[] } => {
+    const all = datasetProblems(value);
+    const dataset = value as Partial<AiReviewEvalDataset>;
+    if (dataset?.purpose !== "decision" || !isUnfrozenDraft(dataset)) {
+        return { blocking: all, buildState: [] };
+    }
+    const adoption = new Set(adoptionProblems(dataset));
+    return {
+        blocking: all.filter((problem) => !adoption.has(problem)),
+        buildState: all.filter((problem) => adoption.has(problem)),
+    };
+};
+
+/**
  * Whether a set carries no freeze record at all -- the "still being written"
  * state, as opposed to a freeze that is present but broken.
  *

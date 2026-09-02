@@ -23,7 +23,7 @@ import { join, resolve } from "node:path";
 
 import { datasetManifest } from "../lib/aiReviewEvalPlan.ts";
 import { DRAFT_MIN_RESPONSE_CHARACTERS } from "../lib/aiReviewEvalDraftPrompt.ts";
-import { datasetProblems } from "../lib/aiReviewEvalRun.ts";
+import { partitionDatasetProblems } from "../lib/aiReviewEvalRun.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
 
 const DIRECTORY = "docs/ops/ai-review-evaluation-set";
@@ -63,15 +63,25 @@ if (paths.length === 0) {
 
 for (const path of paths) {
   const dataset = read(path);
-  const problems = datasetProblems(dataset);
+  // Defects and build state are different things and are printed as such. A
+  // decision set holds candidates for the whole of its construction, and
+  // listing each one as a validation problem buries the block where a real
+  // fault would show.
+  const { blocking, buildState } = partitionDatasetProblems(dataset);
   console.log(`\n${path}`);
   console.log(`  purpose ${dataset.purpose}   version ${dataset.version}`);
-  if (problems.length > 0) {
-    console.log(`  ${problems.length} validation problem(s):`);
-    for (const problem of problems.slice(0, 20)) console.log(`    - ${problem}`);
-    if (problems.length > 20) {
-      console.log(`    ... and ${problems.length - 20} more`);
+  if (blocking.length > 0) {
+    console.log(`  ${blocking.length} validation problem(s):`);
+    for (const problem of blocking.slice(0, 20)) console.log(`    - ${problem}`);
+    if (blocking.length > 20) {
+      console.log(`    ... and ${blocking.length - 20} more`);
     }
+  }
+  if (buildState.length > 0) {
+    console.log(
+      `  ${buildState.length} case(s) not adopted yet — ordinary while the set is ` +
+        `being written, and what stops it being frozen or used as evidence.`
+    );
   }
 
   const manifest = datasetManifest(dataset.cases ?? []);

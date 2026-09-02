@@ -343,3 +343,56 @@ test("two concurrent runs never lose a written case", async (t) => {
     "two runs must not hand out the same case id"
   );
 });
+
+test("a set holding an older template's cases is refused before anything is reserved", async (t) => {
+  // The shape a stale working copy produces: a decision set that survived a
+  // move, quietly collecting v2 cases on top of v1 ones. Templates differ in
+  // where the fault is planted and how long an answer must be, so a set
+  // holding both measures neither cleanly.
+  const fix = fixture();
+  t.after(() => rmSync(fix.root, { recursive: true, force: true }));
+  writeFileSync(
+    fix.setPath,
+    JSON.stringify({
+      version: "decision-v1",
+      schemaVersion: 1,
+      purpose: "decision",
+      frozenAt: null,
+      frozenBy: null,
+      frozenDigest: null,
+      cases: [
+        {
+          id: "ko-safety-sensitive-001",
+          language: "ko",
+          taskType: "safety_sensitive",
+          phenomenon: "direct_contradiction",
+          mode: "balanced",
+          question: "q",
+          responses: [
+            { label: "a", content: "c", modelId: "drafted", provider: "drafted" },
+            { label: "b", content: "c", modelId: "drafted", provider: "drafted" },
+          ],
+          gold: { contradictions: [{ id: "g", anyOf: ["g"], description: "g" }] },
+          goldCompleteness: { contradictions: true },
+          status: "candidate",
+          adoptedBy: null,
+          adoptedAt: null,
+          draftedBy: {
+            modelId: "gpt-5-6-luna",
+            templateVersion: "ai-review-eval-draft-v1",
+            draftedAt: "2026-09-02T06:59:09.592Z",
+          },
+        },
+      ],
+    })
+  );
+
+  const result = await run(
+    fix.setPath,
+    ["--send", "--max-total-cost-usd=1"],
+    "http://127.0.0.1:1/v1"
+  );
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /ai-review-eval-draft-v1/);
+  assert.equal(existsSync(fix.ledgerPath), false, "nothing may be reserved");
+});
