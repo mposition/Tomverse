@@ -525,4 +525,65 @@ test("a signature date that is not a date, and a threshold version that does not
   const unknown = adjudicate();
   assert.equal(unknown.status, 1);
   assert.match(unknown.stderr, /"v-does-not-exist", which does not exist/);
+
+  // And naming nothing at all. The runbook described this as an ok plus a
+  // scope note for a while; it never was, because the record's identity check
+  // requires the version. Pinned so the contract and the behaviour cannot
+  // drift apart again -- and pinned NEGATIVELY too: no coverage note.
+  writeFileSync(
+    fixture.recordPath,
+    record
+      .split("\n")
+      .filter((line) => !line.startsWith("# threshold-version:"))
+      .join("\n")
+  );
+  const absent = adjudicate();
+  assert.equal(absent.status, 1);
+  assert.match(absent.stderr, /does not state thresholdVersion/);
+  assert.doesNotMatch(absent.stderr, /coverage not judged/);
+});
+
+test("evidence with no threshold version fails the gate, and gets no coverage note", (t) => {
+  // The same contract from the other side: an artifact that reached the
+  // register without a version must FAIL rather than pass with a note.
+  const fixture = build();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+
+  const adjudicated = fixture.runs.map((entry) => {
+    const result = run([
+      "scripts/adjudicate-ai-review-eval.mjs",
+      `--artifact=${entry.artifactPath}`,
+      `--record=${entry.recordPath}`,
+      `--dataset=${fixture.datasetPath}`,
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const path = join(fixture.runDirectory, `${entry.stem}--adjudicated.json`);
+    return {
+      path,
+      block: approvalBlockFromArtifact(JSON.parse(readFileSync(path, "utf8"))),
+    };
+  });
+  const registerPath = writeRegister(fixture, adjudicated);
+
+  // Strip the version the register names AND the one the artifact recorded,
+  // which is every place the gate could find one.
+  const register = JSON.parse(readFileSync(registerPath, "utf8"));
+  delete register[0].evaluation.thresholdVersion;
+  writeFileSync(registerPath, JSON.stringify(register, null, 2));
+  for (const { path } of adjudicated) {
+    const artifact = JSON.parse(readFileSync(path, "utf8"));
+    delete artifact.summary.blindReviewThresholdVersion;
+    writeFileSync(path, JSON.stringify(artifact, null, 2));
+  }
+
+  const result = run([
+    "scripts/check-ai-review-eval-dataset.mjs",
+    `--register=${registerPath}`,
+    `--dataset-dir=${fixture.setDirectory}`,
+  ]);
+  const evidence = section(result.stdout, "AI Review approved-entry evidence").join("\n");
+  assert.match(evidence, /FAIL/);
+  assert.match(evidence, /no threshold version/);
+  assert.doesNotMatch(evidence, /coverage not judged/);
+  assert.equal(result.status, 1);
 });
