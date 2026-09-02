@@ -1278,6 +1278,8 @@ export const fr = {
         sourceUnavailable: "Cette conversation importée est introuvable.",
         lockedRefusal: "L’original importé est verrouillé. Déverrouillez-le sur sa propre page.",
         quickStartFailed: "Impossible de démarrer la continuation.",
+        showSource: "Afficher la conversation importée",
+        hideSource: "Masquer la conversation importée",
         sourceSectionTitle: "Conversation externe · lecture seule",
         sourceSectionSubtitle: "Depuis {provider}, importée le {date}",
         externalAnswerBadge: "Réponse externe",

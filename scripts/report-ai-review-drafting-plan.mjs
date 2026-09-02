@@ -53,8 +53,11 @@ const DRAFTER_PRICE_HOLDS = {
     "the repository prices Flash at $0.14/$0.28 per million; DeepSeek's current " +
     "published pricing is time-of-day banded and higher (cache-miss input " +
     "$0.22-$0.44, output $0.66-$1.32). Until lib/modelPricing.ts is verified " +
-    "and updated by a person, a ceiling computed from it is not one. This also " +
-    "affects what users are charged, not just this estimate.",
+    "and updated by a person, a ceiling computed from it is not one. The wider " +
+    "risk is provider cost accounting, not user charging: an understated rate " +
+    "understates settled provider spend and the operational cost guardrails " +
+    "derived from it. What a user may spend is credits, a separate layer " +
+    "(docs/policy/credit-and-cost-limits.md), and the two must not be conflated.",
 };
 import { draftInstruction } from "../lib/aiReviewEvalDraftPrompt.ts";
 import { AI_REVIEW_EVAL_MIN_CASES } from "../lib/aiReviewEvalCore.ts";
@@ -255,8 +258,18 @@ if (process.argv.includes("--show-instruction") && batches[0]) {
 }
 
 console.log(
-  "\nA CEILING, not a forecast: every call is charged the full output cap and a reply\n" +
-    "is far shorter. Rates from lib/modelPricing.ts, the table the product bills against.\n" +
+  "\nThese set totals are a PLAN ESTIMATE, not a guaranteed total. Each call is\n" +
+    "shown its cell's existing questions, so the later calls' input size depends on\n" +
+    "text nobody has written yet -- assumed here at 220 characters per question. Write\n" +
+    "longer questions and the total rises with them.\n" +
+    "\n" +
+    "What IS exact is the per-call bound the drafter enforces: it prices the actual\n" +
+    "instruction that is about to be sent, against the full output cap, and refuses\n" +
+    "before calling if the running ledger plus that call would pass the approved\n" +
+    "--max-total-cost-usd. The approved total is what holds; this table only says\n" +
+    "which drafter is worth approving one for.\n" +
+    "\n" +
+    "Rates from lib/modelPricing.ts, the table the product bills against.\n" +
     "Nothing was called and nothing was spent. `npm run draft:ai-review-eval-candidates`\n" +
     "sends one batch, and only with --send."
 );

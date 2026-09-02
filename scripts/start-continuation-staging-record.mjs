@@ -138,8 +138,12 @@ const d0Counts = counts(d0.out);
 */
 console.log("Running K-7 (per-model failure isolation, unit level) ...");
 const k7 = runTest(
-    "tests/continuationModelPanels.test.mjs",
-    "failure is reported on that panel|admitted once|never puts imported text"
+    // The property moved with the screen. A continuation is now answered by
+    // the shared chat workspace -- one `ChatApp` per selected model, each with
+    // its own request and its own error -- so the isolation it asserts is the
+    // shell's rather than a continuation-only module's.
+    "tests/continuationNativeShell.test.mjs",
+    "failure isolation is the shared chat path|prelude cannot send|prelude reads the imported half"
 );
 const k7Counts = counts(k7.out);
 
@@ -273,7 +277,7 @@ ${fixtureRow("truncation-conversation.json", "4,000자 상한을 넘는 답변 3
 
 record = record.replace(
     "| K-7 실패 격리 결정적 검사 통과 여부 (유료 turn 없음) | | |",
-    `| K-7 실패 격리 결정적 검사 (유료 turn 없음) | **이 기록을 만들며 실행:** \`tests/continuationModelPanels.test.mjs\` 의 격리·admission·본문 세 건 — ${k7Counts.pass} pass / ${k7Counts.failed} fail → **${k7.ok ? "통과" : "실패"}**. 로컬 트리 \`${localSha ?? "unknown"}\`. 브라우저 쪽 절반(\`tests/e2e/external-conversation-continuation.spec.ts\` "one model failing leaves the other model's answer standing")은 build와 Chromium이 있는 곳에서 실행하고 그 결과를 여기에 덧붙입니다. | |`
+    `| K-7 실패 격리 결정적 검사 (유료 turn 없음) | **이 기록을 만들며 실행:** \`tests/continuationNativeShell.test.mjs\` 의 격리·prelude 세 건 — ${k7Counts.pass} pass / ${k7Counts.failed} fail → **${k7.ok ? "통과" : "실패"}**. 로컬 트리 \`${localSha ?? "unknown"}\`. 브라우저 쪽 절반(\`tests/e2e/external-conversation-continuation.spec.ts\` "one model failing leaves the other model's answer standing")은 build와 Chromium이 있는 곳에서 실행하고 그 결과를 여기에 덧붙입니다. | |`
 );
 
 record = record.replace(

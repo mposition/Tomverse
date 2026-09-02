@@ -1294,6 +1294,8 @@ export const zh = {
         sourceUnavailable: "找不到该导入的对话。",
         lockedRefusal: "导入的原文已锁定。请在其自身页面解锁。",
         quickStartFailed: "无法开始继续对话。",
+        showSource: "显示导入的对话",
+        hideSource: "隐藏导入的对话",
         sourceSectionTitle: "外部对话 · 只读",
         sourceSectionSubtitle: "来自 {provider}，于 {date} 导入",
         externalAnswerBadge: "外部回复",

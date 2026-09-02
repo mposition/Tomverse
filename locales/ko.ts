@@ -1289,6 +1289,8 @@ export const ko = {
         sourceUnavailable: "가져온 원본을 찾을 수 없습니다.",
         lockedRefusal: "가져온 원본이 잠겨 있습니다. 원본 화면에서 잠금을 풀어 주세요.",
         quickStartFailed: "이어가기를 시작하지 못했습니다.",
+        showSource: "가져온 대화 보기",
+        hideSource: "가져온 대화 접기",
         sourceSectionTitle: "외부 대화 · 읽기 전용",
         sourceSectionSubtitle: "{provider}에서 {date}에 가져옴",
         externalAnswerBadge: "외부 답변",

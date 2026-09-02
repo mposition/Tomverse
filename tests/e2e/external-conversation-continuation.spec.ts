@@ -365,9 +365,20 @@ const openConversationList = async (page: Page): Promise<Locator> => {
     // (tests/e2e/mobile-recent-conversations.spec.ts fixes that as a privacy
     // property), so opening it any other way leaves rows this spec cannot
     // identify by name.
+    //
+    // The disclosure only exists on the welcome screen, which is the state a
+    // mobile shell with *no* conversation open renders. With one open --
+    // `/continuations/[id]` always, and `/chat` after a selection -- the
+    // header's own button is the control a user has, so this waits for either
+    // and prefers the disclosure when both could be there.
     const disclosure = page.getByTestId("recent-conversations-disclosure");
-    await expect(disclosure).toBeVisible();
-    await disclosure.click();
+    const headerButton = page.getByTestId("mobile-sidebar-open");
+    await expect(disclosure.or(headerButton).first()).toBeVisible();
+    if ((await disclosure.count()) > 0) {
+        await disclosure.click();
+    } else {
+        await headerButton.click();
+    }
     const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
     return drawer;
@@ -475,314 +486,223 @@ test.describe("continuing an imported conversation", () => {
         );
     });
 
-    test("imported turns and Tomverse turns are told apart on screen", async ({
+    /**
+     * Everything a continuation screen needs, in the order the routes have to
+     * be registered.
+     *
+     * Playwright hands a request to the most recently registered handler, so
+     * the baseline chat fixture goes first, the continuation's own routes
+     * override the two it shares, and the list -- which is what carries each
+     * row's server-decided surface -- goes last.
+     *
+     * The list matters more than it looks: the workspace opens the URL's
+     * conversation only if that id is in the account's loaded list, which is
+     * the same check the tab-restore path has always made.
+     */
+    const openContinuation = async (
+        page: Page,
+        options: Parameters<typeof mockContinuationApi>[1] & {
+            extraRows?: { id: string; title: string }[];
+        } = {}
+    ) => {
+        const { extraRows = [], ...continuationOptions } = options;
+        await mockAuthenticatedApi(page);
+        const api = await mockContinuationApi(page, continuationOptions);
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+            },
+            ...extraRows,
+        ]);
+        return api;
+    };
+
+    test("the continued conversation runs in the ordinary chat shell", async ({
         page,
     }) => {
+        /*
+          The defect this covers is the screen this route used to be: its own
+          textarea, its own grid of model buttons, its own message list, and no
+          sidebar. Everything below the divider was a second implementation of
+          the chat surface, and the ways it differed were not decisions.
+        */
         await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page, {
-            tomverseMessages: [
-                { id: "m1", role: "user", content: "So what changed since?" },
-                {
-                    id: "m2",
-                    role: "assistant",
-                    // An assistant row names the model that wrote it. A row
-                    // with no model belongs to no panel, which is the point:
-                    // it must never be shown as some other model's words.
-                    modelId: PRIMARY_MODEL,
-                    content: "A Tomverse answer.",
-                },
-            ],
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+
+        // The shell, whichever one this viewport gets.
+        const shell = page
+            .getByTestId("desktop-chat-shell")
+            .or(page.getByTestId("mobile-chat-shell"));
+        await expect(shell).toBeVisible();
+
+        // The composer is the one every other conversation uses.
+        await expect(page.getByTestId("chat-input")).toBeVisible();
+        await expect(page.getByTestId("chat-send-button")).toHaveCount(1);
+        await expect(page.getByTestId("composer-model-select")).toHaveCount(1);
+
+        // And the screen it replaced is gone -- not hidden, absent.
+        for (const legacy of [
+            "continued-conversation-workspace",
+            "continuation-composer-textarea",
+            "continuation-send",
+            "continuation-model-selector",
+            "continuation-model-option",
+            "continuation-model-panel",
+        ]) {
+            await expect(page.getByTestId(legacy)).toHaveCount(0);
+        }
+    });
+
+    test("the models are chosen with the ordinary picker, not a button grid", async ({
+        page,
+    }) => {
+        /*
+          The screen this replaced listed every model in the catalogue as a
+          button and saved the selection itself. The composer already owns that
+          question -- the cap, the availability clamp, the swap at the cap and
+          the credit estimate are all its -- so a continuation gets the picker
+          every other conversation gets, and the count it reports is the
+          conversation's own.
+        */
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page, {
+            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
         });
 
         await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(page.getByTestId("composer-model-select")).toBeVisible();
         await expect(
-            page.getByTestId("continued-conversation-workspace")
-        ).toBeVisible();
+            page.getByTestId("composer-active-model-count")
+        ).toContainText("2");
+        // No grid of every model in the catalogue.
+        await expect(
+            page.getByTestId("continuation-model-option")
+        ).toHaveCount(0);
+    });
 
-        // Two sections, and a divider that says where one ends.
+    test("the sidebar is there, with this conversation in it", async ({
+        page,
+    }) => {
+        // "다시 찾아 이어가기" is the whole point of the feature, and the old
+        // screen had no list at all: the only way back was the browser's
+        // history.
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const list = await openConversationList(page);
         await expect(
-            page.getByTestId("continuation-source-section")
+            list
+                .getByTestId("sidebar-conversation-item")
+                .filter({ hasText: "Continued from an imported chat" })
+                .last()
         ).toBeVisible();
+    });
+
+    test("the imported half is a read-only prelude above the timeline", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const prelude = page.getByTestId("continuation-source-section");
+        await expect(prelude).toBeVisible();
+        await expect(page.getByTestId("continuation-provenance")).toBeVisible();
         await expect(page.getByTestId("continuation-divider")).toBeVisible();
 
-        const imported = page.getByTestId("continuation-source-message");
-        await expect(imported).toHaveCount(2);
-        const own = page.getByTestId("continuation-message");
-        await expect(own).toHaveCount(2);
+        // Exactly once for the conversation, never once per model panel
+        // (docs/policy/external-conversation-continuation.md §5.1).
+        await expect(prelude).toHaveCount(1);
 
-        // The imported assistant answer is badged as somebody else's.
+        // Collapsed by default: the panels below scroll on their own, so the
+        // transcript must not take fixed height before anyone asks for it.
+        await expect(
+            page.getByTestId("continuation-source-message")
+        ).toHaveCount(0);
+
+        await page.getByTestId("continuation-source-toggle").click();
+        await expect(
+            page.getByTestId("continuation-source-message")
+        ).toHaveCount(2);
+        // The imported assistant answer is badged as somebody else's, and the
+        // shortened one says so.
         await expect(
             page.getByTestId("continuation-external-badge")
         ).toHaveCount(1);
-        // And a Tomverse answer carries no such badge.
-        await expect(
-            own.nth(1).getByTestId("continuation-external-badge")
-        ).toHaveCount(0);
+        await expect(prelude).toContainText(/줄여|shorten|truncat/i);
+    });
 
-        // The provenance and the context disclosure are both stated.
-        await expect(
-            page.getByTestId("continuation-provenance")
-        ).toBeVisible();
-        await expect(
-            page.getByTestId("continuation-seed-summary")
-        ).toBeVisible();
+    test("the prelude sits above the composer and never over it", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page.getByTestId("continuation-source-toggle").click();
+
+        const preludeBox = await page
+            .getByTestId("continuation-source-section")
+            .boundingBox();
+        const inputBox = await page.getByTestId("chat-input").boundingBox();
+        expect(preludeBox).not.toBeNull();
+        expect(inputBox).not.toBeNull();
+        if (!preludeBox || !inputBox) return;
+        // Even expanded, the transcript ends above the composer's text row.
+        expect(preludeBox.y + preludeBox.height).toBeLessThanOrEqual(
+            inputBox.y + 1
+        );
     });
 
     test("the structure survives a reload", async ({ page }) => {
         await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page, {
-            tomverseMessages: [
-                { id: "m1", role: "user", content: "So what changed since?" },
-            ],
-        });
+        await openContinuation(page);
 
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         await expect(
-            page.getByTestId("continuation-source-message")
-        ).toHaveCount(2);
+            page.getByTestId("continuation-source-section")
+        ).toBeVisible();
 
         await page.reload();
         await expect(
-            page.getByTestId("continued-conversation-workspace")
-        ).toBeVisible();
-        await expect(
-            page.getByTestId("continuation-source-message")
-        ).toHaveCount(2);
-        await expect(page.getByTestId("continuation-divider")).toBeVisible();
-        // The question, and no answer: one model is selected and it has not
-        // answered this turn, so its panel is there and carries no message.
-        await expect(page.getByTestId("continuation-message")).toHaveCount(1);
-        await expect(page.getByTestId("continuation-model-panel")).toHaveCount(1);
-    });
-
-    test("a message is saved before it is answered, and the answer is stored", async ({
-        page,
-    }) => {
-        await prepareGuestPage(page, "ko");
-        const api = await mockContinuationApi(page);
-
-        await page.goto(`/continuations/${CONVERSATION_ID}`);
-        await expect(
-            page.getByTestId("continued-conversation-workspace")
-        ).toBeVisible();
-
-        await page
-            .getByTestId("continuation-composer-textarea")
-            .fill("Where did we leave off?");
-        await page.getByTestId("continuation-send").click();
-
-        await expect
-            .poll(() => api.chatRequests, { timeout: 15_000 })
-            .toBe(1);
-        // The user's own message is a row before the provider is asked.
-        expect(api.savedMessages).toHaveLength(1);
-        expect(api.savedMessages[0].role).toBe("user");
-        expect(api.savedMessages[0].content).toBe("Where did we leave off?");
-
-        await expect(page.getByTestId("continuation-message")).toHaveCount(2);
-    });
-
-    test("every selected model answers the same question, once each", async ({
-        page,
-    }) => {
-        // docs/policy/external-conversation-continuation.md §5.1. The question
-        // is asked once and the imported excerpt is on screen once; what
-        // multiplies is the answers.
-        await prepareGuestPage(page, "ko");
-        const api = await mockContinuationApi(page, {
-            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
-        });
-
-        await page.goto(`/continuations/${CONVERSATION_ID}`);
-        await expect(
-            page.getByTestId("continued-conversation-workspace")
-        ).toBeVisible();
-        await expect(page.getByTestId("continuation-model-panel")).toHaveCount(0);
-
-        await page
-            .getByTestId("continuation-composer-textarea")
-            .fill("Where did we leave off?");
-        await page.getByTestId("continuation-send").click();
-
-        await expect.poll(() => api.chatRequests, { timeout: 15_000 }).toBe(2);
-
-        // One saved user row for the whole turn, not one per model.
-        expect(api.savedMessages).toHaveLength(1);
-
-        // One admission for the comparison, naming both models.
-        expect(api.preflightBodies).toHaveLength(1);
-        expect(api.preflightBodies[0].modelIds).toEqual([
-            PRIMARY_MODEL,
-            SECOND_MODEL,
-        ]);
-
-        // Each request named its own model, and no request carried the
-        // imported transcript: the excerpt is built and priced server-side.
-        const models = api.chatBodies.map((body) => body.modelId).sort();
-        expect(models).toEqual([PRIMARY_MODEL, SECOND_MODEL].sort());
-        for (const body of api.chatBodies) {
-            const serialised = JSON.stringify(body);
-            // The imported transcript's own words, from the fixture above.
-            expect(serialised).not.toContain(
-                "What did we decide about the migration?"
-            );
-            expect(serialised).not.toContain(
-                "You decided to expand first and contract later."
-            );
-        }
-
-        // Two panels for the one question, and the imported section is still
-        // rendered exactly once.
-        await expect(page.getByTestId("continuation-model-panel")).toHaveCount(2);
-        await expect(page.getByTestId("continuation-turn")).toHaveCount(1);
-        await expect(
             page.getByTestId("continuation-source-section")
-        ).toHaveCount(1);
-    });
-
-    test("the estimated credits are shown per model and as a total", async ({
-        page,
-    }) => {
-        // §4.4: the seed is charged once per model request, so the figure the
-        // owner sees before sending has to be the sum of per-model figures.
-        await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page, {
-            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
-        });
-
-        await page.goto(`/continuations/${CONVERSATION_ID}`);
-        await expect(
-            page.getByTestId("continuation-credit-estimate")
         ).toBeVisible();
-        await expect(
-            page.getByTestId("continuation-credit-estimate-model")
-        ).toHaveCount(2);
+        await expect(page.getByTestId("continuation-divider")).toBeVisible();
+        await expect(page.getByTestId("chat-input")).toBeVisible();
     });
 
-    test("one model failing leaves the other model's answer standing", async ({
-        page,
-    }) => {
-        // §5.1: reservation, settlement and refund are per model request. The
-        // failure is reported on its own panel, never as "the turn failed".
-        await prepareGuestPage(page, "ko");
-        const api = await mockContinuationApi(page, {
-            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
-        });
-        // Registered last, so it wins for the model it names.
-        await page.route("**/api/chat", async (route) => {
-            const body = route.request().postDataJSON() as { modelId?: string };
-            if (body.modelId !== SECOND_MODEL) return route.fallback();
-            await route.fulfill({
-                status: 500,
-                contentType: "application/json",
-                body: JSON.stringify({ error: "provider failed" }),
-            });
-        });
-
-        await page.goto(`/continuations/${CONVERSATION_ID}`);
-        await page
-            .getByTestId("continuation-composer-textarea")
-            .fill("Where did we leave off?");
-        await page.getByTestId("continuation-send").click();
-
-        await expect
-            .poll(() => api.chatRequests, { timeout: 15_000 })
-            .toBeGreaterThanOrEqual(1);
-        // The panel that failed says so; the turn does not.
-        await expect(
-            page.getByTestId("continuation-panel-error")
-        ).toHaveCount(1);
-        await expect(page.getByTestId("continuation-send-error")).toHaveCount(0);
-        // And the model that answered kept its answer.
-        await expect(
-            page
-                .getByTestId("continuation-model-panel")
-                .filter({ has: page.getByTestId("continuation-message") })
-        ).toHaveCount(1);
-    });
-
-    test("the model selection is saved by the ordinary conversation endpoint", async ({
-        page,
-    }) => {
-        // §8.3: no continuation-specific limit and no continuation-specific
-        // endpoint. The screen sends `selectedModels` to the same PATCH the
-        // Review workspace uses, and the server decides.
-        await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page);
-        const patched: string[][] = [];
-        await page.route(`**/api/conversations/${CONVERSATION_ID}`, (route) => {
-            if (route.request().method() !== "PATCH") return route.fallback();
-            const body = route.request().postDataJSON() as {
-                selectedModels?: string[];
-            };
-            patched.push(body.selectedModels ?? []);
-            return route.fulfill(
-                json({ id: CONVERSATION_ID, selectedModels: body.selectedModels })
-            );
-        });
-
-        await page.goto(`/continuations/${CONVERSATION_ID}`);
-        await expect(
-            page.getByTestId("continuation-model-selector")
-        ).toBeVisible();
-        await page
-            .getByTestId("continuation-model-option")
-            .filter({ has: page.locator(`[data-model-id="${SECOND_MODEL}"]`) })
-            .or(
-                page.locator(
-                    `[data-testid="continuation-model-option"][data-model-id="${SECOND_MODEL}"]`
-                )
-            )
-            .first()
-            .click();
-
-        await expect.poll(() => patched.length, { timeout: 15_000 }).toBe(1);
-        expect(patched[0]).toEqual([PRIMARY_MODEL, SECOND_MODEL]);
-    });
-
-    test("a deleted source leaves a tombstone and the owner's messages", async ({
+    test("a deleted source leaves a tombstone and the conversation intact", async ({
         page,
     }) => {
         await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page, {
-            source: { status: "deleted" },
-            tomverseMessages: [
-                { id: "m1", role: "user", content: "My own question." },
-                {
-                    id: "m2",
-                    role: "assistant",
-                    modelId: PRIMARY_MODEL,
-                    content: "A Tomverse answer.",
-                },
-            ],
-        });
+        await openContinuation(page, { source: { status: "deleted" } });
 
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         await expect(
             page.getByTestId("continuation-source-tombstone")
         ).toBeVisible();
-        // No imported transcript is rendered any more.
+        // No imported transcript is rendered any more, and no disclosure
+        // offers to show one.
         await expect(
             page.getByTestId("continuation-source-message")
         ).toHaveCount(0);
-        // The owner's own messages are untouched.
-        await expect(page.getByTestId("continuation-message")).toHaveCount(2);
-        // And the composer is still there.
         await expect(
-            page.getByTestId("continuation-composer-textarea")
-        ).toBeVisible();
+            page.getByTestId("continuation-source-toggle")
+        ).toHaveCount(0);
+        // The owner's own conversation is untouched, composer included.
+        await expect(page.getByTestId("chat-input")).toBeVisible();
     });
 
     test("a locked source says so without hiding the conversation", async ({
         page,
     }) => {
         await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page, {
-            source: { status: "locked" },
-            tomverseMessages: [
-                { id: "m1", role: "user", content: "My own question." },
-            ],
-        });
+        await openContinuation(page, { source: { status: "locked" } });
 
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         await expect(
@@ -791,46 +711,36 @@ test.describe("continuing an imported conversation", () => {
         await expect(
             page.getByTestId("continuation-source-message")
         ).toHaveCount(0);
-        await expect(page.getByTestId("continuation-message")).toHaveCount(1);
+        await expect(page.getByTestId("chat-input")).toBeVisible();
     });
 
-    test("the share limitation is stated on the screen itself", async ({
+    test("an ordinary conversation with no bridge renders no prelude", async ({
         page,
     }) => {
+        // The regression this guards: a prelude that rendered a shell of
+        // itself for every conversation would put an empty imported section on
+        // top of `/chat`.
         await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page);
+        await mockAuthenticatedApi(page);
 
-        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page.goto("/chat");
+        await expect(page.getByTestId("chat-input")).toBeVisible();
         await expect(
-            page.getByTestId("continued-conversation-workspace")
-        ).toBeVisible();
-        // The sentence is rendered from the locale, so this asserts the copy
-        // exists on screen rather than matching a specific translation.
-        const banner = page.getByTestId("continued-conversation-workspace");
-        await expect(banner).toContainText(/공유|share/i);
+            page.getByTestId("continuation-source-section")
+        ).toHaveCount(0);
     });
 
     test("the sidebar reopens a continuation at its own surface", async ({
         page,
     }) => {
         // The defect this covers: a continuation opened correctly at creation
-        // and, once the user left the screen, opened in the Review workspace
+        // and, once the user left the screen, opened in the ordinary workspace
         // from the conversation list -- without the imported half it
         // continues.
         await prepareGuestPage(page, "ko");
-        // The shared fixture first, for the signed-in identity and the
-        // baseline routes; the list below then overrides the one route this
-        // spec is actually about.
-        await mockAuthenticatedApi(page);
-        await mockContinuationApi(page);
-        await mockConversationList(page, [
-            {
-                id: CONVERSATION_ID,
-                title: "Continued from an imported chat",
-                surface: "continuation",
-            },
-            { id: "qa-ordinary", title: "An ordinary conversation" },
-        ]);
+        await openContinuation(page, {
+            extraRows: [{ id: "qa-ordinary", title: "An ordinary conversation" }],
+        });
 
         await page.goto("/chat");
         const list = await openConversationList(page);
@@ -844,15 +754,73 @@ test.describe("continuing an imported conversation", () => {
         await expect(
             page.getByTestId("continuation-source-section")
         ).toBeVisible();
-        await expect(page.getByTestId("continuation-divider")).toBeVisible();
+        await expect(page.getByTestId("chat-input")).toBeVisible();
     });
 
-    test("an ordinary conversation still opens in the workspace", async ({
+    test("leaving for an ordinary conversation leaves the continuation URL too", async ({
+        page,
+    }) => {
+        /*
+          The mirror of the defect above, and the one this change introduced
+          the possibility of: now that both screens are the same component,
+          selecting an ordinary conversation in place would leave
+          `/continuations/[id]` in the address bar with that conversation's
+          imported prelude above a conversation it does not describe.
+        */
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page, {
+            extraRows: [{ id: "qa-ordinary", title: "An ordinary conversation" }],
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toBeVisible();
+
+        const list = await openConversationList(page);
+        await list
+            .getByTestId("sidebar-conversation-item")
+            .filter({ hasText: "An ordinary conversation" })
+            .last()
+            .click();
+
+        await expect(page).not.toHaveURL(/\/continuations\//);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toHaveCount(0);
+    });
+
+    test("starting a new chat leaves the continuation URL as well", async ({
+        page,
+    }) => {
+        // Same reasoning as leaving for another conversation: this URL names
+        // one conversation and carries its imported prelude, so a blank one
+        // started in place would leave both describing something that is no
+        // longer on screen.
+        await prepareGuestPage(page, "ko");
+        await openContinuation(page);
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toBeVisible();
+
+        // On mobile the sidebar lives in the drawer, so this reaches the
+        // control the same way the list tests do.
+        const list = await openConversationList(page);
+        await list.getByTestId("sidebar-new-chat").first().click();
+
+        await expect(page).not.toHaveURL(/\/continuations\//);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toHaveCount(0);
+    });
+
+    test("an ordinary conversation still opens in place from /chat", async ({
         page,
     }) => {
         await prepareGuestPage(page, "ko");
         await mockAuthenticatedApi(page);
-        await mockContinuationApi(page);
         await mockConversationList(page, [
             { id: "qa-ordinary", title: "An ordinary conversation" },
         ]);
@@ -866,39 +834,39 @@ test.describe("continuing an imported conversation", () => {
         await expect(row).toBeVisible();
         await row.click();
 
-        // No navigation: the workspace selects the conversation in place,
-        // exactly as it always has. Asserted on the URL rather than on the
-        // row, because the mobile drawer closes on selection and the row it
-        // was clicked on is gone by the time the workspace has it open.
-        await expect(
-            page.getByTestId("continued-conversation-workspace")
-        ).toHaveCount(0);
         await expect(page).not.toHaveURL(/\/continuations\//);
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toHaveCount(0);
     });
 
-    test("at 320px the composer keeps its own row and nothing overflows", async ({
+    test("at 320px the shell, prelude and composer do not overlap or overflow", async ({
         page,
     }) => {
         await page.setViewportSize({ width: 320, height: 720 });
         await prepareGuestPage(page, "ko");
-        await mockContinuationApi(page);
+        await openContinuation(page);
 
         await page.goto(`/continuations/${CONVERSATION_ID}`);
-        const textarea = page.getByTestId("continuation-composer-textarea");
-        await expect(textarea).toBeVisible();
+        const input = page.getByTestId("chat-input");
+        await expect(input).toBeVisible();
+        await expect(
+            page.getByTestId("continuation-source-section")
+        ).toBeVisible();
 
-        const textareaBox = await textarea.boundingBox();
-        const sendBox = await page.getByTestId("continuation-send").boundingBox();
-        expect(textareaBox).not.toBeNull();
-        expect(sendBox).not.toBeNull();
-        if (!textareaBox || !sendBox) return;
-
-        // The send control is below the text row, never beside or over it.
-        expect(sendBox.y).toBeGreaterThanOrEqual(
-            textareaBox.y + textareaBox.height - 1
+        const inputBox = await input.boundingBox();
+        const preludeBox = await page
+            .getByTestId("continuation-source-section")
+            .boundingBox();
+        expect(inputBox).not.toBeNull();
+        expect(preludeBox).not.toBeNull();
+        if (!inputBox || !preludeBox) return;
+        // The composer keeps a full visible line, and the imported half is
+        // above it rather than over it.
+        expect(inputBox.height).toBeGreaterThanOrEqual(24);
+        expect(preludeBox.y + preludeBox.height).toBeLessThanOrEqual(
+            inputBox.y + 1
         );
-        // And the text row has at least one full visible line.
-        expect(textareaBox.height).toBeGreaterThanOrEqual(32);
 
         const overflow = await page.evaluate(
             () =>
