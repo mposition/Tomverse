@@ -56,6 +56,7 @@ import {
   getModelUsageProfile,
   type ChatAttachment,
   type Conversation,
+  type Message,
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import type {
@@ -143,7 +144,37 @@ type DesktopChatShellProps = {
    * selected model, and §5.1 says the source is drawn once for the
    * conversation -- not once per column.
    */
-  conversationPrelude?: React.ReactNode;
+  /**
+   * The imported half of a continued conversation, handed to every panel.
+   *
+   * Replaces the `conversationPrelude` slot this shell used to render above
+   * the panel row. That slot was a second conversation on the page: its own
+   * heading, its own disclosure and its own capped scroller, on a screen
+   * whose whole purpose was the transcript inside it. These are the same
+   * turns as ordinary timeline messages, so each panel prepends them to its
+   * own list and the chat keeps the one scroll container it has always had.
+   */
+  /**
+   * Whether this conversation continues an imported one.
+   *
+   * Separate from `importedTranscript`, and known earlier: the server
+   * classified the row before the transcript itself has been read. The panel
+   * needs it that early because `useCenteredWelcome` hides an empty panel's
+   * message list entirely -- correct for a conversation with nothing in it,
+   * and wrong for a continuation, whose imported half is about to arrive and
+   * has to arrive *into* the list rather than replace it.
+   */
+  hasImportedTranscript?: boolean;
+  importedMessages?: Message[];
+  /** Provenance and paging for that transcript (`ChatMessageList`). */
+  importedTranscript?: {
+    status: "available" | "deleted" | "locked";
+    provider: string;
+    importedAt: string;
+    olderCount: number;
+    onLoadOlder?: () => void;
+    loadingOlder?: boolean;
+  };
   /**
    * Whether this conversation has content the panels cannot see.
    *
@@ -320,7 +351,9 @@ export function DesktopChatShell({
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
-  conversationPrelude,
+  hasImportedTranscript = false,
+  importedMessages,
+  importedTranscript,
   hasConversationPrelude = false,
   onSelectConversation,
   onRename,
@@ -816,7 +849,6 @@ export function DesktopChatShell({
           onSwapModel={onSwapModel}
           canSelectModel={canSelectModel}
         />
-        {conversationPrelude}
         {/*
           UI-P1-05. The tab bar used to be suppressed while the conversation
           was empty, on the reasoning that the welcome screen covers the panels
@@ -1129,6 +1161,9 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  hasImportedTranscript={hasImportedTranscript}
+                  importedMessages={importedMessages}
+                  importedTranscript={importedTranscript}
                   modelId={modelId}
                   initialConversationId={currentChatId}
                   promptPayload={promptPayload}

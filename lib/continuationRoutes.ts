@@ -71,3 +71,45 @@ export const conversationSurfaceHref = (
     conversationId: string
 ): string | null =>
     surface === "continuation" ? continuationPath(conversationId) : null;
+
+/**
+ * The query parameter a surface-crossing navigation carries a conversation in.
+ *
+ * Short-lived by construction: the workspace applies it to its selection and
+ * then drops it from the address bar with `replaceState`, so it never becomes
+ * a stale claim about which conversation is open. A pushed entry would be
+ * worse than stale -- Back would replay a selection rather than returning to
+ * the screen the user came from.
+ */
+export const CONVERSATION_HANDOFF_PARAM = "conversation";
+
+/**
+ * Where to send the browser when a selection belongs to another surface.
+ *
+ * Distinct from {@link conversationSurfaceHref}, which answers "does this
+ * surface have a path of its own" and says `null` for the workspace precisely
+ * because the workspace selects in place. Crossing is the case where in place
+ * is not available: the screen holding the click is about to be unmounted, so
+ * the conversation's id has to survive in the URL or it is lost.
+ *
+ * Losing it is what made this a bug rather than a rough edge. A click on an
+ * ordinary conversation from `/continuations/[a]` used to land on a bare
+ * `/chat`, which opens with no conversation named -- so the workspace fell
+ * through to its session restore, found the continuation the user had *just
+ * left* still recorded as the active one, selected it, and crossed straight
+ * back to `/continuations/[a]`. The click looked like it did nothing.
+ *
+ * `workspacePath` is passed in rather than imported so this file does not
+ * decide where the workspace lives: `/chat` and `/review` both render it and
+ * which one a caller is on is the caller's own fact.
+ */
+export const conversationHandoffHref = (
+    surface: ConversationSurface,
+    conversationId: string,
+    workspacePath: string
+): string =>
+    surface === "continuation"
+        ? continuationPath(conversationId)
+        : `${workspacePath}?${CONVERSATION_HANDOFF_PARAM}=${encodeURIComponent(
+              conversationId
+          )}`;

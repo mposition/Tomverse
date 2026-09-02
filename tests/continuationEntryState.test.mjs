@@ -127,51 +127,105 @@ test("the prelude flag is the server's answer, never the node or the title", () 
     for (const forbidden of ["productKey", "kind", "selectionMode", "title"]) {
         assert.ok(
             !derivation.includes(forbidden),
-            `the prelude flag must not be derived from ${forbidden}`
+            `the imported-half flag must not be derived from ${forbidden}`
         );
     }
 });
 
-/* --------------------------------------------------------- the prelude */
+/* ------------------------------------------- the transcript in the timeline */
 
-test("the imported transcript is open on arrival, bounded", () => {
-    const source = code("components/continuations/ContinuationSourcePrelude.tsx");
-    // Open, not closed: the transcript is the thing the screen is about.
-    assert.match(source, /const \[expanded, setExpanded\] = useState\(true\)/);
-    // Bounded, so a long import cannot push the composer off the screen.
-    assert.match(source, /SOURCE_PREVIEW_COUNT/);
-    assert.match(source, /messages\.slice\(-SOURCE_PREVIEW_COUNT\)/);
-    // A short transcript is shown whole rather than truncated to the preview.
-    assert.match(source, /messages\.length <= SOURCE_PREVIEW_COUNT/);
+test("the imported transcript is inside the chat's own scroll container", () => {
+    /*
+      Not a block above the panels with a scroller of its own. The panel
+      already owns the one vertical scroll the chat has, so a second one is a
+      second conversation on the page -- which is what
+      docs/policy/external-conversation-continuation.md §8.2 stopped allowing.
+    */
+    const app = code("components/chat/ChatApp.tsx");
+    assert.match(app, /\.\.\.\(importedMessages \?\? \[\]\)/);
+    // Before the panel's own messages, because they are the earlier part of
+    // the same conversation.
+    const importedAt = app.indexOf("...(importedMessages ?? [])");
+    const ownAt = app.indexOf("...(useCenteredWelcome");
+    assert.ok(importedAt > 0 && ownAt > importedAt);
+
+    const list = code("components/chat/ChatMessageList.tsx");
+    // One scroller, the one the chat has always had.
+    assert.equal(
+        (list.match(/overflow-y-auto/g) ?? []).length,
+        1,
+        "no nested scroll container was added"
+    );
 });
 
-test("the disclosure is a real one, and names its conversation", () => {
-    const source = code("components/continuations/ContinuationSourcePrelude.tsx");
-    assert.match(source, /aria-expanded=\{expanded\}/);
-    assert.match(source, /aria-controls=\{panelId\}/);
-    // The source title, so a screen reader hears which imported conversation
-    // this control belongs to.
-    assert.match(source, /t\("continuation\.hideSourceFor"\)/);
-    assert.match(source, /t\("continuation\.showSourceFor"\)/);
-    assert.match(source, /\{ title: sourceTitle \}/);
+test("an imported bubble is the ordinary bubble, dashed", () => {
+    const source = code("components/chat/ChatMessageList.tsx");
+    // The same element, the same class string: only the edge is added.
+    assert.match(source, /imported\s*\n?\s*\? isUser\s*\n?\s*\? "border border-dashed/);
+    assert.match(source, /: "border-dashed"/);
+    // And the state is announced, not only drawn.
+    assert.match(source, /continuation\.importedMessageDescription/);
+});
+
+test("an imported message carries no action that changes a Tomverse turn", () => {
+    /*
+      Regenerate, retry, "continue without files" and the error report are all
+      inside the `error` and `cancelled` branches, and the mapper gives every
+      imported message `status: "normal"`. That is what makes the absence
+      structural rather than a list of conditions somebody has to maintain.
+    */
+    const mapper = code("lib/continuationTimelineMessages.ts");
+    assert.match(mapper, /status: "normal"/);
+    for (const forbidden of ["error", "cancelled", "pending"]) {
+        assert.ok(
+            !new RegExp(`status: "${forbidden}"`).test(mapper),
+            `an imported message must never be ${forbidden}`
+        );
+    }
 });
 
 test("the divider is a separator, in every source state", () => {
-    const source = code("components/continuations/ContinuationSourcePrelude.tsx");
+    const source = code("components/chat/ChatMessageList.tsx");
     assert.match(source, /role="separator"/);
     assert.match(source, /aria-label=\{t\("continuation\.divider"\)\}/);
-    // Outside the `available` branches: a deleted or locked source still has
-    // Tomverse messages under it, and the boundary is what must not vanish
-    // when the source does.
-    const dividerAt = source.indexOf('data-testid="continuation-divider"');
-    const sectionEnd = source.indexOf("</section>");
-    assert.ok(dividerAt > sectionEnd, "the divider is outside the source section");
+    // Exactly two places it can be drawn -- after the last imported message,
+    // or on its own when nothing was imported (a deleted or locked snapshot,
+    // where the boundary is what must not vanish with the source).
+    assert.equal(
+        (source.match(/data-testid="continuation-divider"/g) ?? []).length,
+        2
+    );
+    assert.match(source, /isLastImported &&/);
+    assert.match(
+        source,
+        /importedTranscript && !messages\.some\(\(message\) => message\.imported\)/
+    );
 });
 
-test("a gone or locked source offers no disclosure to press", () => {
-    const source = code("components/continuations/ContinuationSourcePrelude.tsx");
-    assert.match(source, /const canDisclose = source\.status === "available"/);
-    assert.match(source, /\{canDisclose \? \(/);
+test("only one divider can render for a conversation", () => {
+    /*
+      The two sites are mutually exclusive by construction: `isLastImported`
+      requires an imported message and the standalone one requires that there
+      is none.
+    */
+    const source = code("components/chat/ChatMessageList.tsx");
+    assert.match(
+        source,
+        /const isLastImported =\s*\n?\s*Boolean\(imported\) && !messages\[idx \+ 1\]\?\.imported/
+    );
+});
+
+test("a long transcript pages inside the timeline, from the divider back", () => {
+    const hook = code("components/continuations/useContinuationSource.ts");
+    // The page next to the divider first: it is the part the next answer
+    // follows on from.
+    assert.match(hook, /offset=end/);
+    // And backwards from there, never overlapping what is held.
+    assert.match(hook, /windowStart - CONTINUATION_SOURCE_PAGE_SIZE/);
+    assert.match(hook, /const nextLimit = windowStart - nextOffset/);
+    const list = code("components/chat/ChatMessageList.tsx");
+    assert.match(list, /data-testid="imported-load-older"/);
+    assert.match(list, /continuation\.showOlderImported/);
 });
 
 /* ----------------------------------------------------------- the title */

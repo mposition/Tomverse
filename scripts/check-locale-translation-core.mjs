@@ -37,12 +37,6 @@ export const MIN_TRANSLATABLE_LENGTH = 13;
  */
 export const SHARED_STRING_ALLOWLIST = [
   {
-    key: "continuation.sourceMessageCount",
-    locales: ["fr"],
-    reason:
-      "A count and the plural of 'message', which French spells the same way English does. The other five locales differ: German capitalises the noun, Spanish and Portuguese drop the final 'e', and Korean and Chinese use their own counter words.",
-  },
-  {
     key: "continuation.creditEstimatePerModel",
     locales: ["ko", "de", "es", "pt"],
     reason:

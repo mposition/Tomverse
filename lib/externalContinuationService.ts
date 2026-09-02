@@ -475,7 +475,24 @@ export type ContinuationTimeline = {
 export async function getContinuationTimeline(
     userId: string,
     conversationId: string,
-    options: { request: Request; offset?: number; limit?: number }
+    options: {
+        request: Request;
+        offset?: number;
+        limit?: number;
+        /**
+         * Read the *end* of the transcript rather than the beginning.
+         *
+         * The imported half is now rendered inside the conversation's own
+         * timeline, so the page that has to arrive first is the one next to
+         * the divider -- the turns the next answer actually follows on from.
+         * Asking for it by offset is not something a client can do: the
+         * offset depends on `messageTotal`, which is what this call is for.
+         *
+         * Ignored when `offset` is given, so paging further back stays an
+         * ordinary offset walk.
+         */
+        fromEnd?: boolean;
+    }
 ): Promise<ContinuationTimeline | null> {
     const bridge = await getContinuationBridge(userId, conversationId);
     if (!bridge) return null;
@@ -539,8 +556,11 @@ export async function getContinuationTimeline(
         return { ...base, source: { status: "locked" } };
     }
 
-    const offset = Math.max(0, options.offset ?? 0);
     const limit = clampTimelinePageSize(options.limit);
+    const offset =
+        options.offset === undefined && options.fromEnd
+            ? Math.max(0, snapshot.messageCount - limit)
+            : Math.max(0, options.offset ?? 0);
     const messages = await prisma.externalMessage.findMany({
         where: { externalConversationId: snapshot.id },
         orderBy: { ordinal: "asc" },

@@ -80,11 +80,23 @@ export async function GET(
         }
 
         const url = new URL(req.url);
-        const offsetRaw = Number(url.searchParams.get("offset"));
+        const offsetParam = url.searchParams.get("offset");
+        const offsetRaw = Number(offsetParam);
         const limitRaw = Number(url.searchParams.get("limit"));
+        // `offset=end` asks for the last page. The timeline is now drawn
+        // inside the conversation, so the turns immediately before the
+        // divider are the ones that have to load first -- and their offset
+        // depends on a total only the server knows.
+        const wantsEnd = offsetParam === "end";
         const timeline = await getContinuationTimeline(userId, conversationId, {
             request: req,
-            offset: Number.isSafeInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0,
+            offset:
+                wantsEnd
+                    ? undefined
+                    : Number.isSafeInteger(offsetRaw) && offsetRaw >= 0
+                      ? offsetRaw
+                      : 0,
+            fromEnd: wantsEnd,
             limit: Number.isSafeInteger(limitRaw) ? limitRaw : undefined,
         });
         // An ordinary conversation is not an error state, but it has no

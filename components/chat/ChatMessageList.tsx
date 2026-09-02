@@ -1,6 +1,13 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
@@ -25,6 +32,8 @@ import {
   UserRound,
 } from "lucide-react";
 import { Message, type ChatAttachment } from "@/components/chat/types";
+import { providerLabel } from "@/components/imports/importFormatting";
+import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -76,6 +85,28 @@ type ChatMessageListProps = {
   // Aborts only this panel's in-flight request, distinct from the shell's
   // "stop all" button.
   onStopGenerating?: () => void;
+  /**
+   * The imported half of a continued conversation, if this conversation has
+   * one: how many turns are still above the loaded window, and how to ask for
+   * them.
+   *
+   * The messages themselves arrive in `messages`, already at the front --
+   * they are part of the conversation, not a section beside it. What is left
+   * here is only what a *timeline* cannot express: that there is more history
+   * above the top, and the separator that marks where Tomverse takes over.
+   */
+  importedTranscript?: {
+    /** What the snapshot is: readable, deleted, or behind its own lock. */
+    status: "available" | "deleted" | "locked";
+    /** One of `EXTERNAL_IMPORT_PROVIDERS`, from the bridge. */
+    provider: string;
+    /** When the snapshot was imported, ISO-8601. */
+    importedAt: string;
+    /** How many imported turns precede the loaded window. */
+    olderCount: number;
+    onLoadOlder?: () => void;
+    loadingOlder?: boolean;
+  };
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
@@ -290,6 +321,7 @@ export function ChatMessageList({
   currentChatId = null,
   isSending = false,
   onStopGenerating,
+  importedTranscript,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
   // The same map the composer's chip was derived from, so the price the badge
@@ -491,8 +523,123 @@ export function ChatMessageList({
         className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-6"
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3.5 pb-3 md:gap-5 md:pb-4">
+          {importedTranscript && (
+            /*
+              Where this conversation came from, as one line at the top of it.
+
+              A date separator's shape, which is the timeline's own idiom for
+              "everything below this belongs to X" -- not a header, not a
+              card, and not a panel with a control on it. What it states is
+              the whole of the provenance the policy requires on screen: the
+              service, when the transcript was taken, and that none of it can
+              be changed here (docs/policy/external-conversation-continuation.md §5.1).
+            */
+            <div
+              data-testid="continuation-provenance"
+              className="flex items-center justify-center pb-1"
+            >
+              <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold leading-4 text-zinc-500 dark:bg-zinc-800/70 dark:text-zinc-400">
+                <span>
+                  {t("continuation.importedFrom").replaceAll(
+                    "{provider}",
+                    providerLabel(importedTranscript.provider)
+                  )}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>{importedTranscript.importedAt.slice(0, 10)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{t("continuation.readOnlyLabel")}</span>
+              </span>
+            </div>
+          )}
+          {importedTranscript?.status === "deleted" && (
+            // Compact, and in the flow: the transcript is gone, which changes
+            // what the next turn carries, so it is stated where the transcript
+            // would have been rather than in chrome above the conversation.
+            <p
+              data-testid="continuation-source-tombstone"
+              className="px-1 pb-1 text-center text-[11px] leading-4 text-zinc-500 dark:text-zinc-400"
+            >
+              {t("continuation.sourceDeleted")}
+            </p>
+          )}
+          {importedTranscript?.status === "locked" && (
+            <p
+              data-testid="continuation-source-locked"
+              className="px-1 pb-1 text-center text-[11px] leading-4 text-zinc-500 dark:text-zinc-400"
+            >
+              {t("continuation.sourceLocked")}
+            </p>
+          )}
+          {importedTranscript && !messages.some((message) => message.imported) && (
+            /*
+              The separator still belongs here when nothing was imported onto
+              the screen -- a deleted or locked snapshot, and the moment before
+              the first page lands. The conversation below it is still a
+              continuation, and
+              docs/policy/external-conversation-continuation.md §8.2 keeps the
+              boundary in place in exactly those states.
+            */
+            <div
+              role="separator"
+              aria-label={t("continuation.divider")}
+              data-testid="continuation-divider"
+              className="my-1 flex items-center gap-3 md:my-2"
+            >
+              <span
+                aria-hidden="true"
+                className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800"
+              />
+              <span className="shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                {t("continuation.divider")}
+              </span>
+              <span
+                aria-hidden="true"
+                className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800"
+              />
+            </div>
+          )}
+          {importedTranscript && importedTranscript.olderCount > 0 && (
+            /*
+              Older imported turns, reached from inside the timeline.
+
+              A button rather than a second screen or a collapsed panel: the
+              transcript is this conversation's own history, and history is
+              read by scrolling up until there is no more of it. The count is
+              stated because "show more" on a transcript of unknown length
+              tells the reader nothing about what pressing it costs.
+            */
+            <div className="flex justify-center pb-1">
+              <button
+                type="button"
+                data-testid="imported-load-older"
+                onClick={importedTranscript.onLoadOlder}
+                disabled={importedTranscript.loadingOlder}
+                className="inline-flex min-h-9 items-center gap-2 rounded-full border border-dashed border-zinc-300 px-3 text-[11px] font-semibold text-zinc-500 transition-colors hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                {importedTranscript.loadingOlder
+                  ? t("continuation.loadingOlderImported")
+                  : t("continuation.showOlderImported").replaceAll(
+                      "{count}",
+                      String(importedTranscript.olderCount)
+                    )}
+              </button>
+            </div>
+          )}
           {messages.map((msg, idx) => {
             const isUser = msg.role === "user";
+            const imported = msg.imported;
+            /*
+              The last imported turn, so the separator can follow it.
+
+              Read from the list rather than passed in: the imported half is
+              always the front of `messages`, so "the last one that has
+              `imported`" is the boundary by construction and cannot drift out
+              of step with what is actually rendered. `-1` when nothing here
+              is imported, which is every ordinary conversation.
+            */
+            const isLastImported =
+              Boolean(imported) && !messages[idx + 1]?.imported;
 
             const modelInfo = !isUser && msg.modelId
               ? AVAILABLE_MODELS.find(m => m.id === msg.modelId)
@@ -548,14 +695,55 @@ export function ChatMessageList({
             const userBoxClass = "bg-blue-600 text-white";
 
             return (
+              <Fragment key={msg.id || idx}>
               <div
-                key={msg.id || idx}
                 data-testid="chat-message"
                 data-message-role={msg.role}
                 data-model-id={msg.modelId || ""}
+                data-message-source={imported ? "imported" : "native"}
                 className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
               >
-                {!isUser && modelInfo && (
+                {!isUser && imported && (
+                  /*
+                    Who wrote this, in the source.
+
+                    The same row an ordinary answer has -- a logo and a name
+                    -- so the bubble below reads as part of one conversation.
+                    What it never does is resolve `sourceModelLabel` against
+                    the Tomverse catalogue: it names a model this app may not
+                    serve, and rendering it as one of ours would claim a
+                    Tomverse answer where there was none.
+                  */
+                  <div
+                    data-testid="imported-message-header"
+                    data-imported-provider={imported.provider}
+                    className="mb-1.5 ml-1 flex max-w-full select-none items-center gap-2"
+                  >
+                    {externalProviderBrand(imported.provider) ? (
+                      <ModelLogo
+                        provider={externalProviderBrand(imported.provider) ?? undefined}
+                        size="sm"
+                      />
+                    ) : (
+                      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-zinc-500/10 text-zinc-500">
+                        <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                    )}
+                    <span className="min-w-0 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                      {providerLabel(imported.provider)}
+                    </span>
+                    {imported.sourceModelLabel && (
+                      <span
+                        data-testid="imported-source-model"
+                        title={imported.sourceModelLabel}
+                        className="min-w-0 truncate rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                      >
+                        {imported.sourceModelLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {!isUser && !imported && modelInfo && (
                   // Every control on this row states something the reader
                   // cannot recover from anywhere else -- the run mode, that
                   // the turn is live, how to stop it -- so none of them may
@@ -670,7 +858,21 @@ export function ChatMessageList({
 
                 {isUser && (
                   <div className="mb-1.5 mr-1 flex select-none items-center gap-2">
-                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.you")}</span>
+                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                      {/*
+                        An imported question was asked somewhere else. Naming
+                        it "You" would be true of the person and false of the
+                        conversation: it was not sent in this Tomverse
+                        conversation, and it is not something this turn can
+                        edit or resend.
+                      */}
+                      {imported
+                        ? t("continuation.importedYou").replaceAll(
+                            "{provider}",
+                            providerLabel(imported.provider)
+                          )
+                        : t("chat.you")}
+                    </span>
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white">
                       <UserRound className="h-3.5 w-3.5" />
                     </span>
@@ -679,8 +881,45 @@ export function ChatMessageList({
 
                 <div
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
+                  data-imported={imported ? "true" : undefined}
+                  /*
+                    Read-only, said rather than only drawn.
+
+                    The dashed edge is the visible half and it is not enough
+                    on its own: a border style carries no meaning to a screen
+                    reader, and none at all to a reader who cannot tell 1px of
+                    dash from 1px of solid. So the same fact is in the
+                    accessible description, which also names where the turn
+                    came from -- the one thing that distinguishes it from
+                    everything else in this conversation.
+                  */
+                  aria-description={
+                    imported
+                      ? t("continuation.importedMessageDescription").replaceAll(
+                          "{provider}",
+                          providerLabel(imported.provider)
+                        )
+                      : undefined
+                  }
                   className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
+                  } ${
+                    /*
+                      Same shape, same padding, same type, same alignment as
+                      every other bubble -- only the edge changes. A different
+                      background or a card around the whole transcript would
+                      make the imported half a section of the page again,
+                      which is the thing this replaced.
+
+                      `border-dashed` alone would be invisible on the user
+                      bubble, which has no border to restyle, so that side
+                      gets a dashed border in its own foreground colour.
+                    */
+                    imported
+                      ? isUser
+                        ? "border border-dashed border-white/70"
+                        : "border-dashed"
+                      : ""
                   } ${!isUser && msg.content && msg.status !== "error" ? "pr-8 md:pr-9" : ""} ${
                     !isUser && msg.status === "error" ? "pl-9 md:pl-11" : ""
                   }`}
@@ -1286,6 +1525,42 @@ export function ChatMessageList({
                   )}
                 </div>
               </div>
+              {isLastImported && (
+                /*
+                  Where Tomverse takes over.
+
+                  Inside the timeline and between two messages, not a heading
+                  above a section: the imported turns and the Tomverse ones
+                  are one conversation, and this is the only thing that says
+                  which half a bubble belongs to once the reader has scrolled
+                  past its edge.
+
+                  Rendered whether or not anything follows it. A continuation
+                  that has been opened and not yet answered is the state this
+                  screen is in most often, and a separator that appeared only
+                  after the first answer would leave that screen unable to say
+                  the transcript above it is not its own.
+                */
+                <div
+                  role="separator"
+                  aria-label={t("continuation.divider")}
+                  data-testid="continuation-divider"
+                  className="my-1 flex items-center gap-3 md:my-2"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800"
+                  />
+                  <span className="shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                    {t("continuation.divider")}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800"
+                  />
+                </div>
+              )}
+              </Fragment>
             );
           })}
         </div>

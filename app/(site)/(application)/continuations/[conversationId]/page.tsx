@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
-import { ContinuationSourcePrelude } from "@/components/continuations/ContinuationSourcePrelude";
 
 /**
  * `/continuations/[conversationId]` — a conversation continued from an
@@ -42,9 +41,6 @@ export default async function ContinuedConversationPage({
         <ReviewWorkspaceShell
             initialConversationId={conversationId}
             mountedSurface="continuation"
-            conversationPrelude={
-                <ContinuationSourcePrelude conversationId={conversationId} />
-            }
         />
     );
 }

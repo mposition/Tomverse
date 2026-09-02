@@ -456,14 +456,15 @@ test("the client routes by the server's answer, never by a derived one", () => {
     );
     assert.match(client, /conversationSurfaceHref/);
     /*
-      The surface comes from the row the server sent, and routing happens
-      whenever it differs from the surface this mount *is*.
+      The surface comes from the row the server sent, and the destination is
+      that row's own path.
 
-      The rule used to read `targetSurface === "continuation"`, which was
-      complete while this workspace only ran at `/chat`. It now also runs at
-      `/continuations/[id]`, where the other direction needs the same
-      treatment: selecting an ordinary conversation in place would leave that
-      URL, and its imported prelude, describing a different conversation.
+      Two questions, and conflating them was a defect in both directions.
+      Asking only "is this a different surface" dropped the clicked id on the
+      way out of a continuation -- the workspace has no per-conversation URL,
+      so the navigation lost it and the session restore reopened the
+      continuation the user had just left -- and it navigated nowhere at all
+      between two continuations, which are the same surface at different URLs.
     */
     assert.match(
         client,
@@ -471,7 +472,12 @@ test("the client routes by the server's answer, never by a derived one", () => {
     );
     assert.match(
         client,
-        /if \(targetSurface && targetSurface !== mountedSurface\) \{/
+        /const ownPath = conversationSurfaceHref\(targetSurface, id\)/
+    );
+    assert.match(client, /if \(pathname !== ownPath\) \{/);
+    assert.match(
+        client,
+        /conversationHandoffHref\(targetSurface, id, LEGACY_REVIEW_PATH\)/
     );
     // Never from the product, the modality or the id's shape.
     const routing = client.slice(
