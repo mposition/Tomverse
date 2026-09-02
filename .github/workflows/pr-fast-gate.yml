@@ -385,6 +385,18 @@ jobs:
         timeout-minutes: 5
         run: npm run check:capacitor-local-bundle
 
+      # D19. The refresh token belongs to the native layer and the platform
+      # secure store; what the WebView receives across the bridge is an access
+      # token and an expiry. That rule is an absence, and nobody breaks it on
+      # purpose -- what happens is that somebody wants a signed-in browser for
+      # local work, writes a web fallback that calls the refresh endpoint
+      # directly, and the policy sentence quietly stops being true in the build
+      # a developer looks at most. Textual, for the same reason as the check
+      # above: a URL assembled from a constant would evaluate to nothing.
+      - name: Mobile JS cannot hold a refresh token
+        timeout-minutes: 5
+        run: npm run check:native-token-boundary
+
       # PLANNER-03. Memory, imported content and uploaded documents already
       # reach the prompt, and the defences that keep them data -- fences,
       # rules stated first, inerting -- had nothing measuring them. This runs

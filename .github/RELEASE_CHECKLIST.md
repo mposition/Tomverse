@@ -60,6 +60,12 @@ Date / timezone:    ____________________
       authentication policy ("Deliberately excluded") because it changes the
       origin the bearer-token boundary is defined against. Read as text, so a
       URL supplied through an environment variable is still a finding
+- [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
+      ships for the three endpoints whose responses carry a refresh token, and
+      for the field name itself. D19 states the rule as an absence — the bridge
+      hands JavaScript an access token and an expiry, and nothing else — and an
+      absence is what review is worst at seeing. It does **not** establish what
+      a real device does; `AUTH-03`'s evidence is a physical check
 - [ ] `npm run check:push-scope` — reports PUSH-01's metric
       (`unapproved_push_infrastructure_components_in_v1`). The gate is met by an
       absence, so this is the artefact that states it; approving a use case is
