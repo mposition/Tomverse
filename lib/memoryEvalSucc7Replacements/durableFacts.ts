@@ -10,10 +10,7 @@ import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
  * (`en-612`, `ko-609`, `ko-617`), and downgrading any of them to `bulk_safe`
  * would be the substantive change this transition is not making.
  *
- * ## Rewritten after the first adoption review (2026-09-02)
- *
- * The first draft of these thirty-eight was rejected on two grounds, and both
- * corrections are visible here.
+ * ## Rewritten after two adoption reviews (2026-09-02)
  *
  * **One direction per case.** Six cases paired "I know this field, skip the
  * glossary" with "but explain this one term", and labelled the second clause
@@ -29,30 +26,42 @@ import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
  * from "does not use one"; `ko-615` names a real ceiling instead of the word
  * "limit", which filters nothing; `ko-617` keeps asthma in the conversation and
  * out of the tokens, the way `ko-428` kept its migraine out of them; and
- * `en-618` anchors on wanting the model's own view rather than on the adverb
+ * `en-618` anchors on wanting the model’s own view rather than on the adverb
  * "bluntly", which points at `tone`.
+ *
+ * **The kind has to be the kind.** `en-603` was one enrolment let pass, which
+ * is an event rather than the standing decision `en-155` tested, so it now
+ * refuses the pursuit itself rather than one intake of it. `en-614` said the
+ * user would not buy a wetsuit, which is a `decision` wearing a `constraint`
+ * label; it is now a skill never acquired, as `en-433` was. `en-617` blamed the
+ * user’s eyesight, which makes the case an accessibility fact and leaves a
+ * single `formatting`/`bulk_safe` gold short of `exhaustive`; the reason is back
+ * where `en-441` had it, in what survives a paste.
  *
  * ## Why the conversations are not one sentence frame
  *
  * Every decision case read "I decided not to X, so leave it out" and every
  * durable case was two messages. Individually correct, and still one case
- * counted thirty-eight times: a set like that measures a single phrasing's
+ * counted thirty-eight times: a set like that measures a single phrasing’s
  * extraction rate and reports it as a cell. The framings are now distinct —
- * a decision costed and dropped, one a household settled, one whose enrolment
- * window was let pass, a constraint of space, of permission, of transport, of
- * schedule, of money — and twelve of the thirty-eight run to three messages,
- * six in each language.
+ * a decision costed and dropped, one a household settled, one closed years ago,
+ * a constraint of space, of permission, of transport, of schedule, of money —
+ * and each language cell carries three turn shapes rather than one: ten two-turn,
+ * six three-turn and two four-turn in en, twelve, six and two in ko.
  *
- * Three messages, not more, and never opening with the assistant: all 1150
- * conversations in succ-6 start with the user, and `durable_facts` uses only
- * two- and three-message shapes. Variety that leaves the cell's own repertoire
- * would make these thirty-eight unlike every case they sit beside, which is a
- * different way of measuring something other than the boundary.
+ * In the four-turn cases the durable fact arrives after the assistant has
+ * proposed something, which is how these facts reach a real assistant. The
+ * proposal states nothing about the user, and every third or fourth turn that is
+ * not the fact itself is a bare acknowledgement: each case is `exhaustive`, so a
+ * turn that introduced a durable fact of its own would be a candidate the gold
+ * does not admit, scoring as a false positive against a case that never meant to
+ * test it.
  *
- * Every third turn is a bare acknowledgement. Each case is `exhaustive`, so a
- * turn that introduced any durable fact of its own would be a candidate the
- * gold does not admit, scoring as a false positive against a case that never
- * meant to test it.
+ * The ko cell is not the en cell in Korean. Seven subjects were literal
+ * translations of their English counterparts — 카약/kayak, 해먹/hammock,
+ * 우표수집/philately, 우쿨렐레/ukulele, 트램펄린/trampoline, 활판/letterpress,
+ * 매사냥/falconry — which makes twenty Korean cases partly a measurement of
+ * the same twenty English ones. They now stand on their own subjects.
  */
 export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
     {
@@ -163,8 +172,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["taxidermy"],
                 evidence: {
                     evidenceMessageId: "succ-b702-3-m1",
-                    evidenceQuote:
-                        "The taxidermy course opened enrolment last month and I let it pass on purpose.",
+                    evidenceQuote: "I am not taking up taxidermy, now or later",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -173,18 +181,18 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-3",
-                title: "Enrolment",
+                title: "Closed for good",
                 messages: [
                     {
                         externalMessageId: "succ-b702-3-m1",
                         role: "user",
                         content:
-                            "The taxidermy course opened enrolment last month and I let it pass on purpose.",
+                            "That question closed for me years ago — I am not taking up taxidermy, now or later.",
                     },
                     {
                         externalMessageId: "succ-b702-3-m2",
                         role: "assistant",
-                        content: "I will treat that as closed.",
+                        content: "Then it stays off the list.",
                     },
                 ],
             },
@@ -498,7 +506,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 polarity: "negated",
                 factValueAll: ["pergola"],
                 evidence: {
-                    evidenceMessageId: "succ-b702-11-m1",
+                    evidenceMessageId: "succ-b702-11-m3",
                     evidenceQuote: "The freeholder turned down a pergola",
                 },
                 expectedDisposition: "bulk_safe",
@@ -508,18 +516,31 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-11",
-                title: "Turned down",
+                title: "Shade",
                 messages: [
                     {
                         externalMessageId: "succ-b702-11-m1",
                         role: "user",
                         content:
-                            "The freeholder turned down a pergola, so that is closed to me.",
+                            "What is the usual way to get shade over a patio?",
                     },
                     {
                         externalMessageId: "succ-b702-11-m2",
                         role: "assistant",
-                        content: "Understood.",
+                        content:
+                            "A pergola is the common answer — shall I work from that?",
+                    },
+                    {
+                        externalMessageId: "succ-b702-11-m3",
+                        role: "user",
+                        content:
+                            "The freeholder turned down a pergola, so that route is closed to me.",
+                    },
+                    {
+                        externalMessageId: "succ-b702-11-m4",
+                        role: "assistant",
+                        content:
+                            "Then I will keep to things that need no permission.",
                     },
                 ],
             },
@@ -616,11 +637,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "constraint",
                 polarity: "negated",
-                factValueAll: ["wetsuit"],
+                factValueAll: ["read music"],
                 evidence: {
-                    evidenceMessageId: "succ-b702-14-m1",
-                    evidenceQuote:
-                        "I have never owned a wetsuit and I am not going to buy one",
+                    evidenceMessageId: "succ-b702-14-m3",
+                    evidenceQuote: "I never learned to read music",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -629,18 +649,31 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-14",
-                title: "Cold water",
+                title: "Where to start",
                 messages: [
                     {
                         externalMessageId: "succ-b702-14-m1",
                         role: "user",
                         content:
-                            "I have never owned a wetsuit and I am not going to buy one, so rule that out.",
+                            "How would someone pick up the tin whistle from scratch?",
                     },
                     {
                         externalMessageId: "succ-b702-14-m2",
                         role: "assistant",
-                        content: "Understood.",
+                        content:
+                            "Most people start from sheet music and work through a beginner book.",
+                    },
+                    {
+                        externalMessageId: "succ-b702-14-m3",
+                        role: "user",
+                        content:
+                            "I never learned to read music, so anything that starts from a score is out for me.",
+                    },
+                    {
+                        externalMessageId: "succ-b702-14-m4",
+                        role: "assistant",
+                        content:
+                            "Then I will keep to things you can learn by ear.",
                     },
                 ],
             },
@@ -741,7 +774,8 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["italics"],
                 evidence: {
                     evidenceMessageId: "succ-b702-17-m1",
-                    evidenceQuote: "I cannot pick out italics",
+                    evidenceQuote:
+                        "Emphasis in italics does not survive the editor I paste into",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -750,18 +784,18 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-17",
-                title: "On screen",
+                title: "What survives the paste",
                 messages: [
                     {
                         externalMessageId: "succ-b702-17-m1",
                         role: "user",
                         content:
-                            "On screen I cannot pick out italics, so please emphasise some other way.",
+                            "Emphasis in italics does not survive the editor I paste into, so please use something else.",
                     },
                     {
                         externalMessageId: "succ-b702-17-m2",
                         role: "assistant",
-                        content: "I will avoid them.",
+                        content: "I will mark emphasis another way.",
                     },
                 ],
             },
@@ -815,10 +849,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "decision",
                 polarity: "negated",
-                factValueAll: ["카약"],
+                factValueAll: ["캠핑카"],
                 evidence: {
                     evidenceMessageId: "succ-b702-19-m1",
-                    evidenceQuote: "카약은 견적까지 받아 보고 사지 않기로 정했습니다.",
+                    evidenceQuote: "캠핑카는 견적까지 받아 보고 사지 않기로 정했습니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -827,17 +861,17 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-19",
-                title: "카약",
+                title: "차",
                 messages: [
                     {
                         externalMessageId: "succ-b702-19-m1",
                         role: "user",
-                        content: "카약은 견적까지 받아 보고 사지 않기로 정했습니다.",
+                        content: "캠핑카는 견적까지 받아 보고 사지 않기로 정했습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-19-m2",
                         role: "assistant",
-                        content: "그럼 카약은 빼고 말씀드릴까요?",
+                        content: "그럼 캠핑카는 빼고 말씀드릴까요?",
                     },
                     {
                         externalMessageId: "succ-b702-19-m3",
@@ -857,10 +891,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "decision",
                 polarity: "negated",
-                factValueAll: ["우쿨렐레"],
+                factValueAll: ["낚시"],
                 evidence: {
                     evidenceMessageId: "succ-b702-20-m1",
-                    evidenceQuote: "우쿨렐레는 두 달 배워 보고 접었습니다.",
+                    evidenceQuote: "낚시는 두어 번 따라가 보고 접었습니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -869,12 +903,12 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-20",
-                title: "악기",
+                title: "물가에서",
                 messages: [
                     {
                         externalMessageId: "succ-b702-20-m1",
                         role: "user",
-                        content: "우쿨렐레는 두 달 배워 보고 접었습니다. 다시 시작할 생각은 없습니다.",
+                        content: "낚시는 두어 번 따라가 보고 접었습니다. 다시 시작할 생각은 없습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-20-m2",
@@ -894,10 +928,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "decision",
                 polarity: "negated",
-                factValueAll: ["우표수집"],
+                factValueAll: ["주말농장"],
                 evidence: {
                     evidenceMessageId: "succ-b702-21-m1",
-                    evidenceQuote: "우표수집은 남은 것을 다 넘기면서 그만두기로 했습니다.",
+                    evidenceQuote: "주말농장은 계약을 연장하지 않기로 했습니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -906,17 +940,17 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-21",
-                title: "예전 취미",
+                title: "작년까지 하던 것",
                 messages: [
                     {
                         externalMessageId: "succ-b702-21-m1",
                         role: "user",
-                        content: "우표수집은 남은 것을 다 넘기면서 그만두기로 했습니다.",
+                        content: "주말농장은 계약을 연장하지 않기로 했습니다. 그 방향은 접었습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-21-m2",
                         role: "assistant",
-                        content: "네, 그 방향은 빼겠습니다.",
+                        content: "네, 그 전제로 보겠습니다.",
                     },
                 ],
             },
@@ -1010,10 +1044,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "constraint",
                 polarity: "negated",
-                factValueAll: ["해먹"],
+                factValueAll: ["건조기"],
                 evidence: {
                     evidenceMessageId: "succ-b702-24-m1",
-                    evidenceQuote: "집에는 해먹을 걸 만한 기둥이 없어서 그건 안 됩니다.",
+                    evidenceQuote: "베란다가 좁아서 건조기를 놓을 자리가 나오지 않습니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -1022,17 +1056,17 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-24",
-                title: "걸 데가 없음",
+                title: "베란다",
                 messages: [
                     {
                         externalMessageId: "succ-b702-24-m1",
                         role: "user",
-                        content: "집에는 해먹을 걸 만한 기둥이 없어서 그건 안 됩니다.",
+                        content: "베란다가 좁아서 건조기를 놓을 자리가 나오지 않습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-24-m2",
                         role: "assistant",
-                        content: "네, 빼겠습니다.",
+                        content: "네, 그건 빼고 보겠습니다.",
                     },
                 ],
             },
@@ -1175,10 +1209,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "constraint",
                 polarity: "negated",
-                factValueAll: ["활판"],
+                factValueAll: ["암실"],
                 evidence: {
-                    evidenceMessageId: "succ-b702-28-m1",
-                    evidenceQuote: "활판 설비를 쓸 수 있는 곳이 근처에 없습니다.",
+                    evidenceMessageId: "succ-b702-28-m3",
+                    evidenceQuote: "암실은 마련할 수 없는 형편입니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -1187,17 +1221,27 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b702-28",
-                title: "장비",
+                title: "현상",
                 messages: [
                     {
                         externalMessageId: "succ-b702-28-m1",
                         role: "user",
-                        content: "활판 설비를 쓸 수 있는 곳이 근처에 없습니다. 그게 필요한 방법은 빼 주세요.",
+                        content: "필름을 직접 현상하려면 무엇부터 갖춰야 하나요?",
                     },
                     {
                         externalMessageId: "succ-b702-28-m2",
                         role: "assistant",
-                        content: "네, 그 단계가 들어가는 방법은 제외하겠습니다.",
+                        content: "보통은 암실을 먼저 마련하고 그 안에서 작업합니다.",
+                    },
+                    {
+                        externalMessageId: "succ-b702-28-m3",
+                        role: "user",
+                        content: "암실은 마련할 수 없는 형편입니다. 그게 필요한 방법은 빼 주세요.",
+                    },
+                    {
+                        externalMessageId: "succ-b702-28-m4",
+                        role: "assistant",
+                        content: "네, 암실 없이 되는 쪽으로만 안내하겠습니다.",
                     },
                 ],
             },
@@ -1254,10 +1298,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "constraint",
                 polarity: "negated",
-                factValueAll: ["트램펄린"],
+                factValueAll: ["평상"],
                 evidence: {
                     evidenceMessageId: "succ-b702-30-m1",
-                    evidenceQuote: "마당 바닥이 고르지 않아 트램펄린은 놓을 수 없습니다.",
+                    evidenceQuote: "마당 바닥이 고르지 않아 평상은 놓을 수 없습니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -1271,7 +1315,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                     {
                         externalMessageId: "succ-b702-30-m1",
                         role: "user",
-                        content: "마당 바닥이 고르지 않아 트램펄린은 놓을 수 없습니다.",
+                        content: "마당 바닥이 고르지 않아 평상은 놓을 수 없습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-30-m2",
@@ -1493,10 +1537,10 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "decision",
                 polarity: "negated",
-                factValueAll: ["매사냥"],
+                factValueAll: ["승마"],
                 evidence: {
                     evidenceMessageId: "succ-b702-36-m1",
-                    evidenceQuote: "매사냥은 알아보다가 배우지 않기로 정했습니다.",
+                    evidenceQuote: "승마는 알아보다가 배우지 않기로 정했습니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -1510,7 +1554,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                     {
                         externalMessageId: "succ-b702-36-m1",
                         role: "user",
-                        content: "매사냥은 알아보다가 배우지 않기로 정했습니다.",
+                        content: "승마는 알아보다가 배우지 않기로 정했습니다.",
                     },
                     {
                         externalMessageId: "succ-b702-36-m2",
@@ -1585,7 +1629,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 polarity: "affirmed",
                 factValueAll: ["물레"],
                 evidence: {
-                    evidenceMessageId: "succ-b702-38-m1",
+                    evidenceMessageId: "succ-b702-38-m3",
                     evidenceQuote: "물레는 스무 해 가까이 돌려 왔습니다.",
                 },
                 expectedDisposition: "bulk_safe",
@@ -1596,7 +1640,7 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                 polarity: "negated",
                 factValueAll: ["유약"],
                 evidence: {
-                    evidenceMessageId: "succ-b702-38-m1",
+                    evidenceMessageId: "succ-b702-38-m3",
                     evidenceQuote: "유약 같은 말은 따로 설명하지 않으셔도 됩니다.",
                 },
                 expectedDisposition: "bulk_safe",
@@ -1611,11 +1655,22 @@ export const SUCC7_DURABLE_FACTS: readonly MemoryEvalCaseV3[] = [
                     {
                         externalMessageId: "succ-b702-38-m1",
                         role: "user",
+                        content: "물레로 뽑은 그릇 표면을 정리하는 순서를 알려 주세요.",
+                    },
+                    {
+                        externalMessageId: "succ-b702-38-m2",
+                        role: "assistant",
+                        content:
+                            "먼저 굽을 깎고, 유약을 어떻게 올릴지 정하는 순서로 보시면 됩니다. 용어는 풀어 드릴까요?",
+                    },
+                    {
+                        externalMessageId: "succ-b702-38-m3",
+                        role: "user",
                         content:
                             "물레는 스무 해 가까이 돌려 왔습니다. 유약 같은 말은 따로 설명하지 않으셔도 됩니다.",
                     },
                     {
-                        externalMessageId: "succ-b702-38-m2",
+                        externalMessageId: "succ-b702-38-m4",
                         role: "assistant",
                         content: "네, 용어는 그대로 두겠습니다.",
                     },

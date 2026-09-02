@@ -224,6 +224,11 @@ for (const row of SUCC7_TRANSITION) {
     p("새 대화:");
     p("");
     for (const cv of rep.conversations ?? []) {
+        // The title is model input: `renderConversation()` writes it into the
+        // prompt as `## <label>: <title>`, and fingerprint v4 exists because v3
+        // left it out of the digest. A sheet that omits it asks for a signature
+        // on something the signer was not shown.
+        p(`- *(제목)* ${cv.title}`);
         for (const m of cv.messages ?? []) {
             p(`- **${m.role}** — ${m.content}`);
         }
