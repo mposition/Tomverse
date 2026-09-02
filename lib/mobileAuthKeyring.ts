@@ -74,6 +74,23 @@ export type MobileKeyringEntry = { keyId: string; secret: string };
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /**
+ * The one way an id from a variable is read.
+ *
+ * Ring and retirement ids cannot carry whitespace -- `KEY_ID_PATTERN` has no
+ * space in it, so `"sign-1 :secret"` is refused at parse time. The *active id*
+ * variable had no such guard, and the two readers of it disagreed: the lookup
+ * trimmed and the active-key resolver did not, so `" sign-2 "` made
+ * `activeMobileSigningKey` throw (and every request answer 503) while
+ * `mobileSigningKeyById("sign-2")` cheerfully reported the same key usable.
+ * A pre-deploy check that trimmed then passed a configuration the runtime
+ * refuses.
+ *
+ * One function, used by both, and by the checker.
+ */
+export const normalizeMobileKeyId = (value: string | undefined | null) =>
+  value?.trim() ?? "";
+
+/**
  * Says a configuration problem once, not once per parse.
  *
  * A single `mobileAuthReady()` parses each ring more than once, and the public
@@ -362,7 +379,7 @@ export const activeMobileSigningKey = (
   activeEntry(
     mobileSigningKeyring(environment),
     mobileSigningKeyRetirements(environment),
-    environment[MOBILE_ACTIVE_SIGNING_KEY_ENV] ?? "",
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
     MOBILE_ACTIVE_SIGNING_KEY_ENV,
     MOBILE_SIGNING_KEYS_ENV
   );
@@ -387,7 +404,7 @@ export const mobileSigningKeyById = (
     keyId,
     mobileSigningKeyring(environment),
     mobileSigningKeyRetirements(environment),
-    environment[MOBILE_ACTIVE_SIGNING_KEY_ENV]?.trim() ?? "",
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
     MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
     nowMs
   );
@@ -428,7 +445,7 @@ export const activeMobileRefreshPepper = (
   activeEntry(
     mobileRefreshPepperRing(environment),
     mobileRefreshPepperRetirements(environment),
-    environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV] ?? "",
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
     MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
     MOBILE_REFRESH_PEPPERS_ENV
   );
@@ -454,7 +471,7 @@ export const mobileRefreshPepperById = (
     keyId,
     mobileRefreshPepperRing(environment),
     mobileRefreshPepperRetirements(environment),
-    environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]?.trim() ?? "",
+    normalizeMobileKeyId(environment[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
     MOBILE_PREVIOUS_PEPPER_SECONDS,
     nowMs
   );
