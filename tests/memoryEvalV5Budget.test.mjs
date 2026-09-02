@@ -152,10 +152,14 @@ test("only the pair whose binding is satisfied can run live", () => {
                 })
             ).mode === "live"
     ).map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`);
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        "gpt-5-6-luna::mem-extract-v7",
-    ]);
+    // One entry since 2026-09-02: v7 was revoked after run 1 came back an
+    // admissible §12.3 failure, so it refuses on the status ahead of its
+    // budget exactly as the v5 pairs do
+    // (.github/audits/memory-eval-v7-run1-blind-review-2026-09-01.md). Its
+    // approved US$6.39 x 2 is still on the record and would still cover a
+    // second run; that is precisely why the status, not the ceiling, is what
+    // closes it.
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
 });
 
 test("v4's budget cannot fund a run, because it names no instrument", () => {
