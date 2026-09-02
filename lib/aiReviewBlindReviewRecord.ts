@@ -57,6 +57,15 @@ export type AiReviewBlindReviewIdentity = {
      * enough.
      */
     thresholdVersion: string;
+    /**
+     * The sheet the person read, by digest.
+     *
+     * The one artefact a human actually looked at, and for a while the only
+     * one nothing opened. Without it, a correct sheet, a deleted sheet, a
+     * sheet of different questions and a sheet edited after the verdicts were
+     * written are the same evidence.
+     */
+    blindSheetDigest: string;
 };
 
 export type AiReviewBlindReviewRow = {
@@ -81,6 +90,7 @@ const HEADER_KEYS = [
     "commit-sha",
     "sheet-seed",
     "threshold-version",
+    "blind-sheet-digest",
     "signed-by",
     "signed-at",
 ] as const;
@@ -103,6 +113,7 @@ export const renderBlindReviewRecordHeader = (
         `# commit-sha: ${identity.commitSha}`,
         `# sheet-seed: ${identity.sheetSeed}`,
         `# threshold-version: ${identity.thresholdVersion}`,
+        `# blind-sheet-digest: ${identity.blindSheetDigest}`,
         "# signed-by: ",
         "# signed-at: ",
         "#",
@@ -227,6 +238,7 @@ export const parseBlindReviewRecord = (
                 commitSha: identity["commit-sha"] || undefined,
                 sheetSeed: numeric(identity["sheet-seed"]),
                 thresholdVersion: identity["threshold-version"] || undefined,
+                blindSheetDigest: identity["blind-sheet-digest"] || undefined,
             },
             signedBy: identity["signed-by"] || null,
             signedAt: identity["signed-at"] || null,
@@ -255,7 +267,17 @@ export const blindReviewRecordProblems = (input: {
     const { record, identity } = input;
 
     if (!record.signedBy) problems.push("nobody signed the record");
-    if (!record.signedAt) problems.push("the record is not dated");
+    // The same rule the threshold sets get. A date that cannot be turned into
+    // a day is the same as no day, and `signed-at: someday` passed both
+    // adjudication and the approval check while it was only tested for
+    // emptiness.
+    if (!record.signedAt) {
+        problems.push("the record is not dated");
+    } else if (Number.isNaN(Date.parse(record.signedAt))) {
+        problems.push(
+            `the record's signature date "${record.signedAt}" is not a date`
+        );
+    }
 
     const compare = <K extends keyof AiReviewBlindReviewIdentity>(key: K) => {
         const stated = record.identity[key];
@@ -274,6 +296,7 @@ export const blindReviewRecordProblems = (input: {
     compare("commitSha");
     compare("sheetSeed");
     compare("thresholdVersion");
+    compare("blindSheetDigest");
 
     const answered = new Set(record.rows.map((row) => row.label));
     for (const label of input.sheetLabels) {

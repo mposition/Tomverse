@@ -153,12 +153,96 @@ export function buildBlindSheet(input: {
  * encodes the phenomenon in its name (`en-safety-02`), so printing it would
  * un-blind the sheet.
  */
+/**
+ * Rebuilds the sheet a person was given, from the answer key they were judged
+ * against.
+ *
+ * ## Why the sheet has to be evidence too
+ *
+ * The approval opened the record, the answer key and the journal, and never
+ * the sheet -- the one artefact a human actually read. So four situations were
+ * indistinguishable: the sheet was correct, the sheet was deleted, the sheet
+ * showed different questions than the answer key claims, and the sheet was
+ * edited after the verdicts were written. A blind review is a person's reading
+ * of specific text; if that text is not pinned, the verdicts are attached to
+ * nothing.
+ *
+ * Rebuilt from the answer key rather than from a seed, because the answer key
+ * IS the record of which cases were shown and in what order -- `S001` to a
+ * case id, in sheet order. A seed would only reproduce the same order if the
+ * sample size and task-type filter were also recorded and unchanged, which is
+ * three more things to keep true; the answer key is one thing, and it is
+ * already bound to the record by every label a person filled in.
+ *
+ * The result is compared by digest against the file on disk, so a sheet that
+ * shows anything other than these cases -- or that has been touched since --
+ * is a mismatch rather than a file nobody opened.
+ */
+export function rebuildBlindSheet(input: {
+    cases: readonly AiReviewEvalCase[];
+    observations: ReadonlyMap<string, AiReviewEvalObservation>;
+    /** label -> caseId, in the order the sheet presented them. */
+    answerKey: Readonly<Record<string, { caseId: string }>>;
+}): AiReviewBlindSheet | null {
+    const byId = new Map(input.cases.map((testCase) => [testCase.id, testCase]));
+    const entries: AiReviewBlindSheetEntry[] = [];
+    const answerKey: Record<string, { caseId: string; gold: unknown; notes?: string }> = {};
+
+    // The answer key's own order, not a sorted one.
+    //
+    // The labels are `S` plus a three-digit pad, so past 999 they get a fourth
+    // digit and a string sort stops matching the order they were written in:
+    // `S1000` sorts before `S200`, and a 1,001-case sheet diverged from its
+    // rebuild at index 100. Numeric parsing would fix that, but the deeper
+    // point is that the answer key IS the record of what was shown and in what
+    // order -- so re-deriving an order from the labels answers a question the
+    // file has already answered, and can only disagree with it.
+    //
+    // Insertion order is what `Object.keys` gives for these keys: `S001` is
+    // not an integer index, so it is not subject to the numeric-key ordering
+    // rule, and JSON.parse preserves the order the file was written in.
+    for (const label of Object.keys(input.answerKey)) {
+        const caseId = input.answerKey[label]?.caseId;
+        const testCase = caseId ? byId.get(caseId) : undefined;
+        const observation = caseId ? input.observations.get(caseId) : undefined;
+        // A label that cannot be rebuilt is not repaired into a shorter sheet:
+        // the caller is asking whether the sheet on disk is the sheet these
+        // verdicts belong to, and a partial rebuild answers a different
+        // question.
+        if (!testCase || !observation) return null;
+        entries.push({
+            label,
+            caseId,
+            language: testCase.language,
+            question: testCase.question,
+            responses: testCase.responses.map((response) => ({
+                label: response.label.toUpperCase(),
+                content: response.content,
+            })),
+            reviewerFindings: {
+                contradictions: observation.findings.contradictions,
+                missingPoints: observation.findings.missingPoints,
+                differences: observation.findings.differences,
+            },
+            reviewerAllText: observation.allText,
+            reviewerProse: observation.reviewerProse,
+        });
+        answerKey[label] = { caseId, gold: testCase.gold, notes: testCase.notes };
+    }
+    return { entries, answerKey };
+}
+
 export function renderBlindSheet(sheet: AiReviewBlindSheet, meta: {
     runOrdinal: number | null;
     reviewerModelId: string;
     promptVersion: string;
     datasetVersion: string;
     seed: number;
+    /**
+     * The threshold version the sheet was sized for, printed on the sheet the
+     * person reads so the paper in front of them says which bar it is for.
+     */
+    thresholdVersion?: string;
 }): string {
     const lines: string[] = [
         `# AI Review 블라인드 품질 검토 시트`,
@@ -167,6 +251,7 @@ export function renderBlindSheet(sheet: AiReviewBlindSheet, meta: {
         `- reviewer pair: \`${meta.reviewerModelId}@${meta.promptVersion}\``,
         `- run ordinal: ${meta.runOrdinal ?? "(없음)"}`,
         `- sheet seed: ${meta.seed}`,
+        `- threshold version: \`${meta.thresholdVersion ?? "(없음)"}\``,
         `- 항목 수: ${sheet.entries.length}`,
         "",
         "## 판정 방법",

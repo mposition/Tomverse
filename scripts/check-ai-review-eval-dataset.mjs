@@ -45,6 +45,7 @@ import {
 import {
   adjudicatedArtifactProblems,
   decisionDatasetProblems,
+  fileDigest,
   verifyEvidenceBundle,
 } from "../lib/aiReviewEvidenceBundle.ts";
 import {
@@ -368,23 +369,63 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
     // check has not judged coverage, and says so instead of letting an "ok"
     // imply it did. The refusal for resting on an unsigned set already lives
     // in the register check, where an approval is what is being refused.
-    if (approvedBar === undefined) {
+    // Three states, and they are not the same answer.
+    //
+    // Naming NOTHING is a failure: evidence that does not say which bar it was
+    // produced under was not produced by the generator, which always writes
+    // one.
+    //
+    // Naming a version that does not EXIST is a failure too, for a different
+    // reason: the evidence claims a bar, and there is no such bar -- a typo, a
+    // deleted set, or a version from a branch nobody merged.
+    //
+    // Naming a real set nobody has SIGNED is scope: there is no bar to apply
+    // yet, and the check says so beside its ok rather than letting the ok
+    // imply coverage was judged.
+    if (!effectiveThresholdVersion) {
+      // Not a note. The record's identity check requires a threshold version
+      // and compares it, so evidence without one never reaches a coverage
+      // note anyway -- it fails a few lines later with "the record does not
+      // state thresholdVersion". Two rules describing the same evidence
+      // differently is how a contract stops meaning anything, so this says
+      // plainly what the other one already enforced: the generator always
+      // writes a version, and evidence that carries none was not made by it.
+      problems.push(
+        "no threshold version: this evidence does not say which bar it was produced " +
+          "under, and the blind sheet generator always records one"
+      );
+    } else if (!namedSet) {
+      problems.push(
+        `threshold set "${effectiveThresholdVersion}" does not exist; this evidence names ` +
+          "a bar that is not in this tree"
+      );
+    } else if (approvedBar === undefined) {
       notes.push(
-        effectiveThresholdVersion
-          ? `coverage not judged: threshold set "${effectiveThresholdVersion}" is not approved, ` +
-            "so it supplies no bar for how many cases the blind review had to cover"
-          : "coverage not judged: nothing names a threshold version, so there is no bar " +
-            "for how many cases the blind review had to cover"
+        `coverage not judged: threshold set "${effectiveThresholdVersion}" is not approved, ` +
+          "so it supplies no bar for how many cases the blind review had to cover"
       );
     }
     const journalText = readFileSync(journalPath, "utf8");
     const answerKeyText = readFileSync(answerKeyPath, "utf8");
     const recordText = readFileSync(recordRef, "utf8");
+    const sheetPath = join(artifactDirectory, `${artifactStem}--blind-sheet.md`);
+    const blindSheetText = existsSync(sheetPath)
+      ? readFileSync(sheetPath, "utf8")
+      : null;
     const bundle = verifyEvidenceBundle({
       dataset: matchingSet.dataset,
       journalText,
       answerKeyText,
       recordText,
+      blindSheetText,
+      sheetMeta: {
+        runOrdinal: summary.runOrdinal ?? null,
+        reviewerModelId: summary.reviewerModelId ?? "",
+        promptVersion: summary.promptVersion ?? "",
+        datasetVersion: matchingSet.dataset.version,
+        seed: summary.blindReviewSheetSeed,
+        thresholdVersion: effectiveThresholdVersion ?? undefined,
+      },
       identity: {
         runOrdinal: expected?.runOrdinal ?? summary.runOrdinal,
         reviewerModelId: expected?.reviewerModelId ?? summary.reviewerModelId,
@@ -394,6 +435,7 @@ const verifyRunArtifact = ({ artifactPath, expected, decisionSets, thresholdVers
         // The sheet's seed as the artifact recorded it, not the run's.
         sheetSeed: summary.blindReviewSheetSeed,
         thresholdVersion: effectiveThresholdVersion,
+        blindSheetDigest: blindSheetText ? fileDigest(blindSheetText) : undefined,
       },
       // The signed bar, when the entry names a set that has one. An entry
       // resting on an unsigned set is already refused by the register check;

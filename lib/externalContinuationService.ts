@@ -17,15 +17,33 @@
  * cannot tell apart from any other. A bridge with no conversation is
  * provenance about nothing. Both are created inside the caller's transaction
  * through `createConversation`, which is what the writer-coverage check
- * requires and what makes `productKey = "chat"` unmissable.
+ * requires and what makes `productKey = "review"` unmissable.
+ *
+ * ## Why the product is Review
+ *
+ * Continuing an imported transcript is asking several models the same next
+ * question with the same imported context, in one place. That is Review
+ * (docs/policy/external-conversation-continuation.md §3.1). The bridge decides
+ * provenance and which surface the row opens at; it does not decide the
+ * product, and the product does not decide the surface -- deriving one from
+ * the other would send every Review conversation to `/continuations`.
  */
 
 import type { Prisma } from "@prisma/client";
 
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { isExternalContinuationEnabled } from "@/lib/appSettings";
-import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
+import {
+    effectivePlanModelLimit,
+    getUserBillingPlan,
+} from "@/lib/billingEntitlements";
+import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
 import { createConversation } from "@/lib/conversationCreation";
+import {
+    capToPlanModelLimit,
+    resolveNewConversationSelectedModels,
+} from "@/lib/newConversationSelectedModels";
 import {
     ConversationLockError,
     hasResourceUnlockGrant,
@@ -190,8 +208,19 @@ export async function createExternalContinuation(input: {
         return { ...existing, idempotentReplay: true };
     }
 
+    /*
+      Resolved before the transaction opens, not inside it.
+
+      Two reads (the account's settings and its billing plan) and a catalogue
+      snapshot are not work a write transaction should be holding a row lock
+      through, and none of them depend on anything the transaction does. The
+      idempotent replay above returns before any of it runs, so a retried click
+      does not pay for it either.
+    */
+    const selectedModels = await resolveInitialContinuationModels(input.userId);
+
     try {
-        return await createContinuationRows(input);
+        return await createContinuationRows({ ...input, selectedModels });
     } catch (error) {
         /*
           Two requests with the same key raced past the read above.
@@ -221,6 +250,39 @@ export async function createExternalContinuation(input: {
     }
 }
 
+/**
+ * The models a new continuation starts with.
+ *
+ * The account's saved new-conversation combination, exactly as a new Review
+ * conversation created from `POST /api/conversations` would start
+ * (docs/policy/external-conversation-continuation.md §8.3). There is no
+ * continuation-specific default: a combination that means one thing on the
+ * Review screen and another here is a setting the owner cannot reason about.
+ *
+ * The plan's ceiling truncates rather than refuses. The create route refuses a
+ * body whose *explicit* model list exceeds the plan, because that request named
+ * models the plan does not allow; this request names none, so refusing it would
+ * make a saved combination from a since-downgraded plan block the feature
+ * entirely, with nothing on this screen to change.
+ */
+async function resolveInitialContinuationModels(
+    userId: string
+): Promise<string[]> {
+    const [settings, plan] = await Promise.all([
+        prisma.userSettings.findUnique({
+            where: { userId },
+            select: { defaultModel: true, newConversationModelIds: true },
+        }),
+        getUserBillingPlan(userId),
+    ]);
+    const modelIds = await resolveNewConversationSelectedModels({
+        storedNewConversationModelIds: settings?.newConversationModelIds ?? null,
+        defaultModelId: settings?.defaultModel || APP_DEFAULTS.defaultModelId,
+        planTier: plan.tier,
+    });
+    return capToPlanModelLimit(modelIds, effectivePlanModelLimit(plan));
+}
+
 /** Prisma's unique-constraint violation, without importing its error class. */
 const isUniqueConstraintError = (error: unknown): boolean =>
     typeof error === "object" &&
@@ -245,6 +307,7 @@ async function createContinuationRows(input: {
     externalConversationId: string;
     idempotencyKey: string;
     request: Request;
+    selectedModels: string[];
 }): Promise<CreatedContinuation> {
     return prisma.$transaction(async (tx) => {
         const snapshot = await loadUnlockedSnapshot(
@@ -268,16 +331,21 @@ async function createContinuationRows(input: {
             {
                 userId: input.userId,
                 title: CONTINUATION_DEFAULT_TITLE,
-                // A server constant. Chat is what the user is doing here:
-                // continuing one conversation with one assistant. Recording it
-                // as `review` to reach a screen that exists today would make
-                // the column a lie about the product, which is the one thing
-                // the product-key policy forbids outright.
-                productKey: CHAT_PRODUCT_KEY,
-                // Not derived, and not inherited from anything: `manual` is the
-                // default and Auto is a separate opt-in whose availability this
-                // feature does not decide.
+                // A server constant, never a body field. Review is what the
+                // user is doing here: putting the same imported context and
+                // the same next question to the models they chose
+                // (docs/policy/external-conversation-continuation.md §3.1).
+                productKey: REVIEW_PRODUCT_KEY,
+                // Not derived, and not inherited from anything. Auto is a
+                // Chat-only feature (`AUTO_SELECTION_PRODUCT`), so on a Review
+                // row it is absent rather than refused, and the database's
+                // `Conversation_auto_only_chat_check` would refuse the pair
+                // anyway.
                 selectionMode: "manual",
+                // The account's own new-conversation combination, resolved by
+                // the same function `POST /api/conversations` uses. §8.3: no
+                // continuation-specific default combination.
+                selectedModels: JSON.stringify(input.selectedModels),
             },
             { id: true }
         );

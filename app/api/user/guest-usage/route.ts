@@ -5,14 +5,29 @@ import { getGuestUsageSnapshot } from "@/lib/chatSecurity";
 import { getGuestComparisonReviewRemaining } from "@/lib/comparisonReviewQuota";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 
 export async function GET(req: Request) {
     try {
         const anonymousKey = getAnonymousClientKey(req);
-        await consumeApiRateLimit(req, `ip:${anonymousKey}`, "guest-usage-read", {
-            minute: 30,
-            day: 3_000,
-        });
+        // The rate limiter's buckets are rows: `consumeApiRateLimit` opens a
+        // Prisma transaction, so on the Playwright server -- which runs with
+        // E2E_DISABLE_DATABASE and an unreachable DATABASE_URL -- it threw
+        // before the snapshot below was ever reached, and this endpoint
+        // answered 500 on every page load of the suite.
+        //
+        // Skipped rather than made to fail softly, which is what
+        // `app/api/models/status/route.ts` already does for the same call: a
+        // limiter with nowhere to count is not a weaker limiter, it is none.
+        // `isE2EDatabaseDisabled()` needs the flag *and* a loopback
+        // NEXTAUTH_URL, and /api/ready refuses the flag in production, so no
+        // deployment reaches this branch with its limiter switched off.
+        if (!isE2EDatabaseDisabled()) {
+            await consumeApiRateLimit(req, `ip:${anonymousKey}`, "guest-usage-read", {
+                minute: 30,
+                day: 3_000,
+            });
+        }
 
         const snapshot = await getGuestUsageSnapshot(req);
         // The AI Review trial is a separate, feature-scoped monthly bucket, and

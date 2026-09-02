@@ -1,0 +1,282 @@
+# N2 구현 보고서 — native mobile bearer authentication (2026-09-02)
+
+승인 문서: `.github/audits/2026-08-31-native-mobile-auth-n2-design-approval.md`
+(승인 SHA `190056fc2ee9ffc923a8f6e1331081e272762d2f`, 승인자 `mposition`,
+2026-08-31, Backend/AI · Mobile/Release 양쪽 approve)
+
+벡터 커버리지: `.github/audits/2026-09-02-native-mobile-auth-n2-vector-coverage.md`
+
+---
+
+## 1. 한 문단 요약
+
+승인된 설계의 §8.1.1을 계약으로 삼아 N2를 구현했습니다. 토큰 발급·검증, refresh
+회전, 취소, 다섯 개 endpoint, proxy의 순서, native bridge 경계가 모두 들어갔고
+`develop`에 병합돼 있습니다. **동작은 아직 아무것도 바뀌지 않았습니다** —
+`N1B_BEARER_ROUTES`가 승인된 대로 빈 목록이므로 native의 mutation은 여전히 403이고,
+모바일 인증 자체는 환경변수가 없으면 503을 답합니다. 들어간 것은 **순서와 경계**이지
+개방이 아닙니다.
+
+---
+
+## 2. 이 보고서가 주장하지 않는 것
+
+승인 문서 §8.2.1이 명시한 것을 그대로 유지합니다. 아래 어느 것도 **아닙니다**.
+
+- N1b 개방
+- production 활성화
+- 실기기 검증(`AUTH-01`·`AUTH-03`·`AUTH-04`)
+- release-gate 통과
+- R2의 `capacitor://` CORS 확인
+
+`docs/release-gates/tomverse-chat-v1.yaml`의 `status`·`approvedBy`·`evidenceRefs`는
+**건드리지 않았습니다.**
+
+---
+
+## 3. 커밋
+
+| commit | 무엇 |
+|---|---|
+| `e07c7d5` | 순수 판정 모듈 — 토큰 검증(§5.2), 회전 3-갈래(D5), 취소 신선도(D12) |
+| `236eb61` | data-domain registry 등재 → 다섯 테이블 migration |
+| `9412dc4` | 암호 경계 — keyring 둘, JWS/Ed25519, refresh HMAC |
+| `27bd00c` | 서비스와 다섯 endpoint, mutation-origin 면제와 그 조건 |
+| `31b813e` | proxy의 §5.4·§5.5 순서, V14, D19의 TypeScript 표면 |
+| `f9c4475` | native bridge, 거절하는 web fallback, `check:native-token-boundary` |
+| `60383b2` | D12 배선 분리와 그 테스트, 남은 §7 벡터, 계약 불변식 |
+
+그 사이에 다른 사람이 고친 것이 둘 있습니다 — `e0e60d6`, `75062ac`. §8에 적습니다.
+
+---
+
+## 4. 만들어진 것
+
+### 4.1 판정 — 데이터베이스도 환경도 없는 순수 모듈
+
+| 파일 | 무엇을 정하는가 |
+|---|---|
+| `lib/mobileAuthContract.ts` | 승인된 18개 값과 닫힌 목록 넷. 항목 번호를 각 값에 붙였습니다 |
+| `lib/mobileAccessTokenCore.ts` | §5.2의 **순서**. 서명 검증이 주입된 port이고 step 3에서 불립니다 |
+| `lib/mobileRefreshRotationCore.ts` | D5의 3단계. secret 비교가 **thunk**이고 step 2에서 불립니다 |
+| `lib/mobileRevocationFreshnessCore.ts` | D12의 판정. `usable`과 `cacheable`을 따로 답합니다 |
+| `lib/mobileSessionSnapshotCache.ts` | D12의 **기계** — 캐시, generation, 재조회 1회 |
+| `lib/nativeBearerGate.ts` | §5.2를 바깥에서 본 판정, §5.4의 헤더 삭제 |
+
+**왜 순서가 모듈 안에 있는가.** 이 여섯 중 셋은 "검사 목록"이 아니라 "순서"입니다.
+호출자에게 순서를 맡기면 가독성을 위해 두 줄을 바꾸는 순간 틀립니다. 그래서
+`verifyMobileAccessToken`은 claim을 반환하기 전까지 호출자에게 주지 않고,
+`decideMobileRefresh`는 boolean이 아니라 thunk를 받습니다 — boolean은 호출자가 잘못된
+순서로 계산해도 모듈이 알 수 없습니다.
+
+### 4.2 암호 경계
+
+| 파일 | 무엇 |
+|---|---|
+| `lib/mobileAuthKeyring.ts` | 링 **둘**. 서명 키와 pepper는 주기가 다릅니다(D6) |
+| `lib/mobileAccessToken.ts` | JWS 압축 직렬화, Ed25519, port 결속 |
+| `lib/mobileRefreshToken.ts` | 256비트 secret, pepper HMAC, 상수 시간 비교 |
+| `lib/mobileLoginGrant.ts` | 60초 단일 사용 grant, PKCE S256 결속 |
+
+링이 둘인 것이 D6의 요점입니다. 서명 키는 자기가 서명한 10분짜리 토큰만 넘기면 되고,
+pepper는 **살아 있는 refresh 전부**에 묶여 있습니다. 같은 주기로 돌리면 전 사용자가
+로그아웃됩니다. `tests/mobileAuthContract.test.mjs`가 그 관계를 고정합니다.
+
+### 4.3 서비스와 인가
+
+| 파일 | 무엇 |
+|---|---|
+| `lib/mobileAuthService.ts` | 발급·회전·logout·기기 목록·기기 해제·전체 폐기 |
+| `lib/mobileSessionAuthorization.ts` | 검증된 토큰이 **아직 인가하는가** |
+| `lib/mobileAuthRoute.ts` | route가 같은 토큰을 독립적으로 다시 검증(D2) |
+
+**게이트는 인가가 아닙니다.** proxy는 서명과 만료만 봅니다. 폐기된 세션의 토큰이
+`exp`까지 게이트를 통과할 수 있고, 그것을 막는 것이 `mobileSessionAuthorization.ts`
+입니다. 이 문장을 쓸 수 없으면 설계가 틀린 것이라고 D12가 적었고, 쓸 수 있습니다.
+
+### 4.4 데이터
+
+migration `20260831120000_mobile_bearer_authentication` (201줄): `MobileDevice`,
+`MobileTokenFamily`, `MobileRefreshRotation`, `MobileLoginGrant`, `MobileAuthEvent`.
+
+- **등재가 먼저였습니다.** `docs/policy/tomverse-chat-data-domain-registry.yaml`에
+  네 행을 넣은 뒤 migration을 썼습니다. `MobileRefreshRotation`은 user 컬럼이 없어
+  등재 대상이 아니고, 등재하면 오히려 검사가 실패합니다. 2단계 cascade로 지워집니다.
+- **`MobileAuthEvent.deviceId`·`familyId`에 FK가 없습니다.** audit 행은 자기가
+  기록한 기기보다 오래 살아야 하니까요. 그래서 CHECK로 `userId`를 함께 요구합니다 —
+  없으면 사람을 식별하는 행이 cascade를 피해 남습니다.
+- 닫힌 목록 넷이 코드와 CHECK 양쪽에 있고 `check:enum-constraints`가 대조합니다.
+- retention 정책 셋과 maintenance step 셋을 추가했습니다. rotation 정리는 **나이
+  기준이 아닙니다** — 소비된 행이 재사용을 `reuse_detected`로 만드는 유일한 근거라,
+  오래됐다고 지우면 공격자가 가장 오래 쥔 토큰에 대해서만 탐지가 사라집니다.
+
+### 4.5 endpoint
+
+| 경로 | 인증 | mutation-origin |
+|---|---|---|
+| `POST /api/auth/mobile/login-grant` | cookie 세션 | **적용**(브라우저 요청) |
+| `POST /api/auth/mobile/exchange` | 본문의 grant + PKCE verifier | 면제 |
+| `POST /api/auth/mobile/refresh` | 본문의 refresh token | 면제 |
+| `POST /api/auth/mobile/logout` | 본문의 refresh token | 면제 |
+| `GET /api/auth/mobile/devices` | access token | 해당 없음 |
+| `POST /api/auth/mobile/devices/{id}/revoke` | access token | **적용** — D14대로 N1b 뒤 |
+
+**면제에는 조건이 붙어 있고, 그 조건이 테스트입니다.** 세 handler는 cookie 신원을
+절대 받지 않습니다 — `tests/mobileAuthExemptPaths.test.mjs`가 그 파일들이
+`getServerSession`을 **언급만 해도** 실패합니다. 그 문장이 참인 동안에만 면제가
+안전하고, 거짓이 되는 날 면제는 CSRF 구멍이 됩니다.
+
+logout은 **항상 204**입니다. 다르게 답하면 토큰 진위 oracle이 되고, 호출자가 그 답으로
+달리 할 수 있는 일이 없습니다.
+
+### 4.6 proxy의 순서
+
+§5.5 그대로: ① host·origin-secret → ② **내부 auth 헤더 무조건 삭제** →
+③ N1a preflight → ④ route 등재 확인 → ⑤ bearer 검증 → ⑥ mutation-origin(⑤가
+`yes`가 **아닐 때만**).
+
+`N1B_BEARER_ROUTES`가 비어 있으므로 오늘 모든 판정이 `not_applicable`이고 어떤 요청도
+다르게 동작하지 않습니다. `tests/mobileBearerProxy.test.mjs`가 그 무해함을 실제
+proxy로 확인합니다 — **진짜 유효한 토큰**을 미등재 route에 보내도 여전히 403입니다.
+
+route 목록은 상수를 읽지 않고 **인자로 받습니다.** 빈 목록은 그러지 않으면 곧
+"테스트되지 않은 목록"이 됩니다.
+
+### 4.7 native bridge (D19)
+
+`apps/mobile/src/authBridgeContract.ts`가 표면을 셋으로 고정하고
+(`getAccessToken`·`hasSession`·`signOut`), `authBridge.ts`의 web 구현은 **거절합니다.**
+Capacitor가 권하는 web fallback의 자연스러운 형태가 JS에서 refresh endpoint를 부르는
+것이고, 그것이 정확히 D19가 막는 것입니다. 브라우저에서는 로그인되지 않은 상태이며,
+그것은 나중에 채울 구멍이 아니라 기기 밖에서 셸을 돌리는 일의 한계입니다.
+
+`npm run check:native-token-boundary`가 게이트입니다. `apps/mobile`이 싣는 모든
+파일에서 세 endpoint와 필드 이름을 찾습니다. **잡는다고 주장하는 세 형태 모두에서
+실제로 실패하는 것을 확인했고**, 그 이름이 왜 없는지 설명하는 주석에는 걸리지 않는
+것도 확인했습니다. PR Fast Gate와 릴리스 체크리스트에 있습니다.
+
+---
+
+## 5. 구현 중 발견해 고친 것
+
+설계에 없던, 코드를 쓰다가 드러난 것들입니다.
+
+1. **강제 로그아웃이 모바일 세션을 되살렸습니다.** `sessionsRevokedAt`만 찍으면
+   access token(`iat`이 그보다 앞섬)은 막히지만 refresh token은 살아 있어서, 다음
+   refresh가 sign-out **이후** 날짜의 access token을 발급하고 세션이 돌아왔습니다.
+   `revokeAllUserSessions`가 모바일 family도 폐기하도록 했습니다 — D11의 가장 넓은
+   행이 원래 그렇게 말하고 있었습니다. 이 수정 없이는 실패하는 db 테스트가 함께
+   있습니다.
+2. **`mobile_auth.revoked_on_account_deletion`을 아무도 쓰지 않았습니다.** CHECK
+   제약에는 있고 writer가 없는 상태였습니다. 삭제 트랜잭션 안, User 행이 사라지기
+   전에 `userId: null`로 씁니다 — 계정을 지목하는 행은 잠시 뒤 같은 cascade에 쓸려
+   가고, 승인 결정 9는 비식별 집계 하나만 남기는 것을 허용합니다.
+3. **D12의 배선에 테스트가 하나도 없었습니다.** 판정은 처음부터 테스트가 있었지만
+   15초 상한을 실제로 참으로 만드는 캐시·generation·재조회에는 없었습니다.
+   `lib/mobileSessionSnapshotCache.ts`로 분리해 조회와 시계를 주입받게 했고,
+   V29a·V29b가 느린 DB를 기다리는 실험이 아니라 unit test가 됐습니다.
+4. **N1a의 가드가 실패했고, 그게 맞았습니다.** "검증기가 생기기 전까지
+   `Authorization`의 존재가 아무것도 바꿔서는 안 된다"는 문장은 생기는 날을 위한
+   예약이었습니다. 실제로 성립하는 규칙으로 다시 썼습니다 — 헤더는 읽되 검증에
+   넘기기 위해서만, 우회는 판정에 걸립니다.
+5. **prefetch 분기가 위조 헤더를 그대로 전달했습니다.** 인자 없는
+   `NextResponse.next()`는 요청을 그대로 넘기므로, §5.4의 삭제를 모든 early return
+   위로 올려야 했습니다. 실제로 확인했고 테스트는 재작성된 헤더 목록의 **존재를
+   단언**합니다 — 없어도 통과하면 회귀를 지나갑니다.
+
+---
+
+## 6. 검증
+
+이 보고서를 쓴 시점에 실행한 것입니다.
+
+| 무엇 | 결과 |
+|---|---|
+| `npm run test:unit` | **7,479 pass / 0 fail** (1 skipped, 기존) |
+| `npm run test:server-contract` | **508 pass / 0 fail** |
+| `tests/integration/mobile-auth-*.db.test.ts` | **29 pass / 0 fail** — 실제 PostgreSQL 16, 전체 migration 이력으로 세운 DB |
+| `prisma migrate diff --exit-code` | 차이 없음 |
+| `npm run lint` · `typecheck` · `build` | 통과 |
+| `check:enum-constraints` · `check:data-domain-registry` · `check:native-token-boundary` · `check:capacitor-local-bundle` · `check:doc-references` · `check:policy-section-references` · `check:encoding:strict` · `check:shared-packages` | 전부 0 |
+
+모바일 인증 테스트는 **147개 unit + 29개 db = 176개**, 16개 파일입니다.
+소스는 lib·routes·apps·script 합쳐 약 3,460줄입니다.
+
+**실행하지 않은 것은 위 표에 없습니다.** E2E(Playwright), 부하, 실기기는 실행하지
+않았습니다.
+
+---
+
+## 7. §7 벡터
+
+전체 대조는 `.github/audits/2026-09-02-native-mobile-auth-n2-vector-coverage.md`에
+있습니다. 요약하면:
+
+- **통과**: V1~V14, V16, V22, V24~V31 (V24b·V24c·V25·V26·V26b·V27·V28·V29a·V29b·V30·V31 포함)
+- **N1b가 열려야 도달**: V17·V18·V19·V23, 그리고 V20·V21의 401 절반
+- **코드가 판정할 수 없음**: V15의 15분(운영 행위), 실기기 증거
+
+§8.2 선행 조건 3번은 V17~V23을 "N1b 이전에" 요구하는데 이 넷은 N1b 없이 성립하지
+않습니다. 순환처럼 보이지만 아닙니다 — **첫 route 등재가 이 넷을 함께 들고 와야
+한다**는 뜻으로 읽습니다. 등재를 먼저 하고 벡터를 나중에 붙이는 순서는 이 조건을
+만족하지 않습니다.
+
+---
+
+## 8. 이번 작업이 `develop`을 빨갛게 만들었습니다
+
+정직하게 적습니다. `236eb61`("다섯 테이블")이 `lib/maintenance.ts`에 cleanup step
+셋을 추가하면서, server-contract 테스트의 stub에 그 세 모델을 넣지 않았습니다.
+`develop`이 그 시점부터 빨갛게 됐고 열려 있던 모든 PR이 그 실패를 물려받았습니다.
+`e0e60d6`이 stub을 채워 고쳤고, 같은 수정이 두 PR에 중복으로 들어가 `75062ac`이
+중복을 지웠습니다.
+
+**원인은 제가 실행한 lane이 하나 모자랐다는 것입니다.** 저는
+`npm run test:unit`만 돌렸고 `npm run test:server-contract`는 별도 script인데 돌리지
+않았습니다. 이 보고서를 쓰면서 실행했고 508/508 통과합니다. 이후 커밋부터는 두 lane을
+모두 확인했습니다.
+
+배운 것을 한 줄로: **`lib/maintenance.ts`에 step을 추가하면 server-contract stub도
+같이 움직여야 합니다.** `75062ac`이 남긴 주석이 그 stub이 뒤처진 것이 이번이 두 번째
+라고 적고 있고, 아직 그것을 검사하는 것은 없습니다.
+
+---
+
+## 9. 운영에 필요한 환경변수
+
+여섯 개이고, **지금까지 어느 문서도 적지 않았습니다.**
+
+| 변수 | 형태 | 뜻 |
+|---|---|---|
+| `MOBILE_AUTH_SIGNING_KEYS` | `id:base64Pkcs8,...` | Ed25519 개인키 링. 은퇴한 키는 링에 남깁니다 |
+| `MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID` | `id` | 새 access token을 서명할 키 |
+| `MOBILE_AUTH_REFRESH_PEPPERS` | `id:secret,...` | refresh digest용 pepper 링 |
+| `MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID` | `id` | 새 digest를 계산할 pepper |
+| `MOBILE_AUTH_TOKEN_ISSUER` | 문자열 | `iss`. 검증이 **정확 일치**합니다 |
+| `MOBILE_AUTH_TOKEN_AUDIENCE` | 문자열 | `aud`. 같습니다 |
+
+넷 중 하나라도 없으면 `mobileAuthConfigured()`가 false이고 모든 모바일 endpoint가
+**503**을 답합니다. 어느 변수가 없는지는 말하지 않습니다 — 인증되지 않은 요청자가
+들을 이유가 없는 배포 사실입니다.
+
+**`/api/ready`는 이 여섯을 검사하지 않습니다.** 의도된 것입니다: 모바일 인증이 아직
+켜지지 않은 배포에서 readiness를 실패시킬 이유가 없고, 켜졌는지 여부는 endpoint가
+fail-closed로 답합니다. production 활성화를 결정할 때 `/api/ready`에 넣을지는 그때의
+결정입니다.
+
+키 생성은 자격증명을 만드는 일이므로 이 저장소에 script를 두지 않았습니다. 필요할 때
+운영자에게 실행 위치와 함께 제시합니다.
+
+---
+
+## 10. 남은 것
+
+| 항목 | 조건 |
+|---|---|
+| **N1b 개방** | §8.2의 네 선행 조건. route 하나씩, 각각 bearer 전환 증거와 V17~V19·V23을 함께 |
+| **production 활성화** | 별도 승인. 환경변수 배포가 코드보다 먼저 |
+| **실기기 판정** | `AUTH-01`·`AUTH-03`·`AUTH-04`. Swift·Kotlin이 아직 없습니다 |
+| **R2의 `capacitor://` CORS** | 별도 확인 |
+| **B-2 재검토** | 승인 항목 17 — 별도 후속 |
+| **웹 `sessionSecurity` 캐시 조사** | 승인 항목 18 — 별도 후속. N2에는 D12의 강화된 계약을 처음부터 적용했습니다 |
+| **maintenance stub 검사** | §8의 재발 방지. 아직 없습니다 |

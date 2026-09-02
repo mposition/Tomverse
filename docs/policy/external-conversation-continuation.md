@@ -13,6 +13,14 @@ approvalTicket: N/A
 사용자의 명시적 선택으로 새 Tomverse Conversation을 만들어 같은 화면에서 대화를
 이어가는 기능의 계약입니다.
 
+**이어진 대화는 Review 대화입니다**(`productKey = "review"`, `kind = "chat"`).
+가져온 원본을 여러 모델에게 같은 자리에서 다시 물어보는 것이 이 기능이 답하는
+질문이고, 그것이 Review가 하는 일입니다. 2026-09-01 개정 이전의 v1은 이어가기를
+단일 모델 Chat으로 정의하면서 모델 선택을 "Chat surface의 문제"로 미뤘고, 그
+결과 Review와 같은 화면 계약을 쓰면서 제품만 `chat`으로 기록된 행이 만들어졌습니다.
+이 개정은 정책과 구현을 같은 변경에서 함께 고칩니다 — 제품 정체성은 §3.1, turn은
+§5.1, 화면은 §8.2, 기존 행의 교정은 §15입니다.
+
 `docs/policy/external-conversation-import-and-memory.md` §6이 이 기능을 릴리스 A의
 비목표로 두면서 방향만 예약해 두었습니다. 이 문서는 그 예약을 구현 계약으로
 확정한 것이며, **§6을 대체하지 않고 그 위에 쌓입니다.** §6이 금지한 다섯 가지는
@@ -40,13 +48,16 @@ viewer의 즉흥 bridge, 전체 transcript의 첫 요청 첨부.
 
 | 범위 | 명시적 비목표 |
 |---|---|
-| 하나의 immutable snapshot을 지목하는 bridge, 새 `productKey=chat` Conversation, deterministic bounded context seed, source-backed timeline 화면, 삭제·lock·share·export 의미, 전용 feature flag | LLM 요약 seed, memory 연동, lineage 최신 snapshot 자동 추적, 공개 share, 게스트, 다중 모델 비교, 외부 첨부 복제, 외부 원문의 일반 export 포함 |
+| 하나의 immutable snapshot을 지목하는 bridge, 새 `productKey=review` Conversation, **선택한 모델마다 같은 seed로 답하는 다중 모델 비교**, deterministic bounded context seed, source-backed timeline 화면, 삭제·lock·share·export 의미, 전용 feature flag | LLM 요약 seed, memory 연동, lineage 최신 snapshot 자동 추적, 공개 share, 게스트, 외부 첨부 복제, 외부 원문의 일반 export 포함 |
 
 - 이 기능은 **memory 릴리스와 독립적으로 동작해야 합니다.** `memoryExtractionEnabled`
   · `memoryInjectionEnabled`가 모두 꺼진 상태에서 전 기능이 성립합니다. 승인되지
   않은 memory pair·candidate를 읽지 않고, extraction·review·injection 경로를
   호출하지 않습니다.
 - Import 릴리스 A와도 flag가 다릅니다(§7).
+- **다중 모델 비교는 더 이상 비목표가 아닙니다**(2026-09-01 개정). 다만 이 기능이
+  가져오는 것은 Review의 **기존** 모델 선택·entitlement·비교 계약이며, 여기서 새
+  모델 선택 규칙이나 새 상한을 만들지 않습니다(§3.1, §8.2).
 
 ## 2. 용어
 
@@ -54,7 +65,7 @@ viewer의 즉흥 bridge, 전체 transcript의 첫 요청 첨부.
 |---|---|
 | Source snapshot | 사용자가 지목한 하나의 immutable `ExternalConversation`(import 정책 §4.2) |
 | Bridge | source snapshot과 새 Conversation을 잇는 provenance row |
-| Continuation | bridge를 가진 Tomverse Conversation |
+| Continuation | bridge를 가진 Tomverse Review Conversation(`productKey = "review"`) |
 | Context seed | 이 대화의 각 turn이 싣는, source에서 결정적으로 뽑은 제한된 발췌 |
 | Tombstone | source가 삭제된 뒤 continuation 화면이 그 사실을 말하는 상태 |
 
@@ -81,6 +92,32 @@ viewer의 즉흥 bridge, 전체 transcript의 첫 요청 첨부.
   응답에 싣지 않고 로그·telemetry에 남기지 않습니다(import 정책 §4.1).
 - 계정 삭제는 `userId` FK Cascade로 함께 지워집니다.
 - bridge가 없는 일반 Conversation은 이 변경의 영향을 받지 않습니다.
+
+### 3.1 제품 정체성 — `productKey = "review"`, `kind = "chat"`
+
+**continuation은 Review 대화입니다.** 생성 경로는 공통 생성 서비스
+`createConversation()`에 서버 상수 `REVIEW_PRODUCT_KEY`를 **행과 같은
+statement로** 넘깁니다 — docs/policy/conversation-product-key.md §5.2.
+요청 본문이 제품을 실어 보내는 경로는 없고, 앞으로도 만들지 않습니다.
+
+- **bridge는 provenance이지 제품이 아닙니다.** bridge가 있다는 사실이 정하는 것은
+  둘 — 이 대화가 어느 snapshot에서 시작됐는가, 그리고 어느 surface에서 열리는가
+  (§8.2의 `conversationSurface()`). `productKey`는 그 둘 중 어느 쪽에서도
+  유도되지 않고, 반대로 `productKey`에서 surface를 유도하지도 않습니다. 후자를
+  하면 앞으로의 모든 `review` 대화가 continuation surface로 갑니다.
+- **`kind`는 `chat`으로 남습니다.** `kind`는 서버 authorization·modality
+  경계이고(`docs/policy/conversation-product-key.md` §1), Chat과 Review는 둘 다
+  `chat` modality입니다. `PRODUCT_MODALITY`가 이 조합을 애플리케이션에서 먼저
+  거부하고 `Conversation_product_modality_check`가 뒤를 받칩니다.
+- **`selectionMode`는 `manual`입니다.** Auto는 Chat 전용이므로
+  (`AUTO_SELECTION_PRODUCT`) Review 제품에서는 제공되지 않습니다. 이것은 거절이
+  아니라 부재이며 `product_not_chat`으로 관측됩니다
+  (`docs/ui-contracts/auto-model-selection.md`). `Conversation_auto_only_chat_check`
+  가 `review + auto` 행 자체를 막습니다.
+- **`selectedModels` 개수·`selectionMode`·제목·route로 제품을 유도하지
+  않습니다.** 모델 하나만 고른 Review 대화도 여전히 Review이고, 모델을 셋 고른
+  Chat 대화가 Review가 되지도 않습니다. 이것이 §15가 마이그레이션 기준에서 그
+  넷을 명시적으로 배제하는 이유입니다.
 
 ## 4. Context seed
 
@@ -152,8 +189,17 @@ memory와 구분되지 않으면서, memory 프로그램이 앞에 세워 둔 va
 
 seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영됩니다.**
 `buildChatTurnSystemBlocks`의 `promptTokens`에 포함되므로 `/api/chat`과
-`/api/chat/preflight`가 같은 숫자를 봅니다. 내부 USD는 사용자 응답에 노출하지
-않습니다(`docs/policy/credit-and-cost-limits.md`).
+`/api/chat/preflight`가 같은 숫자를 봅니다.
+
+**모델을 N개 고르면 seed 입력 비용도 N번 발생합니다.** preflight가 모델마다 따로
+견적을 내고(`budgets = models.map(...)`) 실제 예약도 모델 요청마다 따로
+일어나므로, 견적과 예약이 같은 seed를 같은 횟수로 셉니다. 사용자에게 보이는
+예상 크레딧은 **모델별 값의 합계**이며 한 모델의 값을 곱해 유도하지 않습니다 —
+모델마다 가격도 검색 surcharge도 다릅니다. 이 절은 크레딧 계약을 새로 만들지
+않고 `docs/policy/credit-and-cost-limits.md`를 그대로 가리킵니다.
+
+내부 USD는 사용자 응답에 노출하지 않습니다
+(`docs/policy/credit-and-cost-limits.md`).
 
 ## 5. Turn 동작
 
@@ -179,6 +225,40 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
   텍스트를 실어 보내는 경로는 존재하지 않으며, seed는 서버가 만들고 서버가
   가격을 매깁니다.
 - deep research turn은 system block 자체를 싣지 않으므로 seed도 없습니다.
+
+### 5.1 선택한 모델마다 같은 seed
+
+한 번의 사용자 입력은 **선택된 모델 수만큼의 assistant Message/attempt**를
+만듭니다. Review의 비교 turn과 같은 구조이고, 이어가기가 더하는 것은 seed
+하나뿐입니다.
+
+- **seed는 서버가 각 모델 요청에 따로 적용합니다.** 클라이언트가 보내는 것은
+  자기가 쓴 문장과 모델 id이며, 발췌는 `/api/chat`이 요청마다
+  `loadContinuationTurnSeed()`로 다시 만들어 `buildChatTurnSystemBlocks()`에
+  넣습니다. **클라이언트 요청 본문에 외부 원문이 실리는 경로는 존재하지
+  않습니다.** 모델이 셋이면 그 판정도 셋 다 서버에서 따로 일어납니다.
+- **네 관문은 모델마다 독립으로 지나갑니다**(§5의 1–4). 한 요청은 seed를 얻고
+  다른 요청은 못 얻는 상태는 그 사이에 원본이 잠기거나 지워졌을 때만 생기며,
+  그때는 그것이 정확한 답입니다. 한 요청이 만든 seed를 다른 요청에 복사해 넣지
+  않습니다 — 복사하는 순간 lock·삭제 판정이 요청마다 다시 일어난다는 §5의
+  약속이 깨집니다.
+- **같은 turn의 모든 모델은 같은 발췌를 받습니다.** seed는
+  `contextSeedVersion`과 source snapshot에서 결정적으로 파생되므로, 같은 turn의
+  N개 요청은 같은 창(窓)을 봅니다. 모델별로 발췌를 달리 자르지 않습니다 —
+  그러면 비교가 답이 아니라 입력의 차이를 재게 됩니다.
+- **한 모델의 실패가 다른 모델에 닿지 않습니다.** 예약·정산·환급은 모델 요청
+  단위이고, 실패한 요청의 환급은 성공한 요청의 정산과 무관합니다(§4.4).
+- **원본은 화면에 한 번만 나옵니다.** divider 위의 "외부 대화 · 읽기 전용" 구획
+  하나이고 모델 패널은 divider 아래에 놓입니다. 패널마다 원본을 복제해 그리지
+  않으며, 외부 message를 `Message`로 복제하지 않는다는 금지는 그대로입니다.
+- **Deep Research는 기존 제약을 유지합니다** — system block을 싣지 않으므로
+  가져온 seed가 전달되지 않습니다. 이 개정이 그 제약을 풀지 않습니다.
+- **이미지 생성은 이 대화에서 실행되지 않습니다.** 별도 이미지 대화 draft로
+  넘기며, 그 draft에 원본 transcript를 전달하지 않습니다
+  (`docs/policy/image-generation.md`).
+- **Web Search · 첨부 · Assistant profile · Memory는 기존 Review 계약을 그대로
+  따릅니다.** 이 문서는 그 계약들을 다시 쓰지 않고, 이어가기라는 이유로 완화하지도
+  않습니다.
 
 ## 6. 삭제
 
@@ -269,9 +349,14 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 아래에 놓습니다 — 이 선택은 방금 읽은 대화에 관한 것이고, 고지가 가리키는
 메시지보다 먼저 닿아서는 안 됩니다.
 
-실행 전에 다섯 문장을 보여 줍니다: 새 대화가 만들어짐 · 원본은 읽기 전용 유지 ·
+실행 전에 여섯 문장을 보여 줍니다: 새 대화가 만들어짐 · 원본은 읽기 전용 유지 ·
 외부 메시지는 Tomverse 답변이 아님 · 첨부와 잘린 메시지가 있을 수 있음 · 선택한
-일부만 AI context로 사용됨.
+일부만 AI context로 사용됨 · **여러 모델이 답하며 모델마다 크레딧이 든다**.
+
+여섯 번째는 이 개정이 추가한 것이고 다른 다섯과 성격이 다릅니다 — 앞의 다섯은
+무엇이 보존되는지에 대한 고지이고, 이것은 **비용이 몇 배가 되는지**에 대한
+고지입니다(§4.4). 계정의 새 대화 기본 조합이 모델 셋이면 첫 turn부터 세 번
+청구되므로, 그 사실을 만들기 전에 말합니다.
 
 - 성공하면 새 Conversation workspace로 이동합니다.
 - 실패해도 **중복 생성 없이 재시도**할 수 있습니다: idempotency key는 고지를 연
@@ -284,10 +369,18 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 `/continuations/[conversationId]` (`lib/continuationRoutes.ts`).
 
 `/chat`과 `/review`는 Tomverse Review workspace를 렌더합니다
-(`lib/productSurfaceRoutes.ts`). continuation은 `productKey=chat`이므로 선택지는
-둘이었습니다 — 외부 transcript를 모르는 Review shell에서 열거나, 전용 surface를
-주거나. 후자를 택했고 그것은 additive입니다: 기존 route의 의미가 바뀌지 않고
-Review를 재배선하지 않습니다. Tomverse Chat이 자기 surface를 갖는 날 옮길 자리는
+(`lib/productSurfaceRoutes.ts`). continuation은 `productKey=review`이지만
+**여전히 전용 surface에서 열립니다.** 이유는 제품이 아니라 화면에 있습니다 —
+Review workspace는 외부 transcript도, provenance 구획도, tombstone도, lock 상태도
+모르며, 그것을 가르치는 일은 flag 뒤에 있는 기능을 위해 6천 줄짜리 클라이언트를
+재배선하는 것입니다. 전용 surface는 additive입니다: 기존 route의 의미가 바뀌지
+않고 Review를 재배선하지 않습니다.
+
+**그래서 판정 근거가 `productKey`가 아니라는 것이 이 개정 이후 더 중요해졌습니다.**
+`conversationSurface()`가 읽는 것은 bridge row의 존재 하나뿐이고, `productKey`에서
+유도하면 이제 **모든 Review 대화**가 여기로 옵니다 — 개정 전에는 모든 `chat`
+대화였고 그때도 틀렸지만, 오늘은 그 집합이 저장소의 거의 모든 대화입니다.
+Review workspace가 외부 transcript를 다룰 수 있게 되는 날 옮길 자리는
 `CONTINUATION_SURFACE_PATH` 한 곳입니다.
 
 **재진입은 서버가 판정합니다.** 대화 목록·상세·검색 응답은 각 대화의
@@ -308,10 +401,36 @@ Review workspace로 열려 외부 원문·출처 구획이 사라졌습니다.**
 
 - source provider와 import 시점
 - "외부 대화 · 읽기 전용" 구획 — 외부 user·assistant 메시지, assistant에는
-  provider badge와 "외부 답변" 표시, 잘림 고지
+  provider badge와 "외부 답변" 표시, 잘림 고지. **화면 전체에서 한 번만
+  그립니다**(§5.1)
 - "여기부터 Tomverse에서 이어진 대화" divider
-- 새 Tomverse 메시지
-- composer
+- **모델 패널** — 선택한 모델마다 하나. 각 패널은 자기 모델의 답변만 담습니다
+- composer와 모델 선택 control
+
+### 8.3 모델 선택
+
+**기존 Review의 절차를 그대로 씁니다.** 이 화면은 자기 규칙을 만들지 않습니다.
+
+- **상한·가용성·entitlement 판정은 서버가 합니다.** 화면은
+  `PATCH /api/conversations/[conversationId]`에 `selectedModels`를 보내고,
+  그 route가 `clampRuntimeSelectedModels()`로 가용성을,
+  `effectivePlanModelLimit()`로 플랜 상한을 판정합니다. 상한 초과는
+  `modelLimitResponse()`이고, 이어가기 전용 상한이나 전용 오류 코드를 만들지
+  않습니다.
+- **초기 `selectedModels`는 일반 새 Review 대화와 같은 규칙으로 정합니다** —
+  `resolveNewConversationModels()`(계정의 새 대화 기본 조합, `NULL`이면
+  `[defaultModel]`) → `clampRuntimeSelectedModels()` → 플랜 상한. 이어가기 전용
+  기본 조합을 두지 않습니다.
+- **읽기 경로는 저장값을 다시 쓰지 않습니다.** 비활성 모델이 저장돼 있어도
+  `effective` 상태만 보여 주고 저장값은 보존합니다
+  (`docs/policy/default-model-luna-migration.md` §1.2).
+- **상한이 찼을 때 새 모델을 고르면 교체를 확인받습니다.** 조용히 바꾸지도,
+  아무 일도 일어나지 않은 것처럼 두지도 않습니다 — 어느 모델을 뺄지 사람이
+  고릅니다. Review picker와 같은 절차입니다.
+- **기존 continuation의 `selectedModels`는 migration이나 배포로 자동
+  확장되지 않습니다**(§15). 모델이 하나인 채로 만들어진 대화는 사용자가 직접
+  더하기 전까지 하나입니다.
+- **예상 크레딧은 제출 전에 모델별로, 그리고 합계로 보여 줍니다**(§4.4).
 
 **외부 source를 일반 `Message` 배열에 합쳐 직렬화하지 않습니다.** 두 배열은 두
 endpoint에서 오고, 수명·삭제 계약·provenance가 다릅니다. 하나로 합치면 그 차이가
@@ -387,6 +506,11 @@ USD를 싣지 않습니다.
   seed 없이 나갔다"입니다 — 가리는 것이 아니라 구조상 담을 수 없습니다.
 - **기록은 `/api/chat`에서만 합니다.** preflight는 같은 turn을 견적낼 뿐이므로
   양쪽에서 세면 모든 수치가 두 배가 되고 comparison은 세 배가 됩니다.
+- **계수의 단위는 사용자 turn이 아니라 모델 요청입니다.** 모델 셋짜리 turn 하나는
+  `/api/chat` 요청 셋이고 outcome도 셋 기록됩니다. 이것이 맞는 단위인 이유는 §5.1이
+  네 관문을 요청마다 독립으로 지나가게 하기 때문입니다 — 셋 중 하나만 lock에
+  걸리는 상태가 실제로 가능하고, turn 단위로 접으면 그 사실이 사라집니다. 지표를
+  읽을 때 "오늘 사유 R로 N**개 모델 요청**이 seed 없이 나갔다"로 읽습니다.
 - **rollback 중에는 `flag_off_stale_cache`가 잠깐 올랐다가 0으로 돌아오는 것이
   정상입니다.** 계속 0이면 아직 아무 인스턴스도 캐시가 만료되지 않았거나 그
   경로를 지나는 turn이 없었다는 뜻이고, 계속 0이 아니면 어떤 인스턴스가 flag
@@ -404,7 +528,16 @@ USD를 싣지 않습니다.
 - source 삭제가 새 Tomverse `Message`를 함께 삭제함
 - 계정 삭제가 bridge를 남김
 - imported prompt가 system/developer 경계를 넘음
-- `productKey`가 `review`로 위장되거나 누락됨
+- `productKey`가 `review`가 아니거나 누락됨(§3.1), 또는 bridge·`selectedModels`
+  개수·`selectionMode`·제목·route에서 `productKey`가 유도됨
+- 가져온 원본이 모델 패널마다 복제되거나 `Message`로 복제됨(§5.1)
+- 같은 turn의 모델들이 서로 다른 발췌를 받거나, 한 요청이 만든 seed가 다른
+  요청에 복사됨(§5.1)
+- 클라이언트 요청 본문에 외부 원문이 실림(§5.1)
+- 표시된 모델 · preflight가 견적낸 모델 · 실제 요청 모델이 어긋남
+- 다중 모델 예상 크레딧이 실제 예약·정산과 어긋남(§4.4)
+- 한 모델의 실패가 다른 모델의 답변·예약·정산·환급을 손상시킴(§5.1)
+- migration이 기존 continuation의 `selectedModels`를 바꿈(§15)
 - flag off가 ordinary chat을 깨뜨리거나 사용자 새 메시지를 숨김
 - share·export를 통해 외부 원문이 사용자 동의 없이 공개됨
 
@@ -413,11 +546,16 @@ USD를 싣지 않습니다.
 
 ## 14. 알려진 제약과 사람 판단이 필요한 항목
 
-1. **`productKey=chat` 제품 surface.** Tomverse Chat은 아직 출시되지 않았고
-   `/chat`은 Review를 렌더합니다. §8.2의 전용 surface는 그 사이를 메우는 것이며,
-   Chat surface가 생기면 continuation을 그쪽으로 옮길지가 사람의 결정입니다.
-2. **모델 선택.** continuation은 Conversation의 기본 모델 하나로 시작합니다.
-   모델 선택 UI는 Chat surface의 문제이며 여기서 선점하지 않습니다.
+1. **전용 surface의 수명.** continuation은 `productKey=review`이면서도 Review
+   workspace가 아니라 `/continuations/[id]`에서 열립니다(§8.2). Review workspace가
+   외부 transcript·provenance·tombstone·lock을 다룰 수 있게 되는 날 두 화면을
+   합칠지는 사람의 결정이며, 그때 옮길 자리는 `CONTINUATION_SURFACE_PATH`
+   한 곳입니다.
+2. **기본 조합의 크기.** 새 continuation은 계정의 새 대화 기본 조합으로
+   시작하므로(§8.3), 그 조합이 셋이면 첫 turn부터 세 번 청구됩니다. 이어가기만
+   더 작은 기본값을 쓸지는 제품 결정이고, 지금은 **일반 Review와 같게** 두는 쪽을
+   택했습니다 — 이어가기에만 다른 기본값을 두면 사용자가 저장한 조합이 화면마다
+   다르게 해석됩니다.
 3. **seed 예산 값.** `CONTINUATION_SEED_TOKEN_BUDGET`은 보수적인 시작값입니다.
    조정은 관측(§12) 뒤의 결정이고, 올리는 것은 매 turn 사용자가 부담하는 비용을
    올리는 일입니다.
@@ -425,3 +563,67 @@ USD를 싣지 않습니다.
    생기면 재검토합니다. 그 전까지 완화하지 않습니다.
 5. **staging 검증.** `docs/ops/external-conversation-continuation-staging-checklist.md`
    의 차단 항목이 flag를 켜기 전 완료 조건입니다.
+
+## 15. 기존 continuation 교정 migration
+
+개정 이전에 만들어진 continuation은 `productKey = "chat"`으로 저장돼 있습니다.
+그 행들은 **틀린 제품을 기록한 것**이므로 교정합니다.
+
+### 15.1 대상 — bridge 존재 **그리고** `productKey = 'chat'`
+
+```sql
+UPDATE "Conversation" AS c
+SET "productKey" = 'review'
+FROM "ConversationContinuationBridge" AS b
+WHERE b."conversationId" = c."id"
+  AND c."productKey" = 'chat'
+  AND c."selectionMode" <> 'auto';
+```
+
+앞의 두 조건이 대상을 정하고, 세 번째는 안전장치입니다.
+
+- **bridge 존재**가 continuation임을 말하는 유일한 사실입니다. §3.1이 정한 그대로,
+  provenance는 bridge가 답하고 제품은 컬럼이 답합니다.
+- **`productKey = 'chat'`** 조건이 없으면 이 문장은 이미 옳은 행과 아직 결정되지
+  않은 `NULL` 행까지 건드립니다. `NULL`은 "아직 안 정해짐"이고 그 해석은
+  `docs/policy/conversation-product-key.md` §3이 소유합니다 — 이 migration이
+  그것을 대신 결정하지 않습니다.
+- **일반 chat 대화에는 닿지 않습니다.** bridge가 없는 행은 `FROM` 절이 걸러냅니다.
+- **`selectionMode = 'auto'`인 행은 건드리지 않습니다.** continuation은 `manual`로
+  만들어지므로 그런 행은 있을 수 없지만, 있다면 `review + auto`는
+  `Conversation_auto_only_chat_check`가 금지하는 조합이라 이 문장이 그 행을
+  제약 위반으로 만들게 됩니다. 가정 대신 `WHERE`에 적어 두고, 남은 행은 사람이
+  봅니다.
+
+### 15.2 기준으로 쓰지 않는 것
+
+**`selectedModels` 개수 · `selectionMode` · 제목 · route를 판정에 넣지
+않습니다.**
+
+- `selectedModels`가 하나라는 것은 그 계정의 기본 조합이 하나였다는 뜻일 뿐이고,
+  일반 Review 대화도 그렇습니다.
+- `selectionMode`는 manual 복귀가 sticky state를 지우므로 "Auto였던 적이 있나"를
+  나중에 물을 수조차 없습니다(`docs/policy/conversation-product-key.md` §1).
+- 제목(`Continued from an imported chat`)은 사용자가 언제든 바꿀 수 있는
+  값이고, 바꾼 사람의 대화만 교정에서 빠지는 기준은 기준이 아닙니다.
+- route는 행에 없습니다.
+
+### 15.3 이 migration이 바꾸지 않는 것
+
+**`productKey` 한 컬럼만 씁니다.**
+
+- **`selectedModels`를 확장하지 않습니다.** 모델 하나로 만들어진 대화는 하나인
+  채로 남습니다. 배포가 사용자의 모델 선택을 늘리는 것은 다음 turn마다 몇 배의
+  크레딧을 사용자 동의 없이 쓰는 일이고, 되돌릴 수 있는 종류가 아닙니다
+  (`AGENTS.md`의 되돌릴 수 없는 것 규칙).
+- `selectionMode` · `title` · `kind` · `disabledPanels` · bridge · `Message`를
+  건드리지 않습니다. `kind`는 이미 `chat`이고 Review도 `chat`이므로
+  `Conversation_product_modality_check`가 교정 후에도 통과합니다.
+- **surface가 바뀌지 않습니다.** `conversationSurface()`는 bridge만 읽으므로
+  교정 전후로 같은 답을 냅니다. 사용자가 보는 화면은 그대로입니다.
+
+### 15.4 되돌리기
+
+`productKey`를 `chat`으로 되돌리는 문장이 정확한 역연산이며, bridge와
+`selectedModels`가 그대로이므로 잃는 정보가 없습니다. 되돌린 뒤에도 화면은 같은
+자리에서 열립니다.

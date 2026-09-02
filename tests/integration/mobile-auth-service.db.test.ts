@@ -374,6 +374,182 @@ test("an expired grant is refused, and an unknown one says so without a lookup k
   );
 });
 
+test("V12 -- logging one device out leaves the web session standing", async () => {
+  // The policy's third revocation argument, and the half the earlier scope test
+  // did not reach: losing one phone must not end the browser session. The two
+  // signals that would say otherwise are `sessionsRevokedAt` and the Session
+  // rows, so both are checked rather than inferred from the family's state.
+  const { logoutMobileSession } = await service();
+  const user = await createUser();
+  const tokens = await issue(user.id);
+  await prisma.session.create({
+    data: {
+      userId: user.id,
+      sessionToken: `web_${randomUUID()}`,
+      expires: new Date(Date.now() + 86_400_000),
+    },
+  });
+
+  await logoutMobileSession({ request: request(), refreshToken: tokens.refreshToken });
+
+  const after = await prisma.user.findUniqueOrThrow({
+    where: { id: user.id },
+    select: { sessionsRevokedAt: true },
+  });
+  assert.equal(after.sessionsRevokedAt, null, "a device logout is not a global sign-out");
+  assert.equal(await prisma.session.count({ where: { userId: user.id } }), 1);
+});
+
+test("V13 -- releasing one device leaves the web session standing too", async () => {
+  const { revokeMobileDevice } = await service();
+  const user = await createUser();
+  const phone = await issue(user.id);
+  await prisma.session.create({
+    data: {
+      userId: user.id,
+      sessionToken: `web_${randomUUID()}`,
+      expires: new Date(Date.now() + 86_400_000),
+    },
+  });
+
+  await revokeMobileDevice({ userId: user.id, deviceId: phone.deviceId });
+
+  const after = await prisma.user.findUniqueOrThrow({
+    where: { id: user.id },
+    select: { sessionsRevokedAt: true },
+  });
+  assert.equal(after.sessionsRevokedAt, null);
+  assert.equal(await prisma.session.count({ where: { userId: user.id } }), 1);
+});
+
+test("V5 -- the device list is scoped to the account that asked", async () => {
+  const { listMobileDevices } = await service();
+  const owner = await createUser();
+  const stranger = await createUser();
+  const owned = await issue(owner.id);
+  await issue(stranger.id);
+
+  const devices = await listMobileDevices(owner.id);
+  assert.deepEqual(
+    devices.map((device) => device.id),
+    [owned.deviceId]
+  );
+  // Another account's device is absent rather than refused: the query is
+  // scoped by userId, so there is no branch that could report the difference.
+  assert.equal((await listMobileDevices(stranger.id)).length, 1);
+});
+
+test("the device list drops a released device and keeps no IP of any kind", async () => {
+  // Approved decision 8: no IP is shown or stored, truncated or otherwise.
+  const { listMobileDevices, revokeMobileDevice } = await service();
+  const user = await createUser();
+  const phone = await issue(user.id);
+  const tablet = await issue(user.id);
+
+  await revokeMobileDevice({ userId: user.id, deviceId: phone.deviceId });
+
+  const devices = await listMobileDevices(user.id);
+  assert.deepEqual(
+    devices.map((device) => device.id),
+    [tablet.deviceId]
+  );
+  const fields = Object.keys(devices[0] ?? {});
+  assert.deepEqual(fields.sort(), [
+    "appVersion",
+    "createdAt",
+    "id",
+    "label",
+    "lastSeenAt",
+    "platform",
+  ]);
+});
+
+test("V11 -- a lost response is indistinguishable from a replay, and that is option A", async () => {
+  // Recorded rather than worked around. Under strict single use the server
+  // cannot tell "the client never received my answer" from "somebody is
+  // replaying a token", because the two requests are byte-identical. The
+  // consequence is that a client which retries instead of single-flighting
+  // loses its session -- which is why native single-flight is an approved
+  // implementation requirement rather than an optimisation.
+  const { rotateMobileSession } = await service();
+  const user = await createUser();
+  const first = await issue(user.id);
+
+  const rotated = await rotateMobileSession({
+    request: request(),
+    refreshToken: first.refreshToken,
+  });
+  assert.equal(rotated.ok, true);
+
+  // The client never saw that response and retries with the token it still has.
+  const retry = await rotateMobileSession({
+    request: request(),
+    refreshToken: first.refreshToken,
+  });
+  assert.equal(retry.ok, false);
+
+  const family = await prisma.mobileTokenFamily.findFirstOrThrow();
+  assert.equal(family.revokedReason, "reuse_detected");
+});
+
+test("V14 -- deleting the account takes every mobile row and leaves one nameless record", async () => {
+  // Approved decision 9: deletion removes the rows and identifiers naming the
+  // person, their devices and their families, and only a de-identified
+  // aggregate may remain. The cascade does the first half; this is the second.
+  const { deleteTomverseAccount } = await import("@/lib/accountDeletion");
+  const user = await createUser();
+  await issue(user.id);
+  await issue(user.id);
+
+  const result = await deleteTomverseAccount(user.id, { cancelSubscription: false });
+  assert.equal(result.deleted, true);
+
+  assert.equal(await prisma.mobileDevice.count(), 0);
+  assert.equal(await prisma.mobileTokenFamily.count(), 0);
+  assert.equal(await prisma.mobileRefreshRotation.count(), 0);
+
+  const remaining = await prisma.mobileAuthEvent.findMany();
+  assert.equal(remaining.length, 1, "one aggregate row, and only one");
+  assert.equal(remaining[0]?.event, "mobile_auth.revoked_on_account_deletion");
+  // It survives because it names nobody. A row naming the account would have
+  // been taken by the same cascade a moment later.
+  assert.equal(remaining[0]?.userId, null);
+  assert.equal(remaining[0]?.deviceId, null);
+  assert.equal(remaining[0]?.familyId, null);
+});
+
+test("V14 -- an account with no mobile session leaves no mobile record at all", async () => {
+  // A row on every deletion would count deletions rather than mobile sessions
+  // ended, and an operator reading it would draw the wrong number.
+  const { deleteTomverseAccount } = await import("@/lib/accountDeletion");
+  const user = await createUser();
+
+  await deleteTomverseAccount(user.id, { cancelSubscription: false });
+
+  assert.equal(await prisma.mobileAuthEvent.count(), 0);
+});
+
+test("V28 -- logout works when the access token has already expired", async () => {
+  // The correction rev.2 made to D14: the most common moment to log out is
+  // after the access token has lapsed, so an access-authenticated logout would
+  // fail exactly when it is wanted. Nothing here presents one.
+  const { logoutMobileSession } = await service();
+  const user = await createUser();
+  const tokens = await issue(user.id);
+
+  await logoutMobileSession({
+    // No Authorization header at all, which is the point.
+    request: new Request("https://tomverse.test/api/auth/mobile/logout", {
+      method: "POST",
+    }),
+    refreshToken: tokens.refreshToken,
+  });
+
+  const family = await prisma.mobileTokenFamily.findFirstOrThrow();
+  assert.notEqual(family.revokedAt, null);
+  assert.equal(family.revokedReason, "logout");
+});
+
 test("no audit row carries a token, a digest or a record id", async () => {
   // D15's forbidden list, checked against what was actually written rather
   // than against the schema's intent.

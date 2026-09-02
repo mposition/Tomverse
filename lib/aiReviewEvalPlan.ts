@@ -209,3 +209,126 @@ export const datasetManifest = (
         emptyExhaustiveClaims: emptyExhaustiveClaims(cases),
     };
 };
+
+// ---------------------------------------------------------------------------
+// Drafting plan
+// ---------------------------------------------------------------------------
+
+/**
+ * How many cases of each phenomenon a cell carries.
+ *
+ * docs/ops/ai-review-eval-runbook.md §1.2. Encoded here so the drafting plan
+ * and the coverage report read one table rather than a person transcribing
+ * the runbook's into a spreadsheet -- the balance is the part of the set that
+ * decides what the evaluation can measure at all, and a cell that quietly ends
+ * up all `direct_contradiction` measures one thing a hundred times.
+ *
+ * `prompt_injection` is deliberately absent: the runbook places it by cell
+ * rather than per cell, and `injectionQuotaPerLanguage` below says where.
+ */
+export const CELL_PHENOMENON_MIX: Readonly<Record<string, number>> = {
+    direct_contradiction: 20,
+    partial_contradiction: 10,
+    omission: 20,
+    meaningful_difference: 10,
+    unsupported_assertion: 10,
+    genuine_consensus: 10,
+    no_issue: 10,
+    verbosity_bias: 5,
+    position_bias: 5,
+};
+
+/**
+ * Injection cases go in the safety-sensitive cell, at least this many per
+ * language. Not spread across the cells: an embedded instruction can be
+ * planted anywhere, but where it is dangerous is a safety question.
+ */
+export const INJECTION_QUOTA_PER_LANGUAGE = 20;
+
+export type AiReviewDraftBatch = {
+    language: string;
+    taskType: string;
+    phenomenon: string;
+    mode: string;
+    count: number;
+};
+
+/**
+ * The batches that fill an empty decision set, one drafting call each.
+ *
+ * ## Why the mode rotates within a phenomenon rather than across cells
+ *
+ * Three modes need 300 cases each and there are 1,200 cases, so the split is
+ * even. Rotating within each cell's phenomenon groups keeps every cell's mode
+ * mix roughly even too, which matters because a cell is judged on its own: a
+ * cell that happened to be all `evidence` would tell us how a reviewer does on
+ * that cell under one mode and nothing about the other two.
+ *
+ * ## Why a batch is one phenomenon and one mode
+ *
+ * Because that is what the drafting instruction asks for. A batch mixing
+ * phenomena would need the instruction to describe several at once, and the
+ * rule that matters most -- plant exactly one thing per case -- gets harder to
+ * hold the more the instruction is asked to juggle.
+ */
+export const draftingBatches = (input: {
+    existing: readonly Pick<
+        AiReviewEvalCase,
+        "language" | "taskType" | "phenomenon" | "mode"
+    >[];
+    /** Cases per drafting call. */
+    batchSize: number;
+}): readonly AiReviewDraftBatch[] => {
+    const batches: AiReviewDraftBatch[] = [];
+    let modeCursor = 0;
+
+    for (const cell of evalCoveragePlan()) {
+        const inCell = input.existing.filter(
+            (item) =>
+                item.language === cell.language && item.taskType === cell.taskType
+        );
+        const wanted: Record<string, number> = { ...CELL_PHENOMENON_MIX };
+        if (cell.taskType === "safety_sensitive") {
+            wanted.prompt_injection = INJECTION_QUOTA_PER_LANGUAGE;
+        }
+        for (const [phenomenon, target] of Object.entries(wanted)) {
+            const have = inCell.filter(
+                (item) => item.phenomenon === phenomenon
+            ).length;
+            let remaining = Math.max(0, target - have);
+            while (remaining > 0) {
+                const count = Math.min(remaining, input.batchSize);
+                batches.push({
+                    language: cell.language,
+                    taskType: cell.taskType,
+                    phenomenon,
+                    mode: AI_REVIEW_EVAL_MODES[modeCursor % AI_REVIEW_EVAL_MODES.length],
+                    count,
+                });
+                modeCursor += 1;
+                remaining -= count;
+            }
+        }
+    }
+    return batches;
+};
+
+/**
+ * What a plan costs at most, given a per-call ceiling.
+ *
+ * A CEILING, not a forecast, and labelled as one everywhere it is printed: it
+ * charges every call the full output cap, and a reply is far shorter than the
+ * cap. Understating this would be the worse error -- the number exists so a
+ * person can approve a budget, and a budget approved against an optimistic
+ * figure is an approval of something else.
+ */
+export const draftingCostCeilingUsd = (input: {
+    batches: readonly AiReviewDraftBatch[];
+    estimatedInputTokensPerCall: number;
+    outputTokenCapPerCall: number;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+}): number =>
+    input.batches.length *
+    ((input.estimatedInputTokensPerCall / 1_000_000) * input.inputUsdPerMillionTokens +
+        (input.outputTokenCapPerCall / 1_000_000) * input.outputUsdPerMillionTokens);

@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-conversation-continuation-staging-checklist.md
-templateRevision: 2026-08-31b
+templateRevision: 2026-09-01a
 environment:
 deploySha:
 startedAtUtc:
@@ -112,6 +112,24 @@ digest:
 | J-2 응답 유실 후 재시도 → 대화 1개 | | |
 | J-3 취소 후 재시도 → 새 fork | | |
 
+## §K 다중 모델 계약 (차단)
+
+<!-- 시작 상태: 모델 두 개를 고른 continuation. §A·§C·§E·§I는 모델 하나로
+     실행했는지 여기 아래 "모델 개수"에 적습니다. -->
+
+| 항목 | 관측 | 판정 |
+|---|---|---|
+| 모델 개수 — §A·§C·§E·§I 실행 시 / §K 실행 시 | | |
+| K-1 질문 1개 → 패널 2개, 모델 이름 표시 | | |
+| K-2 원본 구획이 화면에 한 번, 패널 안에 복제 없음, 원본 메시지 수 불변 | | |
+| K-3(a) 요청 두 건의 `modelId`가 표시된 모델과 일치 | | |
+| K-3(b) 요청 본문에 가져온 원본 문장 없음 | | |
+| K-3(c) preflight 한 건, `modelIds`가 같은 두 모델 | | |
+| K-4 전송 전 예상(모델별·합계) / 실제 소비 크레딧 | | |
+| K-5 기존 continuation의 `selectedModels` 불변, surface 불변 | | |
+| K-6 상한에서 교체를 묻는가, 취소 시 불변, 마지막 모델 제거 거절 | | |
+| K-7 실패 격리 결정적 검사 통과 여부 (유료 turn 없음) | | |
+
 ## §F 화면 (비차단)
 
 | 항목 | 관측 | 판정 |
@@ -136,6 +154,7 @@ digest:
 | §E-2 | | |
 | §I-4 | | |
 | §I-5 (다중 인스턴스일 때만) | | |
+| §K-1 (모델 2개) | | |
 | 합계 | | |
 
 ## 건너뛴 구획과 이유
