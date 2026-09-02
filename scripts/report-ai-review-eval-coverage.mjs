@@ -125,6 +125,30 @@ for (const path of paths) {
       console.log(`    ${claim.id}: ${claim.kind}`);
     }
   }
+
+  const leads = Object.entries(manifest.goldLeadLabels.byLabel).sort(
+    (left, right) => right[1] - left[1]
+  );
+  if (leads.length > 0) {
+    console.log(
+      "\n  which answer each gold item names first (a heuristic: the first label " +
+        "token in the item's leading phrase, which is where the accused answer goes)"
+    );
+    for (const [label, count] of leads) {
+      console.log(`    ${label.padEnd(16)} ${count}`);
+    }
+    const attributed = manifest.goldLeadLabels.attributed;
+    const top = leads.find(([label]) => label !== "unattributed");
+    if (attributed >= 5 && top && top[1] / attributed >= 0.8) {
+      console.log(
+        `    NOTE ${Math.round((top[1] / attributed) * 100)}% of the ${attributed} attributed ` +
+          `item(s) lead with "${top[0]}". If the planted answer really does sit there every ` +
+          `time, a reviewer that always accuses that slot scores as well as one that reads, ` +
+          `and position is being measured alongside reasoning. Read a few and decide; ` +
+          `this counts a leading token and cannot tell you which answer is actually wrong.`
+      );
+    }
+  }
 }
 
 console.log(

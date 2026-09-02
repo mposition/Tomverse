@@ -31,7 +31,9 @@ import {
   artifactAdmissibilityProblems,
   artifactRunProblems,
   datasetDigest,
+  adoptionProblems,
   datasetProblems,
+  isUnfrozenDraft,
   freezeDrift,
 } from "../lib/aiReviewEvalRun.ts";
 import {
@@ -125,12 +127,47 @@ const checkDataset = (path) => {
     report(path, [`could not be read: ${dataset.__readError}`]);
     return;
   }
+  // A decision set is written over months: 330 drafting calls, then a person
+  // adopting each case. For all of that time it holds candidates, is not
+  // frozen, and is short of 1,200 -- and every one of those is a failure once
+  // the set is evidence. Failing the repository's own gate for the whole of
+  // the build would leave the work with nowhere to live, so while a decision
+  // set carries NO freeze record the three build-state rules are reported as
+  // notes instead. Everything else still fails: a malformed case is malformed
+  // whether or not anybody has adopted it.
+  //
+  // Keyed on the freeze record rather than a flag, because freezing IS the
+  // moment the set stops being under construction. A half-written freeze is
+  // not this state and keeps failing.
+  const underConstruction =
+    dataset.purpose === "decision" && isUnfrozenDraft(dataset);
+  const adoption = adoptionProblems(dataset);
+  const notes = [];
   const problems = [...datasetProblems(dataset)];
+  if (underConstruction && adoption.length > 0) {
+    const excused = new Set(adoption);
+    for (let index = problems.length - 1; index >= 0; index -= 1) {
+      if (excused.has(problems[index])) problems.splice(index, 1);
+    }
+    notes.push(
+      `${adoption.length} of ${dataset.cases.length} case(s) are not adopted yet. ` +
+        `A person adopts each one; until then this set cannot be frozen and ` +
+        `cannot produce evidence.`
+    );
+  }
   if (problems.length === 0) {
     // Only meaningful once the shape is known good: adequacy and freeze both
     // read fields the structural check has just proven exist.
     const adequacy = assessSampleAdequacy(dataset.cases);
-    if (dataset.purpose === "decision") {
+    if (dataset.purpose === "decision" && underConstruction) {
+      notes.push(
+        `under construction: ${dataset.cases.length} case(s), no freeze record. ` +
+          `A decision set needs ${AI_REVIEW_EVAL_MIN_CASES.aggregate} ` +
+          `(${adequacy.shortfalls.length} shortfall(s)) and a freeze before any ` +
+          `run against it is admissible.`
+      );
+      notes.push(`current digest ${datasetDigest(dataset)}`);
+    } else if (dataset.purpose === "decision") {
       const drift = freezeDrift(dataset);
       if (drift) problems.push(drift);
       if (!adequacy.adequate) problems.push(...adequacy.shortfalls);
@@ -146,7 +183,7 @@ const checkDataset = (path) => {
       console.log(`       current digest ${datasetDigest(dataset)}`);
     }
   }
-  report(path, problems);
+  report(path, problems, notes);
 };
 
 console.log("AI Review evaluation dataset");

@@ -59,11 +59,16 @@ export type AiReviewDraftLedgerEntry =
       };
 
 export type AiReviewDraftLedgerBalance = {
-    /** Calls that reached a settlement. */
+    /**
+     * Settled calls, at the CEILING each was reserved at -- not at what the
+     * provider actually billed, which this tool never learns. Every number
+     * here is a committed ceiling, and the operator-facing wording says so:
+     * calling it spend would claim a precision the ledger does not have.
+     */
     settledUsd: number;
     /** Reservations with no settlement. Held against the budget. */
     outstandingUsd: number;
-    /** What the budget has to be measured against. */
+    /** Committed ceiling: what the approved total has to be measured against. */
     committedUsd: number;
     settledCount: number;
     outstandingCount: number;
@@ -188,6 +193,26 @@ export const admitDraftCall = (input: {
             reason:
                 `the ledger cannot be read, so the total spent is unknown:\n  - ` +
                 `${input.balance.problems.slice(0, 5).join("\n  - ")}`,
+        };
+    }
+    // An unsettled reservation means a run is either still going or died
+    // holding one, and in both cases another call must not start.
+    //
+    // The budget arithmetic alone would let one through whenever there was
+    // room, and room is not the only question: a second run reads the same
+    // decision set, appends its own cases to its own copy and writes the whole
+    // file back, so whichever finishes last erases the other's work. The
+    // ledger cannot see that, which is why the rule is stated here rather than
+    // left to the totals.
+    if (input.balance.outstandingCount > 0) {
+        return {
+            allowed: false,
+            reason:
+                `${input.balance.outstandingCount} reservation(s) worth ` +
+                `~$${input.balance.outstandingUsd.toFixed(4)} have not settled. ` +
+                `Either a drafting run is still going -- and two runs would overwrite ` +
+                `each other's cases in the decision set -- or one died holding a ` +
+                `reservation, which has to be accounted for before more is spent`,
         };
     }
     if (
