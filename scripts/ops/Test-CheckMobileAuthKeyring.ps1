@@ -67,6 +67,7 @@ $PEPPER_SECRET = "TEST-PEPPER-RING-9d4a03"
 
 $global:results = @()
 $global:promptCount = 0
+$global:promptSecure = @()
 $global:npmArgs = $null
 $global:npmExit = 0
 $global:throwOnPrompt = 0
@@ -85,6 +86,10 @@ function Read-Host {
     param([string] $Prompt, [switch] $AsSecureString)
 
     $global:promptCount++
+    # Whether the wrapper asked for a SecureString is the contract here, not a
+    # detail of the shim: without -AsSecureString the operator's ring is echoed
+    # to the screen as they type it, and every other case still passes.
+    $global:promptSecure += [bool]$AsSecureString.IsPresent
     if ($global:throwOnPrompt -eq $global:promptCount) {
         throw "simulated interruption at prompt $($global:promptCount)"
     }
@@ -117,6 +122,7 @@ function Invoke-Wrapper {
     param([int] $NpmExit = 0, [int] $ThrowOnPrompt = 0)
 
     $global:promptCount = 0
+    $global:promptSecure = @()
     $global:npmArgs = $null
     $global:npmExit = $NpmExit
     $global:throwOnPrompt = $ThrowOnPrompt
@@ -150,6 +156,7 @@ function Invoke-Wrapper {
         Leftover  = (Get-LeftoverManaged)
         NpmArgs   = $global:npmArgs
         Prompts   = $global:promptCount
+        Secure    = @($global:promptSecure)
     }
 }
 
@@ -189,6 +196,10 @@ Assert-Case "2a. success returns 0" ($ok.ExitCode -eq 0) ("exit={0}" -f $ok.Exit
 Assert-Case "2b. prompted for both rings" ($ok.Prompts -eq 2) ("prompts={0}" -f $ok.Prompts)
 Assert-Case "2c. -RequireConfigured reached the check" `
     ($ok.NpmArgs -like "*--require-configured*") ("npm args: {0}" -f $ok.NpmArgs)
+
+Assert-Case "2e. both prompts asked for a SecureString" `
+    ((@($ok.Secure).Count -eq 2) -and (@($ok.Secure | Where-Object { -not $_ }).Count -eq 0)) `
+    ("secure flags: {0}" -f (@($ok.Secure) -join ", "))
 
 $bad = Invoke-Wrapper -NpmExit 1
 Assert-Case "2d. failure returns non-zero" ($bad.ExitCode -ne 0) ("exit={0}" -f $bad.ExitCode)
