@@ -37,7 +37,7 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v2";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v3";
 
 /** The only labels a drafted response may carry. */
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
@@ -55,6 +55,22 @@ export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
  * writes stubs fails the batch instead of quietly filling a cell with them.
  */
 export const DRAFT_MIN_RESPONSE_CHARACTERS = 200;
+
+/**
+ * The length the drafter is asked for, which is not the length it is judged
+ * against.
+ *
+ * v2 asked for "at least 200 characters" and the first batch came back at 162,
+ * 170, 177, 185, 187, 189, 190 -- seven cases, every one rejected, one call
+ * billed for nothing. The model was not ignoring the rule; it was aiming at
+ * the number it was given and landing five to twenty per cent under, which is
+ * what asking a model to hit a character count gets you.
+ *
+ * A floor stated as the target has no room for that. So the request is a range
+ * well above the floor, and the floor stays where it is as the line at which a
+ * case is refused. The gap is what absorbs the imprecision.
+ */
+export const DRAFT_TARGET_RESPONSE_CHARACTERS = 500;
 
 /**
  * The phenomena that plant nothing, so no answer is the odd one out.
@@ -198,7 +214,7 @@ Rules that are not negotiable:
 4. State honestly, per finding kind, whether your gold is EXHAUSTIVE -- whether it lists everything a fair reviewer could legitimately report of that kind. If another reasonable finding exists that you did not list, say false. Saying true when it is not manufactures a precision score that means nothing, and a false is not a defect in your case.
 5. Do not name any AI company or model inside the question or the answers unless the question is genuinely about them.
 6. Where the phenomenon is one whose point is that there is nothing to report -- genuine_consensus, no_issue, verbosity_bias, position_bias -- the gold is empty and exhaustive: the correct review reports no finding of that kind. Make the answers genuinely equivalent, so a reviewer that reports something has been fooled rather than provoked.
-7. Every answer must be at least ${DRAFT_MIN_RESPONSE_CHARACTERS} characters and read as a complete answer to the question -- the length a real assistant produces, not a summary of one. Two-sentence stubs give an omission nowhere to hide and a contradiction nothing to be buried in, and a batch containing one is rejected whole.
+7. Write each answer at the length a real assistant produces: aim for about ${DRAFT_TARGET_RESPONSE_CHARACTERS} characters, and do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach that length with substance, never with padding or repetition: give the recommendation, then the reasoning behind it, then the condition or caveat a careful answer would name. A two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
 8. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
 
 Reply with JSON only, no prose around it, in exactly this shape:
@@ -352,9 +368,16 @@ export function parseDraftedCases(
             (response) => response.content.trim().length < floor
         );
         if (short.length > 0) {
+            // Every length, not just the shortest: an operator reading a
+            // rejected batch needs to tell a near-miss from a stub, and the
+            // two call for different responses -- one is the instruction
+            // aiming too low, the other is a drafter that ignored it.
             problems.push(
-                `case[${index}]: ${short.length} answer(s) below ${floor} characters ` +
-                    `(shortest ${Math.min(...short.map((r) => r.content.trim().length))})`
+                `case[${index}]: ${short.length} of ${item.responses.length} answer(s) ` +
+                    `below ${floor} characters (lengths ` +
+                    `${item.responses
+                        .map((response) => response.content.trim().length)
+                        .join(", ")})`
             );
             continue;
         }

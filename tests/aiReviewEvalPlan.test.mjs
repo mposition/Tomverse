@@ -6,6 +6,7 @@ import {
   draftingBatches,
   draftingCallCostCeilingUsd,
   draftingCostCeilingUsd,
+  draftingOutputTokenCap,
   modeTargets,
   CELL_PHENOMENON_MIX,
   INJECTION_QUOTA_PER_LANGUAGE,
@@ -272,13 +273,18 @@ test("the cost is summed per call, so a growing request is not priced at its fir
   // so multiplying the first understated the last threefold, and a figure
   // called a ceiling that is not one is what somebody approves a budget
   // against.
+  //
+  // The output cap varies per call too, since it is sized to the batch, so
+  // neither side of the sum can be one figure for the whole plan.
   const ceiling = draftingCostCeilingUsd({
-    inputTokensPerCall: [1_000_000, 3_000_000],
-    outputTokenCapPerCall: 1_000_000,
+    perCall: [
+      { inputTokens: 1_000_000, outputTokenCap: 1_000_000 },
+      { inputTokens: 3_000_000, outputTokenCap: 2_000_000 },
+    ],
     inputUsdPerMillionTokens: 1,
     outputUsdPerMillionTokens: 3,
   });
-  assert.equal(ceiling, 1 + 3 + 3 + 3);
+  assert.equal(ceiling, 1 + 3 + 3 + 6);
 
   // And one call on its own, which is what a hard stop checks before making it.
   assert.equal(
@@ -538,4 +544,22 @@ test("build state and defects are separated, and only for an unfrozen decision s
   const development = partitionDatasetProblems(set({ purpose: "development" }));
   assert.deepEqual(development.blocking, []);
   assert.deepEqual(development.buildState, []);
+});
+
+test("the output cap is sized to the batch, not flat", () => {
+  // A flat cap was wrong twice over: four times too generous for the small
+  // batches that make up most of the plan, and under what a full batch at v3's
+  // answer length actually needs -- seven cases come to roughly 17,200 output
+  // tokens, and a reply that does not fit is truncated mid-JSON and billed for
+  // nothing.
+  assert.equal(draftingOutputTokenCap(1), 3_500);
+  assert.equal(draftingOutputTokenCap(7), 21_500);
+  assert.ok(
+    draftingOutputTokenCap(7) > 17_200,
+    "a full v3 batch must fit under its own cap"
+  );
+  // Monotonic, so a bigger batch never gets a smaller allowance.
+  for (let count = 1; count < 12; count += 1) {
+    assert.ok(draftingOutputTokenCap(count + 1) > draftingOutputTokenCap(count));
+  }
 });
