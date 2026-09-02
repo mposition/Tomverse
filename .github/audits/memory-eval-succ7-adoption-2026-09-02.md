@@ -18,7 +18,7 @@
 | source dataset digest (succ-6) | `2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63` |
 | scoring contract | `mem-score-v3.4`, digest `a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd` |
 | fingerprint | v4 (대화 `title` 포함) |
-| 동결 commit SHA (40자리) | *(다음 commit이 기입)* |
+| 동결 commit SHA (40자리) | `79ffe61687e61d31a74b1800fc9361d6b7cf1da4` |
 
 SHA는 동결 commit 자신을 가리키므로 그 commit 안에 담을 수 없습니다. succ-6과 같은
 순서로, 바로 다음 commit이 기입합니다. 그 사이에 dataset·manifest digest는 움직이지
