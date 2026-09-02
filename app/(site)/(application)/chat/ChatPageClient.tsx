@@ -7,7 +7,6 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
-  type ReactNode,
 } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { useModalDialog } from "@/components/useModalDialog";
