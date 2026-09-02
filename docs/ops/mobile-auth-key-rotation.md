@@ -68,23 +68,46 @@ D6과 승인 결정 3번입니다.
 
 ## 2.1 배포 전 확인 — 필수
 
-**Railway 서비스 shell에서 실행합니다.** 로컬 PC가 아닙니다 — 이 검사는 **서명
-개인키와 pepper 원문**을 읽어야 하고(활성 키로 실제 서명해 보는 것이 검사의
-일부입니다), 그 값을 노트북으로 복사하는 것이 검사보다 큰 위험입니다.
+**로컬 PC의 PowerShell, Tomverse clone 폴더 안.** Node 22와 `npm ci`가 끝나 있어야
+합니다. **지금 배포하려는 값**을 그 창의 환경변수로 넣고 실행합니다.
 
-> **rev.4 정정.** 이 문서의 이전 판은 "production 자격증명이 필요한 것이 아니다"라고
-> 적었습니다. 틀렸습니다. **배포할 값이 곧 production 자격증명입니다.**
-
-- **바꾸기 전 상태를 볼 때**: 서비스 shell에서 그대로 실행합니다.
-- **바꾼 뒤를 미리 볼 때**: 바꿀 변수만 그 shell 세션에 얹어 실행합니다. 그 창을
-  닫으면 사라지고 서비스에는 아무 영향이 없습니다.
-
-```bash
-npm run check:mobile-auth-keyring
+```powershell
+$env:MOBILE_AUTH_SIGNING_KEYS = "<배포할 값>"
+$env:MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID = "<배포할 값>"
+$env:MOBILE_AUTH_RETIRED_SIGNING_KEYS = "<배포할 값>"
+$env:MOBILE_AUTH_REFRESH_PEPPERS = "<배포할 값>"
+$env:MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID = "<배포할 값>"
+$env:MOBILE_AUTH_RETIRED_REFRESH_PEPPERS = "<배포할 값>"
+$env:MOBILE_AUTH_TOKEN_ISSUER = "<배포할 값>"
+$env:MOBILE_AUTH_TOKEN_AUDIENCE = "<배포할 값>"
+npm run check:mobile-auth-keyring -- --require-configured
 ```
 
-읽기 전용입니다. 아무것도 바꾸지 않고, 출력에 비밀값이 없으므로 결과는 그대로
-붙여도 안전합니다.
+`$env:`는 그 PowerShell 창에서만 삽니다. 창을 닫으면 사라지고 서비스에는 아무 영향이
+없습니다. 검사는 읽기 전용이고, 출력에 비밀값이 없으므로 결과는 그대로 붙여도
+안전합니다.
+
+**자격증명이 필요합니다.** 검사가 활성 키로 실제 서명해 보므로 그 개인키가 있어야
+합니다 — 회전에서는 방금 만든 새 키이므로 이미 손에 있습니다.
+
+> **rev.4 정정, rev.5 재정정.** rev.3까지는 "production 자격증명이 필요하지 않다"고
+> 적었고 그것은 틀렸습니다. rev.4는 그것을 고치면서 실행 위치를 "Railway 서비스
+> shell"로 옮겼는데, **그것도 틀렸습니다** — 두 가지 이유로.
+>
+> 1. `railway shell`은 컨테이너에 접속하는 명령이 아닙니다. 서비스 변수를 **로컬
+>    셸에 주입**하는 것이고, sealed 변수는 API로 읽히지 않으므로 그렇게는 오지
+>    않습니다. 컨테이너에 들어가는 명령은 `railway ssh`입니다.
+> 2. **그리고 이 검사는 배포된 컨테이너에서 돌아간다고 보장할 수 없습니다.**
+>    `tsx`는 devDependency이고, 이 저장소의 배포되는 script들(`run-maintenance.mjs`
+>    등)은 전부 TypeScript를 import하지 않는 순수 `.mjs`입니다 — 그 관례가 곧 이유
+>    입니다. production 이미지에 `tsx`가 있는지 저는 여기서 확인할 수 없습니다.
+>
+> 그래서 검사는 **저장소가 있는 곳에서, 배포할 값을 손으로 넣어** 돌립니다. 그것이
+> 원래 필요한 것이기도 합니다 — 검증 대상은 *지금 설정된 것*이 아니라 *설정하려는
+> 것*입니다.
+>
+> **한계도 적습니다.** 현재 살아 있는 설정을 감사하려면 컨테이너 안에서 돌려야 하고,
+> 그것은 아직 지원되지 않습니다(§6).
 
 키마다 `ACTIVE` / `RETIRED, verifies until …` / `UNDECLARED -- verifies nothing`을
 출력합니다. 실패하는 것:
@@ -99,9 +122,10 @@ npm run check:mobile-auth-keyring
 배포는 정상입니다). 모바일 인증을 서비스하기로 한 배포의 릴리스 점검에서는
 `--require-configured`를 붙여 그것도 실패로 만듭니다.
 
-```bash
-npm run check:mobile-auth-keyring -- --require-configured
-```
+모바일 인증을 서비스하는 배포라면 `--require-configured`를 붙입니다(위 명령이 이미
+그렇습니다). 붙이지 않으면 **아무것도 설정되지 않은 상태가 통과**합니다 — 모바일
+인증을 켜지 않은 배포는 정상이기 때문이며, 그래서 릴리스 체크리스트는 플래그가 붙은
+쪽을 씁니다.
 
 ---
 
@@ -115,10 +139,9 @@ npm run check:mobile-auth-keyring -- --require-configured
 node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPairSync('ed25519').privateKey.export({format:'der',type:'pkcs8'}).toString('base64'))"
 ```
 
-그 다음 **Railway 대시보드의 환경변수 화면**에서, 한 번에 하나씩:
-
-**세 변수를 한 배포에서 함께 바꿉니다.** 나눠 배포하면 안 됩니다 — 이유는 아래에
-있습니다.
+그 다음 **Railway 대시보드의 환경변수 화면**에서 **세 변수를 함께** 바꿉니다. 화면에서
+편집한 변경은 배포로 확정되기 전까지 staged 상태로 모이므로, 셋을 모두 고친 뒤 한 번에
+배포하면 중간 상태가 존재하지 않습니다. 나눠 배포하면 안 되는 이유는 아래에 있습니다.
 
 1. 최종 값 셋을 정합니다.
    - `MOBILE_AUTH_SIGNING_KEYS` = `이전id:이전키,새id:새키`
@@ -211,7 +234,15 @@ pepper도 같습니다 — `MOBILE_AUTH_REFRESH_PEPPERS`와
 
 **배포 전 확인은 CI가 아닙니다.** CI에는 모바일 키가 없고, 설정되지 않은 배포는
 정상 상태입니다(endpoint가 503으로 답하는 것이 설계입니다). 그래서 이 확인은
-운영자가 배포할 값을 들고 직접 돌리는 것이며, 그 실행을 강제하는 것은 이 문서뿐입니다.
+운영자가 배포할 값을 들고 직접 돌리는 것이며, 그 실행을 강제하는 것은 이 문서와
+릴리스 체크리스트뿐입니다.
+
+**살아 있는 설정을 감사하는 방법은 아직 없습니다.** `railway ssh`로 컨테이너에
+들어갈 수는 있지만, 검사기가 `tsx`(devDependency)를 통해 TypeScript 모듈을
+읽으므로 production 이미지에서 돌아간다고 보장할 수 없습니다. 값이 sealed라면
+로컬에서 재현할 수도 없습니다. 해결하려면 검사기의 순수 판정 부분을 의존성 없는
+`.mjs`로 옮겨야 하며(`lib/schemaComparisonCore.mjs`가 그 선례입니다), production
+활성화와 함께 정할 일로 남깁니다.
 
 production 활성화를 결정할 때 함께 정할 것 둘:
 

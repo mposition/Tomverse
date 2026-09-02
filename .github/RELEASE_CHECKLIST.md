@@ -60,14 +60,16 @@ Date / timezone:    ____________________
       authentication policy ("Deliberately excluded") because it changes the
       origin the bearer-token boundary is defined against. Read as text, so a
       URL supplied through an environment variable is still a finding
-- [ ] `npm run check:mobile-auth-keyring` — **Railway 서비스 shell에서**, 배포할 변수
-      값으로 실행합니다(검사가 활성 키로 실제 서명해 보므로 개인키가 필요하고, 그
-      값을 노트북으로 옮기는 편이 더 위험합니다). 키마다 active / 은퇴+유예 /
-      선언되지 않음을 보고하고, 선언되지 않은 키·오타 난 은퇴 id·**일부만 설정된
-      상태**에서 실패합니다. 모바일 인증을 서비스하는 배포라면
-      `-- --require-configured`를 붙여 완전 미설정도 실패로 만듭니다. CI 항목이
-      아닙니다 — CI에는 모바일 키가 없습니다. 절차는
+- [ ] 모바일 인증을 서비스하는 배포라면
+      `npm run check:mobile-auth-keyring -- --require-configured` — **배포하려는 변수
+      값을** 셸에 넣고 clone 안에서 실행합니다. 플래그가 명령에 포함돼 있습니다:
+      빼면 아무것도 설정되지 않은 상태가 통과하므로, 변수를 불러오지 않은 셸에서도
+      초록이 됩니다. 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지
+      않은 키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 —
+      CI에는 모바일 키가 없습니다. 절차와 한계는
       `docs/ops/mobile-auth-key-rotation.md`
+- [ ] 모바일 인증을 켜지 않은 배포라면 `npm run check:mobile-auth-keyring` — 완전
+      미설정을 정상으로 통과시키되, **일부만** 설정된 상태는 여전히 실패합니다
 - [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
       ships for the three endpoints whose responses carry a refresh token, and
       for the field name itself. D19 states the rule as an absence — the bridge
