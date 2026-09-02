@@ -777,8 +777,26 @@ test("every client-facing code in the contract is one a route actually returns",
   seen.add(rejectedBody.code);
   assert.equal(rejectedBody.reauthenticate, true);
 
-  // MOBILE_RATE_LIMITED is taken on the wire by the admission test above.
-  seen.add(MOBILE_AUTH_ERROR_CODES.rateLimited);
+  // MOBILE_RATE_LIMITED, from a real 429 rather than from the constant.
+  //
+  // Injecting it here is what the previous version did, and the test name --
+  // "one a route actually returns" -- was then untrue of a quarter of the map.
+  // A different client address, so this is this test's own bucket.
+  const spend = () =>
+    refresh(
+      new Request("https://tomverse.test/api/auth/mobile/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": "192.0.2.44" },
+        body: JSON.stringify({ refreshToken: "no-dot" }),
+      })
+    );
+  let limited: Response | null = null;
+  for (let attempt = 0; attempt < 80 && !limited; attempt += 1) {
+    const response = await spend();
+    if (response.status === 429) limited = response;
+  }
+  assert.ok(limited, "the admission limit must be reachable from the route");
+  seen.add((await limited.json()).code);
 
   assert.deepEqual(
     [...seen].sort(),
