@@ -191,7 +191,8 @@
     "report:ai-review-eval-coverage": "node --conditions=react-server --import tsx scripts/report-ai-review-eval-coverage.mjs",
     "draft:ai-review-eval-candidates": "node --conditions=react-server --import tsx scripts/draft-ai-review-eval-candidates.mjs",
     "adjudicate:ai-review-eval": "node --conditions=react-server --import tsx scripts/adjudicate-ai-review-eval.mjs",
-    "check:native-token-boundary": "node scripts/check-native-token-boundary.mjs"
+    "check:native-token-boundary": "node scripts/check-native-token-boundary.mjs",
+    "report:ai-review-drafting-plan": "node --conditions=react-server --import tsx scripts/report-ai-review-drafting-plan.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.44",
