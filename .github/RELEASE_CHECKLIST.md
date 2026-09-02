@@ -60,6 +60,10 @@ Date / timezone:    ____________________
       authentication policy ("Deliberately excluded") because it changes the
       origin the bearer-token boundary is defined against. Read as text, so a
       URL supplied through an environment variable is still a finding
+- [ ] `npm run check:mobile-auth-keyring` — **운영자가 배포할 변수 값을 들고** 실행
+      합니다. 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고 마지막 것이 있으면
+      실패합니다. CI 항목이 아닙니다 — CI에는 모바일 키가 없고, 설정되지 않은 배포는
+      정상 상태입니다. 절차는 `docs/ops/mobile-auth-key-rotation.md`
 - [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
       ships for the three endpoints whose responses carry a refresh token, and
       for the field name itself. D19 states the rule as an absence — the bridge

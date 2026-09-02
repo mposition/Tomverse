@@ -81,6 +81,11 @@ test("a row under a retired pepper still verifies while that pepper is in the ri
   const afterRotation = env({
     MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-2:${PEPPER_2}`,
     MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-2",
+    // The retirement line is what keeps the old generation verifiable. Without
+    // it a ring pepper that is not active verifies nothing -- which is why the
+    // rotation runbook treats this line as part of the rotation, not a
+    // follow-up.
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${new Date().toISOString()}`,
   });
 
   assert.equal(
@@ -191,4 +196,32 @@ test("one-time secrets are digested with the same discipline", () => {
     ),
     digest
   );
+});
+
+test("a pepper rotation that forgets the retirement line strands the old generation", () => {
+  // Recorded rather than smoothed over. The safe default costs something here:
+  // those refresh tokens stop verifying and those people sign in again. It is
+  // still the right default -- the alternative is trusting a pepper nobody has
+  // declared -- and `npm run check:mobile-auth-keyring` exists so this is found
+  // before a deploy.
+  const minted = mintMobileRefreshToken(env());
+  const undeclared = env({
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-2:${PEPPER_2}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-2",
+  });
+
+  assert.equal(
+    mobileRefreshSecretMatches(
+      {
+        secret: parseMobileRefreshToken(minted.token).secret,
+        storedDigest: minted.secretDigest,
+        pepperKid: "pep-1",
+      },
+      undeclared
+    ),
+    false
+  );
+  // A refusal, not a family destruction: the caller sees secret_mismatch and
+  // the person signs in again.
+  assert.equal(mintMobileRefreshToken(undeclared).pepperKid, "pep-2");
 });

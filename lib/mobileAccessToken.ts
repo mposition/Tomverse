@@ -87,13 +87,21 @@ const privateKeyFrom = (base64Pkcs8: string) =>
  * `lookupKey` answers only with an id and an algorithm -- never key material.
  * The core has no use for the bytes and no way to leak what it never holds.
  */
-const verifierPorts = (environment: Environment): MobileAccessTokenVerifierPorts => ({
+const verifierPorts = (
+  environment: Environment,
+  // The same instant the claims are judged against, not the wall clock.
+  // Without this the key's retirement grace is evaluated against `Date.now()`
+  // while `exp` and `nbf` are evaluated against the caller's clock, so a test
+  // -- or a replay of a captured request -- disagrees with itself about what
+  // time it is.
+  nowMs: number
+): MobileAccessTokenVerifierPorts => ({
   lookupKey: (kid) =>
-    mobileSigningKeyById(kid, environment)
+    mobileSigningKeyById(kid, environment, nowMs)
       ? { kid, algorithm: MOBILE_ACCESS_TOKEN_ALGORITHM }
       : null,
   verifySignature: ({ key, signingInput, signature }) => {
-    const entry = mobileSigningKeyById(key.kid, environment);
+    const entry = mobileSigningKeyById(key.kid, environment, nowMs);
     if (!entry) return false;
     try {
       // The public half is derived from the configured private key rather than
@@ -297,11 +305,12 @@ export const verifyMobileAccessTokenString = (
   const parsed = parseCompactJws(token);
   if (!parsed) return { ok: false, failure: "malformed" };
 
+  const nowMs = options.now?.getTime() ?? Date.now();
   return verifyMobileAccessToken(parsed, {
-    ports: verifierPorts(environment),
+    ports: verifierPorts(environment, nowMs),
     expectedIssuer: mobileTokenIssuer(environment),
     expectedAudience: mobileTokenAudience(environment),
-    nowSeconds: Math.floor((options.now?.getTime() ?? Date.now()) / 1000),
+    nowSeconds: Math.floor(nowMs / 1000),
   });
 };
 

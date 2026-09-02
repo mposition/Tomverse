@@ -29,10 +29,14 @@
 // handles its own phrasing and its own idea of what counts as a contradiction.
 // Those are refused unless overridden, so the choice lands in the record.
 
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  openSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -55,6 +59,10 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
 import { getModelPricingProfile } from "../lib/modelPricing.ts";
 import { draftingCallCostCeilingUsd } from "../lib/aiReviewEvalPlan.ts";
+import {
+  admitDraftCall,
+  ledgerBalance,
+} from "../lib/aiReviewDraftLedger.ts";
 
 const args = process.argv.slice(2);
 const argValue = (name) =>
@@ -111,6 +119,24 @@ if (configuration.protocol !== "openai-compatible" && model.provider !== "openai
       "requests. Pick another drafter, or add a builder for it."
   );
 }
+
+// A test seam, not a configuration knob.
+//
+// The stub-provider regressions need the request to go somewhere they control,
+// and the ledger is only worth testing against a provider that can be made to
+// return nothing usable on demand. Loopback only: an override that could name
+// any host would be a way to send a live API key somewhere else, and this
+// script holds one.
+const baseUrlOverride = process.env.AI_REVIEW_DRAFT_BASE_URL ?? null;
+if (baseUrlOverride !== null && !/^http:\/\/(127\.0\.0\.1|localhost):\d+(\/|$)/.test(baseUrlOverride)) {
+  die(
+    `AI_REVIEW_DRAFT_BASE_URL is a loopback-only test seam and "${baseUrlOverride}" is not\n` +
+      "loopback. It exists so the spend regressions can stand a stub provider up on a\n" +
+      "local port; it is not a way to point a drafting run, and the API key it sends,\n" +
+      "at another host."
+  );
+}
+const baseUrl = baseUrlOverride ?? configuration.baseUrl;
 
 // The set is created on first use rather than committed empty.
 //
@@ -191,6 +217,9 @@ console.log(`  already in this cell: ${inCell.length}`);
 console.log(
   `  key from ${configuration.apiKeyEnvName}: ${process.env[configuration.apiKeyEnvName] ? "present" : "MISSING"}`
 );
+if (baseUrlOverride !== null) {
+  console.log(`  BASE URL OVERRIDDEN to ${baseUrl} — no provider is being called`);
+}
 if (tier) {
   console.log(
     `\n  cost ceiling  ~$${estimatedCostUsd.toFixed(4)}  ` +
@@ -208,34 +237,29 @@ if (tier) {
 
 console.log(`\n--- instruction ---\n${instruction}\n--- end ---`);
 
-// The cumulative hard stop.
+// The cumulative hard stop: reserve before the call, settle after.
 //
-// This script sends ONE batch per invocation, and filling the set takes about
-// 136 of them. A per-call ceiling printed on screen bounds nothing across a
-// loop: an operator running the loop overnight has approved 136 calls' worth
-// of spend one call at a time. So the budget is a total, it is required with
-// --send, and it is enforced against a ledger that survives between
-// invocations.
+// This script sends ONE batch per invocation and the plan needs 330 of them, so
+// a per-call ceiling printed on screen bounds nothing across the loop -- an
+// operator running it overnight has approved 330 calls' worth one call at a
+// time. (330 is not 1,240 / 10: a batch belongs to one (cell, phenomenon, mode),
+// so a phenomenon split across three modes is three batches, not the two its
+// count alone would suggest. `report:ai-review-drafting-plan` prints the real
+// figure per cell.)
 //
-// Checked BEFORE the call, against this call's own cost computed from the
-// instruction that is about to go out -- not from a plan-time estimate, which
-// is smaller for exactly the batches that run last.
+// Reserve-then-settle rather than a single write afterwards, for the same
+// reason the credit path works that way: the decision to spend and the record
+// of spending cannot be one event, because everything between them can fail.
+// A settle-only ledger lost every call that returned nothing usable, every
+// reply that would not parse, every process that died after the response, and
+// let two processes read the same balance and both proceed.
 const ledgerPath = join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
-const spentSoFarUsd = existsSync(ledgerPath)
-  ? readFileSync(ledgerPath, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .reduce((total, line) => {
-        try {
-          return total + (JSON.parse(line).costCeilingUsd ?? 0);
-        } catch {
-          // A ledger line that cannot be read is treated as spend of unknown
-          // size, which has to stop the loop: continuing would be spending
-          // against a total nobody can compute.
-          return Number.NaN;
-        }
-      }, 0)
-  : 0;
+const lockPath = `${ledgerPath}.lock`;
+
+const readLedger = () =>
+  ledgerBalance(
+    existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8").split("\n") : []
+  );
 
 const maxTotalCostUsd = argValue("max-total-cost-usd")
   ? Number(argValue("max-total-cost-usd"))
@@ -249,11 +273,16 @@ const callCeilingUsd = tier
     })
   : null;
 
+const balanceBefore = readLedger();
 console.log(`\n  budget ledger  ${ledgerPath}`);
 console.log(
-  `  spent so far   ${Number.isNaN(spentSoFarUsd) ? "UNREADABLE" : `~$${spentSoFarUsd.toFixed(4)}`}` +
+  `  committed      ~$${balanceBefore.committedUsd.toFixed(4)}` +
+    ` (${balanceBefore.settledCount} settled, ${balanceBefore.outstandingCount} outstanding)` +
     (maxTotalCostUsd === null ? "" : ` of $${maxTotalCostUsd.toFixed(2)}`)
 );
+for (const problem of balanceBefore.problems.slice(0, 5)) {
+  console.log(`  LEDGER PROBLEM ${problem}`);
+}
 
 if (!send) {
   console.log(
@@ -266,37 +295,113 @@ if (!send) {
 if (maxTotalCostUsd === null || !Number.isFinite(maxTotalCostUsd) || maxTotalCostUsd <= 0) {
   die(
     "--max-total-cost-usd=<total> is required with --send.\n\n" +
-      "This sends one batch per run and the set needs about 136 of them, so a\n" +
+      "This sends one batch per run and the plan needs 330 of them, so a\n" +
       "per-call figure bounds nothing across the loop. The total is enforced\n" +
       `against ${ledgerPath}, which persists between runs.`
   );
 }
-if (Number.isNaN(spentSoFarUsd)) {
-  die(
-    `${ledgerPath} has a line that cannot be read, so the total spent is unknown.\n` +
-      "Refusing to add to a total nobody can compute."
-  );
-}
-if (callCeilingUsd === null) {
-  die(
-    `lib/modelPricing.ts has no profile for ${modelId}, so this call's cost cannot be\n` +
-      "bounded. A budget enforced against an unknown price is not a budget."
-  );
-}
-if (spentSoFarUsd + callCeilingUsd > maxTotalCostUsd) {
-  die(
-    `\nHARD STOP. This call's ceiling is ~$${callCeilingUsd.toFixed(4)} and ` +
-      `~$${spentSoFarUsd.toFixed(4)} is already spent,\n` +
-      `which would exceed the approved $${maxTotalCostUsd.toFixed(2)}.\n\n` +
-      "Nothing was sent. Re-plan the remaining work, or approve a new total."
-  );
-}
 
+// Before the lock, because everything past this point writes a reservation and
+// a reservation stands for money that was very likely spent. A run with no key
+// cannot call anything, so it must not leave one behind.
 const apiKey = process.env[configuration.apiKeyEnvName];
 if (!apiKey) die(`\n${configuration.apiKeyEnvName} is not set.`);
 
-const response = await fetch(
-  `${configuration.baseUrl.replace(/\/+$/, "")}/chat/completions`,
+// The lock. An exclusive create is atomic, so two processes cannot both hold
+// it, which is what stops both from reading the same balance and each
+// deciding it has room.
+let lockHandle;
+for (let attempt = 0; attempt < 50; attempt += 1) {
+  try {
+    lockHandle = openSync(lockPath, "wx");
+    break;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    await new Promise((resolve_) => setTimeout(resolve_, 100));
+  }
+}
+if (lockHandle === undefined) {
+  die(
+    `Another drafting run holds ${lockPath}.\n\n` +
+      "Two runs reading the same balance would each decide they had room. If no\n" +
+      "run is active, remove the lock file by hand -- and check the ledger for an\n" +
+      "outstanding reservation first, because a run that died holding the lock\n" +
+      "probably also left one."
+  );
+}
+
+const reservationId = randomUUID();
+let reserved = false;
+try {
+  // Re-read INSIDE the lock. The balance printed above was read outside it and
+  // is only for the operator's eyes.
+  const balance = readLedger();
+  const decision = admitDraftCall({
+    balance,
+    callCostCeilingUsd: callCeilingUsd,
+    maxTotalCostUsd,
+  });
+  if (!decision.allowed) {
+    closeSync(lockHandle);
+    rmSync(lockPath, { force: true });
+    die(`\nHARD STOP. ${decision.reason}\n\nNothing was sent.`);
+  }
+  appendFileSync(
+    ledgerPath,
+    `${JSON.stringify({
+      op: "reserve",
+      id: reservationId,
+      at: new Date().toISOString(),
+      costCeilingUsd: callCeilingUsd,
+      modelId,
+      language,
+      taskType,
+      phenomenon,
+      mode,
+      requestedCases: count,
+      estimatedInputTokens,
+      outputTokenCap,
+    })}\n`,
+    "utf8"
+  );
+  reserved = true;
+  console.log(
+    `  reserved       ~$${callCeilingUsd.toFixed(4)} as ${reservationId}` +
+      `  (~$${decision.remainingUsd.toFixed(4)} would remain)`
+  );
+} finally {
+  closeSync(lockHandle);
+  rmSync(lockPath, { force: true });
+}
+
+/**
+ * Records what the reserved call turned into.
+ *
+ * Called on every exit path after the reservation exists, including the ones
+ * that produce nothing usable -- the call was billed either way. A reservation
+ * left unsettled keeps holding the budget for ever, which is the safe
+ * direction: it stands for a call that was very likely charged.
+ */
+const settle = (outcome) => {
+  if (!reserved) return;
+  reserved = false;
+  appendFileSync(
+    ledgerPath,
+    `${JSON.stringify({
+      op: "settle",
+      reservationId,
+      at: new Date().toISOString(),
+      costCeilingUsd: callCeilingUsd,
+      outcome,
+    })}\n`,
+    "utf8"
+  );
+};
+
+let response;
+try {
+  response = await fetch(
+  `${baseUrl.replace(/\/+$/, "")}/chat/completions`,
   {
     method: "POST",
     headers: {
@@ -308,19 +413,37 @@ const response = await fetch(
       messages: [{ role: "user", content: instruction }],
       ...generationParameters,
     }),
-    signal: AbortSignal.timeout(Number(process.env.DRAFT_TIMEOUT_MS || 180_000)),
-  }
-);
+      signal: AbortSignal.timeout(Number(process.env.DRAFT_TIMEOUT_MS || 180_000)),
+    }
+  );
+} catch (error) {
+  // The request may or may not have reached the provider. Settled rather than
+  // left outstanding only because the alternative -- holding the budget for
+  // ever on a connection error -- would stop the loop on the first flake; the
+  // outcome names it so an operator can tell.
+  settle("request_failed");
+  die(`\nThe request failed: ${error.message}`);
+}
 const body = await response.text();
-if (!response.ok) die(`\nHTTP ${response.status}: ${body.slice(0, 500)}`);
+if (!response.ok) {
+  settle(`http_${response.status}`);
+  die(`\nHTTP ${response.status}: ${body.slice(0, 500)}`);
+}
 
-const completion = JSON.parse(body);
+let completion;
+try {
+  completion = JSON.parse(body);
+} catch (error) {
+  settle("unparseable_response");
+  die(`\nThe reply is not JSON: ${error.message}`);
+}
 const { cases, problems } = parseDraftedCases(
   completion.choices?.[0]?.message?.content ?? ""
 );
 for (const problem of problems) console.error(`  rejected: ${problem}`);
 if (cases.length === 0) {
-  die("\nNothing usable came back. The call was billed; nothing was written.");
+  settle("no_usable_cases");
+  die("\nNothing usable came back. The call was billed and is settled in the ledger.");
 }
 
 const draftedAt = new Date().toISOString();
@@ -376,25 +499,7 @@ writeFileSync(
   "utf8"
 );
 
-// Appended after the call, because the call was billed whether or not anything
-// usable came back. A ledger that only recorded successes would let a run of
-// unusable replies spend without moving the total.
-appendFileSync(
-  ledgerPath,
-  `${JSON.stringify({
-    at: draftedAt,
-    modelId,
-    language,
-    taskType,
-    phenomenon,
-    mode,
-    count: cases.length,
-    estimatedInputTokens,
-    outputTokenCap,
-    costCeilingUsd: callCeilingUsd,
-  })}\n`,
-  "utf8"
-);
+settle(`drafted_${cases.length}`);
 
 console.log(`\n${cases.length} candidate(s) appended to ${setPath}.`);
 console.log(

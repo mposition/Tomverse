@@ -27,3 +27,11 @@ docs/ops/external-conversation-continuation-staging-verification-records/fixture
 # written beside these files is evidence too.
 docs/ops/ai-review-evaluation-records/** text eol=lf
 docs/ops/ai-review-evaluation-set/*.json text eol=lf
+
+# The drafting spend ledger sits beside the set it paid for.
+#
+# Not digest-bound, but it is append-only and read line by line to decide
+# whether more money may be spent, and a line the reader rejects stops the
+# loop. Pinned for the same reason as the files above: an operator's own clone
+# must read what CI reads.
+docs/ops/ai-review-evaluation-set/*.jsonl text eol=lf
