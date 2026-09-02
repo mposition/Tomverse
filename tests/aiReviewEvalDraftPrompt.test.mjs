@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DRAFT_MIN_RESPONSE_CHARACTERS,
+  DRAFT_DISCARD_FLOOR_CHARACTERS,
   ANSWER_SHAPE,
   DRAFT_RESPONSE_LABELS,
   DRAFT_TARGET_RESPONSE_RANGE,
@@ -103,7 +103,19 @@ test("the instruction names the assigned answer for every case", () => {
       `${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters`
     )
   );
-  assert.match(instruction, new RegExp(`not go under ${DRAFT_MIN_RESPONSE_CHARACTERS}`));
+  assert.match(
+    instruction,
+    new RegExp(`under ${DRAFT_DISCARD_FLOOR_CHARACTERS} characters is discarded unread`)
+  );
+  // The band is a writing target and the floor is a format check, and the
+  // instruction has to say both. Running them together is what made v2 aim at
+  // 200 and land at 162-190, and v3 aim at 500 and land at 215.
+  assert.match(instruction, /a target for writing, not a test to pass/);
+  assert.match(instruction, /clearing it says nothing at all about whether the case is good/);
+  // Depth is asked for as substance, with padding named as the failure.
+  assert.match(instruction, /specific to THIS case/);
+  assert.match(instruction, /do not invent one to fill the space/);
+  assert.match(instruction, /no facts the question did not ask about/);
   // The one-difference rule is what makes an exhaustive gold honest: a planted
   // answer careless in a second way scores a reviewer wrong for finding it.
   assert.match(instruction, /differs from the others on ONE point/);
@@ -146,11 +158,11 @@ test("labels are checked, never filled in", () => {
 test("a stub answer is refused rather than accepted into the cell", () => {
   const short = parseDraftedCases(reply([caseWith(["a", "b", "c"], { contentLength: "short" })]), {
     targetLabels: ["a"],
-    minResponseCharacters: DRAFT_MIN_RESPONSE_CHARACTERS,
+    minResponseCharacters: DRAFT_DISCARD_FLOOR_CHARACTERS,
   });
   assert.equal(short.cases.length, 0);
   // Every length is named, so a near-miss and a stub are distinguishable.
-  assert.match(short.problems[0], /3 of 3 answer\(s\) below 200 characters \(lengths /);
+  assert.match(short.problems[0], /3 of 3 answer\(s\) below the 200-character discard floor/);
 });
 
 test("an accepted case remembers which case of the batch it was", () => {
@@ -220,4 +232,27 @@ test("the planted answer is told to believe itself", () => {
     instruction,
     new RegExp(`elements 3 to ${ANSWER_SHAPE[cell.taskType].length} follow from it`)
   );
+});
+
+test("one difference means one reportable action, wrong in every reading", () => {
+  // The v5 pilot's two rejections. In 002 the planted difference was taking a
+  // stroke patient by car rather than by ambulance -- which official guidance
+  // allows where it is genuinely faster, so the case scores a reviewer for not
+  // knowing the drafter's unstated circumstance. In 005 one gold item bundled
+  // ventilating instead of evacuating, staying in a nearby room, and going back
+  // in: a reviewer reporting two of the three takes false positives against a
+  // gold that claims to be exhaustive.
+  const instruction = draftInstruction({
+    ...cell,
+    count: 2,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, count: 2 }),
+  });
+  assert.match(instruction, /ONE ACTION a reviewer could report on its own/);
+  assert.match(instruction, /wrong under every reading of the question/);
+  assert.match(instruction, /One item per finding a reviewer could report on its own/);
+  // Both rules are stated with the failure that produced them, because "be
+  // atomic" is the kind of instruction a model agrees with and does not act on.
+  assert.match(instruction, /by car rather than waiting for an ambulance/);
+  assert.match(instruction, /ventilates instead of evacuating/);
 });
