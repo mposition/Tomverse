@@ -1,0 +1,267 @@
+// The drafting script's spend control, exercised as a script.
+//
+// The unit tests cover the ledger's arithmetic. These cover the part that
+// arithmetic cannot: that a billed call which returns nothing usable is
+// settled rather than forgotten, that a process killed after reserving leaves
+// its money held, and that two runs cannot both decide they have room.
+//
+// No provider is called. A stub server stands in, so "billed" here means
+// "reserved and settled" -- which is exactly the bookkeeping under test.
+
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { ledgerBalance } from "../lib/aiReviewDraftLedger.ts";
+
+const ARGS = [
+  "--model=gpt-5-6-luna",
+  "--language=ko",
+  "--task-type=safety_sensitive",
+  "--phenomenon=prompt_injection",
+  "--mode=balanced",
+  "--count=2",
+];
+
+/**
+ * A stand-in provider. `reply` is what it returns; `null` never answers.
+ *
+ * It runs in this process, so the children must be spawned asynchronously:
+ * `spawnSync` blocks this event loop, and a server that cannot accept a
+ * connection looks exactly like a provider that never replies.
+ */
+const stubProvider = async (reply) => {
+  const server = createServer((request, response) => {
+    if (reply === null) return; // hangs, so the caller can be killed mid-flight
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(reply);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${server.address().port}/v1`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+};
+
+const fixture = () => {
+  const root = mkdtempSync(join(tmpdir(), "ai-review-ledger-"));
+  const setPath = join(root, "decision-v1.json");
+  return {
+    root,
+    setPath,
+    ledgerPath: join(root, "decision-v1.spend.jsonl"),
+    balance: () =>
+      ledgerBalance(
+        existsSync(join(root, "decision-v1.spend.jsonl"))
+          ? readFileSync(join(root, "decision-v1.spend.jsonl"), "utf8").split("\n")
+          : []
+      ),
+  };
+};
+
+const args = (setPath, extra = []) => [
+  "--conditions=react-server",
+  "--import",
+  "tsx",
+  "scripts/draft-ai-review-eval-candidates.mjs",
+  ...ARGS,
+  `--set=${setPath}`,
+  ...extra,
+];
+
+const env = (baseUrl) => ({
+  ...process.env,
+  OPENAI_API_KEY: "test-key-not-a-real-one",
+  // The script accepts a loopback base URL only, which is what makes this a
+  // test seam rather than a way to redirect a real key.
+  AI_REVIEW_DRAFT_BASE_URL: baseUrl,
+});
+
+/** Runs the drafter to completion and collects what it said. */
+const run = (setPath, extra, baseUrl) =>
+  new Promise((resolve) => {
+    const child = spawn(process.execPath, args(setPath, extra), {
+      env: env(baseUrl),
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+
+test("a billed call that returns nothing usable is settled, not forgotten", async (t) => {
+  const provider = await stubProvider(
+    JSON.stringify({ choices: [{ message: { content: "no json here at all" } }] })
+  );
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /Nothing usable came back/);
+
+  const balance = fix.balance();
+  assert.deepEqual(balance.problems, []);
+  assert.equal(balance.settledCount, 1, "the billed call must be settled");
+  assert.equal(balance.outstandingCount, 0);
+  assert.ok(balance.committedUsd > 0, "a billed call must move the total");
+  const settlement = readFileSync(fix.ledgerPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .find((entry) => entry.op === "settle");
+  assert.equal(settlement.outcome, "no_usable_cases");
+});
+
+test("a reply that will not parse is settled too", async (t) => {
+  const provider = await stubProvider("<html>gateway error</html>");
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /The reply is not JSON/);
+  const balance = fix.balance();
+  assert.equal(balance.settledCount, 1);
+  assert.ok(balance.committedUsd > 0);
+});
+
+test("a process killed after reserving leaves its money held", async (t) => {
+  const provider = await stubProvider(null); // never answers
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const child = spawn(
+    process.execPath,
+    args(fix.setPath, ["--send", "--max-total-cost-usd=1"]),
+    { env: env(provider.url) }
+  );
+  // Wait for the reservation to land, then kill mid-flight. The window is
+  // generous because the whole unit suite runs these files concurrently and
+  // the child has to boot tsx before it reserves anything.
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    if (fix.balance().outstandingCount > 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  child.kill("SIGKILL");
+  await new Promise((resolve) => child.on("exit", resolve));
+
+  const balance = fix.balance();
+  assert.equal(balance.outstandingCount, 1, "the reservation must survive the kill");
+  assert.ok(balance.committedUsd > 0, "and must still hold the budget");
+  assert.equal(balance.settledCount, 0);
+});
+
+test("a reservation nobody settled blocks a later run that would pass the total", async (t) => {
+  const fix = fixture();
+  t.after(() => rmSync(fix.root, { recursive: true, force: true }));
+  writeFileSync(
+    fix.ledgerPath,
+    `${JSON.stringify({
+      op: "reserve",
+      id: "orphan",
+      at: "2026-09-01",
+      costCeilingUsd: 0.999,
+    })}\n`
+  );
+
+  const result = await run(
+    fix.setPath,
+    ["--send", "--max-total-cost-usd=1"],
+    "http://127.0.0.1:1/v1"
+  );
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /HARD STOP/);
+  assert.match(result.stderr, /1 outstanding/);
+  // Nothing was added: the refusal happens before the reservation is written.
+  assert.equal(fix.balance().outstandingCount, 1);
+});
+
+test("two runs at once cannot both decide they have room", async (t) => {
+  const provider = await stubProvider(
+    JSON.stringify({ choices: [{ message: { content: "not usable" } }] })
+  );
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  // A total that fits one call and not two, and both runs start at once.
+  const [one, two] = await Promise.all([
+    run(fix.setPath, ["--send", "--max-total-cost-usd=0.02"], provider.url),
+    run(fix.setPath, ["--send", "--max-total-cost-usd=0.02"], provider.url),
+  ]);
+  const refused = [one, two].filter((result) => /HARD STOP/.test(result.stderr));
+  assert.equal(refused.length, 1, `${one.stderr}\n---\n${two.stderr}`);
+
+  const balance = fix.balance();
+  assert.deepEqual(balance.problems, []);
+  assert.ok(
+    balance.committedUsd <= 0.02,
+    `committed ${balance.committedUsd} passed the approved total`
+  );
+});
+
+test("the base-URL seam refuses anything but loopback", async (t) => {
+  const fix = fixture();
+  t.after(() => rmSync(fix.root, { recursive: true, force: true }));
+
+  const result = await run(
+    fix.setPath,
+    ["--send", "--max-total-cost-usd=1"],
+    "http://evil.example.com:8080/v1"
+  );
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /loopback-only test seam/);
+  // The refusal happens before the key is read and before anything is reserved.
+  assert.equal(existsSync(fix.ledgerPath), false);
+});
+
+test("a run with no API key reserves nothing", async (t) => {
+  const provider = await stubProvider(
+    JSON.stringify({ choices: [{ message: { content: "not usable" } }] })
+  );
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      args(fix.setPath, ["--send", "--max-total-cost-usd=1"]),
+      { env: { ...env(provider.url), OPENAI_API_KEY: "" } }
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout.resume();
+    child.on("close", (status) => resolve({ status, stderr }));
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /OPENAI_API_KEY is not set/);
+  // A reservation stands for money very likely spent. This run could not
+  // spend any, so it must not leave one holding the budget for ever.
+  assert.equal(existsSync(fix.ledgerPath), false);
+});
