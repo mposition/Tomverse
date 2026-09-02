@@ -28,15 +28,28 @@ import { expect, test } from "@playwright/test";
  * The obligation itself is covered without a browser in
  * tests/discardResponseBody.test.mjs.
  *
- * The 500 is real, not mocked: the E2E server runs against a deliberately
- * unreachable database, so `/api/user/guest-usage` genuinely fails there. A
- * `page.route` fulfilment would be served by Playwright rather than by the
- * network stack and would prove nothing about either.
+ * The error response is real, not mocked. A `page.route` fulfilment would be
+ * served by Playwright rather than by the network stack and would prove nothing
+ * about either, so this needs an `/api/*` route that genuinely answers 5xx on
+ * the E2E server.
+ *
+ * That used to be `/api/user/guest-usage`, which failed there because it read
+ * usage rows from a deliberately unreachable database. It was a defect and it
+ * has been fixed (the endpoint short-circuits under `E2E_DISABLE_DATABASE`),
+ * so the case moved to `/api/ready`, which answers 503 on this server for the
+ * reason it exists to report. The E2E server has no database,
+ * no provider budgets and no snapshot keyring, so it is genuinely not ready to
+ * serve, and saying so is the endpoint working rather than failing. That is the
+ * difference from the old case, and it is why this one is not a defect waiting
+ * to be fixed out from under the test.
+ *
+ * If `/api/ready` ever passes here, the status assertion below fails loudly
+ * rather than the test quietly covering nothing.
  */
 
 const CASES = [
   { label: "200", path: "/api/build-info", expectOk: true },
-  { label: "500", path: "/api/user/guest-usage", expectOk: false },
+  { label: "503", path: "/api/ready", expectOk: false },
 ] as const;
 
 const CONSUMERS = [
