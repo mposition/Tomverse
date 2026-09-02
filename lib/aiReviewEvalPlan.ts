@@ -509,10 +509,14 @@ export const draftingBatches = (input: {
  * the same way the length floor took the first v3 batch, one step later.
  *
  * So the cap is per case with a fixed allowance for the envelope, and the
- * ceiling that is checked against the approved total moves with it. 3,000 is
- * the measured ~2,455 with a fifth again on top: a cap that is occasionally
- * generous costs a slightly high reservation, and one that is occasionally
- * tight costs the whole call.
+ * ceiling that is checked against the approved total moves with it.
+ *
+ * 3,500 sizes it for the TOP of v4's band, not its middle: three answers of
+ * 600 characters plus the question, gold and notes come to about 2,450
+ * characters, ~2,800 tokens at the measured Korean density, and the gold gets
+ * longer as the answers do. A cap that is occasionally generous costs a
+ * slightly high reservation; one that is occasionally tight costs the whole
+ * call, which has now happened once and been avoided once.
  *
  * The 1.143 comes from this repository's own estimator, which its comments say
  * overstates Korean by roughly 110% against o200k. Left overstated on purpose:
@@ -520,7 +524,7 @@ export const draftingBatches = (input: {
  * expensive while the cost of being wrong the other way is a reservation a
  * little larger than it needed to be.
  */
-export const DRAFTING_OUTPUT_TOKENS_PER_CASE = 3_000;
+export const DRAFTING_OUTPUT_TOKENS_PER_CASE = 3_500;
 
 /** The envelope: the JSON around the cases, whatever their number. */
 export const DRAFTING_OUTPUT_TOKENS_FIXED = 500;

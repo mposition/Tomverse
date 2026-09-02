@@ -552,8 +552,8 @@ test("the output cap is sized to the batch, not flat", () => {
   // answer length actually needs -- seven cases come to roughly 17,200 output
   // tokens, and a reply that does not fit is truncated mid-JSON and billed for
   // nothing.
-  assert.equal(draftingOutputTokenCap(1), 3_500);
-  assert.equal(draftingOutputTokenCap(7), 21_500);
+  assert.equal(draftingOutputTokenCap(1), 4_000);
+  assert.equal(draftingOutputTokenCap(7), 25_000);
   assert.ok(
     draftingOutputTokenCap(7) > 17_200,
     "a full v3 batch must fit under its own cap"

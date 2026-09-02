@@ -10,12 +10,14 @@ import test from "node:test";
 
 import {
   DRAFT_MIN_RESPONSE_CHARACTERS,
+  ANSWER_SHAPE,
   DRAFT_RESPONSE_LABELS,
-  DRAFT_TARGET_RESPONSE_CHARACTERS,
+  DRAFT_TARGET_RESPONSE_RANGE,
   assignTargetLabels,
   draftInstruction,
   parseDraftedCases,
 } from "../lib/aiReviewEvalDraftPrompt.ts";
+import { AI_REVIEW_EVAL_TASK_TYPES } from "../lib/aiReviewEvalCore.ts";
 
 const cell = {
   language: "ko",
@@ -88,16 +90,23 @@ test("the instruction names the assigned answer for every case", () => {
     assert.match(instruction, new RegExp(`case ${index + 1}: answer "${label}"`));
   }
   assert.match(instruction, /Do not move it/);
-  // The request is the target; the floor is the line a case is refused at.
-  // Stating the floor AS the target is what wasted the first v2 call: the
-  // model aimed at 200 and landed between 162 and 190, seven times out of
-  // seven.
-  assert.match(instruction, new RegExp(`about ${DRAFT_TARGET_RESPONSE_CHARACTERS} characters`));
-  assert.match(instruction, new RegExp(`not go under ${DRAFT_MIN_RESPONSE_CHARACTERS}`));
-  assert.ok(
-    DRAFT_TARGET_RESPONSE_CHARACTERS >= DRAFT_MIN_RESPONSE_CHARACTERS * 2,
-    "the target needs room above the floor for a model's imprecision"
+  // Length is asked for as a structure, not as a number. Raising the number
+  // was tried twice and did not work: v2 asked for 200 and got 162-190, v3
+  // asked for 500 and got 215 -- three elements at about seventy characters
+  // each, which is exactly what v3's three-element frame produces.
+  for (const element of ANSWER_SHAPE[cell.taskType]) {
+    assert.match(instruction, new RegExp(element.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(
+    instruction,
+    new RegExp(
+      `${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters`
+    )
   );
+  assert.match(instruction, new RegExp(`not go under ${DRAFT_MIN_RESPONSE_CHARACTERS}`));
+  // The one-difference rule is what makes an exhaustive gold honest: a planted
+  // answer careless in a second way scores a reviewer wrong for finding it.
+  assert.match(instruction, /differs from the others on ONE point/);
 });
 
 test("an instruction cannot be built with the wrong number of assignments", () => {
@@ -162,4 +171,30 @@ test("an accepted case remembers which case of the batch it was", () => {
 
 test("the allowed labels are the ones the dataset rule allows", () => {
   assert.deepEqual([...DRAFT_RESPONSE_LABELS], ["a", "b", "c"]);
+});
+
+test("the answer shape is per task type, not one frame for the whole set", () => {
+  // A single five-sentence skeleton imposed everywhere becomes its own pattern:
+  // every answer in the set built the same way, and a reviewer that learns the
+  // skeleton learns something the evaluation did not mean to teach it. That is
+  // the position confound again in different clothes.
+  assert.equal(ANSWER_SHAPE.safety_sensitive.length, 5);
+  for (const [taskType, shape] of Object.entries(ANSWER_SHAPE)) {
+    if (taskType === "safety_sensitive") continue;
+    assert.equal(shape.length, 3, `${taskType} was widened without being measured`);
+  }
+  // Every task type has one, so no cell falls back to an unstated shape.
+  for (const taskType of AI_REVIEW_EVAL_TASK_TYPES) {
+    assert.ok(ANSWER_SHAPE[taskType]?.length > 0, taskType);
+  }
+  // And each cell's instruction carries its own, not another's.
+  const planning = draftInstruction({
+    ...cell,
+    taskType: "planning_decision",
+    count: 1,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, taskType: "planning_decision", count: 1 }),
+  });
+  assert.match(planning, /the trade-off behind it/);
+  assert.doesNotMatch(planning, /the warning signs or cautions that matter/);
 });

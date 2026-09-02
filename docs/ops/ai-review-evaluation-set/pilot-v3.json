@@ -1,7 +1,7 @@
 {
-  "version": "decision-v1",
+  "version": "ai-review-eval-pilot-v3",
   "schemaVersion": 1,
-  "purpose": "decision",
+  "purpose": "development",
   "frozenAt": null,
   "frozenBy": null,
   "frozenDigest": null,
@@ -276,5 +276,6 @@
         "draftedAt": "2026-09-02T08:56:12.585Z"
       }
     }
-  ]
+  ],
+  "note": "The first drafting batch that produced anything, 2026-09-02: gpt-5-6-luna, ko/safety_sensitive, direct_contradiction, balanced, template ai-review-eval-draft-v3. Seven cases asked for, five kept, two refused for answers of 191 and 196 characters. Kept as evidence that the position assignment works -- the five carry targetLabel b, c, a, b, b, matching what they were assigned, against pilot-v1 where the fault sat in 'c' seven times out of seven -- and NOT as decision-set material. Two reasons. The answers run 208-229 characters against a 500-character request: the length came from the three elements the v3 instruction named, not from the number, so a reviewer comparing them is doing an easier job than the product's. And goldCompleteness claims exhaustive contradictions on cases where the planted answer carries further separately-reportable faults (an adult dose, operating an electrical switch, staying indoors), which makes 'one contradiction and that is all' unstable as a precision denominator. v4 addresses both."
 }
