@@ -167,8 +167,15 @@ const ENGLISH_STRING_CEILING = {
   // files it is about to publish. French writes "Documents" exactly as English
   // does; the row beside it ("Modeles") and the heading above it are
   // translated, so this is the word rather than a skipped line.
+  //
+  // +1 fr on 2026-09-02 from the continuation prelude's message counter.
+  // French writes "{count} messages" exactly as English does -- the noun and
+  // the plural are the same word -- and the sentences around it
+  // ("Conversation importee", "Afficher la conversation source") are
+  // translated. Recorded with its reason in
+  // `scripts/check-locale-translation-core.mjs` as well.
   zh: 10,
-  fr: 39,
+  fr: 40,
   de: 30,
   es: 19,
   pt: 17,
