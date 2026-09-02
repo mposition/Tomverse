@@ -5,7 +5,10 @@ import test from "node:test";
 import {
   bearerTokenFromHeader,
   mintMobileAccessToken,
+  mobileAuthReady,
+  mobileSigningKeyUsable,
   parseCompactJws,
+  resetMobileSigningSelfTestForTesting,
   verifyMobileAccessTokenString,
 } from "../lib/mobileAccessToken.ts";
 import { MOBILE_ACCESS_TOKEN_TTL_SECONDS } from "../lib/mobileAuthContract.ts";
@@ -239,4 +242,68 @@ test("no verdict and no minted value carries key material", () => {
     assert.ok(!serialized.includes(secret));
   }
   assert.ok(!serialized.includes(minted.token));
+});
+
+// --- the self-test that has to run before any credential is spent ----------
+
+test("a well-shaped key that is not a key is refused, by signing with it", () => {
+  // The gap this closes. `mobileAuthConfigured` reads shapes -- four variables
+  // present, ids sane, secrets long enough -- and a base64 string of the right
+  // length passes every one of them while being unable to sign anything.
+  //
+  // Where that lands is the problem: minting happens after the transaction that
+  // creates the session, so a bad key would consume a one-time grant, spend a
+  // rate-limit unit and write a device and a family before the 500. On refresh
+  // it would consume the presented token and mint a successor the client never
+  // receives, which on the next attempt is a replay.
+  const notAKey = Buffer.from("x".repeat(64), "utf8").toString("base64");
+  const broken = env({ MOBILE_AUTH_SIGNING_KEYS: `sign-1:${notAKey}` });
+
+  resetMobileSigningSelfTestForTesting();
+  assert.equal(mobileSigningKeyUsable(broken), false);
+  assert.equal(mobileAuthReady(broken), false);
+});
+
+test("a real key passes the self-test, and the answer is memoised per key", () => {
+  resetMobileSigningSelfTestForTesting();
+  assert.equal(mobileAuthReady(env()), true);
+  assert.equal(mobileAuthReady(env()), true);
+
+  // A different key re-evaluates rather than inheriting the previous answer.
+  const other = env({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-2:${SIGN_2}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+  });
+  assert.equal(mobileAuthReady(other), true);
+
+  const notAKey = Buffer.from("y".repeat(64), "utf8").toString("base64");
+  assert.equal(
+    mobileAuthReady(env({ MOBILE_AUTH_SIGNING_KEYS: `sign-1:${notAKey}` })),
+    false,
+    "a memoised pass must not carry over to a different key"
+  );
+});
+
+test("a missing variable is still refused, and the two halves are both required", () => {
+  resetMobileSigningSelfTestForTesting();
+  for (const missing of [
+    "MOBILE_AUTH_SIGNING_KEYS",
+    "MOBILE_AUTH_REFRESH_PEPPERS",
+    "MOBILE_AUTH_TOKEN_ISSUER",
+    "MOBILE_AUTH_TOKEN_AUDIENCE",
+  ]) {
+    assert.equal(mobileAuthReady(env({ [missing]: "" })), false, missing);
+  }
+});
+
+test("an unusable key makes minting unreachable rather than throwing late", () => {
+  // The property that matters is the order, so this asserts both halves: the
+  // readiness answer is false, and minting with that key really would have
+  // thrown -- which is what would have happened after the writes.
+  const notAKey = Buffer.from("z".repeat(64), "utf8").toString("base64");
+  const broken = env({ MOBILE_AUTH_SIGNING_KEYS: `sign-1:${notAKey}` });
+
+  resetMobileSigningSelfTestForTesting();
+  assert.equal(mobileAuthReady(broken), false);
+  assert.throws(() => mint(broken));
 });

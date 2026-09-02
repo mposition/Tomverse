@@ -53,6 +53,13 @@ const reset = async () => {
       "MobileDevice"
     RESTART IDENTITY CASCADE
   `);
+  // The admission limit is per client and lives in ChatUsageBucket. Without
+  // this, the test that deliberately exhausts a bucket would leave every later
+  // test throttled -- which is how a 429 gets mistaken for the behaviour under
+  // test.
+  await prisma.chatUsageBucket.deleteMany({
+    where: { period: { startsWith: "api-mobile-" } },
+  });
   const { resetMobileSessionSnapshotsForTesting } = await authorization();
   resetMobileSessionSnapshotsForTesting();
 };
@@ -123,9 +130,17 @@ test("a refresh consumes its token, mints a successor, and links the chain", asy
   assert.equal(rows[1]?.consumedAt, null);
 });
 
-test("two requests racing on one token: one successor, one refusal", async () => {
-  // Section 4 option A, strict single use. The conditional UPDATE is what makes
-  // this true rather than the read that precedes it.
+test("V10 -- two requests racing on one token: one successor, and the family is revoked", async () => {
+  // Section 4 option A, strict single use, and the assertion this test used to
+  // get wrong. It previously pinned the family *surviving*, on the reasoning
+  // that the loser had presented a legitimate token which merely arrived
+  // second. That is not option A: A draws no distinction between a token
+  // consumed a microsecond ago by a sibling and one consumed an hour ago by an
+  // attacker, and V10 says one 200, one 401, family revoked.
+  //
+  // The old behaviour was also non-deterministic -- whether the family survived
+  // depended on whether the loser's read landed before or after the winner's
+  // commit. This asserts the outcome that no longer depends on that.
   const { rotateMobileSession } = await service();
   const user = await createUser();
   const first = await issue(user.id);
@@ -138,10 +153,41 @@ test("two requests racing on one token: one successor, one refusal", async () =>
   const winners = [left, right].filter((result) => result.ok);
   assert.equal(winners.length, 1, "exactly one rotation may win");
 
-  // And the family survives: the loser presented a legitimate token that simply
-  // arrived second, which is not a replay.
   const family = await prisma.mobileTokenFamily.findFirstOrThrow();
-  assert.equal(family.revokedAt, null);
+  assert.notEqual(family.revokedAt, null, "option A revokes on the second use");
+  assert.equal(family.revokedReason, "reuse_detected");
+  assert.equal(family.epoch, 1);
+
+  const events = await prisma.mobileAuthEvent.findMany({ select: { event: true } });
+  assert.ok(events.some((row) => row.event === "mobile_auth.reuse_detected"));
+});
+
+test("V10 -- the race outcome does not depend on which side read first", async () => {
+  // The property the old branch lacked. Whichever interleaving the database
+  // produces, the pair of answers and the family's fate are the same -- which
+  // is what makes this option A rather than a fourth thing.
+  const { rotateMobileSession } = await service();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await reset();
+    const user = await createUser();
+    const first = await issue(user.id);
+
+    const results = await Promise.all([
+      rotateMobileSession({ request: request(), refreshToken: first.refreshToken }),
+      rotateMobileSession({ request: request(), refreshToken: first.refreshToken }),
+    ]);
+
+    assert.equal(
+      results.filter((result) => result.ok).length,
+      1,
+      `attempt ${attempt}: exactly one winner`
+    );
+    const loser = results.find((result) => !result.ok);
+    assert.equal(loser?.reason, "reuse_detected", `attempt ${attempt}: the loser's reason`);
+
+    const family = await prisma.mobileTokenFamily.findFirstOrThrow();
+    assert.equal(family.revokedReason, "reuse_detected", `attempt ${attempt}`);
+  }
 });
 
 test("a replayed token destroys the family, and the revocation commits", async () => {
@@ -548,6 +594,197 @@ test("V28 -- logout works when the access token has already expired", async () =
   const family = await prisma.mobileTokenFamily.findFirstOrThrow();
   assert.notEqual(family.revokedAt, null);
   assert.equal(family.revokedReason, "logout");
+});
+
+test("a broken signing key spends no credential -- the route refuses first", async () => {
+  // The ordering finding, driven through the real handler rather than the
+  // service, because the ordering is the handler's. A base64 string of the
+  // right length passes every shape check and cannot sign; before the
+  // self-test existed, this request consumed the grant, spent a rate-limit
+  // unit and wrote a device and a family before failing.
+  const { POST } = await import("@/app/api/auth/mobile/exchange/route");
+  const { issueMobileLoginGrant, pkceChallengeFor } = await import(
+    "@/lib/mobileLoginGrant"
+  );
+  const { resetMobileSigningSelfTestForTesting } = await import(
+    "@/lib/mobileAccessToken"
+  );
+
+  const user = await createUser();
+  const verifier = randomBytes(32).toString("base64url");
+  const { grant } = await issueMobileLoginGrant({
+    userId: user.id,
+    codeChallenge: pkceChallengeFor(verifier),
+  });
+
+  const goodKeys = process.env.MOBILE_AUTH_SIGNING_KEYS;
+  process.env.MOBILE_AUTH_SIGNING_KEYS = `sign-1:${Buffer.from(
+    "x".repeat(64),
+    "utf8"
+  ).toString("base64")}`;
+  resetMobileSigningSelfTestForTesting();
+
+  try {
+    const response = await POST(
+      new Request("https://tomverse.test/api/auth/mobile/exchange", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          grant,
+          codeVerifier: verifier,
+          platform: "ios",
+          deviceLabel: "Phone",
+        }),
+      })
+    );
+
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, "NOT_AVAILABLE");
+  } finally {
+    process.env.MOBILE_AUTH_SIGNING_KEYS = goodKeys;
+    resetMobileSigningSelfTestForTesting();
+  }
+
+  assert.equal(await prisma.mobileDevice.count(), 0, "no device was created");
+  assert.equal(await prisma.mobileTokenFamily.count(), 0, "no family was created");
+  assert.equal(await prisma.mobileRefreshRotation.count(), 0);
+
+  // And the grant is still spendable, so the person can simply try again once
+  // the key is fixed rather than having to start the sign-in over.
+  const stillThere = await prisma.mobileLoginGrant.findFirstOrThrow();
+  assert.equal(stillThere.consumedAt, null);
+});
+
+test("with a working key the same request succeeds, so the refusal above was the key", async () => {
+  // The other half. Without this, "503 and no rows" would also be what a
+  // broken handler produces.
+  const { POST } = await import("@/app/api/auth/mobile/exchange/route");
+  const { issueMobileLoginGrant, pkceChallengeFor } = await import(
+    "@/lib/mobileLoginGrant"
+  );
+
+  const user = await createUser();
+  const verifier = randomBytes(32).toString("base64url");
+  const { grant } = await issueMobileLoginGrant({
+    userId: user.id,
+    codeChallenge: pkceChallengeFor(verifier),
+  });
+
+  const response = await POST(
+    new Request("https://tomverse.test/api/auth/mobile/exchange", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        grant,
+        codeVerifier: verifier,
+        platform: "ios",
+        deviceLabel: "Phone",
+      }),
+    })
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.ok(body.accessToken && body.refreshToken && body.deviceId);
+  assert.equal(await prisma.mobileDevice.count(), 1);
+});
+
+test("an unparseable refresh token writes no row, and the endpoint is rate limited first", async () => {
+  // Review finding 3. Before this, every malformed request wrote a
+  // MobileAuthEvent with no subject and nothing bounding the rate, on a path
+  // that is a mutation-origin exception and therefore reachable by anyone.
+  const { rotateMobileSession } = await service();
+  const { POST } = await import("@/app/api/auth/mobile/refresh/route");
+
+  for (const bad of ["", "no-dot", "a.b.c", "..", "x."]) {
+    const result = await rotateMobileSession({ request: request(), refreshToken: bad });
+    assert.equal(result.ok, false, bad);
+  }
+  assert.equal(await prisma.mobileAuthEvent.count(), 0, "a malformed token names nobody");
+
+  // And the handler admits before it reads the body, so the refusal above is
+  // not free to repeat without limit.
+  const send = () =>
+    POST(
+      new Request("https://tomverse.test/api/auth/mobile/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": "203.0.113.9" },
+        body: JSON.stringify({ refreshToken: "no-dot" }),
+      })
+    );
+
+  let limited: Response | null = null;
+  for (let attempt = 0; attempt < 80 && !limited; attempt += 1) {
+    const response = await send();
+    if (response.status === 429) limited = response;
+  }
+  assert.ok(limited, "the pre-auth limit must eventually refuse");
+
+  // The body, not only the status. Checking the status alone is what let the
+  // contract and the wire disagree: every limit in the app throws the shared
+  // API_RATE_LIMITED, and D15 names MOBILE_RATE_LIMITED for these endpoints.
+  const body = await limited.json();
+  assert.equal(body.code, "MOBILE_RATE_LIMITED");
+  assert.equal(body.ok, false);
+  assert.ok(limited.headers.get("Retry-After"), "a rate-limit answer must say when");
+});
+
+test("every client-facing code in the contract is one a route actually returns", async () => {
+  // The finding this covers: MOBILE_RATE_LIMITED was declared and never
+  // reached execution, because the shared responder returned its own code.
+  // A constant nothing emits is a contract nobody keeps, so each of the four
+  // is taken off the wire here rather than read out of the source.
+  const { MOBILE_AUTH_ERROR_CODES } = await import("@/lib/mobileAuthContract");
+  const refresh = (await import("@/app/api/auth/mobile/refresh/route")).POST;
+  const devices = (await import("@/app/api/auth/mobile/devices/route")).GET;
+  const seen = new Set<string>();
+
+  // MOBILE_TOKEN_INVALID -- no bearer at all.
+  const noBearer = await devices(
+    new Request("https://tomverse.test/api/auth/mobile/devices")
+  );
+  assert.equal(noBearer.status, 401);
+  seen.add((await noBearer.json()).code);
+
+  // MOBILE_TOKEN_EXPIRED -- a real token, past its life.
+  const { mintMobileAccessToken } = await import("@/lib/mobileAccessToken");
+  const user = await createUser();
+  const tokens = await issue(user.id);
+  const expired = mintMobileAccessToken({
+    userId: user.id,
+    deviceId: tokens.deviceId,
+    familyId: (await prisma.mobileTokenFamily.findFirstOrThrow()).id,
+    now: new Date(Date.now() - 3_600_000),
+  });
+  const stale = await devices(
+    new Request("https://tomverse.test/api/auth/mobile/devices", {
+      headers: { authorization: `Bearer ${expired.token}` },
+    })
+  );
+  assert.equal(stale.status, 401);
+  seen.add((await stale.json()).code);
+
+  // MOBILE_REFRESH_REJECTED -- a syntactically fine token that is not one.
+  const rejected = await refresh(
+    new Request("https://tomverse.test/api/auth/mobile/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-real-ip": "198.51.100.7" },
+      body: JSON.stringify({ refreshToken: "abc.def" }),
+    })
+  );
+  assert.equal(rejected.status, 401);
+  const rejectedBody = await rejected.json();
+  seen.add(rejectedBody.code);
+  assert.equal(rejectedBody.reauthenticate, true);
+
+  // MOBILE_RATE_LIMITED is taken on the wire by the admission test above.
+  seen.add(MOBILE_AUTH_ERROR_CODES.rateLimited);
+
+  assert.deepEqual(
+    [...seen].sort(),
+    Object.values(MOBILE_AUTH_ERROR_CODES).sort(),
+    "a code the contract declares and no route emits is a promise nobody keeps"
+  );
 });
 
 test("no audit row carries a token, a digest or a record id", async () => {

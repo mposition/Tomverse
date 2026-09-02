@@ -15,19 +15,22 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { mobileAuthReady } from "@/lib/mobileAccessToken";
+import { readLimitedJson } from "@/lib/apiSecurity";
 import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
-import { mobileAuthConfigured } from "@/lib/mobileAuthKeyring";
 import { rotateMobileSession } from "@/lib/mobileAuthService";
-import { mobileAuthRefusal } from "@/lib/mobileAuthRoute";
+import { enforceMobileAuthAdmission, mobileApiSecurityResponse, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
 
 const requestSchema = z.object({ refreshToken: z.string().min(1).max(512) }).strict();
 
 export async function POST(request: Request) {
   try {
-    if (!mobileAuthConfigured()) {
+    if (!mobileAuthReady()) {
       return NextResponse.json({ ok: false, code: "NOT_AVAILABLE" }, { status: 503 });
     }
+    // Before the body is even read: a refusal is the cheapest request a caller
+    // can make, and these three paths are reachable without a subject.
+    await enforceMobileAuthAdmission(request);
     const body = await readLimitedJson(request, 1_024, requestSchema);
     const result = await rotateMobileSession({
       request,
@@ -42,7 +45,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, ...result.tokens });
   } catch (error) {
-    const securityResponse = apiSecurityResponse(error);
+    const securityResponse = mobileApiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Mobile refresh failed:", error);
     return NextResponse.json({ ok: false, code: "REFRESH_FAILED" }, { status: 500 });
