@@ -752,32 +752,43 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
         },
         {
             /**
-             * The Korean numeral rule, bounded to word starts
+             * Korean numerals rewritten from a reviewed expression list
              * (.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md).
              *
-             * v3.4 rewrote a Korean numeral wherever a counter followed it,
-             * including when the numeral was the last syllable of an ordinary
-             * word: `토요일 일정` canonicalised to `토요1일정`, so the token
-             * 격주토요일 existed in no candidate that phrased it that way, and
-             * `이십일` became `이10일`. The rule always meant a numeral word;
-             * v3.5 says so, with a lookbehind.
+             * v3.4 built the rewrite from every Korean numeral crossed with
+             * every counter, so it read the 일 ending 토요일 as the numeral one
+             * and the 일 beginning 일정 as the day counter: `토요일 일정`
+             * canonicalised to `토요1일정` and the token 격주토요일 existed in no
+             * candidate that phrased it that way. `이십일` became `이10일` the
+             * same way. Found by pointing the harness at `mem-eval-succ-7`,
+             * where the smoke run scored 484 of 485 golds its own stub had
+             * answered correctly.
              *
-             * Found by pointing the harness at `mem-eval-succ-7`, where the
-             * smoke run scored 484 of 485 golds its own stub had answered
-             * correctly. Fixing the gold instead was refused: shortening the
-             * token to ["격주", "일정"] drops the condition being tested and
-             * ["격주", "토요"] only routes around the defect, and succ-7 is
-             * frozen and signed either way.
+             * Fixing the gold instead was refused: shortening the token to
+             * ["격주", "일정"] drops the condition being tested, ["격주", "토요"]
+             * only routes around the defect, and succ-7 is frozen and signed
+             * either way.
+             *
+             * v3.5 replaces the cross-product with `KOREAN_NUMERAL_EXPRESSIONS`
+             * — two reviewed rows, each a frozen gold's own wording. The step
+             * stays **context-free**, which two attempts at a lookaround rule
+             * showed is the load-bearing property: a gold token is matched as a
+             * substring, so `육 개월` alone and `저는 육 개월씩` have to
+             * canonicalise the same way, and a lookbehind makes them differ.
              *
              * Nothing else moved: same rules, same thresholds, same
-             * categories, same languages, same floors, same numeral table and
-             * counters. The difference is the boundary condition, the step's
-             * name, and the version string.
+             * categories, same languages, same floors, same numeral table, same
+             * counters. The difference is which expressions the step rewrites,
+             * the step's name, and the version string.
+             *
+             * `approvedOn` is the day this record was written, and it is not a
+             * signature — `mem-eval-succ-8` carries the approval that matters
+             * and is unsigned. See its `MEMORY_EVAL_SUCC8_APPROVAL`.
              */
             version: "mem-score-v3.5",
             approvedOn: "2026-09-03",
             descriptorDigest:
-                "6f1c8ce354bf6cb8cc826cf3132d79206300ff6a29f7aad1ef796c9fb376499e",
+                "e2d4e62dfe7e3790870382159f2da13bf145138836c2ad93d1d5ffa91d8bef66",
             pendingRules: [],
         },
     ];

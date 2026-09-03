@@ -76,8 +76,8 @@ import {
 } from "@/lib/memoryEvalSucc7";
 import {
     MEMORY_EVAL_SUCC8_CASES,
-    buildSucc8Manifest,
-    succ8Problems,
+    MEMORY_EVAL_SUCC8_MANIFEST,
+    verifySucc8Manifest,
 } from "@/lib/memoryEvalSucc8";
 import {
     MEMORY_EVAL_SUCC5_CASES,
@@ -207,9 +207,9 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         // has to match on the version first and the digest second. Matching on
         // the digest alone would resolve a succ-8 artifact to succ-7 and read
         // its numbers under the superseded `mem-score-v3.4`.
-        manifest: buildSucc8Manifest(),
+        manifest: MEMORY_EVAL_SUCC8_MANIFEST,
         cases: MEMORY_EVAL_SUCC8_CASES,
-        verify: () => succ8Problems(),
+        verify: () => verifySucc8Manifest(),
     },
 ];
 

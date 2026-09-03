@@ -88,7 +88,7 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // record its numbers would be resolved against, not only the cases.
         assert.match(
             result.output,
-            /manifest: 35749cf36c1268bd….*binding: verified/
+            /manifest: e8b6b93dfa9ec000….*binding: verified/
         );
         assert.match(result.output, /digest: 9326730a/);
         // succ-5 is an earlier target and must not be what a default run

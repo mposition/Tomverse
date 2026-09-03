@@ -538,7 +538,7 @@ test("the canonicalisation table and its order reach the digest", () => {
                 "lowercase",
                 "contraction_nt_to_not",
                 "digit_group_separators",
-                "numeral_words_at_word_start_to_digits",
+                "reviewed_numeral_expressions_to_digits",
                 "punctuation_to_space",
                 "collapse_whitespace_trim",
             ].join(ITEM)

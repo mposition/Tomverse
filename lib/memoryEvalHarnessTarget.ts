@@ -64,7 +64,7 @@ import {
     MEMORY_EVAL_SUCC8_DATASET_FROZEN,
     MEMORY_EVAL_SUCC8_DATASET_PURPOSE,
     MEMORY_EVAL_SUCC8_DATASET_VERSION,
-    buildSucc8Manifest,
+    MEMORY_EVAL_SUCC8_MANIFEST,
 } from "@/lib/memoryEvalSucc8";
 import { MEMORY_EVAL_DATASET_MANIFESTS } from "@/lib/memoryEvalDatasetManifests";
 import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
@@ -242,7 +242,7 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         // today and diverging on the first edit to either.
         cases: MEMORY_EVAL_SUCC8_CASES,
         datasetDigest: sha256(datasetFingerprintInputV4(MEMORY_EVAL_SUCC8_CASES)),
-        datasetManifestDigest: buildSucc8Manifest().manifestDigest,
+        datasetManifestDigest: MEMORY_EVAL_SUCC8_MANIFEST.manifestDigest,
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
@@ -285,7 +285,7 @@ export function targetManifestDigests(
     // from the batch registry below: succ-4 onwards are not batch-composed, so
     // their record is the pinned literal each module carries.
     for (const manifest of [
-        buildSucc8Manifest(),
+        MEMORY_EVAL_SUCC8_MANIFEST,
         MEMORY_EVAL_SUCC7_MANIFEST,
         MEMORY_EVAL_SUCC6_MANIFEST,
         MEMORY_EVAL_SUCC5_MANIFEST,

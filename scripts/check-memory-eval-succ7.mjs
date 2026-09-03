@@ -555,7 +555,11 @@ console.log(
 console.log(`  unresolvedPolicy  ${manifest.unresolvedPolicies.length}`);
 console.log(`  fingerprint       v${manifest.fingerprintVersion}`);
 console.log(`  frozen            ${manifest.frozen}`);
-console.log(`  harness target    mem-eval-succ-6 (unchanged — a separate change)`);
+// Read, never named. This line said `mem-eval-succ-6 (unchanged — a separate
+// change)` while the summary below already said succ-8, so one run of one
+// check printed two different harness targets. A hard-coded fact in an output
+// whose job is to report facts is worse than no line at all.
+console.log(`  harness target    ${HARNESS_TARGET_DATASET_VERSION}`);
 console.log("");
 
 /* ------------------------------------------------------------- report --- */

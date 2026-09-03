@@ -34,10 +34,11 @@ export const CANON_STEP_ORDER: readonly string[] = [
     "lowercase",
     "contraction_nt_to_not",
     "digit_group_separators",
-    // Renamed in `mem-score-v3.5`, and the name is the change: the step
-    // rewrites numeral *words*, and until then it also rewrote numeral
-    // syllables sitting at the end of ordinary ones.
-    "numeral_words_at_word_start_to_digits",
+    // Renamed in `mem-score-v3.5`, and the name is the change: the step now
+    // rewrites the reviewed rows of `KOREAN_NUMERAL_EXPRESSIONS` plus the
+    // English numeral words, and nothing else. Until then it rewrote every
+    // Korean numeral crossed with every counter, which reached inside words.
+    "reviewed_numeral_expressions_to_digits",
     "punctuation_to_space",
     "collapse_whitespace_trim",
 ];
@@ -100,11 +101,13 @@ export const NUMERAL_TABLE: Readonly<Record<string, string>> = {
  * Korean numerals that are also ordinary syllables.
  *
  * `세` is 셋 and also 세상·세계·세금; `이` is 2 and also the subject particle.
- * Rewriting them wherever they appear would corrupt the text being compared,
- * so a Korean numeral is rewritten **only when a counter follows it and no
- * syllable precedes it** — the shape a numeral actually takes in these
- * sentences. The second half was added in `mem-score-v3.5`; see
- * `KOREAN_NUMERAL_RE` for what its absence did to 토요일.
+ * Rewriting them wherever a counter followed would corrupt the text being
+ * compared, and did — see `KOREAN_NUMERAL_EXPRESSIONS` for what it did to
+ * 토요일 and to 이십일.
+ *
+ * From `mem-score-v3.5` this list no longer generates the rewrite. It is the
+ * vocabulary a reviewed expression may draw its counter from, which is what
+ * keeps a new row to a shape the contract already describes.
  */
 export const KOREAN_COUNTERS: readonly string[] = [
     "시",
@@ -147,38 +150,102 @@ export const APPROVED_STEMS: Readonly<
     en: [],
 };
 
+/**
+ * The Korean numeral expressions this contract rewrites, one row each.
+ *
+ * ## Why a list of expressions and not a rule
+ *
+ * Because the step has to be **context-free**, and only a table can be.
+ *
+ * A gold token is matched as a *substring* of the candidate's statement, so
+ * the token standing alone and the same token inside a sentence must
+ * canonicalise identically. Any rule with a lookaround breaks that by
+ * construction, and both attempts at one did:
+ *
+ *   * `mem-score-v3.4` had no left condition, which is context-free — its bug
+ *     was this table, not the missing boundary. Built from every numeral
+ *     crossed with every counter, it read the 일 ending 토요일 as the numeral
+ *     one and the 일 beginning 일정 as the day counter, so `토요일 일정`
+ *     became `토요1일정` and the gold token 격주토요일 existed in no candidate
+ *     that phrased it that way (`succ-durable-ko-611`). `이십일` became
+ *     `이10일` the same way.
+ *   * A `(?<![가-힣])` lookbehind fixed those two and broke something wider.
+ *     It consults spacing, and Korean matching drops spacing, so **82 of the
+ *     2,250 Korean strings in this corpus** canonicalised differently
+ *     depending on how they were typed. Widening it to `(?<![가-힣]\s*)` cured
+ *     the spacing half and left the fatal half: `육 개월` alone became 6개월
+ *     while `저는 육 개월씩` became …육개월씩, so the gold no longer occurred
+ *     in the sentence it was drawn from. That is not a scoring edge case —
+ *     `succ-4` stops assembling, because its `gold-evidence-covers-fact`
+ *     anchor asks exactly that question.
+ *
+ * So: no lookaround, and a table narrow enough to be safe without one.
+ *
+ * ## What is registered, and what a row costs
+ *
+ * A row earns its place by being needed by a **frozen gold**, and both rows
+ * here are gold tokens verbatim — `succ-durable-ko-35` states 육 개월 and
+ * `succ-durable-ko-36` states 새벽 세 시. Registering them is reading the
+ * golds, not inventing policy. Nothing else is registered: no gold asks a
+ * model's 10년 to meet 십 년, so a row for it would be scoring surface with
+ * no question behind it.
+ *
+ * `rejects` is the half that is easy to skip and the reason the row is
+ * reviewable. Each row rewrites its expression **everywhere**, including
+ * inside words, and the entries below say which words. That is tolerable
+ * precisely because it is context-free: both sides of every comparison are
+ * rewritten the same way, so an over-match costs a collision, never a false
+ * negative. A row whose over-matches could collide two different facts does
+ * not belong here.
+ */
+export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
+    numeral: string;
+    counter: string;
+    /** Written out, so a diff of this file is a diff of the claim. */
+    canonical: string;
+    /** Forms that must land on `canonical`. */
+    matches: readonly string[];
+    /** Words this row also rewrites. Reviewed, not accidental. */
+    rejects: readonly string[];
+}[] = [
+    {
+        // succ-durable-ko-35: factValueAll ["항해사", "육 개월"].
+        numeral: "육",
+        counter: "개월",
+        canonical: "6개월",
+        matches: ["육 개월", "육개월", "6개월"],
+        // 육 is not a common word-final syllable before 개월; no corpus string
+        // outside the intended sense contains 육개월.
+        rejects: [],
+    },
+    {
+        // succ-durable-ko-36: factValueAll ["제빵", "새벽 세 시"].
+        numeral: "세",
+        counter: "시",
+        canonical: "3시",
+        matches: ["세 시", "세시", "3시"],
+        // Rewrites 세 시간 to 3시간, which is the same fact, and 전세 시장 to
+        // 전3장 — nonsense, but the same nonsense on both sides, so it can
+        // only collide, never miss. No other 세…시 sense occurs in the corpus.
+        rejects: ["세 시간", "전세 시장"],
+    },
+];
+
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const KOREAN_NUMERALS = Object.keys(NUMERAL_TABLE).filter((word) =>
-    /[가-힣]/.test(word)
-);
 const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
     (word) => !/[가-힣]/.test(word)
 );
 
-/**
- * A Korean numeral, when a counter follows it **and a syllable does not
- * precede it**.
- *
- * The counter condition was here from the start; the left-hand one was not,
- * and without it the rule reached inside words. `토요일 일정` — Saturday, a
- * schedule — became `토요1일정`: the 일 ending 토요일 was read as the numeral
- * one and the 일 beginning 일정 as the counter for days. The token 격주토요일
- * then existed in no candidate that phrased it that way, so
- * `succ-durable-ko-611` could only ever score a false negative for three of
- * five plausible phrasings of the fact it tests.
- *
- * `이십일` was the same defect on a number: 십 preceded by 이 matched as ten
- * plus the day counter, and twenty-one canonicalised to `이10일`.
- *
- * The lookbehind says what the rule always meant — a numeral is a word, not a
- * syllable — and it costs nothing the datasets use: every legitimate form is
- * a numeral at a word boundary, whether or not a space follows it
- * (`육 개월`, `육개월`, `새벽 세 시`, `삼 일`, `여섯 개` are all unchanged).
- */
-const KOREAN_NUMERAL_RE = new RegExp(
-    `(?<![가-힣])(${KOREAN_NUMERALS.map(escape).join("|")})\\s*(${KOREAN_COUNTERS.map(escape).join("|")})`,
-    "g"
+const KOREAN_NUMERAL_EXPRESSION_RE = KOREAN_NUMERAL_EXPRESSIONS.map(
+    (entry) =>
+        [
+            new RegExp(
+                `${escape(entry.numeral)}\\s*${escape(entry.counter)}`,
+                "g"
+            ),
+            `${NUMERAL_TABLE[entry.numeral]}${entry.counter}`,
+        ] as const
 );
 const ENGLISH_NUMERAL_RE = new RegExp(
     `\\b(${ENGLISH_NUMERALS.map(escape).join("|")})\\b`,
@@ -190,9 +257,10 @@ export const canon = (value: string): string => {
     let out = value.normalize("NFC").toLowerCase();
     out = out.replace(/n['’]t\b/g, " not");
     out = out.replace(/(\d)[,  ](?=\d{3}\b)/g, "$1");
-    out = out.replace(KOREAN_NUMERAL_RE, (_m, numeral: string, counter: string) =>
-        `${NUMERAL_TABLE[numeral]}${counter}`
-    );
+    for (const [pattern, replacement] of KOREAN_NUMERAL_EXPRESSION_RE) {
+        pattern.lastIndex = 0;
+        out = out.replace(pattern, replacement);
+    }
     out = out.replace(ENGLISH_NUMERAL_RE, (word) => NUMERAL_TABLE[word] ?? word);
     out = out.replace(/[^\p{L}\p{N}\s]/gu, " ");
     return out.replace(/\s+/g, " ").trim();
