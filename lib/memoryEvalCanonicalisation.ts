@@ -183,14 +183,23 @@ export const APPROVED_STEMS: Readonly<
  *
  * ## What earns a row
  *
- * **A frozen gold that cannot be satisfied without it.** Not a gold that
- * happens to contain a numeral — that was the first draft's test, and it
- * registered two rows nothing needed. `succ-durable-ko-35` (`육 개월`) and
- * `succ-durable-ko-36` (`새벽 세 시`) both state their facts in the same words
- * their evidence does, so they match verbatim; a row for them bought nothing
- * and licensed everything below.
+ * **An equivalence a frozen gold requires**, which is two things and not one.
+ * Getting it wrong in each direction produced the two tables before this one.
  *
- * ## What a row costs, and why this one costs nothing
+ *   1. The gold cannot be satisfied by its own evidence without it —
+ *      `succ-durable-ko-401` says `9시` and its evidence says `아홉 시`.
+ *   2. The gold cannot accept the model's other spelling without it —
+ *      `succ-durable-ko-35` says `육 개월` and a model may answer `6개월`.
+ *
+ * "The gold contains a numeral" was the first test and registered rows nothing
+ * needed. "The gold cannot be satisfied without it" was the second and dropped
+ * (2), so a model answering `6개월` scored wrong where it had scored right.
+ *
+ * A **guard** row earns its place differently: it buys no equivalence and
+ * exists so a longer expression is consumed before a shorter one can fire
+ * inside it. Its `requiredBy` names the row it protects.
+ *
+ * ## What a row costs
  *
  * A row rewrites its forms **everywhere**, including inside other words, so
  * the question a reviewer has to answer is whether that can make two different
@@ -199,15 +208,30 @@ export const APPROVED_STEMS: Readonly<
  * *o'clock* is a substring of that. Two different facts, one value, which is
  * exactly what this contract's canonicalisation rule forbids.
  *
- * This row avoids it by collapsing toward the **word** form rather than the
- * digit. `아홉 시간` becomes 아홉시간, which is what it becomes with no rule at
- * all, so the row adds no equality that plain Korean matching did not already
- * have. Rewriting to `9시` instead would have made 아홉 시간 into 9시간 and let
- * a `9시` gold reach it — the same defect as `세`+`시`, one numeral over.
+ * Collapsing toward the word form did not fix it either. `9시` is the gold, so
+ * mapping `아홉 시` to `아홉시` put the gold inside `아홉시간`, and mapping it
+ * to `9시` puts it inside `9시간`. The prefix relation is the problem, not the
+ * script, and only a guard row breaks it.
  *
- * The direction is per row and reviewed per row. There is no general rule that
- * the word form wins; there is one row, and for it the word form is the one
- * that collides with nothing.
+ * The invariant that settles it is stated once rather than argued per row:
+ * **no canonical form may be a substring of another**, enforced by
+ * `canonicalFormsAreDisjoint()` and run in CI by `check:memory-eval-succ8`.
+ * Three shapes broke it in three ways and each carried a comment saying why it
+ * was fine; a comment cannot fail a build.
+ *
+ * ## What the rows do not change
+ *
+ * A digit variant can be matched inside a longer number — `3시간` inside
+ * `23시간`, `6개월` inside `16개월` — so a gold naming the shorter is
+ * satisfied by text naming the longer. That is worth writing down and is
+ * **not** something these rows introduce: substring matching over digits
+ * already had it, because `3시간` is literally inside `23시간` with no
+ * canonicalisation at all. The rows change the spelling on both sides and
+ * leave the relation exactly as they found it.
+ *
+ * Closing it would need a "not preceded by a digit" test, which is the
+ * lookaround this step cannot have — the same trap as the two boundary rules
+ * above. It is recorded in each row's `rejects` instead of argued away.
  */
 export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
     /** The form every variant collapses to. */
@@ -233,9 +257,10 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "6개월",
         variants: ["육 개월", "6개월"],
         requiredBy: "succ-durable-ko-35",
-        // 개월 is not the prefix of any other registered counter, and no
-        // corpus string contains 육개월 outside the intended sense.
-        rejects: [],
+        // 개월 is not the prefix of any other registered counter, and no corpus
+        // string contains 육개월 outside the intended sense. `16개월` still
+        // contains `6개월`, as it does with no rule at all.
+        rejects: ["16개월"],
     },
     {
         // A guard, not an equivalence: 세 시간 is three *hours*.
@@ -248,7 +273,9 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "세시간",
         variants: ["세 시간", "3시간"],
         requiredBy: "guards succ-durable-ko-36",
-        rejects: [],
+        // `23시간` becomes `2세시간`, which still contains `세시간` — the
+        // pre-existing digit-substring relation, carried over unchanged.
+        rejects: ["23시간"],
     },
     {
         // succ-durable-ko-36 states `새벽 세 시`; a model may answer `새벽 3시`.
@@ -258,7 +285,7 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         // 전세 시장 becomes 전3시장 — nonsense on both sides of every
         // comparison, and it collides with nothing: no canonical form is a
         // substring of another, which `canonicalFormsAreDisjoint()` enforces.
-        rejects: ["전세 시장"],
+        rejects: ["전세 시장", "13시"],
     },
     {
         // The same guard for 아홉, and the reason it is not optional.
@@ -272,7 +299,9 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "아홉시간",
         variants: ["아홉 시간", "9시간"],
         requiredBy: "guards succ-durable-ko-401",
-        rejects: [],
+        // As above: `19시간` becomes `1아홉시간` and still contains
+        // `아홉시간`.
+        rejects: ["19시간"],
     },
     {
         // succ-durable-ko-401: factValueAll ["9시"], evidence
@@ -282,7 +311,8 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "9시",
         variants: ["아홉 시", "9시"],
         requiredBy: "succ-durable-ko-401",
-        rejects: [],
+        // `19시` contains `9시` before and after this row alike.
+        rejects: ["19시"],
     },
 ];
 

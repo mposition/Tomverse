@@ -277,11 +277,11 @@ digest를 움직이지 않게 하기 위해서이고, 세 dataset 모두 binding
 
 ```
 datasetDigest    9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251
-manifestDigest   0d38901a42fdc2cfbcc387f966fcf1590755eca41d5e6163c7b67aae8d8cb9d4
+manifestDigest   6b255f0e96944b5ffdcfd4edfb2fcaff87757ada315914119954f7c9739c9fdc
 ```
 
 계약 descriptor digest는
-`ff3570a34a48ea48a4987a19eeb7d0f3e1eb4dce8f8ba09ab0ee5969dd6b60cb`입니다.
+`cd5f0e224c1cd7b152a6ac1cf3e9c18d3333db60762ec4f2a32162f85b6585bf`입니다.
 
 `datasetDigest`는 succ-7과 같습니다 — 그것이 contract-only successor라는
 주장이며, `succ8Problems()`가 같지 않으면 실패합니다. `manifestDigest`는
