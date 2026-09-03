@@ -44,7 +44,11 @@ jobs:
   # and main, so removing this would take secret scanning off the
   # merge-blocking path entirely. Remove it only after
   # "Scan repository history for secrets" is itself made a required check.
-  # `fetch-depth: 0` exists for this job, and only for this job.
+  # `fetch-depth: 0` here is for gitleaks, which scans base..head and needs
+  # both ends. Every job in this workflow now checks out full history, each
+  # for its own reason stated at its own checkout, so no comment here claims
+  # anything about the others: the line this replaces said the depth existed
+  # "for this job, and only for this job", and three other jobs had it.
   secret-scan:
     name: Secret scan (PR commits)
     runs-on: ubuntu-latest
