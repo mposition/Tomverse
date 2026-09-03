@@ -10,6 +10,7 @@
  * Nothing here freezes anything. Freezing stays a human act recorded in the
  * register (docs/policy/external-conversation-import-and-memory.md 12.4).
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -20,8 +21,12 @@ import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacement
 import {
     MEMORY_EVAL_SUCC7_CASES,
     MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC7_REVIEW,
+    MEMORY_EVAL_SUCC7_REVIEWED,
     buildSucc7DraftManifest,
     succ7AssemblyProblems,
+    succ7SignatureProblems,
+    verifySucc7Manifest,
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
@@ -387,19 +392,103 @@ if (manifest.composition.sourceDatasetDigest !== MEMORY_EVAL_SUCC6_MANIFEST.data
     ok("succ-7's source digest is succ-6's pinned digest");
 }
 
-/* ------------------------------------------------------------- not frozen -- */
+/* --------------------------------------------------------- the signature -- */
 
-if (MEMORY_EVAL_SUCC7_DATASET_FROZEN !== false || manifest.frozen !== false) {
-    fail(
-        "succ-7 reports frozen, but the review sheet carries no verdict, " +
-            "reviewer or signature. Adoption is a human act."
-    );
+// Freezing is downstream of signing, never the other way round. A dataset
+// frozen with nobody's name on it is a claim this repository cannot support,
+// and the flag alone cannot tell the two apart: it is a boolean, and the
+// question is whose.
+if (MEMORY_EVAL_SUCC7_DATASET_FROZEN && !MEMORY_EVAL_SUCC7_REVIEWED) {
+    fail("succ-7 is frozen with no signature. Adoption is a human act.");
+}
+if (MEMORY_EVAL_SUCC7_REVIEWED) {
+    const stale = succ7SignatureProblems();
+    if (stale.length > 0) {
+        fail(`the signature no longer describes this tree: ${stale.join("; ")}`);
+    } else {
+        ok(
+            "the signature describes this tree",
+            `${MEMORY_EVAL_SUCC7_REVIEW.reviewer} on ` +
+                `${MEMORY_EVAL_SUCC7_REVIEW.reviewedAt}, dataset ` +
+                `${MEMORY_EVAL_SUCC7_REVIEW.signedDatasetDigest.slice(0, 16)}…`
+        );
+    }
 } else {
     ok(
-        "succ-7 is assembled and NOT adopted",
-        "assembled=true reviewed=false frozen=false"
+        "succ-7 carries no signature for this tree",
+        MEMORY_EVAL_SUCC7_REVIEW.status
     );
 }
+
+// Two things a module cannot check for itself: whether the record it names is
+// a file, and whether the commit it names is in this history. Both were blank
+// strings away from meaningless on 2026-09-02.
+if (!existsSync(fileURLToPath(new URL(`../${MEMORY_EVAL_SUCC7_REVIEW.record}`, import.meta.url)))) {
+    fail(`the signature's record does not exist: ${MEMORY_EVAL_SUCC7_REVIEW.record}`);
+} else {
+    ok("the signature's record exists", MEMORY_EVAL_SUCC7_REVIEW.record);
+}
+{
+    const sha = MEMORY_EVAL_SUCC7_REVIEW.reviewedCommit;
+    const git = (args) =>
+        execFileSync("git", args, {
+            cwd: fileURLToPath(new URL("..", import.meta.url)),
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+    let known = true;
+    try {
+        git(["cat-file", "-e", `${sha}^{commit}`]);
+    } catch {
+        known = false;
+    }
+    if (!known) {
+        // Fail, rather than reporting "not verifiable here".
+        //
+        // That softer version was written for a shallow checkout, and it made
+        // the check fail-open exactly where it mattered: `static-and-unit`
+        // checks out at depth 1, so "cannot verify, therefore OK" was the
+        // normal path in CI and any 40-character string would have passed as
+        // a signing commit. The workflow now fetches full history; if some
+        // other caller cannot, the honest answer is that this cannot be
+        // checked there, which is a failure and not an OK.
+        fail(
+            `the reviewed commit ${sha.slice(0, 12)}… is not in this checkout, ` +
+                "so the signature cannot be tied to a history. Fetch full " +
+                "history (actions/checkout with fetch-depth: 0) and re-run."
+        );
+    } else {
+        try {
+            git(["merge-base", "--is-ancestor", sha, "HEAD"]);
+            ok("the reviewed commit is an ancestor of HEAD", `${sha.slice(0, 12)}…`);
+        } catch {
+            fail(
+                `the signature names ${sha.slice(0, 12)}…, which is not an ` +
+                    "ancestor of HEAD: it describes a history this tree does not have"
+            );
+        }
+    }
+}
+if (manifest.frozen !== MEMORY_EVAL_SUCC7_DATASET_FROZEN) {
+    fail(
+        `the manifest reports frozen=${manifest.frozen} while the module ` +
+            `declares ${MEMORY_EVAL_SUCC7_DATASET_FROZEN}`
+    );
+}
+// The pinned record against a freshly built one. Called with no arguments on
+// purpose: both defaults are load-bearing, and a version that built both sides
+// would compare the tree with itself.
+{
+    const drift = verifySucc7Manifest();
+    if (drift.length > 0) {
+        fail(`succ-7 no longer matches its pinned manifest: ${drift.join("; ")}`);
+    } else {
+        ok("succ-7 matches its pinned manifest", "record against tree");
+    }
+}
+ok(
+    "succ-7's lifecycle state",
+    `reviewed=${MEMORY_EVAL_SUCC7_REVIEWED} frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}`
+);
 // The digest a reviewer signs must be the digest that gets frozen, so `frozen`
 // is not part of the manifest's identity. Asserted, because the whole point of
 // excluding it is lost the moment someone puts it back.
@@ -449,6 +538,7 @@ if (failures.length > 0) {
     process.exit(1);
 }
 console.log(
-    "\nsucc-7 structural checks all hold. It is NOT adopted: the review sheet " +
-        "has no signature, and freezing is a human act."
+    `\nsucc-7 structural checks all hold. reviewed=${MEMORY_EVAL_SUCC7_REVIEWED}, ` +
+        `frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}; the harness still targets ` +
+        "mem-eval-succ-6."
 );

@@ -26,7 +26,7 @@ export const SUCC7_ASSISTANT_ONLY_SUBTYPES: Readonly<
         subtype: 3,
         ground: "I do not go bowling on Thursdays or any other night",
     },
-    "succ-assistant-en-603": { subtype: 3, ground: "I have never done archery" },
+    "succ-assistant-en-603": { subtype: 3, ground: "I have never kept bees" },
     "succ-assistant-en-604": { subtype: 3, ground: "I do not own a bicycle" },
     "succ-assistant-en-605": {
         subtype: 3,
