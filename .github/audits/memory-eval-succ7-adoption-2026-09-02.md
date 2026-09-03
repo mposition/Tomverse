@@ -37,7 +37,7 @@
 | manifest digest | `ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902` |
 | transition digest | `36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1` |
 | 1차 동결 commit SHA (40자리) | `79ffe61687e61d31a74b1800fc9361d6b7cf1da4` *(무효화됨, §9)* |
-| 2차 동결 commit SHA (40자리) | *(다음 commit이 기입)* |
+| 2차 동결 commit SHA (40자리) | `7762fb9e14df870da93cbee48de9ebc07cb58780` |
 
 SHA는 동결 commit 자신을 가리키므로 그 commit 안에 담을 수 없습니다. succ-6과 같은
 순서로, 바로 다음 commit이 기입합니다. 그 사이에 dataset·manifest digest는 움직이지
