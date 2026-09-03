@@ -70,6 +70,23 @@ const ARGS = [
 ];
 
 /**
+ * Where the drafter will tell the reply to plant the fault, for ARGS.
+ *
+ * Read out of ARGS rather than restated, so editing the cell above cannot
+ * leave the stub accusing an answer the drafter did not assign.
+ */
+const ARGS_CELL = Object.fromEntries(
+  ARGS.map((argument) => argument.replace(/^--/, "").split("="))
+);
+const ARGS_TARGET_LABELS = assignTargetLabels({
+  language: ARGS_CELL.language,
+  taskType: ARGS_CELL["task-type"],
+  phenomenon: ARGS_CELL.phenomenon,
+  mode: ARGS_CELL.mode,
+  count: Number(ARGS_CELL.count),
+});
+
+/**
  * A stand-in provider. `reply` is what it returns; `null` never answers.
  *
  * It runs in this process, so the children must be spawned asynchronously:
@@ -107,9 +124,17 @@ const usableReply = (marker) =>
                 question: `question ${marker}`,
                 responses: ["a", "b", "c"].map((label) => ({
                   label,
+                  // Distinct per label: two identical answers are refused, and
+                  // a stub that shipped three copies of one string would be
+                  // testing the drafter against material it will not accept.
                   content: `answer ${label} for ${marker}. `.repeat(20),
                 })),
                 gold: {
+                  // The label the assignment picked for the first case of this
+                  // batch, derived rather than typed in -- the drafter checks
+                  // the gold's accusation against it, and a constant here would
+                  // break the moment the cell in ARGS changed.
+                  accusedLabel: ARGS_TARGET_LABELS[0],
                   contradictions: [
                     { id: marker, anyOf: [marker], description: marker },
                   ],

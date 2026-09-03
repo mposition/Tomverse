@@ -37,24 +37,50 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v6";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v8";
 
 /** The only labels a drafted response may carry. */
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
 
 /**
- * The shortest a drafted answer may be.
+ * The field in which the drafter states which answer its gold accuses.
  *
- * The v1 batch averaged 108 characters, between 81 and 133 -- readable, and
- * nothing like the answers this product produces. The runbook asks for
- * "hundreds to thousands of characters" because a reviewer comparing two
- * two-sentence stubs is not doing the job being measured: there is nowhere for
- * an omission to hide and nothing for a contradiction to be buried in.
- *
- * A floor rather than a target. It is enforced on the reply, so a drafter that
- * writes stubs fails the batch instead of quietly filling a cell with them.
+ * Named once, here, because two things read it: the instruction that asks for
+ * it and the parser that checks it against the assignment. A batch drafted
+ * against one spelling and validated against another would pass its check by
+ * never finding the field -- which is the shape of failure this field exists
+ * to remove.
  */
-export const DRAFT_MIN_RESPONSE_CHARACTERS = 200;
+export const ACCUSED_LABEL_FIELD = "accusedLabel";
+
+/**
+ * Runs of whitespace collapsed to one space, ends trimmed.
+ *
+ * Two answers that differ only in where their line breaks fall are the same
+ * answer. Comparing raw strings would call them different and let a copy
+ * through, which is the one thing the duplicate check exists to catch.
+ */
+export const collapseWhitespace = (value: string): string =>
+    value.replace(/\s+/gu, " ").trim();
+
+/**
+ * The length below which a drafted answer is discarded unread.
+ *
+ * **This is a format check, not a quality bar.** It exists to catch a reply
+ * that is malformed -- a stub where an answer should be -- in the same way the
+ * label rules catch a missing label. An answer that clears it has been found
+ * well-formed and nothing more: whether the case is worth adopting is a
+ * judgement about the reasoning in it, and a person makes that.
+ *
+ * The distinction matters because the two were run together once and the
+ * number started reading as a target. v2 asked for "at least 200 characters"
+ * and got 162-190; v3 raised the request to 500 and got 215. A floor stated as
+ * a goal is a goal, and a goal a model aims at is a ceiling it lands under. So
+ * the writing target lives in the instruction as a range
+ * (`DRAFT_TARGET_RESPONSE_RANGE`), the quality decision lives with the person
+ * adopting the case, and this number only throws away what is not an answer.
+ */
+export const DRAFT_DISCARD_FLOOR_CHARACTERS = 200;
 
 /**
  * The length the drafter is asked for, which is not the length it is judged
@@ -266,17 +292,19 @@ Rules that are not negotiable:
 
 1. Plant EXACTLY ONE phenomenon per case. A case that plants three things at once cannot say which one a miss was.
 2. The answers must read like real answers from a competent model: complete, fluent, and confident. An answer that is obviously the wrong one measures nothing.
-3. The gold is the list of what a fair reviewer SHOULD find. Write it as concretely as you can: for each item, the strings that would appear in a correct finding. **One item per finding a reviewer could report on its own.** Several actions that follow from the same principle are still several findings: an answer that ventilates instead of evacuating, keeps people in a nearby room, and lets them go back inside is wrong three times, and a reviewer that reports one of those has found one whole finding, not a third of one. Bundling them into a single item makes the other two count as false positives against a gold that claims to be exhaustive. Either write one item per action, or -- better -- narrow the answer so it differs in one.
+3. The gold is the list of what a fair reviewer SHOULD find, written as concretely as you can: for each item, the strings a correct finding would contain. **One item per finding a reviewer could report on its own.** An answer that ventilates instead of evacuating, keeps people in a nearby room, and lets them back inside is wrong three times, and a reviewer that reports one of those has found one whole finding, not a third of one -- bundled into a single item, the other two score as false positives. Either write one item per action or, better, narrow the answer so it differs in one.
 4. State honestly, per finding kind, whether your gold is EXHAUSTIVE -- whether it lists everything a fair reviewer could legitimately report of that kind. Read the answers back and ask what else a careful reviewer would flag; if anything at all comes to mind that your gold does not list, say false. Saying true when it is not manufactures a precision score that means nothing, and a false is not a defect in your case.
 5. Do not name any AI company or model inside the question or the answers unless the question is genuinely about them.
 6. Where the phenomenon is one whose point is that there is nothing to report -- genuine_consensus, no_issue, verbosity_bias, position_bias -- the gold is empty and exhaustive: the correct review reports no finding of that kind. Make the answers genuinely equivalent, so a reviewer that reports something has been fooled rather than provoked.
 7. Every answer covers all of these, in this order:
 ${ANSWER_SHAPE[request.taskType].map((element, index) => `   ${index + 1}. ${element}`).join("\n")}
-   Written properly that comes to ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. Do not go under ${DRAFT_MIN_RESPONSE_CHARACTERS} -- a case with a shorter answer in it is thrown away. Reach the length by covering the points, never by padding or repeating: a two-sentence answer gives an omission nowhere to hide and a contradiction nothing to be buried in, so it measures something easier than the real thing.
-8. **The assigned answer differs from the others on ONE point and is otherwise just as sound.** One point means ONE ACTION a reviewer could report on its own -- not one principle that shows up as three actions. Everything else in it -- every dose, every step, every figure, every caution -- must be as correct as in the answers that are right. This is what makes the gold an honest list: if the assigned answer is also careless in a second way, a reviewer that reports that second thing has found a real fault, your gold does not contain it, and the case scores that reviewer as wrong. Plant the one difference and leave the rest alone.
-   **That one difference must be wrong under every reading of the question.** If there is any ordinary circumstance in which the assigned answer's advice is the right call, the case is not scoring a mistake -- it is scoring a reviewer for not knowing which circumstance you had in mind. Taking a suspected stroke patient by car rather than waiting for an ambulance is that kind of difference: usually wrong, and official guidance allows it where it is genuinely faster. Either fix the circumstance in the question so that only one answer can be right, or pick a difference that does not depend on one.
-9. **The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, and elements 3 to ${String(ANSWER_SHAPE[request.taskType].length)} follow from it. It must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage", or "put juice in the mouth of an unconscious person" and then "liquid in an unconscious person's mouth can be aspirated", has argued against itself: the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right -- they are the reasoning of a different recommendation, and pasting them in is how an answer comes to refute itself.
-10. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them.${assignment}${avoid}
+   Each element carries something specific to THIS case -- the action actually to take, the reason it actually follows, the condition that actually changes it -- and not a sentence that would sit equally well under any question of this kind. Give a figure, a time or a dose where one belongs naturally and you are sure of it; do not invent one to fill the space.
+   Written that way an answer runs to roughly ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. **That is a target for writing, not a test to pass.** What decides whether a case is any good is whether each answer gives a reviewer real ground to stand on, so: no padding, no restating an earlier element in other words, no facts the question did not ask about. An answer under ${DRAFT_DISCARD_FLOOR_CHARACTERS} characters is discarded unread -- a check on the shape of the reply, like the label rules, and clearing it says nothing at all about whether the case is good.
+8. **The assigned answer differs from the others on ONE point and is otherwise just as sound.** One point means ONE ACTION a reviewer could report on its own, not one principle that surfaces as three actions; every dose, step, figure and caution in it is as correct as in the answers that are right. A second carelessness makes your gold dishonest -- a reviewer that reports it has found a real fault your gold does not contain, and the case scores that reviewer as wrong.
+   **That one difference must be wrong under every reading of the question.** Taking a suspected stroke patient by car rather than waiting for an ambulance is a difference that is not: usually wrong, and official guidance allows it where it is genuinely faster, so the case would score a reviewer for not knowing which circumstance you had in mind. Fix the circumstance in the question, or pick a difference that does not depend on one.
+9. **The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, elements 3 to ${String(ANSWER_SHAPE[request.taskType].length)} follow from it, and it must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage" has argued against itself -- the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right: they argue for a different recommendation, and pasting them in is how an answer comes to refute itself.
+10. **Write every answer independently, and do not copy sentences between them.** Two answers that share their wording are one answer, and a case built that way asks which answer is not a copy rather than which one is wrong -- the reviewers this set measures compare answers from different models, which are never identical. A case with two answers alike once whitespace is ignored is rejected unread.
+11. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them. Name the answer your gold accuses in \`gold.${ACCUSED_LABEL_FIELD}\`: it is checked against the assignment, and a case that accuses another answer is rejected.${assignment}${avoid}
 
 Reply with JSON only, no prose around it, in exactly this shape:
 
@@ -290,6 +318,7 @@ Reply with JSON only, no prose around it, in exactly this shape:
         { "label": "c", "content": "..." }
       ],
       "gold": {
+        "${ACCUSED_LABEL_FIELD}": "the label of the answer this gold accuses",
         "contradictions": [
           { "id": "short-slug", "anyOf": ["a string a correct finding would contain"], "description": "what is wrong and where" }
         ],
@@ -303,7 +332,7 @@ Reply with JSON only, no prose around it, in exactly this shape:
   ]
 }
 
-Use three responses labelled "a", "b" and "c". Omit a gold kind entirely rather than writing an empty array for it, except where the phenomenon is one of the four with nothing to report.`;
+Use three responses labelled "a", "b" and "c". Omit a gold kind entirely rather than writing an empty array for it, except where the phenomenon is one of the four with nothing to report. Omit \`${ACCUSED_LABEL_FIELD}\` only where the phenomenon plants nothing and there is therefore no answer to accuse.`;
 }
 
 export const templateHash = (instruction: string): string =>
@@ -435,10 +464,39 @@ export function parseDraftedCases(
             // aiming too low, the other is a drafter that ignored it.
             problems.push(
                 `case[${index}]: ${short.length} of ${item.responses.length} answer(s) ` +
-                    `below ${floor} characters (lengths ` +
+                    `below the ${floor}-character discard floor -- malformed, not merely ` +
+                    `thin (lengths ` +
                     `${item.responses
                         .map((response) => response.content.trim().length)
                         .join(", ")})`
+            );
+            continue;
+        }
+        // Two identical answers make the case a different exercise.
+        //
+        // Every case of the v7 batch shipped one pair copied word for word, so
+        // finding the planted answer meant finding the one that was not
+        // duplicated -- no reading required. The reviewers this set measures
+        // compare answers from different models, which are never identical, so
+        // a set built this way measures something that cannot happen.
+        //
+        // Compared with runs of whitespace collapsed: two answers that differ
+        // only in where the line breaks fall are the same answer, and a check
+        // that says otherwise is one an indented copy walks straight past.
+        const contents = item.responses.map((response) =>
+            collapseWhitespace(response.content)
+        );
+        const duplicated = contents.flatMap((content, position) =>
+            contents.slice(position + 1).flatMap((other, offset) =>
+                content === other
+                    ? [`${labels[position]}=${labels[position + 1 + offset]}`]
+                    : []
+            )
+        );
+        if (duplicated.length > 0) {
+            problems.push(
+                `case[${index}]: answers ${duplicated.join(", ")} are identical, so the ` +
+                    `planted one is the one that is not a copy`
             );
             continue;
         }
@@ -453,7 +511,43 @@ export function parseDraftedCases(
             problems.push(`case[${index}]: no goldCompleteness`);
             continue;
         }
-        accepted.push({ ...(item as ParsedDraftCase), requestIndex: index });
+        // The accusation, read from a field rather than from prose.
+        //
+        // 004 of the v7 batch was assigned "b" and planted its fault in "c",
+        // and nothing noticed: the assignment lives in the record, the
+        // accusation lived only in Korean sentences, and no check could compare
+        // them. Now the drafter states which answer its gold accuses, and a
+        // case that accuses one other than the assigned answer is refused.
+        //
+        // The field is read and then dropped. A case that got here agrees with
+        // its assignment by construction, so persisting it would store a second
+        // copy of `draftedBy.targetLabel` that can never disagree with the
+        // first -- and it would put a key that is not a finding kind inside a
+        // gold that is otherwise exactly that map.
+        const { [ACCUSED_LABEL_FIELD]: accused, ...gold } = item.gold as Record<
+            string,
+            unknown
+        >;
+        if (target != null) {
+            if (typeof accused !== "string" || accused.trim() === "") {
+                problems.push(
+                    `case[${index}]: gold.${ACCUSED_LABEL_FIELD} is missing, so nothing can ` +
+                        `check that the fault went where it was assigned`
+                );
+                continue;
+            }
+            if (accused !== target) {
+                problems.push(
+                    `case[${index}]: assigned to "${target}" but the gold accuses "${accused}"`
+                );
+                continue;
+            }
+        }
+        accepted.push({
+            ...(item as ParsedDraftCase),
+            gold: gold as ParsedDraftCase["gold"],
+            requestIndex: index,
+        });
     }
     return { cases: accepted, problems };
 }

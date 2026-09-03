@@ -33,7 +33,10 @@ import {
     type AiReviewEvalCase,
 } from "@/lib/aiReviewEvalCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { DRAFT_MIN_RESPONSE_CHARACTERS } from "@/lib/aiReviewEvalDraftPrompt";
+import {
+    collapseWhitespace,
+    DRAFT_DISCARD_FLOOR_CHARACTERS,
+} from "@/lib/aiReviewEvalDraftPrompt";
 
 export type AiReviewEvalCell = {
     language: string;
@@ -242,7 +245,7 @@ export const goldLeadLabels = (
  * two-sentence stubs has nowhere for an omission to hide and nothing for a
  * contradiction to be buried in, so what gets measured is not what the product
  * does. The runbook asks for the length a real assistant produces, and
- * `DRAFT_MIN_RESPONSE_CHARACTERS` now enforces a floor on new drafting -- but
+ * `DRAFT_DISCARD_FLOOR_CHARACTERS` now enforces a floor on new drafting -- but
  * a floor says nothing about the shape above it, and a cell can still fill up
  * with answers sitting exactly on it.
  *
@@ -276,7 +279,7 @@ export const responseLengths = (
                 : Math.round((lengths[middle - 1] + lengths[middle]) / 2),
         mean: Math.round(lengths.reduce((total, value) => total + value, 0) / lengths.length),
         max: lengths[lengths.length - 1],
-        belowFloor: lengths.filter((value) => value < DRAFT_MIN_RESPONSE_CHARACTERS).length,
+        belowFloor: lengths.filter((value) => value < DRAFT_DISCARD_FLOOR_CHARACTERS).length,
     };
 };
 
@@ -332,6 +335,110 @@ export const plantedLabelReport = (
     return { assigned, realized: goldLeadLabels(cases).byLabel, disagreements };
 };
 
+/**
+ * How alike two answers may be before a person should look.
+ *
+ * A warning line, deliberately not a gate. The parser refuses answers that are
+ * identical, because those cannot be told apart by reading and no comparison
+ * of real models produces them. Everything short of identical is a judgement:
+ * three answers to one safety question share the vocabulary of that question,
+ * and two that open on the same sentence may still differ on the point the
+ * case is about. A threshold that refused them would be deciding, from a
+ * number, something only a reader can decide -- and the way this toolchain has
+ * failed before is checks that look decisive and are not.
+ *
+ * 0.6 is where a pair stops looking like two answers to one question and
+ * starts looking like one answer edited twice. It is a place to start reading,
+ * nothing more.
+ */
+export const NEAR_DUPLICATE_SIMILARITY = 0.6;
+
+const trigrams = (value: string): ReadonlySet<string> => {
+    const normalised = collapseWhitespace(value);
+    const characters = [...normalised];
+    const found = new Set<string>();
+    for (let index = 0; index + 3 <= characters.length; index += 1) {
+        found.add(characters.slice(index, index + 3).join(""));
+    }
+    return found;
+};
+
+/**
+ * Jaccard overlap of character trigrams, 0 to 1.
+ *
+ * Character trigrams rather than words because the set is drafted in Korean as
+ * well as English, and Korean has no spaces to tokenise on that mean what
+ * spaces mean in English. Code points rather than UTF-16 units so a surrogate
+ * pair is one character.
+ */
+export const answerSimilarity = (left: string, right: string): number => {
+    const leftGrams = trigrams(left);
+    const rightGrams = trigrams(right);
+    if (leftGrams.size === 0 || rightGrams.size === 0) return 0;
+    let shared = 0;
+    for (const gram of leftGrams) if (rightGrams.has(gram)) shared += 1;
+    const union = leftGrams.size + rightGrams.size - shared;
+    return union === 0 ? 0 : Math.round((shared / union) * 1000) / 1000;
+};
+
+/**
+ * Every within-case pair of answers, scored, with the close ones named.
+ *
+ * Reported so that the v7 failure -- five cases, five copied pairs, nothing
+ * measuring it -- is visible before a batch is adopted rather than after. The
+ * parser now rejects the identical case outright; this is what catches the
+ * near miss it cannot, and it catches it by telling a person where to look.
+ */
+export const answerSimilarityReport = (
+    cases: readonly Pick<AiReviewEvalCase, "id" | "responses">[]
+): {
+    readonly pairs: number;
+    readonly max: number;
+    readonly median: number;
+    readonly near: readonly {
+        id: string;
+        labels: readonly [string, string];
+        similarity: number;
+    }[];
+} => {
+    const scores: number[] = [];
+    const near: { id: string; labels: [string, string]; similarity: number }[] = [];
+    for (const testCase of cases) {
+        const responses = testCase.responses ?? [];
+        for (let left = 0; left < responses.length; left += 1) {
+            for (let right = left + 1; right < responses.length; right += 1) {
+                const similarity = answerSimilarity(
+                    responses[left]?.content ?? "",
+                    responses[right]?.content ?? ""
+                );
+                scores.push(similarity);
+                if (similarity >= NEAR_DUPLICATE_SIMILARITY) {
+                    near.push({
+                        id: testCase.id,
+                        labels: [
+                            responses[left]?.label ?? String(left),
+                            responses[right]?.label ?? String(right),
+                        ],
+                        similarity,
+                    });
+                }
+            }
+        }
+    }
+    if (scores.length === 0) return { pairs: 0, max: 0, median: 0, near: [] };
+    const sorted = [...scores].sort((first, second) => first - second);
+    const middle = Math.floor(sorted.length / 2);
+    return {
+        pairs: sorted.length,
+        max: sorted[sorted.length - 1],
+        median:
+            sorted.length % 2 === 1
+                ? sorted[middle]
+                : Math.round(((sorted[middle - 1] + sorted[middle]) / 2) * 1000) / 1000,
+        near: near.sort((first, second) => second.similarity - first.similarity),
+    };
+};
+
 export type AiReviewEvalManifest = {
     cases: number;
     byCell: readonly AiReviewEvalCellGap[];
@@ -348,6 +455,8 @@ export type AiReviewEvalManifest = {
     plantedLabels: ReturnType<typeof plantedLabelReport>;
     /** Answer length in characters, against the drafting floor. */
     responseLengths: ReturnType<typeof responseLengths>;
+    /** How alike the answers within a case are. A warning, never a gate. */
+    answerSimilarity: ReturnType<typeof answerSimilarityReport>;
 };
 
 /**
@@ -387,6 +496,7 @@ export const datasetManifest = (
         goldLeadLabels: goldLeadLabels(cases),
         plantedLabels: plantedLabelReport(cases),
         responseLengths: responseLengths(cases),
+        answerSimilarity: answerSimilarityReport(cases),
     };
 };
 
