@@ -74,8 +74,12 @@ export const MEMORY_EVAL_SUCC8_SUPERSEDES = MEMORY_EVAL_SUCC7_DATASET_VERSION;
  * A successor that carries no case change has to say what it *did* change, or
  * the next reader assumes the sample moved and goes looking for the diff.
  */
+// The wording is part of `manifestDigest`, so it is the record's identity and
+// not a comment: it said "context-free expression table" while the rule read a
+// lookbehind, which is a manifest describing a contract the tree does not have.
 export const MEMORY_EVAL_SUCC8_CHANGE_REASON =
-    "Korean numeral canonicalisation narrowed to a reviewed, context-free expression table";
+    "Korean numeral canonicalisation narrowed to a reviewed expression table, " +
+    "bounded on the left only";
 
 /**
  * False, pending a signature.
@@ -274,7 +278,7 @@ export function buildSucc8Manifest(): Succ8DatasetManifest {
 const SUCC8_SCORING_CONTRACT_DIGEST =
     "fa32bcfc87aa9203ff05a3e608f01562e3c396ea403b0054226122778fa3cc93";
 const SUCC8_MANIFEST_DIGEST =
-    "16613ddbed2d20f5836726012a6a2f8f3cd9307cd50606732cdee12222dd273c";
+    "2aa4de5516769c15cb01fea2cfe42c1d8fdd48791832a78d4a5e5420ff6fe7da";
 
 /**
  * The manifest as a **record**, written out.

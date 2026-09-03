@@ -62,7 +62,7 @@ test("its digests are the ones the manifest records", () => {
     );
     assert.equal(
         target.datasetManifestDigest,
-        "16613ddbed2d20f5836726012a6a2f8f3cd9307cd50606732cdee12222dd273c"
+        "2aa4de5516769c15cb01fea2cfe42c1d8fdd48791832a78d4a5e5420ff6fe7da"
     );
     assert.equal(
         target.scoringContractDigest,
@@ -120,7 +120,7 @@ test("the run tuple describes succ-8, and a budget for succ-7 is refused", () =>
     );
     assert.equal(
         tuple.datasetManifestDigest,
-        "16613ddbed2d20f5836726012a6a2f8f3cd9307cd50606732cdee12222dd273c"
+        "2aa4de5516769c15cb01fea2cfe42c1d8fdd48791832a78d4a5e5420ff6fe7da"
     );
     assert.equal(tuple.scoringContractVersion, "mem-score-v3.5");
 

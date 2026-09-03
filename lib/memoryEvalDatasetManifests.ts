@@ -775,21 +775,21 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
              * succ-durable-ko-35, `세 시`/`3시` for succ-durable-ko-36, and
              * `아홉 시`/`9시` for succ-durable-ko-401.
              *
-             * Each row is **bounded on both sides**, and both boundaries were
-             * learned from a defect. No Hangul syllable may precede the
-             * numeral, or 교육 개월 is read as six months and 전세 시장 destroys
-             * the gold 전세. The counter must end the expression or be followed
-             * by one of that row's reviewed continuations, or 아홉 시장 is read
-             * as nine o'clock. Those two lookarounds are the only context any
-             * step reads.
+             * Each row is **bounded on the left, and only on the left**. No
+             * Hangul syllable may precede the numeral, or 교육 개월 is read as
+             * six months and 전세 시장 destroys the gold 전세. That one
+             * character is the only context any step reads.
              *
-             * The continuation list is complete for 개월, which begins no
-             * Korean word, and deliberately partial for 시, which begins many:
-             * nine of thirty-five particles are also a 시-noun's second
-             * syllable, so the boundary refuses `아홉 시가` rather than score
-             * 시가 as the hour. Both of those — the spacing the left boundary
-             * assumes and the spellings the right one refuses — are what a
-             * signature on this contract is approving.
+             * A right boundary — a list of particles the counter could be
+             * followed by — was carried for one day and withdrawn on
+             * 2026-09-04. It constrained only the rewrite, and only the Korean
+             * word spelling needs a rewrite, so it refused correct answers
+             * (`아홉 시입니다`, `육 개월짜리`) while the false positives it named
+             * reached the gold through the digit spelling regardless. What a
+             * signature on this contract approves is the spacing the left
+             * boundary assumes; what it acknowledges rather than approves is
+             * that a gold token is matched as a substring, so `9시장` reaches a
+             * `9시` gold in either spelling and did so under v3.4 as well.
              *
              * Nothing else moved: same rules, same thresholds, same
              * categories, same languages, same floors, same numeral table, same

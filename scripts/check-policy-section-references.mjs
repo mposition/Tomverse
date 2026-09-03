@@ -54,7 +54,7 @@
 // of every comment that predates the check.
 
 import { readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
   classifyFile,
   sectionsFromMarkdown,
@@ -176,8 +176,14 @@ const addedLines = (ref) => {
 
 const SCANNED_EXTENSIONS = ["*.ts", "*.tsx", "*.mjs", "*.prisma", "*.md"];
 
+// `execFileSync` with an argv array, not a shell string. The previous version
+// wrapped each pattern in Unix single quotes, which `cmd` does not strip, so on
+// Windows git looked for a file literally named `'docs/policy/*.md'` and matched
+// nothing. The check then passed by finding no citations at all — a gate that
+// reports "0 against 0" is not passing, it is not running, and that is how three
+// bare section references reached CI on 2026-09-04.
 const tracked = (patterns) =>
-  execSync(`git ls-files ${patterns.map((p) => `'${p}'`).join(" ")}`)
+  execFileSync("git", ["ls-files", ...patterns])
     .toString()
     .trim()
     .split("\n")

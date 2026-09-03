@@ -155,12 +155,21 @@ export const APPROVED_STEMS: Readonly<
  *
  * ## Why a table and not a rule
  *
- * Because the step has to be **context-free**, and only a table can be.
+ * Because the cross-product was too wide, and only a table can be narrow
+ * enough to name what it rewrites.
+ *
+ * This section argued for a **context-free** step until 2026-09-04 and the
+ * rule is not one: it reads the character before the numeral. The claim was
+ * wrong in its own terms — a lookbehind was already there while the paragraph
+ * denied it — and the table is what earns its keep, not the absence of
+ * lookaround. What the left boundary costs is stated in section 4.13 of
+ * `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md` and is
+ * approved at signature; what it buys is below.
  *
  * A gold token is matched as a *substring* of the candidate's statement, so
  * the token standing alone and the same token inside a sentence must
- * canonicalise identically. Any rule with a lookaround breaks that by
- * construction, and both attempts at one did:
+ * canonicalise identically. A lookaround puts that at risk, and the two
+ * attempts below are how much:
  *
  *   * `mem-score-v3.4` had no left condition, which is context-free — its bug
  *     was its table, not the missing boundary. Built from every numeral
@@ -179,7 +188,8 @@ export const APPROVED_STEMS: Readonly<
  *     `succ-4` stops assembling, because its `gold-evidence-covers-fact`
  *     anchor asks exactly that question.
  *
- * So: no lookaround, and a table narrow enough to be safe without one.
+ * So: one lookbehind, and a table narrow enough that the lookbehind is the
+ * only context anything reads.
  *
  * ## What earns a row
  *
@@ -211,7 +221,7 @@ export const APPROVED_STEMS: Readonly<
  *     the hour, and no closed list of nouns can be written.
  *   * A **right boundary** was then tried: the counter had to end the
  *     expression unless one of a reviewed list of particles followed. That is
- *     the shape this file carried until 2026-09-04, and §4.14 of the audit
+ *     the shape this file carried until 2026-09-04, and the audit section 4.14
  *     defended it as a deliberate trade — refuse `아홉 시가` rather than credit
  *     `시가 급등` as nine o'clock. **The trade does not exist**, for the reason
  *     below, and the list is gone.
@@ -256,7 +266,7 @@ export const APPROVED_STEMS: Readonly<
  *
  * Removing it belongs to the matcher rather than here — a token boundary on
  * the gold side would settle both spellings at once — and it is recorded as
- * the open question it is in §4.14 of
+ * the open question it is in section 4.14 of
  * `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md`.
  * `tests/memoryEvalCanonicalisationScoring.test.mjs` pins the exposure in both
  * spellings, so it is a measured boundary and not an omission.

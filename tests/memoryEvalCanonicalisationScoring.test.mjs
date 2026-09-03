@@ -381,8 +381,9 @@ test("the substring residual is measured, in both spellings", () => {
     // penalised for a protection the digit spelling never had.
     //
     // Removing it belongs to the matcher — a token boundary on the gold side
-    // would settle both spellings at once — and is recorded as open in §4.14 of
-    // the amendment. **These assertions are a measurement, not an approval.**
+    // would settle both spellings at once — and is recorded as open in section
+    // 4.14 of `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md`.
+    // **These assertions are a measurement, not an approval.**
     const ko401 = caseById("succ-durable-ko-401");
     for (const [word, digit] of [
         ["사용자는 아홉 시장을 매주 순회합니다.", "사용자는 9시장을 매주 순회합니다."],
