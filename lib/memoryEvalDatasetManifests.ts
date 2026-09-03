@@ -750,6 +750,36 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
                 "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
             pendingRules: [],
         },
+        {
+            /**
+             * The Korean numeral rule, bounded to word starts
+             * (.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md).
+             *
+             * v3.4 rewrote a Korean numeral wherever a counter followed it,
+             * including when the numeral was the last syllable of an ordinary
+             * word: `토요일 일정` canonicalised to `토요1일정`, so the token
+             * 격주토요일 existed in no candidate that phrased it that way, and
+             * `이십일` became `이10일`. The rule always meant a numeral word;
+             * v3.5 says so, with a lookbehind.
+             *
+             * Found by pointing the harness at `mem-eval-succ-7`, where the
+             * smoke run scored 484 of 485 golds its own stub had answered
+             * correctly. Fixing the gold instead was refused: shortening the
+             * token to ["격주", "일정"] drops the condition being tested and
+             * ["격주", "토요"] only routes around the defect, and succ-7 is
+             * frozen and signed either way.
+             *
+             * Nothing else moved: same rules, same thresholds, same
+             * categories, same languages, same floors, same numeral table and
+             * counters. The difference is the boundary condition, the step's
+             * name, and the version string.
+             */
+            version: "mem-score-v3.5",
+            approvedOn: "2026-09-03",
+            descriptorDigest:
+                "6f1c8ce354bf6cb8cc826cf3132d79206300ff6a29f7aad1ef796c9fb376499e",
+            pendingRules: [],
+        },
     ];
 
 /**

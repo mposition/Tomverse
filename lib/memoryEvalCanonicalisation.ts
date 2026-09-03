@@ -34,7 +34,10 @@ export const CANON_STEP_ORDER: readonly string[] = [
     "lowercase",
     "contraction_nt_to_not",
     "digit_group_separators",
-    "numeral_words_to_digits",
+    // Renamed in `mem-score-v3.5`, and the name is the change: the step
+    // rewrites numeral *words*, and until then it also rewrote numeral
+    // syllables sitting at the end of ordinary ones.
+    "numeral_words_at_word_start_to_digits",
     "punctuation_to_space",
     "collapse_whitespace_trim",
 ];
@@ -98,8 +101,10 @@ export const NUMERAL_TABLE: Readonly<Record<string, string>> = {
  *
  * `세` is 셋 and also 세상·세계·세금; `이` is 2 and also the subject particle.
  * Rewriting them wherever they appear would corrupt the text being compared,
- * so a Korean numeral is rewritten **only when a counter follows it** — the
- * shape a numeral actually takes in these sentences.
+ * so a Korean numeral is rewritten **only when a counter follows it and no
+ * syllable precedes it** — the shape a numeral actually takes in these
+ * sentences. The second half was added in `mem-score-v3.5`; see
+ * `KOREAN_NUMERAL_RE` for what its absence did to 토요일.
  */
 export const KOREAN_COUNTERS: readonly string[] = [
     "시",
@@ -151,8 +156,28 @@ const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
     (word) => !/[가-힣]/.test(word)
 );
 
+/**
+ * A Korean numeral, when a counter follows it **and a syllable does not
+ * precede it**.
+ *
+ * The counter condition was here from the start; the left-hand one was not,
+ * and without it the rule reached inside words. `토요일 일정` — Saturday, a
+ * schedule — became `토요1일정`: the 일 ending 토요일 was read as the numeral
+ * one and the 일 beginning 일정 as the counter for days. The token 격주토요일
+ * then existed in no candidate that phrased it that way, so
+ * `succ-durable-ko-611` could only ever score a false negative for three of
+ * five plausible phrasings of the fact it tests.
+ *
+ * `이십일` was the same defect on a number: 십 preceded by 이 matched as ten
+ * plus the day counter, and twenty-one canonicalised to `이10일`.
+ *
+ * The lookbehind says what the rule always meant — a numeral is a word, not a
+ * syllable — and it costs nothing the datasets use: every legitimate form is
+ * a numeral at a word boundary, whether or not a space follows it
+ * (`육 개월`, `육개월`, `새벽 세 시`, `삼 일`, `여섯 개` are all unchanged).
+ */
 const KOREAN_NUMERAL_RE = new RegExp(
-    `(${KOREAN_NUMERALS.map(escape).join("|")})\\s*(${KOREAN_COUNTERS.map(escape).join("|")})`,
+    `(?<![가-힣])(${KOREAN_NUMERALS.map(escape).join("|")})\\s*(${KOREAN_COUNTERS.map(escape).join("|")})`,
     "g"
 );
 const ENGLISH_NUMERAL_RE = new RegExp(

@@ -58,11 +58,18 @@ test("the sample is succ-4's, case for case and by digest", () => {
 test("the contract did move, and says what it moved from", () => {
     assert.equal(MEMORY_EVAL_SUCC5_SUPERSEDES, "mem-eval-succ-4");
     assert.equal(MEMORY_EVAL_SUCC5_CHANGE_REASON, "contract descriptor correction");
-    assert.equal(
+    // The contract succ-5 was frozen under, which since 2026-09-03 is no
+    // longer the one the tree ships. That is the correct relationship, not
+    // drift: a frozen dataset records what scored it, and the Korean numeral
+    // amendment (`mem-score-v3.5`) arrived after succ-5 was closed. This used
+    // to be asserted equal to `MEMORY_EVAL_SCORING_CONTRACT_VERSION`, and
+    // that coupling would have silently moved succ-5's manifest digest at the
+    // bump — the failure the recorded binding exists to prevent.
+    assert.equal(MEMORY_EVAL_SUCC5_MANIFEST.scoringContractVersion, "mem-score-v3.4");
+    assert.notEqual(
         MEMORY_EVAL_SUCC5_MANIFEST.scoringContractVersion,
         MEMORY_EVAL_SCORING_CONTRACT_VERSION
     );
-    assert.equal(MEMORY_EVAL_SUCC5_MANIFEST.scoringContractVersion, "mem-score-v3.4");
     assert.notEqual(
         MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest,
         MEMORY_EVAL_SUCC4_MANIFEST.scoringContractDigest

@@ -31,7 +31,10 @@ import {
     SUCC7_TRANSITION_DIGEST,
     succ7TransitionDigestOf,
 } from "../lib/memoryEvalSucc7Transition.ts";
-import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.ts";
+import {
+    HARNESS_TARGET_DATASET_VERSION,
+    harnessTarget,
+} from "../lib/memoryEvalHarnessTarget.ts";
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -300,11 +303,24 @@ test("freezing does not move the manifest digest", () => {
     );
 });
 
-test("adoption did not move the harness, and 1150 cases are still there", () => {
-    // The signature covers the sample. Pointing the harness at it is a
-    // separate decision that was not signed.
-    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-6");
+test("the harness runs these cases, under a contract succ-7 is not bound to", () => {
+    // The signature covered the sample; pointing the harness at it was a
+    // separate decision. That decision was taken on 2026-09-03 and then
+    // immediately overtaken, in the same session, by the Korean numeral
+    // amendment: `mem-score-v3.5` moved the contract, and a frozen dataset
+    // records the contract it was frozen under rather than following the tree.
+    //
+    // So the harness runs `mem-eval-succ-8`, which inherits *these* cases by
+    // reference under the amended contract. Both halves are asserted because
+    // this file is the one that would notice a signature and a target drifting
+    // apart: the sample is still succ-7's, and the name no longer is.
+    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-8");
     assert.equal(MEMORY_EVAL_SUCC7_CASES.length, 1150);
+    assert.deepEqual(harnessTarget().cases, MEMORY_EVAL_SUCC7_CASES);
+    assert.equal(
+        harnessTarget().datasetDigest,
+        MEMORY_EVAL_SUCC7_MANIFEST.datasetDigest
+    );
 });
 
 /* ------------------------------------------- what the digests have to cover -- */

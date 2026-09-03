@@ -3,10 +3,6 @@ import { createHash } from "node:crypto";
 import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
 import { datasetFingerprintInputV3 } from "@/lib/memoryEvalDatasetSchemaV3";
 import { datasetFingerprintInputV4 } from "@/lib/memoryEvalDatasetFingerprintV4";
-import {
-    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
-    scoringContractDescriptorInput,
-} from "@/lib/memoryEvalScoringContractDigest";
 import { MEMORY_EVAL_SUCC6_CASES } from "@/lib/memoryEvalSucc6";
 import { MEMORY_EVAL_SUCC7_REPLACEMENTS } from "@/lib/memoryEvalSucc7Replacements";
 import {
@@ -246,6 +242,22 @@ export const MEMORY_EVAL_SUCC7_CHANGE_REASON =
     "mem-extract-v8 wording was selected from; 1:1 replacements throughout, " +
     "assistant_only subtype composition preserved";
 
+/**
+ * The contract this dataset was frozen under, recorded rather than recomputed.
+ *
+ * It read the live contract until `mem-score-v3.5` shipped. That was correct
+ * while this dataset's contract *was* the live one and wrong the moment it
+ * stopped being: an earlier contract's constants are gone from the tree, so
+ * its descriptor cannot be rebuilt, and recomputing would have moved this
+ * manifest's digest — the value a person signed — for a change to a contract
+ * this dataset is not scored under. It is bound to v3.4 for good, and its
+ * successor carries the same cases under v3.5.
+ */
+export const MEMORY_EVAL_SUCC7_SCORING_CONTRACT = {
+    version: "mem-score-v3.4",
+    digest: "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+} as const;
+
 const sha256 = (input: string): string =>
     createHash("sha256").update(input, "utf8").digest("hex");
 
@@ -377,8 +389,8 @@ export function buildSucc7DraftManifest(): Succ7DraftManifest {
         datasetDigest: sha256(
             datasetFingerprintInputV4(MEMORY_EVAL_SUCC7_CASES)
         ),
-        scoringContractDigest: sha256(scoringContractDescriptorInput()),
-        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+        scoringContractDigest: MEMORY_EVAL_SUCC7_SCORING_CONTRACT.digest,
+        scoringContractVersion: MEMORY_EVAL_SUCC7_SCORING_CONTRACT.version,
         frozen: MEMORY_EVAL_SUCC7_DATASET_FROZEN,
     };
     return {

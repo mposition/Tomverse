@@ -97,7 +97,7 @@ import {
  * change regardless — this string is for people, so a manifest row can be
  * read without recomputing anything.
  */
-export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.4";
+export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.5";
 
 /**
  * The approved records that define the contract, oldest first.
@@ -112,6 +112,7 @@ export const MEMORY_EVAL_SCORING_AMENDMENTS: readonly string[] = [
     ".github/audits/memory-eval-mixed-critical-amendment-2026-08-26.md",
     ".github/audits/memory-eval-kind-boundary-amendment-2026-08-27.md",
     ".github/audits/memory-eval-gold-contract-2026-08-27.md",
+    ".github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md",
 ];
 
 /**
@@ -242,8 +243,11 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
         statement:
             "Both sides of a comparison pass through canon in the fixed step order, then " +
             "through the language's matching form: Korean drops every space, English keeps " +
-            "them. Canonicalisation rewrites a token to a canonical form by a fixed table " +
-            "and never decides that two different facts are the same.",
+            "them. A Korean numeral word is rewritten to its digit only where a counter " +
+            "follows it and no syllable precedes it, so the rule reaches numerals and not " +
+            "the syllables that end other words. Canonicalisation rewrites a token to a " +
+            "canonical form by a fixed table and never decides that two different facts " +
+            "are the same.",
     },
     {
         id: "v3-evidence-binding",
