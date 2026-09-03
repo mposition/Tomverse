@@ -244,16 +244,21 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
         statement:
             "Both sides of a comparison pass through canon in the fixed step order, then " +
             "through the language's matching form: Korean drops every space, English keeps " +
-            "them. Every step is context-free: it rewrites by a fixed table and consults " +
-            "nothing to either side of what it matches, so a token canonicalises the same " +
-            "way alone as it does inside a sentence, and the same way however the sentence " +
-            "was spaced within a registered expression. Korean numerals are rewritten " +
+            "them. Every step rewrites by a fixed table. Korean numerals are rewritten " +
             "only by the reviewed rows of canonKoreanNumeralExpressions, matched as one " +
-            "alternation in a single pass with the longest form first. A row matches only " +
-            "where no Hangul syllable precedes the numeral and the counter ends the " +
-            "expression, unless what follows the counter is one of that row's reviewed " +
-            "continuations; an unlisted numeral is left as written. No canonical form may " +
-            "be a substring of another. Canonicalisation rewrites a token to a canonical " +
+            "alternation in a single pass with the longest form first, and each row is " +
+            "bounded on both sides: it matches only where no Hangul syllable immediately " +
+            "precedes the numeral, and where the counter ends the expression or is " +
+            "followed by one of that row's reviewed continuations. An unlisted numeral is " +
+            "left as written. Those two boundaries are the only context any step reads, " +
+            "and they are one character before and the reviewed continuations after — " +
+            "nothing else about the surrounding sentence can change a result. A token " +
+            "therefore canonicalises the same alone as inside a sentence provided the word " +
+            "boundary before it is present, and the same however the expression itself is " +
+            "spaced. No canonical form may be a substring of another. The continuation " +
+            "lists are complete for counters that begin no Korean word and deliberately " +
+            "partial for those that do, which refuses some correct spellings rather than " +
+            "crediting a different fact. Canonicalisation rewrites a token to a canonical " +
             "form by a fixed table and never decides that two different facts are the " +
             "same.",
     },

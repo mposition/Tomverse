@@ -34,6 +34,7 @@ import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import {
     KOREAN_NUMERAL_EXPRESSIONS,
     NUMERAL_TABLE,
+    canonMatch,
 } from "../lib/memoryEvalCanonicalisation.ts";
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -279,4 +280,88 @@ test("that guard would fire on the shapes it is for", () => {
     // And not on the forms the corpus actually uses.
     assert.doesNotMatch("저는 육 개월씩 배를 탑니다", patternFor("육 개월"));
     assert.doesNotMatch("가게 문을 아홉 시에 엽니다", patternFor("아홉 시"));
+});
+
+test("the counter's continuation list is complete where it can be", () => {
+    // `개월` is two syllables and begins no Korean word, so 개월 followed by
+    // any particle is unambiguously six months and the list is simply
+    // finished. Every form the 2026-09-03 review found refused now scores.
+    const ko35 = caseById("succ-durable-ko-35");
+    for (const particle of ["을", "은", "도", "이", "만", "마다", "씩", "간"]) {
+        assert.equal(
+            scoreOf(ko35, "e2", `사용자는 육 개월${particle} 배를 탑니다.`).goldMatched,
+            1,
+            `육 개월${particle}`
+        );
+        assert.equal(
+            scoreOf(ko35, "e2", `사용자는 6개월${particle} 배를 탑니다.`).goldMatched,
+            1,
+            `6개월${particle}`
+        );
+    }
+});
+
+test("the 시 rows take the false negative, and this is which ones", () => {
+    // `시` is one syllable and begins many ordinary nouns, so a continuation
+    // that is also such a noun's second syllable makes the row read that noun
+    // as the hour: 가 -> 시가 (市價), 은 -> 시은, 도 -> 시도 (試圖),
+    // 의 -> 시의, 로 -> 시론, 와 -> 시와, 나 -> 시나리오, 야 -> 시야,
+    // 대로 -> 시대. Nine of the thirty-five particles collide, three of them
+    // among the commonest.
+    //
+    // The boundary cannot be neither: adding 가 fixes `아홉 시가` and breaks
+    // `시가 급등` at the same time. This list takes the false negatives,
+    // because crediting a fact the user never stated is the more expensive
+    // error in a memory eval — and the choice is pinned here so it is a
+    // recorded boundary rather than an omission somebody has to find again.
+    const ko401 = caseById("succ-durable-ko-401");
+
+    // Accepted: continuations that begin no 시-noun.
+    for (const particle of ["에", "부터", "까지", "는", "를", "을", "만", "마다"]) {
+        assert.equal(
+            scoreOf(ko401, "g1", `사용자는 가게 문을 아홉 시${particle} 엽니다.`)
+                .goldMatched,
+            1,
+            `아홉 시${particle}`
+        );
+    }
+
+    // Refused, and what each refusal buys.
+    for (const [particle, noun] of [
+        ["가", "시가 (市價)"],
+        ["도", "시도 (試圖)"],
+        ["야", "시야 (視野)"],
+    ]) {
+        assert.equal(
+            scoreOf(ko401, "g1", `사용자는 가게 문을 아홉 시${particle} 엽니다.`)
+                .goldMatched,
+            0,
+            `아홉 시${particle} is refused so that ${noun} is not the hour`
+        );
+    }
+
+    // The other side of that trade, stated as the thing being bought.
+    for (const statement of [
+        "사용자는 아홉 시가가 급등했다고 적었습니다.",
+        "사용자는 아홉 시도 끝에 성공했습니다.",
+        "사용자는 아홉 시야가 좁다고 말합니다.",
+    ]) {
+        assert.equal(scoreOf(ko401, "g1", statement).goldMatched, 0, statement);
+    }
+});
+
+test("every registered continuation is one that keeps the row matching", () => {
+    // A continuation that does nothing is a list entry nobody checked. This
+    // walks the registered lists rather than a hand-written set, so an entry
+    // added without effect fails here.
+    for (const row of KOREAN_NUMERAL_EXPRESSIONS) {
+        for (const after of row.followedBy) {
+            const digit = NUMERAL_TABLE[row.numeral];
+            assert.equal(
+                canonMatch(`${row.numeral} ${row.counter}${after}`, "ko"),
+                canonMatch(`${digit}${row.counter}${after}`, "ko"),
+                `${row.counter}${after}`
+            );
+        }
+    }
 });

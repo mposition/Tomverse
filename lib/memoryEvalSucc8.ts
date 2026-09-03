@@ -272,9 +272,9 @@ export function buildSucc8Manifest(): Succ8DatasetManifest {
  * be given for.
  */
 const SUCC8_SCORING_CONTRACT_DIGEST =
-    "f4dfc6eca8f78fff6272a24c59632aefe9243568a4f6186f4ab2e56816457b53";
+    "e3524c2636eccccde9c29b0b13fcef818255238952bb89688841a11fa8a6cf8d";
 const SUCC8_MANIFEST_DIGEST =
-    "f644c1a3443ff60f555112a659c43927aede6657db1bfe635022ffc25576191d";
+    "61c4bad423a2f8d87a50d827a63182658d7985f1244b7fe1616f898fbdf51980";
 
 /**
  * The manifest as a **record**, written out.

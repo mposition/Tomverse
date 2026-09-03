@@ -239,6 +239,61 @@ export const APPROVED_STEMS: Readonly<
  * not nine o'clock); the digit form would need a "not preceded by a digit"
  * test, which is recorded in each row's `rejects` instead.
  */
+/**
+ * Particles and suffixes that may follow a counter, for counters where the
+ * list can be completed.
+ *
+ * Korean particles are a closed class, so an allowlist is a real list rather
+ * than an open-ended one — **as long as no noun begins with the counter**.
+ * `개월` is two syllables and starts no Korean word, so 개월 + anything in this
+ * list is unambiguously six months and the list can simply be finished.
+ *
+ * `시` is the opposite case and gets its own, deliberately shorter list; see
+ * `SI_CONTINUATIONS`.
+ */
+const UNAMBIGUOUS_COUNTER_CONTINUATIONS: readonly string[] = [
+    // case and topic
+    "이", "가", "은", "는", "을", "를", "의",
+    // adverbial
+    "에", "에서", "로", "으로", "와", "과", "랑", "이랑", "하고",
+    "보다", "처럼", "같이", "만큼", "대로",
+    // auxiliary
+    "도", "만", "마다", "부터", "까지", "조차", "마저", "밖에", "뿐",
+    "나", "이나", "라도", "이라도",
+    // approximation and duration suffixes
+    "쯤", "경", "께", "씩", "째", "간", "치", "여",
+];
+
+/**
+ * What may follow `시` and still be the hour.
+ *
+ * Shorter than the list above, and it cannot be completed. `시` is one
+ * syllable and begins many ordinary nouns, so a continuation that is also the
+ * first syllable of such a noun makes the row read that noun as the hour:
+ *
+ *   가 -> 시가 (市價)   은 -> 시은     의 -> 시의 (市議)
+ *   도 -> 시도 (試圖)   로 -> 시론     와 -> 시와
+ *   나 -> 시나리오      야 -> 시야     대로 -> 시대 (時代)
+ *
+ * Nine of the thirty-five particles above collide that way, and three of them
+ * — 가, 은, 도 — are among the commonest. So the right boundary for `시` is a
+ * choice between refusing `아홉 시가` (a false negative on a correct answer)
+ * and scoring `시가 급등했다` as nine o'clock (a false positive on a different
+ * fact). It cannot be neither.
+ *
+ * **This list takes the false negatives.** A memory eval credits a fact the
+ * user never stated when it takes the other side, and the critical categories
+ * exist because that is the more expensive error. The refused forms are pinned
+ * by `tests/memoryEvalCanonicalisationScoring.test.mjs` so the choice is a
+ * recorded boundary rather than an omission, and
+ * `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md` §4.14
+ * states it as the decision it is.
+ */
+const SI_CONTINUATIONS: readonly string[] = [
+    // Safe: no Korean noun begins 시 + one of these.
+    "는", "를", "을", "만", "마다", "부터", "까지", "쯤", "경", "께", "에",
+];
+
 export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
     /** The form both spellings collapse to. */
     canonical: string;
@@ -249,25 +304,15 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
     /**
      * What may follow the counter and still be this expression.
      *
-     * The right-hand half of the boundary, and reviewed per row because it has
-     * to be. `시` is one syllable and begins 시장, 시청, 시절 and 시간, so a row
-     * that stopped at the counter read nine *markets* as nine *o'clock*. The
-     * set of nouns starting with 시 is open and cannot be guarded; the set of
-     * particles that may follow a time is closed, so the rule is stated that
-     * way round.
-     *
-     * A following character that is not Hangul — a space, punctuation, the end
-     * of the string — always continues the expression, so `아홉 시 정각에`
-     * needs no entry. Only a Hangul syllable immediately after the counter has
-     * to be listed.
-     *
-     * The lists differ by row on purpose. `간` continues 개월 (개월간, "for six
-     * months") and must not continue 시, where 시간 is a different counter.
+     * The right-hand half of the boundary. A following character that is not
+     * Hangul — a space, punctuation, the end of the string — always continues
+     * the expression, so `아홉 시 정각에` needs no entry; only a Hangul
+     * syllable immediately after the counter has to be listed.
      */
     followedBy: readonly string[];
     /** The frozen gold that cannot be scored without this row. */
     requiredBy: string;
-    /** What else this row rewrites. Reviewed, not accidental. */
+    /** What else this row rewrites, or refuses. Reviewed, not accidental. */
     rejects: readonly string[];
 }[] = [
     {
@@ -275,7 +320,7 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "6개월",
         numeral: "육",
         counter: "개월",
-        followedBy: ["씩", "째", "간", "치"],
+        followedBy: UNAMBIGUOUS_COUNTER_CONTINUATIONS,
         requiredBy: "succ-durable-ko-35",
         // `16개월` still contains `6개월`, as it does with no rule at all.
         rejects: ["16개월"],
@@ -285,12 +330,12 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "3시",
         numeral: "세",
         counter: "시",
-        followedBy: ["에", "부터", "까지", "쯤", "경", "께"],
+        followedBy: SI_CONTINUATIONS,
         requiredBy: "succ-durable-ko-36",
-        // `13시` contains `3시` before and after this row alike. `전세 시장`
-        // and `세 시간` are left alone by the boundary, which is what the row
-        // is bounded for.
-        rejects: ["13시"],
+        // `13시` contains `3시` before and after this row alike. The forms this
+        // row refuses are 시가·시은·시도·시의·시로·시와·시나·시야·시대로, for
+        // the reason `SI_CONTINUATIONS` gives.
+        rejects: ["13시", "세 시가", "세 시도"],
     },
     {
         // succ-durable-ko-401: factValueAll ["9시"], evidence
@@ -300,10 +345,11 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "9시",
         numeral: "아홉",
         counter: "시",
-        followedBy: ["에", "부터", "까지", "쯤", "경", "께"],
+        followedBy: SI_CONTINUATIONS,
         requiredBy: "succ-durable-ko-401",
-        // `19시` contains `9시` before and after this row alike.
-        rejects: ["19시"],
+        // `19시` contains `9시` before and after this row alike, and the same
+        // 시-noun forms are refused as above.
+        rejects: ["19시", "아홉 시가", "아홉 시도"],
     },
 ];
 

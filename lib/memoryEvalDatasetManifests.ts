@@ -770,19 +770,26 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
              * either way.
              *
              * v3.5 replaces the cross-product with `KOREAN_NUMERAL_EXPRESSIONS`,
-             * a reviewed table: two rows, each registered because a frozen gold
-             * cannot be scored without it — `육 개월`/`6개월` for
-             * succ-durable-ko-35, and `아홉 시에`/`9시에` for
-             * succ-durable-ko-401.
+             * a reviewed table of **three rows**, each registered because a
+             * frozen gold cannot be scored without it: `육 개월`/`6개월` for
+             * succ-durable-ko-35, `세 시`/`3시` for succ-durable-ko-36, and
+             * `아홉 시`/`9시` for succ-durable-ko-401.
              *
-             * Two properties decide the shape. The step stays **context-free**,
-             * which two attempts at a lookaround rule showed is load-bearing: a
-             * gold token is matched as a substring, so `육 개월` alone and
-             * `저는 육 개월씩` have to canonicalise the same way, and a
-             * lookbehind makes them differ. And **no row ends in a counter that
-             * begins other words**: 시 begins 시장, 시청, 시절 and 시간, so a
-             * row ending in the bare counter reads nine *markets* as nine
-             * *o'clock*. The ko-401 variant carries the particle instead.
+             * Each row is **bounded on both sides**, and both boundaries were
+             * learned from a defect. No Hangul syllable may precede the
+             * numeral, or 교육 개월 is read as six months and 전세 시장 destroys
+             * the gold 전세. The counter must end the expression or be followed
+             * by one of that row's reviewed continuations, or 아홉 시장 is read
+             * as nine o'clock. Those two lookarounds are the only context any
+             * step reads.
+             *
+             * The continuation list is complete for 개월, which begins no
+             * Korean word, and deliberately partial for 시, which begins many:
+             * nine of thirty-five particles are also a 시-noun's second
+             * syllable, so the boundary refuses `아홉 시가` rather than score
+             * 시가 as the hour. Both of those — the spacing the left boundary
+             * assumes and the spellings the right one refuses — are what a
+             * signature on this contract is approving.
              *
              * Nothing else moved: same rules, same thresholds, same
              * categories, same languages, same floors, same numeral table, same
@@ -796,7 +803,7 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
             version: "mem-score-v3.5",
             approvedOn: "2026-09-03",
             descriptorDigest:
-                "f4dfc6eca8f78fff6272a24c59632aefe9243568a4f6186f4ab2e56816457b53",
+                "e3524c2636eccccde9c29b0b13fcef818255238952bb89688841a11fa8a6cf8d",
             pendingRules: [],
         },
     ];
