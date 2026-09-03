@@ -184,7 +184,7 @@ export const APPROVED_STEMS: Readonly<
  * ## What earns a row
  *
  * **An equivalence a frozen gold requires**, which is two things and not one.
- * Getting it wrong in each direction produced the two tables before this one.
+ * Getting it wrong in each direction produced two of the tables before this.
  *
  *   1. The gold cannot be satisfied by its own evidence without it —
  *      `succ-durable-ko-401` says `9시` and its evidence says `아홉 시`.
@@ -195,121 +195,128 @@ export const APPROVED_STEMS: Readonly<
  * needed. "The gold cannot be satisfied without it" was the second and dropped
  * (2), so a model answering `6개월` scored wrong where it had scored right.
  *
- * A **guard** row earns its place differently: it buys no equivalence and
- * exists so a longer expression is consumed before a shorter one can fire
- * inside it. Its `requiredBy` names the row it protects.
+ * ## What a row costs, and what pays for it
  *
- * ## What a row costs
+ * A row rewrites where it matches, so the question a reviewer has to answer is
+ * whether that can make two different facts equal, or stop one fact meeting
+ * itself. Four shapes were tried and each failed differently:
  *
- * A row rewrites its forms **everywhere**, including inside other words, so
- * the question a reviewer has to answer is whether that can make two different
- * facts equal. For the discarded `세`+`시` row it could, and did: it turned
- * `세 시간` — three *hours* — into `3시간`, and a gold asking for three
- * *o'clock* is a substring of that. Two different facts, one value, which is
- * exactly what this contract's canonicalisation rule forbids.
+ *   * `세`+`시` with no boundary turned `세 시간` — three *hours* — into
+ *     `3시간`, which a gold asking for three *o'clock* is a substring of.
+ *   * Collapsing toward the word form instead put the gold inside 아홉시간;
+ *     collapsing to `9시` puts it inside 9시간. The prefix relation is the
+ *     problem, not the script.
+ *   * Guard rows for the durations fixed that pair and left the open one:
+ *     시 begins 시장, 시청, 시절 and 시작 too, so `아홉 시장` still read as
+ *     the hour, and no closed list of nouns can be written.
+ *   * Registering the whole phrase `아홉 시에` closed that, and was narrower
+ *     than the contract it replaced: `아홉 시부터` and `새벽 3시에` — answers
+ *     `mem-score-v3.4` accepted — stopped scoring.
  *
- * Collapsing toward the word form did not fix it either. `9시` is the gold, so
- * mapping `아홉 시` to `아홉시` put the gold inside `아홉시간`, and mapping it
- * to `9시` puts it inside `9시간`. The prefix relation is the problem, not the
- * script, and only a guard row breaks it.
+ * What pays for it is a boundary on **both** sides, in `koreanAlternatives`
+ * below: no Hangul syllable before the numeral, and the counter ends the
+ * expression unless a reviewed continuation follows. The continuations are a
+ * closed set (particles), where the nouns to exclude are not.
  *
- * The invariant that settles it is stated once rather than argued per row:
- * **no canonical form may be a substring of another**, enforced by
- * `canonicalFormsAreDisjoint()` and run in CI by `check:memory-eval-succ8`.
- * Three shapes broke it in three ways and each carried a comment saying why it
- * was fine; a comment cannot fail a build.
+ * The invariant is still stated once and enforced rather than argued —
+ * `canonicalFormsAreDisjoint()`, run in CI by `check:memory-eval-succ8` — but
+ * it is a floor, not the argument. It reported nothing while 시장 was being
+ * read as the hour, because 시장 is not a canonical form. The check that
+ * decides is `tests/memoryEvalCanonicalisationScoring.test.mjs`, which runs
+ * candidates through `scoreCaseV3()` in both directions and over the whole
+ * corpus. Every shape above carried a comment explaining why it was fine; a
+ * comment cannot fail a build.
  *
  * ## What the rows do not change
  *
- * A digit variant can be matched inside a longer number — `3시간` inside
- * `23시간`, `6개월` inside `16개월` — so a gold naming the shorter is
- * satisfied by text naming the longer. That is worth writing down and is
- * **not** something these rows introduce: substring matching over digits
- * already had it, because `3시간` is literally inside `23시간` with no
- * canonicalisation at all. The rows change the spelling on both sides and
- * leave the relation exactly as they found it.
- *
- * Closing it would need a "not preceded by a digit" test, which is the
- * lookaround this step cannot have — the same trap as the two boundary rules
- * above. It is recorded in each row's `rejects` instead of argued away.
+ * A digit spelling can still be matched inside a longer number — `6개월`
+ * inside `16개월`, `9시` inside `19시` — so a gold naming the shorter is
+ * satisfied by text naming the longer. That is **not** something these rows
+ * introduce: substring matching over digits already had it, because `6개월` is
+ * literally inside `16개월` with no canonicalisation at all. The rows change
+ * the spelling on both sides and leave the relation where they found it. The
+ * left boundary excludes the Hangul form of the same shape (`열아홉 시에` is
+ * not nine o'clock); the digit form would need a "not preceded by a digit"
+ * test, which is recorded in each row's `rejects` instead.
  */
 export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
-    /** The form every variant collapses to. */
+    /** The form both spellings collapse to. */
     canonical: string;
+    /** The Korean numeral word. Its digit comes from `NUMERAL_TABLE`. */
+    numeral: string;
+    /** The counter, drawn from `KOREAN_COUNTERS`. */
+    counter: string;
     /**
-     * The forms rewritten to `canonical`. A space inside a variant matches a
-     * run of whitespace or none, so `아홉 시` covers `아홉시` as well.
-     */
-    variants: readonly string[];
-    /**
-     * Why the row is here: the frozen gold it serves, or the row it protects.
+     * What may follow the counter and still be this expression.
      *
-     * A guard row buys no equivalence of its own. It exists so that a longer
-     * expression is consumed before a shorter one can fire inside it, which is
-     * what keeps an hour from meeting a duration.
+     * The right-hand half of the boundary, and reviewed per row because it has
+     * to be. `시` is one syllable and begins 시장, 시청, 시절 and 시간, so a row
+     * that stopped at the counter read nine *markets* as nine *o'clock*. The
+     * set of nouns starting with 시 is open and cannot be guarded; the set of
+     * particles that may follow a time is closed, so the rule is stated that
+     * way round.
+     *
+     * A following character that is not Hangul — a space, punctuation, the end
+     * of the string — always continues the expression, so `아홉 시 정각에`
+     * needs no entry. Only a Hangul syllable immediately after the counter has
+     * to be listed.
+     *
+     * The lists differ by row on purpose. `간` continues 개월 (개월간, "for six
+     * months") and must not continue 시, where 시간 is a different counter.
      */
+    followedBy: readonly string[];
+    /** The frozen gold that cannot be scored without this row. */
     requiredBy: string;
     /** What else this row rewrites. Reviewed, not accidental. */
     rejects: readonly string[];
 }[] = [
     {
         // succ-durable-ko-35 states `육 개월`; a model may answer `6개월`.
-        //
-        // `개월` is two syllables and begins no Korean noun, which is what
-        // makes it registrable at all — see the note on `시` below.
         canonical: "6개월",
-        variants: ["육 개월", "6개월"],
+        numeral: "육",
+        counter: "개월",
+        followedBy: ["씩", "째", "간", "치"],
         requiredBy: "succ-durable-ko-35",
         // `16개월` still contains `6개월`, as it does with no rule at all.
         rejects: ["16개월"],
     },
     {
+        // succ-durable-ko-36 states `새벽 세 시`; a model may answer `새벽 3시`.
+        canonical: "3시",
+        numeral: "세",
+        counter: "시",
+        followedBy: ["에", "부터", "까지", "쯤", "경", "께"],
+        requiredBy: "succ-durable-ko-36",
+        // `13시` contains `3시` before and after this row alike. `전세 시장`
+        // and `세 시간` are left alone by the boundary, which is what the row
+        // is bounded for.
+        rejects: ["13시"],
+    },
+    {
         // succ-durable-ko-401: factValueAll ["9시"], evidence
         // `가게 문을 아홉 시에 열어서`. The gold is written as a digit and the
-        // only statement of the fact is written in words, so without a row the
-        // gold is satisfiable by nothing.
-        //
-        // The variant is the whole phrase **including the particle**, and that
-        // is the load-bearing part. A row ending in the bare counter `시`
-        // cannot be made safe: 시 is one syllable and begins 시장, 시청, 시절,
-        // 시작, 시간 and more, so `아홉 시` fires inside `아홉 시장` and nine
-        // *markets* scores as nine *o'clock*. That set is open — there is no
-        // list of 시-initial nouns to guard — which is the same shape as v3.4
-        // reading the 일 of 토요일, one counter over.
-        //
-        // `에` is a particle, so `시에` begins no noun and the row reaches only
-        // what it names. It costs generality: a model writing `아홉 시부터`
-        // is not covered, and no row will be added for it until a gold needs
-        // one.
-        canonical: "9시에",
-        variants: ["아홉 시에", "9시에"],
+        // only statement of the fact is written in words, so without this row
+        // the gold is satisfiable by nothing.
+        canonical: "9시",
+        numeral: "아홉",
+        counter: "시",
+        followedBy: ["에", "부터", "까지", "쯤", "경", "께"],
         requiredBy: "succ-durable-ko-401",
-        // `19시에` contains `9시에` before and after this row alike.
-        rejects: ["19시에"],
+        // `19시` contains `9시` before and after this row alike.
+        rejects: ["19시"],
     },
 ];
-
-const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
-    (word) => !/[가-힣]/.test(word)
-);
-
-/** A variant's lookup key: itself, with every space removed. */
-const variantKey = (variant: string) => variant.replace(/\s+/g, "");
 
 /**
  * No canonical form may be a substring of another.
  *
- * The invariant that separates an hour from a duration, stated once and
- * enforced rather than argued per row. Matching is by substring, so if one
- * canonical form sits inside another then a gold carrying the shorter one is
- * satisfied by text carrying the longer, and the two are different facts.
- *
- * This is what the first three attempts got wrong in three different ways —
- * `3시` inside `3시간`, then `아홉시` inside `아홉시간`, and rewriting to `9시`
- * would have put `9시` inside `9시간`. Guard rows exist to keep the pair
- * disjoint, and this function is what says whether they succeeded.
+ * A cheap structural floor, and a narrow one: it compares the registered
+ * canonical forms with each other, so it cannot see an unregistered noun that
+ * one of them sits inside. That blind spot is real — it reported nothing while
+ * `아홉 시` was reading 시장 as the hour — so the check that decides the design
+ * is the behavioural one in
+ * `tests/memoryEvalCanonicalisationScoring.test.mjs`, which runs candidates
+ * through `scoreCaseV3()`. This stays as the floor it is.
  */
 export function canonicalFormsAreDisjoint(): readonly string[] {
     const forms = KOREAN_NUMERAL_EXPRESSIONS.map((entry) => entry.canonical);
@@ -324,41 +331,73 @@ export function canonicalFormsAreDisjoint(): readonly string[] {
             }
         }
     }
-    const keys = KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) =>
-        entry.variants.map(variantKey)
-    );
-    for (const key of keys) {
-        if (keys.filter((other) => other === key).length > 1) {
-            problems.push(`the variant ${key} is registered by two rows`);
+    for (const entry of KOREAN_NUMERAL_EXPRESSIONS) {
+        if (!KOREAN_COUNTERS.includes(entry.counter)) {
+            problems.push(`${entry.counter} is not a registered counter`);
+        }
+        if (!Object.hasOwn(NUMERAL_TABLE, entry.numeral)) {
+            problems.push(`${entry.numeral} is not a registered numeral`);
         }
     }
     return problems;
 }
 
 /**
- * One alternation, longest variant first, applied in a single pass.
+ * The rule, as one ordered alternation applied in a single pass.
  *
- * The ordering is a contract term, not an implementation detail. Rewriting
- * variant by variant re-scans what an earlier row already produced, so a guard
- * row cannot protect anything: `아홉 시간` collapses to 아홉시간 and then the
- * hour row finds `아홉시` inside it and produces 9시간, which is the collision
- * the guard exists to prevent. A single ordered alternation consumes the whole
- * of the longer expression and carries on past it.
+ * Both boundaries are here, and each was learned from a defect:
  *
- * A space in a variant becomes `\s*`, so one written form covers the spaced and
- * unspaced spellings without a second row — Korean spacing is not stable, and a
- * reviewer registering `아홉 시` is registering the equivalence, not the typing.
+ *   * **Left** — `(?<![가-힣])`. Without it the numeral is read off the end of
+ *     the preceding word: `교육 개월` became 교6개월 and scored as six months,
+ *     `전세 시장` became 전3시장 and destroyed the gold 전세, and `열아홉 시에`
+ *     became 열9시에.
+ *   * **Right** — the counter must end the expression, unless what follows is
+ *     one of the row's reviewed continuations. Without it `아홉 시장` became
+ *     9시장 and nine markets scored as nine o'clock.
+ *
+ * Longest first and one pass, so `아홉 시간` is not reached by the `아홉 시`
+ * alternative after some earlier rewrite has moved the text under it.
+ *
+ * ## The assumption this rule makes, stated rather than buried
+ *
+ * The left boundary reads the character before the numeral, so the canonical
+ * form depends on **the space between the numeral and the word before it**.
+ * That space is assumed present. It is a different space from the one inside
+ * the expression: `육 개월` and `육개월` both canonicalise to 6개월, because
+ * `\s*` covers that one, and it is the unstable one. The inter-word space is
+ * the stable one — a Korean numeral is its own word — but "stable" is a claim
+ * about orthography, not a proof, and `저는육 개월씩` does canonicalise
+ * differently from `저는 육 개월씩`.
+ *
+ * That is the whole cost of the rule and it is a policy question, not an
+ * implementation detail: `mem-score-v3.5` cannot have both this boundary and
+ * total spacing invariance, and without the boundary it scores 교육 개월 as
+ * six months.
  */
-const KOREAN_CANONICAL_BY_VARIANT = new Map(
-    KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) =>
-        entry.variants.map((variant) => [variantKey(variant), entry.canonical] as const)
-    )
+const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
+    (word) => !/[가-힣]/.test(word)
+);
+
+const koreanAlternatives = KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) => {
+    const digit = NUMERAL_TABLE[entry.numeral];
+    const right =
+        entry.followedBy.length > 0
+            ? `(?:(?![가-힣])|(?=${entry.followedBy.map(escape).join("|")}))`
+            : "(?![가-힣])";
+    return [entry.numeral, digit].map((form) => ({
+        source: `(?<![가-힣])${escape(form)}\\s*${escape(entry.counter)}${right}`,
+        key: `${form}${entry.counter}`,
+        canonical: entry.canonical,
+    }));
+}).sort((a, b) => b.key.length - a.key.length);
+
+const KOREAN_CANONICAL_BY_FORM = new Map(
+    koreanAlternatives.map((entry) => [entry.key, entry.canonical] as const)
 );
 const KOREAN_NUMERAL_EXPRESSION_RE = new RegExp(
-    KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) => entry.variants)
-        .sort((a, b) => variantKey(b).length - variantKey(a).length)
-        .map((variant) => variant.split(/\s+/).map(escape).join("\\s*"))
-        .join("|"),
+    koreanAlternatives.map((entry) => entry.source).join("|"),
     "g"
 );
 const ENGLISH_NUMERAL_RE = new RegExp(
@@ -374,7 +413,8 @@ export const canon = (value: string): string => {
     KOREAN_NUMERAL_EXPRESSION_RE.lastIndex = 0;
     out = out.replace(
         KOREAN_NUMERAL_EXPRESSION_RE,
-        (match) => KOREAN_CANONICAL_BY_VARIANT.get(variantKey(match)) ?? match
+        (match) =>
+            KOREAN_CANONICAL_BY_FORM.get(match.replace(/\s+/g, "")) ?? match
     );
     out = out.replace(ENGLISH_NUMERAL_RE, (word) => NUMERAL_TABLE[word] ?? word);
     out = out.replace(/[^\p{L}\p{N}\s]/gu, " ");

@@ -167,9 +167,9 @@ test("the check would fail if the numeral table stopped covering a gold", () => 
         ["9시"],
         "and its gold states it as a digit"
     );
-    // The two meet only because the table says so — and the registered form
-    // is the whole phrase `아홉 시에`, not the bare `아홉 시`, because a row
-    // ending in the counter reads 시장 and 시절 as the hour too.
+    // The two meet only because the table says so, and only inside the
+    // boundaries: 아홉 followed by 시 and then a reviewed continuation. A noun
+    // that merely begins with the counter is not the hour.
     assert.ok(canonMatch(text, "ko").includes(canonMatch("9시", "ko")));
-    assert.equal(canonMatch("아홉 시", "ko"), "아홉시");
+    assert.equal(canonMatch("아홉 시장", "ko"), "아홉시장");
 });

@@ -31,7 +31,10 @@ import test from "node:test";
 
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
-import { KOREAN_NUMERAL_EXPRESSIONS } from "../lib/memoryEvalCanonicalisation.ts";
+import {
+    KOREAN_NUMERAL_EXPRESSIONS,
+    NUMERAL_TABLE,
+} from "../lib/memoryEvalCanonicalisation.ts";
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -48,6 +51,12 @@ const midWordPattern = (variant) =>
             ")",
         "g"
     );
+
+/** Both spellings of a row, as the rule writes them. */
+const variantsOf = (row) => [
+    `${row.numeral} ${row.counter}`,
+    `${NUMERAL_TABLE[row.numeral]}${row.counter}`,
+];
 
 const caseById = (id) => {
     const found = harnessTarget().cases.find((entry) => entry.id === id);
@@ -103,6 +112,42 @@ test("a candidate quoting the gold's own fact is matched", () => {
         scoreOf(ko401, "g1", "사용자는 가게 문을 9시에 엽니다.").goldMatched,
         1
     );
+});
+
+test("the same fact scores the same however the particle falls", () => {
+    // The regression the earlier positive control was too narrow to catch: it
+    // used only the exact `…시에` wording, so a table that covered that one
+    // phrasing and nothing else looked correct. It was not — `아홉 시부터` and
+    // `아홉 시 정각에` were both refused while their digit forms passed, so the
+    // same fact scored differently depending on the particle and the spelling.
+    //
+    // Every row of this table now has to hold in both spellings across every
+    // reviewed continuation, which is what makes the equivalence an
+    // equivalence rather than one memorised sentence.
+    const ko401 = caseById("succ-durable-ko-401");
+    for (const statement of [
+        "사용자는 가게 문을 아홉 시에 엽니다.",
+        "사용자는 가게 문을 아홉 시부터 엽니다.",
+        "사용자는 가게 문을 아홉 시까지 닫아 둡니다.",
+        "사용자는 가게 문을 아홉 시 정각에 엽니다.",
+        "사용자는 가게 문을 9시부터 엽니다.",
+        "사용자는 가게 문을 9시 정각에 엽니다.",
+    ]) {
+        assert.equal(scoreOf(ko401, "g1", statement).goldMatched, 1, statement);
+    }
+
+    // succ-durable-ko-36 is the same question in the other direction: its gold
+    // is written in words and a model may answer with the digit.
+    const ko36 = caseById("succ-durable-ko-36");
+    const goldId = ko36.expected.find((gold) =>
+        (gold.factValueAll ?? []).some((token) => token.includes("세 시"))
+    ).id;
+    for (const statement of [
+        "사용자는 새벽 세 시에 일을 시작합니다.",
+        "사용자는 새벽 3시에 일을 시작합니다.",
+    ]) {
+        assert.equal(scoreOf(ko36, goldId, statement).goldMatched, 1, statement);
+    }
 });
 
 test("a noun that merely begins with the counter is not the hour", () => {
@@ -194,7 +239,7 @@ test("no registered variant matches inside a longer word, anywhere in the corpus
     // So it is guarded here instead, where it fails loudly rather than
     // silently changing a score.
     const patterns = KOREAN_NUMERAL_EXPRESSIONS.flatMap((row) =>
-        row.variants.map(midWordPattern)
+        variantsOf(row).map(midWordPattern)
     );
 
     const found = [];
@@ -229,9 +274,9 @@ test("that guard would fire on the shapes it is for", () => {
     // of these, which is also how it would pass if the pattern were wrong.
     const patternFor = midWordPattern;
     assert.match("교육 개월별 계획", patternFor("육 개월"));
-    assert.match("열아홉 시에 만나요", patternFor("아홉 시에"));
-    assert.match("19시에 만나요", patternFor("9시에"));
+    assert.match("열아홉 시에 만나요", patternFor("아홉 시"));
+    assert.match("19시에 만나요", patternFor("9시"));
     // And not on the forms the corpus actually uses.
     assert.doesNotMatch("저는 육 개월씩 배를 탑니다", patternFor("육 개월"));
-    assert.doesNotMatch("가게 문을 아홉 시에 엽니다", patternFor("아홉 시에"));
+    assert.doesNotMatch("가게 문을 아홉 시에 엽니다", patternFor("아홉 시"));
 });

@@ -560,9 +560,14 @@ test("the rows that actually rewrite Korean text are in the digest", () => {
     // did and moved nothing a reviewer signs.
     const row = descriptorRow("canonKoreanNumeralExpressions");
     for (const entry of KOREAN_NUMERAL_EXPRESSIONS) {
-        assert.ok(row.includes(entry.canonical), `${entry.canonical} is not in the digest: ${row}`);
-        for (const variant of entry.variants) {
-            assert.ok(variant === entry.canonical || row.includes(variant), variant);
+        assert.ok(
+            row.includes(`${entry.numeral}+${entry.counter}=${entry.canonical}`),
+            `${entry.canonical} is not in the digest: ${row}`
+        );
+        // The right boundary travels with the row. A continuation added or
+        // dropped changes what the matcher does, so it has to move the digest.
+        for (const after of entry.followedBy) {
+            assert.ok(row.includes(after), `${after} is not in the digest`);
         }
     }
     // Every row, not merely one of them.
@@ -573,14 +578,15 @@ test("the rows that actually rewrite Korean text are in the digest", () => {
     // quietly swapped is a different decision under the same spelling, and
     // `rejects` for the reason `approvedStemsFor` gives.
     assert.ok(row.includes("succ-durable-ko-401"), row);
-    assert.ok(row.includes("19시에"), row);
+    assert.ok(row.includes("19시"), row);
 
     // Red-before-green: retargeting a row moves the digest.
     const moved = descriptorSortedListRow(
         "canonKoreanNumeralExpressions",
         KOREAN_NUMERAL_EXPRESSIONS.map(
             (entry) =>
-                `${entry.canonical}9<-${[...entry.variants].sort().join("|")}` +
+                `${entry.numeral}+${entry.counter}=${entry.canonical}9` +
+                `:after=${[...entry.followedBy].sort().join("|")}` +
                 `:by=${entry.requiredBy}` +
                 `:-${[...entry.rejects].sort().join("|")}`
         )
@@ -769,6 +775,7 @@ test("rule: v3-canonicalisation", () => {
     // noun that merely begins with the counter — 시장, 시절, 시간 — is left
     // alone and cannot be read as the hour.
     assert.equal(canon("아홉 시에"), "9시에");
+    assert.equal(canon("아홉 시부터"), "9시부터");
     assert.equal(canon("육 개월"), "6개월");
     assert.equal(canon("아홉 시장"), "아홉 시장");
     assert.ok(!canonMatch("아홉 시장", "ko").includes(canonMatch("9시", "ko")));

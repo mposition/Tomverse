@@ -247,12 +247,13 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
             "them. Every step is context-free: it rewrites by a fixed table and consults " +
             "nothing to either side of what it matches, so a token canonicalises the same " +
             "way alone as it does inside a sentence, and the same way however the sentence " +
-            "was spaced. Korean numerals are rewritten only by the reviewed rows of " +
-            "canonKoreanNumeralExpressions, matched as one alternation in a single pass " +
-            "with the longest variant first, so a longer expression is consumed before a " +
-            "shorter one can fire inside it; an unlisted numeral is left as written. No " +
-            "canonical form may be a substring of another, which is what keeps an hour " +
-            "from meeting a duration. Canonicalisation rewrites a token to a canonical " +
+            "was spaced within a registered expression. Korean numerals are rewritten " +
+            "only by the reviewed rows of canonKoreanNumeralExpressions, matched as one " +
+            "alternation in a single pass with the longest form first. A row matches only " +
+            "where no Hangul syllable precedes the numeral and the counter ends the " +
+            "expression, unless what follows the counter is one of that row's reviewed " +
+            "continuations; an unlisted numeral is left as written. No canonical form may " +
+            "be a substring of another. Canonicalisation rewrites a token to a canonical " +
             "form by a fixed table and never decides that two different facts are the " +
             "same.",
     },
@@ -503,7 +504,12 @@ export function scoringContractDescriptorInput(): string {
             "canonKoreanNumeralExpressions",
             KOREAN_NUMERAL_EXPRESSIONS.map(
                 (entry) =>
-                    `${entry.canonical}<-${[...entry.variants].sort().join("|")}` +
+                    `${entry.numeral}+${entry.counter}=${entry.canonical}` +
+                    // The right boundary is a contract term, not a hint: it is
+                    // what stops 아홉 시장 being read as the hour, so a
+                    // continuation quietly added or removed is a different
+                    // matcher and has to move this digest.
+                    `:after=${[...entry.followedBy].sort().join("|")}` +
                     `:by=${entry.requiredBy}` +
                     `:-${[...entry.rejects].sort().join("|")}`
             )

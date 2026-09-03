@@ -98,19 +98,28 @@ test("Korean canonicalisation does not depend on how the text was spaced", () =>
     //
     // A `(?<![가-힣])` lookbehind did exactly that for 82 of the 2,250 Korean
     // strings in the frozen corpus. These are four of them.
-    for (const spaced of [
-        "새벽 세 시",
-        "매주 두 번",
-        "총 세 개",
-        "주식은 이번에 처음 시작합니다",
-        "일주일 두 번",
+    // The unstable space is the one *inside* the expression — a writer may
+    // put 육 개월 or 육개월 — and `\\s*` covers it. The space *before* the
+    // numeral is a different one: it separates two words, and the left
+    // boundary reads it.
+    for (const [a, b] of [
+        ["육 개월", "육개월"],
+        ["저는 육 개월씩", "저는 육개월씩"],
+        ["아홉 시에", "아홉시에"],
+        ["새벽 세 시에", "새벽 세시에"],
+        ["매주 두 번", "매주두번"],
+        ["주식은 이번에 처음", "주식은이번에처음"],
     ]) {
-        assert.equal(
-            canonMatch(spaced, "ko"),
-            canonMatch(spaced.replace(/ /g, ""), "ko"),
-            spaced
-        );
+        assert.equal(canonMatch(a, "ko"), canonMatch(b, "ko"), `${a} / ${b}`);
     }
+
+    // And the assumption, asserted so it is a decision rather than a surprise:
+    // deleting the space before the numeral does change the canonical form.
+    // Five of the corpus's 2,250 Korean strings behave this way, all of them
+    // under a transform that deletes every space at once, which is not how
+    // Korean is written. Removing the assumption means removing the left
+    // boundary, and that is what scored 교육 개월 as six months.
+    assert.notEqual(canonMatch("저는 육 개월씩", "ko"), canonMatch("저는육 개월씩", "ko"));
 });
 
 /* ------------------------------------------- what the fix must not change -- */
@@ -139,7 +148,7 @@ test("the registered rows normalise, in both spellings", () => {
     );
 });
 
-test("a row never ends in a counter that begins other words", () => {
+test("a row matches only where both boundaries allow it", () => {
     // The 2026-09-03 finding, and the reason the ko-401 variant carries `에`.
     //
     // `시` is one syllable and begins 시장, 시청, 시절, 시작, 시간 and more, so
@@ -152,6 +161,9 @@ test("a row never ends in a counter that begins other words", () => {
     // Asserted on the canonical text here; scored through `scoreCaseV3()` in
     // tests/memoryEvalCanonicalisationScoring.test.mjs, which is the check
     // that would actually have caught it.
+    // Right boundary: the counter must end the expression unless a reviewed
+    // continuation follows. 시 begins 시장, 시청, 시절 and 시간, and that set
+    // is open, so the rule is stated as the closed set of particles instead.
     for (const untouched of [
         "아홉 시장",
         "아홉 시절",
@@ -159,13 +171,37 @@ test("a row never ends in a counter that begins other words", () => {
         "세 시장",
         "세 시청",
         "세 시간",
-        "새벽 세 시",
     ]) {
         assert.equal(
             canonMatch(untouched, "ko"),
             untouched.replace(/\s+/g, ""),
             untouched
         );
+    }
+    // Left boundary: the numeral must not be read off the end of a word.
+    for (const untouched of [
+        "교육 개월",
+        "체육 개월",
+        "열아홉 시에",
+        "이십일",
+        "토요일 일정",
+    ]) {
+        assert.equal(
+            canonMatch(untouched, "ko"),
+            untouched.replace(/\s+/g, ""),
+            untouched
+        );
+    }
+    // And the reviewed continuations do continue the expression.
+    for (const [text, expected] of [
+        ["아홉 시에", "9시에"],
+        ["아홉 시부터", "9시부터"],
+        ["아홉 시까지", "9시까지"],
+        ["아홉 시 정각에", "9시정각에"],
+        ["육 개월씩", "6개월씩"],
+        ["육 개월째", "6개월째"],
+    ]) {
+        assert.equal(canonMatch(text, "ko"), expected, text);
     }
     // And the token-alone property holds for a real gold that the discarded
     // 세+시 row destroyed: `전세` inside `전세 시장` became 전3시장.
@@ -206,7 +242,6 @@ test("unregistered numeral expressions are left as written", () => {
         "삼 일",
         "책 세 권",
         "강아지 두 마리",
-        "새벽 세 시",
     ]) {
         assert.equal(canon(untouched), untouched, untouched);
     }
@@ -217,18 +252,33 @@ test("every registered row names why it exists and what else it rewrites", () =>
     // is safe only when it cannot make two different facts equal, and
     // `requiredBy` plus `rejects` are where that reasoning is written down. A
     // row added without them has not been reviewed.
-    assert.equal(KOREAN_NUMERAL_EXPRESSIONS.length, 2);
+    assert.equal(KOREAN_NUMERAL_EXPRESSIONS.length, 3);
     for (const row of KOREAN_NUMERAL_EXPRESSIONS) {
         assert.match(row.requiredBy, /^succ-/, row.canonical);
         assert.ok(Array.isArray(row.rejects), row.canonical);
-        assert.ok(row.variants.length >= 2, "a row with one variant collapses nothing");
-        for (const variant of row.variants) {
+        assert.ok(KOREAN_COUNTERS.includes(row.counter), row.counter);
+        assert.ok(Object.hasOwn(NUMERAL_TABLE, row.numeral), row.numeral);
+        // Both spellings reach the canonical form.
+        const digit = NUMERAL_TABLE[row.numeral];
+        assert.equal(canonMatch(`${row.numeral} ${row.counter}`, "ko"), row.canonical);
+        assert.equal(canonMatch(`${digit}${row.counter}`, "ko"), row.canonical);
+        // Every reviewed continuation is a real one: it keeps the expression
+        // matching rather than silently doing nothing.
+        for (const after of row.followedBy) {
             assert.equal(
-                canonMatch(variant, "ko"),
-                canonMatch(row.canonical, "ko"),
-                `${variant} should canonicalise to ${row.canonical}`
+                canonMatch(`${row.numeral} ${row.counter}${after}`, "ko"),
+                `${row.canonical}${after}`,
+                `${row.counter}${after}`
             );
         }
+    }
+    // 간 continues 개월 and must not continue 시, where 시간 is a different
+    // counter. The lists are per row for that reason.
+    assert.ok(
+        KOREAN_NUMERAL_EXPRESSIONS.find((row) => row.counter === "개월").followedBy.includes("간")
+    );
+    for (const row of KOREAN_NUMERAL_EXPRESSIONS.filter((entry) => entry.counter === "시")) {
+        assert.ok(!row.followedBy.includes("간"), "간 after 시 is 시간, a duration");
     }
 });
 
