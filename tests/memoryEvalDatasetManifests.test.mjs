@@ -120,7 +120,7 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
     assert.equal(result.version, "mem-score-v3.5");
     assert.equal(
         result.entry.descriptorDigest,
-        "cd5f0e224c1cd7b152a6ac1cf3e9c18d3333db60762ec4f2a32162f85b6585bf"
+        "780290160fd0966e8985c94a02ea92688abde1e75430de3547856e8f8e887e9d"
     );
     // v3.4 stays pinned at what it was frozen with. succ-5, succ-6 and succ-7
     // are bound to it for good, so a value that moved here would leave three

@@ -254,65 +254,38 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
 }[] = [
     {
         // succ-durable-ko-35 states `육 개월`; a model may answer `6개월`.
+        //
+        // `개월` is two syllables and begins no Korean noun, which is what
+        // makes it registrable at all — see the note on `시` below.
         canonical: "6개월",
         variants: ["육 개월", "6개월"],
         requiredBy: "succ-durable-ko-35",
-        // 개월 is not the prefix of any other registered counter, and no corpus
-        // string contains 육개월 outside the intended sense. `16개월` still
-        // contains `6개월`, as it does with no rule at all.
+        // `16개월` still contains `6개월`, as it does with no rule at all.
         rejects: ["16개월"],
-    },
-    {
-        // A guard, not an equivalence: 세 시간 is three *hours*.
-        //
-        // Without it the row below fires inside it — `세 시간` becomes `3시간`,
-        // and a `3시` gold is a substring of that. Three hours would score as
-        // three o'clock, which is the one thing this contract's
-        // canonicalisation rule forbids. Collapsing to the word form keeps the
-        // duration out of every hour form's reach.
-        canonical: "세시간",
-        variants: ["세 시간", "3시간"],
-        requiredBy: "guards succ-durable-ko-36",
-        // `23시간` becomes `2세시간`, which still contains `세시간` — the
-        // pre-existing digit-substring relation, carried over unchanged.
-        rejects: ["23시간"],
-    },
-    {
-        // succ-durable-ko-36 states `새벽 세 시`; a model may answer `새벽 3시`.
-        canonical: "3시",
-        variants: ["세 시", "3시"],
-        requiredBy: "succ-durable-ko-36",
-        // 전세 시장 becomes 전3시장 — nonsense on both sides of every
-        // comparison, and it collides with nothing: no canonical form is a
-        // substring of another, which `canonicalFormsAreDisjoint()` enforces.
-        rejects: ["전세 시장", "13시"],
-    },
-    {
-        // The same guard for 아홉, and the reason it is not optional.
-        //
-        // `succ-durable-ko-401`'s gold is the digit `9시`. With the hour row
-        // alone, `아홉 시간` — nine *hours* — canonicalises to something the
-        // gold reaches: collapsing to `아홉시` puts the gold inside 아홉시간,
-        // and collapsing to `9시` puts it inside 9시간. Either direction
-        // collides. Consuming the duration first is what actually separates
-        // them, and it is why rows are matched longest-first in one pass.
-        canonical: "아홉시간",
-        variants: ["아홉 시간", "9시간"],
-        requiredBy: "guards succ-durable-ko-401",
-        // As above: `19시간` becomes `1아홉시간` and still contains
-        // `아홉시간`.
-        rejects: ["19시간"],
     },
     {
         // succ-durable-ko-401: factValueAll ["9시"], evidence
         // `가게 문을 아홉 시에 열어서`. The gold is written as a digit and the
-        // only statement of the fact is written in words, so without this row
-        // the gold is satisfiable by nothing.
-        canonical: "9시",
-        variants: ["아홉 시", "9시"],
+        // only statement of the fact is written in words, so without a row the
+        // gold is satisfiable by nothing.
+        //
+        // The variant is the whole phrase **including the particle**, and that
+        // is the load-bearing part. A row ending in the bare counter `시`
+        // cannot be made safe: 시 is one syllable and begins 시장, 시청, 시절,
+        // 시작, 시간 and more, so `아홉 시` fires inside `아홉 시장` and nine
+        // *markets* scores as nine *o'clock*. That set is open — there is no
+        // list of 시-initial nouns to guard — which is the same shape as v3.4
+        // reading the 일 of 토요일, one counter over.
+        //
+        // `에` is a particle, so `시에` begins no noun and the row reaches only
+        // what it names. It costs generality: a model writing `아홉 시부터`
+        // is not covered, and no row will be added for it until a gold needs
+        // one.
+        canonical: "9시에",
+        variants: ["아홉 시에", "9시에"],
         requiredBy: "succ-durable-ko-401",
-        // `19시` contains `9시` before and after this row alike.
-        rejects: ["19시"],
+        // `19시에` contains `9시에` before and after this row alike.
+        rejects: ["19시에"],
     },
 ];
 

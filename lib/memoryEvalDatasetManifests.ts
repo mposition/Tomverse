@@ -769,12 +769,20 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
              * only routes around the defect, and succ-7 is frozen and signed
              * either way.
              *
-             * v3.5 replaces the cross-product with `KOREAN_NUMERAL_EXPRESSIONS`
-             * — two reviewed rows, each a frozen gold's own wording. The step
-             * stays **context-free**, which two attempts at a lookaround rule
-             * showed is the load-bearing property: a gold token is matched as a
-             * substring, so `육 개월` alone and `저는 육 개월씩` have to
-             * canonicalise the same way, and a lookbehind makes them differ.
+             * v3.5 replaces the cross-product with `KOREAN_NUMERAL_EXPRESSIONS`,
+             * a reviewed table: two rows, each registered because a frozen gold
+             * cannot be scored without it — `육 개월`/`6개월` for
+             * succ-durable-ko-35, and `아홉 시에`/`9시에` for
+             * succ-durable-ko-401.
+             *
+             * Two properties decide the shape. The step stays **context-free**,
+             * which two attempts at a lookaround rule showed is load-bearing: a
+             * gold token is matched as a substring, so `육 개월` alone and
+             * `저는 육 개월씩` have to canonicalise the same way, and a
+             * lookbehind makes them differ. And **no row ends in a counter that
+             * begins other words**: 시 begins 시장, 시청, 시절 and 시간, so a
+             * row ending in the bare counter reads nine *markets* as nine
+             * *o'clock*. The ko-401 variant carries the particle instead.
              *
              * Nothing else moved: same rules, same thresholds, same
              * categories, same languages, same floors, same numeral table, same
@@ -788,7 +796,7 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
             version: "mem-score-v3.5",
             approvedOn: "2026-09-03",
             descriptorDigest:
-                "cd5f0e224c1cd7b152a6ac1cf3e9c18d3333db60762ec4f2a32162f85b6585bf",
+                "780290160fd0966e8985c94a02ea92688abde1e75430de3547856e8f8e887e9d",
             pendingRules: [],
         },
     ];

@@ -1,0 +1,159 @@
+/**
+ * What the canonicalisation table must NOT score, run through the real scorer.
+ *
+ * `canonicalFormsAreDisjoint()` compares the registered canonical forms with
+ * each other, and that is a narrow question. It cannot see an **unregistered**
+ * word that a canonical form happens to sit inside, and on 2026-09-03 that is
+ * exactly what it missed: with `아홉 시` registered, `사용자는 아홉 시장을 매주
+ * 순회합니다` — nine *markets* — canonicalised to `사용자는9시장을…`, which
+ * contains the `9시` gold of `succ-durable-ko-401`, and nine markets scored as
+ * nine o'clock. The structural check reported no problem, because 시장 is not
+ * a canonical form; it is an ordinary noun that begins with the counter.
+ *
+ * So the check that matters is behavioural: build a candidate, hand it to
+ * `scoreCaseV3()` — the function the harness actually calls — and assert what
+ * comes back. A structural invariant can only rule out what it was told to
+ * look for; this rules out what the scorer would really do.
+ *
+ * ## The two directions
+ *
+ * A false **positive** is a candidate stating a different fact that scores as
+ * the gold (nine markets as nine o'clock). A false **negative** is a candidate
+ * stating the gold's own fact that stops matching (`전세` lost inside
+ * `전세 시장`, because the discarded 세+시 row rewrote it to 전3시장). Both are
+ * failures of the same rule — normalisation "never decides that two different
+ * facts are the same" — and both are asserted here, because a table narrow
+ * enough to avoid the first is easy to make too narrow for the second.
+ */
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
+import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
+
+const caseById = (id) => {
+    const found = harnessTarget().cases.find((entry) => entry.id === id);
+    assert.ok(found, `${id} is not in the harness target`);
+    return found;
+};
+
+/**
+ * A candidate that differs from the named gold only in its statement.
+ *
+ * Kind, polarity and evidence are copied from that gold so nothing except the
+ * wording can decide the outcome. The gold is named rather than taken as
+ * `expected[0]`, because `succ-durable-ko-35` carries two — an occupation and
+ * a recurring context — and probing the first one answers a question about
+ * 항해사 while claiming to be about 육 개월.
+ */
+const goldOf = (testCase, goldId) => {
+    const found = testCase.expected.find((entry) => entry.id === goldId);
+    assert.ok(found, `${testCase.id} has no gold ${goldId}`);
+    return found;
+};
+
+const candidateFor = (testCase, goldId, statement) => {
+    const gold = goldOf(testCase, goldId);
+    return {
+        kind: gold.kind,
+        polarity: gold.polarity,
+        statement,
+        bulkSafe: gold.expectedDisposition === "bulk_safe",
+        disposition: gold.expectedDisposition,
+        evidence: [
+            {
+                evidenceMessageId: gold.evidence.evidenceMessageId,
+                evidenceQuote: gold.evidence.evidenceQuote,
+            },
+        ],
+    };
+};
+
+const scoreOf = (testCase, goldId, statement) =>
+    scoreCaseV3(testCase, [candidateFor(testCase, goldId, statement)]);
+
+test("a candidate quoting the gold's own fact is matched", () => {
+    // The positive control. Without it every assertion below would pass
+    // against a scorer that matched nothing at all.
+    const ko401 = caseById("succ-durable-ko-401");
+    const outcome = scoreOf(ko401, "g1", "사용자는 가게 문을 아홉 시에 엽니다.");
+    assert.equal(outcome.goldMatched, 1, JSON.stringify(outcome));
+
+    // And in the other spelling, which is the equivalence the row exists for:
+    // the gold is the digit `9시` and the evidence is written in words.
+    assert.equal(
+        scoreOf(ko401, "g1", "사용자는 가게 문을 9시에 엽니다.").goldMatched,
+        1
+    );
+});
+
+test("a noun that merely begins with the counter is not the hour", () => {
+    // The 2026-09-03 finding. `시` is one syllable and begins 시장, 시청, 시절,
+    // 시작 and more, so a row ending in the bare counter reads all of them as
+    // the hour. The set is open — there is no list of 시-initial nouns to
+    // guard — so no row may end in it, and the registered variant carries the
+    // particle instead.
+    const ko401 = caseById("succ-durable-ko-401");
+    for (const statement of [
+        "사용자는 아홉 시장을 매주 순회합니다.",
+        "사용자는 아홉 시절을 자주 떠올립니다.",
+        "사용자는 아홉 시간 넘게 잡니다.",
+    ]) {
+        assert.equal(
+            scoreOf(ko401, "g1", statement).goldMatched,
+            0,
+            `"${statement}" must not score as the 9시 gold`
+        );
+    }
+});
+
+test("a gold token is not destroyed by the word that follows it", () => {
+    // The false negative the discarded 세+시 row caused: `전세 시장` became
+    // 전3시장, so `succ-durable-ko-22`'s gold `전세` no longer occurred in a
+    // sentence that plainly states it. The contract claims a token
+    // canonicalises the same alone as inside a sentence, and that row broke
+    // the claim on a real gold.
+    const ko22 = caseById("succ-durable-ko-22");
+    assert.deepEqual(
+        ko22.expected.flatMap((gold) => gold.factValueAll ?? []),
+        ["전세"],
+        "this test is about that gold"
+    );
+    for (const statement of [
+        "사용자는 전세로 살고 있습니다.",
+        "사용자는 전세 시장을 걱정하며 전세로 살고 있습니다.",
+    ]) {
+        assert.equal(
+            scoreOf(ko22, "e1", statement).goldMatched,
+            1,
+            `"${statement}" states the gold's fact and must match`
+        );
+    }
+});
+
+test("the registered equivalence works from either spelling", () => {
+    // succ-durable-ko-35 is the other direction: the gold is written in words
+    // and a model may answer with the digit. Dropping this row is what made a
+    // correct `6개월` answer score wrong on 2026-09-03.
+    const ko35 = caseById("succ-durable-ko-35");
+    // `e2` is the 육 개월 gold. `e1` is 항해사 and would match either
+    // statement, which is why the gold is named.
+    for (const statement of [
+        "사용자는 육 개월씩 배를 탑니다.",
+        "사용자는 6개월씩 배를 탑니다.",
+    ]) {
+        assert.equal(scoreOf(ko35, "e2", statement).goldMatched, 1, statement);
+    }
+});
+
+test("an unregistered numeral expression scores neither way", () => {
+    // The cost of a closed table, asserted so it is a decision rather than a
+    // surprise. Nothing registers 십 년, so a model writing `10년` for a gold
+    // that says `십 년` is not credited — and no gold asks it to be.
+    const ko35 = caseById("succ-durable-ko-35");
+    assert.equal(
+        scoreOf(ko35, "e2", "사용자는 여섯 달씩 배를 탑니다.").goldMatched,
+        0
+    );
+});
