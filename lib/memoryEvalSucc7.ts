@@ -19,21 +19,25 @@ import {
 } from "@/lib/memoryEvalSucc7Transition";
 
 /**
- * `mem-eval-succ-7`: signed once, pinned, and awaiting a second signature.
+ * `mem-eval-succ-7`: adopted and frozen on 2026-09-03, on the second signature.
  *
  * Fifty-four out and fifty-four in against succ-6: ten carrying an approved
  * gold change, forty-four that selected the `mem-extract-v8` intervention. The
  * retired cases are preserved in `lib/memoryEvalSucc7Regression.ts`.
  *
- * ## Where this stands
+ * ## Two signatures, and why
  *
  * `@mposition` signed the 54 cases on 2026-09-02 and the dataset was frozen.
  * Review of the freeze machinery then found the manifest did not cover the
  * retired -> replacement pairing, so `transitionDigest` was added and the
- * manifest digest moved. A signature is of a digest, so it does not survive
- * that: `MEMORY_EVAL_SUCC7_REVIEW.status` is `superseded`, `frozen` is false
- * again, and the record keeps every value that was signed. The sample is
- * untouched — the dataset digest is still the one that was read.
+ * manifest digest moved. A signature is of a digest, so it did not survive
+ * that: the freeze was lifted and the first signature filed in
+ * `MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS` with its reason, rather than carried
+ * across a change its signer had not seen.
+ *
+ * The second signature, on 2026-09-03, covers the manifest that includes the
+ * pairing. It kept the sample digests of the first — the 54 cases never moved,
+ * which is what made the re-reading a re-reading of a manifest.
  *
  * ## What the pin is for
  *
@@ -51,24 +55,24 @@ import {
 export const MEMORY_EVAL_SUCC7_DATASET_VERSION = "mem-eval-succ-7";
 
 /**
- * False again, pending a second signature.
+ * Adopted by @mposition on 2026-09-03, on the second signature.
  *
- * It was true between 79ffe616 and the manifest fix: `@mposition` signed on
- * 2026-09-02 and the dataset was frozen against that signature. Review then
- * found that the signed manifest did not cover the retired -> replacement
- * pairing, so adding `transitionDigest` moved the manifest digest — and a
- * signature is of a digest, not of a version number. Carrying it forward
- * would be the repository asserting a person approved something they never
- * saw.
+ * The gate that reads this is `decideEvalRunMode()`, which refuses a
+ * decision-grade run against an unfrozen decision sample. Flipping it removes
+ * that refusal and nothing else. It does not point the harness here — that is
+ * still succ-6 — and it does not register a pair, authorise a budget, approve
+ * a paid run, move a release gate or turn on a feature flag, each of which is
+ * its own decision with its own record.
  *
- * The sample did not move. The dataset digest is the one that was read, and
- * `MEMORY_EVAL_SUCC7_REVIEW` keeps the whole of the first signature so the
- * second one is a re-reading of a manifest rather than of 54 cases again.
+ * It was true once before, between 79ffe616 and the manifest fix, and went
+ * back to false when `transitionDigest` moved the manifest digest out from
+ * under the first signature. That history is in
+ * `MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS` rather than deleted.
  *
  * The order stays signature first, then this: the check refuses a freeze whose
  * signature does not describe the tree.
  */
-export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = true;
 
 export const MEMORY_EVAL_SUCC7_DATASET_PURPOSE: "development" | "decision" =
     "decision";
@@ -129,15 +133,73 @@ export type Succ7AdoptionSignature = {
     supersededBecause?: string;
 };
 
+/**
+ * The signatures this dataset has outlived, newest first.
+ *
+ * Kept rather than replaced. A superseded signature is the record of a person
+ * having read something and of what then moved underneath them, and deleting
+ * it would leave the repository unable to say why the current signature is the
+ * second one. `succ7SupersededReviewProblems()` holds each entry to being
+ * genuinely stale, so this cannot quietly become a list of live signatures.
+ */
+export const MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS: readonly Succ7AdoptionSignature[] =
+    [
+        {
+            status: "superseded",
+            reviewer: "@mposition",
+            reviewedAt: "2026-09-02",
+            reviewedCommit: "e522796dd11e3d009d23a13836b7a45b005f3bc8",
+            signedDatasetDigest:
+                "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+            signedManifestDigest:
+                "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+            signedSourceDatasetDigest:
+                "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+            verdict: {
+                sameBoundaryPassed: 53,
+                sameBoundaryTotal: 53,
+                coverageRepairGoldFit: true,
+                problemCases: 0,
+                cellDiversitySufficient: true,
+            },
+            record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
+            supersededBecause:
+                "The manifest this was signed against did not cover the retired -> " +
+                "replacement pairing, so two same-cell rows could trade originals with " +
+                "every digest unmoved — the 53 same-boundary verdicts would then point " +
+                "at pairings nobody judged. Adding `transitionDigest` fixes that and " +
+                "moves the manifest digest from 42c9b0a8… to ecfb84a4…. The sample did " +
+                "not change: the dataset digest is still 9326730a…, and the 54 cases " +
+                "the reviewer read are the 54 cases here. What needs signing again is " +
+                "the manifest, not the sample.",
+        },
+    ];
+
+/**
+ * Re-signed by @mposition on 2026-09-03.
+ *
+ * The second signature, and the first one to cover `transitionDigest` — which
+ * is the whole of what the first was missing. The sample is the one that was
+ * read in the first round: `signedDatasetDigest` and `signedSourceDatasetDigest`
+ * are unchanged from it, and only the two values that the pairing fix moved are
+ * new. That is why this was a re-reading of a manifest rather than of 54 cases.
+ *
+ * `reviewedCommit` is 3ce908f2, the commit the sheet and the checks were run
+ * against. It is a commit on develop rather than on a branch, because the
+ * branch was merged before the second reading; the check requires it to be an
+ * ancestor of HEAD, which fixes what it means.
+ */
 export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
-    status: "superseded",
+    status: "signed",
     reviewer: "@mposition",
-    reviewedAt: "2026-09-02",
-    reviewedCommit: "e522796dd11e3d009d23a13836b7a45b005f3bc8",
+    reviewedAt: "2026-09-03",
+    reviewedCommit: "3ce908f29620d95d0be1bfa25079dd84735126ee",
     signedDatasetDigest:
         "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
     signedManifestDigest:
-        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+        "ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902",
+    signedTransitionDigest:
+        "36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1",
     signedSourceDatasetDigest:
         "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
     verdict: {
@@ -148,15 +210,6 @@ export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
         cellDiversitySufficient: true,
     },
     record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
-    supersededBecause:
-        "The manifest this was signed against did not cover the retired -> " +
-        "replacement pairing, so two same-cell rows could trade originals with " +
-        "every digest unmoved — the 53 same-boundary verdicts would then point " +
-        "at pairings nobody judged. Adding `transitionDigest` fixes that and " +
-        "moves the manifest digest from 42c9b0a8… to ecfb84a4…. The sample did " +
-        "not change: the dataset digest is still 9326730a…, and the 54 cases " +
-        "the reviewer read are the 54 cases here. What needs signing again is " +
-        "the manifest, not the sample.",
 };
 
 /**
@@ -391,7 +444,7 @@ export const MEMORY_EVAL_SUCC7_MANIFEST: Succ7DraftManifest = {
     scoringContractDigest:
         "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
     scoringContractVersion: "mem-score-v3.4",
-    frozen: false,
+    frozen: true,
     manifestDigest:
         "ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902",
 };
@@ -479,6 +532,45 @@ export function verifySucc7Manifest(
         );
     }
     return failures;
+}
+
+/**
+ * Everything wrong with the list of signatures this dataset has outlived.
+ *
+ * Two things, and the second is the point. An entry must say it is superseded
+ * and say why — a record with no reason cannot be audited. And it must
+ * actually be stale: at least one of the digests it signed has to differ from
+ * what the tree computes, because an entry matching the tree in every value is
+ * a live signature filed as history, which is how a superseded approval gets
+ * quietly reused.
+ */
+export function succ7SupersededReviewProblems(
+    entries: readonly Succ7AdoptionSignature[] = MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
+    built: Succ7DraftManifest = buildSucc7DraftManifest()
+): readonly string[] {
+    const problems: string[] = [];
+    for (const entry of entries) {
+        const label = `${entry.reviewer} ${entry.reviewedAt}`;
+        if (entry.status !== "superseded") {
+            problems.push(`${label} is filed as history but says "${entry.status}"`);
+        }
+        if (!entry.supersededBecause) {
+            problems.push(`${label} is superseded and records no reason`);
+        }
+        const stillMatches =
+            entry.signedDatasetDigest === built.datasetDigest &&
+            entry.signedManifestDigest === built.manifestDigest &&
+            entry.signedSourceDatasetDigest ===
+                built.composition.sourceDatasetDigest &&
+            entry.signedTransitionDigest === built.transitionDigest;
+        if (stillMatches) {
+            problems.push(
+                `${label} matches this tree in every signed digest, so it is a ` +
+                    "live signature filed as history"
+            );
+        }
+    }
+    return problems;
 }
 
 /**

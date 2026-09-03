@@ -19,9 +19,11 @@ import {
     MEMORY_EVAL_SUCC7_MANIFEST,
     MEMORY_EVAL_SUCC7_REVIEW,
     MEMORY_EVAL_SUCC7_REVIEWED,
+    MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
     buildSucc7DraftManifest,
     manifestFingerprintInput,
     succ7SignatureProblems,
+    succ7SupersededReviewProblems,
     verifySucc7Manifest,
 } from "../lib/memoryEvalSucc7.ts";
 import {
@@ -33,25 +35,65 @@ import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.t
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("the sample the reviewer read is still the sample here", () => {
-    // The manifest moved and the signature with it; the cases did not. This is
-    // what makes the second signature a re-reading of a manifest rather than
-    // of 54 cases again.
+test("the second signature describes this tree, pairing included", () => {
+    assert.deepEqual([...succ7SignatureProblems()], []);
     const built = buildSucc7DraftManifest();
-    assert.equal(
-        MEMORY_EVAL_SUCC7_REVIEW.signedDatasetDigest,
-        built.datasetDigest
-    );
-    assert.equal(
-        MEMORY_EVAL_SUCC7_REVIEW.signedSourceDatasetDigest,
-        built.composition.sourceDatasetDigest
-    );
-    assert.notEqual(
-        MEMORY_EVAL_SUCC7_REVIEW.signedManifestDigest,
-        built.manifestDigest
-    );
+    for (const [field, value] of [
+        ["signedDatasetDigest", built.datasetDigest],
+        ["signedManifestDigest", built.manifestDigest],
+        ["signedTransitionDigest", built.transitionDigest],
+        ["signedSourceDatasetDigest", built.composition.sourceDatasetDigest],
+    ]) {
+        assert.equal(MEMORY_EVAL_SUCC7_REVIEW[field], value, field);
+    }
     assert.equal(MEMORY_EVAL_SUCC7_REVIEW.reviewer, "@mposition");
-    assert.equal(MEMORY_EVAL_SUCC7_REVIEW.reviewedAt, "2026-09-02");
+    assert.equal(MEMORY_EVAL_SUCC7_REVIEW.reviewedAt, "2026-09-03");
+    assert.equal(MEMORY_EVAL_SUCC7_REVIEWED, true);
+});
+
+test("the first signature is kept, and cannot pass as a live one", () => {
+    // History rather than deletion: without it the repository cannot say why
+    // the current signature is the second one. The check holds each entry to
+    // being genuinely stale, so the list cannot become a place a superseded
+    // approval is quietly reused.
+    assert.deepEqual([...succ7SupersededReviewProblems()], []);
+    assert.equal(MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS.length, 1);
+    const [first] = MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS;
+    assert.equal(first.reviewedAt, "2026-09-02");
+    assert.equal(first.status, "superseded");
+    assert.ok(first.supersededBecause);
+    // The sample it signed is this sample; the manifest it signed is not.
+    const built = buildSucc7DraftManifest();
+    assert.equal(first.signedDatasetDigest, built.datasetDigest);
+    assert.notEqual(first.signedManifestDigest, built.manifestDigest);
+    assert.equal(first.signedTransitionDigest, undefined);
+});
+
+test("a history entry that still matches the tree is refused", () => {
+    const built = buildSucc7DraftManifest();
+    const problems = succ7SupersededReviewProblems([
+        {
+            ...MEMORY_EVAL_SUCC7_REVIEW,
+            status: "superseded",
+            supersededBecause: "claimed",
+        },
+    ]);
+    assert.ok(
+        problems.some((line) => line.includes("live signature filed as history")),
+        problems.join(" | ")
+    );
+    // And one with no reason, whichever way its digests fall.
+    const noReason = succ7SupersededReviewProblems([
+        {
+            ...MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS[0],
+            supersededBecause: undefined,
+        },
+        built && undefined,
+    ].filter(Boolean));
+    assert.ok(
+        noReason.some((line) => line.includes("records no reason")),
+        noReason.join(" | ")
+    );
 });
 
 test("a signature of a different dataset is refused", () => {
@@ -86,12 +128,9 @@ test("a verdict that did not pass everything is refused", () => {
     }
 });
 
-test("the manifest is a literal rather than a view", () => {
-    // Not frozen at the moment: the first signature was superseded when the
-    // manifest gained `transitionDigest`. The pin stays, because what it is
-    // for — disagreeing with a moved tree — does not depend on the flag.
-    assert.equal(MEMORY_EVAL_SUCC7_DATASET_FROZEN, false);
-    assert.equal(MEMORY_EVAL_SUCC7_MANIFEST.frozen, false);
+test("it is frozen, and the manifest is a literal rather than a view", () => {
+    assert.equal(MEMORY_EVAL_SUCC7_DATASET_FROZEN, true);
+    assert.equal(MEMORY_EVAL_SUCC7_MANIFEST.frozen, true);
     assert.deepEqual([...verifySucc7Manifest()], []);
     // Pinned, not computed. A computed record cannot disagree with the tree,
     // and disagreeing is the only thing a frozen record is for.
@@ -270,10 +309,11 @@ test("a signature that does not cover the pairing is refused", () => {
 });
 
 test("a superseded signature never reads as covering this tree", () => {
-    assert.equal(MEMORY_EVAL_SUCC7_REVIEW.status, "superseded");
-    assert.equal(MEMORY_EVAL_SUCC7_REVIEWED, false);
-    assert.ok(MEMORY_EVAL_SUCC7_REVIEW.supersededBecause);
-    const problems = succ7SignatureProblems();
+    const problems = succ7SignatureProblems({
+        ...MEMORY_EVAL_SUCC7_REVIEW,
+        status: "superseded",
+        supersededBecause: "for the test",
+    });
     assert.ok(
         problems.some((line) => line.includes("no signature covers this tree")),
         problems.join(" | ")
@@ -337,14 +377,16 @@ test("the sheet command refuses to claim an adoption the tree lost", (t) => {
     assert.equal(before.status, 0, before.stderr);
     assert.ok(existsSync(clean));
 
-    // Now make the recorded signature claim to cover this tree. Its digests
-    // are the ones signed before `transitionDigest` existed, so they no longer
-    // match what the tree computes.
-    const modulePath = path.join(root, "lib/memoryEvalSucc7.ts");
-    const source = readFileSync(modulePath, "utf8");
-    const claimed = source.replace('status: "superseded",', 'status: "signed",');
-    assert.notEqual(claimed, source, "the signature's status was not found");
-    writeFileSync(modulePath, claimed, "utf8");
+    // Now edit a case, which is the defect in its original form: an edit lands
+    // after the signature, under the same version number. The title is model
+    // input and fingerprint v4 covers it, so the dataset digest moves and the
+    // manifest digest with it, while the recorded signature still says
+    // "signed".
+    const casesPath = path.join(root, "lib/memoryEvalSucc7Replacements/durableFacts.ts");
+    const source = readFileSync(casesPath, "utf8");
+    const edited = source.replace('title: "Kayak",', 'title: "Kayaks",');
+    assert.notEqual(edited, source, "the case title to edit was not found");
+    writeFileSync(casesPath, edited, "utf8");
 
     const out = path.join(root, "claimed.md");
     const result = runSheet(root, out);

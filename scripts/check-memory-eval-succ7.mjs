@@ -23,9 +23,11 @@ import {
     MEMORY_EVAL_SUCC7_DATASET_FROZEN,
     MEMORY_EVAL_SUCC7_REVIEW,
     MEMORY_EVAL_SUCC7_REVIEWED,
+    MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
     buildSucc7DraftManifest,
     succ7AssemblyProblems,
     succ7SignatureProblems,
+    succ7SupersededReviewProblems,
     verifySucc7Manifest,
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
@@ -418,6 +420,18 @@ if (MEMORY_EVAL_SUCC7_REVIEWED) {
         "succ-7 carries no signature for this tree",
         MEMORY_EVAL_SUCC7_REVIEW.status
     );
+}
+
+{
+    const stale = succ7SupersededReviewProblems();
+    if (stale.length > 0) {
+        fail(`the superseded signature history is wrong: ${stale.join("; ")}`);
+    } else {
+        ok(
+            "the superseded signatures are genuinely superseded",
+            `${MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS.length} kept with reasons`
+        );
+    }
 }
 
 // Two things a module cannot check for itself: whether the record it names is
