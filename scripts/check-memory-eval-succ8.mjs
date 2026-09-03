@@ -22,6 +22,10 @@
  * build when the record and the tree disagree.
  */
 
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import {
     MEMORY_EVAL_SUCC8_APPROVAL,
     MEMORY_EVAL_SUCC8_CASES,
@@ -116,6 +120,80 @@ if (signatureProblems.length > 0) {
             ? `signed by ${MEMORY_EVAL_SUCC8_APPROVAL.approvedBy} on ` +
                   `${MEMORY_EVAL_SUCC8_APPROVAL.approvedAt}`
             : "unsigned, and every signed field is null"
+    );
+}
+
+/**
+ * Shape is not existence, and only this script can tell the difference.
+ *
+ * `succ8SignatureProblems()` is a pure function in a module that must stay
+ * loadable in every environment, so it can check that the five fields are
+ * present and that the digests match the record — and nothing else. It cannot
+ * tell whether the reviewer is a name or three spaces, whether the commit is a
+ * commit or forty plausible hex characters, or whether the audit record it
+ * cites is a file that exists. A signature that passes only the shape check is
+ * a signature nobody can trace to a person, a history, or a document.
+ *
+ * These are the same three questions `check-memory-eval-succ7.mjs` asks of
+ * succ-7's signature, asked here for the same reason.
+ */
+if (MEMORY_EVAL_SUCC8_APPROVAL.approvedBy !== null) {
+    const reviewer = String(MEMORY_EVAL_SUCC8_APPROVAL.approvedBy);
+    if (reviewer.trim() === "") {
+        fail("the approval names a reviewer of whitespace");
+    } else if (!/^@[\w.-]+$/.test(reviewer)) {
+        fail(
+            `the approval's reviewer is not a handle: ${JSON.stringify(reviewer)}. ` +
+                "A signature has to name someone a reader can go and ask."
+        );
+    } else {
+        ok("the reviewer is a handle", reviewer);
+    }
+
+    const record = MEMORY_EVAL_SUCC8_APPROVAL.record;
+    if (!existsSync(fileURLToPath(new URL(`../${record}`, import.meta.url)))) {
+        fail(`the approval's record does not exist: ${record}`);
+    } else {
+        ok("the approval's record exists", record);
+    }
+
+    const sha = String(MEMORY_EVAL_SUCC8_APPROVAL.approvedCommit);
+    const git = (args) =>
+        execFileSync("git", args, {
+            cwd: fileURLToPath(new URL("..", import.meta.url)),
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+    let known = true;
+    try {
+        git(["cat-file", "-e", `${sha}^{commit}`]);
+    } catch {
+        known = false;
+    }
+    if (!known) {
+        // Fail, not "not verifiable here". The softer answer is what made the
+        // succ-7 version fail open: `static-and-unit` used to check out at
+        // depth 1, so "cannot verify, therefore OK" was the *normal* path and
+        // any 40-character string passed as a signing commit.
+        fail(
+            `the approval's commit ${sha.slice(0, 12)}… is not in this checkout, so ` +
+                "it cannot be tied to a history. Fetch full history " +
+                "(actions/checkout with fetch-depth: 0) and re-run."
+        );
+    } else {
+        try {
+            git(["merge-base", "--is-ancestor", sha, "HEAD"]);
+            ok("the approval's commit is an ancestor of HEAD", `${sha.slice(0, 12)}…`);
+        } catch {
+            fail(
+                `the approval names ${sha.slice(0, 12)}…, which is not an ancestor of ` +
+                    "HEAD: it describes a history this tree does not have"
+            );
+        }
+    }
+} else {
+    ok(
+        "no signature to trace",
+        "unsigned, so there is no reviewer, commit or record to resolve"
     );
 }
 

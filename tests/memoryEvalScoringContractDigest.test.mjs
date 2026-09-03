@@ -539,7 +539,7 @@ test("the canonicalisation table and its order reach the digest", () => {
                 "lowercase",
                 "contraction_nt_to_not",
                 "digit_group_separators",
-                "reviewed_numeral_expressions_to_digits",
+                "reviewed_expressions_and_english_numerals",
                 "punctuation_to_space",
                 "collapse_whitespace_trim",
             ].join(ITEM)
@@ -560,26 +560,28 @@ test("the rows that actually rewrite Korean text are in the digest", () => {
     // did and moved nothing a reviewer signs.
     const row = descriptorRow("canonKoreanNumeralExpressions");
     for (const entry of KOREAN_NUMERAL_EXPRESSIONS) {
-        assert.ok(
-            row.includes(`${entry.numeral}+${entry.counter}=${entry.canonical}`),
-            `${entry.numeral}+${entry.counter} is not in the digest: ${row}`
-        );
+        assert.ok(row.includes(entry.canonical), `${entry.canonical} is not in the digest: ${row}`);
+        for (const variant of entry.variants) {
+            assert.ok(variant === entry.canonical || row.includes(variant), variant);
+        }
     }
     // Every row, not merely one of them.
     assert.equal(row.split(ITEM).length, KOREAN_NUMERAL_EXPRESSIONS.length);
 
-    // And the reviewed over-matches travel with the row, for the reason
-    // `approvedStemsFor` gives: a rule whose negative examples were dropped is
-    // a different rule under the same spelling.
-    assert.ok(row.includes("전세 시장"), row);
+    // The gold a row exists for, and the over-matches it admits, travel with
+    // it. `requiredBy` is in the digest because a row whose justification was
+    // quietly swapped is a different decision under the same spelling, and
+    // `rejects` for the reason `approvedStemsFor` gives.
+    assert.ok(row.includes("succ-durable-ko-401"), row);
+    assert.ok(row.includes("아홉 시간"), row);
 
-    // Red-before-green: a row that changed target moves the digest.
+    // Red-before-green: retargeting a row moves the digest.
     const moved = descriptorSortedListRow(
         "canonKoreanNumeralExpressions",
         KOREAN_NUMERAL_EXPRESSIONS.map(
             (entry) =>
-                `${entry.numeral}+${entry.counter}=${entry.canonical}9` +
-                `:+${[...entry.matches].sort().join("|")}` +
+                `${entry.canonical}9<-${[...entry.variants].sort().join("|")}` +
+                `:by=${entry.requiredBy}` +
                 `:-${[...entry.rejects].sort().join("|")}`
         )
     );
@@ -691,14 +693,18 @@ test("rule: v3-gold-match", () => {
         id: "g1",
         kind: "preference",
         polarity: "affirmed",
-        factValueAll: ["6개월"],
-        evidence: { evidenceMessageIndex: 0, evidenceQuote: "육 개월" },
+        // The registered equivalence, not a retired one. Until v3.5 this pin
+        // used 6개월 against 육 개월, which the cross-product happened to
+        // collapse; the reviewed table registers only what a frozen gold needs,
+        // and this is that row (`succ-durable-ko-401`).
+        factValueAll: ["9시"],
+        evidence: { evidenceMessageIndex: 0, evidenceQuote: "아홉 시" },
         expectedDisposition: "bulk_safe",
     };
     const cand = (over) => ({
         kind: "preference",
         polarity: "affirmed",
-        statement: "사용자는 육 개월 동안 준비한다",
+        statement: "사용자는 아홉 시에 준비한다",
         ...over,
     });
 
@@ -723,7 +729,7 @@ test("rule: v3-gold-match", () => {
     const withAny = { ...goldV3, factValueAny: ["준비", "연습"] };
     assert.equal(candidateMatchesGoldV3(withAny, cand(), "ko"), true);
     assert.equal(
-        candidateMatchesGoldV3(withAny, cand({ statement: "사용자는 육 개월 동안 쉰다" }), "ko"),
+        candidateMatchesGoldV3(withAny, cand({ statement: "사용자는 아홉 시에 쉰다" }), "ko"),
         false
     );
 });
@@ -759,7 +765,17 @@ test("rule: v3-polarity-is-compared-not-inferred", () => {
 
 test("rule: v3-canonicalisation", () => {
     assert.equal(canon("Twelve-hour, $2,000."), "12 hour 2000");
-    assert.equal(canon("육 개월"), "6개월");
+    // The one registered Korean row. `육 개월` is deliberately NOT rewritten
+    // any more: its gold states the fact in the same words its evidence does,
+    // so it matches verbatim, and a row for it would have licensed the
+    // `세`+`시` collision described in `KOREAN_NUMERAL_EXPRESSIONS`.
+    assert.equal(canon("아홉 시"), "아홉시");
+    assert.equal(canon("육 개월"), "육 개월");
+    // Every step is context-free, so a token canonicalises the same alone as
+    // inside a sentence and the same however it was spaced. Both were broken by
+    // a lookaround, and both are what the table restores.
+    assert.ok(canonMatch("가게 문을 아홉 시에", "ko").includes(canonMatch("9시", "ko")));
+    assert.equal(canonMatch("아홉 시", "ko"), canonMatch("아홉시", "ko"));
     // Korean drops spaces so unstable spacing does not decide a match;
     // English keeps them so words are not joined into strings nobody wrote.
     assert.equal(canonMatch("6 개월", "ko"), canonMatch("6개월", "ko"));

@@ -38,7 +38,7 @@ export const CANON_STEP_ORDER: readonly string[] = [
     // rewrites the reviewed rows of `KOREAN_NUMERAL_EXPRESSIONS` plus the
     // English numeral words, and nothing else. Until then it rewrote every
     // Korean numeral crossed with every counter, which reached inside words.
-    "reviewed_numeral_expressions_to_digits",
+    "reviewed_expressions_and_english_numerals",
     "punctuation_to_space",
     "collapse_whitespace_trim",
 ];
@@ -151,9 +151,9 @@ export const APPROVED_STEMS: Readonly<
 };
 
 /**
- * The Korean numeral expressions this contract rewrites, one row each.
+ * The Korean numeral equivalences this contract collapses, one row each.
  *
- * ## Why a list of expressions and not a rule
+ * ## Why a table and not a rule
  *
  * Because the step has to be **context-free**, and only a table can be.
  *
@@ -163,91 +163,79 @@ export const APPROVED_STEMS: Readonly<
  * construction, and both attempts at one did:
  *
  *   * `mem-score-v3.4` had no left condition, which is context-free — its bug
- *     was this table, not the missing boundary. Built from every numeral
+ *     was its table, not the missing boundary. Built from every numeral
  *     crossed with every counter, it read the 일 ending 토요일 as the numeral
- *     one and the 일 beginning 일정 as the day counter, so `토요일 일정`
- *     became `토요1일정` and the gold token 격주토요일 existed in no candidate
- *     that phrased it that way (`succ-durable-ko-611`). `이십일` became
- *     `이10일` the same way.
+ *     one and the 일 beginning 일정 as the day counter, so `토요일 일정` became
+ *     `토요1일정` and the gold token 격주토요일 existed in no candidate that
+ *     phrased it that way (`succ-durable-ko-611`). `이십일` became `이10일`
+ *     the same way.
  *   * A `(?<![가-힣])` lookbehind fixed those two and broke something wider.
  *     It consults spacing, and Korean matching drops spacing, so **82 of the
  *     2,250 Korean strings in this corpus** canonicalised differently
  *     depending on how they were typed. Widening it to `(?<![가-힣]\s*)` cured
  *     the spacing half and left the fatal half: `육 개월` alone became 6개월
- *     while `저는 육 개월씩` became …육개월씩, so the gold no longer occurred
- *     in the sentence it was drawn from. That is not a scoring edge case —
+ *     while `저는 육 개월씩` became …육개월씩, so the gold no longer occurred in
+ *     the sentence it was drawn from. That is not a scoring edge case —
  *     `succ-4` stops assembling, because its `gold-evidence-covers-fact`
  *     anchor asks exactly that question.
  *
  * So: no lookaround, and a table narrow enough to be safe without one.
  *
- * ## What is registered, and what a row costs
+ * ## What earns a row
  *
- * A row earns its place by being needed by a **frozen gold**, and both rows
- * here are gold tokens verbatim — `succ-durable-ko-35` states 육 개월 and
- * `succ-durable-ko-36` states 새벽 세 시. Registering them is reading the
- * golds, not inventing policy. Nothing else is registered: no gold asks a
- * model's 10년 to meet 십 년, so a row for it would be scoring surface with
- * no question behind it.
+ * **A frozen gold that cannot be satisfied without it.** Not a gold that
+ * happens to contain a numeral — that was the first draft's test, and it
+ * registered two rows nothing needed. `succ-durable-ko-35` (`육 개월`) and
+ * `succ-durable-ko-36` (`새벽 세 시`) both state their facts in the same words
+ * their evidence does, so they match verbatim; a row for them bought nothing
+ * and licensed everything below.
  *
- * `rejects` is the half that is easy to skip and the reason the row is
- * reviewable. Each row rewrites its expression **everywhere**, including
- * inside words, and the entries below say which words. That is tolerable
- * precisely because it is context-free: both sides of every comparison are
- * rewritten the same way, so an over-match costs a collision, never a false
- * negative. A row whose over-matches could collide two different facts does
- * not belong here.
+ * ## What a row costs, and why this one costs nothing
+ *
+ * A row rewrites its forms **everywhere**, including inside other words, so
+ * the question a reviewer has to answer is whether that can make two different
+ * facts equal. For the discarded `세`+`시` row it could, and did: it turned
+ * `세 시간` — three *hours* — into `3시간`, and a gold asking for three
+ * *o'clock* is a substring of that. Two different facts, one value, which is
+ * exactly what this contract's canonicalisation rule forbids.
+ *
+ * This row avoids it by collapsing toward the **word** form rather than the
+ * digit. `아홉 시간` becomes 아홉시간, which is what it becomes with no rule at
+ * all, so the row adds no equality that plain Korean matching did not already
+ * have. Rewriting to `9시` instead would have made 아홉 시간 into 9시간 and let
+ * a `9시` gold reach it — the same defect as `세`+`시`, one numeral over.
+ *
+ * The direction is per row and reviewed per row. There is no general rule that
+ * the word form wins; there is one row, and for it the word form is the one
+ * that collides with nothing.
  */
 export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
-    numeral: string;
-    counter: string;
-    /** Written out, so a diff of this file is a diff of the claim. */
+    /** The form every variant collapses to. */
     canonical: string;
-    /** Forms that must land on `canonical`. */
-    matches: readonly string[];
-    /** Words this row also rewrites. Reviewed, not accidental. */
+    /**
+     * The forms rewritten to `canonical`. A space inside a variant matches a
+     * run of whitespace or none, so `아홉 시` covers `아홉시` as well.
+     */
+    variants: readonly string[];
+    /** The frozen gold that cannot be satisfied without this row. */
+    requiredBy: string;
+    /** What else this row rewrites. Reviewed, not accidental. */
     rejects: readonly string[];
 }[] = [
     {
-        // succ-durable-ko-35: factValueAll ["항해사", "육 개월"].
-        numeral: "육",
-        counter: "개월",
-        canonical: "6개월",
-        matches: ["육 개월", "육개월", "6개월"],
-        // 육 is not a common word-final syllable before 개월; no corpus string
-        // outside the intended sense contains 육개월.
-        rejects: [],
-    },
-    {
-        // succ-durable-ko-36: factValueAll ["제빵", "새벽 세 시"].
-        numeral: "세",
-        counter: "시",
-        canonical: "3시",
-        matches: ["세 시", "세시", "3시"],
-        // Rewrites 세 시간 to 3시간, which is the same fact, and 전세 시장 to
-        // 전3장 — nonsense, but the same nonsense on both sides, so it can
-        // only collide, never miss. No other 세…시 sense occurs in the corpus.
-        rejects: ["세 시간", "전세 시장"],
-    },
-    {
-        // succ-durable-ko-401: factValueAll ["9시"], and the only place the
-        // fact appears is `가게 문을 아홉 시에 열어서`. This row is the one the
-        // first draft of the table missed, and the miss is instructive: the
-        // survey behind that draft looked for golds *written in Korean
-        // numerals* and this gold is written as a digit. The requirement is
-        // symmetric — a word-form gold over digit text and a digit gold over
-        // word text are the same question — and only one direction was asked.
-        //
-        // `tests/memoryEvalGoldNormalisationCoverage.test.mjs` now asks it of
-        // every gold in every assembled dataset, so the next row cannot be
-        // missed by choosing the wrong direction to look in.
-        numeral: "아홉",
-        counter: "시",
-        canonical: "9시",
-        matches: ["아홉 시", "아홉시", "9시"],
-        // 아홉 is a numeral and nothing else, and no corpus word ends in it
-        // before 시. Nothing else is rewritten.
-        rejects: [],
+        // succ-durable-ko-401: factValueAll ["9시"], evidence
+        // `가게 문을 아홉 시에 열어서`. The gold is written as a digit and the
+        // only statement of the fact is written in words, so without this row
+        // the gold is satisfiable by nothing. It is the only gold in the corpus
+        // that answers that description.
+        canonical: "아홉시",
+        variants: ["아홉 시", "9시"],
+        requiredBy: "succ-durable-ko-401",
+        // 아홉 시간 (nine hours) becomes 아홉시간 — identical to what it becomes
+        // with no rule at all, so an 아홉시 gold reaches it exactly as far as
+        // plain Korean substring matching already let it, and no further.
+        // Nothing else in the corpus contains either variant.
+        rejects: ["아홉 시간"],
     },
 ];
 
@@ -257,15 +245,25 @@ const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
     (word) => !/[가-힣]/.test(word)
 );
 
-const KOREAN_NUMERAL_EXPRESSION_RE = KOREAN_NUMERAL_EXPRESSIONS.map(
-    (entry) =>
-        [
-            new RegExp(
-                `${escape(entry.numeral)}\\s*${escape(entry.counter)}`,
-                "g"
-            ),
-            `${NUMERAL_TABLE[entry.numeral]}${entry.counter}`,
-        ] as const
+/**
+ * Each variant as a pattern, paired with the canonical form it collapses to.
+ *
+ * A space in a variant becomes `\s*`, so one written form covers the spaced
+ * and unspaced spellings without a second row — Korean spacing is not stable
+ * and a reviewer registering `아홉 시` is registering the equivalence, not the
+ * typing.
+ */
+const KOREAN_NUMERAL_EXPRESSION_RE = KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) =>
+    entry.variants.map(
+        (variant) =>
+            [
+                new RegExp(
+                    variant.split(/\s+/).map(escape).join("\\s*"),
+                    "g"
+                ),
+                entry.canonical,
+            ] as const
+    )
 );
 const ENGLISH_NUMERAL_RE = new RegExp(
     `\\b(${ENGLISH_NUMERALS.map(escape).join("|")})\\b`,

@@ -500,8 +500,8 @@ export function scoringContractDescriptorInput(): string {
             "canonKoreanNumeralExpressions",
             KOREAN_NUMERAL_EXPRESSIONS.map(
                 (entry) =>
-                    `${entry.numeral}+${entry.counter}=${entry.canonical}` +
-                    `:+${[...entry.matches].sort().join("|")}` +
+                    `${entry.canonical}<-${[...entry.variants].sort().join("|")}` +
+                    `:by=${entry.requiredBy}` +
                     `:-${[...entry.rejects].sort().join("|")}`
             )
         ),

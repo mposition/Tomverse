@@ -75,7 +75,7 @@ export const MEMORY_EVAL_SUCC8_SUPERSEDES = MEMORY_EVAL_SUCC7_DATASET_VERSION;
  * the next reader assumes the sample moved and goes looking for the diff.
  */
 export const MEMORY_EVAL_SUCC8_CHANGE_REASON =
-    "Korean numeral canonicalisation bounded to a Hangul boundary, spacing-invariant";
+    "Korean numeral canonicalisation narrowed to a reviewed, context-free expression table";
 
 /**
  * False, pending a signature.
@@ -272,9 +272,9 @@ export function buildSucc8Manifest(): Succ8DatasetManifest {
  * be given for.
  */
 const SUCC8_SCORING_CONTRACT_DIGEST =
-    "08e6d8b6a65a8f874b3c437a118b89e2e57eacb5652dffcd301247cff24213bc";
+    "d6a0460e1254a0e950a0e637c77568acc1a1d7f5e4619f17a9c34518773ff5a3";
 const SUCC8_MANIFEST_DIGEST =
-    "01d94eb3750a799b1dff07f115e6efac7e471573a1f6df6efccbc5da8f539f15";
+    "1e311a81208f3f5e28b1e5c80c9745df24124d5c976c29591f04716a3a1041e3";
 
 /**
  * The manifest as a **record**, written out.

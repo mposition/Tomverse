@@ -53,19 +53,36 @@ const DATASETS = [
     "mem-eval-succ-8",
 ];
 
-const caseText = (testCase) =>
+/**
+ * The text a gold may legitimately be grounded in: **user turns only**.
+ *
+ * The first version of this file joined every conversation title and every
+ * message, assistant turns included, and that hides the failure it exists to
+ * find. `v3-evidence-binding` credits an adoption only when the quote occurs
+ * in a *user* message, so a gold reachable only from a title or an assistant
+ * sentence is a gold the scorer cannot satisfy — and the loose version would
+ * have reported it as covered. Titles are labels the harness writes into the
+ * prompt, not things the user said; assistant turns are the model's own words,
+ * and grounding a fact about the user in them is the injection failure the
+ * critical categories exist for.
+ *
+ * So the haystack is narrower than the prompt on purpose. A gold that needs
+ * more than this to be found is a finding, not a false alarm.
+ */
+const groundingText = (testCase) =>
     (testCase.conversations ?? [])
-        .flatMap((conversation) => [
-            conversation.title ?? "",
-            ...(conversation.messages ?? []).map((message) => message.content),
-        ])
+        .flatMap((conversation) =>
+            (conversation.messages ?? [])
+                .filter((message) => message.role === "user")
+                .map((message) => message.content)
+        )
         .join("\n");
 
 const unsatisfiable = (datasetVersion) => {
     const target = harnessTarget(datasetVersion);
     const problems = [];
     for (const testCase of target.cases) {
-        const haystack = canonMatch(caseText(testCase), testCase.language);
+        const haystack = canonMatch(groundingText(testCase), testCase.language);
         for (const gold of testCase.expected ?? []) {
             const has = (token) =>
                 haystack.includes(canonMatch(token, testCase.language));
@@ -111,7 +128,7 @@ test("the check would fail if the numeral table stopped covering a gold", () => 
     const target = harnessTarget("mem-eval-succ-8");
     const testCase = target.cases.find((entry) => entry.id === "succ-durable-ko-401");
     assert.ok(testCase, "succ-durable-ko-401 is not in the dataset");
-    const text = caseText(testCase);
+    const text = groundingText(testCase);
     assert.match(text, /아홉 시/, "the case states the hour in words");
     assert.deepEqual(
         testCase.expected.flatMap((gold) => gold.factValueAll ?? []),
