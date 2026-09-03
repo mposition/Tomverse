@@ -34,7 +34,6 @@ import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import {
     KOREAN_NUMERAL_EXPRESSIONS,
     NUMERAL_TABLE,
-    canonMatch,
 } from "../lib/memoryEvalCanonicalisation.ts";
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -151,65 +150,28 @@ test("the same fact scores the same however the particle falls", () => {
     }
 });
 
-test("the 시 continuations widened on review are the ones that widened", () => {
-    // The 2026-09-03 review finding, in both directions.
+test("the left boundary still refuses a numeral read off another word", () => {
+    // The half of the boundary that survives, and the one that does real work:
+    // without it `교육 개월` canonicalises to 교6개월 and scores as six months,
+    // and `열아홉 시에` to 열9시에, whose `9시` a ko-401 gold would reach.
     //
-    // `시` gets the shared continuation list minus a reviewed blocklist, and
-    // the blocklist used to hold nine entries of which three were wrong:
-    // 시론 is 시 + **론**, so the syllable `로` never occurred in it, and
-    // 시와/시은 are the standalone noun 시 plus that same particle — which the
-    // left boundary already excludes, because this rule only fires where a
-    // numeral precedes. Each was a false negative bought for nothing.
-    //
-    // Asserted through `scoreCaseV3()` rather than against the list, because
-    // a test that reads the list can only ever agree with it.
+    // The right half is gone (2026-09-04). What it claimed to prevent —
+    // 시장·시간·시절 read as the hour — is asserted below as the residual it
+    // always was, reachable through the digit spelling with or without a rule.
     const ko401 = caseById("succ-durable-ko-401");
-    for (const statement of [
-        "사용자는 가게 문을 아홉 시로 정했습니다.",
-        "사용자는 가게 문을 아홉 시와 열 시 사이에 엽니다.",
-        "사용자는 가게 문을 아홉 시는 지나서 엽니다.",
-        "사용자는 가게 문을 아홉 시를 기준으로 엽니다.",
-        "사용자는 가게 문을 아홉 시만 되면 엽니다.",
-        "사용자는 가게 문을 아홉 시마다 확인합니다.",
-    ]) {
-        assert.equal(scoreOf(ko401, "g1", statement).goldMatched, 1, statement);
-    }
-
-    // And the other direction, which is the half that makes the widening a
-    // boundary rather than a surrender: these three stay refused, and each
-    // names a real 시-initial noun a numeral can precede.
-    for (const statement of [
-        "사용자는 가게 문을 아홉 시가 되면 엽니다.", // 시가 (市價)
-        "사용자는 아홉 시도 끝에 문을 열었습니다.", // 시도 (試圖)
-        "사용자는 아홉 시의회 안건을 검토합니다.", // 시의회
-    ]) {
-        assert.equal(
-            scoreOf(ko401, "g1", statement).goldMatched,
-            0,
-            `"${statement}" is refused on purpose; see amendment section 4.14`
-        );
-    }
+    assert.equal(
+        scoreOf(ko401, "g1", "사용자는 열아홉 시에 가게를 닫습니다.").goldMatched,
+        0,
+        "nineteen o'clock is not nine o'clock"
+    );
+    const ko35 = caseById("succ-durable-ko-35");
+    assert.equal(
+        scoreOf(ko35, "e2", "사용자는 교육 개월 수를 셉니다.").goldMatched,
+        0,
+        "the 육 of 교육 is not the numeral six"
+    );
 });
 
-test("a noun that merely begins with the counter is not the hour", () => {
-    // The 2026-09-03 finding. `시` is one syllable and begins 시장, 시청, 시절,
-    // 시작 and more, so a row ending in the bare counter reads all of them as
-    // the hour. The set is open — there is no list of 시-initial nouns to
-    // guard — so no row may end in it, and the registered variant carries the
-    // particle instead.
-    const ko401 = caseById("succ-durable-ko-401");
-    for (const statement of [
-        "사용자는 아홉 시장을 매주 순회합니다.",
-        "사용자는 아홉 시절을 자주 떠올립니다.",
-        "사용자는 아홉 시간 넘게 잡니다.",
-    ]) {
-        assert.equal(
-            scoreOf(ko401, "g1", statement).goldMatched,
-            0,
-            `"${statement}" must not score as the 9시 gold`
-        );
-    }
-});
 
 test("a gold token is not destroyed by the word that follows it", () => {
     // The false negative the discarded 세+시 row caused: `전세 시장` became
@@ -322,86 +284,124 @@ test("that guard would fire on the shapes it is for", () => {
     assert.doesNotMatch("가게 문을 아홉 시에 엽니다", patternFor("아홉 시"));
 });
 
-test("the counter's continuation list is complete where it can be", () => {
-    // `개월` is two syllables and begins no Korean word, so 개월 followed by
-    // any particle is unambiguously six months and the list is simply
-    // finished. Every form the 2026-09-03 review found refused now scores.
+test("a suffix the old list never held now scores, on the counter it was completed for", () => {
+    // `개월` was the counter whose list was called finished, at 42 entries.
+    // These are the forms it still refused, and they are ordinary Korean.
     const ko35 = caseById("succ-durable-ko-35");
-    for (const particle of ["을", "은", "도", "이", "만", "마다", "씩", "간"]) {
+    for (const suffix of ["을", "은", "도", "이", "만", "마다", "씩", "간",
+                          "짜리", "동안", "입니다", "이고"]) {
         assert.equal(
-            scoreOf(ko35, "e2", `사용자는 육 개월${particle} 배를 탑니다.`).goldMatched,
+            scoreOf(ko35, "e2", `사용자는 육 개월${suffix} 배를 탑니다.`).goldMatched,
             1,
-            `육 개월${particle}`
-        );
-        assert.equal(
-            scoreOf(ko35, "e2", `사용자는 6개월${particle} 배를 탑니다.`).goldMatched,
-            1,
-            `6개월${particle}`
+            `육 개월${suffix}`
         );
     }
 });
 
-test("the 시 rows take the false negative, and this is which ones", () => {
-    // `시` is one syllable and begins many ordinary nouns, so a continuation
-    // that is also such a noun's second syllable makes the row read that noun
-    // as the hour: 가 -> 시가 (市價), 은 -> 시은, 도 -> 시도 (試圖),
-    // 의 -> 시의, 로 -> 시론, 와 -> 시와, 나 -> 시나리오, 야 -> 시야,
-    // 대로 -> 시대. Nine of the thirty-five particles collide, three of them
-    // among the commonest.
+
+test("both spellings of the same fact score the same", () => {
+    // The 2026-09-04 finding, and the reason the continuation lists are gone.
     //
-    // The boundary cannot be neither: adding 가 fixes `아홉 시가` and breaks
-    // `시가 급등` at the same time. This list takes the false negatives,
-    // because crediting a fact the user never stated is the more expensive
-    // error in a memory eval — and the choice is pinned here so it is a
-    // recorded boundary rather than an omission somebody has to find again.
-    const ko401 = caseById("succ-durable-ko-401");
-
-    // Accepted: continuations that begin no 시-noun.
-    for (const particle of ["에", "부터", "까지", "는", "를", "을", "만", "마다"]) {
-        assert.equal(
-            scoreOf(ko401, "g1", `사용자는 가게 문을 아홉 시${particle} 엽니다.`)
-                .goldMatched,
-            1,
-            `아홉 시${particle}`
-        );
-    }
-
-    // Refused, and what each refusal buys.
-    for (const [particle, noun] of [
-        ["가", "시가 (市價)"],
-        ["도", "시도 (試圖)"],
-        ["야", "시야 (視野)"],
-    ]) {
-        assert.equal(
-            scoreOf(ko401, "g1", `사용자는 가게 문을 아홉 시${particle} 엽니다.`)
-                .goldMatched,
-            0,
-            `아홉 시${particle} is refused so that ${noun} is not the hour`
-        );
-    }
-
-    // The other side of that trade, stated as the thing being bought.
-    for (const statement of [
-        "사용자는 아홉 시가가 급등했다고 적었습니다.",
-        "사용자는 아홉 시도 끝에 성공했습니다.",
-        "사용자는 아홉 시야가 좁다고 말합니다.",
-    ]) {
-        assert.equal(scoreOf(ko401, "g1", statement).goldMatched, 0, statement);
-    }
-});
-
-test("every registered continuation is one that keeps the row matching", () => {
-    // A continuation that does nothing is a list entry nobody checked. This
-    // walks the registered lists rather than a hand-written set, so an entry
-    // added without effect fails here.
-    for (const row of KOREAN_NUMERAL_EXPRESSIONS) {
-        for (const after of row.followedBy) {
-            const digit = NUMERAL_TABLE[row.numeral];
+    // A right boundary can only constrain the rewrite, and only the Korean-word
+    // spelling needs a rewrite — the digit spelling is already the canonical
+    // form. So a list of permitted continuations could only ever refuse the
+    // word spelling, and it did: `아홉 시입니다`, `육 개월짜리` and
+    // `승선 근무는 육 개월입니다` all scored 0 while their digit forms scored 1.
+    // What may follow a counter is an open class — particles, bound nouns like
+    // 짜리 and 동안, and the copula 입니다 — so no enumeration terminates. The
+    // 개월 list reached 42 entries and still refused a plain sentence.
+    //
+    // This is the assertion that replaces the list: whatever follows, the two
+    // spellings agree.
+    const rows = [
+        { id: "succ-durable-ko-35", gold: "e2", word: "육 개월", digit: "6개월",
+          frame: (x) => `사용자는 ${x} 배를 탑니다.` },
+        { id: "succ-durable-ko-36", gold: "e2", word: "새벽 세 시", digit: "새벽 3시",
+          frame: (x) => `사용자는 ${x} 제빵을 시작합니다.` },
+        { id: "succ-durable-ko-401", gold: "g1", word: "아홉 시", digit: "9시",
+          frame: (x) => `사용자는 가게 문을 ${x} 엽니다.` },
+    ];
+    // Particles, bound nouns and verb endings alike — the open class the list
+    // could not enumerate. An empty suffix is included so the bare expression
+    // is covered too.
+    const suffixes = [
+        "", "에", "부터", "까지", "는", "를", "을", "만", "마다", "쯤", "경", "께",
+        "이", "가", "은", "의", "로", "으로", "와", "과", "랑", "하고", "보다",
+        "처럼", "같이", "만큼", "대로", "도", "조차", "마저", "밖에", "뿐", "나",
+        "이나", "라도", "씩", "째", "간", "치", "여",
+        "짜리", "동안", "입니다", "이고", "이며", "이라서",
+    ];
+    for (const row of rows) {
+        const testCase = caseById(row.id);
+        for (const suffix of suffixes) {
+            const word = scoreOf(testCase, row.gold, row.frame(row.word + suffix));
+            const digit = scoreOf(testCase, row.gold, row.frame(row.digit + suffix));
             assert.equal(
-                canonMatch(`${row.numeral} ${row.counter}${after}`, "ko"),
-                canonMatch(`${digit}${row.counter}${after}`, "ko"),
-                `${row.counter}${after}`
+                word.goldMatched,
+                digit.goldMatched,
+                `${row.word}${suffix} scored ${word.goldMatched} and ` +
+                    `${row.digit}${suffix} scored ${digit.goldMatched}`
             );
         }
     }
+});
+
+test("the sentences the removed list refused now score, in both spellings", () => {
+    // The four reproductions from the 2026-09-04 review, kept by name so a
+    // continuation list reintroduced under any spelling fails here rather than
+    // being found again by hand.
+    for (const [id, goldId, word, digit] of [
+        ["succ-durable-ko-35", "e2",
+         "사용자는 육 개월짜리 승선 근무를 반복합니다.",
+         "사용자는 6개월짜리 승선 근무를 반복합니다."],
+        ["succ-durable-ko-35", "e2",
+         "승선 근무는 육 개월입니다.", "승선 근무는 6개월입니다."],
+        ["succ-durable-ko-36", "e2",
+         "근무 시작은 새벽 세 시입니다.", "근무 시작은 새벽 3시입니다."],
+        ["succ-durable-ko-401", "g1",
+         "가게 개점 시간은 아홉 시입니다.", "가게 개점 시간은 9시입니다."],
+    ]) {
+        const testCase = caseById(id);
+        assert.equal(scoreOf(testCase, goldId, word).goldMatched, 1, word);
+        assert.equal(scoreOf(testCase, goldId, digit).goldMatched, 1, digit);
+    }
+});
+
+test("the substring residual is measured, in both spellings", () => {
+    // What removing the right boundary does NOT fix, asserted rather than left
+    // to a comment — because the earlier design claimed to prevent this and
+    // only ever prevented one spelling of it.
+    //
+    // A gold token is matched as a substring, so text naming a different fact
+    // that contains the token is credited for it. `9시` is inside 9시장,
+    // 9시간 and 9시절; `6개월` is inside 16개월. That held under
+    // `mem-score-v3.4` with no Korean numeral rule at all, and it holds for the
+    // digit spelling whatever this table does. What changed on 2026-09-04 is
+    // that the word spelling is exposed on the same terms instead of being
+    // penalised for a protection the digit spelling never had.
+    //
+    // Removing it belongs to the matcher — a token boundary on the gold side
+    // would settle both spellings at once — and is recorded as open in §4.14 of
+    // the amendment. **These assertions are a measurement, not an approval.**
+    const ko401 = caseById("succ-durable-ko-401");
+    for (const [word, digit] of [
+        ["사용자는 아홉 시장을 매주 순회합니다.", "사용자는 9시장을 매주 순회합니다."],
+        ["사용자는 아홉 시간 넘게 잡니다.", "사용자는 9시간 넘게 잡니다."],
+        ["사용자는 아홉 시절을 자주 떠올립니다.", "사용자는 9시절을 자주 떠올립니다."],
+    ]) {
+        assert.equal(scoreOf(ko401, "g1", word).goldMatched, 1, word);
+        assert.equal(scoreOf(ko401, "g1", digit).goldMatched, 1, digit);
+    }
+
+    // And the digit-only half, which the word spelling still escapes because
+    // 십육 is not a registered numeral: 16개월 contains 6개월, 십육 개월 does not.
+    const ko35 = caseById("succ-durable-ko-35");
+    assert.equal(
+        scoreOf(ko35, "e2", "사용자는 16개월 동안 승선합니다.").goldMatched,
+        1
+    );
+    assert.equal(
+        scoreOf(ko35, "e2", "사용자는 십육 개월 동안 승선합니다.").goldMatched,
+        0
+    );
 });

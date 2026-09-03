@@ -46,7 +46,6 @@ import { MEMORY_EVAL_SCORING_CONTRACT_VERSION } from "../lib/memoryEvalScoringCo
 import {
     KOREAN_NUMERAL_EXPRESSIONS,
     canonicalFormsAreDisjoint,
-    siRefusalsAreReal,
 } from "../lib/memoryEvalCanonicalisation.ts";
 
 const failures = [];
@@ -97,16 +96,15 @@ if (disjoint.length > 0) {
     );
 }
 
-// The `시` continuation list is the shared list minus a reviewed blocklist, so
-// a particle added to the shared list reaches `시` unless somebody refuses it
-// on purpose. That only holds while every refusal names a particle the shared
-// list actually offers: a blocklist entry for something nobody offers refuses
-// nothing while reading, in review, exactly like a boundary.
-const siRefusals = [...siRefusalsAreReal()];
-if (siRefusals.length > 0) {
-    for (const problem of siRefusals) fail(problem);
+// A row reads nothing after its counter since 2026-09-04, so there is no
+// continuation list to check. The guard that stood here checked that every
+// 시 refusal named a real particle; with no refusals it has no subject, and
+// `tests/memoryEvalCanonicalisation.test.mjs` fails the build if `followedBy`
+// comes back as a field.
+if (KOREAN_NUMERAL_EXPRESSIONS.some((row) => Object.hasOwn(row, "followedBy"))) {
+    fail("a row carries a continuation list again; the right boundary was withdrawn");
 } else {
-    ok("every 시 refusal blocks a real continuation", "blocklist, not a second allowlist");
+    ok("no row reads past its counter", "left boundary only");
 }
 
 /* --------------------------------------------- the contract-only claim ---- */

@@ -120,7 +120,7 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
     assert.equal(result.version, "mem-score-v3.5");
     assert.equal(
         result.entry.descriptorDigest,
-        "5a5e0a969194dec9a421c78d7a958b1e5c8217784e07414713df132399b32377"
+        "fa32bcfc87aa9203ff05a3e608f01562e3c396ea403b0054226122778fa3cc93"
     );
     // v3.4 stays pinned at what it was frozen with. succ-5, succ-6 and succ-7
     // are bound to it for good, so a value that moved here would leave three
@@ -157,7 +157,9 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
             .descriptorDigest,
         "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc"
     );
-    assert.equal(result.entry.approvedOn, "2026-09-03");
+    // 09-04, not 09-03: v3.5 was drafted on the 3rd and its right boundary
+    // removed on the 4th, before any signature was given for it.
+    assert.equal(result.entry.approvedOn, "2026-09-04");
     // Nothing outstanding that a dataset could satisfy. v3.3 split the one
     // pending rule: the gold-authoring half is enforced at review, and the
     // half about what a model emits is `prompt_pending`, which is reported by

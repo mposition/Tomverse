@@ -148,37 +148,10 @@ test("the registered rows normalise, in both spellings", () => {
     );
 });
 
-test("a row matches only where both boundaries allow it", () => {
-    // The 2026-09-03 finding, and the reason the ko-401 variant carries `에`.
-    //
-    // `시` is one syllable and begins 시장, 시청, 시절, 시작, 시간 and more, so
-    // a row ending in the bare counter reads all of them as the hour: with
-    // `아홉 시` registered, nine *markets* canonicalised to `9시장…` and scored
-    // as the `9시` gold. That set is open — there is no list of 시-initial
-    // nouns to guard against — which is the same shape as `mem-score-v3.4`
-    // reading the 일 of 토요일, one counter over.
-    //
-    // Asserted on the canonical text here; scored through `scoreCaseV3()` in
-    // tests/memoryEvalCanonicalisationScoring.test.mjs, which is the check
-    // that would actually have caught it.
-    // Right boundary: the counter must end the expression unless a reviewed
-    // continuation follows. 시 begins 시장, 시청, 시절 and 시간, and that set
-    // is open, so the rule is stated as the closed set of particles instead.
-    for (const untouched of [
-        "아홉 시장",
-        "아홉 시절",
-        "아홉 시간",
-        "세 시장",
-        "세 시청",
-        "세 시간",
-    ]) {
-        assert.equal(
-            canonMatch(untouched, "ko"),
-            untouched.replace(/\s+/g, ""),
-            untouched
-        );
-    }
-    // Left boundary: the numeral must not be read off the end of a word.
+test("a row matches only where the left boundary allows it", () => {
+    // Left boundary: the numeral must not be read off the end of a word. This
+    // is the whole of the boundary since 2026-09-04, and it is the half that
+    // does real work — 교6개월 and 열9시에 are wrong answers, not stylistic ones.
     for (const untouched of [
         "교육 개월",
         "체육 개월",
@@ -188,25 +161,34 @@ test("a row matches only where both boundaries allow it", () => {
     ]) {
         assert.equal(
             canonMatch(untouched, "ko"),
-            untouched.replace(/\s+/g, ""),
+            untouched.split(" ").join(""),
             untouched
         );
     }
-    // And the reviewed continuations do continue the expression.
+    // There is no right boundary. Whatever follows the counter, the expression
+    // is rewritten — which is what makes the two spellings agree, and is also
+    // why 시장·시간·시절 are rewritten. Both consequences are one decision, so
+    // both are asserted together rather than one being left to a comment.
     for (const [text, expected] of [
         ["아홉 시에", "9시에"],
         ["아홉 시부터", "9시부터"],
-        ["아홉 시까지", "9시까지"],
         ["아홉 시 정각에", "9시정각에"],
+        ["아홉 시입니다", "9시입니다"],
         ["육 개월씩", "6개월씩"],
-        ["육 개월째", "6개월째"],
+        ["육 개월짜리", "6개월짜리"],
+        ["육 개월입니다", "6개월입니다"],
+        ["아홉 시장", "9시장"],
+        ["아홉 시간", "9시간"],
+        ["세 시절", "3시절"],
     ]) {
         assert.equal(canonMatch(text, "ko"), expected, text);
     }
     // And the token-alone property holds for a real gold that the discarded
-    // 세+시 row destroyed: `전세` inside `전세 시장` became 전3시장.
+    // 세+시 row destroyed: `전세` inside `전세 시장` became 전3시장. The left
+    // boundary is what keeps it, and it still does.
     assert.ok(canonMatch("전세 시장이 불안합니다", "ko").includes(canonMatch("전세", "ko")));
 });
+
 
 test("no canonical form is a substring of another", () => {
     // A structural invariant, and a narrow one: it compares the registered
@@ -216,17 +198,29 @@ test("no canonical form is a substring of another", () => {
     assert.deepEqual([...canonicalFormsAreDisjoint()], []);
 });
 
-test("rows are matched longest-first, in one pass", () => {
-    // Ordering is a contract term. Rewriting row by row re-scans what an
-    // earlier row produced, so a longer expression could be broken up by a
-    // shorter one that is its prefix.
+test("the rewrite is one pass, and idempotent", () => {
+    // Ordering is a contract term: rows are sorted longest-key-first and
+    // applied as one alternation, so a longer expression cannot be broken up by
+    // a shorter one that is its prefix.
     //
-    // Asserted on the outcome rather than the mechanism, so a reimplementation
-    // that keeps the property passes.
-    assert.equal(canon("아홉 시에"), "9시에");
-    assert.equal(canon("아홉 시간"), "아홉 시간");
-    assert.equal(canon("아홉 시에 아홉 시간"), "9시에 아홉 시간");
+    // With today's three rows nothing overlaps — 육개월, 아홉시, 세시 share no
+    // prefix — so the ordering is not observable from the outside, and this
+    // says so rather than dressing up an unrelated assertion as a test of it.
+    // What is observable is that one pass does not re-scan its own output.
+    for (const text of [
+        "아홉 시에",
+        "아홉 시간",
+        "아홉 시에 아홉 시간",
+        "육 개월씩",
+        "새벽 세 시에",
+    ]) {
+        assert.equal(canon(canon(text)), canon(text), text);
+    }
+    // Both occurrences of a row are rewritten, and the sentence keeps its
+    // shape around them.
+    assert.equal(canon("아홉 시에 아홉 시간"), "9시에 9시간");
 });
+
 
 test("unregistered numeral expressions are left as written", () => {
     // Deliberate, and the cost of the design. No frozen gold asks a model's
@@ -262,25 +256,17 @@ test("every registered row names why it exists and what else it rewrites", () =>
         const digit = NUMERAL_TABLE[row.numeral];
         assert.equal(canonMatch(`${row.numeral} ${row.counter}`, "ko"), row.canonical);
         assert.equal(canonMatch(`${digit}${row.counter}`, "ko"), row.canonical);
-        // Every reviewed continuation is a real one: it keeps the expression
-        // matching rather than silently doing nothing.
-        for (const after of row.followedBy) {
-            assert.equal(
-                canonMatch(`${row.numeral} ${row.counter}${after}`, "ko"),
-                `${row.canonical}${after}`,
-                `${row.counter}${after}`
-            );
-        }
     }
-    // 간 continues 개월 and must not continue 시, where 시간 is a different
-    // counter. The lists are per row for that reason.
-    assert.ok(
-        KOREAN_NUMERAL_EXPRESSIONS.find((row) => row.counter === "개월").followedBy.includes("간")
-    );
-    for (const row of KOREAN_NUMERAL_EXPRESSIONS.filter((entry) => entry.counter === "시")) {
-        assert.ok(!row.followedBy.includes("간"), "간 after 시 is 시간, a duration");
+    // A row carries no continuation list since 2026-09-04. The field is gone
+    // rather than emptied, so a list reintroduced as data fails here.
+    for (const row of KOREAN_NUMERAL_EXPRESSIONS) {
+        assert.ok(
+            !Object.hasOwn(row, "followedBy"),
+            `${row.canonical} carries a continuation list again`
+        );
     }
 });
+
 
 test("the vocabulary lists stay, and stop generating the rewrite", () => {
     // `NUMERAL_TABLE` and `KOREAN_COUNTERS` are still contract terms and still

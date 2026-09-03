@@ -153,18 +153,19 @@ export const APPROVED_STEMS: Readonly<
 /**
  * The Korean numeral equivalences this contract collapses, one row each.
  *
- * ## Why a table, and why the table alone was not enough
+ * ## Why a table and not a rule
+ *
+ * Because the step has to be **context-free**, and only a table can be.
  *
  * A gold token is matched as a *substring* of the candidate's statement, so
- * the token standing alone and the same token inside a sentence should
- * canonicalise identically. A table is what makes that reachable; a rule
- * generated from every numeral crossed with every counter is not. The
- * history, because each step was paid for:
+ * the token standing alone and the same token inside a sentence must
+ * canonicalise identically. Any rule with a lookaround breaks that by
+ * construction, and both attempts at one did:
  *
- *   * `mem-score-v3.4` had no boundary at all, which is genuinely
- *     context-free — its bug was its table, not a missing lookaround. Built
- *     from the cross product, it read the 일 ending 토요일 as the numeral one
- *     and the 일 beginning 일정 as the day counter, so `토요일 일정` became
+ *   * `mem-score-v3.4` had no left condition, which is context-free — its bug
+ *     was its table, not the missing boundary. Built from every numeral
+ *     crossed with every counter, it read the 일 ending 토요일 as the numeral
+ *     one and the 일 beginning 일정 as the day counter, so `토요일 일정` became
  *     `토요1일정` and the gold token 격주토요일 existed in no candidate that
  *     phrased it that way (`succ-durable-ko-611`). `이십일` became `이10일`
  *     the same way.
@@ -177,16 +178,8 @@ export const APPROVED_STEMS: Readonly<
  *     the sentence it was drawn from. That is not a scoring edge case —
  *     `succ-4` stops assembling, because its `gold-evidence-covers-fact`
  *     anchor asks exactly that question.
- *   * A narrow table with **no** boundary was then tried, and it was not safe
- *     either: `교육 개월` scored as 6개월 off the end of 교육, and `아홉 시장`
- *     — nine markets — scored as nine o'clock.
  *
- * **So the shipped rule is a narrow table AND both boundaries.** It is not
- * context-free, and this comment claimed it was until 2026-09-03; see
- * `KOREAN_NUMERAL_EXPRESSION_RE` below for the two conditions and
- * `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md` §4.13
- * for the space-invariance this costs — five of those 2,250 strings, down
- * from 82, and the residue is stated rather than claimed away.
+ * So: no lookaround, and a table narrow enough to be safe without one.
  *
  * ## What earns a row
  *
@@ -216,142 +209,64 @@ export const APPROVED_STEMS: Readonly<
  *   * Guard rows for the durations fixed that pair and left the open one:
  *     시 begins 시장, 시청, 시절 and 시작 too, so `아홉 시장` still read as
  *     the hour, and no closed list of nouns can be written.
- *   * Registering the whole phrase `아홉 시에` closed that, and was narrower
- *     than the contract it replaced: `아홉 시부터` and `새벽 3시에` — answers
- *     `mem-score-v3.4` accepted — stopped scoring.
+ *   * A **right boundary** was then tried: the counter had to end the
+ *     expression unless one of a reviewed list of particles followed. That is
+ *     the shape this file carried until 2026-09-04, and §4.14 of the audit
+ *     defended it as a deliberate trade — refuse `아홉 시가` rather than credit
+ *     `시가 급등` as nine o'clock. **The trade does not exist**, for the reason
+ *     below, and the list is gone.
  *
- * What pays for it is a boundary on **both** sides, in `koreanAlternatives`
- * below: no Hangul syllable before the numeral, and the counter ends the
- * expression unless a reviewed continuation follows. The continuations are a
- * closed set (particles), where the nouns to exclude are not.
+ * ## Why there is no right boundary
  *
- * The invariant is still stated once and enforced rather than argued —
- * `canonicalFormsAreDisjoint()`, run in CI by `check:memory-eval-succ8` — but
- * it is a floor, not the argument. It reported nothing while 시장 was being
- * read as the hour, because 시장 is not a canonical form. The check that
- * decides is `tests/memoryEvalCanonicalisationScoring.test.mjs`, which runs
- * candidates through `scoreCaseV3()` in both directions and over the whole
- * corpus. Every shape above carried a comment explaining why it was fine; a
- * comment cannot fail a build.
+ * A right boundary can only constrain the **rewrite**, and only the
+ * Korean-word spelling needs a rewrite. The digit spelling is already the
+ * canonical form, so it reaches the gold by plain substring containment with
+ * no rule involved at all. Measured against `succ-durable-ko-401`, whose gold
+ * is the digit `9시`:
+ *
+ * ```
+ *                                        아홉 시…   9시…
+ *   …시장을 매주 순회합니다  (markets)        0        1
+ *   …시간 동안 일합니다      (hours)          0        1
+ *   …시절의 기억입니다       (eras)           0        1
+ * ```
+ *
+ * Every false positive the list was written to prevent was already reachable
+ * through the other spelling. What the list actually did was refuse the word
+ * spelling of *correct* answers — `아홉 시입니다`, `육 개월짜리`,
+ * `승선 근무는 육 개월입니다` — because what may follow a counter is an open
+ * class: particles, plus bound nouns like 짜리 and 동안, plus the copula
+ * 입니다. No enumeration of it terminates. The 개월 list reached 42 entries
+ * and still refused a plain declarative sentence.
+ *
+ * So the rule keeps the left boundary, which does real work, and has no right
+ * boundary at all. The two spellings now score the same fact the same way,
+ * which is what an eval needs from a normaliser.
+ *
+ * ## The residual, stated rather than traded away
+ *
+ * `9시장`, `9시간`, `9시절` and `16개월` still contain the gold tokens
+ * `9시` and `6개월`, so a candidate stating one of those other facts is
+ * credited for the gold. **These rows do not introduce that and cannot remove
+ * it.** It is a property of matching a two-character token as a substring; it
+ * was present under `mem-score-v3.4` with no Korean numeral rule at all, and
+ * it holds for the digit spelling either way. What changed on 2026-09-04 is
+ * that the Korean spelling is exposed to it on the same terms, instead of
+ * being penalised for a protection the digit spelling never had.
+ *
+ * Removing it belongs to the matcher rather than here — a token boundary on
+ * the gold side would settle both spellings at once — and it is recorded as
+ * the open question it is in §4.14 of
+ * `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md`.
+ * `tests/memoryEvalCanonicalisationScoring.test.mjs` pins the exposure in both
+ * spellings, so it is a measured boundary and not an omission.
  *
  * ## What the rows do not change
  *
- * A digit spelling can still be matched inside a longer number — `6개월`
- * inside `16개월`, `9시` inside `19시` — so a gold naming the shorter is
- * satisfied by text naming the longer. That is **not** something these rows
- * introduce: substring matching over digits already had it, because `6개월` is
- * literally inside `16개월` with no canonicalisation at all. The rows change
- * the spelling on both sides and leave the relation where they found it. The
- * left boundary excludes the Hangul form of the same shape (`열아홉 시에` is
- * not nine o'clock); the digit form would need a "not preceded by a digit"
+ * The left boundary excludes the Hangul form of the same shape (`열아홉 시에`
+ * is not nine o'clock). The digit form would need a "not preceded by a digit"
  * test, which is recorded in each row's `rejects` instead.
  */
-/**
- * Particles and suffixes that may follow a counter, for counters where the
- * list can be completed.
- *
- * Korean particles are a closed class, so an allowlist is a real list rather
- * than an open-ended one — **as long as no noun begins with the counter**.
- * `개월` is two syllables and starts no Korean word, so 개월 + anything in this
- * list is unambiguously six months and the list can simply be finished.
- *
- * `시` is the opposite case and gets its own, deliberately shorter list; see
- * `SI_CONTINUATIONS`.
- */
-const UNAMBIGUOUS_COUNTER_CONTINUATIONS: readonly string[] = [
-    // case and topic
-    "이", "가", "은", "는", "을", "를", "의",
-    // adverbial
-    "에", "에서", "로", "으로", "와", "과", "랑", "이랑", "하고",
-    "보다", "처럼", "같이", "만큼", "대로",
-    // auxiliary
-    "도", "만", "마다", "부터", "까지", "조차", "마저", "밖에", "뿐",
-    "나", "이나", "라도", "이라도",
-    // approximation and duration suffixes
-    "쯤", "경", "께", "씩", "째", "간", "치", "여",
-];
-
-/**
- * The continuations `시` must refuse, and the only ones.
- *
- * A blocklist rather than a second allowlist, and the shape is the fix. Two
- * independent allowlists diverge silently: a particle added to the shared list
- * above simply never reaches `시`, and nothing says so. Here the shared list is
- * the source for both counters and this names the exceptions, so a new
- * particle applies to `시` too unless somebody reviews it as colliding.
- *
- * `시` is one syllable and begins ordinary nouns, so a continuation that is
- * also a noun's **second syllable** makes the row read that noun as the hour.
- * These six do:
- *
- *   가  -> 시가 (市價, 詩歌)      의  -> 시의회
- *   도  -> 시도 (試圖)            나  -> 시나리오
- *   대로 -> 시대 (時代) + 로       간  -> 시간 (an hour is not nine o'clock)
- *
- * `간` is the one that is not merely a noun: `아홉 시간` is nine *hours*, and
- * Korean drops spaces before matching, so `9시간` contains the `9시` gold. It
- * has to be refused for the reason §4.6 of the amendment gives, not this one.
- *
- * ## What is deliberately NOT here
- *
- * An earlier draft of this list refused nine continuations, and three of those
- * nine were wrong — a false negative bought for nothing:
- *
- *   * **`로`** — the claimed collision was 시론, which is 시 + **론**. The
- *     syllable 로 does not occur in it, so the rule never matched it. `아홉
- *     시로 정했다` is ordinary Korean and was being refused for a noun that
- *     cannot be reached.
- *   * **`와`**, **`은`** — the claimed collisions were 시와 and 시은, which are
- *     the standalone noun 시 (市/詩) plus that same particle, not nouns
- *     beginning with 시. The left boundary already excludes them: this rule
- *     only fires where a numeral precedes the counter, and `시와 군` has no
- *     numeral before it. `아홉 시와 열 시` is nine and ten o'clock.
- *
- * That is the general trap in reading a collision list: a form is only a
- * collision if a **numeral can precede it**, because nothing else reaches this
- * rule at all.
- *
- * ## The cost that remains
- *
- * `가` and `도` are common, so `아홉 시가`, `아홉 시도` and `새벽 세 시가` are
- * still refused — false negatives on correct answers. That is the deliberate
- * side of the trade: taking them would score `아홉 시도` as nine o'clock when
- * it says nine attempts, and a memory eval crediting a fact the user never
- * stated is the more expensive error. The refused forms are pinned by
- * `tests/memoryEvalCanonicalisationScoring.test.mjs` so this stays a recorded
- * boundary rather than an omission, and
- * `.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md` §4.14
- * states it as the decision it is.
- */
-const SI_REFUSED_CONTINUATIONS: readonly string[] = [
-    "가", "의", "도", "나", "대로", "간",
-];
-
-/**
- * What may follow `시` and still be the hour: the shared list, minus the six.
- *
- * Derived rather than written out, so the two lists cannot drift apart.
- */
-const SI_CONTINUATIONS: readonly string[] = UNAMBIGUOUS_COUNTER_CONTINUATIONS
-    .filter((particle) => !SI_REFUSED_CONTINUATIONS.includes(particle));
-
-/**
- * Every refused continuation must actually be in the shared list.
- *
- * A blocklist entry naming a particle nobody offers is not a boundary — it is
- * a typo that reads like one, and it would leave the real particle allowed
- * while the file appears to refuse it.
- */
-export function siRefusalsAreReal(): readonly string[] {
-    return SI_REFUSED_CONTINUATIONS.filter(
-        (particle) => !UNAMBIGUOUS_COUNTER_CONTINUATIONS.includes(particle)
-    ).map(
-        (particle) =>
-            `${particle} is refused for 시 but is not in the shared continuation ` +
-            "list, so the refusal blocks nothing"
-    );
-}
-
 export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
     /** The form both spellings collapse to. */
     canonical: string;
@@ -359,15 +274,6 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
     numeral: string;
     /** The counter, drawn from `KOREAN_COUNTERS`. */
     counter: string;
-    /**
-     * What may follow the counter and still be this expression.
-     *
-     * The right-hand half of the boundary. A following character that is not
-     * Hangul — a space, punctuation, the end of the string — always continues
-     * the expression, so `아홉 시 정각에` needs no entry; only a Hangul
-     * syllable immediately after the counter has to be listed.
-     */
-    followedBy: readonly string[];
     /** The frozen gold that cannot be scored without this row. */
     requiredBy: string;
     /** What else this row rewrites, or refuses. Reviewed, not accidental. */
@@ -378,7 +284,6 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "6개월",
         numeral: "육",
         counter: "개월",
-        followedBy: UNAMBIGUOUS_COUNTER_CONTINUATIONS,
         requiredBy: "succ-durable-ko-35",
         // `16개월` still contains `6개월`, as it does with no rule at all.
         rejects: ["16개월"],
@@ -388,26 +293,27 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         canonical: "3시",
         numeral: "세",
         counter: "시",
-        followedBy: SI_CONTINUATIONS,
         requiredBy: "succ-durable-ko-36",
-        // `13시` contains `3시` before and after this row alike. The forms this
-        // row refuses are 시가·시은·시도·시의·시로·시와·시나·시야·시대로, for
-        // the reason `SI_CONTINUATIONS` gives.
-        rejects: ["13시", "세 시가", "세 시도"],
+        // `13시` contains `3시` before and after this row alike. `새벽 세 시간`
+        // now reads as `새벽3시간` exactly as `새벽 3시간` already did — the
+        // substring residual, reached by both spellings rather than one.
+        rejects: ["13시", "새벽 세 시간"],
     },
     {
         // succ-durable-ko-401: factValueAll ["9시"], evidence
-        // `가게 문을 아홉 시에 열어서`. The gold is written as a digit and the
-        // only statement of the fact is written in words, so without this row
-        // the gold is satisfiable by nothing.
+        // `가게 문을 아홉 시에 열어서`. The gold is written as a digit and its
+        // evidence in words, so without this row the quote does not cover the
+        // fact and the dataset stops assembling on `gold-evidence-covers-fact`.
+        // A candidate writing `9시` matches either way: it is assembly this
+        // row is required for, not matching.
         canonical: "9시",
         numeral: "아홉",
         counter: "시",
-        followedBy: SI_CONTINUATIONS,
         requiredBy: "succ-durable-ko-401",
-        // `19시` contains `9시` before and after this row alike, and the same
-        // 시-noun forms are refused as above.
-        rejects: ["19시", "아홉 시가", "아홉 시도"],
+        // `19시` contains `9시` before and after this row alike. 9시장·9시간·
+        // 9시절 contain it too, now in both spellings rather than only in the
+        // digit one — the substring residual described above.
+        rejects: ["19시", "아홉 시장", "아홉 시간"],
     },
 ];
 
@@ -486,12 +392,8 @@ const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
 
 const koreanAlternatives = KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) => {
     const digit = NUMERAL_TABLE[entry.numeral];
-    const right =
-        entry.followedBy.length > 0
-            ? `(?:(?![가-힣])|(?=${entry.followedBy.map(escape).join("|")}))`
-            : "(?![가-힣])";
     return [entry.numeral, digit].map((form) => ({
-        source: `(?<![가-힣])${escape(form)}\\s*${escape(entry.counter)}${right}`,
+        source: `(?<![가-힣])${escape(form)}\\s*${escape(entry.counter)}`,
         key: `${form}${entry.counter}`,
         canonical: entry.canonical,
     }));

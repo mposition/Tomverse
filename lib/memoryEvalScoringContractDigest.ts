@@ -246,21 +246,21 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
             "through the language's matching form: Korean drops every space, English keeps " +
             "them. Every step rewrites by a fixed table. Korean numerals are rewritten " +
             "only by the reviewed rows of canonKoreanNumeralExpressions, matched as one " +
-            "alternation in a single pass with the longest form first, and each row is " +
-            "bounded on both sides: it matches only where no Hangul syllable immediately " +
-            "precedes the numeral, and where the counter ends the expression or is " +
-            "followed by one of that row's reviewed continuations. An unlisted numeral is " +
-            "left as written. Those two boundaries are the only context any step reads, " +
-            "and they are one character before and the reviewed continuations after — " +
-            "nothing else about the surrounding sentence can change a result. A token " +
-            "therefore canonicalises the same alone as inside a sentence provided the word " +
-            "boundary before it is present, and the same however the expression itself is " +
-            "spaced. No canonical form may be a substring of another. The continuation " +
-            "lists are complete for counters that begin no Korean word and deliberately " +
-            "partial for those that do, which refuses some correct spellings rather than " +
-            "crediting a different fact. Canonicalisation rewrites a token to a canonical " +
-            "form by a fixed table and never decides that two different facts are the " +
-            "same.",
+            "alternation in a single pass with the longest form first, and an unlisted " +
+            "numeral is left as written. A row is bounded on the left and only on the " +
+            "left: it matches where no Hangul syllable immediately precedes the numeral, " +
+            "and it does not read what follows the counter. That one character is the " +
+            "only context any step reads, so a token canonicalises the same alone as " +
+            "inside a sentence provided the word boundary before it is present, and the " +
+            "same however the expression itself is spaced. No canonical form may be a " +
+            "substring of another. This contract states no bound on what a canonical " +
+            "form may be a substring OF: a gold token is matched as a substring, so a " +
+            "candidate stating a different fact whose text contains the token is " +
+            "credited for it, in either spelling and whether or not a row rewrote " +
+            "anything. That is a property of the matcher, it predates this rule, and " +
+            "no boundary inside canonicalisation can remove it. Canonicalisation " +
+            "rewrites a token to a canonical form by a fixed table and never decides " +
+            "that two different facts are the same.",
     },
     {
         id: "v3-evidence-binding",
@@ -510,11 +510,10 @@ export function scoringContractDescriptorInput(): string {
             KOREAN_NUMERAL_EXPRESSIONS.map(
                 (entry) =>
                     `${entry.numeral}+${entry.counter}=${entry.canonical}` +
-                    // The right boundary is a contract term, not a hint: it is
-                    // what stops 아홉 시장 being read as the hour, so a
-                    // continuation quietly added or removed is a different
-                    // matcher and has to move this digest.
-                    `:after=${[...entry.followedBy].sort().join("|")}` +
+                    // There is no right boundary to hash since 2026-09-04: a
+                    // row reads nothing after its counter, so the row is the
+                    // numeral, the counter, the canonical form, the gold that
+                    // requires it and its reviewed over-matches.
                     `:by=${entry.requiredBy}` +
                     `:-${[...entry.rejects].sort().join("|")}`
             )

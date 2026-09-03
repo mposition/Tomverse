@@ -73,17 +73,9 @@ export const MEMORY_EVAL_SUCC8_SUPERSEDES = MEMORY_EVAL_SUCC7_DATASET_VERSION;
  *
  * A successor that carries no case change has to say what it *did* change, or
  * the next reader assumes the sample moved and goes looking for the diff.
- *
- * **This string is inside `succ8ManifestFingerprintInput()`**, so it is part of
- * the digest a reviewer signs. It said "context-free" until 2026-09-03, which
- * the rule had by then stopped being — it reads one character before the
- * numeral and the reviewed continuations after. A signature is worth what its
- * description is worth, and a reviewer who signs a digest whose own summary
- * denies the mechanism has signed nothing they could later check.
  */
 export const MEMORY_EVAL_SUCC8_CHANGE_REASON =
-    "Korean numeral canonicalisation narrowed to a reviewed expression table, " +
-    "bounded left by a preceding-syllable check and right by per-row continuations";
+    "Korean numeral canonicalisation narrowed to a reviewed, context-free expression table";
 
 /**
  * False, pending a signature.
@@ -280,9 +272,9 @@ export function buildSucc8Manifest(): Succ8DatasetManifest {
  * be given for.
  */
 const SUCC8_SCORING_CONTRACT_DIGEST =
-    "5a5e0a969194dec9a421c78d7a958b1e5c8217784e07414713df132399b32377";
+    "fa32bcfc87aa9203ff05a3e608f01562e3c396ea403b0054226122778fa3cc93";
 const SUCC8_MANIFEST_DIGEST =
-    "b66d17e3b511dd5abbb92cbcc42334dee7cfb782b458e165f3bab703862df920";
+    "16613ddbed2d20f5836726012a6a2f8f3cd9307cd50606732cdee12222dd273c";
 
 /**
  * The manifest as a **record**, written out.

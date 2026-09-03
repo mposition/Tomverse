@@ -564,11 +564,9 @@ test("the rows that actually rewrite Korean text are in the digest", () => {
             row.includes(`${entry.numeral}+${entry.counter}=${entry.canonical}`),
             `${entry.canonical} is not in the digest: ${row}`
         );
-        // The right boundary travels with the row. A continuation added or
-        // dropped changes what the matcher does, so it has to move the digest.
-        for (const after of entry.followedBy) {
-            assert.ok(row.includes(after), `${after} is not in the digest`);
-        }
+        // There is no continuation list to hash since 2026-09-04. A row is the
+        // numeral, the counter, the canonical form, the gold that requires it
+        // and its reviewed over-matches — all asserted below.
     }
     // Every row, not merely one of them.
     assert.equal(row.split(ITEM).length, KOREAN_NUMERAL_EXPRESSIONS.length);
@@ -586,7 +584,6 @@ test("the rows that actually rewrite Korean text are in the digest", () => {
         KOREAN_NUMERAL_EXPRESSIONS.map(
             (entry) =>
                 `${entry.numeral}+${entry.counter}=${entry.canonical}9` +
-                `:after=${[...entry.followedBy].sort().join("|")}` +
                 `:by=${entry.requiredBy}` +
                 `:-${[...entry.rejects].sort().join("|")}`
         )
@@ -771,15 +768,19 @@ test("rule: v3-polarity-is-compared-not-inferred", () => {
 
 test("rule: v3-canonicalisation", () => {
     assert.equal(canon("Twelve-hour, $2,000."), "12 hour 2000");
-    // The two registered Korean rows. The hour row carries the particle, so a
-    // noun that merely begins with the counter — 시장, 시절, 시간 — is left
-    // alone and cannot be read as the hour.
+    // The three registered Korean rows. There is no right boundary, so a noun
+    // that begins with the counter — 시장, 시절, 시간 — is rewritten too,
+    // which is the substring residual the rule states rather than claims to
+    // prevent: 9시장 reaches a 9시 gold in either spelling, and did so under
+    // mem-score-v3.4 with no Korean rule at all.
     assert.equal(canon("아홉 시에"), "9시에");
     assert.equal(canon("아홉 시부터"), "9시부터");
     assert.equal(canon("육 개월"), "6개월");
-    assert.equal(canon("아홉 시장"), "아홉 시장");
-    assert.ok(!canonMatch("아홉 시장", "ko").includes(canonMatch("9시", "ko")));
-    // Every step is context-free, so a token canonicalises the same alone as
+    assert.equal(canon("아홉 시장"), "9시장");
+    assert.equal(canon("9시장"), "9시장");
+    // The left boundary is the one context any step reads, and it holds: a
+    // token canonicalises the same alone as inside a sentence, and the same
+    // however the expression itself is spaced.
     // inside a sentence and the same however it was spaced. Both were broken by
     // a lookaround, and both are what the table restores.
     assert.ok(canonMatch("가게 문을 아홉 시에", "ko").includes(canonMatch("9시", "ko")));

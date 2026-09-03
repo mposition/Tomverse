@@ -167,9 +167,12 @@ test("the check would fail if the numeral table stopped covering a gold", () => 
         ["9시"],
         "and its gold states it as a digit"
     );
-    // The two meet only because the table says so, and only inside the
-    // boundaries: 아홉 followed by 시 and then a reviewed continuation. A noun
-    // that merely begins with the counter is not the hour.
+    // The two meet only because the table says so, and only where the left
+    // boundary allows it. There is no right boundary since 2026-09-04, so a
+    // noun beginning with the counter is rewritten as well — the substring
+    // residual, which reaches the gold in either spelling.
     assert.ok(canonMatch(text, "ko").includes(canonMatch("9시", "ko")));
-    assert.equal(canonMatch("아홉 시장", "ko"), "아홉시장");
+    assert.equal(canonMatch("아홉 시장", "ko"), "9시장");
+    // And the left boundary still holds, which is what keeps 열아홉 시에 out.
+    assert.equal(canonMatch("열아홉 시에", "ko"), "열아홉시에");
 });

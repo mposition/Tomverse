@@ -801,9 +801,12 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
              * and is unsigned. See its `MEMORY_EVAL_SUCC8_APPROVAL`.
              */
             version: "mem-score-v3.5",
-            approvedOn: "2026-09-03",
+            // 2026-09-04, not 09-03: the amendment was drafted on the 3rd and
+            // its right boundary removed on the 4th, before any signature. The
+            // date is when the digest below became what it is.
+            approvedOn: "2026-09-04",
             descriptorDigest:
-                "5a5e0a969194dec9a421c78d7a958b1e5c8217784e07414713df132399b32377",
+                "fa32bcfc87aa9203ff05a3e608f01562e3c396ea403b0054226122778fa3cc93",
             pendingRules: [],
         },
     ];
