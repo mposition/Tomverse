@@ -225,5 +225,29 @@ drift가 있으면 사유를 적고 비정상 종료하며 파일을 쓰지 않�
 `succ7SignatureProblems()`가 그 필드가 없는 서명을 거절합니다. 1차 서명에 그 값이
 없는 것이 이 무효화의 내용 그 자체입니다.
 
+### 9.6 검토 3회차에서 나온 차단 2건 (2026-09-02)
+
+위 수정 자체를 다시 검토해 두 건이 더 나왔습니다. 둘 다 digest를 움직이지
+않습니다.
+
+- **Windows에서 신규 회귀 테스트가 깨졌습니다.** sandbox가 `node_modules`를
+  기본 디렉터리 symlink로 만드는데, 이 저장소의 개발 환경인 Windows에서는 권한이
+  없어 `EPERM`으로 실패합니다. Linux CI는 내내 green이었고 **개발 환경에서만 unit
+  gate 전체가 깨졌습니다.** `process.platform === "win32"`이면 `junction`을 씁니다.
+- **검수 commit 조상 검사가 CI에서 fail-open이었습니다.** commit 객체가 없으면
+  실패가 아니라 `OK ... not verifiable here`를 냈는데, 이 검사가 도는
+  `static-and-unit`의 checkout에는 `fetch-depth`가 없어 depth 1입니다. 즉 **검사가
+  실제로 도는 유일한 환경에서 "확인 불가지만 OK"가 정상 경로**였고, 40자리이기만
+  하면 존재하지 않는 SHA도 서명 commit으로 통과했습니다. 이제 commit을 확인할 수
+  없으면 **실패**하고, workflow의 해당 checkout에 `fetch-depth: 0`을 넣었습니다.
+  git 저장소가 아닌 sandbox에서 검사를 실제로 실행해 실패하는 것을 테스트가
+  고정합니다.
+
+앞서 §9.4에서 "결함이 아닌 이유로 빨간 검사는 읽히지 않게 된다"를 근거로 완화를
+택했는데, 그 논리가 통하려면 **완화된 경로가 예외여야** 합니다. 여기서는 그것이
+유일한 경로였으므로 근거가 성립하지 않았습니다.
+
+### 9.7 재서명
+
 표본을 다시 읽을 필요는 없습니다. dataset digest와 source digest는 1차 서명 값
 그대로이고, `tests/memoryEvalSucc7Adoption.test.mjs`가 그 사실을 고정합니다.

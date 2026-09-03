@@ -282,16 +282,31 @@ test("a superseded signature never reads as covering this tree", () => {
 
 /* ------------------------------------- the sheet, run as the command it is -- */
 
-const sandbox = () => {
-    const root = mkdtempSync(path.join(tmpdir(), "succ7-sheet-"));
-    for (const entry of ["lib", "scripts", "tsconfig.json", "package.json"]) {
+const sandbox = (prefix = "succ7-sheet-") => {
+    const root = mkdtempSync(path.join(tmpdir(), prefix));
+    for (const entry of [
+        "lib",
+        "scripts",
+        "tsconfig.json",
+        "package.json",
+        ".github",
+    ]) {
         cpSync(path.join(REPO, entry), path.join(root, entry), {
             recursive: true,
         });
     }
     // Linked rather than copied: the point is to run the real command against
     // a tree we may edit, not to reinstall anything.
-    symlinkSync(path.join(REPO, "node_modules"), path.join(root, "node_modules"));
+    //
+    // `junction` on Windows, where a plain directory symlink needs privileges
+    // this repository's own development machine does not run with — the first
+    // version threw EPERM there and took the whole unit gate down with it,
+    // green on Linux CI the entire time.
+    symlinkSync(
+        path.join(REPO, "node_modules"),
+        path.join(root, "node_modules"),
+        process.platform === "win32" ? "junction" : "dir"
+    );
     return root;
 };
 
@@ -337,4 +352,28 @@ test("the sheet command refuses to claim an adoption the tree lost", (t) => {
     assert.match(result.stderr, /Refusing to write a sheet/);
     assert.match(result.stderr, /signature is of manifest/);
     assert.equal(existsSync(out), false, "a refused run still left a sheet behind");
+});
+
+test("the check refuses when it cannot place the reviewed commit", (t) => {
+    // Fail-closed, demonstrated. The previous version answered "cannot verify,
+    // therefore OK", and `static-and-unit` checks out at depth 1 — so in the
+    // one environment this check runs, the unverifiable path *was* the normal
+    // path, and any 40-character string would have passed as a signing commit.
+    //
+    // The sandbox is not a git repository, which is the same condition a
+    // shallow checkout produces for a commit it does not have.
+    const root = sandbox("succ7-check-");
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+
+    const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "scripts/check-memory-eval-succ7.mjs"],
+        { cwd: root, encoding: "utf8" }
+    );
+    assert.notEqual(result.status, 0, "the check passed with no history to check against");
+    assert.match(
+        `${result.stdout}${result.stderr}`,
+        /is not in this checkout/,
+        `${result.stdout}\n${result.stderr}`
+    );
 });

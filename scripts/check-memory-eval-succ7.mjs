@@ -442,10 +442,20 @@ if (!existsSync(fileURLToPath(new URL(`../${MEMORY_EVAL_SUCC7_REVIEW.record}`, i
         known = false;
     }
     if (!known) {
-        // A shallow CI checkout genuinely does not have the commit. Saying so
-        // beats a red check for a reason that is not a defect — and beats
-        // silence, which would read as "verified".
-        ok("the reviewed commit is not in this checkout", `${sha.slice(0, 12)}… not verifiable here`);
+        // Fail, rather than reporting "not verifiable here".
+        //
+        // That softer version was written for a shallow checkout, and it made
+        // the check fail-open exactly where it mattered: `static-and-unit`
+        // checks out at depth 1, so "cannot verify, therefore OK" was the
+        // normal path in CI and any 40-character string would have passed as
+        // a signing commit. The workflow now fetches full history; if some
+        // other caller cannot, the honest answer is that this cannot be
+        // checked there, which is a failure and not an OK.
+        fail(
+            `the reviewed commit ${sha.slice(0, 12)}… is not in this checkout, ` +
+                "so the signature cannot be tied to a history. Fetch full " +
+                "history (actions/checkout with fetch-depth: 0) and re-run."
+        );
     } else {
         try {
             git(["merge-base", "--is-ancestor", sha, "HEAD"]);
