@@ -80,10 +80,12 @@ Date / timezone:    ____________________
       뿐입니다**: `Pending`은 다음 배포 후보이므로 배포 전에 Railway와 다른 것이
       정상입니다. Active가 어긋나면 이번 배포와 무관한 드리프트이므로 배포를 중단하고,
       Active를 기준으로 복구한 뒤 §2.1 검사와 단일 staged 배포를 다시 합니다
-- [ ] 모바일 인증을 서비스하는 배포라면 **배포 후 `npm run verify:mobile-auth-deployment`
-      → Pending 승격** — 통제된 exchange를 한 번 성공시켜 access token · refresh token과
-      그때 생긴 `MobileRefreshRotation` 행의 `secretDigest`·`pepperKid`를 모아 Pending
-      값으로 실행합니다. **id가 아니라 재료를 대조합니다**: 같은 id 아래 다른 개인키나
+- [ ] 모바일 인증을 서비스하는 배포라면 **배포 후
+      `./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1` → Pending 승격** — 통제된
+      exchange를 한 번 성공시켜 access token · refresh token과 그때 생긴
+      `MobileRefreshRotation` 행의 `secretDigest`·`pepperKid`를 모아 Pending 값으로
+      실행합니다. **증거는 15분 안에 모읍니다** — 재료 대조는 나이를 못 보므로 오래된
+      token은 "그때 맞았다"만 증명합니다. **그 exchange 세션은 폐기합니다.** **id가 아니라 재료를 대조합니다**: 같은 id 아래 다른 개인키나
       pepper가 들어가도 id 대조는 통과하고, 그 값이 Active로 승격되면 롤백이나 다음
       회전에서 토큰이 끊깁니다. **통과한 뒤에만** Pending을 Active로 승격하고, 실패하면
       Pending의 deployment ID를 기준으로 롤백하고 Pending을 폐기합니다. 그 exchange
@@ -91,8 +93,15 @@ Date / timezone:    ____________________
       기록합니다
 - [ ] 모바일 인증을 서비스하는 배포라면 **이전 세대 확인**(유예 안) — 배포 **전에** 받아
       둔 access token이 아직 받아들여지고, 배포 전에 받아 둔 refresh token이 회전에
-      성공하는지. **롤백이 의존하는 것이 정확히 이 둘**이며, 은퇴 항목은 이것 말고
-      관측 경로가 없습니다(§2.2). 실패하면 승격하지 않습니다
+      성공하는지. 이것이 증명하는 것은 **새 배포가 이전 세대를 계속 받아 준다**는 정방향
+      호환성이고, 배포 순간 아무도 로그아웃되지 않는 이유입니다. **롤백 호환성이
+      아닙니다** — 되돌린 배포에는 새 키가 없으므로 배포 이후 발급된 자격증명은 전부
+      거절되며, 그것이 롤백의 값입니다(§2.2). 은퇴 항목은 이것 말고 관측 경로가
+      없습니다. 실패하면 승격하지 않습니다
+- [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1`
+      — 배포 후 wrapper가 지키는 계약을 고정합니다(17 사례). 이쪽은 링 둘에 더해 **live
+      credential 둘**(access·refresh token)을 다루므로, 같은 부재 계약이 더 중요합니다.
+      출력을 release SHA와 함께 §8에 붙입니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-CheckMobileAuthKeyring.ps1`
       — wrapper가 지키는 다섯 가지(비밀이 parameter에 없음 / 출력에 없음 / 성공·실패·
       중단 뒤 환경에 없음 / 검사기의 종료 코드를 그대로 반환 / `op run`이 주입한 링을

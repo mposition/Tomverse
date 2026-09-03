@@ -6,6 +6,7 @@ import {
   MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
 } from "../lib/mobileAuthContract.ts";
 import {
+  MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS,
   MobileAuthKeyringError,
   activeMobileRefreshPepper,
   activeMobileSigningKey,
@@ -13,6 +14,7 @@ import {
   mobileRefreshPepperById,
   mobileSigningKeyById,
   mobileSigningKeyring,
+  futureDatedMobileRetirements,
   mobileTokenAudience,
   mobileTokenIssuer,
 } from "../lib/mobileAuthKeyring.ts";
@@ -313,4 +315,63 @@ test("the active key needs no declaration, and everything else does", () => {
   assert.equal(mobileRefreshPepperById("pep-2", env(), far)?.secret, KEY_B);
   assert.equal(mobileSigningKeyById("sign-1", env(), far), null);
   assert.equal(mobileRefreshPepperById("pep-1", env(), far), null);
+});
+
+test("a retirement dated in the future is not a retirement", () => {
+  // The mistyped-id hole a third time, wearing a different hat. This parses,
+  // reads as "retired", and would leave the previous key trusted until 2099 --
+  // the approved fifteen minutes describing nothing. Same answer as every
+  // other unclear declaration here: the key verifies nothing.
+  const misdated = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: "sign-1@2099-01-01T00:00:00.000Z" });
+
+  assert.equal(mobileSigningKeyById("sign-1", misdated, retiredAtMs), null);
+  // Still refused the day before the date it names. The seventy years of
+  // trust are what the defect was; once the instant genuinely arrives the line
+  // is an ordinary retirement, which is why the pre-deploy check has to be the
+  // thing that catches the typo.
+  assert.equal(
+    mobileSigningKeyById("sign-1", misdated, Date.parse("2098-12-31T00:00:00.000Z")),
+    null
+  );
+  // The active key is untouched -- a bad retirement line takes down the key it
+  // names, not the deployment.
+  assert.equal(activeMobileSigningKey(misdated).keyId, "sign-2");
+});
+
+test("a retirement a few minutes ahead of the server clock still counts", () => {
+  // The allowance exists for an operator writing "now" against a clock that is
+  // slightly ahead. Without it, a correct rotation would take the previous key
+  // out immediately and log that generation out.
+  const aheadSeconds = MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS - 60;
+  const retired = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${RETIRED_AT}` });
+  const serverNow = retiredAtMs - aheadSeconds * 1000;
+
+  assert.equal(mobileSigningKeyById("sign-1", retired, serverNow)?.secret, KEY_A);
+});
+
+test("a future-dated pepper retirement is refused the same way", () => {
+  // Worth its own case: getting this wrong on the pepper ring means the
+  // previous generation of refresh tokens keeps verifying long past the
+  // approved thirty days, which is the window that matters most.
+  const misdated = env({ MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: "pep-1@2099-01-01T00:00:00.000Z" });
+
+  assert.equal(mobileRefreshPepperById("pep-1", misdated, retiredAtMs), null);
+  assert.equal(activeMobileRefreshPepper(misdated).keyId, "pep-2");
+});
+
+test("futureDatedMobileRetirements names every bad line, not just the first", () => {
+  // The pre-deploy check refuses a deploy over these, so it wants the list.
+  const found = futureDatedMobileRetirements(
+    new Map([
+      ["sign-1", Date.parse("2099-01-01T00:00:00.000Z")],
+      ["sign-0", retiredAtMs],
+      ["sign-9", Date.parse("2100-01-01T00:00:00.000Z")],
+    ]),
+    retiredAtMs
+  );
+
+  assert.deepEqual(
+    found.map((entry) => entry.keyId),
+    ["sign-1", "sign-9"]
+  );
 });

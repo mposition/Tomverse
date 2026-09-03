@@ -53,6 +53,11 @@ D6과 승인 결정 3번입니다.
   찍어 내는 것이 이 장치가 막으려는 실수입니다.
 - 유예를 지난 키는 링에 남아 있어도 쓰이지 않습니다. 답은 "설정된 적 없는 키"와
   같고, 검증기는 `unknown_kid`로 보고합니다.
+- **은퇴 시각이 미래이면 그 키는 아무것도 검증하지 않습니다.** `sign-1@2099-01-01…`은
+  문법상 멀쩡하고 "RETIRED, verifies until 2099"로 보고되며 **70년치 신뢰**입니다 —
+  승인된 15분이 아무것도 가리키지 않게 됩니다. 은퇴는 신뢰를 거둔 시각이므로 과거이고,
+  미래 시각은 오타입니다. 운영자 시계가 조금 앞설 수 있으므로 **5분**까지는 허용합니다
+  (`MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS`). §2.1 검사가 배포 전에 실패시킵니다.
 - 링에 없는 id가 은퇴 목록에 있으면 **로그를 남기고 무시합니다.** 정리하고 남은 줄과
   오타는 여기서 구분되지 않기 때문입니다. **오타가 위험하지 않은 이유는 그 줄이
   무시돼서가 아니라 위 규칙 때문입니다** — 은퇴시키려던 진짜 키는 선언되지 않은
@@ -149,6 +154,7 @@ op run --env-file ./mobile-auth.env -- pwsh -File ./scripts/ops/Check-MobileAuth
 출력합니다. 실패하는 것:
 
 - `UNDECLARED`가 하나라도 있을 때
+- **은퇴 시각이 미래일 때** (`RETIREMENT IN THE FUTURE`)
 - 링에 없는 id를 은퇴 목록이 지목할 때 (오타의 다른 절반)
 - active id가 링에 없거나, 은퇴했거나, 그 키가 서명하지 못할 때
 - **일부만 설정됐을 때** — 모바일 인증이 전부 503이 되는데 endpoint는 어느 변수가
@@ -165,21 +171,35 @@ wrapper가 지키기로 한 것은 **네 가지이고 전부 부재(不在)**입
 출력에 없고, 끝난 뒤 환경에 없고, 실패가 조용히 삼켜지지 않는 것. 부재는 검토가 가장
 못 보는 것이라 테스트를 붙였습니다.
 
+**wrapper는 둘이고 smoke test도 둘입니다** — `Check-MobileAuthKeyring.ps1`(배포 전)과
+`Invoke-MobileAuthDeploymentVerify.ps1`(배포 후). 뒤쪽은 링 둘에 더해 **live
+credential 둘**을 다루므로 같은 계약이 더 중요합니다.
+
+```powershell
+./scripts/ops/Test-CheckMobileAuthKeyring.ps1
+./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1
+```
+
 **로컬 PC의 PowerShell, clone 폴더 안.** 자격증명이 필요 없고 네트워크에 닿지 않으며
 실제 `npm`을 부르지도 않습니다 — `Read-Host`와 `npm`을 함수로 가려서 wrapper를 진짜로
 실행합니다(PowerShell은 application보다 function을 먼저 찾습니다).
 
-```powershell
-./scripts/ops/Test-CheckMobileAuthKeyring.ps1
-```
-
-| 사례 | 무엇을 고정하나 |
+| 사례 (`Test-CheckMobileAuthKeyring.ps1`, 19건) | 무엇을 고정하나 |
 |---|---|
 | 1a–1b | wrapper가 파싱되고, **parameter 집합이 허용 목록과 정확히 같습니다.** "비밀처럼 보이는 이름"을 찾지 않습니다 — 그러면 `-SigningKeyRing`이 통과합니다. 목록을 닫아 두면 새 parameter를 추가할 때 그것이 비밀인지 묻게 됩니다 |
 | 2a–2e | 프롬프트가 두 번 뜨고 **둘 다 `-AsSecureString`으로 묻고**, `-RequireConfigured`가 검사기까지 가고, 검사기의 **종료 코드가 그대로 반환**됩니다. `-AsSecureString`이 빠지면 입력하는 링이 화면에 그대로 보입니다 |
 | 3a–3c | 성공·실패·**중단** 뒤 `MOBILE_AUTH_*` 여덟 개가 전부 사라집니다 |
 | 4a–4c | 두 비밀이 **어느 stream에도** 없고(`*>&1`로 전부 수집합니다), **두 길이**는 각각 있습니다 |
 | 5a–5f | `-UsePreinjectedRings`에서 **프롬프트가 뜨지 않고**, `op run`이 주입한 두 링이 **덮어써지지 않은 채 검사기까지 가고**, 주입이 없으면 검사를 돌리지 않고 실패하며, 어느 경우에도 환경은 비워지고 링은 출력에 없습니다 |
+
+| 사례 (`Test-InvokeMobileAuthDeploymentVerify.ps1`, 17건) | 무엇을 고정하나 |
+|---|---|
+| 1a–1b | 파싱되고, parameter 집합이 허용 목록과 정확히 같습니다 — **두 링도 두 token도 parameter가 아닙니다** |
+| 2a–2e | 프롬프트 **넷**(링 둘 + live credential 둘)이 전부 `-AsSecureString`이고, verifier가 호출되며, 종료 코드가 그대로 반환됩니다 |
+| 3a–3b | 성공·실패 뒤 **열세 개** 변수가 전부 사라집니다 |
+| 4a | `-Mode`가 verifier까지 갑니다. **실패 안내가 여기서 갈립니다** — emergency에서 "Active로 롤백"은 버린 링을 복구하라는 말입니다 |
+| 5a–5d | 두 링과 두 token이 **어느 stream에도** 없고, 길이는 있고, **exchange를 폐기하라는 안내**가 나옵니다 |
+| 6a–6c | 주입 모드에서는 프롬프트가 **둘**(token만)이고, 주입이 없으면 프롬프트도 verify도 없이 실패합니다 |
 
 3c의 "중단"은 두 번째 프롬프트를 던지게 해서 만듭니다 — Ctrl-C가 `finally`로 들어가는
 것과 같은 terminating error 경로입니다. **진짜 Ctrl-C는 키보드 이벤트라 수동 확인으로
@@ -353,17 +373,38 @@ access token, refresh token, 그리고 그 exchange가 만든 `MobileRefreshRota
 
 **이 exchange는 진짜 세션입니다.** 끝나면 폐기합니다(§3의 6번에 적혀 있습니다).
 
+**증거는 신선해야 합니다.** 재료 대조는 **나이를 보지 못합니다** — 일주일 전에 발급된
+token도 같은 키에 대해 똑같이 검증됩니다. 그래서 script는 `iat`가 15분(기본,
+`MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS`) 안이고 `exp`가 아직 지나지 않았는지 봅니다.
+**지난 회전에서 남겨 둔 증거가 통과하면, 증명되는 것은 "그때 맞았다"뿐입니다.**
+
 **이전 세대는 행동으로 확인합니다.** 은퇴한 항목은 관측 경로가 없지만, **유예 안에서는
 쓰이므로 써 보면 됩니다** — 배포 **전에** 받아 둔 access token이 배포 후에도 받아들여지면
 이전 서명 키가 온전한 것이고, 배포 전에 받아 둔 refresh token이 회전에 성공하면 이전
-pepper가 온전한 것입니다. **롤백이 의존하는 것이 정확히 이 둘**이므로 확인할 값이
-있습니다.
+pepper가 온전한 것입니다.
+
+> **rev.15 정정 — 이것은 롤백 호환성이 아닙니다.** rev.14는 "롤백이 의존하는 것이
+> 정확히 이 둘"이라고 적었고 **틀렸습니다.** 이 확인이 증명하는 것은 **새 배포가 이전
+> 세대를 계속 받아 준다**는 것(정방향 호환성)이고, 그것이 배포 순간에 아무도
+> 로그아웃되지 않는 이유입니다.
+>
+> **롤백은 반대 방향이고 그렇게 될 수 없습니다.** Active로 되돌린 배포에는 새 키·새
+> pepper가 없으므로, **배포 이후에 발급된 자격증명은 전부 거절됩니다.** 롤백은 배포
+> 후 생긴 세션을 잃는 것이 값이며, 그 값은 롤백이 늦을수록 큽니다. 이 확인으로 줄어드는
+> 것이 아닙니다.
 
 | 대상 | 증명됨? |
 |---|---|
 | 활성 서명 키 재료 · 활성 pepper 재료 · `iss` · `aud` | **예** — 위 script |
-| 은퇴한 서명 키 · 은퇴한 pepper (유예 안) | **행동으로** — 배포 전 토큰이 배포 후에도 동작하는지 |
+| 증거가 이 배포의 것인가 | **예** — `iat`·`exp` 신선도 |
+| 후보의 은퇴 선언이 실제 은퇴인가 | **예** — 미래 시각 은퇴는 실패입니다(§2의 규칙) |
+| 은퇴한 서명 키 · 은퇴한 pepper (유예 안) | **행동으로, 정방향만** — 새 배포가 이전 세대를 받아 주는지. **롤백 호환성은 아닙니다**(위 정정) |
 | 유예가 지난 링 항목 | **아니오.** 그리고 **런타임에서는 문제가 되지 않습니다** — 그 항목들은 이미 아무것도 검증하지 않습니다. 다음 회전에서 링을 편집할 때만 문제이고, 그때 편집의 기준은 Railway가 아니라 store입니다(계약 1·2번) |
+
+**실패했을 때의 지시는 상황에 따라 다릅니다.** `MOBILE_AUTH_VERIFY_MODE`가 `rotation`
+(기본)이면 Active로 롤백하라고 하고, `emergency`(§5.1)면 **롤백하지 말라고 합니다** —
+그 상황에서 "이전으로 되돌리기"는 이 절차가 버린 링을 복구하는 일이고, 유출이었다면
+유출된 링입니다.
 
 **그래서 계약 3번의 "일치"는 이렇게 읽습니다** — 위 셋은 증명하고, 유예 지난 잔여
 항목은 증명하지 않으며 증명할 필요도 없습니다. **증명하지 않는 것을 증명한 것처럼
@@ -414,12 +455,25 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    token·refresh token과 그때 생긴 `MobileRefreshRotation` 행의
    `secretDigest`·`pepperKid`를 모으고,
 
-   ```
-   npm run verify:mobile-auth-deployment
+   ```powershell
+   ./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1 `
+     -ActiveSigningKeyId "<Pending>" -ActiveRefreshPepperId "<Pending>" `
+     -TokenIssuer "<Pending>" -TokenAudience "<Pending>" `
+     -RetiredSigningKeys "<Pending>" -RetiredRefreshPeppers "<Pending>" `
+     -SecretDigest "<행에서>" -PepperKid "<행에서>"
    ```
 
-   를 **Pending 값과 그 넷을 환경변수로 넣고** 실행합니다. **그리고 그 exchange 세션을
-   폐기합니다** — 진짜 자격증명입니다.
+   **두 링과 두 token은 인수가 아니라 프롬프트로 들어갑니다** — refresh token은 family를
+   회전시키는 bearer secret이고, 인수는 명령줄에 남습니다. 끝나면 여덟 + 다섯 개
+   환경변수를 `finally`가 지웁니다. `op run` 아래에서는 `-UsePreinjectedRings`를
+   붙입니다(그래도 두 token은 물어봅니다 — store가 아니라 방금 만든 exchange에서 오는
+   값입니다).
+
+   **증거는 15분 안에 모읍니다**(`MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS`). 재료 대조는
+   나이를 못 보므로, 오래된 token은 "그때 맞았다"만 증명합니다.
+
+   **그리고 그 exchange 세션을 폐기합니다** — 진짜 자격증명이고 script가 대신 해 줄 수
+   없습니다.
 7. **이전 세대를 확인합니다**(유예 안): 4.5번에서 받아 둔 access token이 아직
    받아들여지는지, refresh token이 회전에 성공하는지. 실패하면 **롤백이 동작하지 않는
    상태**이므로 8번의 승격을 하지 않습니다.
@@ -535,9 +589,12 @@ Active로 승격합니다. store만 정리하고 Railway를 두면 다음 회전
    아닙니다: 1번에서 만든 값을 store에 먼저 씁니다.
 7. §2.1의 검사를 그 값으로 실행하고, **단일 staged 배포**로 여덟 변수를 함께 씁니다.
    deployment ID를 적습니다.
-8. **배포 후 두 가지를 확인합니다** — `npm run verify:mobile-auth-deployment`로 새
-   재료가 맞는지, 그리고 **이전 access/refresh가 이제 거절되는지**. 두 번째가 이
-   절차의 목적입니다: 신뢰를 잃은 세대가 실제로 끊겼다는 확인입니다.
+8. **배포 후 두 가지를 확인합니다** — `-Mode emergency`로 verify를 돌려 새 재료가
+   맞는지, 그리고 **이전 access/refresh가 이제 거절되는지**. 두 번째가 이 절차의
+   목적입니다: 신뢰를 잃은 세대가 실제로 끊겼다는 확인입니다.
+   **`-Mode emergency`가 중요합니다** — 기본 `rotation` 모드의 실패 안내는 "Active로
+   롤백"인데, 여기서 그것은 **이 절차가 버린 링(유출이었다면 유출된 링)을 복구하라는
+   말**이 됩니다.
 9. **통과하면 `Emergency Pending`을 Active로 승격**합니다.
 
 > **왜 여기서도 Pending을 쓰는가.** `Active`의 뜻은 "지금 배포돼 있는 값"입니다.

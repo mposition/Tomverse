@@ -768,6 +768,66 @@ target SHA · **Railway deployment ID**(배포 생성 후). 뒤의 둘이 없으
 
 ---
 
+### 5.12 13차 검토(2026-09-03)에서 지적돼 고친 것
+
+다섯 건이고, **넷은 제가 방금 만든 것의 결함**입니다.
+
+**1. [높음] 만료된 과거 증거가 `PASS`였습니다.**
+재료 대조는 **나이를 보지 못합니다** — 일주일 전 token도 같은 키에 대해 똑같이
+검증됩니다. 그래서 지난 회전에서 남겨 둔 증거가 전부 통과했고, 증명되는 것은 "그때
+맞았다"뿐이었습니다.
+→ `iat`가 15분(기본, `MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS`) 안이고 `exp`가 지나지
+않았는지 봅니다. 테스트 둘: 8일 된 증거(**나머지는 전부 `OK`인 채** 신선도만 실패),
+그리고 2분 전 발급됐지만 만료된 token.
+
+**2. [높음] retirement 시각이 2099년이어도 `PASS`였습니다 — 세 층 다 고쳤습니다.**
+`sign-1@2099-01-01…`은 문법상 멀쩡하고 "RETIRED, verifies until 2099"로 보고되며
+**70년치 신뢰**입니다. 승인된 15분이 아무것도 가리키지 않게 됩니다.
+
+이건 verifier만의 문제가 아니라 **런타임 규칙의 구멍**이었습니다 — 오타 난 은퇴 id와
+같은 종류이고, `usableEntry`가 세 번째로 답해야 할 질문이었습니다.
+
+| 층 | 무엇을 했나 |
+|---|---|
+| 런타임 (`lib/mobileAuthKeyring.ts`) | **도착하지 않은 은퇴 시각은 은퇴가 아닙니다** — 그 키는 아무것도 검증하지 않습니다. 운영자 시계가 앞설 수 있으므로 5분 허용(`MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS`) |
+| 배포 전 검사 | `RETIREMENT IN THE FUTURE`로 보고하고 **실패**합니다 |
+| 배포 후 verifier | 후보 링의 은퇴 선언을 같은 규칙으로 다시 봅니다 — 승격 직전의 마지막 관문이므로 |
+
+테스트: 런타임 4건(양쪽 링, skew 허용, 목록 함수), 검사기 1건(양쪽 링), verifier 1건.
+
+**3. [높음] 실패 안내가 emergency에서도 "Active로 롤백"이었습니다.**
+§5.1은 **이전 링을 믿을 수 없어서** 오는 곳입니다. 거기서 "이전으로 되돌리기"는 이
+절차가 버린 링을 복구하라는 말이고, 유출이었다면 **유출된 링**입니다.
+→ `MOBILE_AUTH_VERIFY_MODE`(`rotation` 기본 / `emergency`)가 안내를 가릅니다.
+emergency에서는 롤백을 지시하지 않고 **모바일 인증 비활성화 또는 roll-forward**를
+말합니다. 모르는 모드는 **실패**합니다 — 기본값으로 흘러가면 그것이 바로 이 결함입니다.
+
+**4. [높음] 이전 refresh의 성공은 롤백 호환성이 아닙니다.**
+rev.14가 "롤백이 의존하는 것이 정확히 이 둘"이라고 적었고 **틀렸습니다.** 그 확인이
+증명하는 것은 **새 배포가 이전 세대를 받아 준다**는 **정방향** 호환성이고, 배포 순간
+아무도 로그아웃되지 않는 이유입니다. **롤백은 반대 방향이고 그렇게 될 수 없습니다** —
+되돌린 배포에는 새 키·새 pepper가 없으므로 **배포 이후 발급된 자격증명은 전부
+거절됩니다.** 롤백의 값은 그 세션들이고, 이 확인으로 줄어들지 않습니다. runbook §2.2와
+릴리스 체크리스트를 고쳤습니다.
+
+**5. [높음] verifier에 token을 안전하게 넣는 wrapper가 없었습니다.**
+verify가 다루는 값은 링 둘 + **live credential 둘**이고, refresh token은 family를
+회전시키는 bearer secret입니다. 그것을 인수로 주면 명령줄에 남습니다.
+→ `scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1`. 넷 다 `Read-Host
+-AsSecureString`, `-Mode`·`-UsePreinjectedRings` 지원(주입 모드에서도 **token 둘은
+물어봅니다** — store가 아니라 방금 만든 exchange에서 오는 값입니다), `finally`에서 **열세
+개** 변수 제거, 길이만 출력, 그리고 **exchange를 폐기하라는 안내**(script가 대신 할 수
+없습니다). smoke test 17건 + mutation 4건 확인:
+
+| 고의 결함 | 걸린 사례 |
+|---|---|
+| refresh token을 parameter로 | 1b |
+| `Write-Warning`으로 token 유출 | 5a |
+| `-Mode` 전달 누락 | 4a |
+| 정리 목록에서 refresh token 누락 | 3a · 3b · 6b |
+
+---
+
 ## 6. 검증
 
 이 보고서를 쓴 시점에 실행한 것입니다.
@@ -794,6 +854,10 @@ target SHA · **Railway deployment ID**(배포 생성 후). 뒤의 둘이 없으
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
 >
+> **rev.15 (2026-09-03).** 13차 검토의 다섯 건은 §5.12입니다. **넷은 rev.14에서 제가
+> 만든 것의 결함**이고, 그중 하나(미래 시각 은퇴)는 verifier가 아니라 **런타임 규칙의
+> 구멍**이었습니다.
+>
 > **rev.14 (2026-09-03).** 12차 검토의 다섯 건은 §5.11입니다. 둘은 코드가 필요했고
 > (`verify:mobile-auth-deployment` 신설, wrapper의 `-UsePreinjectedRings`), 그중
 > 하나는 **id 대조가 계약이 요구하는 것을 증명하지 못한다**는 지적이었습니다.
@@ -817,6 +881,14 @@ target SHA · **Railway deployment ID**(배포 생성 후). 뒤의 둘이 없으
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.15 회차.** 이번에는 **런타임(`lib/mobileAuthKeyring.ts`)이 바뀌었으므로**
+> lane을 넓게 돌렸습니다 — `test:unit` **7,646 pass / 0 fail**,
+> `test:server-contract` **511 pass / 0 fail**, `lint app components lib tests scripts`,
+> `typecheck`, smoke test **19/19**와 **17/17**, `check:mobile-auth-keyring`·
+> `check:enum-constraints`·`check:data-domain-registry`·`check:doc-references`·
+> `check:policy-section-references`·`check:encoding:strict` 통과. **DB integration과
+> build는 다시 돌리지 않았습니다** — schema도 route도 바뀌지 않았습니다.
 >
 > **rev.14 회차.** 코드가 들어갔으므로 lane을 다시 돌렸습니다 —
 > `npm run test:unit` **7,632 pass / 0 fail**(1 skipped, 기존; 새 verifier 테스트 7건
