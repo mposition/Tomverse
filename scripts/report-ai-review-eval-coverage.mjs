@@ -21,7 +21,10 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { datasetManifest } from "../lib/aiReviewEvalPlan.ts";
+import {
+  datasetManifest,
+  NEAR_DUPLICATE_SIMILARITY,
+} from "../lib/aiReviewEvalPlan.ts";
 import {
   DRAFT_DISCARD_FLOOR_CHARACTERS,
   DRAFT_TARGET_RESPONSE_RANGE,
@@ -158,6 +161,26 @@ for (const path of paths) {
           `discard floor, which new drafting refuses outright. That floor is a check on the ` +
           `shape of a reply, not a quality bar -- these predate it.`
       );
+    }
+  }
+
+  const similarity = manifest.answerSimilarity;
+  if (similarity.pairs > 0) {
+    console.log("\n  how alike the answers within a case are (character-trigram overlap, 0-1)");
+    console.log(
+      `    median ${similarity.median}   max ${similarity.max}   (${similarity.pairs} pair(s))`
+    );
+    if (similarity.near.length > 0) {
+      console.log(
+        `    ${similarity.near.length} pair(s) at or above ${NEAR_DUPLICATE_SIMILARITY}. This is a ` +
+          `WARNING, not a failure: three answers to one question share its vocabulary, and two ` +
+          `that open alike may still differ on the point the case is about. Read these and decide.`
+      );
+      for (const pair of similarity.near) {
+        console.log(
+          `      ${pair.id}  ${pair.labels[0]}/${pair.labels[1]}  ${pair.similarity}`
+        );
+      }
     }
   }
 
