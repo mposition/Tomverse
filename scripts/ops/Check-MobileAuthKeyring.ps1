@@ -45,6 +45,25 @@
     Pass for a deployment that serves mobile auth: an entirely unconfigured
     environment then fails instead of passing.
 
+.PARAMETER UsePreinjectedRings
+    Do not prompt: take MOBILE_AUTH_SIGNING_KEYS and MOBILE_AUTH_REFRESH_PEPPERS
+    from the environment this script was started with. That is what `op run`
+    gives it -- 1Password injects a secret reference into the child process at
+    run time, so the value never lands in a file or in shell history either.
+    Without this switch the prompts would overwrite whatever `op run` injected,
+    which is the same mistake in the other direction. Missing or empty rings are
+    a failure here, never a silent run against an empty ring.
+
+.EXAMPLE
+    op run --env-file ./mobile-auth.env -- pwsh -File ./scripts/ops/Check-MobileAuthKeyring.ps1 `
+      -ActiveSigningKeyId sign-2 -ActiveRefreshPepperId pep-2 `
+      -TokenIssuer https://tomverse.app -TokenAudience tomverse-mobile-api `
+      -RetiredSigningKeys "sign-1@2026-09-02T10:00:00Z" `
+      -RequireConfigured -UsePreinjectedRings
+
+    The same check with the rings coming from 1Password instead of the
+    keyboard. The env file holds secret references, not secrets.
+
 .EXAMPLE
     ./scripts/ops/Check-MobileAuthKeyring.ps1 `
       -ActiveSigningKeyId sign-2 -ActiveRefreshPepperId pep-2 `
@@ -63,7 +82,8 @@ param(
     [Parameter(Mandatory = $true)][string] $TokenAudience,
     [string] $RetiredSigningKeys = "",
     [string] $RetiredRefreshPeppers = "",
-    [switch] $RequireConfigured
+    [switch] $RequireConfigured,
+    [switch] $UsePreinjectedRings
 )
 
 Set-StrictMode -Version Latest
@@ -79,6 +99,9 @@ if (Test-Path Variable:\PSNativeCommandUseErrorActionPreference) {
 # Non-zero unless the check says otherwise: a path that skips the assignment
 # must not read as a pass.
 $exit = 1
+
+# Declared here so the branches below can both read it under strict mode.
+$missing = @()
 
 # The two secrets, never as parameters: a parameter value is in the command
 # line, and the command line is what gets saved.
@@ -108,27 +131,55 @@ $assigned = @(
 )
 
 try {
-    $env:MOBILE_AUTH_SIGNING_KEYS = Read-SecretValue -Prompt "MOBILE_AUTH_SIGNING_KEYS (id:base64,...)"
-    $env:MOBILE_AUTH_REFRESH_PEPPERS = Read-SecretValue -Prompt "MOBILE_AUTH_REFRESH_PEPPERS (id:secret,...)"
-
-    $env:MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID = $ActiveSigningKeyId
-    $env:MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID = $ActiveRefreshPepperId
-    $env:MOBILE_AUTH_RETIRED_SIGNING_KEYS = $RetiredSigningKeys
-    $env:MOBILE_AUTH_RETIRED_REFRESH_PEPPERS = $RetiredRefreshPeppers
-    $env:MOBILE_AUTH_TOKEN_ISSUER = $TokenIssuer
-    $env:MOBILE_AUTH_TOKEN_AUDIENCE = $TokenAudience
-
-    # Lengths, never values -- enough to catch a paste that lost a character.
-    Write-Host ("MOBILE_AUTH_SIGNING_KEYS length: {0}" -f $env:MOBILE_AUTH_SIGNING_KEYS.Length)
-    Write-Host ("MOBILE_AUTH_REFRESH_PEPPERS length: {0}" -f $env:MOBILE_AUTH_REFRESH_PEPPERS.Length)
-
-    if ($RequireConfigured) {
-        npm run check:mobile-auth-keyring -- --require-configured
+    if ($UsePreinjectedRings) {
+        # Already on the environment -- read them rather than replacing them.
+        # An empty ring here means the injection did not happen, and running
+        # anyway would report "partly configured" for a reason that has nothing
+        # to do with the values being deployed.
+        #
+        # The outer @() matters: a Where-Object that matches nothing yields
+        # $null, and $null.Count throws under Set-StrictMode.
+        $missing = @(
+            @(
+                "MOBILE_AUTH_SIGNING_KEYS",
+                "MOBILE_AUTH_REFRESH_PEPPERS"
+            ) | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+        )
     }
     else {
-        npm run check:mobile-auth-keyring
+        $env:MOBILE_AUTH_SIGNING_KEYS = Read-SecretValue -Prompt "MOBILE_AUTH_SIGNING_KEYS (id:base64,...)"
+        $env:MOBILE_AUTH_REFRESH_PEPPERS = Read-SecretValue -Prompt "MOBILE_AUTH_REFRESH_PEPPERS (id:secret,...)"
     }
-    $exit = $LASTEXITCODE
+
+    if ($missing.Count -gt 0) {
+        # Said plainly rather than thrown: this is an operator mistake with an
+        # obvious remedy, and a stack trace buries the sentence naming it.
+        # Nothing is checked -- there is nothing to check -- and the finally
+        # below still clears the environment.
+        Write-Host ("FAIL -UsePreinjectedRings was passed but {0} is empty. Nothing injected it." -f ($missing -join " and "))
+        Write-Host "     Run this under 'op run', or drop the switch to be prompted."
+        $exit = 1
+    }
+    else {
+        $env:MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID = $ActiveSigningKeyId
+        $env:MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID = $ActiveRefreshPepperId
+        $env:MOBILE_AUTH_RETIRED_SIGNING_KEYS = $RetiredSigningKeys
+        $env:MOBILE_AUTH_RETIRED_REFRESH_PEPPERS = $RetiredRefreshPeppers
+        $env:MOBILE_AUTH_TOKEN_ISSUER = $TokenIssuer
+        $env:MOBILE_AUTH_TOKEN_AUDIENCE = $TokenAudience
+
+        # Lengths, never values -- enough to catch a paste that lost a character.
+        Write-Host ("MOBILE_AUTH_SIGNING_KEYS length: {0}" -f $env:MOBILE_AUTH_SIGNING_KEYS.Length)
+        Write-Host ("MOBILE_AUTH_REFRESH_PEPPERS length: {0}" -f $env:MOBILE_AUTH_REFRESH_PEPPERS.Length)
+
+        if ($RequireConfigured) {
+            npm run check:mobile-auth-keyring -- --require-configured
+        }
+        else {
+            npm run check:mobile-auth-keyring
+        }
+        $exit = $LASTEXITCODE
+    }
 }
 finally {
     # Runs on success, on failure and on Ctrl-C. Leaving a signing key on the

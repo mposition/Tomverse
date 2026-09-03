@@ -75,6 +75,22 @@ D6과 승인 결정 3번입니다.
 **로컬 PC의 PowerShell, Tomverse clone 폴더 안.** Node 22와 `npm ci`가 끝나 있어야
 합니다. **지금 배포하려는 값**으로 실행합니다.
 
+1Password에서 링을 주입할 때는 `-UsePreinjectedRings`를 붙이고 `op run` 아래에서
+실행합니다 — 그러면 값이 파일에도 셸 이력에도 들어가지 않고, **프롬프트가 주입된 값을
+덮어쓰지 않습니다.**
+
+```powershell
+op run --env-file ./mobile-auth.env -- pwsh -File ./scripts/ops/Check-MobileAuthKeyring.ps1 `
+  -ActiveSigningKeyId "<배포할 값>" -ActiveRefreshPepperId "<배포할 값>" `
+  -TokenIssuer "<배포할 값>" -TokenAudience "<배포할 값>" `
+  -RetiredSigningKeys "<배포할 값>" -RetiredRefreshPeppers "<배포할 값>" `
+  -RequireConfigured -UsePreinjectedRings
+```
+
+`op.env` 파일에는 secret reference만 들어가고 비밀은 들어가지 않습니다. **그 파일의
+정확한 문구는 아직 정하지 않았습니다**(§6). 주입 없이 손으로 넣을 때는 스위치를 빼고
+프롬프트를 씁니다.
+
 ```powershell
 ./scripts/ops/Check-MobileAuthKeyring.ps1 `
   -ActiveSigningKeyId "<배포할 값>" `
@@ -163,6 +179,7 @@ wrapper가 지키기로 한 것은 **네 가지이고 전부 부재(不在)**입
 | 2a–2e | 프롬프트가 두 번 뜨고 **둘 다 `-AsSecureString`으로 묻고**, `-RequireConfigured`가 검사기까지 가고, 검사기의 **종료 코드가 그대로 반환**됩니다. `-AsSecureString`이 빠지면 입력하는 링이 화면에 그대로 보입니다 |
 | 3a–3c | 성공·실패·**중단** 뒤 `MOBILE_AUTH_*` 여덟 개가 전부 사라집니다 |
 | 4a–4c | 두 비밀이 **어느 stream에도** 없고(`*>&1`로 전부 수집합니다), **두 길이**는 각각 있습니다 |
+| 5a–5f | `-UsePreinjectedRings`에서 **프롬프트가 뜨지 않고**, `op run`이 주입한 두 링이 **덮어써지지 않은 채 검사기까지 가고**, 주입이 없으면 검사를 돌리지 않고 실패하며, 어느 경우에도 환경은 비워지고 링은 출력에 없습니다 |
 
 3c의 "중단"은 두 번째 프롬프트를 던지게 해서 만듭니다 — Ctrl-C가 `finally`로 들어가는
 것과 같은 terminating error 경로입니다. **진짜 Ctrl-C는 키보드 이벤트라 수동 확인으로
@@ -217,9 +234,12 @@ wrapper가 지키기로 한 것은 **네 가지이고 전부 부재(不在)**입
 3. **store에는 항목이 둘이고, 드리프트는 Active에 대해서만 판정합니다**(아래
    "Active와 Pending"). **Active와 Railway가 어긋나면 배포를 중단**하고, store를
    기준으로 Railway를 복구한 뒤 §2.1의 wrapper 검사와 **단일 staged 배포**를 다시
-   수행합니다. 어긋난 채로 진행하지 않습니다.
-4. **배포 후 (c)로 두 활성 id를 대조합니다** — 활성 서명 키 id와 활성 pepper id 둘 다.
-   아래 "선택적 보완"이 (c)였고, 이 승인으로 **회전 절차의 일부**가 됐습니다.
+   수행합니다. 어긋난 채로 진행하지 않습니다. **다만 "어긋난다"를 무엇으로 관측하는지가
+   따로 정해져 있어야 합니다** — 아래 "무엇이 실제로 증명되는가".
+4. **배포 후 두 링의 재료를 암호로 대조합니다**(`npm run verify:mobile-auth-deployment`).
+   id 대조만으로는 부족합니다: 같은 id 아래 다른 개인키·pepper가 들어가도 id는 맞기
+   때문입니다. 아래 "선택적 보완"이 (c)였고, 이 승인으로 **회전 절차의 일부**가
+   됐습니다.
 5. **secret store의 평문까지 잃거나 믿을 수 없으면 정상 회전을 시도하지 않습니다.**
    그때는 §5.1의 **전면 교체**입니다 — 이전 링을 재현할 수 없으므로 회전이 아니라
    두 링을 통째로 새로 만드는 별개 절차이고, 기존 모바일 자격증명 전체 무효화와
@@ -251,8 +271,20 @@ Railway에는 아직 이전 링이 있는 것이 맞습니다. 그래서 항목�
 5. **실패하면 Active로 Railway를 롤백하고 Pending을 폐기합니다.** 승격은 검증 뒤에만
    일어나므로, 실패한 배포가 정본을 오염시키지 않습니다.
 
-**Pending에 target SHA를 함께 적습니다.** 그것이 없으면 나중에 남아 있는 Pending이
-"이번 배포용"인지 "지난번에 실패하고 남은 것"인지 구분되지 않습니다.
+**Pending은 값만 담지 않습니다.** target SHA 하나로는 부족합니다 — 비밀값 변경은 코드
+변경 없이도 staged 배포를 만들므로, **서로 다른 회전과 그 재시도가 같은 Git SHA를
+가질 수 있습니다.** 최소한 다음을 함께 적습니다.
+
+| 항목 | 왜 |
+|---|---|
+| `rotationId` | 이 회전을 유일하게 가리킵니다. 재시도는 같은 `rotationId`의 다음 시도이고, 다른 회전은 다른 id입니다 |
+| `createdAt` | 남아 있는 Pending이 언제 것인지. 오래된 Pending은 그 자체가 신호입니다 |
+| candidate fingerprint | §2.1 검사를 통과시킨 값의 지문. **배포 후 대조가 이 값에 대해 이뤄집니다** |
+| target SHA | 함께 나가는 코드. 유일 식별자는 아니지만 무엇과 같이 배포되는지를 말합니다 |
+| Railway deployment ID | 배포를 만든 뒤 적습니다. **어느 staged 배포가 이 Pending을 실었는지**를 잇는 유일한 값입니다 |
+
+`rotationId`와 deployment ID가 없으면 "이 Pending이 실린 배포"를 지목할 수 없고,
+그러면 롤백 대상도 지목할 수 없습니다.
 
 ### 결정란 — 확정(2026-09-02)
 
@@ -301,10 +333,41 @@ secret reference 주입)은 제품 선택과 함께 운영자가 확인한 사�
 | 활성 **pepper** id | **가능.** `MobileRefreshRotation.pepperKid`가 그 digest를 계산한 pepper 세대를 행에 남깁니다(`lib/mobileRefreshToken.ts`가 채우고 `lib/mobileAuthService.ts`가 씁니다). 통제된 exchange 또는 refresh 직후 **그때 생긴 행**을 읽습니다 |
 | 두 링의 나머지 항목(은퇴 포함) | **불가.** 어떤 키가 링에 있을 뿐인지를 알리는 것이 없습니다 |
 
-그러므로 **대조 범위는 두 활성 id입니다.** 그 이상을 원하면 §6의
-"살아 있는 설정 감사"가 먼저 필요하고, 그것은 별개의 작업입니다. **(c)를 전면 대조로
-적어 두고 실제로는 두 필드만 보는 것이 가장 나쁜 결과입니다** — 대조했다는 기록이
-대조되지 않은 값까지 덮습니다.
+### 무엇이 실제로 증명되는가 — id가 아니라 재료
+
+> **rev.14 정정.** rev.13까지 이 절은 **id 대조로 끝났습니다.** 그것은 계약 3번이
+> 요구하는 "Active와 Railway 일치"를 증명하지 못합니다 — **같은 id 아래 다른 유효한
+> 개인키나 pepper가 들어가도 id 대조는 통과**하고, 잘못된 값이 Active로 승격된 뒤
+> 롤백이나 다음 회전에서 토큰이 끊깁니다.
+
+`npm run verify:mobile-auth-deployment`이 배포 **후에** 재료를 대조합니다. 입력은
+전부 환경변수이고(인수는 명령줄에 남습니다), 통제된 exchange 한 번에서 나옵니다 —
+access token, refresh token, 그리고 그 exchange가 만든 `MobileRefreshRotation` 행의
+`secretDigest`·`pepperKid`.
+
+| 무엇 | 어떻게 |
+|---|---|
+| 활성 **서명 키 재료** | token의 서명을, **후보 개인키에서 유도한 공개키**로 검증합니다. Ed25519 공개키는 개인키가 결정하므로, 검증되면 배포된 키가 곧 후보 키입니다 |
+| 활성 **pepper 재료** | `HMAC-SHA256(후보 pepper, secret)`을 그 행의 `secretDigest`와 대조합니다 — **런타임 자신의 비교 함수**(`mobileRefreshSecretMatches`)로 하므로 판정이 갈라지지 않습니다 |
+| `iss` · `aud` | claim에서 읽어 후보 값과 비교합니다. token이 들고 다니고, 틀리면 조용합니다 |
+
+**이 exchange는 진짜 세션입니다.** 끝나면 폐기합니다(§3의 6번에 적혀 있습니다).
+
+**이전 세대는 행동으로 확인합니다.** 은퇴한 항목은 관측 경로가 없지만, **유예 안에서는
+쓰이므로 써 보면 됩니다** — 배포 **전에** 받아 둔 access token이 배포 후에도 받아들여지면
+이전 서명 키가 온전한 것이고, 배포 전에 받아 둔 refresh token이 회전에 성공하면 이전
+pepper가 온전한 것입니다. **롤백이 의존하는 것이 정확히 이 둘**이므로 확인할 값이
+있습니다.
+
+| 대상 | 증명됨? |
+|---|---|
+| 활성 서명 키 재료 · 활성 pepper 재료 · `iss` · `aud` | **예** — 위 script |
+| 은퇴한 서명 키 · 은퇴한 pepper (유예 안) | **행동으로** — 배포 전 토큰이 배포 후에도 동작하는지 |
+| 유예가 지난 링 항목 | **아니오.** 그리고 **런타임에서는 문제가 되지 않습니다** — 그 항목들은 이미 아무것도 검증하지 않습니다. 다음 회전에서 링을 편집할 때만 문제이고, 그때 편집의 기준은 Railway가 아니라 store입니다(계약 1·2번) |
+
+**그래서 계약 3번의 "일치"는 이렇게 읽습니다** — 위 셋은 증명하고, 유예 지난 잔여
+항목은 증명하지 않으며 증명할 필요도 없습니다. **증명하지 않는 것을 증명한 것처럼
+적지 않습니다.**
 
 > **rev.9 정정.** rev.8은 이 표에서 활성 pepper id를 "불가"로 적었고 **그것은 사실이
 > 아니었습니다.** `pepperKid`는 rotation 행마다 저장됩니다. 제가 schema를
@@ -334,7 +397,8 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    - `MOBILE_AUTH_SIGNING_KEYS` = `이전id:이전키,새id:새키`
    - `MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID` = `새id`
    - `MOBILE_AUTH_RETIRED_SIGNING_KEYS` = `이전id@<지금 UTC instant>` (기존 줄에 추가)
-2. **그 셋을 store의 Pending 항목에 씁니다** — target SHA와 함께. Active는 건드리지
+2. **그 셋을 store의 Pending 항목에 씁니다** — `rotationId`·`createdAt`·candidate
+   fingerprint·target SHA와 함께(§2.2 "Active와 Pending"). Active는 건드리지
    않습니다. **이 시점에 Railway가 Pending과 다른 것은 정상입니다**(§2.2 "Active와
    Pending").
 3. §2.1의 검사를 **Pending 값으로** 실행합니다. 이전 키가 `RETIRED, verifies until …`로,
@@ -342,14 +406,27 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
 4. **Active와 Railway가 일치하는지 확인합니다.** 어긋나면 이번 회전과 무관한
    드리프트이므로 **배포를 중단**하고, Active를 기준으로 Railway를 복구한 뒤 3번부터
    다시 합니다(계약 3번).
-5. Pending의 셋을 **한 번에** 저장하고 배포합니다.
-6. **배포 뒤 두 활성 id를 대조합니다**(계약 4번, §2.2의 (c)). 통제된 exchange를 한 번
-   성공시켜 access token의 `kid`와, 그때 생긴 `MobileRefreshRotation` 행의 `pepperKid`를
-   읽어 의도한 id와 같은지 봅니다.
-7. **통과하면 Pending을 Active로 승격**하고 Pending을 비웁니다. **실패하면 Active로
-   Railway를 롤백하고 Pending을 폐기합니다** — 승격이 검증 뒤에 있으므로 실패한 배포가
-   정본을 오염시키지 않습니다.
-8. **15분 뒤부터** 이전 키는 검증에 쓰이지 않습니다.
+4.5. **배포 전에 access token 하나와 refresh token 하나를 받아 둡니다.** 7번의
+   이전 세대 확인이 이것을 씁니다 — 배포 뒤에는 만들 수 없습니다.
+5. Pending의 셋을 **한 번에** 저장하고 배포합니다. **Railway deployment ID를 Pending에
+   적습니다** — 롤백 대상을 지목하는 유일한 값입니다.
+6. **배포 뒤 재료를 대조합니다**(계약 4번). 통제된 exchange를 한 번 성공시켜 access
+   token·refresh token과 그때 생긴 `MobileRefreshRotation` 행의
+   `secretDigest`·`pepperKid`를 모으고,
+
+   ```
+   npm run verify:mobile-auth-deployment
+   ```
+
+   를 **Pending 값과 그 넷을 환경변수로 넣고** 실행합니다. **그리고 그 exchange 세션을
+   폐기합니다** — 진짜 자격증명입니다.
+7. **이전 세대를 확인합니다**(유예 안): 4.5번에서 받아 둔 access token이 아직
+   받아들여지는지, refresh token이 회전에 성공하는지. 실패하면 **롤백이 동작하지 않는
+   상태**이므로 8번의 승격을 하지 않습니다.
+8. **6·7이 통과하면 Pending을 Active로 승격**하고 Pending을 비웁니다. **실패하면 5번의
+   deployment ID를 기준으로 Active로 롤백하고 Pending을 폐기합니다** — 승격이 검증 뒤에
+   있으므로 실패한 배포가 정본을 오염시키지 않습니다.
+9. **15분 뒤부터** 이전 키는 검증에 쓰이지 않습니다.
 
 > **rev.4 정정 — 왜 나눠 배포하면 안 되는가.** 이 문서의 이전 판은 ① 새 키만 추가해
 > 배포 ② 그 뒤 active 전환 ③ 그 뒤 은퇴 줄 추가로 적었습니다. 지금 규칙에서는 **두
@@ -452,16 +529,37 @@ Active로 승격합니다. store만 정리하고 Railway를 두면 다음 회전
    읽을 수 없는 값을 링에 두는 것은 `UNDECLARED`를 만드는 일입니다.
 3. **두 active id를 새 id로 바꿉니다.**
 4. **은퇴 목록 둘을 비웁니다.** 은퇴시킬 이전 세대가 존재하지 않습니다.
-5. **그 값을 store에 먼저 저장합니다** — 새 Active 항목을 만듭니다. Railway에서 store로
-   옮기는 방향이 아닙니다.
-6. §2.1의 검사를 그 값으로 실행하고, **단일 staged 배포**로 여덟 변수를 함께 씁니다.
-7. 배포 후 두 활성 id를 대조합니다.
-8. **기존 모바일 자격증명 전체 무효화를 확인합니다.** 이전 pepper가 사라졌으므로 살아
-   있던 refresh token은 전부 검증에 실패합니다. 세션 정리를 함께 할지는
-   `revokeAllUserSessions`로 판단합니다.
+5. **기존 Active를 `untrusted/unavailable`로 표시합니다.** 지우지 않습니다 — 나중에
+   그 값이 나타나면 무엇이었는지 알아야 합니다.
+6. **새 값을 `Emergency Pending`으로 저장합니다.** Railway에서 store로 옮기는 방향이
+   아닙니다: 1번에서 만든 값을 store에 먼저 씁니다.
+7. §2.1의 검사를 그 값으로 실행하고, **단일 staged 배포**로 여덟 변수를 함께 씁니다.
+   deployment ID를 적습니다.
+8. **배포 후 두 가지를 확인합니다** — `npm run verify:mobile-auth-deployment`로 새
+   재료가 맞는지, 그리고 **이전 access/refresh가 이제 거절되는지**. 두 번째가 이
+   절차의 목적입니다: 신뢰를 잃은 세대가 실제로 끊겼다는 확인입니다.
+9. **통과하면 `Emergency Pending`을 Active로 승격**합니다.
 
-**Pending은 여기서 쓰지 않습니다.** 승격할 Active가 이미 신뢰를 잃은 상태이고, 이
-절차의 결과물 자체가 새 Active입니다.
+> **왜 여기서도 Pending을 쓰는가.** `Active`의 뜻은 "지금 배포돼 있는 값"입니다.
+> 배포 전에 새 값을 Active로 적으면, 배포가 실패하거나 중단됐을 때 **store는 새 값을
+> 가리키고 런타임은 이전 값을 돌리는** 상태가 됩니다. 이전 Active를 믿을 수 없다는
+> 사실이 **새 후보가 곧 Active라는 뜻은 아닙니다.**
+>
+> **rev.14 정정.** rev.13의 §5.1은 5번에서 배포 전에 Active를 썼습니다. 위 이유로
+> 틀렸습니다.
+
+**8번이 실패하면 롤백할 곳이 없습니다.** 이전 Active는 이미 신뢰를 잃었고, 그것이 이
+절차로 온 이유입니다. 선택지는 둘뿐입니다.
+
+- **모바일 인증 비활성화** — 필수 여섯 변수를 걷어 모든 모바일 endpoint를 503으로
+  되돌립니다. 웹은 영향받지 않습니다. 원인을 찾는 동안의 상태입니다.
+- **새 후보로 roll-forward** — 1번부터 다시 하고 `Emergency Pending`을 교체합니다.
+
+**"이전 값으로 되돌린다"는 여기에 없습니다.** 그 값이 없다는 것이 전제입니다.
+
+마지막으로 **기존 모바일 자격증명 전체 무효화를 확인합니다.** 이전 pepper가 사라졌으므로
+살아 있던 refresh token은 전부 검증에 실패합니다. 세션 정리를 함께 할지는
+`revokeAllUserSessions`로 판단합니다.
 
 ## 6. 남은 것
 
@@ -474,21 +572,25 @@ Active로 승격합니다. store만 정리하고 Railway를 두면 다음 회전
 운영자가 배포할 값을 들고 직접 돌리는 것이며, 그 실행을 강제하는 것은 이 문서와
 릴리스 체크리스트뿐입니다.
 
-**살아 있는 설정을 감사하는 방법은 아직 없습니다.** `railway ssh`로 컨테이너에
-들어갈 수는 있지만, 검사기가 `tsx`(devDependency)를 통해 TypeScript 모듈을
-읽으므로 production 이미지에서 돌아간다고 보장할 수 없습니다. 값이 sealed라면
-로컬에서 재현할 수도 없습니다. 해결하려면 검사기의 순수 판정 부분을 의존성 없는
-`.mjs`로 옮겨야 하며(`lib/schemaComparisonCore.mjs`가 그 선례입니다), production
-활성화와 함께 정할 일로 남깁니다.
+**설정 전체를 컨테이너 안에서 감사하는 방법은 아직 없습니다.** `railway ssh`로 들어갈
+수는 있지만, 검사기가 `tsx`(devDependency)를 통해 TypeScript 모듈을 읽으므로 production
+이미지에서 돌아간다고 보장할 수 없습니다. 해결하려면 순수 판정 부분을 의존성 없는
+`.mjs`로 옮겨야 하며(`lib/schemaComparisonCore.mjs`가 그 선례입니다).
 
-production 활성화를 결정할 때 함께 정할 것 셋:
+**다만 계약이 요구하는 것은 이제 그것과 다릅니다.** §2.2의 "무엇이 실제로 증명되는가"가
+활성 재료·`iss`·`aud`를 배포 밖에서 증명하고, 이전 세대는 행동으로 확인합니다. 남은
+것은 유예 지난 잔여 항목이고, 그것들은 런타임에서 아무것도 검증하지 않습니다.
 
-- **1Password 명령의 실제 문구** — §2.2가 제품·vault·복구 권한을 확정했고 §3·§5.1이
-  "store에서 읽는다 / store에 먼저 저장한다"를 절차에 넣었지만, **그 문장을 실행하는
-  CLI 명령은 아직 없습니다.** 계약(추가 5번)은 값이 중간 파일이나 셸 이력을 거치지
-  않도록 secret reference 주입을 요구하므로, 명령을 쓸 때 그 동작을 그 자리에서
-  확인합니다. 활성화 전에 채웁니다.
-- **Active·Pending 두 항목의 최초 생성** — 첫 설정에서 만들어지며, 그것이 §3의 0번이
-  읽을 대상입니다.
-- 유예가 지난 항목과 선언되지 않은 키를 보고하는 상시 점검(예: 일일 리포트)
-- 이 절차와 §2.1 확인의 실행 기록을 어디에 남길지
+production 활성화를 결정할 때 함께 정할 것 넷:
+
+1. **1Password 명령의 실제 문구** — §2.2가 제품·vault·복구 권한을 확정했고 §3·§5.1이
+   "store에서 읽는다 / store에 먼저 저장한다"를 절차에 넣었지만, **그 문장을 실행하는
+   명령은 아직 없습니다.** wrapper 쪽은 준비됐습니다 — `-UsePreinjectedRings`가 `op run`이
+   주입한 두 변수를 그대로 소비하고, 프롬프트가 그것을 덮어쓰지 않습니다
+   (§2.1.1의 5a–5f). 남은 것은 `op.env` 파일의 secret reference 문구와, 그 동작을 그
+   자리에서 확인하는 일입니다.
+2. **Active·Pending 두 항목의 최초 생성** — 첫 설정에서 만들어지며, 그것이 §3의 0번이
+   읽을 대상입니다. Pending의 다섯 field(§2.2)를 어디에 어떻게 적을지도 여기서
+   정합니다.
+3. **유예가 지난 항목과 선언되지 않은 키를 보고하는 상시 점검**(예: 일일 리포트).
+4. **이 절차와 §2.1 확인의 실행 기록을 어디에 남길지.**

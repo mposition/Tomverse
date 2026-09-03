@@ -69,6 +69,8 @@ $global:results = @()
 $global:promptCount = 0
 $global:promptSecure = @()
 $global:npmArgs = $null
+$global:npmSawSigningRing = $null
+$global:npmSawPepperRing = $null
 $global:npmExit = 0
 $global:throwOnPrompt = 0
 
@@ -100,6 +102,11 @@ function Read-Host {
 # Shadows the npm application. Records what it was asked to do.
 function npm {
     $global:npmArgs = $args -join " "
+    # What the check would actually read. The pre-injected mode exists so that
+    # `op run`'s value survives to here instead of being overwritten by a
+    # prompt, and that is only observable at the moment the check is called.
+    $global:npmSawSigningRing = $env:MOBILE_AUTH_SIGNING_KEYS
+    $global:npmSawPepperRing = $env:MOBILE_AUTH_REFRESH_PEPPERS
     Write-Output "stub npm: $($global:npmArgs)"
     # $LASTEXITCODE is what the wrapper reads to decide its own exit code, and
     # it resolves to the global one from inside the wrapper's scope.
@@ -119,14 +126,26 @@ function Get-LeftoverManaged {
 }
 
 function Invoke-Wrapper {
-    param([int] $NpmExit = 0, [int] $ThrowOnPrompt = 0)
+    param(
+        [int] $NpmExit = 0,
+        [int] $ThrowOnPrompt = 0,
+        [switch] $Preinjected,
+        [hashtable] $Inject
+    )
 
     $global:promptCount = 0
     $global:promptSecure = @()
     $global:npmArgs = $null
+    $global:npmSawSigningRing = $null
+    $global:npmSawPepperRing = $null
     $global:npmExit = $NpmExit
     $global:throwOnPrompt = $ThrowOnPrompt
     Clear-Managed
+    if ($Inject) {
+        foreach ($name in $Inject.Keys) {
+            Set-Item -Path ("Env:\{0}" -f $name) -Value $Inject[$name]
+        }
+    }
 
     # *>&1 and not 2>&1 6>&1: a secret reaches the operator's screen through
     # whichever stream printed it, so the leak check has to read all of them.
@@ -142,7 +161,7 @@ function Invoke-Wrapper {
             -TokenAudience "tomverse-mobile-api" `
             -RetiredSigningKeys "sign-1@2026-09-02T10:00:00Z" `
             -RetiredRefreshPeppers "pep-1@2026-09-02T10:00:00Z" `
-            -RequireConfigured *>&1 | Out-String
+            -RequireConfigured -UsePreinjectedRings:$Preinjected *>&1 | Out-String
     }
     catch {
         $threw = $true
@@ -152,9 +171,14 @@ function Invoke-Wrapper {
     [pscustomobject]@{
         Output    = $output
         Threw     = $threw
-        ExitCode  = $LASTEXITCODE
+        # A script that dies on an unhandled error exits non-zero when it is
+        # run as `pwsh -File`; read here it would be whatever the last run
+        # left, which can read as success.
+        ExitCode  = $(if ($threw) { 1 } else { $LASTEXITCODE })
         Leftover  = (Get-LeftoverManaged)
         NpmArgs   = $global:npmArgs
+        SawSigning = $global:npmSawSigningRing
+        SawPepper = $global:npmSawPepperRing
         Prompts   = $global:promptCount
         Secure    = @($global:promptSecure)
     }
@@ -171,7 +195,8 @@ $ALLOWED_PARAMETERS = @(
     "TokenAudience",
     "RetiredSigningKeys",
     "RetiredRefreshPeppers",
-    "RequireConfigured"
+    "RequireConfigured",
+    "UsePreinjectedRings"
 )
 
 $tokens = $null
@@ -228,6 +253,34 @@ Assert-Case "4b. the signing ring's length is reported" `
     ($ok.Output -match ("MOBILE_AUTH_SIGNING_KEYS length: {0}\b" -f $SIGNING_SECRET.Length)) ""
 Assert-Case "4c. the pepper ring's length is reported" `
     ($ok.Output -match ("MOBILE_AUTH_REFRESH_PEPPERS length: {0}\b" -f $PEPPER_SECRET.Length)) ""
+
+# 5. Pre-injected rings: the mode `op run` uses.
+$INJECTED_SIGNING = "INJECTED-SIGNING-e31f80"
+$INJECTED_PEPPER = "INJECTED-PEPPER-4c9d22"
+$injected = Invoke-Wrapper -Preinjected -Inject @{
+    MOBILE_AUTH_SIGNING_KEYS  = $INJECTED_SIGNING
+    MOBILE_AUTH_REFRESH_PEPPERS = $INJECTED_PEPPER
+}
+Assert-Case "5a. pre-injected mode does not prompt" ($injected.Prompts -eq 0) `
+    ("prompts={0}" -f $injected.Prompts)
+# The regression this mode was added for: the prompts used to overwrite what
+# `op run` injected, so the check ran against the operator's typing instead.
+Assert-Case "5b. the injected rings reach the check unchanged" `
+    (($injected.SawSigning -eq $INJECTED_SIGNING) -and ($injected.SawPepper -eq $INJECTED_PEPPER)) `
+    ("check saw signing=[{0}] pepper=[{1}]" -f $injected.SawSigning, $injected.SawPepper)
+Assert-Case "5c. pre-injected mode still clears the environment" `
+    ($injected.Leftover.Count -eq 0) ("left: {0}" -f ($injected.Leftover -join ", "))
+
+# An empty injection is a failure, never a silent run against an empty ring.
+$notInjected = Invoke-Wrapper -Preinjected
+Assert-Case "5d. a missing injection fails without running the check" `
+    (($notInjected.ExitCode -ne 0) -and ($null -eq $notInjected.NpmArgs) -and
+     ($notInjected.Output -match "Nothing injected it")) `
+    ("exit={0} npmArgs=[{1}]" -f $notInjected.ExitCode, $notInjected.NpmArgs)
+Assert-Case "5e. a missing injection still clears the environment" `
+    ($notInjected.Leftover.Count -eq 0) ("left: {0}" -f ($notInjected.Leftover -join ", "))
+Assert-Case "5f. neither injected ring appears in the output" `
+    ((-not ($injected.Output -like "*$INJECTED_SIGNING*")) -and (-not ($injected.Output -like "*$INJECTED_PEPPER*"))) ""
 
 $failed = @($global:results | Where-Object { -not $_.Ok })
 Write-Host ""

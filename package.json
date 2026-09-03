@@ -196,7 +196,8 @@
     "adjudicate:ai-review-eval": "node --conditions=react-server --import tsx scripts/adjudicate-ai-review-eval.mjs",
     "check:native-token-boundary": "node scripts/check-native-token-boundary.mjs",
     "report:ai-review-drafting-plan": "node --conditions=react-server --import tsx scripts/report-ai-review-drafting-plan.mjs",
-    "check:mobile-auth-keyring": "node --import tsx scripts/check-mobile-auth-keyring.mjs"
+    "check:mobile-auth-keyring": "node --import tsx scripts/check-mobile-auth-keyring.mjs",
+    "verify:mobile-auth-deployment": "node --conditions=react-server --import tsx scripts/verify-mobile-auth-deployment.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.44",
