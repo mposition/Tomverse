@@ -31,6 +31,23 @@ import test from "node:test";
 
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
+import { KOREAN_NUMERAL_EXPRESSIONS } from "../lib/memoryEvalCanonicalisation.ts";
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A variant as a pattern, preceded by a Hangul syllable or a digit.
+ *
+ * The shape every instance of this defect has had: the variant matches a span
+ * that is part of a longer token, so the rewrite starts mid-word.
+ */
+const midWordPattern = (variant) =>
+    new RegExp(
+        "([가-힣\\d])(" +
+            variant.split(/\s+/).map(escapeRegExp).join("\\s*") +
+            ")",
+        "g"
+    );
 
 const caseById = (id) => {
     const found = harnessTarget().cases.find((entry) => entry.id === id);
@@ -156,4 +173,65 @@ test("an unregistered numeral expression scores neither way", () => {
         scoreOf(ko35, "e2", "사용자는 여섯 달씩 배를 탑니다.").goldMatched,
         0
     );
+});
+
+test("no registered variant matches inside a longer word, anywhere in the corpus", () => {
+    // The general form of the defect this file was written for, asked of the
+    // corpus rather than of a probe list.
+    //
+    // Every instance so far has been "the variant matched a span that is part
+    // of a longer word", from one side or the other: `전세 시장` -> 전3시장 lost
+    // the gold 전세 on the left, and `아홉 시장` -> 9시장 read a noun as the
+    // hour on the right. A probe list finds the instance somebody thought of;
+    // this finds the next one, on the day a case is added that contains it.
+    //
+    // The left edge is what is checkable in general. A Hangul syllable or a
+    // digit immediately before a variant means the match starts mid-token:
+    // 교육 개월 would canonicalise to 교6개월, and 열아홉 시에 to 열9시에, whose
+    // `9시` a ko-401 gold would then reach. Neither occurs today, and neither
+    // can be excluded by the rule itself — that needs a lookbehind, which
+    // makes the step spacing-dependent and is what `mem-score-v3.5` removed.
+    // So it is guarded here instead, where it fails loudly rather than
+    // silently changing a score.
+    const patterns = KOREAN_NUMERAL_EXPRESSIONS.flatMap((row) =>
+        row.variants.map(midWordPattern)
+    );
+
+    const found = [];
+    for (const datasetVersion of ["mem-eval-succ-4", "mem-eval-succ-6", "mem-eval-succ-8"]) {
+        for (const testCase of harnessTarget(datasetVersion).cases) {
+            const texts = [
+                ...(testCase.conversations ?? []).flatMap((conversation) => [
+                    conversation.title ?? "",
+                    ...(conversation.messages ?? []).map((message) => message.content),
+                ]),
+                ...(testCase.expected ?? []).flatMap((gold) => [
+                    ...(gold.factValueAll ?? []),
+                    ...(gold.factValueAny ?? []),
+                    gold.evidence?.evidenceQuote ?? "",
+                ]),
+            ];
+            for (const text of texts) {
+                for (const pattern of patterns) {
+                    pattern.lastIndex = 0;
+                    for (const hit of String(text).matchAll(pattern)) {
+                        found.push(`${testCase.id}: ${JSON.stringify(hit[0])}`);
+                    }
+                }
+            }
+        }
+    }
+    assert.deepEqual(found, []);
+});
+
+test("that guard would fire on the shapes it is for", () => {
+    // Red-before-green. The assertion above passes on a corpus containing none
+    // of these, which is also how it would pass if the pattern were wrong.
+    const patternFor = midWordPattern;
+    assert.match("교육 개월별 계획", patternFor("육 개월"));
+    assert.match("열아홉 시에 만나요", patternFor("아홉 시에"));
+    assert.match("19시에 만나요", patternFor("9시에"));
+    // And not on the forms the corpus actually uses.
+    assert.doesNotMatch("저는 육 개월씩 배를 탑니다", patternFor("육 개월"));
+    assert.doesNotMatch("가게 문을 아홉 시에 엽니다", patternFor("아홉 시에"));
 });
