@@ -151,6 +151,46 @@ test("the same fact scores the same however the particle falls", () => {
     }
 });
 
+test("the 시 continuations widened on review are the ones that widened", () => {
+    // The 2026-09-03 review finding, in both directions.
+    //
+    // `시` gets the shared continuation list minus a reviewed blocklist, and
+    // the blocklist used to hold nine entries of which three were wrong:
+    // 시론 is 시 + **론**, so the syllable `로` never occurred in it, and
+    // 시와/시은 are the standalone noun 시 plus that same particle — which the
+    // left boundary already excludes, because this rule only fires where a
+    // numeral precedes. Each was a false negative bought for nothing.
+    //
+    // Asserted through `scoreCaseV3()` rather than against the list, because
+    // a test that reads the list can only ever agree with it.
+    const ko401 = caseById("succ-durable-ko-401");
+    for (const statement of [
+        "사용자는 가게 문을 아홉 시로 정했습니다.",
+        "사용자는 가게 문을 아홉 시와 열 시 사이에 엽니다.",
+        "사용자는 가게 문을 아홉 시는 지나서 엽니다.",
+        "사용자는 가게 문을 아홉 시를 기준으로 엽니다.",
+        "사용자는 가게 문을 아홉 시만 되면 엽니다.",
+        "사용자는 가게 문을 아홉 시마다 확인합니다.",
+    ]) {
+        assert.equal(scoreOf(ko401, "g1", statement).goldMatched, 1, statement);
+    }
+
+    // And the other direction, which is the half that makes the widening a
+    // boundary rather than a surrender: these three stay refused, and each
+    // names a real 시-initial noun a numeral can precede.
+    for (const statement of [
+        "사용자는 가게 문을 아홉 시가 되면 엽니다.", // 시가 (市價)
+        "사용자는 아홉 시도 끝에 문을 열었습니다.", // 시도 (試圖)
+        "사용자는 아홉 시의회 안건을 검토합니다.", // 시의회
+    ]) {
+        assert.equal(
+            scoreOf(ko401, "g1", statement).goldMatched,
+            0,
+            `"${statement}" is refused on purpose; see amendment section 4.14`
+        );
+    }
+});
+
 test("a noun that merely begins with the counter is not the hour", () => {
     // The 2026-09-03 finding. `시` is one syllable and begins 시장, 시청, 시절,
     // 시작 and more, so a row ending in the bare counter reads all of them as

@@ -46,6 +46,7 @@ import { MEMORY_EVAL_SCORING_CONTRACT_VERSION } from "../lib/memoryEvalScoringCo
 import {
     KOREAN_NUMERAL_EXPRESSIONS,
     canonicalFormsAreDisjoint,
+    siRefusalsAreReal,
 } from "../lib/memoryEvalCanonicalisation.ts";
 
 const failures = [];
@@ -94,6 +95,18 @@ if (disjoint.length > 0) {
         "no canonical form is inside another",
         `${KOREAN_NUMERAL_EXPRESSIONS.length} reviewed row(s)`
     );
+}
+
+// The `시` continuation list is the shared list minus a reviewed blocklist, so
+// a particle added to the shared list reaches `시` unless somebody refuses it
+// on purpose. That only holds while every refusal names a particle the shared
+// list actually offers: a blocklist entry for something nobody offers refuses
+// nothing while reading, in review, exactly like a boundary.
+const siRefusals = [...siRefusalsAreReal()];
+if (siRefusals.length > 0) {
+    for (const problem of siRefusals) fail(problem);
+} else {
+    ok("every 시 refusal blocks a real continuation", "blocklist, not a second allowlist");
 }
 
 /* --------------------------------------------- the contract-only claim ---- */
