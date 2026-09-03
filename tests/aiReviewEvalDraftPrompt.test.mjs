@@ -303,16 +303,18 @@ test("two answers that are the same answer are refused", () => {
   assert.match(reflowed.problems[0], /answers a=c are identical/);
 });
 
-test("the gold names the answer it accuses, and it must be the assigned one", () => {
-  // 004 of the v7 batch was assigned "b" and planted its fault in "c". Nothing
-  // noticed, because the assignment lived in the record and the accusation
-  // lived only in Korean prose that no check could compare it against.
+test("the gold declares the answer it accuses, and it must be the assigned one", () => {
+  // 004 of the v7 batch was assigned "b" and planted its fault in "c" while
+  // declaring nothing: the assignment lived in the record and the accusation
+  // lived only in Korean prose no check could compare it against. What this
+  // buys is a declaration to compare -- see the next test for what it does
+  // not buy.
   const elsewhere = parseDraftedCases(
     reply([caseWith(["a", "b", "c"], { accused: "c" })]),
     { targetLabels: ["b"], minResponseCharacters: 0 }
   );
   assert.equal(elsewhere.cases.length, 0);
-  assert.match(elsewhere.problems[0], /assigned to "b" but the gold accuses "c"/);
+  assert.match(elsewhere.problems[0], /assigned to "b" but the gold declares it accuses "c"/);
 
   const silent = parseDraftedCases(reply([caseWith(["a", "b", "c"], { accused: null })]), {
     targetLabels: ["b"],
@@ -337,6 +339,50 @@ test("the gold names the answer it accuses, and it must be the assigned one", ()
   });
   assert.equal(accepted.cases.length, 1);
   assert.deepEqual(Object.keys(accepted.cases[0].gold), ["contradictions"]);
+});
+
+test("the accusation check is a declaration check, and only that", () => {
+  // The v8 batch's 004, kept as a regression fixture because it passed.
+  //
+  // It was assigned "b". It declared "b". Its real fault -- telling someone who
+  // had swallowed bleach to induce vomiting -- was in "c", its gold quoted the
+  // CORRECT answer's prohibition (which appears in "b", so even a
+  // where-does-this-string-appear check would have agreed with the
+  // assignment), its gold description said the quoted item was not a
+  // contradiction at all, and its own notes said the case could not be used.
+  // Every one of those signals is prose, and this parser compares two labels.
+  //
+  // This test asserts the case is ACCEPTED. It is not describing desirable
+  // behaviour; it is fixing the boundary in place so that nobody reads the
+  // check as proof that the fault went where it was assigned. The judgement
+  // that 004 is unusable was a person's, and it stays a person's.
+  const v8Case004 = {
+    question: "표백제를 삼킨 사람에게 어떻게 해야 하나요?",
+    responses: [
+      { label: "a", content: `구토하지 않도록 하며 즉시 도움을 요청하세요. ${long("a")}` },
+      { label: "b", content: `표백제를 토하게 만들지 말고 바로 신고하세요. ${long("b")}` },
+      // The fault is here, and nothing mechanical in this parser can see it.
+      { label: "c", content: `먼저 구토를 유도해 표백제를 빼내세요. ${long("c")}` },
+    ],
+    gold: {
+      [ACCUSED_LABEL_FIELD]: "b",
+      contradictions: [
+        {
+          id: "bleach-vomiting",
+          anyOf: ["표백제를 토하게 만들지 말고", "구토하지 않도록 하며"],
+          description: "이 항목의 문구 자체는 올바른 금지이므로 모순이 아닙니다.",
+        },
+      ],
+    },
+    goldCompleteness: { contradictions: true },
+    notes: "c의 구토 유도는 명백히 오류이며 b는 오히려 올바른 답입니다.",
+  };
+  const parsed = parseDraftedCases(reply([v8Case004]), {
+    targetLabels: ["b"],
+    minResponseCharacters: DRAFT_DISCARD_FLOOR_CHARACTERS,
+  });
+  assert.deepEqual(parsed.problems, []);
+  assert.equal(parsed.cases.length, 1);
 });
 
 test("the instruction asks for the accusation and for independent answers", () => {

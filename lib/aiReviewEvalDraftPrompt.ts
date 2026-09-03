@@ -43,13 +43,17 @@ export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v8";
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
 
 /**
- * The field in which the drafter states which answer its gold accuses.
+ * The field in which the drafter DECLARES which answer its gold accuses.
+ *
+ * A declaration, not a finding. What the parser can do with it is compare it
+ * with the assignment; what nothing here can do is verify that the gold and
+ * the answers really put the fault there. See the check itself in
+ * `parseDraftedCases()` for the case that passed while being wrong.
  *
  * Named once, here, because two things read it: the instruction that asks for
- * it and the parser that checks it against the assignment. A batch drafted
- * against one spelling and validated against another would pass its check by
- * never finding the field -- which is the shape of failure this field exists
- * to remove.
+ * it and the parser that compares it. A batch drafted against one spelling and
+ * validated against another would pass by never finding the field -- which is
+ * the shape of failure this field exists to remove.
  */
 export const ACCUSED_LABEL_FIELD = "accusedLabel";
 
@@ -511,16 +515,30 @@ export function parseDraftedCases(
             problems.push(`case[${index}]: no goldCompleteness`);
             continue;
         }
-        // The accusation, read from a field rather than from prose.
+        // A DECLARATION CONSISTENCY CHECK. Read what it does and does not say.
         //
-        // 004 of the v7 batch was assigned "b" and planted its fault in "c",
-        // and nothing noticed: the assignment lives in the record, the
-        // accusation lived only in Korean sentences, and no check could compare
-        // them. Now the drafter states which answer its gold accuses, and a
-        // case that accuses one other than the assigned answer is refused.
+        // What it checks: the drafter wrote a label down, and it is the label
+        // the assignment gave. 004 of the v7 batch was assigned "b" and planted
+        // its fault in "c" while declaring nothing at all, because the
+        // assignment lived in the record and the accusation lived only in
+        // Korean sentences; a case that declares nothing, or declares another
+        // answer, is now refused.
         //
-        // The field is read and then dropped. A case that got here agrees with
-        // its assignment by construction, so persisting it would store a second
+        // What it does NOT check: that the gold and the answers actually put
+        // the fault in the declared answer. That is a question about meaning,
+        // and this compares two strings. **004 of the v8 batch declared "b",
+        // passed here, and had its real fault in "c"** -- its gold even quoted
+        // the correct answer's wording and its own notes said the case was
+        // unusable. Nothing mechanical read either.
+        //
+        // Do not describe this check, in code or in a report, as evidence that
+        // the fault went where it was assigned. It is evidence that the drafter
+        // said so. Which answer is really at fault is read by the person
+        // adopting the case -- see the runbook for what was tried instead and
+        // why it does not work.
+        //
+        // The field is read and then dropped. A case that got here declares the
+        // assigned label by construction, so persisting it would store a second
         // copy of `draftedBy.targetLabel` that can never disagree with the
         // first -- and it would put a key that is not a finding kind inside a
         // gold that is otherwise exactly that map.
@@ -531,14 +549,15 @@ export function parseDraftedCases(
         if (target != null) {
             if (typeof accused !== "string" || accused.trim() === "") {
                 problems.push(
-                    `case[${index}]: gold.${ACCUSED_LABEL_FIELD} is missing, so nothing can ` +
-                        `check that the fault went where it was assigned`
+                    `case[${index}]: gold.${ACCUSED_LABEL_FIELD} is missing, so the drafter ` +
+                        `never said which answer its gold accuses`
                 );
                 continue;
             }
             if (accused !== target) {
                 problems.push(
-                    `case[${index}]: assigned to "${target}" but the gold accuses "${accused}"`
+                    `case[${index}]: assigned to "${target}" but the gold declares it accuses ` +
+                        `"${accused}"`
                 );
                 continue;
             }
