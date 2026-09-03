@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ACCUSED_LABEL_FIELD,
   DRAFT_DISCARD_FLOOR_CHARACTERS,
   ANSWER_SHAPE,
   DRAFT_RESPONSE_LABELS,
@@ -30,13 +31,20 @@ const long = (marker) => `${marker} `.repeat(120).trim();
 
 const reply = (cases) => JSON.stringify({ cases });
 
-const caseWith = (labels, { contentLength = "long" } = {}) => ({
+const caseWith = (
+  labels,
+  { contentLength = "long", accused = labels[0], content } = {}
+) => ({
   question: "질문",
   responses: labels.map((label) => ({
     label,
-    content: contentLength === "long" ? long(`answer ${label}`) : "짧다",
+    content:
+      content?.[label] ?? (contentLength === "long" ? long(`answer ${label}`) : "짧다"),
   })),
-  gold: { contradictions: [{ id: "x", anyOf: ["x"], description: "x" }] },
+  gold: {
+    ...(accused === null ? {} : { [ACCUSED_LABEL_FIELD]: accused }),
+    contradictions: [{ id: "x", anyOf: ["x"], description: "x" }],
+  },
   goldCompleteness: { contradictions: true },
 });
 
@@ -171,7 +179,11 @@ test("an accepted case remembers which case of the batch it was", () => {
   // Recording the assigned label off that position would put the wrong one on
   // every case after the first rejection.
   const parsed = parseDraftedCases(
-    reply([caseWith(["a", "a"]), caseWith(["a", "b", "c"]), caseWith(["a", "b", "c"])]),
+    reply([
+      caseWith(["a", "a"]),
+      caseWith(["a", "b", "c"], { accused: "b" }),
+      caseWith(["a", "b", "c"], { accused: "c" }),
+    ]),
     { targetLabels: ["a", "b", "c"], minResponseCharacters: 0 }
   );
   assert.equal(parsed.cases.length, 2);
@@ -255,4 +267,86 @@ test("one difference means one reportable action, wrong in every reading", () =>
   // atomic" is the kind of instruction a model agrees with and does not act on.
   assert.match(instruction, /by car rather than waiting for an ambulance/);
   assert.match(instruction, /ventilates instead of evacuating/);
+});
+
+test("two answers that are the same answer are refused", () => {
+  // Every case of the v7 batch shipped one pair copied word for word. Finding
+  // the planted answer meant finding the one that was not a copy, which is not
+  // the exercise: the reviewers this set measures compare answers from
+  // different models, and those are never identical.
+  const copied = parseDraftedCases(
+    reply([
+      caseWith(["a", "b", "c"], {
+        content: { a: long("shared"), b: long("own"), c: long("shared") },
+      }),
+    ]),
+    { targetLabels: ["a"], minResponseCharacters: 0 }
+  );
+  assert.equal(copied.cases.length, 0);
+  assert.match(copied.problems[0], /answers a=c are identical/);
+
+  // Identical once whitespace is ignored is identical. A copy that landed with
+  // its line breaks in different places is still a copy.
+  const reflowed = parseDraftedCases(
+    reply([
+      caseWith(["a", "b", "c"], {
+        content: {
+          a: "같은   답변\n입니다",
+          b: long("own"),
+          c: "같은 답변 입니다",
+        },
+      }),
+    ]),
+    { targetLabels: ["a"], minResponseCharacters: 0 }
+  );
+  assert.equal(reflowed.cases.length, 0);
+  assert.match(reflowed.problems[0], /answers a=c are identical/);
+});
+
+test("the gold names the answer it accuses, and it must be the assigned one", () => {
+  // 004 of the v7 batch was assigned "b" and planted its fault in "c". Nothing
+  // noticed, because the assignment lived in the record and the accusation
+  // lived only in Korean prose that no check could compare it against.
+  const elsewhere = parseDraftedCases(
+    reply([caseWith(["a", "b", "c"], { accused: "c" })]),
+    { targetLabels: ["b"], minResponseCharacters: 0 }
+  );
+  assert.equal(elsewhere.cases.length, 0);
+  assert.match(elsewhere.problems[0], /assigned to "b" but the gold accuses "c"/);
+
+  const silent = parseDraftedCases(reply([caseWith(["a", "b", "c"], { accused: null })]), {
+    targetLabels: ["b"],
+    minResponseCharacters: 0,
+  });
+  assert.equal(silent.cases.length, 0);
+  assert.match(silent.problems[0], /gold.accusedLabel is missing/);
+
+  // A phenomenon that plants nothing has no answer to accuse, so the field is
+  // not asked for and its absence is not a defect.
+  const nothingPlanted = parseDraftedCases(
+    reply([caseWith(["a", "b", "c"], { accused: null })]),
+    { targetLabels: [null], minResponseCharacters: 0 }
+  );
+  assert.equal(nothingPlanted.cases.length, 1);
+
+  // The field is read and then dropped: a stored gold is a map of finding
+  // kinds, and `draftedBy.targetLabel` already holds the same label.
+  const accepted = parseDraftedCases(reply([caseWith(["a", "b", "c"], { accused: "b" })]), {
+    targetLabels: ["b"],
+    minResponseCharacters: 0,
+  });
+  assert.equal(accepted.cases.length, 1);
+  assert.deepEqual(Object.keys(accepted.cases[0].gold), ["contradictions"]);
+});
+
+test("the instruction asks for the accusation and for independent answers", () => {
+  const instruction = draftInstruction({
+    ...cell,
+    count: 2,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, count: 2 }),
+  });
+  assert.match(instruction, new RegExp(`gold\\.${ACCUSED_LABEL_FIELD}`));
+  assert.match(instruction, /Write every answer independently/);
+  assert.match(instruction, /do not copy sentences between them/);
 });

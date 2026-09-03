@@ -13,6 +13,9 @@ import {
   datasetManifest,
   goldLeadLabels,
   plantedLabelReport,
+  answerSimilarity,
+  answerSimilarityReport,
+  NEAR_DUPLICATE_SIMILARITY,
   responseLengths,
   duplicateQuestions,
   emptyExhaustiveClaims,
@@ -484,6 +487,42 @@ test("answer length is reported against the drafting floor", () => {
     mean: Math.round((80 + 120 + 300) / 3),
     max: 300,
     belowFloor: 2,
+  });
+});
+
+test("answers that are nearly the same are reported, not refused", () => {
+  // The v7 batch put a word-for-word copy in all five cases and nothing
+  // measured it. The parser now refuses the identical case; this reports the
+  // near miss, which is a judgement -- three answers to one safety question
+  // share that question's vocabulary, and two that open alike may still differ
+  // on the point the case is about. So it warns and names the pair.
+  assert.equal(answerSimilarity("같은 문장입니다", "같은   문장입니다\n"), 1);
+  assert.ok(answerSimilarity("고열이면 즉시 병원에 가세요", "냉장고는 문을 닫아 두세요") < 0.2);
+
+  const shared = "즉시 대피하고 창문을 열지 마십시오. 소방서에 신고한 뒤 안전한 곳에서 기다리세요.";
+  const report = answerSimilarityReport([
+    {
+      id: "ko-safety-sensitive-001",
+      responses: [
+        { label: "a", content: shared },
+        { label: "b", content: `${shared} 추가로 관리사무소에도 알리세요.` },
+        { label: "c", content: "환기부터 시키고 상황을 지켜보다가 필요하면 신고하세요." },
+      ],
+    },
+  ]);
+  assert.equal(report.pairs, 3);
+  assert.equal(report.near.length, 1);
+  assert.equal(report.near[0].id, "ko-safety-sensitive-001");
+  assert.deepEqual([...report.near[0].labels], ["a", "b"]);
+  assert.ok(report.near[0].similarity >= NEAR_DUPLICATE_SIMILARITY);
+  assert.equal(report.max, report.near[0].similarity);
+
+  // Nothing to compare is 0 rather than a division by zero.
+  assert.deepEqual(answerSimilarityReport([{ id: "x", responses: [{ label: "a", content: "짧" }] }]), {
+    pairs: 0,
+    max: 0,
+    median: 0,
+    near: [],
   });
 });
 
