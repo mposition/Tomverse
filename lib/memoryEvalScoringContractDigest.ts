@@ -248,10 +248,13 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
             "nothing to either side of what it matches, so a token canonicalises the same " +
             "way alone as it does inside a sentence, and the same way however the sentence " +
             "was spaced. Korean numerals are rewritten only by the reviewed rows of " +
-            "canonKoreanNumeralExpressions, each of which records the words it also " +
-            "rewrites; an unlisted numeral is left as written. Canonicalisation rewrites a " +
-            "token to a canonical form by a fixed table and never decides that two " +
-            "different facts are the same.",
+            "canonKoreanNumeralExpressions, matched as one alternation in a single pass " +
+            "with the longest variant first, so a longer expression is consumed before a " +
+            "shorter one can fire inside it; an unlisted numeral is left as written. No " +
+            "canonical form may be a substring of another, which is what keeps an hour " +
+            "from meeting a duration. Canonicalisation rewrites a token to a canonical " +
+            "form by a fixed table and never decides that two different facts are the " +
+            "same.",
     },
     {
         id: "v3-evidence-binding",

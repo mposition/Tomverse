@@ -54,36 +54,68 @@ const DATASETS = [
 ];
 
 /**
- * The text a gold may legitimately be grounded in: **user turns only**.
+ * The text a gold may legitimately be grounded in: **its own anchored user
+ * turn**, and nothing else.
  *
- * The first version of this file joined every conversation title and every
- * message, assistant turns included, and that hides the failure it exists to
- * find. `v3-evidence-binding` credits an adoption only when the quote occurs
- * in a *user* message, so a gold reachable only from a title or an assistant
- * sentence is a gold the scorer cannot satisfy — and the loose version would
- * have reported it as covered. Titles are labels the harness writes into the
- * prompt, not things the user said; assistant turns are the model's own words,
- * and grounding a fact about the user in them is the injection failure the
- * critical categories exist for.
+ * This has been narrowed twice, and each wider version hid the failure the
+ * file exists to find.
  *
- * So the haystack is narrower than the prompt on purpose. A gold that needs
- * more than this to be found is a finding, not a false alarm.
+ * The first joined every conversation title and every message, assistant turns
+ * included. `v3-evidence-binding` credits an adoption only when the quote
+ * occurs in a *user* message, so a gold reachable only from a title or from
+ * the model's own sentence is a gold the scorer cannot satisfy — and that
+ * version called it covered.
+ *
+ * Narrowing to "all user turns" was still too loose. A gold anchors to one
+ * message by id and the scorer reads *that* message, so a gold whose anchor
+ * points at the wrong turn is satisfied by a different turn under the union —
+ * and a mis-anchored gold is exactly the defect worth catching. The haystack
+ * is therefore the anchored message alone.
+ *
+ * A gold that needs more than its own anchor to be found is a finding, not a
+ * false alarm.
  */
-const groundingText = (testCase) =>
-    (testCase.conversations ?? [])
-        .flatMap((conversation) =>
-            (conversation.messages ?? [])
-                .filter((message) => message.role === "user")
-                .map((message) => message.content)
-        )
-        .join("\n");
+const anchoredUserText = (testCase, gold) => {
+    const messages = (testCase.conversations ?? []).flatMap(
+        (conversation) => conversation.messages ?? []
+    );
+    const anchor = gold.evidence ?? {};
+    const byId =
+        anchor.evidenceMessageId === undefined
+            ? undefined
+            : messages.find(
+                  (message) => message.externalMessageId === anchor.evidenceMessageId
+              );
+    const byIndex =
+        anchor.evidenceMessageIndex === undefined
+            ? undefined
+            : messages[anchor.evidenceMessageIndex];
+    const message = byId ?? byIndex;
+    // An anchor resolving to nothing, or to a turn the user did not write, is
+    // reported rather than quietly replaced by text that would have matched.
+    if (!message) {
+        return { text: "", problem: "its evidence anchor resolves to no message" };
+    }
+    if (message.role !== "user") {
+        return {
+            text: "",
+            problem: `its evidence anchor points at a ${message.role} turn`,
+        };
+    }
+    return { text: message.content, problem: null };
+};
 
 const unsatisfiable = (datasetVersion) => {
     const target = harnessTarget(datasetVersion);
     const problems = [];
     for (const testCase of target.cases) {
-        const haystack = canonMatch(groundingText(testCase), testCase.language);
         for (const gold of testCase.expected ?? []) {
+            const anchored = anchoredUserText(testCase, gold);
+            if (anchored.problem) {
+                problems.push(`${testCase.id}/${gold.id}: ${anchored.problem}`);
+                continue;
+            }
+            const haystack = canonMatch(anchored.text, testCase.language);
             const has = (token) =>
                 haystack.includes(canonMatch(token, testCase.language));
             // `factValueAll` is every token; `factValueAny` is at least one.
@@ -94,7 +126,7 @@ const unsatisfiable = (datasetVersion) => {
                 if (!has(token)) {
                     problems.push(
                         `${testCase.id}/${gold.id}: factValueAll ${JSON.stringify(token)} ` +
-                            `does not occur in the case's own text`
+                            `does not occur in its anchored user turn`
                     );
                 }
             }
@@ -102,7 +134,7 @@ const unsatisfiable = (datasetVersion) => {
             if (any.length > 0 && !any.some(has)) {
                 problems.push(
                     `${testCase.id}/${gold.id}: none of factValueAny ` +
-                        `${JSON.stringify(any)} occurs in the case's own text`
+                        `${JSON.stringify(any)} occurs in its anchored user turn`
                 );
             }
         }
@@ -111,7 +143,7 @@ const unsatisfiable = (datasetVersion) => {
 };
 
 for (const datasetVersion of DATASETS) {
-    test(`every gold in ${datasetVersion} is satisfiable by its own case`, () => {
+    test(`every gold in ${datasetVersion} is satisfiable by its own anchor`, () => {
         assert.deepEqual(unsatisfiable(datasetVersion), []);
     });
 }
@@ -128,7 +160,7 @@ test("the check would fail if the numeral table stopped covering a gold", () => 
     const target = harnessTarget("mem-eval-succ-8");
     const testCase = target.cases.find((entry) => entry.id === "succ-durable-ko-401");
     assert.ok(testCase, "succ-durable-ko-401 is not in the dataset");
-    const text = groundingText(testCase);
+    const text = anchoredUserText(testCase, testCase.expected[0]).text;
     assert.match(text, /아홉 시/, "the case states the hour in words");
     assert.deepEqual(
         testCase.expected.flatMap((gold) => gold.factValueAll ?? []),

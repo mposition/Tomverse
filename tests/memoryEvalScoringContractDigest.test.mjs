@@ -765,16 +765,17 @@ test("rule: v3-polarity-is-compared-not-inferred", () => {
 
 test("rule: v3-canonicalisation", () => {
     assert.equal(canon("Twelve-hour, $2,000."), "12 hour 2000");
-    // The one registered Korean row. `육 개월` is deliberately NOT rewritten
-    // any more: its gold states the fact in the same words its evidence does,
-    // so it matches verbatim, and a row for it would have licensed the
-    // `세`+`시` collision described in `KOREAN_NUMERAL_EXPRESSIONS`.
-    assert.equal(canon("아홉 시"), "아홉시");
-    assert.equal(canon("육 개월"), "육 개월");
+    // The registered Korean rows, and the guards that keep an hour out of a
+    // duration: three o'clock must not be found inside three hours.
+    assert.equal(canon("아홉 시"), "9시");
+    assert.equal(canon("육 개월"), "6개월");
+    assert.equal(canon("아홉 시간"), "아홉시간");
+    assert.ok(!canonMatch("아홉 시간", "ko").includes(canonMatch("9시", "ko")));
     // Every step is context-free, so a token canonicalises the same alone as
     // inside a sentence and the same however it was spaced. Both were broken by
     // a lookaround, and both are what the table restores.
     assert.ok(canonMatch("가게 문을 아홉 시에", "ko").includes(canonMatch("9시", "ko")));
+    assert.ok(canonMatch("6개월씩 배를", "ko").includes(canonMatch("육 개월", "ko")));
     assert.equal(canonMatch("아홉 시", "ko"), canonMatch("아홉시", "ko"));
     // Korean drops spaces so unstable spacing does not decide a match;
     // English keeps them so words are not joined into strings nobody wrote.

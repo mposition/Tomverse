@@ -16,6 +16,7 @@ import {
     NUMERAL_TABLE,
     canon,
     canonMatch,
+    canonicalFormsAreDisjoint,
 } from "../lib/memoryEvalCanonicalisation.ts";
 
 /* ---------------------------------------- the defect mem-score-v3.5 fixed -- */
@@ -114,43 +115,81 @@ test("Korean canonicalisation does not depend on how the text was spaced", () =>
 
 /* ------------------------------------------- what the fix must not change -- */
 
-test("the one registered row normalises, in both spacings and as a digit", () => {
+test("the registered rows normalise, in both spacings and as digits", () => {
     // The other half. A table narrowed until it fires on nothing would pass
     // every test above and silently undo what the step is for.
-    //
-    // One row, because exactly one frozen gold cannot be satisfied without it:
-    // `succ-durable-ko-401` says `9시` and its evidence says `아홉 시`. The
-    // rows the first draft carried for `육 개월` and `새벽 세 시` are gone —
-    // both golds are stated in the same words as their evidence, so they match
-    // verbatim, and the `세`+`시` row bought nothing while making `세 시간`
-    // (three hours) equal to three o'clock.
     for (const [input, expected] of [
-        ["아홉 시", "아홉시"],
-        ["아홉시", "아홉시"],
-        ["9시", "아홉시"],
-        ["가게 문을 아홉 시에 열어서", "가게 문을 아홉시에 열어서"],
+        // succ-durable-ko-35, both scripts
+        ["육 개월", "6개월"],
+        ["육개월", "6개월"],
+        ["6개월", "6개월"],
+        // succ-durable-ko-36
+        ["새벽 세 시", "새벽 3시"],
+        ["새벽세시", "새벽3시"],
+        ["새벽 3시", "새벽 3시"],
+        // succ-durable-ko-401
+        ["아홉 시", "9시"],
+        ["아홉시", "9시"],
+        ["9시", "9시"],
+        ["가게 문을 아홉 시에 열어서", "가게 문을 9시에 열어서"],
     ]) {
         assert.equal(canon(input), expected, input);
     }
-    // The equivalence the gold actually needs, through the matching form.
+    // The three equivalences the golds actually need, through the matching form.
+    assert.equal(canonMatch("육 개월", "ko"), canonMatch("6개월", "ko"));
+    assert.equal(canonMatch("새벽 세 시", "ko"), canonMatch("새벽 3시", "ko"));
     assert.equal(canonMatch("9시", "ko"), canonMatch("아홉 시", "ko"));
 });
 
-test("the row collapses toward the word form, so it adds no new equality", () => {
-    // The property that makes this row safe and made `세`+`시` unsafe.
+test("an hour never meets a duration, in either script", () => {
+    // The defect that took three attempts to remove, and the reason guard rows
+    // exist. Matching is by substring, so if the hour's canonical form sits
+    // inside the duration's then three hours scores as three o'clock.
     //
-    // Rewriting to `9시` would turn `아홉 시간` — nine *hours* — into `9시간`,
-    // and a `9시` gold is a substring of that: two different facts, one value,
-    // which the canonicalisation rule forbids. Collapsing to `아홉시` leaves
-    // `아홉 시간` as `아홉시간`, which is exactly what it is with no rule at
-    // all, so the row licenses nothing plain Korean matching did not already.
-    assert.equal(canonMatch("아홉 시간", "ko"), "아홉시간");
-    assert.equal(canonMatch("아홉시간", "ko"), "아홉시간");
-    // And the discarded rule's collision is gone: three hours is no longer
-    // three o'clock.
-    assert.equal(canonMatch("세 시간 넘게", "ko"), "세시간넘게");
-    assert.equal(canonMatch("새벽 세 시", "ko"), "새벽세시");
-    assert.ok(!canonMatch("세 시간 넘게", "ko").includes(canonMatch("3시", "ko")));
+    // Every earlier shape failed here: `3시` inside `3시간`, then `아홉시`
+    // inside `아홉시간`, and collapsing to `9시` would have put `9시` inside
+    // `9시간`. The guard rows collapse the duration to a form that shares no
+    // prefix with the hour, and they are matched first.
+    for (const [gold, durationText] of [
+        ["3시", "세 시간 넘게 집을 비웁니다"],
+        ["3시", "3시간 넘게 집을 비웁니다"],
+        ["새벽 세 시", "세 시간 넘게 집을 비웁니다"],
+        ["9시", "아홉 시간 넘게 잤습니다"],
+        ["9시", "9시간 넘게 잤습니다"],
+    ]) {
+        assert.ok(
+            !canonMatch(durationText, "ko").includes(canonMatch(gold, "ko")),
+            `${gold} -> ${canonMatch(gold, "ko")} must not be inside ` +
+                `${durationText} -> ${canonMatch(durationText, "ko")}`
+        );
+    }
+    // And the durations still meet each other, so the guard is a normalisation
+    // and not a hole.
+    assert.equal(canonMatch("세 시간", "ko"), canonMatch("3시간", "ko"));
+    assert.equal(canonMatch("아홉 시간", "ko"), canonMatch("9시간", "ko"));
+});
+
+test("no canonical form is a substring of another", () => {
+    // The invariant behind the test above, stated once rather than argued per
+    // row, and enforced in the library so a new row cannot reopen it. This is
+    // what `check:memory-eval-succ8` runs in CI.
+    assert.deepEqual([...canonicalFormsAreDisjoint()], []);
+});
+
+test("rows are matched longest-first, in one pass", () => {
+    // Ordering is a contract term, not an implementation detail. Rewriting row
+    // by row re-scans what an earlier row produced: the guard turns `아홉 시간`
+    // into a form the hour row then finds `아홉시` inside, and the collision is
+    // back. One ordered alternation consumes the whole longer expression.
+    //
+    // Asserted on the outcome rather than the mechanism, so a reimplementation
+    // that keeps the property passes.
+    assert.equal(canon("아홉 시간"), "아홉시간");
+    assert.equal(canon("아홉 시"), "9시");
+    assert.equal(canon("세 시간"), "세시간");
+    assert.equal(canon("세 시"), "3시");
+    // Both in one sentence, each resolved as itself.
+    assert.equal(canon("아홉 시부터 아홉 시간"), "9시부터 아홉시간");
 });
 
 test("unregistered numeral expressions are left as written", () => {
@@ -159,8 +198,6 @@ test("unregistered numeral expressions are left as written", () => {
     // rewritten. Asserted rather than left implicit: registering a row is a
     // reviewed act, and a row appearing without review should fail here.
     for (const untouched of [
-        "육 개월",
-        "새벽 세 시",
         "십 년",
         "삼십 분",
         "매주 두 번",
@@ -174,14 +211,14 @@ test("unregistered numeral expressions are left as written", () => {
     }
 });
 
-test("every registered row names its gold and its over-matches", () => {
+test("every registered row names why it exists and what else it rewrites", () => {
     // A row rewrites its forms everywhere, including inside other words. That
     // is safe only when it cannot make two different facts equal, and
     // `requiredBy` plus `rejects` are where that reasoning is written down. A
     // row added without them has not been reviewed.
-    assert.equal(KOREAN_NUMERAL_EXPRESSIONS.length, 1);
+    assert.equal(KOREAN_NUMERAL_EXPRESSIONS.length, 5);
     for (const row of KOREAN_NUMERAL_EXPRESSIONS) {
-        assert.match(row.requiredBy, /^succ-/, row.canonical);
+        assert.match(row.requiredBy, /^(succ-|guards succ-)/, row.canonical);
         assert.ok(Array.isArray(row.rejects), row.canonical);
         assert.ok(row.variants.length >= 2, "a row with one variant collapses nothing");
         for (const variant of row.variants) {
@@ -192,14 +229,18 @@ test("every registered row names its gold and its over-matches", () => {
             );
         }
     }
+    // Three rows serve a gold and two guard one. A guard that stopped naming
+    // what it guards would read as an equivalence somebody wanted.
+    assert.equal(
+        KOREAN_NUMERAL_EXPRESSIONS.filter((row) => row.requiredBy.startsWith("guards ")).length,
+        2
+    );
 });
 
 test("the vocabulary lists stay, and stop generating the rewrite", () => {
     // `NUMERAL_TABLE` and `KOREAN_COUNTERS` are still contract terms and still
     // hashed, but from v3.5 they no longer produce the Korean rewrite: they are
-    // the vocabulary a reviewed row may draw from. Asserted because a future
-    // row using a counter outside the list would describe a shape the contract
-    // does not.
+    // the vocabulary a reviewed row may draw from.
     assert.ok(Object.hasOwn(NUMERAL_TABLE, "아홉"));
     assert.ok(KOREAN_COUNTERS.includes("시"));
     // And the cross-product is genuinely gone: 토요일 일정 and 이십일 are the

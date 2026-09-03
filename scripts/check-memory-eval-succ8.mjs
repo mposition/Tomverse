@@ -43,6 +43,10 @@ import {
     harnessTargetBindingFailures,
 } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_SCORING_CONTRACT_VERSION } from "../lib/memoryEvalScoringContractDigest.ts";
+import {
+    KOREAN_NUMERAL_EXPRESSIONS,
+    canonicalFormsAreDisjoint,
+} from "../lib/memoryEvalCanonicalisation.ts";
 
 const failures = [];
 const notes = [];
@@ -72,6 +76,24 @@ if (MEMORY_EVAL_SUCC8_MANIFEST === built) {
     );
 } else {
     ok("the manifest is a record, not a recomputation", "literal, compared with the builder");
+}
+
+/* ------------------------------------------- the contract's own invariant -- */
+
+// The rule that separates an hour from a duration, checked rather than argued.
+//
+// Three attempts got this wrong in three ways — `3시` inside `3시간`, `아홉시`
+// inside `아홉시간`, and rewriting to `9시` would have put `9시` inside `9시간`
+// — each time with a comment explaining why it was fine. A comment cannot fail
+// a build. This can, and it runs on the live contract wherever this gate does.
+const disjoint = [...canonicalFormsAreDisjoint()];
+if (disjoint.length > 0) {
+    for (const problem of disjoint) fail(problem);
+} else {
+    ok(
+        "no canonical form is inside another",
+        `${KOREAN_NUMERAL_EXPRESSIONS.length} reviewed row(s)`
+    );
 }
 
 /* --------------------------------------------- the contract-only claim ---- */

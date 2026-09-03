@@ -217,25 +217,72 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
      * run of whitespace or none, so `아홉 시` covers `아홉시` as well.
      */
     variants: readonly string[];
-    /** The frozen gold that cannot be satisfied without this row. */
+    /**
+     * Why the row is here: the frozen gold it serves, or the row it protects.
+     *
+     * A guard row buys no equivalence of its own. It exists so that a longer
+     * expression is consumed before a shorter one can fire inside it, which is
+     * what keeps an hour from meeting a duration.
+     */
     requiredBy: string;
     /** What else this row rewrites. Reviewed, not accidental. */
     rejects: readonly string[];
 }[] = [
     {
+        // succ-durable-ko-35 states `육 개월`; a model may answer `6개월`.
+        canonical: "6개월",
+        variants: ["육 개월", "6개월"],
+        requiredBy: "succ-durable-ko-35",
+        // 개월 is not the prefix of any other registered counter, and no
+        // corpus string contains 육개월 outside the intended sense.
+        rejects: [],
+    },
+    {
+        // A guard, not an equivalence: 세 시간 is three *hours*.
+        //
+        // Without it the row below fires inside it — `세 시간` becomes `3시간`,
+        // and a `3시` gold is a substring of that. Three hours would score as
+        // three o'clock, which is the one thing this contract's
+        // canonicalisation rule forbids. Collapsing to the word form keeps the
+        // duration out of every hour form's reach.
+        canonical: "세시간",
+        variants: ["세 시간", "3시간"],
+        requiredBy: "guards succ-durable-ko-36",
+        rejects: [],
+    },
+    {
+        // succ-durable-ko-36 states `새벽 세 시`; a model may answer `새벽 3시`.
+        canonical: "3시",
+        variants: ["세 시", "3시"],
+        requiredBy: "succ-durable-ko-36",
+        // 전세 시장 becomes 전3시장 — nonsense on both sides of every
+        // comparison, and it collides with nothing: no canonical form is a
+        // substring of another, which `canonicalFormsAreDisjoint()` enforces.
+        rejects: ["전세 시장"],
+    },
+    {
+        // The same guard for 아홉, and the reason it is not optional.
+        //
+        // `succ-durable-ko-401`'s gold is the digit `9시`. With the hour row
+        // alone, `아홉 시간` — nine *hours* — canonicalises to something the
+        // gold reaches: collapsing to `아홉시` puts the gold inside 아홉시간,
+        // and collapsing to `9시` puts it inside 9시간. Either direction
+        // collides. Consuming the duration first is what actually separates
+        // them, and it is why rows are matched longest-first in one pass.
+        canonical: "아홉시간",
+        variants: ["아홉 시간", "9시간"],
+        requiredBy: "guards succ-durable-ko-401",
+        rejects: [],
+    },
+    {
         // succ-durable-ko-401: factValueAll ["9시"], evidence
         // `가게 문을 아홉 시에 열어서`. The gold is written as a digit and the
         // only statement of the fact is written in words, so without this row
-        // the gold is satisfiable by nothing. It is the only gold in the corpus
-        // that answers that description.
-        canonical: "아홉시",
+        // the gold is satisfiable by nothing.
+        canonical: "9시",
         variants: ["아홉 시", "9시"],
         requiredBy: "succ-durable-ko-401",
-        // 아홉 시간 (nine hours) becomes 아홉시간 — identical to what it becomes
-        // with no rule at all, so an 아홉시 gold reaches it exactly as far as
-        // plain Korean substring matching already let it, and no further.
-        // Nothing else in the corpus contains either variant.
-        rejects: ["아홉 시간"],
+        rejects: [],
     },
 ];
 
@@ -245,25 +292,71 @@ const ENGLISH_NUMERALS = Object.keys(NUMERAL_TABLE).filter(
     (word) => !/[가-힣]/.test(word)
 );
 
+/** A variant's lookup key: itself, with every space removed. */
+const variantKey = (variant: string) => variant.replace(/\s+/g, "");
+
 /**
- * Each variant as a pattern, paired with the canonical form it collapses to.
+ * No canonical form may be a substring of another.
  *
- * A space in a variant becomes `\s*`, so one written form covers the spaced
- * and unspaced spellings without a second row — Korean spacing is not stable
- * and a reviewer registering `아홉 시` is registering the equivalence, not the
- * typing.
+ * The invariant that separates an hour from a duration, stated once and
+ * enforced rather than argued per row. Matching is by substring, so if one
+ * canonical form sits inside another then a gold carrying the shorter one is
+ * satisfied by text carrying the longer, and the two are different facts.
+ *
+ * This is what the first three attempts got wrong in three different ways —
+ * `3시` inside `3시간`, then `아홉시` inside `아홉시간`, and rewriting to `9시`
+ * would have put `9시` inside `9시간`. Guard rows exist to keep the pair
+ * disjoint, and this function is what says whether they succeeded.
  */
-const KOREAN_NUMERAL_EXPRESSION_RE = KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) =>
-    entry.variants.map(
-        (variant) =>
-            [
-                new RegExp(
-                    variant.split(/\s+/).map(escape).join("\\s*"),
-                    "g"
-                ),
-                entry.canonical,
-            ] as const
+export function canonicalFormsAreDisjoint(): readonly string[] {
+    const forms = KOREAN_NUMERAL_EXPRESSIONS.map((entry) => entry.canonical);
+    const problems: string[] = [];
+    for (const a of forms) {
+        for (const b of forms) {
+            if (a !== b && b.includes(a)) {
+                problems.push(
+                    `the canonical form ${a} is inside ${b}, so a gold carrying ` +
+                        `${a} is satisfied by text carrying ${b}`
+                );
+            }
+        }
+    }
+    const keys = KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) =>
+        entry.variants.map(variantKey)
+    );
+    for (const key of keys) {
+        if (keys.filter((other) => other === key).length > 1) {
+            problems.push(`the variant ${key} is registered by two rows`);
+        }
+    }
+    return problems;
+}
+
+/**
+ * One alternation, longest variant first, applied in a single pass.
+ *
+ * The ordering is a contract term, not an implementation detail. Rewriting
+ * variant by variant re-scans what an earlier row already produced, so a guard
+ * row cannot protect anything: `아홉 시간` collapses to 아홉시간 and then the
+ * hour row finds `아홉시` inside it and produces 9시간, which is the collision
+ * the guard exists to prevent. A single ordered alternation consumes the whole
+ * of the longer expression and carries on past it.
+ *
+ * A space in a variant becomes `\s*`, so one written form covers the spaced and
+ * unspaced spellings without a second row — Korean spacing is not stable, and a
+ * reviewer registering `아홉 시` is registering the equivalence, not the typing.
+ */
+const KOREAN_CANONICAL_BY_VARIANT = new Map(
+    KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) =>
+        entry.variants.map((variant) => [variantKey(variant), entry.canonical] as const)
     )
+);
+const KOREAN_NUMERAL_EXPRESSION_RE = new RegExp(
+    KOREAN_NUMERAL_EXPRESSIONS.flatMap((entry) => entry.variants)
+        .sort((a, b) => variantKey(b).length - variantKey(a).length)
+        .map((variant) => variant.split(/\s+/).map(escape).join("\\s*"))
+        .join("|"),
+    "g"
 );
 const ENGLISH_NUMERAL_RE = new RegExp(
     `\\b(${ENGLISH_NUMERALS.map(escape).join("|")})\\b`,
@@ -275,10 +368,11 @@ export const canon = (value: string): string => {
     let out = value.normalize("NFC").toLowerCase();
     out = out.replace(/n['’]t\b/g, " not");
     out = out.replace(/(\d)[,  ](?=\d{3}\b)/g, "$1");
-    for (const [pattern, replacement] of KOREAN_NUMERAL_EXPRESSION_RE) {
-        pattern.lastIndex = 0;
-        out = out.replace(pattern, replacement);
-    }
+    KOREAN_NUMERAL_EXPRESSION_RE.lastIndex = 0;
+    out = out.replace(
+        KOREAN_NUMERAL_EXPRESSION_RE,
+        (match) => KOREAN_CANONICAL_BY_VARIANT.get(variantKey(match)) ?? match
+    );
     out = out.replace(ENGLISH_NUMERAL_RE, (word) => NUMERAL_TABLE[word] ?? word);
     out = out.replace(/[^\p{L}\p{N}\s]/gu, " ");
     return out.replace(/\s+/g, " ").trim();
