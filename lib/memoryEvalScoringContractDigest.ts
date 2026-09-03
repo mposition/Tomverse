@@ -77,6 +77,7 @@ import {
     APPROVED_STEMS,
     CANON_STEP_ORDER,
     KOREAN_COUNTERS,
+    KOREAN_NUMERAL_EXPRESSIONS,
     NUMERAL_TABLE,
 } from "@/lib/memoryEvalCanonicalisation";
 import {
@@ -243,11 +244,14 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
         statement:
             "Both sides of a comparison pass through canon in the fixed step order, then " +
             "through the language's matching form: Korean drops every space, English keeps " +
-            "them. A Korean numeral word is rewritten to its digit only where a counter " +
-            "follows it and no syllable precedes it, so the rule reaches numerals and not " +
-            "the syllables that end other words. Canonicalisation rewrites a token to a " +
-            "canonical form by a fixed table and never decides that two different facts " +
-            "are the same.",
+            "them. Every step is context-free: it rewrites by a fixed table and consults " +
+            "nothing to either side of what it matches, so a token canonicalises the same " +
+            "way alone as it does inside a sentence, and the same way however the sentence " +
+            "was spaced. Korean numerals are rewritten only by the reviewed rows of " +
+            "canonKoreanNumeralExpressions, each of which records the words it also " +
+            "rewrites; an unlisted numeral is left as written. Canonicalisation rewrites a " +
+            "token to a canonical form by a fixed table and never decides that two " +
+            "different facts are the same.",
     },
     {
         id: "v3-evidence-binding",
@@ -477,6 +481,30 @@ export function scoringContractDescriptorInput(): string {
         descriptorListRow("canonStepOrder", CANON_STEP_ORDER),
         descriptorSortedTableRow("canonNumeralTable", NUMERAL_TABLE),
         descriptorSortedListRow("canonKoreanCounters", KOREAN_COUNTERS),
+        // The rows that actually rewrite Korean text, and the reason they are
+        // here rather than left to the two rows above.
+        //
+        // Until `mem-score-v3.5` the Korean rewrite was `NUMERAL_TABLE` crossed
+        // with `KOREAN_COUNTERS`, so hashing those two hashed the matcher. v3.5
+        // replaced the cross-product with a reviewed list, and for one commit
+        // the digest covered the *vocabulary* a row may draw from while the
+        // rows themselves sat outside it: adding, removing or retargeting a row
+        // changed what every comparison did and moved nothing. A contract
+        // digest that cannot see the matcher is not pinning the contract.
+        //
+        // The `rejects` are inside for the reason `approvedStemsFor` states —
+        // a row whose reviewed over-matches were quietly dropped is a different
+        // rule wearing the same spelling — and the whole row is sorted, because
+        // rewriting rows in another order is the same matcher.
+        descriptorSortedListRow(
+            "canonKoreanNumeralExpressions",
+            KOREAN_NUMERAL_EXPRESSIONS.map(
+                (entry) =>
+                    `${entry.numeral}+${entry.counter}=${entry.canonical}` +
+                    `:+${[...entry.matches].sort().join("|")}` +
+                    `:-${[...entry.rejects].sort().join("|")}`
+            )
+        ),
         // Empty at freeze, and that emptiness is the record: registering the
         // first stem moves this digest, which under the contract's §5 is a new
         // scoring contract version.

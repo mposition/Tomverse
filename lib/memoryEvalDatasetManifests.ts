@@ -788,7 +788,7 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
             version: "mem-score-v3.5",
             approvedOn: "2026-09-03",
             descriptorDigest:
-                "e2d4e62dfe7e3790870382159f2da13bf145138836c2ad93d1d5ffa91d8bef66",
+                "08e6d8b6a65a8f874b3c437a118b89e2e57eacb5652dffcd301247cff24213bc",
             pendingRules: [],
         },
     ];

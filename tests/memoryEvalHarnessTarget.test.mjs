@@ -62,11 +62,11 @@ test("its digests are the ones the manifest records", () => {
     );
     assert.equal(
         target.datasetManifestDigest,
-        "e8b6b93dfa9ec0001cbd2692f08262b948681a39f597eeff6693d646b88814fb"
+        "01d94eb3750a799b1dff07f115e6efac7e471573a1f6df6efccbc5da8f539f15"
     );
     assert.equal(
         target.scoringContractDigest,
-        "e2d4e62dfe7e3790870382159f2da13bf145138836c2ad93d1d5ffa91d8bef66"
+        "08e6d8b6a65a8f874b3c437a118b89e2e57eacb5652dffcd301247cff24213bc"
     );
     assert.equal(target.scoringContractVersion, "mem-score-v3.5");
     assert.deepEqual([...harnessTargetBindingFailures(target)], []);
@@ -120,7 +120,7 @@ test("the run tuple describes succ-8, and a budget for succ-7 is refused", () =>
     );
     assert.equal(
         tuple.datasetManifestDigest,
-        "e8b6b93dfa9ec0001cbd2692f08262b948681a39f597eeff6693d646b88814fb"
+        "01d94eb3750a799b1dff07f115e6efac7e471573a1f6df6efccbc5da8f539f15"
     );
     assert.equal(tuple.scoringContractVersion, "mem-score-v3.5");
 

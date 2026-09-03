@@ -229,6 +229,26 @@ export const KOREAN_NUMERAL_EXPRESSIONS: readonly {
         // only collide, never miss. No other 세…시 sense occurs in the corpus.
         rejects: ["세 시간", "전세 시장"],
     },
+    {
+        // succ-durable-ko-401: factValueAll ["9시"], and the only place the
+        // fact appears is `가게 문을 아홉 시에 열어서`. This row is the one the
+        // first draft of the table missed, and the miss is instructive: the
+        // survey behind that draft looked for golds *written in Korean
+        // numerals* and this gold is written as a digit. The requirement is
+        // symmetric — a word-form gold over digit text and a digit gold over
+        // word text are the same question — and only one direction was asked.
+        //
+        // `tests/memoryEvalGoldNormalisationCoverage.test.mjs` now asks it of
+        // every gold in every assembled dataset, so the next row cannot be
+        // missed by choosing the wrong direction to look in.
+        numeral: "아홉",
+        counter: "시",
+        canonical: "9시",
+        matches: ["아홉 시", "아홉시", "9시"],
+        // 아홉 is a numeral and nothing else, and no corpus word ends in it
+        // before 시. Nothing else is rewritten.
+        rejects: [],
+    },
 ];
 
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

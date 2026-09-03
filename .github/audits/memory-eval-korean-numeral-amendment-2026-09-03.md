@@ -108,11 +108,32 @@ lookaround가 없으므로 문맥 자유이고, 표가 좁으므로 단어 내�
 | --- | --- | --- |
 | `육` + `개월` | `6개월` | `succ-durable-ko-35`의 gold 토큰 `육 개월` |
 | `세` + `시` | `3시` | `succ-durable-ko-36`의 gold 토큰 `새벽 세 시` |
+| `아홉` + `시` | `9시` | `succ-durable-ko-401`의 gold 토큰 `9시` |
 
-**두 행 모두 동결된 gold의 문구 그대로입니다.** 등록은 gold를 읽은 것이지
+**세 행 모두 동결된 gold가 요구하는 것입니다.** 등록은 gold를 읽은 것이지
 정책을 만든 것이 아닙니다. 그 밖에는 아무것도 등록하지 않았습니다 — 어떤
 gold도 모델의 `10년`이 `십 년`과 만나기를 요구하지 않으므로, 그 행은 질문 없는
 채점 표면이 됩니다.
+
+### 4.4 세 번째 행을 놓쳤던 이유 — 측정이 한 방향뿐이었습니다
+
+첫 초안은 두 행만 등록했고 `succ-durable-ko-401`을 놓쳤습니다. 이 gold는
+`factValueAll: ["9시"]`이고, 사실이 서술된 곳은 `가게 문을 아홉 시에 열어서`
+하나뿐입니다. v3.4에서는 `아홉 시` → `9시`로 만족됐고, 두 행 표에서는
+**어떤 후보로도 만족될 수 없는 gold**가 됩니다.
+
+놓친 이유는 조사 방법이었습니다 — **한국어 숫자로 쓰인 gold**만 찾았는데 이
+gold는 숫자로 쓰여 있습니다. 요구는 대칭입니다: 단어형 gold가 숫자 텍스트를
+만나는 것과 숫자형 gold가 단어 텍스트를 만나는 것은 같은 질문이고, 저는 한
+방향만 물었습니다.
+
+그래서 조사를 **테스트로 만들었습니다**
+(`tests/memoryEvalGoldNormalisationCoverage.test.mjs`). 숫자를 전혀 보지 않고
+채점기가 던지는 질문을 그대로 던집니다 — *이 gold가 이 case 자신의 텍스트로
+만족되는가*. 조립되는 모든 schema-3 dataset의 모든 gold에 대해 매 commit
+실행됩니다. `factValueAll`은 전부·`factValueAny`는 하나 이상이라는 규칙까지
+반영해야 하고(그러지 않으면 동의어 17건이 오탐으로 묻습니다), 그 상태에서 트리
+전체의 진짜 미충족 gold는 **정확히 1건**이었습니다.
 
 각 행은 `rejects`로 **자기가 함께 바꾸는 단어**를 적습니다. `세 시` 행은
 `세 시간`을 `3시간`으로, `전세 시장`을 `전3장`으로 바꿉니다. 이것이 허용되는
@@ -133,9 +154,25 @@ gold도 모델의 `10년`이 `십 년`과 만나기를 요구하지 않으므로
 | `이십일` 보존 | 아니오 | 예 | 예 | **예** |
 | ko-35 `6개월` 허용 | 예 | 예 | 예 | **예** |
 | ko-36 `새벽 3시` 허용 | 예 | 예 | **아니오** | **예** |
+| ko-401 `아홉 시`≡`9시` | 예 | 예 | 예 | **예**(2차 수정) |
 | 트리 조립 | 예 | 아니오 | 아니오 | **예** |
+| 미충족 gold (dataset 5개 전체) | 0 | — | — | **0** |
 
-**채택안은 모든 축에서 v3.4 이상입니다.**
+마지막 줄이 "트레이드오프 없음"의 유일한 근거이고, **처음에는 성립하지
+않았습니다** — 두 행만 있던 초안에서 1건이었습니다(§4.4). 세 번째 행을 넣은 뒤
+0이며, 그 값은 이제 테스트가 매 commit 확인합니다.
+
+## 5.1 계약 digest가 실제 표를 덮습니다
+
+v3.4까지 한국어 치환은 `NUMERAL_TABLE` × `KOREAN_COUNTERS` 교차곱이었으므로
+그 둘을 해싱하는 것이 곧 matcher를 해싱하는 것이었습니다. v3.5가 교차곱을 표로
+바꾸면서 **한 commit 동안 digest는 행이 쓸 수 있는 어휘만 덮고 행 자체는 밖에
+있었습니다** — 행을 추가·삭제·변경하면 모든 비교의 동작이 바뀌는데 서명 대상은
+움직이지 않는 상태였습니다.
+
+descriptor에 `canonKoreanNumeralExpressions` 행을 넣었습니다. `rejects`도 함께
+들어갑니다 — `approvedStemsFor`와 같은 이유로, 검토된 과잉 매치 목록이 조용히
+빠진 규칙은 같은 철자를 쓴 다른 규칙입니다.
 
 ## 6. 계약 digest와 후속 dataset
 
@@ -176,11 +213,11 @@ digest를 움직이지 않게 하기 위해서이고, 세 dataset 모두 binding
 
 ```
 datasetDigest    9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251
-manifestDigest   e8b6b93dfa9ec0001cbd2692f08262b948681a39f597eeff6693d646b88814fb
+manifestDigest   01d94eb3750a799b1dff07f115e6efac7e471573a1f6df6efccbc5da8f539f15
 ```
 
 계약 descriptor digest는
-`e2d4e62dfe7e3790870382159f2da13bf145138836c2ad93d1d5ffa91d8bef66`입니다.
+`08e6d8b6a65a8f874b3c437a118b89e2e57eacb5652dffcd301247cff24213bc`입니다.
 
 `datasetDigest`는 succ-7과 같습니다 — 그것이 contract-only successor라는
 주장이며, `succ8Problems()`가 같지 않으면 실패합니다. `manifestDigest`는
@@ -200,6 +237,12 @@ manifestDigest   e8b6b93dfa9ec0001cbd2692f08262b948681a39f597eeff6693d646b88814f
   모양이므로 거절합니다. 서명된 digest는 리터럴과 대조하며, 빌더와는 대조하지
   않습니다.
 
+**그리고 그 검증기들이 이제 실제로 실행됩니다.** 위 셋은 작성된 뒤 어떤 gate
+에서도 호출되지 않았습니다 — `resolveArtifactDataset()`에서만 도달 가능한데
+그것은 누군가 옛 artifact를 읽을 때 실행되지, commit마다도 서명 전에도
+아닙니다. `npm run check:memory-eval-succ8`을 succ-6·succ-7과 같은 패턴으로
+만들어 PR Fast Gate의 static 단계와 release checklist에 넣었습니다.
+
 서명이 없는 동안 `decideEvalRunMode()`는 succ-8에 대한 유료 실행을
 `dataset_not_frozen`으로 거절합니다. smoke run은 영향을 받지 않으며
 485/485입니다.
@@ -215,3 +258,9 @@ manifestDigest   e8b6b93dfa9ec0001cbd2692f08262b948681a39f597eeff6693d646b88814f
 - 등록된 두 행이 세 가지 표기(띄어쓰기 둘 + 숫자) 모두에서 정규화된다
 - **등록되지 않은 표현은 그대로 남는다** — 검토 없이 행이 늘어나면 실패합니다
 - 모든 행이 `rejects`를 갖고, 단위가 `KOREAN_COUNTERS`에 있다
+
+`tests/memoryEvalGoldNormalisationCoverage.test.mjs` — 조립되는 다섯 dataset의
+모든 gold가 자기 case 텍스트로 만족되는가(§4.4).
+
+`tests/memoryEvalScoringContractDigest.test.mjs` — 등록된 모든 행과 그
+`rejects`가 descriptor에 들어가는가, 행 하나를 바꾸면 digest가 움직이는가(§5.1).

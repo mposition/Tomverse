@@ -197,6 +197,14 @@ Date / timezone:    ____________________
       `frozen` kept out of the manifest's identity so the digest a
       reviewer signs is the digest that gets frozen, and no claim of
       adoption while the review sheet carries no signature
+- [ ] `npm run check:memory-eval-succ8` — the harness target, and the
+      dataset a signature is pending on. Its manifest is a pinned literal
+      compared with the builder rather than the builder compared with
+      itself, the record is re-hashed from its own fields so a field
+      edited with the digest left alone is caught, the contract-only
+      claim holds in both directions (the sample did not move, the
+      contract did), and the approval is all five signed fields or none —
+      a name without digests approves nothing in particular
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`

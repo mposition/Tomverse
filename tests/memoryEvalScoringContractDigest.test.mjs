@@ -35,6 +35,7 @@ import {
     goldEvidenceFailure,
 } from "../lib/memoryEvalDatasetSchemaV3.ts";
 import { POLARITY_MARKERS } from "../lib/memoryEvalPolarityCalibration/distance.ts";
+import { KOREAN_NUMERAL_EXPRESSIONS } from "../lib/memoryEvalCanonicalisation.ts";
 import {
     matchesExpectedV2,
     scoreCaseV2,
@@ -547,6 +548,42 @@ test("the canonicalisation table and its order reach the digest", () => {
     assert.ok(table.includes("twelve=12"));
     assert.ok(table.includes(`육=6`));
     assert.ok(descriptorRow("canonKoreanCounters").includes("개월"));
+});
+
+test("the rows that actually rewrite Korean text are in the digest", () => {
+    // The gap `mem-score-v3.5` opened for one commit. Until v3.5 the Korean
+    // rewrite was `canonNumeralTable` crossed with `canonKoreanCounters`, so
+    // hashing those two hashed the matcher. v3.5 replaced the cross-product
+    // with `KOREAN_NUMERAL_EXPRESSIONS`, and for a commit the digest covered
+    // the vocabulary a row may draw from while the rows themselves sat outside
+    // it: adding, removing or retargeting a row changed what every comparison
+    // did and moved nothing a reviewer signs.
+    const row = descriptorRow("canonKoreanNumeralExpressions");
+    for (const entry of KOREAN_NUMERAL_EXPRESSIONS) {
+        assert.ok(
+            row.includes(`${entry.numeral}+${entry.counter}=${entry.canonical}`),
+            `${entry.numeral}+${entry.counter} is not in the digest: ${row}`
+        );
+    }
+    // Every row, not merely one of them.
+    assert.equal(row.split(ITEM).length, KOREAN_NUMERAL_EXPRESSIONS.length);
+
+    // And the reviewed over-matches travel with the row, for the reason
+    // `approvedStemsFor` gives: a rule whose negative examples were dropped is
+    // a different rule under the same spelling.
+    assert.ok(row.includes("전세 시장"), row);
+
+    // Red-before-green: a row that changed target moves the digest.
+    const moved = descriptorSortedListRow(
+        "canonKoreanNumeralExpressions",
+        KOREAN_NUMERAL_EXPRESSIONS.map(
+            (entry) =>
+                `${entry.numeral}+${entry.counter}=${entry.canonical}9` +
+                `:+${[...entry.matches].sort().join("|")}` +
+                `:-${[...entry.rejects].sort().join("|")}`
+        )
+    );
+    assert.notEqual(moved, row);
 });
 
 test("order is a contract term where it decides a match, and not where it does not", () => {
