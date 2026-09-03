@@ -70,7 +70,6 @@ test("the first signature is kept, and cannot pass as a live one", () => {
 });
 
 test("a history entry that still matches the tree is refused", () => {
-    const built = buildSucc7DraftManifest();
     const problems = succ7SupersededReviewProblems([
         {
             ...MEMORY_EVAL_SUCC7_REVIEW,
@@ -82,18 +81,110 @@ test("a history entry that still matches the tree is refused", () => {
         problems.some((line) => line.includes("live signature filed as history")),
         problems.join(" | ")
     );
-    // And one with no reason, whichever way its digests fall.
     const noReason = succ7SupersededReviewProblems([
-        {
-            ...MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS[0],
-            supersededBecause: undefined,
-        },
-        built && undefined,
-    ].filter(Boolean));
+        { ...MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS[0], supersededBecause: undefined },
+    ]);
     assert.ok(
         noReason.some((line) => line.includes("records no reason")),
         noReason.join(" | ")
     );
+});
+
+test("the first signature cannot be quietly edited", () => {
+    // Every one of these passed on 2026-09-03. The history entry was checked
+    // for its status, its reason, and whether it differed from the tree — and
+    // it differs for free, because it has no `signedTransitionDigest`, so the
+    // only real test was vacuous and the values inside it were unguarded.
+    const first = MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS[0];
+    const tamperings = [
+        [{ ...first, reviewer: "" }, "reviewer"],
+        [{ ...first, reviewedAt: "yesterday" }, "reviewedAt"],
+        [{ ...first, reviewedCommit: "" }, "reviewedCommit"],
+        [{ ...first, record: "missing.md" }, "record"],
+        [{ ...first, signedDatasetDigest: "corrupt" }, "signedDatasetDigest"],
+        [{ ...first, signedManifestDigest: "corrupt" }, "signedManifestDigest"],
+        [
+            { ...first, signedSourceDatasetDigest: "corrupt" },
+            "signedSourceDatasetDigest",
+        ],
+        [
+            {
+                ...first,
+                verdict: {
+                    sameBoundaryPassed: 0,
+                    sameBoundaryTotal: 53,
+                    coverageRepairGoldFit: false,
+                    problemCases: 53,
+                    cellDiversitySufficient: false,
+                },
+            },
+            "verdict",
+        ],
+        [{ ...first, status: "signed" }, "status"],
+    ];
+    for (const [entry, what] of tamperings) {
+        const problems = succ7SupersededReviewProblems([entry]);
+        assert.ok(problems.length > 0, `${what} was accepted`);
+    }
+    // A signature filed twice reads as two approvals.
+    const duplicated = succ7SupersededReviewProblems([first, { ...first }]);
+    assert.ok(
+        duplicated.some((line) => line.includes("repeats a signature")),
+        duplicated.join(" | ")
+    );
+});
+
+test("only the one legacy signature may omit the pairing digest", () => {
+    // The exception is a commit, not a shape. "A signature may omit it" is the
+    // rule that let the first one be signed without it.
+    const first = MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS[0];
+    assert.equal(
+        first.reviewedCommit,
+        "e522796dd11e3d009d23a13836b7a45b005f3bc8"
+    );
+    const elsewhere = succ7SupersededReviewProblems([
+        {
+            ...first,
+            reviewedCommit: "0".repeat(40),
+            signedTransitionDigest: undefined,
+        },
+    ]);
+    assert.ok(
+        elsewhere.some((line) => line.includes("not the one signature that")),
+        elsewhere.join(" | ")
+    );
+});
+
+test("the pinned legacy values are the ones the record shows", () => {
+    // Written out here as well as in the module: the module's copy is what the
+    // check compares against, and a tamperer editing both would still have to
+    // edit this file, which is not the one they are looking at.
+    const first = MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS[0];
+    assert.equal(first.reviewer, "@mposition");
+    assert.equal(first.reviewedAt, "2026-09-02");
+    assert.equal(
+        first.record,
+        ".github/audits/memory-eval-succ7-adoption-2026-09-02.md"
+    );
+    assert.equal(
+        first.signedDatasetDigest,
+        "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251"
+    );
+    assert.equal(
+        first.signedManifestDigest,
+        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965"
+    );
+    assert.equal(
+        first.signedSourceDatasetDigest,
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
+    );
+    assert.deepEqual({ ...first.verdict }, {
+        sameBoundaryPassed: 53,
+        sameBoundaryTotal: 53,
+        coverageRepairGoldFit: true,
+        problemCases: 0,
+        cellDiversitySufficient: true,
+    });
 });
 
 test("a signature of a different dataset is refused", () => {

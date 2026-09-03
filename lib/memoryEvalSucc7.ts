@@ -534,6 +534,106 @@ export function verifySucc7Manifest(
     return failures;
 }
 
+const HEX_64 = /^[0-9a-f]{64}$/;
+const SHA_40 = /^[0-9a-f]{40}$/;
+const AUDIT_RECORD = /^\.github\/audits\/[\w.-]+\.md$/;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The one signature allowed to predate `signedTransitionDigest`.
+ *
+ * Named by its commit rather than allowed by shape. "A signature may omit the
+ * pairing digest" is the rule that let the first one be signed without it; the
+ * exception has to be one commit, not a category, or the fix reopens itself.
+ */
+const LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST =
+    "e522796dd11e3d009d23a13836b7a45b005f3bc8";
+
+/**
+ * The values the 2026-09-02 signature actually carried.
+ *
+ * Pinned because a historical record has no other defence. A live signature is
+ * checked against the tree and fails the moment either moves; a superseded one
+ * is checked against nothing, so `reviewer: ""` and a corrupted digest sat
+ * inside it and every check still passed. These are what it said.
+ */
+const LEGACY_SIGNATURE_VALUES = {
+    reviewer: "@mposition",
+    reviewedAt: "2026-09-02",
+    signedDatasetDigest:
+        "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+    signedManifestDigest:
+        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+    signedSourceDatasetDigest:
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+    record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
+} as const;
+
+/**
+ * What any signature must look like, live or superseded.
+ *
+ * Shared deliberately. The live path had these checks and the history path did
+ * not, which is exactly how a record nobody compares against anything becomes
+ * editable: the fields are the same fields, so they are checked in one place.
+ */
+function signatureShapeProblems(
+    signature: Succ7AdoptionSignature,
+    label: string
+): string[] {
+    const problems: string[] = [];
+    const require = (ok: boolean, what: string) => {
+        if (!ok) problems.push(`${label}: ${what}`);
+    };
+    require(/^@[\w-]+$/.test(signature.reviewer), `reviewer "${signature.reviewer}"`);
+    require(ISO_DAY.test(signature.reviewedAt), `reviewedAt "${signature.reviewedAt}"`);
+    require(
+        SHA_40.test(signature.reviewedCommit),
+        `reviewedCommit is not a 40-character SHA: "${signature.reviewedCommit}"`
+    );
+    require(
+        AUDIT_RECORD.test(signature.record),
+        `record is not an audit path: "${signature.record}"`
+    );
+    for (const field of [
+        "signedDatasetDigest",
+        "signedManifestDigest",
+        "signedSourceDatasetDigest",
+    ] as const) {
+        require(HEX_64.test(signature[field]), `${field} "${signature[field]}"`);
+    }
+    if (signature.signedTransitionDigest === undefined) {
+        require(
+            signature.reviewedCommit ===
+                LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST,
+            "no signedTransitionDigest, and this is not the one signature that " +
+                "predates it"
+        );
+    } else {
+        require(
+            HEX_64.test(signature.signedTransitionDigest),
+            `signedTransitionDigest "${signature.signedTransitionDigest}"`
+        );
+    }
+    const { verdict } = signature;
+    require(
+        verdict.sameBoundaryTotal === SUCC7_SAME_BOUNDARY_COUNT,
+        `the verdict counts ${verdict.sameBoundaryTotal} same-boundary ` +
+            `transitions, the transition declares ${SUCC7_SAME_BOUNDARY_COUNT}`
+    );
+    require(
+        verdict.sameBoundaryPassed === verdict.sameBoundaryTotal,
+        `the verdict passes ${verdict.sameBoundaryPassed} of ` +
+            `${verdict.sameBoundaryTotal} same-boundary transitions`
+    );
+    require(verdict.problemCases === 0, `${verdict.problemCases} problem case(s)`);
+    require(verdict.coverageRepairGoldFit, "the coverage repair's gold was not passed");
+    require(
+        verdict.cellDiversitySufficient,
+        "a cell's diversity was not found sufficient"
+    );
+    return problems;
+}
+
 /**
  * Everything wrong with the list of signatures this dataset has outlived.
  *
@@ -549,24 +649,61 @@ export function succ7SupersededReviewProblems(
     built: Succ7DraftManifest = buildSucc7DraftManifest()
 ): readonly string[] {
     const problems: string[] = [];
-    for (const entry of entries) {
-        const label = `${entry.reviewer} ${entry.reviewedAt}`;
+    const seen = new Set<string>();
+    for (const [index, entry] of entries.entries()) {
+        const label = `superseded[${index}]`;
+        problems.push(...signatureShapeProblems(entry, label));
         if (entry.status !== "superseded") {
             problems.push(`${label} is filed as history but says "${entry.status}"`);
         }
         if (!entry.supersededBecause) {
             problems.push(`${label} is superseded and records no reason`);
         }
-        const stillMatches =
-            entry.signedDatasetDigest === built.datasetDigest &&
-            entry.signedManifestDigest === built.manifestDigest &&
-            entry.signedSourceDatasetDigest ===
-                built.composition.sourceDatasetDigest &&
-            entry.signedTransitionDigest === built.transitionDigest;
-        if (stillMatches) {
+        // Identity, so the same reading cannot be filed twice — two copies of
+        // one signature read as two approvals.
+        const identity = `${entry.reviewedCommit}@${entry.reviewedAt}`;
+        if (seen.has(identity)) {
+            problems.push(`${label} repeats a signature already in the history`);
+        }
+        seen.add(identity);
+        // The values it actually carried. A live signature is defended by the
+        // tree; a superseded one is compared against nothing unless the values
+        // are written down, which is how "" and "corrupt" sat in this record
+        // and every check still passed.
+        if (entry.reviewedCommit === LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST) {
+            for (const [field, expected] of Object.entries(
+                LEGACY_SIGNATURE_VALUES
+            )) {
+                const actual = entry[field as keyof typeof LEGACY_SIGNATURE_VALUES];
+                if (actual !== expected) {
+                    problems.push(
+                        `${label} ${field} is "${actual}", the 2026-09-02 ` +
+                            `signature carried "${expected}"`
+                    );
+                }
+            }
+        }
+        // Stale, judged only on the digests it actually has: the first
+        // signature has no `signedTransitionDigest`, so comparing an absent
+        // field made every entry look stale for free.
+        const signed: [string, string][] = [
+            [entry.signedDatasetDigest, built.datasetDigest],
+            [entry.signedManifestDigest, built.manifestDigest],
+            [
+                entry.signedSourceDatasetDigest,
+                built.composition.sourceDatasetDigest,
+            ],
+            ...(entry.signedTransitionDigest === undefined
+                ? []
+                : ([[entry.signedTransitionDigest, built.transitionDigest]] as [
+                      string,
+                      string,
+                  ][])),
+        ];
+        if (signed.every(([was, now]) => was === now)) {
             problems.push(
-                `${label} matches this tree in every signed digest, so it is a ` +
-                    "live signature filed as history"
+                `${label} matches this tree in every digest it signed, so it is ` +
+                    "a live signature filed as history"
             );
         }
     }
@@ -601,17 +738,11 @@ export function succ7SignatureProblems(
         );
         return problems;
     }
-    // A signature has to name a commit that can be looked up and a record that
-    // can be read. Blank strings passed every check until 2026-09-02, which
-    // made "signed by nobody, of nothing" indistinguishable from a signature.
-    if (!/^[0-9a-f]{40}$/.test(signature.reviewedCommit)) {
-        problems.push(
-            `reviewedCommit is not a 40-character SHA: "${signature.reviewedCommit}"`
-        );
-    }
-    if (!/^\.github\/audits\/[\w.-]+\.md$/.test(signature.record)) {
-        problems.push(`record is not an audit path: "${signature.record}"`);
-    }
+    // A signature has to name a reviewer, a date, a commit that can be looked
+    // up and a record that can be read. Blank strings passed every check until
+    // 2026-09-02, which made "signed by nobody, of nothing" indistinguishable
+    // from a signature.
+    problems.push(...signatureShapeProblems(signature, "the signature"));
     if (signature.signedTransitionDigest === undefined) {
         problems.push(
             "the signature does not cover the transition pairing: without it, " +
@@ -644,35 +775,6 @@ export function succ7SignatureProblems(
             `the signature records succ-6 as ${signature.signedSourceDatasetDigest}, ` +
                 `the tree computes ${built.composition.sourceDatasetDigest}`
         );
-    }
-    if (!signature.reviewer || !signature.reviewedAt) {
-        problems.push("the signature names no reviewer, or no date");
-    }
-    // A verdict is what was signed; a partial one is not a signature of this
-    // dataset. Recorded as numbers rather than a boolean so a later reader can
-    // see what the reviewer actually passed, and so a quietly weakened verdict
-    // is a diff rather than a mood.
-    const { verdict } = signature;
-    if (verdict.sameBoundaryPassed !== verdict.sameBoundaryTotal) {
-        problems.push(
-            `the verdict passes ${verdict.sameBoundaryPassed} of ` +
-                `${verdict.sameBoundaryTotal} same-boundary transitions`
-        );
-    }
-    if (verdict.sameBoundaryTotal !== SUCC7_SAME_BOUNDARY_COUNT) {
-        problems.push(
-            `the verdict counts ${verdict.sameBoundaryTotal} same-boundary ` +
-                `transitions, the transition declares ${SUCC7_SAME_BOUNDARY_COUNT}`
-        );
-    }
-    if (verdict.problemCases !== 0) {
-        problems.push(`the verdict records ${verdict.problemCases} problem case(s)`);
-    }
-    if (!verdict.coverageRepairGoldFit) {
-        problems.push("the coverage repair's gold was not passed");
-    }
-    if (!verdict.cellDiversitySufficient) {
-        problems.push("a cell's diversity was not found sufficient");
     }
     return problems;
 }
