@@ -80,17 +80,24 @@ Date / timezone:    ____________________
       뿐입니다**: `Pending`은 다음 배포 후보이므로 배포 전에 Railway와 다른 것이
       정상입니다. Active가 어긋나면 이번 배포와 무관한 드리프트이므로 배포를 중단하고,
       Active를 기준으로 복구한 뒤 §2.1 검사와 단일 staged 배포를 다시 합니다
-- [ ] 모바일 인증을 서비스하는 배포라면 **배포 후 두 활성 id 대조 → Pending 승격** —
-      통제된 exchange를 한 번 성공시켜 access token의 `kid`와 그때 생긴
-      `MobileRefreshRotation` 행의 `pepperKid`가 의도한 id와 같은지 확인하고, **통과한
-      뒤에만** Pending을 Active로 승격합니다. 실패하면 Active로 롤백하고 Pending을
-      폐기합니다. 링의 나머지 항목은 관측 경로가 없어 이 대조에 포함되지 않습니다(§2.2).
-      배포 **후** 항목이므로 §7.6과 함께 기록합니다
+- [ ] 모바일 인증을 서비스하는 배포라면 **배포 후 `npm run verify:mobile-auth-deployment`
+      → Pending 승격** — 통제된 exchange를 한 번 성공시켜 access token · refresh token과
+      그때 생긴 `MobileRefreshRotation` 행의 `secretDigest`·`pepperKid`를 모아 Pending
+      값으로 실행합니다. **id가 아니라 재료를 대조합니다**: 같은 id 아래 다른 개인키나
+      pepper가 들어가도 id 대조는 통과하고, 그 값이 Active로 승격되면 롤백이나 다음
+      회전에서 토큰이 끊깁니다. **통과한 뒤에만** Pending을 Active로 승격하고, 실패하면
+      Pending의 deployment ID를 기준으로 롤백하고 Pending을 폐기합니다. 그 exchange
+      세션은 폐기합니다 — 진짜 자격증명입니다. 배포 **후** 항목이므로 §7.6과 함께
+      기록합니다
+- [ ] 모바일 인증을 서비스하는 배포라면 **이전 세대 확인**(유예 안) — 배포 **전에** 받아
+      둔 access token이 아직 받아들여지고, 배포 전에 받아 둔 refresh token이 회전에
+      성공하는지. **롤백이 의존하는 것이 정확히 이 둘**이며, 은퇴 항목은 이것 말고
+      관측 경로가 없습니다(§2.2). 실패하면 승격하지 않습니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-CheckMobileAuthKeyring.ps1`
-      — wrapper가 지키는 네 가지(비밀이 parameter에 없음 / 출력에 없음 / 성공·실패·
-      중단 뒤 환경에 없음 / 검사기의 종료 코드를 그대로 반환)를 고정합니다. **전부
-      부재라서 검토로는 안 보입니다.** 자격증명도 네트워크도 필요 없고 실제 `npm`을
-      부르지 않습니다. 출력(13 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
+      — wrapper가 지키는 다섯 가지(비밀이 parameter에 없음 / 출력에 없음 / 성공·실패·
+      중단 뒤 환경에 없음 / 검사기의 종료 코드를 그대로 반환 / `op run`이 주입한 링을
+      프롬프트가 덮어쓰지 않음)를 고정합니다. **전부 부재라서 검토로는 안 보입니다.** 자격증명도 네트워크도 필요 없고 실제 `npm`을
+      부르지 않습니다. 출력(19 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
       되돌릴 수 없으므로 "돌렸다"가 아니라 기록이 증거입니다. 개발 중 통과 기록은 Linux의
       PowerShell 7.4.6, Windows의 PowerShell Core 7.6.4, Windows PowerShell
       5.1.19041.6456 셋 다 있지만 **전부 최종 release SHA가 아닙니다.** 막으려는 것이 운영자의 Windows PowerShell 습관이므로

@@ -702,6 +702,72 @@ Active가 이미 신뢰를 잃었고, 이 절차의 결과물 자체가 새 Acti
 
 ---
 
+### 5.11 12차 검토(2026-09-03)에서 지적돼 고친 것
+
+다섯 건이고, 둘은 **코드가 필요했습니다** — 문서만 고쳐서는 닫히지 않는 것이었습니다.
+
+**1. [높음] `Active = Railway`가 증명되지 않았습니다.**
+§2.2는 전체 일치를 요구하는데 sealed 변수는 읽히지 않고, 절차가 대조하던 것은
+`kid`·`pepperKid` **id 둘뿐**이었습니다. **같은 id 아래 다른 유효한 개인키나 pepper가
+들어가도 전부 통과**하고, 그 값이 Active로 승격된 뒤 롤백이나 다음 회전에서 토큰이
+끊깁니다.
+
+→ `npm run verify:mobile-auth-deployment`(+`tests/mobileAuthDeploymentVerify.test.mjs`,
+7건)를 만들었습니다. **id가 아니라 재료를 봅니다.**
+
+| 무엇 | 어떻게 |
+|---|---|
+| 활성 서명 키 재료 | token의 서명을 **후보 개인키에서 유도한 공개키**로 검증. Ed25519 공개키는 개인키가 결정하므로 검증되면 같은 키입니다 |
+| 활성 pepper 재료 | `HMAC-SHA256(후보 pepper, secret)`을 그 exchange가 만든 행의 `secretDigest`와 대조 — **런타임 자신의 `mobileRefreshSecretMatches`**로, 판정이 갈라지지 않게 |
+| `iss` · `aud` | claim에서 읽어 후보와 비교 |
+
+증거는 통제된 exchange 한 번에서 전부 나옵니다(access token · refresh token ·
+`secretDigest` · `pepperKid`). 전부 환경변수로 받고, 출력에 비밀이 없습니다.
+**테스트의 핵심 사례는 "같은 kid, 다른 키"** — id 검사는 `OK`, 재료 검사는 `FAIL`입니다.
+
+**은퇴 항목은 행동으로 확인합니다.** 유예 안에서는 실제로 쓰이므로, **배포 전에** 받아
+둔 access token이 배포 후에도 받아들여지는지, refresh token이 회전에 성공하는지를 봅니다.
+**롤백이 의존하는 것이 정확히 그 둘**입니다. §3에 4.5번(미리 받아 두기)과 7번(확인)으로
+들어갔습니다.
+
+유예가 지난 잔여 항목은 여전히 증명되지 않지만 **런타임에서 아무것도 검증하지
+않으므로** 문제가 아니며, 다음 회전의 편집 기준은 Railway가 아니라 store입니다.
+
+**2. [높음] §5.1이 다시 Active의 뜻을 깼고 실패 경로가 없었습니다.**
+5번이 **배포 전에** 새 값을 Active로 썼습니다. `Active`는 "지금 배포돼 있는 값"이므로,
+배포가 실패하면 store는 새 값을 가리키고 런타임은 이전 값을 돌립니다. **이전 Active를
+믿을 수 없다는 사실이 새 후보가 곧 Active라는 뜻은 아닙니다.**
+
+→ 기존 Active를 `untrusted/unavailable`로 표시하고, 새 값은 `Emergency Pending`으로
+저장하고, 배포와 **이전 자격증명 거절 확인**까지 통과한 뒤에 승격합니다. 그리고 실패
+경로를 적었습니다 — **되돌릴 곳이 없으므로** 모바일 인증 비활성화(필수 변수를 걷어
+503으로) 또는 새 후보로 roll-forward 둘뿐입니다.
+
+**3. [중간] target SHA만으로 Pending을 식별할 수 없습니다.**
+비밀값 변경은 코드 변경 없이 staged 배포를 만들므로 서로 다른 회전과 재시도가 같은 SHA를
+가질 수 있습니다.
+→ Pending이 다섯을 답니다 — `rotationId` · `createdAt` · candidate fingerprint ·
+target SHA · **Railway deployment ID**(배포 생성 후). 뒤의 둘이 없으면 "이 Pending이
+실린 배포"를 지목할 수 없고, 그러면 롤백 대상도 지목할 수 없습니다.
+
+**4. [중간] 1Password 연동은 wrapper 변경까지 필요했습니다.**
+`op run`은 자식 프로세스 환경변수로 주입하는데, wrapper는 그 두 변수를 **`Read-Host`
+결과로 덮어썼습니다.** §6에 "명령 문구만 정하면 된다"고 적은 것은 틀렸습니다.
+→ `-UsePreinjectedRings`를 넣었습니다. 프롬프트하지 않고 주입된 값을 그대로 쓰며,
+주입이 없으면 **검사를 돌리지 않고** 이유를 말하며 실패합니다(빈 링으로 돌면 "일부만
+설정됨"이라는 엉뚱한 이유가 나옵니다). smoke test에 5a–5f가 붙어 **13 → 19 사례**가
+됐고, 그중 5b가 이 결함의 회귀 시험입니다 — 주입된 링이 덮어써지지 않고 검사기까지
+가는지.
+
+만들면서 두 결함을 잡았습니다: `Where-Object`가 아무것도 안 맞으면 `$null`이라
+`$missing.Count`가 strict mode에서 터진 것, 그리고 미주입 경로가 `$null.Length`로
+터진 것. 후자는 **테스트가 "실패했다"는 사실만으로 통과할 뻔했고**(exit 1이 맞긴
+했습니다), 5d에 "검사기를 부르지 않았는가"와 메시지 검사를 함께 넣어 잡았습니다.
+
+**5. [낮음] §6이 "셋"이라면서 넷을 나열했습니다.** 넷으로 고쳤습니다.
+
+---
+
 ## 6. 검증
 
 이 보고서를 쓴 시점에 실행한 것입니다.
@@ -728,6 +794,10 @@ Active가 이미 신뢰를 잃었고, 이 절차의 결과물 자체가 새 Acti
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
 >
+> **rev.14 (2026-09-03).** 12차 검토의 다섯 건은 §5.11입니다. 둘은 코드가 필요했고
+> (`verify:mobile-auth-deployment` 신설, wrapper의 `-UsePreinjectedRings`), 그중
+> 하나는 **id 대조가 계약이 요구하는 것을 증명하지 못한다**는 지적이었습니다.
+>
 > **rev.13 (2026-09-02).** §2.2가 **(a)로 확정**됐고(`mposition`, `f53396f` 검토 후),
 > 같은 날 후속 검토에서 **결정란 셋(1Password Individual · `Tomverse Production
 > Secrets` · `mposition` 단독 복구)과 추가 계약 다섯**이 확정됐습니다. 같은 검토가
@@ -747,6 +817,14 @@ Active가 이미 신뢰를 잃었고, 이 절차의 결과물 자체가 새 Acti
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.14 회차.** 코드가 들어갔으므로 lane을 다시 돌렸습니다 —
+> `npm run test:unit` **7,632 pass / 0 fail**(1 skipped, 기존; 새 verifier 테스트 7건
+> 포함), `lint scripts tests` 통과, `typecheck` 통과, smoke test **19/19**,
+> `check:doc-references`·`check:policy-section-references`·`check:encoding:strict`·
+> `check:mobile-auth-keyring` 통과. **server-contract·DB·build는 다시 돌리지
+> 않았습니다** — 이번 변경은 `scripts/`와 `tests/`, 문서뿐이고 `lib/`·`app/`·schema를
+>건드리지 않았습니다.
 >
 > **rev.8 회차.** 바꾼 것은 문서 셋과 새 PowerShell smoke test 하나입니다. 같은 세
 > 게이트를 다시 돌렸고 `tests/mobileAuthKeyringCheck.test.mjs`도 다시 돌렸습니다
