@@ -19,21 +19,25 @@ import {
 } from "@/lib/memoryEvalSucc7Transition";
 
 /**
- * `mem-eval-succ-7`: signed once, pinned, and awaiting a second signature.
+ * `mem-eval-succ-7`: adopted and frozen on 2026-09-03, on the second signature.
  *
  * Fifty-four out and fifty-four in against succ-6: ten carrying an approved
  * gold change, forty-four that selected the `mem-extract-v8` intervention. The
  * retired cases are preserved in `lib/memoryEvalSucc7Regression.ts`.
  *
- * ## Where this stands
+ * ## Two signatures, and why
  *
  * `@mposition` signed the 54 cases on 2026-09-02 and the dataset was frozen.
  * Review of the freeze machinery then found the manifest did not cover the
  * retired -> replacement pairing, so `transitionDigest` was added and the
- * manifest digest moved. A signature is of a digest, so it does not survive
- * that: `MEMORY_EVAL_SUCC7_REVIEW.status` is `superseded`, `frozen` is false
- * again, and the record keeps every value that was signed. The sample is
- * untouched — the dataset digest is still the one that was read.
+ * manifest digest moved. A signature is of a digest, so it did not survive
+ * that: the freeze was lifted and the first signature filed in
+ * `MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS` with its reason, rather than carried
+ * across a change its signer had not seen.
+ *
+ * The second signature, on 2026-09-03, covers the manifest that includes the
+ * pairing. It kept the sample digests of the first — the 54 cases never moved,
+ * which is what made the re-reading a re-reading of a manifest.
  *
  * ## What the pin is for
  *
@@ -51,24 +55,24 @@ import {
 export const MEMORY_EVAL_SUCC7_DATASET_VERSION = "mem-eval-succ-7";
 
 /**
- * False again, pending a second signature.
+ * Adopted by @mposition on 2026-09-03, on the second signature.
  *
- * It was true between 79ffe616 and the manifest fix: `@mposition` signed on
- * 2026-09-02 and the dataset was frozen against that signature. Review then
- * found that the signed manifest did not cover the retired -> replacement
- * pairing, so adding `transitionDigest` moved the manifest digest — and a
- * signature is of a digest, not of a version number. Carrying it forward
- * would be the repository asserting a person approved something they never
- * saw.
+ * The gate that reads this is `decideEvalRunMode()`, which refuses a
+ * decision-grade run against an unfrozen decision sample. Flipping it removes
+ * that refusal and nothing else. It does not point the harness here — that is
+ * still succ-6 — and it does not register a pair, authorise a budget, approve
+ * a paid run, move a release gate or turn on a feature flag, each of which is
+ * its own decision with its own record.
  *
- * The sample did not move. The dataset digest is the one that was read, and
- * `MEMORY_EVAL_SUCC7_REVIEW` keeps the whole of the first signature so the
- * second one is a re-reading of a manifest rather than of 54 cases again.
+ * It was true once before, between 79ffe616 and the manifest fix, and went
+ * back to false when `transitionDigest` moved the manifest digest out from
+ * under the first signature. That history is in
+ * `MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS` rather than deleted.
  *
  * The order stays signature first, then this: the check refuses a freeze whose
  * signature does not describe the tree.
  */
-export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC7_DATASET_FROZEN = true;
 
 export const MEMORY_EVAL_SUCC7_DATASET_PURPOSE: "development" | "decision" =
     "decision";
@@ -129,15 +133,73 @@ export type Succ7AdoptionSignature = {
     supersededBecause?: string;
 };
 
+/**
+ * The signatures this dataset has outlived, newest first.
+ *
+ * Kept rather than replaced. A superseded signature is the record of a person
+ * having read something and of what then moved underneath them, and deleting
+ * it would leave the repository unable to say why the current signature is the
+ * second one. `succ7SupersededReviewProblems()` holds each entry to being
+ * genuinely stale, so this cannot quietly become a list of live signatures.
+ */
+export const MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS: readonly Succ7AdoptionSignature[] =
+    [
+        {
+            status: "superseded",
+            reviewer: "@mposition",
+            reviewedAt: "2026-09-02",
+            reviewedCommit: "e522796dd11e3d009d23a13836b7a45b005f3bc8",
+            signedDatasetDigest:
+                "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+            signedManifestDigest:
+                "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+            signedSourceDatasetDigest:
+                "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+            verdict: {
+                sameBoundaryPassed: 53,
+                sameBoundaryTotal: 53,
+                coverageRepairGoldFit: true,
+                problemCases: 0,
+                cellDiversitySufficient: true,
+            },
+            record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
+            supersededBecause:
+                "The manifest this was signed against did not cover the retired -> " +
+                "replacement pairing, so two same-cell rows could trade originals with " +
+                "every digest unmoved — the 53 same-boundary verdicts would then point " +
+                "at pairings nobody judged. Adding `transitionDigest` fixes that and " +
+                "moves the manifest digest from 42c9b0a8… to ecfb84a4…. The sample did " +
+                "not change: the dataset digest is still 9326730a…, and the 54 cases " +
+                "the reviewer read are the 54 cases here. What needs signing again is " +
+                "the manifest, not the sample.",
+        },
+    ];
+
+/**
+ * Re-signed by @mposition on 2026-09-03.
+ *
+ * The second signature, and the first one to cover `transitionDigest` — which
+ * is the whole of what the first was missing. The sample is the one that was
+ * read in the first round: `signedDatasetDigest` and `signedSourceDatasetDigest`
+ * are unchanged from it, and only the two values that the pairing fix moved are
+ * new. That is why this was a re-reading of a manifest rather than of 54 cases.
+ *
+ * `reviewedCommit` is 3ce908f2, the commit the sheet and the checks were run
+ * against. It is a commit on develop rather than on a branch, because the
+ * branch was merged before the second reading; the check requires it to be an
+ * ancestor of HEAD, which fixes what it means.
+ */
 export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
-    status: "superseded",
+    status: "signed",
     reviewer: "@mposition",
-    reviewedAt: "2026-09-02",
-    reviewedCommit: "e522796dd11e3d009d23a13836b7a45b005f3bc8",
+    reviewedAt: "2026-09-03",
+    reviewedCommit: "3ce908f29620d95d0be1bfa25079dd84735126ee",
     signedDatasetDigest:
         "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
     signedManifestDigest:
-        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+        "ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902",
+    signedTransitionDigest:
+        "36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1",
     signedSourceDatasetDigest:
         "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
     verdict: {
@@ -148,15 +210,6 @@ export const MEMORY_EVAL_SUCC7_REVIEW: Succ7AdoptionSignature = {
         cellDiversitySufficient: true,
     },
     record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
-    supersededBecause:
-        "The manifest this was signed against did not cover the retired -> " +
-        "replacement pairing, so two same-cell rows could trade originals with " +
-        "every digest unmoved — the 53 same-boundary verdicts would then point " +
-        "at pairings nobody judged. Adding `transitionDigest` fixes that and " +
-        "moves the manifest digest from 42c9b0a8… to ecfb84a4…. The sample did " +
-        "not change: the dataset digest is still 9326730a…, and the 54 cases " +
-        "the reviewer read are the 54 cases here. What needs signing again is " +
-        "the manifest, not the sample.",
 };
 
 /**
@@ -391,7 +444,7 @@ export const MEMORY_EVAL_SUCC7_MANIFEST: Succ7DraftManifest = {
     scoringContractDigest:
         "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
     scoringContractVersion: "mem-score-v3.4",
-    frozen: false,
+    frozen: true,
     manifestDigest:
         "ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902",
 };
@@ -481,6 +534,182 @@ export function verifySucc7Manifest(
     return failures;
 }
 
+const HEX_64 = /^[0-9a-f]{64}$/;
+const SHA_40 = /^[0-9a-f]{40}$/;
+const AUDIT_RECORD = /^\.github\/audits\/[\w.-]+\.md$/;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The one signature allowed to predate `signedTransitionDigest`.
+ *
+ * Named by its commit rather than allowed by shape. "A signature may omit the
+ * pairing digest" is the rule that let the first one be signed without it; the
+ * exception has to be one commit, not a category, or the fix reopens itself.
+ */
+const LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST =
+    "e522796dd11e3d009d23a13836b7a45b005f3bc8";
+
+/**
+ * The values the 2026-09-02 signature actually carried.
+ *
+ * Pinned because a historical record has no other defence. A live signature is
+ * checked against the tree and fails the moment either moves; a superseded one
+ * is checked against nothing, so `reviewer: ""` and a corrupted digest sat
+ * inside it and every check still passed. These are what it said.
+ */
+const LEGACY_SIGNATURE_VALUES = {
+    reviewer: "@mposition",
+    reviewedAt: "2026-09-02",
+    signedDatasetDigest:
+        "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+    signedManifestDigest:
+        "42c9b0a877086dc4767613e6b357d85ccba7ef40a67f7ff02d7d64b0ced91965",
+    signedSourceDatasetDigest:
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63",
+    record: ".github/audits/memory-eval-succ7-adoption-2026-09-02.md",
+} as const;
+
+/**
+ * What any signature must look like, live or superseded.
+ *
+ * Shared deliberately. The live path had these checks and the history path did
+ * not, which is exactly how a record nobody compares against anything becomes
+ * editable: the fields are the same fields, so they are checked in one place.
+ */
+function signatureShapeProblems(
+    signature: Succ7AdoptionSignature,
+    label: string
+): string[] {
+    const problems: string[] = [];
+    const require = (ok: boolean, what: string) => {
+        if (!ok) problems.push(`${label}: ${what}`);
+    };
+    require(/^@[\w-]+$/.test(signature.reviewer), `reviewer "${signature.reviewer}"`);
+    require(ISO_DAY.test(signature.reviewedAt), `reviewedAt "${signature.reviewedAt}"`);
+    require(
+        SHA_40.test(signature.reviewedCommit),
+        `reviewedCommit is not a 40-character SHA: "${signature.reviewedCommit}"`
+    );
+    require(
+        AUDIT_RECORD.test(signature.record),
+        `record is not an audit path: "${signature.record}"`
+    );
+    for (const field of [
+        "signedDatasetDigest",
+        "signedManifestDigest",
+        "signedSourceDatasetDigest",
+    ] as const) {
+        require(HEX_64.test(signature[field]), `${field} "${signature[field]}"`);
+    }
+    if (signature.signedTransitionDigest === undefined) {
+        require(
+            signature.reviewedCommit ===
+                LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST,
+            "no signedTransitionDigest, and this is not the one signature that " +
+                "predates it"
+        );
+    } else {
+        require(
+            HEX_64.test(signature.signedTransitionDigest),
+            `signedTransitionDigest "${signature.signedTransitionDigest}"`
+        );
+    }
+    const { verdict } = signature;
+    require(
+        verdict.sameBoundaryTotal === SUCC7_SAME_BOUNDARY_COUNT,
+        `the verdict counts ${verdict.sameBoundaryTotal} same-boundary ` +
+            `transitions, the transition declares ${SUCC7_SAME_BOUNDARY_COUNT}`
+    );
+    require(
+        verdict.sameBoundaryPassed === verdict.sameBoundaryTotal,
+        `the verdict passes ${verdict.sameBoundaryPassed} of ` +
+            `${verdict.sameBoundaryTotal} same-boundary transitions`
+    );
+    require(verdict.problemCases === 0, `${verdict.problemCases} problem case(s)`);
+    require(verdict.coverageRepairGoldFit, "the coverage repair's gold was not passed");
+    require(
+        verdict.cellDiversitySufficient,
+        "a cell's diversity was not found sufficient"
+    );
+    return problems;
+}
+
+/**
+ * Everything wrong with the list of signatures this dataset has outlived.
+ *
+ * Two things, and the second is the point. An entry must say it is superseded
+ * and say why — a record with no reason cannot be audited. And it must
+ * actually be stale: at least one of the digests it signed has to differ from
+ * what the tree computes, because an entry matching the tree in every value is
+ * a live signature filed as history, which is how a superseded approval gets
+ * quietly reused.
+ */
+export function succ7SupersededReviewProblems(
+    entries: readonly Succ7AdoptionSignature[] = MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
+    built: Succ7DraftManifest = buildSucc7DraftManifest()
+): readonly string[] {
+    const problems: string[] = [];
+    const seen = new Set<string>();
+    for (const [index, entry] of entries.entries()) {
+        const label = `superseded[${index}]`;
+        problems.push(...signatureShapeProblems(entry, label));
+        if (entry.status !== "superseded") {
+            problems.push(`${label} is filed as history but says "${entry.status}"`);
+        }
+        if (!entry.supersededBecause) {
+            problems.push(`${label} is superseded and records no reason`);
+        }
+        // Identity, so the same reading cannot be filed twice — two copies of
+        // one signature read as two approvals.
+        const identity = `${entry.reviewedCommit}@${entry.reviewedAt}`;
+        if (seen.has(identity)) {
+            problems.push(`${label} repeats a signature already in the history`);
+        }
+        seen.add(identity);
+        // The values it actually carried. A live signature is defended by the
+        // tree; a superseded one is compared against nothing unless the values
+        // are written down, which is how "" and "corrupt" sat in this record
+        // and every check still passed.
+        if (entry.reviewedCommit === LEGACY_SIGNATURE_WITHOUT_TRANSITION_DIGEST) {
+            for (const [field, expected] of Object.entries(
+                LEGACY_SIGNATURE_VALUES
+            )) {
+                const actual = entry[field as keyof typeof LEGACY_SIGNATURE_VALUES];
+                if (actual !== expected) {
+                    problems.push(
+                        `${label} ${field} is "${actual}", the 2026-09-02 ` +
+                            `signature carried "${expected}"`
+                    );
+                }
+            }
+        }
+        // Stale, judged only on the digests it actually has: the first
+        // signature has no `signedTransitionDigest`, so comparing an absent
+        // field made every entry look stale for free.
+        const signed: [string, string][] = [
+            [entry.signedDatasetDigest, built.datasetDigest],
+            [entry.signedManifestDigest, built.manifestDigest],
+            [
+                entry.signedSourceDatasetDigest,
+                built.composition.sourceDatasetDigest,
+            ],
+            ...(entry.signedTransitionDigest === undefined
+                ? []
+                : ([[entry.signedTransitionDigest, built.transitionDigest]] as [
+                      string,
+                      string,
+                  ][])),
+        ];
+        if (signed.every(([was, now]) => was === now)) {
+            problems.push(
+                `${label} matches this tree in every digest it signed, so it is ` +
+                    "a live signature filed as history"
+            );
+        }
+    }
+    return problems;
+}
+
 /**
  * Everything the signature claims that the tree no longer supports.
  *
@@ -509,17 +738,11 @@ export function succ7SignatureProblems(
         );
         return problems;
     }
-    // A signature has to name a commit that can be looked up and a record that
-    // can be read. Blank strings passed every check until 2026-09-02, which
-    // made "signed by nobody, of nothing" indistinguishable from a signature.
-    if (!/^[0-9a-f]{40}$/.test(signature.reviewedCommit)) {
-        problems.push(
-            `reviewedCommit is not a 40-character SHA: "${signature.reviewedCommit}"`
-        );
-    }
-    if (!/^\.github\/audits\/[\w.-]+\.md$/.test(signature.record)) {
-        problems.push(`record is not an audit path: "${signature.record}"`);
-    }
+    // A signature has to name a reviewer, a date, a commit that can be looked
+    // up and a record that can be read. Blank strings passed every check until
+    // 2026-09-02, which made "signed by nobody, of nothing" indistinguishable
+    // from a signature.
+    problems.push(...signatureShapeProblems(signature, "the signature"));
     if (signature.signedTransitionDigest === undefined) {
         problems.push(
             "the signature does not cover the transition pairing: without it, " +
@@ -552,35 +775,6 @@ export function succ7SignatureProblems(
             `the signature records succ-6 as ${signature.signedSourceDatasetDigest}, ` +
                 `the tree computes ${built.composition.sourceDatasetDigest}`
         );
-    }
-    if (!signature.reviewer || !signature.reviewedAt) {
-        problems.push("the signature names no reviewer, or no date");
-    }
-    // A verdict is what was signed; a partial one is not a signature of this
-    // dataset. Recorded as numbers rather than a boolean so a later reader can
-    // see what the reviewer actually passed, and so a quietly weakened verdict
-    // is a diff rather than a mood.
-    const { verdict } = signature;
-    if (verdict.sameBoundaryPassed !== verdict.sameBoundaryTotal) {
-        problems.push(
-            `the verdict passes ${verdict.sameBoundaryPassed} of ` +
-                `${verdict.sameBoundaryTotal} same-boundary transitions`
-        );
-    }
-    if (verdict.sameBoundaryTotal !== SUCC7_SAME_BOUNDARY_COUNT) {
-        problems.push(
-            `the verdict counts ${verdict.sameBoundaryTotal} same-boundary ` +
-                `transitions, the transition declares ${SUCC7_SAME_BOUNDARY_COUNT}`
-        );
-    }
-    if (verdict.problemCases !== 0) {
-        problems.push(`the verdict records ${verdict.problemCases} problem case(s)`);
-    }
-    if (!verdict.coverageRepairGoldFit) {
-        problems.push("the coverage repair's gold was not passed");
-    }
-    if (!verdict.cellDiversitySufficient) {
-        problems.push("a cell's diversity was not found sufficient");
     }
     return problems;
 }
