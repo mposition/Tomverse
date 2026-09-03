@@ -20,6 +20,23 @@ import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
  * `goldEvidenceFailure()` reads the quote and not the message: a gold anchored
  * to a span that does not contain its own words scores as unanchored however
  * true it is.
+ *
+ * ## Three rewritten after the first adoption review (2026-09-02)
+ *
+ * `en-607` and `ko-606` had gained a clause the original did not have — "please
+ * explain terms like that", "용어를 풀어서 설명해 주세요" — beside a gold labelled
+ * `explanation_depth`/negated. Asking for an explanation is an affirmative
+ * depth request, so the case carried two propositions of opposite sign under
+ * one negated gold while calling itself `exhaustive`. The clause is gone; what
+ * remains is the original's proposition, that the term conveys nothing.
+ *
+ * `en-603` replaces `en-313`, whose boundary is narrower than "the assistant
+ * guessed and the user corrected it": the claim under test sits in the first
+ * person inside a passage the assistant *drafted*, and the user keeps the
+ * passage while denying the fact of it. A plain wrong assumption tests the
+ * general case and leaves that one unmeasured, so the draft is back — and the
+ * user's reply says only that they have never kept bees, with no second
+ * request for a gold that does not exist to admit it.
  */
 export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
     {
@@ -125,11 +142,11 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                 id: "g1",
                 kind: "expertise",
                 polarity: "negated",
-                factValueAll: ["archery"],
+                factValueAll: ["bees"],
                 evidence: {
                     evidenceMessageId: "succ-b701-3-m3",
                     evidenceQuote:
-                        "I have never done archery",
+                        "I have never kept bees",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -139,25 +156,25 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b701-3",
-                title: "Draw weight",
+                title: "Leave the opening",
                 messages: [
                     {
                         externalMessageId: "succ-b701-3-m1",
                         role: "user",
                         content:
-                            "How is draw weight usually chosen?",
+                            "Draft two sentences to open a piece for people taking up beekeeping.",
                     },
                     {
                         externalMessageId: "succ-b701-3-m2",
                         role: "assistant",
                         content:
-                            "With your archery background you will recognise the trade-off already.",
+                            'Try: "The first time I lifted the lid on bees of my own, my hands shook."',
                     },
                     {
                         externalMessageId: "succ-b701-3-m3",
                         role: "user",
                         content:
-                            "I have never done archery. Please assume I know nothing about it.",
+                            "I have never kept bees, but that opening works — leave it in.",
                     },
                 ],
             },
@@ -354,7 +371,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-7-m3",
                         role: "user",
                         content:
-                            "I am not a tailor, and a pattern block means nothing to me — please explain terms like that rather than using them.",
+                            "I am not a tailor, and a pattern block means nothing to me.",
                     },
                 ],
             },
@@ -692,7 +709,7 @@ export const SUCC7_ASSISTANT_ONLY: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b701-14-m3",
                         role: "user",
                         content:
-                            "저는 재단사가 아니고, 문양 이름만 대시면 못 알아듣습니다. 용어를 풀어서 설명해 주세요.",
+                            "저는 재단사가 아니고, 문양 이름만 대시면 못 알아듣습니다.",
                     },
                 ],
             },

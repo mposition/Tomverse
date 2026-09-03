@@ -13,3 +13,5 @@
 {"op":"settle","reservationId":"7b2f046a-f99c-4bf8-b656-22c6cda4354f","at":"2026-09-02T23:17:58.714Z","costCeilingUsd":0.0231006,"outcome":"drafted_5"}
 {"op":"reserve","id":"9ce3931f-7b9c-45fb-9b02-f5af8a38348e","at":"2026-09-03T00:12:50.663Z","costCeilingUsd":0.023068599999999998,"modelId":"gpt-5-6-luna","language":"ko","taskType":"safety_sensitive","phenomenon":"direct_contradiction","mode":"balanced","requestedCases":5,"inputTokenCeiling":7343,"outputTokenCap":18000}
 {"op":"settle","reservationId":"9ce3931f-7b9c-45fb-9b02-f5af8a38348e","at":"2026-09-03T00:14:10.958Z","costCeilingUsd":0.023068599999999998,"outcome":"drafted_5"}
+{"op":"reserve","id":"7c30f414-f57b-41e4-9a70-535d892a7e49","at":"2026-09-03T05:16:09.118Z","costCeilingUsd":0.023357399999999997,"modelId":"gpt-5-6-luna","language":"ko","taskType":"safety_sensitive","phenomenon":"omission","mode":"balanced","requestedCases":5,"inputTokenCeiling":8787,"outputTokenCap":18000}
+{"op":"settle","reservationId":"7c30f414-f57b-41e4-9a70-535d892a7e49","at":"2026-09-03T05:16:09.229Z","costCeilingUsd":0.023357399999999997,"outcome":"http_403"}

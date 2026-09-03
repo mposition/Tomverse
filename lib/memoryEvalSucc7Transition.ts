@@ -36,6 +36,8 @@
  * fail-closed rule and does NOT approve extracting the safe half of a mixed
  * turn; the question is preserved unresolved in the regression corpus.
  */
+import { createHash } from "node:crypto";
+
 export type Succ7TransitionRow = {
     /** The succ-6 case leaving the decision set. */
     retired: string;
@@ -139,3 +141,50 @@ export const SUCC7_SAME_BOUNDARY_COUNT = SUCC7_TRANSITION.filter(
 export const SUCC7_COVERAGE_REPAIR_COUNT = SUCC7_TRANSITION.filter(
     (row) => row.transitionType === "coverage_repair"
 ).length;
+
+/**
+ * The pairing itself, serialized.
+ *
+ * The dataset digest covers which cases exist; the counts in the manifest
+ * cover how many moved and of what type. Neither covers **which replacement
+ * stood in for which original**, and that is the question a reviewer answered
+ * fifty-three times. Swap two rows in the same cell and the case set, the cell
+ * counts, the type tally and both digests are unchanged — while every
+ * "does this replacement test that original's boundary" verdict now points
+ * somewhere else. Demonstrated on 2026-09-02 with
+ * `succ-durable-en-103 -> en-601` and `succ-durable-en-11 -> en-602`: every
+ * check passed after the swap.
+ *
+ * So the pairing gets a digest of its own, and the manifest carries it. Sorted
+ * by `retired` rather than trusting file order, so a reordering of the array
+ * is not mistaken for a change of pairing — and every field a verdict rests on
+ * is inside: the pair, why it moved, what kind of transition it is, and any
+ * policy question the row carries forward unanswered.
+ */
+const transitionFingerprintInput = (
+    rows: readonly Succ7TransitionRow[]
+): string =>
+    [...rows]
+        .sort((a, b) => (a.retired < b.retired ? -1 : a.retired > b.retired ? 1 : 0))
+        .map((row) =>
+            [
+                `retired=${row.retired}`,
+                `replacement=${row.replacement}`,
+                `basis=${row.basis}`,
+                `type=${row.transitionType}`,
+                `unresolved=${row.unresolvedPolicy ?? "-"}`,
+            ].join("\u0000")
+        )
+        .join("\u0001");
+
+export const SUCC7_TRANSITION_DIGEST: string = createHash("sha256")
+    .update(transitionFingerprintInput(SUCC7_TRANSITION), "utf8")
+    .digest("hex");
+
+/** Exported so a test can digest a *moved* table without editing this file. */
+export const succ7TransitionDigestOf = (
+    rows: readonly Succ7TransitionRow[]
+): string =>
+    createHash("sha256")
+        .update(transitionFingerprintInput(rows), "utf8")
+        .digest("hex");
