@@ -750,6 +750,67 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
                 "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
             pendingRules: [],
         },
+        {
+            /**
+             * Korean numerals rewritten from a reviewed expression list
+             * (.github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md).
+             *
+             * v3.4 built the rewrite from every Korean numeral crossed with
+             * every counter, so it read the 일 ending 토요일 as the numeral one
+             * and the 일 beginning 일정 as the day counter: `토요일 일정`
+             * canonicalised to `토요1일정` and the token 격주토요일 existed in no
+             * candidate that phrased it that way. `이십일` became `이10일` the
+             * same way. Found by pointing the harness at `mem-eval-succ-7`,
+             * where the smoke run scored 484 of 485 golds its own stub had
+             * answered correctly.
+             *
+             * Fixing the gold instead was refused: shortening the token to
+             * ["격주", "일정"] drops the condition being tested, ["격주", "토요"]
+             * only routes around the defect, and succ-7 is frozen and signed
+             * either way.
+             *
+             * v3.5 replaces the cross-product with `KOREAN_NUMERAL_EXPRESSIONS`,
+             * a reviewed table of **three rows**, each registered because a
+             * frozen gold cannot be scored without it: `육 개월`/`6개월` for
+             * succ-durable-ko-35, `세 시`/`3시` for succ-durable-ko-36, and
+             * `아홉 시`/`9시` for succ-durable-ko-401.
+             *
+             * Each row is **bounded on the left, and only on the left**. No
+             * Hangul syllable may precede the numeral, or 교육 개월 is read as
+             * six months and 전세 시장 destroys the gold 전세. That one
+             * character is the only context the Korean numeral step reads; the
+             * contraction, digit-separator and English numeral steps read word
+             * boundaries of their own, which the rule statement sets out.
+             *
+             * A right boundary — a list of particles the counter could be
+             * followed by — was carried for one day and withdrawn on
+             * 2026-09-04. It constrained only the rewrite, and only the Korean
+             * word spelling needs a rewrite, so it refused correct answers
+             * (`아홉 시입니다`, `육 개월짜리`) while the false positives it named
+             * reached the gold through the digit spelling regardless. What a
+             * signature on this contract approves is the spacing the left
+             * boundary assumes; what it acknowledges rather than approves is
+             * that a gold token is matched as a substring, so `9시장` reaches a
+             * `9시` gold in either spelling and did so under v3.4 as well.
+             *
+             * Nothing else moved: same rules, same thresholds, same
+             * categories, same languages, same floors, same numeral table, same
+             * counters. The difference is which expressions the step rewrites,
+             * the step's name, and the version string.
+             *
+             * `approvedOn` is the day this record was written, and it is not a
+             * signature — `mem-eval-succ-8` carries the approval that matters
+             * and is unsigned. See its `MEMORY_EVAL_SUCC8_APPROVAL`.
+             */
+            version: "mem-score-v3.5",
+            // 2026-09-04, not 09-03: the amendment was drafted on the 3rd and
+            // its right boundary removed on the 4th, before any signature. The
+            // date is when the digest below became what it is.
+            approvedOn: "2026-09-04",
+            descriptorDigest:
+                "2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4",
+            pendingRules: [],
+        },
     ];
 
 /**

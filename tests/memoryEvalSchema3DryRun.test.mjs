@@ -79,9 +79,19 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // that named the new prompt over the old sample would be the failure
         // the switch exists to avoid.
         assert.match(result.output, /gpt-5-6-luna::mem-extract-v7/);
-        assert.match(result.output, /mem-eval-succ-6 \(decision, frozen\)/);
-        assert.match(result.output, /digest: 2ffc8c09/);
-        // succ-5 is the previous target and must not be what a default run
+        // "frozen" since 2026-09-04. succ-8 spent a day unsigned and the header
+        // said so for exactly that day. A smoke run is admissible either way,
+        // because nothing is spent; the word is what stops a reader citing an
+        // unsigned sample's numbers as decision-grade, so it is asserted.
+        assert.match(result.output, /mem-eval-succ-8 \(decision, frozen\)/);
+        // The manifest digest as well as the sample's: a smoke run names the
+        // record its numbers would be resolved against, not only the cases.
+        assert.match(
+            result.output,
+            /manifest: 24820f585c3c84aa….*binding: verified/
+        );
+        assert.match(result.output, /digest: 9326730a/);
+        // succ-5 is an earlier target and must not be what a default run
         // reports; it stays reachable by name, which the harness-target tests
         // cover.
         assert.doesNotMatch(result.output, /mem-eval-succ-5/);
@@ -105,18 +115,27 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // be ignored and every citation unchecked, and the run would still
         // pass — so the assertion that matters is the one below it.
         assert.equal(artifact.verdict.aggregate.failures, 0);
-        // 476 since the target moved to succ-6, and the two are derivable
-        // from each other: succ-5 carried 474, the thirteen cases that left
-        // carried none between them — ten B+ `assistant_only` cases and three
-        // composition repairs, all of which expected nothing — and the
-        // thirteen that arrived carry two, `ko-501`'s expertise gold and
-        // `ko-504`'s recurring_context. 474 − 0 + 2.
+        // 485 since the target moved to succ-7, whose cases succ-8 inherits by
+        // reference. The chain is derivable: succ-5 carried 474; succ-6 lost
+        // thirteen cases carrying nothing between them and gained thirteen
+        // carrying two (`ko-501`'s expertise gold and `ko-504`'s
+        // recurring_context), so 474 − 0 + 2 = 476; succ-7 rewrote sixteen
+        // cases whose replacements state facts the originals left implicit,
+        // and those carry nine more. 476 + 9.
         //
         // Written out rather than read from the dataset, for the reason the
         // whole file exists: a denominator computed from the same array the
         // scorer walked would agree with itself whatever went wrong.
-        assert.equal(artifact.verdict.aggregate.recallNumerator, 476);
-        assert.equal(artifact.verdict.aggregate.recallDenominator, 476);
+        //
+        // The *numerator* is the amendment's own evidence. Until
+        // `mem-score-v3.5` this read 484 against succ-7 — one gold the stub
+        // answered verbatim and the scorer marked wrong, because the Korean
+        // numeral rule reached inside 토요일 and canonicalised
+        // `succ-durable-ko-611`'s token to something no candidate contained.
+        // A stub that echoes every gold scoring anything but a perfect
+        // recall is a defect in the scorer, and 485 is what says it is fixed.
+        assert.equal(artifact.verdict.aggregate.recallNumerator, 485);
+        assert.equal(artifact.verdict.aggregate.recallDenominator, 485);
         assert.equal(
             artifact.verdict.aggregate.unboundCandidates,
             0,
@@ -156,6 +175,11 @@ test("the gate now admits the schema the harness scores", () => {
     const target = harnessTarget();
     assert.equal(target.datasetSchemaVersion, 3);
 
+    // The freeze is read from the target. It was a stated `true` while succ-8
+    // was unsigned, so that this test kept asking about the *schema* gate it is
+    // named for instead of stopping at `dataset_not_frozen`; the 2026-09-04
+    // signature made the stated value and the target's the same thing.
+    assert.equal(target.datasetFrozen, true);
     const decision = decideEvalRunMode({
         live: true,
         registerEntry: { status: "candidate", evalBudget: { maxUsd: 50 } },
@@ -276,6 +300,10 @@ test("the binding still decides a pair the register leaves open", () => {
     // Asserted as the *difference* three inputs make, because that is the
     // claim: the schema is no longer the answer, and the binding is.
     const target = harnessTarget();
+    // Same reading as the schema test above: the binding gates sit past the
+    // freeze, and since 2026-09-04 the target is frozen, so nothing has to be
+    // stated to reach them.
+    assert.equal(target.datasetFrozen, true);
     const base = {
         live: true,
         registerEntry: {

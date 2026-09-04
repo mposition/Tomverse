@@ -30,7 +30,7 @@ import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.
  */
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
+import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 
 const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
 const NETWORK_GUARD = fileURLToPath(
@@ -574,9 +574,14 @@ test("a smoke run that passes every rule still says it proves nothing", () => {
     const result = runHarness([]);
     assert.match(result.output, /SMOKE RUN — NOT an eval result/);
     assert.match(result.output, /No provider was called/);
+    // Read from the *target's* freeze flag, not succ-3's. The harness prints
+    // the state of whatever it is pointed at, and succ-3 stopped being that
+    // four datasets ago — the two agreed by coincidence until 2026-09-03,
+    // when the harness moved to the unfrozen `mem-eval-succ-8` and this
+    // assertion started demanding a word the harness had no reason to print.
     assert.match(
         result.output,
-        MEMORY_EVAL_SUCC3_DATASET_FROZEN
+        harnessTarget().datasetFrozen
             ? /\(decision, frozen\)/
             : /\(decision, not frozen\)/
     );

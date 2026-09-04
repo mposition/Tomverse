@@ -209,7 +209,7 @@ test("the live contract recomputes to its recorded digest", () => {
     // whenever a contract is corrected, and this file is about the gold-review
     // rules rather than about which version carries them. What must hold is
     // that whatever is live has a record and recomputes to it.
-    assert.equal(MEMORY_EVAL_SCORING_CONTRACT_VERSION, "mem-score-v3.4");
+    assert.equal(MEMORY_EVAL_SCORING_CONTRACT_VERSION, "mem-score-v3.5");
     const result = verifyScoringContractManifest();
     assert.ok(result.entry);
     assert.deepEqual([...result.mismatches], []);

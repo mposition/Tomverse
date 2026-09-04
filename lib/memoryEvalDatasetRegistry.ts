@@ -70,6 +70,16 @@ import {
     verifySucc6Manifest,
 } from "@/lib/memoryEvalSucc6";
 import {
+    MEMORY_EVAL_SUCC7_CASES,
+    MEMORY_EVAL_SUCC7_MANIFEST,
+    verifySucc7Manifest,
+} from "@/lib/memoryEvalSucc7";
+import {
+    MEMORY_EVAL_SUCC8_CASES,
+    MEMORY_EVAL_SUCC8_MANIFEST,
+    verifySucc8Manifest,
+} from "@/lib/memoryEvalSucc8";
+import {
     MEMORY_EVAL_SUCC5_CASES,
     MEMORY_EVAL_SUCC5_MANIFEST,
     verifySucc5Manifest,
@@ -181,6 +191,25 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         // tree rather than an argument against itself — see the note on
         // `verifySucc6Manifest`.
         verify: () => verifySucc6Manifest(),
+    },
+    {
+        // Frozen and signed on 2026-09-03, superseded the same day by succ-8,
+        // and never run. It is here for the reason succ-4 is: a signature and
+        // a frozen manifest are records, and a record nobody can resolve is
+        // not one.
+        manifest: MEMORY_EVAL_SUCC7_MANIFEST,
+        cases: MEMORY_EVAL_SUCC7_CASES,
+        verify: () => verifySucc7Manifest(),
+    },
+    {
+        // The live target. succ-8 shares succ-7's cases by reference, so its
+        // `datasetDigest` is succ-7's — which is why `resolveArtifactDataset`
+        // has to match on the version first and the digest second. Matching on
+        // the digest alone would resolve a succ-8 artifact to succ-7 and read
+        // its numbers under the superseded `mem-score-v3.4`.
+        manifest: MEMORY_EVAL_SUCC8_MANIFEST,
+        cases: MEMORY_EVAL_SUCC8_CASES,
+        verify: () => verifySucc8Manifest(),
     },
 ];
 

@@ -117,9 +117,18 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
     // record of its own.
     const result = verifyScoringContractManifest();
     assert.deepEqual(result.mismatches, []);
-    assert.equal(result.version, "mem-score-v3.4");
+    assert.equal(result.version, "mem-score-v3.5");
     assert.equal(
         result.entry.descriptorDigest,
+        "2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4"
+    );
+    // v3.4 stays pinned at what it was frozen with. succ-5, succ-6 and succ-7
+    // are bound to it for good, so a value that moved here would leave three
+    // frozen manifests describing a contract that no longer exists.
+    assert.equal(
+        MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS.find(
+            (m) => m.version === "mem-score-v3.4"
+        ).descriptorDigest,
         "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd"
     );
     // v3.3 stays pinned at the value it was frozen with, and that value is
@@ -148,7 +157,9 @@ test("mem-score-v3 is pinned, and the tree still computes it", () => {
             .descriptorDigest,
         "0ff454d61bb41b640465bc77aad39f590f09413d9e46e32f1a8ba66fc2cd26dc"
     );
-    assert.equal(result.entry.approvedOn, "2026-08-28");
+    // 09-04, not 09-03: v3.5 was drafted on the 3rd and its right boundary
+    // removed on the 4th, before any signature was given for it.
+    assert.equal(result.entry.approvedOn, "2026-09-04");
     // Nothing outstanding that a dataset could satisfy. v3.3 split the one
     // pending rule: the gold-authoring half is enforced at review, and the
     // half about what a model emits is `prompt_pending`, which is reported by

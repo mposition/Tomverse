@@ -720,7 +720,17 @@ console.log(`\nMemory extraction eval — ${modelId}::${MEMORY_EXTRACTION_PROMPT
 console.log(
     `  mode: ${runMode.mode === "live" ? "LIVE" : "SMOKE"}   commit: ${commitSha}\n` +
         `  dataset: ${MEMORY_EVAL_DATASET_VERSION} (${MEMORY_EVAL_DATASET_PURPOSE}, ` +
-        `${MEMORY_EVAL_DATASET_FROZEN ? "frozen" : "not frozen"})  digest: ${datasetDigest.slice(0, 16)}…`
+        `${MEMORY_EVAL_DATASET_FROZEN ? "frozen" : "not frozen"})  digest: ${datasetDigest.slice(0, 16)}…\n` +
+        // The manifest digest as well as the sample's. The dataset digest says
+        // which cases ran; the manifest digest is what the signature was given
+        // for, and it covers what the sample cannot — the retired-to-
+        // replacement pairing among them. A header naming only the first
+        // leaves a reader unable to tell which record this run answers to.
+        `  manifest: ${
+            target.datasetManifestDigest
+                ? `${target.datasetManifestDigest.slice(0, 16)}…`
+                : "none recorded (schema-2 dataset)"
+        }  binding: verified against the recorded manifest`
 );
 
 console.log("\nAggregate");

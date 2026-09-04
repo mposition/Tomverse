@@ -52,9 +52,24 @@ import {
     MEMORY_EVAL_SUCC6_DATASET_VERSION,
     MEMORY_EVAL_SUCC6_MANIFEST,
 } from "@/lib/memoryEvalSucc6";
+import {
+    MEMORY_EVAL_SUCC7_CASES,
+    MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC7_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC7_DATASET_VERSION,
+    MEMORY_EVAL_SUCC7_MANIFEST,
+} from "@/lib/memoryEvalSucc7";
+import {
+    MEMORY_EVAL_SUCC8_CASES,
+    MEMORY_EVAL_SUCC8_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC8_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC8_DATASET_VERSION,
+    MEMORY_EVAL_SUCC8_MANIFEST,
+} from "@/lib/memoryEvalSucc8";
 import { MEMORY_EVAL_DATASET_MANIFESTS } from "@/lib/memoryEvalDatasetManifests";
 import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
 import { datasetFingerprintInputV3 } from "@/lib/memoryEvalDatasetSchemaV3";
+import { datasetFingerprintInputV4 } from "@/lib/memoryEvalDatasetFingerprintV4";
 import {
     MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     scoringContractDigest,
@@ -104,16 +119,30 @@ export type HarnessTarget =
 /**
  * The dataset the harness is pointed at.
  *
- * One name, changed in one place. The harness has moved target five times —
- * seed-11 to succ-2 to succ-3 to succ-4 to succ-5 to succ-6 — and before this
- * module each move was a set of import renames spread across the file.
+ * One name, changed in one place. The harness has moved target six times —
+ * seed-11 to succ-2 to succ-3 to succ-4 to succ-5 to succ-6 to succ-7 — and
+ * before this module each move was a set of import renames spread across the
+ * file. A half-switched harness fingerprints one sample and scores another,
+ * which is the failure the module exists to make impossible.
  *
- * succ-6 is the first move that changes the *sample*: succ-5 shared succ-4's
- * cases and corrected only the contract. Thirteen cases differ here, so a
- * half-switched harness would fingerprint one set and score another — which
- * is the failure this module was written to make impossible.
+ * The target is succ-8 rather than succ-7, and the two moves are one step
+ * apart for a reason worth keeping. succ-7 replaced fifty-four cases and was
+ * signed; pointing the harness at it then showed the smoke run scoring 484 of
+ * 485 golds its own stub had answered correctly, because `mem-score-v3.4`
+ * canonicalised `토요일 일정` to `토요1일정`. The contract was the defect, so the
+ * contract moved — `mem-score-v3.5` — and succ-8 carries succ-7's sample,
+ * unchanged and by reference, under it.
+ *
+ * succ-7 therefore stops being a run target the way succ-4 did: it is bound to
+ * v3.4 for good, and `harnessTargetBindingFailures()` says so. It stays
+ * selectable by name, because the artifacts scored against it have to stay
+ * readable.
+ *
+ * Moving this name does not approve a run. The register holds no runnable pair
+ * and no budget, and succ-8 is not frozen yet, so the gates downstream refuse
+ * for those reasons rather than for this one.
  */
-export const HARNESS_TARGET_DATASET_VERSION = MEMORY_EVAL_SUCC6_DATASET_VERSION;
+export const HARNESS_TARGET_DATASET_VERSION = MEMORY_EVAL_SUCC8_DATASET_VERSION;
 
 /** Every dataset this module can build a target for, newest last. */
 const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
@@ -163,8 +192,9 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         cases: MEMORY_EVAL_SUCC5_CASES,
         datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC5_CASES)),
         datasetManifestDigest: MEMORY_EVAL_SUCC5_MANIFEST.manifestDigest,
-        scoringContractDigest: sha256(scoringContractDescriptorInput()),
-        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+        // Recorded, like succ-4's: succ-5 is bound to `mem-score-v3.4`.
+        scoringContractDigest: MEMORY_EVAL_SUCC5_MANIFEST.scoringContractDigest,
+        scoringContractVersion: MEMORY_EVAL_SUCC5_MANIFEST.scoringContractVersion,
     }),
     [MEMORY_EVAL_SUCC6_DATASET_VERSION]: () => ({
         datasetSchemaVersion: 3,
@@ -178,6 +208,41 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         // against itself.
         datasetDigest: sha256(datasetFingerprintInputV3(MEMORY_EVAL_SUCC6_CASES)),
         datasetManifestDigest: MEMORY_EVAL_SUCC6_MANIFEST.manifestDigest,
+        // Recorded, like succ-4's and succ-5's: succ-6 is bound to v3.4.
+        scoringContractDigest: MEMORY_EVAL_SUCC6_MANIFEST.scoringContractDigest,
+        scoringContractVersion: MEMORY_EVAL_SUCC6_MANIFEST.scoringContractVersion,
+    }),
+    [MEMORY_EVAL_SUCC7_DATASET_VERSION]: () => ({
+        datasetSchemaVersion: 3,
+        datasetVersion: MEMORY_EVAL_SUCC7_DATASET_VERSION,
+        datasetFrozen: MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+        datasetPurpose: MEMORY_EVAL_SUCC7_DATASET_PURPOSE,
+        cases: MEMORY_EVAL_SUCC7_CASES,
+        // v4, not v3. succ-7 is fingerprinted with the version that covers
+        // `conversation.title`, which the prompt sends and v3 omitted; hashing
+        // it with v3 here would compute a digest the manifest never recorded
+        // and refuse the target for a difference this file invented.
+        datasetDigest: sha256(datasetFingerprintInputV4(MEMORY_EVAL_SUCC7_CASES)),
+        datasetManifestDigest: MEMORY_EVAL_SUCC7_MANIFEST.manifestDigest,
+        // Recorded, not recomputed, for the reason succ-4's entry gives: succ-7
+        // is bound to `mem-score-v3.4` for good and this tree ships v3.5.
+        // Computing it would report a contract this dataset was never scored
+        // under, which `harnessTargetBindingFailures()` then refuses —
+        // correctly, and that refusal is why succ-7 is no longer a run target.
+        scoringContractDigest: MEMORY_EVAL_SUCC7_MANIFEST.scoringContractDigest,
+        scoringContractVersion: MEMORY_EVAL_SUCC7_MANIFEST.scoringContractVersion,
+    }),
+    [MEMORY_EVAL_SUCC8_DATASET_VERSION]: () => ({
+        datasetSchemaVersion: 3,
+        datasetVersion: MEMORY_EVAL_SUCC8_DATASET_VERSION,
+        datasetFrozen: MEMORY_EVAL_SUCC8_DATASET_FROZEN,
+        datasetPurpose: MEMORY_EVAL_SUCC8_DATASET_PURPOSE,
+        // succ-7's array, by reference all the way down: a contract-only
+        // successor that held its own copy would be two datasets agreeing
+        // today and diverging on the first edit to either.
+        cases: MEMORY_EVAL_SUCC8_CASES,
+        datasetDigest: sha256(datasetFingerprintInputV4(MEMORY_EVAL_SUCC8_CASES)),
+        datasetManifestDigest: MEMORY_EVAL_SUCC8_MANIFEST.manifestDigest,
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
@@ -216,7 +281,12 @@ export type TargetManifestDigests = {
 export function targetManifestDigests(
     datasetVersion: string
 ): TargetManifestDigests | null {
+    // Newest first, and each read from the successor's own module rather than
+    // from the batch registry below: succ-4 onwards are not batch-composed, so
+    // their record is the pinned literal each module carries.
     for (const manifest of [
+        MEMORY_EVAL_SUCC8_MANIFEST,
+        MEMORY_EVAL_SUCC7_MANIFEST,
         MEMORY_EVAL_SUCC6_MANIFEST,
         MEMORY_EVAL_SUCC5_MANIFEST,
         MEMORY_EVAL_SUCC4_MANIFEST,

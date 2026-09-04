@@ -313,6 +313,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:memory-eval-succ7
 
+      # succ-8 is the harness target and the dataset a signature is pending on,
+      # and until this step existed its verifiers ran nowhere. Both are
+      # reachable only from `resolveArtifactDataset()`, which runs when someone
+      # reads an old artifact -- not on a commit, and not before a signature.
+      # So succ-8 could have lost its pinned manifest and gone back to
+      # recomputing it, carried a half-filled approval, or been frozen with
+      # nobody's name on it, and every required check would still be green.
+      - name: Memory eval succ-8 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ8
+
       # Tomverse Chat release thresholds live only in the canonical registry
       # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
       # gate IDs and may not redefine numbers. A registry with duplicate IDs,

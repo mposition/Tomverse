@@ -21,6 +21,8 @@ import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacement
 import {
     MEMORY_EVAL_SUCC7_CASES,
     MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC7_DATASET_VERSION,
+    MEMORY_EVAL_SUCC7_MANIFEST,
     MEMORY_EVAL_SUCC7_REVIEW,
     MEMORY_EVAL_SUCC7_REVIEWED,
     MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
@@ -33,6 +35,8 @@ import {
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
 import { manifestFingerprintInput } from "../lib/memoryEvalSucc7.ts";
+import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.ts";
+import { MEMORY_EVAL_SCORING_CONTRACT_VERSION } from "../lib/memoryEvalScoringContractDigest.ts";
 
 const failures = [];
 const notes = [];
@@ -551,7 +555,11 @@ console.log(
 console.log(`  unresolvedPolicy  ${manifest.unresolvedPolicies.length}`);
 console.log(`  fingerprint       v${manifest.fingerprintVersion}`);
 console.log(`  frozen            ${manifest.frozen}`);
-console.log(`  harness target    mem-eval-succ-6 (unchanged — a separate change)`);
+// Read, never named. This line said `mem-eval-succ-6 (unchanged — a separate
+// change)` while the summary below already said succ-8, so one run of one
+// check printed two different harness targets. A hard-coded fact in an output
+// whose job is to report facts is worse than no line at all.
+console.log(`  harness target    ${HARNESS_TARGET_DATASET_VERSION}`);
 console.log("");
 
 /* ------------------------------------------------------------- report --- */
@@ -566,8 +574,20 @@ if (failures.length > 0) {
     );
     process.exit(1);
 }
+// The harness target is read rather than named, because this sentence was
+// wrong within a day of being written: it said "still targets mem-eval-succ-6"
+// after the harness had moved twice. A summary line that states a fact it does
+// not check is worse than one that omits it.
 console.log(
     `\nsucc-7 structural checks all hold. reviewed=${MEMORY_EVAL_SUCC7_REVIEWED}, ` +
-        `frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}; the harness still targets ` +
-        "mem-eval-succ-6."
+        `frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}; the harness targets ` +
+        `${HARNESS_TARGET_DATASET_VERSION}.`
 );
+if (HARNESS_TARGET_DATASET_VERSION !== MEMORY_EVAL_SUCC7_DATASET_VERSION) {
+    console.log(
+        `succ-7 is not a run target: it is bound to ` +
+            `${MEMORY_EVAL_SUCC7_MANIFEST.scoringContractVersion} and this tree ` +
+            `ships ${MEMORY_EVAL_SCORING_CONTRACT_VERSION}. Its records stay ` +
+            "resolvable; its successor carries the same cases forward."
+    );
+}
