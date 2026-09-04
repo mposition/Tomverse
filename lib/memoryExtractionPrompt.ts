@@ -425,27 +425,144 @@ export const MEMORY_EXTRACTION_POLARITY_RULE = [
  * chosen for plausibility. `MEMORY_EXTRACTION_EXAMPLE_TERMS` is what that
  * check reads.
  */
+/**
+ * The label the examples cite.
+ *
+ * `toExtractionPromptInput()` numbers messages from 1, so `m0` is a label it
+ * can never produce. That matters because a worked example is text the model
+ * may copy: if the example cited `m1`, a copied citation would name a real
+ * message and the model would be one lucky substring away from a candidate
+ * nobody's evidence supports. Citing a label that cannot exist means a copied
+ * citation resolves to nothing and the candidate is discarded, which is what
+ * `tests/memoryExtractionPromptExamples.test.mjs` asserts against the real
+ * parser rather than by reading this comment.
+ */
+export const MEMORY_EXTRACTION_EXAMPLE_LABEL = "m0";
+
+/**
+ * The examples as data, so every check about them can be exact.
+ *
+ * Held as records rather than as prose because three separate things need to
+ * read them and each was getting a regex before: the parser test needs the
+ * candidate object, the contamination scan needs the subject matter and
+ * nothing else, and the corpus-cell check needs the kind and polarity. A
+ * regex over rendered prose answers none of those precisely.
+ */
+export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
+    {
+        language: "en",
+        message:
+            "The registration form lists two dependants; I have no dependants.",
+        candidate: {
+            kind: "relationship",
+            polarity: "negated",
+            statement: "The user has no dependants",
+            confidence: 0.9,
+            sensitivity: "standard",
+            expiresAt: null,
+            evidence: [
+                {
+                    messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
+                    quote: "I have no dependants",
+                },
+            ],
+        },
+    },
+    {
+        language: "ko",
+        message: "코드 예시는 의사코드로 주지 말아 주세요. 바로 돌려볼 수 있어야 합니다.",
+        candidate: {
+            kind: "code_style",
+            polarity: "negated",
+            statement: "사용자는 코드 예시를 의사코드로 받는 것을 원하지 않습니다",
+            confidence: 0.9,
+            sensitivity: "standard",
+            expiresAt: null,
+            evidence: [
+                {
+                    messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
+                    quote: "코드 예시는 의사코드로 주지 말아 주세요",
+                },
+            ],
+        },
+    },
+] as const;
+
+/**
+ * Two complete negated candidates, added in `mem-extract-v8`.
+ *
+ * Separate from `MEMORY_EXTRACTION_POLARITY_RULE` on purpose. The rule's
+ * sentences were approved as they stand and are unchanged by this version —
+ * `tests/memoryExtractionPromptExamples.test.mjs` pins their bytes — so the
+ * examples are a second constant rather than an edit to the first. That way
+ * "the rule did not change" is something a test can say rather than something
+ * a reader has to diff.
+ *
+ * Complete in the sense that matters for a structured-output prompt: the whole
+ * candidate object, with all seven required fields and the evidence array
+ * shaped as the schema asks. A prose gloss naming only the statement and the
+ * polarity leaves the model to infer `kind`, `confidence`, `sensitivity` and
+ * `expiresAt` from a schema it is shown separately, which is the gap an
+ * example is for.
+ *
+ * ## Why this subject and not a more natural one
+ *
+ * An example is text the model reads before it reads the input, so an example
+ * built from a case in a scored dataset teaches that case's answer. Two rounds
+ * of that happened here and both are worth keeping written down.
+ *
+ * The first was lexical: `낚시` is the gold token of a frozen durable-facts
+ * case, and it is the obvious subject for a Korean negated example.
+ *
+ * The second was structural, and a term scan could not see it. Replacing the
+ * subjects with `kitesurfing` and `드론` kept the *scenario* — an activity
+ * tried and abandoned — which is the core judgement of `succ-durable-en-608`
+ * and `succ-durable-ko-602`. Both are `polarity44` replacements, and those
+ * cases exist precisely because the originals were retired to buy an
+ * independent holdout for this rule. Teaching their shape gave it back.
+ *
+ * So both subjects were chosen against a measurement rather than for how
+ * natural they read, and the measurement is the (language, kind, polarity)
+ * cell each one occupies. An example landing where the corpus has cases is
+ * teaching a verdict the eval scores.
+ *
+ * The English example is the sentence the boundary rule above already calls a
+ * negated relationship fact, so it introduces no mapping the approved prompt
+ * had not already made. `en|relationship|negated` is scored nowhere in
+ * succ-4 through succ-8.
+ *
+ * The Korean one could not be the same fact: `ko|relationship|negated` is
+ * scored five times. Nor could it be any factual kind, because every factual
+ * kind carries negated Korean cases — so it is an answer-style preference in
+ * `ko|code_style|negated`, which is scored nowhere and which no `polarity44`
+ * replacement touches at all.
+ */
 export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
-    "Two complete examples of a negated candidate, one in each language, because `negated` is the half of this field that goes wrong. Each shows the whole unit: the span you cite, the statement you write from it, and the polarity that follows from that statement.",
+    "Two complete examples of a negated candidate, one in each language. Each is a whole candidate object rather than a description of one, so the seven required fields are visible together and in the shape the schema asks for.",
     "",
-    "The user wrote \"I gave kitesurfing a proper go for two summers and it never clicked, so I stopped.\" The statement is \"The user no longer does kitesurfing\", and the polarity is negated, because that statement asserts something is not so of them. It is negated for what the statement claims, not because the evidence happens to contain \"never\".",
+    `Both cite the placeholder label ${MEMORY_EXTRACTION_EXAMPLE_LABEL}, which never appears in real input. Cite only the labels listed beneath the imported content, never a label you saw in an example.`,
     "",
-    "The same shape in Korean, where the statement is written in the language of the evidence you cited. The user wrote \"드론은 자격증까지 땄는데 결국 손을 뗐습니다.\" The statement is \"사용자는 더 이상 드론을 하지 않습니다\", and the polarity is negated.",
+    ...MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES.flatMap((example) => [
+        `A user message labelled ${MEMORY_EXTRACTION_EXAMPLE_LABEL}: ${example.message}`,
+        JSON.stringify({ candidates: [example.candidate] }, null, 2),
+        "",
+    ]),
+    "In each, the polarity is negated because the statement asserts something is not so of the user, not because the message contains a negation word. The quote is a span copied from the message rather than the whole of it, and the statement is written in the language of the evidence it cites.",
 ].join("\n");
 
 /**
- * The content words the examples above introduce.
+ * The subject-matter terms the examples introduce.
  *
- * Read by the contamination test, which asserts that none of them occurs in
- * any corpus the harness can resolve. Registered by hand and checked from both
- * ends: an entry that no longer appears in the prompt is dead, and a Korean
- * content word in the examples that is not registered here fails the same
- * test — the second half is what stops a future example smuggling a gold token
- * in the way `낚시` would have.
+ * Read by the contamination scan, which asserts that none occurs in any corpus
+ * the harness can resolve, case-folded on both sides. Registered by hand and
+ * checked from both ends: an entry appearing in no example is dead, and a
+ * content word in an example's own text that no registered term covers fails
+ * the same test — in both languages, which is what stops a future example
+ * introducing a gold token without anybody adding it here.
  */
 export const MEMORY_EXTRACTION_EXAMPLE_TERMS: readonly string[] = [
-    "kitesurfing",
-    "드론",
+    "dependants",
+    "의사코드",
 ];
 
 const SYSTEM_PROMPT = [
