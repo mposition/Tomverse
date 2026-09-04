@@ -257,15 +257,20 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
             "is a boundary or a fixed-width lookahead written into the step, and no step " +
             "reads a word, a distance, a sentence or anything a later edit could change " +
             "at range. A registered Korean numeral expression therefore canonicalises " +
-            "the same alone as inside a sentence provided the word boundary before it " +
-            "is present, and the same however the expression itself is spaced. The " +
-            "general form of that guarantee is weaker, and is stated as it is rather " +
-            "than borrowed from the Korean step: a token canonicalises the same alone " +
-            "as in a sentence exactly when every boundary its own step requires is " +
-            "satisfied. The English numeral step requires both, so one becomes 1 while " +
-            "oneway is left as written; the digit-group separator step requires none " +
-            "before the digit, so it fires inside a longer token as well. No canonical " +
-            "form may be a substring of " +
+            "the same alone as inside a sentence provided no Hangul syllable " +
+            "immediately precedes it, and the same however the expression itself is " +
+            "spaced. That condition is not a word boundary and is deliberately weaker " +
+            "than one: the rule reads the single character before the numeral and asks " +
+            "only whether it is Hangul, so an expression preceded by a letter or a " +
+            "digit still rewrites. It is stated in those terms rather than as a word " +
+            "boundary because the two are not the same test and the difference changes " +
+            "results. The general form of the guarantee is weaker again, and is stated " +
+            "as it is rather than borrowed from the Korean step: a token canonicalises " +
+            "the same alone as in a sentence exactly when every condition its own step " +
+            "imposes is satisfied. The English numeral step imposes a word boundary on " +
+            "both sides, so one becomes 1 while oneway is left as written; the " +
+            "digit-group separator step imposes none before the digit, so it fires " +
+            "inside a longer token as well. No canonical form may be a substring of " +
             "another. This contract states no bound on what a canonical form may be a " +
             "substring OF: a gold token is matched as a substring, so a candidate stating " +
             "a different fact whose text contains the token is credited for it, in either " +

@@ -166,6 +166,21 @@ test("a row matches only where the left boundary allows it", () => {
             untouched
         );
     }
+    // And it is not a word boundary, which the contract statement now says in
+    // those terms because the two tests differ and the difference changes
+    // results. `(?<![가-힣])` reads one character and asks only whether it is
+    // Hangul, so a Latin letter or a digit before the numeral does not stop the
+    // rewrite the way `` would. The last row is the one that matters: a digit
+    // in front produces a different number.
+    for (const [text, expected] of [
+        ["육개월", "6개월"],
+        ["x육개월", "x6개월"],
+        ["2육개월", "26개월"],
+        ["1아홉시", "19시"],
+    ]) {
+        assert.equal(canonMatch(text, "ko"), expected, text);
+    }
+
     // There is no right boundary. Whatever follows the counter, the expression
     // is rewritten — which is what makes the two spellings agree, and is also
     // why 시장·시간·시절 are rewritten. Both consequences are one decision, so
