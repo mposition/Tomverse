@@ -238,6 +238,56 @@ test("a freeze standing on a draft subtype reading is refused", () => {
     }
 });
 
+test("a complete signature over an unfrozen dataset is refused", () => {
+    // The other half of the coupling, and the half that stayed unreachable
+    // after the first was fixed: `frozen` was read from the module here, so
+    // the combination could not be built. It is the direction a tree does not
+    // stay in for long — five fields filled, `frozen` still false — and that
+    // is exactly why nothing would have noticed it going unchecked.
+    //
+    // What it costs: the digests a signature names stop meaning anything the
+    // next time a case moves, and nothing in the record would say so.
+    const problems = succ9SignatureProblems(
+        MEMORY_EVAL_SUCC9_APPROVAL,
+        MEMORY_EVAL_SUCC9_MANIFEST,
+        false
+    );
+    assert.equal(problems.length, 1, problems.join(" / "));
+    assert.match(problems[0], /complete and the dataset is not frozen/);
+
+    // Frozen with an empty approval, the mirror image, also reachable now.
+    const empty = {
+        ...MEMORY_EVAL_SUCC9_APPROVAL,
+        approvedBy: null,
+        approvedAt: null,
+        approvedCommit: null,
+        signedDatasetDigest: null,
+        signedManifestDigest: null,
+    };
+    assert.match(
+        succ9SignatureProblems(empty, MEMORY_EVAL_SUCC9_MANIFEST, true)[0],
+        /frozen and the approval is empty/
+    );
+
+    // And the two legitimate states, both ways round.
+    assert.deepEqual(
+        [...succ9SignatureProblems(empty, MEMORY_EVAL_SUCC9_MANIFEST, false)],
+        [],
+        "unsigned and unfrozen is the ordinary state before an approval"
+    );
+    assert.deepEqual(
+        [
+            ...succ9SignatureProblems(
+                MEMORY_EVAL_SUCC9_APPROVAL,
+                MEMORY_EVAL_SUCC9_MANIFEST,
+                true
+            ),
+        ],
+        [],
+        "signed and frozen is the tree's own state"
+    );
+});
+
 test("the confirmation and the freeze are separate approvals", () => {
     // They were given separately: the confirmation covers the three subtype
     // rows, the freeze covers the sample and its two digests. Both are present

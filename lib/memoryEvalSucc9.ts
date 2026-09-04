@@ -445,7 +445,15 @@ export const MEMORY_EVAL_SUCC9_MANIFEST: Succ9DatasetManifest = {
  */
 export function succ9SignatureProblems(
     approval = MEMORY_EVAL_SUCC9_APPROVAL,
-    manifest: Succ9DatasetManifest = MEMORY_EVAL_SUCC9_MANIFEST
+    manifest: Succ9DatasetManifest = MEMORY_EVAL_SUCC9_MANIFEST,
+    /**
+     * An argument, not a module read, and for the same reason
+     * `freezePreconditionProblems()` takes its three: the two rules below turn
+     * on it, and while it was read from the module the only reachable value
+     * was the one the tree already holds. The completed-but-unfrozen refusal
+     * in particular could not be run at all.
+     */
+    frozen: boolean = MEMORY_EVAL_SUCC9_DATASET_FROZEN
 ): readonly string[] {
     const problems: string[] = [];
     const fields = [
@@ -461,7 +469,7 @@ export function succ9SignatureProblems(
     );
 
     if (filled.length === 0) {
-        if (MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
+        if (frozen) {
             problems.push(
                 "the dataset is frozen and the approval is empty; a freeze is a " +
                     "signature, and there is none here"
@@ -501,7 +509,11 @@ export function succ9SignatureProblems(
                 `${approval.signedManifestDigest}, pinned ${manifest.manifestDigest}`
         );
     }
-    if (!MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
+    // The direction that is easy to leave untested, because a tree in it does
+    // not exist for long: five fields filled and `frozen` still false is a
+    // signature over a sample that can still change, and the digests it names
+    // stop meaning anything the next time a case moves.
+    if (!frozen) {
         problems.push(
             "the approval is complete and the dataset is not frozen; a signature " +
                 "over a sample that can still change is a signature over nothing"
