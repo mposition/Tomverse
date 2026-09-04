@@ -20,18 +20,19 @@ import {
     MEMORY_EVAL_SUCC9_APPROVAL,
     MEMORY_EVAL_SUCC9_CASES,
     MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC9_MANIFEST,
     buildSucc9Manifest,
     succ9Problems,
+    succ9SignatureProblems,
+    verifySucc9Manifest,
 } from "../lib/memoryEvalSucc9.ts";
 import {
     SUCC9_REGRESSION_CORPUS,
     succ9RegressionProblems,
 } from "../lib/memoryEvalSucc9Regression.ts";
 import { SUCC9_TRANSITION } from "../lib/memoryEvalSucc9Transition.ts";
-import { isCalendarDay } from "../lib/memoryEvalCalendarDay.ts";
 import {
     SUCC9_SUBTYPE_REVIEW,
-    isReviewerHandle,
     succ9Subtype,
 } from "../lib/memoryEvalSucc9Subtypes.ts";
 import { MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS } from "../lib/memoryExtractionPrompt.ts";
@@ -40,7 +41,13 @@ import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.t
 const failures = [];
 const notes = [];
 const ok = (label, detail) => notes.push(`OK    ${label}  — ${detail}`);
-const fail = (line) => failures.push(line);
+// Deduplicated: `verifySucc9Manifest()` folds in `succ9SignatureProblems()`
+// and `succ9Problems()`, and this script also calls them for their own
+// sections, so one defect can arrive twice. A repeated line is noise, and
+// noise in a failure report is how the second line stops being read.
+const fail = (line) => {
+    if (!failures.includes(line)) failures.push(line);
+};
 
 const manifest = buildSucc9Manifest();
 
@@ -138,81 +145,43 @@ if (missingFromSucc8.length > 0) {
     ok("succ-8 is unchanged", "the retirement is a new version, not an edit");
 }
 
+/* ------------------------------------------------ the pinned record --- */
+
+// The literal against itself and against the tree. `verifySucc9Manifest()`
+// folds in `succ9SignatureProblems()` and `succ9Problems()`, so a failure here
+// names the field that moved rather than saying the dataset changed.
+const pinned = [...verifySucc9Manifest()];
+if (pinned.length > 0) for (const problem of pinned) fail(problem);
+else
+    ok(
+        "the pinned manifest matches this tree",
+        `${MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest.slice(0, 12)}…`
+    );
+
 /* ----------------------------------------------------- the signature --- */
 
-const signedFields = [
-    MEMORY_EVAL_SUCC9_APPROVAL.approvedBy,
-    MEMORY_EVAL_SUCC9_APPROVAL.approvedAt,
-    MEMORY_EVAL_SUCC9_APPROVAL.approvedCommit,
-    MEMORY_EVAL_SUCC9_APPROVAL.signedDatasetDigest,
-    MEMORY_EVAL_SUCC9_APPROVAL.signedManifestDigest,
-];
-// Non-empty, not merely non-null: an empty string is not half a signature and
-// treating it as one is how a partial signature passes the all-or-none rule.
-const filled = signedFields.filter(
-    (value) => typeof value === "string" && value.trim() !== ""
-);
-if (filled.length === 0) {
-    if (MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
-        fail("frozen with nobody's name on it");
-    } else {
-        ok("the approval's shape", "unsigned, and every signed field is null");
-    }
-} else if (filled.length !== signedFields.length) {
-    fail(
-        `${filled.length} of ${signedFields.length} signature fields are filled; ` +
-            "a partial signature claims an approval of bytes nobody read"
-    );
+// The judgement lives in `succ9SignatureProblems()`. What is left here is the
+// part a pure function cannot do: read the filesystem and ask git.
+const signature = [...succ9SignatureProblems()];
+if (signature.length > 0) {
+    for (const problem of signature) fail(problem);
+} else if (MEMORY_EVAL_SUCC9_APPROVAL.approvedBy === null) {
+    ok("the approval's shape", "unsigned, and every signed field is null");
 } else {
     ok("the approval's shape", `signed by ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
-    // The same judgement the subtype review uses, not a second copy of it.
-    //
-    // The copy that stood here was `/^@[A-Za-z0-9-]+$/`, which accepts `@-`,
-    // `@--` and `@a-` — the exact hole closed on the review path two commits
-    // earlier, still open on the path that signs the dataset. Two spellings of
-    // one rule is how a fix reaches one of them.
-    //
-    // `isReviewerHandle()` drops this path's `@` requirement, deliberately: the
-    // repository already writes the same person both ways — `mposition` in the
-    // frozen subtype table, `@mposition` in succ-8's approval — so the shared
-    // rule tolerates both, and re-adding a prefix condition here would be the
-    // third rule rather than the end of the second. What it does not tolerate
-    // is a name made of punctuation, which is the thing that mattered.
-    if (!isReviewerHandle(MEMORY_EVAL_SUCC9_APPROVAL.approvedBy)) {
-        fail(`the reviewer is not a handle: ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
-    }
-    // A day that exists, not merely a date-shaped string. `filled.length`
-    // counts a field holding "" or "soon" as signed, and the regex succ-8 uses
-    // counts `2026-99-99`, so neither says the record can be looked up.
-    if (!isCalendarDay(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt)) {
-        fail(
-            "approvedAt is not a day that exists: " +
-                JSON.stringify(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt)
-        );
-    }
     if (!existsSync(MEMORY_EVAL_SUCC9_APPROVAL.record)) {
         fail(`the approval's record does not exist: ${MEMORY_EVAL_SUCC9_APPROVAL.record}`);
-    }
-    if (MEMORY_EVAL_SUCC9_APPROVAL.signedDatasetDigest !== manifest.datasetDigest) {
-        fail("the signed dataset digest is not this tree's");
-    }
-    if (MEMORY_EVAL_SUCC9_APPROVAL.signedManifestDigest !== manifest.manifestDigest) {
-        fail("the signed manifest digest is not this tree's");
     }
     // Fail-closed: "cannot verify here" is the normal path in a shallow clone
     // and would pass any forty-hex string.
     const commit = MEMORY_EVAL_SUCC9_APPROVAL.approvedCommit ?? "";
-    if (!/^[0-9a-f]{40}$/.test(commit)) {
-        fail(`the approved commit is not a full sha: ${commit}`);
-    } else {
-        try {
-            execFileSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], {
-                stdio: ["ignore", "ignore", "ignore"],
-            });
-            ok("the approval's commit is an ancestor of HEAD", `${commit.slice(0, 12)}…`);
-        } catch {
-            fail(`${commit} is not an ancestor of HEAD in this checkout`);
-        }
+    try {
+        execFileSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], {
+            stdio: ["ignore", "ignore", "ignore"],
+        });
+        ok("the approval's commit is an ancestor of HEAD", `${commit.slice(0, 12)}…`);
+    } catch {
+        fail(`${commit} is not an ancestor of HEAD in this checkout`);
     }
 }
 

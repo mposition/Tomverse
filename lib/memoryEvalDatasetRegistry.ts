@@ -81,8 +81,8 @@ import {
 } from "@/lib/memoryEvalSucc8";
 import {
     MEMORY_EVAL_SUCC9_CASES,
-    buildSucc9Manifest,
-    succ9Problems,
+    MEMORY_EVAL_SUCC9_MANIFEST,
+    verifySucc9Manifest,
 } from "@/lib/memoryEvalSucc9";
 import {
     MEMORY_EVAL_SUCC5_CASES,
@@ -217,12 +217,17 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         verify: () => verifySucc8Manifest(),
     },
     {
-        // Assembled 2026-09-04 and not yet signed. Registered so an artifact
-        // naming it resolves at all; the harness still scores succ-8, which
-        // is a separate decision from having the sample.
-        manifest: buildSucc9Manifest(),
+        // Assembled, signed and frozen on 2026-09-04. The harness still scores
+        // succ-8: pointing it here is a separate decision from having the
+        // sample, and it has not been taken.
+        //
+        // The pinned literal rather than `buildSucc9Manifest()`, for the reason
+        // succ-8's row gives — a resolver comparing an artifact against a
+        // recomputed manifest agrees with whatever the tree says today, which
+        // is what a signature exists to be able to disagree with.
+        manifest: MEMORY_EVAL_SUCC9_MANIFEST,
         cases: MEMORY_EVAL_SUCC9_CASES,
-        verify: () => succ9Problems(),
+        verify: () => verifySucc9Manifest(),
     },
 ];
 

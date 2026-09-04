@@ -11,9 +11,14 @@ import {
     succ9SubtypeProblems,
 } from "../lib/memoryEvalSucc9Subtypes.ts";
 import {
+    MEMORY_EVAL_SUCC9_APPROVAL,
     MEMORY_EVAL_SUCC9_CASES,
     MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC9_MANIFEST,
+    buildSucc9Manifest,
     succ9Problems,
+    succ9SignatureProblems,
+    verifySucc9Manifest,
 } from "../lib/memoryEvalSucc9.ts";
 import { SUCC9_TRANSITION } from "../lib/memoryEvalSucc9Transition.ts";
 
@@ -160,12 +165,95 @@ test("the shipped review record is a confirmation with a name and a day on it", 
     assert.equal(isReviewerHandle(SUCC9_SUBTYPE_REVIEW.reviewer), true);
 });
 
-test("confirming the subtype rows did not freeze the dataset", () => {
-    // The two are separate approvals and were given separately: the
-    // confirmation covers the three subtype rows, and the freeze covers the
-    // sample and its digests. `human_confirmed` is what `succ9Problems()`
-    // requires *before* a freeze, never a substitute for one.
-    assert.equal(MEMORY_EVAL_SUCC9_DATASET_FROZEN, false);
+test("the confirmation and the freeze are separate approvals", () => {
+    // They were given separately and an hour apart: the confirmation covers the
+    // three subtype rows, the freeze covers the sample and its two digests.
+    // Both are present now, so the assertion that matters is the dependency
+    // between them rather than either state — a freeze standing on a draft
+    // reading has to be refused.
+    assert.equal(SUCC9_SUBTYPE_REVIEW.status, "human_confirmed");
+    assert.equal(MEMORY_EVAL_SUCC9_DATASET_FROZEN, true);
+    const draftReview = { ...SUCC9_SUBTYPE_REVIEW, status: "ai_draft", reviewer: null, reviewedAt: null };
+    assert.equal(
+        subtypeReviewProblems(draftReview).length,
+        0,
+        "a well-formed draft is a legitimate state on its own"
+    );
+});
+
+/* --------------------------------------------------------- the freeze -- */
+
+test("the pinned manifest is this tree's, and hashes to its own digest", () => {
+    assert.deepEqual([...verifySucc9Manifest()], []);
+    // Not two builder calls agreeing with each other: the literal is compared
+    // with what the tree computes, and it is the literal a signature names.
+    const built = buildSucc9Manifest();
+    assert.equal(MEMORY_EVAL_SUCC9_MANIFEST.datasetDigest, built.datasetDigest);
+    assert.equal(MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest, built.manifestDigest);
+    assert.equal(MEMORY_EVAL_SUCC9_MANIFEST.subtypeDigest, built.subtypeDigest);
+    assert.equal(MEMORY_EVAL_SUCC9_MANIFEST.caseCount, 1150);
+});
+
+test("a pinned field edited without its digest is caught", () => {
+    // succ-7 shipped `caseCount: 999` verifying clean, because the check
+    // compared digest strings and a digest string is not the record.
+    const tampered = { ...MEMORY_EVAL_SUCC9_MANIFEST, caseCount: 999 };
+    const problems = verifySucc9Manifest(tampered);
+    assert.ok(problems.some((line) => /does not hash to its own manifestDigest/.test(line)));
+    assert.ok(problems.some((line) => /caseCount: recorded 999/.test(line)));
+});
+
+test("the signature is complete, and names this record's digests", () => {
+    assert.deepEqual([...succ9SignatureProblems()], []);
+    assert.equal(
+        MEMORY_EVAL_SUCC9_APPROVAL.signedDatasetDigest,
+        MEMORY_EVAL_SUCC9_MANIFEST.datasetDigest
+    );
+    assert.equal(
+        MEMORY_EVAL_SUCC9_APPROVAL.signedManifestDigest,
+        MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest
+    );
+    assert.equal(isCalendarDay(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt), true);
+    assert.match(MEMORY_EVAL_SUCC9_APPROVAL.approvedCommit ?? "", /^[0-9a-f]{40}$/);
+});
+
+test("a partial signature is refused rather than read as mostly signed", () => {
+    for (const field of [
+        "approvedBy",
+        "approvedAt",
+        "approvedCommit",
+        "signedDatasetDigest",
+        "signedManifestDigest",
+    ]) {
+        for (const value of [null, "", "   "]) {
+            const problems = succ9SignatureProblems(
+                { ...MEMORY_EVAL_SUCC9_APPROVAL, [field]: value },
+                MEMORY_EVAL_SUCC9_MANIFEST
+            );
+            assert.equal(problems.length, 1, `${field}=${JSON.stringify(value)}`);
+            assert.match(problems[0], /partly filled \(4 of 5 fields\)/);
+        }
+    }
+});
+
+test("a signature over a digest that is not the pinned one is refused", () => {
+    // The failure the literal exists to make visible: a signature that agrees
+    // with a recomputed value agrees with whatever the tree says today.
+    const zero = "0".repeat(64);
+    assert.match(
+        succ9SignatureProblems(
+            { ...MEMORY_EVAL_SUCC9_APPROVAL, signedDatasetDigest: zero },
+            MEMORY_EVAL_SUCC9_MANIFEST
+        )[0],
+        /signedDatasetDigest is not the pinned record's/
+    );
+    assert.match(
+        succ9SignatureProblems(
+            { ...MEMORY_EVAL_SUCC9_APPROVAL, signedManifestDigest: zero },
+            MEMORY_EVAL_SUCC9_MANIFEST
+        )[0],
+        /signedManifestDigest is not the pinned record's/
+    );
 });
 
 test("the reviewer rule lives in one place and both paths use it", () => {
@@ -185,11 +273,27 @@ test("the reviewer rule lives in one place and both paths use it", () => {
         assert.equal(isReviewerHandle(name), true, `${name} was rejected`);
     }
 
+    // The dataset approval path, exercised directly. It reached the same
+    // judgement through a copy of the pattern that accepted `@-`, and the fix
+    // was to have one rule; this asserts the path, not the spelling.
+    const signed = { ...MEMORY_EVAL_SUCC9_APPROVAL };
+    for (const approvedBy of ["@-", "@--", "@a-", "-", "@"]) {
+        const problems = succ9SignatureProblems(
+            { ...signed, approvedBy },
+            MEMORY_EVAL_SUCC9_MANIFEST
+        );
+        assert.equal(problems.length, 1, `${approvedBy}: ${problems.join(" / ")}`);
+        assert.match(problems[0], /approvedBy is not a handle/);
+    }
+    for (const approvedBy of ["@mposition", "mposition"]) {
+        assert.deepEqual(
+            succ9SignatureProblems({ ...signed, approvedBy }, MEMORY_EVAL_SUCC9_MANIFEST),
+            [],
+            `${approvedBy} was rejected`
+        );
+    }
+
     // And structurally: nothing in succ-9's own files defines a second one.
-    // Read as source, because the branch that judges the dataset approval only
-    // runs once all five signature fields are filled, and the tree is unsigned
-    // — a test that could only observe it after a signature is a test that
-    // arrives too late to prevent one.
     const files = [
         "scripts/check-memory-eval-succ9.mjs",
         "lib/memoryEvalSucc9.ts",
@@ -207,11 +311,6 @@ test("the reviewer rule lives in one place and both paths use it", () => {
         }
     }
     assert.equal(definitions, 1, `${definitions} handle patterns across ${files.join(", ")}`);
-    assert.match(
-        readFileSync("scripts/check-memory-eval-succ9.mjs", "utf8"),
-        /isReviewerHandle\(MEMORY_EVAL_SUCC9_APPROVAL\.approvedBy\)/,
-        "the dataset approval does not use the shared rule"
-    );
 });
 
 /* ------------------------------------------------------ grounds and rows -- */

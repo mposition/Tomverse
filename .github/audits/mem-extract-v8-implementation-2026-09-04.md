@@ -164,19 +164,57 @@ subtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce
                  (human_confirmed, @mposition, 2026-09-04)
 transitionDigest cf8fa0800fe97be1daee34a27ba3196a4ba6cbe421b1d280b061cd0ad52bb6cd
 scoringContract  mem-score-v3.5  2d4bcb69…  (변경 없음)
-frozen           false
+frozen           true
 ```
 
-**subtype 검토는 2026-09-04에 `@mposition`이 확인했습니다.** 확인이 `b72e658e`
-(CI 20/20 success) 위에서 이뤄졌고, 그 기록을 쓰면서 subtypeDigest가 움직였으며
-manifestDigest도 따라 움직였습니다 — 위 값이 그 뒤의 값입니다. **확인 전 값을
-서명 대상으로 제시하지 않은 이유가 이것입니다.**
+## 두 승인, 순서대로
 
-그 승인이 덮는 것은 **세 case의 subtype 3 판정뿐**입니다. dataset 동결과 두
-digest 서명, harness 이동, pair·예산·유료 실행·release gate·feature flag는
-포함되지 않으며, `frozen`은 여전히 `false`입니다. `succ9Problems()`는 이제
-`human_confirmed`를 **동결의 전제 조건**으로 요구하지만, 그것이 동결을 대신하지는
-않습니다.
+**1. subtype 검토 — 2026-09-04, `@mposition`.** `b72e658e`(CI 20/20 success)
+위에서 세 줄을 각각 그 case가 대체하는 case, 그리고 그 case가 대체했던 case와
+대조해 확인했습니다. 그 기록을 쓰면서 subtypeDigest가 움직였고 manifestDigest도
+따라 움직였습니다 — **확인 전 값을 서명 대상으로 제시하지 않은 이유가
+이것입니다.** 확인 뒤에 서명했다면 이미 존재하지 않는 bytes에 서명하는 일이
+됐습니다.
+
+**2. dataset 채택·동결 — 2026-09-04, `@mposition`, `25b3f503`.**
+
+```
+approvedBy            @mposition
+approvedAt            2026-09-04
+approvedCommit        25b3f503ed2637d7b160e6a8c5750203d5e60b1d
+signedDatasetDigest   626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6
+signedManifestDigest  82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c
+```
+
+승인 내용은 넷입니다 — prompt 선택에 쓰인 다섯 case의 B+ 퇴역과 regression
+보존, 네 same_boundary 대체, `succ-durable-ko-701`의 누락 affirmed gold를 더한
+repair, 그리고 위 두 digest로 식별되는 1,150건.
+
+**동결 전후 두 digest는 같습니다.** `frozen`은 fingerprint 밖에 있고 승인 기록도
+그렇기 때문이며, 그 설계의 목적이 바로 이것입니다 — 서명한 digest가 곧 동결되는
+digest여야 합니다.
+
+동결과 함께 들어간 것:
+
+- `MEMORY_EVAL_SUCC9_MANIFEST` — 계산이 아니라 **literal**. builder는 "오늘 이
+  트리가 뭐라고 하는가"에 답하고, 서명은 오늘과 **다를 수 있어야** 합니다.
+- `verifySucc9Manifest()` — 고정본을 **자기 자신에게** 먼저 해시하고(succ-7이
+  `caseCount: 999`로 통과한 적이 있습니다 — digest 문자열 비교는 기록을 보지
+  않습니다), 그 다음 트리와 대조합니다. 기본 인자가 한쪽은 literal, 한쪽은
+  builder인 것이 요점입니다.
+- `succ9SignatureProblems()` — 다섯 필드 전부 아니면 전무, handle·달력 날짜·
+  40자 SHA, 그리고 두 digest가 **literal의 것**과 같은지. 미서명 상태에서
+  `frozen=true`도, 서명된 상태에서 `frozen=false`도 실패입니다.
+- registry의 succ-9 행이 `buildSucc9Manifest()`/`succ9Problems()`에서 위 둘로
+  바뀝니다.
+
+되돌려 확인했습니다 — 고정본의 `caseCount`를 999로(자기 해시 + 트리 대조 둘 다
+실패), 서명된 채 `frozen=false`로, 서명 digest를 0으로, 다섯 필드 중 하나를
+비움(4/5).
+
+**포함되지 않는 것**: harness 이동, PR ready 전환·병합, pair 등록·승인, 예산·
+유료 실행, release gate, 두 memory feature flag. harness는 여전히 succ-8을
+겨누고, pair register가 비어 있어 유료 실행은 `unknown_pair`로 거절됩니다.
 
 | 퇴역 | 대체 | 소재 교체 |
 | --- | --- | --- |
@@ -268,9 +306,11 @@ digest 서명, harness 이동, pair·예산·유료 실행·release gate·featur
   turn에 실제로 들어 있는지 대조합니다.
 - **succ-8은 손대지 않습니다.** 동결·서명된 역사본이고, 거기서 case를 빼면
   두 digest가 움직여 그 서명이 무효가 됩니다. 검사가 이것을 직접 단언합니다.
-- **harness는 아직 succ-8입니다.** 서명 후에 옴기는 것이 순서이고, succ-9는
-  이름으로 해석만 됩니다. 그동안 v8 예시는 live target(succ-8)과 겹치지만,
-  pair가 등록되지 않아 유료 실행 자체가 `unknown_pair`로 거절됩니다.
+- **동결됐지만 harness는 여전히 succ-8입니다.** 표본에 서명하는 것과 harness를
+  그리로 겨누는 것은 별개 결정이고, 뒤쪽은 아직 내려지지 않았습니다. 그동안
+  v8 예시는 live target(succ-8)과 겹치지만, pair가 등록되지 않아 유료 실행
+  자체가 `unknown_pair`로 거절됩니다 — 동결이 없앤 거절 사유는
+  `dataset_not_frozen` 하나뿐입니다.
 
 ## 4. 테스트
 

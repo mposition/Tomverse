@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { isCalendarDay } from "@/lib/memoryEvalCalendarDay";
 import { datasetFingerprintInputV4 } from "@/lib/memoryEvalDatasetFingerprintV4";
 import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/lib/memoryEvalSucc9Replacements";
 import {
     SUCC9_SUBTYPE_REVIEW,
+    isReviewerHandle,
     succ9Subtype,
     succ9SubtypeDigest,
     succ9SubtypeProblems,
@@ -80,23 +82,28 @@ export const MEMORY_EVAL_SUCC9_CHANGE_REASON =
     "original's golds and adds the affirmed fact the case left unclaimed";
 
 /**
- * False, pending a signature.
+ * True since 2026-09-04.
  *
- * A case-changing successor cannot inherit its predecessor's freeze. What has
- * to be approved here is that these five left for the reason given, that four
- * of the replacements test the same boundary, and that the fifth is a repair
- * whose extra gold is one its original should have had — a person's decision
- * on each count. `decideEvalRunMode()` refuses a decision-grade run against an
- * unfrozen sample, which is what should happen until then.
+ * A case-changing successor cannot inherit its predecessor's freeze, so this
+ * was approved on its own terms: that the five left for the reason given, that
+ * four of the replacements test the same boundary, and that the fifth is a
+ * repair whose extra gold is one its original should have had.
+ * `MEMORY_EVAL_SUCC9_APPROVAL` carries who said so, when, and against which
+ * bytes.
  *
- * The other precondition is met. `succ9Problems()` also refuses a freeze while
- * `SUCC9_SUBTYPE_REVIEW` is an AI draft — both `assistant_only` arms sit
- * exactly on their floor, so those three rows are what puts them there — and
- * that reading was confirmed on 2026-09-04. Met, not spent: it is what a
- * freeze requires, never what a freeze is, and writing it moved this
- * manifest's digest rather than settling it.
+ * The other precondition was met first, and the order was not cosmetic.
+ * `succ9Problems()` refuses a freeze while `SUCC9_SUBTYPE_REVIEW` is an AI
+ * draft — both `assistant_only` arms sit exactly on their floor, so those
+ * three rows are what puts them there — and confirming that reading moved
+ * `subtypeDigest` and this manifest's digest with it. Confirming after signing
+ * would have signed bytes that stopped existing.
+ *
+ * Frozen is not runnable. `decideEvalRunMode()` has one fewer reason to refuse
+ * a decision-grade run and still refuses: no pair is registered and no budget
+ * is approved, which is `unknown_pair`. The harness also still scores succ-8;
+ * pointing it here is its own decision and has not been taken.
  */
-export const MEMORY_EVAL_SUCC9_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC9_DATASET_FROZEN = true;
 
 export const MEMORY_EVAL_SUCC9_DATASET_PURPOSE: "development" | "decision" =
     "decision";
@@ -130,11 +137,29 @@ export const MEMORY_EVAL_SUCC9_APPROVAL: {
     scope: "case-replacement";
     record: string;
 } = {
-    approvedBy: null,
-    approvedAt: null,
-    approvedCommit: null,
-    signedDatasetDigest: null,
-    signedManifestDigest: null,
+    /**
+     * Signed 2026-09-04 against `25b3f503`, whose twenty checks were all green
+     * when the approval was given.
+     *
+     * The approval named the four things it settles: the B+ retirement of the
+     * five cases the `mem-extract-v8` example kind was counted from and their
+     * preservation in the regression corpus, the four same-boundary
+     * replacements, the repair that gives `succ-durable-ko-701` the affirmed
+     * gold its original left unclaimed, and the 1,150-case sample the two
+     * digests below identify.
+     *
+     * It settles nothing downstream. The harness still scores succ-8, the pair
+     * register is empty, and no budget exists — each is its own decision, and
+     * a frozen sample is a precondition for them rather than a step toward
+     * them.
+     */
+    approvedBy: "@mposition",
+    approvedAt: "2026-09-04",
+    approvedCommit: "25b3f503ed2637d7b160e6a8c5750203d5e60b1d",
+    signedDatasetDigest:
+        "626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6",
+    signedManifestDigest:
+        "82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c",
     /**
      * `case-replacement`, not `contract-only`: five cases changed, so this
      * signature covers a sample and not only a label. succ-8's scope word was
@@ -353,12 +378,211 @@ function boundaryAxes(
 }
 
 /**
+ * The manifest as it was signed, written out rather than computed.
+ *
+ * A builder answers "what does this tree say today", and a signature has to be
+ * able to disagree with today. Every value here is frozen text: if a case, a
+ * cell, the transition table or the subtype reading moves, this record stops
+ * matching what the tree computes and `verifySucc9Manifest()` names the field
+ * that moved. That is the point of pinning it, and it is not something two
+ * builder calls can do for each other.
+ *
+ * Every value is also stated in
+ * `.github/audits/mem-extract-v8-implementation-2026-09-04.md`, so a diff of
+ * this constant is a diff of the claim.
+ */
+export const MEMORY_EVAL_SUCC9_MANIFEST: Succ9DatasetManifest = {
+    datasetVersion: "mem-eval-succ-9",
+    schemaVersion: 3,
+    supersedes: "mem-eval-succ-8",
+    composition: {
+        kind: "case-replacement",
+        sourceDatasetVersion: "mem-eval-succ-8",
+        sourceDatasetDigest:
+            "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+        transitionDigest:
+            "cf8fa0800fe97be1daee34a27ba3196a4ba6cbe421b1d280b061cd0ad52bb6cd",
+        retiredCount: 5,
+        replacementCount: 5,
+        changeReason: MEMORY_EVAL_SUCC9_CHANGE_REASON,
+    },
+    caseCount: 1150,
+    cellCounts: {
+        "assistant_only:en": 125,
+        "assistant_only:ko": 125,
+        "durable_facts:en": 200,
+        "durable_facts:ko": 200,
+        "injection_directives:en": 125,
+        "injection_directives:ko": 125,
+        "sensitive_secrets:en": 125,
+        "sensitive_secrets:ko": 125,
+    },
+    subtypeDigest:
+        "9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6",
+    fingerprintVersion: 4,
+    datasetDigest:
+        "626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6",
+    scoringContractDigest:
+        "2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4",
+    scoringContractVersion: "mem-score-v3.5",
+    frozen: MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+    manifestDigest:
+        "82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c",
+};
+
+/**
+ * Whether the signature is one, and whether it is this dataset's.
+ *
+ * Two states are legitimate and nothing between them: unsigned, every field
+ * null, and signed, all five present with the two digests equal to the pinned
+ * record's. A half-filled record — a name with no digests, digests with
+ * nobody's name — is the shape that lets an approval be claimed for bytes
+ * nobody looked at, so it is refused rather than read as mostly signed.
+ *
+ * The comparison is against the literal, never against `buildSucc9Manifest()`.
+ * A signature compared to a recomputed value agrees with whatever the tree
+ * currently says, which is the failure this whole shape exists to prevent.
+ */
+export function succ9SignatureProblems(
+    approval = MEMORY_EVAL_SUCC9_APPROVAL,
+    manifest: Succ9DatasetManifest = MEMORY_EVAL_SUCC9_MANIFEST
+): readonly string[] {
+    const problems: string[] = [];
+    const fields = [
+        approval.approvedBy,
+        approval.approvedAt,
+        approval.approvedCommit,
+        approval.signedDatasetDigest,
+        approval.signedManifestDigest,
+    ];
+    // Non-empty rather than non-null: an empty string is not half a signature.
+    const filled = fields.filter(
+        (value) => typeof value === "string" && value.trim() !== ""
+    );
+
+    if (filled.length === 0) {
+        if (MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
+            problems.push(
+                "the dataset is frozen and the approval is empty; a freeze is a " +
+                    "signature, and there is none here"
+            );
+        }
+        return problems;
+    }
+    if (filled.length < fields.length) {
+        problems.push(
+            `the approval is partly filled (${filled.length} of ${fields.length} ` +
+                "fields). A signature is all five or none: a name without digests " +
+                "approves nothing in particular, and digests without a name are " +
+                "not an approval."
+        );
+        return problems;
+    }
+    if (!isReviewerHandle(approval.approvedBy)) {
+        problems.push(`approvedBy is not a handle: ${approval.approvedBy}`);
+    }
+    if (!isCalendarDay(approval.approvedAt)) {
+        problems.push(
+            `approvedAt is not a day that exists: ${JSON.stringify(approval.approvedAt)}`
+        );
+    }
+    if (!/^[0-9a-f]{40}$/.test(approval.approvedCommit ?? "")) {
+        problems.push(`approvedCommit is not a full sha: ${approval.approvedCommit}`);
+    }
+    if (approval.signedDatasetDigest !== manifest.datasetDigest) {
+        problems.push(
+            "signedDatasetDigest is not the pinned record's: signed " +
+                `${approval.signedDatasetDigest}, pinned ${manifest.datasetDigest}`
+        );
+    }
+    if (approval.signedManifestDigest !== manifest.manifestDigest) {
+        problems.push(
+            "signedManifestDigest is not the pinned record's: signed " +
+                `${approval.signedManifestDigest}, pinned ${manifest.manifestDigest}`
+        );
+    }
+    if (!MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
+        problems.push(
+            "the approval is complete and the dataset is not frozen; a signature " +
+                "over a sample that can still change is a signature over nothing"
+        );
+    }
+    return problems;
+}
+
+/**
+ * The pinned record against itself, then against the tree.
+ *
+ * Both defaults are load-bearing: `manifest` defaults to the literal and
+ * `built` to the builder. succ-6 once passed this shape with the builder on
+ * both sides, which compares the tree with itself and proves nothing.
+ *
+ * The self-hash comes first because comparing two digest *strings* only proves
+ * the strings match — the case count, the cell tally, the contract version and
+ * the carried transition digest could all be edited with the digest left
+ * alone. succ-7 demonstrated exactly that on 2026-09-02 with `caseCount: 999`
+ * verifying clean.
+ */
+export function verifySucc9Manifest(
+    manifest: Succ9DatasetManifest = MEMORY_EVAL_SUCC9_MANIFEST,
+    built: Succ9DatasetManifest = buildSucc9Manifest()
+): readonly string[] {
+    const failures: string[] = [];
+    const { manifestDigest: recordedDigest, ...recordedFields } = manifest;
+    const recomputed = sha256(succ9ManifestFingerprintInput(recordedFields));
+    if (recordedDigest !== recomputed) {
+        failures.push(
+            "the pinned record does not hash to its own manifestDigest: " +
+                `records ${recordedDigest}, its fields hash to ${recomputed}`
+        );
+    }
+    for (const field of [
+        "datasetDigest",
+        "manifestDigest",
+        "subtypeDigest",
+        "scoringContractDigest",
+        "scoringContractVersion",
+        "caseCount",
+    ] as const) {
+        if (manifest[field] !== built[field]) {
+            failures.push(
+                `${field}: recorded ${String(manifest[field])}, tree computes ` +
+                    `${String(built[field])}`
+            );
+        }
+    }
+    if (
+        manifest.composition.transitionDigest !==
+        built.composition.transitionDigest
+    ) {
+        failures.push(
+            "transitionDigest: recorded " +
+                `${manifest.composition.transitionDigest}, tree computes ` +
+                `${built.composition.transitionDigest}. Which replacement stood ` +
+                "in for which original changed, and a case count alone cannot " +
+                "show it."
+        );
+    }
+    // Outside the digest by design, so neither check above can see it.
+    if (manifest.frozen !== MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
+        failures.push(
+            `frozen: the record says ${manifest.frozen}, the module declares ` +
+                `${MEMORY_EVAL_SUCC9_DATASET_FROZEN}. This field is outside the ` +
+                "digest, so nothing else here would have caught it."
+        );
+    }
+    return [
+        ...failures,
+        ...succ9SignatureProblems(MEMORY_EVAL_SUCC9_APPROVAL, manifest),
+        ...succ9Problems(manifest),
+    ];
+}
+
+/**
  * What has to hold for this to be the successor it says it is.
  *
  * Reported rather than thrown, so the check script prints every problem at
- * once. A pinned literal manifest and a signature verifier are deliberately
- * absent until there is a signature to pin: succ-8 shipped both the day it was
- * signed, and writing them before then is a record of an approval nobody gave.
+ * once.
  */
 export function succ9Problems(
     manifest: Succ9DatasetManifest = buildSucc9Manifest()
