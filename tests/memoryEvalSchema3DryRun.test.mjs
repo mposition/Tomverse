@@ -78,7 +78,7 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // the pair and the dataset have to appear together, because a run
         // that named the new prompt over the old sample would be the failure
         // the switch exists to avoid.
-        assert.match(result.output, /gpt-5-6-luna::mem-extract-v7/);
+        assert.match(result.output, /gpt-5-6-luna::mem-extract-v8/);
         // "frozen" since 2026-09-04. succ-8 spent a day unsigned and the header
         // said so for exactly that day. A smoke run is admissible either way,
         // because nothing is spent; the word is what stops a reader citing an
@@ -202,22 +202,25 @@ test("the gate now admits the schema the harness scores", () => {
 test("whatever version the tree ships, its pair cannot run", () => {
     // The property the test below used to carry implicitly by resolving
     // through the shipped version. Kept as its own assertion so a new prompt
-    // version cannot arrive runnable: v6 is refused because it was revoked
-    // and v7 because it has no budget, and this does not care which — only
-    // that the answer is never `live`.
+    // version cannot arrive runnable: v6 is refused because it was revoked,
+    // v7 because it has no budget, and v8 because registering a pair is a
+    // separate approval that has not happened. This does not care which —
+    // only that the answer is never `live`.
+    //
+    // `pair` may be undefined, and that is the strongest form of the property
+    // rather than a gap in the test: `decideEvalRunMode()` answers
+    // `unknown_pair` for a version nobody registered. Asserting the entry
+    // exists would have made a version bump fail here for being unregistered,
+    // which is the state this test wants.
     const target = harnessTarget();
     const pair = MEMORY_EXTRACTION_EVAL_REGISTER.find(
         (entry) =>
             entry.extractionModelId === "gpt-5-6-luna" &&
             entry.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
     );
-    assert.ok(
-        pair,
-        `no register entry for gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION}`
-    );
     const decision = decideEvalRunMode({
         live: true,
-        registerEntry: pair,
+        registerEntry: pair ?? null,
         hasApiKey: true,
         datasetFrozen: target.datasetFrozen,
         datasetPurpose: target.datasetPurpose,
@@ -229,6 +232,9 @@ test("whatever version the tree ships, its pair cannot run", () => {
         "live",
         `gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION} can run — this test now spends money`
     );
+    // And the reason is recorded, so a later reader can tell "nobody
+    // registered it" from "somebody registered it and it is closed".
+    assert.equal(decision.reason, pair ? decision.reason : "unknown_pair");
 });
 
 test("the shipped pair is closed, and the status answers before the budget", () => {

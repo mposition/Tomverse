@@ -198,7 +198,7 @@ import {
  * `tests/memoryExtractionPromptFingerprint.test.mjs` pins a digest over all
  * four, so changing any of them without bumping this fails the build.
  */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v7";
+export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v8";
 
 /** Bounds carried into the schema so the model is told them, not just checked. */
 export const MEMORY_EXTRACTION_MAX_CANDIDATES_PER_CHUNK = 25;
@@ -396,6 +396,58 @@ export const MEMORY_EXTRACTION_POLARITY_RULE = [
     "Never answer an unsettled case with a lower confidence instead. Confidence says how sure you are of something you did assert; it has no reading for a statement whose direction was never fixed.",
 ].join("\n");
 
+/**
+ * Two worked negated candidates, added in `mem-extract-v8`.
+ *
+ * Separate from `MEMORY_EXTRACTION_POLARITY_RULE` on purpose. The rule's
+ * sentences were approved as they stand and are unchanged by this version —
+ * `tests/memoryExtractionPromptExamples.test.mjs` pins their bytes — so the
+ * examples are a second constant rather than an edit to the first. That way
+ * "the rule did not change" is something a test can say rather than something
+ * a reader has to diff.
+ *
+ * Complete rather than fragmentary: each shows the span cited, the statement
+ * written from it, and the polarity that follows, because the field's failures
+ * are in `negated`, and a fragment does not show which of the three the model
+ * got wrong.
+ *
+ * ## Why these two subjects and not the obvious ones
+ *
+ * An example is text the model reads before it reads the input, so an example
+ * built from a case in a scored dataset teaches that case's answer. The
+ * frozen `mem-eval-succ-8` sample contains exactly the fact this rule is
+ * hardest on — a hobby the user tried and gave up, with `낚시` as its gold
+ * token — which is the first thing anyone reaches for when writing a Korean
+ * negated example. Writing it here would have made `succ-durable-ko-*`
+ * unscorable as evidence of anything.
+ *
+ * So the subjects are checked against every resolvable corpus rather than
+ * chosen for plausibility. `MEMORY_EXTRACTION_EXAMPLE_TERMS` is what that
+ * check reads.
+ */
+export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
+    "Two complete examples of a negated candidate, one in each language, because `negated` is the half of this field that goes wrong. Each shows the whole unit: the span you cite, the statement you write from it, and the polarity that follows from that statement.",
+    "",
+    "The user wrote \"I gave kitesurfing a proper go for two summers and it never clicked, so I stopped.\" The statement is \"The user no longer does kitesurfing\", and the polarity is negated, because that statement asserts something is not so of them. It is negated for what the statement claims, not because the evidence happens to contain \"never\".",
+    "",
+    "The same shape in Korean, where the statement is written in the language of the evidence you cited. The user wrote \"드론은 자격증까지 땄는데 결국 손을 뗐습니다.\" The statement is \"사용자는 더 이상 드론을 하지 않습니다\", and the polarity is negated.",
+].join("\n");
+
+/**
+ * The content words the examples above introduce.
+ *
+ * Read by the contamination test, which asserts that none of them occurs in
+ * any corpus the harness can resolve. Registered by hand and checked from both
+ * ends: an entry that no longer appears in the prompt is dead, and a Korean
+ * content word in the examples that is not registered here fails the same
+ * test — the second half is what stops a future example smuggling a gold token
+ * in the way `낚시` would have.
+ */
+export const MEMORY_EXTRACTION_EXAMPLE_TERMS: readonly string[] = [
+    "kitesurfing",
+    "드론",
+];
+
 const SYSTEM_PROMPT = [
     "You extract durable, reusable facts and answer-style preferences about ONE user from conversations they exported from another AI service.",
     "",
@@ -418,6 +470,8 @@ const SYSTEM_PROMPT = [
     "A correction or rejection can itself be an assertion. Extract it only when the user unambiguously states a stable fact about themselves, outside quoted or task material, and that fact would remain useful in a future, unrelated conversation. Negation does not make a fact non-durable. Do not extract a rejection that only resolves a premise for the current artifact, role-play, hypothetical, or one-off task and provides no independently reusable fact.",
     "",
     MEMORY_EXTRACTION_POLARITY_RULE,
+    "",
+    MEMORY_EXTRACTION_NEGATED_EXAMPLES,
     "",
     MEMORY_EXTRACTION_BOUNDARY_RULE,
     "",

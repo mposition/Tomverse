@@ -47,6 +47,12 @@ export const MEMORY_EVAL_PROMPT_RULE_IMPLEMENTATIONS: Readonly<
     // sharing a file with the version that answered it is not a claim
     // anybody made, and this table exists to record claims people make.
     "mem-extract-v7": ["v3-unfixable-evidence-emits-nothing"],
+    // `mem-extract-v8` carries the same sentences again — byte-identical, and
+    // `tests/memoryExtractionPromptExamples.test.mjs` pins their digest — and
+    // adds two worked negated candidates beside them. The rule it implements
+    // is unchanged, so the claim is the same claim, restated for this version
+    // rather than inherited for the reason v7's entry gives.
+    "mem-extract-v8": ["v3-unfixable-evidence-emits-nothing"],
 };
 
 /**

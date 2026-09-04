@@ -67,12 +67,13 @@ test("the v7 instrument no longer describes this tree, and says so", () => {
     // against succ-6, and is `revoked`; a run under it now would be a run
     // nobody approved.
     //
-    // The five fields that moved are named, so a later reader can see what
-    // moved together: the sample and its record (succ-6 -> succ-8), and the
-    // scoring contract (`mem-score-v3.4` -> `mem-score-v3.5`, the Korean
-    // numeral amendment). The prompt did not move, and is asserted equal
-    // below. A tuple where only some of those had changed would be a
-    // half-switched harness.
+    // Every field of the tuple has now moved, and each is named so a later
+    // reader can see what moved together: the sample and its record
+    // (succ-6 -> succ-8), the scoring contract (`mem-score-v3.4` ->
+    // `mem-score-v3.5`, the Korean numeral amendment), and the prompt
+    // (`mem-extract-v7` -> `mem-extract-v8`, which added the worked negated
+    // examples). Nothing is left to assert equal, which is itself the
+    // statement: v7's approval describes no part of this tree.
     const budget = v7Pair().evalBudget;
     assert.ok(budget?.boundTuple, "the v7 pair records no instrument");
     const actual = harnessRunTuple({
@@ -86,6 +87,8 @@ test("the v7 instrument no longer describes this tree, and says so", () => {
         "datasetDigest",
         "datasetManifestDigest",
         "datasetVersion",
+        "promptDigest",
+        "promptVersion",
         "scoringContractDigest",
         "scoringContractVersion",
     ]);
@@ -97,10 +100,13 @@ test("the v7 instrument no longer describes this tree, and says so", () => {
         failures.find((line) => line.startsWith("scoringContractVersion")),
         /approved mem-score-v3\.4, this run would use mem-score-v3\.5/
     );
-    // The prompt is the one term that did not move, so it is named rather
-    // than left to the absence of a line above.
-    assert.equal(budget.boundTuple.promptVersion, actual.promptVersion);
-    assert.equal(budget.boundTuple.promptDigest, actual.promptDigest);
+    // The prompt was the one term that had not moved until 2026-09-04, and
+    // naming it here is how that stopped being true quietly.
+    assert.match(
+        failures.find((line) => line.startsWith("promptVersion")),
+        /approved mem-extract-v7, this run would use mem-extract-v8/
+    );
+    assert.notEqual(budget.boundTuple.promptDigest, actual.promptDigest);
 
     // And the tuple check is not simply refusing everything: a budget bound to
     // what this tree would actually assemble passes. Without this half, the

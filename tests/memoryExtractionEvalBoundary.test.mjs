@@ -537,12 +537,14 @@ test("the shipped pair refuses without a key, and reaches no network", () => {
     assert.equal(result.status, 1, "the run must refuse");
     assert.doesNotMatch(result.output, /is not frozen/i);
     // Which gate stops it depends on what the register says today: with every
-    // pair revoked it is the status, and with a candidate registered it would
-    // be the key. Any refusal is correct; reaching the network is not, and
-    // that is what this test exists for.
+    // pair revoked it is the status, with a candidate registered it would be
+    // the key, and with the prompt bumped past every registered pair — which
+    // is where `mem-extract-v8` leaves it — it is the missing entry. Any
+    // refusal is correct; reaching the network is not, and that is what this
+    // test exists for.
     assert.match(
         result.output,
-        /OPENAI_API_KEY|no approved eval budget|in the\s+register/i
+        /OPENAI_API_KEY|no approved eval budget|in the\s+register|No register entry/i
     );
     assert.doesNotMatch(
         result.output,
