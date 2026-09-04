@@ -159,17 +159,24 @@ kind를 prompt에서 가져오고 나서, 남는 중복 1건을
 ```
 caseCount        1150  (succ-8과 같음 — 1:1)
 datasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6
-manifestDigest   15b40cd92a737b53906ca287ac5a991339bfcaf4668aca440e3aa47507f14c4a
-subtypeDigest    06a0c8cfc56f496d965cac0ff47cfb6cde294674c6742559eebd5483e83a682c  (ai_draft)
+manifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c
+subtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6
+                 (human_confirmed, @mposition, 2026-09-04)
 transitionDigest cf8fa0800fe97be1daee34a27ba3196a4ba6cbe421b1d280b061cd0ad52bb6cd
 scoringContract  mem-score-v3.5  2d4bcb69…  (변경 없음)
 frozen           false
 ```
 
-**이 두 값은 아직 서명 대상이 아닙니다.** `SUCC9_SUBTYPE_REVIEW`가 `ai_draft`
-이고, 사람이 세 줄을 확인하면 subtypeDigest가 움직이며 manifestDigest도 따라
-움직입니다. 확인 뒤의 값이 서명 대상입니다. 그 전에 동결을 시도하면
-`succ9Problems()`가 거절합니다.
+**subtype 검토는 2026-09-04에 `@mposition`이 확인했습니다.** 확인이 `b72e658e`
+(CI 20/20 success) 위에서 이뤄졌고, 그 기록을 쓰면서 subtypeDigest가 움직였으며
+manifestDigest도 따라 움직였습니다 — 위 값이 그 뒤의 값입니다. **확인 전 값을
+서명 대상으로 제시하지 않은 이유가 이것입니다.**
+
+그 승인이 덮는 것은 **세 case의 subtype 3 판정뿐**입니다. dataset 동결과 두
+digest 서명, harness 이동, pair·예산·유료 실행·release gate·feature flag는
+포함되지 않으며, `frozen`은 여전히 `false`입니다. `succ9Problems()`는 이제
+`human_confirmed`를 **동결의 전제 조건**으로 요구하지만, 그것이 동결을 대신하지는
+않습니다.
 
 | 퇴역 | 대체 | 소재 교체 |
 | --- | --- | --- |
@@ -243,7 +250,7 @@ frozen           false
   아무것도 덮이지 않습니다 — 세 표 모두 손으로 쓴 문장이고, 동결 뒤에 고쳐도
   어떤 case도 움직이지 않으니까요. `succ9SubtypeDigest()`가 동결 표의 digest,
   succ-7의 행, succ-9의 행과 **그 검토 기록**(`SUCC9_SUBTYPE_REVIEW`,
-  현재 `ai_draft`)을 하나로 접고, 그 값이 manifest fingerprint 안에 들어갑니다.
+  status·검수자·날짜)을 하나로 접고, 그 값이 manifest fingerprint 안에 들어갑니다.
   ground 한 줄만 고쳐도 subtypeDigest와 manifestDigest가 함께 움직입니다 —
   되돌려 확인했습니다.
 - **`ai_draft`인 채로는 동결할 수 없습니다.** digest에 묶는 것만으로는
@@ -252,6 +259,8 @@ frozen           false
   서명이 덮어야 할 대상입니다. `succ9Problems()`가 이제 `frozen &&
   status !== "human_confirmed"`를 실패로 만듭니다. succ-6이 밟은 순서와 같습니다 —
   사람이 확인하고, 그것이 digest를 움직이고, **그 다음에** 고정합니다.
+  **2026-09-04에 그 첫 단계가 끝났습니다**(`@mposition`). 남은 것은 동결이며,
+  그것은 별개의 승인입니다.
 - **ground가 실제 발화인지 검사합니다.** 표의 문장은 id 옆에 손으로 친 prose이고
   digest는 읽지 않고 접습니다 — 오타도, assistant 발화 인용도 똑같이 깔끔하게
   들어갑니다. subtype 3은 **사용자가** 철회하는 것이므로 사용자가 쓰지 않은

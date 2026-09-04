@@ -74,9 +74,21 @@ export const SUCC9_ASSISTANT_ONLY_SUBTYPES: Readonly<
  * therefore needs its own signature rather than arriving silently.
  */
 export const SUCC9_SUBTYPE_REVIEW = {
-    status: "ai_draft" as "ai_draft" | "human_confirmed",
-    reviewer: null as string | null,
-    reviewedAt: null as string | null,
+    /**
+     * Confirmed by a person on 2026-09-04, on `b72e658e` with its checks all
+     * green, after reading each of the three rows against the case it replaces
+     * and against the case that case replaced. The approval named what it
+     * covered and what it did not: the subtype 3 reading of these three, and
+     * not the dataset freeze, the digests, the harness move, or anything
+     * downstream of them.
+     *
+     * Writing this line moved `succ9SubtypeDigest()` and `manifestDigest` with
+     * it, which is the intended order and the reason the digests before it
+     * were never offered for signature.
+     */
+    status: "human_confirmed" as "ai_draft" | "human_confirmed",
+    reviewer: "@mposition" as string | null,
+    reviewedAt: "2026-09-04" as string | null,
     method:
         "Each of the three replacement cases was read in full against the case " +
         "it replaces; the clause quoted in each row is the one the subtype " +

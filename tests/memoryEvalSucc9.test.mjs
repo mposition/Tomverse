@@ -145,14 +145,21 @@ test("an unknown status is refused rather than read as a draft", () => {
     assert.match(problems[0], /status is unknown/);
 });
 
-test("the shipped review record is well formed and is still a draft", () => {
+test("the shipped review record is a confirmation with a name and a day on it", () => {
+    // Confirmed 2026-09-04. The assertions are the ones the state has to
+    // satisfy rather than the literal it holds: a name that is a name, a day
+    // that exists, and no problem reported.
     assert.deepEqual([...subtypeReviewProblems(SUCC9_SUBTYPE_REVIEW)], []);
-    assert.equal(SUCC9_SUBTYPE_REVIEW.status, "ai_draft");
-    assert.equal(SUCC9_SUBTYPE_REVIEW.reviewer, null);
-    // And the dataset it gates is not frozen, which is what that pairing
-    // implies. `human_confirmed` with `frozen` is a fine state; `frozen` with
-    // this still a draft is the one `succ9Problems()` refuses, and this
-    // asserts the tree is not quietly in it.
+    assert.equal(SUCC9_SUBTYPE_REVIEW.status, "human_confirmed");
+    assert.equal(isCalendarDay(SUCC9_SUBTYPE_REVIEW.reviewedAt), true);
+    assert.match(SUCC9_SUBTYPE_REVIEW.reviewer ?? "", /^@?[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$/);
+});
+
+test("confirming the subtype rows did not freeze the dataset", () => {
+    // The two are separate approvals and were given separately: the
+    // confirmation covers the three subtype rows, and the freeze covers the
+    // sample and its digests. `human_confirmed` is what `succ9Problems()`
+    // requires *before* a freeze, never a substitute for one.
     assert.equal(MEMORY_EVAL_SUCC9_DATASET_FROZEN, false);
 });
 
