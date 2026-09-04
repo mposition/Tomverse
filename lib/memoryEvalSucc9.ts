@@ -579,6 +579,52 @@ export function verifySucc9Manifest(
 }
 
 /**
+ * What has to be true of the world before `frozen` may be true.
+ *
+ * Two conditions, and both were unreachable from a test until this function
+ * existed: they read module constants, and a module constant is whatever the
+ * tree currently says. So a test could assert that the tree is in a good state
+ * and could never assert that a bad one is refused — which is the half that
+ * protects anything. Every input is an argument here for that reason, and
+ * `succ9Problems()` supplies the module's own values.
+ *
+ * **A freeze needs a name.** An empty approval beside `frozen: true` is a
+ * dataset claiming an approval nobody gave.
+ *
+ * **A freeze needs the subtype reading confirmed.** Both `assistant_only` arms
+ * sit on 38 of a floor of 38, so those three rows decide whether succ-9 meets
+ * docs/ops/memory-extraction-eval-dataset.md §3.3 at all. Before this rule,
+ * signing the digests and setting `frozen` passed while `SUCC9_SUBTYPE_REVIEW`
+ * still said `ai_draft`. succ-6 is the precedent for the order: it moved to
+ * `human_confirmed` *before* its manifest was pinned, and the pinning had to
+ * wait because confirming moves the digest.
+ *
+ * Unfrozen is not checked in either direction. A draft reading on an unfrozen
+ * dataset is the ordinary state on the way here, and an empty approval on one
+ * is the only honest thing to hold.
+ */
+export function freezePreconditionProblems(input: {
+    frozen: boolean;
+    subtypeReviewStatus: string;
+    approvedBy: string | null;
+}): readonly string[] {
+    if (!input.frozen) return [];
+    const problems: string[] = [];
+    if (!input.approvedBy) {
+        problems.push("frozen with nobody's name on it");
+    }
+    if (input.subtypeReviewStatus !== "human_confirmed") {
+        problems.push(
+            "frozen while the subtype reading is still " +
+                `${input.subtypeReviewStatus}; both assistant_only arms sit ` +
+                "exactly on the docs/ops/memory-extraction-eval-dataset.md §3.3 " +
+                "floor, so those rows are part of what a signature covers"
+        );
+    }
+    return problems;
+}
+
+/**
  * What has to hold for this to be the successor it says it is.
  *
  * Reported rather than thrown, so the check script prints every problem at
@@ -743,29 +789,12 @@ export function succ9Problems(
             "the dataset digest equals succ-8's, so nothing about the sample changed"
         );
     }
-    if (MEMORY_EVAL_SUCC9_DATASET_FROZEN && !MEMORY_EVAL_SUCC9_APPROVAL.approvedBy) {
-        problems.push("frozen with nobody's name on it");
-    }
-    // A freeze cannot rest on an AI's reading of the floor.
-    //
-    // Both `assistant_only` arms sit on 38 of 38, so those three rows decide
-    // whether succ-9 meets docs/ops/memory-extraction-eval-dataset.md §3.3 at
-    // all — and until this line existed, signing the digest and setting
-    // `frozen` passed while `SUCC9_SUBTYPE_REVIEW` still said `ai_draft`. That
-    // is the state succ-6 refused to ship in: it moved to `human_confirmed`
-    // *before* its manifest was pinned, and the pinning had to wait because
-    // confirming moves the digest.
-    if (
-        MEMORY_EVAL_SUCC9_DATASET_FROZEN &&
-        SUCC9_SUBTYPE_REVIEW.status !== "human_confirmed"
-    ) {
-        problems.push(
-            "frozen while the subtype reading is still " +
-                `${SUCC9_SUBTYPE_REVIEW.status}; both assistant_only arms sit ` +
-                "exactly on the docs/ops/memory-extraction-eval-dataset.md §3.3 " +
-                "floor, so those rows are part of what a " +
-                "signature covers"
-        );
-    }
+    problems.push(
+        ...freezePreconditionProblems({
+            frozen: MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+            subtypeReviewStatus: SUCC9_SUBTYPE_REVIEW.status,
+            approvedBy: MEMORY_EVAL_SUCC9_APPROVAL.approvedBy,
+        })
+    );
     return problems;
 }

@@ -16,6 +16,7 @@ import {
     MEMORY_EVAL_SUCC9_DATASET_FROZEN,
     MEMORY_EVAL_SUCC9_MANIFEST,
     buildSucc9Manifest,
+    freezePreconditionProblems,
     succ9Problems,
     succ9SignatureProblems,
     verifySucc9Manifest,
@@ -165,20 +166,95 @@ test("the shipped review record is a confirmation with a name and a day on it", 
     assert.equal(isReviewerHandle(SUCC9_SUBTYPE_REVIEW.reviewer), true);
 });
 
+test("a freeze standing on a draft subtype reading is refused", () => {
+    // The refusal that matters, and the one nothing exercised until now: the
+    // earlier version of this test asserted the tree's two states and called
+    // the dependency between them "the assertion that matters" without ever
+    // running it. Both conditions read module constants, so the only reachable
+    // combination was the good one — and a rule you can only observe passing
+    // is a rule you have not tested.
+    //
+    // Both `assistant_only` arms sit on 38 of a floor of 38, so the three
+    // subtype rows decide whether succ-9 meets
+    // docs/ops/memory-extraction-eval-dataset.md §3.3 at all. Freezing on an
+    // AI's reading of them is the state this refuses.
+    const frozenOnDraft = freezePreconditionProblems({
+        frozen: true,
+        subtypeReviewStatus: "ai_draft",
+        approvedBy: "@mposition",
+    });
+    assert.equal(frozenOnDraft.length, 1, frozenOnDraft.join(" / "));
+    assert.match(frozenOnDraft[0], /frozen while the subtype reading is still ai_draft/);
+
+    // An unknown status is refused too — reading a word nobody defined as
+    // "confirmed" is the failure, and it must not be reachable by typo.
+    assert.equal(
+        freezePreconditionProblems({
+            frozen: true,
+            subtypeReviewStatus: "reviewed",
+            approvedBy: "@mposition",
+        }).length,
+        1
+    );
+
+    // A freeze with nobody's name on it, and both defects together.
+    assert.match(
+        freezePreconditionProblems({
+            frozen: true,
+            subtypeReviewStatus: "human_confirmed",
+            approvedBy: null,
+        })[0],
+        /frozen with nobody's name on it/
+    );
+    assert.equal(
+        freezePreconditionProblems({
+            frozen: true,
+            subtypeReviewStatus: "ai_draft",
+            approvedBy: null,
+        }).length,
+        2
+    );
+
+    // The state the tree is actually in, and the state it passed through to
+    // get here. Unfrozen is unchecked in either direction: a draft reading on
+    // an unfrozen dataset is the ordinary way to this point.
+    assert.deepEqual(
+        [
+            ...freezePreconditionProblems({
+                frozen: true,
+                subtypeReviewStatus: "human_confirmed",
+                approvedBy: "@mposition",
+            }),
+        ],
+        []
+    );
+    for (const subtypeReviewStatus of ["ai_draft", "human_confirmed"]) {
+        for (const approvedBy of [null, "@mposition"]) {
+            assert.deepEqual(
+                [...freezePreconditionProblems({ frozen: false, subtypeReviewStatus, approvedBy })],
+                []
+            );
+        }
+    }
+});
+
 test("the confirmation and the freeze are separate approvals", () => {
-    // They were given separately and an hour apart: the confirmation covers the
-    // three subtype rows, the freeze covers the sample and its two digests.
-    // Both are present now, so the assertion that matters is the dependency
-    // between them rather than either state — a freeze standing on a draft
-    // reading has to be refused.
+    // They were given separately: the confirmation covers the three subtype
+    // rows, the freeze covers the sample and its two digests. Both are present
+    // now, and `succ9Problems()` carries the dependency between them into the
+    // tree's own values.
     assert.equal(SUCC9_SUBTYPE_REVIEW.status, "human_confirmed");
     assert.equal(MEMORY_EVAL_SUCC9_DATASET_FROZEN, true);
-    const draftReview = { ...SUCC9_SUBTYPE_REVIEW, status: "ai_draft", reviewer: null, reviewedAt: null };
-    assert.equal(
-        subtypeReviewProblems(draftReview).length,
-        0,
-        "a well-formed draft is a legitimate state on its own"
-    );
+    assert.deepEqual([...succ9Problems()], []);
+    // A well-formed draft is a legitimate state on its own — it is the freeze
+    // that it cannot support.
+    const draftReview = {
+        ...SUCC9_SUBTYPE_REVIEW,
+        status: "ai_draft",
+        reviewer: null,
+        reviewedAt: null,
+    };
+    assert.deepEqual([...subtypeReviewProblems(draftReview)], []);
 });
 
 /* --------------------------------------------------------- the freeze -- */
