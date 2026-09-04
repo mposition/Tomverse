@@ -17,6 +17,7 @@ import {
 } from "@/lib/memoryEvalSucc9Replacements";
 import {
     succ9Subtype,
+    succ9SubtypeDigest,
     succ9SubtypeProblems,
 } from "@/lib/memoryEvalSucc9Subtypes";
 import {
@@ -141,6 +142,13 @@ export type Succ9DatasetManifest = {
     composition: Succ9Composition;
     caseCount: number;
     cellCounts: Readonly<Record<string, number>>;
+    /**
+     * The docs/ops/memory-extraction-eval-dataset.md §3.3 reading succ-9's floor rests on, across all three subtype
+     * tables — see `succ9SubtypeDigest()`. Inside the manifest because a
+     * signature over the sample covers no part of it otherwise, and because
+     * both `assistant_only` arms sit exactly on the floor.
+     */
+    subtypeDigest: string;
     /** v4, as succ-7 and succ-8 are: the fingerprint covers conversation titles. */
     fingerprintVersion: 4;
     datasetDigest: string;
@@ -179,6 +187,7 @@ export function succ9ManifestFingerprintInput(
         `replacements=${manifest.composition.replacementCount}`,
         `caseCount=${manifest.caseCount}`,
         `cells=${cells}`,
+        `subtypeDigest=${manifest.subtypeDigest}`,
         `fingerprint=v${manifest.fingerprintVersion}`,
         `datasetDigest=${manifest.datasetDigest}`,
         `scoringContractVersion=${manifest.scoringContractVersion}`,
@@ -217,6 +226,7 @@ export function buildSucc9Manifest(): Succ9DatasetManifest {
         },
         caseCount: MEMORY_EVAL_SUCC9_CASES.length,
         cellCounts: cellCountsOf(MEMORY_EVAL_SUCC9_CASES),
+        subtypeDigest: succ9SubtypeDigest(),
         fingerprintVersion: 4,
         datasetDigest,
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
@@ -241,10 +251,10 @@ export function buildSucc9Manifest(): Succ9DatasetManifest {
  * discrimination the case was written for.
  *
  * So the axes below are everything a scorer reads that is not the subject
- * matter itself: what the gold demands, how completely it is meant to be
- * found, how many values it names, where it anchors, and the shape of the
- * conversation it anchors into. What is deliberately *not* here is the text —
- * the subject changes, or the retirement bought nothing.
+ * matter itself: what each gold demands, how completely it is meant to be
+ * found, how many values it names, **which turn it reads it off**, and the
+ * shape of the conversation it reads into. What is deliberately *not* here is
+ * the text — the subject changes, or the retirement bought nothing.
  *
  * Each entry is `[axis, was, now]`, compared as strings so a report can print
  * both sides.
@@ -253,39 +263,42 @@ function boundaryAxes(
     original: MemoryEvalCaseV3,
     replacement: MemoryEvalCaseV3
 ): readonly (readonly [string, string, string])[] {
-    const golds = (testCase: MemoryEvalCaseV3) =>
-        [...(testCase.expected ?? [])]
-            .map(
-                (gold) =>
-                    `${gold.kind}|${gold.polarity}|${gold.expectedDisposition}` +
-                    `|all=${(gold.factValueAll ?? []).length}` +
-                    `|any=${(gold.factValueAny ?? []).length}`
-            )
-            .sort()
-            .join(",");
     /**
-     * Where each gold anchors, by *position* rather than by message id: ids
-     * necessarily change with the case, and the boundary is that the first
-     * gold comes from the opening turn and the second from a later one.
+     * One string per gold, carrying its anchor with it.
+     *
+     * The anchor is by *position and role* rather than by message id, because
+     * ids necessarily change with the case while "the first gold comes from
+     * the opening turn and the second from a later one" is the boundary.
+     *
+     * Carrying it **inside** the gold's own descriptor rather than in a second
+     * sorted list is the whole point. Two independently sorted multisets say
+     * only "these kinds appear and these anchors appear"; a replacement that
+     * swapped which gold came from which turn — the goal read off the later
+     * turn and the gap off the opening one, inverting the case — matched both
+     * of them. The pair is the fact.
      */
-    const anchors = (testCase: MemoryEvalCaseV3) => {
-        const order = new Map<string, number>();
+    const golds = (testCase: MemoryEvalCaseV3) => {
+        const position = new Map<string, string>();
         let index = 0;
         for (const conversation of testCase.conversations ?? []) {
             for (const message of conversation.messages ?? []) {
-                order.set(message.externalMessageId, index++);
-            }
-        }
-        const roleOf = new Map<string, string>();
-        for (const conversation of testCase.conversations ?? []) {
-            for (const message of conversation.messages ?? []) {
-                roleOf.set(message.externalMessageId, message.role);
+                position.set(
+                    message.externalMessageId,
+                    `${index++}:${message.role}`
+                );
             }
         }
         return [...(testCase.expected ?? [])]
             .map((gold) => {
-                const id = gold.evidence?.evidenceMessageId ?? "";
-                return `${order.get(id) ?? -1}:${roleOf.get(id) ?? "?"}`;
+                const anchor =
+                    position.get(gold.evidence?.evidenceMessageId ?? "") ??
+                    "unanchored";
+                return (
+                    `${gold.kind}|${gold.polarity}|${gold.expectedDisposition}` +
+                    `|all=${(gold.factValueAll ?? []).length}` +
+                    `|any=${(gold.factValueAny ?? []).length}` +
+                    `@${anchor}`
+                );
             })
             .sort()
             .join(",");
@@ -314,8 +327,7 @@ function boundaryAxes(
             String((original.expected ?? []).length),
             String((replacement.expected ?? []).length),
         ],
-        ["gold shape", golds(original), golds(replacement)],
-        ["evidence anchoring", anchors(original), anchors(replacement)],
+        ["gold shape and anchoring", golds(original), golds(replacement)],
         ["conversation shape", turns(original), turns(replacement)],
     ];
 }
@@ -443,6 +455,9 @@ export function succ9Problems(
 
     if (manifest.composition.transitionDigest !== SUCC9_TRANSITION_DIGEST) {
         problems.push("the manifest's transition digest is not this tree's");
+    }
+    if (manifest.subtypeDigest !== succ9SubtypeDigest()) {
+        problems.push("the manifest's subtype digest is not this tree's");
     }
     if (manifest.datasetDigest === MEMORY_EVAL_SUCC8_MANIFEST.datasetDigest) {
         problems.push(

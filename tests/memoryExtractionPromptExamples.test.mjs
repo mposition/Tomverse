@@ -48,31 +48,45 @@ import {
     toExtractionPromptInput,
 } from "../lib/memoryExtractionPrompt.ts";
 import { parseExtractionOutput } from "../lib/memoryExtractionOutput.ts";
-import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
+import {
+    harnessTarget,
+    harnessTargetBindingFailures,
+    harnessTargetVersions,
+} from "../lib/memoryEvalHarnessTarget.ts";
+import { schema3DatasetVersions } from "../lib/memoryEvalDatasetRegistry.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
 import { MEMORY_EVAL_SUCC9_CASES } from "../lib/memoryEvalSucc9.ts";
 import { SUCC9_REGRESSION_CORPUS } from "../lib/memoryEvalSucc9Regression.ts";
 
 /**
- * Every dataset a scored corpus can come from, the incoming one included.
+ * The schema-3 datasets, derived rather than listed.
  *
- * `mem-eval-succ-9` belongs here for the reason the whole list does: it is a
- * decision set, its five replacement cases are 1,150 lines of text no scan had
- * ever read, and it is the version the harness moves to next. Stopping at
- * succ-8 would have checked the examples against every corpus except the one
- * they will be measured on — and the replacements were written *after* the
- * examples, which is the direction contamination is easiest to introduce in
- * and hardest to notice.
+ * This was a hand-written array and it drifted the first time it could: succ-9
+ * was assembled, registered and pushed while the scan still stopped at succ-8,
+ * so the newest decision set — the one whose replacement cases were written
+ * *after* these examples were fixed, which is the direction contamination
+ * enters from — was the only corpus nobody checked.
+ *
+ * ## What this list is and is not
+ *
+ * It is every schema-3 dataset. It is **not** every dataset that resolves:
+ * seed-11, succ-2 and succ-3 still resolve, still hold 1,150 cases each, and
+ * are not here. That is a decision rather than an oversight, and `dependants`'
+ * Korean counterpart makes it one worth stating — `부양가족` occurs in
+ * `succ-assistant-ko-306`, a succ-3 case, which is the ancestor of the very
+ * line this version retires (306 → 407 → regression).
+ *
+ * The reason it is not contamination is that no answer can be scored against
+ * those three. succ-3 is in `harnessTargetVersions()` but
+ * `harnessTargetBindingFailures()` refuses it — schema 2, bound to
+ * `mem-score-v2.3`, contract digest disagreeing with the tree — and seed-11
+ * and succ-2 have no target entry at all. That is checked below rather than
+ * asserted here, because a contract change has made a refused dataset runnable
+ * before: `mem-score-v3.5` is exactly what turned succ-7's sample back into a
+ * run target as succ-8.
  */
-const CORPORA = [
-    "mem-eval-succ-4",
-    "mem-eval-succ-5",
-    "mem-eval-succ-6",
-    "mem-eval-succ-7",
-    "mem-eval-succ-8",
-    "mem-eval-succ-9",
-];
+const CORPORA = schema3DatasetVersions();
 
 const built = () =>
     buildExtractionPrompt({
@@ -311,6 +325,34 @@ const corpusText = () => {
     parts.push(JSON.stringify(SUCC9_REGRESSION_CORPUS));
     return fold(parts.join("\n"));
 };
+
+test("every dataset a run could be scored against is in the scanned set", () => {
+    // The guard the scope note above depends on. `CORPORA` covers the
+    // schema-3 datasets; the datasets left out are left out because nothing
+    // can be run against them, and that is a runtime fact about contract
+    // binding rather than a property of the version string.
+    //
+    // `mem-eval-succ-3` is the one that matters: it is a selectable target and
+    // it contains `부양가족`, so if a future contract change ever made it
+    // runnable this fails here rather than in a run whose Korean example had
+    // been sitting in the corpus all along.
+    const scanned = new Set(CORPORA);
+    const runnable = harnessTargetVersions().filter(
+        (version) => harnessTargetBindingFailures(harnessTarget(version)).length === 0
+    );
+    assert.ok(runnable.length > 0, "no dataset is runnable, so this proves nothing");
+    for (const version of runnable) {
+        assert.ok(
+            scanned.has(version),
+            `${version} can be run against and is not scanned for example terms`
+        );
+    }
+    // And the refusal that keeps succ-3 out is real, not assumed.
+    assert.ok(
+        harnessTargetBindingFailures(harnessTarget("mem-eval-succ-3")).length > 0,
+        "mem-eval-succ-3 is runnable now; it holds 부양가족 and must be scanned"
+    );
+});
 
 test("no example term occurs in a scored corpus, whatever its case", () => {
     const corpus = corpusText();

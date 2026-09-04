@@ -226,6 +226,20 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
     },
 ];
 
+/**
+ * Every schema-3 dataset version this module can hand cases back for.
+ *
+ * Exported so a consumer that has to sweep all of them derives the list
+ * instead of writing its own. Two did write their own — the gold
+ * normalisation coverage test and the prompt example contamination scan — and
+ * both stopped at succ-8 when succ-9 was added, each silently excluding the
+ * newest decision set from the check it exists to run. A hand-written list is
+ * a copy of this table that nobody updates.
+ */
+export function schema3DatasetVersions(): readonly string[] {
+    return schema3Datasets().map((entry) => entry.manifest.datasetVersion);
+}
+
 export type ArtifactDatasetRefusalReason =
     | "no_dataset_version"
     | "no_dataset_digest"

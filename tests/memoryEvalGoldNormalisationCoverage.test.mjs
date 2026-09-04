@@ -35,6 +35,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
+import { schema3DatasetVersions } from "../lib/memoryEvalDatasetRegistry.ts";
 import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
 
 /**
@@ -44,14 +45,14 @@ import { canonMatch } from "../lib/memoryEvalCanonicalisation.ts";
  * scores old artifacts against them — so a contract change that made one of
  * their golds unsatisfiable would make those artifacts unreadable without
  * anything saying so.
+ *
+ * Derived rather than listed. This was a hand-written array through succ-8,
+ * and `mem-eval-succ-9` was assembled, registered, checked and pushed without
+ * joining it — so the newest decision set, the one carrying six brand-new
+ * golds, was the only one this file did not read. A list that has to be
+ * updated in step with another list is a list that will not be.
  */
-const DATASETS = [
-    "mem-eval-succ-4",
-    "mem-eval-succ-5",
-    "mem-eval-succ-6",
-    "mem-eval-succ-7",
-    "mem-eval-succ-8",
-];
+const DATASETS = schema3DatasetVersions();
 
 /**
  * The text a gold may legitimately be grounded in: **its own anchored user

@@ -32,9 +32,20 @@ import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
  *
  * Every subject here was checked against succ-4 through succ-8, the succ-7
  * regression corpus and the shipped prompt before it was used:
- * `사촌`, `welding`, `sourdough`, `soldering`, `백두대간`, `능선`, `야영`,
- * `산행` occur in none of them. `종주` does occur, which is why the goal gold
- * names `백두대간` and that word stays out of every scored value.
+ * Every subject was scanned against **all nine** datasets the tree assembles —
+ * seed-11, succ-2 and succ-3 as well as succ-4 through succ-9 — plus both
+ * regression corpora and the shipped prompt. `welding`, `sourdough`,
+ * `soldering`, `백두대간`, `능선`, `야영`, `계곡` and `텐트` occur in none of
+ * them.
+ *
+ * Two exceptions, stated rather than left to a narrower scan. `종주` occurs
+ * throughout, so it stays out of every scored value and the goal gold names
+ * `백두대간` instead. `사촌` occurs in seed-11 and succ-2, in
+ * `succ-durable-ko-107` — "사촌이랑 같이 삽니다", a relationship *affirmed*,
+ * which is the opposite judgement and lives in two schema-1/2 datasets that
+ * `harnessTargetBindingFailures()` refuses as run targets. It is clear across
+ * every schema-3 dataset. Kinship vocabulary is dense in those two ancestors;
+ * `조카` and `처남` collide there too.
  *
  * ## The subtypes travel too
  *
@@ -245,13 +256,21 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
         // is live in the same conversation" — the user can swim, and a reader
         // taking the topic alone would have scored a negation of swimming.
         //
-        // So this keeps all of that: an ability affirmed in the easy setting
-        // (당일 산행) against one denied in the setting the goal demands
-        // (능선에서 야영), and a two-value gold naming the place and the act
-        // together. A first draft used 빙벽 — a different discipline
-        // altogether, single-valued, with nothing in the sentence to confuse
-        // it with. That is a case about a goal and an unrelated gap, which is
-        // not the case being replaced.
+        // So this keeps all of that, and keeping it means the two halves have
+        // to be the *same act*. A first draft used 빙벽 — a different
+        // discipline, single-valued, nothing in the sentence to confuse it
+        // with. A second used 당일 산행 against 능선에서 야영, which is closer
+        // and still wrong twice over: hiking and camping are different acts,
+        // so no opposite reading is live and the two-value gold does no work;
+        // and "당일 산행만 해 봤다" is a durable fact about the user that no
+        // gold claims, which an `exhaustive` case may not leave lying there.
+        //
+        // 계곡에서만 텐트를 쳐 봤고 / 능선에서는 아직 야영을 못 합니다 is the
+        // original's shape exactly: one act, affirmed where it is easy and
+        // denied where the goal demands it, so "this user camps" is live in
+        // the sentence and the gold has to say **where** as well as what. The
+        // affirmed half scopes the same act rather than adding a second, which
+        // is what lets both cases be exhaustive on two golds.
         id: "succ-durable-ko-701",
         category: "durable_facts",
         language: "ko",
@@ -275,6 +294,9 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["능선", "야영"],
                 evidence: {
                     evidenceMessageId: "succ-b901-5-m3",
+                    // Self-contained, as the original's quote is: it names
+                    // both the place and the act, so the denial stands on its
+                    // own rather than needing the clause before it.
                     evidenceQuote: "능선에서는 아직 야영을 못 합니다.",
                 },
                 expectedDisposition: "bulk_safe",
@@ -300,7 +322,7 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b901-5-m3",
                         role: "user",
                         content:
-                            "당일 산행만 해 봤고 능선에서는 아직 야영을 못 합니다.",
+                            "계곡에서만 텐트를 쳐 봤고 능선에서는 아직 야영을 못 합니다.",
                     },
                 ],
             },

@@ -158,9 +158,10 @@ kind를 prompt에서 가져오고 나서, 남는 중복 1건을
 
 ```
 caseCount        1150  (succ-8과 같음 — 1:1)
-datasetDigest    aae89898cd74fffff3b1a6864a7f9df74792e34a456111ce851d2f6f23edeb30
-manifestDigest   13dab207cb57a6cdeda6ec87b712b59d2d1b0b849a1cfb4bee936c58a46e68b9
+datasetDigest    b376478e895a006079f14048f9f4a6820e0da9b5360178c20d573cdbbf011366
+manifestDigest   87814cf099c300381326be5259b1fa951013b5a9cc5ceaad23c080e1a479c4c8
 transitionDigest 066bec67f99d21592f90d788f54fbbfcd7a4ef6c340a04975c2fc2f678f9b857
+subtypeDigest    06a0c8cfc56f496d965cac0ff47cfb6cde294674c6742559eebd5483e83a682c  (ai_draft)
 scoringContract  mem-score-v3.5  2d4bcb69…  (변경 없음)
 frozen           false  — 서명 대기
 ```
@@ -171,27 +172,44 @@ frozen           false  — 서명 대기
 | succ-assistant-en-603 | succ-assistant-en-701 | bees → welding |
 | succ-assistant-en-608 | succ-assistant-en-702 | houseplant → sourdough |
 | succ-durable-en-423 | succ-durable-en-701 | code → soldering |
-| succ-durable-ko-422 | succ-durable-ko-701 | 오픈워터·바다 → 백두대간·능선·야영 |
+| succ-durable-ko-422 | succ-durable-ko-701 | 오픈워터·바다·헤엄 → 백두대간·능선·야영 |
 
 - **경계는 그대로, 소재만 바뀝니다.** case가 틀려서 나가는 것이 아니라
   **선택에 쓰였기 때문에** 나가므로, 판단은 보존됩니다.
-- **"같은 경계"는 여덟 축으로 대조합니다**(`boundaryAxes()`). category,
-  language, `goldCompleteness`, `criticalGoldMode`, gold 개수, gold 형태
-  (kind·polarity·`expectedDisposition`·`factValueAll`/`Any`의 **원소 수**),
-  evidence가 걸리는 **위치와 역할**, 대화의 역할 나열입니다. 처음에는 셋
-  (category·language·`kind|polarity`)이었고, 셋으로는 아래 ko-701 결함이
-  통과했습니다.
+- **"같은 경계"는 일곱 축으로 대조합니다**(`boundaryAxes()`). category,
+  language, `goldCompleteness`, `criticalGoldMode`, gold 개수, **gold 형태와
+  anchor를 한 문자열로 묶은 것**(kind·polarity·`expectedDisposition`·
+  `factValueAll`/`Any`의 원소 수 + 그 gold가 읽는 turn의 위치·역할), 대화의
+  역할 나열입니다.
+  - 처음에는 셋(category·language·`kind|polarity`)이었고, 셋으로는 아래
+    ko-701 결함이 통과했습니다.
+  - 그다음 판은 gold 형태와 anchor를 **각각 정렬한 두 multiset**으로 비교해서,
+    "어떤 kind가 있고 어떤 turn이 쓰였다"만 말하고 **어느 gold가 어느 turn을
+    읽는지**를 잃었습니다. 목표를 나중 turn에서, 결핍을 첫 turn에서 읽는
+    뒤집힌 case가 통과합니다. 지금은 anchor가 gold 문자열 **안에** 들어갑니다.
 - **ko-422는 gold가 둘**이고, 그 둘의 관계가 이 case입니다. 목표와 **그 목표가
-  요구하는 바로 그 조건**의 부재이며, 같은 문장이 쉬운 조건에서의 능력을
+  요구하는 바로 그 조건**의 부재이며, 같은 문장이 쉬운 조건에서 **같은 행위**를
   긍정합니다("실내 수영장에서 자유형만 하고 바다에서는 아직 못 헤엄칩니다").
   succ-4의 기록이 negated gold에 `헤엄`과 `바다`를 **함께** 넣은 이유를
-  적어 두었습니다 — 반대 독해가 같은 문장 안에 살아 있기 때문입니다.
-  첫 대체본은 `빙벽`(단일 값, 무관한 종목)이어서 이 관계를 잃었고, 여덟 축
-  중 gold 형태 축이 그것을 잡습니다. 지금은 `능선`·`야영` 두 값이며 대화도
-  같은 구조입니다.
-- **소재는 전부 corpus·prompt 대조를 거쳤습니다** — 사촌·welding·sourdough·
-  soldering·백두대간·능선·야영·산행 모두 succ-4~8, succ-7 regression, 배포된
-  prompt에 없습니다. `종주`는 corpus에 있어 어떤 채점 값에도 넣지 않았습니다.
+  적어 두었습니다 — "헤엄칠 수 있다"는 반대 독해가 같은 문장 안에 살아 있기
+  때문입니다.
+  - 첫 대체본은 `빙벽` — 단일 값, 무관한 종목. gold 형태 축이 잡습니다.
+  - 둘째 판은 `당일 산행` 대 `능선 야영`이었고 두 번 틀렸습니다. 산행과 야영은
+    **다른 행위**라 반대 독해가 살아 있지 않아 두 값짜리 gold가 일을 하지
+    않고, "당일 산행만 해 봤다"는 **어느 gold도 주장하지 않는 durable 사실**
+    이라 `exhaustive` case에 남겨 둘 수 없습니다.
+  - 지금은 "계곡에서만 텐트를 쳐 봤고 능선에서는 아직 야영을 못 합니다" —
+    한 행위(야영)를 쉬운 곳에서 긍정하고 목표가 요구하는 곳에서 부정하므로,
+    원본과 같은 이유로 gold가 **어디서**까지 말해야 하고, 긍정 절이 새 사실을
+    더하는 대신 같은 행위의 범위를 좁히므로 두 gold로 exhaustive입니다.
+- **소재는 이번에 tree가 조립하는 아홉 corpus 전부**(seed-11·succ-2·succ-3
+  포함) **와 두 regression corpus, 배포된 prompt**에 대조했습니다.
+  welding·sourdough·soldering·백두대간·능선·야영·계곡·텐트는 어디에도
+  없습니다. 예외 둘은 적어 둡니다 — `종주`는 아홉 곳 모두에 있어 채점 값에서
+  뺐고, `사촌`은 seed-11·succ-2의 `succ-durable-ko-107`("사촌이랑 같이
+  삽니다", relationship **affirmed**)에 있습니다. 반대 판정이고, 그 두 dataset은
+  `harnessTargetBindingFailures()`가 run target으로 거절하며, schema-3
+  전체에서는 깨끗합니다.
 - **§3.3 subtype floor도 함께 이동합니다.** 나가는 5건 중 3건이
   `assistant_only`이고 셋 다 subtype 3입니다(1건은 succ-6 manifest에 동결된
   표, 2건은 succ-7의 표). 두 arm 모두 floor 38/125에 **여유 0으로** 걸쳐
@@ -199,6 +217,14 @@ frozen           false  — 서명 대기
   floor 아래로 내려갑니다. `memoryEvalSucc9Subtypes.ts`가 셋을 선언하고,
   succ-7과 같은 이유로 **동결된 표를 편집하지 않고** 별도 표로 둡니다.
   검사는 floor와 **구성**(3을 3으로 갈음했는지) 양쪽을 봅니다.
+- **그 분류를 서명에 묶습니다.** 표본만 서명하면 floor를 판정한 **읽기**는
+  아무것도 덮이지 않습니다 — 세 표 모두 손으로 쓴 문장이고, 동결 뒤에 고쳐도
+  어떤 case도 움직이지 않으니까요. `succ9SubtypeDigest()`가 동결 표의 digest,
+  succ-7의 행, succ-9의 행과 **그 검토 기록**(`SUCC9_SUBTYPE_REVIEW`,
+  현재 `ai_draft`)을 하나로 접고, 그 값이 manifest fingerprint 안에 들어갑니다.
+  ground 한 줄만 고쳐도 subtypeDigest와 manifestDigest가 함께 움직입니다 —
+  되돌려 확인했습니다. 나중에 사람이 확인하면 그것도 digest를 움직이므로
+  조용히 승격되지 않습니다.
 - **succ-8은 손대지 않습니다.** 동결·서명된 역사본이고, 거기서 case를 빼면
   두 digest가 움직여 그 서명이 무효가 됩니다. 검사가 이것을 직접 단언합니다.
 - **harness는 아직 succ-8입니다.** 서명 후에 옴기는 것이 순서이고, succ-9는
@@ -245,12 +271,22 @@ frozen           false  — 서명 대기
 - **kind 근거 검사**: 예시의 kind가 **prompt가 명시한 mapping**인지 확인합니다.
   boundary 규칙과 `KIND_GUIDE`의 문장을 직접 단언하므로, 그 문장이 사라지면
   예시가 mapping의 유일한 출처가 되는 대신 실패합니다
-- **오염 corpus에 succ-9를 포함합니다.** succ-4~8에서 멈추면 예시가 **앞으로
-  측정될 바로 그 집합**만 빼고 검사받습니다. 게다가 대체 case는 예시보다
-  **나중에** 쓰였고, 그 방향이 오염이 들어오기 가장 쉬운 방향입니다. 두
-  regression corpus(succ-7·succ-9)도 함께 넣습니다 — 퇴역 텍스트는 채점되지
-  않으므로 필요 이상이지만, 되살릴 수 있는 case와의 충돌을 나중에 아무도 다시
-  보지 않기 때문입니다
+- **오염 corpus 목록을 손으로 쓰지 않고 유도합니다**(`schema3DatasetVersions()`).
+  손으로 쓴 목록은 쓸 수 있는 첫 기회에 어긋났습니다 — succ-9가 조립·등록·
+  push되는 동안 이 검사도, gold 정합성 전수 검사도 succ-8에서 멈춰 있었고,
+  **대체 case가 예시보다 나중에 쓰였다**는 점에서 그 방향이 오염이 들어오는
+  방향입니다. 두 regression corpus(succ-7·succ-9)도 넣습니다
+- **빠진 셋을 밝히고, 그 근거를 검사로 만듭니다.** seed-11·succ-2·succ-3은
+  여전히 resolve되고 각각 1,150건을 들고 있지만 목록에 없습니다. 이것이
+  누락이 아니라 판단인 이유를 적어야 하는 까닭이 있습니다 — **`부양가족`이
+  succ-3의 `succ-assistant-ko-306`에 있습니다.** 이번에 퇴역시킨 계보의 조상
+  (306 → 407 → regression)입니다. 오염이 아닌 이유는 그 셋에 대고 채점할 수
+  있는 답이 없다는 것이고(succ-3은 target 목록에 있으나
+  `harnessTargetBindingFailures()`가 schema 2·`mem-score-v2.3` 결속으로
+  거절, seed-11·succ-2는 target 자체가 없음), 그래서 **가정하지 않고
+  단언합니다**: 실행 가능한 target은 전부 검사 집합 안에 있어야 하고, succ-3의
+  거절이 실제로 존재해야 합니다. contract 변경이 거절된 dataset을 되살린 적이
+  이미 있습니다 — succ-7의 표본을 succ-8로 되살린 `mem-score-v3.5`가 그것입니다
 - **B+ 검사**: kind 선택에 쓰인 gold 5건이 succ-9의 채점 집합에서 **빠졌고**
   regression에 **보존됐는지**를 확인합니다. 이름 붙인 예외를 대신한 검사이며,
   기록하는 것과 제거하는 것은 다른 일입니다
@@ -267,8 +303,11 @@ frozen           false  — 서명 대기
 | 5건 중 하나를 succ-9에 남김 | B+ 검사 |
 | KO 메시지 → 두 문장 | 한 문장 검사, 미등록 content word |
 | en-701의 subtype 선언 제거 | subtype floor(37/38), subtype 구성 |
-| ko-701의 negated gold를 단일 값으로 | gold 형태 축 |
-| ko-701의 evidence를 assistant turn으로 | evidence 위치·역할 축 |
+| ko-701의 negated gold를 단일 값으로 | gold 형태·anchor 축 |
+| ko-701의 evidence를 assistant turn으로 | gold 형태·anchor 축 |
+| ko-701의 두 anchor를 서로 바꿈(multiset 불변) | gold 형태·anchor 축 |
+| subtype ground 한 줄 수정 | subtypeDigest·manifestDigest 이동 |
+| KO 예시 소재를 `사촌`으로 교체 | 오염 검사(succ-9에만 있는 낱말) |
 
 **이미 있던 gate도 걸렸습니다.** `tests/memoryEvalPromptDatasetSeparation.test.mjs`가
 초안 문구의 `at the end of the`가 `succ-injection-en-70`의 발화와 겹친다고

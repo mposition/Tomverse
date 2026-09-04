@@ -278,6 +278,11 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
  * choose a scorer, and there is no answer to "which ones" that is safer than
  * stopping.
  */
+/** Every dataset version the harness can be pointed at, newest last. */
+export function harnessTargetVersions(): readonly string[] {
+    return Object.keys(TARGETS);
+}
+
 export function harnessTarget(
     datasetVersion: string = HARNESS_TARGET_DATASET_VERSION
 ): HarnessTarget {

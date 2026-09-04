@@ -28,7 +28,10 @@ import {
     succ9RegressionProblems,
 } from "../lib/memoryEvalSucc9Regression.ts";
 import { SUCC9_TRANSITION } from "../lib/memoryEvalSucc9Transition.ts";
-import { succ9Subtype } from "../lib/memoryEvalSucc9Subtypes.ts";
+import {
+    SUCC9_SUBTYPE_REVIEW,
+    succ9Subtype,
+} from "../lib/memoryEvalSucc9Subtypes.ts";
 import { MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS } from "../lib/memoryExtractionPrompt.ts";
 import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.ts";
 
@@ -191,6 +194,7 @@ console.log("");
 for (const line of notes) console.log(line);
 console.log("");
 console.log(`transitions: ${SUCC9_TRANSITION.length}`);
+console.log(`subtypeDigest    ${manifest.subtypeDigest}  (${SUCC9_SUBTYPE_REVIEW.status})`);
 console.log(`datasetDigest    ${manifest.datasetDigest}`);
 console.log(`manifestDigest   ${manifest.manifestDigest}`);
 console.log(`scoringContract  ${manifest.scoringContractVersion} ${manifest.scoringContractDigest}`);

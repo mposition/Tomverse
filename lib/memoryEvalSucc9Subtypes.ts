@@ -28,8 +28,11 @@
  * trusting the column.
  */
 
+import { createHash } from "node:crypto";
+
 import {
     ASSISTANT_ONLY_SUBTYPES,
+    subtypeTableDigest,
     type AssistantOnlySubtypeEntry,
 } from "@/lib/memoryEvalAssistantOnlySubtypes";
 import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "@/lib/memoryEvalSucc7Replacements/subtypes";
@@ -56,6 +59,68 @@ export const SUCC9_ASSISTANT_ONLY_SUBTYPES: Readonly<
         ground: "I have no experience with sourdough at all",
     },
 };
+
+/**
+ * Who has confirmed the three rows above, and who has not.
+ *
+ * The frozen table carries the same record and folds it into its own digest,
+ * for a reason worth repeating here: while `ASSISTANT_ONLY_SUBTYPES` said
+ * `ai_draft`, the docs/ops/memory-extraction-eval-dataset.md §3.3 floor was
+ * what a careful reading found; signed, it is
+ * what the dataset claims. These three rows are an AI draft and say so, and
+ * because the status sits inside `succ9SubtypeDigest()` a later human
+ * confirmation moves that digest, succ-9's manifest digest with it, and
+ * therefore needs its own signature rather than arriving silently.
+ */
+export const SUCC9_SUBTYPE_REVIEW = {
+    status: "ai_draft" as "ai_draft" | "human_confirmed",
+    reviewer: null as string | null,
+    reviewedAt: null as string | null,
+    method:
+        "Each of the three replacement cases was read in full against the case " +
+        "it replaces; the clause quoted in each row is the one the subtype " +
+        "rests on, and each matches the subtype of its predecessor.",
+} as const;
+
+/**
+ * The whole subtype judgement succ-9 depends on, as one digest.
+ *
+ * Three tables answer the docs/ops/memory-extraction-eval-dataset.md §3.3
+ * question for succ-9's cases, and a signature
+ * over the sample alone covers none of them: the classifications decide
+ * whether both `assistant_only` arms clear their floor, both arms sit exactly
+ * on it, and every row here is hand-written prose that can be edited after a
+ * freeze without moving a single case. So the digest goes in the manifest,
+ * where signing the dataset signs the reading that made it admissible.
+ *
+ * All three are folded in, not only succ-9's own. `ko-407`'s replacement is
+ * credited against a row in the frozen table and `en-603`/`en-608`'s against
+ * succ-7's, so an edit to either upstream table changes what succ-9's floor
+ * says while leaving succ-9's own rows untouched.
+ */
+export function succ9SubtypeFingerprintInput(): string {
+    const rows = (table: Readonly<Record<string, AssistantOnlySubtypeEntry>>) =>
+        Object.keys(table)
+            .sort()
+            .map((id) => `${id}=${table[id].subtype}:${table[id].ground}`);
+    return [
+        `frozenTableDigest=${subtypeTableDigest()}`,
+        `succ7Rows=${rows(SUCC7_ASSISTANT_ONLY_SUBTYPES).length}`,
+        ...rows(SUCC7_ASSISTANT_ONLY_SUBTYPES),
+        `status=${SUCC9_SUBTYPE_REVIEW.status}`,
+        `reviewer=${SUCC9_SUBTYPE_REVIEW.reviewer ?? "-"}`,
+        `reviewedAt=${SUCC9_SUBTYPE_REVIEW.reviewedAt ?? "-"}`,
+        `method=${SUCC9_SUBTYPE_REVIEW.method}`,
+        `succ9Rows=${rows(SUCC9_ASSISTANT_ONLY_SUBTYPES).length}`,
+        ...rows(SUCC9_ASSISTANT_ONLY_SUBTYPES),
+    ].join("\n");
+}
+
+export function succ9SubtypeDigest(): string {
+    return createHash("sha256")
+        .update(succ9SubtypeFingerprintInput(), "utf8")
+        .digest("hex");
+}
 
 /**
  * The subtype of a case in `mem-eval-succ-9`, from whichever table declares it.
