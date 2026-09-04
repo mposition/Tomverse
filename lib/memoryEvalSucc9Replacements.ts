@@ -246,8 +246,11 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
         ],
     },
     {
-        // Replaces succ-durable-ko-422, the one that carries two golds and the
-        // one whose boundary is easiest to lose. It is not "a goal, and
+        // Replaces succ-durable-ko-422, and the only one of the five that is a
+        // repair rather than a like-for-like move: it carries a third gold its
+        // original should have had. See the note on `e3`.
+        //
+        // It is the one whose boundary is easiest to lose. It is not "a goal, and
         // separately a gap": the denial names the very setting the goal
         // requires, inside a sentence that affirms the same ability in an
         // easier one. succ-4's note on the original is explicit that the
@@ -268,9 +271,12 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
         // 계곡에서만 텐트를 쳐 봤고 / 능선에서는 아직 야영을 못 합니다 is the
         // original's shape exactly: one act, affirmed where it is easy and
         // denied where the goal demands it, so "this user camps" is live in
-        // the sentence and the gold has to say **where** as well as what. The
-        // affirmed half scopes the same act rather than adding a second, which
-        // is what lets both cases be exhaustive on two golds.
+        // the sentence and the gold has to say **where** as well as what.
+        //
+        // And because it is live in the sentence, it is a fact, which is where
+        // an earlier draft of this comment was wrong: it claimed the affirmed
+        // half "scopes the same act rather than adding a second", so two golds
+        // were enough. They are not — see `e3`.
         id: "succ-durable-ko-701",
         category: "durable_facts",
         language: "ko",

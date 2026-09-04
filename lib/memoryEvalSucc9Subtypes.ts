@@ -35,6 +35,7 @@ import {
     subtypeTableDigest,
     type AssistantOnlySubtypeEntry,
 } from "@/lib/memoryEvalAssistantOnlySubtypes";
+import { isCalendarDay } from "@/lib/memoryEvalCalendarDay";
 import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "@/lib/memoryEvalSucc7Replacements/subtypes";
 
 export const SUCC9_ASSISTANT_ONLY_SUBTYPES: Readonly<
@@ -149,6 +150,63 @@ export function succ9Subtype(caseId: string): 3 | 4 | undefined {
  * Only succ-9's own table is checked for that; the other two legitimately name
  * cases this version retired.
  */
+/**
+ * What a review record has to look like in each of its two states.
+ *
+ * Checked in **both** directions, because only one of them is the dangerous
+ * one and it is the one a single-sided check misses. Setting
+ * `status: "human_confirmed"` and leaving `reviewer` and `reviewedAt` null
+ * passed everything: the freeze gate saw `human_confirmed` and let the dataset
+ * through, so the whole protection amounted to editing one string. A
+ * confirmation nobody's name is on is not a confirmation, and the state it
+ * unlocks is the docs/ops/memory-extraction-eval-dataset.md §3.3 floor both
+ * `assistant_only` arms sit exactly on.
+ *
+ * The other direction matters less but costs nothing: an `ai_draft` carrying a
+ * reviewer and a date is a record halfway through being written, and reading
+ * it as a draft loses whatever the half means.
+ *
+ * Pure and parameterised so a test can put a record into each state; the
+ * module constant is one argument among the possible ones.
+ */
+export function subtypeReviewProblems(review: {
+    status: string;
+    reviewer: string | null;
+    reviewedAt: string | null;
+    method: string;
+}): readonly string[] {
+    const problems: string[] = [];
+    if (review.method.trim() === "") {
+        problems.push("the subtype review states no method");
+    }
+    if (review.status === "human_confirmed") {
+        if (!/^@?[A-Za-z0-9-]+$/.test(review.reviewer ?? "")) {
+            problems.push(
+                "the subtype review is human_confirmed with no reviewer: " +
+                    JSON.stringify(review.reviewer)
+            );
+        }
+        if (!isCalendarDay(review.reviewedAt)) {
+            problems.push(
+                "the subtype review is human_confirmed with no day it happened: " +
+                    JSON.stringify(review.reviewedAt)
+            );
+        }
+    } else if (review.status === "ai_draft") {
+        if (review.reviewer !== null || review.reviewedAt !== null) {
+            problems.push(
+                "the subtype review is an ai_draft but names " +
+                    `${JSON.stringify(review.reviewer)} on ` +
+                    `${JSON.stringify(review.reviewedAt)}; a draft nobody ` +
+                    "confirmed carries nobody's name"
+            );
+        }
+    } else {
+        problems.push(`the subtype review status is unknown: ${review.status}`);
+    }
+    return problems;
+}
+
 export function succ9SubtypeProblems(
     cases: readonly {
         id: string;
@@ -157,7 +215,7 @@ export function succ9SubtypeProblems(
         }[];
     }[]
 ): readonly string[] {
-    const problems: string[] = [];
+    const problems: string[] = [...subtypeReviewProblems(SUCC9_SUBTYPE_REVIEW)];
     const byId = new Map(cases.map((testCase) => [testCase.id, testCase]));
     for (const [id, entry] of Object.entries(SUCC9_ASSISTANT_ONLY_SUBTYPES)) {
         const testCase = byId.get(id);

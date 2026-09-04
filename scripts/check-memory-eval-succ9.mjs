@@ -28,6 +28,7 @@ import {
     succ9RegressionProblems,
 } from "../lib/memoryEvalSucc9Regression.ts";
 import { SUCC9_TRANSITION } from "../lib/memoryEvalSucc9Transition.ts";
+import { isCalendarDay } from "../lib/memoryEvalCalendarDay.ts";
 import {
     SUCC9_SUBTYPE_REVIEW,
     succ9Subtype,
@@ -166,13 +167,13 @@ if (filled.length === 0) {
     if (!/^@[A-Za-z0-9-]+$/.test(MEMORY_EVAL_SUCC9_APPROVAL.approvedBy ?? "")) {
         fail(`the reviewer is not a handle: ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
     }
-    // A date, not merely a non-null. `filled.length` counts a field that holds
-    // "" or "soon" as signed, so without this the only thing the five-field
-    // rule guarantees is that somebody typed something. succ-8 checks the same
-    // pattern; this is the check that was missing rather than a new idea.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt ?? "")) {
+    // A day that exists, not merely a date-shaped string. `filled.length`
+    // counts a field holding "" or "soon" as signed, and the regex succ-8 uses
+    // counts `2026-99-99`, so neither says the record can be looked up.
+    if (!isCalendarDay(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt)) {
         fail(
-            `approvedAt is not an ISO day: ${JSON.stringify(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt)}`
+            "approvedAt is not a day that exists: " +
+                JSON.stringify(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt)
         );
     }
     if (!existsSync(MEMORY_EVAL_SUCC9_APPROVAL.record)) {

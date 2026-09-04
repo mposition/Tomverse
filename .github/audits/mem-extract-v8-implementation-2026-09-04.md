@@ -179,8 +179,14 @@ frozen           false
 | succ-durable-en-423 | succ-durable-en-701 | code → soldering |
 | succ-durable-ko-422 | succ-durable-ko-701 | 오픈워터·바다·헤엄 → 백두대간·능선·야영 (**repair**, gold 3개) |
 
-- **경계는 그대로, 소재만 바뀝니다.** case가 틀려서 나가는 것이 아니라
-  **선택에 쓰였기 때문에** 나가므로, 판단은 보존됩니다.
+- **다섯 중 넷은 경계 그대로, 소재만 바뀝니다.** case가 틀려서 나가는 것이
+  아니라 **선택에 쓰였기 때문에** 나가므로, 판단은 보존됩니다.
+- **다섯째 `succ-durable-ko-701`은 repair입니다.** 원본 `succ-durable-ko-422`가
+  `exhaustive`인데 자기 발화가 말하는 세 번째 사실을 gold로 갖고 있지 않았고
+  (아래 참조), 그것을 물려받지 않기 위해 gold를 **하나 더** 집니다. 따라서 이
+  한 행은 "경계 그대로"가 아니며, 전환 표도 `same_boundary`가 아니라 `repair`로
+  적고 무엇을 고치는지 문장으로 남깁니다. `repair`는 원본의 gold를 전부
+  유지하고 **더하는** 방향으로만 허용됩니다.
 - **"같은 경계"는 일곱 축으로 대조합니다**(`boundaryAxes()`). category,
   language, `goldCompleteness`, `criticalGoldMode`, gold 개수, **gold 형태와
   anchor를 한 문자열로 묶은 것**(kind·polarity·`expectedDisposition`·
@@ -335,10 +341,30 @@ frozen           false
 | subtype ground 한 줄 수정 | subtypeDigest·manifestDigest 이동 |
 | ground를 assistant 발화/오타로 교체 | ground 실재성 검사 |
 | `ai_draft`인 채로 서명·동결 | 동결 gate |
-| `approvedAt`을 빈 문자열로 | ISO 날짜 검사, 부분 서명 검사 |
+| `approvedAt`을 빈 문자열로 | 달력 날짜 검사, 부분 서명 검사 |
+| status만 `human_confirmed`로 (검수자·날짜 null) | subtype 검토 기록 검사 |
+| 검수자는 채우고 날짜를 `2026-99-99`로 | 달력 날짜 검사 |
 | repair를 `same_boundary`로 기록 | 전환 유형·gold 개수·gold 형태 축 |
 | repair에서 gold 하나를 잃음 | repair 부분집합 검사 |
 | KO 예시 소재를 `사촌`으로 교체 | 오염 검사(succ-9에만 있는 낱말) |
+
+`tests/memoryEvalSucc9.test.mjs` (신규, 11건)
+
+script는 트리를 **있는 그대로** 읽으므로 "트리가 아닌 상태"를 만들어 볼 수
+없습니다. 이 파일이 그 상태들을 만듭니다.
+
+- **날짜가 실제 달력 날짜인가.** 정규식은 모양일 뿐이고 `2026-99-99`·
+  `2026-02-30`·`2026-02-29`(2026은 윤년이 아닙니다)를 전부 통과시킵니다.
+  `isCalendarDay()`는 `Date.UTC` 왕복으로 판정합니다. succ-7·succ-8의 같은
+  약점은 **고치지 않습니다** — 동결·서명된 module이고 그 값들은 실제 날짜라,
+  상수 하나 때문에 서명이 가리키는 digest를 움직이는 것이 더 나쁜 거래입니다.
+- **검토 기록의 두 상태를 양방향으로.** `human_confirmed`인데 검수자·날짜가
+  없으면 실패, `ai_draft`인데 둘 중 하나가 채워져 있어도 실패, 모르는 status는
+  fail-closed입니다. `subtypeReviewProblems()`가 순수 함수라 테스트가 기록을
+  임의 상태로 넣을 수 있습니다.
+- **repair 계약** — 정확히 한 행만 repair이고 무엇을 고치는지 적혀 있으며,
+  `same_boundary` 행은 그 칸이 비어 있어야 합니다. 고쳐진 case가 원본에 없던
+  gold를 실제로 들고 그 gold가 user turn에 결속돼 있는지도 봅니다.
 
 **이미 있던 gate도 걸렸습니다.** `tests/memoryEvalPromptDatasetSeparation.test.mjs`가
 초안 문구의 `at the end of the`가 `succ-injection-en-70`의 발화와 겹친다고
