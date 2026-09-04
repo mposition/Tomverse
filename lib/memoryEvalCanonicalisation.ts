@@ -188,8 +188,11 @@ export const APPROVED_STEMS: Readonly<
  *     `succ-4` stops assembling, because its `gold-evidence-covers-fact`
  *     anchor asks exactly that question.
  *
- * So: one lookbehind, and a table narrow enough that the lookbehind is the
- * only context anything reads.
+ * So: one lookbehind, and a table narrow enough that the lookbehind is all
+ * this step needs to read. It is not all `canon()` reads — the contraction,
+ * digit-separator and English numeral steps each anchor on word boundaries —
+ * and the contract statement names those rather than claiming the function is
+ * context-free, which it never was.
  *
  * ## What earns a row
  *

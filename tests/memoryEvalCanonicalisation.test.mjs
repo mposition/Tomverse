@@ -132,8 +132,9 @@ test("the registered rows normalise, in both spellings", () => {
         ["육 개월", "6개월"],
         ["육개월", "6개월"],
         ["6개월", "6개월"],
-        // succ-durable-ko-401. The variant carries the particle, so the bare
-        // counter is never the right edge of a row — see the test below.
+        // succ-durable-ko-401. The particle is incidental here — a row reads
+        // nothing after its counter since 2026-09-04, so 아홉 시에 and 아홉 시
+        // rewrite alike. These are the spellings the gold's own evidence uses.
         ["아홉 시에", "9시에"],
         ["아홉시에", "9시에"],
         ["9시에", "9시에"],

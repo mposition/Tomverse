@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -242,15 +242,19 @@ const runIn = (cwd) => {
     }
 };
 
-/** A repository with tracked files but no `docs/policy` at all. */
-const emptyCorpus = () => {
+/** A throwaway repository seeded with exactly the files a case needs. */
+const repoWith = (files) => {
     const root = mkdtempSync(path.join(tmpdir(), "policy-section-"));
     const git = (...args) =>
         execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
     git("init", "-q");
     git("config", "user.email", "test@example.invalid");
     git("config", "user.name", "test");
-    writeFileSync(path.join(root, "example.ts"), "export const x = 1;\n");
+    for (const [relative, content] of Object.entries(files)) {
+        const target = path.join(root, relative);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, content);
+    }
     git("add", "-A");
     git("commit", "-qm", "seed");
     return root;
@@ -266,7 +270,7 @@ test("the command refuses a run that resolved no policy documents", (t) => {
     // That is the shape worth testing: not the quoting, which a rewrite would
     // change, but the claim. A gate that scanned nothing must not report a pass,
     // however it came to scan nothing.
-    const root = emptyCorpus();
+    const root = repoWith({ "example.ts": "export const x = 1;" });
     t.after(() => rmSync(root, { recursive: true, force: true }));
 
     const result = runIn(root);
@@ -277,6 +281,32 @@ test("the command refuses a run that resolved no policy documents", (t) => {
     );
     assert.match(result.output, /no policy documents were found/);
     assert.doesNotMatch(result.output, /check passed/);
+});
+test("the command refuses a run that scanned no citations", (t) => {
+    // The second guard, and it needs its own case: the test above never reaches
+    // it, because a run with no policy documents exits at the first one. Here
+    // the corpus resolves and the scan still reads nothing, which is what a
+    // broken exclusion list or a pattern that stopped matching would look like.
+    //
+    // The seeded policy document has headings and no citations of its own, so
+    // `policyDocuments.length` is 1 and `checked` is 0.
+    const root = repoWith({
+        "docs/policy/example.md": ["# Example", "", "## 1. Scope", "", "## 2. Limits", ""].join("\n"),
+        "lib/example.ts": "export const x = 1;",
+    });
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+
+    const result = runIn(root);
+    assert.notEqual(
+        result.status,
+        0,
+        `the check passed having scanned nothing:
+${result.output}`
+    );
+    assert.match(result.output, /no citations were scanned/);
+    // And it reached the second guard rather than the first, which is the
+    // distinction this case exists to hold.
+    assert.doesNotMatch(result.output, /no policy documents were found/);
 });
 
 test("the command passes on this repository, and says how much it read", () => {

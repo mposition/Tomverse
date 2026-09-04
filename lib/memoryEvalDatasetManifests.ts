@@ -778,7 +778,9 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
              * Each row is **bounded on the left, and only on the left**. No
              * Hangul syllable may precede the numeral, or 교육 개월 is read as
              * six months and 전세 시장 destroys the gold 전세. That one
-             * character is the only context any step reads.
+             * character is the only context the Korean numeral step reads; the
+             * contraction, digit-separator and English numeral steps read word
+             * boundaries of their own, which the rule statement sets out.
              *
              * A right boundary — a list of particles the counter could be
              * followed by — was carried for one day and withdrawn on
@@ -806,7 +808,7 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
             // date is when the digest below became what it is.
             approvedOn: "2026-09-04",
             descriptorDigest:
-                "01ff1f40933386d0a87c5a74c749f0f9f7cc1eddbc46da8b571030d95cbb7ebf",
+                "c20378d357805b6dee46fed5590405b705d4654a9a4c7e19ed53154283ccaa99",
             pendingRules: [],
         },
     ];
