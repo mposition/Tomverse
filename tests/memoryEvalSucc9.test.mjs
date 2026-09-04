@@ -5,6 +5,7 @@ import { isCalendarDay } from "../lib/memoryEvalCalendarDay.ts";
 import {
     SUCC9_ASSISTANT_ONLY_SUBTYPES,
     SUCC9_SUBTYPE_REVIEW,
+    isReviewerHandle,
     subtypeReviewProblems,
     succ9SubtypeProblems,
 } from "../lib/memoryEvalSucc9Subtypes.ts";
@@ -152,7 +153,10 @@ test("the shipped review record is a confirmation with a name and a day on it", 
     assert.deepEqual([...subtypeReviewProblems(SUCC9_SUBTYPE_REVIEW)], []);
     assert.equal(SUCC9_SUBTYPE_REVIEW.status, "human_confirmed");
     assert.equal(isCalendarDay(SUCC9_SUBTYPE_REVIEW.reviewedAt), true);
-    assert.match(SUCC9_SUBTYPE_REVIEW.reviewer ?? "", /^@?[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$/);
+    // The shared judgement, not a second copy of it. The copy that stood here
+    // required two characters and so disagreed with `isReviewerHandle()` about
+    // a one-letter handle — a test that restates a rule tests its restatement.
+    assert.equal(isReviewerHandle(SUCC9_SUBTYPE_REVIEW.reviewer), true);
 });
 
 test("confirming the subtype rows did not freeze the dataset", () => {

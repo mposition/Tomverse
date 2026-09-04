@@ -45,8 +45,19 @@ import {
  *
  * ## What it is not
  *
- * Not a correction. None of the five is wrong, and their content is preserved
- * runnable in `memoryEvalSucc9Regression.ts`. Not a contract change either:
+ * Not a correction — that is what put the five on the list. All five left for
+ * their part in choosing a prompt, not for anything they got wrong, and all
+ * five are preserved runnable in `memoryEvalSucc9Regression.ts`.
+ *
+ * One of them turned out to be wrong as well, which is a separate fact about
+ * one case rather than the reason any of them moved. `succ-durable-ko-422`
+ * claims to be `exhaustive` and leaves a fact its own user turn states
+ * unclaimed, so its replacement keeps both of its golds and adds a third, and
+ * the transition table records that row as a `repair` rather than a
+ * same-boundary move. succ-8 keeps the case as it is: it is frozen and signed,
+ * and inheriting a defect is not a licence to ship one.
+ *
+ * Not a contract change either:
  * succ-9 is scored by the same `mem-score-v3.5` succ-8 is, and the only reason
  * its `scoringContractDigest` is recomputed rather than inherited is that a
  * dataset records the contract it was frozen under.

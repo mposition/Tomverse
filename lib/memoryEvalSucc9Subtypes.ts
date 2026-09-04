@@ -62,16 +62,20 @@ export const SUCC9_ASSISTANT_ONLY_SUBTYPES: Readonly<
 };
 
 /**
- * Who has confirmed the three rows above, and who has not.
+ * Who has confirmed the three rows above.
  *
  * The frozen table carries the same record and folds it into its own digest,
  * for a reason worth repeating here: while `ASSISTANT_ONLY_SUBTYPES` said
  * `ai_draft`, the docs/ops/memory-extraction-eval-dataset.md §3.3 floor was
- * what a careful reading found; signed, it is
- * what the dataset claims. These three rows are an AI draft and say so, and
- * because the status sits inside `succ9SubtypeDigest()` a later human
- * confirmation moves that digest, succ-9's manifest digest with it, and
- * therefore needs its own signature rather than arriving silently.
+ * only what a careful reading had found; confirmed, it is what the dataset
+ * claims. These three rows were an AI draft and said so until 2026-09-04, when
+ * a person read them and this record was written.
+ *
+ * Because the status, the reviewer and the date all sit inside
+ * `succ9SubtypeDigest()`, writing them moved that digest and succ-9's manifest
+ * digest with it — which is why no digest was offered for signature while this
+ * still said `ai_draft`. A future correction to these rows moves both again and
+ * needs its own approval rather than arriving silently.
  */
 export const SUCC9_SUBTYPE_REVIEW = {
     /**
@@ -180,7 +184,15 @@ export function succ9Subtype(caseId: string): 3 | 4 | undefined {
  */
 const HANDLE = /^@?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
 
-const isHandle = (value: unknown): boolean =>
+/**
+ * Exported so nothing has to restate the rule.
+ *
+ * A test wrote the pattern out again and got it wrong in the direction that
+ * matters least and reads worst: its copy required two characters, so `m` was
+ * a reviewer to this function and not to the test. Neither reading was the
+ * defect — having two readings was.
+ */
+export const isReviewerHandle = (value: unknown): boolean =>
     typeof value === "string" && HANDLE.test(value);
 
 /**
@@ -213,7 +225,7 @@ export function subtypeReviewProblems(review: {
         problems.push("the subtype review states no method");
     }
     if (review.status === "human_confirmed") {
-        if (!isHandle(review.reviewer)) {
+        if (!isReviewerHandle(review.reviewer)) {
             problems.push(
                 "the subtype review is human_confirmed with no reviewer: " +
                     JSON.stringify(review.reviewer)
