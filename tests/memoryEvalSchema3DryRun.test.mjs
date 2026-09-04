@@ -79,11 +79,11 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // that named the new prompt over the old sample would be the failure
         // the switch exists to avoid.
         assert.match(result.output, /gpt-5-6-luna::mem-extract-v7/);
-        // "not frozen" is printed, and asserted, because succ-8 is a
-        // contract-only successor awaiting its own signature. A smoke run
-        // against it is fine — nothing is spent — and the header saying so is
-        // what stops a reader from citing its numbers as decision-grade.
-        assert.match(result.output, /mem-eval-succ-8 \(decision, not frozen\)/);
+        // "frozen" since 2026-09-04. succ-8 spent a day unsigned and the header
+        // said so for exactly that day. A smoke run is admissible either way,
+        // because nothing is spent; the word is what stops a reader citing an
+        // unsigned sample's numbers as decision-grade, so it is asserted.
+        assert.match(result.output, /mem-eval-succ-8 \(decision, frozen\)/);
         // The manifest digest as well as the sample's: a smoke run names the
         // record its numbers would be resolved against, not only the cases.
         assert.match(
@@ -175,17 +175,16 @@ test("the gate now admits the schema the harness scores", () => {
     const target = harnessTarget();
     assert.equal(target.datasetSchemaVersion, 3);
 
-    // The freeze is stated rather than read, and the line below says why: the
-    // gate under test is the *schema* one, which sits past the freeze, and the
-    // live target is a contract-only successor nobody has signed yet. Reading
-    // `target.datasetFrozen` here would make this test assert
-    // `dataset_not_frozen` — true, but about a different gate.
-    assert.equal(target.datasetFrozen, false);
+    // The freeze is read from the target. It was a stated `true` while succ-8
+    // was unsigned, so that this test kept asking about the *schema* gate it is
+    // named for instead of stopping at `dataset_not_frozen`; the 2026-09-04
+    // signature made the stated value and the target's the same thing.
+    assert.equal(target.datasetFrozen, true);
     const decision = decideEvalRunMode({
         live: true,
         registerEntry: { status: "candidate", evalBudget: { maxUsd: 50 } },
         hasApiKey: true,
-        datasetFrozen: true,
+        datasetFrozen: target.datasetFrozen,
         datasetPurpose: target.datasetPurpose,
         datasetSchemaVersion: target.datasetSchemaVersion,
         commitKnown: true,
@@ -301,9 +300,10 @@ test("the binding still decides a pair the register leaves open", () => {
     // Asserted as the *difference* three inputs make, because that is the
     // claim: the schema is no longer the answer, and the binding is.
     const target = harnessTarget();
-    // Same stated premise as the schema test above, for the same reason: the
-    // binding gates sit past the freeze, and succ-8 is unsigned.
-    assert.equal(target.datasetFrozen, false);
+    // Same reading as the schema test above: the binding gates sit past the
+    // freeze, and since 2026-09-04 the target is frozen, so nothing has to be
+    // stated to reach them.
+    assert.equal(target.datasetFrozen, true);
     const base = {
         live: true,
         registerEntry: {
@@ -311,7 +311,7 @@ test("the binding still decides a pair the register leaves open", () => {
             evalBudget: { maxUsd: 6.285, maxProviderDispatchedRuns: 2 },
         },
         hasApiKey: true,
-        datasetFrozen: true,
+        datasetFrozen: target.datasetFrozen,
         datasetPurpose: target.datasetPurpose,
         datasetSchemaVersion: target.datasetSchemaVersion,
         commitKnown: true,

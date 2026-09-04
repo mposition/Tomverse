@@ -1,20 +1,20 @@
 # 채점 계약 개정 — 한국어 숫자 정규화를 검토된 표현 목록으로 (`mem-score-v3.5`)
 
-**상태: draft. 서명 없음.**
+**상태: 서명됨. `mem-eval-succ-8` 동결 완료 (2026-09-04, @mposition).**
 
-이 문서는 **승인 기록이 아니라 개정 초안**입니다.
+사람이 직접 내린 결정은 세 번입니다.
 
-- 2026-09-03 개정(gold가 아니라 채점기를 고치고, 새 계약 버전과
-  contract-only successor로 담는다)은 @mposition이 지시했습니다.
-- **2026-09-04 개정(오른쪽 경계 제거)는 리뷰 권고를 반영한 것이며,
-  사용자가 내린 결정으로 기록하지 않습니다.** 제시된 세 안 중
-  1안이 권고됐고, 그 권고에는 **서명·병합 승인이 아니라는 문구가
-  명시돼 있었습니다.**
-- `mem-eval-succ-8`의 digest에 대한 **동결 서명은 별개 행위이고 아직
-  이뤄지지 않았습니다** — §8.
+- **2026-09-03 방향 지시** — gold가 아니라 채점기를 고치고, 그 결과를
+  새 계약 버전과 contract-only successor로 담는다.
+- **2026-09-04 오른쪽 경계 제거** — 제시된 세 안 중 1안이 리뷰에서
+  권고됐고, 그 권고에는 서명·병합 승인이 아니라는 문구가 명시돼
+  있었습니다. 그 시점에서는 초안이었고, 아래 서명이 그것을 덮습니다.
+- **2026-09-04 동결 서명** — §8. 두 digest를 서명 대상으로 명시하고,
+  §4.13을 승인하고, §4.14의 잔여를 인지했습니다.
 
-즉, 이 문서가 적힌 것 중 사람이 승인한 것은 **2026-09-03의 방향
-지시 하나뿐**이며, 나머지는 검토를 기다리는 초안입니다.
+**서명에 포함되지 않은 것**도 같이 적어 둡니다 — PR의 ready 전환·병합,
+`mem-extract-v8`, pair 등록·승인, 예산, 유료 실행, release gate, feature flag
+활성화는 **서명 밖**입니다.
 
 - 대상: `lib/memoryEvalCanonicalisation.ts`의 한국어 숫자 치환 단계
 - 2026-09-04 개정: **오른쪽 경계(조사 목록)를 철회**했습니다 — §4.14
@@ -508,11 +508,9 @@ digest를 움직이지 않게 하기 위해서이고, 세 dataset 모두 binding
 와 트리가 실제로 적용할 계약이 다르면 **거절**합니다. 추측하지 않고 멈추는 것이
 이 모듈의 원칙입니다.
 
-## 8. 아직 없는 것 — succ-8의 동결 서명
+## 8. 동결 서명
 
-`mem-eval-succ-8`은 `MEMORY_EVAL_SUCC8_DATASET_FROZEN = false`,
-`MEMORY_EVAL_SUCC8_APPROVAL`의 다섯 필드가 모두 `null`입니다. 표본이 succ-7의
-것이므로 case 재검토는 필요 없지만, **동결은 사람의 서명**입니다.
+**2026-09-04, @mposition.** commit `a302e5f4` 기준으로 검토하고 서명했습니다.
 
 서명 대상은 succ-8이 자기 이름으로 갖는 두 값입니다.
 
@@ -521,12 +519,52 @@ datasetDigest    9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e4649825
 manifestDigest   24820f585c3c84aae513cdb7c9ea1185b36ebbcab4e15687ce17fe69bfee3012
 ```
 
-계약 descriptor digest는
+이 manifest가 결속하는 계약은 `mem-score-v3.5`이며 descriptor digest는
 `2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4`입니다.
 
-`datasetDigest`는 succ-7과 같습니다 — 그것이 contract-only successor라는
-주장이며, `succ8Problems()`가 같지 않으면 실패합니다. `manifestDigest`는
-달라야 하고, 그 차이는 계약 하나뿐입니다.
+기록된 값:
+
+```
+MEMORY_EVAL_SUCC8_DATASET_FROZEN              true
+MEMORY_EVAL_SUCC8_APPROVAL.approvedBy         @mposition
+MEMORY_EVAL_SUCC8_APPROVAL.approvedAt         2026-09-04
+MEMORY_EVAL_SUCC8_APPROVAL.approvedCommit     a302e5f47a1b942759110899823a5207139978ab
+MEMORY_EVAL_SUCC8_APPROVAL.signedDatasetDigest    9326730a…
+MEMORY_EVAL_SUCC8_APPROVAL.signedManifestDigest   24820f58…
+MEMORY_EVAL_SUCC8_APPROVAL.scope              contract-only
+```
+
+**동결이 digest를 움직이지 않았습니다.** `frozen`은
+`succ8ManifestFingerprintInput`에서 의도적으로 빠져 있으므로, 검수자가 본
+digest와 동결된 digest가 같은 값입니다. 서명 직후 재계산한 세 값이
+위와 일치함을 확인했고, `succ8Problems()`·`succ8SignatureProblems()`·
+`verifySucc8Manifest()`가 모두 빈 배열을 반환합니다.
+
+### 8.1 서명이 덤는 것과 덤지 않는 것
+
+**덤는 것**
+
+- `mem-eval-succ-8`의 동결과 위 두 digest.
+- **§4.13 — 숫자 앞 띄어쓰기 가정.** corpus 한국어 문자열 2,250개 중
+  5개가 전면 무공백 변환에서 다르게 정규화되는 잔여를 알고 수용합니다.
+
+**덤지 않는 것**
+
+- **§4.14 — 부분 문자열 잔여.** `9시장`·`9시간`이 `9시` gold에 닿는
+  현상은 **승인된 것도 해결된 것도 아닙니다.** matcher 차원의 열린
+  질문으로 유지합니다. 서명은 이것을 **알고 있다**는 기록입니다.
+- **case-level 재채택·재검수.** 표본 1,150건은 서명된 succ-7 표본을 변경
+  없이 상속하므로, 그쪽 적용 기록은 `.github/audits/memory-eval-succ7-
+  adoption-2026-09-02.md`이고 여기서 다시 쓰지 않습니다.
+- **PR ready 전환·병합, `mem-extract-v8`, pair 등록·승인, 예산, 유료
+  실행, release gate, feature flag 활성화.** 전부 서명 밖입니다.
+
+### 8.2 서명 이후 달라지는 것
+
+`decideEvalRunMode()`가 더 이상 `dataset_not_frozen`으로 거절하지 않습니다.
+그것만 바뀝니다 — 유료 실행은 여전히 승인된 eval 예산, 등록된 pair,
+깨끗한 named commit, 쓰이지 않은 run ordinal을 각각 따로 요구하며 그 네
+가지 중 어느 것도 이 서명에 들어 있지 않습니다.
 
 **서명이 가능한 기록이 되도록 갖춘 것:**
 
@@ -556,9 +594,10 @@ manifestDigest   24820f585c3c84aae513cdb7c9ea1185b36ebbcab4e15687ce17fe69bfee301
 아닙니다. `npm run check:memory-eval-succ8`을 succ-6·succ-7과 같은 패턴으로
 만들어 PR Fast Gate의 static 단계와 release checklist에 넣었습니다.
 
-서명이 없는 동안 `decideEvalRunMode()`는 succ-8에 대한 유료 실행을
-`dataset_not_frozen`으로 거절합니다. smoke run은 영향을 받지 않으며
-485/485입니다.
+서명이 들어오기 전까지 `decideEvalRunMode()`는 succ-8에 대한 유료 실행을
+`dataset_not_frozen`으로 거절했고, 그것이 이 검사들이 지키려던 상태입니다.
+2026-09-04에 서명되어 그 거절은 해제됐습니다 — §8.2가 이후 무엇이
+남아 있는지를 적습니다. smoke run은 서명과 무관하게 485/485입니다.
 
 ## 9. 회귀
 

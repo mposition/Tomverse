@@ -82,15 +82,20 @@ export const MEMORY_EVAL_SUCC8_CHANGE_REASON =
     "bounded on the left only";
 
 /**
- * False, pending a signature.
+ * True since 2026-09-04.
  *
- * A contract-only successor inherits its sample's adoption but not its freeze:
- * what has to be approved here is the contract change and the claim that the
- * cases are carried whole, which is a person's decision like any other.
- * `decideEvalRunMode()` refuses a decision-grade run against an unfrozen
- * sample, which is what should happen until then.
+ * A contract-only successor inherits its sample's adoption but not its
+ * freeze: what had to be approved here was the contract change and the claim
+ * that the cases are carried whole. @mposition signed both against commit
+ * a302e5f4, and the digests that signature names are in
+ * `MEMORY_EVAL_SUCC8_APPROVAL`.
+ *
+ * `frozen` sits deliberately outside `succ8ManifestFingerprintInput`, so
+ * flipping it does not move `manifestDigest`. That is the point of keeping it
+ * out: the digest signed off on is the digest that got frozen, rather than a
+ * value that changes the moment the signature lands.
  */
-export const MEMORY_EVAL_SUCC8_DATASET_FROZEN = false;
+export const MEMORY_EVAL_SUCC8_DATASET_FROZEN = true;
 
 export const MEMORY_EVAL_SUCC8_DATASET_PURPOSE: "development" | "decision" =
     "decision";
@@ -131,11 +136,11 @@ export const MEMORY_EVAL_SUCC8_APPROVAL: {
     scope: "contract-only";
     record: string;
 } = {
-    approvedBy: null,
-    approvedAt: null,
-    approvedCommit: null,
-    signedDatasetDigest: null,
-    signedManifestDigest: null,
+    approvedBy: "@mposition",
+    approvedAt: "2026-09-04",
+    approvedCommit: "a302e5f47a1b942759110899823a5207139978ab",
+    signedDatasetDigest: "9326730a889d99008ca1c5709fcaaa4226f6031c25b9aced7b1fb26e46498251",
+    signedManifestDigest: "24820f585c3c84aae513cdb7c9ea1185b36ebbcab4e15687ce17fe69bfee3012",
     /**
      * `contract-only` — the cases are inherited whole and were not
      * re-reviewed. Named so that nobody reads this record as a second case

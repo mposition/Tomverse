@@ -39,12 +39,11 @@ test("the harness target is the schema-3 set the live contract scores", () => {
     assert.equal(target.datasetSchemaVersion, 3);
     assert.equal(target.datasetPurpose, "decision");
     assert.equal(target.cases.length, 1150);
-    // Not frozen, and that is a statement about where succ-8 is rather than
-    // an omission: it is a contract-only successor created on 2026-09-03 and
-    // nobody has signed its digest yet. `decideEvalRunMode()` refuses a paid
-    // run against it for exactly this reason, which is the intended state
-    // until a signature exists.
-    assert.equal(target.datasetFrozen, false);
+    // Frozen since 2026-09-04, when @mposition signed its two digests against
+    // commit a302e5f4. It was unfrozen for a day before that, and
+    // `decideEvalRunMode()` refused a decision-grade run against it throughout,
+    // which is what should have happened.
+    assert.equal(target.datasetFrozen, true);
     assert.equal(target.datasetFrozen, MEMORY_EVAL_SUCC8_DATASET_FROZEN);
 });
 

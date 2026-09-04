@@ -191,26 +191,26 @@ test("a revoked pair refuses both ordinals, and would not have without the statu
             `ordinal ${ordinal} must refuse while the pair is revoked`
         );
         // Red-before-green, permanently: the only field changed is the
-        // status, and it is what decides *which* refusal is reached. Since
-        // 2026-09-03 the harness points at `mem-eval-succ-8`, which is a
-        // contract-only successor awaiting its own signature, so reopening
-        // the pair no longer yields a live run — it yields the next gate
-        // down. The reason moving is what proves the status was load-bearing;
-        // an assertion of `live` here would have needed a frozen flag this
-        // target does not have, and would have been asserting something the
-        // tree cannot do.
-        assert.deepEqual(
-            decideEvalRunMode(input({ ...registered, status: "candidate" }, ordinal)),
-            { mode: "refused", reason: "dataset_not_frozen" },
-            `ordinal ${ordinal} must clear the status gate if the pair were reopened`
+        // status, and it is what turns a live decision into a refusal.
+        //
+        // This read `dataset_not_frozen` between 2026-09-03 and the signature
+        // on 2026-09-04, because the harness pointed at an unsigned successor
+        // and the freeze gate answered first. succ-8 is frozen now, so the
+        // control is back to what it was written to say: with the status
+        // reopened, nothing else refuses.
+        assert.equal(
+            decideEvalRunMode(input({ ...registered, status: "candidate" }, ordinal))
+                .mode,
+            "live",
+            `ordinal ${ordinal} would run again if the pair were reopened`
         );
     }
 
-    // And the second gate is the target's, not a synthetic value: succ-8 is
-    // unfrozen because nobody has signed it. If it is frozen later, this line
-    // fails and the assertion above has to be restated deliberately rather
-    // than drifting into passing for a new reason.
-    assert.equal(target.datasetFrozen, false);
+    // And the freeze is the target's own, not a synthetic value. succ-8 was
+    // signed on 2026-09-04; if it is ever unfrozen this line fails and the
+    // control above has to be restated deliberately rather than drifting into
+    // passing for a new reason.
+    assert.equal(target.datasetFrozen, true);
 });
 
 test("v6's instrument cannot fund what this tree now ships", () => {
