@@ -170,7 +170,7 @@ test("a row matches only where the left boundary allows it", () => {
     // those terms because the two tests differ and the difference changes
     // results. `(?<![가-힣])` reads one character and asks only whether it is
     // Hangul, so a Latin letter or a digit before the numeral does not stop the
-    // rewrite the way `` would. The last row is the one that matters: a digit
+    // rewrite the way `\b` would. The last row is the one that matters: a digit
     // in front produces a different number.
     for (const [text, expected] of [
         ["육개월", "6개월"],
