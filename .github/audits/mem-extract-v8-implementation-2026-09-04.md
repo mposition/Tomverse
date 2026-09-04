@@ -9,7 +9,7 @@
   `memoryExtractionEnabled`·`memoryInjectionEnabled`
 - 기준: 동결된 `mem-eval-succ-8`(2026-09-04 서명), `mem-score-v3.5`
 
-**prompt digest: `5eb52b1d08fb360a1643278659761ada25738dc7f77718ba7a9806e1bec5f86e`**
+**prompt digest: `a1d804c6b9359b722c60b1309c7324176f72c54008d2a616fa78dd520a6b44ae`**
 
 ## 1. 추가된 문안
 
@@ -22,32 +22,32 @@
 그대로 씁니다.
 
 ```
-A user message labelled m0: I have no plans to open a franchise, now or later.
+A user message labelled m0: The registration form lists two dependants; I have no dependants.
 {
   "candidates": [
     {
-      "kind": "long_term_goal",
+      "kind": "relationship",
       "polarity": "negated",
-      "statement": "The user does not plan to open a franchise",
+      "statement": "The user has no dependants",
       "confidence": 0.9,
       "sensitivity": "standard",
       "expiresAt": null,
-      "evidence": [ { "messageLabel": "m0", "quote": "I have no plans to open a franchise" } ]
+      "evidence": [ { "messageLabel": "m0", "quote": "I have no dependants" } ]
     }
   ]
 }
 
-A user message labelled m0: 저는 프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다.
+A user message labelled m0: 가입 서류에는 부양가족이 둘로 적혀 있는데, 저는 부양가족이 없습니다.
 {
   "candidates": [
     {
-      "kind": "long_term_goal",
+      "kind": "relationship",
       "polarity": "negated",
-      "statement": "사용자는 프랜차이즈를 여는 것을 계획하고 있지 않습니다",
+      "statement": "사용자는 부양가족이 없습니다",
       "confidence": 0.9,
       "sensitivity": "standard",
       "expiresAt": null,
-      "evidence": [ { "messageLabel": "m0", "quote": "프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다" } ]
+      "evidence": [ { "messageLabel": "m0", "quote": "저는 부양가족이 없습니다" } ]
     }
   ]
 }
@@ -55,7 +55,7 @@ A user message labelled m0: 저는 프랜차이즈를 여는 계획은 지금도
 
 세 가지가 의도적입니다.
 
-- **한 문장, 한 사실, 한 candidate.** `KIND_GUIDE`는 독립적으로 유용한 사실
+- **한 문장, 한 candidate.** 문장 수는 사실 수를 보장하지 않습니다 — 한 문장이 독립적으로 유용한 사실 둘을 담을 수 있습니다. 이것은 **필요조건**이고, 실제 사실이 하나라는 것은 검토된 판단입니다 — 세미콜론 앞 절은 서류를 설명할 뿐 사용자에 대한 사실이 아닙니다. `KIND_GUIDE`는 독립적으로 유용한 사실
   둘을 담은 문장은 candidate 둘을 낳는다고 말합니다. 초안은 두 문장·두 사실
   메시지에 candidate 하나를 보여, 둘째 사실을 버리라고 가르치고 있었습니다.
   완결하지 않은 "완결 출력 예시"는 없느니만 못합니다.
@@ -122,36 +122,52 @@ cell로 고른 2차 수정본(EN `relationship`, KO `code_style`)은 세 가지�
    가르치는 것이 아니라 mapping 둘을 한 번씩 가르치게 돼, 언어 규칙을 분리해
    보여 주는 값이 사라졌습니다.
 
-### 3.4 채택 — 제약을 동시에 만족하는 kind는 하나뿐입니다
+### 3.4 4차 — 빈 cell은 kind 판정의 근거가 아닙니다
 
-제약을 전부 적으면 답이 하나로 좁혀집니다.
+3.3을 고치면서 `long_term_goal`을 골랐는데, 근거가 **"그 cell이 0건이다"**
+하나였습니다. 그것은 안전 측정이지 분류 판정이 아닙니다. 승인된 prompt는
+`long_term_goal`의 negated mapping을 **어디에도 적지 않았고**, 그런데도 예시가
+그 mapping을 새 정책으로 도입하고 있었습니다. 게다가 "목표를 가지지 않음"은
+`decision`과도 모호하고, `decision|negated`는 바로 퇴역된 holdout 형태입니다.
 
-| 제약 | 근거 |
+**예시가 승인되지 않은 분류 규칙을 도입하는 것이, 측정된 case 위에 앉는 것보다
+나쁜 실패입니다.**
+
+### 3.5 채택 — kind는 prompt가 정하고, cell은 측정으로 남깁니다
+
+승인된 prompt가 negated로 명시하는 mapping은 둘뿐입니다.
+
+| 근거 | 문장 |
 | --- | --- |
-| 진짜 negated여야 함 → 사실 계열 kind | 답변 방식 kind의 부정은 부정적 선호 = affirmed |
-| 두 언어 같은 kind | 3.3의 3번 |
-| 해당 cell이 **0건** (두 언어, 두 기준) | 오염 검사 |
-| `polarity44` 형태가 아닐 것 | holdout 보호 |
-| 소재가 corpus에 없을 것 | 어휘 검사 |
+| boundary 규칙 | "The registration form lists two dependants; I have no dependants"가 **negated relationship fact를 성립시킨다** |
+| `KIND_GUIDE` | 형제가 몇 명인지, **또는 없다는 것**은 relationship이다 |
+| `KIND_GUIDE` | expertise는 **해당 분야 경험이 없는 것**을 포함한다 |
 
-사실 계열 kind 중 **두 언어 모두, live target과 succ-4~8 합집합 모두에서
-negated 0건**인 것은 `long_term_goal` 하나입니다. `relationship`이 자연스러운
-선택이었지만(boundary 규칙이 이미 "I have no dependants"를 negated relationship
-fact라고 부릅니다), `ko|relationship|negated`가 **live 1건·합집합 5건**이라 쌍을
-같은 kind로 만들 수 없었습니다.
+그래서 kind는 **`relationship`**입니다 — 두 번 명시되고, 그중 하나는 이 예시가
+쓰는 **바로 그 문장**입니다. 예시가 더하는 것은 판단이 아니라 출력 모양입니다.
 
-소재는 `franchise`·`프랜차이즈` — 대소문자 접기 후 어느 corpus에도 없습니다.
-부재를 **포기한 것이 아니라 애초에 가진 적 없다**고 쓰면("지금도 앞으로도"),
-퇴역된 `decision|negated` 형태와도 거리가 생깁니다.
+**그 대가를 측정해서 적습니다.** prompt가 명시하면서 두 언어 모두 0건인 kind는
+**없습니다.**
 
-**남는 위험.** `long_term_goal|affirmed`는 en 75·ko 80건이므로 이 예시는 채워진
-affirmed cell의 반대편입니다. 어떤 negated 예시를 써도 피할 수 없고(corpus가
-negated durable fact를 의도적으로 많이 담고 있으므로), 기준은 "채점되는 cell을
-피한다"이지 "flip을 피한다"가 아닙니다.
+| kind | 명시 | en distinct | ko distinct |
+| --- | --- | --- | --- |
+| `relationship` | 2회 | 0 | **1** (`succ-assistant-ko-407#g1`) |
+| `expertise` | 1회 | 3 | 1 |
+
+`relationship`이 더 강하게 명시되고 노출도 작아서 이쪽입니다. 남는 한 건은
+`MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS`에 **id로** 적어 둡니다 — 숫자
+허용치로 흡수하지 않으므로, 그 cell에 **둘째 case가 들어오면 여전히 실패**합니다.
+
+ko-407은 "저는 배우자가 없어서 그 항목은 해당되지 않습니다"입니다. kind와
+polarity는 같고 소재는 다릅니다(`배우자` 대 `부양가족`), 두 예시 소재는 어느
+corpus에도 없습니다. **깨끗한 결과가 아니며, 그렇게 적습니다.**
+
+영어 예시의 문장은 v7부터 prompt에 있었고, succ-7·succ-8 서명과 polarity44
+구성 시점에도 있었습니다. 새 노출이 아니라 기존 상태입니다.
 
 ## 4. 테스트
 
-`tests/memoryExtractionPromptExamples.test.mjs` (신규, 16건)
+`tests/memoryExtractionPromptExamples.test.mjs` (신규, 17건)
 
 **구조화 출력과 parser**
 

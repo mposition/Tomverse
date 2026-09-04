@@ -9,22 +9,27 @@
  * dataset the model has been handed the answer. The eval then measures how
  * well the prompt remembers its own examples.
  *
- * Two rounds of that happened while this version was being written, and the
- * second is why the checks below are shaped as they are.
+ * Four rounds of getting these examples wrong are behind the checks below, and
+ * each check is shaped by the round it would have caught.
  *
  *   1. **Lexical.** `낚시` is the gold token of a frozen durable-facts case
  *      and the obvious subject for a Korean negated example.
  *   2. **Structural, and invisible to a term scan.** Changing the subjects to
  *      `kitesurfing` and `드론` kept the scenario — an activity tried and
  *      abandoned — which is the core judgement of `succ-durable-en-608` and
- *      `succ-durable-ko-602`. Both are `polarity44` replacements, cases that
- *      exist because their originals were retired to buy an independent
- *      holdout for exactly this rule.
+ *      `succ-durable-ko-602`, both `polarity44` replacements whose originals
+ *      were retired to buy an independent holdout for exactly this rule.
+ *   3. **Classification.** A Korean `code_style` candidate was marked negated,
+ *      two paragraphs below the rule establishing that a preference against
+ *      something is affirmed. Every answer-style kind negates that way, so the
+ *      family is refused by name.
+ *   4. **Justification.** `long_term_goal` was then chosen because its cell was
+ *      unscored — a safety measurement standing in for a taxonomy judgement,
+ *      and a mapping the approved prompt makes nowhere.
  *
- * So there are two contamination checks and not one: a case-folded term scan
- * over every resolvable corpus, and a structural check that the (language,
- * kind, polarity) cell an example occupies is one the corpus does not score.
- * The second is what would have caught round two.
+ * So the kind is checked against the prompt's own sentences, and the cell is
+ * checked separately as what it is: a measurement, with every gold in it named
+ * rather than tolerated by a count.
  */
 
 import assert from "node:assert/strict";
@@ -32,6 +37,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 
 import {
+    MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS,
     MEMORY_EXTRACTION_EXAMPLE_LABEL,
     MEMORY_EXTRACTION_EXAMPLE_TERMS,
     MEMORY_EXTRACTION_NEGATED_EXAMPLES,
@@ -348,13 +354,24 @@ test("no content word in either example escapes registration", () => {
     // corpus because every code_style case is about code examples; they are
     // the category, not the subject. The subject is `의사코드`, which is
     // registered and scanned.
+    // The allowlist is the examples' context clause and their grammar, never
+    // their subject. Both messages set the scene with a form that lists a
+    // number of dependants and then state the fact; the scene is what these
+    // words are, and `dependants` / `부양가족` is the subject, registered above
+    // and absent from every corpus.
+    //
+    // Two entries overlap a gold as substrings and neither is that gold's
+    // subject: `form` occurs inside the gold `formal`, and `two` inside the
+    // gold `two passports`, which is a different fact about a different thing.
+    // Whole-word identity with a gold token would be a different matter and is
+    // not what these are.
     const ALLOWED = new Set([
-        // English framing
-        "the", "user", "have", "has", "no", "plans", "plan", "to", "open",
-        "does", "not", "now", "or", "later",
-        // Korean grammar and framing
-        "저는", "사용자는", "여는", "계획은", "계획하고", "지금도", "앞으로도",
-        "없습니다", "것을", "있지", "않습니다",
+        // English context clause and grammar
+        "the", "user", "have", "has", "no", "i", "registration", "form",
+        "lists", "two",
+        // Korean context clause and grammar
+        "가입", "서류에는", "둘로", "적혀", "있는데", "저는", "사용자는",
+        "없습니다",
     ]);
     const corpus = corpusText();
     const registered = MEMORY_EXTRACTION_EXAMPLE_TERMS.map(fold);
@@ -385,62 +402,112 @@ test("no content word in either example escapes registration", () => {
     assert.ok(checked > 10, `only ${checked} words were walked`);
 });
 
-const cellCounts = (versions) => {
+/**
+ * Distinct golds per cell, keyed `caseId#goldId`.
+ *
+ * Counting occurrences instead would report a single gold five times, because
+ * succ-4 through succ-8 inherit most cases from one another: the one Korean
+ * `relationship|negated` gold appears in all five and a raw count calls that
+ * five cases. A reviewer reading "scored five times" would picture a
+ * population, and the number is one.
+ */
+const cellGolds = (versions) => {
     const scored = new Map();
     for (const version of versions) {
         for (const testCase of harnessTarget(version).cases) {
             for (const gold of testCase.expected ?? []) {
                 const cell = `${testCase.language}|${gold.kind}|${gold.polarity}`;
-                scored.set(cell, (scored.get(cell) ?? 0) + 1);
+                if (!scored.has(cell)) scored.set(cell, new Set());
+                scored.get(cell).add(`${testCase.id}#${gold.id}`);
             }
         }
     }
     return scored;
 };
 
-test("neither example sits in a cell any corpus scores, on either basis", () => {
-    // The structural check, and the one that would have caught the second
-    // round. `kitesurfing` and `드론` were absent from every corpus as strings
-    // while their scenario — an activity tried and abandoned — was the core
-    // judgement of two `polarity44` replacements.
+test("the kind each example uses is one the approved prompt licenses", () => {
+    // The finding this closes, and it is about what justifies a judgement
+    // rather than about safety. "The cell is unscored" and "this is the right
+    // kind" are different claims: a draft chose `long_term_goal` on the first
+    // and thereby introduced the second as new policy, in a prompt whose whole
+    // point is to state policy explicitly.
     //
-    // A (language, kind, polarity) cell is a coarse stand-in for "scenario",
-    // but it is a checkable one, and it is the axis the eval actually scores.
+    // So the kind is checked against the prompt's own sentences. If the
+    // boundary rule or the kind guide stops saying these, this fails rather
+    // than the examples quietly becoming the only place the mapping lives.
+    const text = `${built().system}\n${built().user}`;
+    assert.match(
+        text,
+        /"The registration form lists two dependants; I have no dependants" establishes a negated relationship fact/
+    );
+    assert.match(
+        text,
+        /How many siblings a user has, or has none, is a relationship/
+    );
+    for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
+        assert.equal(
+            example.candidate.kind,
+            "relationship",
+            "the examples use a kind the prompt does not license for a negation"
+        );
+    }
+});
+
+test("every gold in the examples' cell is one that was looked at", () => {
+    // The structural check, and the one that would have caught the round where
+    // `kitesurfing` and `드론` were absent from every corpus as strings while
+    // their scenario — an activity tried and abandoned — was the core judgement
+    // of two `polarity44` replacements.
     //
-    // **Zero, not "at most one".** This read `<= 1` for one revision, and the
-    // slack was not harmless: `ko|relationship|negated` is scored exactly once
-    // in the live target, so the tolerance would have admitted the one cell
-    // that made the pair same-kind. A cell the corpus scores once is a cell
-    // the corpus scores.
+    // It is not "the cell must be empty". That version forced the kind to be
+    // picked for its cell count, which is how `long_term_goal` — a mapping the
+    // prompt licenses nowhere — got shipped. No kind is both licensed for a
+    // negation and unscored in both languages, so the cell is an input to the
+    // decision and not the decision.
     //
-    // Both bases are checked. The live target is what a run is measured on;
-    // the union is what any resolvable artifact was measured on, and an
-    // example contaminating a retired case still misleads whoever reads that
-    // artifact later.
+    // It is not "at most one" either. That tolerance would swallow whatever
+    // happened to be there. What it is: every gold in the cell must be named,
+    // so the one that is there was read, and a second one arriving fails.
     for (const [label, versions] of [
         ["every resolvable corpus", CORPORA],
         ["the live target", ["mem-eval-succ-8"]],
     ]) {
-        const scored = cellCounts(versions);
+        const scored = cellGolds(versions);
         for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
             const cell = `${example.language}|${example.candidate.kind}|${example.candidate.polarity}`;
-            assert.equal(
-                scored.get(cell) ?? 0,
-                0,
-                `the ${example.language} example sits in ${cell}, scored ${scored.get(cell)} times in ${label}`
+            const unreviewed = [...(scored.get(cell) ?? [])].filter(
+                (gold) => !MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS.includes(gold)
+            );
+            assert.deepEqual(
+                unreviewed,
+                [],
+                `${cell} carries golds nobody reviewed, in ${label}: ${unreviewed.join(", ")}`
             );
         }
     }
 
-    // And the cell the retired scenario occupies is populated, so the
-    // assertion above is not vacuously true of every cell.
-    const all = cellCounts(CORPORA);
-    assert.ok((all.get("en|decision|negated") ?? 0) > 1);
-    assert.ok((all.get("ko|decision|negated") ?? 0) > 1);
-    // The cell that the `<= 1` tolerance used to admit, named so the tightening
-    // cannot be undone without this line failing.
-    assert.equal(all.get("ko|relationship|negated"), 5);
-    assert.equal(cellCounts(["mem-eval-succ-8"]).get("ko|relationship|negated"), 1);
+    // The exceptions are real golds, not stale ids: an entry that stopped
+    // existing would silently widen the check.
+    const everywhere = cellGolds(CORPORA);
+    const known = new Set([...everywhere.values()].flatMap((set) => [...set]));
+    for (const gold of MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS) {
+        assert.ok(known.has(gold), `${gold} is recorded as an exception but does not exist`);
+    }
+
+    // And the counts, so the write-up beside them cannot drift. One distinct
+    // Korean gold — appearing in five corpora, which a raw occurrence count
+    // reported as five cases and a reviewer read as a population.
+    assert.equal(everywhere.get("ko|relationship|negated").size, 1);
+    assert.equal(
+        cellGolds(["mem-eval-succ-8"]).get("ko|relationship|negated").size,
+        1
+    );
+    assert.equal(everywhere.get("en|relationship|negated") ?? undefined, undefined);
+
+    // The cell the retired scenario occupies is populated, so the assertions
+    // above are not vacuously true of every cell.
+    assert.ok(everywhere.get("en|decision|negated").size > 1);
+    assert.ok(everywhere.get("ko|decision|negated").size > 1);
 });
 
 test("both examples are the same kind, differing only in language", () => {
@@ -497,29 +564,39 @@ test("a negated example is a fact that is not so, never a preference against", (
     );
 });
 
-test("each example's message carries exactly one fact", () => {
-    // The completeness half. `KIND_GUIDE` says a sentence carrying two
-    // independently useful facts yields two candidates, so an example whose
-    // message carries two and shows one teaches the model to drop the second.
+test("each example's message is a single sentence", () => {
+    // A **necessary** condition for the completeness the examples claim, and
+    // not a sufficient one. It is worth being exact about which, because the
+    // earlier name for this test ("carries exactly one fact") asserted
+    // something it does not check: a single sentence can carry two
+    // independently useful facts, and `KIND_GUIDE` says such a sentence yields
+    // two candidates.
     //
-    // A draft did that: "코드 예시는 의사코드로 주지 말아 주세요. 바로 돌려볼
-    // 수 있어야 합니다." is two claims and it showed one candidate.
+    // What it does close is the way the defect actually arrived. The draft
+    // message was "코드 예시는 의사코드로 주지 말아 주세요. 바로 돌려볼 수
+    // 있어야 합니다." — two sentences, two claims, one candidate shown. One
+    // sentence per example makes a second claim visible in review instead of
+    // hiding behind a full stop.
     //
-    // Enforced as one sentence rather than by counting facts, which is not
-    // mechanical: a single sentence with a single candidate cannot be
-    // incomplete in that way. An example that needs two facts has to show two
-    // candidates, and this assertion is what makes that a deliberate act.
+    // That the sentence carries one fact is a reviewed judgement, recorded in
+    // section 1 of the implementation record: the clause before the semicolon
+    // describes the form rather than the user, so the only durable fact is the
+    // one the candidate states. No test here proves that, and this comment is
+    // the honest version of what the assertion below is worth.
     for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
         const terminators = example.message.match(/[.!?。]/g) ?? [];
         assert.equal(
             terminators.length,
             1,
-            `the ${example.language} message has ${terminators.length} sentences: ${example.message}`
+            `the ${example.language} message has ${terminators.length} sentence terminators: ${example.message}`
         );
         assert.ok(
             example.message.trimEnd().endsWith(terminators[0]),
             `the ${example.language} message continues past its only terminator`
         );
+        // And exactly one candidate is shown for it, so a message that grows a
+        // second fact has to grow a second candidate deliberately.
+        assert.equal(typeof example.candidate.statement, "string");
     }
 });
 

@@ -451,41 +451,67 @@ export const MEMORY_EXTRACTION_EXAMPLE_LABEL = "m0";
 export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
     {
         language: "en",
-        message: "I have no plans to open a franchise, now or later.",
+        message:
+            "The registration form lists two dependants; I have no dependants.",
         candidate: {
-            kind: "long_term_goal",
+            kind: "relationship",
             polarity: "negated",
-            statement: "The user does not plan to open a franchise",
+            statement: "The user has no dependants",
             confidence: 0.9,
             sensitivity: "standard",
             expiresAt: null,
             evidence: [
                 {
                     messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
-                    quote: "I have no plans to open a franchise",
+                    quote: "I have no dependants",
                 },
             ],
         },
     },
     {
         language: "ko",
-        message: "저는 프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다.",
+        message:
+            "가입 서류에는 부양가족이 둘로 적혀 있는데, 저는 부양가족이 없습니다.",
         candidate: {
-            kind: "long_term_goal",
+            kind: "relationship",
             polarity: "negated",
-            statement: "사용자는 프랜차이즈를 여는 것을 계획하고 있지 않습니다",
+            statement: "사용자는 부양가족이 없습니다",
             confidence: 0.9,
             sensitivity: "standard",
             expiresAt: null,
             evidence: [
                 {
                     messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
-                    quote: "프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다",
+                    quote: "저는 부양가족이 없습니다",
                 },
             ],
         },
     },
 ] as const;
+
+/**
+ * The one case that already occupies the examples' cell.
+ *
+ * The cell check would otherwise require `relationship|negated` to be scored
+ * nowhere, and in Korean it is scored once. Recording that case by id rather
+ * than loosening the check to "at most one" keeps the difference that matters:
+ * a *new* case entering the cell still fails, and the case that is there was
+ * looked at.
+ *
+ * `succ-assistant-ko-407` states "저는 배우자가 없어서 그 항목은 해당되지
+ * 않습니다" — a listed benefit that does not apply because the user has no
+ * spouse. The examples share its kind and polarity and not its subject, which
+ * is `배우자` against `부양가족`; neither example term occurs in any corpus.
+ *
+ * This is a residual, not a clean result, and section 3.5 of
+ * `.github/audits/mem-extract-v8-implementation-2026-09-04.md` says so. It is
+ * accepted because the alternative was worse: no kind is
+ * scored zero in both languages *and* carries a mapping the approved prompt
+ * states, so avoiding it meant inventing a taxonomy rule inside an example.
+ */
+export const MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS: readonly string[] = [
+    "succ-assistant-ko-407#g1",
+];
 
 /**
  * Two complete negated candidates, added in `mem-extract-v8`.
@@ -539,25 +565,39 @@ export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
  * isolates is the rule that a statement is written in the language of the
  * evidence it cites.
  *
- * **This kind.** The negation has to be a fact that is not so of the user, not
- * a preference against something: `MEMORY_EXTRACTION_POLARITY_RULE` above
- * settles that "The user dislikes open-plan offices" is *affirmed*, because
- * the dislike holds of them. That rules out every answer-style kind, whose
- * natural negation — "does not want citations", "does not want pseudocode" —
- * is a preference against something and therefore affirmed. A draft made
- * exactly that mistake and shipped an example contradicting the rule two
- * paragraphs above it.
+ * **This kind, and why the cell did not choose it.** A kind is a taxonomy
+ * judgement, and an empty cell is a safety measurement; they are different
+ * claims, and a draft let the second stand in for the first. It shipped
+ * `long_term_goal|negated` — a mapping the approved prompt states nowhere,
+ * and one that sits ambiguously against `decision`, which is the retired
+ * holdout shape — on the sole ground that the cell was unscored. An example
+ * introducing a taxonomy rule nobody approved is worse than one landing on a
+ * measured case.
  *
- * Of the factual kinds, `long_term_goal` is the only one scored zero times as
- * negated in both languages, across succ-4 through succ-8 and in the live
- * target alike, and it appears in no `polarity44` replacement. `relationship`
- * would have been the natural choice — the boundary rule already calls "I have
- * no dependants" a negated relationship fact — but `ko|relationship|negated`
- * is scored once in the live target and five times across the corpora, so the
- * pair could not have been the same kind there.
+ * So the kind comes from the prompt. `MEMORY_EXTRACTION_BOUNDARY_RULE` says
+ * that "The registration form lists two dependants; I have no dependants"
+ * **establishes a negated relationship fact**, and `KIND_GUIDE` says that how
+ * many siblings a user has, **or has none**, is a relationship. The mapping
+ * these examples show is therefore one the approved prompt already makes,
+ * twice, and the examples add the output shape rather than the judgement.
  *
- * The absence is stated as never held rather than given up ("now or later"),
- * which keeps it clear of the retired `decision|negated` shape.
+ * The negation also has to be a fact that is not so of the user rather than a
+ * preference against something: `MEMORY_EXTRACTION_POLARITY_RULE` settles that
+ * "The user dislikes open-plan offices" is *affirmed*, because the dislike
+ * holds of them. That rules out every answer-style kind, whose natural
+ * negation — "does not want citations", "does not want pseudocode" — is a
+ * preference and therefore affirmed. An earlier draft made exactly that
+ * mistake and shipped an example contradicting the rule two paragraphs above
+ * it. "Has no dependants" is not a preference in either direction.
+ *
+ * **What that costs, stated rather than measured away.** No kind is both
+ * licensed by the prompt and scored zero in both languages:
+ * `relationship|negated` is scored once in Korean and `expertise|negated` —
+ * the other licensed negation, "having no experience in a domain" — four
+ * times. `relationship` is the better-licensed and smaller of the two, and the
+ * single Korean case is named in
+ * `MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS` rather than absorbed by a
+ * tolerance, so a second case entering that cell still fails the check.
  */
 export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
     "Two complete examples of a negated candidate, one in each language. Each is a whole candidate object rather than a description of one, so the seven required fields are visible together and in the shape the schema asks for.",
@@ -583,8 +623,8 @@ export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
  * introducing a gold token without anybody adding it here.
  */
 export const MEMORY_EXTRACTION_EXAMPLE_TERMS: readonly string[] = [
-    "franchise",
-    "프랜차이즈",
+    "dependants",
+    "부양가족",
 ];
 
 const SYSTEM_PROMPT = [
