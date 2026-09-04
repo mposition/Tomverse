@@ -83,6 +83,31 @@ test("a confirmation with nobody's name on it is not a confirmation", () => {
     assert.match(problems.join(" "), /no day it happened/);
 });
 
+test("a hyphen is not a name", () => {
+    // The one-character-wide version of the same hole. `human_confirmed` with
+    // `reviewer: "-"` and a real date passed every check, so a placeholder
+    // somebody typed to fill the field counted as a confirmation.
+    for (const reviewer of ["-", "--", "-a", "a-", "@-", "@", "", " ", "has space", "@@x", null]) {
+        const problems = subtypeReviewProblems(
+            review({ status: "human_confirmed", reviewer, reviewedAt: "2026-09-04" })
+        );
+        assert.equal(problems.length, 1, `${JSON.stringify(reviewer)} was accepted`);
+        assert.match(problems[0], /no reviewer/);
+    }
+    // Hyphens inside a handle are ordinary, and both spellings this repository
+    // already uses have to keep working: the frozen subtype table's reviewer
+    // is `mposition` and succ-8's approval is `@mposition`.
+    for (const reviewer of ["mposition", "@mposition", "a-b", "@a-b-c", "m"]) {
+        assert.deepEqual(
+            subtypeReviewProblems(
+                review({ status: "human_confirmed", reviewer, reviewedAt: "2026-09-04" })
+            ),
+            [],
+            `${reviewer} was rejected`
+        );
+    }
+});
+
 test("a confirmation needs a day that exists, not a date-shaped one", () => {
     assert.deepEqual(
         subtypeReviewProblems(

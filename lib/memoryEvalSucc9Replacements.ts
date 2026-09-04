@@ -22,16 +22,21 @@ import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
  *
  * ## What a replacement has to do
  *
- * Keep the boundary and drop the subject. Each of these tests exactly what its
- * original tested — same category, same language, same kind and polarity, same
- * conversational shape — with different subject matter, because the case is
- * retired for its role in a decision and not for the judgement it encodes.
- * `docs/ops/memory-extraction-eval-dataset.md` §7.3 is why the originals are
- * preserved unedited in `memoryEvalSucc9Regression.ts` rather than rewritten
- * in place.
+ * Keep the boundary and drop the subject. **Four** of these test exactly what
+ * their originals tested — same category, language, kind, polarity, gold
+ * shape, anchoring and conversational shape — with different subject matter,
+ * because the case is retired for its role in a decision and not for the
+ * judgement it encodes. `docs/ops/memory-extraction-eval-dataset.md` §7.3 is
+ * why the originals are preserved unedited in `memoryEvalSucc9Regression.ts`
+ * rather than rewritten in place.
  *
- * Every subject here was checked against succ-4 through succ-8, the succ-7
- * regression corpus and the shipped prompt before it was used:
+ * The fifth, `succ-durable-ko-701`, is a **repair**: its original claims to be
+ * `exhaustive` and leaves a fact its own user turn states unclaimed, so the
+ * replacement keeps both of the original's golds and adds a third. The
+ * transition table names it `repair` and says what it repairs, and
+ * `succ9Problems()` allows a repair to differ on the gold axes and on nothing
+ * else — and only by adding. See the note on that case's `e3`.
+ *
  * Every subject was scanned against **all nine** datasets the tree assembles —
  * seed-11, succ-2 and succ-3 as well as succ-4 through succ-9 — plus both
  * regression corpora and the shipped prompt. `welding`, `sourdough`,

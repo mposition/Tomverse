@@ -151,6 +151,27 @@ export function succ9Subtype(caseId: string): 3 | 4 | undefined {
  * cases this version retired.
  */
 /**
+ * A name somebody could be reached at.
+ *
+ * `/^@?[A-Za-z0-9-]+$/` was the first attempt and it accepted `"-"`, which is
+ * how a placeholder becomes a reviewer: `human_confirmed` with a hyphen and a
+ * real date passed every check, so the "confirmation with nobody's name on it"
+ * path was still open one character wide. Hyphens are legal inside a handle
+ * and at neither end, which is also GitHub's own rule, so requiring the first
+ * and last character to be alphanumeric closes it without inventing a
+ * restriction.
+ *
+ * The `@` is optional because both records this family already holds spell it
+ * differently: `ASSISTANT_ONLY_SUBTYPES`' reviewer is `mposition` and succ-8's
+ * approval is `@mposition`. Rejecting either spelling would refuse a signature
+ * over a punctuation mark.
+ */
+const HANDLE = /^@?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+
+const isHandle = (value: unknown): boolean =>
+    typeof value === "string" && HANDLE.test(value);
+
+/**
  * What a review record has to look like in each of its two states.
  *
  * Checked in **both** directions, because only one of them is the dangerous
@@ -180,7 +201,7 @@ export function subtypeReviewProblems(review: {
         problems.push("the subtype review states no method");
     }
     if (review.status === "human_confirmed") {
-        if (!/^@?[A-Za-z0-9-]+$/.test(review.reviewer ?? "")) {
+        if (!isHandle(review.reviewer)) {
             problems.push(
                 "the subtype review is human_confirmed with no reviewer: " +
                     JSON.stringify(review.reviewer)

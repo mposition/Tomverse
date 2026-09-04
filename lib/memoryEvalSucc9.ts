@@ -71,11 +71,17 @@ export const MEMORY_EVAL_SUCC9_CHANGE_REASON =
 /**
  * False, pending a signature.
  *
- * A case-changing successor cannot inherit its predecessor's freeze: what has
- * to be approved here is that these five left for the reason given and that
- * their replacements test the same boundaries, which is a person's decision.
- * `decideEvalRunMode()` refuses a decision-grade run against an unfrozen
- * sample, which is what should happen until then.
+ * A case-changing successor cannot inherit its predecessor's freeze. What has
+ * to be approved here is that these five left for the reason given, that four
+ * of the replacements test the same boundary, and that the fifth is a repair
+ * whose extra gold is one its original should have had — a person's decision
+ * on each count. `decideEvalRunMode()` refuses a decision-grade run against an
+ * unfrozen sample, which is what should happen until then.
+ *
+ * Not the only thing pending. `succ9Problems()` also refuses a freeze while
+ * `SUCC9_SUBTYPE_REVIEW` is still an AI draft, because both `assistant_only`
+ * arms sit exactly on their floor and those three rows are what puts them
+ * there.
  */
 export const MEMORY_EVAL_SUCC9_DATASET_FROZEN = false;
 
