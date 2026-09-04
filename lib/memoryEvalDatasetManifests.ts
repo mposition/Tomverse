@@ -806,7 +806,7 @@ export const MEMORY_EVAL_SCORING_CONTRACT_MANIFESTS: readonly ScoringContractMan
             // date is when the digest below became what it is.
             approvedOn: "2026-09-04",
             descriptorDigest:
-                "fa32bcfc87aa9203ff05a3e608f01562e3c396ea403b0054226122778fa3cc93",
+                "01ff1f40933386d0a87c5a74c749f0f9f7cc1eddbc46da8b571030d95cbb7ebf",
             pendingRules: [],
         },
     ];

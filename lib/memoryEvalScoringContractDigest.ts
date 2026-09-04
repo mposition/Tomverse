@@ -250,17 +250,22 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
             "numeral is left as written. A row is bounded on the left and only on the " +
             "left: it matches where no Hangul syllable immediately precedes the numeral, " +
             "and it does not read what follows the counter. That one character is the " +
-            "only context any step reads, so a token canonicalises the same alone as " +
-            "inside a sentence provided the word boundary before it is present, and the " +
-            "same however the expression itself is spaced. No canonical form may be a " +
-            "substring of another. This contract states no bound on what a canonical " +
-            "form may be a substring OF: a gold token is matched as a substring, so a " +
-            "candidate stating a different fact whose text contains the token is " +
-            "credited for it, in either spelling and whether or not a row rewrote " +
-            "anything. That is a property of the matcher, it predates this rule, and " +
-            "no boundary inside canonicalisation can remove it. Canonicalisation " +
-            "rewrites a token to a canonical form by a fixed table and never decides " +
-            "that two different facts are the same.",
+            "only context the Korean numeral step reads. It is not the only context any " +
+            "step reads: the contraction step, the digit-group separator step and the " +
+            "English numeral step each anchor on a word boundary, and the separator step " +
+            "also looks ahead for the three digits that make a group. Every one of those " +
+            "is a boundary or a fixed-width lookahead written into the step, and no step " +
+            "reads a word, a distance, a sentence or anything a later edit could change " +
+            "at range. A token therefore canonicalises the same alone as inside a " +
+            "sentence provided the boundary before it is present, and the same however " +
+            "the expression itself is spaced. No canonical form may be a substring of " +
+            "another. This contract states no bound on what a canonical form may be a " +
+            "substring OF: a gold token is matched as a substring, so a candidate stating " +
+            "a different fact whose text contains the token is credited for it, in either " +
+            "spelling and whether or not a row rewrote anything. That is a property of " +
+            "the matcher, it predates this rule, and no boundary inside canonicalisation " +
+            "can remove it. Canonicalisation rewrites a token to a canonical form by a " +
+            "fixed table and never decides that two different facts are the same.",
     },
     {
         id: "v3-evidence-binding",

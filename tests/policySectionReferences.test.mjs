@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -213,4 +218,81 @@ test("code between two blocks ends the first one's scope", () => {
     const result = classify(source);
     // §9.1 is not in image-generation.md, and the file names nothing else.
     assert.equal(result.unscoped.length, 1);
+});
+
+/* -------------------------------------------------- the command itself -- */
+
+const SCRIPT = fileURLToPath(
+    new URL("../scripts/check-policy-section-references.mjs", import.meta.url)
+);
+
+const runIn = (cwd) => {
+    try {
+        const stdout = execFileSync(process.execPath, [SCRIPT], {
+            cwd,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        return { status: 0, output: stdout };
+    } catch (error) {
+        return {
+            status: error.status ?? 1,
+            output: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+        };
+    }
+};
+
+/** A repository with tracked files but no `docs/policy` at all. */
+const emptyCorpus = () => {
+    const root = mkdtempSync(path.join(tmpdir(), "policy-section-"));
+    const git = (...args) =>
+        execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    git("init", "-q");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "user.name", "test");
+    writeFileSync(path.join(root, "example.ts"), "export const x = 1;\n");
+    git("add", "-A");
+    git("commit", "-qm", "seed");
+    return root;
+};
+
+test("the command refuses a run that resolved no policy documents", (t) => {
+    // The defect this closes, at the level it happened. Until 2026-09-04 the
+    // file list was built by interpolating patterns into a shell string and
+    // quoting them for a POSIX shell, so on Windows `git ls-files` was handed
+    // a literal `'docs/policy/*.md'` and matched nothing. The run then
+    // printed "0 citation(s) against 0 policy document(s)" and exited 0.
+    //
+    // That is the shape worth testing: not the quoting, which a rewrite would
+    // change, but the claim. A gate that scanned nothing must not report a pass,
+    // however it came to scan nothing.
+    const root = emptyCorpus();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+
+    const result = runIn(root);
+    assert.notEqual(
+        result.status,
+        0,
+        `the check passed on an empty corpus:\n${result.output}`
+    );
+    assert.match(result.output, /no policy documents were found/);
+    assert.doesNotMatch(result.output, /check passed/);
+});
+
+test("the command passes on this repository, and says how much it read", () => {
+    // The positive control. Without it the assertion above would hold just as
+    // well against a script that refused everything, which is the other way to
+    // make a gate useless.
+    const repo = fileURLToPath(new URL("..", import.meta.url));
+    const result = runIn(repo);
+    assert.equal(result.status, 0, result.output);
+    const counts = result.output.match(
+        /passed: (\d+) citation\(s\) against (\d+) policy document\(s\)/
+    );
+    assert.ok(counts, `the summary did not name its counts:\n${result.output}`);
+    // Written as floors rather than exact numbers: the point is that the scan
+    // reached the corpus, and an exact count would fail on every unrelated
+    // policy edit.
+    assert.ok(Number(counts[1]) > 100, `only ${counts[1]} citations scanned`);
+    assert.ok(Number(counts[2]) > 10, `only ${counts[2]} policy documents found`);
 });

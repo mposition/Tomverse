@@ -190,6 +190,22 @@ const tracked = (patterns) =>
     .filter(Boolean);
 
 const policyDocuments = tracked(["docs/policy/*.md"]);
+
+// Fail-closed on an empty corpus. This check reported
+// `0 citation(s) against 0 policy document(s)` on Windows for as long as it
+// built its file list with a shell string, and that line read as a pass while
+// the check was not running at all -- three bare citations went to CI under it.
+// A gate that finds nothing has not verified anything, so it says so and exits.
+if (policyDocuments.length === 0) {
+  console.error("Policy section reference check failed: no policy documents were found.");
+  console.error("");
+  console.error("  git ls-files docs/policy/*.md returned nothing.");
+  console.error("");
+  console.error("This is refused rather than passed. Every earlier run resolved 30");
+  console.error("documents, so an empty list means file discovery broke, not that the");
+  console.error("citations are clean.");
+  process.exit(1);
+}
 const sections = new Map(
   policyDocuments.map((path) => [
     path,
@@ -272,6 +288,22 @@ if (failures.length > 0 || newUnscoped.length > 0 || newAmbiguous.length > 0) {
     "Write the document beside the number — `docs/policy/external-conversation-import-and-memory.md §14` —\n" +
       "or correct the number. A citation nobody can follow is worse than none."
   );
+  process.exit(1);
+}
+
+// The second half of the same guard. Documents can resolve while the scan
+// itself reaches no file -- a broken exclusion list, a pattern that stops
+// matching -- and the summary would again read as a pass.
+if (checked === 0) {
+  console.error("Policy section reference check failed: no citations were scanned.");
+  console.error("");
+  console.error(
+    `  ${policyDocuments.length} policy document(s) resolved, but no scanned source`
+  );
+  console.error("  file contained a section citation.");
+  console.error("");
+  console.error("This repository has thousands. An empty scan means the file list or");
+  console.error("the exclusions broke, and a clean result cannot be claimed from it.");
   process.exit(1);
 }
 

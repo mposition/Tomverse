@@ -365,18 +365,25 @@ export function canonicalFormsAreDisjoint(): readonly string[] {
 /**
  * The rule, as one ordered alternation applied in a single pass.
  *
- * Both boundaries are here, and each was learned from a defect:
+ * One boundary, on the left, and it was learned from a defect:
  *
- *   * **Left** — `(?<![가-힣])`. Without it the numeral is read off the end of
- *     the preceding word: `교육 개월` became 교6개월 and scored as six months,
- *     `전세 시장` became 전3시장 and destroyed the gold 전세, and `열아홉 시에`
- *     became 열9시에.
- *   * **Right** — the counter must end the expression, unless what follows is
- *     one of the row's reviewed continuations. Without it `아홉 시장` became
- *     9시장 and nine markets scored as nine o'clock.
+ *   * `(?<![가-힣])`. Without it the numeral is read off the end of the
+ *     preceding word: `교육 개월` became 교6개월 and scored as six months,
+ *     `전세 시장` became 전3시장 and destroyed the gold 전세, and
+ *     `열아홉 시에` became 열9시에.
  *
- * Longest first and one pass, so `아홉 시간` is not reached by the `아홉 시`
- * alternative after some earlier rewrite has moved the text under it.
+ * There is no right boundary. A list of permitted continuations stood here
+ * for one day and was withdrawn on 2026-09-04: it constrained only the
+ * rewrite, only the Korean-word spelling needs a rewrite, and every false
+ * positive it named reached the gold through the digit spelling anyway. See
+ * the section above.
+ *
+ * Longest key first, and one pass so no rewrite is re-scanned. With today's
+ * three rows nothing overlaps — 육개월, 아홉시 and 세시 share no prefix — so
+ * the ordering cannot be observed from outside; it is kept because a fourth
+ * row could make it observable, and the tests say so rather than dressing an
+ * unrelated assertion up as a test of it. (아홉 시간 is rewritten to 9시간
+ * now, which is the withdrawn right boundary, not the ordering.)
  *
  * ## The assumption this rule makes, stated rather than buried
  *
