@@ -158,13 +158,18 @@ kind를 prompt에서 가져오고 나서, 남는 중복 1건을
 
 ```
 caseCount        1150  (succ-8과 같음 — 1:1)
-datasetDigest    b376478e895a006079f14048f9f4a6820e0da9b5360178c20d573cdbbf011366
-manifestDigest   87814cf099c300381326be5259b1fa951013b5a9cc5ceaad23c080e1a479c4c8
-transitionDigest 066bec67f99d21592f90d788f54fbbfcd7a4ef6c340a04975c2fc2f678f9b857
+datasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6
+manifestDigest   15b40cd92a737b53906ca287ac5a991339bfcaf4668aca440e3aa47507f14c4a
 subtypeDigest    06a0c8cfc56f496d965cac0ff47cfb6cde294674c6742559eebd5483e83a682c  (ai_draft)
+transitionDigest cf8fa0800fe97be1daee34a27ba3196a4ba6cbe421b1d280b061cd0ad52bb6cd
 scoringContract  mem-score-v3.5  2d4bcb69…  (변경 없음)
-frozen           false  — 서명 대기
+frozen           false
 ```
+
+**이 두 값은 아직 서명 대상이 아닙니다.** `SUCC9_SUBTYPE_REVIEW`가 `ai_draft`
+이고, 사람이 세 줄을 확인하면 subtypeDigest가 움직이며 manifestDigest도 따라
+움직입니다. 확인 뒤의 값이 서명 대상입니다. 그 전에 동결을 시도하면
+`succ9Problems()`가 거절합니다.
 
 | 퇴역 | 대체 | 소재 교체 |
 | --- | --- | --- |
@@ -172,7 +177,7 @@ frozen           false  — 서명 대기
 | succ-assistant-en-603 | succ-assistant-en-701 | bees → welding |
 | succ-assistant-en-608 | succ-assistant-en-702 | houseplant → sourdough |
 | succ-durable-en-423 | succ-durable-en-701 | code → soldering |
-| succ-durable-ko-422 | succ-durable-ko-701 | 오픈워터·바다·헤엄 → 백두대간·능선·야영 |
+| succ-durable-ko-422 | succ-durable-ko-701 | 오픈워터·바다·헤엄 → 백두대간·능선·야영 (**repair**, gold 3개) |
 
 - **경계는 그대로, 소재만 바뀝니다.** case가 틀려서 나가는 것이 아니라
   **선택에 쓰였기 때문에** 나가므로, 판단은 보존됩니다.
@@ -198,10 +203,21 @@ frozen           false  — 서명 대기
     **다른 행위**라 반대 독해가 살아 있지 않아 두 값짜리 gold가 일을 하지
     않고, "당일 산행만 해 봤다"는 **어느 gold도 주장하지 않는 durable 사실**
     이라 `exhaustive` case에 남겨 둘 수 없습니다.
-  - 지금은 "계곡에서만 텐트를 쳐 봤고 능선에서는 아직 야영을 못 합니다" —
-    한 행위(야영)를 쉬운 곳에서 긍정하고 목표가 요구하는 곳에서 부정하므로,
-    원본과 같은 이유로 gold가 **어디서**까지 말해야 하고, 긍정 절이 새 사실을
-    더하는 대신 같은 행위의 범위를 좁히므로 두 gold로 exhaustive입니다.
+  - 셋째 판이 지금 것입니다. "계곡에서만 텐트를 쳐 봤고 능선에서는 아직
+    야영을 못 합니다" — 한 행위(야영)를 쉬운 곳에서 긍정하고 목표가 요구하는
+    곳에서 부정하므로, 원본과 같은 이유로 gold가 **어디서**까지 말해야 합니다.
+  - **그런데 긍정 절도 사실입니다.** "같은 행위의 범위를 좁힐 뿐 새 사실을
+    더하지 않는다"고 적었던 것은 틀렸습니다. `scoreCaseV3()`에 세 후보를
+    넣어 확인했습니다 — 긍정 후보는 `unboundCandidates 0`으로 정상 결속되고
+    `candidateMatched 2/3`, 즉 **맞는 답이 false positive로 채점**됩니다.
+    `goldCompleteness: "exhaustive"`가 그런 뜻입니다.
+  - **succ-8의 ko-422도 같은 결함입니다**("실내 수영장에서 자유형만 하고" —
+    같은 실험에서 같은 2/3). 동결·서명본이므로 고치지 않고, 결함을 물려받은
+    것이 새 decision set을 유효하게 만들지는 않으므로 **여기서 고칩니다.**
+    ko-701은 gold 셋(목표 / 능선·야영 negated / 계곡·텐트 affirmed)을 갖고,
+    전환은 `same_boundary`가 아니라 **`repair`**로 기록하며 무엇을 고치는지
+    문장으로 적습니다. `repair`는 원본의 gold를 **전부 유지하고 더하는**
+    방향으로만 허용되고, 하나라도 잃으면 실패입니다.
 - **소재는 이번에 tree가 조립하는 아홉 corpus 전부**(seed-11·succ-2·succ-3
   포함) **와 두 regression corpus, 배포된 prompt**에 대조했습니다.
   welding·sourdough·soldering·백두대간·능선·야영·계곡·텐트는 어디에도
@@ -223,8 +239,18 @@ frozen           false  — 서명 대기
   succ-7의 행, succ-9의 행과 **그 검토 기록**(`SUCC9_SUBTYPE_REVIEW`,
   현재 `ai_draft`)을 하나로 접고, 그 값이 manifest fingerprint 안에 들어갑니다.
   ground 한 줄만 고쳐도 subtypeDigest와 manifestDigest가 함께 움직입니다 —
-  되돌려 확인했습니다. 나중에 사람이 확인하면 그것도 digest를 움직이므로
-  조용히 승격되지 않습니다.
+  되돌려 확인했습니다.
+- **`ai_draft`인 채로는 동결할 수 없습니다.** digest에 묶는 것만으로는
+  부족했습니다 — 서명하고 `frozen=true`로 바꿔도 검사가 통과했으니까요. 두 arm이
+  38/38로 걸쳐 있으므로 그 세 줄이 §3.3 충족 여부를 **결정**하고, 따라서
+  서명이 덮어야 할 대상입니다. `succ9Problems()`가 이제 `frozen &&
+  status !== "human_confirmed"`를 실패로 만듭니다. succ-6이 밟은 순서와 같습니다 —
+  사람이 확인하고, 그것이 digest를 움직이고, **그 다음에** 고정합니다.
+- **ground가 실제 발화인지 검사합니다.** 표의 문장은 id 옆에 손으로 친 prose이고
+  digest는 읽지 않고 접습니다 — 오타도, assistant 발화 인용도 똑같이 깔끔하게
+  들어갑니다. subtype 3은 **사용자가** 철회하는 것이므로 사용자가 쓰지 않은
+  문장은 근거가 될 수 없고, 이 부분은 기계적입니다. 각 ground가 그 case의 user
+  turn에 실제로 들어 있는지 대조합니다.
 - **succ-8은 손대지 않습니다.** 동결·서명된 역사본이고, 거기서 case를 빼면
   두 digest가 움직여 그 서명이 무효가 됩니다. 검사가 이것을 직접 단언합니다.
 - **harness는 아직 succ-8입니다.** 서명 후에 옴기는 것이 순서이고, succ-9는
@@ -307,6 +333,11 @@ frozen           false  — 서명 대기
 | ko-701의 evidence를 assistant turn으로 | gold 형태·anchor 축 |
 | ko-701의 두 anchor를 서로 바꿈(multiset 불변) | gold 형태·anchor 축 |
 | subtype ground 한 줄 수정 | subtypeDigest·manifestDigest 이동 |
+| ground를 assistant 발화/오타로 교체 | ground 실재성 검사 |
+| `ai_draft`인 채로 서명·동결 | 동결 gate |
+| `approvedAt`을 빈 문자열로 | ISO 날짜 검사, 부분 서명 검사 |
+| repair를 `same_boundary`로 기록 | 전환 유형·gold 개수·gold 형태 축 |
+| repair에서 gold 하나를 잃음 | repair 부분집합 검사 |
 | KO 예시 소재를 `사촌`으로 교체 | 오염 검사(succ-9에만 있는 낱말) |
 
 **이미 있던 gate도 걸렸습니다.** `tests/memoryEvalPromptDatasetSeparation.test.mjs`가

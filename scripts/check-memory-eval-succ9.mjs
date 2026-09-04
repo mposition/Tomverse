@@ -145,7 +145,11 @@ const signedFields = [
     MEMORY_EVAL_SUCC9_APPROVAL.signedDatasetDigest,
     MEMORY_EVAL_SUCC9_APPROVAL.signedManifestDigest,
 ];
-const filled = signedFields.filter((value) => value !== null);
+// Non-empty, not merely non-null: an empty string is not half a signature and
+// treating it as one is how a partial signature passes the all-or-none rule.
+const filled = signedFields.filter(
+    (value) => typeof value === "string" && value.trim() !== ""
+);
 if (filled.length === 0) {
     if (MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
         fail("frozen with nobody's name on it");
@@ -161,6 +165,15 @@ if (filled.length === 0) {
     ok("the approval's shape", `signed by ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
     if (!/^@[A-Za-z0-9-]+$/.test(MEMORY_EVAL_SUCC9_APPROVAL.approvedBy ?? "")) {
         fail(`the reviewer is not a handle: ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
+    }
+    // A date, not merely a non-null. `filled.length` counts a field that holds
+    // "" or "soon" as signed, so without this the only thing the five-field
+    // rule guarantees is that somebody typed something. succ-8 checks the same
+    // pattern; this is the check that was missing rather than a new idea.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt ?? "")) {
+        fail(
+            `approvedAt is not an ISO day: ${JSON.stringify(MEMORY_EVAL_SUCC9_APPROVAL.approvedAt)}`
+        );
     }
     if (!existsSync(MEMORY_EVAL_SUCC9_APPROVAL.record)) {
         fail(`the approval's record does not exist: ${MEMORY_EVAL_SUCC9_APPROVAL.record}`);
@@ -212,6 +225,20 @@ console.log(
 if (!MEMORY_EVAL_SUCC9_DATASET_FROZEN) {
     console.log(
         "A decision-grade run against it is refused as `dataset_not_frozen` until " +
-            "somebody signs the two digests above."
+            "it is signed and frozen."
     );
+    if (SUCC9_SUBTYPE_REVIEW.status !== "human_confirmed") {
+        // Said here rather than left for the freeze to fail on, because the
+        // order matters and it is not the obvious one: confirming the subtype
+        // rows moves `subtypeDigest`, which is inside the manifest, so a
+        // digest signed before the confirmation is a digest for a tree that
+        // no longer exists the moment it arrives.
+        console.log(
+            "\nThe digests above are NOT the ones to sign. The subtype reading " +
+                `is ${SUCC9_SUBTYPE_REVIEW.status}, both assistant_only arms sit on ` +
+                "38 of a floor of 38, and confirming those three rows moves " +
+                "subtypeDigest and the manifest digest with it. Confirm first, " +
+                "then sign what this prints afterwards."
+        );
+    }
 }

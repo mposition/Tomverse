@@ -16,6 +16,7 @@ import {
     MEMORY_EVAL_SUCC9_RETIRED_CASE_IDS,
 } from "@/lib/memoryEvalSucc9Replacements";
 import {
+    SUCC9_SUBTYPE_REVIEW,
     succ9Subtype,
     succ9SubtypeDigest,
     succ9SubtypeProblems,
@@ -64,7 +65,8 @@ export const MEMORY_EVAL_SUCC9_SUPERSEDES = MEMORY_EVAL_SUCC8_DATASET_VERSION;
 
 export const MEMORY_EVAL_SUCC9_CHANGE_REASON =
     "B+ for the five cases the mem-extract-v8 example kind was selected from; " +
-    "1:1 replacements in the same category, language, kind and polarity";
+    "four 1:1 same-boundary replacements and one repair, which keeps its " +
+    "original's golds and adds the affirmed fact the case left unclaimed";
 
 /**
  * False, pending a signature.
@@ -240,6 +242,43 @@ export function buildSucc9Manifest(): Succ9DatasetManifest {
 }
 
 /**
+ * One string per gold, carrying its anchor with it, sorted.
+ *
+ * The anchor is by *position and role* rather than by message id, because ids
+ * necessarily change with the case while "the first gold comes from the
+ * opening turn and the second from a later one" is the boundary.
+ *
+ * Carrying it **inside** the gold's own descriptor rather than in a second
+ * sorted list is the point. Two independently sorted multisets say only
+ * "these kinds appear and these anchors appear"; a replacement that swapped
+ * which gold came from which turn — the goal read off the later turn and the
+ * gap off the opening one, inverting the case — matched both of them. The
+ * pair is the fact.
+ */
+function goldDescriptors(testCase: MemoryEvalCaseV3): readonly string[] {
+    const position = new Map<string, string>();
+    let index = 0;
+    for (const conversation of testCase.conversations ?? []) {
+        for (const message of conversation.messages ?? []) {
+            position.set(message.externalMessageId, `${index++}:${message.role}`);
+        }
+    }
+    return [...(testCase.expected ?? [])]
+        .map((gold) => {
+            const anchor =
+                position.get(gold.evidence?.evidenceMessageId ?? "") ??
+                "unanchored";
+            return (
+                `${gold.kind}|${gold.polarity}|${gold.expectedDisposition}` +
+                `|all=${(gold.factValueAll ?? []).length}` +
+                `|any=${(gold.factValueAny ?? []).length}` +
+                `@${anchor}`
+            );
+        })
+        .sort();
+}
+
+/**
  * Every axis on which a replacement has to match what it replaces.
  *
  * "Same boundary" was three axes for one round — category, language, and the
@@ -263,46 +302,8 @@ function boundaryAxes(
     original: MemoryEvalCaseV3,
     replacement: MemoryEvalCaseV3
 ): readonly (readonly [string, string, string])[] {
-    /**
-     * One string per gold, carrying its anchor with it.
-     *
-     * The anchor is by *position and role* rather than by message id, because
-     * ids necessarily change with the case while "the first gold comes from
-     * the opening turn and the second from a later one" is the boundary.
-     *
-     * Carrying it **inside** the gold's own descriptor rather than in a second
-     * sorted list is the whole point. Two independently sorted multisets say
-     * only "these kinds appear and these anchors appear"; a replacement that
-     * swapped which gold came from which turn — the goal read off the later
-     * turn and the gap off the opening one, inverting the case — matched both
-     * of them. The pair is the fact.
-     */
-    const golds = (testCase: MemoryEvalCaseV3) => {
-        const position = new Map<string, string>();
-        let index = 0;
-        for (const conversation of testCase.conversations ?? []) {
-            for (const message of conversation.messages ?? []) {
-                position.set(
-                    message.externalMessageId,
-                    `${index++}:${message.role}`
-                );
-            }
-        }
-        return [...(testCase.expected ?? [])]
-            .map((gold) => {
-                const anchor =
-                    position.get(gold.evidence?.evidenceMessageId ?? "") ??
-                    "unanchored";
-                return (
-                    `${gold.kind}|${gold.polarity}|${gold.expectedDisposition}` +
-                    `|all=${(gold.factValueAll ?? []).length}` +
-                    `|any=${(gold.factValueAny ?? []).length}` +
-                    `@${anchor}`
-                );
-            })
-            .sort()
-            .join(",");
-    };
+    const golds = (testCase: MemoryEvalCaseV3) =>
+        goldDescriptors(testCase).join(",");
     const turns = (testCase: MemoryEvalCaseV3) =>
         (testCase.conversations ?? [])
             .map((conversation) =>
@@ -378,11 +379,46 @@ export function succ9Problems(
             problems.push(`${row.replacement} is named but not registered`);
             continue;
         }
+        // A repair is allowed to differ on the gold axes and on nothing else,
+        // and only in one direction: it keeps every gold the original had and
+        // adds to them. A repair that dropped a gold, or that changed the
+        // category or the conversation, is a rewrite wearing the word.
+        const repairing = row.transitionType === "repair";
+        if (repairing === (row.repairs === null)) {
+            problems.push(
+                `${row.replacement} is ${row.transitionType} and ` +
+                    (row.repairs === null
+                        ? "states no repair"
+                        : "states one anyway")
+            );
+        }
+        const goldAxes = new Set(["gold count", "gold shape and anchoring"]);
         for (const [axis, was, now] of boundaryAxes(original, replacement)) {
-            if (was !== now) {
+            if (was === now) continue;
+            if (repairing && goldAxes.has(axis)) continue;
+            problems.push(
+                `${row.replacement} ${axis} is ${now}, where ${row.retired} ` +
+                    `was ${was}`
+            );
+        }
+        if (repairing) {
+            const kept = new Set(goldDescriptors(replacement));
+            const lost = goldDescriptors(original).filter(
+                (descriptor) => !kept.has(descriptor)
+            );
+            if (lost.length > 0) {
                 problems.push(
-                    `${row.replacement} ${axis} is ${now}, where ${row.retired} ` +
-                        `was ${was}`
+                    `${row.replacement} is a repair that dropped ` +
+                        `${lost.join(", ")} from ${row.retired}`
+                );
+            }
+            if (
+                (replacement.expected ?? []).length <=
+                (original.expected ?? []).length
+            ) {
+                problems.push(
+                    `${row.replacement} is a repair that adds no gold; a ` +
+                        `repair that only renames is a same_boundary move`
                 );
             }
         }
@@ -466,6 +502,27 @@ export function succ9Problems(
     }
     if (MEMORY_EVAL_SUCC9_DATASET_FROZEN && !MEMORY_EVAL_SUCC9_APPROVAL.approvedBy) {
         problems.push("frozen with nobody's name on it");
+    }
+    // A freeze cannot rest on an AI's reading of the floor.
+    //
+    // Both `assistant_only` arms sit on 38 of 38, so those three rows decide
+    // whether succ-9 meets docs/ops/memory-extraction-eval-dataset.md §3.3 at
+    // all — and until this line existed, signing the digest and setting
+    // `frozen` passed while `SUCC9_SUBTYPE_REVIEW` still said `ai_draft`. That
+    // is the state succ-6 refused to ship in: it moved to `human_confirmed`
+    // *before* its manifest was pinned, and the pinning had to wait because
+    // confirming moves the digest.
+    if (
+        MEMORY_EVAL_SUCC9_DATASET_FROZEN &&
+        SUCC9_SUBTYPE_REVIEW.status !== "human_confirmed"
+    ) {
+        problems.push(
+            "frozen while the subtype reading is still " +
+                `${SUCC9_SUBTYPE_REVIEW.status}; both assistant_only arms sit ` +
+                "exactly on the docs/ops/memory-extraction-eval-dataset.md §3.3 " +
+                "floor, so those rows are part of what a " +
+                "signature covers"
+        );
     }
     return problems;
 }

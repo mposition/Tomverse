@@ -26,8 +26,24 @@ export type Succ9TransitionRow = {
     replacement: string;
     /** Why it moved. */
     basis: "promptSelection5";
-    /** Whether the replacement tests the original's boundary. */
-    transitionType: "same_boundary";
+    /**
+     * What the replacement does relative to the original.
+     *
+     * `same_boundary` — every axis in `boundaryAxes()` matches, so the case
+     * tests exactly what its predecessor tested with a different subject.
+     *
+     * `repair` — the replacement keeps the original's golds and **adds** one,
+     * because the original was wrong in a way that would have been inherited.
+     * A repair states what it fixes; a replacement that quietly changed its
+     * gold set while claiming `same_boundary` is the thing this field exists
+     * to make impossible.
+     */
+    transitionType: "same_boundary" | "repair";
+    /**
+     * What the repair fixes, for a `repair` row. Null on a `same_boundary`
+     * one, and `succ9Problems()` fails either combination the other way round.
+     */
+    repairs: string | null;
     /** The gold that appeared in the selection count, `caseId#goldId`. */
     countedGold: string;
 };
@@ -38,6 +54,7 @@ export const SUCC9_TRANSITION: readonly Succ9TransitionRow[] = [
         replacement: "succ-assistant-ko-701",
         basis: "promptSelection5",
         transitionType: "same_boundary",
+        repairs: null,
         countedGold: "succ-assistant-ko-407#g1",
     },
     {
@@ -45,6 +62,7 @@ export const SUCC9_TRANSITION: readonly Succ9TransitionRow[] = [
         replacement: "succ-assistant-en-701",
         basis: "promptSelection5",
         transitionType: "same_boundary",
+        repairs: null,
         countedGold: "succ-assistant-en-603#g1",
     },
     {
@@ -52,6 +70,7 @@ export const SUCC9_TRANSITION: readonly Succ9TransitionRow[] = [
         replacement: "succ-assistant-en-702",
         basis: "promptSelection5",
         transitionType: "same_boundary",
+        repairs: null,
         countedGold: "succ-assistant-en-608#g1",
     },
     {
@@ -59,13 +78,22 @@ export const SUCC9_TRANSITION: readonly Succ9TransitionRow[] = [
         replacement: "succ-durable-en-701",
         basis: "promptSelection5",
         transitionType: "same_boundary",
+        repairs: null,
         countedGold: "succ-durable-en-423#e1",
     },
     {
         retired: "succ-durable-ko-422",
         replacement: "succ-durable-ko-701",
         basis: "promptSelection5",
-        transitionType: "same_boundary",
+        transitionType: "repair",
+        repairs:
+            "succ-durable-ko-422 is marked exhaustive and claims two golds, " +
+            "but its own user turn states a third durable fact — an ability " +
+            "affirmed in the easy setting (실내 수영장에서 자유형만 하고). An " +
+            "extractor returning it is correct and is scored as a false " +
+            "positive: scoreCaseV3() reports candidateMatched 2 of 3 with no " +
+            "unbound candidate. succ-durable-ko-701 keeps both golds and adds " +
+            "the affirmed one (계곡, 텐트), so exhaustive is true of it.",
         countedGold: "succ-durable-ko-422#e2",
     },
 ];
@@ -84,7 +112,8 @@ export const SUCC9_TRANSITION_DIGEST = createHash("sha256")
             .sort((left, right) => left.retired.localeCompare(right.retired))
             .map(
                 (row) =>
-                    `${row.retired}->${row.replacement}:${row.basis}:${row.transitionType}:${row.countedGold}`
+                    `${row.retired}->${row.replacement}:${row.basis}:` +
+                    `${row.transitionType}:${row.repairs ?? "-"}:${row.countedGold}`
             )
             .join("\n"),
         "utf8"

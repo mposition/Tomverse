@@ -150,16 +150,44 @@ export function succ9Subtype(caseId: string): 3 | 4 | undefined {
  * cases this version retired.
  */
 export function succ9SubtypeProblems(
-    cases: readonly { id: string }[]
+    cases: readonly {
+        id: string;
+        conversations?: readonly {
+            messages?: readonly { role: string; content: string }[];
+        }[];
+    }[]
 ): readonly string[] {
     const problems: string[] = [];
-    const ids = new Set(cases.map((testCase) => testCase.id));
-    for (const id of Object.keys(SUCC9_ASSISTANT_ONLY_SUBTYPES)) {
-        if (!ids.has(id)) {
+    const byId = new Map(cases.map((testCase) => [testCase.id, testCase]));
+    for (const [id, entry] of Object.entries(SUCC9_ASSISTANT_ONLY_SUBTYPES)) {
+        const testCase = byId.get(id);
+        if (!testCase) {
             problems.push(`${id} is declared a subtype but is not in succ-9`);
+            continue;
         }
         if (SUCC7_ASSISTANT_ONLY_SUBTYPES[id] || ASSISTANT_ONLY_SUBTYPES[id]) {
             problems.push(`${id} is declared in more than one subtype table`);
+        }
+        // The ground has to be in the case, and in a turn the *user* wrote.
+        //
+        // Every row above is prose typed by hand beside an id, and the digest
+        // binds it without reading it: a typo, a paraphrase, or a clause
+        // quoted from the assistant's turn all fold in exactly as cleanly as a
+        // real quotation. Subtype 3 is the user withdrawing something they or
+        // the assistant said, so a ground the user did not write cannot be
+        // evidence of it — and this much is mechanical, which makes it the one
+        // part of the classification a check can settle.
+        const userTurns = (testCase.conversations ?? []).flatMap(
+            (conversation) =>
+                (conversation.messages ?? [])
+                    .filter((message) => message.role === "user")
+                    .map((message) => message.content)
+        );
+        if (!userTurns.some((content) => content.includes(entry.ground))) {
+            problems.push(
+                `${id}'s ground is in no user turn of its own case: ` +
+                    JSON.stringify(entry.ground)
+            );
         }
     }
     return problems;

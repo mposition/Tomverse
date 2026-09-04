@@ -301,6 +301,34 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
                 },
                 expectedDisposition: "bulk_safe",
             },
+            {
+                // The third gold, and the reason this transition is recorded
+                // as a repair rather than a like-for-like move.
+                //
+                // The affirmed half is not scenery. "계곡에서만 텐트를 쳐 봤고"
+                // states a durable fact about the user; an extractor that
+                // returns it is right; and under `goldCompleteness:
+                // "exhaustive"` a candidate no gold claims is scored as a
+                // false positive. Put through the real `scoreCaseV3()`, three
+                // correct candidates against the two-gold version report
+                // `candidateMatched 2/3` with `unboundCandidates 0` — bound
+                // properly, and wrong anyway.
+                //
+                // succ-8's `succ-durable-ko-422` has the same defect: its
+                // "실내 수영장에서 자유형만 하고" is the same unclaimed fact,
+                // and it scores the same way. It stays as it is, because it is
+                // frozen and signed — but inheriting a defect is not a licence
+                // to ship one, so it is repaired here.
+                id: "e3",
+                kind: "expertise",
+                polarity: "affirmed",
+                factValueAll: ["계곡", "텐트"],
+                evidence: {
+                    evidenceMessageId: "succ-b901-5-m3",
+                    evidenceQuote: "계곡에서만 텐트를 쳐 봤고",
+                },
+                expectedDisposition: "bulk_safe",
+            },
         ],
         conversations: [
             {
