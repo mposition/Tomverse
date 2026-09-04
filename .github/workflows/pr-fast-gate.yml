@@ -324,6 +324,9 @@ jobs:
         timeout-minutes: 5
         run: npm run check:memory-eval-succ8
 
+      - name: Memory eval succ-9 structural checks
+        run: npm run check:memory-eval-succ9
+
       # Tomverse Chat release thresholds live only in the canonical registry
       # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
       # gate IDs and may not redefine numbers. A registry with duplicate IDs,

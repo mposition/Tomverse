@@ -80,6 +80,11 @@ import {
     verifySucc8Manifest,
 } from "@/lib/memoryEvalSucc8";
 import {
+    MEMORY_EVAL_SUCC9_CASES,
+    buildSucc9Manifest,
+    succ9Problems,
+} from "@/lib/memoryEvalSucc9";
+import {
     MEMORY_EVAL_SUCC5_CASES,
     MEMORY_EVAL_SUCC5_MANIFEST,
     verifySucc5Manifest,
@@ -210,6 +215,14 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         manifest: MEMORY_EVAL_SUCC8_MANIFEST,
         cases: MEMORY_EVAL_SUCC8_CASES,
         verify: () => verifySucc8Manifest(),
+    },
+    {
+        // Assembled 2026-09-04 and not yet signed. Registered so an artifact
+        // naming it resolves at all; the harness still scores succ-8, which
+        // is a separate decision from having the sample.
+        manifest: buildSucc9Manifest(),
+        cases: MEMORY_EVAL_SUCC9_CASES,
+        verify: () => succ9Problems(),
     },
 ];
 

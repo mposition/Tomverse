@@ -37,7 +37,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 
 import {
-    MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS,
+    MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS,
     MEMORY_EXTRACTION_EXAMPLE_LABEL,
     MEMORY_EXTRACTION_EXAMPLE_TERMS,
     MEMORY_EXTRACTION_NEGATED_EXAMPLES,
@@ -51,6 +51,8 @@ import { parseExtractionOutput } from "../lib/memoryExtractionOutput.ts";
 import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
+import { MEMORY_EVAL_SUCC9_CASES } from "../lib/memoryEvalSucc9.ts";
+import { SUCC9_REGRESSION_CORPUS } from "../lib/memoryEvalSucc9Regression.ts";
 
 const CORPORA = [
     "mem-eval-succ-4",
@@ -402,28 +404,6 @@ test("no content word in either example escapes registration", () => {
     assert.ok(checked > 10, `only ${checked} words were walked`);
 });
 
-/**
- * Distinct golds per cell, keyed `caseId#goldId`.
- *
- * Counting occurrences instead would report a single gold five times, because
- * succ-4 through succ-8 inherit most cases from one another: the one Korean
- * `relationship|negated` gold appears in all five and a raw count calls that
- * five cases. A reviewer reading "scored five times" would picture a
- * population, and the number is one.
- */
-const cellGolds = (versions) => {
-    const scored = new Map();
-    for (const version of versions) {
-        for (const testCase of harnessTarget(version).cases) {
-            for (const gold of testCase.expected ?? []) {
-                const cell = `${testCase.language}|${gold.kind}|${gold.polarity}`;
-                if (!scored.has(cell)) scored.set(cell, new Set());
-                scored.get(cell).add(`${testCase.id}#${gold.id}`);
-            }
-        }
-    }
-    return scored;
-};
 
 test("the kind each example uses is one the approved prompt licenses", () => {
     // The finding this closes, and it is about what justifies a judgement
@@ -453,61 +433,64 @@ test("the kind each example uses is one the approved prompt licenses", () => {
     }
 });
 
-test("every gold in the examples' cell is one that was looked at", () => {
-    // The structural check, and the one that would have caught the round where
-    // `kitesurfing` and `드론` were absent from every corpus as strings while
-    // their scenario — an activity tried and abandoned — was the core judgement
-    // of two `polarity44` replacements.
+test("the golds that chose this kind have left the decision set", () => {
+    // The replacement for the "reviewed exception" this file used to carry.
+    // Naming a contaminated case records it; it does not remove it, and the
+    // established remedy in this repository is a B+ retirement — which is what
+    // succ-7 did for the forty-four cases v8's wording was selected from.
     //
-    // It is not "the cell must be empty". That version forced the kind to be
-    // picked for its cell count, which is how `long_term_goal` — a mapping the
-    // prompt licenses nowhere — got shipped. No kind is both licensed for a
-    // negation and unscored in both languages, so the cell is an input to the
-    // decision and not the decision.
-    //
-    // It is not "at most one" either. That tolerance would swallow whatever
-    // happened to be there. What it is: every gold in the cell must be named,
-    // so the one that is there was read, and a second one arriving fails.
-    for (const [label, versions] of [
-        ["every resolvable corpus", CORPORA],
-        ["the live target", ["mem-eval-succ-8"]],
-    ]) {
-        const scored = cellGolds(versions);
-        for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
-            const cell = `${example.language}|${example.candidate.kind}|${example.candidate.polarity}`;
-            const unreviewed = [...(scored.get(cell) ?? [])].filter(
-                (gold) => !MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS.includes(gold)
-            );
-            assert.deepEqual(
-                unreviewed,
-                [],
-                `${cell} carries golds nobody reviewed, in ${label}: ${unreviewed.join(", ")}`
-            );
-        }
-    }
+    // All five go, not just the one in the chosen cell. The kind was picked by
+    // comparing counts, so the four on the losing side are as much part of the
+    // decision as the one that won.
+    assert.equal(MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS.length, 5);
 
-    // The exceptions are real golds, not stale ids: an entry that stopped
-    // existing would silently widen the check.
-    const everywhere = cellGolds(CORPORA);
-    const known = new Set([...everywhere.values()].flatMap((set) => [...set]));
-    for (const gold of MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS) {
-        assert.ok(known.has(gold), `${gold} is recorded as an exception but does not exist`);
-    }
-
-    // And the counts, so the write-up beside them cannot drift. One distinct
-    // Korean gold — appearing in five corpora, which a raw occurrence count
-    // reported as five cases and a reviewer read as a population.
-    assert.equal(everywhere.get("ko|relationship|negated").size, 1);
-    assert.equal(
-        cellGolds(["mem-eval-succ-8"]).get("ko|relationship|negated").size,
-        1
+    const succ9 = new Set(
+        MEMORY_EVAL_SUCC9_CASES.flatMap((testCase) =>
+            (testCase.expected ?? []).map((gold) => `${testCase.id}#${gold.id}`)
+        )
     );
-    assert.equal(everywhere.get("en|relationship|negated") ?? undefined, undefined);
+    const preserved = new Set(
+        SUCC9_REGRESSION_CORPUS.flatMap((entry) =>
+            (entry.originalCase.expected ?? []).map(
+                (gold) => `${entry.originalCase.id}#${gold.id}`
+            )
+        )
+    );
 
-    // The cell the retired scenario occupies is populated, so the assertions
-    // above are not vacuously true of every cell.
-    assert.ok(everywhere.get("en|decision|negated").size > 1);
-    assert.ok(everywhere.get("ko|decision|negated").size > 1);
+    for (const gold of MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS) {
+        assert.ok(
+            !succ9.has(gold),
+            `${gold} still scores in mem-eval-succ-9, so it both chose the prompt and measures it`
+        );
+        assert.ok(
+            preserved.has(gold),
+            `${gold} left the decision set without being preserved, which is a deletion rather than a retirement`
+        );
+    }
+
+    // Red-before-green: the scan can see golds that are still scored, so the
+    // absence above is a fact about these five and not about the lookup. The
+    // floor is on golds, not cases: most cases are "extract nothing" and
+    // carry none, so 1,150 cases expose 485 golds.
+    assert.ok(succ9.size > 400, `succ-9 exposed only ${succ9.size} golds`);
+});
+
+test("succ-8 is left exactly as it was signed", () => {
+    // The retirement is a new dataset, never an edit to the frozen one. succ-8
+    // was signed on 2026-09-04 against two digests, and a case removed from it
+    // would move both and quietly void that signature.
+    const stillThere = MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS.filter((gold) => {
+        const [caseId, goldId] = gold.split("#");
+        const testCase = harnessTarget("mem-eval-succ-8").cases.find(
+            (entry) => entry.id === caseId
+        );
+        return (testCase?.expected ?? []).some((entry) => entry.id === goldId);
+    });
+    assert.deepEqual(
+        stillThere,
+        [...MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS],
+        "succ-8 was edited; it is a signed historical dataset and must not be"
+    );
 });
 
 test("both examples are the same kind, differing only in language", () => {

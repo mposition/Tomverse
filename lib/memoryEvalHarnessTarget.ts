@@ -66,6 +66,13 @@ import {
     MEMORY_EVAL_SUCC8_DATASET_VERSION,
     MEMORY_EVAL_SUCC8_MANIFEST,
 } from "@/lib/memoryEvalSucc8";
+import {
+    MEMORY_EVAL_SUCC9_CASES,
+    MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC9_DATASET_PURPOSE,
+    MEMORY_EVAL_SUCC9_DATASET_VERSION,
+    buildSucc9Manifest,
+} from "@/lib/memoryEvalSucc9";
 import { MEMORY_EVAL_DATASET_MANIFESTS } from "@/lib/memoryEvalDatasetManifests";
 import { datasetFingerprintInput } from "@/lib/memoryExtractionEvalCore";
 import { datasetFingerprintInputV3 } from "@/lib/memoryEvalDatasetSchemaV3";
@@ -246,6 +253,21 @@ const TARGETS: Readonly<Record<string, () => HarnessTarget>> = {
         scoringContractDigest: sha256(scoringContractDescriptorInput()),
         scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
     }),
+    // Resolvable, and deliberately not the default. succ-9 replaces the five
+    // cases the mem-extract-v8 example kind was selected from, and it is
+    // unsigned: the harness moves after a signature, which is a separate
+    // decision from assembling the sample.
+    [MEMORY_EVAL_SUCC9_DATASET_VERSION]: () => ({
+        datasetSchemaVersion: 3,
+        datasetVersion: MEMORY_EVAL_SUCC9_DATASET_VERSION,
+        datasetFrozen: MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+        datasetPurpose: MEMORY_EVAL_SUCC9_DATASET_PURPOSE,
+        cases: MEMORY_EVAL_SUCC9_CASES,
+        datasetDigest: sha256(datasetFingerprintInputV4(MEMORY_EVAL_SUCC9_CASES)),
+        datasetManifestDigest: buildSucc9Manifest().manifestDigest,
+        scoringContractDigest: sha256(scoringContractDescriptorInput()),
+        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    }),
 };
 
 /**
@@ -285,6 +307,7 @@ export function targetManifestDigests(
     // from the batch registry below: succ-4 onwards are not batch-composed, so
     // their record is the pinned literal each module carries.
     for (const manifest of [
+        buildSucc9Manifest(),
         MEMORY_EVAL_SUCC8_MANIFEST,
         MEMORY_EVAL_SUCC7_MANIFEST,
         MEMORY_EVAL_SUCC6_MANIFEST,

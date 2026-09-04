@@ -78,7 +78,7 @@ diff로 확인하는 대신 테스트가 말할 수 있게 됩니다.
 scorer 기준(`MEMORY_EVAL_SCORING_RULES`, `scoreCaseV3`)은 손대지 않았고
 `mem-score-v3.5` descriptor digest는 `2d4bcb69…` 그대로입니다.
 
-## 3. 오염과 분류 — 세 번 틀렸습니다
+## 3. 오염과 분류 — 다섯 번 틀렸습니다
 
 **예시는 모델이 입력보다 먼저 읽는 텍스트입니다.** 규칙은 판정하는 법을 적지만
 예시는 이미 판정된 사례를 건네므로, 그 사례가 채점 대상 dataset에서 왔다면
@@ -133,41 +133,63 @@ cell로 고른 2차 수정본(EN `relationship`, KO `code_style`)은 세 가지�
 **예시가 승인되지 않은 분류 규칙을 도입하는 것이, 측정된 case 위에 앉는 것보다
 나쁜 실패입니다.**
 
-### 3.5 채택 — kind는 prompt가 정하고, cell은 측정으로 남깁니다
+### 3.5 5차 — 이름 붙인 예외는 B+ 이동을 대신하지 못합니다
 
-승인된 prompt가 negated로 명시하는 mapping은 둘뿐입니다.
+kind를 prompt에서 가져오고 나서, 남는 중복 1건을
+`MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS`에 id로 적어 둔 판이 있었습니다.
+**그것은 오염을 기록할 뿐 제거하지 않습니다.** 제거하는 확립된 수단은 B+
+이동이고, succ-7이 v8 문안 선택에 쓰인 44건에 그여한 것이 바로 그것입니다.
 
-| 근거 | 문장 |
+그리고 **1건이 아니라 5건입니다.** kind를 고른 것은 개별 case가 아니라
+`relationship` 1건 대 `expertise` 4건이라는 **집계 비교**였으므로, 진 쪽 4건도
+그 결정의 일부입니다 — 진 쪽이 있어야 이긴 쪽이 선택이 됩니다.
+
+| 이동 대상 gold | cell |
 | --- | --- |
-| boundary 규칙 | "The registration form lists two dependants; I have no dependants"가 **negated relationship fact를 성립시킨다** |
-| `KIND_GUIDE` | 형제가 몇 명인지, **또는 없다는 것**은 relationship이다 |
-| `KIND_GUIDE` | expertise는 **해당 분야 경험이 없는 것**을 포함한다 |
+| `succ-assistant-ko-407#g1` | ko relationship/negated |
+| `succ-assistant-en-603#g1` | en expertise/negated |
+| `succ-assistant-en-608#g1` | en expertise/negated |
+| `succ-durable-en-423#e1` | en expertise/negated |
+| `succ-durable-ko-422#e2` | ko expertise/negated |
 
-그래서 kind는 **`relationship`**입니다 — 두 번 명시되고, 그중 하나는 이 예시가
-쓰는 **바로 그 문장**입니다. 예시가 더하는 것은 판단이 아니라 출력 모양입니다.
+### 3.6 `mem-eval-succ-9`
 
-**그 대가를 측정해서 적습니다.** prompt가 명시하면서 두 언어 모두 0건인 kind는
-**없습니다.**
+위 5건을 regression으로 옮기고 1:1 대체한 successor입니다.
 
-| kind | 명시 | en distinct | ko distinct |
-| --- | --- | --- | --- |
-| `relationship` | 2회 | 0 | **1** (`succ-assistant-ko-407#g1`) |
-| `expertise` | 1회 | 3 | 1 |
+```
+caseCount        1150  (succ-8과 같음 — 1:1)
+datasetDigest    affb41e18e788db2265ad36bbefb1c4728954c67cdbba36ea7722acba7976ac2
+manifestDigest   07edb04eaeccdfbaf5549545bed2e6597fcdfa99ef32df0e919b2264ff7d4e9f
+transitionDigest 066bec67f99d21592f90d788f54fbbfcd7a4ef6c340a04975c2fc2f678f9b857
+scoringContract  mem-score-v3.5  2d4bcb69…  (변경 없음)
+frozen           false  — 서명 대기
+```
 
-`relationship`이 더 강하게 명시되고 노출도 작아서 이쪽입니다. 남는 한 건은
-`MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS`에 **id로** 적어 둡니다 — 숫자
-허용치로 흡수하지 않으므로, 그 cell에 **둘째 case가 들어오면 여전히 실패**합니다.
+| 퇴역 | 대체 | 소재 교체 |
+| --- | --- | --- |
+| succ-assistant-ko-407 | succ-assistant-ko-701 | 배우자 → 사촌 |
+| succ-assistant-en-603 | succ-assistant-en-701 | bees → welding |
+| succ-assistant-en-608 | succ-assistant-en-702 | houseplant → sourdough |
+| succ-durable-en-423 | succ-durable-en-701 | code → soldering |
+| succ-durable-ko-422 | succ-durable-ko-701 | 오픈워터·바다 → 백두대간·빙벽 |
 
-ko-407은 "저는 배우자가 없어서 그 항목은 해당되지 않습니다"입니다. kind와
-polarity는 같고 소재는 다릅니다(`배우자` 대 `부양가족`), 두 예시 소재는 어느
-corpus에도 없습니다. **깨끗한 결과가 아니며, 그렇게 적습니다.**
-
-영어 예시의 문장은 v7부터 prompt에 있었고, succ-7·succ-8 서명과 polarity44
-구성 시점에도 있었습니다. 새 노출이 아니라 기존 상태입니다.
+- **경계는 그대로, 소재만 바뀝니다.** 같은 category·language·kind·polarity이며
+  `succ9Problems()`가 네 가지를 전부 대조합니다. case가 틀려서 나가는 것이
+  아니라 **선택에 쓰였기 때문에** 나가므로, 판단은 보존됩니다.
+- **ko-422는 gold가 둘**이라 대체본도 둘을 집니다. affirmed 쪽을 버렸으면
+  1:1이라고 보고하면서 case를 좀히는 것이 됩니다.
+- **소재는 전부 corpus·prompt 대조를 거쳤습니다** — 사촌·welding·sourdough·
+  soldering·백두대간·빙벽·야산 모두 succ-4~8, succ-7 regression, 배포된 prompt에
+  없습니다.
+- **succ-8은 손대지 않습니다.** 동결·서명된 역사본이고, 거기서 case를 빼면
+  두 digest가 움직여 그 서명이 무효가 됩니다. 검사가 이것을 직접 단언합니다.
+- **harness는 아직 succ-8입니다.** 서명 후에 옴기는 것이 순서이고, succ-9는
+  이름으로 해석만 됩니다. 그동안 v8 예시는 live target(succ-8)과 겹치지만,
+  pair가 등록되지 않아 유료 실행 자체가 `unknown_pair`로 거절됩니다.
 
 ## 4. 테스트
 
-`tests/memoryExtractionPromptExamples.test.mjs` (신규, 17건)
+`tests/memoryExtractionPromptExamples.test.mjs` (신규, 18건)
 
 **구조화 출력과 parser**
 
@@ -202,18 +224,23 @@ corpus에도 없습니다. **깨끗한 결과가 아니며, 그렇게 적습니�
 - 등록됐지만 예시에 없는 term은 실패(죽은 항목)
 - **양쪽 언어**에서, 예시 본문의 content word가 (1) 등록 term이 덮거나
   (2) 어느 corpus에도 없거나 (3) 검토된 allowlist에 있어야 합니다
-- **구조 검사**: 두 예시의 cell이 **0건**이다 — `<= 1`이 아니라 정확히 0,
-  그리고 **live target과 합집합 두 기준 모두**. 이전 `<= 1` 여유는
-  `ko|relationship|negated`(live 1건)를 통과시켰을 것이므로 무해하지 않았습니다.
-  그 cell의 수치를 직접 단언해, 완화를 되돌리면 실패합니다
+- **kind 근거 검사**: 예시의 kind가 **prompt가 명시한 mapping**인지 확인합니다.
+  boundary 규칙과 `KIND_GUIDE`의 문장을 직접 단언하므로, 그 문장이 사라지면
+  예시가 mapping의 유일한 출처가 되는 대신 실패합니다
+- **B+ 검사**: kind 선택에 쓰인 gold 5건이 succ-9의 채점 집합에서 **빠졌고**
+  regression에 **보존됐는지**를 확인합니다. 이름 붙인 예외를 대신한 검사이며,
+  기록하는 것과 제거하는 것은 다른 일입니다
+- **succ-8 불변 검사**: 그 5건이 succ-8에는 그대로 있어야 합니다. 동결·서명된
+  역사본이므로 편집은 서명을 무효로 만듭니다
 - **holdout 검사**: 두 예시가 `polarity44` 대체본의 형태를 재현하지 않는다
 
 **되돌려서 확인했습니다.**
 
 | 되돌린 것 | 실패하는 검사 |
 | --- | --- |
-| KO kind → `code_style` | 같은 kind, 답변 방식 kind 금지 |
-| KO kind → `relationship` | cell 0건, 같은 kind |
+| kind → `long_term_goal` | kind 근거 검사 |
+| kind → `code_style` | kind 근거, 같은 kind, 답변 방식 kind 금지 |
+| 5건 중 하나를 succ-9에 남김 | B+ 검사 |
 | KO 메시지 → 두 문장 | 한 문장 검사, 미등록 content word |
 
 **이미 있던 gate도 걸렸습니다.** `tests/memoryEvalPromptDatasetSeparation.test.mjs`가

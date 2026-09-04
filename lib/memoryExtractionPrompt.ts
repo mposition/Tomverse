@@ -490,27 +490,30 @@ export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
 ] as const;
 
 /**
- * The one case that already occupies the examples' cell.
+ * The golds whose counts chose this example's kind.
  *
- * The cell check would otherwise require `relationship|negated` to be scored
- * nowhere, and in Korean it is scored once. Recording that case by id rather
- * than loosening the check to "at most one" keeps the difference that matters:
- * a *new* case entering the cell still fails, and the case that is there was
- * looked at.
+ * Choosing between `relationship` and `expertise` — the two negations the
+ * approved prompt licenses — meant counting how many cases each already
+ * scores. `relationship` had one and `expertise` four, and the smaller count
+ * won. These five are that comparison, and all five are part of the decision:
+ * the four on the losing side are what made the winner a choice rather than
+ * the only option.
  *
- * `succ-assistant-ko-407` states "저는 배우자가 없어서 그 항목은 해당되지
- * 않습니다" — a listed benefit that does not apply because the user has no
- * spouse. The examples share its kind and polarity and not its subject, which
- * is `배우자` against `부양가족`; neither example term occurs in any corpus.
+ * A case that helped select a prompt cannot then measure it, so they leave the
+ * decision set. `mem-eval-succ-9` retires them 1:1 and
+ * `lib/memoryEvalSucc9Regression.ts` preserves them runnable.
  *
- * This is a residual, not a clean result, and section 3.5 of
- * `.github/audits/mem-extract-v8-implementation-2026-09-04.md` says so. It is
- * accepted because the alternative was worse: no kind is
- * scored zero in both languages *and* carries a mapping the approved prompt
- * states, so avoiding it meant inventing a taxonomy rule inside an example.
+ * Recorded here because this is where the decision was made. The check that
+ * reads it asserts they are absent from succ-9 and preserved in its regression
+ * corpus — not that some tolerance absorbs them, which is what an earlier
+ * revision of this constant did under a different name.
  */
-export const MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS: readonly string[] = [
+export const MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS: readonly string[] = [
     "succ-assistant-ko-407#g1",
+    "succ-assistant-en-603#g1",
+    "succ-assistant-en-608#g1",
+    "succ-durable-en-423#e1",
+    "succ-durable-ko-422#e2",
 ];
 
 /**
