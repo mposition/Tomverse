@@ -89,10 +89,12 @@ export const MEMORY_EVAL_SUCC9_CHANGE_REASON =
  * on each count. `decideEvalRunMode()` refuses a decision-grade run against an
  * unfrozen sample, which is what should happen until then.
  *
- * Not the only thing pending. `succ9Problems()` also refuses a freeze while
- * `SUCC9_SUBTYPE_REVIEW` is still an AI draft, because both `assistant_only`
- * arms sit exactly on their floor and those three rows are what puts them
- * there.
+ * The other precondition is met. `succ9Problems()` also refuses a freeze while
+ * `SUCC9_SUBTYPE_REVIEW` is an AI draft — both `assistant_only` arms sit
+ * exactly on their floor, so those three rows are what puts them there — and
+ * that reading was confirmed on 2026-09-04. Met, not spent: it is what a
+ * freeze requires, never what a freeze is, and writing it moved this
+ * manifest's digest rather than settling it.
  */
 export const MEMORY_EVAL_SUCC9_DATASET_FROZEN = false;
 
